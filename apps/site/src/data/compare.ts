@@ -89,11 +89,14 @@ function moved(
 }
 
 /**
- * The rows, by side. "authtempo" and "parity" hold the rows that the review
- * marks "we exceed" or "parity". "better-auth" holds each row whose action
- * is a new plan row that is not merged. A row of a merged plan moves when
- * the merged code closes each gap of its review row. It moves to
- * "authtempo" only when the review states that Better Auth lacks the item.
+ * The rows, by side (rulings 25 and 26 of the plan 11b lane). A row is
+ * "parity" only when authtempo has each part of its Better Auth cell. A row
+ * is "authtempo" only when it also has more. A part that authtempo leaves
+ * out by a design choice of the review keeps the review's side. The
+ * authtempo cell then names that part (f4, f16, g6). Each other row is
+ * "better-auth": the new plan rows that are not merged, and each row where
+ * Better Auth keeps a part. A port with one adapter does not match five
+ * shipped providers.
  */
 export const COMPARE_ROWS: readonly CompareRow[] = [
   // Where authtempo does more.
@@ -103,13 +106,6 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "Magic link",
     "The link opens a confirm page with no side effect, so a mail scanner that follows it spends nothing.",
     "Has a magic link sign-in.",
-  ),
-  row(
-    "d5",
-    "authtempo",
-    "A new app from the CLI",
-    "authtempo init copies a tested example of each stack, and each copy compiles and passes its own test.",
-    "The init command covers Next.js and SQLite only.",
   ),
   row(
     "d11",
@@ -129,28 +125,28 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "f4",
     "authtempo",
     "Trusted origins",
-    "Exact origins and app schemes only. With no wildcard, a takeover of one subdomain gives no trust.",
+    "Exact origins and app schemes only, with no wildcard and no function. A takeover of one subdomain gives no trust.",
     "Exact origins, wildcards, custom schemes, or a function for each request.",
   ),
   row(
     "f16",
     "authtempo",
     "Provider tokens at rest",
-    "Stores no access token and no refresh token of a social provider, so the store holds none to steal.",
+    "Stores no access token and no refresh token of a social provider, so the store holds none to steal. An app cannot call the provider with one.",
     "Stores the tokens of each linked account, with encryption as an option.",
   ),
   row(
     "g3",
     "authtempo",
     "Schema version",
-    "A numbered schema version. An adapter refuses an older database, and authtempo migrate stops on a newer one.",
+    "A numbered schema version. An adapter checks it at its first use and refuses an older database. authtempo migrate stops on a newer one.",
     "Checks the schema at start, on by default since 1.7.3.",
   ),
   row(
     "g6",
     "authtempo",
     "Telemetry",
-    "No telemetry. No data leaves your app.",
+    "No telemetry, and no setting turns it on. No data leaves your app.",
     "Telemetry that is off by default, and that an app can turn on.",
   ),
   row(
@@ -220,27 +216,11 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "Has an upgrade guide for 1.7.",
   ),
   moved(
-    "a31",
-    "parity",
-    "ASVS 5.0 authentication",
-    "A reset asks for the second factor. A breach check, a uniform sign-up answer, and a mail after each credential change ship.",
-    "Ships a breach check and a sign-up mode that hides a taken address. A reset opens no session.",
-    [P12A, P12B, P12C],
-  ),
-  moved(
     "b1",
     "parity",
     "Turn off open sign-up",
     "signUp is open, invited, or false.",
     "disableSignUp turns off the sign-up.",
-    [P12B],
-  ),
-  moved(
-    "b28",
-    "parity",
-    "Captcha",
-    "A captcha port, and a Turnstile adapter package. Another provider answers the same port.",
-    "Turnstile, reCAPTCHA, hCaptcha, CaptchaFox, and Vercel BotID.",
     [P12B],
   ),
   moved(
@@ -250,22 +230,6 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "@authtempo/breach-check calls the range API with padding and a time limit, and fails closed.",
     "The haveibeenpwned plugin calls the range API with padding.",
     [P12B],
-  ),
-  moved(
-    "b31",
-    "parity",
-    "OpenAPI document",
-    "An OpenAPI document of every route, served by core and by the docs, and held to the routes by a check.",
-    "An OpenAPI document from the routes, with an interactive page.",
-    [P11G],
-  ),
-  moved(
-    "e1",
-    "parity",
-    "OpenAPI reference",
-    "The docs serve the document and a reference page of it.",
-    "An interactive page from the routes.",
-    [P11G],
   ),
   moved(
     "b41",
@@ -287,7 +251,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "f3",
     "parity",
     "Secret rotation",
-    "Versioned secrets. Each sealed value names its version, and an operator route rewraps the old rows.",
+    "Versioned secrets. A signing key gets a new seal at its next signature, and an operator route reseals each old row.",
     "Versioned secrets, with a new encryption on the next write and no downtime.",
     [P12B],
   ),
@@ -308,28 +272,12 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     [P12B],
   ),
   moved(
-    "f11",
-    "parity",
-    "Captcha, as a security rule",
-    "A captcha port with a Turnstile adapter.",
-    "Five captcha providers, Turnstile among them.",
-    [P12B],
-  ),
-  moved(
     "f12",
     "parity",
     "A taken address at sign-up",
     "By default, each sign-up gets the same answer, and the owner of a taken address gets a mail.",
     "With a setting, each sign-up gets the same answer, with a simulated hash.",
     [P12B],
-  ),
-  moved(
-    "g8",
-    "parity",
-    "Hooks",
-    "Hooks on the user, the identity, the session, and the organization. No request hook: an app wraps the handler.",
-    "Hooks before and after each endpoint, and database hooks on the user, the session, and the account.",
-    [P12A],
   ),
 
   // Where Better Auth does more today.
@@ -431,8 +379,8 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "a32",
     "better-auth",
     "ASVS 5.0 sessions",
-    "A session list, the end of one or of the others, a fresh-session rule, and an absolute lifetime. No operator ends sessions.",
-    "The same set, and an admin who ends the sessions of a user.",
+    "A session list, the end of one or of the others, a fresh-session rule, and an absolute lifetime. No operator ends the sessions of a user.",
+    "A list, the end of one, of the others, or of all, freshAge, and an admin who ends the sessions of a user.",
     [P12A, P12B],
   ),
   row(
@@ -446,7 +394,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "b3",
     "better-auth",
     "Second factor",
-    "TOTP, backup codes, trusted devices, a passkey, or an email code. The factor gates every sign-in method. No SMS code.",
+    "TOTP, backup codes, trusted devices, a passkey, or an email code. The factor gates each sign-in method but the passkey, which is two factors itself. No SMS code.",
     "TOTP, a code by email or SMS, backup codes, trusted devices, and a lockout that is on by default.",
     [P12C],
   ),
@@ -514,7 +462,7 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "b17",
     "better-auth",
     "Admin tools",
-    "The operator routes cover the keys and the secrets only.",
+    "The operator routes cover the keys, the secrets, and the info report only.",
     "List users, ban a user, set a role, act as a user, and end the sessions of a user.",
   ),
   row(
@@ -618,6 +566,62 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "Changelog",
     "No release notes yet.",
     "A changelog on the site, and GitHub releases.",
+  ),
+  // Rows where Better Auth keeps a part that authtempo lacks (ruling 26 of the plan 11b lane).
+  row(
+    "d5",
+    "better-auth",
+    "A new app from the CLI",
+    "authtempo init copies a tested example of each stack, and each copy passes its own test. No stack is Next.js.",
+    "The init command covers Next.js and SQLite only.",
+  ),
+  moved(
+    "a31",
+    "better-auth",
+    "ASVS 5.0 authentication",
+    "A reset asks for the second factor. A breach check, a uniform sign-up answer, and a mail after each credential change ship. No lockout.",
+    "Ships a breach check, a sign-up mode that hides a taken address, and a second-factor lockout. A reset opens no session.",
+    [P12A, P12B, P12C],
+  ),
+  moved(
+    "b28",
+    "better-auth",
+    "Captcha",
+    "A captcha port, and a Turnstile adapter package. Another provider answers the same port.",
+    "Turnstile, reCAPTCHA, hCaptcha, CaptchaFox, and Vercel BotID.",
+    [P12B],
+  ),
+  moved(
+    "b31",
+    "better-auth",
+    "OpenAPI document",
+    "An OpenAPI document of every route, served by core and by the docs, and held to the routes by a check.",
+    "An OpenAPI document from the routes, with an interactive page.",
+    [P11G],
+  ),
+  moved(
+    "e1",
+    "better-auth",
+    "OpenAPI reference",
+    "The docs serve the document and a reference page of it.",
+    "An interactive page from the routes.",
+    [P11G],
+  ),
+  moved(
+    "f11",
+    "better-auth",
+    "Captcha, as a security rule",
+    "A captcha port with a Turnstile adapter.",
+    "Five captcha providers, Turnstile among them.",
+    [P12B],
+  ),
+  moved(
+    "g8",
+    "better-auth",
+    "Hooks",
+    "Hooks on the user, the identity, the session, and the organization. No request hook: an app wraps the handler.",
+    "Hooks before and after each endpoint, and database hooks on the user, the session, and the account.",
+    [P12A],
   ),
 ];
 

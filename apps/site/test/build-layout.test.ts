@@ -695,6 +695,14 @@ describe("the compare page (plan 11b Task 6)", () => {
     ]);
   });
 
+  it("states the source rule and the age limit in the first paragraph after the hero", () => {
+    const after = mainOf("compare/index.html").split('<div class="cmp prose">')[1] ?? "";
+    const first = textOf(after.split("</p>")[0] ?? "");
+    expect(first).toBe(
+      "Each row names its source and the day we read it. A row older than 180 days fails our build, so this page cannot show an old fact.",
+    );
+  });
+
   it("shows no image and no logo of another product (brand spec 10)", () => {
     const main = mainOf("compare/index.html");
     expect(tags(main, "img")).toEqual([]);

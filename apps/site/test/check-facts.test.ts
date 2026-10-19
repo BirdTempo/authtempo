@@ -5,7 +5,7 @@ import { checkTerms } from "../scripts/check-terms.ts";
 import { COMPARE_PROSE_PATH, compareProsePage } from "../scripts/lib/compare-prose.ts";
 import { docsPages } from "../scripts/lib/load.ts";
 import { prosePages } from "../scripts/lib/prose.ts";
-import type { CompareRow, HostedModel } from "../src/data/compare.ts";
+import { COMPARE_ROWS, type CompareRow, type HostedModel } from "../src/data/compare.ts";
 
 /** The build day of every test (plan 11b Task 6). */
 const TODAY = new Date("2026-10-14");
@@ -257,5 +257,42 @@ describe("the prose of /compare/ (plan 11b Task 6)", () => {
     const good = compareProsePage(rows(), models());
     expect(checkTerms([...docsPages(), good]).failures).toEqual([]);
     expect(checkSentences([good]).failures).toEqual([]);
+  });
+});
+
+describe("the sides of /compare/ (rulings 25 and 26 of the plan 11b lane)", () => {
+  // The strict rule: parity only when authtempo has each part of the Better Auth cell.
+  it("puts each review row on its ruled side", () => {
+    const of = (side: string) =>
+      COMPARE_ROWS.filter((r) => r.side === side)
+        .map((r) => r.id)
+        .sort();
+    expect(of("authtempo")).toEqual(
+      ["a26", "b5", "d11", "e7", "f16", "f18", "f4", "g14", "g3", "g6"].sort(),
+    );
+    expect(of("parity")).toEqual(
+      [
+        "a18",
+        "a4",
+        "a9",
+        "b1",
+        "b29",
+        "b41",
+        "b8",
+        "d12",
+        "e10",
+        "f10",
+        "f12",
+        "f2",
+        "f3",
+        "f6",
+      ].sort(),
+    );
+    expect(of("better-auth")).toHaveLength(50);
+    for (const id of ["a31", "a32", "b28", "b3", "b31", "b6", "d5", "e1", "f11", "g8"])
+      expect({ id, side: COMPARE_ROWS.find((r) => r.id === id)?.side }).toEqual({
+        id,
+        side: "better-auth",
+      });
   });
 });

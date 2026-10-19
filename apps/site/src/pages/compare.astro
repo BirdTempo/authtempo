@@ -28,13 +28,15 @@ const groups = SIDE_HEADINGS.map(([side, heading]) => ({
   rows: COMPARE_ROWS.filter((r) => r.side === side),
 }));
 const hosted = sectionOf(parts, "The hosted providers", where);
+// The age sentence closes the first paragraph, as the brief of Task 6 gives it.
+const [introFirst = "", ...introRest] = parts.intro.split(/\n\s*\n/);
 const P = COMPARE_PAGE;
 ---
 <Site title={entry.data.title} description={entry.data.description} path={entry.data.page}>
   <PageHero title={entry.data.title}><Fragment set:html={await renderMarkdown(parts.lede)} /></PageHero>
   <div class="cmp prose">
-    <Fragment set:html={await renderMarkdown(parts.intro)} />
-    <p>{P.age}</p>
+    <Fragment set:html={await renderMarkdown(`${introFirst} ${P.age}`)} />
+    <Fragment set:html={await renderMarkdown(introRest.join("\n\n"))} />
   </div>
   {groups.map(async (g) => (
     <section class="cmp">
