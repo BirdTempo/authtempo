@@ -270,7 +270,7 @@ describe("private_key_jwt (plan 12e Task 5, RFC 7523 with rfc7523bis-11)", () =>
           ...(GEN.RS256 as object),
           modulusLength: bits,
           publicExponent: new Uint8Array(e),
-        } as Algorithm,
+        } as RsaHashedKeyGenParams,
         true,
         ["sign", "verify"],
       )) as CryptoKeyPair;
