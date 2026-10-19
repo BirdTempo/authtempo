@@ -118,10 +118,38 @@ function publicJwkOf(jwk: JsonWebKey, alg: JwsAlg, kid: string): PublicJwk {
   return { kty: "EC", crv: "P-256", x: jwk.x, y: jwk.y, kid, alg, use: "sig" };
 }
 
+/** The bit length of a big-endian unsigned integer with no leading zero byte. */
+function bitLength(bytes: Uint8Array): number {
+  const first = bytes[0] ?? 0;
+  return (bytes.length - 1) * 8 + (32 - Math.clz32(first));
+}
+
+/**
+ * True for the public members of an RSA key, the one rule for the keys of
+ * core and of a client. RFC 7518 section 2: `n` and `e` use the fewest
+ * octets, so a leading zero byte is refused. Section 3.3: `n` holds 2048
+ * bits or more, counted as bits, not bytes. `e` is odd and at least 65537.
+ * An `e` of 1 or 3 is weak: with 1, anyone can make a signature.
+ */
+export function rsaPublicOk(n: unknown, e: unknown): boolean {
+  // A length of 1 mod 4 passes the alphabet, but no base64 text has it, and the decode throws.
+  const b64 = (v: unknown): v is string =>
+    typeof v === "string" && PART_RE.test(v) && v.length % 4 !== 1;
+  if (!b64(n) || !b64(e)) return false;
+  const modulus = fromBase64Url(n);
+  const exponent = fromBase64Url(e);
+  if (modulus[0] === 0 || exponent[0] === 0) return false;
+  if (bitLength(modulus) < RSA_MODULUS_BITS) return false;
+  if (((exponent[exponent.length - 1] ?? 0) & 1) === 0) return false;
+  // 65537 is 0x010001: three bytes. A longer e with no leading zero is larger.
+  if (exponent.length > 3) return true;
+  return exponent.reduce((v, b) => v * 256 + b, 0) >= 65_537;
+}
+
 /**
  * True for a public signing key of one of the three algs. It has a string
  * `kid`, `use` `sig`, and the members of its `kty` with its `alg`. It holds no
- * private member. An RSA modulus must hold at least 2048 bits (RFC 7518 section 3.3).
+ * private member. An RSA key passes `rsaPublicOk`.
  * A JWK type is a compile-time type only, so a key from outside core comes through here.
  */
 export function isPublicJwk(value: unknown): value is PublicJwk {
@@ -134,13 +162,7 @@ export function isPublicJwk(value: unknown): value is PublicJwk {
   if (value.kty === "OKP") return value.crv === "Ed25519" && value.alg === "EdDSA" && b64(value.x);
   if (value.kty === "EC")
     return value.crv === "P-256" && value.alg === "ES256" && b64(value.x) && b64(value.y);
-  if (value.kty === "RSA")
-    return (
-      value.alg === "RS256" &&
-      b64(value.n) &&
-      b64(value.e) &&
-      fromBase64Url(value.n).length >= RSA_MODULUS_BITS / 8
-    );
+  if (value.kty === "RSA") return value.alg === "RS256" && rsaPublicOk(value.n, value.e);
   return false;
 }
 

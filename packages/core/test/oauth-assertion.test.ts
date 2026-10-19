@@ -3,7 +3,7 @@ import type { AuthConfig } from "../src/config.js";
 import { resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
-import { randomBase64Url, toBase64Url } from "../src/primitives/crypto.js";
+import { fromBase64Url, randomBase64Url, toBase64Url } from "../src/primitives/crypto.js";
 import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
 import {
   authorized,
@@ -259,6 +259,42 @@ describe("private_key_jwt (plan 12e Task 5, RFC 7523 with rfc7523bis-11)", () =>
       );
       expect(await res.json()).toEqual({ error: "invalid_client_metadata" });
     }
+  });
+
+  it("refuses an RSA key under 2048 bits or with a weak e at registration (RFC 7518 3.3)", async () => {
+    const { h } = setup();
+    const rsa = async (bits: number, e: number[]) => {
+      const pair = (await crypto.subtle.generateKey(
+        {
+          ...(GEN.RS256 as object),
+          modulusLength: bits,
+          publicExponent: new Uint8Array(e),
+        } as Algorithm,
+        true,
+        ["sign", "verify"],
+      )) as CryptoKeyPair;
+      const jwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as Record<string, unknown>;
+      return { kty: "RSA", n: String(jwk.n), e: String(jwk.e), kid: "k1" };
+    };
+    const register = async (key: Record<string, unknown>) =>
+      (
+        await h.auth.handle(
+          post("/auth/oauth/register", {
+            redirect_uris: [REDIRECT],
+            token_endpoint_auth_method: "private_key_jwt",
+            jwks: { keys: [key] },
+          }),
+        )
+      ).status;
+    expect(await register(await rsa(2048, [1, 0, 1]))).toBe(201);
+    const k512 = await rsa(512, [1, 0, 1]);
+    const padded = toBase64Url(new Uint8Array([...new Uint8Array(192), ...fromBase64Url(k512.n)]));
+    for (const [what, key] of [
+      ["2047 bits", await rsa(2047, [1, 0, 1])],
+      ["512 bits behind 192 zero bytes", { ...k512, n: padded }],
+      ["e = 3", await rsa(2048, [3])],
+    ] as const)
+      expect({ what, status: await register(key) }).toEqual({ what, status: 400 });
   });
 
   it("refuses the token endpoint URL as aud (rfc7523bis)", async () => {

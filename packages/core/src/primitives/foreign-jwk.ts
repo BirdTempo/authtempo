@@ -1,5 +1,5 @@
-import { fromBase64Url, sha256Base64Url } from "./crypto.js";
-import { JWK_PRIVATE_MEMBERS, parseJws, RSA_MODULUS_BITS } from "./jwk.js";
+import { sha256Base64Url } from "./crypto.js";
+import { JWK_PRIVATE_MEMBERS, parseJws, rsaPublicOk } from "./jwk.js";
 
 /**
  * A JWS under a key that a client sends (plan 12e): a client assertion of
@@ -84,9 +84,9 @@ export function publicMembersOnly(jwk: unknown): boolean {
 }
 
 /**
- * True when `jwk` is a public key of `alg`: the `kty` and `crv` of the alg,
- * its members, a `use` of `sig` when present, and an `alg` of the same alg
- * when present. An RSA modulus holds at least 2048 bits (RFC 7518 section 3.3).
+ * True when `jwk` is a public key of `alg`. It has the `kty`, the `crv`,
+ * and the members of the alg. A `use`, when present, is `sig`. An `alg`,
+ * when present, is the same alg. An RSA key passes `rsaPublicOk`.
  */
 export function keyFitsAlg(jwk: Record<string, unknown>, alg: ForeignAlg): boolean {
   if (!publicMembersOnly(jwk)) return false;
@@ -96,12 +96,7 @@ export function keyFitsAlg(jwk: Record<string, unknown>, alg: ForeignAlg): boole
   if (alg === "EdDSA" || alg === "Ed25519")
     return jwk.kty === "OKP" && jwk.crv === "Ed25519" && b64(jwk.x);
   if (alg === "ES256") return jwk.kty === "EC" && jwk.crv === "P-256" && b64(jwk.x) && b64(jwk.y);
-  return (
-    jwk.kty === "RSA" &&
-    b64(jwk.n) &&
-    b64(jwk.e) &&
-    fromBase64Url(jwk.n).length >= RSA_MODULUS_BITS / 8
-  );
+  return jwk.kty === "RSA" && rsaPublicOk(jwk.n, jwk.e);
 }
 
 function importParams(alg: ForeignAlg): Algorithm | EcKeyImportParams | RsaHashedImportParams {

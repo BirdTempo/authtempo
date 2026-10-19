@@ -18,6 +18,23 @@ const SECRET = "0123456789abcdef0123456789abcdef";
 const PRIVATE_MEMBERS = ["d", "p", "q", "dp", "dq", "qi", "oth", "k"];
 const enc = new TextEncoder();
 
+/** The `n` of a new RSA key of `bits`, as WebCrypto exports it. */
+async function modulusOf(bits: number): Promise<string> {
+  const pair = (await crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: bits,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash: "SHA-256",
+    },
+    true,
+    ["sign", "verify"],
+  )) as CryptoKeyPair;
+  const jwk = await crypto.subtle.exportKey("jwk", pair.publicKey);
+  if (typeof jwk.n !== "string") throw new Error("no n");
+  return jwk.n;
+}
+
 describe("RS256 keys (plan 12e, owner decision 1)", () => {
   it("generates an RS256 key of 2048 bits with e AQAB", async () => {
     const g = await generateSigningKey("RS256", "k1");
@@ -110,6 +127,38 @@ describe("RS256 keys (plan 12e, owner decision 1)", () => {
     const short = toBase64Url(fromBase64Url(rs.kty === "RSA" ? rs.n : "").slice(1));
     expect(isPublicJwk({ ...rs, n: short })).toBe(false);
     expect(isPublicJwk({ ...rs, e: "AQ+B" })).toBe(false);
+  });
+
+  it("counts the bits of an RSA modulus and refuses a leading zero byte or a weak e (RFC 7518 sections 2 and 3.3)", async () => {
+    const rs = (await generateSigningKey("RS256", "k1")).publicJwk;
+    if (rs.kty !== "RSA") throw new Error("not an RSA key");
+    expect(isPublicJwk(rs)).toBe(true);
+    // A 2047-bit modulus is 256 bytes long, the length of a 2048-bit one.
+    const n2047 = await modulusOf(2047);
+    expect(fromBase64Url(n2047).length).toBe(256);
+    expect(isPublicJwk({ ...rs, n: n2047 })).toBe(false);
+    // A 512-bit modulus behind 192 zero bytes, and a 2048-bit one behind one zero byte.
+    const padded = toBase64Url(
+      new Uint8Array([...new Uint8Array(192), ...fromBase64Url(await modulusOf(512))]),
+    );
+    expect(fromBase64Url(padded).length).toBe(256);
+    expect(isPublicJwk({ ...rs, n: padded })).toBe(false);
+    expect(
+      isPublicJwk({ ...rs, n: toBase64Url(new Uint8Array([0, ...fromBase64Url(rs.n)])) }),
+    ).toBe(false);
+    // e: 65537, 65539, and 16777217 pass. 1, 3, 65535, the even 65538 and 2^24, and a leading zero do not.
+    for (const [e, ok] of [
+      ["AQAB", true],
+      ["AQAD", true],
+      ["AQAAAQ", true],
+      ["AQ", false],
+      ["Aw", false],
+      ["__8", false],
+      ["AQAC", false],
+      ["AQAAAA", false],
+      ["AAEAAQ", false],
+    ] as const)
+      expect({ e, ok: isPublicJwk({ ...rs, e }) }).toEqual({ e, ok });
   });
 
   it("answers false, with no throw, for a key member that is not base64url", async () => {

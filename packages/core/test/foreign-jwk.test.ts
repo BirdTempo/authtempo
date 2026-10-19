@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { toBase64Url } from "../src/primitives/crypto.js";
+import { fromBase64Url, toBase64Url } from "../src/primitives/crypto.js";
 import {
   decodeForeignJws,
   type ForeignAlg,
   importForeignKey,
   jwkThumbprint,
+  keyFitsAlg,
   publicMembersOnly,
   verifyForeign,
 } from "../src/primitives/foreign-jwk.js";
@@ -40,10 +41,13 @@ const PARAMS: Record<ForeignAlg, { gen: unknown; sign: unknown }> = {
   },
 };
 
-/** A generated key pair of `alg`, its public JWK, and a signer of compact JWS. */
-async function keyOf(alg: ForeignAlg) {
+/** A generated key pair of `alg`, its public JWK, and a signer of compact JWS. `rsa` sets the modulus bits and e. */
+async function keyOf(alg: ForeignAlg, rsa: { bits: number; e: number[] } | null = null) {
   const p = PARAMS[alg];
-  const pair = (await crypto.subtle.generateKey(p.gen as Algorithm, true, [
+  const gen = rsa
+    ? { ...(p.gen as object), modulusLength: rsa.bits, publicExponent: new Uint8Array(rsa.e) }
+    : p.gen;
+  const pair = (await crypto.subtle.generateKey(gen as Algorithm, true, [
     "sign",
     "verify",
   ])) as CryptoKeyPair;
@@ -131,6 +135,41 @@ describe("foreign keys (plan 12e Task 5)", () => {
     expect(publicMembersOnly({ kty: "oct" })).toBe(false);
     expect(publicMembersOnly(null)).toBe(false);
     expect(publicMembersOnly([])).toBe(false);
+  });
+
+  it("refuses an RSA key under 2048 bits, with a leading zero byte, or with a weak e", async () => {
+    for (const alg of ["RS256", "PS256"] as const) {
+      const verifies = async (k: Awaited<ReturnType<typeof keyOf>>, jwk = k.jwk) => {
+        const decoded = decodeForeignJws(await k.sign({ alg }, { sub: "x" }));
+        if (!decoded) throw new Error("no decode");
+        return verifyForeign(decoded, jwk, ALL);
+      };
+      const k2048 = await keyOf(alg);
+      expect({ alg, bits: 2048, ok: await verifies(k2048) }).toEqual({ alg, bits: 2048, ok: true });
+      const k2047 = await keyOf(alg, { bits: 2047, e: [1, 0, 1] });
+      expect(fromBase64Url(String(k2047.jwk.n)).length).toBe(256);
+      expect({ alg, bits: 2047, ok: await verifies(k2047) }).toEqual({
+        alg,
+        bits: 2047,
+        ok: false,
+      });
+      expect(keyFitsAlg(k2047.jwk, alg)).toBe(false);
+      // A short key with zero bytes in front of n, to 256 bytes. PS256 needs 1024 bits:
+      // its salt and its hash do not fit in a 512-bit key.
+      const bits = alg === "PS256" ? 1024 : 512;
+      const short = await keyOf(alg, { bits, e: [1, 0, 1] });
+      const n = new Uint8Array([
+        ...new Uint8Array(256 - bits / 8),
+        ...fromBase64Url(String(short.jwk.n)),
+      ]);
+      const padded = { ...short.jwk, n: toBase64Url(n) };
+      expect({ alg, bits, ok: await verifies(short, padded) }).toEqual({ alg, bits, ok: false });
+      // e = 3: WebCrypto makes and imports the key, and core refuses it.
+      const k3 = await keyOf(alg, { bits: 2048, e: [3] });
+      expect(k3.jwk.e).toBe("Aw");
+      expect({ alg, e: 3, ok: await verifies(k3) }).toEqual({ alg, e: 3, ok: false });
+      expect(keyFitsAlg({ ...k2048.jwk, e: "AQ" }, alg)).toBe(false);
+    }
   });
 
   it("computes the RFC 7638 thumbprint of its example", async () => {
