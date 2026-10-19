@@ -51,8 +51,9 @@ describe("the package scripts (plan 11a)", () => {
     // The test pins the order of plan 11e Task 3. build-agent runs right after
     // astro build and before any check, because the checks read its output.
     // write-headers runs next (plan 11b Task 3), because check-csp reads dist/_headers.
+    // build-feed runs after it (plan 11b Task 7), because check-feed reads dist/feed.xml.
     // --force: see the test "builds with --force" below.
-    const build = `${PREFIX}astro build --force && node scripts/build-agent.ts && node scripts/write-headers.ts && `;
+    const build = `${PREFIX}astro build --force && node scripts/build-agent.ts && node scripts/write-headers.ts && node scripts/build-feed.ts && `;
     const script = pkg.scripts.test ?? "";
     expect(script.startsWith(build)).toBe(true);
     const rest = script.slice(build.length);
@@ -101,6 +102,20 @@ describe("the package scripts (plan 11a)", () => {
       expect({ name, written: script === chain || script.startsWith(`${chain} && `) }).toEqual({
         name,
         written: true,
+      });
+    }
+  });
+
+  // Plan 11b Task 7. The feed is a file of dist that no Astro page writes. So
+  // each script that builds writes it right after the headers, or wrangler
+  // serves a site with no /feed.xml and the footer link fails.
+  it("writes the feed right after the headers in each script that builds", () => {
+    const chain = `${PREFIX}astro build --force && node scripts/build-agent.ts && node scripts/write-headers.ts && node scripts/build-feed.ts`;
+    for (const name of ["build", "test", "preview:smoke", "preview"]) {
+      const script = pkg.scripts[name] ?? "";
+      expect({ name, fed: script === chain || script.startsWith(`${chain} && `) }).toEqual({
+        name,
+        fed: true,
       });
     }
   });

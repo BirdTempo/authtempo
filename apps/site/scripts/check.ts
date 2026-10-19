@@ -14,6 +14,8 @@ import { CONFLICT_REASONS, PROVIDER_FILES } from "@authtempo/import";
 import { COMPARE_ROWS, HOSTED_MODELS } from "../src/data/compare.ts";
 import { FEATURES, PACKAGE_EXEMPT, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
+import { RELEASE_DATES } from "../src/data/releases.ts";
+import { REPO_ROOT } from "../src/data/repo.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
 import { checkCli } from "./check-cli.ts";
 import { checkConfig } from "./check-config.ts";
@@ -27,6 +29,7 @@ import { checkExternal } from "./check-external.ts";
 import { checkFacts } from "./check-facts.ts";
 import { checkFaq, FAQ_PAGE, migrationGuides } from "./check-faq.ts";
 import { checkFeatures } from "./check-features.ts";
+import { checkFeed } from "./check-feed.ts";
 import { checkFences } from "./check-fences.ts";
 import { checkFonts } from "./check-fonts.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
@@ -50,6 +53,7 @@ import { sidebarGroups, sidebarOrder } from "./lib/agent.ts";
 import { helpRuns } from "./lib/cli-help.ts";
 import { configKeyPaths } from "./lib/config-keys.ts";
 import { EXPORT_ENTRIES } from "./lib/entries.ts";
+import { readChangelogs, readVersions } from "./lib/feed.ts";
 import {
   distFiles,
   distPageOrEmpty,
@@ -345,6 +349,18 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         built: distPageOrEmpty("/compare/"),
         files: distFiles(),
         today: new Date(),
+      }),
+  },
+  // Plan 11b Task 7: the feed of dist is valid Atom, with one entry per version
+  // heading and one row of RELEASE_DATES each. The root comes from repo.ts (ruling 24).
+  {
+    name: "check-feed",
+    run: () =>
+      checkFeed({
+        feed: existsSync(`${DIST}feed.xml`) ? distText("feed.xml") : null,
+        versions: readVersions(REPO_ROOT),
+        changelogs: readChangelogs(REPO_ROOT),
+        dates: RELEASE_DATES,
       }),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },

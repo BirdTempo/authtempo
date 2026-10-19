@@ -267,6 +267,25 @@ describe("the root layout (plan 11b)", () => {
     expect(header).toMatch(/\.site-header[^{]* nav[^{]*\{grid-area:nav;margin-inline-start:0\}/);
   });
 
+  // Plan 11b Task 7, ruling 7 of its lane: the feed is the last footer link, and each root page names it in its head.
+  it("links the feed in the footer after Changelog, and in the head of each root page", () => {
+    const footer = page("index.html").split('class="site-footer')[1] ?? "";
+    const labels = [...footer.matchAll(/<a\b[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
+    expect(labels.slice(-2)).toEqual(["Changelog", "Feed"]);
+    expect(footer).toMatch(/<a\b[^>]* href="\/feed\.xml"[^>]*>Feed<\/a>/);
+    for (const path of ["index.html", "features/index.html", "compare/index.html"]) {
+      const head = page(path).split("</head>")[0] ?? "";
+      const alternates = tags(head, "link").filter((t) => t.includes('rel="alternate"'));
+      expect({ path, alternates }).toEqual({
+        path,
+        alternates: [
+          '<link rel="alternate" type="application/atom+xml" title="authtempo releases" href="/feed.xml">',
+        ],
+      });
+    }
+    expect(existsSync(`${DIST}feed.xml`)).toBe(true);
+  });
+
   it("marks the link of the current page, and no other link, in the header and the footer", () => {
     // The path prop of Site.astro names the page; the lockup of the header is not a nav link.
     const current = (path: string) =>

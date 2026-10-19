@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { feedSources } from "../scripts/lib/feed.ts";
 import { walk } from "../scripts/lib/files.ts";
 import { REPO, SITE } from "../scripts/lib/paths.ts";
+import { REPO_ROOT } from "../src/data/repo.ts";
 
 /** A task of turbo.json: the keys that this test reads. */
 interface Task {
@@ -19,11 +21,17 @@ const inputs = tasks["@authtempo/site#build"]?.inputs ?? [];
 /** The three root files that src/data/repo.ts reads. */
 const ROOT_FILES = ["package.json", "SECURITY.md", "LICENSE"];
 
-/** The repo paths that the inputs name after $TURBO_ROOT$/, the three root files apart. */
-const examplePatterns = inputs
+/** The two globs of the files that build-feed.ts reads (plan 11b Task 7). */
+const FEED_FILES = ["packages/*/CHANGELOG.md", "packages/*/package.json"];
+
+/** The repo paths that the inputs name after $TURBO_ROOT$/. */
+const rootPatterns = inputs
   .filter((i) => i.startsWith("$TURBO_ROOT$/"))
-  .map((i) => i.slice("$TURBO_ROOT$/".length))
-  .filter((p) => !ROOT_FILES.includes(p));
+  .map((i) => i.slice("$TURBO_ROOT$/".length));
+/** The same, the three root files and the feed files apart. */
+const examplePatterns = rootPatterns.filter(
+  (p) => !ROOT_FILES.includes(p) && !FEED_FILES.includes(p),
+);
 
 /** True when a repo path matches an input glob: `*` is one path segment part, `**` any depth. */
 function matches(path: string, pattern: string): boolean {
@@ -87,6 +95,21 @@ describe("the inputs of the site build in turbo.json (plan 11b Task 5, rulings 2
   it("names no input outside apps/site that no ?raw import reads", () => {
     const unused = examplePatterns.filter((g) => !outside.some((p) => matches(p, g)));
     expect(unused).toEqual([]);
+  });
+
+  // build-feed.ts reads the changelogs and the package names outside apps/site.
+  // Without these inputs, a cache hit serves a feed older than its changelog.
+  it("hashes each file that build-feed.ts reads, on the fixture tree and on this tree", () => {
+    expect(inputs.slice(4, 6)).toEqual([
+      "$TURBO_ROOT$/packages/*/CHANGELOG.md",
+      "$TURBO_ROOT$/packages/*/package.json",
+    ]);
+    const fixture = feedSources(`${SITE}test/fixtures/site/changelogs`);
+    const real = feedSources(REPO_ROOT);
+    expect(fixture.filter((p) => p.endsWith("CHANGELOG.md")).length).toBe(2);
+    expect(real.length).toBeGreaterThan(0);
+    const missed = [...fixture, ...real].filter((p) => !rootPatterns.some((g) => matches(p, g)));
+    expect(missed).toEqual([]);
   });
 
   it("reads a ?raw import, resolves it, and matches it to a glob", () => {

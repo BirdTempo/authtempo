@@ -8,7 +8,9 @@
     // The docs pages also import each example file below with ?raw, and no
     // example is a dependency of the site (ruling 22). The [...path] folder of
     // next is a * here, because a glob reads [ ] as a set of characters.
-    // apps/site/test/turbo-inputs.test.ts holds the list to the imports.
+    // build-feed.ts reads each packages/*/CHANGELOG.md and the name in each
+    // packages/*/package.json, so a new release misses the cache (plan 11b Task 7).
+    // apps/site/test/turbo-inputs.test.ts holds the list to the imports and the feed.
     "@authtempo/site#build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**"],
@@ -17,6 +19,8 @@
         "$TURBO_ROOT$/package.json",
         "$TURBO_ROOT$/SECURITY.md",
         "$TURBO_ROOT$/LICENSE",
+        "$TURBO_ROOT$/packages/*/CHANGELOG.md",
+        "$TURBO_ROOT$/packages/*/package.json",
         "$TURBO_ROOT$/examples/elysia/src/app.ts",
         "$TURBO_ROOT$/examples/elysia/test/app.test.ts",
         "$TURBO_ROOT$/examples/mcp-server/src/auth.ts",

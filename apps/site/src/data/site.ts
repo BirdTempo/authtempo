@@ -1,3 +1,5 @@
+import { FEED_PATH } from "./releases.ts";
+
 /**
  * The site's own names (brand spec 9 and 13). They are the origin of the
  * canonical and Open Graph URLs, the docs path, and the labels of the header
@@ -36,6 +38,7 @@ export const FOOTER_LINKS: readonly { label: string; href: string }[] = [
   { label: "Pricing", href: "/pricing/" },
   { label: "Security", href: "/security/" },
   { label: "Changelog", href: `${SITE.docs}changelog/` },
+  { label: "Feed", href: FEED_PATH },
 ];
 
 /**

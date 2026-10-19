@@ -10,6 +10,7 @@ import { parseTokens } from "../../scripts/lib/tokens.ts";
 import Icon from "../components/Icon.astro";
 import Lockup from "../components/Lockup.astro";
 import { HOME } from "../data/home.ts";
+import { FEED_PATH, FEED_TITLE } from "../data/releases.ts";
 import { rootLicense } from "../data/repo.ts";
 import { FOOTER_LINKS, NAV_LINKS, REPO_URL, SITE } from "../data/site.ts";
 import toggle from "../scripts/theme-toggle.js?raw";
@@ -43,6 +44,8 @@ const license: string = rootLicense() ?? HOME.noLicense;
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <link rel="manifest" href="/site.webmanifest" />
+    {/* The Atom feed of the releases (plan 11b Task 7). build-feed.ts writes it after the build. */}
+    <link rel="alternate" type="application/atom+xml" title={FEED_TITLE} href={FEED_PATH} />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content={tokens.light.get("--at-paper")} />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content={tokens.darkAttr.get("--at-paper")} />
     <meta property="og:title" content={Astro.props.title} />

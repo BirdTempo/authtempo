@@ -21,3 +21,9 @@
 # Rule form: Workers static assets docs, headers page, read 2026-10-19.
 /docs/reference/openapi.json
   Access-Control-Allow-Origin: *
+
+# The Atom feed (plan 11b Task 7). wrangler picks the type by the extension
+# and sends application/xml for .xml (wrangler dev, 2026-10-20). RFC 4287
+# section 7 registers application/atom+xml, so a feed reader knows the format.
+/feed.xml
+  Content-Type: application/atom+xml; charset=utf-8

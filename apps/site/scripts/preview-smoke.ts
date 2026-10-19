@@ -1,8 +1,9 @@
 // Review Focus 1 of plan 11a: the Worker answers a URL with no trailing slash
 // and a missing page the way a reader expects. It runs `wrangler dev` on the
 // built dist and checks each answer below; the summary line counts them. Plan
-// 11b adds the headers of dist/_headers on / and /docs/. It is not part of
-// `pnpm test`, because wrangler dev takes seconds to start.
+// 11b adds the headers of dist/_headers on / and /docs/, and the type of the
+// feed. It is not part of `pnpm test`, because wrangler dev takes seconds to
+// start.
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { DIST, SITE } from "./lib/paths.ts";
@@ -230,6 +231,20 @@ try {
     const origin = res.headers.get("access-control-allow-origin");
     if (res.status !== 200) return `status ${res.status}`;
     return origin === null ? null : `access-control-allow-origin ${origin} on a page`;
+  });
+  // Plan 11b Task 7. The rule for /feed.xml in _headers.template gives the
+  // feed the Atom type of RFC 4287 section 7. The CSP still applies, and the
+  // body is the feed that build-feed.ts wrote.
+  await expectAnswer("/feed.xml", (res, body) => {
+    const type = res.headers.get("content-type") ?? "(none)";
+    console.log(`preview-smoke: /feed.xml status=${res.status} content-type=${type}`);
+    if (res.status !== 200) return `status ${res.status}`;
+    if (type !== "application/atom+xml; charset=utf-8")
+      return `content-type ${type}, not application/atom+xml; charset=utf-8`;
+    if (res.headers.get("content-security-policy") !== builtPolicy())
+      return "the CSP of dist/_headers is not on the feed";
+    const built = existsSync(`${DIST}feed.xml`) ? readFileSync(`${DIST}feed.xml`, "utf8") : null;
+    return body === built ? null : "the body is not dist/feed.xml";
   });
 } catch (e) {
   failures.push(e instanceof Error ? e.message : String(e));
