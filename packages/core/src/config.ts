@@ -596,6 +596,13 @@ export interface OAuthConfig {
   refreshTtlDays?: number;
   /** The life of an authorization code, 1 to 10. Default 5. */
   codeTtlMinutes?: number;
+  /**
+   * The resources that each introspection client may see, by client id
+   * (plan 12e, RFC 7662 section 4). Each resource is an entry of
+   * `resources`. Without the map, a client sees the one resource when
+   * `resources` has one entry, and no resource when it has more.
+   */
+  introspection?: Record<string, string[]>;
 }
 
 export interface ResolvedOAuth {
@@ -611,6 +618,8 @@ export interface ResolvedOAuth {
   accessTtlMinutes: number;
   refreshTtlDays: number;
   codeTtlMinutes: number;
+  /** The resources of each introspection client, by client id, or null: no map (plan 12e). */
+  introspection: ReadonlyMap<string, readonly string[]> | null;
   /** The metadata documents this isolate read, by URL, each for one hour. */
   cimdCache: Map<string, CimdEntry>;
   /** The `jwks_uri` key sets of `private_key_jwt` clients that this isolate read, by URL, each for one hour (plan 12e). */
@@ -1552,7 +1561,43 @@ const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {
   accessTtlMinutes: true,
   refreshTtlDays: true,
   codeTtlMinutes: true,
+  introspection: true,
 };
+
+/** The longest client id: a `cl_` id or a metadata document URL (plan 11d). */
+const CLIENT_ID_MAX = 2048;
+
+/**
+ * `oauth.introspection`: client id to 1 to 20 distinct entries of
+ * `resources` (plan 12e). Core cannot read the clients at config time, so
+ * an unknown id is no error: no client of that id authenticates.
+ */
+function resolveIntrospection(
+  input: unknown,
+  resources: readonly string[],
+): ReadonlyMap<string, readonly string[]> | null {
+  if (input === undefined) return null;
+  if (!isPlainObject(input))
+    throw new ConfigError("oauth.introspection must be an object of client ids to resource lists");
+  const map = new Map<string, readonly string[]>();
+  for (const [clientId, list] of Object.entries(input)) {
+    if (clientId.length < 1 || clientId.length > CLIENT_ID_MAX || hasControlChar(clientId))
+      throw new ConfigError(
+        "oauth.introspection has a client id that is not 1 to 2048 characters with no control character",
+      );
+    if (
+      !Array.isArray(list) ||
+      list.length < 1 ||
+      new Set(list).size !== list.length ||
+      !list.every((r) => typeof r === "string" && resources.includes(r))
+    )
+      throw new ConfigError(
+        `oauth.introspection.${clientId} must be a list of distinct entries of oauth.resources`,
+      );
+    map.set(clientId, [...(list as string[])]);
+  }
+  return map;
+}
 
 function integerIn(path: string, value: number, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || value < min || value > max)
@@ -1570,7 +1615,7 @@ function resolveOAuth(
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(OAUTH_KEYS, key))
       throw new ConfigError(
-        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, and codeTtlMinutes`,
+        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, and introspection`,
       );
   if (!jwtMint)
     throw new ConfigError("oauth needs jwtMint: an access token is a JWT that core signs");
@@ -1665,6 +1710,7 @@ function resolveOAuth(
     ),
     refreshTtlDays: integerIn("oauth.refreshTtlDays", input.refreshTtlDays ?? 30, 1, 365),
     codeTtlMinutes: integerIn("oauth.codeTtlMinutes", input.codeTtlMinutes ?? 5, 1, 10),
+    introspection: resolveIntrospection(input.introspection, resources as string[]),
     cimdCache: new Map(),
     jwksCache: new Map(),
   };

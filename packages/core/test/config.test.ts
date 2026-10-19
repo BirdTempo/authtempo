@@ -754,6 +754,7 @@ describe("oauth (plan 9g)", () => {
       accessTtlMinutes: 15,
       refreshTtlDays: 30,
       codeTtlMinutes: 5,
+      introspection: null,
     });
     expect([...(on?.scopes.keys() ?? [])]).toEqual([
       "openid",
@@ -833,7 +834,7 @@ describe("oauth (plan 9g)", () => {
       [{ resources: [R], fetch, consentPage: "html" }, "oauth.consentPage must be a function"],
       [
         { resources: [R], fetch, loginPage: "/login" },
-        "oauth.loginPage is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, and codeTtlMinutes",
+        "oauth.loginPage is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, and introspection",
       ],
       [true, "oauth must be an object or false"],
     ];
@@ -842,6 +843,40 @@ describe("oauth (plan 9g)", () => {
     expect(() =>
       resolveConfig({ ...base, jwtMint: false, oauth: { resources: [R], fetch } }),
     ).toThrowError("oauth needs jwtMint: an access token is a JWT that core signs");
+  });
+
+  it("reads oauth.introspection and refuses a resource outside oauth.resources (ruling 29 of plan 12e)", () => {
+    const R2 = "https://api.example.com/files";
+    const on = resolveConfig({
+      ...base,
+      oauth: { resources: [R, R2], fetch, introspection: { cl_rs: [R2], cl_two: [R, R2] } },
+    }).oauth;
+    expect(on?.introspection).toEqual(
+      new Map([
+        ["cl_rs", [R2]],
+        ["cl_two", [R, R2]],
+      ]),
+    );
+    const LIST = "must be a list of distinct entries of oauth.resources";
+    const bad: [unknown, string][] = [
+      [[], "oauth.introspection must be an object of client ids to resource lists"],
+      [null, "oauth.introspection must be an object of client ids to resource lists"],
+      [{ cl_rs: ["https://other.example.com/mcp"] }, `oauth.introspection.cl_rs ${LIST}`],
+      [{ cl_rs: [] }, `oauth.introspection.cl_rs ${LIST}`],
+      [{ cl_rs: [R, R] }, `oauth.introspection.cl_rs ${LIST}`],
+      [{ cl_rs: R }, `oauth.introspection.cl_rs ${LIST}`],
+      [
+        { "": [R] },
+        "oauth.introspection has a client id that is not 1 to 2048 characters with no control character",
+      ],
+    ];
+    for (const [introspection, message] of bad)
+      expect(() =>
+        resolveConfig({
+          ...base,
+          oauth: { resources: [R, R2], fetch, introspection: introspection as never },
+        }),
+      ).toThrowError(message);
   });
 
   it("accepts dynamic and cimd both off: api.oauth.clients.create is the way in (plan 12e)", () => {

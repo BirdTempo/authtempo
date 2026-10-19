@@ -951,7 +951,7 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | --- | --- |
 | Needs | Nothing; or the client id and secret as HTTP Basic. The caller takes the client auth of `POST /oauth/token`. It is a confidential client with `introspect: true` of `api.oauth.clients`. Any other caller gets `invalid_client`. After an `Authorization` header, `invalid_client` is a 401 with `WWW-Authenticate: Basic` and the issuer as the realm. With no header it is a 400 with no challenge |
 | Input | Form `{ token, token_type_hint?, client_id?, client_secret?, client_assertion_type?, client_assertion? }`. RFC 7662. The hint orders the lookups only |
-| Answer | `{ active: true, scope, client_id, sub, aud, iss, exp, iat, jti, token_type }` for a live access token, and for a live refresh token of the caller. `{ active: false }` alone for every other token. A revoke, a delete, or a lost scope ends a token here at once |
+| Answer | `{ active: true, scope, client_id, sub, aud, iss, exp, iat, jti, token_type }` for a live access token, and for a live refresh token of the caller. `{ active: false }` alone for every other token. A token of a resource outside the caller's [`oauth.introspection`](/docs/reference/config/#oauth-provider) entry is inactive too. A revoke, a delete, or a lost scope ends a token here at once |
 | Errors | [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
 
 <h3 id="get-oauth-userinfo"><code>GET /oauth/userinfo</code></h3>

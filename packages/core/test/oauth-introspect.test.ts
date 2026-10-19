@@ -56,8 +56,15 @@ async function apiClient(
   return { clientId: made.value.client.id, secret };
 }
 
-/** A second instance on the storage, clock, and secret of `h`, with its own limiter. */
-function twin(h: Handle, scopes: Record<string, string> = SCOPES): Handle {
+/**
+ * A second instance on the storage, clock, and secret of `h`, with its own
+ * limiter. `introspection` names the resources of each resource server.
+ */
+function twin(
+  h: Handle,
+  introspection?: Record<string, string[]>,
+  scopes: Record<string, string> = SCOPES,
+): Handle {
   const input: AuthConfig = {
     baseURL: BASE_URL,
     secret: "0123456789abcdef0123456789abcdef",
@@ -70,6 +77,7 @@ function twin(h: Handle, scopes: Record<string, string> = SCOPES): Handle {
       resources: [RESOURCE, OTHER_RESOURCE],
       scopes,
       registration: { cimd: false, dynamic: true },
+      ...(introspection ? { introspection } : {}),
     },
   };
   return {
@@ -144,7 +152,8 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
     const h = oauthHandle();
     const rs = await apiClient(h);
     const t = await userToken(h);
-    const r = await ask(h, rs, t.access_token);
+    const v = twin(h, { [rs.clientId]: [RESOURCE] });
+    const r = await ask(v, rs, t.access_token);
     expect(r.status).toBe(200);
     expect(r.res.headers.get("cache-control")).toBe("no-store");
     expect(r.res.headers.get("pragma")).toBe("no-cache");
@@ -175,14 +184,14 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
     });
     expect(Number(r.body.exp) - Number(r.body.iat)).toBe(900);
     // The hint orders the lookups only: a wrong hint still finds the access token.
-    const hinted = await ask(h, rs, t.access_token, { token_type_hint: "refresh_token" });
+    const hinted = await ask(v, rs, t.access_token, { token_type_hint: "refresh_token" });
     expect(hinted.body.active).toBe(true);
   });
 
   it("answers active false at once after a grant revoke, a user delete, and a client delete, with no other member", async () => {
     const h = oauthHandle();
-    const other = twin(h);
     const rs = await apiClient(h);
+    const other = twin(h, { [rs.clientId]: [RESOURCE] });
     // A grant revoke on the first instance; the second instance answers.
     const a = await userToken(h);
     expect((await ask(other, rs, a.access_token)).body.active).toBe(true);
@@ -213,8 +222,8 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
 
     // A client delete.
     const h2 = oauthHandle();
-    const other2 = twin(h2);
     const rs2 = await apiClient(h2);
+    const other2 = twin(h2, { [rs2.clientId]: [RESOURCE] });
     const c = await userToken(h2, "mcp:read");
     expect((await ask(other2, rs2, c.access_token)).body.active).toBe(true);
     expect(await clientsOf(h2).delete({ clientId: c.clientId })).toEqual({
@@ -228,8 +237,9 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
 
   it("answers an oauth-client token while its client keeps the scope", async () => {
     const h = oauthHandle();
-    const other = twin(h);
     const rs = await apiClient(h);
+    const sees = { [rs.clientId]: [RESOURCE] };
+    const other = twin(h, sees);
     const machine = await apiClient(h, { name: "Billing service", introspect: false });
     const grant = (c: Creds, ip: string) =>
       tokens(
@@ -255,7 +265,7 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
       token_type: "Bearer",
     });
     // A config that drops the scope ends the token on that instance (ruling 28).
-    expect((await ask(twin(h, { "mcp:write": "Change" }), rs, t.access_token)).body).toEqual(
+    expect((await ask(twin(h, sees, { "mcp:write": "Change" }), rs, t.access_token)).body).toEqual(
       INACTIVE,
     );
     // The scope leaves credentialsScopes.
@@ -287,6 +297,7 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
       credentialsScopes: [],
     });
     const rs = await apiClient(h);
+    const v = twin(h, { [owner.clientId]: [RESOURCE], [rs.clientId]: [RESOURCE] });
     const s = await signedIn(h);
     const p = await pkce();
     const { code } = await authorized(h, s.cookie, {
@@ -312,7 +323,7 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
       { field: "clientId", op: "eq", value: owner.clientId },
     ]);
     if (!row) throw new Error("no refresh row");
-    const own = await ask(h, owner, refresh, { token_type_hint: "refresh_token" });
+    const own = await ask(v, owner, refresh, { token_type_hint: "refresh_token" });
     expect(own.body).toEqual({
       active: true,
       scope: "mcp:read offline_access",
@@ -326,7 +337,7 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
       token_type: "Bearer",
     });
     // Another resource server learns nothing of it.
-    const theirs = await ask(h, rs, refresh);
+    const theirs = await ask(v, rs, refresh);
     expect(Object.keys(theirs.body)).toEqual(["active"]);
     expect(theirs.body).toEqual(INACTIVE);
     // A spent token is inactive; its child is live until its expiry.
@@ -334,11 +345,11 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
       h,
       tokenPost({ grant_type: "refresh_token", refresh_token: refresh }, basic),
     );
-    expect((await ask(h, owner, refresh)).body).toEqual(INACTIVE);
+    expect((await ask(v, owner, refresh)).body).toEqual(INACTIVE);
     const child = next.refresh_token ?? "";
-    expect((await ask(h, owner, child)).body.active).toBe(true);
+    expect((await ask(v, owner, child)).body.active).toBe(true);
     h.clock.advance(31 * DAY_MS);
-    expect((await ask(h, owner, child)).body).toEqual(INACTIVE);
+    expect((await ask(v, owner, child)).body).toEqual(INACTIVE);
   });
 
   it("refuses a caller without introspect: true and a public caller", async () => {
@@ -392,6 +403,7 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
     const h = oauthHandle();
     const rs = await apiClient(h);
     const t = await userToken(h, "openid mcp:read");
+    const v = twin(h, { [rs.clientId]: [RESOURCE] });
     const session = await h.auth.handle(get("/auth/token", { cookie: t.cookie }));
     const sessionJwt = ((await session.json()) as { token: string }).token;
     const minted = await h.auth.handle(post("/auth/tokens", { name: "ci" }, { cookie: t.cookie }));
@@ -400,13 +412,50 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
     const idToken = t.id_token ?? "";
     expect(idToken.split(".")).toHaveLength(3);
     // The access token of the same grant is live, so each refusal below is about its form.
-    expect((await ask(h, rs, t.access_token)).body.active).toBe(true);
+    expect((await ask(v, rs, t.access_token)).body.active).toBe(true);
     const garbage = ["garbage", `or_${"A".repeat(43)}`, "a.b.c", ""];
     for (const token of [sessionJwt, idToken, apiToken, ...garbage]) {
-      const r = await ask(h, rs, token);
+      const r = await ask(v, rs, token);
       expect(r.status, token).toBe(200);
       expect(r.body, token).toEqual(INACTIVE);
     }
+  });
+
+  it("answers only a token of a resource that oauth.introspection gives the caller (ruling 29)", async () => {
+    const h = oauthHandle();
+    const mine = await apiClient(h, { name: "MCP server" });
+    const files = await apiClient(h, { name: "File server" });
+    const absent = await apiClient(h, { name: "Unmapped server" });
+    const v = twin(h, { [mine.clientId]: [RESOURCE], [files.clientId]: [OTHER_RESOURCE] });
+    const s = await signedIn(h);
+    const clientId = await registered(h);
+    const issue = async (resource: string) => {
+      const p = await pkce();
+      const { code } = await authorized(h, s.cookie, {
+        clientId,
+        challenge: p.challenge,
+        scope: "mcp:read",
+        resource,
+      });
+      return (await tokens(h, exchange(code, clientId, p.verifier, { resource }))).access_token;
+    };
+    const mcp = await issue(RESOURCE);
+    const other = await issue(OTHER_RESOURCE);
+    expect((await ask(v, mine, mcp)).body).toMatchObject({ active: true, aud: RESOURCE });
+    expect((await ask(v, mine, other)).body).toEqual(INACTIVE);
+    expect((await ask(v, files, other)).body).toMatchObject({ active: true, aud: OTHER_RESOURCE });
+    expect((await ask(v, files, mcp)).body).toEqual(INACTIVE);
+    // A client that the map does not name sees no token.
+    expect((await ask(v, absent, mcp)).body).toEqual(INACTIVE);
+    // No map and two resources: core cannot tell the caller's resource, so no caller sees a token.
+    expect((await ask(h, mine, mcp)).body).toEqual(INACTIVE);
+    // No map and one resource: every introspection client sees it.
+    const one = oauthHandle({
+      storage: h.storage,
+      clock: h.clock,
+      oauth: { resources: [RESOURCE], scopes: SCOPES, registration: { cimd: false } },
+    });
+    expect((await ask(one, absent, mcp)).body).toMatchObject({ active: true, aud: RESOURCE });
   });
 
   it("limits one caller to 600 per 60 seconds", async () => {

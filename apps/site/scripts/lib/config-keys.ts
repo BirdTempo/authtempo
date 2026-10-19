@@ -204,6 +204,7 @@ export const CONFIG_KEYS = {
     accessTtlMinutes: true,
     refreshTtlDays: true,
     codeTtlMinutes: true,
+    introspection: true,
   } satisfies Keys<OAuthConfig>,
   "oauth.registration": {
     dynamic: true,

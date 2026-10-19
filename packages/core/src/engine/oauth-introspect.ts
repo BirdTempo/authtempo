@@ -1,9 +1,9 @@
-import type { ResolvedConfig } from "../config.js";
+import type { ResolvedConfig, ResolvedOAuth } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { decodeJws } from "../primitives/jwk.js";
 import { issuerOf } from "./jwt.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
-import { type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
+import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { liveUser, type OAuthAccess, refreshRowOf, resolveAccessToken } from "./oauth-token.js";
 
 /**
@@ -124,11 +124,23 @@ async function refreshAnswer(
 }
 
 /**
+ * The resources whose tokens a caller may see (RFC 7662 section 4, ruling
+ * 29 of plan 12e). The map of `oauth.introspection` names them. With no
+ * map, one configured resource is the set, and several give an empty set:
+ * core cannot tell which resource server the caller is.
+ */
+export function visibleResources(oauth: ResolvedOAuth, clientId: string): readonly string[] {
+  if (oauth.introspection) return oauth.introspection.get(clientId) ?? [];
+  return oauth.resources.length === 1 ? oauth.resources : [];
+}
+
+/**
  * `POST /oauth/introspect` for a caller that `authenticateClient` checked.
  * Section 4: the caller is a confidential client that the operator allowed
  * (`introspect: true` of `api.oauth.clients`), else `invalid_client`. A
  * missing `token` is `invalid_request` (section 2.1). `hint` orders the two
- * lookups only: a token never fits both forms.
+ * lookups only: a token never fits both forms. A token of a resource
+ * outside `visibleResources` answers inactive.
  */
 export async function introspect(
   config: ResolvedConfig,
@@ -140,11 +152,12 @@ export async function introspect(
   if (!(await config.limiter.allow(limit, INTROSPECT_PER_CLIENT))) return oauthFail("rate_limited");
   const token = input.token;
   if (token === null) return oauthFail("invalid_request");
+  const visible = visibleResources(oauthOf(config), caller.client.id);
   const lookups = [() => accessAnswer(config, token), () => refreshAnswer(config, caller, token)];
   if (input.hint === "refresh_token") lookups.reverse();
   for (const lookup of lookups) {
     const answer = await lookup();
-    if (answer) return oauthOk(answer);
+    if (answer) return oauthOk(visible.includes(answer.aud) ? answer : { active: false });
   }
   return oauthOk({ active: false });
 }
