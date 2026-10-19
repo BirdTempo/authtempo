@@ -421,6 +421,21 @@ describe("the DPoP scheme (RFC 9449 section 7)", () => {
     expect(await h.auth.caller(two)).toBeNull();
   });
 
+  it("never shares the answer of one request between two core instances (ruling 31)", async () => {
+    const a = instance();
+    const b = instance();
+    const key = await dpopKey();
+    const { token } = await boundToken(a, key);
+    // B has its own storage and its own key, so it never takes a token of A.
+    const first = resourceRequest(token, "DPoP", await resourceProof(a, key, token));
+    expect((await a.auth.caller(first))?.kind).toBe("oauth");
+    expect(await b.auth.caller(first)).toBeNull();
+    // In the other order, B's null does not hide A's caller.
+    const second = resourceRequest(token, "DPoP", await resourceProof(a, key, token));
+    expect(await b.auth.caller(second)).toBeNull();
+    expect((await a.auth.caller(second))?.kind).toBe("oauth");
+  });
+
   it("takes a plain Bearer token with no proof as today", async () => {
     const h = instance();
     const c = await publicCode(h);

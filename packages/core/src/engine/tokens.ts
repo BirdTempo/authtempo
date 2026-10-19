@@ -238,11 +238,12 @@ const accessCaller = (r: ResolvedAccess): Caller =>
   r.kind === "oauth" ? { kind: "oauth", ...r.access } : { kind: "oauth-client", ...r.access };
 
 /**
- * The caller of each request with `Authorization: DPoP`, so a second
- * `auth.caller` of one request answers the same. The proof's `jti` is spent
- * at the first call, and a replay is another request.
+ * The caller of each request with `Authorization: DPoP`, by instance, so a
+ * second `auth.caller` of one request answers the same. The proof's `jti`
+ * is spent at the first call, and a replay is another request. The key is
+ * the config first, so two instances never share an answer (ruling 31).
  */
-const dpopCallers = new WeakMap<Request, Promise<Caller | null>>();
+const dpopCallers = new WeakMap<ResolvedConfig, WeakMap<Request, Promise<Caller | null>>>();
 
 /**
  * A DPoP-bound access token with its proof (RFC 9449 section 7.1), for the
@@ -285,10 +286,15 @@ export async function callerFromRequest(
   }
   const dpop = readDpopToken(request);
   if (dpop !== null) {
-    const seen = dpopCallers.get(request);
+    let mine = dpopCallers.get(config);
+    if (!mine) {
+      mine = new WeakMap();
+      dpopCallers.set(config, mine);
+    }
+    const seen = mine.get(request);
     if (seen) return seen;
     const caller = dpopCaller(config, request, dpop);
-    dpopCallers.set(request, caller);
+    mine.set(request, caller);
     return caller;
   }
   const bearer = readBearer(request);
