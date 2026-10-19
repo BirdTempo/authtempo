@@ -15,7 +15,7 @@ import {
 import { RFC7515_A2_HEADER, RFC7515_A2_JWS, RFC7515_A2_KEY } from "./fixtures/rfc7515-a2.js";
 
 const SECRET = "0123456789abcdef0123456789abcdef";
-const PRIVATE_MEMBERS = ["d", "p", "q", "dp", "dq", "qi"];
+const PRIVATE_MEMBERS = ["d", "p", "q", "dp", "dq", "qi", "k"];
 const enc = new TextEncoder();
 
 describe("RS256 keys (plan 12e, owner decision 1)", () => {
@@ -110,5 +110,22 @@ describe("RS256 keys (plan 12e, owner decision 1)", () => {
     const short = toBase64Url(fromBase64Url(rs.kty === "RSA" ? rs.n : "").slice(1));
     expect(isPublicJwk({ ...rs, n: short })).toBe(false);
     expect(isPublicJwk({ ...rs, e: "AQ+B" })).toBe(false);
+  });
+
+  it("answers false, with no throw, for a key member that is not base64url", async () => {
+    const rs = (await generateSigningKey("RS256", "k1")).publicJwk;
+    const ed = (await generateSigningKey("EdDSA", "k2")).publicJwk;
+    // A length of 1 mod 4 passes the alphabet, and no base64 text has that length.
+    const bad = [
+      { ...rs, n: "A".repeat(345) },
+      { ...rs, e: "A" },
+      { ...rs, n: `${"A".repeat(340)}==` },
+      { ...rs, n: 7 },
+      { ...ed, x: "AAAAA" },
+    ];
+    for (const key of bad) {
+      const member = JSON.stringify(key).slice(0, 40);
+      expect({ member, ok: isPublicJwk(key) }).toEqual({ member, ok: false });
+    }
   });
 });

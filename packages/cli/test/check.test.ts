@@ -287,6 +287,16 @@ describe("authtempo check (spec 19)", () => {
     expect(result((await check([], routes)).report, "jwks")).toMatchObject({ status: "fail" });
   });
 
+  it("gives jwks_bad_key, not a stop, for an RSA key whose n is not base64url", async () => {
+    // A length of 1 mod 4: no base64 text has that length.
+    const bad = { kty: "RSA", n: "A".repeat(345), e: "AQAB", kid: "R2", alg: "RS256", use: "sig" };
+    const routes = healthy();
+    routes.set("GET /auth/jwks", () => keySet([KEY, bad]));
+    const r = await check([], routes);
+    expect(r.code).toBe(1);
+    expect(result(r.report, "jwks")).toMatchObject({ status: "fail", code: "jwks_bad_key" });
+  });
+
   it("skips the checks that need the mount when the mount is missing", async () => {
     const routes = healthy();
     routes.delete("GET /auth/session");

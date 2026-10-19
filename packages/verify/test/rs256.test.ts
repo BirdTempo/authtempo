@@ -28,7 +28,36 @@ function editedKeys(
   }) as typeof fetch;
 }
 
+/** An RSA entry whose `n` has a length of 1 mod 4: no base64 text has that length. */
+const BAD_RSA = {
+  kty: "RSA",
+  n: "A".repeat(345),
+  e: "AQAB",
+  kid: "bad",
+  alg: "RS256",
+  use: "sig",
+};
+
 describe("RS256 keys in the verifier (plan 12e)", () => {
+  it("drops an RSA entry whose n is not base64url, and the good key of the same set verifies", async () => {
+    const server = makeServer();
+    const s = await signedIn(server);
+    const jwt = await sessionJwt(server, s.sessionToken);
+    const before = server.count("/auth/jwks");
+    const v = createVerifier({
+      issuer: ISSUER,
+      audience: FILES,
+      clock: server.clock,
+      fetch: editedKeys(server, (keys) => [BAD_RSA, ...keys]),
+    });
+    for (let i = 0; i < 3; i++) {
+      const r = await v.verifyRequest(withBearer(FILES, jwt));
+      expect(r.ok && r.value?.kind).toBe("session-jwt");
+    }
+    // editedKeys reads core once per read of the verifier: one read for three verifies.
+    expect(server.count("/auth/jwks") - before).toBe(1);
+  });
+
   it("verifies an RS256 session JWT and access token offline", async () => {
     const server = rsServer();
     const s = await signedIn(server);

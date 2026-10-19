@@ -125,7 +125,9 @@ export function isPublicJwk(value: unknown): value is PublicJwk {
   if (!isObject(value)) return false;
   if (typeof value.kid !== "string" || value.use !== "sig") return false;
   if (PRIVATE_MEMBERS.some((m) => m in value)) return false;
-  const b64 = (v: unknown): v is string => typeof v === "string" && PART_RE.test(v);
+  // A length of 1 mod 4 passes the alphabet, but no base64 text has it, and the decode throws.
+  const b64 = (v: unknown): v is string =>
+    typeof v === "string" && PART_RE.test(v) && v.length % 4 !== 1;
   if (value.kty === "OKP") return value.crv === "Ed25519" && value.alg === "EdDSA" && b64(value.x);
   if (value.kty === "EC")
     return value.crv === "P-256" && value.alg === "ES256" && b64(value.x) && b64(value.y);
