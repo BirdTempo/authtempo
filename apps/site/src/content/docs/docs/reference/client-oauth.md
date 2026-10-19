@@ -45,7 +45,7 @@ sources:
 | `refresh(refreshToken, { scopes })` | `POST /oauth/token` | `OAuthTokens`. The `scopes` input is optional and narrows the grant. |
 | `revoke(token)` | `POST /oauth/revoke` | `{ revoked: true }` |
 | `userinfo(accessToken)` | `GET /oauth/userinfo` | The claims by scope |
-| `registerOAuthClient({ issuer, clientName, redirectUris })` | `POST /oauth/register` | `{ clientId, redirectUris }` |
+| `registerOAuthClient({ issuer, clientName, redirectUris, initialAccessToken? })` | `POST /oauth/register` | `{ clientId, redirectUris }`. `initialAccessToken` goes as the bearer when the server sets `oauth.registration.initialAccessTokenHash`. Without it, such a server answers `invalid_token`. |
 
 `OAUTH_CALLS` is the table of these routes and of the metadata document.
 

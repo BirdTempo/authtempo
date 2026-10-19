@@ -207,6 +207,47 @@ async function redirectWith(
 
 const GOOD = { access_token: "oa_x", token_type: "Bearer", expires_in: 3600, scope: "openid" };
 
+describe("the initial access token of the registration (plan 12e)", () => {
+  it("sends initialAccessToken as the bearer, and answers invalid_token without it", async () => {
+    const token = "iat-0123456789abcdef0123456789abcdef";
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+    const hash = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
+    const server = makeServer({
+      oauth: {
+        resources: [RESOURCE],
+        registration: { cimd: false, dynamic: true, initialAccessTokenHash: hash },
+      },
+    });
+    const seen: (string | null)[] = [];
+    const appFetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = new Request(input, init);
+      seen.push(request.headers.get("authorization"));
+      return server.auth.handle(request);
+    }) as typeof fetch;
+    const logs = (["log", "info", "warn", "error", "debug"] as const).map((m) =>
+      vi.spyOn(console, m).mockImplementation(() => {}),
+    );
+    const base = { issuer: ISSUER, clientName: "CLI", redirectUris: [REDIRECT], fetch: appFetch };
+    expect(await registerOAuthClient(base)).toEqual({
+      ok: false,
+      code: "invalid_token",
+      status: 401,
+    });
+    const wrong = await registerOAuthClient({ ...base, initialAccessToken: "iat-wrong" });
+    expect(wrong).toEqual({ ok: false, code: "invalid_token", status: 401 });
+    const ok = await registerOAuthClient({ ...base, initialAccessToken: token });
+    expect(ok).toMatchObject({ ok: true, value: { redirectUris: [REDIRECT] } });
+    expect(seen).toEqual([null, "Bearer iat-wrong", `Bearer ${token}`]);
+    // No answer and no log line holds the token.
+    expect(JSON.stringify([wrong, ok])).not.toContain(token);
+    const text = logs.flatMap((l) => l.mock.calls.flat().map(String)).join("\n");
+    expect(text).not.toContain(token);
+    for (const l of logs) l.mockRestore();
+  });
+});
+
 describe("the OAuth client's answers and rules (plan 11d Task 8 review)", () => {
   it("answers unexpected for a token answer of a wrong shape, and never throws", async () => {
     const wrong: unknown[] = [

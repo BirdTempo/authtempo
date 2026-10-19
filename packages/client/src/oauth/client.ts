@@ -267,11 +267,15 @@ export function createOAuthClient(options: OAuthClientOptions): OAuthClient {
  * Registers a client (RFC 7591, `POST /oauth/register`), for a native app or
  * a CLI that registers itself at its first run. The register endpoint has no
  * CORS for a foreign origin, so a single-page app is registered by its owner.
+ * `initialAccessToken` goes as `Authorization: Bearer <token>` when the
+ * server sets `oauth.registration.initialAccessTokenHash` (plan 12e). No log
+ * and no answer of this call holds the token.
  */
 export async function registerOAuthClient(input: {
   issuer: string;
   clientName: string;
   redirectUris: readonly string[];
+  initialAccessToken?: string | undefined;
   fetch?: typeof fetch | undefined;
 }): Promise<OAuthResult<{ clientId: string; redirectUris: string[] }>> {
   const issuer = checkedIssuer(input.issuer);
@@ -281,6 +285,7 @@ export async function registerOAuthClient(input: {
     {
       method: "POST",
       json: { client_name: input.clientName, redirect_uris: [...input.redirectUris] },
+      bearer: input.initialAccessToken,
     },
     registerAnswer,
   );

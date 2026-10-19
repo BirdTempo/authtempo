@@ -220,6 +220,7 @@ the client holds lives on to its `exp`, at most `oauth.accessTtlMinutes`.
 `@authtempo/client/oauth` signs a third-party app in to an authtempo OAuth provider. The app can be a native app, a CLI with a loopback redirect, or the server side of a web app. A single-page app on its own registered origin can use it too.
 
 1. Register the app once with `registerOAuthClient({ issuer, clientName, redirectUris })`, or have the owner register it. Keep the `clientId`.
+   - When the server sets `oauth.registration.initialAccessTokenHash`, pass the token that the owner gives you as `initialAccessToken`. The call sends it as the bearer and never logs it.
 2. `createOAuthClient({ issuer, clientId, redirectUri, resource, scopes })`. A single-page app passes `pending: browserPendingStore()`.
 3. Open the URL of `authorizeURL()`. The person signs in and allows the app.
 4. Pass the URL that the redirect brings back to `handleRedirect(url)`. It checks `state` and `iss`, then answers the tokens.
