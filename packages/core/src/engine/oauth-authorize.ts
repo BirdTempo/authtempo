@@ -25,8 +25,11 @@ export const CODE_PREFIX = "oc_";
 export const CHALLENGE_RE = /^[A-Za-z0-9._~-]{43,128}$/;
 const PARAM_MAX = 512;
 const CLIENT_ID_MAX = 2048;
-/** RFC 9449 section 10: `dpop_jkt` is a SHA-256 thumbprint, 43 base64url characters. */
-const JKT_RE = /^[A-Za-z0-9_-]{43}$/;
+/**
+ * RFC 9449 section 10: `dpop_jkt` is a SHA-256 thumbprint, 43 base64url
+ * characters. Exported for the contract, so the two rules are one.
+ */
+export const DPOP_JKT_RE = /^[A-Za-z0-9_-]{43}$/;
 /** The short id of a held authorize request (plan 9h). Not `or_`: that is the refresh token's prefix. */
 export const REQUEST_PREFIX = "oq_";
 const REQUEST_RE = /^oq_[A-Za-z0-9_-]{43}$/;
@@ -163,7 +166,7 @@ export async function checkAuthorize(
   const prompts = new Set((prompt ?? "").split(" ").filter((p) => p.length > 0));
   if (prompts.has("none") && prompts.size > 1) return back("invalid_request", state);
   const dpopJkt = single(params, "dpop_jkt");
-  if (dpopJkt === undefined || (dpopJkt !== null && !JKT_RE.test(dpopJkt)))
+  if (dpopJkt === undefined || (dpopJkt !== null && !DPOP_JKT_RE.test(dpopJkt)))
     return back("invalid_request", state);
   return {
     ok: true,

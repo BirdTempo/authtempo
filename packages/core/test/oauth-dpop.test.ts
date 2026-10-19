@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
+import { authorizeQuery } from "../src/http/contract/oauth.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { fromBase64Url, sha256Hex } from "../src/primitives/crypto.js";
 import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
@@ -242,6 +243,11 @@ describe("DPoP at the token endpoint (RFC 9449 section 5)", () => {
       status: 200,
       body: { token_type: "DPoP" },
     });
+    // The contract reads the same pattern as the engine (ruling 31).
+    const query = { response_type: "code", client_id: clientId, redirect_uri: REDIRECT };
+    const asked = { ...query, scope: "mcp:read", resource: RESOURCE };
+    expect(authorizeQuery.safeParse({ ...asked, dpop_jkt: key.jkt }).success).toBe(true);
+    expect(authorizeQuery.safeParse({ ...asked, dpop_jkt: key.jkt.slice(1) }).success).toBe(false);
     // dpop_jkt is a thumbprint: 43 base64url characters.
     for (const dpop_jkt of [key.jkt.slice(1), `${key.jkt}=`, `${key.jkt.slice(1)}+`]) {
       const bad = await publicCode(h, { dpop_jkt }, clientId);

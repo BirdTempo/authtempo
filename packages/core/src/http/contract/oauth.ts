@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CHALLENGE_RE } from "../../engine/oauth-authorize.js";
+import { CHALLENGE_RE, DPOP_JKT_RE } from "../../engine/oauth-authorize.js";
 import type { RouteKey } from "../route-list.js";
 import { OkAnswer } from "./shapes.js";
 import type { RouteContract } from "./types.js";
@@ -55,10 +55,7 @@ export const authorizeQuery = z.object({
   state: z.string().max(512).optional(),
   nonce: z.string().max(512).optional(),
   prompt: z.string().optional(),
-  dpop_jkt: z
-    .string()
-    .regex(/^[A-Za-z0-9_-]{43}$/)
-    .optional(),
+  dpop_jkt: z.string().regex(DPOP_JKT_RE).optional(),
   request_id: z.string().optional(),
 });
 
