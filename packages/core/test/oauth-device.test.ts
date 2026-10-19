@@ -583,6 +583,38 @@ describe("the device grant (plan 12e Task 14, RFC 8628)", () => {
     expect(await answer(twice)).toEqual({ status: 400, body: { error: "invalid_request" } });
   });
 
+  it("counts each GET with no session on the authorize key, before a held row (ruling 48)", async () => {
+    const h = instance(
+      undefined,
+      { signInURL: `${APP_ORIGIN}/sign-in` },
+      {
+        clientIp: () => "203.0.113.7",
+      },
+    );
+    const held = () =>
+      h.storage.findMany("verification", [{ field: "purpose", op: "eq", value: "oauth-request" }]);
+    for (let i = 0; i < 60; i++)
+      expect((await h.auth.handle(new Request(DEVICE_URL))).status).toBe(302);
+    expect(await held()).toHaveLength(60);
+    expect(await answer(await h.auth.handle(new Request(DEVICE_URL)))).toEqual({
+      status: 429,
+      body: { error: "rate_limited" },
+    });
+    expect(await held()).toHaveLength(60);
+    // The authorize step of the same IP shares the count.
+    const clientId = await deviceClient(h);
+    const authorize = await h.auth.handle(
+      new Request(
+        `${ISSUER}/oauth/authorize?${new URLSearchParams({ response_type: "code", client_id: clientId })}`,
+      ),
+    );
+    expect(await answer(authorize)).toEqual({ status: 429, body: { error: "rate_limited" } });
+    // A signed-in person still gets the page: the count is for a request that holds a row.
+    const s = await signedIn(h);
+    const page = await h.auth.handle(new Request(DEVICE_URL, { headers: { cookie: s.cookie } }));
+    expect(page.status).toBe(200);
+  });
+
   it("needs Origin equal to baseURL on the POST", async () => {
     const h = instance();
     const clientId = await deviceClient(h);

@@ -614,7 +614,11 @@ function deviceRoutes(
         const raw = ctx.url.searchParams.get("user_code");
         const userCode = raw === null ? null : normalizeUserCode(raw);
         const session = await sessionFromRequest(config, ctx.request);
-        if (!session) return redirect(await deviceSignIn(config, userCode));
+        if (!session) {
+          const location = await deviceSignIn(config, userCode, ctx.ip);
+          if (location === null) return json({ error: "rate_limited" }, OAUTH_ERRORS.rate_limited);
+          return redirect(location);
+        }
         return page({
           step: "code",
           action,

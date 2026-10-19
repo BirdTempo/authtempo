@@ -72,7 +72,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `operator:ip:<ip>` | 1 hour | 5 | Operator key rotation, right or wrong secret |
 | `operator-secrets:ip:<ip>` | 1 hour | 120 | Operator secret status, secret rewrap, and info, one count for the three, right or wrong secret. A rewrap of 100 000 rows at 1000 rows per call needs 100 calls |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
-| `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize |
+| `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize, and each `GET /oauth/device` with no session. The count runs before a request is held for the sign-in |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke |
 | `oauth-token-origin:ip:<ip>` | 15 minutes | 60 | The origin check of a foreign origin at the token endpoint and its preflight |
 | `oauth-device:ip:<ip>` | 15 minutes | 30 | The device authorization request, before the client auth, so a failed auth counts too |

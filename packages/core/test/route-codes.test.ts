@@ -406,7 +406,12 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
       w,
       routes,
       (key) =>
-        key === "POST /token/live" ? { authorization: `Bearer ${jwt.token}` } : w.cookie(me.token),
+        key === "POST /token/live"
+          ? { authorization: `Bearer ${jwt.token}` }
+          : // The device page counts a request with no session only.
+            key === "GET /oauth/device"
+            ? {}
+            : w.cookie(me.token),
       fills,
     );
     // The two routes that carry the code in a redirect to the app.

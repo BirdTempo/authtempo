@@ -541,11 +541,16 @@ export function devicePagePath(config: ResolvedConfig, userCode: string | null):
  * page lands back on the device page with the code in the URL. An app's
  * own sign-in route gets the id of a held row, as for an authorize request.
  * The row holds no user code, so after the sign-in the person types it again.
+ * Null: the IP is past `AUTHORIZE_PER_IP`, which this step shares with the
+ * authorize step.
  */
 export async function deviceSignIn(
   config: ResolvedConfig,
   userCode: string | null,
-): Promise<string> {
+  ip: string | null,
+): Promise<string | null> {
+  // The count of the authorize step, before any row is held (ruling 48 of plan 12e).
+  if (await limited(config, ip)) return null;
   if (oauthOf(config).signInURL === null)
     return signInPageUrl(config, devicePagePath(config, userCode));
   const params = new URLSearchParams(DEVICE_HELD_PARAMS);

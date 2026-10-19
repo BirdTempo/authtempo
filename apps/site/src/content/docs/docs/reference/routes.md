@@ -969,8 +969,8 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | --- | --- |
 | Needs | Nothing; or a session cookie, or a `ts_` bearer token. `oauth.device` is on. With no session, the route sends the browser to the sign-in step |
 | Input | Query `{ user_code? }`. A code of the `XXXX-XXXX` form fills the field. The person still submits it (RFC 8628 section 3.3.1) |
-| Answer | 200, the device page; or 302 to `/oauth/sign-in` or to `oauth.signInURL`. After `oauth.signInURL`, the person types the code again: core never stores a user code in clear |
-| Errors | None |
+| Answer | 200, the device page; or 302 to `/oauth/sign-in` or to `oauth.signInURL`. After `oauth.signInURL`, the person types the code again: core never stores a user code in clear. A request with no session counts on `oauth-authorize:ip`, as the authorize step does |
+| Errors | [`rate_limited`](/docs/reference/errors/#oauth-rate_limited) |
 
 <h3 id="post-oauth-device"><code>POST /oauth/device</code></h3>
 

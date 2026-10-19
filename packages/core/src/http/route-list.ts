@@ -1304,7 +1304,7 @@ export const ROUTES = Object.freeze([
     feature: "oauthDevice",
     auth: ["none", "session"],
     codes: [],
-    oauthCodes: [],
+    oauthCodes: ["rate_limited"],
   },
   {
     method: "POST",

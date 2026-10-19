@@ -624,12 +624,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-rate_limited"><code>rate_limited</code> 429</h3>
 
-- **Meaning:** A limit of the provider is full: register, authorize, or token for the IP, or introspection for the IP or the client. Or a device limit is full: the device request for the IP, or the device page for the session, the IP, or one code.
+- **Meaning:** A limit of the provider is full: register, authorize, or token for the IP, or introspection for the IP or the client. Or a device limit is full: the device request for the IP, or the device page for the session, the IP, or one code. A `GET /oauth/device` with no session counts as an authorize request.
 - **Do:** Wait for the window to end.
 
 | Routes |
 | --- |
-| [`POST /oauth/register`](/docs/reference/routes/#post-oauth-register), [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization), [`POST /oauth/device`](/docs/reference/routes/#post-oauth-device). |
+| [`POST /oauth/register`](/docs/reference/routes/#post-oauth-register), [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization), [`GET /oauth/device`](/docs/reference/routes/#get-oauth-device), [`POST /oauth/device`](/docs/reference/routes/#post-oauth-device). |
 
 <h3 id="oauth-unauthorized_client"><code>unauthorized_client</code> 400</h3>
 
