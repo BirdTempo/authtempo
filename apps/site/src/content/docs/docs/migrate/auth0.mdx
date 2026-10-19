@@ -12,7 +12,8 @@ sidebar:
 ---
 
 import { Code } from "@astrojs/starlight/components";
-import seam from "../../../../../samples/migrate/legacy-hash.ts?raw";
+import seam from "../../../../../samples/migrate/auth0.ts?raw";
+import test from "../../../../../samples/migrate/auth0.test.ts?raw";
 
 **For:** an operator and a developer who move an app from Auth0 to authtempo.
 
@@ -44,6 +45,9 @@ authtempo import auth0 --users users.ndjson --hashes hashes.ndjson --organizatio
 ```
 
 7. Run the same command without `--dry-run`.
+
+<Code code={test} lang="ts" title="The test of this guide" />
+
 8. Sign in once with a known user and the old password.
 9. Change each auth call of the app with the table below.
 10. Do the steps of [The cutover](/docs/migrate/cutover/).
