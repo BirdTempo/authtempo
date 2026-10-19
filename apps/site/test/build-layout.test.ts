@@ -267,6 +267,8 @@ describe("the docs theme (brand spec 11)", () => {
     const header = docs.split(/<header class="header[ "]/)[1]?.split("</header>")[0] ?? "";
     expect(header).toMatch(/ class="at-lockup[ "]/);
     expect(header).toContain('aria-label="authtempo"');
+    // Starlight's title carries translate="no", so a page translator leaves the name.
+    expect(header).toMatch(/ translate="no"[^>]*><a class="at-lockup[ "]/);
   });
 
   it("restyles Starlight's theme select with the three sprite icons", () => {
@@ -278,9 +280,52 @@ describe("the docs theme (brand spec 11)", () => {
       expect({ name, found: select.includes(`/icons.svg#${name}`) }).toEqual({ name, found: true });
   });
 
+  it("shows the icon of the checked option and hides the select over it", () => {
+    const docsCss = css("docs/index.html");
+    for (const choice of ["auto", "light", "dark"])
+      expect({
+        choice,
+        shown: new RegExp(
+          `\\.at-theme-select[^{},]*:has\\(option\\[value=("?)${choice}\\1\\]:checked\\)\\.at-choice-${choice}(?:,[^{]*)?\\{display:block[;}]`,
+        ).test(docsCss),
+      }).toEqual({ choice, shown: true });
+    expect(docsCss).toMatch(/\.at-theme-select[^{},]*select\{[^}]*opacity:0[;}]/);
+    expect(docsCss).toMatch(/\.at-theme-select[^{},]*select\{[^}]*padding:0[;}]/);
+    expect(docsCss).toMatch(/\.at-theme-select[^{},]*select\{[^}]*margin:0[;}]/);
+  });
+
   it("rings the theme select when its select has focus", () => {
     expect(css("docs/index.html")).toMatch(
       /\.at-theme-select[^{]*:has\(select:focus-visible\)\{outline:2pxsolidvar\(--at-accent\)/,
+    );
+  });
+
+  it("marks the one link of the current page in the sidebar", () => {
+    const sidebar = (path: string) =>
+      page(path).split("<sl-sidebar-state-persist")[1]?.split("</sl-sidebar-state-persist>")[0] ??
+      "";
+    for (const [path, href] of [
+      ["docs/start/first-sign-in/index.html", "/docs/start/first-sign-in/"],
+      ["docs/faq/index.html", "/docs/faq/"],
+    ] as const) {
+      const current = tags(sidebar(path), "a").filter((t) => t.includes(' aria-current="page"'));
+      expect({
+        path,
+        count: current.length,
+        href: current[0]?.includes(` href="${href}"`),
+      }).toEqual({
+        path,
+        count: 1,
+        href: true,
+      });
+    }
+  });
+
+  it("draws no rule under each element with the class header", () => {
+    // Starlight's header.header has the hairline. A bare .header rule also
+    // matches the inner header div and each code frame caption.
+    expect(css("docs/start/first-sign-in/index.html")).not.toMatch(
+      /(^|[},])\.header(,[^{]*)?\{[^}]*border-bottom/,
     );
   });
 
@@ -294,9 +339,23 @@ describe("the docs theme (brand spec 11)", () => {
     );
   });
 
-  it("sets the code block background to the code token", () => {
+  it("puts every code frame on the code token, with no border and no shadow", () => {
     const codeCss = css("docs/start/first-sign-in/index.html");
     expect(codeCss).toContain(".expressive-code");
-    expect(codeCss).toContain("var(--at-code)");
+    const value = (name: string) =>
+      [...codeCss.matchAll(new RegExp(`${name}:([^;}]*)`, "g"))].map((m) => m[1]);
+    for (const [name, want] of [
+      ["--ec-codeBg", "var(--at-code)"],
+      ["--ec-frm-edBg", "var(--at-code)"],
+      ["--ec-frm-trmBg", "var(--at-code)"],
+      ["--ec-frm-trmTtbBg", "var(--at-code)"],
+      ["--ec-frm-edTabBarBg", "var(--at-code)"],
+      ["--ec-frm-edActTabBg", "var(--at-code)"],
+      ["--ec-frm-trmTtbBrdBtmCol", "var(--at-line)"],
+      ["--ec-frm-edTabBarBrdBtmCol", "var(--at-line)"],
+      ["--ec-brdWd", "0px"],
+      ["--ec-frm-frameBoxShdCssVal", "none"],
+    ] as const)
+      expect({ name, values: value(name) }).toEqual({ name, values: [want] });
   });
 });

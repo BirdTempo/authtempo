@@ -76,9 +76,11 @@ describe("the package scripts (plan 11a)", () => {
   // writes. turbo --force does not clear that file; astro build --force does.
   // A cache is a speed tool, never evidence. So each script whose build feeds a
   // check uses --force: build, test, and preview:smoke. The mcp index copy and
-  // the mcp tests read the dist of build. dev and preview feed no check.
-  it("builds with --force in each script whose build feeds a check", () => {
-    for (const name of ["build", "test", "preview:smoke"])
+  // the mcp tests read the dist of build. preview feeds no check, but a stale
+  // store gives a reader 10 pages with no code stylesheet, so it uses --force too.
+  // dev builds nothing.
+  it("builds with --force in each script that runs astro build", () => {
+    for (const name of ["build", "test", "preview:smoke", "preview"])
       expect({
         name,
         forced: (pkg.scripts[name] ?? "").startsWith(`${PREFIX}astro build --force && `),

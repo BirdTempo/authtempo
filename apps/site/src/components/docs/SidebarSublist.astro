@@ -1,9 +1,12 @@
 ---
 // biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
 // biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
-// Starlight's SidebarSublist.astro of 0.42.6 with three changes (brand spec
-// 11). Each top-level group shows its icon before its label. The active page
-// has no background. The 2 px accent rail sits at its left edge.
+// Starlight's SidebarSublist.astro of 0.42.6, changed for brand spec 11. Each
+// top-level group shows its icon before its label. The active page has no
+// background, and the 2 px accent rail sits at its left edge. The colors come
+// from the tokens. The styles have no cascade layer. A link shows its hover
+// color on focus-visible, not on focus, and has no radius. The summary puts
+// the caret at its end with a margin.
 // The icon sits before the group-label span, not in it. The agent index
 // (scripts/lib/agent.ts) reads the label span as the first child of that span.
 // The template reads Astro.props in place: Biome 2.5.15 lints this

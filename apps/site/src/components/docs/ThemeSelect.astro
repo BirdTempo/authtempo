@@ -20,7 +20,8 @@ import Icon from "../Icon.astro";
   .at-theme-select:has(option[value="light"]:checked) :global(.at-choice-light),
   .at-theme-select:has(option[value="dark"]:checked) :global(.at-choice-dark) { display: block; }
   .at-theme-select :global(starlight-theme-select), .at-theme-select :global(label) { position: absolute; inset: 0; }
-  .at-theme-select :global(select) { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+  /* No padding and no margin: Starlight's own values push the select box out of the control. */
+  .at-theme-select :global(select) { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; margin: 0; opacity: 0; cursor: pointer; }
   .at-theme-select :global(svg.label-icon), .at-theme-select :global(svg.caret) { display: none; }
   /* The select is not seen, so the ring goes on the control (brand spec 14). */
   .at-theme-select:has(select:focus-visible) { outline: 2px solid var(--at-accent); outline-offset: 2px; }

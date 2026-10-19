@@ -79,7 +79,8 @@ export default defineConfig({
       // One dark theme in both schemes: brand spec 4 gives a code block the
       // same ink in light and dark. The background is the code token, and the
       // frame has no border and no shadow. The frames plugin takes its editor
-      // background from codeBackground.
+      // background from codeBackground. It takes the terminal, the title bar,
+      // and the tab colors from the theme, so each one is set here.
       expressiveCode: {
         themes: ["starlight-dark"],
         useStarlightDarkModeSwitch: false,
@@ -88,7 +89,15 @@ export default defineConfig({
           codeBackground: "var(--at-code)",
           codeFontFamily: "var(--at-font-mono)",
           borderWidth: "0px",
-          frames: { frameBoxShadowCssValue: "none" },
+          frames: {
+            frameBoxShadowCssValue: "none",
+            terminalBackground: "var(--at-code)",
+            terminalTitlebarBackground: "var(--at-code)",
+            terminalTitlebarBorderBottomColor: "var(--at-line)",
+            editorTabBarBackground: "var(--at-code)",
+            editorTabBarBorderBottomColor: "var(--at-line)",
+            editorActiveTabBackground: "var(--at-code)",
+          },
         },
       },
       // Brand spec 13 on every docs page. Starlight already links /favicon.svg.

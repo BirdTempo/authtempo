@@ -10,8 +10,3 @@ mobile-starlight-toc a[aria-current="true"] {
   color: var(--at-ink);
   box-shadow: inset var(--at-rail) 0 0 var(--at-accent);
 }
-
-/* One surface: the header sits on paper over a hairline rule. */
-.header {
-  border-bottom: 1px solid var(--at-line);
-}
