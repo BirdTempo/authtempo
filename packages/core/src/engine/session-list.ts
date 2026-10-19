@@ -191,8 +191,8 @@ export async function revokeOtherSessions(
   const ended = endedList(config);
   const now = config.clock.now();
   const n = await config.storage.transaction(async (tx) => {
-    // An ended row goes with no hook. Its client links go with no logout in
-    // `endSessions` below: an expiry is no sign-out, as at the sweep.
+    // An ended row goes with no hook. Its client links become logouts in
+    // `endSessions` below: an expiry ends a session too (ruling 49).
     await deleteEndedSessions(tx, config, user.id, now);
     return endOtherSessions(tx, user.id, session.id, ended ?? null, now);
   });

@@ -141,8 +141,10 @@ const LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout";
  * exchange and the device grant call it before they sign the ID token. A
  * session end that read the links before this write cannot see the link.
  * So the call reads the session after the write. When the session is gone,
- * the logout goes to the outbox now and is sent. A second logout of one
- * session is harmless: section 2.7 treats it as a success.
+ * the logout goes to the outbox now and is sent. In the other order, the
+ * end deletes the session after this read, and the link stays with no
+ * session. `endSessions` and the sweep make such a link a logout (ruling
+ * 49). A second logout of one session is harmless (section 2.7).
  */
 export async function linkIdToken(
   config: ResolvedConfig,

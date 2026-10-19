@@ -5,10 +5,10 @@ import { confirmEmailChange, requestEmailChange } from "../src/engine/email-chan
 import { publicKeySet } from "../src/engine/jwt.js";
 import { createClient } from "../src/engine/oauth-client-store.js";
 import { DEVICE_GRANT, fetchCimd } from "../src/engine/oauth-clients.js";
-import { deliverLogouts } from "../src/engine/oauth-logout.js";
+import { deliverLogouts, linkIdToken } from "../src/engine/oauth-logout.js";
 import { changePassword, requestPasswordReset, resetPassword } from "../src/engine/password.js";
 import { revokeOtherSessions, revokeSession } from "../src/engine/session-list.js";
-import { endSessions, type ResolvedSession } from "../src/engine/sessions.js";
+import { createSession, endSessions, type ResolvedSession } from "../src/engine/sessions.js";
 import { sweepExpired } from "../src/engine/sweep.js";
 import { enableTotp, setupTotp } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
@@ -567,7 +567,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(await live(w, other.session.id)).toBe(true);
   });
 
-  it("writes no outbox row at the sweep's delete of expired sessions and deletes their links", async () => {
+  it("sends a logout at the sweep's delete of expired sessions, and deletes their links (ruling 49)", async () => {
     const w = world();
     const { actor, other } = await twoSessions(w);
     const bc = await bcClient(w, BC);
@@ -580,10 +580,110 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     const swept = await sweepExpired(w.auth.config);
     expect(swept.sessions).toBe(3);
     expect(swept.oauthSessionLinks).toBe(2);
-    expect(swept.oauthLogouts).toBe(0);
+    expect(swept.oauthLogouts).toBe(2);
     expect(await w.auth.storage.findMany("oauthSessionClient", [])).toEqual([]);
     expect(await outbox(w)).toEqual([]);
+    expect(w.calls.map((c) => decodeJwt(tokenOfCall(c)).sid).sort()).toEqual(
+      [actor.session.id, other.session.id].sort(),
+    );
+  });
+
+  /**
+   * The race of review M1: the exchange writes its link and reads the
+   * session after the sign-out read the links, and before it deletes the
+   * session. The real `linkIdToken` runs inside the sign-out's link read.
+   * The link then stays with no session.
+   */
+  async function raceLink(w: World, target: Signed, clientId: string) {
+    const store = w.auth.storage;
+    const findMany = store.findMany.bind(store);
+    let armed = true;
+    store.findMany = (async (model, where, opts) => {
+      const rows = await findMany(model, where, opts);
+      if (armed && model === "oauthSessionClient") {
+        armed = false;
+        await linkIdToken(w.auth.config, {
+          sessionId: target.session.id,
+          clientId,
+          userId: target.user.id,
+        });
+      }
+      return rows;
+    }) as StorageAdapter["findMany"];
+    return () => {
+      store.findMany = findMany;
+    };
+  }
+
+  it("sends the logout of a link that a sign-out raced, at the next sweep (review P1)", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    const restore = await raceLink(w, actor, bc);
+    const out = await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    restore();
+    expect(out.status).toBe(200);
+    expect(await live(w, actor.session.id)).toBe(false);
+    expect(await linksOf(w, actor.session.id)).toHaveLength(1);
     expect(w.calls).toEqual([]);
+    const swept = await sweepExpired(w.auth.config);
+    expect(swept.oauthSessionLinks).toBe(1);
+    expect(swept.oauthLogouts).toBe(1);
+    expect(w.calls.map((c) => decodeJwt(tokenOfCall(c)).sid)).toEqual([actor.session.id]);
+    expect(await linksOf(w, actor.session.id)).toEqual([]);
+  });
+
+  it("reads the links that it saw longest ago, so a live link never hides a link with no session", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    // 50 live links of 50 sign-ins, each one second older than the next.
+    for (let i = 0; i < 50; i++) {
+      const s = await createSession(w.auth.config, {
+        userId: actor.user.id,
+        ip: null,
+        userAgent: null,
+      });
+      await linkIdToken(w.auth.config, {
+        sessionId: s.session.id,
+        clientId: bc,
+        userId: actor.user.id,
+      });
+      w.auth.clock.advance(1_000);
+    }
+    // Then the raced link of a sign-out: the newest link, with no session.
+    const restore = await raceLink(w, actor, bc);
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    restore();
+    w.auth.clock.advance(1_000);
+    // The first sweep reads the 50 live links and moves each to now.
+    expect((await sweepExpired(w.auth.config)).oauthSessionLinks).toBe(0);
+    expect(w.calls).toEqual([]);
+    w.auth.clock.advance(1_000);
+    // The second sweep reads the link with no session first.
+    expect((await sweepExpired(w.auth.config)).oauthSessionLinks).toBe(1);
+    expect(w.calls.map((c) => decodeJwt(tokenOfCall(c)).sid)).toEqual([actor.session.id]);
+    expect(await w.auth.storage.findMany("oauthSessionClient", [])).toHaveLength(50);
+  });
+
+  it("sends the logout of a link with no session at the user's next session end", async () => {
+    const w = world();
+    const { actor, other } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    const restore = await raceLink(w, other, bc);
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, other.token) }));
+    restore();
+    expect(await linksOf(w, other.session.id)).toHaveLength(1);
+    expect(w.calls).toEqual([]);
+    // A password change ends the user's other sessions: endSessions reads the link with no session.
+    const r = await changePassword(w.auth.config, {
+      session: actor,
+      currentPassword: PASSWORD,
+      newPassword: "a new long password",
+    });
+    expect(r.ok).toBe(true);
+    expect(await linksOf(w, other.session.id)).toEqual([]);
+    expect(w.calls.map((c) => decodeJwt(tokenOfCall(c)).sid)).toEqual([other.session.id]);
   });
 
   it("ends no refresh token at a logout (Back-Channel Logout 2.7)", async () => {

@@ -30,7 +30,7 @@ type Kind =
   | "by id"
   /** The flow created this session in this transaction: no link can exist yet. */
   | "undo"
-  /** Expired sessions: the links go with no logout, as at the sweep. */
+  /** Expired sessions: a later step makes each link with no session a logout (ruling 49). */
   | "expired"
   /** A call of `destroySession`, which is a "by id" site; the caller delivers after it. */
   | "sign-out";
@@ -133,15 +133,15 @@ const SITES: Site[] = [
     call: 'delete("session"',
     count: 2,
     kind: "expired",
-    reason: "the revoke of the other sessions; endSessions after it deletes the dead links",
+    reason: "the revoke of the other sessions; endSessions after it makes the dead links logouts",
   },
   {
     file: "engine/sweep.ts",
-    fn: "sweepSessions",
+    fn: "sweepExpired",
     call: 'delete("session"',
     count: 1,
     kind: "expired",
-    reason: "the sweep deletes the links of each page first",
+    reason: "the sweep; its link step makes each link of a gone session a logout",
   },
   {
     file: "engine/password.ts",

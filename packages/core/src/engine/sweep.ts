@@ -2,13 +2,14 @@ import type { ResolvedConfig } from "../config.js";
 import { RETIRED_KEY_MS } from "../primitives/jwk.js";
 import type { StorageAdapter } from "../storage/port.js";
 import { deliverDueLogouts } from "./oauth-logout.js";
+import { writeLogouts } from "./oauth-outbox.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
 export interface SweepResult {
   verificationExpired: number;
   verificationConsumed: number;
   invitations: number;
-  /** Session rows past `expiresAt`, at most 2000 per sweep (plan 12e). */
+  /** Session rows past `expiresAt`. */
   sessions: number;
   /** API token rows past `expiresAt`. A token with no expiry is never swept. */
   apiTokens: number;
@@ -26,7 +27,7 @@ export interface SweepResult {
   limits: number;
   /** Device grants past `expiresAt` (plan 12e, RFC 8628): pending, decided, and spent alike. */
   oauthDevices: number;
-  /** The client links of the swept sessions (plan 12e). An expiry sends no back-channel logout. */
+  /** Client links whose session is gone, each made an outbox row: at most 50 per sweep (plan 12e). */
   oauthSessionLinks: number;
   /** Back-channel logouts delivered, or deleted after their last attempt, at most 50 per sweep (plan 12e). */
   oauthLogouts: number;
@@ -96,36 +97,58 @@ async function sweepClients(storage: StorageAdapter, now: Date): Promise<number>
 }
 
 /**
- * The expired sessions, in pages of `SESSION_PAGE`, with the client links of
- * each page first (plan 12e Task 16). The port has no join and no delete
- * that answers its rows, so a page is read, then deleted by id. 50 ids and
- * one more term stay under the 100 parameters of a D1 statement. At most
- * `SESSION_PAGES` pages: one sweep stays short, and the next one takes the
- * rest. The expiry term stays in the delete, so a row that moved on is kept.
+ * The client links of one sweep (plan 12e Task 16, ruling 49). A link whose
+ * session is gone means that the session ended: an expiry, a crash, or a
+ * race between a link write and a session end. Each such link gets one
+ * `oauthLogout` row in place of a silent delete. The sweep reads the links
+ * that it saw longest ago, and moves each live link to now, so the next
+ * sweep reads others. 50 ids and one more term stay under the 100 bound
+ * parameters of a D1 statement (D1 limits page updated 21 April 2026, read
+ * 2026-10-20). One step costs at most 4 statements and one row per link.
  */
-const SESSION_PAGE = 50;
-const SESSION_PAGES = 40;
+export const LINK_SWEEP_MAX = 50;
 
-async function sweepSessions(
-  storage: StorageAdapter,
-  now: Date,
-): Promise<{ sessions: number; links: number }> {
-  let sessions = 0;
-  let links = 0;
-  const expired = { field: "expiresAt" as const, op: "lt" as const, value: now };
-  for (let page = 0; page < SESSION_PAGES; page++) {
-    const rows = await storage.findMany("session", [expired], { limit: SESSION_PAGE });
-    if (rows.length === 0) break;
-    const ids = rows.map((r) => r.id);
-    links += await storage.delete("oauthSessionClient", [
-      { field: "sessionId", op: "in", value: ids },
-    ]);
-    const n = await storage.delete("session", [{ field: "id", op: "in", value: ids }, expired]);
-    sessions += n;
-    // A short page was the last one. A page that deleted nothing would repeat.
-    if (rows.length < SESSION_PAGE || n === 0) break;
+async function sweepLinks(storage: StorageAdapter, now: Date): Promise<number> {
+  const links = await storage.findMany("oauthSessionClient", [], {
+    sort: [
+      { field: "updatedAt", dir: "asc" },
+      { field: "id", dir: "asc" },
+    ],
+    limit: LINK_SWEEP_MAX,
+  });
+  if (links.length === 0) return 0;
+  const sessionIds = [...new Set(links.map((l) => l.sessionId))];
+  const live = new Set(
+    (await storage.findMany("session", [{ field: "id", op: "in", value: sessionIds }])).map(
+      (s) => s.id,
+    ),
+  );
+  const orphans = links.filter((l) => !live.has(l.sessionId));
+  // One transaction: a row and the delete of its link go together.
+  await storage.transaction((tx) => writeLogouts(tx, orphans, now));
+  const kept = links.filter((l) => live.has(l.sessionId)).map((l) => l.id);
+  if (kept.length > 0)
+    await storage.update("oauthSessionClient", [{ field: "id", op: "in", value: kept }], {
+      updatedAt: now,
+    });
+  return orphans.length;
+}
+
+/**
+ * The count of a last step, or 0 with one log line when the storage throws.
+ * On the D1 Free plan an invocation has 50 queries, and these steps can
+ * meet that limit. The counts above stay, and the next sweep goes on.
+ */
+async function softStep(name: string, step: Promise<number>): Promise<number> {
+  try {
+    return await step;
+  } catch (e) {
+    console.error(
+      `authtempo: the sweep ${name} step stopped`,
+      e instanceof Error ? e.name : typeof e,
+    );
+    return 0;
   }
-  return { sessions, links };
 }
 
 /** Deletes rows that no flow can use any more. Call it from a scheduled handler. Safe to run at any time. */
@@ -153,7 +176,7 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   // A session row goes on its own only when someone presents its token
   // after the expiry. A row that nobody presents again keeps its IP address
   // and user agent with no limit (final review M-2, 2026-10-10).
-  const { sessions, links: oauthSessionLinks } = await sweepSessions(storage, now);
+  const sessions = await storage.delete("session", [{ field: "expiresAt", op: "lt", value: now }]);
   // An expired token goes on its own only when a script presents it again.
   // A null expiry never matches lt (port.ts null rules), so it stays.
   // A row at exactly `expiresAt` is refused by `resolveApiToken` (`<=`) and goes at the next sweep.
@@ -193,12 +216,14 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
     { field: "enabledAt", op: "eq", value: null },
     { field: "createdAt", op: "lt", value: new Date(now.getTime() - SETUP_TTL_MS) },
   ]);
-  // The back-channel outbox: each due row gets one more attempt, and a row
-  // past its last attempt goes (plan 12e Task 16).
-  const oauthLogouts = await deliverDueLogouts(config);
   // The owned limiters keep one row per key and window. Without this sweep
   // every address and IP that reached a limiter stays in ta_limit forever.
   const limits = (await config.limiter.sweep?.(now)) ?? 0;
+  // Last, so a storage limit met here leaves every count above done. The
+  // links of the sessions that ended become outbox rows, and the outbox
+  // sends its due rows (plan 12e Task 16).
+  const oauthSessionLinks = await softStep("link", sweepLinks(storage, now));
+  const oauthLogouts = await softStep("outbox", deliverDueLogouts(config));
   return {
     verificationExpired,
     verificationConsumed,

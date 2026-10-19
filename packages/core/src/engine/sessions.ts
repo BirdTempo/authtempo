@@ -336,8 +336,8 @@ export async function sessionOpened(
  * The back-channel outbox (plan 12e Task 16): first the user's client links.
  * With none, nothing more runs. With some, each linked session that `where`
  * matches gets one `oauthLogout` row per link, and its links go, in this
- * transaction. A link whose session is gone goes with no row: an expired
- * session ends with no logout, as at the sweep.
+ * transaction. A link whose session is gone gets its row too: that session
+ * ended, by an expiry or by a race with another end (ruling 49).
  */
 export async function endSessions(
   tx: StorageAdapter,
@@ -355,8 +355,7 @@ export async function endSessions(
   for (const id of new Set(links.map((l) => l.sessionId))) {
     const byId: Where<"session"> = { field: "id", op: "eq", value: id };
     if (await tx.findOne("session", [...where, byId])) ending.add(id);
-    else if (!(await tx.findOne("session", [byId])))
-      await tx.delete("oauthSessionClient", [{ field: "sessionId", op: "eq", value: id }]);
+    else if (!(await tx.findOne("session", [byId]))) ending.add(id);
   }
   await writeLogouts(
     tx,
