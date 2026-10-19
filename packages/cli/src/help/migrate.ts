@@ -62,4 +62,7 @@ export const MIGRATE_HELP: HelpText = {
       says: "A usage error, a newer database, a database that does not answer, an edited compat copy, or a migration that failed.",
     },
   ],
+  notes: [
+    "With --tables compat, the command warns when the project holds better-auth below 1.7.7.",
+  ],
 };

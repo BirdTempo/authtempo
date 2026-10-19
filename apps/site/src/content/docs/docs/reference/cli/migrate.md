@@ -63,6 +63,7 @@ authtempo migrate --target d1 --database my-app --remote
 - `applyPostgresMigrations` applies the files. Its advisory lock makes two runs at once safe.
 - The command uses one connection, and ends it before it exits.
 - With `--tables compat`, the command runs the migrations of the compatibility package. That package refuses a schema with core's own `ta_meta` and `ta_limit`.
+- With `--tables compat`, the command prints one warning when the project holds `better-auth` below 1.7.7. Upgrade it first.
 
 ## D1
 
@@ -75,6 +76,7 @@ authtempo migrate --target d1 --database my-app --remote
 - With `--tables compat`, a `migrations_dir` in a package or under `node_modules` stops the run with exit 2, before the first write. The default folder of a core D1 app is that of `@authtempo/adapter-d1`, so point `migrations_dir` at a folder of the app first.
 - A file whose text the folder holds already is not copied again.
 - wrangler records each applied file in its table `d1_migrations`.
+- With `--tables compat`, the command prints one warning when the project holds `better-auth` below 1.7.7. Upgrade it first.
 
 :::caution
 Warning: do not edit a copied compat file. The next run stops with exit 2 before any write, and names the file. Restore its text, and put the change in a new migration of the app.

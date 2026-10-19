@@ -1,2 +1,4 @@
 # The scaffolds, fixture projects, and wrangler state of the CLI tests (plan 11c).
 .scaffold/
+# The fixture projects of the Better Auth version test hold a package.json under node_modules (plan 11f Task 6).
+!test/fixtures/better-auth/*/node_modules/

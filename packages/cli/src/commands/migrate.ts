@@ -1,6 +1,7 @@
 import { dirname, join, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { COMMON_OPTIONS, oneOf, parseOrUsage } from "../args.js";
+import { betterAuthWarning } from "../better-auth-version.js";
 import type { Command } from "../command.js";
 import { Stop, UsageError } from "../errors.js";
 import { MIGRATE_HELP } from "../help/migrate.js";
@@ -11,6 +12,7 @@ import {
   adapterD1Dir,
   applyD1,
   compatD1Dir,
+  type D1Project,
   type D1Target,
   findWranglerConfig,
   readD1CompatText,
@@ -219,8 +221,13 @@ export function planCompatCopy(
   return copies;
 }
 
-async function migrateD1(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
-  const project = readD1Project(ctx, findWranglerConfig(ctx, v.config), v.database);
+/** The D1 target. `run` reads `project` once: the warning needs its folder before the target runs. */
+async function migrateD1(
+  ctx: Ctx,
+  v: Values,
+  plan: MigratePlan,
+  project: D1Project,
+): Promise<MigrateRun> {
   if (!ctx.exists(wranglerOf(project.cwd)))
     throw new Stop(
       `no wrangler in ${join(project.cwd, "node_modules")}: install the packages of the project first`,
@@ -261,8 +268,7 @@ async function migrateD1(ctx: Ctx, v: Values, plan: MigratePlan): Promise<Migrat
 }
 
 /** The targets of `--target`. */
-const TARGETS = { d1: migrateD1, postgres: migratePostgres } as const;
-type TargetName = keyof typeof TARGETS;
+const TARGETS = ["d1", "postgres"] as const;
 
 /** `authtempo migrate --target <...>` (spec 19): the version gate, the list, the apply, and the gate again. */
 export const migrateCommand: Command = {
@@ -272,10 +278,9 @@ export const migrateCommand: Command = {
     const { values, positionals } = parse(argv);
     if (positionals.length > 0)
       throw new UsageError(`migrate takes no argument; got ${positionals[0]}`);
-    const names = Object.keys(TARGETS) as TargetName[];
-    const target = oneOf("target", values.target, names);
+    const target = oneOf("target", values.target, TARGETS);
     if (target === undefined)
-      throw new UsageError(`name a target: --target ${names.join(" or --target ")}`);
+      throw new UsageError(`name a target: --target ${TARGETS.join(" or --target ")}`);
     const tables = oneOf("tables", values.tables, ["core", "compat"] as const) ?? "core";
     if (target === "postgres")
       for (const flag of ["database", "config", "remote", "before-1.7"] as const)
@@ -289,11 +294,20 @@ export const migrateCommand: Command = {
     const dryRun = values["dry-run"] === true;
     const json = values.json === true;
     const say = sayer(ctx, json);
-    const run = await TARGETS[target](ctx, values, {
-      tables,
-      dryRun,
-      note: (line) => ctx.err(line),
-    });
+    const project =
+      target === "d1"
+        ? readD1Project(ctx, findWranglerConfig(ctx, values.config), values.database)
+        : null;
+    if (tables === "compat") {
+      // Spec 23 item 12: one warning line on stderr before the target runs. The run goes on.
+      const w = betterAuthWarning(ctx, project === null ? ctx.cwd : project.cwd);
+      if (w !== null) ctx.err(w);
+    }
+    const plan: MigratePlan = { tables, dryRun, note: (line) => ctx.err(line) };
+    const run =
+      project === null
+        ? await migratePostgres(ctx, values, plan)
+        : await migrateD1(ctx, values, plan, project);
     for (const name of run.copied) say(`${dryRun ? "would copy" : "copied"} ${name}`);
     for (const name of dryRun ? run.pending : run.applied)
       say(`${dryRun ? "would apply" : "applied"} ${name}`);
