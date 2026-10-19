@@ -77,8 +77,13 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
       const route = routeOf(request.method, url.pathname);
       const checked =
         route === null ? null : await checkSandboxLimit(this.ctx.storage.sql, route, request);
-      if (checked !== null && !checked.ok)
-        return json(429, { error: "demo_limit", limit: checked.limit });
+      if (checked !== null && !checked.ok) {
+        // A cap holds until the alarm deletes the sandbox, so the wait ends at the reset (re-review R4).
+        const refused = json(429, { error: "demo_limit", limit: checked.limit });
+        const wait = Math.max(1, Math.ceil((this.resetAt() - Date.now()) / 1000));
+        refused.headers.set("retry-after", String(wait));
+        return refused;
+      }
       return auth.handle(request);
     }
     if (url.pathname === "/whoami") {

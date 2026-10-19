@@ -52,6 +52,18 @@ function gateIps(): Promise<string[]> {
   );
 }
 
+/**
+ * Holds the Retry-After of a cap of the sandbox to the reset of the sandbox
+ * (re-review R4). A cap stays until the alarm deletes the sandbox.
+ */
+async function holdsResetWait(jar: Jar, res: Response): Promise<void> {
+  const [meta] = await rowsIn(jar, "SELECT value FROM demo_meta WHERE key = 'reset_at'");
+  const left = Math.ceil((Number(meta?.value) - Date.now()) / 1000);
+  const wait = Number(res.headers.get("retry-after"));
+  expect(wait).toBeGreaterThan(0);
+  expect(Math.abs(wait - left)).toBeLessThanOrEqual(2);
+}
+
 async function count(jar: Jar, table: string): Promise<number> {
   const rows = await rowsIn(jar, `SELECT count(*) AS n FROM ${table}`);
   return Number(rows[0]?.n);
@@ -250,6 +262,7 @@ describe("the limits of the demo", () => {
       const jar = await newSandbox();
       await tenUsers(jar);
       const res = await make(sameSandbox(jar), "eleventh@example.com");
+      await holdsResetWait(jar, res);
       const body = await res.text();
       expect({ route, status: res.status, body }).toEqual({
         route,
@@ -405,6 +418,7 @@ describe("the limits of the demo", () => {
       expect(await count(jar, table)).toBe(10);
       const res = await CREATE_ROUTE_CALLS[route](jar, 11);
       expect({ route, status: res.status }).toEqual({ route, status: 429 });
+      await holdsResetWait(jar, res);
       expect(await res.json()).toEqual({ ...REFUSED, limit });
       expect(await count(jar, table)).toBe(10);
     }
