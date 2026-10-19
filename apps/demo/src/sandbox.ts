@@ -91,9 +91,17 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
     const entry = DEMO_PAGES.find((p) => p.path === url.pathname);
     if (entry === undefined) return json(404, { error: "not_found" });
     // A call form posts to its own page only when no script runs. The page script makes each call.
-    if (request.method !== "GET") return json(405, { error: "method_not_allowed" });
+    if (request.method !== "GET" && request.method !== "HEAD") {
+      // RFC 9110 15.5.6: a 405 answer names the methods of the resource in Allow.
+      const refused = json(405, { error: "method_not_allowed" });
+      refused.headers.set("allow", "GET, HEAD");
+      return refused;
+    }
     const { body, script } = DEMO_BODIES[entry.path];
     const state = { resetAt: this.resetAt(), mail: mailbox.list(), origin: this.env.DEMO_ORIGIN };
+    // RFC 9110 9.3.2: HEAD answers as GET. The runtime sends no body for a
+    // HEAD answer (a break that returns the full page still gives an empty
+    // body, 2026-10-20), so HEAD takes the GET answer.
     return page({
       title: entry.title,
       path: entry.path,

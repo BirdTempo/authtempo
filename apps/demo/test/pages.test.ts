@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { env, SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { DEMO_PAGES } from "../src/pages/layout.js";
 import {
@@ -229,6 +229,40 @@ describe("the demo pages", () => {
     expect(res.headers.get("location")).toBe(`${ORIGIN}/`);
     expect(res.headers.get("set-cookie")).toBeNull();
     expect(await stub(id).exists()).toBe(true);
+  });
+
+  it("answers HEAD of a page as GET, with no body", async () => {
+    const jar = await newSandbox();
+    const cookie = `${SANDBOX_COOKIE}=${sandboxId(jar)}`;
+    for (const path of ["/password", "/mailbox", PROVIDER_PAGE]) {
+      const get = await SELF.fetch(`${ORIGIN}${path}`, { headers: { cookie } });
+      const head = await SELF.fetch(`${ORIGIN}${path}`, { method: "HEAD", headers: { cookie } });
+      expect(head.status, path).toBe(200);
+      expect(head.headers.get("content-type"), path).toBe(get.headers.get("content-type"));
+      expect(head.headers.get("content-security-policy"), path).toBe(POLICY);
+      expect(await head.text(), path).toBe("");
+      expect((await get.text()).length, path).toBeGreaterThan(0);
+    }
+  });
+
+  it("names the methods in Allow on each 405 answer", async () => {
+    const jar = await newSandbox();
+    const cookie = `${SANDBOX_COOKIE}=${sandboxId(jar)}`;
+    const cases: [string, string, string][] = [
+      ["POST", "/password", "GET, HEAD"],
+      ["PUT", "/mailbox", "GET, HEAD"],
+      ["GET", "/reset", "POST"],
+      ["PUT", PROVIDER_PAGE, "GET, HEAD, POST"],
+    ];
+    for (const [method, path, allow] of cases) {
+      const res = await SELF.fetch(`${ORIGIN}${path}`, {
+        method,
+        headers: { cookie, origin: ORIGIN },
+        redirect: "manual",
+      });
+      expect(res.status, `${method} ${path}`).toBe(405);
+      expect(res.headers.get("allow"), `${method} ${path}`).toBe(allow);
+    }
   });
 
   it("links each method page to its guide", async () => {

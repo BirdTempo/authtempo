@@ -76,7 +76,12 @@ function withPageHeaders(res: Response): Response {
  * of the answer, so an unconditional clear resets the visitor.
  */
 async function reset(request: Request, env: Cloudflare.Env, origin: string): Promise<Response> {
-  if (request.method !== "POST") return json(405, { error: "method_not_allowed" });
+  if (request.method !== "POST") {
+    // RFC 9110 15.5.6: a 405 answer names the methods of the resource in Allow.
+    const refused = json(405, { error: "method_not_allowed" });
+    refused.headers.set("allow", "POST");
+    return refused;
+  }
   const site = request.headers.get("sec-fetch-site");
   if (site === "cross-site" || site === "same-site") return json(403, { error: "cross_site" });
   const ids = cookieIds(request);

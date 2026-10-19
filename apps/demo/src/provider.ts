@@ -64,8 +64,14 @@ export async function providerRoute(request: Request, db: D1Database): Promise<R
   if (url.pathname === "/provider/authorize") {
     const q = authorizeQuery(url);
     if (q === null) return text(400, "bad authorize request");
-    if (request.method === "GET") return pickPage(url, db);
-    if (request.method !== "POST") return text(405, "method not allowed");
+    // RFC 9110 9.3.2: HEAD answers as GET; the runtime sends no body for HEAD.
+    if (request.method === "GET" || request.method === "HEAD") return pickPage(url, db);
+    if (request.method !== "POST") {
+      // RFC 9110 15.5.6: a 405 answer names the methods of the resource in Allow.
+      const refused = text(405, "method not allowed");
+      refused.headers.set("allow", "GET, HEAD, POST");
+      return refused;
+    }
     const form = new URLSearchParams(await request.text());
     const identity = pickIdentity(form);
     if (identity === null) return text(400, "pick a test identity");
