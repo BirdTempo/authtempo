@@ -1,0 +1,107 @@
+import { describe, expect, it } from "vitest";
+import { z } from "zod";
+import { ENTERED, NO_KEYS, shapeOf, shapePaths } from "./setup/answer-shape.js";
+
+// Two closed branches that differ only in the value of `state`, and one optional key.
+const byEnum = z.union([
+  z.strictObject({
+    state: z.enum(["pending", "held"]),
+    user: z.string(),
+    note: z.string().optional(),
+  }),
+  z.strictObject({ state: z.enum(["done", "gone"]), user: z.string() }),
+]);
+const byPattern = z.union([
+  z.strictObject({ id: z.string().regex(/^tk_/), note: z.string().optional() }),
+  z.strictObject({ id: z.string().regex(/^to_/) }),
+]);
+const byFormat = z.union([
+  z.strictObject({ at: z.iso.datetime(), note: z.string().optional() }),
+  z.strictObject({ at: z.string() }),
+]);
+
+describe("the shape walk of the answer check (plan 11g)", () => {
+  it("reads a body of a union under the branch of its enum value", () => {
+    expect(shapeOf(byEnum, { state: "done", user: "u" })).toEqual({
+      absent: [],
+      nulls: [],
+      twoBranches: [],
+    });
+    expect(shapeOf(byEnum, { state: "held", user: "u" })).toEqual({
+      absent: ["note"],
+      nulls: [],
+      twoBranches: [],
+    });
+  });
+
+  it("reads a body of a union under the branch of its pattern", () => {
+    expect(shapeOf(byPattern, { id: "to_1" })).toEqual({ absent: [], nulls: [], twoBranches: [] });
+    expect(shapeOf(byPattern, { id: "tk_1" })).toEqual({
+      absent: ["note"],
+      nulls: [],
+      twoBranches: [],
+    });
+  });
+
+  it("reports a body that fits two branches", () => {
+    expect(shapeOf(byFormat, { at: "2026-10-19T00:00:00.000Z" }).twoBranches).toEqual([
+      "the answer",
+    ]);
+    expect(
+      shapeOf(z.strictObject({ last: byFormat }), { last: { at: "2026-10-19T00:00:00.000Z" } })
+        .twoBranches,
+    ).toEqual(["last"]);
+  });
+
+  it("blocks each node that can hold keys and that the walk does not enter", () => {
+    const shared = z.strictObject({ at: z.string().optional() }).meta({ id: "AnswerShapeShared" });
+    expect(shapePaths(z.strictObject({ one: shared, two: shared })).blocked).toEqual([
+      "the walk cannot enter $defs at the answer",
+      "the walk cannot enter $ref at one",
+      "the walk cannot enter $ref at two",
+    ]);
+    // Zod writes an intersection of two objects as one object, so a tuple stands in for allOf here.
+    const pair = z.tuple([z.strictObject({ a: z.string().optional() })]);
+    expect(shapePaths(pair).blocked).toEqual(["the walk cannot enter prefixItems at the answer"]);
+    const tagged = z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal("a"), x: z.string().optional() }),
+      z.strictObject({ kind: z.literal("b") }),
+    ]);
+    expect(shapePaths(tagged).blocked).toEqual(["the walk cannot enter oneOf at the answer"]);
+  });
+
+  it("enters six keywords and reads twenty-one as keywords that hold no key", () => {
+    // A keyword that holds keys, such as $ref or $defs, must never join NO_KEYS: it hides them.
+    expect([...ENTERED]).toEqual([
+      "type",
+      "properties",
+      "required",
+      "items",
+      "anyOf",
+      "additionalProperties",
+    ]);
+    expect([...NO_KEYS]).toEqual([
+      "$schema",
+      "const",
+      "enum",
+      "format",
+      "pattern",
+      "minimum",
+      "maximum",
+      "exclusiveMinimum",
+      "exclusiveMaximum",
+      "multipleOf",
+      "minLength",
+      "maxLength",
+      "minItems",
+      "maxItems",
+      "uniqueItems",
+      "propertyNames",
+      "contentEncoding",
+      "description",
+      "title",
+      "default",
+      "examples",
+    ]);
+  });
+});

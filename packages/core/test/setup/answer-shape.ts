@@ -7,7 +7,9 @@ import { z } from "zod";
  * walk goes through nested objects, array items (`tokens[].hint`), and each
  * branch of a union. A path of two branches is one path. `shapeOf` reads one
  * body and answers the paths it leaves out and the paths it sets null. The
- * recorder writes the second; the check holds the first to it.
+ * recorder writes the second; the check holds the first to it. A body that
+ * fits two branches of a union is a failure, because the walk can read it
+ * under the wrong branch.
  */
 
 /** A JSON schema node, as `z.toJSONSchema` writes it: the parts this file reads. */
@@ -26,6 +28,11 @@ export interface Shape {
   nulls: string[];
 }
 
+/** The shape of one body, and each union at which the body fits two branches. */
+export interface BodyShape extends Shape {
+  twoBranches: string[];
+}
+
 /** The paths of a schema, and each node that the walk cannot enter. */
 export interface Paths {
   paths: string[];
@@ -36,8 +43,9 @@ export interface Paths {
  * The keywords that the walk enters or that hold no key. Any other keyword
  * (`oneOf`, `allOf`, `$ref`, `not`, `if`, `prefixItems`) is a node the walk
  * cannot enter. The check fails on it by name, so a new kind cannot hide keys.
+ * `answer-shape.test.ts` pins both lists.
  */
-const ENTERED = new Set([
+export const ENTERED: ReadonlySet<string> = new Set([
   "type",
   "properties",
   "required",
@@ -45,7 +53,7 @@ const ENTERED = new Set([
   "anyOf",
   "additionalProperties",
 ]);
-const NO_KEYS = new Set([
+export const NO_KEYS: ReadonlySet<string> = new Set([
   "$schema",
   "const",
   "enum",
@@ -138,17 +146,20 @@ function typesOf(value: unknown): string[] {
 }
 
 /**
- * True when `body` has the form of `node`. The body has the node's type and
- * its required keys. It has no key that a closed object does not name, and
- * each value has the form of its node.
- * The recorder calls it after the strict parse passed, so it picks the
- * branch of a union that the body parses under.
+ * True when `body` has the form of `node`. The body has the node's type,
+ * `const`, `enum`, `pattern`, and required keys. It has no key that a closed
+ * object does not name, and each value has the form of its node. The fit does
+ * not read `format`, so a body can fit two branches. `walkBody` reports each
+ * such union, and the recorder fails the answer.
  */
 function fits(node: Node, body: unknown): boolean {
   const { branches, nullable } = branchesOf(node);
   if (body === null && nullable) return true;
   if (node.anyOf) return branches.some((b) => fits(b, body));
   if (node.const !== undefined && node.const !== body) return false;
+  if (Array.isArray(node.enum) && !node.enum.includes(body)) return false;
+  if (typeof node.pattern === "string" && typeof body === "string")
+    if (!new RegExp(node.pattern).test(body)) return false;
   const types = Array.isArray(node.type) ? node.type : node.type ? [node.type] : [];
   if (types.length > 0 && !typesOf(body).some((t) => types.includes(t))) return false;
   if (node.properties) {
@@ -169,10 +180,11 @@ function fits(node: Node, body: unknown): boolean {
   return true;
 }
 
-function walkBody(node: Node, body: unknown, prefix: string, shape: Shape): void {
+function walkBody(node: Node, body: unknown, prefix: string, shape: BodyShape): void {
   if (node.anyOf) {
-    const branch = branchesOf(node).branches.find((b) => fits(b, body));
-    if (branch) walkBody(branch, body, prefix, shape);
+    const fitting = branchesOf(node).branches.filter((b) => fits(b, body));
+    if (fitting.length > 1) shape.twoBranches.push(prefix || "the answer");
+    if (fitting[0]) walkBody(fitting[0], body, prefix, shape);
     return;
   }
   if (node.properties) {
@@ -189,9 +201,16 @@ function walkBody(node: Node, body: unknown, prefix: string, shape: Shape): void
   }
 }
 
-/** The paths of `schema` that `body` leaves out, and the paths it sets null, each once. */
-export function shapeOf(schema: z.ZodType, body: unknown): Shape {
-  const shape: Shape = { absent: [], nulls: [] };
+/**
+ * The paths of `schema` that `body` leaves out, the paths it sets null, and
+ * the unions at which it fits two branches, each once.
+ */
+export function shapeOf(schema: z.ZodType, body: unknown): BodyShape {
+  const shape: BodyShape = { absent: [], nulls: [], twoBranches: [] };
   walkBody(nodeOf(schema), body, "", shape);
-  return { absent: [...new Set(shape.absent)], nulls: [...new Set(shape.nulls)] };
+  return {
+    absent: [...new Set(shape.absent)],
+    nulls: [...new Set(shape.nulls)],
+    twoBranches: [...new Set(shape.twoBranches)],
+  };
 }

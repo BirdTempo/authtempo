@@ -123,7 +123,16 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     }
     const parsed = fit.schema.safeParse(body);
     // The shape of the answer, so the check can hold the optional and nullable keys to the wire.
-    if (parsed.success) return { verdict: "ok", ...shapeOf(fit.schema, body) };
+    if (parsed.success) {
+      const { twoBranches, ...shape } = shapeOf(fit.schema, body);
+      // The walk can read such a body under the wrong branch and hide a key of the right one.
+      if (twoBranches.length > 0)
+        return {
+          verdict: `the body fits two branches of a union at ${twoBranches.join(", ")}`,
+          ...shape,
+        };
+      return { verdict: "ok", ...shape };
+    }
     const verdict = parsed.error.issues
       .map((i) => {
         const where = "keys" in i ? (i.keys as string[]).join(",") : i.path.join(".");

@@ -338,7 +338,7 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     field: "allowCredentials[].transports",
     form: "absent",
     reason:
-      "the sign-in options carry no credentials (passkeys.ts passkeyAuthenticationOptions), so no item exists; passkeys.test.ts proves the empty list",
+      "the sign-in options carry no credentials: passkeys.ts passkeyAuthenticationOptions calls the seam with no list, so no item exists; webauthn-seam.test.ts:96 proves the empty list",
   },
   ...optionsRows("POST /reauth/passkey/options", REQUEST_OPTION_KEYS),
   ...optionsRows("POST /second-factor/passkey/options", REQUEST_OPTION_KEYS),
