@@ -119,8 +119,8 @@ export function callForm(
   return html`${form}<p class="cost">${COST_LINE}</p>`;
 }
 
-/** The time of the reset in UTC, as "HH:MM UTC". */
-function utcTime(at: number): string {
+/** A time in UTC, as "HH:MM UTC". */
+export function utcTime(at: number): string {
   return `${new Date(at).toISOString().slice(11, 16)} UTC`;
 }
 

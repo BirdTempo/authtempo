@@ -3,6 +3,7 @@ import { DEMO_LIMITS } from "./facts.js";
 import { IsolateCount } from "./flood.js";
 import { Gate } from "./gate.js";
 import { PAGE_HEADERS } from "./html.js";
+import { type Refusal, refusedPage } from "./pages/refused.js";
 import { Sandbox } from "./sandbox.js";
 
 export { Gate, Sandbox };
@@ -101,6 +102,27 @@ function json(status: number, body: unknown): Response {
 }
 
 /**
+ * A refusal of the Worker (final review Low 3 of plan 11b). A page view
+ * (Accept with text/html) gets a page with the limit and the wait, so a
+ * visitor reads no raw JSON. Each other request gets the JSON body. With a
+ * wait, the answer names it in Retry-After (RFC 9110 10.2.3).
+ */
+function refuse(
+  request: Request,
+  status: number,
+  body: Record<string, string>,
+  refusal: Refusal,
+  retryAt: number | null,
+): Response {
+  const now = Date.now();
+  const view = (request.headers.get("accept") ?? "").includes("text/html");
+  const res = view ? refusedPage(status, refusal, retryAt ?? now) : json(status, body);
+  if (retryAt !== null)
+    res.headers.set("retry-after", String(Math.max(1, Math.ceil((retryAt - now) / 1000))));
+  return res;
+}
+
+/**
  * The page headers on one answer of the script. A header that the answer
  * already has stays, so a page of core keeps its own policy.
  */
@@ -128,7 +150,8 @@ async function reset(request: Request, env: Cloudflare.Env, origin: string): Pro
     return refused;
   }
   const site = request.headers.get("sec-fetch-site");
-  if (site === "cross-site" || site === "same-site") return json(403, { error: "cross_site" });
+  if (site === "cross-site" || site === "same-site")
+    return refuse(request, 403, { error: "cross_site" }, "cross_site", null);
   const ids = cookieIds(request);
   const home = { location: `${origin}/` };
   if (ids.length === 0) return new Response(null, { status: 303, headers: home });
@@ -156,7 +179,10 @@ async function route(request: Request, env: Cloudflare.Env, ip: string): Promise
 
   const gate = env.GATE.get(env.GATE.idFromName("gate"));
   const admitted = await gate.admit(ip, Date.now());
-  if (!admitted.ok) return json(429, { error: "demo_limit", limit: admitted.limit });
+  if (!admitted.ok) {
+    const body = { error: "demo_limit", limit: admitted.limit };
+    return refuse(request, 429, body, admitted.limit, admitted.retryAt);
+  }
 
   const fresh = newId();
   await env.SANDBOX.get(env.SANDBOX.idFromName(fresh)).create();
@@ -178,8 +204,12 @@ export default {
     // another path reached the script, so no IP can be counted.
     const ip = request.headers.get("cf-connecting-ip");
     if (ip === null || ip === "") return withPageHeaders(json(400, { error: "no_client_ip" }));
-    if (!FIRST.take(ip, Date.now()))
-      return withPageHeaders(json(429, { error: "demo_limit", limit: "requestsPerIpPerMinute" }));
+    const now = Date.now();
+    if (!FIRST.take(ip, now)) {
+      const limit = "requestsPerIpPerMinute";
+      const body = { error: "demo_limit", limit };
+      return withPageHeaders(refuse(request, 429, body, limit, FIRST.until(ip, now)));
+    }
     const bounded = await capped(request);
     if (bounded === null) return withPageHeaders(json(413, { error: "body_too_large" }));
     return withPageHeaders(await route(bounded, env, ip));

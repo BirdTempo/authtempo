@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { ipKey } from "@authtempo/core";
-import { DEMO_LIMITS } from "./facts.js";
+import { DEMO_LIMITS, type GateLimit } from "./facts.js";
 
 /** The gate keeps an IP for one window at most (the demo stores no IP past one hour). */
 const KEEP_MS = DEMO_LIMITS.windowMs;
@@ -25,14 +25,27 @@ export class Gate extends DurableObject<Cloudflare.Env> {
    * key of ipKey of core: an IPv4 address as it is, an IPv6 address as its
    * /64. One visitor holds a /64 or more, so a rotated address counts once.
    */
-  async admit(address: string, now: number): Promise<{ ok: true } | { ok: false; limit: string }> {
+  async admit(
+    address: string,
+    now: number,
+  ): Promise<{ ok: true } | { ok: false; limit: GateLimit; retryAt: number }> {
     const ip = ipKey(address);
     const sql = this.ctx.storage.sql;
     sql.exec("DELETE FROM admit WHERE at <= ?", now - KEEP_MS);
-    const perIp = sql.exec<{ n: number }>("SELECT count(*) AS n FROM admit WHERE ip = ?", ip).one();
-    if (perIp.n >= DEMO_LIMITS.sandboxesPerIp) return { ok: false, limit: "sandboxesPerIp" };
-    const total = sql.exec<{ n: number }>("SELECT count(*) AS n FROM admit").one();
-    if (total.n >= DEMO_LIMITS.sandboxesTotal) return { ok: false, limit: "sandboxesTotal" };
+    // A refusal names the time when its oldest counted row leaves the window.
+    const perIp = sql
+      .exec<{ n: number; m: number | null }>(
+        "SELECT count(*) AS n, min(at) AS m FROM admit WHERE ip = ?",
+        ip,
+      )
+      .one();
+    if (perIp.n >= DEMO_LIMITS.sandboxesPerIp)
+      return { ok: false, limit: "sandboxesPerIp", retryAt: (perIp.m ?? now) + KEEP_MS };
+    const total = sql
+      .exec<{ n: number; m: number | null }>("SELECT count(*) AS n, min(at) AS m FROM admit")
+      .one();
+    if (total.n >= DEMO_LIMITS.sandboxesTotal)
+      return { ok: false, limit: "sandboxesTotal", retryAt: (total.m ?? now) + KEEP_MS };
     sql.exec("INSERT INTO admit (ip, at) VALUES (?, ?)", ip, now);
     // With no new visitor, no admit runs, so the alarm deletes each row at one hour.
     if ((await this.ctx.storage.getAlarm()) === null) await this.alarmAtOldest();

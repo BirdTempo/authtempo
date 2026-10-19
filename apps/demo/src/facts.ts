@@ -130,3 +130,6 @@ export const DEMO_LIMITS = {
    */
   requestsPerIpPerMinute: 600,
 } as const;
+
+/** The two limits that the gate checks, by their keys of DEMO_LIMITS. */
+export type GateLimit = Extract<keyof typeof DEMO_LIMITS, "sandboxesPerIp" | "sandboxesTotal">;

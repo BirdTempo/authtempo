@@ -10,6 +10,7 @@ import { DEMO_IDENTITIES, MAX_EMAIL } from "../../src/identities.ts";
 import { DEMO_BODIES } from "../../src/pages/index.ts";
 import { DEMO_PAGES, type PageState, page } from "../../src/pages/layout.ts";
 import { PROVIDER_TITLE, providerBody } from "../../src/pages/provider.ts";
+import { type Refusal, refusedPage } from "../../src/pages/refused.ts";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const GLOSSARY_PATH = "docs/reference/glossary.md";
@@ -94,7 +95,19 @@ describe("the prose of the demo pages", () => {
         null,
       ),
     );
-    expect(pages.length).toBe(11);
+    // The pages of a refused view (final review Low 3).
+    const refusals: Refusal[] = [
+      "sandboxesPerIp",
+      "sandboxesTotal",
+      "requestsPerIpPerMinute",
+      "cross_site",
+    ];
+    for (const r of refusals) {
+      const doc = await refusedPage(429, r, STATE.resetAt).text();
+      const source = `---\ntitle: ${r}\n---\n\n${textOf(doc).join("\n\n")}\n`;
+      pages.push({ path: `demo/refused/${r}`, source });
+    }
+    expect(pages.length).toBe(15);
     for (const p of pages) {
       const terms = checkTerms([glossary, p]);
       expect(terms.failures, p.path).toEqual([]);

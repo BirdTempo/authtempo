@@ -35,6 +35,11 @@ export class IsolateCount {
     return entry.n <= this.limit;
   }
 
+  /** The end of the window of the key of `address`, in ms since the epoch. */
+  until(address: string, now: number): number {
+    return (this.counts.get(ipKey(address))?.start ?? now) + WINDOW_MS;
+  }
+
   /** Deletes each ended window. When every window is live, it starts again with no key. */
   private prune(now: number): void {
     for (const [key, entry] of this.counts)
