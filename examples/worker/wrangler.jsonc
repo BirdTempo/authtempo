@@ -12,7 +12,9 @@
   "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
   "vars": {
     "BASE_URL": "https://example.test",
-    "TEST_MODE": "0"
+    "TEST_MODE": "0",
+    // 1 only for the local conformance run of plan 12e; a deploy keeps 0.
+    "CONFORMANCE_MODE": "0"
   },
   "d1_databases": [
     {

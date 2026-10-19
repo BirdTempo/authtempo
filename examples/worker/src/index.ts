@@ -23,6 +23,7 @@ function refusedBearer(request: Request): boolean {
 }
 
 import { compatLastLink, getCompat } from "./compat.js";
+import { conformanceConfig, conformanceOn, seedConformance } from "./conformance.js";
 import { devRedirectPattern } from "./dev-redirect.js";
 import { exampleHooks } from "./hooks.js";
 import { LEGACY_FORMATS } from "./legacy-formats.js";
@@ -104,6 +105,9 @@ function getAuth(env: Env): Auth {
       registration: { cimd: false, dynamic: true },
       scopes: { "mcp:tools": "Use the example tools" },
     },
+    // CONFORMANCE_MODE "1" only (plan 12e Task 17): RS256, the device grant, and a default
+    // resource for the local OpenID conformance run. wrangler.jsonc keeps "0" for a deploy.
+    ...(conformanceOn(env) ? conformanceConfig(env.BASE_URL, (i, init) => fetch(i, init)) : {}),
     // The operator route (plan 11c) for `authtempo keys rotate`: on only when the var
     // OPERATOR_SECRET_HASH is set. The Worker holds the hash, never the secret.
     ...(env.OPERATOR_SECRET_HASH ? { operator: { secretHash: env.OPERATOR_SECRET_HASH } } : {}),
@@ -132,6 +136,17 @@ function getAuth(env: Env): Auth {
   return auth;
 }
 
+let seeded: Promise<void> | null = null;
+
+// CONFORMANCE_MODE "1" only: the test user and the two clients, once per isolate.
+function seedOnce(env: Env, a: Auth): Promise<void> {
+  if (!env.CONFORMANCE_PASSWORD)
+    throw new Error("conformance mode needs the var CONFORMANCE_PASSWORD");
+  const password = env.CONFORMANCE_PASSWORD;
+  seeded ??= seedConformance(a, password, () => lastLink);
+  return seeded;
+}
+
 let verifier: Verifier | null = null;
 
 // The verifier of a server that is not the auth app (plan 11d). This Worker is the
@@ -150,6 +165,7 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
     const a = getAuth(env);
+    if (conformanceOn(env)) await seedOnce(env, a);
     // RFC 8414 and RFC 9728 put the metadata at the origin root (plan 9g).
     if (url.pathname.startsWith("/.well-known/")) return a.wellKnown(request);
     if (url.pathname.startsWith("/auth/")) return a.handle(request);
