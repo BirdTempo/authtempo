@@ -1,8 +1,9 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { request } from "node:https";
 import { createServer } from "node:net";
-import { dirname, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, describe, expect, it } from "vitest";
 import { devArgs, devPort } from "../../scripts/dev.mjs";
@@ -55,13 +56,16 @@ function send(
 }
 
 let child: ChildProcess | null = null;
+const stores: string[] = [];
 
 afterAll(async () => {
   // The run is a group: node, pnpm, wrangler, and workerd. Stop all of them.
-  if (child?.pid === undefined || child.exitCode !== null) return;
-  const exited = new Promise((done) => child?.on("exit", done));
-  process.kill(-child.pid, "SIGTERM");
-  await exited;
+  if (child?.pid !== undefined && child.exitCode === null) {
+    const exited = new Promise((done) => child?.on("exit", done));
+    process.kill(-child.pid, "SIGTERM");
+    await exited;
+  }
+  for (const store of stores.splice(0)) rmSync(store, { recursive: true, force: true });
 });
 
 describe("the local demo", () => {
@@ -86,7 +90,11 @@ describe("the local demo", () => {
   it("answers a magic-link request from the page origin, and mails a link of that origin", async () => {
     const port = await freePort();
     const origin = `https://localhost:${port}`;
-    child = spawn("node", ["scripts/dev.mjs"], {
+    // A new store each run. wrangler dev keeps the gate rows in .wrangler/state,
+    // so a sixth run within one hour from 127.0.0.1 gets 429 sandboxesPerIp.
+    const store = mkdtempSync(join(tmpdir(), "authtempo-demo-dev-"));
+    stores.push(store);
+    child = spawn("node", ["scripts/dev.mjs", "--persist-to", store], {
       cwd: PKG,
       detached: true,
       stdio: "ignore",

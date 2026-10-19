@@ -4,6 +4,7 @@
 // back to this run. With the planned host as DEMO_ORIGIN, core refuses each
 // call of a page with 403 origin_not_trusted.
 // The port is DEMO_DEV_PORT of src/facts.ts, or DEMO_PORT when it is set.
+// Each other argument goes to wrangler, as `--persist-to <dir>` for a new store.
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { DEMO_DEV_PORT, demoDevOrigin } from "../src/facts.ts";
@@ -35,7 +36,7 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.a
   const port = devPort(process.env);
   console.log(`dev: open ${demoDevOrigin(port)}/ and accept the local certificate of wrangler`);
   // The four keys of each wrangler spawn (ruling 40 of plan 11e).
-  const child = spawn("pnpm", ["exec", "wrangler", ...devArgs(port)], {
+  const child = spawn("pnpm", ["exec", "wrangler", ...devArgs(port), ...process.argv.slice(2)], {
     cwd: PKG,
     stdio: "inherit",
     env: {
