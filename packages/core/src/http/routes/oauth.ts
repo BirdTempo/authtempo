@@ -300,8 +300,8 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         : scheme === "Bearer"
           ? `Bearer ${params}, DPoP ${algs}`
           : `Bearer, DPoP ${algs}`;
-    const code = error === "insufficient_scope" ? error : "invalid_token";
-    return json({ error: code }, status, { "www-authenticate": challenge });
+    // The body names the code of the challenge (ruling 31 of plan 12e).
+    return json({ error }, status, { "www-authenticate": challenge });
   };
   const userinfo = async (ctx: RouteContext): Promise<Response> => {
     const request = ctx.request;

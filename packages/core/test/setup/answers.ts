@@ -25,13 +25,17 @@ const FS_MODULE = "node:fs";
  *    `metadata`, HTML for `html`, a 302 with `Location` for `redirect`.
  * 4. A route that takes `clientSecretBasic` answers `invalid_client` as a
  *    401 with a Basic challenge, or as a 400 with none (plan 12e, ruling 19).
+ * 5. A route that takes `dpopAccessToken` answers `invalid_dpop_proof` as a
+ *    401 (plan 12e, ruling 31).
  * An answer for a path of no route has the key `null` and the verdict `ok`.
  */
 vi.mock("../../src/http/router.js", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../src/http/router.js")>();
   const { appendFileSync }: AppendFs = await import(/* @vite-ignore */ FS_MODULE);
   const { shapeVerdict } = await import("./answer-shape.js");
-  const { ERRORS, INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS } = await import("../../src/errors.js");
+  const { DPOP_PROOF_AT_RESOURCE, ERRORS, INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS } = await import(
+    "../../src/errors.js"
+  );
   const { ROUTE_CONTRACT } = await import("../../src/http/contract/index.js");
   const { AUTH_ERROR_PARAM } = await import("../../src/http/redirect.js");
   const { routeKeyOf } = await import("../../src/http/route-key.js");
@@ -103,8 +107,13 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     const statuses: number[] = [];
     if ((entry.codes as readonly string[]).includes(code))
       statuses.push(ERRORS[code as keyof typeof ERRORS]);
+    // Rule 5: a route of a bound token answers invalid_dpop_proof as a 401 (ruling 31 of plan 12e).
     if ((entry.oauthCodes as readonly string[]).includes(code))
-      statuses.push(OAUTH_ERRORS[code as keyof typeof OAUTH_ERRORS]);
+      statuses.push(
+        code === "invalid_dpop_proof" && entry.auth.includes("dpopAccessToken")
+          ? DPOP_PROOF_AT_RESOURCE
+          : OAUTH_ERRORS[code as keyof typeof OAUTH_ERRORS],
+      );
     // Rule 4: with no Authorization header, invalid_client is a 400 at a route of client auth.
     if (code === "invalid_client" && entry.auth.includes("clientSecretBasic"))
       statuses.push(INVALID_CLIENT_NO_HEADER);

@@ -1278,7 +1278,7 @@ export const ROUTES = Object.freeze([
     feature: "oauth",
     auth: ["accessToken", "dpopAccessToken"],
     codes: [],
-    oauthCodes: ["invalid_token", "insufficient_scope"],
+    oauthCodes: ["invalid_token", "insufficient_scope", "invalid_dpop_proof"],
   },
   {
     method: "POST",
@@ -1286,7 +1286,7 @@ export const ROUTES = Object.freeze([
     feature: "oauth",
     auth: ["accessToken", "dpopAccessToken"],
     codes: [],
-    oauthCodes: ["invalid_token", "insufficient_scope"],
+    oauthCodes: ["invalid_token", "insufficient_scope", "invalid_dpop_proof"],
   },
   {
     method: "GET",

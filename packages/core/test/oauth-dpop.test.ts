@@ -504,12 +504,12 @@ describe("the DPoP scheme (RFC 9449 section 7)", () => {
     });
     expect(await userinfo("DPoP")).toEqual({
       status: 401,
-      error: "invalid_token",
+      error: "invalid_dpop_proof",
       challenge: `DPoP error="invalid_dpop_proof", ${ALGS}`,
     });
     expect(await userinfo("DPoP", good)).toEqual({
       status: 401,
-      error: "invalid_token",
+      error: "invalid_dpop_proof",
       challenge: `DPoP error="invalid_dpop_proof", ${ALGS}`,
     });
     expect(await userinfo(null)).toEqual({
@@ -528,6 +528,20 @@ describe("the DPoP scheme (RFC 9449 section 7)", () => {
       }),
     );
     expect(posted.status).toBe(200);
+    // A POST with a proof of GET is a bad proof there too.
+    const wrongMethod = await h.auth.handle(
+      new Request(USERINFO_URL, {
+        method: "POST",
+        headers: {
+          authorization: `DPoP ${token}`,
+          dpop: await resourceProof(h, key, token, USERINFO_URL, "GET"),
+        },
+      }),
+    );
+    expect({ status: wrongMethod.status, body: await wrongMethod.json() }).toEqual({
+      status: 401,
+      body: { error: "invalid_dpop_proof" },
+    });
   });
 
   it("answers userinfo for an unbound token under DPoP and a token with no openid", async () => {

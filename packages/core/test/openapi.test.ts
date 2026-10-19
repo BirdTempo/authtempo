@@ -117,8 +117,13 @@ describe("openApiDocument (plan 11g)", () => {
             code === "invalid_client" &&
             status === "400" &&
             entry.auth.includes("clientSecretBasic");
+          // Ruling 31 of plan 12e: a route of a bound token answers a bad proof as a 401.
+          const resource =
+            code === "invalid_dpop_proof" &&
+            status === "401" &&
+            entry.auth.includes("dpopAccessToken");
           expect(
-            core === Number(status) || oauth === Number(status) || bare,
+            core === Number(status) || oauth === Number(status) || bare || resource,
             `${key} ${status} ${code}`,
           ).toBe(true);
           answered.push(code);
@@ -242,6 +247,12 @@ describe("openApiDocument (plan 11g)", () => {
       { oauth: [] },
       { oauthDpop: [] },
     ]);
+    // Ruling 31: a bad proof at userinfo is a 401 with the DPoP challenge, never a 400.
+    const info = reference().paths["/oauth/userinfo"]?.get?.responses;
+    expect(info?.["401"]?.content?.["application/json"]?.schema.properties?.error?.enum).toContain(
+      "invalid_dpop_proof",
+    );
+    expect(info?.["400"]).toBeUndefined();
     expect(reference().components.securitySchemes.oauthDpop).toMatchObject({
       type: "http",
       scheme: "DPoP",

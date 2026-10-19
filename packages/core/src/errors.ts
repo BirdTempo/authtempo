@@ -102,6 +102,7 @@ export const OAUTH_ERRORS = {
   insufficient_scope: 403,
   // RFC 9449 section 5 (read 2026-10-20): a DPoP proof at the token endpoint
   // fails a check of section 4.3. Or a client that must send a proof sent none.
+  // At userinfo the status is DPOP_PROOF_AT_RESOURCE.
   invalid_dpop_proof: 400,
   rate_limited: 429,
 } as const;
@@ -115,3 +116,10 @@ export type OAuthErrorCode = keyof typeof OAUTH_ERRORS;
  * browser shows a sign-in dialog. With a header the status stays 401.
  */
 export const INVALID_CLIENT_NO_HEADER = 400;
+
+/**
+ * The status of `invalid_dpop_proof` at a route of a bound access token
+ * (userinfo, plan 12e ruling 31). RFC 9449 section 7.1 makes the refusal
+ * of a protected resource a 401 with the DPoP challenge.
+ */
+export const DPOP_PROOF_AT_RESOURCE = 401;

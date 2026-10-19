@@ -958,10 +958,10 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 
 | Field | Value |
 | --- | --- |
-| Needs | An access token of the OAuth provider as the bearer; or a DPoP-bound access token with its proof. The token has the scope `openid`. A bound token goes as `Authorization: DPoP <token>`, with a proof of its key for this URL and method in the `DPoP` header. A bound token as a bearer answers 401 (RFC 9449 section 7.2). `WWW-Authenticate` names both schemes; the scheme of the request carries the error, and `invalid_dpop_proof` there names a bad proof |
+| Needs | An access token of the OAuth provider as the bearer; or a DPoP-bound access token with its proof. The token has the scope `openid`. A bound token goes as `Authorization: DPoP <token>`, with a proof of its key for this URL and method in the `DPoP` header. A bound token as a bearer answers 401 (RFC 9449 section 7.2). `WWW-Authenticate` names both schemes, and the scheme of the request carries the error. A bad proof answers 401 `invalid_dpop_proof` in the body and in the challenge |
 | Input | None |
 | Answer | `{ sub, email?, email_verified?, name?, picture? }` by scope |
-| Errors | [`invalid_token`](/docs/reference/errors/#oauth-invalid_token), [`insufficient_scope`](/docs/reference/errors/#oauth-insufficient_scope) |
+| Errors | [`invalid_token`](/docs/reference/errors/#oauth-invalid_token), [`insufficient_scope`](/docs/reference/errors/#oauth-insufficient_scope), [`invalid_dpop_proof`](/docs/reference/errors/#oauth-invalid_dpop_proof) |
 
 <h3 id="post-oauth-userinfo"><code>POST /oauth/userinfo</code></h3>
 
@@ -970,7 +970,7 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | Needs | An access token of the OAuth provider as the bearer; or a DPoP-bound access token with its proof. The token has the scope `openid`. The rules are those of the GET, and the proof names POST |
 | Input | None |
 | Answer | The same as the GET |
-| Errors | [`invalid_token`](/docs/reference/errors/#oauth-invalid_token), [`insufficient_scope`](/docs/reference/errors/#oauth-insufficient_scope) |
+| Errors | [`invalid_token`](/docs/reference/errors/#oauth-invalid_token), [`insufficient_scope`](/docs/reference/errors/#oauth-insufficient_scope), [`invalid_dpop_proof`](/docs/reference/errors/#oauth-invalid_dpop_proof) |
 
 <h3 id="get-oauth-grants"><code>GET /oauth/grants</code></h3>
 

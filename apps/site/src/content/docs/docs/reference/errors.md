@@ -543,7 +543,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_token"><code>invalid_token</code> 401</h3>
 
-- **Meaning:** The bearer of the userinfo route is not a live access token of this instance, or it is a DPoP-bound token. Under the `DPoP` scheme, the token is not bound or its proof fails; `WWW-Authenticate` then names `invalid_dpop_proof`. At the register route, the bearer is not the initial access token.
+- **Meaning:** The bearer of the userinfo route is not a live access token of this instance, or it is a DPoP-bound token. Under the `DPoP` scheme, the token is not bound. At the register route, the bearer is not the initial access token.
 - **Do:** Refresh the access token. Send a bound token as `Authorization: DPoP` with a new proof. At the register route, send the initial access token that the app gave you.
 
 | Routes |
@@ -561,12 +561,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_dpop_proof"><code>invalid_dpop_proof</code> 400</h3>
 
-- **Meaning:** The `DPoP` header of a token request fails a check of RFC 9449 section 4.3, or its `jti` was spent. Or a client of `dpop_bound_access_tokens` sent no proof. Or the code or the refresh token is bound to another key.
+- **Meaning:** The `DPoP` header of a token request fails a check of RFC 9449 section 4.3, or its `jti` was spent. Or a client of `dpop_bound_access_tokens` sent no proof. Or the code or the refresh token is bound to another key. At userinfo, a bound token came with no valid proof of its key. The status there is 401, with the `DPoP` challenge (RFC 9449 section 7.1).
 - **Do:** Sign a new proof for each request, with `htm`, `htu`, a fresh `iat`, and a new `jti`. Use the key that the code or the refresh token is bound to.
 
 | Routes |
 | --- |
-| [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token). |
+| [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`GET /oauth/userinfo`](/docs/reference/routes/#get-oauth-userinfo), [`POST /oauth/userinfo`](/docs/reference/routes/#post-oauth-userinfo). |
 
 <h3 id="oauth-rate_limited"><code>rate_limited</code> 429</h3>
 

@@ -1,5 +1,10 @@
 import type { z } from "zod";
-import { ERRORS, INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS } from "../errors.js";
+import {
+  DPOP_PROOF_AT_RESOURCE,
+  ERRORS,
+  INVALID_CLIENT_NO_HEADER,
+  OAUTH_ERRORS,
+} from "../errors.js";
 import { DOCS_ORIGIN, type ErrorTable, errorAnchor } from "../http/anchors.js";
 import type { AnswerKind, RouteContract } from "../http/contract/types.js";
 import { ROUTER_CODES, type RouteEntry } from "../http/route-list.js";
@@ -99,7 +104,11 @@ export function codesOf(entry: RouteEntry): { code: string; table: ErrorTable; s
     ...entry.oauthCodes.map((code) => ({
       code,
       table: "oauth" as const,
-      status: OAUTH_ERRORS[code],
+      // Ruling 31 of plan 12e: a route of a bound token answers a bad proof as a 401.
+      status:
+        code === "invalid_dpop_proof" && entry.auth.includes("dpopAccessToken")
+          ? DPOP_PROOF_AT_RESOURCE
+          : OAUTH_ERRORS[code],
     })),
     // Plan 12e, ruling 19: a route of client auth answers invalid_client 400 with no Authorization header.
     ...(entry.auth.includes("clientSecretBasic") && entry.oauthCodes.includes("invalid_client")
@@ -183,7 +192,10 @@ export function responsesOf(
     const challenged = entry.auth.includes("accessToken")
       ? codes.filter(
           (c) =>
-            c.table === "oauth" && (c.code === "invalid_token" || c.code === "insufficient_scope"),
+            c.table === "oauth" &&
+            (c.code === "invalid_token" ||
+              c.code === "insufficient_scope" ||
+              c.code === "invalid_dpop_proof"),
         )
       : [];
     if (challenged.length > 0) {
