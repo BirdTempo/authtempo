@@ -9,6 +9,13 @@
   // The same date as examples/worker. The Worker has no script, so the
   // Node.js compatibility flags change nothing here.
   "compatibility_date": "2026-09-30",
+  // Ruling 14 of the plan 11b lane. wrangler runs this command before each
+  // deploy, dry run, and dev start. It fails when dist/_headers lacks the CSP
+  // of this build, or when dist/_headers.template is still there. Without it,
+  // `astro build` then `wrangler deploy` ships a site with no CSP. It does not
+  // build: a build here would rewrite dist while check.ts reads it (its
+  // check-deploy row runs the dry run), and would build twice in preview.
+  "build": { "command": "node scripts/guard-deploy.ts" },
   "assets": {
     "directory": "./dist",
     // A path with no file answers the nearest 404.html with status 404.
