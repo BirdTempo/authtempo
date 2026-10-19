@@ -29,8 +29,8 @@ export interface Route {
   path: string;
   /**
    * The entry of ROUTES that this route serves (plan 11g). The route list
-   * test holds it to the method and the path. Optional on the type, so a
-   * test stub with a path outside ROUTES needs none (ruling 3); every core
+   * test holds it to the method and the path. It is optional on the type, so
+   * a test stub with a path outside ROUTES needs none (ruling 3). Every core
    * route sets it, and the route list test refuses a core route without it.
    */
   key?: RouteKey;

@@ -691,8 +691,6 @@ export const ROUTES = Object.freeze([
       "invalid_token",
       "invalid_code",
       "too_many_attempts",
-      "passkey_failed",
-      "token_expired",
       "hook_refused",
       "hook_failed",
       "conflict",
@@ -719,8 +717,6 @@ export const ROUTES = Object.freeze([
       "conflict",
       "invalid_code",
       "too_many_attempts",
-      "passkey_failed",
-      "token_expired",
       "hook_refused",
       "hook_failed",
     ],
@@ -1316,9 +1312,10 @@ type KeyOf<R> = R extends {
   : never;
 
 /**
- * `"<METHOD> <path>"` of one entry of `ROUTES` (plan 11g): a union of the
- * literal keys, one per entry, so a route with a key that `ROUTES` does not
- * hold fails the compile. `routeKeyOf` builds the same key from a mounted route.
+ * `"<METHOD> <path>"` of one entry of `ROUTES` (plan 11g). The type is a
+ * union of the literal keys, one per entry. So a route with a key that
+ * `ROUTES` does not hold fails the compile. `routeKeyOf` builds the same key
+ * from a mounted route.
  */
 export type RouteKey = KeyOf<RouteLiteral>;
 
