@@ -1,6 +1,6 @@
 import { FEATURES } from "../../src/data/features.ts";
 import { HOME } from "../../src/data/home.ts";
-import { NAV_LINKS } from "../../src/data/site.ts";
+import { NAV_LINKS, SITE } from "../../src/data/site.ts";
 import type { Page } from "./markdown.ts";
 
 /** The path that a failure of check-terms or check-sentences names for the home prose. */
@@ -10,10 +10,13 @@ export const HOME_PROSE_PATH =
 /**
  * The prose of the root layout and the home page as one page, so check-terms
  * and check-sentences hold it (brand spec 2). Each string is one paragraph.
- * Plan 11b moves the root prose into its content collection `site`.
+ * The title and the description are also in the body, because check-sentences
+ * reads the body only. Plan 11b moves the root prose into its content collection `site`.
  */
 export function homeProsePage(): Page {
   const paragraphs = [
+    HOME.title,
+    HOME.description,
     HOME.headline,
     HOME.lede,
     ...HOME.claims,
@@ -25,6 +28,8 @@ export function homeProsePage(): Page {
     HOME.skip,
     HOME.noLicense,
     ...NAV_LINKS.map((l) => l.label),
+    SITE.nav,
+    SITE.repo,
   ];
   return {
     path: HOME_PROSE_PATH,
