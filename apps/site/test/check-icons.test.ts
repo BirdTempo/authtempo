@@ -123,6 +123,24 @@ describe("checkIcons", () => {
     ]);
   });
 
+  it("fails an unquoted attribute value", () => {
+    expect(
+      checkIcons(one(`<path pathLength="1" fill=red d="M4 12 H20"/>`), ["a"]).failures,
+    ).toEqual(["a: a <path> has text the check cannot read: fill=red"]);
+  });
+
+  it("fails an attribute name the reader cannot read", () => {
+    expect(checkIcons(one(`<path pathLength="1" x1="4" d="M4 12 H20"/>`), ["a"]).failures).toEqual([
+      'a: a <path> has text the check cannot read: x1="4"',
+    ]);
+  });
+
+  it("fails a symbol with text the reader cannot read", () => {
+    expect(
+      checkIcons(one(`<path pathLength="1" d="M4 12 H20"/>`, " opacity=0.3"), ["a"]).failures,
+    ).toEqual(["a: the symbol has text the check cannot read: opacity=0.3"]);
+  });
+
   it("fails a cubic command that reads one pair", () => {
     expect(pathPoints("M4 12 C5 5 6 6")).toEqual({ error: "C needs pairs of numbers" });
   });

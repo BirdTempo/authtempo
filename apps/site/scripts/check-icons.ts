@@ -25,14 +25,16 @@ export const SHAPE_ATTRS: Readonly<Record<string, readonly string[]>> = {
 /** The three attributes that have their own failure line, so the allow-list does not name them twice. */
 const PAINT_ATTRS = ["fill", "stroke", "stroke-width"];
 
-/** Each attribute of a tag, in either quote form. */
-function attrs(text: string): Map<string, string> {
-  return new Map(
-    [...text.matchAll(/([a-zA-Z:-]+)=(?:"([^"]*)"|'([^']*)')/g)].map((m) => [
-      m[1] ?? "",
-      m[2] ?? m[3] ?? "",
-    ]),
-  );
+/**
+ * Each attribute of a tag, in either quote form, and the text that is not
+ * one. An unquoted value or a name the reader cannot read stops an XML
+ * parser, so the caller fails on any leftover text by name.
+ */
+function attrs(text: string): { map: Map<string, string>; rest: string } {
+  const re = /([a-zA-Z:-]+)=(?:"([^"]*)"|'([^']*)')/g;
+  const map = new Map([...text.matchAll(re)].map((m) => [m[1] ?? "", m[2] ?? m[3] ?? ""]));
+  const rest = text.replace(re, " ").replace(/\s+/g, " ").trim();
+  return { map, rest };
 }
 
 /**
@@ -132,9 +134,11 @@ export function checkIcons(sprite: string, names: readonly string[]): CheckRepor
   for (const tag of rootChildren(sprite))
     r.failures.push(`the root holds <${tag}>; the root holds a title, a comment, and symbols only`);
   for (const m of sprite.matchAll(/<symbol\b([^>]*)>([\s\S]*?)<\/symbol>/g)) {
-    const a = attrs(m[1] ?? "");
+    const { map: a, rest: symbolRest } = attrs(m[1] ?? "");
     const id = a.get("id") ?? "(no id)";
     r.counts.symbols = (r.counts.symbols ?? 0) + 1;
+    if (symbolRest !== "")
+      r.failures.push(`${id}: the symbol has text the check cannot read: ${symbolRest}`);
     if (seen.has(id)) r.failures.push(`${id} is in the sprite twice`);
     seen.add(id);
     if (!names.includes(id)) r.failures.push(`${id} is not a name of ICON_NAMES`);
@@ -146,8 +150,10 @@ export function checkIcons(sprite: string, names: readonly string[]): CheckRepor
         r.failures.push(`${id}: the symbol sets ${k}, which is not id or a symbol attribute`);
     for (const s of (m[2] ?? "").matchAll(/<([a-zA-Z]+)\b([^>]*?)\/?>/g)) {
       const tag = s[1] ?? "";
-      const sa = attrs(s[2] ?? "");
+      const { map: sa, rest: shapeRest } = attrs(s[2] ?? "");
       r.counts.shapes = (r.counts.shapes ?? 0) + 1;
+      if (shapeRest !== "")
+        r.failures.push(`${id}: a <${tag}> has text the check cannot read: ${shapeRest}`);
       const allowed = SHAPE_ATTRS[tag];
       if (allowed === undefined) {
         r.failures.push(`${id}: <${tag}> is not a path, a circle, or a rect`);
