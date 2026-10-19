@@ -61,15 +61,19 @@ const COMPAT_VERSION = COMPAT_MIGRATION_NAMES.length;
  * a database at the CLI's own version. An adapter of another version lacks a
  * table or a column. `gate` of migrate stops only a newer database; this one
  * also stops an older one and names the fix. The higher line comes from
- * `gate` itself, so that text keeps one source. A compat import also reads
- * `compatVersion`, the mapping version of the compat tables (0 when the
- * database has none; ruling 6 of plan 11f): the compat storage of another
- * mapping version lacks a table too. A core import does not read it.
+ * `gate` itself, so that text keeps one source. The gate also reads two
+ * facts of the database (rulings 6 and 7 of plan 11f). `appliedCore` is the
+ * count of core's applied migrations. `compatVersion` is the mapping version
+ * of the compat tables, 0 when the database has none. A core import on a
+ * database that only the compat run made names the compat set. A compat
+ * import on a database that only core's migrations made names the core set.
+ * A compat import also stops on compat tables of another mapping version:
+ * that compat storage lacks a table too.
  */
 export function importGate(
   version: number | null,
   tables: "core" | "compat",
-  compatVersion: number,
+  db: { appliedCore: number; compatVersion: number },
 ): void {
   const fix = `run authtempo migrate --target postgres${tables === "compat" ? " --tables compat" : ""} first`;
   if (version === null)
@@ -84,9 +88,22 @@ export function importGate(
     if (e instanceof Stop) throw new Stop(`${e.message}; nothing was written`);
     throw e;
   }
-  if (tables !== "compat") return;
+  const { appliedCore, compatVersion } = db;
+  if (tables === "core") {
+    // Only the compat run writes schema_version with no ta_migrations row.
+    if (appliedCore === 0 && compatVersion > 0)
+      throw new Stop(
+        "the database holds the Better Auth tables of an app; add --tables compat; nothing was written",
+      );
+    return;
+  }
+  // The compat run always writes its own row, so a schema_version with no
+  // compat row is a database that only core's migrations made. The compat
+  // run stops on it (its tables exist), so the fix is another run or database.
   if (compatVersion === 0)
-    throw new Stop(`the database has no compat tables of authtempo; ${fix}; nothing was written`);
+    throw new Stop(
+      "the database holds the tables of core and no Better Auth tables of an app; leave out --tables compat for the tables of core, or point --url-env at the Better Auth database of the app; nothing was written",
+    );
   if (compatVersion < COMPAT_VERSION)
     throw new Stop(
       `the compat tables are at version ${compatVersion}; this CLI writes version ${COMPAT_VERSION}; ${fix}; nothing was written`,

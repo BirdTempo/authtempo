@@ -174,10 +174,11 @@ export const importCommand: Command = {
           await pg.ping();
           // Before the first row read or write: a database at another version
           // stops the run with nothing written (spec 23 item 4).
+          const appliedCore = (await pg.appliedCore()).length;
           importGate(
-            readableVersion(await pg.schemaVersionText(), (await pg.appliedCore()).length),
+            readableVersion(await pg.schemaVersionText(), appliedCore),
             betterAuth ? "compat" : "core",
-            betterAuth ? await pg.compatVersion() : 0,
+            { appliedCore, compatVersion: await pg.compatVersion() },
           );
         } catch (e) {
           await pg.close();

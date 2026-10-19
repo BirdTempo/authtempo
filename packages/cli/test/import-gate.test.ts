@@ -31,6 +31,12 @@ const RUN = [
   "TEST_DB_URL",
 ];
 const MIGRATE_FIRST = "run authtempo migrate --target postgres first; nothing was written";
+/** A compat import on a database that only core's migrations made. */
+const CORE_ONLY =
+  "the database holds the tables of core and no Better Auth tables of an app; leave out --tables compat for the tables of core, or point --url-env at the Better Auth database of the app; nothing was written";
+/** A core import on a database that only the compat run made. */
+const COMPAT_ONLY =
+  "the database holds the Better Auth tables of an app; add --tables compat; nothing was written";
 
 let dir: string;
 let db: Awaited<ReturnType<typeof freshDatabase>>;
@@ -143,9 +149,30 @@ it("stops a compat import before any write on a core schema with no compat table
     const r = run(["--tables", "compat", ...extra]);
     expect(r.status, extra.join(" ")).toBe(2);
     expect(r.stdout).toBe("");
-    expect(linesOf(r.stderr).at(-1)).toBe(
-      "stopped: the database has no compat tables of authtempo; run authtempo migrate --target postgres --tables compat first; nothing was written",
-    );
+    expect(linesOf(r.stderr).at(-1)).toBe(`stopped: ${CORE_ONLY}`);
+  }
+  expect(await rowCounts()).toEqual(before);
+});
+
+it("stops a core import before any write on a Better Auth database after the compat run", async () => {
+  await db.sql.unsafe(
+    readFileSync(
+      join(PKG, "../compat-better-auth/test/fixtures/better-auth-1.7.2.postgres.sql"),
+      "utf8",
+    ),
+  );
+  const c = connection();
+  const m = runBin(
+    ["migrate", "--target", "postgres", "--url-env", "TEST_DB_URL", "--tables", "compat"],
+    { env: { TEST_DB_URL: c.url, PGPASSWORD: c.password } },
+  );
+  expect(m.status, m.stderr).toBe(0);
+  const before = await rowCounts();
+  for (const extra of [[], ["--dry-run"]]) {
+    const r = run(extra);
+    expect(r.status, extra.join(" ")).toBe(2);
+    expect(r.stdout).toBe("");
+    expect(linesOf(r.stderr).at(-1)).toBe(`stopped: ${COMPAT_ONLY}`);
   }
   expect(await rowCounts()).toEqual(before);
 });
@@ -161,9 +188,14 @@ it("stops a dry run too", async () => {
 });
 
 /** The line of the Stop that `importGate` throws, or null when it passes. */
-function stopOf(version: number | null, tables: "core" | "compat", compat: number): string | null {
+function stopOf(
+  version: number | null,
+  tables: "core" | "compat",
+  appliedCore: number,
+  compatVersion: number,
+): string | null {
   try {
-    importGate(version, tables, compat);
+    importGate(version, tables, { appliedCore, compatVersion });
     return null;
   } catch (e) {
     if (e instanceof Stop) return e.message;
@@ -171,24 +203,29 @@ function stopOf(version: number | null, tables: "core" | "compat", compat: numbe
   }
 }
 
-describe("importGate and the compat version", () => {
+describe("importGate and the two table sets", () => {
   const FIX = "run authtempo migrate --target postgres --tables compat first; nothing was written";
 
   it("stops a compat import on compat tables below or above the package's version", () => {
-    expect(stopOf(10, "compat", 6)).toBe(
+    expect(stopOf(10, "compat", 0, 6)).toBe(
       `the compat tables are at version 6; this CLI writes version 7; ${FIX}`,
     );
-    expect(stopOf(10, "compat", 8)).toBe(
+    expect(stopOf(10, "compat", 0, 8)).toBe(
       "the compat tables are at version 8; this CLI knows version 7; use a newer CLI; nothing was written",
     );
-    expect(stopOf(10, "compat", 7)).toBeNull();
+    expect(stopOf(10, "compat", 0, 7)).toBeNull();
   });
 
-  it("reads the core version first, and no compat version for a core import", () => {
-    expect(stopOf(9, "compat", 0)).toBe(
+  it("names the other table set when the database holds only one", () => {
+    expect(stopOf(10, "compat", 10, 0)).toBe(CORE_ONLY);
+    expect(stopOf(10, "core", 0, 7)).toBe(COMPAT_ONLY);
+  });
+
+  it("reads the core version first, and passes a core import on core's tables", () => {
+    expect(stopOf(9, "compat", 9, 0)).toBe(
       `the database is at version 9; this CLI writes version 10; ${FIX}`,
     );
-    expect(stopOf(10, "core", 0)).toBeNull();
+    expect(stopOf(10, "core", 10, 0)).toBeNull();
   });
 });
 
