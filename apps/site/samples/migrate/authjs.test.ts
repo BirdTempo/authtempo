@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { call, harness } from "../support/harness.ts";
 import { AUTHJS_FORMATS, createAuthjsAuth } from "./authjs.ts";
 
-// The fixture export of the Authjs reader: Ida with the bcrypt2a vector in the app's password column.
+// The fixture export of the Auth.js reader: Ida with the bcrypt2a vector in the app's password column.
 const f = FIXTURE_EXPORTS.authjs;
 const GUIDE = new URL("../../src/content/docs/docs/migrate/authjs.mdx", import.meta.url);
 

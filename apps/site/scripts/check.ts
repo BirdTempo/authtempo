@@ -102,7 +102,10 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
     name: "check-sentences",
     run: () => checkSentences([...docsPages(), homeProsePage(), ...cliHelpPages()]),
   },
-  { name: "check-fences", run: () => checkFences(docsPages(), sampleFiles(), existsSync) },
+  {
+    name: "check-fences",
+    run: () => checkFences(docsPages(), sampleFiles(), existsSync, (p) => readFileSync(p, "utf8")),
+  },
   // The agent files of plan 11e. llms.txt, llms-full.txt, and the .md twins list every page.
   // The agent index holds the tree, its anchors, its samples, and the bodies of the twins.
   {

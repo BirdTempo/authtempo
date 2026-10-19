@@ -6,16 +6,27 @@ import {
   type StorageAdapter,
 } from "@authtempo/core";
 import { createLegacyPasswordHash, type LegacyFormat } from "@authtempo/legacy-hashes";
-import { FIREBASE } from "@authtempo/legacy-hashes/testing";
 
 // Give `authtempo import firebase --formats` exactly this list.
 export const FIREBASE_FORMATS: readonly LegacyFormat[] = ["firescrypt"];
 
-export function createFirebaseAuth(deps: {
-  storage: StorageAdapter;
-  mail: MailPort;
-  secret: string;
-}) {
+/** The two hash parameters of the Firebase console. Read them from your secret store. The placeholders only build the config. */
+export interface FirebaseEnv {
+  /** The base64 signer key. */
+  FIREBASE_SIGNER_KEY: string;
+  /** The base64 salt separator. */
+  FIREBASE_SALT_SEPARATOR: string;
+}
+
+const PLACEHOLDERS: FirebaseEnv = {
+  FIREBASE_SIGNER_KEY: "cGxhY2Vob2xkZXItc2lnbmVyLWtleQ==",
+  FIREBASE_SALT_SEPARATOR: "AA==",
+};
+
+export function createFirebaseAuth(
+  deps: { storage: StorageAdapter; mail: MailPort; secret: string },
+  env: FirebaseEnv = PLACEHOLDERS,
+) {
   return createAuth({
     baseURL: "https://api.example.com",
     trustedOrigins: [],
@@ -26,9 +37,11 @@ export function createFirebaseAuth(deps: {
       hash: createLegacyPasswordHash({
         // Only the formats that the import brought. A row in another format never signs in.
         formats: FIREBASE_FORMATS,
-        // The signer key and the salt separator of the Firebase console. These are the test
-        // values of the firebase/scrypt README. The app reads its own two from its secrets.
-        firebase: { signerKey: FIREBASE.signerKey, saltSeparator: FIREBASE.saltSeparator },
+        // Only for firescrypt: the signer key and the salt separator of the project.
+        firebase: {
+          signerKey: env.FIREBASE_SIGNER_KEY,
+          saltSeparator: env.FIREBASE_SALT_SEPARATOR,
+        },
         // New hashes, and the rehash at the first right sign-in, are PBKDF2.
         next: createPbkdf2PasswordHash(),
       }),

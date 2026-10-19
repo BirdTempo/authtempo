@@ -8,15 +8,29 @@ export const FENCE_LANGS = ["sh", "json", "jsonc", "http", "text"] as const;
 /** The folders that a `?raw` include may read. */
 const INCLUDE_ROOTS = [`${SITE}samples/`, `${REPO}examples/`];
 const CODE_LANGS = new Set(["ts", "tsx", "js", "mjs", "javascript", "typescript"]);
+/**
+ * A test-only import: the harness of samples/support/, or a `/testing` entry.
+ * A person copies a page sample into an app, so it must not need test code.
+ */
+const TEST_IMPORT = /(?:^|\/)support\/|\/testing$/;
+
+/** The module specifiers of a source text: `from "x"`, `import "x"`, and `import("x")`. */
+export function importSpecifiers(source: string): string[] {
+  return [...source.matchAll(/(?:\bfrom\s*|\bimport\s*\(?\s*)["']([^"']+)["']/g)].map(
+    (m) => m[1] ?? "",
+  );
+}
 
 /**
  * No page holds code inline, every `?raw` include names a file that exists,
  * and every sample file is included by a page, so no sample is dead code.
+ * An included file that is not a test imports no test code.
  */
 export function checkFences(
   pages: readonly Page[],
   samples: readonly string[],
   exists: (absPath: string) => boolean,
+  read: (absPath: string) => string,
 ): CheckReport {
   const r: CheckReport = {
     name: "check-fences",
@@ -53,7 +67,17 @@ export function checkFences(
         r.failures.push(`${p.path}: includes ${abs}, which is outside samples/ and examples/`);
         continue;
       }
-      if (!exists(abs)) r.failures.push(`${p.path}: includes ${abs}, which does not exist`);
+      if (!exists(abs)) {
+        r.failures.push(`${p.path}: includes ${abs}, which does not exist`);
+        continue;
+      }
+      // A page may show a test file. A test may import the harness and a /testing entry.
+      if (abs.endsWith(".test.ts")) continue;
+      for (const spec of importSpecifiers(read(abs)))
+        if (TEST_IMPORT.test(spec))
+          r.failures.push(
+            `${p.path}: includes ${abs.slice(REPO.length)}, which imports the test code ${spec}`,
+          );
     }
   }
   for (const s of samples)

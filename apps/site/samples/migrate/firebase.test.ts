@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { importUsers, readSource } from "@authtempo/import";
 import { FIXTURE_EXPORTS } from "@authtempo/import/testing";
-import { VECTORS } from "@authtempo/legacy-hashes/testing";
+import { FIREBASE, VECTORS } from "@authtempo/legacy-hashes/testing";
 import { describe, expect, it } from "vitest";
 import { call, harness } from "../support/harness.ts";
 import { createFirebaseAuth, FIREBASE_FORMATS } from "./firebase.ts";
@@ -23,7 +23,11 @@ describe("move users from Firebase Auth", () => {
     if (f.signIn === null) throw new Error("the fixture names no user that signs in");
     const { email, password } = f.signIn;
 
-    const auth = createFirebaseAuth(h);
+    // The test values of the firebase/scrypt README, in place of the secrets of a real project.
+    const auth = createFirebaseAuth(h, {
+      FIREBASE_SIGNER_KEY: FIREBASE.signerKey,
+      FIREBASE_SALT_SEPARATOR: FIREBASE.saltSeparator,
+    });
     const signIn = (p: string) =>
       call(auth, "POST", "/auth/password/sign-in", { email, password: p });
     expect((await signIn(VECTORS.firescrypt.wrong)).status).toBe(401);

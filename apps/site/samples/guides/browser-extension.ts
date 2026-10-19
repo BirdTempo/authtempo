@@ -1,5 +1,4 @@
-import { createAuth } from "@authtempo/core";
-import type { SampleDeps } from "../support/harness.ts";
+import { createAuth, type MailPort, type StorageAdapter } from "@authtempo/core";
 
 /**
  * The origin of the extension: `chrome-extension://` and its ID. Put the
@@ -8,7 +7,10 @@ import type { SampleDeps } from "../support/harness.ts";
  */
 export const EXTENSION_ORIGIN = "chrome-extension://abcdefghijklmnopabcdefghijklmnop";
 
-export function createExtensionAuth(deps: SampleDeps, mode: "token" | "cookie" = "token") {
+export function createExtensionAuth(
+  deps: { storage: StorageAdapter; mail: MailPort; secret: string },
+  mode: "token" | "cookie" = "token",
+) {
   return createAuth({
     baseURL: "https://api.example.com",
     // An exact origin. Core refuses a wildcard.

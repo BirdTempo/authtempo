@@ -35,6 +35,18 @@ describe("move users from Supabase Auth", () => {
     ]);
     expect(row?.hash.startsWith("pbkdf2-sha256$")).toBe(true);
     expect((await signIn(password)).status).toBe(200);
+
+    // Bob proves the argon2id half of the seam.
+    const signInBob = (p: string) =>
+      call(auth, "POST", "/auth/password/sign-in", { email: "bob@example.com", password: p });
+    expect((await signInBob(VECTORS.argon2id.wrong)).status).toBe(401);
+    const bob = await signInBob(VECTORS.argon2id.password);
+    expect(bob.status).toBe(200);
+    const { user: bobUser } = (await bob.json()) as { user: { id: string } };
+    const bobRow = await h.storage.findOne("password", [
+      { field: "userId", op: "eq", value: bobUser.id },
+    ]);
+    expect(bobRow?.hash.startsWith("pbkdf2-sha256$")).toBe(true);
   });
 
   it("uses the formats of the fixture", () => {
