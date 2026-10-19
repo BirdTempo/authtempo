@@ -31,12 +31,29 @@ const PAGES = new Map([
   ["docs/reference/client/index.html", "<h1>Client</h1>"],
 ]);
 
+/** One section as features.astro writes it: the title links the guide, then the line and the count. */
+function section(id: string, guide: string, title: string, line: string, count = ""): string {
+  return `<section id="${id}" class="card astro-x"><h3><a href="${guide}">${title}</a></h3><p class="line">${line}</p>${count}</section>`;
+}
+
 /** A /features/ page with one section per feature and per package. */
 function page(passkeyRoutes = "2 routes"): string {
   return [
-    `<section id="passkey"><h3>Passkeys</h3><p>${passkeyRoutes}</p></section>`,
-    '<section id="openapi"><h3>OpenAPI document</h3><p>1 route</p></section>',
-    '<section id="pkg-client"><h3>Client</h3></section>',
+    section(
+      "passkey",
+      "/docs/guides/passkeys/",
+      "Passkeys",
+      "Sign in with a passkey.",
+      `<p>${passkeyRoutes}</p>`,
+    ),
+    section(
+      "openapi",
+      "/docs/reference/openapi/#before-you-start",
+      "OpenAPI document",
+      "The document of the routes.",
+      "<p>1 route</p>",
+    ),
+    section("pkg-client", "/docs/reference/client/", "Client", "The app side."),
   ].join("");
 }
 
@@ -90,6 +107,8 @@ describe("checkFeatures", () => {
     );
     expect(r.failures).toEqual([
       "PACKAGE_FEATURES.client: the guide /docs/reference/nothing/ names no page of the build",
+      // The built section still links the old guide, so it fails the link rule too.
+      "/features/#pkg-client does not link its guide /docs/reference/nothing/",
     ]);
   });
 
@@ -104,6 +123,7 @@ describe("checkFeatures", () => {
     );
     expect(r.failures).toEqual([
       "FEATURES.openapi: the guide /docs/reference/openapi/#steps names no id steps on its page",
+      "/features/#openapi does not link its guide /docs/reference/openapi/#steps",
     ]);
   });
 
@@ -126,6 +146,37 @@ describe("checkFeatures", () => {
       '/features/ has 0 sections with id="openapi"; it needs 1',
       '/features/ has 2 sections with id="pkg-client"; it needs 1',
     ]);
+  });
+
+  it("fails a section that does not link its guide, for a feature and a package", () => {
+    const built = page()
+      .replace('href="/docs/guides/passkeys/"', 'href="/docs/"')
+      .replace('href="/docs/reference/client/"', 'href="/docs/"');
+    const r = checkFeatures(input({ built }));
+    expect(r.failures).toEqual([
+      "/features/#passkey does not link its guide /docs/guides/passkeys/",
+      "/features/#pkg-client does not link its guide /docs/reference/client/",
+    ]);
+  });
+
+  it("fails a section that does not show its line, for a feature and a package", () => {
+    const built = page()
+      .replace('<p class="line">Sign in with a passkey.</p>', "")
+      .replace('<p class="line">The app side.</p>', '<p class="line">Another line.</p>');
+    const r = checkFeatures(input({ built }));
+    expect(r.failures).toEqual([
+      '/features/#passkey does not show its line "Sign in with a passkey."',
+      '/features/#pkg-client does not show its line "The app side."',
+    ]);
+  });
+
+  it("reads the route count from the text of the section, not from its open tag", () => {
+    const built = page().replace(
+      '<section id="passkey"',
+      '<section id="passkey" data-note="2 routes"',
+    );
+    const r = checkFeatures(input({ built: built.replace("<p>2 routes</p>", "") }));
+    expect(r.failures).toEqual(["/features/#passkey states no route count; ROUTES has 2"]);
   });
 
   it("fails on zero folders", () => {

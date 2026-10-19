@@ -1,5 +1,5 @@
 import { routeLabel } from "../src/data/features.ts";
-import { idsOf } from "./lib/html.ts";
+import { hrefsOf, idsOf } from "./lib/html.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** One row of FEATURES or PACKAGE_FEATURES, as the check reads it. */
@@ -25,18 +25,26 @@ export interface FeaturesInput {
   exempt: Readonly<Record<string, string>>;
 }
 
-/** The text of an HTML fragment, with no tags and the spaces joined. */
+/** The text of an HTML fragment: no tags, the five named entities read, the spaces joined. */
 function textOf(html: string): string {
   return html
     .replace(/<[^>]+>/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ")
     .trim();
 }
 
-/** The section of the page with the id, up to its end tag, one item per section found. */
+/**
+ * The body of each section of the page with the id, after its open tag and up
+ * to its end tag. An attribute of the open tag is not part of the body.
+ */
 function sections(html: string, id: string): string[] {
   return html
-    .split(new RegExp(`<section\\b[^>]*\\sid="${id}"`))
+    .split(new RegExp(`<section\\b[^>]*\\sid="${id}"[^>]*>`))
     .slice(1)
     .map((rest) => rest.split("</section>")[0] ?? "");
 }
@@ -48,7 +56,8 @@ function sections(html: string, id: string): string[] {
  * 2. Each guide of both tables names a page of the build. An anchor of a guide
  *    names an id of that page.
  * 3. /features/ has one section per feature, with its route count from
- *    ROUTES, and one section `pkg-<folder>` per package row.
+ *    ROUTES, and one section `pkg-<folder>` per package row. Each section
+ *    links the guide of its row and shows the line of its row.
  * 4. It reads at least one folder.
  */
 export function checkFeatures(input: FeaturesInput): CheckReport {
@@ -102,17 +111,23 @@ export function checkFeatures(input: FeaturesInput): CheckReport {
       r.failures.push(`${name}: the guide ${guide} names no id ${anchor} on its page`);
   }
 
-  const ids = [
-    ...Object.keys(input.features),
-    ...Object.keys(input.packages).map((folder) => `pkg-${folder}`),
+  const rows = [
+    ...Object.entries(input.features),
+    ...Object.entries(input.packages).map(([folder, row]) => [`pkg-${folder}`, row] as const),
   ];
-  for (const id of ids) {
+  for (const [id, row] of rows) {
     const found = sections(input.built, id);
     if (found.length !== 1)
       r.failures.push(`/features/ has ${found.length} sections with id="${id}"; it needs 1`);
-    if (found.length === 0 || id.startsWith("pkg-")) continue;
+    if (found.length === 0) continue;
+    const body = found[0] ?? "";
+    const text = textOf(body);
+    if (!hrefsOf(body).includes(row.guide))
+      r.failures.push(`/features/#${id} does not link its guide ${row.guide}`);
+    if (!text.includes(row.line))
+      r.failures.push(`/features/#${id} does not show its line "${row.line}"`);
+    if (id.startsWith("pkg-")) continue;
     const n = input.routes.filter((route) => route.feature === id).length;
-    const text = textOf(found[0] ?? "");
     const stated = /\b(\d+) routes?\b/.exec(text);
     if (stated === null) r.failures.push(`/features/#${id} states no route count; ROUTES has ${n}`);
     else if (stated[0] !== routeLabel(n))
