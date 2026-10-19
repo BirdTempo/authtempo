@@ -256,6 +256,17 @@ describe("the root layout (plan 11b)", () => {
     expect(footer).toMatch(/<a\b[^>]* href="\/security\/"[^>]*>Security<\/a>/);
   });
 
+  it("keeps the theme toggle at the right end of the top row below 48rem (brand spec 12)", () => {
+    // Each @media block of the page CSS, cut at the next @media. The phone block puts the nav on a row of its own.
+    const phone = pageCss(page("index.html"), read)
+      .split("@media")
+      .filter((b) => /^\s*\((?:max-width:\s*47\.99rem|width\s*<=\s*47\.99rem)\)/.test(b));
+    const header = phone.find((b) => b.includes('grid-template-areas:"lockup toggle""nav nav"'));
+    expect(header).toBeDefined();
+    expect(header).toMatch(/\.at-toggle[^{]*\{grid-area:toggle\}/);
+    expect(header).toMatch(/\.site-header[^{]* nav[^{]*\{grid-area:nav;margin-inline-start:0\}/);
+  });
+
   it("marks the link of the current page, and no other link, in the header and the footer", () => {
     // The path prop of Site.astro names the page; the lockup of the header is not a nav link.
     const current = (path: string) =>
@@ -403,56 +414,6 @@ describe("the pricing and security pages (plan 11b)", () => {
 
 // Starlight 0.42.6 sets scopedStyleStrategy "where", so Astro adds an astro-<hash>
 // class to each element of a styled component. A class match allows that class.
-describe("the compare page (plan 11b Task 6)", () => {
-  // Brand spec 10 (ruling 17 of the plan 11b lane): the hero with the rail and a one-line lede.
-  it("opens with the hero of brand spec 10", () => {
-    expectHero("compare/index.html", "Compare");
-  });
-
-  it("links Compare in the header, right after Docs (ruling 7)", () => {
-    const header = page("index.html").split('class="site-header')[1]?.split("</header>")[0] ?? "";
-    const nav = header.split("<nav")[1]?.split("</nav>")[0] ?? "";
-    const labels = [...nav.matchAll(/<a\b[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
-    expect(labels.slice(0, 2)).toEqual(["Docs", "Compare"]);
-    expect(nav).toMatch(/<a\b[^>]* href="\/compare\/"[^>]*>Compare<\/a>/);
-  });
-
-  it("shows one table a side, in the order of the plan, then the hosted providers", () => {
-    const main = mainOf("compare/index.html");
-    const sections = main.split(/<h2\b[^>]*>/).slice(1);
-    const headings = sections.map((s) => s.split("</h2>")[0]);
-    expect(headings).toEqual([
-      "Where authtempo does more",
-      "Where both do the same",
-      "Where Better Auth does more today",
-      "The hosted providers",
-    ]);
-    const ids = (s: string) =>
-      [...s.matchAll(/<tr\b[^>]* id="((?:cmp|host)-[^"]+)"/g)].map((m) => m[1]);
-    const sides = ["authtempo", "parity", "better-auth"] as const;
-    sides.forEach((side, i) => {
-      const want = COMPARE_ROWS.filter((r) => r.side === side).map((r) => `cmp-${r.id}`);
-      expect({ side, ids: ids(sections[i] ?? "") }).toEqual({ side, ids: want });
-    });
-    expect(ids(sections[3] ?? "")).toEqual([
-      "host-supabase",
-      "host-clerk",
-      "host-auth0",
-      "host-firebase",
-      "host-cognito",
-      "host-workos",
-      "host-authjs",
-    ]);
-  });
-
-  it("shows no image and no logo of another product (brand spec 10)", () => {
-    const main = mainOf("compare/index.html");
-    expect(tags(main, "img")).toEqual([]);
-    expect(tags(main, "svg")).toEqual([]);
-    expect(tags(main, "picture")).toEqual([]);
-  });
-});
-
 describe("the home page (brand spec 9)", () => {
   it("shows the hero of the margin rail", () => {
     const home = page("index.html");
@@ -689,5 +650,55 @@ describe("the docs theme (brand spec 11)", () => {
     // No rule reads the selection colors. A rule that does needs a contrast check first.
     for (const name of ["--ec-codeSelBg", "--ec-uiSelBg", "--ec-uiSelFg"])
       expect({ name, read: codeCss.includes(`var(${name})`) }).toEqual({ name, read: false });
+  });
+});
+
+describe("the compare page (plan 11b Task 6)", () => {
+  // Brand spec 10 (ruling 17 of the plan 11b lane): the hero with the rail and a one-line lede.
+  it("opens with the hero of brand spec 10", () => {
+    expectHero("compare/index.html", "Compare");
+  });
+
+  it("links Compare in the header, right after Docs (ruling 7)", () => {
+    const header = page("index.html").split('class="site-header')[1]?.split("</header>")[0] ?? "";
+    const nav = header.split("<nav")[1]?.split("</nav>")[0] ?? "";
+    const labels = [...nav.matchAll(/<a\b[^>]*>([^<]*)<\/a>/g)].map((m) => m[1]);
+    expect(labels.slice(0, 2)).toEqual(["Docs", "Compare"]);
+    expect(nav).toMatch(/<a\b[^>]* href="\/compare\/"[^>]*>Compare<\/a>/);
+  });
+
+  it("shows one table a side, in the order of the plan, then the hosted providers", () => {
+    const main = mainOf("compare/index.html");
+    const sections = main.split(/<h2\b[^>]*>/).slice(1);
+    const headings = sections.map((s) => s.split("</h2>")[0]);
+    expect(headings).toEqual([
+      "Where authtempo does more",
+      "Where both do the same",
+      "Where Better Auth does more today",
+      "The hosted providers",
+    ]);
+    const ids = (s: string) =>
+      [...s.matchAll(/<tr\b[^>]* id="((?:cmp|host)-[^"]+)"/g)].map((m) => m[1]);
+    const sides = ["authtempo", "parity", "better-auth"] as const;
+    sides.forEach((side, i) => {
+      const want = COMPARE_ROWS.filter((r) => r.side === side).map((r) => `cmp-${r.id}`);
+      expect({ side, ids: ids(sections[i] ?? "") }).toEqual({ side, ids: want });
+    });
+    expect(ids(sections[3] ?? "")).toEqual([
+      "host-supabase",
+      "host-clerk",
+      "host-auth0",
+      "host-firebase",
+      "host-cognito",
+      "host-workos",
+      "host-authjs",
+    ]);
+  });
+
+  it("shows no image and no logo of another product (brand spec 10)", () => {
+    const main = mainOf("compare/index.html");
+    expect(tags(main, "img")).toEqual([]);
+    expect(tags(main, "svg")).toEqual([]);
+    expect(tags(main, "picture")).toEqual([]);
   });
 });

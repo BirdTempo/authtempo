@@ -93,6 +93,17 @@ const license: string = rootLicense() ?? HOME.noLicense;
   .site-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--at-rhythm); min-height: 4rem; border-bottom: 1px solid var(--at-line); }
   .site-header nav { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--at-unit) * 3); margin-inline-start: auto; }
   .site-header nav a { color: var(--at-ink); text-decoration: none; font-weight: 500; }
+  /*
+   * Below 48rem the nav takes a row of its own, so the toggle stays at the
+   * right end of the top row (brand spec 12). With Docs and Compare beside
+   * it, the toggle wrapped to the left of a second row at 390 px.
+   */
+  @media (max-width: 47.99rem) {
+    .site-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "lockup toggle" "nav nav"; gap: var(--at-unit) var(--at-rhythm); padding-block: var(--at-unit); }
+    .site-header > :global(.at-lockup) { grid-area: lockup; }
+    .site-header nav { grid-area: nav; margin-inline-start: 0; }
+    .at-toggle { grid-area: toggle; }
+  }
   .site-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--at-rhythm); padding-block: var(--at-rhythm); border-top: 1px solid var(--at-line); color: var(--at-mute); font-size: var(--at-text-small); }
   .site-footer nav { display: flex; flex-wrap: wrap; gap: calc(var(--at-unit) * 3); }
   .site-footer nav a { color: var(--at-mute); }
