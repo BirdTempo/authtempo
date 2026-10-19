@@ -185,11 +185,43 @@ describe("checkFacts (plan 11b Task 6)", () => {
     expect(r.failures).toEqual(['no row has the side "better-auth"']);
   });
 
-  it("fails a price on the page", () => {
-    for (const price of ["$25 a month", "€0.02 per user", "25 USD"]) {
-      const built = page().replace("<td>Cell</td>", `<td>${price}</td>`);
-      expect(run({ built }).failures).toEqual([`the page names a price: "${price}"`]);
-    }
+  it.each([
+    ["$25 a month", "$25"],
+    ["$<span>25</span> a month", "$25"],
+    ["&#36;25 a month", "$25"],
+    ["€0.02 per user", "€0.02"],
+    ["£25 a month", "£25"],
+    ["¥300 a month", "¥300"],
+    ["25,00 € a month", "25,00 €"],
+    ["25 USD a month", "25 USD"],
+    ["USD 25 a month", "USD 25"],
+    ["25 dollars a month", "25 dollars"],
+    ["25 US dollars a month", "25 US dollars"],
+    ["9 euros a month", "9 euros"],
+  ])("fails the price %s on the page", (cell, found) => {
+    const built = page().replace("<td>Cell</td>", `<td>${cell}</td>`);
+    expect(run({ built }).failures).toEqual([`the page names a price: "${found}"`]);
+  });
+
+  it("fails a page with no main element, where a price would hide", () => {
+    const built = page().replace('<main id="main">', "<div>").replace("</main>", "</div>");
+    expect(run({ built: built.replace("<td>Cell</td>", "<td>$25</td>") }).failures).toEqual([
+      'the page has no <main id="main"> element',
+    ]);
+  });
+
+  it("reads the build day as a UTC day, at any hour of that day", () => {
+    const late = new Date("2026-10-14T23:59:00Z");
+    const r = checkFacts({
+      rows: rows("2026-04-17"),
+      models: models(),
+      providers: ["clerk"],
+      built: pageRead("2026-04-17"),
+      files: FILES,
+      today: late,
+    });
+    expect(r.failures).toEqual([]);
+    expect(r.counts.oldest_days).toBe(180);
   });
 
   it("fails on zero rows", () => {

@@ -8,8 +8,33 @@ import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 const DAY_MS = 86_400_000;
 const SIDES: readonly CompareSide[] = ["authtempo", "parity", "better-auth"];
-/** A price: a currency sign, or a currency code next to a number. */
-const PRICE = /[$€£¥][\s\d]*\d[^<]*|\b\d[\d.,]*\s*(?:USD|EUR|GBP|JPY)\b[^<]*/;
+/**
+ * A price: a currency sign, code, or word before or after a number. The
+ * text has no tags, so "$<span>25</span>" reads as "$25".
+ */
+const PRICE = new RegExp(
+  [
+    String.raw`[$€£¥]\s*\d[\d.,]*`,
+    String.raw`\d[\d.,]*\s*[$€£¥]`,
+    // No \b before a code: a stripped tag can join it to the word before it.
+    String.raw`(?:USD|EUR|GBP|JPY)\s*\d[\d.,]*`,
+    String.raw`\d[\d.,]*\s*(?:USD|EUR|GBP|JPY)\b`,
+    String.raw`\d[\d.,]*\s*(?:US\s+)?(?:dollars?|euros?|pounds?|yen)\b`,
+  ].join("|"),
+  "i",
+);
+/** The currency entities, so "&#36;25" reads as "$25". */
+const ENTITIES: Readonly<Record<string, string>> = {
+  "&#36;": "$",
+  "&#x24;": "$",
+  "&dollar;": "$",
+  "&euro;": "€",
+  "&#8364;": "€",
+  "&pound;": "£",
+  "&#163;": "£",
+  "&yen;": "¥",
+  "&#165;": "¥",
+};
 
 /** The day number of an ISO date, or null when the text is not a real calendar day. */
 function dayOf(iso: string): number | null {
@@ -39,7 +64,8 @@ function rowHtml(built: string, id: string): string {
  * 3. Each importer names a member of `providers`, and each member has a
  *    model with its importer. Each guide is a page of the build.
  * 4. The built page has one `cmp-<id>` per row and one `host-<provider>` per
- *    model, each with "Read <date>", and no other such id. It names no price.
+ *    model, each with "Read <date>", and no other such id. It has a main
+ *    element, and its text names no price.
  */
 export function checkFacts(input: {
   rows: readonly CompareRow[];
@@ -109,8 +135,13 @@ export function checkFacts(input: {
   }
   for (const id of onPage.keys())
     if (!seen.has(id)) r.failures.push(`the page has ${id}, and no row names it`);
-  const main = input.built.split('<main id="main"')[1]?.split("</main>")[0] ?? "";
-  const price = PRICE.exec(main.replace(/<[^>]+>/g, "<"));
+  // A page with no main element would hide a price from this rule, so it fails.
+  const main = input.built.split('<main id="main"')[1]?.split("</main>")[0];
+  if (main === undefined) r.failures.push('the page has no <main id="main"> element');
+  const text = (main ?? "")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&#?\w+;/g, (e) => ENTITIES[e.toLowerCase()] ?? e);
+  const price = PRICE.exec(text);
   if (price !== null) r.failures.push(`the page names a price: "${price[0].trim()}"`);
   return requireCounts(r, ["rows", "models"]);
 }
