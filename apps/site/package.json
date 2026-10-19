@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
-    "build": "ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/build-agent.ts",
+    "build": "ASTRO_TELEMETRY_DISABLED=1 astro build --force && node scripts/build-agent.ts",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/build-agent.ts && { node scripts/check.ts; c=$?; vitest run; v=$?; [ $c -eq 0 ] && [ $v -eq 0 ]; }",
+    "test": "ASTRO_TELEMETRY_DISABLED=1 astro build --force && node scripts/build-agent.ts && { node scripts/check.ts; c=$?; vitest run; v=$?; [ $c -eq 0 ] && [ $v -eq 0 ]; }",
     "preview": "ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/build-agent.ts && WRANGLER_SEND_METRICS=false wrangler dev",
-    "preview:smoke": "ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/build-agent.ts && node scripts/preview-smoke.ts"
+    "preview:smoke": "ASTRO_TELEMETRY_DISABLED=1 astro build --force && node scripts/build-agent.ts && node scripts/preview-smoke.ts"
   },
   "dependencies": {
     "@authtempo/adapter-d1": "workspace:*",

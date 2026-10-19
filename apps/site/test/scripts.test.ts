@@ -50,7 +50,8 @@ describe("the package scripts (plan 11a)", () => {
   it("runs vitest after a failed check, and fails when either one fails", () => {
     // The test pins the order of plan 11e Task 3. build-agent runs right after
     // astro build and before any check, because the checks read its output.
-    const build = `${PREFIX}astro build && node scripts/build-agent.ts && `;
+    // --force: see the test "builds with --force" below.
+    const build = `${PREFIX}astro build --force && node scripts/build-agent.ts && `;
     const script = pkg.scripts.test ?? "";
     expect(script.startsWith(build)).toBe(true);
     const rest = script.slice(build.length);
@@ -66,5 +67,24 @@ describe("the package scripts (plan 11a)", () => {
     expect(run(1, 0)).toEqual({ out: ["check", "vitest"], failed: true });
     expect(run(0, 1)).toEqual({ out: ["check", "vitest"], failed: true });
     expect(run(0, 0)).toEqual({ out: ["check", "vitest"], failed: false });
+  });
+
+  // Plan 11b1 ruling 22. Astro keeps the rendered body of each .md page in
+  // node_modules/.astro/data-store.json and does not clear it when an
+  // integration option changes. On 2026-10-19 the new Expressive Code options
+  // left 10 .md pages with a link to a stylesheet that the build no longer
+  // writes. turbo --force does not clear that file; astro build --force does.
+  // A cache is a speed tool, never evidence. So each script whose build feeds a
+  // check uses --force: build, test, and preview:smoke. The mcp index copy and
+  // the mcp tests read the dist of build. dev and preview feed no check.
+  it("builds with --force in each script whose build feeds a check", () => {
+    for (const name of ["build", "test", "preview:smoke"])
+      expect({
+        name,
+        forced: (pkg.scripts[name] ?? "").startsWith(`${PREFIX}astro build --force && `),
+      }).toEqual({
+        name,
+        forced: true,
+      });
   });
 });
