@@ -20,10 +20,11 @@ export function routeAnchor(method: string, path: string): string {
 }
 
 /**
- * The anchor of a code on `/docs/reference/errors/`: the code for `ERRORS`,
- * `oauth-` and the code for `OAUTH_ERRORS`, because `invalid_token` and
- * `rate_limited` are in both and one page cannot hold one id twice (spec 18
- * rule 8). The site's checks import this one copy.
+ * The anchor of a code on `/docs/reference/errors/`. It is the code for
+ * `ERRORS`, and `oauth-` and the code for `OAUTH_ERRORS`. The prefix exists
+ * because `invalid_token` and `rate_limited` are in both tables, and one page
+ * cannot hold one id twice (spec 18 rule 8). The site's checks import this
+ * one copy.
  */
 export function errorAnchor(code: string, table: ErrorTable): string {
   return table === "core" ? code : `oauth-${code}`;

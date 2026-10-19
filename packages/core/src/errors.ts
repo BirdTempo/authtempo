@@ -73,8 +73,11 @@ export type ErrorCode = keyof typeof ERRORS;
  * between them. RFC 6749 sections 4.1.2.1 and 5.2, RFC 7591 section 3.2.2,
  * RFC 8707 section 2, RFC 6750 section 3.1, and OIDC Core 1.0 section
  * 3.1.2.6 (not re-read on 2026-10-13). `rate_limited` is core's own name.
- * A provider route never answers a code of `ERRORS`, and `ERRORS` gains none,
- * so the client codes and the compatibility table do not change.
+ * A provider route answers the codes of this table and the router codes of
+ * `ERRORS` (`not_found`, `internal`, and `origin_not_trusted` on a POST). The
+ * routes that a session drives also answer codes of `ERRORS`: the consent post
+ * and the two grant routes answer `unauthorized`. `ERRORS` gains no code for
+ * them, so the client codes and the compatibility table do not change.
  */
 export const OAUTH_ERRORS = {
   invalid_request: 400,

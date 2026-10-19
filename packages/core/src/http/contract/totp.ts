@@ -36,11 +36,17 @@ export const pageBody = z.object({
  * refusal after a wrong code. The route holds the challenge to the engine's
  * form.
  */
+/**
+ * The refusal that the challenge page shows after a wrong code. The route,
+ * the query, and the document read this one copy.
+ */
+export const CHALLENGE_PAGE_ERROR = "invalid_code";
+
 export const challengeQuery = z.object({
   challenge: z.string().regex(TWO_FACTOR_TOKEN_RE),
   method: z.enum(["totp", "email"]).optional(),
   backup: z.literal("1").optional(),
-  error: z.literal("invalid_code").optional(),
+  error: z.literal(CHALLENGE_PAGE_ERROR).optional(),
 });
 
 /** The state of the second factor, as `totpStatus` answers it (plan 12c). */

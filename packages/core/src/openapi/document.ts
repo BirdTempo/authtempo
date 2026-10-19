@@ -3,6 +3,7 @@ import { DOCS_ORIGIN, routeAnchor } from "../http/anchors.js";
 import { ROUTE_CONTRACT } from "../http/contract/index.js";
 import { RESET_PAGE_ERRORS } from "../http/contract/password.js";
 import * as shapes from "../http/contract/shapes.js";
+import { CHALLENGE_PAGE_ERROR } from "../http/contract/totp.js";
 import type { RouteContract } from "../http/contract/types.js";
 import { ROUTE_FEATURES, ROUTES, type RouteEntry, type RouteKey } from "../http/route-list.js";
 import { PROVIDER_NAME_RE } from "../social/provider.js";
@@ -24,7 +25,10 @@ const SHARED = z.registry<{ id: string }>();
 for (const [name, value] of Object.entries(shapes))
   if (value instanceof z.ZodType) SHARED.add(value, { id: name });
 
-/** The rules of every route, and the CORS preflight rule, as the routes page states them. */
+/**
+ * The rules of every route, and the CORS preflight rule. `check-routes` of the
+ * site holds each item to an item of the rules section of the routes page.
+ */
 const RULES = [
   "The authtempo API: every route that core can serve under `basePath`. A deployment serves the operations of its features only.",
   "",
@@ -39,7 +43,7 @@ const RULES = [
 /** The text of an operation that its schemas cannot state. */
 const NOTES: Partial<Record<RouteKey, string>> = {
   "GET /oauth/authorize":
-    "The query has two forms. The first form is the authorization request, with each key that the parameters mark as required unless `request_id` comes alone. With no session, the route holds the request and redirects to the sign-in step, `GET /oauth/sign-in`. With `prompt=none` and no session, it redirects to the client with `error=login_required`. After the sign-in, the browser comes back with the second form: `request_id` alone, which names the held request. With a session, the route answers the consent page, or redirects to the client with the code or the `error`.",
+    "The query has two forms. The first form is the authorization request, with each key whose description says it is required unless `request_id` comes alone. With no session, the route holds the request and redirects to the sign-in step, `GET /oauth/sign-in`. With `prompt=none` and no session, it redirects to the client with `error=login_required`. After the sign-in, the browser comes back with the second form: `request_id` alone, which names the held request. With a session, the route answers the consent page, or redirects to the client with the code or the `error`.",
   "POST /oauth/authorize":
     "The consent form. `request_id` names the request that core holds; it works once. A `decision` other than `allow` is a deny.",
   "POST /oauth/token":
@@ -52,7 +56,7 @@ const NOTES: Partial<Record<RouteKey, string>> = {
 
 /** The codes that a form post gets in `error=` on its own page (`routes/totp.ts`, `routes/password.ts`). */
 const PAGE_CODES: Partial<Record<RouteKey, ReadonlySet<string>>> = {
-  "POST /totp/challenge": new Set(["invalid_code"]),
+  "POST /totp/challenge": new Set([CHALLENGE_PAGE_ERROR]),
   "POST /password/reset": new Set(RESET_PAGE_ERRORS),
 };
 
@@ -66,9 +70,11 @@ const MEDIA = { json: "application/json", form: "application/x-www-form-urlencod
 
 /**
  * The OpenAPI 3.1 document of a deployment (plan 11g, spec 25). It has one
- * operation per entry of `ROUTES` whose feature is in `options.features`, in
- * the order of `ROUTES`. The same input gives the same bytes. The six keys of `options`
- * are the whole input: no config, so no secret, reaches the document.
+ * operation per entry of `ROUTES` whose feature is in `options.features`. The
+ * operations follow the order of `ROUTES`, grouped by path: a GET and a POST of
+ * one path share one path item. The same input gives the same bytes. The six
+ * keys of `options` are the whole input: no config, so no secret, reaches the
+ * document.
  */
 export function openApiDocument(options: OpenApiOptions): OpenApiDoc {
   const components: Record<string, object> = {};
@@ -77,8 +83,8 @@ export function openApiDocument(options: OpenApiOptions): OpenApiDoc {
       target: "draft-2020-12",
       io,
       unrepresentable: "throw",
-      // A shape that two routes share is a registry entry; any other reuse stays inline,
-      // because zod names a reused def per conversion and the names collide.
+      // A shape that two routes share is a registry entry. Any other reuse stays inline:
+      // zod names a reused def per conversion, and the names collide.
       reused: "inline",
       metadata: SHARED,
     }) as Record<string, unknown>;

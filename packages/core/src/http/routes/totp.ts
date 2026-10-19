@@ -20,7 +20,13 @@ import {
   verifyTwoFactor,
 } from "../../engine/totp.js";
 import { readBody } from "../body.js";
-import { codeBody, pageBody, setupBody, verifyBody } from "../contract/totp.js";
+import {
+  CHALLENGE_PAGE_ERROR,
+  codeBody,
+  pageBody,
+  setupBody,
+  verifyBody,
+} from "../contract/totp.js";
 import { clearTrustCookie, readCookie, trustCookie } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
@@ -224,7 +230,10 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
           appName: config.appName,
           backup: method === "backup",
           trustDays: totp.trustDays,
-          error: ctx.url.searchParams.get("error") === "invalid_code" ? "invalid_code" : null,
+          error:
+            ctx.url.searchParams.get("error") === CHALLENGE_PAGE_ERROR
+              ? CHALLENGE_PAGE_ERROR
+              : null,
           methods: view.value.methods,
           method,
           trusted: view.value.trusted,
@@ -263,9 +272,9 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         });
         if (r.ok) return withCookies(redirect(resolveNext(config, r.value.next)), r.value);
         // The challenge still lives after a wrong code: send the person back to the form.
-        if (r.code === "invalid_code")
+        if (r.code === CHALLENGE_PAGE_ERROR)
           return redirect(
-            `${page}${backupCode !== undefined ? "&backup=1" : emailCode !== undefined ? "&method=email" : ""}&error=invalid_code`,
+            `${page}${backupCode !== undefined ? "&backup=1" : emailCode !== undefined ? "&method=email" : ""}&error=${CHALLENGE_PAGE_ERROR}`,
           );
         return failed(r.code);
       },

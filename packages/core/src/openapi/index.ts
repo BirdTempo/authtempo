@@ -1,7 +1,7 @@
 /**
- * The entry `@authtempo/core/openapi` (plan 11g): the contract of every
- * route, the types that a client holds its own types to, and the generator
- * of the OpenAPI document.
+ * The entry `@authtempo/core/openapi` (plan 11g). It exports the contract of
+ * every route and the types that a client holds its own types to. It also
+ * exports the generator of the OpenAPI document.
  */
 export {
   type AnswerOf,
