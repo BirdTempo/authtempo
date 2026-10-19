@@ -278,9 +278,9 @@ Each prompt is one skill of the skill pack, with the same text. The local and th
 | `migrate-better-auth` | Move an app from Better Auth to authtempo | none |
 | `migrate-clerk` | Move the users of Clerk to authtempo | none |
 | `migrate-cognito` | Move the users of Amazon Cognito to authtempo | none |
-| `migrate-workos` | Move the users of WorkOS to authtempo | none |
 | `migrate-firebase` | Move the users of Firebase Auth to authtempo | none |
 | `migrate-supabase` | Move the users of Supabase Auth to authtempo | none |
+| `migrate-workos` | Move the users of WorkOS to authtempo | none |
 | `protect-mcp-server` | Protect an MCP server with authtempo | `dir` (optional) |
 
 The `binding` argument takes one name of the bindings of the docs index, such as `next` or `hono`. `prompts/list` does not show the names. Each binding has its reference page, such as [The Next.js package](/docs/reference/next/).

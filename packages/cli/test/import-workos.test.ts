@@ -8,10 +8,10 @@ import { assertFreshBuild, linesOf, runBin } from "./support/bin.js";
 import { freshDatabase } from "./support/pg.js";
 
 // `authtempo import workos` (plan 11f Task 2): the four files of the guide's
-// curl script, the flag --memberships, and no --formats, because no hash
-// moves from WorkOS (owner decision 1 of 2026-10-14). Each run is a child
-// process in a folder that holds the fixture export, on the docker compose
-// Postgres with a schema that `authtempo migrate` wrote.
+// curl script, the flag --memberships, and no --formats. No hash moves from
+// WorkOS (owner decision 1 of 2026-10-14). Each run is a child process in a
+// folder that holds the fixture export. The database is the docker compose
+// Postgres, with a schema that `authtempo migrate` wrote.
 
 const WORKOS = FIXTURE_EXPORTS.workos.bundle.files;
 const NAMES = ["users", "identities", "memberships", "organizations"] as const;

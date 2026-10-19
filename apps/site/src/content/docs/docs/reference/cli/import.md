@@ -35,6 +35,12 @@ To plan an import from Clerk with no database, use the empty store of `--target 
 authtempo import clerk --csv users.csv --users users.json --formats none --target memory --dry-run
 ```
 
+To print the report of a WorkOS import and write nothing, give the four files of the guide's script:
+
+```sh
+authtempo import workos --users users.json --identities identities.json --memberships memberships.json --organizations organizations.json --target postgres --dry-run
+```
+
 | Flag | What it does |
 | --- | --- |
 | `<provider>` | `supabase`, `clerk`, `auth0`, `firebase`, `authjs`, `cognito`, or `workos`. Exactly one. |
