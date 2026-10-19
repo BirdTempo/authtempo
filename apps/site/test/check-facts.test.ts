@@ -241,6 +241,15 @@ describe("checkFacts (plan 11b Task 6)", () => {
     expect(run({ built }).failures).toEqual([`the page names a price: "${found}"`]);
   });
 
+  // A code needs a word boundary before it (Task 6 review, Info 2 and Low 1).
+  it.each(["Pasteur 3", "Mjpy 5", "thusd 7"])(
+    "passes %s, where a code ends a longer word",
+    (cell) => {
+      const built = page().replace("<td>Cell</td>", `<td>${cell}</td>`);
+      expect(run({ built }).failures).toEqual([]);
+    },
+  );
+
   it("fails a page with no main element, where a price would hide", () => {
     const built = page().replace('<main id="main">', "<div>").replace("</main>", "</div>");
     expect(run({ built: built.replace("<td>Cell</td>", "<td>$25</td>") }).failures).toEqual([
