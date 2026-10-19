@@ -83,9 +83,10 @@ export const IMPORT_PROVIDERS = [
 
 /**
  * The keys of `authtempo import --json` (IMPORT_JSON_KEYS of the CLI): the
- * report, the reason of a stop, the bundle path, and the exit code.
+ * report, the reason of a stop, the bundle path, the verify of `import
+ * verify` (null for a plan or a run, plan 11f), and the exit code.
  */
-const IMPORT_KEYS = ["report", "stopped", "bundle", "exit"] as const;
+const IMPORT_KEYS = ["report", "stopped", "bundle", "verify", "exit"] as const;
 
 /**
  * The keys of `authtempo migrate --json` (MIGRATE_JSON_KEYS of the CLI): the

@@ -196,6 +196,30 @@ describe("import --json", () => {
     expect(stopDoc(usage, IMPORT_JSON_KEYS, true).report).toBeNull();
   });
 
+  it("import verify: a usage error prints one document with verify null", () => {
+    const dir = fresh();
+    writeFileSync(join(dir, "users.csv"), "id,email\n");
+    writeFileSync(join(dir, "identities.csv"), "provider,provider_id,user_id\n");
+    const r = runBin([
+      "import",
+      "verify",
+      "supabase",
+      "--users",
+      join(dir, "users.csv"),
+      "--identities",
+      join(dir, "identities.csv"),
+      "--formats",
+      "bcrypt",
+      "--target",
+      "postgres",
+      "--repair",
+      "--json",
+    ]);
+    const doc = stopDoc(r, IMPORT_JSON_KEYS, true);
+    expect(doc.stopped).toBe("import verify reads only; it takes no --repair");
+    expect(doc).toMatchObject({ report: null, bundle: null, verify: null });
+  });
+
   it("prints one document, not two, on the stop of a parsed run", () => {
     // The files parse as flags, so the run reaches runParsed, which returns 2 with its own document.
     const dir = fresh();

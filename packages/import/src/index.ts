@@ -9,7 +9,7 @@ export { type FirebaseExport, firebaseSource } from "./readers/firebase.js";
 export { type SupabaseExport, supabasePassword, supabaseSource } from "./readers/supabase.js";
 export { WORKOS_ROLES, type WorkosExport, workosSource } from "./readers/workos.js";
 // The D1 Worker script (worker/src) reads the next two lines through the package's own name, as a published package must (plan 9b2).
-export { exitCode, summary } from "./report.js";
+export { exitCode, type ImportVerify, summary, verifyLine, verifyReport } from "./report.js";
 export {
   bundleOf,
   type ImportBundle,

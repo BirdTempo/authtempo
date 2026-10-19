@@ -135,7 +135,7 @@ Plans an import and writes nothing. It reads the export files inside the server 
 | `destructiveHint` | `false` |
 | `idempotentHint` | `true` |
 | `openWorldHint` | `false` |
-| Output keys | `report`, `stopped`, `bundle`, `exit`, `against`, `plan_id`, `next` |
+| Output keys | `report`, `stopped`, `bundle`, `verify`, `exit`, `against`, `plan_id`, `next` |
 
 | Input | Type | Rules | What it is |
 | --- | --- | --- | --- |
@@ -174,7 +174,7 @@ Writes the users of a held plan into the database that the server's environment 
 | `destructiveHint` | `true` |
 | `idempotentHint` | `false` |
 | `openWorldHint` | `false` |
-| Output keys | `report`, `stopped`, `bundle`, `exit` |
+| Output keys | `report`, `stopped`, `bundle`, `verify`, `exit` |
 
 | Input | Type | Rules | What it is |
 | --- | --- | --- | --- |

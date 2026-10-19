@@ -107,7 +107,8 @@ describe("authtempo import --target memory (plan 11e)", () => {
     const dir = mkdtempSync(join(tmpdir(), "authtempo-json-fault-"));
     try {
       const file = join(dir, ".env");
-      writeFileSync(file, secret);
+      // Mode 0600: the file mode warning of plan 11f would join the stop line.
+      writeFileSync(file, secret, { mode: 0o600 });
       const argv = ["import", "cognito", "--users", file, "--target", "memory", "--dry-run"];
       const fault =
         "authtempo import: the Cognito users input is not JSON (the fault is at line 1, column 1)";

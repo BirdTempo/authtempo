@@ -99,6 +99,25 @@ with.
 `--report <file>` also writes the report as JSON. The report file holds no
 hash. It is written with mode 0600.
 
+## Verify
+
+```bash
+authtempo import verify supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --target postgres --url-env DATABASE_URL
+```
+
+`authtempo import verify` runs the dry run of the export against the
+database, and reads only (spec 23 item 7). It exits 0 only when the database
+holds the whole export: the dry run would write no record, no record is
+`partial`, no hash is refused, and no record is a conflict or a refusal. A
+skip that the export states does not count. It prints one line, with counts
+and no record: `verify: the database holds this export: user 812,
+organization 3`, or `verify: the database does not hold this export: 2
+records would be written, 1 partial, 0 need a person`. It refuses `--repair`,
+`--dry-run`, and `--target memory`. Run it after the real run, before the
+cutover. On D1, write a verify bundle with `--target d1-bundle --out <file>`
+and run the Worker again (`worker/README.md`). `verifyReport` of this
+package is the one rule, and the D1 Worker reads it too.
+
 ## The exports
 
 Checked against each provider's docs on 2026-10-11. Check a real export

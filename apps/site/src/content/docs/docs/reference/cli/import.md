@@ -29,6 +29,12 @@ The packages are not on a registry yet. In this repo, run each command below as 
 authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt --target postgres --url-env DATABASE_URL --dry-run
 ```
 
+After the real run, `authtempo import verify` checks that the database holds the whole export. [Verify](#verify) gives its rule.
+
+```sh
+authtempo import verify supabase --users users.csv --identities identities.csv --formats bcrypt --target postgres --url-env DATABASE_URL
+```
+
 To plan an import from Clerk with no database, use the empty store of `--target memory`:
 
 ```sh
@@ -74,7 +80,7 @@ authtempo import workos --users users.json --identities identities.json --member
 | `--repair` | Writes the missing rows of each `partial` record. |
 | `--report <file>` | Also writes the report as JSON, with mode 0600 and no hash. |
 | `-n`, `--dry-run` | Prints the report of a real run, and writes nothing. |
-| `--json` | Prints `{ report, stopped, bundle, exit }`. The report is the JSON of `--report`. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
+| `--json` | Prints `{ report, stopped, bundle, verify, exit }`. The report is the JSON of `--report`. `verify`: the result of `import verify`, or null. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 
 ## The old flags
@@ -106,11 +112,33 @@ Warning: the D1 bundle holds every password hash. Do not commit it, and remove i
 
 | Exit code | What it means |
 | --- | --- |
-| 0 | Clean: every record imported, or skipped for a reason that the export states. |
-| 1 | A person must look: a refused hash, a refused record, a conflict, or a partial record. |
+| 0 | Clean: every record imported, or skipped for a reason that the export states. verify: the database holds the export. |
+| 1 | A person must look: a refused hash, a refused record, a conflict, or a partial record. verify: the database does not hold the export. |
 | 2 | A usage error, a malformed input file, or a stop. A stop prints one stopped line. |
 
 A skip that the export states, such as a deleted user, is listed in the report. A stop prints its `stopped:` line on stderr.
+
+## Verify
+
+```sh
+authtempo import verify <provider> [the files of the provider] --formats <list> --target <postgres|d1-bundle>
+```
+
+`import verify` runs the dry run of the export against the database, and reads only. It takes the flags of `import`, and refuses `--repair`, `--dry-run`, and `--target memory`. It exits 0 only when the database holds the whole export:
+
+- The dry run would write no record.
+- No record is `partial`.
+- No hash is refused, and no record is a conflict or a refusal.
+- A skip that the export states, such as a deleted user, does not count.
+
+It prints one of two lines. The counts are the only numbers, and no line names a record.
+
+```text
+verify: the database holds this export: user 812, organization 3
+verify: the database does not hold this export: 2 records would be written, 1 partial, 0 need a person
+```
+
+Run it after the real run, before the cutover. On D1, write a verify bundle with `--target d1-bundle --out <file>`, and run the Worker again. `--json` holds the result as `verify`.
 
 ## The report
 

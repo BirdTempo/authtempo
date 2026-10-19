@@ -54,7 +54,10 @@ it("prints the same report and exits with the same code from the alias and from 
   expect(neu.status).toBe(old.status);
   expect(neu.stdout).toBe(old.stdout);
   expect(linesOf(old.stderr).slice(0, 2)).toEqual([ALIAS_LINES.renamed, ALIAS_LINES.postgres]);
-  expect(linesOf(neu.stderr)[0]).toMatch(/^connecting to \S+:\d+\/cli_/);
+  // The fixture files of the repo are readable by other users, so the new
+  // command warns on each (plan 11f); the alias does not (its deviation 8).
+  const lines = linesOf(neu.stderr).filter((l) => !l.startsWith("warning: "));
+  expect(lines[0]).toMatch(/^connecting to \S+:\d+\/cli_/);
   expect(neu.stdout + neu.stderr).not.toContain(db.url);
 });
 

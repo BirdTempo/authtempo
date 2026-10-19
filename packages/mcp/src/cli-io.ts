@@ -9,6 +9,7 @@ import {
   readdirSync,
   readFileSync,
   realpathSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
@@ -132,6 +133,7 @@ export function confinedIo(opts: {
     },
     exists: (path) => existsSync(readPath(path)),
     realpath: (path) => realpathSync(readPath(path)),
+    fileMode: (path) => statSync(readPath(path)).mode & 0o777,
     listDir: (path) => readdirSync(readPath(path)),
     writeNew: (path, text) => write(path, text, 0o666),
     writePrivate: (path, text) => write(path, text, 0o600),

@@ -21,6 +21,8 @@ export function fakeIo(
     stdin?: string;
     stdinIsTTY?: boolean;
     cwd?: string;
+    /** The mode of a file by its path; a file with no entry has mode 0600. */
+    modes?: Record<string, number>;
     answer?: boolean;
     fetch?: (url: string, init: RequestInit) => Promise<Response>;
     run?: (command: string, args: readonly string[], cwd: string) => Promise<RunResult>;
@@ -58,6 +60,7 @@ export function fakeIo(
     exists: (path) => files.has(path) || [...files.keys()].some((k) => k.startsWith(`${path}/`)),
     // The memory files hold no link.
     realpath: (path) => path,
+    fileMode: (path) => o.modes?.[path] ?? 0o600,
     listDir(path) {
       const prefix = `${path}/`;
       const names = [...files.keys()]

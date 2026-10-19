@@ -14,9 +14,11 @@ import {
   type CliIo,
   type ImportValues,
   type ParsedImport,
+  PROVIDERS,
   parseImportValues,
   runParsed,
 } from "./import-core.js";
+import { checkVerifyFlags, splitVerify } from "./import-verify.js";
 
 const OPTIONS = {
   ...COMMON_OPTIONS,
@@ -96,6 +98,13 @@ export const importCommand: Command = {
       throw new UsageError(
         "--tables names the table set, core or compat; an Auth.js export is --authjs-tables <file>",
       );
+    // `import verify` (owner decision 3): the provider first, as the plain
+    // command names it, then the flags that a read-only run refuses.
+    const { verify, rest } = splitVerify(positionals);
+    if (verify) {
+      if (rest.length === 0) throw new UsageError(`name one provider: ${PROVIDERS.join(", ")}`);
+      checkVerifyFlags(v);
+    }
     const target = oneOf("target", v.target, ["postgres", "d1-bundle", "memory"] as const);
     if (target === undefined)
       throw new UsageError(
@@ -150,7 +159,8 @@ export const importCommand: Command = {
       "better-auth": tables === "compat" ? true : undefined,
       "d1-bundle": target === "d1-bundle" ? v.out : undefined,
       memory: target === "memory" ? true : undefined,
-      "dry-run": v["dry-run"],
+      verify: verify ? true : undefined,
+      "dry-run": verify ? true : v["dry-run"],
       repair: v.repair,
       "on-email-taken": v["on-email-taken"],
       formats: v.formats,
@@ -164,7 +174,16 @@ export const importCommand: Command = {
     const io: CliIo = {
       out: sayer(ctx, json),
       err: (line) => ctx.err(line),
-      readFile: (p) => ctx.readFile(resolve(ctx.cwd, p)),
+      readFile: (p) => {
+        const abs = resolve(ctx.cwd, p);
+        // An export holds addresses and can hold hashes (spec 23 item 6). A
+        // warning, not a stop: the file is the operator's.
+        if ((ctx.fileMode(abs) & 0o077) !== 0)
+          ctx.err(
+            `warning: ${p} is readable by other users of this machine; an export holds addresses and can hold password hashes`,
+          );
+        return ctx.readFile(abs);
+      },
       writeFile: (p, t) => ctx.writePrivate(resolve(ctx.cwd, p), t),
       async openStorage(u, betterAuth) {
         ctx.err(`connecting to ${describeUrl(u)}`);
@@ -194,7 +213,7 @@ export const importCommand: Command = {
     };
     let parsed: ParsedImport;
     try {
-      parsed = parseImportValues(positionals, values, io, (n) =>
+      parsed = parseImportValues(rest, values, io, (n) =>
         Object.hasOwn(NEW_NAMES, n) ? (NEW_NAMES[n] ?? n) : n,
       );
     } catch (e) {
@@ -206,6 +225,7 @@ export const importCommand: Command = {
         report: outcome.report,
         stopped: outcome.stopped,
         bundle: outcome.bundle,
+        verify: outcome.verify,
         exit: outcome.code,
       } satisfies ImportJson);
     return outcome.code;

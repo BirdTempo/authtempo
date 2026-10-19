@@ -25,7 +25,7 @@ const CLI_BIN = join(REPO, "packages/cli/dist/bin/authtempo.js");
 const FIXTURES = join(REPO, "packages/import/test/fixtures");
 
 /** The keys of a plan answer, written out: the CLI's import keys and the three tool keys. */
-const PLAN_KEYS = ["against", "bundle", "exit", "next", "plan_id", "report", "stopped"];
+const PLAN_KEYS = ["against", "bundle", "exit", "next", "plan_id", "report", "stopped", "verify"];
 /** The fixed refusal texts, written out here: the test does not read the constants it pins. */
 const NO_PLAN = "no held plan has this id; run migrate.plan again";
 const OTHER_INPUT = "the input differs from the plan";
@@ -275,7 +275,7 @@ describe("migrate.plan and migrate.run against the database", () => {
     expect(await users(db)).toBe(0);
     const r = await s.call("migrate.run", { ...input, plan_id: id, confirm: true });
     expect(r.isError, text(r)).toBe(false);
-    expect(Object.keys(doc(r)).sort()).toEqual(["bundle", "exit", "report", "stopped"]);
+    expect(Object.keys(doc(r)).sort()).toEqual(["bundle", "exit", "report", "stopped", "verify"]);
     expect(report(r).dryRun).toBe(false);
     const created = (report(r).created ?? {}) as Record<string, unknown>;
     expect(created.user).toBe(SUPABASE_FIXTURE_CREATED.user);

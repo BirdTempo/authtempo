@@ -6,12 +6,15 @@ import {
   type ImportOptions,
   type ImportReport,
   type ImportRole,
+  type ImportVerify,
   importUsers,
   PROVIDER_FILES,
   readSource,
   type Source,
   type SourceName,
   summary,
+  verifyLine,
+  verifyReport,
 } from "@authtempo/import";
 import { LEGACY_FORMATS, type LegacyFormat } from "@authtempo/legacy-hashes";
 import { Stop } from "../errors.js";
@@ -79,6 +82,8 @@ export interface ImportValues {
   "d1-bundle"?: string | undefined;
   /** `authtempo import --target memory` only: the alias has no such flag. */
   memory?: boolean | undefined;
+  /** `authtempo import verify` only (spec 23 item 7): the dry run, then the verify line and its exit status. */
+  verify?: boolean | undefined;
   "dry-run"?: boolean | undefined;
   repair?: boolean | undefined;
   "on-email-taken"?: string | undefined;
@@ -249,6 +254,8 @@ export interface ImportOutcome {
   report: ImportReport | null;
   stopped: string | null;
   bundle: string | null;
+  /** The verify of `import verify` after its dry run; null on every other path. */
+  verify: ImportVerify | null;
 }
 
 /** The run of a parsed import, as the import CLI ran it (exit codes 0, 1, 2; one `stopped:` line). */
@@ -263,7 +270,7 @@ export async function runParsed(parsed: ParsedImport, io: CliIo): Promise<Import
     io.err(`stopped: ${reason}`);
     if (values.report)
       io.writeFile(values.report, JSON.stringify({ stopped: reason, report }, null, 2));
-    return { code: 2, report, stopped: reason, bundle: null };
+    return { code: 2, report, stopped: reason, bundle: null, verify: null };
   };
   const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
   let source: Source;
@@ -286,9 +293,17 @@ export async function runParsed(parsed: ParsedImport, io: CliIo): Promise<Import
   }
   const d1 = values["d1-bundle"];
   if (d1) {
-    io.writeFile(d1, JSON.stringify({ bundle, options: parsed.options }));
+    // A verify bundle carries `verify: true`, and the Worker prints the verify beside the report.
+    io.writeFile(
+      d1,
+      JSON.stringify({
+        bundle,
+        options: parsed.options,
+        ...(values.verify ? { verify: true } : {}),
+      }),
+    );
     io.out(`wrote ${d1}; run the D1 Worker script (packages/import/worker/README.md)`);
-    return { code: 0, report: null, stopped: null, bundle: d1 };
+    return { code: 0, report: null, stopped: null, bundle: d1, verify: null };
   }
   let target: Awaited<ReturnType<CliIo["openStorage"]>>;
   try {
@@ -308,7 +323,13 @@ export async function runParsed(parsed: ParsedImport, io: CliIo): Promise<Import
     const report = await importUsers(target.storage, source, parsed.options);
     for (const l of summary(report)) io.out(l);
     if (values.report) io.writeFile(values.report, JSON.stringify(report, null, 2));
-    return { code: exitCode(report), report, stopped: null, bundle: null };
+    if (values.verify) {
+      // One rule for the CLI and the D1 Worker (spec 23 item 7): the exit status is the verify's.
+      const v = verifyReport(report);
+      io.out(verifyLine(v, report));
+      return { code: v.code, report, stopped: null, bundle: null, verify: v };
+    }
+    return { code: exitCode(report), report, stopped: null, bundle: null, verify: null };
   } catch (e) {
     if (e instanceof ImportConflictError) {
       for (const l of summary(e.report)) io.out(l);

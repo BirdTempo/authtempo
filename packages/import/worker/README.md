@@ -97,17 +97,24 @@ Run every command from `packages/import/worker`.
    Read the report in the first terminal. It is one line:
 
    ```text
-   {"authtempoImport": {...}, "target": "core", "status": 0}
+   {"authtempoImport": {...}, "target": "core", "status": 0, "verify": null}
    ```
 
    `target` is `core` or `compat`. `status` is the CLI's exit status: 1
-   means a person must look at the report. A run without
+   means a person must look at the report. `verify` is null for an import,
+   and the verify of a verify bundle (step 7). A run without
    `--var LOCAL_IMPORT:1` prints an error and writes nothing.
 6. When the dry run report is correct, run step 3 again without `--dry-run`.
    Do not stop wrangler dev: it rebuilds when the input file changes. Wait for
    the rebuild line, then run step 5 again. A second real run changes zero
    rows, and its report lists each user as `exists`.
-7. WARNING: Delete `input/import.local.json` when you finish. It holds the
+7. To check a run, write a bundle with `authtempo import verify … --target
+   d1-bundle --out input/import.local.json`, and run the Worker again.
+   `verify.held` true and status 0 mean that the database holds the export.
+   The bundle carries `verify: true` and `options.dryRun: true`, so the run
+   reads only. A verify bundle without `dryRun: true` is refused before any
+   read.
+8. WARNING: Delete `input/import.local.json` when you finish. It holds the
    password hashes. After a rehearsal on the local copy, also delete
    `.wrangler/state`: the local database in it holds the imported hashes.
 

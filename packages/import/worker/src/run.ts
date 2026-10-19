@@ -15,6 +15,12 @@ import {
 export interface D1Bundle {
   bundle: ImportBundle;
   options: Omit<ImportOptions, "now">;
+  /**
+   * A verify bundle, from `authtempo import verify --target d1-bundle`: the
+   * Worker prints `verifyReport` beside the report (spec 23 item 7). Its
+   * options hold `dryRun: true`, so the run reads only.
+   */
+  verify?: true;
 }
 
 /**
@@ -61,7 +67,30 @@ export function d1BundleOf(value: unknown): D1Bundle {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     throw new Error("authtempo import: the D1 input field (root) is not an object");
   const { bundle, options } = value as Record<string, unknown>;
-  return { bundle: bundleOf(bundle), options: optionsOf(options) };
+  const verify = isVerifyInput(value);
+  const checked = optionsOf(options);
+  // A verify reads only. A bundle that says verify and not dryRun would write
+  // the records and then report that the database did not hold them.
+  if (verify && checked.dryRun !== true)
+    throw new Error(
+      "authtempo import: the D1 input field verify needs options.dryRun true; nothing was written",
+    );
+  return { bundle: bundleOf(bundle), options: checked, ...(verify ? { verify: true } : {}) };
+}
+
+/**
+ * True for a verify bundle. An absent field is a plain import. Any value
+ * other than true or false refuses before any read, as each option does.
+ */
+export function isVerifyInput(input: unknown): boolean {
+  if (typeof input !== "object" || input === null || Array.isArray(input)) return false;
+  const { verify } = input as Record<string, unknown>;
+  if (verify === undefined) return false;
+  if (typeof verify !== "boolean")
+    throw new Error(
+      "authtempo import: the D1 input field verify is not true or false; nothing was written",
+    );
+  return verify;
 }
 
 /**

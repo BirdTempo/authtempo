@@ -7,6 +7,7 @@ export const IMPORT_HELP: HelpText = {
     "Move the users of Supabase, Clerk, Auth0, Firebase, Auth.js, Cognito, or WorkOS into authtempo. A second run writes nothing.",
   usage: [
     "authtempo import <provider> [the files of the provider] --formats <list> --target <postgres|d1-bundle|memory> [flags]",
+    "authtempo import verify <provider> [the files of the provider] --formats <list> --target <postgres|d1-bundle> [flags]",
   ],
   examples: [
     {
@@ -24,6 +25,10 @@ export const IMPORT_HELP: HelpText = {
     {
       line: "authtempo import workos --users users.json --identities identities.json --memberships memberships.json --organizations organizations.json --target postgres --dry-run",
       says: "Print the report of a WorkOS import, and write nothing.",
+    },
+    {
+      line: "authtempo import verify supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --target postgres",
+      says: "Check that the database holds the whole export. Exit 0 means yes.",
     },
   ],
   flags: [
@@ -126,11 +131,11 @@ export const IMPORT_HELP: HelpText = {
   exits: [
     {
       code: 0,
-      says: "Clean: every record imported, or skipped for a reason that the export states.",
+      says: "Clean: every record imported, or skipped for a reason that the export states. verify: the database holds the export.",
     },
     {
       code: 1,
-      says: "A person must look: a refused hash, a refused record, a conflict, or a partial record.",
+      says: "A person must look: a refused hash, a refused record, a conflict, or a partial record. verify: the database does not hold the export.",
     },
     {
       code: 2,

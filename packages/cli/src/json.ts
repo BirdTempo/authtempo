@@ -40,11 +40,14 @@ export const KEYS_JSON_KEYS = { kid: true, exit: true, stopped: true } as const 
 export interface ImportJson extends RunKeys {
   report: import("@authtempo/import").ImportReport | null;
   bundle: string | null;
+  /** Null for an import; the result of `import verify` (spec 23 item 7). A shape only gains keys (spec 19 item 4). */
+  verify: import("@authtempo/import").ImportVerify | null;
 }
 export const IMPORT_JSON_KEYS = {
   report: true,
   stopped: true,
   bundle: true,
+  verify: true,
   exit: true,
 } as const satisfies Record<keyof ImportJson, true>;
 
@@ -245,7 +248,7 @@ export const STOP_JSON = {
     exit: 2,
     stopped: null,
   },
-  import: { report: null, stopped: null, bundle: null, exit: 2 },
+  import: { report: null, stopped: null, bundle: null, verify: null, exit: 2 },
   check: {
     base: "",
     checks: [],

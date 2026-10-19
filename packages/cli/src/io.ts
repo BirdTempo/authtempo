@@ -39,6 +39,8 @@ export interface Io {
   exists(path: string): boolean;
   /** The path with each link resolved. The path must exist. */
   realpath(path: string): string;
+  /** The mode bits of a file (mode & 0o777). The path must exist. */
+  fileMode(path: string): number;
   listDir(path: string): string[];
   /** Makes the folders on the way, and refuses a file that exists. */
   writeNew(path: string, text: string): void;
@@ -120,6 +122,7 @@ export function nodeIo(): Io {
     readStdin: () => readFileSync(0, "utf8"),
     exists: (path) => existsSync(path),
     realpath: (path) => realpathSync(path),
+    fileMode: (path) => statSync(path).mode & 0o777,
     listDir: (path) => readdirSync(path),
     writeNew(path, text) {
       mkdirSync(dirname(path), { recursive: true });
