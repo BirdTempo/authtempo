@@ -142,55 +142,77 @@ async function tokenTo(jar: Jar, to: string): Promise<string> {
   return (await lastLink(jar, to)).searchParams.get("token") ?? "";
 }
 
+/** The side of a two-way body: the JSON text, or the form fields inside it. */
+type Side = "json" | "form";
+
 /**
- * For each user route that reads a body: one body that reads as KNOWN in one
- * way and as NEW in the other (review M1). Core reads NEW. The routes of
- * readJson take JSON for any type; the routes of readBody take a form here.
+ * Which side core reads, by route and by content type. readJson reads the
+ * JSON for any type; readBody reads the form under the form type. These are
+ * literals, so a change of the reader of a core route fails the test (N2).
  */
-const TWO_WAY_CALLS: Record<string, (jar: Jar) => Promise<Response>> = {
-  "POST /password/sign-up": (jar) =>
-    call(
-      jar,
-      "POST",
-      "/auth/password/sign-up",
-      JSON.stringify({ email: NEW, password: PASSWORD, z: `&email=${KNOWN}&` }),
-      { "content-type": FORM },
-    ),
-  "POST /otp/verify": async (jar) => {
-    expect((await call(jar, "POST", "/auth/otp/request", { email: NEW })).status).toBe(200);
-    const code = await lastCode(jar, NEW);
-    const body = JSON.stringify({ email: NEW, code, z: `&email=${KNOWN}&` });
-    return call(jar, "POST", "/auth/otp/verify", body, { "content-type": "text/plain" });
-  },
-  "POST /otp/reset": async (jar) => {
-    expect((await call(jar, "POST", "/auth/otp/reset/request", { email: NEW })).status).toBe(200);
-    const code = await lastCode(jar, NEW);
-    const password = "a new long password";
-    const body = JSON.stringify({ email: NEW, code, password, z: `&email=${KNOWN}&` });
-    return call(jar, "POST", "/auth/otp/reset", body, { "content-type": FORM });
-  },
-  "POST /magic-link/verify": async (jar) => {
-    for (const email of [KNOWN, NEW])
+const CORE_READS: Record<string, Record<Side, Side>> = {
+  "POST /password/sign-up": { form: "json", json: "json" },
+  "POST /otp/verify": { form: "json", json: "json" },
+  "POST /otp/reset": { form: "json", json: "json" },
+  "POST /magic-link/verify": { form: "form", json: "json" },
+  "POST /password/reset": { form: "form", json: "json" },
+};
+
+/** The answer of core to a known user, by route and type: a JSON caller of readBody gets 200, not a redirect. */
+const KNOWN_ANSWER: Record<string, Record<Side, number>> = {
+  "POST /password/sign-up": { form: 200, json: 200 },
+  "POST /otp/verify": { form: 200, json: 200 },
+  "POST /otp/reset": { form: 200, json: 200 },
+  "POST /magic-link/verify": { form: 302, json: 200 },
+  "POST /password/reset": { form: 302, json: 200 },
+};
+
+/** The fields of one request: each value for one address. */
+type Fields = (email: string) => Promise<Record<string, string>>;
+
+/**
+ * One body that reads two ways (review M1). The JSON gives the fields of
+ * `json`. The form fields inside the text give the fields of `form`.
+ */
+function twoWay(json: Record<string, string>, form: Record<string, string>): string {
+  return JSON.stringify({ ...json, z: `&${new URLSearchParams(form)}&` });
+}
+
+/** For each user route that reads a body: its path and the fields for one address. */
+const TWO_WAY_ROUTES: Record<string, (jar: Jar) => { path: string; fields: Fields }> = {
+  "POST /password/sign-up": () => ({
+    path: "/auth/password/sign-up",
+    fields: async (email) => ({ email, password: PASSWORD }),
+  }),
+  "POST /otp/verify": (jar) => ({
+    path: "/auth/otp/verify",
+    fields: async (email) => {
+      expect((await call(jar, "POST", "/auth/otp/request", { email })).status).toBe(200);
+      return { email, code: await lastCode(jar, email) };
+    },
+  }),
+  "POST /otp/reset": (jar) => ({
+    path: "/auth/otp/reset",
+    fields: async (email) => {
+      expect((await call(jar, "POST", "/auth/otp/reset/request", { email })).status).toBe(200);
+      return { email, code: await lastCode(jar, email), password: "a new long password" };
+    },
+  }),
+  "POST /magic-link/verify": (jar) => ({
+    path: "/auth/magic-link/verify",
+    fields: async (email) => {
       expect((await call(jar, "POST", "/auth/magic-link/request", { email })).status).toBe(200);
-    const body = JSON.stringify({
-      token: await tokenTo(jar, KNOWN),
-      z: `&token=${await tokenTo(jar, NEW)}&`,
-    });
-    const type = `${FORM}; x=application/json`;
-    return call(jar, "POST", "/auth/magic-link/verify", body, { "content-type": type });
-  },
-  "POST /password/reset": async (jar) => {
-    for (const email of [KNOWN, NEW])
-      expect((await call(jar, "POST", "/auth/password/reset/request", { email })).status).toBe(200);
-    const password = "new horse battery staple";
-    const body = JSON.stringify({
-      token: await tokenTo(jar, KNOWN),
-      password,
-      z: `&token=${await tokenTo(jar, NEW)}&password=${encodeURIComponent(password)}&`,
-    });
-    const type = `${FORM}; x=application/json`;
-    return call(jar, "POST", "/auth/password/reset", body, { "content-type": type });
-  },
+      return { token: await tokenTo(jar, email) };
+    },
+  }),
+  "POST /password/reset": (jar) => ({
+    path: "/auth/password/reset",
+    fields: async (email) => {
+      const sent = await call(jar, "POST", "/auth/password/reset/request", { email });
+      expect(sent.status).toBe(200);
+      return { token: await tokenTo(jar, email), password: "new horse battery staple" };
+    },
+  }),
 };
 
 const CREATE_CASES = [
@@ -317,18 +339,40 @@ describe("the limits of the demo", () => {
     expect(whole).toEqual([]);
   });
 
-  it("refuses a body that reads as a known user one way and a new user the other", async () => {
-    for (const [route, make] of Object.entries(TWO_WAY_CALLS)) {
-      const jar = await newSandbox();
-      await tenUsers(jar);
-      const res = await make(sameSandbox(jar));
-      expect({ route, status: res.status, body: await res.text() }).toEqual({
-        route,
-        status: 429,
-        body: JSON.stringify({ ...REFUSED, limit: "usersPerSandbox" }),
-      });
-      expect(await count(jar, "ta_user")).toBe(10);
-    }
+  it("reads a two-way body as core reads it on each route, in both orders and both types", async () => {
+    expect(Object.keys(CORE_READS).sort()).toEqual(Object.keys(TWO_WAY_ROUTES).sort());
+    const types: Record<Side, string> = { form: FORM, json: "application/json" };
+    for (const [route, make] of Object.entries(TWO_WAY_ROUTES))
+      for (const [jsonFor, formFor] of [
+        [KNOWN, NEW],
+        [NEW, KNOWN],
+      ] as const)
+        for (const side of ["form", "json"] as const) {
+          const jar = await newSandbox();
+          await tenUsers(jar);
+          const visitor = sameSandbox(jar);
+          const { path, fields } = make(visitor);
+          const body = twoWay(await fields(jsonFor), await fields(formFor));
+          const res = await call(visitor, "POST", path, body, { "content-type": types[side] });
+          const read = CORE_READS[route]?.[side] === "json" ? jsonFor : formFor;
+          const text = await res.text();
+          const location = res.headers.get("location") ?? "";
+          const label = `${route}, JSON ${jsonFor}, form ${formFor}, ${side} type`;
+          // Core reads NEW: the demo must refuse. Core reads KNOWN: a sign-in that must pass.
+          if (read === NEW)
+            expect({ label, status: res.status, text }).toEqual({
+              label,
+              status: 429,
+              text: JSON.stringify({ ...REFUSED, limit: "usersPerSandbox" }),
+            });
+          else
+            expect({ label, status: res.status, error: location.includes("auth_error") }).toEqual({
+              label,
+              status: KNOWN_ANSWER[route]?.[side],
+              error: false,
+            });
+          expect({ label, users: await count(jar, "ta_user") }).toEqual({ label, users: 10 });
+        }
   });
 
   it("refuses the 11th passkey, token, and organization", async () => {
