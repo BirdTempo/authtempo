@@ -326,6 +326,25 @@ describe("the limits of the demo", () => {
     expect(await count(jar, "ta_user")).toBe(10);
   });
 
+  it("admits a GET only, so a HEAD with no sandbox spends no admit", async () => {
+    // Final review Low 2 of plan 11b: link previews and monitors send HEAD.
+    const ip = "192.0.2.77";
+    for (let i = 0; i < DEMO_LIMITS.sandboxesPerIp + 1; i++) {
+      const head = await fetchSelf(`${ORIGIN}/`, {
+        method: "HEAD",
+        redirect: "manual",
+        headers: { "cf-connecting-ip": ip },
+      });
+      expect({ i, status: head.status, cookie: head.headers.get("set-cookie") }).toEqual({
+        i,
+        status: 409,
+        cookie: null,
+      });
+    }
+    expect((await gateIps()).filter((x) => x === ip)).toEqual([]);
+    expect((await firstVisit(ip)).status).toBe(303);
+  });
+
   it("counts the addresses of one IPv6 /64 as one IP", async () => {
     // One visitor holds a /64 or more, so an address that rotates in it still counts once.
     for (let i = 1; i <= 5; i++) expect((await firstVisit(`2001:db8:1:2::${i}`)).status).toBe(303);

@@ -149,9 +149,10 @@ async function route(request: Request, env: Cloudflare.Env, ip: string): Promise
     const stub = env.SANDBOX.get(env.SANDBOX.idFromName(id));
     if (await stub.exists()) return stub.handle(forSandbox(request, ip));
   }
-  // A form post never lands in a new sandbox by surprise.
-  if (request.method !== "GET" && request.method !== "HEAD")
-    return json(409, { error: "sandbox_reset" });
+  // A form post never lands in a new sandbox by surprise. Only GET admits: a
+  // link preview or a monitor sends HEAD, and each HEAD would spend one of the
+  // sandboxes of its address (final review Low 2).
+  if (request.method !== "GET") return json(409, { error: "sandbox_reset" });
 
   const gate = env.GATE.get(env.GATE.idFromName("gate"));
   const admitted = await gate.admit(ip, Date.now());
