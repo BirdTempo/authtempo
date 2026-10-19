@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import { MAGIC_LINK_TOKEN_RE, requestMagicLink, verifyMagicLink } from "../../engine/magic-link.js";
@@ -10,23 +9,13 @@ import {
 } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
+import { requestBody, verifyBody } from "../contract/magic-link.js";
 import { sessionCookie } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import { challengePageUrl, trustTokenOf, twoFactorJson } from "../session-answer.js";
-
-const requestBody = z.object({
-  email: z.string().max(320),
-  next: z.string().max(2048).optional(),
-});
-
-const verifyBody = z.object({
-  token: z.string().max(64),
-  // Plan 12c: a native app's trust token; a browser sends the cookie.
-  trustDevice: z.string().max(64).optional(),
-});
 
 export function magicLinkRoutes(config: ResolvedConfig): Route[] {
   const verifyPath = `${config.basePath}/magic-link/verify`;

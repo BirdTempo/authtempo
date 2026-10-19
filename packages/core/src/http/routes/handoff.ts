@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import {
   continueHandoff,
@@ -9,14 +8,12 @@ import {
 } from "../../engine/handoff.js";
 import { publicSession, sessionFromRequest } from "../../engine/sessions.js";
 import { readBody } from "../body.js";
+import { continueBody, redeemBody } from "../contract/handoff.js";
 import { confirmPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect } from "../redirect.js";
 import type { Route } from "../router.js";
 import { signInPageResponse } from "../sign-in-response.js";
-
-const continueBody = z.object({ h: z.string().max(64) });
-const redeemBody = z.object({ code: z.string().max(64), verifier: z.string().min(43).max(128) });
 
 export function handoffRoutes(config: ResolvedConfig): Route[] {
   const handoff = config.handoff;

@@ -1,0 +1,123 @@
+import { z } from "zod";
+
+/**
+ * The answer shapes that two or more routes share (plan 11g). Each one is
+ * strict, so the answer recorder of the test run sees an extra key. A date
+ * is an ISO string on the wire. A nullable field is `.nullable()`; an absent
+ * field is `.optional()`.
+ */
+
+/** The public user, as `publicUser` of the engine answers it. */
+export const UserJson = z.strictObject({
+  id: z.string(),
+  email: z.string(),
+  emailVerified: z.boolean(),
+  name: z.string().nullable(),
+  image: z.string().nullable(),
+});
+
+/** The public session row of `publicSession`. Never the hash. */
+export const SessionJson = z.strictObject({
+  id: z.string(),
+  expiresAt: z.iso.datetime(),
+  activeOrganizationId: z.string().nullable(),
+});
+
+/**
+ * The JSON of `publicSession`: `GET /session`, the verify routes, and the
+ * passkey sign-in. `needsRefresh` is in the answer of `GET /session` with
+ * `session.deferRefresh` on only (plan 12a).
+ */
+export const SessionAnswer = z.strictObject({
+  user: UserJson,
+  session: SessionJson,
+  needsRefresh: z.boolean().optional(),
+});
+
+/** The JSON of `signedInResponse`: the session with its bearer token. */
+export const SignedInAnswer = z.strictObject({
+  token: z.string(),
+  user: UserJson,
+  session: SessionJson,
+});
+
+/**
+ * A challenge in place of a session, for a user with the second factor on
+ * (plan 12c). The password sign-in, the reset, the magic link, the email
+ * code, and social answer it.
+ */
+export const TwoFactorChallenge = z.strictObject({
+  twoFactor: z.strictObject({
+    challenge: z.string(),
+    expiresAt: z.iso.datetime(),
+    methods: z.array(z.enum(["passkey", "totp", "email", "backup"])),
+  }),
+});
+
+/** `{ ok: true }`: the answer of a change that returns nothing else. */
+export const OkAnswer = z.strictObject({ ok: z.literal(true) });
+
+/** `{ sent: true }`: the uniform answer of a request that mails, for every address. */
+export const SentAnswer = z.strictObject({ sent: z.literal(true) });
+
+/** One passkey of the user, as the engine's `summary` answers it. Never the public key. */
+export const PasskeySummary = z.strictObject({
+  id: z.string(),
+  credentialId: z.string(),
+  name: z.string().nullable(),
+  deviceType: z.string(),
+  backedUp: z.boolean(),
+  createdAt: z.iso.datetime(),
+});
+
+/** One credential of a WebAuthn options answer, in its JSON form. */
+const CredentialDescriptorJson = z.strictObject({
+  id: z.string(),
+  type: z.literal("public-key"),
+  transports: z.array(z.string()).optional(),
+});
+
+const USER_VERIFICATION = ["required", "preferred", "discouraged"] as const;
+
+/**
+ * `PublicKeyCredentialCreationOptionsJSON` of WebAuthn Level 3: the answer of
+ * the passkey registration options. The browser passes it to
+ * `PublicKeyCredential.parseCreationOptionsFromJSON`.
+ */
+export const CreationOptionsJson = z.strictObject({
+  rp: z.strictObject({ id: z.string().optional(), name: z.string() }),
+  user: z.strictObject({ id: z.string(), name: z.string(), displayName: z.string() }),
+  challenge: z.string(),
+  pubKeyCredParams: z.array(
+    z.strictObject({ alg: z.number().int(), type: z.literal("public-key") }),
+  ),
+  timeout: z.number().int().optional(),
+  excludeCredentials: z.array(CredentialDescriptorJson).optional(),
+  authenticatorSelection: z
+    .strictObject({
+      authenticatorAttachment: z.enum(["platform", "cross-platform"]).optional(),
+      requireResidentKey: z.boolean().optional(),
+      residentKey: z.enum(USER_VERIFICATION).optional(),
+      userVerification: z.enum(USER_VERIFICATION).optional(),
+    })
+    .optional(),
+  hints: z.array(z.enum(["hybrid", "security-key", "client-device"])).optional(),
+  attestation: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
+  attestationFormats: z.array(z.string()).optional(),
+  extensions: z.record(z.string(), z.unknown()).optional(),
+});
+
+/**
+ * `PublicKeyCredentialRequestOptionsJSON` of WebAuthn Level 3: the answer of
+ * each authentication options route (the passkey sign-in, the second factor,
+ * and the re-authentication).
+ */
+export const RequestOptionsJson = z.strictObject({
+  challenge: z.string(),
+  timeout: z.number().int().optional(),
+  rpId: z.string().optional(),
+  allowCredentials: z.array(CredentialDescriptorJson).optional(),
+  userVerification: z.enum(USER_VERIFICATION).optional(),
+  hints: z.array(z.enum(["hybrid", "security-key", "client-device"])).optional(),
+  extensions: z.record(z.string(), z.unknown()).optional(),
+});

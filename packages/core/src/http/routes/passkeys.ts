@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { requireFresh } from "../../engine/fresh.js";
 import {
@@ -16,26 +15,18 @@ import {
   sessionFromRequest,
   sessionMaxAgeSeconds,
 } from "../../engine/sessions.js";
+import {
+  authenticateVerifyBody,
+  deleteBody,
+  registerVerifyBody,
+  renameBody,
+} from "../contract/passkeys.js";
 import { sessionCookie } from "../cookies.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
 
-/** The browser's `PublicKeyCredential.toJSON()`. Only the fields the engine reads are checked; the seam checks the rest. */
-export const credentialJson = z
-  .object({
-    id: z.string().min(1).max(1024),
-    response: z.object({ clientDataJSON: z.string().min(1).max(16_384) }).loose(),
-  })
-  .loose();
-
-// The engine applies the passkey name rule (plan 12a Task 19), so an api caller meets it too.
-const registerVerifyBody = z.object({
-  response: credentialJson,
-  name: z.string().optional(),
-});
-const authenticateVerifyBody = z.object({ response: credentialJson });
-const deleteBody = z.object({ id: z.string().min(1).max(64) });
-const renameBody = z.strictObject({ id: z.string().min(1).max(64), name: z.string() });
+// The reauth routes read the credential schema from here (plan 11g: the schema lives in the contract).
+export { credentialJson } from "../contract/passkeys.js";
 
 export function passkeyRoutes(config: ResolvedConfig): Route[] {
   if (!config.passkey) return [];

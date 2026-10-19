@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import {
@@ -17,6 +16,16 @@ import { PASSWORD_MAX_LENGTH } from "../../engine/password-policy.js";
 import { publicUser, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { fail } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
+import {
+  changeBody,
+  RESET_PAGE_ERRORS,
+  resendBody,
+  resetBody,
+  resetRequestBody,
+  signInBody,
+  signUpBody,
+  tokenBody,
+} from "../contract/password.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { defaultPasswordVerifyPage, type ResetPageInput } from "../password-pages.js";
@@ -30,52 +39,10 @@ import {
   twoFactorJson,
 } from "../session-answer.js";
 
-const signUpBody = z.object({
-  email: z.string().max(320),
-  // The engine refuses more than 128 code points; this cap only bounds the body.
-  password: z.string().max(1024),
-  name: z.string().max(200).optional(),
-});
-
-const signInBody = z.object({
-  email: z.string().max(320),
-  // The engine refuses more than 128 code points; this cap only bounds the body.
-  password: z.string().max(1024),
-  // Plan 9f: a native app's trust token (a browser sends the cookie), and the landing path after a challenge.
-  trustDevice: z.string().max(64).optional(),
-  next: z.string().max(2048).optional(),
-});
-
-const tokenBody = z.object({ token: z.string().max(64) });
-
-const resetRequestBody = z.object({
-  email: z.string().max(320),
-  next: z.string().max(2048).optional(),
-});
-
-const resendBody = z.object({ email: z.string().max(320) });
-
-const resetBody = z.object({
-  token: z.string().max(64),
-  // The engine refuses more than 128 code points; this cap only bounds the body.
-  password: z.string().max(1024),
-  // Plan 12c: a native app's trust token; a browser sends the cookie.
-  trustDevice: z.string().max(64).optional(),
-});
-
-const changeBody = z.object({
-  currentPassword: z.string().max(1024).optional(),
-  newPassword: z.string().max(1024),
-});
-
 type PageError = NonNullable<ResetPageInput["error"]>;
 
-/** The refusals the reset page shows. The link is still valid after each. */
-const PAGE_ERRORS: ReadonlySet<string> = new Set<PageError>([
-  "password_policy",
-  "password_breached",
-  "breach_check_unavailable",
-]);
+/** The refusals the reset page shows, from the contract (one source). The link is still valid after each. */
+const PAGE_ERRORS: ReadonlySet<string> = new Set<PageError>(RESET_PAGE_ERRORS);
 
 /** A guard, not a cast: a code outside `PAGE_ERRORS` stays a string. */
 function isPageError(code: string | null): code is PageError {

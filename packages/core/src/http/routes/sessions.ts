@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { listSessions, revokeOtherSessions, revokeSession } from "../../engine/session-list.js";
 import {
@@ -9,13 +8,11 @@ import {
   renewedSessionCookie,
   resolveSession,
 } from "../../engine/sessions.js";
+import { revokeBody } from "../contract/sessions.js";
 import { clearSessionCookie, readCookie } from "../cookies.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route } from "../router.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
-
-// A core session id has 26 characters (newId). The cap of 64 leaves a margin and bounds the read.
-const revokeBody = z.strictObject({ id: z.string().min(1).max(64) });
 
 /**
  * The answer of a request that ended the caller's session: the sign-out, the

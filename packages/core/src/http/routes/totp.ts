@@ -1,4 +1,3 @@
-import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { requireFresh } from "../../engine/fresh.js";
 import { sendSecondFactorEmail } from "../../engine/second-factor-methods.js";
@@ -21,38 +20,13 @@ import {
   verifyTwoFactor,
 } from "../../engine/totp.js";
 import { readBody } from "../body.js";
+import { codeBody, pageBody, setupBody, verifyBody } from "../contract/totp.js";
 import { clearTrustCookie, readCookie, trustCookie } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { Route, RouteContext } from "../router.js";
 import { sessionCookieFor } from "../session-answer.js";
-
-const codeBody = z.object({ code: z.string().max(64) });
-/** The setup takes the password (plan 9f final fix wave, review I-1); the sign-in's length bound applies in `verifyPassword`. */
-const setupBody = z.object({ password: z.string().max(1024) });
-const verifyBody = z.object({
-  challenge: z.string().max(64),
-  code: z.string().max(16).optional(),
-  backupCode: z.string().max(64).optional(),
-  emailCode: z.string().max(16).optional(),
-  // Plan 12c: a WebAuthn assertion; the engine reads only the fields that the seam checks.
-  passkey: z.unknown().optional(),
-  trustDevice: z.boolean().optional(),
-});
-/**
- * The challenge page's forms: the checkbox posts `trustDevice=1` when checked
- * and nothing else. `action` (plan 12c) is the send of an email code or the
- * trusted-device button.
- */
-const pageBody = z.object({
-  challenge: z.string().max(64),
-  code: z.string().max(16).optional(),
-  backupCode: z.string().max(64).optional(),
-  emailCode: z.string().max(16).optional(),
-  trustDevice: z.literal("1").optional(),
-  action: z.enum(["send-email", "trusted"]).optional(),
-});
 
 /**
  * The TOTP routes (plan 9f, spec 8.11). Every route but the verify and the

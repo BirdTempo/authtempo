@@ -20,7 +20,7 @@ const ID_RE = /^hs_[A-Za-z0-9_-]{43}$/;
 const CODE_RE = /^hc_[A-Za-z0-9_-]{43}$/;
 // RFC 7636 verifier: 43 to 128 characters of the unreserved set (letters, digits, "-", ".", "_", "~").
 const VERIFIER_RE = /^[A-Za-z0-9._~-]{43,128}$/;
-const CHALLENGE_RE = /^[A-Za-z0-9_-]{43}$/;
+export const CHALLENGE_RE = /^[A-Za-z0-9_-]{43}$/;
 // A start row lives at least 10 minutes, and at least as long as a magic link, so a person who signs in by the link at its last minute can still continue.
 const START_MIN_TTL_MINUTES = 10;
 const CODE_TTL_MS = 2 * 60_000;

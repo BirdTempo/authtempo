@@ -1,4 +1,3 @@
-import { z } from "zod";
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import {
@@ -8,25 +7,10 @@ import {
   resetPasswordWithOtp,
   verifyEmailOtp,
 } from "../../engine/email-otp.js";
+import { requestBody, resetBody, verifyBody } from "../contract/email-otp.js";
 import { readJson, respond } from "../json.js";
 import type { Route } from "../router.js";
 import { signedInResponse, trustTokenOf, twoFactorJson } from "../session-answer.js";
-
-const requestBody = z.object({ email: z.string().max(320) });
-const verifyBody = z.object({
-  email: z.string().max(320),
-  code: z.string().max(16),
-  // Plan 12c: a native app's trust token; a browser sends the cookie.
-  trustDevice: z.string().max(64).optional(),
-});
-const resetBody = z.object({
-  email: z.string().max(320),
-  code: z.string().max(16),
-  // The engine refuses more than 128 code points; this cap only bounds the body.
-  password: z.string().max(1024),
-  // Plan 12c: a native app's trust token; a browser sends the cookie.
-  trustDevice: z.string().max(64).optional(),
-});
 
 /**
  * The email code routes (plan 9e). None with `emailOtp: false`, and no reset

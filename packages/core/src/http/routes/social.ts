@@ -1,9 +1,9 @@
-import { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { sessionCookieToken, sessionMaxAgeSeconds } from "../../engine/sessions.js";
 import { completeSocial, startLink, startSocial } from "../../engine/social.js";
 import type { Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
+import { callbackBody, linkBody } from "../contract/social.js";
 import {
   bindingCookieName,
   clearOauthCookie,
@@ -18,18 +18,6 @@ import { challengePageUrl, trustTokenOf } from "../session-answer.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
 
 const BIND_MAX_AGE_SECONDS = 600;
-
-/** Apple posts these as a form. Every field is optional; the engine rules on what is missing. */
-const callbackBody = z.object({
-  code: z.string().max(2048).optional(),
-  state: z.string().max(128).optional(),
-  error: z.string().max(256).optional(),
-  user: z.string().max(4096).optional(),
-  id_token: z.string().max(8192).optional(),
-});
-
-// Not strict: a form may carry the name of its button.
-const linkBody = z.object({ next: z.string().max(2048).optional() });
 
 interface CallbackParams {
   code: string | null;
