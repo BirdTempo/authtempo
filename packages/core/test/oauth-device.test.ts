@@ -500,6 +500,29 @@ describe("the device grant (plan 12e Task 14, RFC 8628)", () => {
     expect(later.status).toBe(200);
   });
 
+  it("holds one session to 9 guesses in the life of a 10-minute code (ruling 48)", async () => {
+    const h = instance();
+    const clientId = await deviceClient(h);
+    const s = await signedIn(h);
+    const guess = async () =>
+      (await h.auth.handle(pagePost(s.cookie, { user_code: "BBBB-BBBB" }))).status;
+    // One form opens the session window 899 s before the code starts.
+    expect(await guess()).toBe(200);
+    h.clock.advance(899_000);
+    const started = await start(h, clientId, "mcp:read");
+    expect(started.user_code).not.toBe("BBBB-BBBB");
+    const statuses: number[] = [];
+    for (let i = 0; i < 5; i++) statuses.push(await guess());
+    // The first window ends, and a second one opens in the life of the code.
+    h.clock.advance(1_000);
+    for (let i = 0; i < 6; i++) statuses.push(await guess());
+    expect(statuses).toEqual([200, 200, 200, 200, 429, 200, 200, 200, 200, 200, 429]);
+    // The second window lasts past the end of the code: no more guess reaches it.
+    h.clock.advance(598_000);
+    expect(await guess()).toBe(429);
+    expect(statuses.filter((x) => x === 200)).toHaveLength(9);
+  });
+
   it("limits the code form to 20 per IP and one found code to 10 per 15 minutes", async () => {
     const h = instance(undefined, {}, { clientIp: () => "203.0.113.9" });
     const clientId = await deviceClient(h);

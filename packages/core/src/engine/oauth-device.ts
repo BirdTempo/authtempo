@@ -39,14 +39,27 @@ const DRAWS = 3;
 
 /*
  * The odds of a guessed user code. 20^8 is about 2^34.5. With n live codes
- * one guess passes with p = n / 20^8, about n × 3.9 × 10⁻¹¹. The default code
- * lives 10 minutes, within one 15-minute window of each count below. One
- * session then gets 5 guesses at most: p ≈ n × 2.0 × 10⁻¹⁰ per code life.
- * One IP gets 20 guesses at most: p ≈ n × 7.8 × 10⁻¹⁰ per code life. A code
- * of the 30-minute maximum spans two windows, so each bound doubles. An
- * attacker with k addresses multiplies the IP bound by k. The keyed hash
- * guards a leaked table: 34.5 bits fall to a search of every value in
- * seconds, and the key is the app secret (spec 22 items 3 to 5).
+ * one guess passes with p = n / 20^8, about n × 3.9 × 10⁻¹¹.
+ *
+ * Each count below is a fixed window of the limiter port, which opens at
+ * its first call. A window that opened just before a code started still
+ * takes guesses in the first seconds of the code. More windows open in its
+ * life. So one key gets at most max − 1 + max × ceil(life / 15 minutes)
+ * guesses at one code (ruling 48 of plan 12e).
+ *
+ * - A 10-minute code (the default): 9 guesses per session, p ≈ n × 3.5 × 10⁻¹⁰.
+ *   39 guesses per IP, p ≈ n × 1.5 × 10⁻⁹.
+ * - A 30-minute code (the maximum): 14 guesses per session, p ≈ n × 5.5 × 10⁻¹⁰.
+ *   59 guesses per IP, p ≈ n × 2.3 × 10⁻⁹.
+ *
+ * An attacker with k addresses multiplies the IP bound by k. A limiter that
+ * counts per isolate, as the memory limiter on Workers does, multiplies each
+ * bound by the count of isolates. Core keeps the fixed window: a sliding
+ * count needs a new call of the limiter port in every adapter, and these
+ * bounds stay small.
+ *
+ * The keyed hash guards a leaked table. 34.5 bits fall to a search of every
+ * value in seconds, and the key is the app secret (spec 22 items 3 to 5).
  */
 
 /** The device authorization requests of one IP: the route asks before the client auth, so a failed auth counts. */
