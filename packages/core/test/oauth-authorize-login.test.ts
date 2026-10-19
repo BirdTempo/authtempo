@@ -191,6 +191,45 @@ describe("prompt=login, max_age, and auth_time (plan 12e, OIDC Core 3.1.2.1)", (
     expect((await h.auth.handle(exchange(code, s.clientId, s.verifier))).status).toBe(200);
   });
 
+  it("refuses request, request_uri, and registration with an empty copy beside a value, or two copies of a value", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    const withPairs = (pairs: [string, string][]) => {
+      const p = new URLSearchParams(authorizeParams(s.input));
+      for (const [k, v] of pairs) p.append(k, v);
+      return new Request(`${BASE_URL}/auth/oauth/authorize?${p}`, {
+        headers: { cookie: s.cookie },
+      });
+    };
+    const cases: [string, string][] = [
+      ["request", "request_not_supported"],
+      ["request_uri", "request_uri_not_supported"],
+      ["registration", "registration_not_supported"],
+    ];
+    for (const [name, error] of cases)
+      for (const values of [
+        ["", "x"],
+        ["x", ""],
+        ["x", "x"],
+      ]) {
+        const pairs = values.map((v): [string, string] => [name, v]);
+        expect({ name, values, error: errorOf(await h.auth.handle(withPairs(pairs))) }).toEqual({
+          name,
+          values,
+          error,
+        });
+      }
+    // An empty max_age beside max_age=0 is one value: the sign-in step.
+    for (const values of [
+      ["", "0"],
+      ["0", ""],
+    ])
+      signInIdOf(
+        await h.auth.handle(withPairs(values.map((v): [string, string] => ["max_age", v]))),
+      );
+    expect(await codeRows(h)).toEqual([]);
+  });
+
   it("answers login_required to prompt=none with either case", async () => {
     const h = oauthHandle();
     const s = await setup(h);
