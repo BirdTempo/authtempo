@@ -1,6 +1,7 @@
 // Plan 11b Task 3. Each script that builds runs this right after build-agent.
 // Astro copies public/_headers.template to dist/ as it is. This writes
-// dist/_headers with the hash of each inline script of dist in the CSP, and
+// dist/_headers with the hash of each inline script of dist in the CSP. It
+// also writes the style counts of dist in the style-src comment. Then it
 // deletes the copied template, so the Worker serves no template file. The
 // hashes change when Starlight or the theme toggle changes a script, so the
 // build computes them; no file holds a literal hash. check-csp reads the

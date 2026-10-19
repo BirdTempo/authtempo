@@ -5,7 +5,8 @@
 # Rule form and limits: Workers static assets headers page, last updated 2026-09-22, read 2026-10-19.
 # The page allows 100 rules and 2,000 characters a line. check-csp fails a longer line.
 # 'wasm-unsafe-eval': the docs search runs the WebAssembly module of Pagefind (plan 11b deviation 6).
-# style-src: 1 style elements and 49215 style attributes in the build of 2026-10-19. A style cannot run code; the script rule is the boundary.
+# style-src counts in this build: style elements {{STYLE_ELEMENTS}}, style attributes {{STYLE_ATTRIBUTES}}.
+# The review of 2026-10-19 counted 1 and 49215. A style cannot run code; the script rule is the boundary.
 # Starlight and Expressive Code write the style attributes, and a hash cannot cover a style attribute.
 # img-src data: Starlight, Expressive Code, and Pagefind draw their icons as data: images in CSS.
 # A data: image is bytes in the style sheet; it sends no request (ruling 12 of the plan 11b lane).

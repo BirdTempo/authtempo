@@ -18,6 +18,22 @@ describe("fillHeaders", () => {
     );
   });
 
+  it("writes the style counts of the build in place of the style marks", () => {
+    const template = `# style elements {{STYLE_ELEMENTS}}, style attributes {{STYLE_ATTRIBUTES}}.\n${TEMPLATE}`;
+    const pages = new Map([
+      ["index.html", '<script>a()</script><style>a{}</style><p style="x"></p><p style="y"></p>'],
+    ]);
+    expect(fillHeaders(template, pages).split("\n")[0]).toBe(
+      "# style elements 1, style attributes 2.",
+    );
+  });
+
+  it("fails a style mark that occurs twice", () => {
+    expect(() => fillHeaders(`{{STYLE_ELEMENTS}} {{STYLE_ELEMENTS}}\n${TEMPLATE}`, PAGES)).toThrow(
+      "the template holds {{STYLE_ELEMENTS}} 2 times; it holds it once at most",
+    );
+  });
+
   it("fails a template without the placeholder", () => {
     expect(() => fillHeaders("/*\n  X-Content-Type-Options: nosniff\n", PAGES)).toThrow(
       "the template holds {{SCRIPT_HASHES}} 0 times; it holds it once",
@@ -30,8 +46,10 @@ describe("fillHeaders", () => {
     );
   });
 
-  it("finds the placeholder once in the site template", () => {
+  it("finds each mark once in the site template", () => {
     const template = readFileSync(`${SITE}public/_headers.template`, "utf8");
     expect(template.split("{{SCRIPT_HASHES}}")).toHaveLength(2);
+    expect(template.split("{{STYLE_ELEMENTS}}")).toHaveLength(2);
+    expect(template.split("{{STYLE_ATTRIBUTES}}")).toHaveLength(2);
   });
 });
