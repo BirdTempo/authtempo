@@ -12,6 +12,29 @@ const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const BUNDLE = join(PKG, "dist", "bundle");
 const PUBLIC = join(PKG, "dist", "public");
 const SRC = join(PKG, "src");
+const PACKAGES = resolve(PKG, "../../packages");
+
+/**
+ * Each token prefix that core issues, read from the source of core: each
+ * `export const <NAME>_PREFIX = "<prefix>_"`. So a new token form of core joins the scan.
+ */
+const PREFIXES = files(join(PACKAGES, "core", "src"))
+  .filter((f) => f.endsWith(".ts"))
+  .flatMap((f) => [
+    ...readFileSync(f, "utf8").matchAll(/export const [A-Z_]+_PREFIX = "([a-z]+_)"/g),
+  ])
+  .map((m) => m[1] ?? "")
+  .filter((p, i, all) => all.indexOf(p) === i)
+  .sort();
+
+/** The time of the newest file among `paths`, each a file or a folder. */
+function newest(paths: readonly string[]): number {
+  return Math.max(
+    ...paths
+      .flatMap((p) => (statSync(p).isDirectory() ? files(p) : [p]))
+      .map((f) => statSync(f).mtimeMs),
+  );
+}
 
 /** The one client secret of the demo provider. It guards nothing (src/provider.ts). */
 const DEMO_CLIENT_SECRET = "demo-provider-secret-not-a-secret";
@@ -59,14 +82,19 @@ function scanText(path: string): string {
   return (map.sourcesContent ?? []).filter((s) => s !== null).join("\n");
 }
 
-/** Each credential form in `text`: a token of a core prefix, a 64-character hex string, a client secret. */
+/**
+ * Each credential form in `text`. The forms are a token of a core prefix, a
+ * 64-character hex string, and a 43-character base64url literal (the form of
+ * 32 random bytes, as a sandbox secret). A client secret is the last form.
+ */
 function credentials(text: string): string[] {
   const found: string[] = [];
-  for (const prefix of [SESSION_TOKEN_PREFIX, API_TOKEN_PREFIX]) {
+  for (const prefix of PREFIXES) {
     const token = new RegExp(`(?<![A-Za-z0-9_-])${prefix}[A-Za-z0-9_-]{20,}`, "g");
     found.push(...(text.match(token) ?? []));
   }
   found.push(...(text.match(/(?<![0-9A-Fa-f])[0-9A-Fa-f]{64}(?![0-9A-Fa-f])/g) ?? []));
+  for (const m of text.matchAll(/(["'`])([A-Za-z0-9_-]{43})\1/g)) found.push(m[2] ?? "");
   // A string that a name with "secret" in it takes, as `name = "v"` or `name: "v"`.
   // An empty string and a template with a value in it are no secret.
   const assigned = /[A-Za-z0-9_$]*secret[A-Za-z0-9_$]*["']?\s*[:=]\s*(["'`])([^"'`\n]*)\1/gi;
@@ -90,11 +118,28 @@ describe("no secret in the demo", () => {
     const bundle = files(BUNDLE);
     const entry = join(BUNDLE, "worker.js");
     expect(bundle).toContain(entry);
-    // A pass proves nothing on an old bundle: it must be newer than each source file.
-    const newest = Math.max(...files(SRC).map((f) => statSync(f).mtimeMs));
-    expect({ bundleIsNewer: statSync(entry).mtimeMs >= newest }).toEqual({ bundleIsNewer: true });
+    // A pass proves nothing on an old bundle. The bundle must be newer than each
+    // of its inputs: the source, the config, and the dist of each workspace dependency.
+    const inputs = [
+      SRC,
+      join(PKG, "wrangler.jsonc"),
+      join(PKG, "package.json"),
+      join(PACKAGES, "core", "dist"),
+      join(PACKAGES, "adapter-d1", "dist"),
+    ];
+    expect({ bundleIsNewer: statSync(entry).mtimeMs >= newest(inputs) }).toEqual({
+      bundleIsNewer: true,
+    });
     const assets = files(PUBLIC).filter((f) => TEXT_ASSET.test(f.split("/").pop() ?? ""));
     expect(assets.length).toBeGreaterThan(0);
+    // The same for the copied assets: each one is newer than the files it comes from.
+    const oldest = Math.min(...assets.map((f) => statSync(f).mtimeMs));
+    const sources = [
+      join(SRC, "browser"),
+      join(PACKAGES, "client", "dist"),
+      join(PACKAGES, "core", "dist"),
+    ];
+    expect({ assetsAreNewer: oldest >= newest(sources) }).toEqual({ assetsAreNewer: true });
     const scanned = [...bundle, ...assets];
     const found = scanned.flatMap((f) =>
       credentials(scanText(f)).map((c) => `${relative(PKG, f)}: ${c}`),
@@ -104,8 +149,17 @@ describe("no secret in the demo", () => {
     expect(readFileSync(entry, "utf8")).toContain(`"${DEMO_CLIENT_SECRET}"`);
   });
 
+  it("reads each token prefix of core", () => {
+    expect(PREFIXES).toContain(SESSION_TOKEN_PREFIX);
+    expect(PREFIXES).toContain(API_TOKEN_PREFIX);
+    expect(PREFIXES).toContain("ml_");
+    expect(PREFIXES.length).toBeGreaterThanOrEqual(17);
+  });
+
   it("finds each credential form that the scan names", () => {
     const key = "a".repeat(43);
+    expect(credentials(`x = "ml_${key}"`)).toEqual([`ml_${key}`]);
+    expect(credentials(`const k = "${"B".repeat(43)}"`)).toEqual(["B".repeat(43)]);
     expect(credentials(`x = "ts_${key}"`)).toEqual([`ts_${key}`]);
     expect(credentials(`x = "tk_${key}"`)).toEqual([`tk_${key}`]);
     expect(credentials(`const k = "${"0f".repeat(32)}"`)).toEqual(["0f".repeat(32)]);
