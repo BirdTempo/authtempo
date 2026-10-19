@@ -1,3 +1,4 @@
+import { normalizeEmail } from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { DEMO_LIMITS } from "./facts.js";
 
@@ -72,16 +73,97 @@ export function routeOf(method: string, pathname: string): DemoRoute | null {
   return `${method} ${shape}`;
 }
 
+/** One string field of a JSON or form body, as core reads the two forms. */
+async function bodyField(request: Request, name: string): Promise<string | null> {
+  // The Worker caps the body at bodyBytes, so the copy is small.
+  const text = await request.clone().text();
+  if ((request.headers.get("content-type") ?? "").includes("application/json")) {
+    try {
+      const body: unknown = JSON.parse(text);
+      const value = typeof body === "object" && body !== null ? Reflect.get(body, name) : null;
+      return typeof value === "string" ? value : null;
+    } catch {
+      return null;
+    }
+  }
+  return new URLSearchParams(text).get(name);
+}
+
+/** SHA-256 in lower-case hex, the hash of a link token in ta_verification (core primitives/crypto.ts:40). */
+async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** The address of the live link of `purpose` for a token of the body, or null. */
+async function linkAddress(sql: SqlStorage, purpose: string, token: string | null) {
+  if (token === null) return null;
+  const rows = sql
+    .exec<{ identifier: string }>(
+      `SELECT identifier FROM ${TABLES.verification} WHERE value_hash = ? AND purpose = ?`,
+      await sha256Hex(token),
+      purpose,
+    )
+    .toArray();
+  return rows[0]?.identifier ?? null;
+}
+
+/**
+ * True when the request names a user that exists, so core makes no new
+ * user. Each address goes through normalizeEmail of core, as core stores it.
+ * A request with no readable address counts as a new user.
+ */
+async function namesKnownUser(sql: SqlStorage, route: DemoRoute, request: Request) {
+  const known = (email: string | null) => {
+    const address = email === null ? null : normalizeEmail(email);
+    if (address === null) return false;
+    const q = `SELECT 1 FROM ${TABLES.user} WHERE email = ?`;
+    return sql.exec(q, address).toArray().length > 0;
+  };
+  switch (route) {
+    case "POST /password/sign-up":
+    case "POST /otp/verify":
+    case "POST /otp/reset":
+      return known(await bodyField(request, "email"));
+    // Core finds each link by the SHA-256 of its token (engine/magic-link.ts:95, password.ts:1043).
+    case "POST /magic-link/verify":
+      return known(await linkAddress(sql, "magic-link", await bodyField(request, "token")));
+    case "POST /password/reset":
+      return known(await linkAddress(sql, "password-reset", await bodyField(request, "token")));
+    case "GET /social/:provider/callback": {
+      // The code of the demo provider holds the picked identity (provider.ts).
+      const url = new URL(request.url);
+      const code = url.searchParams.get("code") ?? "";
+      const row = sql
+        .exec<{ identity: string }>("SELECT identity FROM demo_provider_code WHERE code = ?", code)
+        .toArray()[0];
+      if (row === undefined) return false;
+      const picked = JSON.parse(row.identity) as { subject: string; email: string };
+      const provider = url.pathname.split("/")[3] ?? "";
+      const q = `SELECT 1 FROM ${TABLES.identity} WHERE provider = ? AND subject = ?`;
+      // A linked identity, or an address that core links to its user.
+      return sql.exec(q, provider, picked.subject).toArray().length > 0 || known(picked.email);
+    }
+    default:
+      return false;
+  }
+}
+
 /**
  * Refuses a route that makes a counted row when its table already holds the
- * limit. A route that makes no counted row always passes.
+ * limit. A route that makes no counted row always passes. A user route
+ * passes for a user that exists, so a sign-in at the cap still works.
  */
-export function checkSandboxLimit(
+export async function checkSandboxLimit(
   sql: SqlStorage,
   route: DemoRoute,
-): { ok: true } | { ok: false; limit: string } {
+  request: Request,
+): Promise<{ ok: true } | { ok: false; limit: string }> {
   const limit = USER_ROUTES.includes(route) ? "usersPerSandbox" : CREATE_ROUTES[route];
   if (limit === undefined) return { ok: true };
   const n = sql.exec<{ n: number }>(`SELECT count(*) AS n FROM ${COUNTED[limit]}`).one().n;
-  return n >= DEMO_LIMITS[limit] ? { ok: false, limit } : { ok: true };
+  if (n < DEMO_LIMITS[limit]) return { ok: true };
+  if (limit === "usersPerSandbox" && (await namesKnownUser(sql, route, request)))
+    return { ok: true };
+  return { ok: false, limit };
 }

@@ -67,6 +67,9 @@ async function tenUsers(jar: Jar): Promise<void> {
   expect(await count(jar, "ta_user")).toBe(10);
 }
 
+/** The address that core mails to: it trims and lowers the address of the body. */
+const mailTo = (email: string) => email.trim().toLowerCase();
+
 /**
  * For each route that can make a user: one request through it that makes a
  * new user when no demo limit stops it. A visitor of the sandbox of `jar`
@@ -77,12 +80,15 @@ const USER_ROUTE_CALLS: Record<string, (jar: Jar, email: string) => Promise<Resp
     call(jar, "POST", "/auth/password/sign-up", { email, password: PASSWORD }),
   "POST /magic-link/verify": async (jar, email) => {
     expect((await call(jar, "POST", "/auth/magic-link/request", { email })).status).toBe(200);
-    const token = (await lastLink(jar, email)).searchParams.get("token") ?? "";
+    const token = (await lastLink(jar, mailTo(email))).searchParams.get("token") ?? "";
     return call(jar, "POST", "/auth/magic-link/verify", new URLSearchParams({ token }));
   },
   "POST /otp/verify": async (jar, email) => {
     expect((await call(jar, "POST", "/auth/otp/request", { email })).status).toBe(200);
-    return call(jar, "POST", "/auth/otp/verify", { email, code: await lastCode(jar, email) });
+    return call(jar, "POST", "/auth/otp/verify", {
+      email,
+      code: await lastCode(jar, mailTo(email)),
+    });
   },
   "GET /social/:provider/callback": async (jar, email) => {
     const start = await call(jar, "GET", "/auth/social/demo/start");
@@ -97,13 +103,13 @@ const USER_ROUTE_CALLS: Record<string, (jar: Jar, email: string) => Promise<Resp
   "POST /password/reset": async (jar, email) => {
     const sent = await call(jar, "POST", "/auth/password/reset/request", { email });
     expect(sent.status).toBe(200);
-    const token = (await lastLink(jar, email)).searchParams.get("token") ?? "";
+    const token = (await lastLink(jar, mailTo(email))).searchParams.get("token") ?? "";
     const form = new URLSearchParams({ token, password: "new horse battery staple" });
     return call(jar, "POST", "/auth/password/reset", form);
   },
   "POST /otp/reset": async (jar, email) => {
     expect((await call(jar, "POST", "/auth/otp/reset/request", { email })).status).toBe(200);
-    const code = await lastCode(jar, email);
+    const code = await lastCode(jar, mailTo(email));
     return call(jar, "POST", "/auth/otp/reset", { email, code, password: "a new long password" });
   },
 };
@@ -165,6 +171,32 @@ describe("the limits of the demo", () => {
         route,
         status: 429,
         body: JSON.stringify({ ...REFUSED, limit: "usersPerSandbox" }),
+      });
+      expect(await count(jar, "ta_user")).toBe(10);
+    }
+  });
+
+  it("lets a user that exists sign in at 10 users through each user route", async () => {
+    // The answer of core to a user that exists, by route. A sign-up of a
+    // known address answers 200 and makes no user.
+    const expected: Record<string, number> = {
+      "POST /password/sign-up": 200,
+      "POST /magic-link/verify": 302,
+      "POST /otp/verify": 200,
+      "GET /social/:provider/callback": 302,
+      "POST /password/reset": 302,
+      "POST /otp/reset": 200,
+    };
+    expect(Object.keys(expected).sort()).toEqual([...USER_ROUTES].sort());
+    for (const [route, make] of Object.entries(USER_ROUTE_CALLS)) {
+      const jar = await newSandbox();
+      await tenUsers(jar);
+      const res = await make(sameSandbox(jar), " User3@Example.com ");
+      const location = res.headers.get("location") ?? "";
+      expect({ route, status: res.status, error: location.includes("auth_error") }).toEqual({
+        route,
+        status: expected[route],
+        error: false,
       });
       expect(await count(jar, "ta_user")).toBe(10);
     }

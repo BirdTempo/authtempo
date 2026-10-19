@@ -75,7 +75,8 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
     if (url.pathname.startsWith("/auth/")) {
       // The demo limits come before core, so a refused request changes no row.
       const route = routeOf(request.method, url.pathname);
-      const checked = route === null ? null : checkSandboxLimit(this.ctx.storage.sql, route);
+      const checked =
+        route === null ? null : await checkSandboxLimit(this.ctx.storage.sql, route, request);
       if (checked !== null && !checked.ok)
         return json(429, { error: "demo_limit", limit: checked.limit });
       return auth.handle(request);
