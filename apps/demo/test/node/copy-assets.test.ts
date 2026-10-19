@@ -1,9 +1,17 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { ALLOWED, copyAssets } from "../../scripts/copy-assets.mjs";
+import { ALLOWED, checkAssets, copyAssets, importsOf } from "../../scripts/copy-assets.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG = resolve(HERE, "../..");
@@ -162,5 +170,124 @@ describe("copy-assets.mjs", () => {
     expect(existsSync(join(dir, "assets/demo.css"))).toBe(true);
     // The count of the PASS line is the count of the files in the folder.
     expect(written.length).toBe(files(dir).length);
+  });
+});
+
+/**
+ * A client build of one file in a new folder. The test writes it here, not
+ * in fixtures/, because the formatter would add the spaces of a minified import.
+ */
+function clientOf(source: string, more: Record<string, string> = {}): string {
+  const dir = out();
+  for (const [name, text] of Object.entries({ "index.js": source, ...more }))
+    writeFileSync(join(dir, name), text);
+  return join(dir, "index.js");
+}
+
+describe("the import reader of copy-assets.mjs", () => {
+  it("follows a minified import, a side-effect import, a dynamic import, and two re-exports", () => {
+    const client = clientOf(
+      'import{a}from"./a.js";import"./b.js";const c=await import("./c.js");export*from"./d.js";export{e}from"./e.js";',
+      Object.fromEntries(["a", "b", "c", "d", "e"].map((n) => [`${n}.js`, `export const ${n}=1;`])),
+    );
+    const dir = out();
+    run({ out: dir, client });
+    expect(files(join(dir, "assets/client"))).toEqual([
+      "a.js",
+      "b.js",
+      "c.js",
+      "d.js",
+      "e.js",
+      "index.js",
+    ]);
+  });
+
+  it("rewrites a minified import of the core errors", () => {
+    const dir = out();
+    run({
+      out: dir,
+      client: clientOf('import{ERRORS}from"@authtempo/core/errors";export{ERRORS};'),
+    });
+    expect(readFileSync(join(dir, "assets/client/index.js"), "utf8")).toBe(
+      'import{ERRORS}from"../core/errors.js";export{ERRORS};',
+    );
+  });
+
+  it("fails on a bare specifier in each import form", () => {
+    const forms = [
+      'import{a}from"@authtempo/core";',
+      'import"@authtempo/core";',
+      'const m=await import("@authtempo/core");',
+      "const m=await import(`@authtempo/core`);",
+      'export*from"@authtempo/core";',
+      'export{a}from"@authtempo/core";',
+    ];
+    for (const form of forms) {
+      const client = clientOf(form);
+      expect(() => run({ out: out(), client }), form).toThrow(
+        `${client} imports the bare specifier @authtempo/core, which is not allowed`,
+      );
+    }
+  });
+
+  it("fails closed on an import that it cannot read", () => {
+    for (const form of ["const m=await import(`./${x}.js`);", "const m=await import(name);"]) {
+      const client = clientOf(form);
+      expect(() => run({ out: out(), client }), form).toThrow(
+        `${client}: a dynamic import of an expression at 14, which the copy cannot read`,
+      );
+    }
+  });
+
+  it("reads no import in a comment, a string, a regular expression, or a property", () => {
+    const text = [
+      '// import "@x/comment";',
+      "/* export * from '@x/block'; */",
+      "const s = \"import '@x/string'\";",
+      'const t = `export * from "@x/template"`;',
+      'const r = /import "@x\\/regex"/;',
+      "const q = a / 2 / b;",
+      'const w = `a${b}import "@x/substitution"`;',
+      "const o = { import: 1, export: 2 };",
+      "o.import(1); o?.export;",
+      "const u = import.meta.url;",
+      "export const z = 1;",
+      "export { s, t };",
+    ].join("\n");
+    expect(importsOf(text, "probe.js")).toEqual([]);
+  });
+
+  it("runs the asset check after the page compile in each package script", () => {
+    const scripts = (
+      JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as {
+        scripts: Record<string, string>;
+      }
+    ).scripts;
+    for (const name of ["build", "typecheck", "test", "dev"])
+      expect(scripts[name], name).toContain(
+        "node scripts/copy-assets.mjs && tsc -p tsconfig.browser.json && node scripts/copy-assets.mjs --check",
+      );
+  });
+
+  it("checks each compiled page module and each copy of the build", () => {
+    const assets = join(PKG, "dist/public/assets");
+    const js = files(assets).filter((n) => n.endsWith(".js"));
+    expect(js.filter((n) => n.startsWith("js/")).length).toBe(11);
+    const { files: read, imports } = checkAssets(assets);
+    expect(read).toBe(js.length);
+    expect(imports).toBeGreaterThan(30);
+  });
+
+  it("fails a compiled module that imports a package name or a missing file", () => {
+    const dir = out();
+    mkdirSync(join(dir, "js"));
+    writeFileSync(join(dir, "js/page.js"), 'import { createClient } from "@authtempo/client";\n');
+    expect(() => checkAssets(dir)).toThrow(
+      `${join(dir, "js/page.js")} imports @authtempo/client, which is not a relative path`,
+    );
+    writeFileSync(join(dir, "js/page.js"), 'import { createClient } from "../client/index.js";\n');
+    expect(() => checkAssets(dir)).toThrow(
+      `${join(dir, "js/page.js")} imports ../client/index.js, which names no file of the build`,
+    );
   });
 });

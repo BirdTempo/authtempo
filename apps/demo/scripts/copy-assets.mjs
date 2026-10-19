@@ -11,6 +11,10 @@
 // - packages/core/dist/primitives/totp.js with its relative imports (deviation 4).
 // Any other bare specifier, or a Node module, stops the copy with exit 1 and
 // the file and the specifier. It prints `copy-assets: PASS files=<n>`.
+// With --check, it reads every .js file of dist/public/assets, the compiled
+// page modules among them, after `tsc -p tsconfig.browser.json`. Each import
+// must name a file of the build by a relative path. It prints
+// `check-assets: PASS files=<n> imports=<m>`.
 import {
   cpSync,
   existsSync,
@@ -23,6 +27,12 @@ import {
 import { builtinModules } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+// The scanner of the TypeScript parser in the workspace (typescript 7.0.2,
+// pinned exactly). TypeScript 7 runs its full parser in a native binary, and
+// these entries are the JavaScript tokenizer of that parser. They are marked
+// unstable, so the tests hold each import form that the copy reads.
+import { SyntaxKind as K } from "typescript/unstable/ast";
+import { createScanner } from "typescript/unstable/ast/scanner";
 
 const PKG = fileURLToPath(new URL("..", import.meta.url));
 const REPO = resolve(PKG, "../..");
@@ -46,9 +56,6 @@ export const SOURCES = Object.freeze({
   coreDist: join(REPO, "packages/core/dist"),
 });
 
-// A static import or export with "from", a side-effect import, and a dynamic import.
-const SPECIFIER_RE =
-  /(\b(?:import|export)\s[^;]*?\sfrom\s*)(["'])([^"']+)\2|(\bimport\s*)(["'])([^"']+)\5|(\bimport\s*\(\s*)(["'])([^"']+)\8/g;
 const MAP_RE = /\n?\/\/# sourceMappingURL=\S+\s*$/;
 
 function isNodeModule(spec) {
@@ -57,6 +64,116 @@ function isNodeModule(spec) {
 
 function posix(path) {
   return path.split("\\").join("/");
+}
+
+/** A token after which a slash divides. After any other token, a slash starts a regular expression. */
+const EXPRESSION_END = new Set([
+  K.Identifier,
+  K.NumericLiteral,
+  K.BigIntLiteral,
+  K.StringLiteral,
+  K.NoSubstitutionTemplateLiteral,
+  K.TemplateTail,
+  K.RegularExpressionLiteral,
+  K.CloseParenToken,
+  K.CloseBracketToken,
+  K.CloseBraceToken,
+  K.ThisKeyword,
+  K.SuperKeyword,
+  K.NullKeyword,
+  K.TrueKeyword,
+  K.FalseKeyword,
+]);
+
+/**
+ * The module specifiers of `text`, each with the range of its string token
+ * (quotes included). It reads a static import or export with `from`, a
+ * side-effect import, and a dynamic import with one string. It throws on an
+ * import that it cannot read, such as a dynamic import of an expression, so
+ * no import passes unseen.
+ */
+export function importsOf(text, file) {
+  const scanner = createScanner(true);
+  scanner.setText(text);
+  /** "{" for a brace, "${" for a template substitution. */
+  const stack = [];
+  let previous = K.Unknown;
+  const scan = () => {
+    let kind = scanner.scan();
+    if ((kind === K.SlashToken || kind === K.SlashEqualsToken) && !EXPRESSION_END.has(previous))
+      kind = scanner.reScanSlashToken();
+    if (kind === K.OpenBraceToken) stack.push("{");
+    else if (kind === K.TemplateHead) stack.push("${");
+    else if (kind === K.CloseBraceToken && stack.pop() === "${") {
+      kind = scanner.reScanTemplateToken(false);
+      if (kind === K.TemplateMiddle) stack.push("${");
+    }
+    if (scanner.isUnterminated())
+      throw new Error(`${file}: an unterminated token at ${scanner.getTokenStart()}`);
+    // The token in front, with no comment between. A dot there makes a property, as in `x.import`.
+    const before = previous;
+    previous = kind;
+    return {
+      kind,
+      before,
+      start: scanner.getTokenStart(),
+      end: scanner.getTokenEnd(),
+      value: scanner.getTokenValue(),
+    };
+  };
+  let back = null;
+  const take = () => {
+    const token = back ?? scan();
+    back = null;
+    return token;
+  };
+  const unread = (what, at) => {
+    throw new Error(`${file}: ${what} at ${at}, which the copy cannot read`);
+  };
+  /** Takes tokens up to `from` and a string; a semicolon or the end first is an import that the copy cannot read. */
+  const fromClause = (at) => {
+    for (let t = take(); ; t = take()) {
+      if (t.kind === K.EndOfFile || t.kind === K.SemicolonToken) unread("an import or export", at);
+      if (t.kind !== K.FromKeyword) continue;
+      const spec = take();
+      if (spec.kind === K.StringLiteral) return spec;
+      back = spec;
+    }
+  };
+  const found = [];
+  for (let t = take(); t.kind !== K.EndOfFile; t = take()) {
+    const member = t.before === K.DotToken || t.before === K.QuestionDotToken;
+    if ((t.kind !== K.ImportKeyword && t.kind !== K.ExportKeyword) || member) continue;
+    const next = take();
+    if (next.kind === K.ColonToken || next.kind === K.DotToken) {
+      // A property name (`import: 1`) or import.meta.
+      back = next;
+    } else if (t.kind === K.ImportKeyword && next.kind === K.OpenParenToken) {
+      const arg = take();
+      const close = take();
+      const literal = arg.kind === K.StringLiteral || arg.kind === K.NoSubstitutionTemplateLiteral;
+      if (!literal || (close.kind !== K.CloseParenToken && close.kind !== K.CommaToken))
+        unread("a dynamic import of an expression", t.start);
+      found.push(arg);
+      back = close;
+    } else if (t.kind === K.ImportKeyword && next.kind === K.StringLiteral) {
+      found.push(next);
+    } else if (t.kind === K.ImportKeyword || next.kind === K.AsteriskToken) {
+      back = next;
+      found.push(fromClause(t.start));
+    } else if (next.kind === K.OpenBraceToken) {
+      // export { a } is local; export { a } from "x" names a module.
+      for (let m = take(); m.kind !== K.CloseBraceToken; m = take())
+        if (m.kind === K.EndOfFile) unread("an export list", t.start);
+      const after = take();
+      if (after.kind === K.FromKeyword) {
+        const spec = take();
+        if (spec.kind !== K.StringLiteral) unread("an export from", t.start);
+        found.push(spec);
+      } else back = after;
+    } else back = next;
+  }
+  return found.map((f) => ({ spec: f.value, start: f.start, end: f.end }));
 }
 
 /**
@@ -76,26 +193,50 @@ function copyGraph(entry, srcRoot, outDir, rewrite, written) {
     if (name.startsWith("..")) throw new Error(`${file} is outside ${srcRoot}`);
     if (!existsSync(file)) throw new Error(`${file} is missing; build its package first`);
     const out = join(outDir, name);
-    const source = readFileSync(file, "utf8").replace(MAP_RE, "\n");
-    const text = source.replace(SPECIFIER_RE, (whole, ...g) => {
-      const head = g[0] ?? g[3] ?? g[6];
-      const quote = g[1] ?? g[4] ?? g[7];
-      const spec = g[2] ?? g[5] ?? g[8];
+    let text = readFileSync(file, "utf8").replace(MAP_RE, "\n");
+    // From the end, so each range stays right after a rewrite before it.
+    for (const { spec, start, end } of importsOf(text, file).reverse()) {
       if (spec.startsWith("./") || spec.startsWith("../")) {
         queue.push(resolve(dirname(file), spec));
-        return whole;
+        continue;
       }
       if (isNodeModule(spec))
         throw new Error(`${file} imports the Node module ${spec}, which a browser cannot load`);
       const path = rewrite(spec, out);
       if (path === null)
         throw new Error(`${file} imports the bare specifier ${spec}, which is not allowed`);
-      return `${head}${quote}${path}${quote}`;
-    });
+      text = `${text.slice(0, start)}${text[start]}${path}${text[start]}${text.slice(end)}`;
+    }
     mkdirSync(dirname(out), { recursive: true });
     writeFileSync(out, text);
     written.push(out);
   }
+}
+
+/**
+ * Reads each .js file under `dir` (dist/public/assets by default): every
+ * import must name a file under `dir` by a relative path. The compiled page
+ * modules are among the files, so a page module that imports a package name
+ * fails here and not only in a browser. Answers the counts.
+ */
+export function checkAssets(dir = join(PKG, "dist/public/assets")) {
+  let files = 0;
+  let imports = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+    if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
+    const file = join(entry.parentPath, entry.name);
+    files++;
+    for (const { spec } of importsOf(readFileSync(file, "utf8"), file)) {
+      imports++;
+      if (!spec.startsWith("./") && !spec.startsWith("../"))
+        throw new Error(`${file} imports ${spec}, which is not a relative path`);
+      const target = resolve(dirname(file), spec);
+      if (relative(dir, target).startsWith("..") || !existsSync(target))
+        throw new Error(`${file} imports ${spec}, which names no file of the build`);
+    }
+  }
+  if (files === 0) throw new Error(`${dir} holds no .js file; run the build first`);
+  return { files, imports };
 }
 
 /** Copies each file of `from` to `to`, and answers the files written. */
@@ -157,11 +298,15 @@ export function copyAssets(options = {}) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const check = process.argv.includes("--check");
   try {
-    const files = copyAssets();
-    console.log(`copy-assets: PASS files=${files.length}`);
+    if (check) {
+      const { files, imports } = checkAssets();
+      console.log(`check-assets: PASS files=${files} imports=${imports}`);
+    } else console.log(`copy-assets: PASS files=${copyAssets().length}`);
   } catch (error) {
-    console.error(`copy-assets: FAIL: ${error instanceof Error ? error.message : String(error)}`);
+    const name = check ? "check-assets" : "copy-assets";
+    console.error(`${name}: FAIL: ${error instanceof Error ? error.message : String(error)}`);
     process.exit(1);
   }
 }
