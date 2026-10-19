@@ -1,14 +1,19 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { connect } from "node:net";
+import { connect, createServer } from "node:net";
 import { join } from "node:path";
 import { PKG, REPO } from "./bin.js";
 
 const WORKER = join(REPO, "examples/worker");
 const WRANGLER = join(WORKER, "node_modules/.bin/wrangler");
-/** The secret whose SHA-256 hex the Worker gets as OPERATOR_SECRET_HASH (plan 11c Task 2). */
+/**
+ * A fixed operator secret for the tests that need a value of the right form
+ * (plan 11c Task 2). A started Worker does not hold it: each start makes its
+ * own secret (plan 12e, review I1).
+ */
 export const OPERATOR_SECRET = "authtempo-example-operator-secret-0123456789";
-/** The SHA-256 hex of OPERATOR_SECRET: the Worker holds it, and no report may print it (plan 11c2 Task 5). */
+/** The SHA-256 hex of OPERATOR_SECRET. No report may print it (plan 11c2 Task 5). */
 export const OPERATOR_HASH = "9553f46eb9e964b487a02e36147c562555bf1a684cfa614904bcc0f5ab5f1c57";
 // CI=1: wrangler takes the default of each question (examples/worker/proof/dev.mjs, read 2026-10-10).
 // The hidden banner skips wrangler's npm update check: its socket can hold the child (seen 2026-10-18).
@@ -70,16 +75,53 @@ function portTaken(host: string, port: number): Promise<boolean> {
 }
 
 /**
+ * A port that no listener holds now, from the system (port 0). Each run then
+ * starts its Worker on its own port, so two runs at once never share one
+ * Worker (plan 12e, review I1: two runs on the fixed port 8797 shared one).
+ */
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      server.close(() => (port > 0 ? resolve(port) : reject(new Error("no free port"))));
+    });
+  });
+}
+
+/** One started Worker: its base URL and port, the operator secret it holds, and its stop. */
+export interface ExampleWorker {
+  base: string;
+  port: number;
+  operatorSecret: string;
+  operatorHash: string;
+  stop(): Promise<void>;
+}
+
+/**
  * `wrangler dev` of examples/worker on a fresh local D1 in .scaffold/
  * (plan 11c), with BASE_URL set to the local origin, so the issuer of the
  * well-known documents is the base of the check. As examples/worker/proof/dev.mjs
  * does, wrangler runs in its own process group, and stop() ends the group.
  * A signal or the exit of the test process ends the group too.
+ *
+ * The port is free when the run starts, but another process can take it
+ * before wrangler binds it. So the start proves that the answering server is
+ * its own: the Worker holds a secret of this run only, and the operator info
+ * route must accept it. Another Worker on the port refuses it, and the start
+ * fails with that name.
  */
-export async function startExampleWorker(
-  port: number,
-): Promise<{ base: string; stop(): Promise<void> }> {
+export async function startExampleWorker(): Promise<ExampleWorker> {
   const deadline = Date.now() + START_LIMIT_MS;
+  const port = await freePort();
+  // wrangler's own pick of the devtools port (9229, else the next free one) is a check and
+  // then a bind, so two starts at once can pick one port, and one workerd fails with
+  // "bind(): Address already in use" (seen 2026-10-19). So the run names that port too.
+  const inspectorPort = await freePort();
+  const operatorSecret = `authtempo-live-${randomBytes(24).toString("hex")}`;
+  const operatorHash = createHash("sha256").update(operatorSecret, "utf8").digest("hex");
   const base = `http://localhost:${port}`;
   // localhost can resolve to either address: a listener on either one takes the port.
   for (const host of ["127.0.0.1", "::1"])
@@ -110,6 +152,8 @@ export async function startExampleWorker(
       "127.0.0.1",
       "--port",
       String(port),
+      "--inspector-port",
+      String(inspectorPort),
       "--persist-to",
       persist,
       "--var",
@@ -119,7 +163,7 @@ export async function startExampleWorker(
       "--var",
       "AUTH_SECRET:0123456789abcdef0123456789abcdef",
       "--var",
-      `OPERATOR_SECRET_HASH:${OPERATOR_HASH}`,
+      `OPERATOR_SECRET_HASH:${operatorHash}`,
     ],
     { cwd: WORKER, env: ENV, stdio: ["ignore", "pipe", "pipe"], detached: true },
   );
@@ -155,7 +199,19 @@ export async function startExampleWorker(
     const r = await fetch(`${base}/auth/session`, { signal: AbortSignal.timeout(2000) }).catch(
       () => null,
     );
-    if (r?.status === 401) return { base, stop };
+    if (r?.status === 401) {
+      // A 401 comes from any Worker of this example. Only this run's Worker accepts its secret.
+      const own = await fetch(`${base}/auth/operator/info`, {
+        headers: { authorization: `Operator ${operatorSecret}` },
+        signal: AbortSignal.timeout(2000),
+      }).catch(() => null);
+      if (own?.status === 200 && child.exitCode === null)
+        return { base, port, operatorSecret, operatorHash, stop };
+      await stop();
+      throw new Error(
+        `another server answers on ${base}: the operator info route answered ${own?.status ?? "nothing"} to this run's secret. ${log.slice(-2000)}`,
+      );
+    }
     await sleep(300);
   }
   await stop();

@@ -203,7 +203,7 @@ async function served(handler: (req: IncomingMessage, res: ServerResponse) => vo
 describe("check against the example Worker", () => {
   let worker: Awaited<ReturnType<typeof startExampleWorker>> | null = null;
   beforeAll(async () => {
-    worker = await startExampleWorker(8796);
+    worker = await startExampleWorker();
   }, START_LIMIT_MS + 30_000);
   afterAll(async () => {
     await worker?.stop();

@@ -1,23 +1,24 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { assertFreshBuild, linesOf, runBin } from "./support/bin.js";
 import {
-  OPERATOR_HASH,
-  OPERATOR_SECRET,
+  type ExampleWorker,
   START_LIMIT_MS,
   startExampleWorker,
 } from "./support/example-worker.js";
 
 // The binary against `wrangler dev` of examples/worker (plan 11c): the real
 // network path that the Workers-pool test of the example cannot run.
-let worker: Awaited<ReturnType<typeof startExampleWorker>> | null = null;
+// Each run starts its own Worker on a free port, with an operator secret of its own (plan 12e, review I1).
+let worker: ExampleWorker | null = null;
 beforeAll(async () => {
   assertFreshBuild();
-  worker = await startExampleWorker(8797);
+  worker = await startExampleWorker();
 }, START_LIMIT_MS + 30_000);
 afterAll(async () => {
   await worker?.stop();
 });
 const base = () => worker?.base ?? "";
+const secret = () => worker?.operatorSecret ?? "";
 
 async function keyIds(): Promise<string[]> {
   const res = await fetch(`${base()}/auth/jwks`);
@@ -38,7 +39,7 @@ describe("the live runs (spec 19)", () => {
   it("rotates the signing key through the operator route, and prints the new kid only", async () => {
     const before = await keyIds();
     const r = runBin(["keys", "rotate", base(), "--yes"], {
-      env: { AUTHTEMPO_OPERATOR_SECRET: OPERATOR_SECRET },
+      env: { AUTHTEMPO_OPERATOR_SECRET: secret() },
     });
     expect(r.status, r.stderr).toBe(0);
     const kid = /^kid: (\S+)\n$/.exec(r.stdout)?.[1];
@@ -46,12 +47,12 @@ describe("the live runs (spec 19)", () => {
     const after = await keyIds();
     expect(after[0]).toBe(kid);
     expect(after).toContain(before[0]);
-    expect(r.stdout + r.stderr).not.toContain(OPERATOR_SECRET);
+    expect(r.stdout + r.stderr).not.toContain(secret());
   });
 
   it("reads the secret status of the example Worker, and exits 0", () => {
     const r = runBin(["secret", "status", base(), "--json"], {
-      env: { AUTHTEMPO_OPERATOR_SECRET: OPERATOR_SECRET },
+      env: { AUTHTEMPO_OPERATOR_SECRET: secret() },
     });
     expect(r.status, r.stderr).toBe(0);
     const doc = JSON.parse(r.stdout) as {
@@ -64,12 +65,12 @@ describe("the live runs (spec 19)", () => {
     expect(doc.versions[0]).toMatchObject({ version: 1, configured: true, current: true });
     expect(doc.versions[0]?.signingKeys).toBeGreaterThanOrEqual(1);
     expect(doc).toMatchObject({ exit: 0, stopped: null });
-    expect(r.stdout + r.stderr).not.toContain(OPERATOR_SECRET);
+    expect(r.stdout + r.stderr).not.toContain(secret());
   });
 
   it("reseals on the example Worker until more is false, and exits 0", () => {
     const r = runBin(["secret", "rewrap", base(), "--yes", "--json"], {
-      env: { AUTHTEMPO_OPERATOR_SECRET: OPERATOR_SECRET },
+      env: { AUTHTEMPO_OPERATOR_SECRET: secret() },
     });
     expect(r.status, r.stderr).toBe(0);
     const doc = JSON.parse(r.stdout) as Record<string, unknown>;
@@ -81,12 +82,12 @@ describe("the live runs (spec 19)", () => {
       exit: 0,
       stopped: null,
     });
-    expect(r.stdout + r.stderr).not.toContain(OPERATOR_SECRET);
+    expect(r.stdout + r.stderr).not.toContain(secret());
   });
 
   it("reports the example Worker with no secret value", () => {
     const r = runBin(["info", base(), "--json"], {
-      env: { AUTHTEMPO_OPERATOR_SECRET: OPERATOR_SECRET },
+      env: { AUTHTEMPO_OPERATOR_SECRET: secret() },
     });
     expect(r.status, r.stderr).toBe(0);
     const doc = JSON.parse(r.stdout) as {
@@ -106,7 +107,7 @@ describe("the live runs (spec 19)", () => {
     expect(doc.deployment?.core).toMatch(/^\d+\.\d+\.\d+/);
     expect(doc).toMatchObject({ unread: [], exit: 0, stopped: null });
     // No secret, no hash, and no host of the person's own base URL.
-    for (const s of [OPERATOR_SECRET, OPERATOR_HASH, "localhost", "8797"])
+    for (const s of [secret(), worker?.operatorHash ?? "", "localhost", String(worker?.port)])
       expect(r.stdout + r.stderr, s).not.toContain(s);
   });
 
