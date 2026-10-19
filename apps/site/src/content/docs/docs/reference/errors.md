@@ -471,7 +471,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_scope"><code>invalid_scope</code> 400</h3>
 
-- **Meaning:** A scope is unknown, the list is empty, or a refresh asks for more than the grant. A `client_credentials` request asks for a scope outside the client's `credentialsScopes`, or the client has none.
+- **Meaning:** A scope is unknown, the list is empty, or a refresh asks for more than the grant. A `client_credentials` request asks for a scope that is not in both the client's `credentialsScopes` and `oauth.scopes`, or no such scope is left.
 - **Do:** Ask for known scopes only.
 
 | Routes |

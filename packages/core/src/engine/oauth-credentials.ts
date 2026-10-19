@@ -36,25 +36,38 @@ export interface OAuthClientAccess {
 }
 
 /**
- * True while a client may hold tokens of this grant for `scopes`. The client
- * is confidential, its `grantTypes` hold the grant, and its
- * `credentialsScopes` hold each scope. A metadata document never gets the
- * grant: its reader drops it (ruling 24 of plan 12e).
+ * The scopes that a client of this grant may hold: each one is in its
+ * `credentialsScopes` and in `oauth.scopes` (ruling 28 of plan 12e). A scope
+ * that a deploy drops from the config leaves the set at once, on every
+ * instance with that config.
  */
-function holdsGrant(client: OAuthClientRow, scopes: readonly string[]): boolean {
+const servedScopes = (config: ResolvedConfig, client: OAuthClientRow) =>
+  client.credentialsScopes.filter((s) => oauthOf(config).scopes.has(s));
+
+/**
+ * True while a client may hold tokens of this grant for `scopes`. The client
+ * is confidential, its `grantTypes` hold the grant, and each scope is a
+ * served scope. A metadata document never gets the grant: its reader drops
+ * it (ruling 24 of plan 12e).
+ */
+function holdsGrant(
+  config: ResolvedConfig,
+  client: OAuthClientRow,
+  scopes: readonly string[],
+): boolean {
+  const served = servedScopes(config, client);
   return (
     client.authMethod !== "none" &&
     client.grantTypes.includes(CREDENTIALS_GRANT) &&
-    scopes.every((s) => client.credentialsScopes.includes(s))
+    scopes.every((s) => served.includes(s))
   );
 }
 
 /**
  * `grant_type=client_credentials` for a client that `authenticateClient`
  * checked. `resource` is required: the token is for one resource (RFC
- * 8707). An absent `scope` gives every scope of `credentialsScopes`; an
- * asked scope outside them, or an empty set, is `invalid_scope` (RFC 6749
- * section 3.3). `dpop` is null until plan 12e Task 9 binds the token.
+ * 8707). An absent `scope` gives every served scope. An asked scope that
+ * is not served, or an empty set, is `invalid_scope` (RFC 6749 section 3.3). `dpop` is null until plan 12e Task 9 binds the token.
  */
 export async function credentialsGrant(
   config: ResolvedConfig,
@@ -62,7 +75,7 @@ export async function credentialsGrant(
 ): Promise<OAuthResult<TokenAnswer>> {
   const oauth = oauthOf(config);
   const { client, confidential } = input.client;
-  if (!confidential || !holdsGrant(client, [])) return oauthFail("unauthorized_client");
+  if (!confidential || !holdsGrant(config, client, [])) return oauthFail("unauthorized_client");
   if (
     !(await config.limiter.allow(`oauth-credentials:client:${client.id}`, CREDENTIALS_PER_CLIENT))
   )
@@ -71,9 +84,9 @@ export async function credentialsGrant(
     return oauthFail("invalid_target");
   const scopes =
     input.scope === null
-      ? [...client.credentialsScopes]
+      ? servedScopes(config, client)
       : [...new Set(input.scope.split(" ").filter((s) => s.length > 0))];
-  if (scopes.length === 0 || !holdsGrant(client, scopes)) return oauthFail("invalid_scope");
+  if (scopes.length === 0 || !holdsGrant(config, client, scopes)) return oauthFail("invalid_scope");
   const iat = Math.floor(config.clock.now().getTime() / 1000);
   const exp = iat + oauth.accessTtlMinutes * 60;
   const scope = scopes.join(" ");
@@ -100,7 +113,7 @@ export async function clientAccessOf(
   token: { clientId: string; scopes: string[]; resource: string; jti: string; exp: number },
 ): Promise<OAuthClientAccess | null> {
   const client = await findClient(config, token.clientId);
-  if (!client || !holdsGrant(client, token.scopes)) return null;
+  if (!client || !holdsGrant(config, client, token.scopes)) return null;
   return {
     clientId: token.clientId,
     scopes: token.scopes,

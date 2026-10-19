@@ -335,6 +335,129 @@ function cimdInstance(answers: Map<string, unknown>): Handle {
   };
 }
 
+/** An Ed25519 key that this test generates, and a client assertion of `clientId` signed by it. */
+async function clientKey() {
+  const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+  const jwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as Record<string, unknown>;
+  const sign = async (h: Handle, clientId: string) => {
+    const now = Math.floor(h.clock.now().getTime() / 1000);
+    const header = { alg: "EdDSA", kid: "k1" };
+    const claims = {
+      iss: clientId,
+      sub: clientId,
+      aud: ISSUER,
+      exp: now + 60,
+      iat: now,
+      jti: randomBase64Url(16),
+    };
+    const input = `${toBase64Url(enc.encode(JSON.stringify(header)))}.${toBase64Url(enc.encode(JSON.stringify(claims)))}`;
+    const sig = await crypto.subtle.sign({ name: "Ed25519" }, pair.privateKey, enc.encode(input));
+    return `${input}.${toBase64Url(new Uint8Array(sig))}`;
+  };
+  return { jwk: { ...jwk, kid: "k1", alg: "EdDSA", use: "sig" }, sign };
+}
+
+/** A second instance on the storage, clock, and secret of `h`, whose config names `scopes` only. */
+function twin(h: Handle, scopes: Record<string, string>): Handle {
+  const input: AuthConfig = {
+    baseURL: BASE_URL,
+    secret: "0123456789abcdef0123456789abcdef",
+    trustedOrigins: [APP_ORIGIN],
+    storage: h.storage,
+    mail: { send: async () => {} },
+    clock: h.clock,
+    limiter: createMemoryLimiter(h.clock),
+    oauth: { resources: [RESOURCE, OTHER_RESOURCE], scopes, registration: { cimd: false } },
+  };
+  return {
+    auth: createAuth(input),
+    config: resolveConfig(input),
+    storage: h.storage,
+    clock: h.clock,
+  };
+}
+
+describe("the methods and the scopes of the grant (ruling 28)", () => {
+  it("issues a token to a client of client_secret_post and of private_key_jwt", async () => {
+    const h = oauthHandle();
+    const clients = clientsOf(h);
+    const post = await clients.create({
+      authMethod: "client_secret_post",
+      grantTypes: ["client_credentials"],
+      credentialsScopes: ["mcp:read"],
+    });
+    if (!post.ok || !post.value.clientSecret) throw new Error("create failed");
+    const byPost = await h.auth.handle(
+      tokenPost({
+        grant_type: "client_credentials",
+        client_id: post.value.client.id,
+        client_secret: post.value.clientSecret,
+        resource: RESOURCE,
+      }),
+    );
+    const key = await clientKey();
+    const jwt = await clients.create({
+      authMethod: "private_key_jwt",
+      jwks: { keys: [key.jwk] },
+      grantTypes: ["client_credentials"],
+      credentialsScopes: ["mcp:read"],
+    });
+    if (!jwt.ok) throw new Error(jwt.error);
+    const byKey = await h.auth.handle(
+      tokenPost({
+        grant_type: "client_credentials",
+        client_assertion_type: "urn:ietf:params:oauth:client-assertion-type:jwt-bearer",
+        client_assertion: await key.sign(h, jwt.value.client.id),
+        resource: RESOURCE,
+      }),
+    );
+    for (const [res, clientId] of [
+      [byPost, post.value.client.id],
+      [byKey, jwt.value.client.id],
+    ] as const) {
+      const r = await answer(res);
+      expect({ clientId, status: r.status, scope: r.body.scope }).toEqual({
+        clientId,
+        status: 200,
+        scope: "mcp:read",
+      });
+      const caller = await h.auth.caller(atResource(String(r.body.access_token)));
+      expect(caller).toMatchObject({ kind: "oauth-client", clientId });
+    }
+  });
+
+  it("refuses and ends a scope that the config no longer names, on a second instance", async () => {
+    const first = oauthHandle();
+    const both = await machine(first, ["mcp:read", "mcp:write"]);
+    const writeOnly = await machine(first, ["mcp:write"]);
+    const writeToken = await accessToken(first, both, { resource: RESOURCE, scope: "mcp:write" });
+    const readToken = await accessToken(first, both, { resource: RESOURCE, scope: "mcp:read" });
+    const allToken = await accessToken(first, both);
+    // A deploy that drops mcp:write: the second instance names mcp:read only.
+    const second = twin(first, { "mcp:read": "Read your documents" });
+    const refused = { status: 400, body: { error: "invalid_scope" } };
+    for (const scope of ["mcp:write", "mcp:read mcp:write"])
+      expect({
+        scope,
+        r: await answer(
+          await second.auth.handle(credentialsPost(both, { resource: RESOURCE, scope })),
+        ),
+      }).toEqual({ scope, r: refused });
+    // An absent scope gives the scopes in both sets, and invalid_scope when none is left.
+    expect(partsOf(await accessToken(second, both)).payload.scope).toBe("mcp:read");
+    expect(await answer(await second.auth.handle(credentialsPost(writeOnly)))).toEqual(refused);
+    // A token of the dropped scope does not resolve there; a token of a kept scope does.
+    expect(await second.auth.caller(atResource(writeToken))).toBeNull();
+    expect(await second.auth.caller(atResource(allToken))).toBeNull();
+    expect((await second.auth.caller(atResource(readToken)))?.kind).toBe("oauth-client");
+    // The first instance still names mcp:write, so its token still resolves there.
+    expect((await first.auth.caller(atResource(writeToken)))?.kind).toBe("oauth-client");
+  });
+});
+
 describe("a client metadata document and the grant (rulings 21 to 26)", () => {
   it("never gives the grant to a document client, also with private_key_jwt", async () => {
     const pair = (await crypto.subtle.generateKey({ name: "Ed25519" }, true, [
