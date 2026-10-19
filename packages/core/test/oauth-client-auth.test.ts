@@ -106,6 +106,13 @@ describe("client auth at the token endpoint (plan 12e)", () => {
       withBasic({ grant_type: "refresh_token", refresh_token }, basic.clientId, basic.secret),
     );
     expect(refreshed.status).toBe(200);
+    // RFC 7235 section 2.1: the scheme name has no case.
+    const lower = await h.auth.handle(
+      tokenPost(codeBody(await codeOf(h, s.cookie, basic.clientId)), {
+        authorization: basicHeader(basic.clientId, basic.secret).replace(/^Basic/, "basic"),
+      }),
+    );
+    expect(lower.status).toBe(200);
   });
 
   it("reads Basic as form-encoded id and secret (RFC 6749 2.3.1)", async () => {
@@ -148,6 +155,16 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     expect(viaBasic.headers.get("www-authenticate")).toBe(`Basic realm="${ISSUER}"`);
     expect(viaBasic.headers.get("pragma")).toBe("no-cache");
     expect(await answer(viaBasic)).toEqual(CLIENT);
+    // A Basic header that does not parse is a Basic attempt too: bad base64, no colon, a bad escape.
+    const c = await codeOf(h, s.cookie, basic.clientId);
+    for (const token of ["!!!", btoa("no-colon"), btoa(`${basic.clientId}:%zz`)]) {
+      const bad = await h.auth.handle(tokenPost(codeBody(c), { authorization: `Basic ${token}` }));
+      expect({ token, challenge: bad.headers.get("www-authenticate") }).toEqual({
+        token,
+        challenge: `Basic realm="${ISSUER}"`,
+      });
+      expect(await answer(bad)).toEqual(CLIENT);
+    }
     const viaForm = await h.auth.handle(
       tokenPost({
         ...codeBody(await codeOf(h, s.cookie, form.clientId)),
@@ -349,6 +366,24 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     );
     expect(await answer(done)).toEqual({ status: 200, body: {} });
     expect(await h.storage.findMany("oauthToken", [])).toEqual([]);
+  });
+
+  it("counts a failed revoke auth on the per-IP limit of the token endpoint", async () => {
+    const h = oauthHandle();
+    const basic = await confidential(h, "client_secret_basic");
+    const from = (secret: string) =>
+      h.auth.handle(
+        revoke(
+          { token: "or_x" },
+          { authorization: basicHeader(basic.clientId, secret), "cf-connecting-ip": "8.8.8.8" },
+        ),
+      );
+    for (let i = 0; i < 30; i++) expect((await from(`cs_${"A".repeat(43)}`)).status).toBe(401);
+    for (let i = 0; i < 30; i++) expect((await from(basic.secret)).status).toBe(200);
+    expect(await answer(await from(basic.secret))).toEqual({
+      status: 429,
+      body: { error: "rate_limited" },
+    });
   });
 
   it("answers no CORS to a confidential client", async () => {
