@@ -22,6 +22,8 @@ Plans: `docs/superpowers/plans/README.md`.
 | `@authtempo/import` | The readers and `importUsers`: moves users from Supabase Auth, Clerk, Auth0, Firebase, Auth.js, Cognito, and WorkOS through the storage port. A second run writes nothing. The command is `authtempo import` in `@authtempo/cli`. `authtempo import verify` checks that the database holds the whole export. |
 | `@authtempo/cli` | `authtempo`: `init` (a new app from the example of a stack), `migrate` (Postgres and D1, after the version gate), `import`, `check` (a deployment against core's promises), and `keys rotate`. It also has `secret` (a new app secret or operator secret) and `info` (a support report with no secret value). `secret status` and `secret rewrap` count and reseal the rows of each secret version. Node 22 or newer. `authtempo-import` stays for one release. |
 | `@authtempo/mcp` | `authtempo-mcp`: the MCP server for a coding agent. On stdio in the project, it serves `docs.search`, `docs.read`, `version`, `scaffold`, `migrate.plan`, `migrate.run`, `schema.migrate`, and `check`. The last five tools run the CLI in process. The remote Worker serves only the tools `docs.search`, `docs.read`, and `version`, with the docs resources and the prompts, at the planned address `https://mcp.authtempo.com/mcp` (`REMOTE_MCP_URL`). `authtempo mcp` writes its editor config. |
+| `@authtempo/site` | The docs and the root pages: one Worker of static assets. Private; the owner publishes it. |
+| `@authtempo/demo` | The demo Worker: each sign-in method on test data, one Durable Object per visitor sandbox, deleted 60 minutes after it starts. Private; the owner publishes it at a planned address. |
 | `examples/worker` | A Worker that mounts the engine. The end-to-end test runs against it. |
 
 The example pins `@cloudflare/vitest-plugin` 1.4.0 and runs vitest 5.0.3, the same as core.
@@ -120,3 +122,7 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   exits 0 only when the database holds the whole export. A compat file of
   the Better Auth path is never edited: an edited copy stops the next
   `authtempo migrate`.
+- The site and the demo load nothing from another origin and set no
+  tracker. The site sets no cookie.
+- The demo holds no secret and sends no request out of its Worker. Each
+  limit of the demo is our own code.
