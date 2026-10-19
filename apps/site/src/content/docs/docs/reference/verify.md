@@ -129,6 +129,7 @@ With `introspect`, each access token that passes the offline check costs one cal
 | `unauthorizedResponse`, `insufficientScopeResponse`, `bearerChallenge` | The 401, the 403, and the challenge text, with no verifier. A server that checks the caller with `auth.caller` uses them. |
 | `dpopChallenge` | The text of a `DPoP` challenge (RFC 9449 section 7.1). |
 | `memoryReplayStore`, `REPLAY_STORE_DEFAULT_MAX` | The default replay store of one isolate, and its default bound. |
+| `INTROSPECT_MAX_BYTES` | The longest introspection answer that the verifier reads: 64 KiB. |
 
 | Area | Types |
 | --- | --- |

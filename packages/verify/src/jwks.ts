@@ -1,6 +1,6 @@
 import type { ClientFailure } from "@authtempo/client";
 import { isPublicJwk, JWKS_RETIRED_MAX, type PublicJwk } from "@authtempo/core/credentials";
-import type { FetchLike } from "./fetch.js";
+import { cappedText, type FetchLike } from "./fetch.js";
 
 /** The key set lives this long when its answer names no max-age. Core sends 300. */
 export const KEY_SET_DEFAULT_SECONDS = 300;
@@ -37,31 +37,6 @@ function maxAgeSeconds(cacheControl: string | null): number {
   const m = /(?:^|,)\s*max-age=(\d+)/i.exec(cacheControl ?? "");
   if (!m?.[1]) return KEY_SET_DEFAULT_SECONDS;
   return Math.max(KEY_SET_MIN_SECONDS, Math.min(Number(m[1]), KEY_SET_MAX_SECONDS));
-}
-
-/** The body as text, or null when it is longer than the cap. */
-async function cappedText(res: Response): Promise<string | null> {
-  const reader = res.body?.getReader();
-  if (!reader) return "";
-  const parts: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > KEY_SET_MAX_BYTES) {
-      await reader.cancel().catch(() => {});
-      return null;
-    }
-    parts.push(value);
-  }
-  const all = new Uint8Array(size);
-  let at = 0;
-  for (const p of parts) {
-    all.set(p, at);
-    at += p.byteLength;
-  }
-  return new TextDecoder().decode(all);
 }
 
 /**
@@ -114,7 +89,7 @@ export function createKeyCache(input: {
     let text: string | null;
     try {
       res = await input.fetch(input.url, { headers: { accept: "application/json" } });
-      text = await cappedText(res);
+      text = await cappedText(res, KEY_SET_MAX_BYTES);
     } catch {
       return { ok: false, code: "network", status: 0 };
     }

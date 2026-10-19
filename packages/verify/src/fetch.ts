@@ -43,3 +43,28 @@ export function ownedFetch(fetchFn: FetchLike, timeoutMs: number): FetchLike {
     return res;
   };
 }
+
+/** The body as text, or null when it is longer than `max` bytes. The one copy of the body cap. */
+export async function cappedText(res: Response, max: number): Promise<string | null> {
+  const reader = res.body?.getReader();
+  if (!reader) return "";
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    parts.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) {
+    all.set(p, at);
+    at += p.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}

@@ -133,6 +133,25 @@ describe("introspection in the verifier (plan 12e Task 10)", () => {
       code: "unexpected",
       status: 200,
     });
+    // The body cap: an answer of 65,536 bytes passes, and one more byte is unexpected.
+    const sized = (bytes: number) => {
+      const head = '{"active":true,"pad":"';
+      return `${head}${"x".repeat(bytes - head.length - 2)}"}`;
+    };
+    const ofSize = (bytes: number) =>
+      verifierOf(server, rs, (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const request = new Request(input, init);
+        if (new URL(request.url).pathname !== INTROSPECT) return server.auth.handle(request);
+        return new Response(sized(bytes), { headers: { "content-type": "application/json" } });
+      }) as typeof globalThis.fetch);
+    expect(sized(65_536)).toHaveLength(65_536);
+    const atCap = await ofSize(65_536).verifyRequest(withBearer(TOOLS, token));
+    expect(atCap.ok && atCap.value?.kind).toBe("oauth");
+    expect(await ofSize(65_537).verifyRequest(withBearer(TOOLS, token))).toEqual({
+      ok: false,
+      code: "unexpected",
+      status: 200,
+    });
   });
 
   it("authenticates with client_secret_basic", async () => {

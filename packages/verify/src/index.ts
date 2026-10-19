@@ -6,7 +6,7 @@ export {
   type ReplayStore,
 } from "./dpop.js";
 export { TIMEOUT_DEFAULT_MS, TIMEOUT_MAX_MS, TIMEOUT_MIN_MS } from "./fetch.js";
-export type { IntrospectOptions } from "./introspect.js";
+export { INTROSPECT_MAX_BYTES, type IntrospectOptions } from "./introspect.js";
 export {
   FAILED_READ_PAUSE_MS,
   KEY_SET_DEFAULT_SECONDS,
