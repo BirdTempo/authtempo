@@ -27,9 +27,9 @@ export const COMMANDS: Readonly<Record<string, Command>> = {
 /**
  * The help of `<command> [<sub>]`, and its key in `STOP_JSON` (plan 11c2).
  * When `rest[0]` is an own key of the command's subcommands, the answer is
- * that subcommand's help and the key `<name> <sub>`; else the command's own
- * help and the key `<name>`. `name` is the key of the table: the help's
- * `command` can differ from it, as `keys rotate` does.
+ * that subcommand's help and the key `<name> <sub>`. Else the answer is the
+ * command's own help and the key `<name>`. `name` is the key of the table:
+ * the help's `command` can differ from it, as `keys rotate` does.
  */
 export function helpOf(
   name: string,

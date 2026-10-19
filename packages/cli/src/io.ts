@@ -127,10 +127,10 @@ export function nodeIo(): Io {
     },
     writePrivate,
     replaceFile,
-    // `wx` is O_CREAT and O_EXCL: it refuses any path that exists, a link and
-    // a link to a missing file too, so no secret file is ever replaced. The
-    // umask can only narrow the mode. `writePrivate` renames over its target,
-    // so `secret` must not use it.
+    // `wx` is O_CREAT and O_EXCL: it refuses any path that exists. It refuses
+    // a link too, and a link to a missing file. So no secret file is ever
+    // replaced. The umask can only narrow the mode. `writePrivate` renames
+    // over its target, so `secret` must not use it.
     writeNewPrivate: (path, text) => {
       writeFileSync(path, text, { flag: "wx", mode: 0o600 });
     },

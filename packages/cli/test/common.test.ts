@@ -23,7 +23,7 @@ const helpFlags = (flags: readonly { flag: string }[]) =>
 const NAMES = ["init", "migrate", "import", "check", "keys", "mcp"];
 
 describe("the common rules (spec 19)", () => {
-  it("has the six commands, and one help text for each", () => {
+  it("has the six commands in the order of the root help", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
   });
 

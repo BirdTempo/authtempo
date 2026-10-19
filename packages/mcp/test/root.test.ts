@@ -128,6 +128,18 @@ describe("the root rule", () => {
     expect(io.readFile("a/b.txt")).toBe("one\n");
   });
 
+  it("writes no secret file: writeNewPrivate throws a RootError and makes no file", () => {
+    const f = fixtureRoot();
+    fx = f;
+    const { io } = confinedIo({ root: f.root, env, allowFetch: false });
+    const path = join(f.root, ".dev.vars");
+    expect(() => io.writeNewPrivate(path, "AUTH_SECRET=x\n")).toThrow(RootError);
+    expect(() => io.writeNewPrivate(path, "AUTH_SECRET=x\n")).toThrow(
+      "the MCP server writes no secret file",
+    );
+    expect(existsSync(path)).toBe(false);
+  });
+
   it("reads, lists, and tests no path outside the root", () => {
     const f = fixtureRoot();
     fx = f;

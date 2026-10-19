@@ -6,6 +6,7 @@
  * changes only after a new read of its page. It imports no Node.js module,
  * so the docs site and the MCP server can read it.
  */
+import { DEFAULT_URL_ENV } from "./env-names.js";
 
 /**
  * Planned at publication by the owner; not live. One source: the installer,
@@ -89,8 +90,8 @@ export const EDITORS: Readonly<Record<EditorId, EditorSpec>> = {
 // biome-ignore lint/suspicious/noTemplateCurlyInString: VS Code expands this text, not JavaScript.
 const WORKSPACE_FOLDER = "${workspaceFolder}";
 
-/** The variable of the connection string when `--url-env` is not given. */
-export const DEFAULT_URL_ENV = "DATABASE_URL";
+// The one source of the name is env-names.ts; the public entry keeps this export.
+export { DEFAULT_URL_ENV };
 
 /** The command and the arguments that start the local server. */
 export interface McpEntry {
