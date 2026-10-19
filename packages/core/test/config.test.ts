@@ -757,6 +757,8 @@ describe("oauth (plan 9g)", () => {
       introspection: null,
       // Plan 12e Task 9: every proof alg, and a window of 60 s.
       dpop: { algs: ["EdDSA", "Ed25519", "ES256", "RS256", "PS256"], windowSeconds: 60 },
+      // Plan 12e Task 13: the reuse window is off.
+      refreshReuseSeconds: 0,
     });
     expect([...(on?.scopes.keys() ?? [])]).toEqual([
       "openid",
@@ -774,6 +776,7 @@ describe("oauth (plan 9g)", () => {
         registration: { cimd: false, dynamic: true },
         refreshTtlDays: 365,
         codeTtlMinutes: 10,
+        refreshReuseSeconds: 60,
       },
     }).oauth;
     expect(custom).toMatchObject({
@@ -782,6 +785,7 @@ describe("oauth (plan 9g)", () => {
       accessTtlMinutes: 30,
       refreshTtlDays: 365,
       codeTtlMinutes: 10,
+      refreshReuseSeconds: 60,
     });
     expect(custom?.scopes.get("mcp:read")).toBe("Read");
   });
@@ -833,10 +837,22 @@ describe("oauth (plan 9g)", () => {
         { resources: [R], fetch, codeTtlMinutes: 11 },
         "oauth.codeTtlMinutes must be an integer from 1 to 10",
       ],
+      [
+        { resources: [R], fetch, refreshReuseSeconds: 61 },
+        "oauth.refreshReuseSeconds must be an integer from 0 to 60",
+      ],
+      [
+        { resources: [R], fetch, refreshReuseSeconds: -1 },
+        "oauth.refreshReuseSeconds must be an integer from 0 to 60",
+      ],
+      [
+        { resources: [R], fetch, refreshReuseSeconds: 1.5 },
+        "oauth.refreshReuseSeconds must be an integer from 0 to 60",
+      ],
       [{ resources: [R], fetch, consentPage: "html" }, "oauth.consentPage must be a function"],
       [
         { resources: [R], fetch, loginPage: "/login" },
-        "oauth.loginPage is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, and signInURL",
+        "oauth.loginPage is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, signInURL, and refreshReuseSeconds",
       ],
       [true, "oauth must be an object or false"],
     ];

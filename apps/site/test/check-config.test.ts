@@ -6,12 +6,14 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 160 keys, the nested ones by their path", () => {
+  it("lists 161 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
-    // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, and oauth.signInURL.
-    expect(keys.length).toBe(160);
+    // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL, and
+    // oauth.refreshReuseSeconds.
+    expect(keys.length).toBe(161);
     expect(keys).toContain("oauth.signInURL");
+    expect(keys).toContain("oauth.refreshReuseSeconds");
     expect(keys).toContain("oauth.dpop.windowSeconds");
     expect(keys).toContain("oauth.registration.initialAccessTokenHash");
     expect(keys).toContain("oauth.introspection");

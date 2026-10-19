@@ -621,7 +621,31 @@ export interface OAuthConfig {
    * `@authtempo/client/oauth`.
    */
   signInURL?: string;
+  /**
+   * The refresh reuse window in seconds, 0 (off, the default) to 60 (plan
+   * 12e). With it on, a spent refresh token that its own client presents
+   * again within N seconds of its use answers a new child. The child of
+   * the first use is then spent, so the family keeps one live branch.
+   *
+   * The odds. Without the window, a copy of a refresh token presented after
+   * the client's own use deletes the family at once. Take a window of N
+   * seconds. A copy presented within N seconds of the client's use gets a
+   * refresh token and an access token that lives `accessTtlMinutes`. The
+   * family dies at the client's next refresh, when it presents the
+   * superseded child. So the window gives an attacker who holds a copy at
+   * most N seconds to act, and at most `accessTtlMinutes` of access per
+   * success. For a confidential client or a DPoP-bound grant, the copy is
+   * useless without the secret or the key. The use: a client whose answer
+   * was lost on the network retries and keeps its grant.
+   *
+   * RFC 9700 section 4.14.2 (read 2026-10-20) gives no grace period for
+   * rotation, so the window is off by default.
+   */
+  refreshReuseSeconds?: number;
 }
+
+/** The longest refresh reuse window: each second is a second an attacker with a copy can act (plan 12e). */
+export const REUSE_WINDOW_MAX_S = 60;
 
 export interface ResolvedOAuth {
   resources: readonly string[];
@@ -642,6 +666,8 @@ export interface ResolvedOAuth {
   dpop: { algs: readonly ForeignAlg[]; windowSeconds: number };
   /** The absolute URL of the app's sign-in route, or null: core's own sign-in page (plan 12e). */
   signInURL: string | null;
+  /** The refresh reuse window in seconds, 0 to `REUSE_WINDOW_MAX_S`; 0 is off (plan 12e). */
+  refreshReuseSeconds: number;
   /** The metadata documents this isolate read, by URL, each for one hour. */
   cimdCache: Map<string, CimdEntry>;
   /** The `jwks_uri` key sets of `private_key_jwt` clients that this isolate read, by URL, each for one hour (plan 12e). */
@@ -1590,6 +1616,7 @@ const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {
   introspection: true,
   dpop: true,
   signInURL: true,
+  refreshReuseSeconds: true,
 };
 
 /** The longest client id: a `cl_` id or a metadata document URL (plan 11d). */
@@ -1713,7 +1740,7 @@ function resolveOAuth(
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(OAUTH_KEYS, key))
       throw new ConfigError(
-        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, and signInURL`,
+        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, signInURL, and refreshReuseSeconds`,
       );
   if (!jwtMint)
     throw new ConfigError("oauth needs jwtMint: an access token is a JWT that core signs");
@@ -1811,6 +1838,12 @@ function resolveOAuth(
     introspection: resolveIntrospection(input.introspection, resources as string[]),
     dpop: resolveDpop(input.dpop),
     signInURL: resolveSignInURL(input.signInURL, origins),
+    refreshReuseSeconds: integerIn(
+      "oauth.refreshReuseSeconds",
+      input.refreshReuseSeconds ?? 0,
+      0,
+      REUSE_WINDOW_MAX_S,
+    ),
     cimdCache: new Map(),
     jwksCache: new Map(),
   };

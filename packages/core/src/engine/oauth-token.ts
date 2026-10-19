@@ -186,8 +186,8 @@ async function writeRefresh(
     resource: g.resource,
     expiresAt: new Date(now.getTime() + oauth.refreshTtlDays * DAY_MS),
     usedAt: null,
-    // Plan 12e Task 13 sets the spent parent row.
-    parentId: null,
+    // The spent row of a refresh, so the reuse window finds its child; null at the code exchange.
+    parentId: g.spentId,
     // RFC 9449 section 5: a public client's refresh token is bound to the key
     // of its proof. A confidential client's stays unbound: the client auth at
     // each refresh already ties it to the client.
@@ -416,6 +416,40 @@ async function reuse(config: ResolvedConfig, row: OAuthTokenRow): Promise<OAuthR
 }
 
 /**
+ * True while `usedAt` is less than `oauth.refreshReuseSeconds` ago. With
+ * the window at 0 (the default) this is never true. The odds are on the
+ * config key `refreshReuseSeconds`.
+ */
+function inReuseWindow(config: ResolvedConfig, usedAt: Date, now: Date): boolean {
+  return now.getTime() - usedAt.getTime() < oauthOf(config).refreshReuseSeconds * 1000;
+}
+
+/**
+ * The spend of a retry inside the reuse window (plan 12e Task 13). It
+ * spends the one unspent child of `parent` by one conditional update on
+ * its `usedAt`, and answers the count of rows spent. Zero means the client
+ * already used the child, or a parallel retry spent it first: a reuse. So
+ * of two parallel retries, at most one wins, and the loser ends the family.
+ * A row of a core before Task 13 has no `parentId`, so its retry finds no
+ * child.
+ */
+async function spendChild(config: ResolvedConfig, parent: OAuthTokenRow, now: Date) {
+  const child = await config.storage.findOne("oauthToken", [
+    { field: "parentId", op: "eq", value: parent.id },
+    { field: "usedAt", op: "eq", value: null },
+  ]);
+  if (!child) return 0;
+  return config.storage.update(
+    "oauthToken",
+    [
+      { field: "id", op: "eq", value: child.id },
+      { field: "usedAt", op: "eq", value: null },
+    ],
+    { usedAt: now, updatedAt: now },
+  );
+}
+
+/**
  * `grant_type=refresh_token`. Every check that can refuse runs before the
  * spend, so a refused request leaves the token usable. The spend is one
  * conditional update on `usedAt`; zero rows means a parallel request spent
@@ -424,6 +458,11 @@ async function reuse(config: ResolvedConfig, row: OAuthTokenRow): Promise<OAuthR
  * winner reads its spent row again after the write; when the row is gone,
  * the winner deletes its new row and answers `invalid_grant`. In each order
  * the family ends with no live row.
+ *
+ * A spent row inside the reuse window is a retry of its own client, after
+ * the client auth and the DPoP check. The retry spends the child of the
+ * first use and answers a new child of the spent row. So the family keeps
+ * one live branch, and the superseded child, presented later, is a reuse.
  */
 export async function refreshGrant(
   config: ResolvedConfig,
@@ -444,8 +483,8 @@ export async function refreshGrant(
   // before the reuse check: a copy without the key cannot end the family.
   if (row.dpopJkt !== null && input.dpop?.jkt !== row.dpopJkt)
     return oauthFail("invalid_dpop_proof");
-  if (row.usedAt !== null) return reuse(config, row);
   const now = config.clock.now();
+  if (row.usedAt !== null && !inReuseWindow(config, row.usedAt, now)) return reuse(config, row);
   if (row.expiresAt.getTime() <= now.getTime()) return oauthFail("invalid_grant");
   // A deploy can drop a scope. The new token gets the served scopes only,
   // because resolveAccessToken refuses any other scope.
@@ -463,14 +502,17 @@ export async function refreshGrant(
   // The auth read the client: a CIMD document that did not answer refused this refresh there, and the family stays.
   const user = await liveUser(config, row.userId);
   if (!user) return reuse(config, row);
-  const spent = await config.storage.update(
-    "oauthToken",
-    [
-      { field: "id", op: "eq", value: row.id },
-      { field: "usedAt", op: "eq", value: null },
-    ],
-    { usedAt: now, updatedAt: now },
-  );
+  const spent =
+    row.usedAt !== null
+      ? await spendChild(config, row, now)
+      : await config.storage.update(
+          "oauthToken",
+          [
+            { field: "id", op: "eq", value: row.id },
+            { field: "usedAt", op: "eq", value: null },
+          ],
+          { usedAt: now, updatedAt: now },
+        );
   if (spent !== 1) return reuse(config, row);
   return issueTokens(config, {
     user,
