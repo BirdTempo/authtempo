@@ -291,6 +291,28 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
     ).toMatchObject({ ok: false, error: "invalid_client_metadata" });
   });
 
+  it("refuses pairwise for a client whose redirect host is an IP literal", async () => {
+    const h = handle();
+    // Ruling 36: an address can change hands, and a private range is any
+    // local network's. So no IP literal is a sector, as no IP literal is a document host.
+    for (const uri of [
+      "https://203.0.113.5/callback",
+      "https://192.168.1.10/callback",
+      "https://[2001:db8::1]/callback",
+    ]) {
+      const r = await register(h, { redirect_uris: [uri], subject_type: "pairwise" });
+      expect({ uri, status: r.status, body: r.body }).toEqual({
+        uri,
+        status: 400,
+        body: { error: "invalid_client_metadata" },
+      });
+      expect({ uri, status: (await register(h, { redirect_uris: [uri] })).status }).toEqual({
+        uri,
+        status: 201,
+      });
+    }
+  });
+
   it("keeps each http loopback host inside the one local host rule", () => {
     expect([...HTTP_LOOPBACK].sort()).toEqual(["127.0.0.1", "localhost"]);
     for (const host of HTTP_LOOPBACK)

@@ -14,6 +14,18 @@
  */
 export const HTTP_LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
 
+/** A parsed IPv4 host. The URL parser writes every IPv4 form (`127.1`, `0x7f.0.0.1`) as four decimal parts. */
+const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
+
+/**
+ * True for an IP literal host, IPv4 or IPv6. Core takes no address as a
+ * document host or as a pairwise sector (ruling 36 of plan 12e). An address
+ * can change hands, and a private range is any local network's.
+ */
+export function isIpLiteral(hostname: string): boolean {
+  return hostname.startsWith("[") || IPV4_RE.test(hostname);
+}
+
 /** Host suffixes of names that only a local network resolves. A host equal to the name without its dot counts too. */
 const PRIVATE_SUFFIXES: readonly string[] = [".local", ".home.arpa", ".internal"];
 /** 127.0.0.0/8 and 0.0.0.0, the unspecified address, which reaches this machine. */

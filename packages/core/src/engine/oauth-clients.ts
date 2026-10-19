@@ -3,7 +3,7 @@ import type { OAuthErrorCode } from "../errors.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { constantTimeEqual, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { FOREIGN_ALGS, keyFitsAlg } from "../primitives/foreign-jwk.js";
-import { HTTP_LOOPBACK, isLocalHost } from "../primitives/host.js";
+import { HTTP_LOOPBACK, isIpLiteral, isLocalHost } from "../primitives/host.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
@@ -121,8 +121,6 @@ const BLOCKED_SCHEMES: ReadonlySet<string> = new Set([
   "ftp:",
 ]);
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:$/;
-/** A parsed IPv4 host. The URL parser writes every IPv4 form (`127.1`, `0x7f.0.0.1`) as four decimal parts. */
-const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 
 /** One key set of a `jwks_uri` in the isolate cache. */
 export interface JwksEntry {
@@ -582,7 +580,7 @@ export function validCimdUrl(value: string, baseURL: string): boolean {
   // A trailing dot names the same host: `localhost.` is `localhost`.
   const host = u.hostname.replace(/\.$/, "");
   // An IP literal (IPv4 or IPv6, 127.0.0.1 and [::1] too): a public client has a DNS name, and an address may be internal.
-  if (host.startsWith("[") || IPV4_RE.test(host)) return false;
+  if (isIpLiteral(host)) return false;
   // `localhost`, `*.localhost`, a single label, and the private names: the one local host rule.
   if (isLocalHost(host)) return false;
   // This instance's own host: a document there would make core fetch itself.

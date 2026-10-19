@@ -1,6 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { randomBase64Url } from "../primitives/crypto.js";
-import { isLocalHost } from "../primitives/host.js";
+import { isIpLiteral, isLocalHost } from "../primitives/host.js";
 import { newId } from "../primitives/ids.js";
 import type { OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
@@ -23,7 +23,8 @@ const SUBJECT_BYTES = 16;
  * private-use scheme. A private-use scheme has no host that one party owns,
  * so it gives no sector. Two hosts give no sector either. A loopback or
  * local host gives none: no one party owns it, and every app on a machine
- * or a network can serve it (rulings 32 and 34 of plan 12e).
+ * or a network can serve it (rulings 32 and 34 of plan 12e). An IP literal
+ * gives none (ruling 36).
  */
 export function redirectSector(redirectUris: readonly string[]): string | null {
   const hosts = new Set<string>();
@@ -38,7 +39,8 @@ export function redirectSector(redirectUris: readonly string[]): string | null {
     hosts.add(u.hostname);
   }
   const [host] = hosts;
-  return hosts.size === 1 && host !== undefined && !isLocalHost(host) ? host : null;
+  if (hosts.size !== 1 || host === undefined) return null;
+  return isLocalHost(host) || isIpLiteral(host) ? null : host;
 }
 
 /**
