@@ -211,7 +211,10 @@ async function assertionClient(
   if (!claimsHold(decoded.payload, client.id, issuerOf(config), now)) return refused;
   if (!(await signedByClient(config, client, decoded))) return refused;
   // The replay store: the unique key on valueHash refuses a second use of a
-  // jti on every instance over the same storage, until exp plus the skew.
+  // jti on every instance over the same storage. claimsHold compares exp
+  // with the whole second of now, and RFC 7519 lets exp be a fraction. So
+  // the row lives to ceil(exp) plus the skew plus one second: past the last
+  // instant that the claims pass, so no sweep frees a live jti.
   const at = config.clock.now();
   try {
     await config.storage.create("verification", {
@@ -219,7 +222,7 @@ async function assertionClient(
       purpose: "client-assertion",
       identifier: client.id,
       valueHash: await sha256Hex(`${client.id}:${decoded.payload.jti as string}`),
-      expiresAt: new Date(((decoded.payload.exp as number) + CLOCK_SKEW_S) * 1000),
+      expiresAt: new Date((Math.ceil(decoded.payload.exp as number) + CLOCK_SKEW_S + 1) * 1000),
       consumedAt: null,
       data: null,
       createdAt: at,

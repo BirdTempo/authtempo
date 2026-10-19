@@ -451,6 +451,22 @@ describe("private_key_jwt (plan 12e Task 5, RFC 7523 with rfc7523bis-11)", () =>
     ).toEqual(PASSED);
   });
 
+  it("keeps the jti through a sweep, also for a fractional exp at the skew edge", async () => {
+    const key = await keyOf("ES256", "k1");
+    for (const offset of [-29.5, -29, 1.25]) {
+      const { h, s, clientId } = await inline(key);
+      // 900 ms into a second: claimsHold reads the whole second, so exp N - 29.5 still passes.
+      h.clock.advance(900);
+      const token = await assertion(h, key, clientId, { exp: nowS(h) + offset });
+      const first = await h.auth.handle(exchange(await codeOf(h, s.cookie, clientId), token));
+      expect({ offset, answer: await answer(first) }).toEqual({ offset, answer: PASSED });
+      h.clock.advance(50);
+      await h.auth.api.sweepExpired();
+      const again = await h.auth.handle(exchange(await codeOf(h, s.cookie, clientId), token));
+      expect({ offset, answer: await answer(again) }).toEqual({ offset, answer: REFUSED });
+    }
+  });
+
   it("refuses a jti longer than 256 characters and a missing jti", async () => {
     const key = await keyOf("ES256", "k1");
     const { h, s, clientId } = await inline(key);
