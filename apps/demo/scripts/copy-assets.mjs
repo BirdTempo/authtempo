@@ -15,6 +15,7 @@
 // page modules among them, after `tsc -p tsconfig.browser.json`. Each import
 // must name a file of the build by a relative path. It prints
 // `check-assets: PASS files=<n> imports=<m>`.
+import { execFileSync } from "node:child_process";
 import {
   cpSync,
   existsSync,
@@ -219,14 +220,39 @@ function copyGraph(entry, srcRoot, outDir, rewrite, written) {
  * modules are among the files, so a page module that imports a package name
  * fails here and not only in a browser. Answers the counts.
  */
+/**
+ * The static imports of each file, as the parser of V8 reads them. A child
+ * Node with --experimental-vm-modules lists them by vm.SourceTextModule.
+ * The token reader of importsOf can misread a slash after ")" or "}" as
+ * division (Task 10 review, N1). So checkAssets holds its list to this one.
+ */
+const V8_LIST = `const vm = require("node:vm");
+const fs = require("node:fs");
+const out = {};
+for (const f of JSON.parse(process.argv[1]))
+  out[f] = new vm.SourceTextModule(fs.readFileSync(f, "utf8")).moduleRequests.map((r) => r.specifier);
+process.stdout.write(JSON.stringify(out));`;
+
+/** @param {string[]} files @returns {Record<string, string[]>} */
+function v8Imports(files) {
+  const args = ["--experimental-vm-modules", "--no-warnings", "-e", V8_LIST, JSON.stringify(files)];
+  return JSON.parse(execFileSync(process.execPath, args, { encoding: "utf8" }));
+}
+
 export function checkAssets(dir = join(PKG, "dist/public/assets")) {
   let files = 0;
   let imports = 0;
-  for (const entry of readdirSync(dir, { withFileTypes: true, recursive: true })) {
-    if (!entry.isFile() || !entry.name.endsWith(".js")) continue;
-    const file = join(entry.parentPath, entry.name);
+  const all = readdirSync(dir, { withFileTypes: true, recursive: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".js"))
+    .map((entry) => join(entry.parentPath, entry.name));
+  const v8 = all.length === 0 ? {} : v8Imports(all);
+  for (const file of all) {
     files++;
-    for (const { spec } of importsOf(readFileSync(file, "utf8"), file)) {
+    const read = importsOf(readFileSync(file, "utf8"), file);
+    for (const spec of v8[file] ?? [])
+      if (!read.some((r) => r.spec === spec))
+        throw new Error(`${file}: V8 reads the import ${spec}, and the copy does not`);
+    for (const { spec } of read) {
       imports++;
       if (!spec.startsWith("./") && !spec.startsWith("../"))
         throw new Error(`${file} imports ${spec}, which is not a relative path`);

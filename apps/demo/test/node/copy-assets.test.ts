@@ -280,6 +280,18 @@ describe("the import reader of copy-assets.mjs", () => {
     expect(imports).toBeGreaterThan(30);
   });
 
+  it("fails a static import that V8 reads and the token reader misses (Task 10 review, N1)", () => {
+    const dir = out();
+    // After "}" the reader takes the slash as division, so the quote in the regular
+    // expression opens a string that hides the import. V8 reads the import, and the
+    // message names a miss of the reader only.
+    const probe = 'if (globalThis.a) {}\n/\'/.test("x");import "node:fs";//\'\n';
+    writeFileSync(join(dir, "page.js"), probe);
+    expect(() => checkAssets(dir)).toThrow(
+      `${join(dir, "page.js")}: V8 reads the import node:fs, and the copy does not`,
+    );
+  });
+
   it("fails a compiled module that imports a package name or a missing file", () => {
     const dir = out();
     mkdirSync(join(dir, "js"));
