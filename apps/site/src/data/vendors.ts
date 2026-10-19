@@ -77,12 +77,16 @@ export interface DocumentationHost {
 /**
  * The hosts that core names in a documentation link only. No request of a
  * deployment goes to them, so they are not vendors in the path. Each entry
- * states its reason. The list is empty at this commit. A link such as the
- * OpenAPI specification on spec.openapis.org (lane 11g) goes here, with its
- * reason.
+ * states its reason. Plan 11g adds spec.openapis.org, the first entry.
  * unusedDocumentationHosts fails an entry that no core file names.
  */
-export const DOCUMENTATION_HOSTS: readonly DocumentationHost[] = [];
+export const DOCUMENTATION_HOSTS: readonly DocumentationHost[] = [
+  {
+    host: "spec.openapis.org",
+    reason:
+      "a link to the OpenAPI 3.1 specification inside the text of the generated document (packages/core/src/openapi/responses.ts); no request goes to that host",
+  },
+];
 
 /** The site's own host. A URL on our own domain names no other party. */
 const OWN_HOST = new URL(SITE.origin).hostname;
