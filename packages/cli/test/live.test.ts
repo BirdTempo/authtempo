@@ -68,7 +68,14 @@ describe("the live runs (spec 19)", () => {
     });
     expect(r.status, r.stderr).toBe(0);
     const doc = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect(doc).toMatchObject({ calls: 1, failed: 0, more: false, exit: 0, stopped: null });
+    expect(doc).toMatchObject({
+      calls: 1,
+      failed: 0,
+      skipped: 0,
+      more: false,
+      exit: 0,
+      stopped: null,
+    });
     expect(r.stdout + r.stderr).not.toContain(OPERATOR_SECRET);
   });
 

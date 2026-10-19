@@ -232,7 +232,7 @@ describe("authtempo secret rewrap (plan 11c2)", () => {
     const { f, auth } = await twoPhase();
     const { code, io } = await run(["rewrap", BASE, "--limit", "1", "--yes"], f, auth);
     expect(code).toBe(0);
-    expect(io.stdout).toEqual(["calls 2, resealed 2, failed 0, more false"]);
+    expect(io.stdout).toEqual(["calls 2, resealed 2, failed 0, skipped 0, more false"]);
     expect(io.stderr).toContain("call 1: resealed 1, failed 0, skipped 0, more true");
     expect(io.stderr).toContain("call 2: resealed 1, failed 0, skipped 0, more false");
     expect(io.requests.map((r) => `${r.method} ${r.url}`)).toEqual([
@@ -272,6 +272,7 @@ describe("authtempo secret rewrap (plan 11c2)", () => {
       calls: 1,
       resealed: 1,
       failed: 0,
+      skipped: 0,
       more: true,
       exit: 1,
       stopped: null,
@@ -289,11 +290,49 @@ describe("authtempo secret rewrap (plan 11c2)", () => {
     const auth = f.on(TWO);
     const { code, io } = await run(["rewrap", BASE, "--yes"], f, auth);
     expect(code).toBe(1);
-    expect(io.stdout).toEqual(["calls 1, resealed 1, failed 0, more true"]);
+    expect(io.stdout).toEqual(["calls 1, resealed 1, failed 0, skipped 1, more true"]);
     expect(io.stderr).toContain("call 1: resealed 1, failed 0, skipped 1, more true");
     expect(io.stderr.at(-1)).toBe(
       "warning: rows remain after the pass: 1 live setup was skipped; wait 15 minutes, then run it again",
     );
+  });
+
+  it("goes on past a page of skipped setups, and ends the pass at next null", async () => {
+    // Two live setups with codes at the head of the totp table, and one
+    // signing key behind them. A call that reseals 0 rows is not the end
+    // (review of Task 4, Minor 1): the cursor moves the pass past the page.
+    const f = await fixture();
+    const v1 = f.on(ONE);
+    await enroll(f, v1, "ada@example.com");
+    f.advance(MINUTE);
+    await enroll(f, v1, "bo@example.com");
+    const auth = f.on(TWO);
+    const { code, io } = await run(["rewrap", BASE, "--limit", "1", "--yes", "--json"], f, auth);
+    expect(code).toBe(1);
+    expect(docOf(io.stdout)).toEqual({
+      calls: 4,
+      resealed: 1,
+      failed: 0,
+      skipped: 2,
+      more: true,
+      exit: 1,
+      stopped: null,
+    });
+    expect(io.stderr).toContain("call 1: resealed 0, failed 0, skipped 1, more true");
+    expect(io.stderr).toContain("call 2: resealed 0, failed 0, skipped 1, more true");
+    expect(io.stderr).toContain("call 3: resealed 1, failed 0, skipped 0, more true");
+    expect(io.stderr).toContain("call 4: resealed 0, failed 0, skipped 0, more true");
+    expect(io.stderr.at(-1)).toBe(
+      "warning: rows remain after the pass: 2 live setups were skipped; wait 15 minutes, then run it again",
+    );
+    const afters = f.bodies.map((b) => (b as { after?: string }).after?.split(":")[0]);
+    expect(afters).toEqual([undefined, "totp", "totp", "jwk"]);
+    const after = await run(["status", BASE, "--json"], f, auth);
+    expect((docOf(after.io.stdout).versions as unknown[])[1]).toMatchObject({
+      version: 1,
+      totpSecrets: 2,
+      signingKeys: 0,
+    });
   });
 
   it("makes no request with --no-input and no --yes", async () => {
@@ -345,6 +384,7 @@ describe("authtempo secret rewrap (plan 11c2)", () => {
       calls: 1,
       resealed: 1,
       failed: 0,
+      skipped: 0,
       more: true,
       exit: 2,
       stopped: `POST ${REWRAP} answered 502 with no operator answer`,

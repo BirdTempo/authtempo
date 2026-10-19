@@ -37,7 +37,7 @@ authtempo secret rewrap https://api.example.com --yes
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |
 | `--timeout <seconds>` | The time limit of each request, from 1 to 120. The default is 10. |
 | `--yes` | Reseals with no question. A run with no terminal needs it. |
-| `--no-input` | Asks no question. Without `--yes`, the command stops. |
+| `--no-input` | Never ask a question. Without `--yes`, the command then stops. |
 | `--json` | Prints the document of [The JSON](#the-json). `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 
@@ -47,7 +47,7 @@ authtempo secret rewrap https://api.example.com --yes
 | 1 | A row did not open, or rows remain after the last call. A person must look. |
 | 2 | A usage error, or a stop: no answer, the route is off, the deployment refused the secret, or the limit of calls. |
 
-Each call prints one line on stderr: `call <i>: resealed <n>, failed <n>, skipped <n>, more <true|false>`. The sums go to stdout at the end: `calls <n>, resealed <n>, failed <n>, more <true|false>`.
+Each call prints one line on stderr: `call <i>: resealed <n>, failed <n>, skipped <n>, more <true|false>`. The sums go to stdout at the end: `calls <n>, resealed <n>, failed <n>, skipped <n>, more <true|false>`.
 
 ## The loop
 
@@ -74,6 +74,7 @@ Warning: remove a version from `secrets` only when its four counts are 0 in `aut
 | `calls` | The calls of the run. |
 | `resealed` | The rows that the run moved to the current version, summed over the calls. |
 | `failed` | The rows that did not open or did not write, summed over the calls. |
+| `skipped` | The live setups with codes that the calls left, summed over the calls. A later pass moves them. |
 | `more` | The `more` of the last call: true while a row under a configured old version remains. |
 | `exit` | The exit code of the run. |
 | `stopped` | The reason of a stop or a usage error, or null. |

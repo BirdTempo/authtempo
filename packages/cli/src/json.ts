@@ -167,6 +167,8 @@ export interface SecretRewrapJson extends RunKeys {
   calls: number;
   resealed: number;
   failed: number;
+  /** The live TOTP setups with codes that the calls left, summed; a later pass moves them. */
+  skipped: number;
   /** The `more` of the last call: true while a row under a configured old version remains. */
   more: boolean;
 }
@@ -174,6 +176,7 @@ export const SECRET_REWRAP_JSON_KEYS = {
   calls: true,
   resealed: true,
   failed: true,
+  skipped: true,
   more: true,
   exit: true,
   stopped: true,
@@ -181,9 +184,10 @@ export const SECRET_REWRAP_JSON_KEYS = {
 
 /**
  * The document of a usage error or a thrown stop under `--json`, for each
- * command and each subcommand, by the key of `helpOf` (plan 11e deviation 19). Each other key holds its empty value: "",
- * [], null, false, or a zero summary. `main` prints it with `stopped` set to
- * the message. `--version` has no stop, so the version has no entry.
+ * command and each subcommand (plan 11e deviation 19). The key is the key
+ * of `helpOf`. Each other key holds its empty value: "", [], null, false,
+ * or a zero summary. `main` prints it with `stopped` set to the message.
+ * `--version` has no stop, so the version has no entry.
  */
 export const STOP_JSON = {
   init: { stack: "", dir: "", files: [], next: [], exit: 2, stopped: null },
@@ -222,7 +226,15 @@ export const STOP_JSON = {
     stopped: null,
   },
   "secret status": { versions: [], exit: 2, stopped: null },
-  "secret rewrap": { calls: 0, resealed: 0, failed: 0, more: false, exit: 2, stopped: null },
+  "secret rewrap": {
+    calls: 0,
+    resealed: 0,
+    failed: 0,
+    skipped: 0,
+    more: false,
+    exit: 2,
+    stopped: null,
+  },
 } satisfies {
   init: InitJson;
   migrate: MigrateJson;

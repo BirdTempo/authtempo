@@ -19,14 +19,19 @@ export interface OperatorCall {
   ms: number;
 }
 
-/** The limit of the three routes of plan 11c2, as core sets it: 120 calls per IP per hour. */
+/**
+ * The limit of the three routes of plan 11c2: 120 calls per IP per hour. A
+ * copy of `OPERATOR_SECRETS_PER_IP.max` in core's `src/http/routes/operator.ts`
+ * (read 2026-10-19), because no entry of core that the CLI reads exports it.
+ * The number is in a stop text only, as the 5 of `keys rotate` is.
+ */
 const CALLS_PER_HOUR = 120;
 
 /**
  * The shared call of the operator routes of plan 11c2: `secret status`,
  * `secret rewrap`, and the deployment part of `info`. It sends `Operator
  * <secret>` through `fetchWithin`, which follows no redirect. A 404, a 401,
- * and a 429 are stops with their own text; any other status, or a body that
+ * and a 429 are stops with their own text. Any other status, or a body that
  * is not JSON, is a stop that names the request. A 200 answers its parsed
  * body, which the caller validates.
  */

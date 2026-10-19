@@ -16,6 +16,7 @@ import type { SecretJson, SecretRewrapJson, SecretStatusJson } from "../json.js"
 import { baseOf, basePathOf, timeoutOf } from "../net.js";
 import { operatorCall } from "../operator-client.js";
 import { type Ctx, printJson } from "../output.js";
+import { DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "../rewrap-limits.js";
 import { DEFAULT_TOKEN_ENV, readSecret } from "../secrets.js";
 
 const OPTIONS = {
@@ -54,15 +55,8 @@ export const SECRET_BYTES = 32;
  */
 export const MAX_DRAWS = 3;
 
-/**
- * The most calls of one `secret rewrap` run, by default. At the default
- * limit of 100 rows a call, 100 calls move 10 000 rows, and the limiter of
- * core allows 120 calls an hour.
- */
-export const DEFAULT_MAX_CALLS = 100;
-
-/** The most calls that `--max-calls` takes. */
-const MAX_CALLS_MAX = 10_000;
+// The two call limits live in rewrap-limits.ts, so the help reads them too.
+export { DEFAULT_MAX_CALLS } from "../rewrap-limits.js";
 
 /** A version is digits only; the range check comes after. */
 const WHOLE_NUMBER = /^\d+$/;
@@ -111,9 +105,10 @@ interface OperatorValues {
 }
 
 /**
- * The target of an operator call: the base URL (https, or http on this
- * machine only, because the request carries a secret), the base path, and
- * the time limit. Each is a usage error before any read of the secret.
+ * The target of an operator call: the base URL, the base path, and the time
+ * limit. The base is https, or http on this machine only, because the
+ * request carries a secret. Each is a usage error before any read of the
+ * secret.
  */
 function readTarget(
   target: string | undefined,
@@ -140,8 +135,8 @@ function readOperatorSecret(ctx: Ctx, values: OperatorValues): string {
     defaultEnv: DEFAULT_TOKEN_ENV,
     what: "the operator secret",
   });
-  // Core's own rule (one source): a value of another form costs one of the
-  // 120 calls per hour and reads as a refusal, and fetch refuses a header
+  // Core's own rule (one source). A value of another form costs one of the
+  // 120 calls per hour and reads as a refusal. And fetch refuses a header
   // that is not ASCII with no answer.
   if (!isOperatorSecret(secret))
     throw new UsageError(
@@ -196,7 +191,7 @@ const hasRows = (v: VersionCount) =>
 /**
  * `authtempo secret status <base url>` (plan 11c2, spec 19 item 17): the
  * counts of `GET <basePath>/operator/secrets/status`, one line per version.
- * Exit 1 when a version that the config does not hold has rows: its rows
+ * Exit 1 when a version that the config does not hold has rows. Its rows
  * cannot open until the version is back (spec 22 item 9).
  */
 async function runStatus(argv: string[], ctx: Ctx): Promise<number> {
@@ -253,11 +248,13 @@ function rewrapAnswer(body: unknown): RewrapAnswer | null {
 /**
  * `authtempo secret rewrap <base url>` (plan 11c2, spec 19 item 17): the
  * loop over `POST <basePath>/operator/secrets/rewrap`. Each call reads up to
- * `--limit` rows after the cursor of the call before, and the loop sends
- * each `next` back as `after` (spec 22 item 6, the ruling 6 of this plan),
- * so a row that fails or is skipped at the head of a pass blocks no row
- * behind it. The loop ends when `more` is false, when `next` is null (the
- * pass read every row that was left), or when the calls reach `--max-calls`.
+ * `--limit` rows after the cursor of the call before. The loop sends each
+ * `next` back as `after` (spec 22 item 6, ruling 6 of this plan). So a row
+ * that fails or is skipped at the head of a pass blocks no row behind it.
+ * The loop ends when `more` is false, when `next` is null, or when the
+ * calls reach `--max-calls`. A null `next` means the pass read every row
+ * that was left. A call that reseals 0 rows does not end the loop: a page
+ * of skipped setups is not the end (spec 19 item 17 predates the cursor).
  * It exits 1 when a row did not open or rows remain. A stop in the middle
  * keeps the sums of the calls before it in the stop document.
  */
@@ -289,8 +286,7 @@ async function runRewrap(argv: string[], ctx: Ctx): Promise<number> {
   if (!yes && !(await ctx.confirm("Reseal the old rows under the current secret?")))
     throw new Stop("no reseal: the answer was not yes");
   ctx.err(`posting ${t.base}${t.basePath}${path}`);
-  const sums = { calls: 0, resealed: 0, failed: 0, more: false };
-  let skipped = 0;
+  const sums = { calls: 0, resealed: 0, failed: 0, skipped: 0, more: false };
   let after: string | null = null;
   /** Why the loop ended: no row left, the end of the pass, or the limit of calls. */
   let ended: "done" | "pass" | "max" = "max";
@@ -309,8 +305,8 @@ async function runRewrap(argv: string[], ctx: Ctx): Promise<number> {
       sums.calls++;
       sums.resealed += answer.resealed;
       sums.failed += answer.failed;
+      sums.skipped += answer.skipped;
       sums.more = answer.more;
-      skipped += answer.skipped;
       ctx.err(
         `call ${sums.calls}: resealed ${answer.resealed}, failed ${answer.failed}, skipped ${answer.skipped}, more ${answer.more}`,
       );
@@ -333,7 +329,7 @@ async function runRewrap(argv: string[], ctx: Ctx): Promise<number> {
   }
   if (!json)
     ctx.out(
-      `calls ${sums.calls}, resealed ${sums.resealed}, failed ${sums.failed}, more ${sums.more}`,
+      `calls ${sums.calls}, resealed ${sums.resealed}, failed ${sums.failed}, skipped ${sums.skipped}, more ${sums.more}`,
     );
   if (sums.failed > 0)
     ctx.err(
@@ -342,9 +338,9 @@ async function runRewrap(argv: string[], ctx: Ctx): Promise<number> {
   if (sums.more) {
     if (ended === "max")
       ctx.err(`warning: the run reached --max-calls ${maxCalls} with rows left; run it again`);
-    else if (skipped > 0)
+    else if (sums.skipped > 0)
       ctx.err(
-        `warning: rows remain after the pass: ${skipped} live ${skipped === 1 ? "setup was" : "setups were"} skipped; wait 15 minutes, then run it again`,
+        `warning: rows remain after the pass: ${sums.skipped} live ${sums.skipped === 1 ? "setup was" : "setups were"} skipped; wait 15 minutes, then run it again`,
       );
     else ctx.err("warning: rows remain after the pass; run it again");
   }

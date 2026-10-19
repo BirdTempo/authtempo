@@ -1,4 +1,5 @@
 import { REWRAP_LIMIT, SECRET_VERSION_MAX } from "@authtempo/core/secrets";
+import { DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "../rewrap-limits.js";
 import { OPERATOR_FLAGS } from "./keys.js";
 import { COMMON_FLAGS, type HelpText } from "./types.js";
 
@@ -96,7 +97,7 @@ export const SECRET_REWRAP_HELP: HelpText = {
     },
     {
       flag: "--max-calls <n>",
-      says: "The most calls of one run, from 1 to 10000. The default is 100.",
+      says: `The most calls of one run, from 1 to ${MAX_CALLS_MAX}. The default is ${DEFAULT_MAX_CALLS}.`,
     },
     ...OPERATOR_FLAGS,
     { flag: "--yes", says: "Reseal with no question. A run with no terminal needs it." },

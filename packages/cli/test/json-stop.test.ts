@@ -372,7 +372,7 @@ describe("authtempo secret rewrap", () => {
       env: { AUTHTEMPO_OPERATOR_SECRET: secret },
     });
     const doc = stopDoc(stop, SECRET_REWRAP_JSON_KEYS, false);
-    expect(doc).toMatchObject({ calls: 0, resealed: 0, failed: 0, more: false });
+    expect(doc).toMatchObject({ calls: 0, resealed: 0, failed: 0, skipped: 0, more: false });
     expect(doc.stopped).toContain("no answer");
     expect(stop.stdout).not.toContain(secret);
 
