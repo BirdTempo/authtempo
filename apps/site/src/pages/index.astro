@@ -1,12 +1,106 @@
 ---
 // biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
-// The home page on the root layout (plan 11b1 Task 7). Task 10 builds brand spec 9 on it.
+// biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
+// The home page of brand spec 9 (layout 2, the margin rail). Every number
+// comes from code at build time, and every string from src/data, which
+// check-terms and check-sentences read (Task 9). No hero image: the code
+// block and the icons are the pictures.
+import { ROUTES } from "@authtempo/core/routes";
+import corePackage from "../../../../packages/core/package.json";
+import apiSample from "../../samples/start/first-sign-in-api.ts?raw";
+import Mark from "../assets/mark.svg";
+import Icon from "../components/Icon.astro";
+import { FEATURES, featureOrder } from "../data/features.ts";
 import { HOME } from "../data/home.ts";
 import { SITE } from "../data/site.ts";
+import { vendorHosts } from "../data/vendors.ts";
 import Site from "../layouts/Site.astro";
+
+// Core's source at build time, for the vendor count (brand spec 9, decision 2).
+const coreSources = import.meta.glob("../../../../packages/core/src/**/*.ts", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+// A glob that reads no file gives 0 vendors, which is the true count today.
+// So the build stops when the glob does not read the entry of core.
+if (!Object.keys(coreSources).some((path) => path.endsWith("packages/core/src/index.ts")))
+  throw new Error(
+    "index.astro: the glob does not read packages/core/src/index.ts, so the vendor count is not from code",
+  );
+const vendors = vendorHosts(
+  new Map(
+    Object.entries(coreSources).map(([path, text]) => [path.replace(/^(\.\.\/)+/, ""), text]),
+  ),
+);
+const features = featureOrder(ROUTES);
 ---
 <Site title={HOME.title} description={HOME.description} path="/">
-  <h1>{HOME.headline}</h1>
-  <p>{HOME.lede}</p>
-  <p><a href={SITE.docs}>{HOME.cta}</a></p>
+  <section class="hero">
+    <div class="rail" aria-hidden="true"><span></span><span class="rail-accent"></span><span></span><span></span><span></span></div>
+    <div class="hero-text at-stagger">
+      <span class="hero-mark at-beat at-enter"><Mark /></span>
+      <h1 class="at-enter">{HOME.headline}</h1>
+      <p class="lede at-enter">{HOME.lede}</p>
+      <ul class="claims at-enter">{HOME.claims.map((claim) => <li>{claim}</li>)}</ul>
+      <p class="actions at-enter">
+        <a class="button at-lift" href={SITE.docs}>{HOME.cta}</a>
+        <code class="install">npm install {corePackage.name}</code>
+      </p>
+    </div>
+  </section>
+  <section class="features" aria-labelledby="features-title">
+    <h2 id="features-title" class="at-enter">{HOME.featuresTitle}</h2>
+    <div class="features-grid">
+      <ul class="feature-list at-draw-list">
+        {features.map((f) => (
+          <li class="feature-row" id={`feature-${f}`}>
+            <Icon name={FEATURES[f].icon} draw />
+            <span class="feature-name">{FEATURES[f].title}</span>
+            <span class="feature-line">{FEATURES[f].line}</span>
+          </li>
+        ))}
+      </ul>
+      <pre class="code at-card at-lift"><code>{apiSample}</code></pre>
+    </div>
+  </section>
+  <section class="numbers">
+    <dl>
+      <div class="cell"><dt>{HOME.numbers.routes}</dt><dd class="mono">{ROUTES.length}</dd></div>
+      <div class="cell"><dt>{HOME.numbers.vendors}</dt><dd class="mono">{vendors.length}</dd></div>
+    </dl>
+  </section>
 </Site>
+<style>
+  section { padding-block: calc(var(--at-rhythm) * 2); }
+  .hero { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); gap: var(--at-rhythm); padding-block: calc(var(--at-rhythm) * 3); }
+  @media (min-width: 48rem) { .hero { grid-template-columns: 3rem minmax(0, 1fr); } }
+  .rail { display: flex; flex-direction: column; align-items: center; gap: var(--at-unit); padding-top: calc(var(--at-unit) * 7); }
+  .rail span { display: block; width: var(--at-rail); height: 1.5rem; background: var(--at-line); }
+  .rail .rail-accent { height: 3rem; background: var(--at-accent); }
+  .hero-mark { display: block; color: var(--at-ink); }
+  .hero-mark :global(svg) { display: block; width: 2rem; height: 2rem; }
+  h1 { max-width: var(--at-measure-hero); margin: var(--at-rhythm) 0 0; font-size: var(--at-text-display); line-height: var(--at-leading-display); letter-spacing: var(--at-tracking-display); font-weight: 600; }
+  .lede { max-width: var(--at-measure); margin: var(--at-rhythm) 0 0; color: var(--at-mute); font-size: var(--at-text-h3); line-height: var(--at-leading-h3); }
+  .claims { display: flex; flex-wrap: wrap; gap: var(--at-rhythm); margin: var(--at-rhythm) 0 0; padding: 0; list-style: none; font-weight: 500; }
+  .claims li { display: inline-flex; align-items: center; gap: var(--at-unit); }
+  .claims li::before { content: ""; width: 0.375rem; height: 0.375rem; border-radius: 50%; background: var(--at-accent); }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--at-rhythm); margin: var(--at-rhythm) 0 0; }
+  .button { display: inline-block; padding: calc(var(--at-unit) * 1.5) calc(var(--at-unit) * 3); border-radius: 0.5rem; background: var(--at-ink); color: var(--at-paper); text-decoration: none; font-weight: 500; }
+  .install { color: var(--at-mute); font-size: var(--at-text-mono); }
+  h2 { margin: 0; font-size: var(--at-text-h2); line-height: var(--at-leading-h2); letter-spacing: var(--at-tracking-h2); font-weight: 600; }
+  .features-grid { display: grid; gap: var(--at-rhythm); margin-top: var(--at-rhythm); }
+  @media (min-width: 64rem) { .features-grid { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); align-items: start; } }
+  .feature-list { display: grid; column-gap: var(--at-rhythm); margin: 0; padding: 0; list-style: none; }
+  @media (min-width: 40rem) { .feature-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  .feature-row { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); column-gap: calc(var(--at-unit) * 1.5); padding-block: calc(var(--at-unit) * 1.5); border-top: 1px solid var(--at-line); }
+  .feature-row :global(.at-icon) { grid-row: span 2; width: 1.5rem; height: 1.5rem; color: var(--at-ink); }
+  .feature-name { font-weight: 600; }
+  .feature-line { color: var(--at-mute); font-size: var(--at-text-small); line-height: var(--at-leading-small); }
+  .code { margin: 0; padding: var(--at-rhythm); overflow-x: auto; border-radius: 0.75rem; background: var(--at-code); color: var(--at-code-ink); font-size: var(--at-text-mono); line-height: var(--at-leading-mono); }
+  .numbers dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border: 1px solid var(--at-line); }
+  .cell { display: flex; flex-direction: column-reverse; padding: var(--at-rhythm); }
+  .cell + .cell { border-inline-start: 1px solid var(--at-line); }
+  dt { color: var(--at-mute); }
+  dd { margin: 0; font-size: var(--at-text-h1); line-height: var(--at-leading-h1); }
+</style>

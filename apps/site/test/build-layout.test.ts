@@ -1,10 +1,13 @@
 import { existsSync, readFileSync } from "node:fs";
+import { ROUTES } from "@authtempo/core/routes";
 import { describe, expect, it } from "vitest";
 import { walk } from "../scripts/lib/files.ts";
 import { pageCss } from "../scripts/lib/html.ts";
-import { DIST, SITE } from "../scripts/lib/paths.ts";
+import { DIST, REPO, SITE } from "../scripts/lib/paths.ts";
 import { parseTokens } from "../scripts/lib/tokens.ts";
+import { FEATURES, featureOrder } from "../src/data/features.ts";
 import { HOME } from "../src/data/home.ts";
+import { vendorHosts } from "../src/data/vendors.ts";
 
 // `pnpm test` runs `astro build` before vitest, so dist is newer than the change.
 const html = walk(DIST, (p) => p.endsWith(".html")).map((p) => p.slice(DIST.length));
@@ -161,5 +164,61 @@ describe("the root layout (plan 11b1)", () => {
     const footer = page("index.html").split('class="site-footer')[1] ?? "";
     expect(footer).toContain(`authtempo · ${root.license ?? HOME.noLicense}`);
     expect(footer).toContain(core.version);
+  });
+});
+
+// Starlight 0.42.6 sets scopedStyleStrategy "where", so Astro adds an astro-<hash>
+// class to each element of a styled component. A class match allows that class.
+describe("the home page (brand spec 9)", () => {
+  it("shows the hero of the margin rail", () => {
+    const home = page("index.html");
+    // The head description holds the headline and the lede, so the texts are read in the hero only.
+    const hero = home.split('<section class="hero')[1]?.split("</section>")[0] ?? "";
+    for (const text of [
+      HOME.headline,
+      HOME.lede,
+      ...HOME.claims,
+      HOME.cta,
+      "npm install @authtempo/core",
+    ])
+      expect({ text, found: hero.includes(text) }).toEqual({ text, found: true });
+    const rail = /<div class="rail[ "][^>]*>([\s\S]*?)<\/div>/.exec(home)?.[1] ?? "";
+    expect(rail.match(/<span\b/g)?.length).toBe(5);
+    expect(rail.match(/rail-accent/g)?.length).toBe(1);
+    expect(home).toMatch(/ class="hero-mark at-beat[ "]/);
+  });
+
+  it("lists one feature row per RouteFeature member, in route order", () => {
+    const home = page("index.html");
+    const ids = [...home.matchAll(/ id="feature-([A-Za-z]+)"/g)].map((m) => m[1]);
+    expect(ids).toEqual(featureOrder(ROUTES));
+    for (const f of featureOrder(ROUTES)) {
+      const row = home.split(`id="feature-${f}"`)[1]?.split("</li>")[0] ?? "";
+      for (const part of [`/icons.svg#${FEATURES[f].icon}`, FEATURES[f].title, FEATURES[f].line])
+        expect({ f, part, found: row.includes(part) }).toEqual({ f, part, found: true });
+    }
+    expect(home.match(/ class="at-icon (?:astro-\w+ )?at-draw"/g)?.length).toBe(
+      featureOrder(ROUTES).length,
+    );
+  });
+
+  it("shows the route count and the vendor count from code", () => {
+    const core = new Map(
+      walk(`${REPO}packages/core/src/`, (p) => p.endsWith(".ts")).map((p) => [
+        p.slice(REPO.length),
+        readFileSync(p, "utf8"),
+      ]),
+    );
+    const numbers = [...page("index.html").matchAll(/<dd\b[^>]*>(\d+)<\/dd>/g)].map((m) =>
+      Number(m[1]),
+    );
+    expect(numbers).toEqual([ROUTES.length, vendorHosts(core).length]);
+  });
+
+  it("shows the one-call code block of the tested sample", () => {
+    const home = page("index.html");
+    expect(home).toMatch(/<pre class="code at-card at-lift[ "]/);
+    for (const line of ["createAuth({", "trustedOrigins: [", "storage: deps.storage,"])
+      expect({ line, found: home.includes(line) }).toEqual({ line, found: true });
   });
 });
