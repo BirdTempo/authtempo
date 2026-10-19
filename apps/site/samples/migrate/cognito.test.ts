@@ -1,24 +1,12 @@
-import { cognitoSource, importUsers } from "@authtempo/import";
+import { LEGACY_VERIFY_HASH } from "@authtempo/core";
+import { importUsers, readSource } from "@authtempo/import";
+import { FIXTURE_EXPORTS } from "@authtempo/import/testing";
 import { describe, expect, it } from "vitest";
-import { call, harness } from "../support/harness.ts";
+import { call, type Harness, harness } from "../support/harness.ts";
 import { createCognitoAuth } from "./cognito.ts";
 
-// One confirmed user, as `aws cognito-idp list-users` prints it.
-const USERS = JSON.stringify({
-  Users: [
-    {
-      Username: "c0ffee",
-      Attributes: [
-        { Name: "sub", Value: "sub-1" },
-        { Name: "email", Value: "cara@example.com" },
-        { Name: "email_verified", Value: "true" },
-      ],
-      UserCreateDate: 1700000000.5,
-      Enabled: true,
-      UserStatus: "CONFIRMED",
-    },
-  ],
-});
+// The fixture export of the Cognito reader: Cara, one CONFIRMED user, with no hash.
+const f = FIXTURE_EXPORTS.cognito;
 
 /** A fake Cognito: InitiateAuth passes for one password and refuses every other. */
 function fakeCognito(password: string) {
@@ -35,10 +23,38 @@ function fakeCognito(password: string) {
   return { impl, calls };
 }
 
+/** The hash of the one password row in the database. */
+async function onlyHash(h: Harness): Promise<string> {
+  const rows = await h.storage.findMany("password", []);
+  expect(rows.length).toBe(1);
+  return rows[0]?.hash ?? "";
+}
+
 describe("move users from Amazon Cognito", () => {
+  it("imports the fixture export with the marker", async () => {
+    const h = harness();
+    const report = await importUsers(h.storage, await readSource(f.bundle), {
+      formats: [],
+      legacyVerify: true,
+    });
+    expect(report.created.password).toBe(1);
+    // The marker that core reads as "ask the old system".
+    expect(await onlyHash(h)).toBe(LEGACY_VERIFY_HASH);
+
+    const cognito = fakeCognito("right horse battery");
+    const auth = createCognitoAuth(h, cognito.impl);
+    const res = await call(auth, "POST", "/auth/password/sign-in", {
+      email: "cara@example.com",
+      password: "right horse battery",
+    });
+    expect(res.status).toBe(200);
+    expect(cognito.calls).toEqual(["cara@example.com"]);
+    expect((await onlyHash(h)).startsWith("pbkdf2-sha256$")).toBe(true);
+  });
+
   it("asks Cognito once at the first sign-in, then signs in with core's own hash", async () => {
     const h = harness();
-    const report = await importUsers(h.storage, cognitoSource({ users: USERS }), {
+    const report = await importUsers(h.storage, await readSource(f.bundle), {
       formats: [],
       legacyVerify: true,
     });
@@ -55,7 +71,7 @@ describe("move users from Amazon Cognito", () => {
 
   it("answers invalid_credentials when Cognito refuses the password", async () => {
     const h = harness();
-    await importUsers(h.storage, cognitoSource({ users: USERS }), {
+    await importUsers(h.storage, await readSource(f.bundle), {
       formats: [],
       legacyVerify: true,
     });
