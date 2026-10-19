@@ -17,7 +17,9 @@ import type { TokenAnswer } from "./oauth-token.js";
 
 /** The grant type of RFC 6749 section 4.4.2. */
 export const CREDENTIALS_GRANT = "client_credentials";
-// A service polls; 2 per second per client bounds a runaway loop and keeps a real one.
+// A runaway loop of one client stops at 2 per second, also when it spreads over many IPs.
+// oauth-token:ip counts first, so a service on one IP gets 60 tokens per 15 minutes.
+// A service keeps its token until its expiry, so it needs far fewer (ruling 27 of plan 12e).
 export const CREDENTIALS_PER_CLIENT = { seconds: 60, max: 120 };
 
 /** The caller of a valid `client_credentials` access token: a client, and no user. */
