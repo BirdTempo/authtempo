@@ -20,7 +20,7 @@ export const DEMO_FEATURES = [
 /** Off in the demo, each with its reason. A new feature of core fails the coverage test until it is in one list. */
 export const DEMO_EXEMPT = {
   handoff: "It needs a native or desktop app on the visitor's device.",
-  oauth: "The provider needs a client app. A later row can add a demo client page.",
+  oauth: "The provider needs a client app, and the demo has none.",
   oauthRegistration: "The provider needs a client app.",
   jwtMint: "Its key set and tokens serve a client app, which the demo does not have.",
   operator: "An operator tool, not a sign-in method.",
