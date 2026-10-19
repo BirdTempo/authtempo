@@ -13,7 +13,7 @@ const SIDES: readonly CompareSide[] = ["authtempo", "parity", "better-auth"];
  * tag of the text is a space, so "$<span>25</span>" reads as "$ 25", and
  * a cell never joins the word of the next cell.
  */
-const PRICE = new RegExp(
+export const PRICE = new RegExp(
   [
     String.raw`[$€£¥]\s*\d[\d.,]*`,
     String.raw`\d[\d.,]*\s*[$€£¥]`,
@@ -35,6 +35,11 @@ const ENTITIES: Readonly<Record<string, string>> = {
   "&yen;": "¥",
   "&#165;": "¥",
 };
+
+/** The text of an HTML part: each tag is a space, and each currency entity is its sign. */
+export function textOfHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, " ").replace(/&#?\w+;/g, (e) => ENTITIES[e.toLowerCase()] ?? e);
+}
 
 /** The day number of an ISO date, or null when the text is not a real calendar day. */
 function dayOf(iso: string): number | null {
@@ -138,10 +143,7 @@ export function checkFacts(input: {
   // A page with no main element would hide a price from this rule, so it fails.
   const main = input.built.split('<main id="main"')[1]?.split("</main>")[0];
   if (main === undefined) r.failures.push('the page has no <main id="main"> element');
-  const text = (main ?? "")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&#?\w+;/g, (e) => ENTITIES[e.toLowerCase()] ?? e);
-  const price = PRICE.exec(text);
+  const price = PRICE.exec(textOfHtml(main ?? ""));
   if (price !== null) r.failures.push(`the page names a price: "${price[0].trim()}"`);
   return requireCounts(r, ["rows", "models"]);
 }

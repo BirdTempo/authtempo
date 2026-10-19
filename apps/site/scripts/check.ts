@@ -11,12 +11,13 @@ import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
 import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtempo/core/openapi";
 import { ROUTES } from "@authtempo/core/routes";
 import { CONFLICT_REASONS, PROVIDER_FILES } from "@authtempo/import";
-import { COMPARE_ROWS, HOSTED_MODELS } from "../src/data/compare.ts";
+import { COMPARE_ROWS, HOSTED_MODELS, otherNames } from "../src/data/compare.ts";
 import { FEATURES, PACKAGE_EXEMPT, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { FEED_START, RELEASE_DATES } from "../src/data/releases.ts";
 import { REPO_ROOT } from "../src/data/repo.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
+import { checkClaims } from "./check-claims.ts";
 import { checkCli } from "./check-cli.ts";
 import { checkConfig } from "./check-config.ts";
 import { checkContrast } from "./check-contrast.ts";
@@ -339,6 +340,16 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   },
   // Plan 11b Task 6: each fact of /compare/ has a source, and a read date at most FACT_MAX_DAYS old.
   // `today` is the build time, so a fact grows old with no change of the tree.
+  // Spec 24 item 4 on each root page but /compare/ (final review m1 of plan
+  // 11b). The demo pages are not in the build: the demo prose test runs the same rule.
+  {
+    name: "check-claims",
+    run: () =>
+      checkClaims({
+        pages: new Map([...rootPages()].filter(([path]) => path !== "compare/index.html")),
+        names: otherNames(),
+      }),
+  },
   {
     name: "check-facts",
     run: () =>

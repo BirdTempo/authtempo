@@ -2,9 +2,11 @@ import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { checkClaims } from "../../../site/scripts/check-claims.ts";
 import { checkSentences } from "../../../site/scripts/check-sentences.ts";
 import { checkTerms } from "../../../site/scripts/check-terms.ts";
 import type { Page } from "../../../site/scripts/lib/markdown.ts";
+import { otherNames } from "../../../site/src/data/compare.ts";
 import type { Html } from "../../src/html.ts";
 import { DEMO_IDENTITIES, MAX_EMAIL } from "../../src/identities.ts";
 import { DEMO_BODIES } from "../../src/pages/index.ts";
@@ -116,6 +118,45 @@ describe("the prose of the demo pages", () => {
       expect(sentences.failures, p.path).toEqual([]);
       expect(sentences.counts.sentences ?? 0, p.path).toBeGreaterThan(0);
     }
+  });
+
+  it("makes no claim of the compare page on any demo page (spec 24 item 4)", async () => {
+    // Final review m1 of plan 11b: the rule of check-claims, on the pages of the demo Worker.
+    const docs = new Map<string, string>();
+    for (const p of DEMO_PAGES) {
+      const { body, script } = DEMO_BODIES[p.path];
+      const doc = page({
+        title: p.title,
+        path: p.path,
+        resetAt: STATE.resetAt,
+        body: body(STATE),
+        script,
+      });
+      docs.set(`demo${p.path}`, await doc.text());
+    }
+    const provider = providerBody({
+      action: "/provider/authorize",
+      identities: DEMO_IDENTITIES,
+      maxEmail: MAX_EMAIL,
+    });
+    const chooser = page({
+      title: PROVIDER_TITLE,
+      path: "/provider/authorize",
+      resetAt: 0,
+      body: provider,
+      script: null,
+    });
+    docs.set("demo/provider/authorize", await chooser.text());
+    for (const r of [
+      "sandboxesPerIp",
+      "sandboxesTotal",
+      "requestsPerIpPerMinute",
+      "cross_site",
+    ] as const)
+      docs.set(`demo/refused/${r}`, await refusedPage(429, r, STATE.resetAt).text());
+    const report = checkClaims({ pages: docs, names: otherNames() });
+    expect(report.counts.pages).toBe(15);
+    expect(report.failures).toEqual([]);
   });
 
   it("reads the text of the layout, the body, and a mail", async () => {

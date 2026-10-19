@@ -663,6 +663,17 @@ export const HOSTED_MODELS: readonly HostedModel[] = [
   },
 ];
 
+/**
+ * The name of each other product of this page, in full and in short (spec 24
+ * item 4, final review m1). No other root page and no demo page names one;
+ * check-claims holds that, with its allowed phrases.
+ */
+export function otherNames(): string[] {
+  const short = (name: string) => name.replace(/ Auth$/, "").replace(/^Amazon /, "");
+  const names = [COMPARE_PAGE.betterAuth, ...HOSTED_MODELS.flatMap((m) => [m.name, short(m.name)])];
+  return [...new Set(names)];
+}
+
 /** The labels of /compare/ outside its entry. check-terms and check-sentences read them. */
 export const COMPARE_PAGE = {
   topic: "Topic",
