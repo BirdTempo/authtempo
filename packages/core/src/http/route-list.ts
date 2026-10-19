@@ -28,6 +28,7 @@ export const ROUTE_FEATURES = [
   "operator",
   "oauth",
   "oauthRegistration",
+  "openapi",
 ] as const;
 export type RouteFeature = (typeof ROUTE_FEATURES)[number];
 
@@ -54,7 +55,7 @@ export interface RouteEntry {
    * needs `operator.secretHash` (plan 11c), and `/operator/keys/rotate` also
    * needs `jwtMint` (plan 11c2). `account` (plan 12a) is in every
    * deployment. `accountDelete` (plan 12a) is on by default; `account.delete:
-   * false` turns it off.
+   * false` turns it off. `openapi` (plan 11g) needs `openapi: true`.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -1276,6 +1277,14 @@ export const ROUTES = Object.freeze([
     method: "GET",
     path: "/.well-known/openid-configuration",
     feature: "oauth",
+    auth: ["none"],
+    codes: [],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/openapi.json",
+    feature: "openapi",
     auth: ["none"],
     codes: [],
     oauthCodes: [],

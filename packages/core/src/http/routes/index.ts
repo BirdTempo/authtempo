@@ -6,6 +6,7 @@ import { identityRoutes } from "./identities.js";
 import { jwtRoutes } from "./jwt.js";
 import { magicLinkRoutes } from "./magic-link.js";
 import { oauthRoutes } from "./oauth.js";
+import { openApiRoutes } from "./openapi.js";
 import { operatorRoutes } from "./operator.js";
 import { organizationRoutes } from "./organizations.js";
 import { passkeyRoutes } from "./passkeys.js";
@@ -36,7 +37,8 @@ export type RouteModule =
   | "tokens"
   | "jwt"
   | "operator"
-  | "oauth";
+  | "oauth"
+  | "openapi";
 
 /**
  * Every route of a config, by module, in the router's order (plan 11g). The
@@ -45,7 +47,7 @@ export type RouteModule =
 export function coreRouteModules(
   config: ResolvedConfig,
 ): readonly { module: RouteModule; routes: Route[] }[] {
-  return [
+  const list: { module: RouteModule; routes: Route[] }[] = [
     { module: "sessions", routes: sessionRoutes(config) },
     { module: "reauth", routes: reauthRoutes(config) },
     { module: "user", routes: userRoutes(config) },
@@ -64,6 +66,12 @@ export function coreRouteModules(
     { module: "operator", routes: operatorRoutes(config) },
     { module: "oauth", routes: oauthRoutes(config) },
   ];
+  // The thunk reads the final list at the first request, so the document lists this route too.
+  list.push({
+    module: "openapi",
+    routes: openApiRoutes(config, () => list.flatMap((m) => m.routes)),
+  });
+  return list;
 }
 
 /**

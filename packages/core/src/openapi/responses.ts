@@ -26,12 +26,15 @@ export const ERROR_SCHEMAS = {
   },
 } as const;
 
+/** The OpenAPI version that plan 11g read at spec.openapis.org on 2026-10-19: the latest 3.1 patch. */
+export const OPENAPI_VERSION = "3.1.2";
+
 /** The standard that a metadata answer follows. */
 const STANDARDS: Record<Extract<AnswerKind, { kind: "metadata" }>["standard"], string> = {
   rfc8414: "The authorization server metadata of RFC 8414.",
   "oidc-discovery": "The provider metadata of OpenID Connect Discovery 1.0.",
   jwks: "The JSON Web Key Set of RFC 7517.",
-  openapi: "This OpenAPI document.",
+  openapi: `This OpenAPI document, by the [OpenAPI Specification ${OPENAPI_VERSION}](https://spec.openapis.org/oas/v${OPENAPI_VERSION}.html).`,
 };
 
 interface OpenApiResponse {

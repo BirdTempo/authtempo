@@ -39,6 +39,7 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "GET /handoff/start",
   "GET /jwks",
   "GET /oauth/grants",
+  "GET /openapi.json",
   "GET /password/reset",
   "GET /password/verify",
   "GET /social/:provider/callback",

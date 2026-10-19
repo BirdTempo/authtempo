@@ -1,14 +1,16 @@
 import type { z } from "zod";
 import { fail, ok, type Result } from "../result.js";
 
+/** The headers of every JSON answer of core. A route that writes its own JSON text reads them too. */
+export const JSON_HEADERS: Readonly<Record<string, string>> = Object.freeze({
+  "content-type": "application/json; charset=utf-8",
+  "cache-control": "no-store",
+});
+
 export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-      ...headers,
-    },
+    headers: { ...JSON_HEADERS, ...headers },
   });
 }
 

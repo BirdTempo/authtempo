@@ -6,6 +6,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 5
   - packages/core/src/config.ts
   - apps/site/scripts/lib/config-keys.ts
+  - docs/superpowers/plans/2026-10-14-11g-openapi.md
 ---
 
 **For:** a developer who writes the config of `createAuth`, or reads an error of construction.
@@ -53,6 +54,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, `/token/live`, and `api.jwt`. The OAuth provider needs it. |
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
 | `operator` | object or `false` | off | Turns on `GET /operator/secrets/status`, `POST /operator/secrets/rewrap`, `GET /operator/info`, and `POST /operator/keys/rotate`. `keys/rotate` needs `jwtMint`. |
+| `openapi` | `boolean` | `false` | Serves `GET <basePath>/openapi.json`, the OpenAPI document of the routes that the config turns on. |
 | `hooks` | object | no hook | The groups `organization`, `session`, `user`, and `identity`. Any other group is refused. |
 | `account` | object | the defaults below | The settings page: the proof mails, the notices, the confirm page, and the delete. See the keys under Account. |
 

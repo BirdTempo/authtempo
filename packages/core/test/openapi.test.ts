@@ -84,7 +84,7 @@ describe("openApiDocument (plan 11g)", () => {
     const keys = operations(doc).map((o) => o.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect([...keys].sort()).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(98);
+    expect(keys.length).toBe(99);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(":provider", "{provider}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });

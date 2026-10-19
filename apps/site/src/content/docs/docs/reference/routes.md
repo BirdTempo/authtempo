@@ -6,6 +6,7 @@ sources:
   - packages/core/README.md "Routes under"
   - packages/core/src/http/route-list.ts
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
+  - docs/superpowers/plans/2026-10-14-11g-openapi.md
 ---
 
 **For:** a developer who calls the routes of core, or checks what a route answers.
@@ -992,6 +993,19 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | Needs | Nothing |
 | Input | None |
 | Answer | The same document, for OpenID Connect Discovery |
+| Errors | None |
+
+## OpenAPI document
+
+This route exists when the config sets `openapi: true`.
+
+<h3 id="get-openapi-json"><code>GET /openapi.json</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | None |
+| Answer | The OpenAPI 3.1 document of the routes that the config turns on |
 | Errors | None |
 
 ## Next

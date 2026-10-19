@@ -8,11 +8,10 @@ import { ROUTE_FEATURES, ROUTES, type RouteEntry, type RouteKey } from "../http/
 import { PROVIDER_NAME_RE } from "../social/provider.js";
 import type { OpenApiOptions } from "./deployment.js";
 import { FEATURE_INFO } from "./features.js";
-import { ERROR_SCHEMAS, responsesOf } from "./responses.js";
+import { ERROR_SCHEMAS, OPENAPI_VERSION, responsesOf } from "./responses.js";
 import { SCHEME_NAMES, securityOf, securitySchemes } from "./schemes.js";
 
-/** The OpenAPI version that plan 11g read at spec.openapis.org on 2026-10-19: the latest 3.1 patch. */
-export const OPENAPI_VERSION = "3.1.2";
+export { OPENAPI_VERSION } from "./responses.js";
 
 /** The OpenAPI document as plain JSON data. */
 export type OpenApiDoc = { readonly openapi: string } & Record<string, unknown>;

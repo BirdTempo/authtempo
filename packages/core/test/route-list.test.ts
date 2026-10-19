@@ -35,6 +35,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   jwt: ["jwtMint"],
   operator: ["operator"],
   oauth: ["oauth", "oauthRegistration"],
+  openapi: ["openapi"],
 };
 
 describe("ROUTES (plan 11a)", () => {
@@ -48,7 +49,7 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(101);
+    expect(listed.length).toBe(102);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -155,6 +156,7 @@ describe("ROUTES (plan 11a)", () => {
       delta: { operator: { secretHash: "0".repeat(64) } },
       features: ["operator"],
     },
+    { name: "openapi", delta: { openapi: true }, features: ["openapi"] },
   ];
 
   it.each(deltas)(

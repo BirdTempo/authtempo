@@ -6,6 +6,7 @@ import { IDENTITIES_CONTRACT } from "./identities.js";
 import { JWT_CONTRACT } from "./jwt.js";
 import { MAGIC_LINK_CONTRACT } from "./magic-link.js";
 import { OAUTH_CONTRACT } from "./oauth.js";
+import { OPENAPI_CONTRACT } from "./openapi.js";
 import { OPERATOR_CONTRACT } from "./operator.js";
 import { ORGANIZATIONS_CONTRACT } from "./organizations.js";
 import { PASSKEYS_CONTRACT } from "./passkeys.js";
@@ -44,6 +45,7 @@ export const ROUTE_CONTRACT = {
   ...JWT_CONTRACT,
   ...OPERATOR_CONTRACT,
   ...OAUTH_CONTRACT,
+  ...OPENAPI_CONTRACT,
 } as const satisfies Record<RouteKey, RouteContract>;
 
 type ContractOf<K extends RouteKey> = (typeof ROUTE_CONTRACT)[K];

@@ -353,6 +353,12 @@ export interface AuthConfig {
    */
   operator?: OperatorConfig | false;
   /**
+   * `GET <basePath>/openapi.json`, the OpenAPI document of the routes that
+   * this config mounts (plan 11g). Off when absent. It lists no route of a
+   * feature that is off, and holds no secret.
+   */
+  openapi?: boolean;
+  /**
    * The app's code at named points of the organization and session flows
    * (plan 9d, spec 8.9). A before hook runs inside the flow's transaction and
    * refuses with `throw hookRefusal(message)`; an after hook runs after the
@@ -699,6 +705,7 @@ export interface ResolvedConfig {
   jwtMint: ResolvedJwtMint | null;
   oauth: ResolvedOAuth | null;
   operator: { secretHash: string } | null;
+  openapi: boolean;
   hooks: ResolvedHooks;
   account: ResolvedAccount;
   captcha: ResolvedCaptcha | null;
@@ -965,6 +972,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   // One source for the session cookie names: the trust cookie check of `totp` reads them too.
   const { cookieName, legacyCookieName } = sessionCookieNames(input.cookieName);
   const jwtMint = resolveJwtMint(input.jwtMint, input.baseURL);
+  const openapi = input.openapi ?? false;
+  if (typeof openapi !== "boolean") throw new ConfigError("openapi must be true or false");
   return {
     basePath,
     baseURL: input.baseURL,
@@ -1002,6 +1011,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     jwtMint,
     oauth: resolveOAuth(input.oauth, jwtMint),
     operator: resolveOperator(input.operator),
+    openapi,
     hooks: resolveHooks(input.hooks, organizations !== null),
     account: resolveAccount(input.account),
     captcha: resolveCaptcha(

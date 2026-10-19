@@ -61,5 +61,6 @@ export function everyFeature(): ResolvedConfig {
     password: {},
     oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false } },
     operator: { secretHash: "0".repeat(64) },
+    openapi: true,
   });
 }

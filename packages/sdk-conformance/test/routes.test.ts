@@ -78,6 +78,11 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     path: "/user/delete/confirm",
     reason: "the confirm page of the mailed delete link; a browser opens it (plan 12a Task 20)",
   },
+  {
+    method: "GET",
+    path: "/openapi.json",
+    reason: "a code generator or an API tool reads the document; no SDK call needs it (plan 11g)",
+  },
 ];
 
 const TABLES = {

@@ -24,6 +24,7 @@ export const FEATURE_INFO: Record<RouteFeature, { configKey: string; default: "o
   operator: { configKey: "operator", default: "off" },
   oauth: { configKey: "oauth", default: "off" },
   oauthRegistration: { configKey: "oauth.registration.dynamic", default: "off" },
+  openapi: { configKey: "openapi", default: "off" },
 };
 
 const FEATURE_OF: ReadonlyMap<string, RouteFeature> = new Map(
