@@ -3,9 +3,9 @@ import type { AuthConfig } from "./config.js";
 /**
  * Every top-level key of `AuthConfig`, for `GET /operator/info` (plan 11c2).
  * `AuthConfig` has no runtime allow list, so the info route lists a key only
- * when this table names it. The `satisfies` ties the table to the type: a
- * key that core adds and the table lacks fails `typecheck`, and so does a
- * key that the table adds and core lacks.
+ * when this table names it. The `satisfies` ties the table to the type. A
+ * key that core adds and the table lacks fails `typecheck`. A key that the
+ * table adds and core lacks fails it too.
  */
 export const AUTH_CONFIG_KEYS = {
   basePath: true,
@@ -77,11 +77,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * The key paths of a config, sorted: each own key of `input` that
- * `AUTH_CONFIG_KEYS` names and whose value is not `undefined`, and under a
- * key of `CONFIG_BLOCKS` whose value is a plain object, `<key>.<sub>` for
- * each own key whose value is not `undefined`. It reads no value beyond the
- * `undefined` test and the prototype test, so no secret reaches the list.
+ * The key paths of a config, sorted. The list holds each own key of `input`
+ * that `AUTH_CONFIG_KEYS` names and whose value is not `undefined`. Under a
+ * key of `CONFIG_BLOCKS` whose value is a plain object, it also holds
+ * `<key>.<sub>` for each own key whose value is not `undefined`. It reads no
+ * value beyond the `undefined` test and the prototype test, so no secret
+ * reaches the list.
  */
 export function configKeyPaths(input: AuthConfig): string[] {
   const paths: string[] = [];

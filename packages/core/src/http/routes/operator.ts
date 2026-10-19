@@ -33,8 +33,15 @@ export const OPERATOR_SECRETS_PER_IP = { seconds: 3600, max: 120 };
  */
 const OPERATOR_AUTH = /^Operator (\S+)$/i;
 
-/** The body of a rewrap: `limit` alone, a whole number. An empty body is `{}`. */
-const rewrapBody = z.strictObject({ limit: z.number().int().optional() });
+/**
+ * The body of a rewrap: `limit`, a whole number, and `after`, the cursor of
+ * the last answer. An empty body is `{}`. The engine refuses a cursor it did
+ * not answer.
+ */
+const rewrapBody = z.strictObject({
+  limit: z.number().int().optional(),
+  after: z.string().optional(),
+});
 
 type Operator = NonNullable<ResolvedConfig["operator"]>;
 
@@ -51,8 +58,10 @@ async function operatorAuthorized(ctx: RouteContext, operator: Operator): Promis
   );
 }
 
-/** The parsed body of a rewrap, or null for a body that is not a limit. */
-async function readRewrapBody(request: Request): Promise<{ limit?: number } | null> {
+/** The parsed body of a rewrap, or null for a body that is not a limit and a cursor. */
+async function readRewrapBody(
+  request: Request,
+): Promise<{ limit?: number; after?: string } | null> {
   const text = await request.text();
   let raw: unknown = {};
   if (text !== "") {
@@ -64,7 +73,11 @@ async function readRewrapBody(request: Request): Promise<{ limit?: number } | nu
   }
   const parsed = rewrapBody.safeParse(raw);
   if (!parsed.success) return null;
-  return parsed.data.limit === undefined ? {} : { limit: parsed.data.limit };
+  const { limit, after } = parsed.data;
+  return {
+    ...(limit === undefined ? {} : { limit }),
+    ...(after === undefined ? {} : { after }),
+  };
 }
 
 /**

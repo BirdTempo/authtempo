@@ -63,7 +63,7 @@ const RIGHT = `Operator ${SECRET}`;
 /**
  * One storage, clock, limiter, and mail list. `on(secrets)` makes the handle
  * of one phase over them: phase 1 with version 1, phase 2 with version 2
- * current and version 1 kept. `calls` records each limiter call: the memory
+ * current and version 1 kept. `calls` records each limiter call. The memory
  * limiter keys a bucket by the key and its window together, so only the
  * record can show that two routes use two keys.
  */
@@ -102,21 +102,34 @@ async function fixture() {
 type Fixture = Awaited<ReturnType<typeof fixture>>;
 type Handle = ReturnType<Fixture["on"]>;
 
-/**
- * Phase 1 through the routes: a verified user with a password, enrolled in
- * TOTP, and the first signing key. Answers the number of backup codes.
- */
-async function enroll(f: Fixture, auth: Handle): Promise<number> {
-  await auth.handle(post("/auth/password/sign-up", { email: EMAIL, password: PW }));
-  const confirm = f.mails.findLast((m) => m.to === EMAIL && m.subject.startsWith("Confirm"));
+/** A verified user with a password through the routes, and the session cookie of a sign-in. */
+async function signedIn(f: Fixture, auth: Handle, email: string): Promise<string> {
+  await auth.handle(post("/auth/password/sign-up", { email, password: PW }));
+  const confirm = f.mails.findLast((m) => m.to === email && m.subject.startsWith("Confirm"));
   if (!confirm) throw new Error("no confirm mail");
   await auth.handle(post("/auth/password/verify", { token: tokenFromMail(confirm.text) }));
-  const signIn = await auth.handle(post("/auth/password/sign-in", { email: EMAIL, password: PW }));
+  const signIn = await auth.handle(post("/auth/password/sign-in", { email, password: PW }));
   const cookie = signIn.headers
     .getSetCookie()
     .find((c) => c.startsWith("__Host-tempo_session="))
     ?.split(";")[0];
   if (!cookie) throw new Error(`the sign-in answered ${signIn.status} with no session cookie`);
+  return cookie;
+}
+
+/** A TOTP setup through the route, with no enable: a live setup that holds backup codes. */
+async function setupOnly(f: Fixture, auth: Handle, email: string): Promise<void> {
+  const cookie = await signedIn(f, auth, email);
+  const setup = await auth.handle(post("/auth/totp/setup", { password: PW }, { cookie }));
+  if (setup.status !== 200) throw new Error(`the setup answered ${setup.status}`);
+}
+
+/**
+ * Phase 1 through the routes: a verified user with a password, enrolled in
+ * TOTP, and the first signing key. Answers the number of backup codes.
+ */
+async function enroll(f: Fixture, auth: Handle): Promise<number> {
+  const cookie = await signedIn(f, auth, EMAIL);
   const setup = await auth.handle(post("/auth/totp/setup", { password: PW }, { cookie }));
   const body = (await setup.json()) as { secret: string; backupCodes: string[] };
   const code = await totpCode(base32Decode(body.secret), f.clock.now());
@@ -279,6 +292,36 @@ describe("the operator routes of the app secrets and info (plan 11c2)", () => {
     });
   });
 
+  it("passes the cursor after to the engine, so a pass moves past a blocked head row", async () => {
+    const f = await fixture();
+    const v1 = f.on(ONE);
+    // A live setup with codes sorts first: the ids carry the time, and the clock moves after it.
+    await setupOnly(f, v1, "bo@example.com");
+    f.clock.advance(1000);
+    await enroll(f, v1);
+    const auth = f.on(TWO);
+    const first = await auth.handle(rewrap(RIGHT, JSON.stringify({ limit: 1 })));
+    expect(first.status).toBe(200);
+    const head = (await first.json()) as SecretsRewrap;
+    expect({ ...head, next: head.next?.split(":")[0] }).toEqual({
+      resealed: 0,
+      failed: 0,
+      skipped: 1,
+      more: true,
+      next: "totp",
+    });
+    const second = await auth.handle(rewrap(RIGHT, JSON.stringify({ limit: 1, after: head.next })));
+    expect(second.status).toBe(200);
+    const moved = (await second.json()) as SecretsRewrap;
+    expect({ ...moved, next: moved.next?.split(":")[0] }).toEqual({
+      resealed: 1,
+      failed: 0,
+      skipped: 0,
+      more: true,
+      next: "totp",
+    });
+  });
+
   it("refuses a body that is not a limit", async () => {
     const { auth } = await twoPhase();
     const before = await (await auth.handle(status(RIGHT))).json();
@@ -292,6 +335,9 @@ describe("the operator routes of the app secrets and info (plan 11c2)", () => {
       '{ "limit": 1.5 }',
       '{ "limit": "1" }',
       '{ "limit": 1, "x": 1 }',
+      '{ "after": 1 }',
+      '{ "after": "" }',
+      '{ "after": "user:f1" }',
     ]) {
       const res = await auth.handle(rewrap(RIGHT, body));
       expect(res.status, body).toBe(400);
