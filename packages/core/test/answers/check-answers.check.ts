@@ -4,8 +4,8 @@ import { ANSWERS_EXEMPT } from "../answers-exempt.js";
 
 /**
  * The check run of plan 11g Task 5. The recorder of `test/setup/answers.ts`
- * writes one line per answer of the router in `.answers/`; this run reads
- * them and holds the suite to `ROUTES`: every route answered, every answer
+ * writes one line per answer of the router in `.answers/`. This run reads
+ * them and holds the suite to `ROUTES`. Every route answered, every answer
  * fit its contract, and every declared code was answered or has a reason.
  * It runs after the test run, in `pnpm test`, with its own config.
  */

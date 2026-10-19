@@ -17,8 +17,8 @@ function rows(code: string, reason: string, keys: readonly RouteKey[]): AnswersE
 
 /**
  * One row per route for a router code, except the routes in `answered`, where
- * a test causes the code. The check refuses a row whose code a record holds,
- * so a route that a test covers must be in `answered`, and no other may be.
+ * a test causes the code. The check refuses a row whose code a record holds.
+ * So a route that a test covers must be in `answered`, and no other may be.
  */
 function routerRows(code: string, reason: string, answered: readonly RouteKey[]): AnswersExempt[] {
   return rows(

@@ -31,9 +31,9 @@ import { codeNow, enrolled, PASSWORD, verifiedSession, wrongFor } from "./totp-h
 /**
  * The codes that one world answers on every route that declares them (plan
  * 11g Task 5). Each family reads its routes from `ROUTES`, so a route that
- * gains the code joins the family, and the answer recorder sees the code
+ * gains the code joins the family. The answer recorder then sees the code
  * on each route. A route whose check comes after another refusal needs a
- * body that passes the earlier checks: `BODIES` holds one valid body per
+ * body that passes the earlier checks. `BODIES` holds one valid body per
  * POST, and the first test holds each one to the contract's schema.
  */
 
@@ -55,8 +55,8 @@ const UNKNOWN_CEREMONY = ceremonyOf(BODY43);
 
 /**
  * A body that parses under the route's schema, for each POST with a body. A
- * value that starts with `$` is a placeholder: a test fills it with a value
- * of its world (an organization id, a mailed token, a challenge).
+ * value that starts with `$` is a placeholder. A test fills it with a value
+ * of its world: an organization id, a mailed token, or a challenge.
  */
 const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /sessions/revoke": { id: "s1" },
@@ -489,7 +489,7 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
 
 /**
  * The codes of one route each (plan 11g Task 5). Each test builds the one
- * state that the route refuses, through the engine or the routes, and reads
+ * state that the route refuses, through the engine or the routes. It reads
  * the code on the wire, so the answer recorder sees it on that route.
  */
 describe("the codes of one route (plan 11g)", () => {
@@ -865,8 +865,8 @@ describe("the codes of one route (plan 11g)", () => {
 });
 
 /**
- * The routes that declare a hook code and that this file does not drive:
- * the provider callbacks need a provider exchange, the passkey sign-in a
+ * The routes that declare a hook code and that this file does not drive.
+ * The provider callbacks need a provider exchange, the passkey sign-in a
  * registered passkey, and the unlink a linked identity. session-hooks.test.ts,
  * link.test.ts, and identities.test.ts prove the hook on the engine path.
  */
@@ -1050,7 +1050,7 @@ describe("the hook codes on every route that declares them (plan 11g)", () => {
 
 /**
  * The routes that declare `token_expired` and that this file does not
- * drive: the provider callbacks need a provider exchange, and the passkey
+ * drive. The provider callbacks need a provider exchange, and the passkey
  * second factor a registered passkey. social.test.ts and second-factor.test.ts
  * prove the engine path.
  */

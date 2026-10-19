@@ -13,9 +13,9 @@ const FS_MODULE = "node:fs";
 /**
  * The answer recorder of plan 11g Task 5. It wraps `createRouter` in every
  * test file of core, so each answer of the router gets one line in
- * `.answers/<pid>-<worker>.jsonl`: the route's key, the status, the content
- * type, the code, and a verdict. The check run (`vitest.answers.config.ts`)
- * reads the lines. The answer itself does not change.
+ * `.answers/<pid>-<worker>.jsonl`. The line holds the route's key, the
+ * status, the content type, the code, and a verdict. The check run
+ * (`vitest.answers.config.ts`) reads the lines. The answer itself does not change.
  *
  * The verdict is `ok`, or one failure text, by three rules:
  * 1. A code is in the entry's `codes` or `oauthCodes`, or in `ROUTER_CODES`,

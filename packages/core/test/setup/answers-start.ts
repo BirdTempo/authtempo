@@ -1,6 +1,6 @@
 /**
- * The global setup of the test run (plan 11g Task 5): an empty `.answers/`
- * with the start time, so the check run reads the records of this run only.
+ * The global setup of the test run (plan 11g Task 5). It leaves an empty
+ * `.answers/` with the start time, so the check run reads this run only.
  */
 const DIR = new URL("../../.answers/", import.meta.url);
 
