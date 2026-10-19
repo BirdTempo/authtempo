@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { checkFeed } from "../scripts/check-feed.ts";
+import { checkFeed, isDateTime } from "../scripts/check-feed.ts";
 import {
   atomFeed,
   datedEntries,
@@ -456,13 +456,39 @@ describe("checkFeed and RFC 4287 (plan 11b Task 7, ruling 29)", () => {
     ).toEqual([`the updated date of the feed is ${date}; it is not an RFC 3339 date-time`]);
   });
 
-  it("3.3: passes the last day of February in a leap year, and a leap second", () => {
+  it("3.3: passes the last day of February in a leap year as a date-time", () => {
+    // The only failure is the rule of the feed date, so the date-time itself passes.
+    expect(
+      emptyWith(`<updated>${FEED_START}</updated>`, "<updated>2028-02-29T23:59:59Z</updated>")
+        .failures,
+    ).toEqual([
+      "the feed has the updated date 2028-02-29T23:59:59Z; it must be 2026-10-14T00:00:00Z, the newest row of RELEASE_DATES, or FEED_START with no row",
+    ]);
+  });
+
+  it("3.3: fails the second 60, which the Atom schema refuses (Task 7 re-review, Low 1)", () => {
+    expect(isDateTime("2026-06-15T10:20:60Z")).toBe(false);
+    expect(isDateTime("2026-06-15T10:20:59Z")).toBe(true);
     expect(
       emptyWith(`<updated>${FEED_START}</updated>`, "<updated>2028-02-29T23:59:60Z</updated>")
         .failures,
     ).toEqual([
-      "the feed has the updated date 2028-02-29T23:59:60Z; it must be 2026-10-14T00:00:00Z, the newest row of RELEASE_DATES, or FEED_START with no row",
+      "the updated date of the feed is 2028-02-29T23:59:60Z; it is not an RFC 3339 date-time",
     ]);
+  });
+
+  it("holds FEED_START to the form of a row (Task 7 re-review, Low 1)", () => {
+    const start = "2026-10-14T23:59:60Z";
+    const r = checkFeed({
+      start,
+      feed: atomFeed([], start),
+      versions: AT_ZERO,
+      changelogs: [],
+      dates: {},
+    });
+    expect(r.failures).toContain(
+      "FEED_START is 2026-10-14T23:59:60Z; it must be YYYY-MM-DDTHH:MM:SSZ",
+    );
   });
 
   it("4.2.6: fails an id that is not an absolute IRI, and two entries with one id", () => {

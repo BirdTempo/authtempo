@@ -16,9 +16,11 @@ const ROW_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 
 /**
  * True for a date-time of RFC 3339 section 5.6 with a real calendar day.
- * Date.parse takes 2026-02-30 and the hour 24, so the parts are checked
- * here: the month, the day of that month, the hour 00 to 23, the minute, the
- * second (60 for a leap second, section 5.7), and the offset.
+ * Date.parse takes 2026-02-30 and the hour 24, so this function checks each
+ * part. The parts are the month, the day of that month, the hour 00 to 23,
+ * the minute, the second, and the offset. The second 60 fails. RFC 3339
+ * allows it at a leap second only, and the Atom schema refuses it
+ * (Task 7 re-review, Low 1).
  */
 export function isDateTime(d: string): boolean {
   const m = DATE_TIME.exec(d);
@@ -34,7 +36,7 @@ export function isDateTime(d: string): boolean {
     day <= days &&
     (hour ?? 99) <= 23 &&
     (minute ?? 99) <= 59 &&
-    (second ?? 99) <= 60 &&
+    (second ?? 99) <= 59 &&
     Number(m[7] ?? 0) <= 23 &&
     Number(m[8] ?? 0) <= 59
   );
@@ -205,6 +207,10 @@ export function checkFeed(input: FeedInput): CheckReport {
         `the row ${key} of RELEASE_DATES is ${date}; it must be YYYY-MM-DDTHH:MM:SSZ`,
       );
   }
+
+  // FEED_START has the form of a row, so the feed date of an empty feed is a real instant.
+  if (!isRowDate(input.start))
+    r.failures.push(`FEED_START is ${input.start}; it must be YYYY-MM-DDTHH:MM:SSZ`);
 
   // The dates of the feed against RELEASE_DATES (ruling 29, review of Task 7 Low 1).
   // Each entry takes its row. The feed takes the newest row, or FEED_START with no row.
