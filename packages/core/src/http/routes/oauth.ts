@@ -1,10 +1,16 @@
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
+import { issuerOf } from "../../engine/jwt.js";
 import {
   type AuthorizeStep,
   authorizeStep,
   decideAuthorize,
 } from "../../engine/oauth-authorize.js";
+import {
+  type AuthedClient,
+  authenticateClient,
+  namesClient,
+} from "../../engine/oauth-client-auth.js";
 import {
   findClient,
   ORIGIN_CHECK_PER_IP,
@@ -20,10 +26,11 @@ import {
   resolveAccessToken,
   revokeToken,
   type TokenAnswer,
+  tokenLimited,
   userinfoClaims,
 } from "../../engine/oauth-token.js";
 import { readBearer, renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
-import { OAUTH_ERRORS } from "../../errors.js";
+import { OAUTH_ERRORS, type OAuthErrorCode } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import type { OAuthClientRow } from "../../schema.js";
 import { revokeGrantBody } from "../contract/oauth.js";
@@ -181,46 +188,67 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     res.headers.append("vary", "Origin");
     return res;
   };
+  /**
+   * The client takes CORS from `origin`: a public client, from the origin of
+   * one of its redirect URIs. A secret in a browser is not a secret (plan 12e).
+   */
+  const corsClient = (client: OAuthClientRow | null, origin: string) =>
+    client !== null &&
+    client.authMethod === "none" &&
+    redirectOrigins(client.redirectUris).has(origin);
   const originChecked = async (ip: string | null) =>
     config.limiter.allow(`oauth-token-origin:ip:${ipKey(ip)}`, ORIGIN_CHECK_PER_IP);
+  /** A failed client auth; after a Basic attempt a 401 carries the Basic challenge (RFC 6749 section 5.2). */
+  const clientRefused = (r: { ok: false; error: OAuthErrorCode; status: number; basic?: true }) =>
+    json(
+      { error: r.error },
+      r.status,
+      r.basic && r.status === 401
+        ? { "www-authenticate": `Basic realm="${issuerOf(config)}"` }
+        : {},
+    );
+  const GRANTS = new Set(["authorization_code", "refresh_token"]);
   /**
    * The grant of a form; the answer of the endpoint before any CORS header.
+   * The client auth runs before the grant, so a failed auth spends nothing.
    * `client` is the row of `client_id` that the origin check read, so the
-   * grant does not read it again.
+   * auth does not read it again.
    */
   const grantAnswer = async (
+    request: Request,
     form: URLSearchParams | null,
     ip: string | null,
     client?: OAuthClientRow,
   ) => {
     if (!form) return tokenAnswer(oauthFail("invalid_request"));
-    const clientId = form.get("client_id") ?? "";
-    const known = client ? { client } : {};
-    const grant = form.get("grant_type");
+    const grant = form.get("grant_type") ?? "";
+    if (!GRANTS.has(grant)) return tokenAnswer(oauthFail("unsupported_grant_type"));
+    if (await tokenLimited(config, ip)) return tokenAnswer(oauthFail("rate_limited"));
+    const authed = await authenticateClient(config, request, form, client);
+    if (!authed.ok) {
+      // The token route's pragma of RFC 6749 section 5.1, as tokenAnswer sets it.
+      const refused = clientRefused(authed);
+      refused.headers.set("pragma", "no-cache");
+      return refused;
+    }
     if (grant === "authorization_code")
       return tokenAnswer(
         await exchangeCode(config, {
           code: form.get("code") ?? "",
-          codeVerifier: form.get("code_verifier") ?? "",
-          clientId,
+          codeVerifier: form.get("code_verifier"),
+          client: authed.value,
           redirectUri: form.get("redirect_uri") ?? "",
           resource: form.get("resource"),
-          ip,
-          ...known,
         }),
       );
-    if (grant === "refresh_token")
-      return tokenAnswer(
-        await refreshGrant(config, {
-          refreshToken: form.get("refresh_token") ?? "",
-          clientId,
-          scope: form.get("scope"),
-          resource: form.get("resource"),
-          ip,
-          ...known,
-        }),
-      );
-    return tokenAnswer(oauthFail("unsupported_grant_type"));
+    return tokenAnswer(
+      await refreshGrant(config, {
+        refreshToken: form.get("refresh_token") ?? "",
+        client: authed.value,
+        scope: form.get("scope"),
+        resource: form.get("resource"),
+      }),
+    );
   };
   const userinfo = async (ctx: RouteContext): Promise<Response> => {
     const bearer = readBearer(ctx.request);
@@ -250,7 +278,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         if (!(await originChecked(ip)))
           return json({ error: "rate_limited" }, OAUTH_ERRORS.rate_limited);
         const client = await registeredClient(config, url.searchParams.get("client_id") ?? "");
-        if (!client || !redirectOrigins(client.redirectUris).has(origin)) return null;
+        if (!corsClient(client, origin)) return null;
         return clientCors(
           new Response(null, {
             status: 204,
@@ -270,7 +298,8 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         // No Origin: the router applied the Origin rule and the Fetch Metadata rule. A trusted
         // Origin gets the router's credentialed CORS, as before plan 12b.
         // The router's config decides trust, so the handler and the router agree.
-        if (origin === null || originTrusted(ctx.config, origin)) return grantAnswer(form, ctx.ip);
+        if (origin === null || originTrusted(ctx.config, origin))
+          return grantAnswer(ctx.request, form, ctx.ip);
         // A foreign origin: the check runs before the grant, so a refused origin spends no code and no token.
         if (!(await originChecked(ctx.ip)))
           return json({ error: "rate_limited" }, OAUTH_ERRORS.rate_limited);
@@ -278,9 +307,9 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         // from the sweep. A refused probe can make that write too, at most once
         // per client per day, under the per-IP count above.
         const client = form ? await findClient(config, form.get("client_id") ?? "") : null;
-        if (!client || !redirectOrigins(client.redirectUris).has(origin))
+        if (!client || !corsClient(client, origin))
           return json({ error: "origin_not_trusted" }, 403);
-        return clientCors(await grantAnswer(form, ctx.ip, client), origin);
+        return clientCors(await grantAnswer(ctx.request, form, ctx.ip, client), origin);
       },
     },
     {
@@ -290,11 +319,16 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const form = await formParams(ctx.request);
         if (!form) return oauthJson(oauthFail("invalid_request"));
-        const r = await revokeToken(config, {
-          token: form.get("token") ?? "",
-          clientId: form.get("client_id"),
-          ip: ctx.ip,
-        });
+        if (await tokenLimited(config, ctx.ip)) return oauthJson(oauthFail("rate_limited"));
+        // RFC 7009 section 2.1: a client that names itself authenticates. With no
+        // client named, revokeToken lets only a public client's token go.
+        let client: AuthedClient | null = null;
+        if (namesClient(ctx.request, form)) {
+          const authed = await authenticateClient(config, ctx.request, form);
+          if (!authed.ok) return clientRefused(authed);
+          client = authed.value;
+        }
+        const r = await revokeToken(config, { token: form.get("token") ?? "", client });
         return r.ok ? json({}) : oauthJson(r);
       },
     },

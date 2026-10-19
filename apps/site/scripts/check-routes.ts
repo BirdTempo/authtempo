@@ -25,6 +25,7 @@ export const AUTH_WORDS: Record<AuthForm, string> = {
   accessToken: "An access token of the OAuth provider as the bearer",
   operator: "The operator secret",
   initialAccessToken: "The initial access token as the bearer",
+  clientSecretBasic: "The client id and secret as HTTP Basic",
 };
 
 /** The media word of an Input part, by the media types of the request body. */

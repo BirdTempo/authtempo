@@ -11,6 +11,7 @@ export const SCHEME_NAMES = [
   "oauth",
   "operatorSecret",
   "initialAccessToken",
+  "clientSecretBasic",
 ] as const;
 export type SchemeName = (typeof SCHEME_NAMES)[number];
 
@@ -23,11 +24,12 @@ const SCHEMES_OF: Record<AuthForm, readonly SchemeName[]> = {
   accessToken: ["oauth"],
   operator: ["operatorSecret"],
   initialAccessToken: ["initialAccessToken"],
+  clientSecretBasic: ["clientSecretBasic"],
 };
 
 /**
  * The six security schemes of spec 25 item 8, and the initial access token
- * of the register route (plan 12e). The OAuth flow URLs are
+ * of the register route and the client Basic auth (plan 12e). The OAuth flow URLs are
  * absolute with a `serverUrl`; with none, they are absolute paths, which
  * resolve against the server of the document. A token prefix is in a
  * description only, never a value.
@@ -60,7 +62,7 @@ export function securitySchemes(options: OpenApiOptions): Record<SchemeName, obj
     oauth: {
       type: "oauth2",
       description:
-        "An access token of the provider, from the authorization code flow with PKCE (S256). Each client is public: the token request has no client secret.",
+        "An access token of the provider, from the authorization code flow. A public client proves itself with PKCE (S256). A confidential client sends its secret, by `client_secret_basic` or `client_secret_post`. It may omit PKCE only when it asks `openid` with a `nonce`.",
       flows: {
         authorizationCode: {
           authorizationUrl: at("/oauth/authorize"),
@@ -82,6 +84,12 @@ export function securitySchemes(options: OpenApiOptions): Record<SchemeName, obj
       scheme: "bearer",
       description:
         "The initial access token of RFC 7591 as the bearer. The register route needs it while `oauth.registration.initialAccessTokenHash` is set.",
+    },
+    clientSecretBasic: {
+      type: "http",
+      scheme: "basic",
+      description:
+        "The client id and the client secret of a `client_secret_basic` client as HTTP Basic. Each half is form-encoded first (RFC 6749 section 2.3.1).",
     },
   };
 }

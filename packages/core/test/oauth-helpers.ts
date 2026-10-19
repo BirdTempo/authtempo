@@ -79,6 +79,33 @@ export async function registered(
   return ((await res.json()) as { client_id: string }).client_id;
 }
 
+/** A confidential client registered through the route (plan 12e). Answers its id and its secret. */
+export async function confidential(
+  h: Handle,
+  method: "client_secret_basic" | "client_secret_post",
+  redirectUris: string[] = [REDIRECT],
+): Promise<{ clientId: string; secret: string }> {
+  const res = await h.auth.handle(
+    post("/auth/oauth/register", {
+      redirect_uris: redirectUris,
+      client_name: "Secret client",
+      token_endpoint_auth_method: method,
+    }),
+  );
+  if (res.status !== 201) throw new Error(`register answered ${res.status}`);
+  const body = (await res.json()) as { client_id: string; client_secret?: string };
+  if (!body.client_secret) throw new Error("register answered no client_secret");
+  return { clientId: body.client_id, secret: body.client_secret };
+}
+
+/** The form encoding of one value (application/x-www-form-urlencoded). */
+const formEncoded = (value: string) => new URLSearchParams([["v", value]]).toString().slice(2);
+
+/** RFC 6749 section 2.3.1: Basic of the form-encoded id and secret. */
+export function basicHeader(id: string, secret: string): string {
+  return `Basic ${btoa(`${formEncoded(id)}:${formEncoded(secret)}`)}`;
+}
+
 export async function pkce() {
   const verifier = randomBase64Url(32);
   return { verifier, challenge: await sha256Base64Url(verifier) };
@@ -86,7 +113,8 @@ export async function pkce() {
 
 export interface AuthorizeInput {
   clientId: string;
-  challenge: string;
+  /** Null sends no `code_challenge`: a confidential client may omit it with `openid` and `nonce` (plan 12e). */
+  challenge: string | null;
   scope?: string;
   resource?: string;
   state?: string;
@@ -101,8 +129,10 @@ export function authorizeParams(i: AuthorizeInput): Record<string, string> {
     response_type: "code",
     client_id: i.clientId,
     redirect_uri: i.redirectUri ?? REDIRECT,
-    code_challenge: i.challenge,
-    code_challenge_method: i.method ?? "S256",
+    ...(i.challenge !== null ? { code_challenge: i.challenge } : {}),
+    ...(i.challenge !== null || i.method !== undefined
+      ? { code_challenge_method: i.method ?? "S256" }
+      : {}),
     scope: i.scope ?? "mcp:read offline_access",
     resource: i.resource ?? RESOURCE,
     state: i.state ?? "st-1",

@@ -45,9 +45,10 @@ Each operation has one security requirement for each credential form that the ro
 | `sessionBearer` | `http` | A session token as the bearer. It starts with `ts_` |
 | `apiToken` | `http` | An API token as the bearer. It starts with `tk_` |
 | `sessionJwt` | `http` | A session JWT as the bearer |
-| `oauth` | `oauth2` | An access token of the OAuth provider, from the authorization code flow with PKCE (S256). Each client is public |
+| `oauth` | `oauth2` | An access token of the OAuth provider, from the authorization code flow. A public client proves itself with PKCE (S256). A confidential client sends its secret, and may omit PKCE only when it asks `openid` with a `nonce` |
 | `operatorSecret` | `apiKey` | The operator secret in the `Authorization` header, as `Operator <secret>`. `Operator` is not a registered HTTP authentication scheme |
 | `initialAccessToken` | `http` | The initial access token of RFC 7591 as the bearer, for `POST /oauth/register` while `oauth.registration.initialAccessTokenHash` is set |
+| `clientSecretBasic` | `http` | The client id and secret of a `client_secret_basic` client as HTTP Basic, for `POST /oauth/token` and `POST /oauth/revoke`. Each half is form-encoded first |
 
 ## Tags
 

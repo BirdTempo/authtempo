@@ -157,11 +157,11 @@
 <tbody>
 <tr>
 <td>Needs</td>
-<td>Nothing</td>
+<td>Nothing; or the client id and secret as HTTP Basic</td>
 </tr>
 <tr>
 <td>Input</td>
-<td>Form <code dir="auto">{ token, client_id? }</code></td>
+<td>Form <code dir="auto">{ token, client_id?, client_secret? }</code></td>
 </tr>
 <tr>
 <td>Answer</td>
@@ -169,7 +169,7 @@
 </tr>
 <tr>
 <td>Errors</td>
-<td><a href="/docs/reference/errors/#oauth-invalid_request"><code dir="auto">invalid_request</code></a>, <a href="/docs/reference/errors/#oauth-rate_limited"><code dir="auto">rate_limited</code></a>, <a href="/docs/reference/errors/#oauth-unauthorized_client"><code dir="auto">unauthorized_client</code></a></td>
+<td><a href="/docs/reference/errors/#oauth-invalid_request"><code dir="auto">invalid_request</code></a>, <a href="/docs/reference/errors/#oauth-invalid_client"><code dir="auto">invalid_client</code></a>, <a href="/docs/reference/errors/#oauth-rate_limited"><code dir="auto">rate_limited</code></a>, <a href="/docs/reference/errors/#oauth-unauthorized_client"><code dir="auto">unauthorized_client</code></a></td>
 </tr>
 </tbody>
 </table>

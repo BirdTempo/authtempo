@@ -746,22 +746,14 @@ describe("the route contract (plan 11g)", () => {
         key: "GET /oauth/authorize",
         path: "/oauth/authorize",
         query: authorizeQuery(clientId, pkceChallenge),
-        required: [
-          "response_type",
-          "client_id",
-          "redirect_uri",
-          "code_challenge",
-          "code_challenge_method",
-          "scope",
-          "resource",
-        ],
+        // PKCE is optional in the schema: a confidential client may omit it with openid and a
+        // nonce (plan 12e). oauth-client-auth.test.ts holds the refusal for every other request.
+        required: ["response_type", "client_id", "redirect_uri", "scope", "resource"],
         valid: { status: 302, code: null },
         missing: {
           response_type: { status: 302, code: "unsupported_response_type" },
           client_id: INVALID_REQUEST,
           redirect_uri: INVALID_REQUEST,
-          code_challenge: BACK_INVALID,
-          code_challenge_method: BACK_INVALID,
           scope: { status: 302, code: "invalid_scope" },
           resource: { status: 302, code: "invalid_target" },
         },
@@ -882,11 +874,11 @@ describe("the route contract (plan 11g)", () => {
         key: "POST /oauth/token",
         media: "form",
         body: tokenForm(clientId, code, verifier),
-        required: ["grant_type", "client_id"],
+        // A client_secret_basic client names itself in the header (plan 12e).
+        required: ["grant_type"],
         valid: { status: 200, code: null },
         missing: {
           grant_type: { status: 400, code: "unsupported_grant_type" },
-          client_id: { status: 401, code: "invalid_client" },
         },
       },
       {

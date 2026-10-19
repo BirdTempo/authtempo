@@ -444,16 +444,16 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_client"><code>invalid_client</code> 401</h3>
 
-- **Meaning:** The `client_id` is unknown, or its metadata document failed.
-- **Do:** Register the client again, or fix its metadata document.
+- **Meaning:** The `client_id` is unknown, or its metadata document failed. At the token and revoke routes, the client auth failed. The secret is wrong, or the method is not the client's own. A confidential client sent no secret, or a public client sent one. After an HTTP Basic attempt, the answer carries `WWW-Authenticate: Basic`.
+- **Do:** Register the client again, or fix its metadata document. Send the secret by the client's own `token_endpoint_auth_method`, and send one method only.
 
 | Routes |
 | --- |
-| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token). |
+| [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke). |
 
 <h3 id="oauth-invalid_grant"><code>invalid_grant</code> 400</h3>
 
-- **Meaning:** The code or the refresh token is spent, expired, of another client, or its verifier does not match. A reused refresh token deletes its family.
+- **Meaning:** The code or the refresh token is spent, expired, of another client, or its verifier does not match. A code with no challenge takes no verifier. A reused refresh token deletes its family.
 - **Do:** Start the authorize step again.
 
 | Routes |

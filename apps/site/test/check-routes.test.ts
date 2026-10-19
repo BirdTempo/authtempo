@@ -132,9 +132,13 @@ describe("checkRoutes", () => {
   });
 
   it("fails when the Input cell lacks a key, marks a required key optional, or names another media", () => {
-    const lacks = checkRoutes(edit("{ token, client_id? }", "{ token }"), routes, doc);
+    const lacks = checkRoutes(
+      edit("{ token, client_id?, client_secret? }", "{ token, client_secret? }"),
+      routes,
+      doc,
+    );
     expect(lacks.failures).toEqual([
-      "POST /oauth/revoke: Input lacks client_id?; the document has token, client_id?",
+      "POST /oauth/revoke: Input lacks client_id?; the document has token, client_id?, client_secret?",
     ]);
     const optional = checkRoutes(edit("{ token }", "{ token? }"), routes, doc);
     expect(optional.failures).toEqual([

@@ -39,14 +39,16 @@ export const registerBody = z.object({
 /**
  * The authorization request of OAuth 2.1 with PKCE, read by hand. Each key
  * comes once. `request_id` alone names a request that core holds after the
- * sign-in; the engine refuses it beside another key.
+ * sign-in; the engine refuses it beside another key. PKCE is optional only
+ * for a confidential client that asks `openid` with a `nonce` (plan 12e,
+ * `pkceRequired`). The engine refuses its absence for every other request.
  */
 export const authorizeQuery = z.object({
   response_type: z.literal("code"),
   client_id: z.string().min(1).max(2048),
   redirect_uri: z.string().min(1),
-  code_challenge: z.string().regex(CHALLENGE_RE),
-  code_challenge_method: z.literal("S256"),
+  code_challenge: z.string().regex(CHALLENGE_RE).optional(),
+  code_challenge_method: z.literal("S256").optional(),
   scope: z.string().min(1),
   resource: z.string().min(1),
   state: z.string().max(512).optional(),
@@ -68,11 +70,15 @@ export const signInQuery = z.object({ next: z.string().min(1) });
  * The token request of RFC 6749 section 4.1.3 and section 6, read by hand
  * as a form. The code grant takes `code`, `code_verifier`, and
  * `redirect_uri`; the refresh grant takes `refresh_token`. `resource` is
- * the audience of RFC 8707, and `scope` narrows a refresh.
+ * the audience of RFC 8707, and `scope` narrows a refresh. A
+ * `client_secret_post` client sends `client_secret`; a
+ * `client_secret_basic` client sends its id in the header and may omit
+ * `client_id` (plan 12e).
  */
 export const tokenBody = z.object({
   grant_type: z.enum(["authorization_code", "refresh_token"]),
-  client_id: z.string().min(1).max(2048),
+  client_id: z.string().min(1).max(2048).optional(),
+  client_secret: z.string().optional(),
   code: z.string().optional(),
   code_verifier: z.string().optional(),
   redirect_uri: z.string().optional(),
@@ -81,10 +87,11 @@ export const tokenBody = z.object({
   scope: z.string().optional(),
 });
 
-/** The revocation of RFC 7009 section 2.1, read by hand as a form. */
+/** The revocation of RFC 7009 section 2.1, read by hand as a form. The client auth is that of the token route (plan 12e). */
 export const revokeBody = z.object({
   token: z.string(),
   client_id: z.string().optional(),
+  client_secret: z.string().optional(),
 });
 
 /** The token answer of RFC 6749 section 5.1. `id_token` comes with the `openid` scope. */

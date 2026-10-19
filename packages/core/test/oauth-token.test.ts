@@ -336,7 +336,7 @@ describe("the refresh token (plan 9g)", () => {
     ).toEqual(GRANT);
   });
 
-  it("revoke deletes the family; 200 for an unknown token and an access token; 400 unauthorized_client for another client's id, which revokes nothing (plan 9h, RFC 7009 section 2.1, Review Focus 4)", async () => {
+  it("revoke deletes the family; another client's id answers 400 and an unknown id 401, and neither revokes (RFC 7009 section 2.1, Review Focus 4)", async () => {
     const h = oauthHandle();
     const c = await codeFor(h);
     const other = await registered(h);
@@ -354,15 +354,11 @@ describe("the refresh token (plan 9g)", () => {
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({});
     }
-    // A registered client and an unknown id: neither got this token.
-    for (const clientId of [other, "cl_other"]) {
-      const res = await revoke({ token: t.refresh_token ?? "", client_id: clientId });
-      expect({ clientId, status: res.status, body: await res.json() }).toEqual({
-        clientId,
-        status: 400,
-        body: { error: "unauthorized_client" },
-      });
-    }
+    // A registered client did not get this token. An unknown id fails the client auth (plan 12e).
+    const byOther = await revoke({ token: t.refresh_token ?? "", client_id: other });
+    expect(await answer(byOther)).toEqual({ status: 400, body: { error: "unauthorized_client" } });
+    const byUnknown = await revoke({ token: t.refresh_token ?? "", client_id: "cl_other" });
+    expect(await answer(byUnknown)).toEqual({ status: 401, body: { error: "invalid_client" } });
     expect(await h.storage.findMany("oauthToken", [])).toHaveLength(1);
     expect((await revoke({ token: t.refresh_token ?? "", client_id: c.clientId })).status).toBe(
       200,
@@ -454,14 +450,17 @@ describe("userinfo and the endpoint's edges (plan 9g)", () => {
 
   it("limits the token endpoint to 60 per IP per 15 minutes", async () => {
     const h = oauthHandle();
-    const call = () =>
+    const clientId = await registered(h);
+    const call = (id = clientId) =>
       h.auth.handle(
         tokenPost(
-          { grant_type: "refresh_token", refresh_token: "or_x", client_id: "cl_x" },
+          { grant_type: "refresh_token", refresh_token: "or_x", client_id: id },
           { "cf-connecting-ip": "8.8.8.8" },
         ),
       );
-    for (let i = 0; i < 60; i++) expect((await call()).status).toBe(400);
+    // A failed client auth counts too: the limit comes first (plan 12e).
+    for (let i = 0; i < 30; i++) expect((await call()).status).toBe(400);
+    for (let i = 0; i < 30; i++) expect((await call("cl_x")).status).toBe(401);
     expect(await answer(await call())).toEqual({ status: 429, body: { error: "rate_limited" } });
   });
 

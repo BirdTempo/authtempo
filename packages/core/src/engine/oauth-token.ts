@@ -11,10 +11,10 @@ import {
 import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
 import { resourceOf } from "../primitives/resource.js";
-import type { OAuthClientRow, OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
+import type { OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
-import { findClient } from "./oauth-clients.js";
+import type { AuthedClient } from "./oauth-client-auth.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { consumeVerification } from "./verification.js";
 
@@ -82,12 +82,14 @@ const strings = (v: unknown): v is string[] =>
 function codeData(row: VerificationRow): OAuthCodeData | null {
   const d = row.data;
   if (!d) return null;
-  const { clientId, redirectUri, codeChallenge, scopes, resource, userId, sessionId } = d;
-  const nonce = d.nonce === null ? null : typeof d.nonce === "string" ? d.nonce : undefined;
+  const { clientId, redirectUri, scopes, resource, userId, sessionId } = d;
+  const nullable = (v: unknown) => (v === null ? null : typeof v === "string" ? v : undefined);
+  const nonce = nullable(d.nonce);
+  const codeChallenge = nullable(d.codeChallenge);
   if (
     typeof clientId !== "string" ||
     typeof redirectUri !== "string" ||
-    typeof codeChallenge !== "string" ||
+    codeChallenge === undefined ||
     !strings(scopes) ||
     typeof resource !== "string" ||
     typeof userId !== "string" ||
@@ -98,7 +100,11 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
   return { clientId, redirectUri, codeChallenge, scopes, resource, userId, nonce, sessionId };
 }
 
-const limited = async (config: ResolvedConfig, ip: string | null) =>
+/**
+ * True when the IP is past `TOKEN_PER_IP` at the token and revoke routes.
+ * The route asks before the client auth, so a failed auth counts too.
+ */
+export const tokenLimited = async (config: ResolvedConfig, ip: string | null) =>
   !(await config.limiter.allow(`oauth-token:ip:${ipKey(ip)}`, TOKEN_PER_IP));
 
 /** The user, while it exists and its address is verified. */
@@ -234,8 +240,9 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
 }
 
 /**
- * `grant_type=authorization_code`. An unknown client spends nothing. Then
- * the consume spends the code, so a second exchange, or one with a wrong
+ * `grant_type=authorization_code` for an authenticated client (plan 12e:
+ * the route runs `authenticateClient` first, so a failed auth spends
+ * nothing). Then the consume spends the code, so a second exchange, or one with a wrong
  * client, redirect URI, or verifier, finds it spent: one code, one use.
  * The family id of the grant is the id of the code row, so a spent code
  * presented again deletes the family it gave (draft-ietf-oauth-v2-1-16
@@ -249,20 +256,15 @@ export async function exchangeCode(
   config: ResolvedConfig,
   input: {
     code: string;
-    codeVerifier: string;
-    clientId: string;
+    /** Null when the form has no `code_verifier`. */
+    codeVerifier: string | null;
+    client: AuthedClient;
     redirectUri: string;
     resource: string | null;
-    ip: string | null;
-    /** The client of `clientId` that the caller already read (plan 11d), so the grant reads it once. */
-    client?: OAuthClientRow;
   },
 ): Promise<OAuthResult<TokenAnswer>> {
-  if (await limited(config, input.ip)) return oauthFail("rate_limited");
   if (!CODE_RE.test(input.code)) return oauthFail("invalid_grant");
-  const client =
-    input.client?.id === input.clientId ? input.client : await findClient(config, input.clientId);
-  if (!client) return oauthFail("invalid_client");
+  const { client } = input.client;
   const valueHash = await sha256Hex(input.code);
   const consumed = await consumeVerification(config.storage, {
     purpose: "oauth-code",
@@ -276,10 +278,7 @@ export async function exchangeCode(
   const data = codeData(consumed.value);
   if (!data || data.clientId !== client.id || data.redirectUri !== input.redirectUri)
     return oauthFail("invalid_grant");
-  if (
-    !VERIFIER_RE.test(input.codeVerifier) ||
-    !constantTimeEqual(await sha256Base64Url(input.codeVerifier), data.codeChallenge)
-  )
+  if (!(await verifierMatches(input.codeVerifier, data.codeChallenge)))
     return oauthFail("invalid_grant");
   if (input.resource !== null && input.resource !== data.resource)
     return oauthFail("invalid_target");
@@ -300,6 +299,20 @@ export async function exchangeCode(
     familyId: consumed.value.id,
     spentId: null,
   });
+}
+
+/**
+ * RFC 7636 section 4.6: the verifier of the code's challenge. A code with no
+ * challenge (`pkceRequired`, plan 12e) takes no verifier: the RFC gives one
+ * no meaning there, so a verifier is refused.
+ */
+async function verifierMatches(verifier: string | null, challenge: string | null) {
+  if (challenge === null) return verifier === null;
+  return (
+    verifier !== null &&
+    VERIFIER_RE.test(verifier) &&
+    constantTimeEqual(await sha256Base64Url(verifier), challenge)
+  );
 }
 
 /** Deletes every refresh token of one authorization. */
@@ -341,20 +354,18 @@ export async function refreshGrant(
   config: ResolvedConfig,
   input: {
     refreshToken: string;
-    clientId: string;
+    /** The client of the request, which `authenticateClient` checked (plan 12e). */
+    client: AuthedClient;
     scope: string | null;
     resource: string | null;
-    ip: string | null;
-    /** The client of `clientId` that the caller already read (plan 11d), so the grant reads it once. */
-    client?: OAuthClientRow;
   },
 ): Promise<OAuthResult<TokenAnswer>> {
-  if (await limited(config, input.ip)) return oauthFail("rate_limited");
   if (!REFRESH_RE.test(input.refreshToken)) return oauthFail("invalid_grant");
+  const client = input.client.client;
   const row = await config.storage.findOne("oauthToken", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(input.refreshToken) },
   ]);
-  if (!row || row.clientId !== input.clientId) return oauthFail("invalid_grant");
+  if (!row || row.clientId !== client.id) return oauthFail("invalid_grant");
   if (row.usedAt !== null) return reuse(config, row);
   const now = config.clock.now();
   if (row.expiresAt.getTime() <= now.getTime()) return oauthFail("invalid_grant");
@@ -367,10 +378,7 @@ export async function refreshGrant(
   }
   if (input.resource !== null && input.resource !== row.resource)
     return oauthFail("invalid_target");
-  // A CIMD document that does not answer now refuses this refresh and keeps the family.
-  const client =
-    input.client?.id === row.clientId ? input.client : await findClient(config, row.clientId);
-  if (!client) return oauthFail("invalid_client");
+  // The auth read the client: a CIMD document that did not answer refused this refresh there, and the family stays.
   const user = await liveUser(config, row.userId);
   if (!user) return reuse(config, row);
   const spent = await config.storage.update(
@@ -396,26 +404,32 @@ export async function refreshGrant(
 }
 
 /**
- * RFC 7009 (read 2026-10-14). A refresh token's family goes when
- * `client_id` is absent or names the token's client. A `client_id` of
- * another client answers `unauthorized_client` and revokes nothing (section
- * 2.1: the server verifies that the token was issued to the client; plan
- * 9h, owner decision 1a). An unknown token answers the same 200 as a
- * revoked one (section 2.2). An access token cannot be revoked: it is a JWT
- * that lives at most `oauth.accessTtlMinutes`.
+ * RFC 7009 (read 2026-10-14). `client` is the client that
+ * `authenticateClient` checked, or null when the request names none. A
+ * refresh token's family goes when `client` is its client. With no client,
+ * it goes only when its client is public. A confidential client
+ * authenticates (section 2.1; plan 12e): with no client the answer is
+ * `invalid_client`, and nothing goes. Another client answers `unauthorized_client` and
+ * revokes nothing (section 2.1: the server verifies that the token was
+ * issued to the client; plan 9h, owner decision 1a). An unknown token
+ * answers the same 200 as a revoked one (section 2.2). An access token
+ * cannot be revoked: it is a JWT that lives at most `oauth.accessTtlMinutes`.
  */
 export async function revokeToken(
   config: ResolvedConfig,
-  input: { token: string; clientId: string | null; ip: string | null },
+  input: { token: string; client: AuthedClient | null },
 ): Promise<OAuthResult<{ revoked: true }>> {
-  if (await limited(config, input.ip)) return oauthFail("rate_limited");
   if (REFRESH_RE.test(input.token)) {
     const row = await config.storage.findOne("oauthToken", [
       { field: "tokenHash", op: "eq", value: await sha256Hex(input.token) },
     ]);
     if (row) {
-      if (input.clientId !== null && input.clientId !== row.clientId)
-        return oauthFail("unauthorized_client");
+      if (input.client === null) {
+        const owner = await config.storage.findOne("oauthClient", [
+          { field: "id", op: "eq", value: row.clientId },
+        ]);
+        if (owner !== null && owner.authMethod !== "none") return oauthFail("invalid_client");
+      } else if (input.client.client.id !== row.clientId) return oauthFail("unauthorized_client");
       await revokeFamily(config, row.familyId);
     }
   }

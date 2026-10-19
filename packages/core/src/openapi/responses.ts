@@ -193,6 +193,19 @@ export function responsesOf(
         },
       };
     }
+    // RFC 6749 section 5.2: invalid_client after a Basic attempt carries the Basic challenge (plan 12e).
+    const basic =
+      entry.auth.includes("clientSecretBasic") &&
+      codes.some((c) => c.table === "oauth" && c.code === "invalid_client");
+    if (basic)
+      response.headers = {
+        "WWW-Authenticate": {
+          required: false,
+          description:
+            "The Basic challenge of RFC 6749 section 5.2, with the issuer as the realm. Only `invalid_client` after a Basic attempt carries it.",
+          schema: { type: "string" },
+        },
+      };
     out[String(status)] = response;
   }
   return out;

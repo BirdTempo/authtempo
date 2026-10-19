@@ -7,6 +7,7 @@ import { hasControlChar } from "../primitives/text.js";
 import type { OAuthClientRow, UserRow, VerificationRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { issuerOf } from "./jwt.js";
+import { pkceRequired } from "./oauth-client-auth.js";
 import { findClient } from "./oauth-clients.js";
 import { oauthOf } from "./oauth-result.js";
 import type { ResolvedSession } from "./sessions.js";
@@ -34,7 +35,8 @@ export const AUTHORIZE_PER_IP = { seconds: 900, max: 60 };
 export interface AuthorizeRequest {
   clientId: string;
   redirectUri: string;
-  codeChallenge: string;
+  /** Null when the client may omit PKCE (`pkceRequired`, plan 12e). */
+  codeChallenge: string | null;
   /** Each once, in the order asked. */
   scopes: string[];
   state: string | null;
@@ -49,7 +51,8 @@ export interface AuthorizeRequest {
 export interface OAuthCodeData {
   clientId: string;
   redirectUri: string;
-  codeChallenge: string;
+  /** Null when the request had no challenge; the exchange then refuses a verifier (plan 12e). */
+  codeChallenge: string | null;
   scopes: string[];
   resource: string;
   userId: string;
@@ -129,12 +132,11 @@ export async function checkAuthorize(
   const responseType = single(params, "response_type");
   if (responseType === undefined) return back("invalid_request", state);
   if (responseType !== "code") return back("unsupported_response_type", state);
+  // Absent, or S256 with a good challenge. Whether this client may omit it waits for the scopes and the nonce.
   const challenge = single(params, "code_challenge");
-  if (
-    !challenge ||
-    !CHALLENGE_RE.test(challenge) ||
-    single(params, "code_challenge_method") !== "S256"
-  )
+  const method = single(params, "code_challenge_method");
+  if (challenge === undefined || method === undefined) return back("invalid_request", state);
+  if (challenge === null ? method !== null : !CHALLENGE_RE.test(challenge) || method !== "S256")
     return back("invalid_request", state);
   // RFC 8707 section 2 admits a repeated `resource`; one token has one
   // audience here, so a repeated one is refused as `invalid_target`.
@@ -147,6 +149,8 @@ export async function checkAuthorize(
     return back("invalid_scope", state);
   const nonce = single(params, "nonce");
   if (!shortText(nonce)) return back("invalid_request", state);
+  if (challenge === null && pkceRequired(client, scopes, nonce))
+    return back("invalid_request", state);
   // OIDC Core section 3.1.2.1: a space-separated list; `none` with another value is an error.
   const prompt = single(params, "prompt");
   if (prompt === undefined) return back("invalid_request", state);

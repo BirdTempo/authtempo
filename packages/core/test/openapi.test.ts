@@ -197,6 +197,7 @@ describe("openApiDocument (plan 11g)", () => {
       accessToken: ["oauth"],
       operator: ["operatorSecret"],
       initialAccessToken: ["initialAccessToken"],
+      clientSecretBasic: ["clientSecretBasic"],
     };
     for (const { key, op } of operations(reference())) {
       const auth = entryOf(key).auth;
@@ -209,9 +210,23 @@ describe("openApiDocument (plan 11g)", () => {
       );
       expect(op.security, key).toEqual(expected);
     }
+    // Plan 12e: the token and revoke routes take no credential, or the client's Basic auth.
     const token = reference().paths["/oauth/token"]?.post;
-    expect(token?.security).toEqual([]);
+    expect(token?.security).toEqual([{}, { clientSecretBasic: [] }]);
+    expect(reference().paths["/oauth/revoke"]?.post?.security).toEqual([
+      {},
+      { clientSecretBasic: [] },
+    ]);
     expect(token?.description).toContain("PKCE");
+    expect(token?.description).toContain("`client_secret_post`");
+    // Ruling 15 of plan 12e: the oauth scheme no longer says that each client is public.
+    const oauth = reference().components.securitySchemes.oauth;
+    expect(oauth?.description).not.toContain("Each client is public");
+    expect(oauth?.description).toContain("`client_secret_basic`");
+    expect(reference().components.securitySchemes.clientSecretBasic).toMatchObject({
+      type: "http",
+      scheme: "basic",
+    });
     // Plan 12e: the register route takes no credential, or the initial access token.
     expect(reference().paths["/oauth/register"]?.post?.security).toEqual([
       {},
@@ -346,7 +361,11 @@ describe("openApiDocument (plan 11g)", () => {
     // The 403 of the POST also holds origin_not_trusted, which the router answers with no challenge.
     expect(header("/oauth/userinfo", "post", "403")?.required).toBe(false);
     expect(header("/oauth/userinfo", "post", "403")?.description).toContain("`insufficient_scope`");
-    expect(header("/oauth/token", "post", "401")).toBeUndefined();
+    // Plan 12e: invalid_client after a Basic attempt carries the Basic challenge, so it is optional.
+    for (const path of ["/oauth/token", "/oauth/revoke"]) {
+      expect(header(path, "post", "401")?.required, path).toBe(false);
+      expect(header(path, "post", "401")?.description, path).toContain("`invalid_client`");
+    }
   });
 
   it("holds each provider path to the name rule", () => {
