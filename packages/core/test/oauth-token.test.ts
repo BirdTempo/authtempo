@@ -1,10 +1,12 @@
 import { createLocalJWKSet, jwtVerify } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { publicKeySet } from "../src/engine/jwt.js";
 import { decodeJws, tokenHashClaim } from "../src/primitives/jwk.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { BASE_URL, get } from "./helpers.js";
 import {
+  authorized,
+  basicHeader,
   codeFor,
   exchange,
   ISSUER,
@@ -445,6 +447,106 @@ describe("the refresh of a grant whose scope the config drops (ruling 30 of plan
     // The token is not spent: an instance that still names mcp:write refreshes it.
     const back = await tokens(await h.auth.handle(refreshWith(refresh, c.clientId)));
     expect(back.scope).toBe("mcp:write offline_access");
+  });
+});
+
+describe("the end mark of a refresh family (rulings 40 and 43 of plan 12e)", () => {
+  it("a row that a failed family delete leaves serves no refresh and no introspection", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const outer = oauthHandle();
+    let failOnce = false;
+    const storage = new Proxy(outer.storage, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver);
+        if (key !== "delete" || typeof value !== "function") return value;
+        return async (model: string, where: { field: string }[]) => {
+          if (failOnce && model === "oauthToken" && where.some((w) => w.field === "familyId")) {
+            failOnce = false;
+            throw new Error("storage down");
+          }
+          return (value as (...a: unknown[]) => Promise<unknown>).call(target, model, where);
+        };
+      },
+    }) as StorageAdapter;
+    const h = { ...oauthHandle({ storage, clock: outer.clock }), storage: outer.storage };
+    // A confidential client that may introspect its own refresh tokens.
+    const made = await h.auth.api.oauth?.clients.create({
+      name: "Secret client",
+      redirectUris: [REDIRECT],
+      authMethod: "client_secret_basic",
+      introspect: true,
+    });
+    if (!made?.ok || !made.value.clientSecret) throw new Error("create failed");
+    const basic = { authorization: basicHeader(made.value.client.id, made.value.clientSecret) };
+    const s = await signedIn(h);
+    const p = await pkce();
+    const { code } = await authorized(h, s.cookie, {
+      clientId: made.value.client.id,
+      challenge: p.challenge,
+    });
+    const first = await tokens(
+      await h.auth.handle(
+        tokenPost(
+          {
+            grant_type: "authorization_code",
+            code,
+            code_verifier: p.verifier,
+            redirect_uri: REDIRECT,
+            resource: RESOURCE,
+          },
+          basic,
+        ),
+      ),
+    );
+    const child = await tokens(
+      await h.auth.handle(
+        tokenPost({ grant_type: "refresh_token", refresh_token: first.refresh_token ?? "" }, basic),
+      ),
+    );
+    const introspect = async (token: string) =>
+      answer(
+        await h.auth.handle(
+          new Request(`${BASE_URL}/auth/oauth/introspect`, {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded", ...basic },
+            body: new URLSearchParams({ token }).toString(),
+          }),
+        ),
+      );
+    expect(await introspect(child.refresh_token ?? "")).toMatchObject({ body: { active: true } });
+    // A reuse writes the mark, and then its family delete fails.
+    failOnce = true;
+    const reuse = await h.auth.handle(
+      tokenPost({ grant_type: "refresh_token", refresh_token: first.refresh_token ?? "" }, basic),
+    );
+    expect(reuse.status).toBe(500);
+    expect(
+      await h.storage.findMany("oauthToken", [{ field: "usedAt", op: "eq", value: null }]),
+    ).toHaveLength(1);
+    // The left row serves nothing.
+    expect(await introspect(child.refresh_token ?? "")).toEqual({
+      status: 200,
+      body: { active: false },
+    });
+    expect(
+      await answer(
+        await h.auth.handle(
+          tokenPost(
+            { grant_type: "refresh_token", refresh_token: child.refresh_token ?? "" },
+            basic,
+          ),
+        ),
+      ),
+    ).toEqual(GRANT);
+    log.mockRestore();
+  });
+
+  it("a code replayed twice after its exchange answers invalid_grant both times: the second mark is there already", async () => {
+    const h = oauthHandle();
+    const c = await codeFor(h);
+    await tokens(await h.auth.handle(exchange(c.code, c.clientId, c.verifier)));
+    const again = async () => answer(await h.auth.handle(exchange(c.code, c.clientId, c.verifier)));
+    expect([await again(), await again()]).toEqual([GRANT, GRANT]);
   });
 });
 

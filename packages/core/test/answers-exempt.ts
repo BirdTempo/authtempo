@@ -31,7 +31,12 @@ function routerRows(code: string, reason: string, answered: readonly RouteKey[])
 const ROUTER_REASON = "the router's code; router.test.ts proves the path for one route";
 
 /** The routes on which a test answers `internal`: a storage or a hook that throws inside the route. */
-const INTERNAL_ANSWERED: readonly RouteKey[] = ["POST /password/sign-up", "POST /reauth/email"];
+const INTERNAL_ANSWERED: readonly RouteKey[] = [
+  // A family delete that throws after the end mark (ruling 43 of plan 12e).
+  "POST /oauth/token",
+  "POST /password/sign-up",
+  "POST /reauth/email",
+];
 
 /** The routes on which a test calls the path with its feature off. */
 const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
