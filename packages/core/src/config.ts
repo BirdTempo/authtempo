@@ -1634,6 +1634,11 @@ function resolveOAuth(
     typeof registration.initialAccessTokenHash === "string"
       ? registration.initialAccessTokenHash
       : null;
+  // A token for a route that does not exist is a config error, not a silent 404.
+  if (initialAccessTokenHash !== null && !dynamic)
+    throw new ConfigError(
+      "oauth.registration.initialAccessTokenHash needs oauth.registration.dynamic set to true: the register route that reads the token is off",
+    );
   if (input.fetch !== undefined && typeof input.fetch !== "function")
     throw new ConfigError("oauth.fetch must be a function");
   if (cimd && input.fetch === undefined)

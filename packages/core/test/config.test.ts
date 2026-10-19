@@ -853,6 +853,18 @@ describe("oauth (plan 9g)", () => {
     ).toMatchObject({ dynamic: false, cimd: false });
   });
 
+  it("refuses an initialAccessTokenHash while registration.dynamic is off", () => {
+    const message =
+      "oauth.registration.initialAccessTokenHash needs oauth.registration.dynamic set to true: the register route that reads the token is off";
+    for (const registration of [
+      { cimd: false, initialAccessTokenHash: "0a".repeat(32) },
+      { cimd: false, dynamic: false, initialAccessTokenHash: "0a".repeat(32) },
+    ])
+      expect(() =>
+        resolveConfig({ ...base, oauth: { resources: [R], registration } }),
+      ).toThrowError(message);
+  });
+
   it("refuses an initialAccessTokenHash that is not 64 lowercase hex characters", () => {
     const message =
       "oauth.registration.initialAccessTokenHash must be the SHA-256 of the token as 64 lowercase hex characters";

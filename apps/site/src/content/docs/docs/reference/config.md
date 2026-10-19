@@ -235,7 +235,7 @@ Another key of `oauth` is refused.
 | `oauth.refreshTtlDays` | number | 30 | An integer from 1 to 365. |
 | `oauth.codeTtlMinutes` | number | 5 | An integer from 1 to 10. |
 | `oauth.registration.dynamic` | boolean | false | Serves `POST /oauth/register` of RFC 7591. Off by default since plan 12e: MCP 2026-07-28 calls dynamic registration deprecated. |
-| `oauth.registration.initialAccessTokenHash` | string | none | The SHA-256 of an initial access token, as 64 lowercase hex characters. While it is set, `POST /oauth/register` needs `Authorization: Bearer <token>`, and a miss answers 401 `invalid_token`. Core stores the hash and never the token. |
+| `oauth.registration.initialAccessTokenHash` | string | none | The SHA-256 of an initial access token, as 64 lowercase hex characters. While it is set, `POST /oauth/register` needs `Authorization: Bearer <token>`, and a miss answers 401 `invalid_token`. Core stores the hash and never the token. With `dynamic` off, the config throws: no route reads the token. |
 | `oauth.registration.cimd` | boolean | true | Accepts a client id that is the https URL of its metadata document. |
 
 ## Operator
