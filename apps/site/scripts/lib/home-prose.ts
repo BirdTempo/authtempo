@@ -7,6 +7,16 @@ import type { Page } from "./markdown.ts";
 export const HOME_PROSE_PATH =
   "site/home (src/data/home.ts, src/data/features.ts, src/data/site.ts)";
 
+/** The two values of SITE that are a URL or a path, not prose. */
+const SITE_ADDRESSES: readonly string[] = ["origin", "docs"];
+
+/** Every other value of SITE: the labels of the root layout, so a new label joins the page. */
+export function siteLabels(): string[] {
+  return Object.entries(SITE)
+    .filter(([key]) => !SITE_ADDRESSES.includes(key))
+    .map(([, value]) => value);
+}
+
 /**
  * The prose of the root layout and the home page as one page, so check-terms
  * and check-sentences hold it (brand spec 2). Each string is one paragraph.
@@ -28,8 +38,7 @@ export function homeProsePage(): Page {
     HOME.skip,
     HOME.noLicense,
     ...NAV_LINKS.map((l) => l.label),
-    SITE.nav,
-    SITE.repo,
+    ...siteLabels(),
   ];
   return {
     path: HOME_PROSE_PATH,

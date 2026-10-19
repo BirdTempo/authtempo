@@ -15,12 +15,12 @@ export interface Feature {
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
  * icons, and decision 3 keeps the list). `account` takes `verify`: its first
  * route is the re-authentication, and the guide says "prove it again".
- * `accountDelete` takes `magic-link`: the delete mails a link whose page
- * deletes the account, and a notice goes to the deleted address. The next row,
- * `magicLink`, also shows the envelope. We accept the repeat, because the
- * mailed link is the only visible step of the delete. No symbol of spec 8
- * means a removal, and spec 9 sets no rule against a repeat. The two oauth
- * rows also repeat.
+ * `accountDelete` takes `magic-link`, because each delete mails by default.
+ * It mails a link when `account.deleteConfirm` is on, and the notice when
+ * `account.notices` is on. The first option is off by default, and the second
+ * is on. The next row, `magicLink`, also shows the envelope. We accept the
+ * repeat: no symbol of spec 8 means a removal, and spec 9 sets no rule against
+ * a repeat. The two oauth rows also repeat.
  */
 export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
   session: {

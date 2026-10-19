@@ -2,11 +2,15 @@
 const RESERVED = /(^|\.)example\.(com|net|org)$|\.(example|invalid|localhost|test)$|^localhost$/;
 
 /**
- * A string literal, which the scan keeps, or a comment, which it drops. A regex
- * literal that holds a quote or two slashes can hide the rest of its line.
+ * A string literal, a template literal, or a regex literal, which the scan
+ * keeps, or a comment, which it drops. A slash opens a regex literal only after
+ * an operator, an open bracket, a comma, or a keyword. The keywords are return,
+ * typeof, case, in, of, throw, yield, await, and void. Two limits remain. A regex literal
+ * after a close bracket reads as a division. A backtick inside a placeholder of
+ * a template literal ends the literal early.
  */
 const TOKEN =
-  /("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\[\s\S]|[^`\\])*`)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/g;
+  /("(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'|`(?:\\[\s\S]|[^`\\])*`|(?<=(?:^|[=([,:;!&|?{}+\-*%<>~^]|\b(?:return|typeof|case|in|of|throw|yield|await|void))[ \t]*)\/(?![*/])(?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\\\n[])+\/[dgimsuyv]*)|\/\*[\s\S]*?\*\/|\/\/[^\n]*/gm;
 
 /** The scheme of a URL that names a host: http, https, ws, or wss. */
 const SCHEME = /\b(?:https?|wss?):\/\//gi;
@@ -28,8 +32,9 @@ export function stripComments(text: string): string {
 }
 
 /**
- * The host of one URL authority, or null when it names no vendor: an empty
- * authority, an IP literal, or a text that is not a host name. A userinfo part
+ * The host of one URL authority, or null when it names no vendor. These name
+ * no vendor: an empty authority, an IP literal, and a text that is not a host
+ * name. A userinfo part
  * goes away, and so do a port and a root dot. A template host keeps its literal
  * domain after the last `${…}`; a template host with no literal domain throws.
  */

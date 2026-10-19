@@ -83,6 +83,26 @@ describe("the data of the home page (plan 11b1)", () => {
     ["a port", '"https://api.vendor.dev:8443/x"', ["api.vendor.dev"]],
     ["an IPv4 literal", '"https://10.0.0.1/x"', []],
     ["an IPv6 literal", '"http://[::1]:8080/"', []],
+    [
+      "a template URL after a regex literal that holds a backtick",
+      `const A = /[\`{}]/u;\nconst B = (r: string) => \`https://${OPEN}r}.api.flip.dev/x\`;`,
+      ["api.flip.dev"],
+    ],
+    [
+      "a string URL after a regex literal of two slashes",
+      'const A = /^\\/\\//; const B = "https://r3.vendor.dev/x";',
+      ["r3.vendor.dev"],
+    ],
+    [
+      "a template URL after a regex literal at the start of a line",
+      `f(\n  /[\`]/,\n  \`https://m.vendor.dev/x\`,\n);`,
+      ["m.vendor.dev"],
+    ],
+    [
+      "a string URL after a division",
+      'const q = a / 2; const s = "x/y"; const u = "https://div.vendor.dev/x";',
+      ["div.vendor.dev"],
+    ],
     ["an IPv6 template literal", `\`http://[${OPEN}value}]/\``, []],
   ])("reads the host of %s", (_form, text, hosts) => {
     expect(vendorHosts(core(text))).toEqual(hosts);
@@ -92,6 +112,15 @@ describe("the data of the home page (plan 11b1)", () => {
     expect(() => vendorHosts(core(`\`https://${OPEN}host}/x\``))).toThrow(
       `packages/core/src/a.ts: the template URL host "${OPEN}host}" names no literal domain`,
     );
+  });
+
+  it("counts a URL after the regex literal of users.ts that holds a backtick", () => {
+    const path = "packages/core/src/engine/users.ts";
+    const lines = readFileSync(`${REPO}${path}`, "utf8").split("\n");
+    const at = lines.findIndex((l) => l.startsWith("const IMAGE_REFUSED = /"));
+    expect(lines[at]).toContain("`");
+    lines.splice(at + 1, 0, `const ZF = (r: string) => \`https://${OPEN}r}.api.flip.dev/x\`;`);
+    expect(vendorHosts(new Map([[path, lines.join("\n")]]))).toEqual(["api.flip.dev"]);
   });
 
   it("finds no vendor host in the source of core", () => {
@@ -121,8 +150,9 @@ describe("the data of the home page (plan 11b1)", () => {
       ...leaves(HOME),
       ...Object.values(FEATURES).flatMap((f) => [f.title, f.line]),
       ...NAV_LINKS.map((l) => l.label),
-      SITE.nav,
-      SITE.repo,
+      ...Object.entries(SITE)
+        .filter(([key]) => key !== "origin" && key !== "docs")
+        .map(([, value]) => value),
     ];
     expect(paragraphs.sort()).toEqual(strings.sort());
   });
