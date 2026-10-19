@@ -573,6 +573,16 @@ export interface OAuthConfig {
    * under its path as that resource.
    */
   resources: string[];
+  /**
+   * The resource of a request that names none (plan 12e ruling 52). Absent
+   * by default: then an authorize request, a `client_credentials` grant,
+   * and a device start with no `resource` answer `invalid_target`. Set it
+   * to one entry of `resources` for a client that cannot send RFC 8707
+   * `resource`, such as the OpenID conformance suite. Each such token then
+   * has this audience. A code exchange and a refresh with no `resource`
+   * keep the resource of their grant, with or without this key.
+   */
+  defaultResource?: string;
   /** The app's scopes, name to the consent page's text. `openid`, `profile`, `email`, and `offline_access` are built in. */
   scopes?: Record<string, string>;
   /**
@@ -663,6 +673,8 @@ export const REUSE_WINDOW_MAX_S = 60;
 
 export interface ResolvedOAuth {
   resources: readonly string[];
+  /** The resource of a request that names none, or null: such a request answers `invalid_target` (plan 12e). */
+  defaultResource: string | null;
   /** Name to text, the built-in four first. */
   scopes: ReadonlyMap<string, string>;
   dynamic: boolean;
@@ -1623,6 +1635,7 @@ function resolveOperator(input: OperatorConfig | false | undefined): { secretHas
 
 const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {
   resources: true,
+  defaultResource: true,
   scopes: true,
   registration: true,
   fetch: true,
@@ -1781,7 +1794,7 @@ function resolveOAuth(
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(OAUTH_KEYS, key))
       throw new ConfigError(
-        `oauth.${key} is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, signInURL, refreshReuseSeconds, device, and devicePage`,
+        `oauth.${key} is not an option; core has resources, defaultResource, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, signInURL, refreshReuseSeconds, device, and devicePage`,
       );
   if (!jwtMint)
     throw new ConfigError("oauth needs jwtMint: an access token is a JWT that core signs");
@@ -1805,6 +1818,13 @@ function resolveOAuth(
     throw new ConfigError(
       `jwtMint.audience and oauth.resources both hold ${shared}: a server of that audience would take an OAuth access token as a session JWT; give the session JWT its own audience`,
     );
+  // One audience per token: a default outside the list would mint a token no resource takes.
+  const defaultResource: unknown = input.defaultResource;
+  if (
+    defaultResource !== undefined &&
+    (typeof defaultResource !== "string" || !(resources as string[]).includes(defaultResource))
+  )
+    throw new ConfigError("oauth.defaultResource must be one entry of oauth.resources");
   const scopes = new Map(BUILT_IN_SCOPES);
   if (input.scopes !== undefined) {
     if (!isPlainObject(input.scopes as unknown))
@@ -1864,6 +1884,7 @@ function resolveOAuth(
     throw new ConfigError("oauth.devicePage must be a function");
   return {
     resources: [...(resources as string[])],
+    defaultResource: typeof defaultResource === "string" ? defaultResource : null,
     scopes,
     dynamic,
     cimd,

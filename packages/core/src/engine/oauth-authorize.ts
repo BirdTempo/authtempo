@@ -220,7 +220,9 @@ export async function checkAuthorize(
     return back("invalid_request", state);
   // RFC 8707 section 2 admits a repeated `resource`; one token has one
   // audience here, so a repeated one is refused as `invalid_target`.
-  const resource = single(params, "resource");
+  // An absent resource takes oauth.defaultResource when it is set (ruling 52 of plan 12e).
+  const asked = single(params, "resource");
+  const resource = asked === null ? oauth.defaultResource : asked;
   if (!resource || !oauth.resources.includes(resource)) return back("invalid_target", state);
   const scope = single(params, "scope");
   if (scope === undefined) return back("invalid_request", state);

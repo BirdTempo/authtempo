@@ -61,7 +61,8 @@ export const authorizeQuery = z.object({
   code_challenge: z.string().regex(CHALLENGE_RE).optional(),
   code_challenge_method: z.literal("S256").optional(),
   scope: z.string().min(1),
-  resource: z.string().min(1),
+  // Optional: with oauth.defaultResource set, an absent resource takes it (ruling 52 of plan 12e).
+  resource: z.string().min(1).optional(),
   state: z.string().max(512).optional(),
   nonce: z.string().max(512).optional(),
   prompt: z.string().optional(),

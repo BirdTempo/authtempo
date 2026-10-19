@@ -116,7 +116,8 @@ export interface AuthorizeInput {
   /** Null sends no `code_challenge`: a confidential client may omit it with `openid` and `nonce` (plan 12e). */
   challenge: string | null;
   scope?: string;
-  resource?: string;
+  /** Null sends no `resource` (plan 12e ruling 52). */
+  resource?: string | null;
   state?: string;
   nonce?: string;
   redirectUri?: string;
@@ -134,7 +135,7 @@ export function authorizeParams(i: AuthorizeInput): Record<string, string> {
       ? { code_challenge_method: i.method ?? "S256" }
       : {}),
     scope: i.scope ?? "mcp:read offline_access",
-    resource: i.resource ?? RESOURCE,
+    ...(i.resource !== null ? { resource: i.resource ?? RESOURCE } : {}),
     state: i.state ?? "st-1",
     ...(i.nonce !== undefined ? { nonce: i.nonce } : {}),
     ...(i.prompt !== undefined ? { prompt: i.prompt } : {}),

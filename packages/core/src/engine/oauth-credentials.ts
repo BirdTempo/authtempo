@@ -87,8 +87,9 @@ export async function credentialsGrant(
     !(await config.limiter.allow(`oauth-credentials:client:${client.id}`, CREDENTIALS_PER_CLIENT))
   )
     return oauthFail("rate_limited");
-  if (input.resource === null || !oauth.resources.includes(input.resource))
-    return oauthFail("invalid_target");
+  // oauth.defaultResource takes the place of an absent resource; else the 9g rule (ruling 52 of plan 12e).
+  const resource = input.resource ?? oauth.defaultResource;
+  if (resource === null || !oauth.resources.includes(resource)) return oauthFail("invalid_target");
   const scopes =
     input.scope === null
       ? servedScopes(config, client)
@@ -100,7 +101,7 @@ export async function credentialsGrant(
   const access = await signToken(config, ACCESS_TOKEN_TYPE, {
     iss: issuerOf(config),
     sub: client.id,
-    aud: input.resource,
+    aud: resource,
     client_id: client.id,
     scope,
     iat,

@@ -750,14 +750,15 @@ describe("the route contract (plan 11g)", () => {
         query: authorizeQuery(clientId, pkceChallenge),
         // PKCE is optional in the schema: a confidential client may omit it with openid and a
         // nonce (plan 12e). oauth-client-auth.test.ts holds the refusal for every other request.
-        required: ["response_type", "client_id", "redirect_uri", "scope", "resource"],
+        // resource is optional too: oauth.defaultResource may stand in for it (ruling 52).
+        // oauth-default-resource.test.ts holds invalid_target without the key.
+        required: ["response_type", "client_id", "redirect_uri", "scope"],
         valid: { status: 302, code: null },
         missing: {
           response_type: { status: 302, code: "unsupported_response_type" },
           client_id: INVALID_REQUEST,
           redirect_uri: INVALID_REQUEST,
           scope: { status: 302, code: "invalid_scope" },
-          resource: { status: 302, code: "invalid_target" },
         },
         wrong: {
           key: "code_challenge",

@@ -746,6 +746,8 @@ describe("oauth (plan 9g)", () => {
     const on = resolveConfig({ ...base, oauth: { resources: [R], fetch } }).oauth;
     expect(on).toMatchObject({
       resources: [R],
+      // Plan 12e ruling 52: no default resource, so an absent resource answers invalid_target.
+      defaultResource: null,
       // Off by default since plan 12e: MCP 2026-07-28 calls dynamic registration deprecated.
       dynamic: false,
       cimd: true,
@@ -851,8 +853,16 @@ describe("oauth (plan 9g)", () => {
       ],
       [{ resources: [R], fetch, consentPage: "html" }, "oauth.consentPage must be a function"],
       [
+        { resources: [R], fetch, defaultResource: "https://api.example.com/other" },
+        "oauth.defaultResource must be one entry of oauth.resources",
+      ],
+      [
+        { resources: [R], fetch, defaultResource: 7 },
+        "oauth.defaultResource must be one entry of oauth.resources",
+      ],
+      [
         { resources: [R], fetch, loginPage: "/login" },
-        "oauth.loginPage is not an option; core has resources, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, signInURL, refreshReuseSeconds, device, and devicePage",
+        "oauth.loginPage is not an option; core has resources, defaultResource, scopes, registration, fetch, consentPage, accessTtlMinutes, refreshTtlDays, codeTtlMinutes, introspection, dpop, signInURL, refreshReuseSeconds, device, and devicePage",
       ],
       [true, "oauth must be an object or false"],
     ];

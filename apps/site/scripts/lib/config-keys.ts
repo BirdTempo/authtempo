@@ -197,6 +197,7 @@ export const CONFIG_KEYS = {
   } satisfies Keys<JwtMintConfig>,
   oauth: {
     resources: true,
+    defaultResource: true,
     scopes: true,
     registration: true,
     fetch: true,

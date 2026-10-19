@@ -142,8 +142,9 @@ export async function startDevice(
   const { client } = input.client;
   if (!device || !client.grantTypes.includes(DEVICE_GRANT) || client.subjectType === "pairwise")
     return oauthFail("unauthorized_client");
-  if (input.resource === null || !oauth.resources.includes(input.resource))
-    return oauthFail("invalid_target");
+  // oauth.defaultResource takes the place of an absent resource; else the 9g rule (ruling 52 of plan 12e).
+  const resource = input.resource ?? oauth.defaultResource;
+  if (resource === null || !oauth.resources.includes(resource)) return oauthFail("invalid_target");
   const scopes = [...new Set((input.scope ?? "").split(" ").filter((s) => s.length > 0))];
   if (scopes.length === 0 || scopes.some((s) => !oauth.scopes.has(s)))
     return oauthFail("invalid_scope");
@@ -159,7 +160,7 @@ export async function startDevice(
         secretVersion: config.keyring.current,
         clientId: client.id,
         scopes,
-        resource: input.resource,
+        resource: resource,
         status: "pending",
         userId: null,
         sessionId: null,
