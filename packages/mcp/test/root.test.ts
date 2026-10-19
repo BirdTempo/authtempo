@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { confinedIo, insideRoot, RootError } from "../src/cli-io.js";
@@ -150,6 +158,24 @@ describe("the root rule", () => {
     expect(() => io.listDir("link")).toThrow(RootError);
     expect(() => io.realpath("link")).toThrow(RootError);
     expect(existsSync(join(f.outside, "secret"))).toBe(true);
+  });
+
+  it("answers the mode of a file inside the root, and no mode of a path outside it", () => {
+    const f = fixtureRoot();
+    fx = f;
+    const { io } = confinedIo({ root: f.root, env, allowFetch: false });
+    // The file mode warning of the CLI reads these (plan 11f): the real bits, not a fixed answer.
+    for (const [name, mode] of [
+      ["open.csv", 0o644],
+      ["own.csv", 0o600],
+    ] as const) {
+      writeFileSync(join(f.root, name), "id\n");
+      chmodSync(join(f.root, name), mode);
+      expect(io.fileMode(name), name).toBe(mode);
+    }
+    writeFileSync(join(f.outside, "x.csv"), "id\n");
+    expect(() => io.fileMode(join(f.outside, "x.csv"))).toThrow(RootError);
+    expect(() => io.fileMode("link/x.csv")).toThrow(RootError);
   });
 
   it("reads the init templates of the CLI, and no other file of its dist folder", () => {

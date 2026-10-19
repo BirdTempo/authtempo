@@ -15,16 +15,21 @@ export function splitVerify(positionals: readonly string[]): { verify: boolean; 
  * The flags that `import verify` refuses: `--repair` writes, `--dry-run`
  * says what the subcommand always does, and `--target memory` holds no
  * records to check against. A verify needs a database, so no target is the
- * same usage error as the memory target.
+ * same usage error as the memory target. `--on-email-taken fail` would stop
+ * at the first conflict with no count, where the verify counts each one as
+ * a record that needs a person (spec 23 item 7).
  */
 export function checkVerifyFlags(v: {
   repair?: boolean | undefined;
   "dry-run"?: boolean | undefined;
+  "on-email-taken"?: string | undefined;
   target?: string | undefined;
 }): void {
   if (v.repair === true) throw new UsageError("import verify reads only; it takes no --repair");
   if (v["dry-run"] === true)
     throw new UsageError("import verify always reads only; it takes no --dry-run");
+  if (v["on-email-taken"] !== undefined)
+    throw new UsageError("import verify counts each conflict; it takes no --on-email-taken");
   if (v.target === undefined || v.target === "memory")
     throw new UsageError("import verify needs a database: --target postgres or --target d1-bundle");
 }

@@ -124,7 +124,7 @@ A skip that the export states, such as a deleted user, is listed in the report. 
 authtempo import verify <provider> [the files of the provider] --formats <list> --target <postgres|d1-bundle>
 ```
 
-`import verify` runs the dry run of the export against the database, and reads only. It takes the flags of `import`, and refuses `--repair`, `--dry-run`, and `--target memory`. It exits 0 only when the database holds the whole export:
+`import verify` runs the dry run of the export against the database, and reads only. It takes the flags of `import`, and refuses `--repair`, `--dry-run`, `--on-email-taken`, and `--target memory`. The verify reads that each row of a record exists, not its text. It exits 0 only when the database holds the whole export:
 
 - The dry run would write no record.
 - No record is `partial`.

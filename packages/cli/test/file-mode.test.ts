@@ -7,9 +7,9 @@ import { assertFreshBuild, linesOf, runBin } from "./support/bin.js";
 
 // The file mode warning of `authtempo import` (plan 11f Task 4; spec 23 item
 // 6). An export holds addresses and can hold password hashes. A file that
-// other users of the machine can read gets one warning line on stderr, and
-// the run goes on: the file is the operator's. Every export file of the
-// command gets the check, the alias none (plan deviation 8).
+// other users of the machine can read gets one warning line on stderr. The
+// run goes on: the file is the operator's. Every export file of the command
+// gets the check, the alias none (plan deviation 8).
 
 const SUPABASE = FIXTURE_EXPORTS.supabase;
 const FILES = [

@@ -16,8 +16,8 @@ export interface ImportEnv {
  * the operator runs it on their own machine with `wrangler dev
  * --test-scheduled` and starts it with one request to the local
  * `/__scheduled` path, which only wrangler dev serves (worker/README.md).
- * It prints the report, the target, the CLI's exit status, and the verify of
- * a verify bundle (else null) as one JSON line to the wrangler terminal.
+ * It prints one JSON line to the wrangler terminal: the report, the target,
+ * the CLI's exit status, and the verify. The verify is null for an import.
  *
  * The module `authtempo-import-input` is the git-ignored
  * input/import.local.json (the `alias` in worker/wrangler.jsonc).

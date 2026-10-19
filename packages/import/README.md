@@ -109,14 +109,20 @@ authtempo import verify supabase --users users.csv --identities identities.csv -
 database, and reads only (spec 23 item 7). It exits 0 only when the database
 holds the whole export: the dry run would write no record, no record is
 `partial`, no hash is refused, and no record is a conflict or a refusal. A
-skip that the export states does not count. It prints one line, with counts
-and no record: `verify: the database holds this export: user 812,
-organization 3`, or `verify: the database does not hold this export: 2
-records would be written, 1 partial, 0 need a person`. It refuses `--repair`,
-`--dry-run`, and `--target memory`. Run it after the real run, before the
-cutover. On D1, write a verify bundle with `--target d1-bundle --out <file>`
-and run the Worker again (`worker/README.md`). `verifyReport` of this
-package is the one rule, and the D1 Worker reads it too.
+skip that the export states does not count. The verify reads that each row
+of a record exists, not its text. It prints one of two lines, with counts
+and no record:
+
+```text
+verify: the database holds this export: user 812, organization 3
+verify: the database does not hold this export: 2 records would be written, 1 partial, 0 need a person
+```
+
+It refuses `--repair`, `--dry-run`, `--on-email-taken`, and `--target
+memory`. Run it after the real run, before the cutover. On D1, write a
+verify bundle with `--target d1-bundle --out <file>` and run the Worker
+again (`worker/README.md`). `verifyReport` of this package is the one rule,
+and the D1 Worker reads it too.
 
 ## The exports
 

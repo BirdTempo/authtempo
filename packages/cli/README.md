@@ -133,8 +133,9 @@ flag map from the old binary:
 | `--firebase-signer-key <value>` | `--firebase-signer-key-env <NAME>` or `--firebase-signer-key-file <path>` |
 | every other flag | the same name and meaning |
 
-`--json` prints `{ report, stopped, bundle }`: the report is the JSON of
-`--report <file>`.
+`--json` prints `{ report, stopped, bundle, verify, exit }`: the report is
+the JSON of `--report <file>`, and `verify` is the answer of `import verify`,
+else null.
 
 ## The alias authtempo-import
 

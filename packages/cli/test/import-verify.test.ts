@@ -132,8 +132,8 @@ describe("on a database that authtempo migrate made", () => {
   it("exits 1 on a partial record after a claim", async () => {
     realRun();
     // Bob imports unverified with his password. A magic link sign-in over the
-    // same database makes core's claim: it verifies him and deletes the
-    // imported password, so his record lacks a row the export maps to.
+    // same database makes core's claim. The claim verifies him and deletes
+    // the imported password, so his record lacks a row the export maps to.
     const sent: { to: string; text: string }[] = [];
     const auth = createAuth({
       baseURL: "https://api.example.com",
@@ -174,7 +174,7 @@ describe("on a database that authtempo migrate made", () => {
 describe("the argument rules of import verify", () => {
   const run = (args: string[]) => runBin(args, { cwd: dir });
 
-  it("refuses --repair and --dry-run", () => {
+  it("refuses --repair, --dry-run, and --on-email-taken", () => {
     const repair = run(["import", "verify", ...FILES, ...PG, "--repair"]);
     expect(repair.status).toBe(2);
     expect(linesOf(repair.stderr)[0]).toBe("import verify reads only; it takes no --repair");
@@ -183,6 +183,14 @@ describe("the argument rules of import verify", () => {
     expect(linesOf(dryRun.stderr)[0]).toBe(
       "import verify always reads only; it takes no --dry-run",
     );
+    // A stop at the first conflict gives no count (spec 23 item 7), so the flag is refused with either value.
+    for (const value of ["fail", "skip"]) {
+      const r = run(["import", "verify", ...FILES, ...PG, "--on-email-taken", value]);
+      expect(r.status, value).toBe(2);
+      expect(linesOf(r.stderr)[0], value).toBe(
+        "import verify counts each conflict; it takes no --on-email-taken",
+      );
+    }
   });
 
   it("writes a verify bundle for the D1 Worker", () => {

@@ -8,7 +8,7 @@ await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 // The verify bundle on D1 (plan 11f Task 4; spec 23 item 7). The pool gives
 // this file its own database, so the first verify runs on an empty one. The
 // Supabase fixture of `src/testing.ts` is clean: both hashes are in its
-// formats, so a real run gives exit 0, and the verify after it holds.
+// formats. So a real run gives exit 0, and the verify after it holds.
 
 const SUPABASE = FIXTURE_EXPORTS.supabase;
 const VERIFY = { dryRun: true, formats: [...SUPABASE.formats] };
