@@ -1,5 +1,6 @@
 import { createLocalJWKSet, decodeJwt, jwtVerify } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { type AuthConfig, resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { deleteAccount } from "../src/engine/account-delete.js";
 import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
@@ -36,9 +37,9 @@ import { codeNow, EMAIL, PASSWORD, totpAuth, verifiedSession } from "./totp-help
 
 /**
  * OIDC Back-Channel Logout 1.0 (final, errata set 1, 15 December 2023;
- * read 2026-10-20). Plan 12e Task 16: each flow that ends a session writes
- * one outbox row per linked client in its transaction, and delivers the
- * user's due rows after its commit. The sweep retries the rest.
+ * read 2026-10-20), plan 12e Task 16. Each flow that ends a session writes
+ * one outbox row per linked client. After its commit it delivers the user's
+ * due rows. The sweep retries the rest.
  */
 
 const BC = "https://client.example.com/backchannel";
@@ -107,8 +108,8 @@ function world(opts: { noFetch?: boolean; cimd?: boolean } = {}) {
   const auth = totpAuth({ oauth });
   storage = auth.storage;
   const handle = createRouter(auth.config, coreRoutes(auth.config));
-  // The api of the same app, on the same storage and clock.
-  const { api } = createAuth({
+  // A second instance of the same app, on the same storage and clock.
+  const input: AuthConfig = {
     baseURL: BASE_URL,
     secret: "0123456789abcdef0123456789abcdef",
     trustedOrigins: [APP_ORIGIN],
@@ -121,8 +122,9 @@ function world(opts: { noFetch?: boolean; cimd?: boolean } = {}) {
     },
     password: { hash: FAST, uniformSignUp: false },
     oauth,
-  });
-  return { auth, handle, api, calls, status, answer };
+  };
+  const { api } = createAuth(input);
+  return { auth, handle, api, second: resolveConfig(input), calls, status, answer };
 }
 type World = ReturnType<typeof world>;
 
@@ -844,7 +846,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     }
   });
 
-  it("posts a due row once when two deliveries of the user run at the same time", async () => {
+  it("posts a due row once when two instances on one storage deliver it at the same time", async () => {
     const w = world();
     const { actor } = await twoSessions(w);
     const bc = await bcClient(w, BC);
@@ -857,7 +859,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(await outbox(w)).toMatchObject([{ attempts: 0 }]);
     await Promise.all([
       deliverLogouts(w.auth.config, actor.user.id),
-      deliverLogouts(w.auth.config, actor.user.id),
+      deliverLogouts(w.second, actor.user.id),
     ]);
     expect(w.calls).toHaveLength(1);
     expect(await outbox(w)).toEqual([]);
