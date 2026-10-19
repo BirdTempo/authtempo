@@ -1,0 +1,157 @@
+---
+title: From WorkOS
+description: Move the users, the identities, the organizations, and the members of WorkOS into authtempo, and change the app's auth calls.
+type: how-to
+sources:
+  - packages/import/README.md "WorkOS"
+  - packages/import/README.md "The exit status and the report"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
+  - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 9"
+sidebar:
+  order: 9
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/migrate/workos.ts?raw";
+import test from "../../../../../samples/migrate/workos.test.ts?raw";
+
+**For:** an operator and a developer who move an app from WorkOS to authtempo.
+
+**What it does:** you save the users, the identities, the organizations, and the members of WorkOS as four files, and import them into core's tables. Then you change the app's WorkOS calls to `@authtempo/client`.
+
+## Before you start
+
+- An API with authtempo, the magic link, and the password reset. Do a [getting started tutorial](/docs/start/) first.
+- `curl` and `jq` in the shell. [authtempo import](/docs/reference/cli/import/) reads the files that they write.
+- A WorkOS secret key in the shell as `WORKOS_API_KEY`. [The command](/docs/reference/import-cli/#the-command) never reads it.
+- `@authtempo/cli` in the app's workspace. [authtempo import](/docs/reference/cli/import/) is a command of it.
+
+## Steps
+
+### Export
+
+1. Run the script below in a folder that only you can read.
+2. The script writes `users.json`, `identities.json`, `memberships.json`, and `organizations.json`.
+
+```sh
+set -euo pipefail
+umask 077
+api=https://api.workos.com
+page() { curl -sf -H "Authorization: Bearer $WORKOS_API_KEY" "$api$1"; }
+list() {
+  after=""; : > "$2.ndjson"
+  while :; do
+    p=$(page "$1${after:+&after=$after}")
+    printf '%s\n' "$p" | jq -c '.data' >> "$2.ndjson"
+    after=$(printf '%s' "$p" | jq -r '.list_metadata.after // empty')
+    [ -z "$after" ] && break
+  done
+  jq -s 'add // []' "$2.ndjson" > "$2.json"
+}
+list "/user_management/users?limit=100&order=asc" users
+list "/organizations?limit=100&order=asc" organizations
+: > memberships.ndjson
+for o in $(jq -r '.[].id' organizations.json); do
+  list "/user_management/organization_memberships?organization_id=$o&limit=100" "m-$o"
+  cat "m-$o.json" >> memberships.ndjson
+done
+jq -s 'add // []' memberships.ndjson > memberships.json
+for u in $(jq -r '.[].id' users.json); do
+  printf '{"%s":%s}\n' "$u" "$(page "/user_management/users/$u/identities")"
+done | jq -s 'add // {}' > identities.json
+rm -f ./*.ndjson ./m-*.json
+```
+
+### Carry the passwords
+
+WorkOS exports no password hash, so no password moves. Each user signs in by a magic link, or sets a new password by a reset. The API turns on both, and organizations.
+
+<Code code={config} lang="ts" title="The API after the import" />
+
+### Dry run
+
+1. Run the import as a dry run, and read the report.
+2. Read each skipped record and each `dropped` item. A WorkOS export has no hash, so the `hashes:` line counts `none` only.
+
+The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
+
+```sh
+authtempo import workos --users users.json --identities identities.json --memberships memberships.json --organizations organizations.json --target postgres --url-env DATABASE_URL --dry-run
+```
+
+### Move
+
+1. Run the same command without `--dry-run`.
+
+### Verify
+
+1. Run `authtempo import verify` with the same files. It exits 0 only when the database holds the whole export.
+2. Run `authtempo check <base url>` against the API.
+3. Sign in once with a known user by a magic link, and once by each social provider of the export.
+4. Delete the four files after the cutover.
+
+```sh
+authtempo import verify workos --users users.json --identities identities.json --memberships memberships.json --organizations organizations.json --target postgres --url-env DATABASE_URL
+authtempo check https://api.example.com
+```
+
+The test below imports the fixture export, signs a user in by a magic link, and sets a password by a reset.
+
+<Code code={test} lang="ts" title="The test of this guide" />
+
+### Change the calls
+
+1. Change each auth call of the app with the table of [The calls](#the-calls).
+
+### Cut over
+
+1. Do the steps of [The cutover](/docs/migrate/cutover/).
+2. Delete `WORKOS_API_KEY` from the shell, and revoke the key in the WorkOS dashboard after the cutover.
+
+## The calls
+
+WorkOS sends the person to its AuthKit page. authtempo has no page for a web app: the app shows its own sign-in form.
+
+| WorkOS | authtempo |
+| --- | --- |
+| `getSignInUrl()`, `getSignUpUrl()` | The app's own form, with `client.magicLink.request` or `client.password.signIn`. |
+| `userManagement.authenticateWithPassword({ email, password })` | `client.password.signIn({ email, password })` |
+| `userManagement.sendMagicAuthCode({ email })` | `client.emailOtp.request({ email })`, or `client.magicLink.request({ email })` |
+| `userManagement.getAuthorizationUrl({ provider: "GoogleOAuth" })` | Send the browser to `/auth/social/google/start?next=/` on the API. |
+| `userManagement.sendPasswordResetEmail({ email })` | `client.password.requestReset({ email })` |
+| `userManagement.resetPassword({ token, newPassword })` | `client.password.reset({ token, password })`, with the token of the reset link |
+| `signOut()` | `client.signOut()` |
+| `withAuth()`, `getUser()` | `client.session()` |
+| `userManagement.listOrganizationMemberships({ userId })` | `client.organizations.list()` |
+| The check of a WorkOS access token on the server | `auth.session(request)`, or a check of the session JWT against `/auth/jwks` |
+
+## How it behaves
+
+- WorkOS exports no password hash. No password moves.
+- `id` is the source id. `email`, `email_verified`, `name`, `profile_picture_url`, and `created_at` move. Without `name`, `first_name` and `last_name` join with one space.
+- A user imports verified only when `email_verified` is the JSON value `true`.
+- An `OAuth` identity maps `GoogleOAuth` to Google, `AppleOAuth` to Apple, and `GitHubOAuth` to GitHub, with `idp_id` as the subject.
+- `LinkedInOAuth` is listed as `identity:linkedin_legacy`. Every other provider and every other type is dropped and listed.
+- Only an `active` membership imports. The role `admin` becomes admin, `member` becomes member, and the first admin becomes owner.
+- An organization with no active admin gives `no_owner`, and the command exits 1.
+- A membership of another status is listed on its user as `member:<status>`.
+- A WorkOS SSO user and a directory user are not read. Directory sync is a later plan.
+- A user that WorkOS deleted between two calls of the script is absent from the user list, and its identities are not read.
+
+:::caution
+Warning: the four files hold the address and the name of each user. Keep them in a folder that only you can read, and delete them after the cutover.
+:::
+
+## If it fails
+
+- The command stops at start with "the WorkOS memberships input needs the organizations input": give both files, or neither.
+- The command stops at start with "input is not an array": a file holds a page object. Run the script again, which saves the `data` array.
+- The command exits 1: read the report for `no_owner`, `duplicate_row`, or `no_source_id`. [The exit status](/docs/reference/cli/import/#the-exit-status) lists each.
+- [`invalid_credentials`](/docs/reference/errors/#invalid_credentials): no password moved. The user signs in by a magic link, or sets a new password.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): a magic link or a reset link that expired or was used. Send it again.
+
+## Next
+
+- [The cutover](/docs/migrate/cutover/)
+- [Sign in with a magic link](/docs/guides/magic-link/)
+- [Import CLI](/docs/reference/import-cli/)

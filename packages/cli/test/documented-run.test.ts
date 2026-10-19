@@ -30,6 +30,8 @@ const PAGES = [
   "migrate/firebase.mdx",
   "migrate/authjs.mdx",
   "migrate/cognito.mdx",
+  "migrate/workos.mdx",
+  "migrate/better-auth.mdx",
 ];
 
 /** The `node <path>` line of the sh fence of "Run it from this repo" on the CLI index page. */

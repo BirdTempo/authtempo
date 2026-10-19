@@ -20,7 +20,7 @@ describe("checkFaq", () => {
     const real = migrationGuides(pages);
     const r = checkFaq(faq, real);
     expect(r.failures).toEqual([]);
-    expect(r.counts.guides).toBe(8);
+    expect(r.counts.guides).toBe(9);
     expect(r.counts.entries).toBeGreaterThanOrEqual(8);
   });
 

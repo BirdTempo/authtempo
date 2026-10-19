@@ -30,7 +30,35 @@ import test from "../../../../../samples/migrate/better-auth.test.ts?raw";
 
 ## Steps
 
-1. In the app's `package.json`, point each Better Auth name that the app imports at the compatibility package.
+### Export
+
+Nothing leaves the database: the app keeps its own tables.
+
+1. Back up the database before the move, with `pg_dump` on Postgres.
+2. On D1, back it up with `wrangler d1 export <database> --remote --output backup.sql`.
+
+### Carry the passwords
+
+The password rows stay in the `account` table. Core verifies a Better Auth hash, and rehashes it as PBKDF2 at the first right sign-in.
+
+### Dry run
+
+1. List the compat migrations that the database lacks, and apply nothing.
+2. Add `--before-1.7` on D1 when the tables are from before Better Auth 1.7.
+
+The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
+
+```sh
+authtempo migrate --target postgres --url-env DATABASE_URL --tables compat --dry-run
+authtempo migrate --target d1 --database <database> --remote --tables compat --dry-run
+```
+
+### Move
+
+1. Run the same command without `--dry-run`.
+2. On D1, the command copies each compat file of the table below into the app's `migrations_dir`, under the next number. Then it applies them.
+3. On Postgres, the server can call `betterAuthSchemaStorage({ dialect: "postgres", sql }).migrate()` once per deploy, before the first request, instead.
+4. In the app's `package.json`, point each Better Auth name that the app imports at the compatibility package.
 
 ```json
 {
@@ -48,7 +76,25 @@ import test from "../../../../../samples/migrate/better-auth.test.ts?raw";
 }
 ```
 
-2. Keep both adapters in the list, also for an app on one database. The server entry loads both.
+5. Keep both adapters in the list, also for an app on one database. The server entry loads both.
+
+### Verify
+
+1. Run `authtempo check <base url>` against the API.
+2. Sign in once with a known user by each method: the password, the magic link, and each social provider.
+
+```sh
+authtempo check https://api.example.com
+```
+
+The test below runs the sample against a database in memory. It also shows the error at start.
+
+<Code code={test} lang="ts" title="The test of this guide" />
+
+### Change the calls
+
+1. Core stores no provider access token (spec 9). So `getAccessToken` has no answer, and each caller of it breaks at the cutover. Move each call to the provider's own token flow before the move.
+2. The session cookie is `__Host-tempo_session` (plan 12b), and a browser never sends a `__Host-` cookie to a sibling subdomain. So `advanced.crossSubDomainCookies` has no map, and an app that shares its session across subdomains breaks at the cutover.
 3. Remove each import of `better-auth/db`, `better-auth/types`, and the access subpaths. The package does not export them.
 4. Start the server once. Read the list of the one `BetterAuthCompatError`, and change or remove each option that it names.
 
@@ -57,15 +103,15 @@ import test from "../../../../../samples/migrate/better-auth.test.ts?raw";
 The account operations of a settings page work on the shim. They need a fresh session for each sensitive change. [The account operations](/docs/reference/compat-better-auth/#the-account-operations) lists them and their options. [Build an account settings page](/docs/guides/account-settings/) shows the client calls and the fresh rule.
 
 5. Wrap the handler in place of `hooks`. Core has no request hooks.
-6. On Postgres, call `betterAuthSchemaStorage({ dialect: "postgres", sql }).migrate()` once per deploy, before the first request.
-7. On D1, copy each compat file of the table below into the app's `migrations_dir`, in order, with the next number.
-8. Take the files from `migrations/d1/` for Better Auth 1.7 tables, or from `migrations/d1-before-1.7/` for older tables.
-9. Apply them with `pnpm --filter my-app exec wrangler d1 migrations apply <database> --remote`.
-10. Register the new callback URL at each social provider before the cutover.
 
-The test below runs the sample against a database in memory. It also shows the error at start.
+### Cut over
 
-<Code code={test} lang="ts" title="The test of this guide" />
+:::caution
+Warning: upgrade Better Auth to 1.7.7 or later before the move. Version 1.7.7 fixed a magic link takeover, and the old system stays the rollback target during the move.
+:::
+
+1. Do the steps of [The cutover](/docs/migrate/cutover/).
+2. Register the new callback URL at each social provider before the cutover.
 
 ## The D1 files
 
@@ -114,7 +160,7 @@ Warning: a `secret` other than the app's value locks every user with the second 
 
 - `BetterAuthCompatError` at start: change each option in its list.
 - `relation "ta_limit" already exists`: the schema holds the tables of the Postgres adapter. Run the compatibility storage on a schema without them.
-- `no such column: issuer` on D1: the 1.7 file ran on older tables. Use the `d1-before-1.7` file.
+- `no such column: issuer` on D1: the 1.7 file ran on older tables. Run the command again with `--before-1.7`.
 - [`invalid_token`](/docs/reference/errors/#invalid_token): a magic link, an invitation, or a delete link from before the cutover. Send it again.
 
 ## Next

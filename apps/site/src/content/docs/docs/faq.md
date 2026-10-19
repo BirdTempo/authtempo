@@ -11,6 +11,8 @@ sources:
   - apps/site/src/content/docs/docs/migrate/firebase.mdx "If it fails"
   - apps/site/src/content/docs/docs/migrate/authjs.mdx "How it behaves"
   - apps/site/src/content/docs/docs/migrate/cognito.mdx "How it behaves"
+  - apps/site/src/content/docs/docs/migrate/better-auth.mdx "Change the calls"
+  - apps/site/src/content/docs/docs/migrate/workos.mdx "How it behaves"
   - apps/site/src/content/docs/docs/migrate/index.md "Steps"
   - docs/superpowers/plans/2026-10-14-11d2-bindings.md "Task 17"
 ---
@@ -88,6 +90,18 @@ No. A JWT of the old system stops verifying, and each OAuth client of the old sy
 ### When do I change the callback URL at GitHub?
 
 A GitHub OAuth App takes one callback URL, so change it at the moment of the cutover. A GitHub App takes several, as the warning in [How the cutover behaves](/docs/migrate/cutover/#how-it-behaves) states.
+
+### Does `getAccessToken` of Better Auth still work?
+
+No: core stores no provider access token, so each caller of `getAccessToken` breaks at the cutover, as [Change the calls](/docs/migrate/better-auth/#change-the-calls) states.
+
+### Can my session cookie cover sibling subdomains?
+
+No: a browser never sends the `__Host-` session cookie to a sibling subdomain, so `advanced.crossSubDomainCookies` breaks at the cutover, as [Change the calls](/docs/migrate/better-auth/#change-the-calls) states.
+
+### Can I move from WorkOS?
+
+Yes: the import moves the users, the identities, the organizations, and the members with no password, as [From WorkOS](/docs/migrate/workos/) tells.
 
 ## Next
 

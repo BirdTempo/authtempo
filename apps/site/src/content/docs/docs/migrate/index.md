@@ -27,15 +27,16 @@ sidebar:
 2. Open the guide of that row, and do every step.
 3. Do the steps of [The cutover](/docs/migrate/cutover/).
 
-| Source | Path | What moves | What the app changes | Guide |
-| --- | --- | --- | --- | --- |
-| Better Auth 1.7 | The compatibility package | Everything stays in the app's own tables | Its package aliases, and the options that core refuses | [From Better Auth](/docs/migrate/better-auth/) |
-| Supabase Auth | The importer | Users, identities, bcrypt and Argon2id hashes | Its auth calls, to `@authtempo/client` | [From Supabase Auth](/docs/migrate/supabase/) |
-| Clerk | The importer | Users, identities, bcrypt hashes, organizations | Its auth calls | [From Clerk](/docs/migrate/clerk/) |
-| Auth0 | The importer | Users, identities, bcrypt hashes from a support case, organizations | Its auth calls | [From Auth0](/docs/migrate/auth0/) |
-| Firebase Auth | The importer | Users, identities, Firebase scrypt hashes | Its auth calls | [From Firebase Auth](/docs/migrate/firebase/) |
-| Auth.js | The importer | Users, identities, the app's own password hashes, passkeys | Its auth calls | [From Auth.js](/docs/migrate/authjs/) |
-| Amazon Cognito | The importer, and a check against Cognito at the first sign-in | Users, Google and Apple identities | Its auth calls | [From Amazon Cognito](/docs/migrate/cognito/) |
+| Source | Path | What moves | What the app changes | The command | Guide |
+| --- | --- | --- | --- | --- | --- |
+| Better Auth 1.7 | The compatibility package | Everything stays in the app's own tables | Its package aliases, and the options that core refuses | `authtempo migrate --target <postgres or d1> --tables compat --dry-run` | [From Better Auth](/docs/migrate/better-auth/) |
+| Supabase Auth | The importer | Users, identities, bcrypt and Argon2id hashes | Its auth calls, to `@authtempo/client` | `authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --target postgres --url-env DATABASE_URL --dry-run` | [From Supabase Auth](/docs/migrate/supabase/) |
+| Clerk | The importer | Users, identities, bcrypt hashes, organizations | Its auth calls | `authtempo import clerk --csv export.csv --users users.json --organizations organizations.json --formats bcrypt --target postgres --url-env DATABASE_URL --dry-run` | [From Clerk](/docs/migrate/clerk/) |
+| Auth0 | The importer | Users, identities, bcrypt hashes from a support case, organizations | Its auth calls | `authtempo import auth0 --users users.ndjson --hashes hashes.ndjson --organizations organizations.json --role-map lead=admin --formats bcrypt --target postgres --url-env DATABASE_URL --dry-run` | [From Auth0](/docs/migrate/auth0/) |
+| Firebase Auth | The importer | Users, identities, Firebase scrypt hashes | Its auth calls | `authtempo import firebase --users users.json --firebase-rounds 8 --firebase-mem-cost 14 --formats firescrypt --target postgres --url-env DATABASE_URL --dry-run` | [From Firebase Auth](/docs/migrate/firebase/) |
+| Auth.js | The importer | Users, identities, the app's own password hashes, passkeys | Its auth calls | `authtempo import authjs --authjs-tables tables.json --formats bcrypt --password-column passwordHash --same-passkey-rp-id --target postgres --url-env DATABASE_URL --dry-run` | [From Auth.js](/docs/migrate/authjs/) |
+| Amazon Cognito | The importer, and a check against Cognito at the first sign-in | Users, Google and Apple identities | Its auth calls | `authtempo import cognito --users users.json --legacy-verify --target postgres --url-env DATABASE_URL --dry-run` | [From Amazon Cognito](/docs/migrate/cognito/) |
+| WorkOS | The importer | Users, Google, Apple, and GitHub identities, organizations, members; no password | Its auth calls | `authtempo import workos --users users.json --identities identities.json --memberships memberships.json --organizations organizations.json --target postgres --url-env DATABASE_URL --dry-run` | [From WorkOS](/docs/migrate/workos/) |
 
 ## How it behaves
 
@@ -45,6 +46,8 @@ sidebar:
 - No session moves on any path. Every person signs in again once, after the cutover.
 - No second factor secret moves. A person with a second factor sets it up again.
 - An old password hash verifies at the first right sign-in, and core rewrites it as PBKDF2.
+- A person in two sources gives `email_taken` on the import of the second source. The import never merges two accounts.
+- After the real run, `authtempo import verify` exits 0 only when the database holds the whole export.
 
 ## If it fails
 

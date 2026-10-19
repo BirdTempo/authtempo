@@ -162,6 +162,52 @@ The conflicts are `unmatched_row`, `duplicate_row`, `status_compromised`, `statu
 - A second run of the same export writes nothing.
 - A repair writes nothing for a user that a claim verified since the import. The record then stays `partial` with `not repaired: verified_since_import`.
 
+Each conflict below has its remedy. The reason in the report is the anchor of its section.
+
+### `unmatched_row`
+
+Two export files of one provider disagree on this id, such as the Clerk CSV and the API users. Export both files again at the same time, and run the import again.
+
+### `duplicate_row`
+
+One export file holds the same user id twice, so no copy imports. Keep the right copy in the file, and run the import again.
+
+### `status_compromised`
+
+Cognito marks the user as compromised. Reset the user in Cognito, then export the users and run the import again.
+
+### `status_unknown`
+
+Cognito gives the user no status, or a status that the importer does not know. The report lists the value as `status:<value>`. Check the user in the Cognito console.
+
+### `no_source_id`
+
+The record has no provider id, so it has no import key. Find the record in the source system, and export it again with its id.
+
+### `email_taken`
+
+Another user holds the address. A person in two sources gives this on the second import, because the import never merges two accounts. Ask the person which account to keep.
+
+### `identity_taken`
+
+Another user holds the social identity, and the import never merges two accounts. Ask the person which account to keep.
+
+### `slug_taken`
+
+Another organization holds the slug. Change the slug of one of the two organizations, and run the import again.
+
+### `no_owner`
+
+No member of the organization maps to an owner. Map a source role to `owner` or `admin` with `--role-map`, or make a member an admin in the source.
+
+### `duplicate_passkey`
+
+One record holds a passkey credential id twice, or another write took it. Core keeps one row per credential, so run the import again and read the report.
+
+### `user_not_imported`
+
+A member of an organization names a user that did not import. Read the skip of that user, fix its cause, and run the import again.
+
 ## The rules of the rows
 
 - An address is verified only where the export says so.

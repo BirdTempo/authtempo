@@ -26,6 +26,8 @@ import test from "../../../../../samples/migrate/authjs.test.ts?raw";
 
 ## Steps
 
+### Export
+
 1. Read the three tables into `tables.json`, and keep the file private.
 
 ```sh
@@ -35,11 +37,18 @@ import test from "../../../../../samples/migrate/authjs.test.ts?raw";
 2. Put the app's own password column in the select in place of `passwordHash`.
 3. Remove that pair from the select when the app has no password column.
 4. When the `emailVerified` column is already `timestamptz`, remove `at time zone 'UTC'` from the select.
-5. Chain the legacy seam before core's PBKDF2 in the API. Pass the format of the app's hashes as `formats`, such as `["bcrypt"]`.
+
+### Carry the passwords
+
+1. Chain the legacy seam before core's PBKDF2 in the API. Pass the format of the app's hashes as `formats`, such as `["bcrypt"]`.
+2. With no password column, the seam has nothing to carry. Skip this phase.
 
 <Code code={seam} lang="ts" title="The API after the import" />
 
-6. Run the import as a dry run. Add `--same-passkey-rp-id` only when the new API keeps the old relying party id.
+### Dry run
+
+1. Run the import as a dry run. Add `--same-passkey-rp-id` only when the new API keeps the old relying party id.
+2. Check the `hashes:` line against `--formats`. It counts the hash formats of the export, such as `hashes: bcrypt 812, none 31`.
 
 The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
 
@@ -47,13 +56,32 @@ The packages are not on a registry yet. In this repo, run each command below as 
 authtempo import authjs --authjs-tables tables.json --formats bcrypt --password-column passwordHash --same-passkey-rp-id --target postgres --url-env DATABASE_URL --dry-run
 ```
 
-7. Run the same command without `--dry-run`.
+### Move
+
+1. Run the same command without `--dry-run`.
+
+### Verify
+
+1. Run `authtempo import verify` with the same files. It exits 0 only when the database holds the whole export.
+2. Run `authtempo check <base url>` against the API.
+3. Sign in once with a known user and the old password, and once by each other method of the app.
+
+```sh
+authtempo import verify authjs --authjs-tables tables.json --formats bcrypt --password-column passwordHash --same-passkey-rp-id --target postgres --url-env DATABASE_URL
+authtempo check https://api.example.com
+```
 
 <Code code={test} lang="ts" title="The test of this guide" />
 
-8. Delete `tables.json` with `rm tables.json`.
-9. Change each auth call of the app with the table below.
-10. Do the steps of [The cutover](/docs/migrate/cutover/).
+4. Delete `tables.json` with `rm tables.json`.
+
+### Change the calls
+
+1. Change each auth call of the app with the table of [The calls](#the-calls).
+
+### Cut over
+
+1. Do the steps of [The cutover](/docs/migrate/cutover/).
 
 ## The calls
 
