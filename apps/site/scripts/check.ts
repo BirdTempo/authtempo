@@ -196,8 +196,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
       ),
   },
   {
-    // The guide shape of spec 23 item 9 against the readers of the importer and the
-    // conflict anchors of the import page (plan 11f Task 10).
+    // Hold the guides to the shape of spec 23 item 9, the importer's readers, and the conflict anchors (plan 11f).
     name: "check-migrate",
     run: () =>
       checkMigrate(

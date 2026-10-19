@@ -18,7 +18,9 @@ export const PHASES: readonly string[] = [
 
 /**
  * The guides with no reader of the importer, each with its reason. The check
- * prints the reason as an exempt line, so a reader sees each exemption.
+ * prints the reason as an exempt line, so a reader sees each exemption. Such a
+ * guide keeps the include rule: the Better Auth guide includes
+ * samples/migrate/better-auth.ts, the server on the compatibility package.
  */
 export const NO_READER: Readonly<Record<string, string>> = {
   "better-auth": "the compatibility package: the app keeps its tables (spec 16.2)",
@@ -40,14 +42,18 @@ function proseLines(source: string): string[] {
   return out;
 }
 
+// CommonMark lets an ATX heading start with up to three spaces. Four spaces make a code block.
+const H2 = /^ {0,3}## /;
+const H3 = /^ {0,3}### /;
+
 /** The H3 lines from `## Steps` to the next H2, or null when the page has no Steps. */
 function stepHeadings(lines: readonly string[]): string[] | null {
-  const start = lines.findIndex((l) => l.trim() === "## Steps");
+  const start = lines.findIndex((l) => H2.test(l) && l.trim() === "## Steps");
   if (start < 0) return null;
   const out: string[] = [];
   for (const line of lines.slice(start + 1)) {
-    if (line.startsWith("## ")) break;
-    if (line.startsWith("### ")) out.push(line.slice(4).trim());
+    if (H2.test(line)) break;
+    if (H3.test(line)) out.push(line.trim().slice(4).trim());
   }
   return out;
 }
@@ -75,9 +81,16 @@ interface Row {
   stem: string | null;
 }
 
-/** The body rows of the first table of a page, each with the guide it links. */
+/**
+ * The body rows of the first table of a page, each with the guide it links.
+ * The table ends at the first line after it that does not start with a pipe.
+ */
 function tableRows(lines: readonly string[]): { header: string[]; rows: Row[] } {
-  const table = lines.filter((l) => l.trimStart().startsWith("|"));
+  const isRow = (l: string) => l.trimStart().startsWith("|");
+  const first = lines.findIndex(isRow);
+  const rest = first < 0 ? [] : lines.slice(first);
+  const end = rest.findIndex((l) => !isRow(l));
+  const table = end < 0 ? rest : rest.slice(0, end);
   const header = table[0] === undefined ? [] : cells(table[0]);
   const rows = table.slice(2).map((line) => {
     const m = /\]\(\/docs\/migrate\/([^/#)]+)\/\)/.exec(line);
@@ -93,9 +106,9 @@ function codeSpan(cell: string): string | null {
 }
 
 /**
- * Holds each guide of docs/migrate/ to the seven phases and its two includes,
- * the guides to the providers of the importer, the index table to the guides,
- * and the import reference page to the conflict reasons.
+ * Holds each guide of docs/migrate/ to the seven phases and to its own sample
+ * and sample test. Holds the guides to the providers of the importer. Holds
+ * the index table to the guides, and the import page to the conflict reasons.
  */
 export function checkMigrate(
   pages: readonly Page[],
@@ -110,7 +123,7 @@ export function checkMigrate(
     .map((p) => ({ page: p, stem: (p.path.split("/").at(-1) ?? "").replace(/\.[^.]+$/, "") }));
 
   let phases = 0;
-  for (const { page } of guides) {
+  for (const { page, stem } of guides) {
     const lines = proseLines(page.source);
     const found = stepHeadings(lines);
     if (found === null) {
@@ -119,22 +132,23 @@ export function checkMigrate(
       phases += found.length;
       if (found.join("\n") !== PHASES.join("\n"))
         r.failures.push(
-          `${page.path}: the H3 lines under Steps are ${found.join(", ")}; the phases are ${PHASES.join(", ")}`,
+          `${page.path}: the H3 lines under Steps are ${found.length === 0 ? "none" : found.join(", ")}; the phases are ${PHASES.join(", ")}`,
         );
     }
-    const specifiers = importSpecifiers(lines);
-    const tests = specifiers.filter((s) => /samples\/migrate\/[^/]+\.test\.ts\?raw$/.test(s));
-    const samples = specifiers.filter(
-      (s) => /samples\/migrate\/[^/]+\.ts\?raw$/.test(s) && !tests.includes(s),
-    );
-    if (samples.length !== 1)
-      r.failures.push(
-        `${page.path} imports ${samples.length} files samples/migrate/<x>.ts?raw; it needs one`,
-      );
-    if (tests.length !== 1)
-      r.failures.push(
-        `${page.path} imports ${tests.length} files samples/migrate/<x>.test.ts?raw; it needs one`,
-      );
+    // Spec 23 item 9: each guide includes its own sample and its own sample test, by its stem.
+    const own = `samples/migrate/${stem}.ts?raw`;
+    const ownTest = `samples/migrate/${stem}.test.ts?raw`;
+    const included = importSpecifiers(lines).flatMap((s) => {
+      const m = /(samples\/migrate\/[^/]+\?raw)$/.exec(s);
+      return m?.[1] !== undefined ? [m[1]] : [];
+    });
+    for (const file of included)
+      if (file !== own && file !== ownTest)
+        r.failures.push(`${page.path} imports ${file}, which is not a file of the guide ${stem}`);
+    for (const file of [own, ownTest]) {
+      const n = included.filter((x) => x === file).length;
+      if (n !== 1) r.failures.push(`${page.path} imports ${file} ${n} times; it needs one`);
+    }
   }
 
   const stems = new Set(guides.map((g) => g.stem));

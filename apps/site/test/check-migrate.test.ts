@@ -105,20 +105,64 @@ describe("checkMigrate", () => {
     expect(r.failures[0]).toContain("Cut over, Notes");
   });
 
-  it("refuses a guide with no sample test and a guide with two samples", () => {
+  it("refuses a guide with a phase missing, and a guide with no phase", () => {
+    const six = tree([guide("a", SEVEN.slice(0, 6)), guide("better-auth")]);
+    expect(checkMigrate(six, ["a"], HTML, REASONS).failures).toEqual([
+      "docs/migrate/a.mdx: the H3 lines under Steps are Export, Carry the passwords, Dry run, Move, Verify, Change the calls; the phases are Export, Carry the passwords, Dry run, Move, Verify, Change the calls, Cut over",
+    ]);
+    const none = tree([guide("a", []), guide("better-auth")]);
+    expect(checkMigrate(none, ["a"], HTML, REASONS).failures).toEqual([
+      "docs/migrate/a.mdx: the H3 lines under Steps are none; the phases are Export, Carry the passwords, Dry run, Move, Verify, Change the calls, Cut over",
+    ]);
+  });
+
+  it("reads a heading with up to three spaces before it, as CommonMark does", () => {
     const a = guide("a");
-    const noTest = { ...a, source: a.source.replace(/^import test .*$/m, "") };
+    const indentedMove = { ...a, source: a.source.replace("### Move\n", "   ### Move\n") };
+    const codeLine = { ...a, source: a.source.replace("### Move\n", "### Move\n\n    ### Code\n") };
     expect(
-      checkMigrate(tree([noTest, guide("better-auth")]), ["a"], HTML, REASONS).failures,
-    ).toEqual(["docs/migrate/a.mdx imports 0 files samples/migrate/<x>.test.ts?raw; it needs one"]);
-    const extra = 'import more from "../../../../../samples/migrate/b.ts?raw";';
-    const twoSamples = {
+      checkMigrate(tree([indentedMove, guide("better-auth")]), ["a"], HTML, REASONS).failures,
+    ).toEqual([]);
+    expect(
+      checkMigrate(tree([codeLine, guide("better-auth")]), ["a"], HTML, REASONS).failures,
+    ).toEqual([]);
+    const indentedNotes = {
       ...a,
-      source: a.source.replace("## Before you start", `${extra}\n\n## Before you start`),
+      source: a.source.replace("### Cut over\n", "### Cut over\n\n  ### Notes\n"),
     };
     expect(
-      checkMigrate(tree([twoSamples, guide("better-auth")]), ["a"], HTML, REASONS).failures,
-    ).toEqual(["docs/migrate/a.mdx imports 2 files samples/migrate/<x>.ts?raw; it needs one"]);
+      checkMigrate(tree([indentedNotes, guide("better-auth")]), ["a"], HTML, REASONS).failures[0],
+    ).toContain("Cut over, Notes;");
+    const indentedEnd = {
+      ...a,
+      source: a.source.replace("## How it behaves", "  ## How it behaves"),
+    };
+    expect(
+      checkMigrate(tree([indentedEnd, guide("better-auth")]), ["a"], HTML, REASONS).failures,
+    ).toEqual([]);
+  });
+
+  it("refuses a guide with no sample test, its sample twice, or the sample of another guide", () => {
+    const a = guide("a");
+    const run = (source: string) =>
+      checkMigrate(tree([{ ...a, source }, guide("better-auth")]), ["a"], HTML, REASONS).failures;
+    const at = (line: string) =>
+      a.source.replace("## Before you start", `${line}\n\n## Before you start`);
+    expect(run(a.source.replace(/^import test .*$/m, ""))).toEqual([
+      "docs/migrate/a.mdx imports samples/migrate/a.test.ts?raw 0 times; it needs one",
+    ]);
+    expect(run(at('import again from "../../../../../samples/migrate/a.ts?raw";'))).toEqual([
+      "docs/migrate/a.mdx imports samples/migrate/a.ts?raw 2 times; it needs one",
+    ]);
+    expect(
+      run(a.source.replace("samples/migrate/a.test.ts?raw", "samples/migrate/b.test.ts?raw")),
+    ).toEqual([
+      "docs/migrate/a.mdx imports samples/migrate/b.test.ts?raw, which is not a file of the guide a",
+      "docs/migrate/a.mdx imports samples/migrate/a.test.ts?raw 0 times; it needs one",
+    ]);
+    expect(run(at('import other from "../../../../../samples/migrate/b.test.ts?raw";'))).toEqual([
+      "docs/migrate/a.mdx imports samples/migrate/b.test.ts?raw, which is not a file of the guide a",
+    ]);
   });
 
   it("refuses a provider with no guide, and a guide with no provider", () => {
@@ -171,6 +215,16 @@ describe("checkMigrate", () => {
       "better-auth has no row in docs/migrate/index.md",
       "read 0 rows",
     ]);
+  });
+
+  it("reads the first table of the index only", () => {
+    const pages = tree();
+    const index = pages.find((p) => p.path === "docs/migrate/index.md");
+    const second = "\nA second table.\n\n| Term | Meaning |\n| --- | --- |\n| a | b |\n";
+    const withSecond = pages.map((p) => (p === index ? { ...p, source: p.source + second } : p));
+    const r = checkMigrate(withSecond, ["a"], HTML, REASONS);
+    expect(r.failures).toEqual([]);
+    expect(r.counts.rows).toBe(2);
   });
 
   it("refuses a conflict reason with no anchor", () => {
