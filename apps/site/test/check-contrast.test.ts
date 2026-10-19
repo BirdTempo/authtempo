@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { checkContrast, contrastRatio } from "../scripts/check-contrast.ts";
+import { CONTRAST_PAIRS, checkContrast, contrastRatio } from "../scripts/check-contrast.ts";
 import { SITE } from "../scripts/lib/paths.ts";
 
 const css = readFileSync(`${SITE}src/styles/tokens.css`, "utf8");
@@ -17,7 +17,26 @@ describe("checkContrast", () => {
   it("passes every pair of the site's tokens in both schemes", () => {
     const r = checkContrast(css);
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ pairs: 16, lowest_text: 4.61, lowest_non_text: 4.1 });
+    expect(r.counts).toEqual({ pairs: 20, lowest_text: 4.61, lowest_non_text: 3.68 });
+  });
+
+  it("holds the accent on the surface and on the code color as focus-ring pairs", () => {
+    expect(CONTRAST_PAIRS).toContainEqual({
+      fg: "--at-accent",
+      bg: "--at-surface",
+      kind: "non-text",
+    });
+    expect(CONTRAST_PAIRS).toContainEqual({ fg: "--at-accent", bg: "--at-code", kind: "non-text" });
+  });
+
+  it("names an absent token as no value", () => {
+    const broken = css.replace(
+      /(:root\[data-theme="dark"\] \{[\s\S]*?)\n {2}--at-accent-text: #6b9bff;/,
+      "$1",
+    );
+    expect(checkContrast(broken).failures).toContain(
+      "dark: --at-accent-text on --at-paper needs two #rrggbb values; read no value and #121316",
+    );
   });
 
   it("fails a mute color under 4.5:1 on paper", () => {

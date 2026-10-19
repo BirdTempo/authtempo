@@ -22,7 +22,13 @@ export function contrastRatio(a: string, b: string): number {
   return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
 }
 
-/** The pairs of brand spec 4, and the text pairs on a surface and in a code block. */
+/**
+ * The pairs of brand spec 4, and the text pairs on a surface and in a code
+ * block. Spec 4 names the accent for the focus ring, and spec 14 puts the
+ * ring on every interactive element. A card sits on the surface, and the
+ * copy button of a code block sits on the code color. So the accent is a
+ * non-text pair on the paper, on the surface, and on the code color.
+ */
 export const CONTRAST_PAIRS: readonly {
   fg: ColorToken;
   bg: ColorToken;
@@ -35,7 +41,9 @@ export const CONTRAST_PAIRS: readonly {
   { fg: "--at-ink", bg: "--at-surface", kind: "text" },
   { fg: "--at-mute", bg: "--at-surface", kind: "text" },
   { fg: "--at-accent-text", bg: "--at-surface", kind: "text" },
+  { fg: "--at-accent", bg: "--at-surface", kind: "non-text" },
   { fg: "--at-code-ink", bg: "--at-code", kind: "text" },
+  { fg: "--at-accent", bg: "--at-code", kind: "non-text" },
 ];
 /** WCAG 2.1 SC 1.4.3 (text, 4.5:1) and SC 1.4.11 (non-text, 3:1). */
 export const FLOOR = { text: 4.5, "non-text": 3 } as const;
@@ -62,7 +70,7 @@ export function checkContrast(css: string): CheckReport {
       const hex = /^#[0-9a-f]{6}$/i;
       if (fg === undefined || bg === undefined || !hex.test(fg) || !hex.test(bg)) {
         r.failures.push(
-          `${scheme}: ${p.fg} on ${p.bg} needs two #rrggbb values; read ${fg} and ${bg}`,
+          `${scheme}: ${p.fg} on ${p.bg} needs two #rrggbb values; read ${fg ?? "no value"} and ${bg ?? "no value"}`,
         );
         continue;
       }
