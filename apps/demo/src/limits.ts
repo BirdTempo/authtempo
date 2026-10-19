@@ -17,8 +17,14 @@ import { readBodyField, readJsonField } from "./read-body.js";
  * - Workers limits page, last updated 2026-10-12: a request body of 100 MB
  *   on the Free and Pro Cloudflare plans. The demo cap bodyBytes is 16 KiB.
  * - Workers limits page, last updated 2026-10-12: 100,000 requests a day on
- *   Workers Free. The gate total holds the new sandboxes; the WAF rate rule
- *   at publication is an owner-run item and helps only.
+ *   Workers Free. The gate total holds the new sandboxes, but no owned limit
+ *   holds the count of requests in full (final review m7). One request makes
+ *   at most four Durable Object calls: two exists() calls, the gate admit,
+ *   and the create. The count of src/flood.ts stops one client in one
+ *   isolate only. A flood across isolates can use up the daily quota of
+ *   Workers Free and stop the demo for that day. On Workers Paid, Cloudflare
+ *   bills each request and each Durable Object call. The WAF rate rule at
+ *   publication is then the only control of such a flood: an owner input.
  */
 
 /** A route as "<METHOD> <path under /auth>", with :provider for a provider name. */

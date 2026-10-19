@@ -86,6 +86,8 @@ export const LIMIT_WORDS: { readonly [K in keyof typeof DEMO_LIMITS]: (n: number
   organizationsPerSandbox: (n) => `${n} organizations per sandbox.`,
   mailsKept: (n) => `The mailbox keeps the newest ${n} mails.`,
   bodyBytes: (n) => `A request body of at most ${n} bytes.`,
+  requestsPerIpPerMinute: (n) =>
+    `${n} requests per address per minute in each copy of the demo script. Cloudflare runs many copies, so this limit is weak.`,
 };
 
 /** One row per key of DEMO_LIMITS, in the order of the object, with its words. */

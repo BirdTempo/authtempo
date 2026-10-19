@@ -112,9 +112,10 @@ describe("the demo Worker and its sandboxes", () => {
     expect(await stubOf(unknown).exists()).toBe(false);
   });
 
-  it("reads at most four values of the sandbox cookie", async () => {
+  it("reads at most two values of the sandbox cookie (final review m7)", async () => {
     const id = await visit();
-    const unknown = ["1", "2", "3", "4"].map((d) => d.repeat(32));
+    // Each value read costs one exists() call; the live id in third place is never read.
+    const unknown = ["1", "2"].map((d) => d.repeat(32));
     const cookie = [...unknown, id].map((v) => `__Host-demo_sandbox=${v}`).join("; ");
     const res = await fetchSelf(`${ORIGIN}/`, {
       redirect: "manual",

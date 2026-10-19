@@ -123,4 +123,10 @@ export const DEMO_LIMITS = {
   mailsKept: 50,
   /** A body above this answers 413 before the parse. The largest demo form is under 2 KiB. */
   bodyBytes: 16_384,
+  /**
+   * Requests per IP per minute in one isolate, counted before any Durable
+   * Object call (src/flood.ts). A person who clicks through the demo sends far
+   * fewer. Weak: each isolate counts alone (final review m7).
+   */
+  requestsPerIpPerMinute: 600,
 } as const;

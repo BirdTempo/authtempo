@@ -1,5 +1,6 @@
 import { CLIENT_IP_HEADER } from "./auth.js";
 import { DEMO_LIMITS } from "./facts.js";
+import { IsolateCount } from "./flood.js";
 import { Gate } from "./gate.js";
 import { PAGE_HEADERS } from "./html.js";
 import { Sandbox } from "./sandbox.js";
@@ -13,8 +14,20 @@ const CLEAR_COOKIE = `${COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Ag
 const ASSET_PREFIXES = ["/assets/", "/fonts/"];
 /** A sandbox id is 16 random bytes in lower-case hex, so a guess needs 128 bits. */
 const ID_RE = /^[0-9a-f]{32}$/;
-/** Each candidate costs one exists() call, so a request with many values costs at most this many. */
-const MAX_IDS = 4;
+/**
+ * Each candidate costs one exists() call. A browser sends one cookie of a
+ * __Host- name per host, so two values cover a stale value before the live
+ * one (ruling 32). With the gate admit and the create, one request then makes
+ * at most four Durable Object calls (final review m7).
+ */
+const MAX_IDS = 2;
+
+/**
+ * The first limit, before any Durable Object call. It lives in the isolate on
+ * purpose: a count in a Durable Object would cost the call that it saves.
+ * At most 10,000 keys stay in memory.
+ */
+const FIRST = new IsolateCount(DEMO_LIMITS.requestsPerIpPerMinute, 10_000);
 
 /**
  * Each value of the sandbox cookie that has the id form, in header order, at
@@ -164,6 +177,8 @@ export default {
     // another path reached the script, so no IP can be counted.
     const ip = request.headers.get("cf-connecting-ip");
     if (ip === null || ip === "") return withPageHeaders(json(400, { error: "no_client_ip" }));
+    if (!FIRST.take(ip, Date.now()))
+      return withPageHeaders(json(429, { error: "demo_limit", limit: "requestsPerIpPerMinute" }));
     const bounded = await capped(request);
     if (bounded === null) return withPageHeaders(json(413, { error: "body_too_large" }));
     return withPageHeaders(await route(bounded, env, ip));

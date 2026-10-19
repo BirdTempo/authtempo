@@ -837,6 +837,7 @@ describe("the demo page (plan 11b Task 12)", () => {
       "organizationsPerSandbox",
       "mailsKept",
       "bodyBytes",
+      "requestsPerIpPerMinute",
     ]);
     const shown = (key: keyof typeof DEMO_LIMITS) => {
       const value = DEMO_LIMITS[key];
