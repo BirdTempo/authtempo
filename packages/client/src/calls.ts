@@ -5,15 +5,24 @@ import type { RouteMethod, RoutePath } from "@authtempo/core/routes";
  * route it calls. `select` names the one key of the route's answer that the
  * client method answers (plan 11g): `passkeys.list` answers the `passkeys`
  * of `{ passkeys }`. The call reads the key through `selected`, and the
- * type test holds the method's answer to the same key of the contract.
+ * type test holds the method's answer to the same key of the contract. A
+ * row with `select` has no `:name` in its path: the client's `part` fills
+ * no template, so the type refuses one.
  */
 export type ClientCall = {
-  [M in RouteMethod]: {
-    readonly operation: string;
-    readonly method: M;
-    readonly path: RoutePath<M>;
-    readonly select?: string;
-  };
+  [M in RouteMethod]:
+    | {
+        readonly operation: string;
+        readonly method: M;
+        readonly path: RoutePath<M>;
+        readonly select?: undefined;
+      }
+    | {
+        readonly operation: string;
+        readonly method: M;
+        readonly path: Exclude<RoutePath<M>, `${string}/:${string}`>;
+        readonly select: string;
+      };
 }[RouteMethod];
 
 /**

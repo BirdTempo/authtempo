@@ -25,8 +25,6 @@ import { sessionCookie } from "../cookies.js";
 import { json, readJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
 
-// The reauth routes read the credential schema from here (plan 11g: the schema lives in the contract).
-
 export function passkeyRoutes(config: ResolvedConfig): Route[] {
   if (!config.passkey) return [];
   /** The session, plus the renewed cookie when the read moved the expiry. Every session route sends that cookie. */

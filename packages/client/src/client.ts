@@ -37,7 +37,7 @@ export type PasskeySummaryJSON = Omit<PasskeySummary, "createdAt"> & { createdAt
 /**
  * The session answer of every route but `GET /session` (plan 11g): a
  * sign-in, the refresh, and the active organization answer the user and the
- * session, and never `needsRefresh`, which only the read carries.
+ * session. None carries `needsRefresh`; only the read does.
  */
 type PublicSessionJSON = Omit<PublicSession, "needsRefresh">;
 

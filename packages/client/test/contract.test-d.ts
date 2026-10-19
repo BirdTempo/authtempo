@@ -1,15 +1,15 @@
 import type { AnswerOf, BodyOf } from "@authtempo/core/openapi";
 import type { RouteKey } from "@authtempo/core/routes";
-import type { CLIENT_CALLS, ClientOperation, Selected } from "../src/calls.js";
+import type { CLIENT_CALLS, ClientCall, ClientOperation, Selected } from "../src/calls.js";
 import type { Client } from "../src/client.js";
 import type { ClientResult } from "../src/result.js";
 
 /**
  * The client's types held to the route contract (plan 11g). `tsc -p
- * tsconfig.test.json` reads this file; vitest does not run it. For each row
- * of `CLIENT_CALLS` that a method of `Client` answers, the method's answer
- * equals the part of the contract's answer that the row's `select` names.
- * For each row of `BODY_AS_INPUT`, the method's input equals the body.
+ * tsconfig.test.json` reads this file; vitest does not run it. A method of
+ * `Client` answers each row of `CLIENT_CALLS` but the uncompared ones. Its
+ * answer equals the part of the contract's answer that the row's `select`
+ * names. For each row of `BODY_AS_INPUT`, the method's input equals the body.
  * `calls.test.ts` holds the three lists to the table.
  */
 
@@ -337,3 +337,14 @@ export const NOT_COMPARED = [
 export type _covered = Expect<
   Equal<Compared | (typeof NOT_COMPARED)[number]["operation"], ClientOperation>
 >;
+
+/**
+ * A row with `select` and a `:name` path fails the compile (plan 11g Task 4
+ * review, Low 3): `part` sends the row's path with no fill. The error line
+ * below is the test; it fails the compile the day the type admits the row.
+ */
+export const TEMPLATE_REFUSED = [
+  // @ts-expect-error A select row cannot name a template path.
+  { operation: "link", method: "POST", path: "/social/:provider/link", select: "url" },
+  { operation: "list", method: "GET", path: "/passkeys", select: "passkeys" },
+] as const satisfies readonly ClientCall[];

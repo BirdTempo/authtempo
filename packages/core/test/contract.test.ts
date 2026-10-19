@@ -186,8 +186,8 @@ async function registeredClient(w: World): Promise<string> {
   return body.client_id;
 }
 
-/** A valid authorize query of the client, with `scope`. */
-function authorizeQuery(clientId: string, challenge: string, scope = "openid") {
+/** A valid authorize query of the client, with `scope`. `prompt: "consent"` shows the consent page again. */
+function authorizeQuery(clientId: string, challenge: string, scope = "openid", prompt?: string) {
   return {
     response_type: "code",
     client_id: clientId,
@@ -197,6 +197,7 @@ function authorizeQuery(clientId: string, challenge: string, scope = "openid") {
     scope,
     resource: RESOURCE,
     state: "st-1",
+    ...(prompt === undefined ? {} : { prompt }),
   };
 }
 
@@ -253,7 +254,7 @@ interface BodyRow {
 /**
  * The bodies of every POST that parses with its schema, each one accepted by
  * the schema, with the session it needs and the answer of a refused body.
- * The order matters: the account delete goes last, since it ends the
+ * The order matters. The account delete goes last, since it ends the
  * session's user, and the password change goes before it.
  */
 async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<string, string> }> {
@@ -586,10 +587,10 @@ describe("the route contract (plan 11g)", () => {
     const INVALID_REQUEST: Answer = { status: 400, code: "invalid_request" };
     const BACK_INVALID: Answer = { status: 302, code: "invalid_request" };
     /**
-     * Each GET that reads its query by hand: a valid query, the keys the schema requires with
-     * the answer of each one's absence, and the answer of the valid query. `wrong` is for a GET
-     * whose schema holds a key to the engine's regex. It names the key, a value of a wrong form,
-     * the answer of the route, and the engine's regex.
+     * Each GET that reads its query by hand: a valid query, and the keys the schema requires
+     * with the answer of each one's absence. `valid` is the answer of the valid query. `wrong`
+     * is for a GET whose schema holds a key to the engine's regex. It names the key, a value of
+     * a wrong form, the answer of the route, and the engine's regex.
      */
     const VALID_QUERIES: {
       key: RouteKey;
@@ -816,23 +817,31 @@ describe("the route contract (plan 11g)", () => {
     const cookie = w.cookieOf(me.token);
     const clientId = await registeredClient(w);
     const INVALID_REQUEST: Answer = { status: 400, code: "invalid_request" };
-    // The consent of a held request, and a code of a second request for the token exchange.
-    const p = await pkce();
-    const page = await w.handle(
-      get(`/auth/oauth/authorize?${query(authorizeQuery(clientId, p.challenge))}`, cookie),
-    );
-    const requestId = requestIdOf(await page.text());
+    /** A consent form of a fresh held request: the page shows again with `prompt=consent`. */
+    const consentForm = async (): Promise<Record<string, unknown>> => {
+      const p = await pkce();
+      const page = await w.handle(
+        get(
+          `/auth/oauth/authorize?${query(authorizeQuery(clientId, p.challenge, "openid", "consent"))}`,
+          cookie,
+        ),
+      );
+      return { request_id: requestIdOf(await page.text()), decision: "allow" };
+    };
     const consent = { ...cookie, origin: BASE_URL };
+    // A code of a second request, for the token exchange.
     const { code, verifier } = await codeOf(w, cookie, clientId);
     /**
-     * Each POST that reads its body by hand: the media, a valid body, the keys the schema
-     * requires with the answer of each one's absence, and the answer of the valid body. The
-     * valid body runs first, so a spent request or code shapes the later answers.
+     * Each POST that reads its body by hand: the media, a valid body, and the keys the schema
+     * requires with the answer of each one's absence. `valid` is the answer of the valid body.
+     * The valid body runs first, so a spent code shapes the later answers of the token route.
+     * `fresh` makes a new valid body for each probe, where the valid body spends a request.
      */
     const VALID_FORMS: {
       key: RouteKey;
       media: "json" | "form";
       body: Record<string, unknown>;
+      fresh?: () => Promise<Record<string, unknown>>;
       headers?: Record<string, string>;
       required: readonly string[];
       valid: Answer;
@@ -847,13 +856,19 @@ describe("the route contract (plan 11g)", () => {
         missing: { redirect_uris: { status: 400, code: "invalid_redirect_uri" } },
       },
       {
+        // The consent route differs: a form with no decision is a deny, so the answer is a
+        // redirect, not a 400. Each probe takes a fresh held request, since a post spends one.
         key: "POST /oauth/authorize",
         media: "form",
-        body: { request_id: requestId, decision: "allow" },
+        body: await consentForm(),
+        fresh: consentForm,
         headers: consent,
         required: ["request_id", "decision"],
         valid: { status: 302, code: null },
-        missing: { request_id: INVALID_REQUEST, decision: INVALID_REQUEST },
+        missing: {
+          request_id: INVALID_REQUEST,
+          decision: { status: 302, code: "access_denied" },
+        },
       },
       {
         key: "POST /oauth/token",
@@ -897,7 +912,7 @@ describe("the route contract (plan 11g)", () => {
         );
       expect(await answerOf(await send(row.body)), `${row.key}: the valid body`).toEqual(row.valid);
       for (const key of row.required) {
-        const { [key]: _dropped, ...without } = row.body;
+        const { [key]: _dropped, ...without } = row.fresh ? await row.fresh() : row.body;
         expect(body.schema.safeParse(without).success, `${row.key} without ${key}`).toBe(false);
         expect(await answerOf(await send(without)), `${row.key} without ${key}`).toEqual(
           row.missing[key],

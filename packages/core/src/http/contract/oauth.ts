@@ -10,7 +10,7 @@ export const revokeGrantBody = z.object({ clientId: z.string().min(1).max(2048) 
 /**
  * The registration of RFC 7591 section 2, read by hand: `redirect_uris` is
  * the one required key. Core takes public clients only, so the auth method
- * is `none`, the grant types are the code and the refresh, and the one
+ * is `none`. The grant types are the code and the refresh, and the one
  * response type is `code`. The engine rules on each value.
  */
 export const registerBody = z.object({
