@@ -1,0 +1,22 @@
+# The headers of every static answer of the site (plan 11b Task 3).
+# scripts/write-headers.ts writes dist/_headers from this file after each build.
+# It puts the SHA-256 of each inline script of dist in place of the hash mark of script-src.
+# check-csp then holds the written file to the build, so a stale hash fails.
+# Rule form and limits: Workers static assets headers page, last updated 2026-09-22, read 2026-10-19.
+# The page allows 100 rules and 2,000 characters a line. check-csp fails a longer line.
+# 'wasm-unsafe-eval': the docs search runs the WebAssembly module of Pagefind (plan 11b deviation 6).
+# style-src: 1 style elements and 49215 style attributes in the build of 2026-10-19. A style cannot run code; the script rule is the boundary.
+# Starlight and Expressive Code write the style attributes, and a hash cannot cover a style attribute.
+# img-src data: Starlight, Expressive Code, and Pagefind draw their icons as data: images in CSS.
+# A data: image is bytes in the style sheet; it sends no request (ruling 12 of the plan 11b lane).
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval' {{SCRIPT_HASHES}}; style-src 'self' 'unsafe-inline'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Referrer-Policy: no-referrer
+  X-Content-Type-Options: nosniff
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+
+# The OpenAPI document is public data with no secret (plan 11g). A local tool
+# in a browser on another origin loads it; no credential is sent or allowed.
+# Rule form: Workers static assets docs, headers page, read 2026-10-19.
+/docs/reference/openapi.json
+  Access-Control-Allow-Origin: *

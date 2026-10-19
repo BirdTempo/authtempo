@@ -1,5 +1,0 @@
-# The OpenAPI document is public data with no secret (plan 11g). A local tool
-# in a browser on another origin loads it; no credential is sent or allowed.
-# Rule form: Workers static assets docs, headers page, read 2026-10-19.
-/docs/reference/openapi.json
-  Access-Control-Allow-Origin: *

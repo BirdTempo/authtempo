@@ -2,7 +2,7 @@
 // `astro build`, so every check that reads dist reads a build that is newer
 // than the change. Each check prints one summary line. The run fails when one
 // check fails, and the last line counts the checks that passed.
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
@@ -15,10 +15,12 @@ import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
 import { checkCli } from "./check-cli.ts";
 import { checkConfig } from "./check-config.ts";
 import { checkContrast } from "./check-contrast.ts";
+import { checkCsp } from "./check-csp.ts";
 import { checkDeploy, wranglerDryRun } from "./check-deploy.ts";
 import { checkErrorLinks, errorLinks } from "./check-error-links.ts";
 import { checkErrors } from "./check-errors.ts";
 import { checkExports, readExports } from "./check-exports.ts";
+import { checkExternal } from "./check-external.ts";
 import { checkFaq, FAQ_PAGE, migrationGuides } from "./check-faq.ts";
 import { checkFences } from "./check-fences.ts";
 import { checkFonts } from "./check-fonts.ts";
@@ -38,6 +40,7 @@ import { checkSitePages, MINIMUM_ENTRIES } from "./check-site-pages.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
 import { checkTerms } from "./check-terms.ts";
 import { checkTokens } from "./check-tokens.ts";
+import { checkWeight } from "./check-weight.ts";
 import { sidebarGroups, sidebarOrder } from "./lib/agent.ts";
 import { helpRuns } from "./lib/cli-help.ts";
 import { configKeyPaths } from "./lib/config-keys.ts";
@@ -79,6 +82,17 @@ function openApiFile(): unknown {
   } catch {
     return null;
   }
+}
+
+/** dist/_headers as write-headers.ts wrote it, or null when the build lacks it (plan 11b Task 3). */
+function distHeaders(): string | null {
+  return existsSync(`${DIST}_headers`) ? readFileSync(`${DIST}_headers`, "utf8") : null;
+}
+
+/** The size of a file of dist by its URL path, such as /_astro/x.css, or null when it does not exist. */
+function distBytes(path: string): number | null {
+  const abs = `${DIST}${decodeURIComponent(path).slice(1)}`;
+  return existsSync(abs) && statSync(abs).isFile() ? statSync(abs).size : null;
 }
 
 /** The built MCP server. The site's Turbo test builds it first, through the dev dependency. */
@@ -285,6 +299,11 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         rootPages: rootPages(),
       }),
   },
+  // Plan 11b Task 3: no page loads a file of another origin, and the site sets no cookie.
+  { name: "check-external", run: () => checkExternal(distPages(), distHeaders()) },
+  // The CSP that write-headers.ts wrote, held to the inline scripts of this build.
+  { name: "check-csp", run: () => checkCsp(distPages(), distHeaders()) },
+  { name: "check-weight", run: () => checkWeight(rootPages(), distBytes) },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },
 ];

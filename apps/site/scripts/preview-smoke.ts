@@ -3,7 +3,8 @@
 // built dist and makes five requests. It is not part of `pnpm test`, because
 // wrangler dev takes seconds to start; Task 14 of plan 11a runs it.
 import { spawn } from "node:child_process";
-import { SITE } from "./lib/paths.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { DIST, SITE } from "./lib/paths.ts";
 
 const PORT = 8799;
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -84,6 +85,33 @@ async function ready(): Promise<void> {
   throw new Error("wrangler dev did not answer within 60 s");
 }
 
+/**
+ * The CSP value of dist/_headers, which write-headers.ts wrote (plan 11b Task 3),
+ * or null. The Worker must send this value on each page, so the smoke compares
+ * the header of each answer with it.
+ */
+function builtPolicy(): string | null {
+  if (!existsSync(`${DIST}_headers`)) return null;
+  const line = /^\s+Content-Security-Policy:\s*(.*)$/m.exec(
+    readFileSync(`${DIST}_headers`, "utf8"),
+  );
+  return line?.[1]?.trim() ?? null;
+}
+
+/** The verdict on the CSP header of one page: equal to the line of dist/_headers. */
+function policyAnswer(res: Response): string | null {
+  const want = builtPolicy();
+  const got = res.headers.get("content-security-policy");
+  console.log(
+    `preview-smoke: ${new URL(res.url).pathname} status=${res.status} content-security-policy=${got === null ? "(none)" : `${got.length} characters`}`,
+  );
+  if (res.status !== 200) return `status ${res.status}`;
+  if (want === null) return "dist/_headers has no Content-Security-Policy line";
+  if (got === null)
+    return "no content-security-policy header; wrangler dev did not apply dist/_headers";
+  return got === want ? null : `content-security-policy ${got} is not the line of dist/_headers`;
+}
+
 const failures: string[] = [];
 let checks = 0;
 async function expectAnswer(path: string, test: (res: Response, body: string) => string | null) {
@@ -118,6 +146,9 @@ try {
         : 'status 200 but the body lacks "Read the docs"',
   );
   await expectAnswer("/docs/", (res) => (res.status === 200 ? null : `status ${res.status}`));
+  // Plan 11b Task 3: the Worker sends the CSP of dist/_headers on a root page and on a docs page.
+  await expectAnswer("/", (res) => policyAnswer(res));
+  await expectAnswer("/docs/", (res) => policyAnswer(res));
   await expectAnswer("/docs", (res) =>
     (res.status === 307 || res.status === 308) && res.headers.get("location") === "/docs/"
       ? null

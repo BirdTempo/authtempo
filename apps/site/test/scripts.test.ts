@@ -50,8 +50,9 @@ describe("the package scripts (plan 11a)", () => {
   it("runs vitest after a failed check, and fails when either one fails", () => {
     // The test pins the order of plan 11e Task 3. build-agent runs right after
     // astro build and before any check, because the checks read its output.
+    // write-headers runs next (plan 11b Task 3), because check-csp reads dist/_headers.
     // --force: see the test "builds with --force" below.
-    const build = `${PREFIX}astro build --force && node scripts/build-agent.ts && `;
+    const build = `${PREFIX}astro build --force && node scripts/build-agent.ts && node scripts/write-headers.ts && `;
     const script = pkg.scripts.test ?? "";
     expect(script.startsWith(build)).toBe(true);
     const rest = script.slice(build.length);
@@ -88,5 +89,19 @@ describe("the package scripts (plan 11a)", () => {
         name,
         forced: true,
       });
+  });
+
+  // Plan 11b Task 3. The CSP of dist/_headers holds the hash of each inline
+  // script of the build. So each script that builds writes the headers right
+  // after build-agent, or wrangler serves dist/_headers.template and no CSP.
+  it("writes the headers right after build-agent in each script that builds", () => {
+    const chain = `${PREFIX}astro build --force && node scripts/build-agent.ts && node scripts/write-headers.ts`;
+    for (const name of ["build", "test", "preview:smoke", "preview"]) {
+      const script = pkg.scripts[name] ?? "";
+      expect({ name, written: script === chain || script.startsWith(`${chain} && `) }).toEqual({
+        name,
+        written: true,
+      });
+    }
   });
 });
