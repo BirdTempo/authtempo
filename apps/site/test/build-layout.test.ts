@@ -66,18 +66,23 @@ function expectHero(path: string, title: string): void {
 /** The plan names that a cost row can state. A new plan name joins this list. */
 const PLANS = ["Workers Free", "Workers Paid"];
 /**
- * The terms of a cost text: each plan name, and each number with the first
- * plan name after it. A fact and its quote must hold the same terms (ruling 21).
+ * The terms of a cost text (rulings 21 and 22). Each number pairs with the first
+ * plan name after it, and the pairs compare as a set. Each plan name that no
+ * number claims keeps its order, so a swap of two plans fails.
  */
-function costTerms(text: string): string[] {
+function costTerms(text: string): { pairs: string[]; plans: string[] } {
   const tokens = [...text.matchAll(new RegExp(`\\b\\d+\\b|${PLANS.join("|")}`, "g"))].map(
     (m) => m[0],
   );
-  const plans = [...new Set(tokens.filter((t) => PLANS.includes(t)))];
-  const pairs = tokens.flatMap((t, i) =>
-    /^\d+$/.test(t) ? [`${t} ${tokens.slice(i + 1).find((u) => PLANS.includes(u)) ?? "-"}`] : [],
-  );
-  return [...plans, ...pairs].sort();
+  const claimed = new Set<number>();
+  const pairs = tokens.flatMap((t, i) => {
+    if (!/^\d+$/.test(t)) return [];
+    const at = tokens.findIndex((u, k) => k > i && PLANS.includes(u));
+    if (at >= 0) claimed.add(at);
+    return [`${t} ${at >= 0 ? tokens[at] : "-"}`];
+  });
+  const plans = tokens.filter((t, i) => PLANS.includes(t) && !claimed.has(i));
+  return { pairs: pairs.sort(), plans };
 }
 /** True when one tag of the kind has each attribute with its value, in any order. */
 const hasTag = (html: string, tag: string, attrs: Record<string, string>) =>
@@ -360,14 +365,15 @@ describe("the pricing and security pages (plan 11b)", () => {
     }
   });
 
-  it("reads the terms of a cost text: each plan, and each number with its plan", () => {
-    expect(costTerms("D1 goes back 7 days on Workers Free, and 30 days on Workers Paid.")).toEqual([
-      "30 Workers Paid",
-      "7 Workers Free",
-      "Workers Free",
-      "Workers Paid",
-    ]);
-    expect(costTerms("It holds 5 rows.")).toEqual(["5 -"]);
+  it("reads the terms of a cost text: each number with its plan, and the order of the other plans", () => {
+    expect(costTerms("D1 goes back 7 days on Workers Free, and 30 days on Workers Paid.")).toEqual({
+      pairs: ["30 Workers Paid", "7 Workers Free"],
+      plans: [],
+    });
+    expect(costTerms("It needs Workers Paid: Workers Free gives 1 slot.")).toEqual({
+      pairs: ["1 -"],
+      plans: ["Workers Paid", "Workers Free"],
+    });
   });
 
   it("holds each number and plan name of each shown fact to its quote, both ways", () => {
