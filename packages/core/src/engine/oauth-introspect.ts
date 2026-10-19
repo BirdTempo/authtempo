@@ -4,7 +4,13 @@ import { decodeJws } from "../primitives/jwk.js";
 import { issuerOf } from "./jwt.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
-import { liveUser, type OAuthAccess, refreshRowOf, resolveAccessToken } from "./oauth-token.js";
+import {
+  liveUser,
+  type OAuthAccess,
+  refreshRowOf,
+  resolveAccessToken,
+  servedGrantScopes,
+} from "./oauth-token.js";
 
 /**
  * Token introspection (plan 12e, RFC 7662, read 2026-10-20). A resource
@@ -68,13 +74,18 @@ async function grantStands(config: ResolvedConfig, access: OAuthAccess, iat: num
 }
 
 /**
- * The answer for an access token, or null. `resolveAccessToken` checks the
- * signature, the type, the issuer, the audience, and `exp`. For a client
- * token it also checks the client, its grant, and each scope (Task 7).
+ * The answer for an access token of a resource in `visible`, or null.
+ * `resolveAccessToken` checks the signature, the type, the issuer, the
+ * audience, `exp`, and each scope against `oauth.scopes`. For a client
+ * token it also checks the client, its grant, and its client scopes (Task 7).
  */
-async function accessAnswer(config: ResolvedConfig, token: string): Promise<Active | null> {
+async function accessAnswer(
+  config: ResolvedConfig,
+  token: string,
+  visible: readonly string[],
+): Promise<Active | null> {
   const resolved = await resolveAccessToken(config, token);
-  if (!resolved) return null;
+  if (!resolved || !visible.includes(resolved.access.resource)) return null;
   // resolveAccessToken verified this token, so its claims are core's own.
   const iat = decodeJws(token)?.payload.iat;
   if (typeof iat !== "number") return null;
@@ -98,7 +109,9 @@ async function accessAnswer(config: ResolvedConfig, token: string): Promise<Acti
  * The answer for a refresh token, or null. Only its own client learns of
  * it. That client exists: `authenticateClient` read its row for this
  * request. The token is live while the refresh grant would take it: unspent,
- * before its expiry, and of a user that exists with a verified address.
+ * before its expiry, and of a user that exists with a verified address. It
+ * answers the served scopes of the grant, and no scope but `offline_access`
+ * is inactive (ruling 30). No resource map applies (ruling 30).
  */
 async function refreshAnswer(
   config: ResolvedConfig,
@@ -108,10 +121,11 @@ async function refreshAnswer(
   const row = await refreshRowOf(config, token);
   if (!row || row.clientId !== caller.client.id) return null;
   if (row.usedAt !== null || row.expiresAt.getTime() <= config.clock.now().getTime()) return null;
-  if (!(await liveUser(config, row.userId))) return null;
+  const served = servedGrantScopes(config, row.scopes);
+  if (!served || !(await liveUser(config, row.userId))) return null;
   return {
     active: true,
-    scope: row.scopes.join(" "),
+    scope: served.join(" "),
     client_id: row.clientId,
     sub: row.userId,
     aud: row.resource,
@@ -139,8 +153,9 @@ export function visibleResources(oauth: ResolvedOAuth, clientId: string): readon
  * Section 4: the caller is a confidential client that the operator allowed
  * (`introspect: true` of `api.oauth.clients`), else `invalid_client`. A
  * missing `token` is `invalid_request` (section 2.1). `hint` orders the two
- * lookups only: a token never fits both forms. A token of a resource
- * outside `visibleResources` answers inactive.
+ * lookups only: a token never fits both forms. An access token of a
+ * resource outside `visibleResources` answers inactive. A refresh token
+ * answers its own client only, so no resource map applies to it.
  */
 export async function introspect(
   config: ResolvedConfig,
@@ -153,11 +168,14 @@ export async function introspect(
   const token = input.token;
   if (token === null) return oauthFail("invalid_request");
   const visible = visibleResources(oauthOf(config), caller.client.id);
-  const lookups = [() => accessAnswer(config, token), () => refreshAnswer(config, caller, token)];
+  const lookups = [
+    () => accessAnswer(config, token, visible),
+    () => refreshAnswer(config, caller, token),
+  ];
   if (input.hint === "refresh_token") lookups.reverse();
   for (const lookup of lookups) {
     const answer = await lookup();
-    if (answer) return oauthOk(visible.includes(answer.aud) ? answer : { active: false });
+    if (answer) return oauthOk(answer);
   }
   return oauthOk({ active: false });
 }

@@ -352,6 +352,53 @@ describe("token introspection (plan 12e Task 8, RFC 7662)", () => {
     expect((await ask(v, owner, child)).body).toEqual(INACTIVE);
   });
 
+  it("answers a refresh token to its own client with no map entry, with only the served scopes (ruling 30)", async () => {
+    const h = oauthHandle();
+    const owner = await apiClient(h, {
+      name: "Web app",
+      grantTypes: ["authorization_code", "refresh_token"],
+      redirectUris: [REDIRECT],
+      credentialsScopes: [],
+    });
+    const s = await signedIn(h);
+    const basic = { authorization: basicHeader(owner.clientId, owner.secret) };
+    const grant = async (scope: string) => {
+      const p = await pkce();
+      const { code } = await authorized(h, s.cookie, {
+        clientId: owner.clientId,
+        challenge: p.challenge,
+        scope,
+      });
+      const form = {
+        grant_type: "authorization_code",
+        code,
+        code_verifier: p.verifier,
+        redirect_uri: REDIRECT,
+        resource: RESOURCE,
+      };
+      return tokens(h, tokenPost(form, basic));
+    };
+    const both = await grant("mcp:read mcp:write offline_access");
+    // Two resources and no map: the owner still sees its own refresh token.
+    expect((await ask(h, owner, both.refresh_token ?? "")).body).toMatchObject({
+      active: true,
+      scope: "mcp:read mcp:write offline_access",
+    });
+    // A deploy that drops mcp:write: the second instance answers the served scopes only.
+    const rs = await apiClient(h);
+    const readOnly = twin(h, { [rs.clientId]: [RESOURCE] }, { "mcp:read": "Read" });
+    expect((await ask(readOnly, owner, both.refresh_token ?? "")).body).toMatchObject({
+      active: true,
+      scope: "mcp:read offline_access",
+    });
+    // Its access token holds mcp:write, so it is inactive there.
+    expect((await ask(readOnly, rs, both.access_token)).body).toEqual(INACTIVE);
+    // A grant with no served scope but offline_access is inactive there.
+    const writeOnly = await grant("mcp:write offline_access");
+    expect((await ask(readOnly, owner, writeOnly.refresh_token ?? "")).body).toEqual(INACTIVE);
+    expect((await ask(h, owner, writeOnly.refresh_token ?? "")).body.active).toBe(true);
+  });
+
   it("refuses a caller without introspect: true and a public caller", async () => {
     const h = oauthHandle();
     const t = await userToken(h);
