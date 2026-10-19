@@ -17,7 +17,7 @@ function at(config: unknown, path: string): unknown {
 
 // The parts that /demo/ lists as off (final review m3 of plan 11b). A part
 // that the demo turns on fails here, so the page cannot state a false fact.
-// test/node/off.test.ts holds each config path to a key of core and each package.
+// The Node test test/node/off.test.ts holds each path to a key of core.
 describe("the parts that the demo turns off", () => {
   // The config reads no row at its build, so an empty store and mailbox serve.
   const config = demoConfig({

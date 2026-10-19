@@ -14,8 +14,8 @@ export type CompareSide = "authtempo" | "parity" | "better-auth";
 /**
  * One row of the review `review-vs-better-auth.md` of 2026-10-14, shortened
  * to 25 words a cell at most. `id` is the review row. `source` names the
- * public source of the Better Auth cell (SOURCES), and the merged plan file
- * when a fresh read of its code moved the row. Each part ends at "; ".
+ * public source of the Better Auth cell (SOURCES). When a fresh read of
+ * merged code moved the row, it also names the plan file. Parts end at "; ".
  * `read` is an ISO date: the older read of the two cells.
  */
 export interface CompareRow {

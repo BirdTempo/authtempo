@@ -225,8 +225,8 @@ describe("the demo Worker and its sandboxes", () => {
         alarm: await state.storage.getAlarm(),
       }));
     const before = await read();
-    // The call runs on the instance: a throw of an RPC method of the stub also
-    // reaches the pool as an unhandled error of the object (seen 2026-10-20).
+    // The call runs on the instance, not on the stub. A throw of an RPC method
+    // of the stub also reaches the pool as an unhandled error (seen 2026-10-20).
     const second = runInDurableObject(stubOf(id), (instance: Sandbox) => instance.create());
     await expect(second).rejects.toThrow("demo: the sandbox exists");
     expect(await read()).toEqual(before);

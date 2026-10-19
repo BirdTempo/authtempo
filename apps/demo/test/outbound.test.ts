@@ -4,8 +4,8 @@ import { everyFlow } from "./flows.js";
 import { escapes, PROBE_ENTRY } from "./outbound-log.js";
 
 /**
- * The probe goes to a host under .invalid (RFC 6761): no DNS answers it, so
- * the probe reaches no real host even when the recorder is off.
+ * The probe goes to a host under .invalid (RFC 6761), and no DNS answers
+ * such a host. So the probe reaches no real host, also with the recorder off.
  */
 const PROBE = PROBE_ENTRY.replace(/^GET /, "");
 

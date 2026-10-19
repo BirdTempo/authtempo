@@ -85,9 +85,9 @@ export interface Exchange {
 export const EXCHANGES: Exchange[] = [];
 
 /**
- * One request through the Worker. Every test request goes through here, so
- * the cookie rule and the mailbox rule read each answer (test/node/rules.test.ts
- * fails on SELF.fetch in any other test file).
+ * One request through the Worker. Every test request goes through here. So
+ * the cookie rule and the mailbox rule read each answer. The test
+ * test/node/rules.test.ts fails on SELF.fetch in any other test file.
  */
 export async function fetchSelf(url: string, init: RequestInit = {}): Promise<Response> {
   const res = await SELF.fetch(url, init);

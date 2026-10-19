@@ -85,8 +85,8 @@ function scanText(path: string): string {
 
 /**
  * Each credential form in `text`. The forms are a token of a core prefix, a
- * 64-character hex string, and a 43-character base64url literal (the form of
- * 32 random bytes, as a sandbox secret). A client secret is the last form.
+ * 64-character hex string, and a 43-character base64url literal. That last
+ * form is 32 random bytes, as a sandbox secret. A client secret is one more form.
  */
 function credentials(text: string): string[] {
   const found: string[] = [];

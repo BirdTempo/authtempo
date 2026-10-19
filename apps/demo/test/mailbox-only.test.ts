@@ -26,8 +26,8 @@ function holds(text: string, value: string): boolean {
   return at.test(text);
 }
 
-// Spec 24 item 9 (final review m2 of plan 11b): the mailbox page is the only
-// place where a link or a code of a mail appears. Each answer of every flow
+// Spec 24 item 9 and final review m2 of plan 11b. The mailbox page is the
+// only place where a link or a code of a mail appears. Each answer of every flow
 // outside /mailbox (the status, the headers, and the body) holds no such
 // value. An answer may hold a value that its own request sent, as the
 // confirm page holds the token of its URL.
@@ -38,7 +38,6 @@ describe("the mailbox", () => {
 
   it("reads the links and codes of every flow", () => {
     const secrets = mailed();
-    // everyFlow mails 2 sign-up links, 2 reset links, 3 magic links, 3 codes, and 1 invitation at least.
     // everyFlow mails 2 address links, 1 reset link, 3 magic links, 2 codes, and 1 invitation.
     expect(secrets.size).toBe(9);
     const kinds = [...secrets].map((v) => (/^\d+$/.test(v) ? "code" : v.split("_")[0]));

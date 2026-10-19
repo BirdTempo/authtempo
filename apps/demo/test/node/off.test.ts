@@ -6,9 +6,9 @@ import { CONFIG_KEYS } from "../../../site/scripts/lib/config-keys.ts";
 import { DEMO_OFF } from "../../src/facts.ts";
 
 // The places of DEMO_OFF that a Node test can read (final review m3 of plan
-// 11b). test/off.test.ts holds each config path unset and the scheduled
-// handler absent. Here each config path is a key of core, so an unset path
-// cannot pass by a typo, and each package is real and not a dependency.
+// 11b). The pool test test/off.test.ts holds each config path unset and no
+// scheduled handler. Here each config path is a key of core, so a typo
+// cannot pass as unset. Each package is real and is not a dependency.
 const PKG = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const REPO = resolve(PKG, "../..");
 

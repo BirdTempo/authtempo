@@ -37,9 +37,9 @@ const ENTITIES: Readonly<Record<string, string>> = {
 };
 
 /**
- * A public source of a fact (final review m4 of plan 11b): the Better Auth
- * docs, its repository or releases on GitHub, or a file of its npm package
- * at a version. Any other part of a source must be a tracked file of this
+ * A public source of a fact (final review m4 of plan 11b). It is a page of
+ * the Better Auth docs, its repository or releases on GitHub, or a file of
+ * its npm package at a version. Any other part of a source must be a tracked file of this
  * repository, so a reader can open each source.
  */
 const PUBLIC_SOURCE = new RegExp(

@@ -41,8 +41,8 @@ export type DemoOffPlace =
 /**
  * The parts of authtempo that the design turns off in the demo, each with its
  * reason (plan 11b design, "Turned off in the demo"). No one of them is a
- * route feature. test/off.test.ts and test/node/off.test.ts hold each place
- * (final review m3), so a part that the demo turns on makes the page false no more.
+ * route feature. The tests test/off.test.ts and test/node/off.test.ts hold
+ * each place (final review m3). So a part that the demo turns on fails a test.
  */
 export const DEMO_OFF: readonly { name: string; reason: string; place: DemoOffPlace }[] = [
   {

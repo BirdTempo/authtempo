@@ -22,8 +22,9 @@ export const DEMO_PAGE = {
 } as const;
 
 /**
- * The end of the page: a link to the host once the owner sets DEMO_PUBLISHED,
- * else the local command and the address to open (plan 11b, deviation 11).
+ * The end of the page (plan 11b, deviation 11). Once the owner sets
+ * DEMO_PUBLISHED, it is a link to the host. Else it is the local command and
+ * the address to open.
  * A test reads both values.
  */
 export function demoEnd(published: boolean):
