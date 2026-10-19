@@ -64,6 +64,8 @@ export interface FeedInput {
   changelogs: { pkg: string; text: string }[];
   /** RELEASE_DATES of src/data/releases.ts. */
   dates: Readonly<Record<string, string>>;
+  /** FEED_START of src/data/releases.ts: the updated date of a feed with no row. */
+  start: string;
 }
 
 /** The checks of one feed or entry element. `of` names it in a failure, such as "the feed". */
@@ -114,6 +116,12 @@ function checkElement(el: XmlElement, of: string, failures: string[], isEntry: b
         failures.push(`the content of ${of} is ${type} and holds a child element`);
     }
   }
+}
+
+/** The entry id of a `<pkg>@<version>` key. A package name holds an @ too, so the last @ splits it. */
+function entryIdOf(key: string): string {
+  const at = key.lastIndexOf("@");
+  return entryId(key.slice(0, at), key.slice(at + 1));
 }
 
 /** The version headings above 0.0.0 of the changelogs, as `<pkg>@<version>` keys. */
@@ -197,6 +205,35 @@ export function checkFeed(input: FeedInput): CheckReport {
         `the row ${key} of RELEASE_DATES is ${date}; it must be YYYY-MM-DDTHH:MM:SSZ`,
       );
   }
+
+  // The dates of the feed against RELEASE_DATES (ruling 29, review of Task 7 Low 1).
+  // Each entry takes its row. The feed takes the newest row, or FEED_START with no row.
+  const keyOfId = new Map(headings.map((key) => [entryIdOf(key), key]));
+  for (const e of entries) {
+    const [id, updated] = [kids(e, "id"), kids(e, "updated")];
+    if (id.length !== 1 || updated.length !== 1) continue;
+    const key = keyOfId.get(id[0]?.text.trim() ?? "");
+    const row = key === undefined ? undefined : input.dates[key];
+    const date = updated[0]?.text.trim() ?? "";
+    if (row !== undefined && date !== row)
+      r.failures.push(
+        `the entry for ${key} has the updated date ${date}; its row of RELEASE_DATES is ${row}`,
+      );
+  }
+  const rows = headings
+    .map((key) => input.dates[key])
+    .filter((d): d is string => d !== undefined && isRowDate(d));
+  const newest = rows.reduce<string | undefined>(
+    (a, d) => (a === undefined || Date.parse(d) > Date.parse(a) ? d : a),
+    undefined,
+  );
+  const want = newest ?? input.start;
+  const feedDates = kids(root, "updated");
+  const feedDate = feedDates[0]?.text.trim() ?? "";
+  if (feedDates.length === 1 && isDateTime(feedDate) && feedDate !== want)
+    r.failures.push(
+      `the feed has the updated date ${feedDate}; it must be ${want}, the newest row of RELEASE_DATES, or FEED_START with no row`,
+    );
 
   // Zero entries: an exemption only while no release exists (spec 18 item 13).
   if (entries.length === 0) {

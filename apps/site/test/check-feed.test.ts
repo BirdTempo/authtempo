@@ -3,6 +3,7 @@ import { checkFeed } from "../scripts/check-feed.ts";
 import {
   atomFeed,
   datedEntries,
+  entryKey,
   type FeedEntry,
   feedSources,
   feedUpdated,
@@ -13,6 +14,7 @@ import {
 import { SITE } from "../scripts/lib/paths.ts";
 import { parseXml } from "../scripts/lib/xml.ts";
 import { FEED_START, RELEASE_DATES } from "../src/data/releases.ts";
+import { REPO_ROOT } from "../src/data/repo.ts";
 
 /** Two packages: client with two versions, core with one (plan 11b Task 7). */
 const FIXTURE = `${SITE}test/fixtures/site/changelogs`;
@@ -40,11 +42,12 @@ function fixtureFeed(): string {
 const emptyFeed = atomFeed([], FEED_START);
 
 const check = (feed: string | null) =>
-  checkFeed({ feed, versions: FIXTURE_VERSIONS, changelogs, dates: DATES });
+  checkFeed({ start: FEED_START, feed, versions: FIXTURE_VERSIONS, changelogs, dates: DATES });
 /** The empty feed with one line replaced: each break of the feed replaces one whole element. */
 const emptyWith = (from: string, to: string) => {
   expect(emptyFeed).toContain(from);
   return checkFeed({
+    start: FEED_START,
     feed: emptyFeed.replace(from, to),
     versions: AT_ZERO,
     changelogs: [],
@@ -117,7 +120,13 @@ describe("the feed writer (plan 11b Task 7)", () => {
     expect(root.name).toBe("feed");
     expect(root.attrs.xmlns).toBe("http://www.w3.org/2005/Atom");
     expect(
-      checkFeed({ feed: emptyFeed, versions: AT_ZERO, changelogs: [], dates: {} }).failures,
+      checkFeed({
+        start: FEED_START,
+        feed: emptyFeed,
+        versions: AT_ZERO,
+        changelogs: [],
+        dates: {},
+      }).failures,
     ).toEqual([]);
   });
 
@@ -147,14 +156,25 @@ describe("the feed writer (plan 11b Task 7)", () => {
     ]);
   });
 
-  it("holds RELEASE_DATES empty while no changelog exists", () => {
-    expect(RELEASE_DATES).toEqual({});
+  // Review of Task 7, Low 4: the drift rule of ruling 29 on this tree, not a literal.
+  // A release adds a heading and a row, and the test holds without an edit.
+  it("holds a row of RELEASE_DATES for each heading of this tree, and a heading for each row", () => {
+    const keys = releaseEntries(readChangelogs(REPO_ROOT)).map((e) => entryKey(e.pkg, e.version));
+    expect(Object.keys(RELEASE_DATES).sort()).toEqual(keys.sort());
   });
 });
 
 describe("checkFeed (plan 11b Task 7)", () => {
   it("passes zero entries with every package at 0.0.0, as an exemption", () => {
-    expect(checkFeed({ feed: emptyFeed, versions: AT_ZERO, changelogs: [], dates: {} })).toEqual({
+    expect(
+      checkFeed({
+        start: FEED_START,
+        feed: emptyFeed,
+        versions: AT_ZERO,
+        changelogs: [],
+        dates: {},
+      }),
+    ).toEqual({
       name: "check-feed",
       counts: { entries: 0, packages: 2 },
       failures: [],
@@ -164,6 +184,7 @@ describe("checkFeed (plan 11b Task 7)", () => {
 
   it("fails zero entries with a package above 0.0.0", () => {
     const r = checkFeed({
+      start: FEED_START,
       feed: emptyFeed,
       versions: [
         { pkg: "@authtempo/client", version: "0.1.0" },
@@ -196,7 +217,13 @@ describe("checkFeed (plan 11b Task 7)", () => {
 
   it("fails a changelog heading with no row of RELEASE_DATES", () => {
     const { "@authtempo/core@0.1.0": _, ...dates } = DATES;
-    const r = checkFeed({ feed: fixtureFeed(), versions: FIXTURE_VERSIONS, changelogs, dates });
+    const r = checkFeed({
+      start: FEED_START,
+      feed: fixtureFeed(),
+      versions: FIXTURE_VERSIONS,
+      changelogs,
+      dates,
+    });
     expect(r.failures).toEqual([
       "@authtempo/core@0.1.0 has a changelog heading and no row of RELEASE_DATES",
     ]);
@@ -204,6 +231,7 @@ describe("checkFeed (plan 11b Task 7)", () => {
 
   it("fails a row of RELEASE_DATES with no changelog heading", () => {
     const r = checkFeed({
+      start: FEED_START,
       feed: fixtureFeed(),
       versions: FIXTURE_VERSIONS,
       changelogs,
@@ -216,6 +244,7 @@ describe("checkFeed (plan 11b Task 7)", () => {
 
   it("fails a row of RELEASE_DATES that is not a UTC date-time", () => {
     const r = checkFeed({
+      start: FEED_START,
       feed: fixtureFeed(),
       versions: FIXTURE_VERSIONS,
       changelogs,
@@ -230,6 +259,7 @@ describe("checkFeed (plan 11b Task 7)", () => {
     "fails a row of RELEASE_DATES at %s, which is no real instant",
     (date) => {
       const r = checkFeed({
+        start: FEED_START,
         feed: fixtureFeed(),
         versions: FIXTURE_VERSIONS,
         changelogs,
@@ -241,8 +271,53 @@ describe("checkFeed (plan 11b Task 7)", () => {
     },
   );
 
+  // Review of Task 7, Low 1: the dates of the feed against RELEASE_DATES.
+  it("fails an entry whose updated date differs from its row", () => {
+    const r = fixtureWith(
+      "<updated>2026-11-02T09:00:00Z</updated>\n    <link",
+      "<updated>2026-11-03T09:00:00Z</updated>\n    <link",
+    );
+    expect(r.failures).toEqual([
+      "the entry for @authtempo/client@0.1.0 has the updated date 2026-11-03T09:00:00Z; its row of RELEASE_DATES is 2026-11-02T09:00:00Z",
+    ]);
+  });
+
+  it("fails a feed whose updated date is not the newest row", () => {
+    const r = fixtureWith(
+      "  <updated>2026-11-20T09:00:00Z</updated>\n  <link",
+      "  <updated>2026-11-02T09:00:00Z</updated>\n  <link",
+    );
+    expect(r.failures).toEqual([
+      "the feed has the updated date 2026-11-02T09:00:00Z; it must be 2026-11-20T09:00:00Z, the newest row of RELEASE_DATES, or FEED_START with no row",
+    ]);
+  });
+
+  it("passes a feed dated by its newest row when that row is not the first heading", () => {
+    const dates = { ...DATES, "@authtempo/core@0.1.0": "2026-12-01T09:00:00Z" };
+    const { dated } = datedEntries(releaseEntries(changelogs), dates);
+    const feed = atomFeed(dated, feedUpdated(dated, FEED_START));
+    expect(feed).toContain("  <updated>2026-12-01T09:00:00Z</updated>\n  <link");
+    const r = checkFeed({ start: FEED_START, feed, versions: FIXTURE_VERSIONS, changelogs, dates });
+    expect(r.failures).toEqual([]);
+  });
+
+  it("fails an empty feed whose updated date is not FEED_START", () => {
+    expect(
+      emptyWith(`<updated>${FEED_START}</updated>`, "<updated>2026-10-15T00:00:00Z</updated>")
+        .failures,
+    ).toEqual([
+      "the feed has the updated date 2026-10-15T00:00:00Z; it must be 2026-10-14T00:00:00Z, the newest row of RELEASE_DATES, or FEED_START with no row",
+    ]);
+  });
+
   it("reads zero packages as a failure", () => {
-    const r = checkFeed({ feed: emptyFeed, versions: [], changelogs: [], dates: {} });
+    const r = checkFeed({
+      start: FEED_START,
+      feed: emptyFeed,
+      versions: [],
+      changelogs: [],
+      dates: {},
+    });
     expect(r.failures).toEqual(["read 0 packages"]);
   });
 });
@@ -340,7 +415,9 @@ describe("checkFeed and RFC 4287 (plan 11b Task 7, ruling 29)", () => {
         `<updated>${FEED_START}</updated>`,
         "<updated>2026-10-14T00:00:00.5+08:00</updated>",
       ).failures,
-    ).toEqual([]);
+    ).toEqual([
+      "the feed has the updated date 2026-10-14T00:00:00.5+08:00; it must be 2026-10-14T00:00:00Z, the newest row of RELEASE_DATES, or FEED_START with no row",
+    ]);
   });
 
   // Date.parse takes each of these, and RFC 3339 does not (review of Task 7, Minor 1).
@@ -361,7 +438,9 @@ describe("checkFeed and RFC 4287 (plan 11b Task 7, ruling 29)", () => {
     expect(
       emptyWith(`<updated>${FEED_START}</updated>`, "<updated>2028-02-29T23:59:60Z</updated>")
         .failures,
-    ).toEqual([]);
+    ).toEqual([
+      "the feed has the updated date 2028-02-29T23:59:60Z; it must be 2026-10-14T00:00:00Z, the newest row of RELEASE_DATES, or FEED_START with no row",
+    ]);
   });
 
   it("4.2.6: fails an id that is not an absolute IRI, and two entries with one id", () => {
@@ -375,6 +454,8 @@ describe("checkFeed and RFC 4287 (plan 11b Task 7, ruling 29)", () => {
     expect(r.failures).toEqual([
       "two entries have the id tag:authtempo.com,2026:@authtempo/client@0.2.0",
       "the feed has no entry for @authtempo/client@0.1.0",
+      // The second entry now names the release 0.2.0, and its date is the row of 0.1.0.
+      "the entry for @authtempo/client@0.2.0 has the updated date 2026-11-02T09:00:00Z; its row of RELEASE_DATES is 2026-11-20T09:00:00Z",
     ]);
   });
 

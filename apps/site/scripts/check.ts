@@ -14,7 +14,7 @@ import { CONFLICT_REASONS, PROVIDER_FILES } from "@authtempo/import";
 import { COMPARE_ROWS, HOSTED_MODELS } from "../src/data/compare.ts";
 import { FEATURES, PACKAGE_EXEMPT, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
-import { RELEASE_DATES } from "../src/data/releases.ts";
+import { FEED_START, RELEASE_DATES } from "../src/data/releases.ts";
 import { REPO_ROOT } from "../src/data/repo.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
 import { checkCli } from "./check-cli.ts";
@@ -361,6 +361,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         versions: readVersions(REPO_ROOT),
         changelogs: readChangelogs(REPO_ROOT),
         dates: RELEASE_DATES,
+        start: FEED_START,
       }),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
