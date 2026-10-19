@@ -53,11 +53,14 @@ function newId(): string {
 /**
  * The request for the sandbox. The Worker deletes any incoming
  * x-demo-client-ip and sets it from cf-connecting-ip, which only Cloudflare
- * sets. So a visitor cannot choose the IP that core's limits count.
+ * sets. So a visitor cannot choose the IP that core's limits count. It also
+ * deletes cf-connecting-ip, so the clientIp of src/auth.ts is the only path
+ * of the IP into core (Task 9 review, Low 1).
  */
 function forSandbox(request: Request, ip: string): Request {
   const forwarded = new Request(request);
   forwarded.headers.delete(CLIENT_IP_HEADER);
+  forwarded.headers.delete("cf-connecting-ip");
   forwarded.headers.set(CLIENT_IP_HEADER, ip);
   return forwarded;
 }
