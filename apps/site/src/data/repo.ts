@@ -1,15 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 /**
- * The repository root: the nearest folder at or above the working folder
- * that holds pnpm-workspace.yaml. It is not read from import.meta.url,
- * because Vite bundles this file for a page, and the URL then names a build
- * chunk. The site build, vitest, and check.ts each run inside the repository.
- * A build from a folder outside the repository fails closed here: each root
- * page throws, and no page claims a license or a channel.
+ * The nearest folder at or above `from` that holds pnpm-workspace.yaml. It
+ * throws when no folder up to the file system root holds one. A page and a
+ * check then fail closed, and claim no license or channel (ruling 23 of the
+ * plan 11b lane).
  */
-function findRoot(from: string): string {
+export function findRoot(from: string): string {
   let dir = from;
   for (;;) {
     if (existsSync(join(dir, "pnpm-workspace.yaml"))) return dir;
@@ -19,8 +18,14 @@ function findRoot(from: string): string {
   }
 }
 
-/** The repository root, with no trailing slash. */
-export const REPO_ROOT = findRoot(process.cwd());
+/**
+ * The repository root, with no trailing slash. The walk starts at this
+ * module's own file, never at the working folder, so a run started in another
+ * checkout still reads this checkout. Under vitest and check.ts the file is
+ * src/data/repo.ts. In the Astro build, Vite bundles it into a chunk under
+ * apps/site/dist/.prerender/, and the walk from there reaches the same root.
+ */
+export const REPO_ROOT = findRoot(dirname(fileURLToPath(import.meta.url)));
 
 /**
  * A repository file's text by its path from the root, or null when it does
