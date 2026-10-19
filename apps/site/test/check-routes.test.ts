@@ -37,7 +37,7 @@ describe("checkRoutes", () => {
     expect(routes).toHaveLength(6);
     const r = checkRoutes(page, routes, doc);
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ routes: 6, anchors: 6, cells: 18 });
+    expect(r.counts).toEqual({ routes: 6, anchors: 6, cells: 18, rules: 6 });
   });
 
   it("refuses a route with no anchor, an anchor with no route, and a heading that names another route", () => {
@@ -184,17 +184,46 @@ describe("checkRoutes", () => {
 
   it("fails when the document has no operation of a route", () => {
     const r = checkRoutes(page, routes, { openapi: "3.1.2", paths: {} });
-    expect(r.failures).toEqual(KEYS.map((k) => `${k}: the document has no operation`));
+    expect(r.failures).toEqual([
+      ...KEYS.map((k) => `${k}: the document has no operation`),
+      "the document states no rule",
+      "read 0 rules",
+    ]);
     expect(checkRoutes(page, routes, null).failures).toEqual([
       "the built document is missing or is not JSON, so no Input cell is read",
+      "read 0 rules",
     ]);
   });
 
   it("fails when it reads no route", () => {
     expect(checkRoutes("", [], doc).failures).toEqual([
+      "the page has no section The rules of every route",
       "read 0 routes",
       "read 0 anchors",
       "read 0 cells",
+      "read 0 rules",
+    ]);
+  });
+
+  it("fails when the page and the document state other rules", () => {
+    const exceptions =
+      " Two routes are exceptions: Apple’s form post callback, and the token endpoint, which states its own rule.";
+    const r = checkRoutes(edit(exceptions, ""), routes, doc);
+    expect(r.failures).toEqual([
+      "the page lacks the rule: A POST with an Origin header that is not baseURL and not in trustedOrigins answers 403 origin_not_trusted. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.",
+      "the document lacks the rule: A POST with an Origin header that is not baseURL and not in trustedOrigins answers 403 origin_not_trusted.",
+    ]);
+    expect(r.counts.rules).toBe(5);
+  });
+
+  it("holds a rule of the cells to the page only", () => {
+    const r = checkRoutes(
+      edit("<li>The Needs cell names", "<li>The Input cell names"),
+      routes,
+      doc,
+    );
+    expect(r.failures).toEqual([
+      'the document lacks the rule: The Input cell names each credential form that the route takes. "A session cookie, or a ts_ bearer token" is a session in either form.',
     ]);
   });
 });

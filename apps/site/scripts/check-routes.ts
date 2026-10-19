@@ -1,6 +1,6 @@
 import type { AuthForm } from "@authtempo/core/routes";
 import { errorAnchor, routeAnchor } from "./lib/anchors.ts";
-import { h3Headings } from "./lib/html.ts";
+import { h3Headings, sectionOf } from "./lib/html.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** The fields of a route entry that the page states. */
@@ -205,11 +205,70 @@ function inputFailures(
   return out;
 }
 
+/** The h2 of the routes page that states the rules of every route. */
+const RULES_HEADING = "The rules of every route";
+
+/**
+ * A rule that only the page states: the page has the Errors and Needs cells,
+ * and the document has no cells.
+ */
+const PAGE_ONLY_RULE = /^The (?:Errors|Needs) cell /;
+
+/** Text with straight quotes, because the site build writes curly ones outside code. */
+function straight(s: string): string {
+  return s.replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
+}
+
+/** The text of each item of the rules section of the page, or null with no section. */
+function pageRules(html: string): string[] | null {
+  const section = sectionOf(html, RULES_HEADING);
+  if (section === null) return null;
+  return [...section.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) => straight(text(m[1] ?? "")));
+}
+
+/** The text of each item of the list in the document's `info.description`, with no markdown. */
+function documentRules(doc: unknown): string[] {
+  const description = (doc as { info?: { description?: unknown } }).info?.description;
+  if (typeof description !== "string") return [];
+  return description
+    .split("\n")
+    .filter((line) => line.startsWith("- "))
+    .map((line) =>
+      line
+        .slice(2)
+        .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+        .replace(/`/g, "")
+        .trim(),
+    );
+}
+
+/**
+ * The document's rules and the page's rules are one list (plan 11g): each rule
+ * of the document is an item of the page, and each item of the page is a rule
+ * of the document or a rule of the cells.
+ */
+function ruleFailures(html: string, doc: unknown): { held: number; failures: string[] } {
+  const page = pageRules(html);
+  if (page === null) return { held: 0, failures: [`the page has no section ${RULES_HEADING}`] };
+  const want = documentRules(doc);
+  if (want.length === 0) return { held: 0, failures: ["the document states no rule"] };
+  const failures = [
+    ...want
+      .filter((rule) => !page.includes(rule))
+      .map((rule) => `the page lacks the rule: ${rule}`),
+    ...page
+      .filter((rule) => !want.includes(rule) && !PAGE_ONLY_RULE.test(rule))
+      .map((rule) => `the document lacks the rule: ${rule}`),
+  ];
+  return { held: want.filter((rule) => page.includes(rule)).length, failures };
+}
+
 /**
  * Every route of ROUTES has an h3 anchor whose heading names it, and every h3
  * anchor names a route. The table after each heading holds three cells to
  * the entry (plan 11g): Errors to `codes` and `oauthCodes`, Needs to `auth`,
  * and Input to the operation's query and body in the built document `doc`.
+ * The rules section of the page holds the rules of the document's description.
  */
 export function checkRoutes(
   html: string,
@@ -219,7 +278,7 @@ export function checkRoutes(
   const headings = h3Headings(html);
   const r: CheckReport = {
     name: "check-routes",
-    counts: { routes: routes.length, anchors: headings.length, cells: 0 },
+    counts: { routes: routes.length, anchors: headings.length, cells: 0, rules: 0 },
     failures: [],
   };
   if (doc === null || typeof doc !== "object")
@@ -290,5 +349,10 @@ export function checkRoutes(
   }
   for (const h of headings)
     if (!expected.has(h.id)) r.failures.push(`anchor #${h.id} names no route`);
-  return requireCounts(r, ["routes", "anchors", "cells"]);
+  if (doc !== null && typeof doc === "object") {
+    const rules = ruleFailures(html, doc);
+    r.counts.rules = rules.held;
+    r.failures.push(...rules.failures);
+  }
+  return requireCounts(r, ["routes", "anchors", "cells", "rules"]);
 }

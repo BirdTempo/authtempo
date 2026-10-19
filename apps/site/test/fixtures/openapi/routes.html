@@ -1,4 +1,15 @@
-<!-- The routes page of the check-routes tests: six real entries, each with the three cells in the forms of plan 11g Task 9. -->
+<!-- The routes page of the check-routes tests: the rules section, and six real entries, each with the three cells in the forms of plan 11g Task 9. -->
+<h2 id="the-rules-of-every-route">The rules of every route</h2>
+<ul>
+<li>A route that a config key turns off answers 404 <code dir="auto">not_found</code>.</li>
+<li>A POST with an <code dir="auto">Origin</code> header that is not <code dir="auto">baseURL</code> and not in <code dir="auto">trustedOrigins</code> answers 403 <code dir="auto">origin_not_trusted</code>. Two routes are exceptions: Apple’s form post callback, and the token endpoint, which states its own rule.</li>
+<li>A failure answers <code dir="auto">{ "error": "&lt;code&gt;" }</code> with the status of the code. <code dir="auto">hook_refused</code> also carries <code dir="auto">message</code>.</li>
+<li>An unhandled error answers 500 <a href="/docs/reference/errors/#internal"><code dir="auto">internal</code></a> and writes one log line.</li>
+<li>An <code dir="auto">OPTIONS</code> preflight from a trusted origin answers 204 with the CORS headers. A preflight from another origin answers 403, except where a route states its own rule.</li>
+<li>Every answer to a trusted origin carries the CORS headers with credentials.</li>
+<li>The Errors cell of a route does not repeat <code dir="auto">not_found</code>, <code dir="auto">origin_not_trusted</code>, and <code dir="auto">internal</code>, the codes of the router. A route also answers <code dir="auto">not_found</code> for a record that it names and does not find.</li>
+<li>The Needs cell names each credential form that the route takes. “A session cookie, or a <code dir="auto">ts_</code> bearer token” is a session in either form.</li>
+</ul>
 <h2 id="sessions">Sessions</h2>
 <h3 id="post-sign-out"><code>POST /sign-out</code></h3>
 <table>
