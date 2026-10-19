@@ -1,5 +1,3 @@
-export const VERSION = "0.0.0";
-
 export {
   CAPTCHA_FLOWS,
   CAPTCHA_HEADER,
@@ -271,3 +269,4 @@ export {
   StorageError,
   type Where,
 } from "./storage/port.js";
+export { VERSION } from "./version.js";

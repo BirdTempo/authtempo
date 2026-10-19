@@ -52,7 +52,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. An object without `password` is refused. |
 | `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, `/token/live`, and `api.jwt`. The OAuth provider needs it. |
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
-| `operator` | object or `false` | off | Turns on `POST /operator/keys/rotate`. Refused without `jwtMint`. |
+| `operator` | object or `false` | off | Turns on `GET /operator/secrets/status`, `POST /operator/secrets/rewrap`, `GET /operator/info`, and `POST /operator/keys/rotate`. `keys/rotate` needs `jwtMint`. |
 | `hooks` | object | no hook | The groups `organization`, `session`, `user`, and `identity`. Any other group is refused. |
 | `account` | object | the defaults below | The settings page: the proof mails, the notices, the confirm page, and the delete. See the keys under Account. |
 

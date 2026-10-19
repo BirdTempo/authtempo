@@ -70,6 +70,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `user-delete-confirm:ip:<ip>` | 15 minutes | 20 | Account delete link confirm. A malformed token counts no try |
 | `token-live:session:<sessionId>` | 1 minute | 120 | The live check of a session JWT |
 | `operator:ip:<ip>` | 1 hour | 5 | Operator key rotation, right or wrong secret |
+| `operator-secrets:ip:<ip>` | 1 hour | 120 | Operator secret status, secret rewrap, and info, one count for the three, right or wrong secret. A rewrap of 100 000 rows at 1000 rows per call needs 100 calls |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke |

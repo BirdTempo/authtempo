@@ -78,7 +78,10 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/second-factor/disable` | session (fresh), `{ method, password }` with `method` `passkey` or `email` | `{ ok: true, methods }`, the methods left; with none left the factor is off and the trust cookie is cleared; 400 `invalid_body`, `totp_not_enabled` (the method is not on); 401, `invalid_credentials`; 403 `session_not_fresh`; 409 `conflict`; 429 `rate_limited` (`totp-setup:user`). TOTP has its own disable, with a code |
 | GET | `/jwks` | none | `{ keys }`: the signing key and each key retired less than 24 hours ago, public JWKs with `kid`, `alg`, and `use: "sig"`; `cache-control: public, max-age=300`. The first call writes the first key. Absent with `jwtMint: false` |
 | GET | `/token` | session (cookie or `ts_` bearer) | `{ token }`: a session JWT; 401 with no session, a `tk_` bearer, or a JWT bearer; 500 `hook_failed` when `jwtMint.claims` throws |
-| POST | `/operator/keys/rotate` | `Authorization: Operator <secret>` | `{ kid }`: a new signing key; the old one verifies for 24 hours and signs nothing; 401 `unauthorized` for a missing or wrong secret; 429 `rate_limited` after 5 calls per IP per hour (`operator:ip:<ip>`), right or wrong. Only with `operator` |
+| POST | `/operator/keys/rotate` | `Authorization: Operator <secret>` | `{ kid }`: a new signing key; the old one verifies for 24 hours and signs nothing; 401 `unauthorized` for a missing or wrong secret; 429 `rate_limited` after 5 calls per IP per hour (`operator:ip:<ip>`), right or wrong. Only with `operator` and `jwtMint` |
+| GET | `/operator/secrets/status` | `Authorization: Operator <secret>` | `{ versions }`: for each version, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes`, as `api.secrets.status()`; 401 `unauthorized`; 429 `rate_limited` after 120 calls per IP per hour (`operator-secrets:ip:<ip>`), one count with rewrap and info, right or wrong. Only with `operator` |
+| POST | `/operator/secrets/rewrap` | `Authorization: Operator <secret>`, `{ limit? }` (1 to 1000, default 100); an empty body is `{}` | `{ resealed, failed, skipped, more, next }`, as `api.secrets.rewrap({ limit })`; 400 `invalid_body` for a body that is not a limit alone; 401 `unauthorized`; 429 `rate_limited` (`operator-secrets:ip:<ip>`). Only with `operator` |
+| GET | `/operator/info` | `Authorization: Operator <secret>` | `{ core, schemaVersion, configKeys }`: the version of core, its schema version, and the sorted key paths of the config, names only, never a value; 401 `unauthorized`; 429 `rate_limited` (`operator-secrets:ip:<ip>`). Only with `operator` |
 | POST | `/oauth/register` | JSON client metadata (RFC 7591) | 201 `{ client_id, client_id_issued_at, client_name?, redirect_uris, token_endpoint_auth_method: "none", grant_types, response_types }`; 400 `invalid_redirect_uri`, `invalid_client_metadata`; 429. Only with `oauth` and `registration.dynamic` |
 | GET | `/oauth/authorize` | the OAuth 2.1 parameters, PKCE S256, `resource`, `scope`, `state`, `nonce`, `prompt` | 302 to `/oauth/sign-in` with no session, with `next` back to `?request_id=oq_…`, a request that core holds for 10 minutes; `request_id` alone shows the held request, and an unknown, spent, or expired one, or one that the consent page showed to another user, also with no session, answers 400 `invalid_request` JSON and spends nothing for that caller; 200 the consent page; 302 to the client with `code`, `state`, and `iss` when a consent covers the scopes; 302 with `error` for a bad request; 400 or 401 JSON with no redirect for a bad client or redirect URI; 429 |
 | POST | `/oauth/authorize` | the consent form: `request_id` and `decision=allow` or `deny`; the user the page showed the request to; session; `Origin` equal to `baseURL` | 302 to the client with `code` or `error=access_denied`; 400 `invalid_request` for a spent, expired, or another user's request; 401; 403 |
@@ -685,16 +688,18 @@ The limits are per isolate under the memory limiter: on Workers each isolate cou
 
 - The key: `jwtMint.alg` is `EdDSA` (Ed25519, the default) or `ES256` (ECDSA P-256). Core writes the first key at the first use, seals the private half with AES-256-GCM under a key from `secret`, and opens it for one signature at a time. `api.jwt.rotate()` makes a new key; the old one verifies for 24 hours and signs nothing, and the sweep deletes it after that. A new app `secret` opens no old key: the key retires at the next signature with one log line, and a new key signs.
 - The timer (plan 11c): `jwtMint.rotateEvery` is a whole number of days from 1 to 365, and off by default. The first signature with a key that old retires the key and signs with a new one. A JWKS read never rotates. Two signatures at once make one new key: the retire matches the old row by id and slot, and the unique key on `slot` keeps one new row. The retired key verifies for 24 hours, as after `api.jwt.rotate()`.
-- The operator route (plan 11c): `operator: { secretHash }` turns on
-  `POST /operator/keys/rotate`, and it is off by default. `secretHash` is
-  the SHA-256 of the operator secret as 64 lowercase hex characters; core
-  stores no secret. Core hashes the presented secret and compares the
-  digests in constant time. Make the secret from 32 random bytes or more
-  (`openssl rand -base64 32`), and hash it with
+- The operator routes (plans 11c and 11c2): `operator: { secretHash }` turns
+  on `POST /operator/keys/rotate`, `GET /operator/secrets/status`, `POST
+  /operator/secrets/rewrap`, and `GET /operator/info`, and it is off by
+  default. `secretHash` is the SHA-256 of the operator secret as 64
+  lowercase hex characters; core stores no secret. Core hashes the presented
+  secret and compares the digests in constant time. Make the secret from 32
+  random bytes or more (`openssl rand -base64 32`), and hash it with
   `printf '%s' "$SECRET" | shasum -a 256`. The secret must be 32 to 512
   visible ASCII characters, and any other secret answers 401 with no reason.
   The secret is not an API token: no user owns it. `authtempo keys rotate`
-  calls the route. Core refuses `operator` with `jwtMint: false`.
+  calls the rotation. With `jwtMint: false`, `keys/rotate` does not exist,
+  and the three other routes answer.
 - Two live versions: during a gradual deployment, two versions of the app with different secrets, or with different `jwtMint.alg` values, retire each other's key at each mint. The JWKS then grows by one key per mint for 24 hours (core lists the signing key and at most 100 retired keys, the last retired first), and a mint can throw after three tries (`authtempo: no signing key after three tries`). Finish the deployment: when one version serves every request, one key signs again.
 - The token: header `{ alg, kid, typ: "JWT" }`; claims `iss` (`baseURL + basePath`), `sub` (the user id), `aud` (`jwtMint.audience`, default `baseURL`), `iat`, `exp` (`jwtMint.ttlMinutes`, 1 to 60, default 15), `sid` (the session id), `email`, `email_verified`, `name`, and `org` (the active organization id or null). `jwtMint.claims(user, session)` adds names and sets none of these, nor `nbf` or `jti`.
 - A resource server verifies the signature against `<basePath>/jwks`, `iss`, `aud`, `exp`, and the header `typ`: `JWT` for a session JWT, `at+jwt` for an OAuth access token (with jose, `jwtVerify(token, jwks, { issuer, audience, typ: "JWT" })`). One key signs both kinds with one issuer, so a server that skips `typ` can take one kind for the other. It keeps the key set in a cache. The token is a bearer for its life: a sign-out does not end it. Keep `ttlMinutes` short, and where a sign-out must end access at once, check the `sid` claim with `api.jwt.sessionLive({ sid })`: true while the session exists and is not expired.
@@ -1448,6 +1453,10 @@ writes each value under version 1.
 - The live check of a session JWT is limited to 120 per session per 60 s (`token-live:session:<sessionId>`, plan 11d). The count runs after the JWT check, so a bearer that is not a session JWT spends nothing.
 - The operator route is limited to 5 calls per IP per hour
   (`operator:ip:<ip>`), right or wrong secret, in the same limiter.
+- The secret status, secret rewrap, and info routes are limited to 120
+  calls per IP per hour (`operator-secrets:ip:<ip>`), one count for the
+  three, right or wrong secret, in the same limiter. A rewrap of 100 000
+  rows at 1000 rows per call needs 100 calls.
 - Email codes: a request is limited to 3 per address and 20 per IP, and a
   verify or a reset to 10 per address and 30 per IP, per 15 minutes, in the
   same limiter. The sign-in code and the reset code share each budget. Two

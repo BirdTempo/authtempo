@@ -6,6 +6,7 @@ import {
   DEFAULT_CAPTCHA_FLOWS,
   type ResolvedCaptcha,
 } from "./captcha.js";
+import { configKeyPaths } from "./config-paths.js";
 import { type AccountMailInput, defaultAccountMail } from "./engine/account-mail.js";
 import {
   defaultEmailOtpMail,
@@ -340,9 +341,14 @@ export interface AuthConfig {
    */
   oauth?: OAuthConfig | false;
   /**
-   * The operator route (plan 11c): `POST <basePath>/operator/keys/rotate`
-   * with `Authorization: Operator <secret>` makes a new signing key, for
-   * `authtempo keys rotate`. Off when absent or `false`. Needs `jwtMint`.
+   * The operator routes (plans 11c and 11c2), under `Authorization:
+   * Operator <secret>`. Off when absent or `false`. `POST
+   * <basePath>/operator/keys/rotate` makes a new signing key, for
+   * `authtempo keys rotate`; it exists only with `jwtMint`. `GET
+   * <basePath>/operator/secrets/status`, `POST
+   * <basePath>/operator/secrets/rewrap`, and `GET <basePath>/operator/info`
+   * serve `authtempo secret status`, `secret rewrap`, and `info`, with or
+   * without `jwtMint`. They answer counts and key names, never a value.
    */
   operator?: OperatorConfig | false;
   /**
@@ -695,6 +701,12 @@ export interface ResolvedConfig {
   hooks: ResolvedHooks;
   account: ResolvedAccount;
   captcha: ResolvedCaptcha | null;
+  /**
+   * The key paths of the input, sorted, for `GET /operator/info` (plan
+   * 11c2): each top key that `AUTH_CONFIG_KEYS` names, and `<key>.<sub>`
+   * under each option block of `CONFIG_BLOCKS`. Names only, never a value.
+   */
+  configKeys: readonly string[];
 }
 
 /**
@@ -988,7 +1000,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
     jwtMint,
     oauth: resolveOAuth(input.oauth, jwtMint),
-    operator: resolveOperator(input.operator, jwtMint),
+    operator: resolveOperator(input.operator),
     hooks: resolveHooks(input.hooks, organizations !== null),
     account: resolveAccount(input.account),
     captcha: resolveCaptcha(
@@ -999,6 +1011,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         input.handoff?.signInPage === undefined,
       password !== null,
     ),
+    configKeys: configKeyPaths(input),
   };
 }
 
@@ -1482,11 +1495,12 @@ function resolveJwtMint(
 const OPERATOR_KEYS: Readonly<Record<keyof OperatorConfig, true>> = { secretHash: true };
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
-/** `operator` (plan 11c). Off when absent or `false`. */
-function resolveOperator(
-  input: OperatorConfig | false | undefined,
-  jwtMint: ResolvedJwtMint | null,
-): { secretHash: string } | null {
+/**
+ * `operator` (plans 11c and 11c2). Off when absent or `false`. It needs no
+ * `jwtMint`: the secret routes and the info route serve without minting,
+ * and `operatorRoutes` adds `keys/rotate` only with `jwtMint`.
+ */
+function resolveOperator(input: OperatorConfig | false | undefined): { secretHash: string } | null {
   if (input === undefined || input === false) return null;
   if (!isPlainObject(input as unknown))
     throw new ConfigError("operator must be an object or false");
@@ -1497,9 +1511,6 @@ function resolveOperator(
     throw new ConfigError(
       "operator.secretHash must be the SHA-256 of the secret as 64 lowercase hex characters",
     );
-  // The route's one action is a rotation of the signing key.
-  if (!jwtMint)
-    throw new ConfigError("operator needs jwtMint: its one action rotates the signing key");
   return { secretHash: input.secretHash };
 }
 

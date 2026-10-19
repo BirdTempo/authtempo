@@ -33,7 +33,8 @@ export interface RouteEntry {
    * are in every deployment; `emailOtp` and `jwtMint` are on by default;
    * `emailOtpReset` needs `emailOtp` and `password`; `totp` needs `password`;
    * `oauthRegistration` needs `oauth` with `registration.dynamic`; `operator`
-   * needs `operator.secretHash` (plan 11c). `account` (plan 12a) is in every
+   * needs `operator.secretHash` (plan 11c), and `/operator/keys/rotate` also
+   * needs `jwtMint` (plan 11c2). `account` (plan 12a) is in every
    * deployment. `accountDelete` (plan 12a) is on by default; `account.delete:
    * false` turns it off.
    */
@@ -130,6 +131,9 @@ export const ROUTES = Object.freeze([
   { method: "GET", path: "/token", feature: "jwtMint" },
   { method: "POST", path: "/token/live", feature: "jwtMint" },
   { method: "POST", path: "/operator/keys/rotate", feature: "operator" },
+  { method: "GET", path: "/operator/secrets/status", feature: "operator" },
+  { method: "POST", path: "/operator/secrets/rewrap", feature: "operator" },
+  { method: "GET", path: "/operator/info", feature: "operator" },
   { method: "POST", path: "/oauth/register", feature: "oauthRegistration" },
   { method: "GET", path: "/oauth/authorize", feature: "oauth" },
   { method: "POST", path: "/oauth/authorize", feature: "oauth" },

@@ -10,8 +10,8 @@ import { isLiveSetupWithCodes, rewrapTotpRow } from "./totp.js";
  * counts the rows under each version, so an operator can see when an old
  * version may leave the config. `rewrap` reseals the sealed values under the
  * current version for a user who does not sign in. A keyed hash cannot be
- * rehashed: core never sees its code again. Neither call has a route: the
- * CLI wraps them (row 11c2).
+ * rehashed: core never sees its code again. The operator routes of plan
+ * 11c2 serve both calls, for `authtempo secret status` and `secret rewrap`.
  */
 
 export interface SecretVersionCount {

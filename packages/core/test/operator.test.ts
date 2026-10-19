@@ -164,7 +164,7 @@ describe("operator config (plan 11c)", () => {
     });
   });
 
-  it("refuses a bad hash, another key, a value that is not an object, and operator without jwtMint", () => {
+  it("refuses a bad hash, another key, and a value that is not an object", () => {
     const HEX =
       "operator.secretHash must be the SHA-256 of the secret as 64 lowercase hex characters";
     const bad: [unknown, Partial<AuthConfig>, string][] = [
@@ -178,11 +178,6 @@ describe("operator config (plan 11c)", () => {
         "operator.secret is not an option; core has secretHash",
       ],
       [true, {}, "operator must be an object or false"],
-      [
-        { secretHash: HASH },
-        { jwtMint: false },
-        "operator needs jwtMint: its one action rotates the signing key",
-      ],
     ];
     for (const [operator, extra, message] of bad)
       expect(() => resolveConfig({ ...base, ...extra, operator: operator as never })).toThrowError(

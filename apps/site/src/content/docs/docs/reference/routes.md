@@ -844,7 +844,7 @@ These routes exist unless the config sets `jwtMint: false`.
 
 ## Operator
 
-This route exists when the config sets `operator`.
+These routes exist when the config sets `operator`. `POST /operator/keys/rotate` also needs `jwtMint`. Each answers counts and key names, never a sealed value, a hash, or a config value.
 
 <h3 id="post-operator-keys-rotate"><code>POST /operator/keys/rotate</code></h3>
 
@@ -853,6 +853,33 @@ This route exists when the config sets `operator`.
 | Needs | `Authorization: Operator <secret>`, the secret whose SHA-256 is `operator.secretHash`. The secret must be 32 to 512 visible ASCII characters, and any other secret answers 401 with no reason. |
 | Input | None |
 | Answer | `{ kid }`, the id of the new signing key. The old key verifies for 24 hours and signs nothing |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="get-operator-secrets-status"><code>GET /operator/secrets/status</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | `Authorization: Operator <secret>`, as `POST /operator/keys/rotate` |
+| Input | None |
+| Answer | `{ versions }`: for each version, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes`, the answer of `api.secrets.status()`. It counts on `operator-secrets:ip:<ip>`, 120 per hour with rewrap and info, right or wrong secret ([Limits](/docs/reference/limits/)) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="post-operator-secrets-rewrap"><code>POST /operator/secrets/rewrap</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | `Authorization: Operator <secret>`, as `POST /operator/keys/rotate` |
+| Input | `{ limit? }`, a whole number from 1 to 1000, default 100. An empty body is `{}`. Another key, or a limit of another form, answers `invalid_body` |
+| Answer | `{ resealed, failed, skipped, more, next }`, the answer of `api.secrets.rewrap({ limit })`: the rows this call moved to the current version, the rows that did not open or did not write, the live setups it left, whether a row under a configured old version remains, and the cursor. It counts on `operator-secrets:ip:<ip>` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="get-operator-info"><code>GET /operator/info</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | `Authorization: Operator <secret>`, as `POST /operator/keys/rotate` |
+| Input | None |
+| Answer | `{ core, schemaVersion, configKeys }`: the version of core, its schema version, and the sorted key paths of the config, for example `operator.secretHash`. Names only: no value, no hash, and no member of `storage`, `mail`, `limiter`, `clock`, `jwt`, `webauthn`, or `clientIp`. It counts on `operator-secrets:ip:<ip>` |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 ## OAuth provider
