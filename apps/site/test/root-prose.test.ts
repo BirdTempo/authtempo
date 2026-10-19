@@ -5,7 +5,7 @@ import { parseFrontmatter } from "../scripts/lib/markdown.ts";
 import { prosePages } from "../scripts/lib/prose.ts";
 import { ROOT_PROSE_PATH, rootProsePage } from "../scripts/lib/root-prose.ts";
 import { licenseLine, PLATFORM_COSTS, PRICING_PAGE } from "../src/data/costs.ts";
-import { rootLicense } from "../src/data/repo.ts";
+import { licenseOf, rootLicense } from "../src/data/repo.ts";
 import { SECURITY_PAGE } from "../src/data/security.ts";
 
 describe("the prose of /pricing/ and /security/ (plan 11b)", () => {
@@ -34,6 +34,15 @@ describe("the prose of /pricing/ and /security/ (plan 11b)", () => {
     const page = rootProsePage();
     const broken = { ...page, source: `${page.source}\nLog in with one click.\n` };
     expect(checkTerms([broken]).failures.some((f) => f.startsWith(ROOT_PROSE_PATH))).toBe(true);
+  });
+
+  it("reads a license only from a string that is not blank", () => {
+    expect(licenseOf("{}")).toBeNull();
+    expect(licenseOf('{"license": ""}')).toBeNull();
+    expect(licenseOf('{"license": "  "}')).toBeNull();
+    expect(licenseOf('{"license": 5}')).toBeNull();
+    expect(licenseOf('{"license": {"type": "MIT"}}')).toBeNull();
+    expect(licenseOf('{"license": "MIT"}')).toBe("MIT");
   });
 
   it("states the license line, or the empty state of the footer as a sentence", () => {

@@ -6,6 +6,8 @@ import { dirname, join } from "node:path";
  * that holds pnpm-workspace.yaml. It is not read from import.meta.url,
  * because Vite bundles this file for a page, and the URL then names a build
  * chunk. The site build, vitest, and check.ts each run inside the repository.
+ * A build from a folder outside the repository fails closed here: each root
+ * page throws, and no page claims a license or a channel.
  */
 function findRoot(from: string): string {
   let dir = from;
@@ -37,6 +39,11 @@ export function readRepoText(path: string): string | null {
 export function rootLicense(): string | null {
   const text = readRepoText("package.json");
   if (text === null) throw new Error("repo.ts: the root package.json is missing");
-  const pkg = JSON.parse(text) as { license?: unknown };
+  return licenseOf(text);
+}
+
+/** The license field of a package.json text: a string that is not blank, else null. */
+export function licenseOf(packageJson: string): string | null {
+  const pkg = JSON.parse(packageJson) as { license?: unknown };
   return typeof pkg.license === "string" && pkg.license.trim() !== "" ? pkg.license : null;
 }

@@ -3,10 +3,9 @@
 // biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
 // The home page of brand spec 9 (layout 2, the margin rail). Plan 11b Task 5
 // adds the section Start from STACKS and links each feature row to its
-// section of /features/. Every number
-// comes from code at build time, and every string from src/data, which
-// check-terms and check-sentences read (Task 9). No hero image: the code
-// block and the icons are the pictures.
+// section of /features/. Every number comes from code at build time, and
+// every string from src/data, which check-terms and check-sentences read
+// (Task 9). No hero image: the code block and the icons are the pictures.
 import { STACK_INFO, STACKS } from "@authtempo/cli/stacks";
 import { ROUTES } from "@authtempo/core/routes";
 import corePackage from "../../../../packages/core/package.json";
@@ -38,6 +37,14 @@ const vendors = vendorHosts(
   ),
 );
 const features = featureOrder(ROUTES);
+// One row per stack. A label starts with a capital, as a list label does. The
+// command wraps only at its spaces: each word is a span that does not wrap.
+const stacks = STACKS.map((stack) => ({
+  stack,
+  href: `${SITE.docs}start/${STACK_INFO[stack].page}/`,
+  label: `${STACK_INFO[stack].label.charAt(0).toUpperCase()}${STACK_INFO[stack].label.slice(1)}`,
+  words: ["authtempo", "init", "my-app", "--stack", stack],
+}));
 ---
 <Site title={HOME.title} description={HOME.description} path="/">
   <section class="hero">
@@ -56,10 +63,10 @@ const features = featureOrder(ROUTES);
   <section class="start" aria-labelledby="start-title">
     <h2 id="start-title" class="at-enter">{HOME.start}</h2>
     <ul class="stack-list">
-      {STACKS.map((stack) => (
-        <li class="stack-row" id={`stack-${stack}`}>
-          <a href={`${SITE.docs}start/${STACK_INFO[stack].page}/`}>{STACK_INFO[stack].label}</a>
-          <code>{`authtempo init my-app --stack ${stack}`}</code>
+      {stacks.map((row) => (
+        <li class="stack-row" id={`stack-${row.stack}`}>
+          <a href={row.href}>{row.label}</a>
+          <code>{row.words.map((word, i) => <Fragment>{i > 0 ? " " : ""}<span class="word">{word}</span></Fragment>)}</code>
         </li>
       ))}
     </ul>
@@ -113,7 +120,8 @@ const features = featureOrder(ROUTES);
   .stack-list { margin: var(--at-rhythm) 0 0; padding: 0; list-style: none; }
   .stack-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; column-gap: var(--at-rhythm); row-gap: var(--at-unit); padding-block: calc(var(--at-unit) * 1.5); border-top: 1px solid var(--at-line); }
   .stack-row a { font-weight: 500; }
-  .stack-row code { min-width: 0; overflow-wrap: anywhere; color: var(--at-mute); font-size: var(--at-text-mono); }
+  .stack-row code { min-width: 0; color: var(--at-mute); font-size: var(--at-text-mono); }
+  .stack-row .word { white-space: nowrap; }
   .feature-line { color: var(--at-mute); font-size: var(--at-text-small); line-height: var(--at-leading-small); }
   .code { margin: 0; padding: var(--at-rhythm); overflow-x: auto; border-radius: 0.75rem; background: var(--at-code); color: var(--at-code-ink); font-size: var(--at-text-mono); line-height: var(--at-leading-mono); }
   .numbers dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border: 1px solid var(--at-line); }

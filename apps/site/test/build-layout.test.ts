@@ -299,12 +299,11 @@ describe("the pricing and security pages (plan 11b)", () => {
   });
 
   it("states the license, or that it is not set", () => {
-    const root = JSON.parse(readRepoText("package.json") ?? "{}") as { license?: string };
+    const root = JSON.parse(readRepoText("package.json") ?? "{}") as { license?: unknown };
     const text = textOf(mainOf("pricing/index.html"));
-    const line =
-      root.license === undefined
-        ? "The license is not set yet."
-        : `The license is ${root.license}.`;
+    // A license is a string that is not blank; "" or a value of another type is not set.
+    const set = typeof root.license === "string" && root.license.trim() !== "";
+    const line = set ? `The license is ${String(root.license)}.` : "The license is not set yet.";
     expect({ line, found: text.includes(line) }).toEqual({ line, found: true });
     expect(text.includes("The license is")).toBe(true);
   });
@@ -439,19 +438,22 @@ describe("the home page (brand spec 9)", () => {
     for (const stack of STACKS) {
       const row = home.split(` id="stack-${stack}"`)[1]?.split("</li>")[0] ?? "";
       const href = `/docs/start/${STACK_INFO[stack].page}/`;
+      const label = STACK_INFO[stack].label;
+      const shown = `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
+      const code = /<code\b[^>]*>([\s\S]*?)<\/code>/.exec(row)?.[1] ?? "";
       expect({
         stack,
-        linked: new RegExp(`<a\\b[^>]* href="${href}"[^>]*>${STACK_INFO[stack].label}</a>`).test(
-          row,
-        ),
-        command: new RegExp(`<code\\b[^>]*>authtempo init my-app --stack ${stack}</code>`).test(
-          row,
-        ),
+        linked: new RegExp(`<a\\b[^>]* href="${href}"[^>]*>${shown}</a>`).test(row),
+        command: textOf(code) === `authtempo init my-app --stack ${stack}`,
+        // Each word is a span that does not wrap, so the line breaks at spaces only.
+        words: code.match(/<span class="word[ "]/g)?.length === 5,
         built: existsSync(`${DIST}${href.slice(1)}index.html`),
-      }).toEqual({ stack, linked: true, command: true, built: true });
+      }).toEqual({ stack, linked: true, command: true, words: true, built: true });
     }
     // The workers-postgres stack has the tutorial workers-hyperdrive (STACK_INFO).
     expect(home).toContain('href="/docs/start/workers-hyperdrive/"');
+    // A label starts with a capital on the page (the review of Task 5, Low 4).
+    expect(home).toMatch(/>An MCP server on Cloudflare Workers with D1<\/a>/);
   });
 
   it("lists each feature on the home page with its anchor", () => {
