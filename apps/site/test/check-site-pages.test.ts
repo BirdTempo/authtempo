@@ -167,6 +167,17 @@ describe("checkSitePages", () => {
     ]);
   });
 
+  it("fails a root page with a second h1", () => {
+    const r = checkSitePages(
+      entries("valid"),
+      withPage("features/index.html", (h) =>
+        h.replace("</main>", "<h1>Security policy</h1></main>"),
+      ),
+      1,
+    );
+    expect(r.failures).toEqual(["features/index.html has 2 h1 elements; a root page has one"]);
+  });
+
   it("fails a page with no h1 for its entry", () => {
     const r = checkSitePages(
       entries("valid"),

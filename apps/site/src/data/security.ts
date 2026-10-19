@@ -1,3 +1,5 @@
+import { renderMarkdown } from "./markdown.ts";
+
 /**
  * The parts of /security/ outside its entry (plan 11b Task 5). check-terms
  * and check-sentences read the empty state with the other root prose.
@@ -13,3 +15,15 @@ export const READ_MORE: readonly string[] = [
   "/docs/reference/limits/",
   "/docs/reference/cookies/",
 ];
+
+/**
+ * SECURITY.md as HTML under the h2 "Report a fault" of /security/. Each heading
+ * goes down two levels, to h6 at most, so the file adds no h1 and no h2 beside
+ * the sections of the page (ruling 21 of the plan 11b lane).
+ */
+export async function renderPolicy(markdown: string): Promise<string> {
+  const html = await renderMarkdown(markdown);
+  return html.replace(/<(\/?)h([1-6])\b/g, (_m, close: string, level: string) => {
+    return `<${close}h${Math.min(Number(level) + 2, 6)}`;
+  });
+}

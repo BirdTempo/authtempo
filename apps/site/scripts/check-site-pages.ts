@@ -53,6 +53,7 @@ function textOf(html: string): string {
  * 1. Each root page has a <title>, a description meta with a content, the
  *    viewport meta, and the class site-header of the root layout.
  * 2. No root page holds data-pagefind-body: the search reads the docs only.
+ *    Each root page has at most one h1 (ruling 21 of the plan 11b lane).
  * 3. Each entry names a root page, and that page's h1 is the entry's title.
  *    Each root page has one entry, except a page of ENTRY_EXEMPT.
  * 4. It reads at least one root page, and at least `minimum` entries. The
@@ -79,6 +80,8 @@ export function checkSitePages(
     if (!/\sclass="(?:[^"]*\s)?site-header(?:\s[^"]*)?"/.test(html))
       r.failures.push(`${file} lacks the class site-header of the root layout`);
     if (html.includes("data-pagefind-body")) r.failures.push(`${file} holds data-pagefind-body`);
+    const h1s = html.match(/<h1\b/g)?.length ?? 0;
+    if (h1s > 1) r.failures.push(`${file} has ${h1s} h1 elements; a root page has one`);
   }
   const fileOf = new Map([...built.keys()].map((file) => [urlOf(file), file]));
   const named = new Map<string, string>();

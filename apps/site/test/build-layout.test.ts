@@ -10,6 +10,7 @@ import { PLATFORM_COSTS } from "../src/data/costs.ts";
 import { FEATURES, featureOrder, PACKAGE_FEATURES } from "../src/data/features.ts";
 import { HOME } from "../src/data/home.ts";
 import { readRepoText } from "../src/data/repo.ts";
+import { renderPolicy } from "../src/data/security.ts";
 import { SIDEBAR_ICONS } from "../src/data/sidebar-icons.ts";
 
 // `pnpm test` runs `astro build` before vitest, so dist is newer than the change.
@@ -308,18 +309,18 @@ describe("the pricing and security pages (plan 11b)", () => {
     expect(text.includes("The license is")).toBe(true);
   });
 
-  it("states the reporting channel, or that it is not set", () => {
+  it("states the reporting channel, or that it is not set", async () => {
     const policy = readRepoText("SECURITY.md");
-    const text = textOf(mainOf("security/index.html"));
-    const section = text.split("Report a fault")[1] ?? "";
+    const main = mainOf("security/index.html");
+    // The section runs from the h2 "Report a fault" to the end of main.
+    const section = main.split(/<h2\b[^>]*>Report a fault<\/h2>/)[1] ?? "";
     const empty = "The reporting channel is not set yet. It comes with the first release.";
-    if (policy === null) expect(section.trim()).toBe(empty);
+    if (policy === null) expect(textOf(section)).toBe(empty);
     else {
-      // The first line of prose of SECURITY.md, after its headings, is in the section.
-      const first = policy.split("\n").find((l) => l.trim() !== "" && !l.startsWith("#")) ?? "";
-      expect({ first, found: section.includes(textOf(first)) }).toEqual({ first, found: true });
+      expect(section.includes(await renderPolicy(policy))).toBe(true);
       expect(section.includes(empty)).toBe(false);
     }
+    expect(main.match(/<h1\b/g)?.length).toBe(1);
   });
 
   it("links each platform cost to a page of the build", () => {

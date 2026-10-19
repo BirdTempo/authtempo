@@ -11,7 +11,7 @@ import PageHero from "../components/PageHero.astro";
 import { entryParts, sectionOf } from "../data/entry.ts";
 import { renderMarkdown } from "../data/markdown.ts";
 import { readRepoText } from "../data/repo.ts";
-import { READ_MORE, SECURITY_PAGE } from "../data/security.ts";
+import { READ_MORE, renderPolicy, SECURITY_PAGE } from "../data/security.ts";
 import Site from "../layouts/Site.astro";
 
 const entry = await getEntry("site", "security");
@@ -40,7 +40,7 @@ const policy = readRepoText("SECURITY.md");
     <Fragment set:html={await renderMarkdown(report)} />
     {policy === null
       ? <p>{SECURITY_PAGE.noChannel}</p>
-      : <div class="policy"><Fragment set:html={await renderMarkdown(policy)} /></div>}
+      : <div class="policy"><Fragment set:html={await renderPolicy(policy)} /></div>}
   </section>
 </Site>
 <style>
