@@ -297,10 +297,8 @@ describe("the refresh token (plan 9g)", () => {
 
   it("two parallel refreshes of one token: at most one answers 200, and the family ends with no live row in each order", async () => {
     const writeFirst = await parallelRefresh("write-first");
-    expect(writeFirst.statuses).toEqual([200, 400]);
-    expect(writeFirst.results.filter((r) => r.status === 400).map((r) => r.body)).toEqual([
-      GRANT.body,
-    ]);
+    // The loser writes the end mark before its held delete, and the winner reads it after its write (ruling 40).
+    expect(writeFirst.results).toEqual([GRANT, GRANT]);
     expect(await writeFirst.h.storage.findMany("oauthToken", [])).toEqual([]);
     const deleteFirst = await parallelRefresh("delete-first");
     expect(deleteFirst.results).toEqual([GRANT, GRANT]);

@@ -13,6 +13,7 @@ import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
 import { resourceOf } from "../primitives/resource.js";
 import type { OAuthClientRow, OAuthTokenRow, UserRow, VerificationRow } from "../schema.js";
+import { StorageError } from "../storage/port.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
@@ -157,15 +158,36 @@ export function servedGrantScopes(
   return served.some((s) => s !== "offline_access") ? served : null;
 }
 
-/** The refresh row of `token`, or null for a token of another form or an unknown one. */
+/**
+ * The refresh row of `token`, or null for a token of another form, an
+ * unknown one, or one of an ended family. The refresh grant, the revoke,
+ * and introspection read rows here, so a row that a failed family delete
+ * left behind serves none of them.
+ */
 export async function refreshRowOf(
   config: ResolvedConfig,
   token: string,
 ): Promise<OAuthTokenRow | null> {
   if (!REFRESH_RE.test(token)) return null;
-  return config.storage.findOne("oauthToken", [
+  const row = await config.storage.findOne("oauthToken", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
   ]);
+  if (row && (await familyEnded(config, row.familyId))) return null;
+  return row;
+}
+
+const FAMILY_END = "oauth-family-end";
+
+/** The `valueHash` of the end mark of a family: the SHA-256 hex of `oauth-family-end:<familyId>`. */
+const familyEndHash = (familyId: string) => sha256Hex(`${FAMILY_END}:${familyId}`);
+
+/** True when a reuse or a revoke ended the family (ruling 40 of plan 12e). */
+async function familyEnded(config: ResolvedConfig, familyId: string): Promise<boolean> {
+  return (
+    (await config.storage.findOne("verification", [
+      { field: "valueHash", op: "eq", value: await familyEndHash(familyId) },
+    ])) !== null
+  );
 }
 
 async function writeRefresh(
@@ -206,6 +228,8 @@ async function writeRefresh(
  * change deletes the refresh rows and the code rows (`deleteOAuthTokens`).
  */
 async function stillGranted(config: ResolvedConfig, g: Grant): Promise<boolean> {
+  // This read runs after the write of the new row. See revokeFamily for why it closes the race.
+  if (await familyEnded(config, g.familyId)) return false;
   if (g.spentId !== null)
     return (
       (await config.storage.findOne("oauthToken", [
@@ -310,10 +334,9 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
  * The family id of the grant is the id of the code row, so a spent code
  * presented again deletes the family it gave (draft-ietf-oauth-v2-1-16
  * section 4.1.3, read 2026-10-13: the server SHOULD revoke the tokens of
- * a reused code). Two parallel exchanges can race: the loser deletes before
- * the winner writes, and that family stays. PKCE bounds the cost: only a
- * request that holds the verifier passes the checks after the consume, so
- * only a replay that holds the verifier can be the winner.
+ * a reused code). Two parallel exchanges can race. The loser's revoke
+ * writes the end mark of the family. The winner reads it after its write
+ * (`revokeFamily`), so the family ends in each order.
  */
 export async function exchangeCode(
   config: ResolvedConfig,
@@ -390,8 +413,48 @@ async function verifierMatches(verifier: string | null, challenge: string | null
   );
 }
 
-/** Deletes every refresh token of one authorization. */
+/**
+ * Ends one authorization: it writes the end mark of the family, then
+ * deletes every refresh row of the family (ruling 40 of plan 12e).
+ *
+ * Why a mark, not a row lock: D1 has no interactive transaction, so a lock
+ * that spans two calls does not exist on every adapter. The mark needs only
+ * what each adapter gives: a call outside a transaction commits before the
+ * next call starts.
+ *
+ * The race it closes. A parallel request (the winner) writes a new row of
+ * the family, then reads the mark (`stillGranted`). On Postgres, a DELETE
+ * does not see a row that commits while the DELETE runs. Take the two
+ * orders. The mark commits before the winner reads it: the winner sees it
+ * and deletes its new row. Or the winner reads first. Then its new row
+ * committed before the mark, so before the DELETE starts. The DELETE then
+ * sees the row and deletes it. So in each order no row of the family is
+ * live after the delete. A caller must not run this inside a transaction,
+ * because the mark must commit before the DELETE starts.
+ *
+ * The mark lives `refreshTtlDays`, as long as the newest row of the family
+ * can live. It holds the family id only, never a token.
+ */
 export async function revokeFamily(config: ResolvedConfig, familyId: string): Promise<void> {
+  const now = config.clock.now();
+  try {
+    await config.storage.create("verification", {
+      id: newId(now),
+      purpose: FAMILY_END,
+      identifier: familyId,
+      valueHash: await familyEndHash(familyId),
+      expiresAt: new Date(now.getTime() + oauthOf(config).refreshTtlDays * DAY_MS),
+      consumedAt: null,
+      data: null,
+      // An unkeyed SHA-256: the version means nothing here.
+      secretVersion: 1,
+      createdAt: now,
+      updatedAt: now,
+    });
+  } catch (e) {
+    // A second reuse of one family finds the mark there already.
+    if (!(e instanceof StorageError && e.code === "unique_violation")) throw e;
+  }
   await config.storage.delete("oauthToken", [{ field: "familyId", op: "eq", value: familyId }]);
 }
 
@@ -428,10 +491,11 @@ function inReuseWindow(config: ResolvedConfig, usedAt: Date, now: Date): boolean
  * The spend of a retry inside the reuse window (plan 12e Task 13). It
  * spends the one unspent child of `parent` by one conditional update on
  * its `usedAt`, and answers the count of rows spent. Zero means the client
- * already used the child, or a parallel retry spent it first: a reuse. So
- * of two parallel retries, at most one wins, and the loser ends the family.
- * A row of a core before Task 13 has no `parentId`, so its retry finds no
- * child.
+ * already used the child, or a parallel request spent it first: a reuse.
+ * Each retry spends the live child, so two parallel retries leave one live
+ * branch at most. Both can answer 200 when the second finds the new child
+ * of the first. A row of a core before Task 13 has no `parentId`, so its
+ * retry finds no child.
  */
 async function spendChild(config: ResolvedConfig, parent: OAuthTokenRow, now: Date) {
   const child = await config.storage.findOne("oauthToken", [
@@ -453,11 +517,12 @@ async function spendChild(config: ResolvedConfig, parent: OAuthTokenRow, now: Da
  * `grant_type=refresh_token`. Every check that can refuse runs before the
  * spend, so a refused request leaves the token usable. The spend is one
  * conditional update on `usedAt`; zero rows means a parallel request spent
- * it first, which is a reuse too. Two parallel refreshes race: the loser's
- * delete of the family can run before the winner writes its new row. So the
- * winner reads its spent row again after the write; when the row is gone,
- * the winner deletes its new row and answers `invalid_grant`. In each order
- * the family ends with no live row.
+ * it first, which is a reuse too. Two parallel refreshes race: the loser
+ * ends the family while the winner writes its new row. So the winner reads
+ * the end mark and its spent row after the write. When the mark is there or
+ * the row is gone, the winner deletes its new row and answers
+ * `invalid_grant`. In each order the family ends with no live row
+ * (`revokeFamily`).
  *
  * A spent row inside the reuse window is a retry of its own client, after
  * the client auth and the DPoP check. The retry spends the child of the

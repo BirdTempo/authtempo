@@ -26,6 +26,8 @@ import type {
 import { createPbkdf2PasswordHash } from "../seams/password-hash.js";
 import { type StorageAdapter, StorageError } from "./port.js";
 
+export { runRefreshRaceConformance } from "./refresh-race-conformance.js";
+
 export interface ConformanceTarget {
   adapter: StorageAdapter;
   close(): Promise<void>;

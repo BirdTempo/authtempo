@@ -59,7 +59,7 @@ Version 11 comes from the `0011_schema_v11` migration in both adapters, and from
 | `introspect`, `backchannel_logout_session_required`, `dpop_bound` | false |
 | `subject_type` | `public` |
 
-Every other new column is nullable and reads null. Version 11 also adds the verification purposes `client-assertion` and `dpop-proof`, which need no DDL.
+Every other new column is nullable and reads null. Version 11 also adds the verification purposes `client-assertion` and `dpop-proof`, which need no DDL. Plan 12e also adds the purpose `oauth-family-end`, the end mark of a refresh family that a reuse or a revoke ended. It needs no DDL either.
 
 The table prefix `ta_` and the advisory lock names keep the old product name tempo-auth for compatibility. A change needs a migration.
 

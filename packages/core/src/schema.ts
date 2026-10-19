@@ -89,6 +89,13 @@ export type VerificationPurpose =
    */
   | "dpop-proof"
   /**
+   * The end mark of a refresh family (ruling 40 of plan 12e). identifier:
+   * the family id; valueHash: the SHA-256 hex of `oauth-family-end:<familyId>`;
+   * data: null. A reuse or a revoke writes it before it deletes the family,
+   * and a new refresh row reads it after its write. Lives `refreshTtlDays`.
+   */
+  | "oauth-family-end"
+  /**
    * A re-authentication code (plan 12a), as `email-otp`: identifier the
    * address, data { attempts }, valueHash the keyed hash of `<id>:<code>`.
    */
