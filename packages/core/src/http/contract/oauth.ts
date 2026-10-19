@@ -58,7 +58,7 @@ export const authorizeQuery = z.object({
   dpop_jkt: z.string().regex(DPOP_JKT_RE).optional(),
   // OIDC Core 1.0 section 3.1.2.1 (plan 12e): seconds since the last sign-in.
   max_age: z.string().regex(MAX_AGE_RE).optional(),
-  // Read once each and ignored (OIDC Core 1.0 section 3.1.2.1).
+  // Read once each and ignored (OIDC Core 1.0 sections 3.1.2.1, 5.2, and 5.5).
   display: z.string().optional(),
   ui_locales: z.string().optional(),
   claims_locales: z.string().optional(),

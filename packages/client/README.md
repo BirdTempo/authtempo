@@ -230,7 +230,7 @@ Every answer is an `OAuthResult`: `{ ok: true, value }` or `{ ok: false, code, s
 
 A single-page app on another origin needs that origin in a redirect URI of its client. The token request is a form post with no other header, so the browser sends no preflight. The register, revoke, and userinfo endpoints have no CORS for another origin.
 
-An app that owns the provider can serve its own sign-in route (`oauth.signInURL` of core). The browser comes to that route with `request_id=oq_…`. After the sign-in, send the browser to `continueAuthorizeURL({ baseURL, basePath, requestId })`. It throws for an id that is not an `oq_` id.
+An app that owns the provider can serve its own sign-in route (`oauth.signInURL` of core). The browser comes to that route with `request_id=oq_…`. After the sign-in, send the browser to `continueAuthorizeURL({ baseURL, basePath, requestId })`. The route must ask for a new sign-in each time, also when the browser has a live session. Core never lets a session from before the request go on. A route that skips its form for a live session makes a redirect loop. It throws for an id that is not an `oq_` id.
 
 The issuer must have no user info. An `http` issuer is for a loopback host in development.
 Each new sign-in removes the pending sign-ins that are older than 10 minutes.

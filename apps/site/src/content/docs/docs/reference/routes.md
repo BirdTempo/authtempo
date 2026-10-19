@@ -913,9 +913,9 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. The session is of the user that the held request names. `Origin` equals `baseURL` |
+| Needs | A session cookie, or a `ts_` bearer token. The session is of the user that the held request names. For `prompt=login` or `max_age`, the session signed in at or after the request. `Origin` equals `baseURL` |
 | Input | Form `{ request_id, decision }`. `decision` is `allow` or `deny` |
-| Answer | 302 to the client with `code`, or with `error=access_denied` |
+| Answer | 302 to the client with `code`, or with `error=access_denied`. 302 to the sign-in step for an older session of the same user, with nothing spent |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_request`](/docs/reference/errors/#oauth-invalid_request), [`access_denied`](/docs/reference/errors/#oauth-access_denied), [`rate_limited`](/docs/reference/errors/#oauth-rate_limited), [`invalid_client`](/docs/reference/errors/#oauth-invalid_client), [`unsupported_response_type`](/docs/reference/errors/#oauth-unsupported_response_type), [`invalid_target`](/docs/reference/errors/#oauth-invalid_target), [`invalid_scope`](/docs/reference/errors/#oauth-invalid_scope) |
 
 <h3 id="get-oauth-sign-in"><code>GET /oauth/sign-in</code></h3>

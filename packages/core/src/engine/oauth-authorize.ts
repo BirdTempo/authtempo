@@ -48,8 +48,9 @@ const REFUSED_PARAMS = [
   ["registration", "registration_not_supported"],
 ] as const;
 /**
- * OIDC Core 1.0 section 3.1.2.1: each is OPTIONAL. Core reads each once,
- * so a repeated one is `invalid_request`, and does nothing with it.
+ * Each is OPTIONAL: OIDC Core 1.0 section 3.1.2.1, with `claims_locales` in
+ * section 5.2 and `claims` in section 5.5. Core reads each once, so a
+ * repeated one is `invalid_request`, and does nothing with it.
  */
 const IGNORED_PARAMS = [
   "display",
