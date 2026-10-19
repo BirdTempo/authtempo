@@ -61,7 +61,8 @@ describe("a refused page view", () => {
       "This address sent more than 600 requests in one minute. That is the limit requestsPerIpPerMinute.",
     ]);
     expect(text[2]).toMatch(/^Try again after \d\d:\d\d UTC\.$/);
-  });
+    // 601 requests take over 5 s under the load of other lanes.
+  }, 60_000);
 
   it("explains a cross-site post to /reset", async () => {
     const res = await call({ cookies: new Map() }, "POST", "/reset", new URLSearchParams(), {

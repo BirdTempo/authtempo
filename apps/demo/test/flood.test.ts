@@ -47,5 +47,6 @@ describe("the count of one isolate", () => {
     expect(await over.json()).toEqual({ error: "demo_limit", limit: "requestsPerIpPerMinute" });
     // Another address still reaches the same sandbox.
     expect((await call(jar, "GET", "/whoami")).status).toBe(401);
-  });
+    // 601 requests take about 3 s alone, and over 5 s under the load of other lanes.
+  }, 60_000);
 });
