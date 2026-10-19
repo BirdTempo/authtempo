@@ -109,8 +109,8 @@ An app with other names writes 0001 from `storage.migrationSql()` (or
 from `compatMigration0006Sql("sqlite", storage.names)`, and 0007 from
 `compatMigration0007Sql("sqlite", storage.names)`. The shipped files
 fail on its tables with `no such table`. Without `--remote`, the run is on
-the local database of `wrangler dev`. wrangler records each applied file in its table
-`d1_migrations` (`migrations_table`).
+the local database of `wrangler dev`. wrangler records each applied file in
+its table `d1_migrations` (`migrations_table`).
 
 ## import
 
@@ -148,16 +148,23 @@ history and the process list.
 authtempo check https://api.example.com
 ```
 
-Seven checks, each `pass`, `fail` with a code, or `skip` with a reason:
+Eight checks, each `pass`, `fail` with a code, or `skip` with a reason:
 `https`, `mount` (`GET <basePath>/session` answers 401 JSON),
 `origin_rule` (a POST from `https://check.invalid` answers 403), `cookie`
 (the clear cookie of a sign-out is HttpOnly, Secure, and `Path=/`), `jwks`
 (public keys only, EdDSA or ES256, `use: "sig"`, a cache header),
 `well_known` (both documents at the origin root name the issuer and the
-key set), and `schema_version` (with `--target` and the inputs of the
-database). A skip never counts as a pass; `--strict` counts it as a
-failure, except the skip `compat_database`. The command reads public documents only; the first JWKS read of
-a new database writes its first signing key, which is core's own rule.
+key set), `schema_version`, and `schema_shape`. The two schema checks need
+`--target` and the inputs of the database. `schema_shape` compares each
+`ta_` table with the shape that the adapter's migrations make
+(`expectedPostgresShape`, `expectedD1Shape`). A missing table, column, or
+unique index fails, and so does a column of another type or NOT NULL rule.
+A missing plain index, an extra column, and an extra table warn. On a
+database with the Better Auth compatibility tables, it skips with
+`compat_database`. A skip never counts as a pass. `--strict` counts it as
+a failure, except the skip `compat_database`, which no fix clears. The
+command reads public documents only. The first JWKS read of a new database
+writes its first signing key, which is core's own rule.
 `runChecks` is exported and imports no Node.js module, so a Worker test can
 run it. `src/checks.ts` lists every code in `CHECK_CODES`.
 
@@ -173,6 +180,50 @@ needs `operator: { secretHash }` in its config, the SHA-256 hex of the
 secret. The old key verifies for 24 hours and signs nothing. With no
 terminal the command needs `--yes`; it reads the key set before and after,
 and warns when a cache still serves the old set.
+
+## secret
+
+```bash
+authtempo secret --version 2 --out secret-v2.txt
+authtempo secret --operator
+```
+
+It makes an app secret (`--version <n>`) or an operator secret
+(`--operator`) from 32 bytes of the Web Crypto source, as 43 characters of
+base64url. It draws again when core's `entropyBits` would warn on a value.
+The value goes out once: one stdout line, or one new file with mode 0600
+with `--out`. The command replaces no file, follows no link, and keeps no
+copy. `--operator` also prints the SHA-256 for `operator.secretHash`.
+
+## secret status and secret rewrap
+
+```bash
+authtempo secret status https://api.example.com
+authtempo secret rewrap https://api.example.com --yes
+```
+
+`secret status` calls `GET <basePath>/operator/secrets/status` and prints
+the row counts of each app secret version. It exits 1 when a version that
+the config does not hold has rows. `secret rewrap` calls
+`POST <basePath>/operator/secrets/rewrap` and sends each `next` back as
+`after`. It ends when no row of an old version remains, when a pass ends,
+or at `--max-calls`. With no terminal it needs `--yes`. Both send the
+operator secret only, never the app secret. The deployment reseals each
+row and answers counts only. The two routes and `info` share the limit
+`operator-secrets:ip:<ip>`, 120 calls an hour.
+
+## info
+
+```bash
+authtempo info https://api.example.com --target postgres
+```
+
+It prints a support report in four parts: the tools, the project, the
+database (with `--target`), and the deployment (with a base URL, through
+`GET <basePath>/operator/info`). The report holds no secret value and no
+host name. The deployment answers config key paths, never a value, and the
+command drops each path that is not a plain name. Exit 1 names a part that
+gave no answer.
 
 ## Tests
 

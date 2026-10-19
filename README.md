@@ -20,7 +20,7 @@ Plans: `docs/superpowers/plans/README.md`.
 | `@authtempo/compat-better-auth` | Runs a Better Auth 1.7 app on authtempo through a package alias, on the app's own Better Auth tables. Fails at start on an option core cannot keep. |
 | `@authtempo/legacy-hashes` | Verifies bcrypt, Argon2id, PBKDF2, scrypt, and Firebase scrypt hashes at sign-in and rehashes to PBKDF2. Pure JavaScript. bcryptjs is BSD-3-Clause (see `NOTICE`). |
 | `@authtempo/import` | The readers and `importUsers`: moves users from Supabase Auth, Clerk, Auth0, Firebase, Auth.js, and Cognito through the storage port. A second run writes nothing. The command is `authtempo import` in `@authtempo/cli`. |
-| `@authtempo/cli` | `authtempo`: `init` (a new app from the example of a stack), `migrate` (Postgres and D1, after the version gate), `import`, `check` (a deployment against core's promises), and `keys rotate`. Node 22 or newer. `authtempo-import` stays for one release. |
+| `@authtempo/cli` | `authtempo`: `init` (a new app from the example of a stack), `migrate` (Postgres and D1, after the version gate), `import`, `check` (a deployment against core's promises), and `keys rotate`. It also has `secret` (a new app secret or operator secret) and `info` (a support report with no secret value). `secret status` and `secret rewrap` count and reseal the rows of each secret version. Node 22 or newer. `authtempo-import` stays for one release. |
 | `@authtempo/mcp` | `authtempo-mcp`: the MCP server for a coding agent. On stdio in the project, it serves `docs.search`, `docs.read`, `version`, `scaffold`, `migrate.plan`, `migrate.run`, `schema.migrate`, and `check`. The last five tools run the CLI in process. The remote Worker serves only the tools `docs.search`, `docs.read`, and `version`, with the docs resources and the prompts, at the planned address `https://mcp.authtempo.com/mcp` (`REMOTE_MCP_URL`). `authtempo mcp` writes its editor config. |
 | `examples/worker` | A Worker that mounts the engine. The end-to-end test runs against it. |
 
@@ -103,6 +103,8 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
 - No flag of `authtempo` takes a secret as its value. A connection string
   and the operator secret come from the name of a variable or a file, and
   no output line holds a secret that the command read.
+- `authtempo secret` prints a new secret once, or writes it to a new file
+  that only its owner can read, and replaces no file.
 - `authtempo migrate` reads the schema version first and stops, before any
   write, on a database newer than its core. `authtempo check` counts a
   skipped check as no pass, and exits 1 on any failure.

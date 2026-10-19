@@ -7,6 +7,7 @@ sources:
   - packages/cli/README.md "The rules"
   - packages/cli/README.md "Install"
   - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 9"
+  - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 8"
 sidebar:
   order: 1
 ---
@@ -47,6 +48,9 @@ node /path/to/authtempo/packages/cli/dist/bin/authtempo.js --help
 | `authtempo check` | Checks that a deployment answers as core promises. | [authtempo check](/docs/reference/cli/check/) |
 | `authtempo keys rotate` | Makes a new signing key through the operator route. | [authtempo keys rotate](/docs/reference/cli/keys/) |
 | `authtempo-import` | The old import binary. It stays for one release. | [authtempo import](/docs/reference/cli/import/) |
+| `authtempo secret` | Makes an app secret or an operator secret from 32 random bytes. | [authtempo secret](/docs/reference/cli/secret/) |
+| `authtempo secret status`, `authtempo secret rewrap` | Counts and reseals the rows of each app secret version through the operator routes. | [authtempo secret status](/docs/reference/cli/secret-status/), [authtempo secret rewrap](/docs/reference/cli/secret-rewrap/) |
+| `authtempo info` | Prints a support report with no secret value. | [authtempo info](/docs/reference/cli/info/) |
 
 ## The flags
 
@@ -84,6 +88,7 @@ A stop prints its `stopped:` line on stderr.
 - The operator secret comes from `--token-env <NAME>` or `--token-file <path>`. The default variable is `AUTHTEMPO_OPERATOR_SECRET`.
 - A file of `-` is stdin.
 - No output line holds a secret that the command read. The CLI names a database by its host, its port, and its name only.
+- `authtempo secret` prints the secret that it makes once, or writes it to a new file that only its owner can read. It replaces no file.
 
 :::caution
 Warning: a value on the command line goes into the shell history and the process list. Do not give a secret as a flag value.

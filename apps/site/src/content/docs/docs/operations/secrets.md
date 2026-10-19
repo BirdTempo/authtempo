@@ -11,6 +11,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 22
   - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
   - docs/superpowers/plans/2026-10-14-12b-security-hardening.md "Task 13"
+  - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 8"
   - packages/core/README.md "Secrets"
 sidebar:
   order: 2
@@ -24,7 +25,7 @@ sidebar:
 
 - Access to the secret store of the API. On Workers that is `pnpm --filter my-app exec wrangler secret put`. On Node and Bun it is the process environment. [Deploy](/docs/operations/deploy/) sets the first value.
 - Core at schema version 9 on every instance. An instance at version 8 writes each value under version 1. [Upgrades](/docs/operations/upgrades/) gives the steps.
-- A way to run code in the API's process, for the [in-process API](/docs/reference/api/#the-in-process-api).
+- A way to run code in the API's process, for the [in-process API](/docs/reference/api/#the-in-process-api). Or, for the commands of [the CLI](/docs/reference/cli/), `operator: { secretHash }` in the config and the operator secret in `AUTHTEMPO_OPERATOR_SECRET`.
 
 ## What the secret protects
 
@@ -44,8 +45,11 @@ The provider secrets, such as `social.google.clientSecret` and `social.apple.pri
 
 ## Steps
 
-1. Make a new secret of 32 random bytes with `openssl rand -base64 32`.
-2. Store it as a second secret, for example `AUTH_SECRET_V2`. Keep `AUTH_SECRET` as it is.
+1. Make a new secret of 32 random bytes with `authtempo secret --version 2 --out secret-v2.txt`. The command writes a new file that only its owner can read, and replaces no file.
+
+   On a machine with no CLI, use `openssl rand -base64 32`.
+
+2. Store the line of the file as a second secret, for example `AUTH_SECRET_V2`. Keep `AUTH_SECRET` as it is. Then delete the file.
 3. Replace `secret` with `secrets`, and read the old value as version 1. Put version 1 first, then version 2. Deploy to every instance at 100 percent.
 
    On Workers the key reads `secrets: [{ version: 1, value: env.AUTH_SECRET }, { version: 2, value: env.AUTH_SECRET_V2 }]`. On Node and Bun, read `process.env` in the same way.
@@ -59,14 +63,20 @@ The provider secrets, such as `social.google.clientSecret` and `social.apple.pri
    Every instance now knows version 2, and version 1 stays current. Nothing is written under version 2 yet. If you skip this step, an instance on the old config cannot open a value of version 2. Its users then fail the second factor, and its signing key retires at each signature.
 
 4. Put version 2 first in `secrets`, then version 1. Deploy to every instance at 100 percent. Each new value is now written under version 2.
-5. In the API's process, run `auth.api.secrets.rewrap({ limit: 100 })`. The answer is a result: read `value` when `ok` is true.
-6. Pass the `next` of each answer as `after` to the next call. Stop when `next` is `null`. That is one pass.
-7. Run a new pass from step 5, with no `after`, while the last answer has `more: true`. Wait 15 minutes first when `skipped` or `failed` was above 0.
+5. Run `authtempo secret rewrap <base url> --yes`. The command ends when no row of an old version remains, when a pass ends, or at `--max-calls`. It exits 1 when a row did not open or rows remain. [authtempo secret rewrap](/docs/reference/cli/secret-rewrap/) gives the flags.
+
+   In the API's process, the same pass is `auth.api.secrets.rewrap({ limit: 100 })`. The answer is a result: read `value` when `ok` is true.
+
+6. In the API's process, pass the `next` of each answer as `after` to the next call. Stop when `next` is `null`. That is one pass. The command does this step itself.
+7. Run a new pass from step 5, with no `after`, while the last answer has `more: true`. Wait 15 minutes first when `skipped` or `failed` was above 0. With the command, run it again while it exits 1.
 
    After 3 passes with the same `failed` count, stop and read the second warning below. Such a row fails on every pass.
 
 8. Wait for the life of the live email codes: `emailOtp.ttlMinutes`, 10 minutes by default.
-9. Run `auth.api.secrets.status()`. Read the entry of version 1. When `emailCodes` is above 0, wait for `emailOtp.ttlMinutes` again, then repeat step 9.
+9. Run `authtempo secret status <base url>`. Remove a version only when the command lists each of its counts as 0. [authtempo secret status](/docs/reference/cli/secret-status/) gives the flags.
+
+   In the API's process, run `auth.api.secrets.status()`. Read the entry of version 1. When `emailCodes` is above 0, wait for `emailOtp.ttlMinutes` again, then repeat step 9.
+
 10. Remove version 1 from `secrets` when `totpSecrets`, `signingKeys`, `emailCodes`, and `backupCodes` are 0. Make sure that the config has no key `secret`. Deploy.
 
    On Node and Bun, restart each process: it reads the environment only at start.
@@ -109,7 +119,7 @@ Warning: a rollback to a build of core before schema version 9 is safe only befo
 - [`invalid_code`](/docs/reference/errors/#invalid_code) at the second factor: the instance does not know the version of the user's row. Do step 3 on every instance.
 - [`invalid_code`](/docs/reference/errors/#invalid_code) for an email code: its version left the config before the code expired. Ask for a new code.
 - [`invalid_body`](/docs/reference/errors/#invalid_body) from `rewrap`: the `limit` is outside 1 to 1000, or `after` is not a `next` that `rewrap` answered.
-- `createAuth` throws a config error that names an estimate of bits: the current secret is weak. Make a new one with `openssl rand -base64 32`.
+- `createAuth` throws a config error that names an estimate of bits: the current secret is weak. Make a new one with step 1.
 - A log line names a secret version that is not configured: a row holds a version that the config lacks. Add the version back, or let that row fail.
 
 ## Next
