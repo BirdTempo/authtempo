@@ -10,7 +10,7 @@ Run each command from the repository root.
 
 - `pnpm turbo run test --filter=@authtempo/demo --force`: the asset copy and the page scripts, then `wrangler deploy --dry-run` and the bundle scan. Then the pool tests and the Node tests run.
 - `pnpm --filter @authtempo/demo typecheck`: the Worker source, the page scripts, and the tests.
-- `pnpm --filter @authtempo/demo dev`: the Worker on your machine.
+- `pnpm --filter @authtempo/demo dev`: the Worker on your machine. Open `https://localhost:8787/`. `scripts/dev.mjs` runs `wrangler dev` over local https on port 8787 and sets `DEMO_ORIGIN` to that origin. So core trusts the page origin, and each mail link and provider URL leads back to the local run. `DEMO_PORT` names another port. wrangler makes its own certificate, so the browser asks you to accept it. `test/node/dev.test.ts` starts the script on a free port and sends a magic-link request from the page origin.
 
 The package is private. It has no publication: `workers_dev` and `preview_urls` are off, and it has no route.
 

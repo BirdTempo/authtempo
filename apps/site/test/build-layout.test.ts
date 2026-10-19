@@ -864,6 +864,15 @@ describe("the demo page (plan 11b Task 12)", () => {
       "The hosted demo is not open yet. Run it on your machine: pnpm --filter @authtempo/demo dev",
     );
     expect(end).toMatch(/<code\b[^>]*>pnpm --filter @authtempo\/demo dev<\/code>/);
+    // The address of the dev script (final review M1): the run sets DEMO_ORIGIN to it.
+    const local = [...main().matchAll(/<p class="local\b[^>]*>([\s\S]*?)<\/p>/g)].map((m) =>
+      textOf(m[1] ?? ""),
+    );
+    expect(local).toEqual([
+      "Then open this address in your browser: https://localhost:8787/",
+      "The local run has its own certificate, so the browser asks you to accept it.",
+    ]);
+    expect(main()).toMatch(/<code\b[^>]*>https:\/\/localhost:8787\/<\/code>/);
     // No page claims a host that does not answer (deviation 11).
     expect(main()).not.toContain("demo.authtempo.com");
   });
@@ -893,6 +902,9 @@ describe("the data of the demo page (plan 11b Task 12, ruling 40)", () => {
       kind: "closed",
       text: "The hosted demo is not open yet. Run it on your machine:",
       command: "pnpm --filter @authtempo/demo dev",
+      thenOpen: "Then open this address in your browser:",
+      address: "https://localhost:8787/",
+      certificate: "The local run has its own certificate, so the browser asks you to accept it.",
     });
   });
 });

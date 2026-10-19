@@ -37,6 +37,18 @@ export const DEMO_PUBLISHED = false;
  */
 export const DEMO_PLANNED_ORIGIN = "https://demo.authtempo.com";
 
+/** The port of the local demo. scripts/dev.mjs listens on it unless DEMO_PORT names another. */
+export const DEMO_DEV_PORT = 8787;
+
+/**
+ * The origin of the local demo on `port`. The dev script passes it as
+ * DEMO_ORIGIN, so core trusts the page origin. Each mail link and each
+ * provider URL then names this origin, not the planned host.
+ */
+export function demoDevOrigin(port: number = DEMO_DEV_PORT): string {
+  return `https://localhost:${port}`;
+}
+
 /**
  * The docs base of the site. Each demo page links its guide under it. A site
  * test holds it to the origin of the site, so the two cannot drift.

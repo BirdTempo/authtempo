@@ -1,5 +1,5 @@
 import { ipKey } from "@authtempo/core";
-import { DEMO_LIMITS, DEMO_PLANNED_ORIGIN } from "@authtempo/demo/facts";
+import { DEMO_LIMITS, DEMO_PLANNED_ORIGIN, demoDevOrigin } from "@authtempo/demo/facts";
 
 /**
  * The parts of /demo/ outside its entry (plan 11b Task 12). Every number comes
@@ -11,6 +11,10 @@ export const DEMO_PAGE = {
   notOpen: "The hosted demo is not open yet. Run it on your machine:",
   /** The local command of the demo. The page shows it in a code element. */
   command: "pnpm --filter @authtempo/demo dev",
+  /** The line before the local address. The page shows the address in a code element. */
+  thenOpen: "Then open this address in your browser:",
+  /** wrangler signs the certificate of a local https run itself. */
+  certificate: "The local run has its own certificate, so the browser asks you to accept it.",
   /** The end of the page once the owner sets DEMO_PUBLISHED to true. */
   open: "Open the demo",
   /** The planned host of the demo, from the demo facts (decision 2 of 2026-10-14). */
@@ -44,16 +48,30 @@ export const DEMO_OFF: readonly { name: string; reason: string }[] = [
 
 /**
  * The end of the page: a link to the host once the owner sets DEMO_PUBLISHED,
- * else the local command (plan 11b, deviation 11). A test reads both values.
+ * else the local command and the address to open (plan 11b, deviation 11).
+ * A test reads both values.
  */
-export function demoEnd(
-  published: boolean,
-):
+export function demoEnd(published: boolean):
   | { kind: "open"; href: string; text: string }
-  | { kind: "closed"; text: string; command: string } {
+  | {
+      kind: "closed";
+      text: string;
+      command: string;
+      thenOpen: string;
+      address: string;
+      certificate: string;
+    } {
   return published
     ? { kind: "open", href: DEMO_PAGE.host, text: DEMO_PAGE.open }
-    : { kind: "closed", text: DEMO_PAGE.notOpen, command: DEMO_PAGE.command };
+    : {
+        kind: "closed",
+        text: DEMO_PAGE.notOpen,
+        command: DEMO_PAGE.command,
+        thenOpen: DEMO_PAGE.thenOpen,
+        // The dev script sets DEMO_ORIGIN to this origin (final review M1).
+        address: `${demoDevOrigin()}/`,
+        certificate: DEMO_PAGE.certificate,
+      };
 }
 
 /**

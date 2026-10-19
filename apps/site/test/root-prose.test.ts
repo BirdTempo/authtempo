@@ -61,6 +61,8 @@ describe("the prose of /demo/ (plan 11b Task 12)", () => {
       ...DEMO_OFF.flatMap((x) => [x.name, x.reason]),
       ...limitRows().map((r) => r.text),
       DEMO_PAGE.notOpen,
+      DEMO_PAGE.thenOpen,
+      DEMO_PAGE.certificate,
       DEMO_PAGE.open,
       "It needs a native or desktop app on the visitor's device.",
     ])

@@ -17,6 +17,8 @@ export function demoProsePage(): Page {
     ...DEMO_OFF.flatMap((x) => [x.name, x.reason]),
     ...limitRows().map((row) => row.text),
     DEMO_PAGE.notOpen,
+    DEMO_PAGE.thenOpen,
+    DEMO_PAGE.certificate,
     DEMO_PAGE.open,
   ];
   return {

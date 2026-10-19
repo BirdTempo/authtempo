@@ -50,7 +50,11 @@ const exempt = (Object.entries(DEMO_EXEMPT) as [keyof typeof DEMO_EXEMPT, string
     </ul>
     {end.kind === "open"
       ? <p class="end"><a href={end.href}>{end.text}</a></p>
-      : <p class="end">{end.text} <code>{end.command}</code></p>}
+      : <Fragment>
+          <p class="end">{end.text} <code>{end.command}</code></p>
+          <p class="local">{end.thenOpen} <code>{end.address}</code></p>
+          <p class="local">{end.certificate}</p>
+        </Fragment>}
   </section>
 </Site>
 <style>
@@ -67,5 +71,5 @@ const exempt = (Object.entries(DEMO_EXEMPT) as [keyof typeof DEMO_EXEMPT, string
   .off dd { margin: 0; color: var(--at-mute); }
   /* .prose p sets the margin of each paragraph, so this rule names .prose too. */
   .prose .end { margin-top: calc(var(--at-rhythm) * 2); }
-  .end code { font-size: var(--at-text-mono); overflow-wrap: anywhere; }
+  .end code, .local code { font-size: var(--at-text-mono); overflow-wrap: anywhere; }
 </style>
