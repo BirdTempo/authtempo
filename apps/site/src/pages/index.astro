@@ -1,32 +1,11 @@
 ---
-// The placeholder landing page (plan 11a). Plan 11b replaces this file and the
-// site theme, and never the docs tree. The page makes no claim that a test
-// does not hold: the example tests of plan 11a run authtempo on Workers, on
-// Node, and on Bun. It has no data-pagefind-body, so the search skips it.
-// The style is global: a scoped style adds a class to each element, and the
-// build layout test reads the landing link as plain HTML.
-// The placeholder on the brand tokens (plan 11b1 Task 1). Task 7 moves it
-// onto the layout, and Task 10 replaces it.
-import "../styles/tokens.css";
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// The home page on the root layout (plan 11b1 Task 7). Task 10 builds brand spec 9 on it.
+import { HOME } from "../data/home.ts";
+import Site from "../layouts/Site.astro";
 ---
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <title>authtempo</title>
-    <style is:global>
-      body { font-family: var(--at-font-sans); margin: 0; padding: 4rem 1rem; color: var(--at-ink); background: var(--at-paper); }
-      main { max-width: 40rem; margin: 0 auto; }
-      a { color: var(--at-accent-text); }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>authtempo</h1>
-      <p>Your app owns its authentication. It runs on Cloudflare Workers, on Node, and on Bun.</p>
-      <p><a href="/docs/">Read the docs</a></p>
-    </main>
-  </body>
-</html>
+<Site title={HOME.title} description={HOME.description} path="/">
+  <h1>{HOME.headline}</h1>
+  <p>{HOME.lede}</p>
+  <p><a href="/docs/">{HOME.cta}</a></p>
+</Site>

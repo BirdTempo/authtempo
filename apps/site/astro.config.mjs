@@ -3,9 +3,16 @@
 // telemetry.astro.build on each run, and the build makes no network call
 // beyond the registry. Astro reads the switch from the environment only
 // (@astrojs/telemetry 3.3.3, read 2026-10-14). test/scripts.test.ts holds it.
+import { readFileSync } from "node:fs";
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import { FRAMEWORK_PAGES } from "./frameworks.mjs";
+import { parseTokens } from "./scripts/lib/tokens.ts";
+
+// One source for the paper color: the theme-color metas of the docs read tokens.css (brand spec 13).
+const tokens = parseTokens(
+  readFileSync(new URL("./src/styles/tokens.css", import.meta.url), "utf8"),
+);
 
 /**
  * The sidebar. Each content task of plan 11a adds its group. A group with
@@ -56,6 +63,28 @@ export default defineConfig({
       sidebar,
       // Starlight reads the brand tokens (brand spec 11). The root pages import the same file in Site.astro.
       customCss: ["./src/styles/tokens.css"],
+      // Brand spec 13 on every docs page. Starlight already links /favicon.svg.
+      head: [
+        { tag: "link", attrs: { rel: "apple-touch-icon", href: "/apple-touch-icon.png" } },
+        { tag: "link", attrs: { rel: "manifest", href: "/site.webmanifest" } },
+        {
+          tag: "meta",
+          attrs: {
+            name: "theme-color",
+            media: "(prefers-color-scheme: light)",
+            content: tokens.light.get("--at-paper"),
+          },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "theme-color",
+            media: "(prefers-color-scheme: dark)",
+            content: tokens.darkAttr.get("--at-paper"),
+          },
+        },
+        { tag: "meta", attrs: { property: "og:image", content: "https://authtempo.com/og.png" } },
+      ],
     }),
   ],
 });

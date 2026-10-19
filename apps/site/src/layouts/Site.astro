@@ -1,0 +1,78 @@
+---
+// biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
+// biome-ignore-all lint/correctness/noUnusedVariables: the template uses each const, and Biome 2.5.15 reads the frontmatter only
+// The one layout of the root pages (brand spec 9 and 13). Plan 11b builds
+// its pages on it. Task 8 adds the one inline script, the theme toggle.
+// The template reads Astro.props in place: Biome 2.5.15 lints this
+// frontmatter and not the template, so a destructured prop reads as unused.
+import rootPackage from "../../../../package.json";
+import corePackage from "../../../../packages/core/package.json";
+import { parseTokens } from "../../scripts/lib/tokens.ts";
+import Lockup from "../components/Lockup.astro";
+import { HOME } from "../data/home.ts";
+import { NAV_LINKS, REPO_URL } from "../data/site.ts";
+import "../styles/tokens.css";
+import tokensCss from "../styles/tokens.css?raw";
+
+interface Props {
+  title: string;
+  description: string;
+  path: string;
+}
+const tokens = parseTokens(tokensCss);
+// One source per fact (design spec 24 item 3): the license of the root
+// package.json, or the stated empty state until plan 12j sets it.
+const license: string =
+  "license" in rootPackage && typeof rootPackage.license === "string"
+    ? rootPackage.license
+    : HOME.noLicense;
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{Astro.props.title === HOME.title ? Astro.props.title : `${Astro.props.title} · authtempo`}</title>
+    <meta name="description" content={Astro.props.description} />
+    <link rel="canonical" href={new URL(Astro.props.path, "https://authtempo.com").href} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content={tokens.light.get("--at-paper")} />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content={tokens.darkAttr.get("--at-paper")} />
+    <meta property="og:title" content={Astro.props.title} />
+    <meta property="og:description" content={Astro.props.description} />
+    <meta property="og:image" content="https://authtempo.com/og.png" />
+  </head>
+  <body>
+    <a class="skip" href="#main">{HOME.skip}</a>
+    <header class="site-header">
+      <Lockup href="/" beat />
+      <nav aria-label="Site">
+        {NAV_LINKS.map((link) => <a href={link.href}>{link.label}</a>)}
+        {REPO_URL !== null && <a class="mono" href={REPO_URL}>GitHub</a>}
+      </nav>
+    </header>
+    <main id="main"><slot /></main>
+    <footer class="site-footer">
+      <span>authtempo · {license}</span>
+      <span class="mono">{corePackage.version}</span>
+    </footer>
+  </body>
+</html>
+<style is:global>
+  html { background: var(--at-paper); }
+  body { margin: 0; color: var(--at-ink); background: var(--at-paper); font-family: var(--at-font-sans); font-size: var(--at-text-body); line-height: var(--at-leading-body); }
+  code, pre, .mono { font-family: var(--at-font-mono); }
+  a { color: var(--at-accent-text); }
+  img, svg, pre, table { max-width: 100%; }
+</style>
+<style>
+  .skip { position: absolute; left: -100vw; }
+  .skip:focus-visible { left: var(--at-margin); top: var(--at-unit); }
+  .site-header, main, .site-footer { box-sizing: border-box; max-width: var(--at-frame); margin-inline: auto; padding-inline: var(--at-margin); }
+  .site-header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--at-rhythm); min-height: 4rem; border-bottom: 1px solid var(--at-line); }
+  .site-header nav { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--at-unit) * 3); margin-inline-start: auto; }
+  .site-header nav a { color: var(--at-ink); text-decoration: none; font-weight: 500; }
+  .site-footer { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--at-rhythm); padding-block: var(--at-rhythm); border-top: 1px solid var(--at-line); color: var(--at-mute); font-size: var(--at-text-small); }
+</style>
