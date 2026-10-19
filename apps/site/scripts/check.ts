@@ -37,6 +37,7 @@ import { sidebarGroups, sidebarOrder } from "./lib/agent.ts";
 import { cliHelpPages, helpRuns } from "./lib/cli-help.ts";
 import { configKeyPaths } from "./lib/config-keys.ts";
 import { EXPORT_ENTRIES } from "./lib/entries.ts";
+import { homeProsePage } from "./lib/home-prose.ts";
 import {
   distFiles,
   distPageOrEmpty,
@@ -78,8 +79,15 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   },
   { name: "check-frontmatter", run: () => checkFrontmatter(docsPages(), readRepoFile) },
   // The help texts of the CLI keep the same terms and sentence limits as the pages (plan 11c).
-  { name: "check-terms", run: () => checkTerms([...docsPages(), ...cliHelpPages()]) },
-  { name: "check-sentences", run: () => checkSentences([...docsPages(), ...cliHelpPages()]) },
+  // The home prose keeps the docs rules (brand spec 2; plan 11b1).
+  {
+    name: "check-terms",
+    run: () => checkTerms([...docsPages(), homeProsePage(), ...cliHelpPages()]),
+  },
+  {
+    name: "check-sentences",
+    run: () => checkSentences([...docsPages(), homeProsePage(), ...cliHelpPages()]),
+  },
   { name: "check-fences", run: () => checkFences(docsPages(), sampleFiles(), existsSync) },
   // The agent files of plan 11e. llms.txt, llms-full.txt, and the .md twins list every page.
   // The agent index holds the tree, its anchors, its samples, and the bodies of the twins.
