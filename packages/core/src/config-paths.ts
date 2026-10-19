@@ -37,6 +37,7 @@ export const AUTH_CONFIG_KEYS = {
   jwtMint: true,
   oauth: true,
   operator: true,
+  openapi: true,
   hooks: true,
   account: true,
   captcha: true,
