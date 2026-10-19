@@ -11,7 +11,8 @@
       "!**/.wrangler",
       "!**/proof/results",
       "!**/.next",
-      "!**/next-env.d.ts"
+      "!**/next-env.d.ts",
+      "!packages/core/test/fixtures/oas-3.1"
     ]
   }
 }
