@@ -40,8 +40,10 @@ export function checkFonts(input: {
   manifest: FontManifest;
   /** Each file of public/fonts/, by its name. */
   fontDir: ReadonlyMap<string, Uint8Array>;
+  /** Each folder of public/fonts/, by its name. The loader reads no folder, so the runner does not throw. */
+  fontFolders: readonly string[];
   tokensCss: string;
-  /** Each .css and .html file of dist, by its path. */
+  /** Each .css, .html, and .js file of dist, by its path. */
   built: ReadonlyMap<string, string>;
   distFiles: ReadonlySet<string>;
 }): CheckReport {
@@ -69,9 +71,13 @@ export function checkFonts(input: {
       );
     else r.counts.licenses = (r.counts.licenses ?? 0) + 1;
   }
+  // Astro copies every file of public/ to dist, so a stray file of any format
+  // ships. The folder holds the files of the record and the licenses only.
+  const allowed = new Set([...files.keys(), ...input.manifest.sources.map((s) => s.license)]);
   for (const name of input.fontDir.keys())
-    if (name.endsWith(".woff2") && !files.has(name))
-      r.failures.push(`public/fonts/${name} is not in fonts.json`);
+    if (!allowed.has(name)) r.failures.push(`public/fonts/${name} is not in fonts.json`);
+  for (const name of input.fontFolders)
+    r.failures.push(`public/fonts/${name} is a folder, and fonts.json names files only`);
   const faced = new Set<string>();
   for (const x of cssRules(input.tokensCss)) {
     if (x.selector !== "@font-face") continue;

@@ -83,11 +83,21 @@ export function siteSources(): { path: string; text: string }[] {
   return files.map((p) => ({ path: p.slice(SITE.length), text: readFileSync(p, "utf8") }));
 }
 
-/** Each file of public/fonts/ by its name, as bytes. Empty when the folder does not exist. */
-export function fontDir(): Map<string, Uint8Array> {
+/**
+ * The files of public/fonts/ by name, as bytes, and the names of its folders.
+ * Both are empty when the folder does not exist. A folder is not read: the
+ * check names it as a failure, and the runner still prints its summary line.
+ */
+export function fontDir(): { files: Map<string, Uint8Array>; folders: string[] } {
   const dir = `${SITE}public/fonts/`;
-  if (!existsSync(dir)) return new Map();
-  return new Map(readdirSync(dir).map((n) => [n, new Uint8Array(readFileSync(`${dir}${n}`))]));
+  const files = new Map<string, Uint8Array>();
+  const folders: string[] = [];
+  if (!existsSync(dir)) return { files, folders };
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.isDirectory()) folders.push(entry.name);
+    else files.set(entry.name, new Uint8Array(readFileSync(`${dir}${entry.name}`)));
+  }
+  return { files, folders };
 }
 
 /** src/assets/fonts.json, or an empty record, so the check fails on "read 0 fonts". */
@@ -97,12 +107,14 @@ export function readFontManifest(): FontManifest {
   return JSON.parse(text) as FontManifest;
 }
 
-/** Each .css and .html file of dist, by its path relative to dist. */
+/** A built file that can name a font: a style sheet, a page, or a script (brand spec 15). */
+export function isBuiltText(path: string): boolean {
+  return /\.(css|html|js)$/.test(path);
+}
+
+/** Each .css, .html, and .js file of dist, by its path relative to dist. */
 export function distTexts(): Map<string, string> {
   return new Map(
-    walk(DIST, (p) => /\.(css|html)$/.test(p)).map((p) => [
-      p.slice(DIST.length),
-      readFileSync(p, "utf8"),
-    ]),
+    walk(DIST, isBuiltText).map((p) => [p.slice(DIST.length), readFileSync(p, "utf8")]),
   );
 }

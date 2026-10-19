@@ -185,14 +185,17 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   {
     // Brand spec 5: five self-hosted subsets, their licenses, and no font host in the build.
     name: "check-fonts",
-    run: () =>
-      checkFonts({
+    run: () => {
+      const fonts = fontDir();
+      return checkFonts({
         manifest: readFontManifest(),
-        fontDir: fontDir(),
+        fontDir: fonts.files,
+        fontFolders: fonts.folders,
         tokensCss: readSiteFile("src/styles/tokens.css") ?? "",
         built: distTexts(),
         distFiles: distFiles(),
-      }),
+      });
+    },
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },
