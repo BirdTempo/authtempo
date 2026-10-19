@@ -44,20 +44,41 @@ const LAST_SEEN_EVERY_MS = 86_400_000;
 const GRANT_TYPES = ["authorization_code", "refresh_token"];
 /** RFC 8628 section 3.4 (read 2026-10-20): the grant type of a device poll (plan 12e). */
 export const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
+/** The grant type of RFC 6749 section 4.4.2 (plan 12e). */
+export const CREDENTIALS_GRANT = "client_credentials";
 /**
  * The grants that only a client of `api.oauth.clients` takes, beside the
  * registration ones. A registration never takes `client_credentials`: a
  * stranger must not get a machine client. Every source takes the device
  * grant while `oauth.device` is on, and refuses it while it is off.
  */
-const CREATE_ONLY_GRANT_TYPES = ["client_credentials"];
+const CREATE_ONLY_GRANT_TYPES = [CREDENTIALS_GRANT];
+/**
+ * The grants of the token endpoint under this config. The token route and
+ * the metadata documents both read this list, so the two cannot differ.
+ */
+export function tokenGrantTypes(oauth: ResolvedOAuth): string[] {
+  return [
+    ...GRANT_TYPES,
+    ...CREATE_ONLY_GRANT_TYPES,
+    ...(oauth.device !== null ? [DEVICE_GRANT] : []),
+  ];
+}
 const RESPONSE_TYPES = ["code"];
-const AUTH_METHODS: readonly ClientAuthMethod[] = [
+/**
+ * The client auth methods that `authenticateClient` takes. The registration
+ * check and the metadata documents read this list.
+ */
+export const AUTH_METHODS: readonly ClientAuthMethod[] = [
   "none",
   "client_secret_basic",
   "client_secret_post",
   "private_key_jwt",
 ];
+/** The subject types of OIDC Core 1.0 section 8 that a client may ask for (plan 12e). */
+export const SUBJECT_TYPES: readonly OAuthClientRow["subjectType"][] = ["public", "pairwise"];
+const isSubjectType = (v: unknown): v is OAuthClientRow["subjectType"] =>
+  (SUBJECT_TYPES as readonly unknown[]).includes(v);
 /** A client key set holds 1 to 10 keys: room for a rotation, and a bound on each assertion check. */
 export const CLIENT_KEYS_MAX = 10;
 /** The key sets of `jwks_uri` that one isolate keeps, each for one hour. The oldest goes first. */
@@ -437,7 +458,7 @@ function readClientMetadata(
     dropped.push("backchannel_logout_session_required");
   } else backchannelLogoutSessionRequired = backchannelLogoutUri !== null && sessionRequired;
   const subjectType = m.subject_type ?? "public";
-  if (subjectType !== "public" && subjectType !== "pairwise") return meta("subject_type");
+  if (!isSubjectType(subjectType)) return meta("subject_type");
   if (subjectType === "pairwise") {
     // `sector_identifier_uri` is not in plan 12e (OIDC Core 8.1). A document
     // drops it: its sector is the host of its id (`sectorOf`). Elsewhere it

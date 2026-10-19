@@ -19,6 +19,7 @@ import {
   redirectOrigins,
   registerClient,
   registeredClient,
+  tokenGrantTypes,
 } from "../../engine/oauth-clients.js";
 import { CREDENTIALS_GRANT, credentialsGrant } from "../../engine/oauth-credentials.js";
 import {
@@ -265,12 +266,8 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       });
     return json({ error: r.error }, INVALID_CLIENT_NO_HEADER);
   };
-  const GRANTS = new Set([
-    "authorization_code",
-    "refresh_token",
-    CREDENTIALS_GRANT,
-    ...(oauth.device ? [DEVICE_GRANT] : []),
-  ]);
+  // The metadata documents read the same list (Task 17 of plan 12e).
+  const GRANTS = new Set(tokenGrantTypes(oauth));
   /**
    * The grant of a form; the answer of the endpoint before any CORS header.
    * The client auth runs before the grant, so a failed auth spends nothing.

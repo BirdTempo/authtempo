@@ -324,14 +324,7 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
       // OIDC Core 1.0 section 2: the time of the sign-in, not of the request.
       ...(g.authTime !== null ? { auth_time: g.authTime } : {}),
     };
-    if (g.scopes.includes("email")) {
-      claims.email = g.user.email;
-      claims.email_verified = g.user.emailVerified;
-    }
-    if (g.scopes.includes("profile")) {
-      claims.name = g.user.name;
-      claims.picture = g.user.image;
-    }
+    Object.assign(claims, scopeClaims(g.user, g.scopes));
     answer.id_token = await signToken(config, SESSION_JWT_TYPE, claims);
   }
   return oauthOk(answer);
@@ -713,6 +706,41 @@ function cnfJkt(cnf: unknown): string | null | undefined {
 }
 
 /**
+ * The user claims of each scope (OIDC Core 1.0 section 5.4). The ID token,
+ * userinfo, and `claims_supported` of the metadata read this one map.
+ */
+export const SCOPE_CLAIMS: Readonly<
+  Record<string, Readonly<Record<string, (u: UserRow) => unknown>>>
+> = {
+  email: { email: (u) => u.email, email_verified: (u) => u.emailVerified },
+  profile: { name: (u) => u.name, picture: (u) => u.image },
+};
+
+/** The claims of an ID token beside the user claims (OIDC Core 1.0 sections 2 and 3.1.3.6). */
+export const ID_TOKEN_CLAIMS: readonly string[] = [
+  "iss",
+  "sub",
+  "aud",
+  "iat",
+  "exp",
+  "at_hash",
+  "sid",
+  "nonce",
+  "auth_time",
+];
+
+/** The user claims of `scopes`, by `SCOPE_CLAIMS`. */
+function scopeClaims(user: UserRow, scopes: readonly string[]): Record<string, unknown> {
+  const claims: Record<string, unknown> = {};
+  for (const scope of scopes) {
+    // An own key only: a scope such as "constructor" names no claims.
+    const named = Object.hasOwn(SCOPE_CLAIMS, scope) ? SCOPE_CLAIMS[scope] : undefined;
+    for (const [name, value] of Object.entries(named ?? {})) claims[name] = value(user);
+  }
+  return claims;
+}
+
+/**
  * The userinfo claims by scope (OIDC Core 1.0 section 5.3), or null without
  * `openid`. `subject` is the token's `sub`: the user id, or a pairwise subject.
  */
@@ -721,14 +749,7 @@ export function userinfoClaims(
   subject: string,
 ): Record<string, unknown> | null {
   if (!access.scopes.includes("openid")) return null;
-  const { user } = access;
-  return {
-    sub: subject,
-    ...(access.scopes.includes("email")
-      ? { email: user.email, email_verified: user.emailVerified }
-      : {}),
-    ...(access.scopes.includes("profile") ? { name: user.name, picture: user.image } : {}),
-  };
+  return { sub: subject, ...scopeClaims(access.user, access.scopes) };
 }
 
 /**

@@ -5,9 +5,11 @@ import type { DpopBinding } from "../primitives/dpop.js";
 import type { OAuthClientRow } from "../schema.js";
 import { issuerOf, signToken } from "./jwt.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
-import { findClient } from "./oauth-clients.js";
+import { CREDENTIALS_GRANT, findClient } from "./oauth-clients.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import type { TokenAnswer } from "./oauth-token.js";
+
+export { CREDENTIALS_GRANT };
 
 /**
  * The `client_credentials` grant (plan 12e, RFC 6749 section 4.4, read
@@ -16,8 +18,6 @@ import type { TokenAnswer } from "./oauth-token.js";
  * comes with it (section 4.4.3), and no ID token, because no user signed in.
  */
 
-/** The grant type of RFC 6749 section 4.4.2. */
-export const CREDENTIALS_GRANT = "client_credentials";
 // A runaway loop of one client stops at 2 per second, also when it spreads over many IPs.
 // oauth-token:ip counts first, so a service on one IP gets 60 tokens per 15 minutes.
 // A service keeps its token until its expiry, so it needs far fewer (ruling 27 of plan 12e).

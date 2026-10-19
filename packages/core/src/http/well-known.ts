@@ -1,6 +1,9 @@
 import type { ResolvedConfig } from "../config.js";
 import { issuerOf, mintConfig } from "../engine/jwt.js";
+import { AUTH_METHODS, SUBJECT_TYPES, tokenGrantTypes } from "../engine/oauth-clients.js";
 import { oauthOf } from "../engine/oauth-result.js";
+import { ID_TOKEN_CLAIMS, SCOPE_CLAIMS } from "../engine/oauth-token.js";
+import { FOREIGN_ALGS } from "../primitives/foreign-jwk.js";
 import { json } from "./json.js";
 
 /**
@@ -24,34 +27,63 @@ const OIDC_PATH = "/.well-known/openid-configuration";
 const PRM_PATH = "/.well-known/oauth-protected-resource";
 
 /**
- * RFC 8414 section 2 and OIDC Discovery section 3. The auth method `none`
- * is stated: the RFC 8414 default is `client_secret_basic`, which core does
- * not take. The alg list names the configured `jwtMint.alg` alone, because
- * core signs with one key of one alg (spec 8.13 item 5). OIDC Discovery asks
- * for RS256 in the list: a deployment sets `jwtMint.alg: "RS256"` for that (plan 12e).
+ * RFC 8414 section 2 and OIDC Discovery 1.0 section 3 (both read 2026-10-20).
+ * Each member is what the code does under this config, no more and no less.
+ * Each list reads the constant or the config value that the code reads.
+ * The auth method `none` is stated: the RFC 8414 default is
+ * `client_secret_basic` alone. The ID token alg list names `jwtMint.alg`
+ * alone, because core signs with one key of one alg (spec 8.13 item 5).
+ * OIDC Discovery asks for RS256 in it: a deployment sets
+ * `jwtMint.alg: "RS256"` for that (plan 12e deviation 4).
  */
 export function authorizationServerMetadata(config: ResolvedConfig): Record<string, unknown> {
   const oauth = oauthOf(config);
   const issuer = issuerOf(config);
+  // Core posts a logout token only through oauth.fetch (ruling 49 of plan 12e).
+  const backchannel = oauth.fetch !== null;
   return {
     issuer,
     authorization_endpoint: `${issuer}/oauth/authorize`,
     token_endpoint: `${issuer}/oauth/token`,
     ...(oauth.dynamic ? { registration_endpoint: `${issuer}/oauth/register` } : {}),
     revocation_endpoint: `${issuer}/oauth/revoke`,
+    introspection_endpoint: `${issuer}/oauth/introspect`,
+    // The device routes exist only while oauth.device is on.
+    ...(oauth.device !== null
+      ? { device_authorization_endpoint: `${issuer}/oauth/device_authorization` }
+      : {}),
+    end_session_endpoint: `${issuer}/oauth/end-session`,
     userinfo_endpoint: `${issuer}/oauth/userinfo`,
     jwks_uri: `${issuer}/jwks`,
     scopes_supported: [...oauth.scopes.keys()],
     response_types_supported: ["code"],
     // Stated: the RFC 8414 default adds `fragment`, which core does not send.
     response_modes_supported: ["query"],
-    grant_types_supported: ["authorization_code", "refresh_token"],
-    token_endpoint_auth_methods_supported: ["none"],
-    revocation_endpoint_auth_methods_supported: ["none"],
+    grant_types_supported: tokenGrantTypes(oauth),
+    token_endpoint_auth_methods_supported: [...AUTH_METHODS],
+    // RFC 8414 section 2: a MUST while private_key_jwt is listed.
+    token_endpoint_auth_signing_alg_values_supported: [...FOREIGN_ALGS],
+    revocation_endpoint_auth_methods_supported: [...AUTH_METHODS],
+    // Introspection takes a confidential client only (RFC 7662 section 4).
+    introspection_endpoint_auth_methods_supported: AUTH_METHODS.filter((m) => m !== "none"),
     // Required here: without it, RFC 8414 says the server has no PKCE.
     code_challenge_methods_supported: ["S256"],
-    subject_types_supported: ["public"],
+    subject_types_supported: [...SUBJECT_TYPES],
     id_token_signing_alg_values_supported: [mintConfig(config).alg],
+    // RFC 9449 section 5.1: the algs of a DPoP proof at the token endpoint.
+    dpop_signing_alg_values_supported: [...oauth.dpop.algs],
+    claims_supported: [
+      ...ID_TOKEN_CLAIMS,
+      ...Object.values(SCOPE_CLAIMS).flatMap((named) => Object.keys(named)),
+    ],
+    // OIDC Core 3.1.2.6: core refuses `request` and `request_uri`, and ignores `claims`.
+    request_parameter_supported: false,
+    // Stated: the OIDC Discovery default of this member is true.
+    request_uri_parameter_supported: false,
+    claims_parameter_supported: false,
+    backchannel_logout_supported: backchannel,
+    // Each logout token holds the `sid` of the session (Back-Channel Logout 1.0 section 2.4).
+    backchannel_logout_session_supported: backchannel,
     // RFC 9207: every redirect to a client carries iss.
     authorization_response_iss_parameter_supported: true,
     // The CIMD draft, section 6 (read 2026-10-13).
@@ -59,16 +91,21 @@ export function authorizationServerMetadata(config: ResolvedConfig): Record<stri
   };
 }
 
-/** RFC 9728 section 2. A client must find `resource` identical to the URL it asked for (section 3.3). */
+/**
+ * RFC 9728 section 2. A client must find `resource` identical to the URL it
+ * asked for (section 3.3). The DPoP algs are those that `auth.caller` takes.
+ */
 export function protectedResourceMetadata(
   config: ResolvedConfig,
   resource: string,
 ): Record<string, unknown> {
+  const oauth = oauthOf(config);
   return {
     resource,
     authorization_servers: [issuerOf(config)],
-    scopes_supported: [...oauthOf(config).scopes.keys()],
+    scopes_supported: [...oauth.scopes.keys()],
     bearer_methods_supported: ["header"],
+    dpop_signing_alg_values_supported: [...oauth.dpop.algs],
   };
 }
 

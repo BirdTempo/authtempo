@@ -67,7 +67,12 @@ describe("be the OAuth and OIDC provider for MCP clients", () => {
     };
     expect(server.issuer).toBe(`${API}/auth`);
     expect(server.code_challenge_methods_supported).toEqual(["S256"]);
-    expect(server.token_endpoint_auth_methods_supported).toEqual(["none"]);
+    expect(server.token_endpoint_auth_methods_supported).toEqual([
+      "none",
+      "client_secret_basic",
+      "client_secret_post",
+      "private_key_jwt",
+    ]);
     const resource = (await (
       await auth.wellKnown(new Request(`${API}/.well-known/oauth-protected-resource/mcp`))
     ).json()) as {
