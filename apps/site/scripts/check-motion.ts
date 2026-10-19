@@ -38,12 +38,16 @@ export function checkMotion(input: {
     const name = /^@keyframes (\S+)$/.exec(x.at)?.[1];
     if (name === undefined) continue;
     frames.add(name);
-    if (x.selector === "to" || x.selector === "100%")
+    // A step list such as `0%, 100%` or `from, to` holds an end state too.
+    const steps = x.selector.split(",").map((s) => s.trim());
+    if (steps.some((s) => s === "to" || s === "100%"))
       r.failures.push(
         `@keyframes ${name} sets an end state; the end state is the element's own style`,
       );
   }
   r.counts.keyframes = frames.size;
+  for (const name of MOTION_KEYFRAMES)
+    if (!frames.has(name)) r.failures.push(`tokens.css lacks @keyframes ${name}`);
   for (const name of frames)
     if (!(MOTION_KEYFRAMES as readonly string[]).includes(name))
       r.failures.push(`@keyframes ${name} is not a motion of brand spec section 7`);
@@ -53,8 +57,14 @@ export function checkMotion(input: {
         continue;
       if (prop !== "animation-fill-mode" && !/^none(?: !important)?$/.test(value)) {
         r.counts.animations = (r.counts.animations ?? 0) + 1;
-        const used = value.split(/[\s,]+/).find((w) => w.startsWith("at-"));
-        if (used === undefined || !frames.has(used))
+        // Each animation of a comma list names one keyframes of the sheet.
+        const used = value.split(",").map((item) =>
+          item
+            .trim()
+            .split(/\s+/)
+            .find((w) => w.startsWith("at-")),
+        );
+        if (used.some((name) => name === undefined || !frames.has(name)))
           r.failures.push(
             `${x.selector} runs an animation with no keyframes of tokens.css: ${value}`,
           );
@@ -65,7 +75,7 @@ export function checkMotion(input: {
         );
     }
   for (const f of input.sources)
-    if (/@keyframes\b|\banimation(?:-name)?\s*:/.test(f.text))
+    if (/@keyframes\b|\banimation(?:-name|-fill-mode)?\s*:/.test(f.text))
       r.failures.push(`${f.path} declares an animation; motion lives in tokens.css only`);
   for (const [page, html] of input.pages) {
     const css = pageCss(html, input.read).replace(/\s+/g, "");

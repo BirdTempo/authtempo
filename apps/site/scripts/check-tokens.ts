@@ -12,8 +12,8 @@ const COLORS: readonly string[] = COLOR_TOKENS;
 /**
  * The tokens of the light block that may hold a color literal and are not a
  * color token. The one shadow of brand spec 6 is black at an alpha, not a
- * color of the palette, so it is not a tenth color token. The rule narrows
- * by name, so the list stays visible here, and the runner prints each use.
+ * color of the palette. So it is not a tenth color token. The rule narrows by
+ * name, so the list stays visible here, and the runner prints each use.
  */
 export const SHADOW_TOKENS = ["--at-shadow-lift"] as const;
 const SHADOWS: readonly string[] = SHADOW_TOKENS;

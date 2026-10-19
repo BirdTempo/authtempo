@@ -34,6 +34,38 @@ describe("checkMotion", () => {
     ]);
   });
 
+  it("fails a keyframe step list with an end state", () => {
+    const broken = css.replace(
+      "@keyframes at-draw {\n  from {",
+      "@keyframes at-draw {\n  0%, 100% {",
+    );
+    expect(broken).not.toBe(css);
+    expect(run(broken).failures).toEqual([
+      "@keyframes at-draw sets an end state; the end state is the element's own style",
+    ]);
+  });
+
+  it("fails tokens.css that lacks a keyframe of brand spec 7", () => {
+    const broken = css
+      .replace("@keyframes at-draw {\n  from {\n    stroke-dashoffset: 1;\n  }\n}\n", "")
+      .replace("  animation: at-draw var(--at-draw) var(--at-ease-draw) backwards;\n", "");
+    expect(broken).not.toBe(css);
+    const r = run(broken);
+    expect(r.failures).toEqual(["tokens.css lacks @keyframes at-draw"]);
+    expect(r.counts).toEqual({ pages: 2, keyframes: 2, animations: 2 });
+  });
+
+  it("fails a second animation of one list with no keyframes", () => {
+    const broken = css.replace(
+      "animation: at-enter var(--at-enter) var(--at-ease-enter) backwards;",
+      "animation: at-enter var(--at-enter) var(--at-ease-enter) backwards, at-none 1s;",
+    );
+    expect(broken).not.toBe(css);
+    expect(run(broken).failures).toEqual([
+      ".at-enter runs an animation with no keyframes of tokens.css: at-enter var(--at-enter) var(--at-ease-enter) backwards, at-none 1s",
+    ]);
+  });
+
   it("fails an animation that keeps its end state", () => {
     const broken = css.replace(
       "animation: at-enter var(--at-enter) var(--at-ease-enter) backwards;",
@@ -46,6 +78,16 @@ describe("checkMotion", () => {
 
   it("fails an animation in another source", () => {
     const source = { path: "src/x.astro", text: "<style>p { animation: at-enter 1s; }</style>" };
+    expect(run(css, [source]).failures).toEqual([
+      "src/x.astro declares an animation; motion lives in tokens.css only",
+    ]);
+  });
+
+  it("fails a fill mode in another source", () => {
+    const source = {
+      path: "src/x.astro",
+      text: "<style>.at-enter { animation-fill-mode: both; }</style>",
+    };
     expect(run(css, [source]).failures).toEqual([
       "src/x.astro declares an animation; motion lives in tokens.css only",
     ]);
