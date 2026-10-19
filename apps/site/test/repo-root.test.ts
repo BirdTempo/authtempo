@@ -16,14 +16,14 @@ const other = mkdtempSync(join(tmpdir(), "authtempo-other-checkout-"));
 writeFileSync(join(other, "pnpm-workspace.yaml"), "packages: []\n");
 afterAll(() => rmSync(other, { recursive: true, force: true }));
 
-/** REPO_ROOT as a new Node process reads it, started in `cwd`. */
-function rootFrom(cwd: string): string {
+/** REPO_ROOT as a new Node process reads it, started in `cwd`, after `before` runs. */
+function rootFrom(cwd: string, before = ""): string {
   const run = spawnSync(
     process.execPath,
     [
       "--input-type=module",
       "-e",
-      `const m = await import(${JSON.stringify(MODULE)}); console.log(m.REPO_ROOT);`,
+      `${before} const m = await import(${JSON.stringify(MODULE)}); console.log(m.REPO_ROOT);`,
     ],
     { cwd, encoding: "utf8" },
   );
@@ -48,6 +48,15 @@ describe("the repository root of src/data/repo.ts (ruling 23 of the plan 11b lan
       vite?: { define?: Record<string, unknown> };
     };
     expect(config.vite?.define?.__AUTHTEMPO_REPO_ROOT__).toBe(JSON.stringify(ROOT));
+  });
+
+  // The Astro build writes the value in place of the name; a global gives the
+  // same name a value here, so the branch of repo.ts that takes it runs.
+  it("takes the root that the build defines, in place of the walk", () => {
+    const probe = "/probe/root/of/the/build";
+    expect(rootFrom(other, `globalThis.__AUTHTEMPO_REPO_ROOT__ = ${JSON.stringify(probe)};`)).toBe(
+      probe,
+    );
   });
 
   it("fails closed when no folder up to the file system root holds pnpm-workspace.yaml", () => {
