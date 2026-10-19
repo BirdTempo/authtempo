@@ -83,20 +83,31 @@ interface HeaderLine {
   value: string;
 }
 
-/** The URL rules of a _headers file in order, and each header line under them. */
-function parseHeaders(text: string): { rules: string[]; lines: HeaderLine[] } {
+/**
+ * The URL rules of a _headers file in order, each header line under them,
+ * and each indented line that is not `Name: value`. Cloudflare reads
+ * `! Name` as a detach line, which removes a header that another rule set.
+ */
+function parseHeaders(text: string): {
+  rules: string[];
+  lines: HeaderLine[];
+  other: { rule: string; line: number; text: string }[];
+} {
   const rules: string[] = [];
   const lines: HeaderLine[] = [];
-  for (const line of text.split("\n")) {
-    if (line.trim() === "" || line.trimStart().startsWith("#")) continue;
+  const other: { rule: string; line: number; text: string }[] = [];
+  text.split("\n").forEach((line, i) => {
+    if (line.trim() === "" || line.trimStart().startsWith("#")) return;
     if (!/^\s/.test(line)) {
       rules.push(line.trim());
-      continue;
+      return;
     }
-    const m = /^\s+([^:\s]+)\s*:\s*(.*)$/.exec(line);
-    if (m) lines.push({ rule: rules.at(-1) ?? "", name: m[1] ?? "", value: (m[2] ?? "").trim() });
-  }
-  return { rules, lines };
+    const rule = rules.at(-1) ?? "";
+    const m = /^\s+([A-Za-z0-9-]+)\s*:\s*(.*)$/.exec(line);
+    if (m) lines.push({ rule, name: m[1] ?? "", value: (m[2] ?? "").trim() });
+    else other.push({ rule, line: i + 1, text: line.trim() });
+  });
+  return { rules, lines, other };
 }
 
 /**
@@ -164,6 +175,16 @@ export function checkCsp(
   });
 
   const parsed = parseHeaders(headers);
+  // Ruling 15 of the plan 11b lane: a detach line in another rule removes the
+  // CSP from the paths of that rule (seen under wrangler dev on 2026-10-19).
+  for (const o of parsed.other)
+    r.failures.push(
+      `_headers line ${o.line} under ${o.rule} is not Name: value: ${o.text}; the site detaches no header`,
+    );
+  const siteNames = ["content-security-policy", ...OTHER_HEADERS.map(([n]) => n.toLowerCase())];
+  for (const h of parsed.lines)
+    if (h.rule !== "/*" && siteNames.includes(h.name.toLowerCase()))
+      r.failures.push(`the rule for ${h.rule} sets ${h.name}; only the rule for /* sets it`);
   const all = parsed.rules.filter((rule) => rule === "/*").length;
   if (all !== 1) r.failures.push(`_headers has ${all} rules for /*; it has one`);
   // A report-only policy enforces nothing, and its report goes to a URL.
@@ -189,9 +210,8 @@ export function checkCsp(
     else if (got[0]?.value !== value)
       r.failures.push(`the rule for /* has ${name}: ${got[0]?.value}, not ${name}: ${value}`);
   }
-  const known = ["content-security-policy", ...OTHER_HEADERS.map(([n]) => n.toLowerCase())];
   for (const h of parsed.lines)
-    if (h.rule === "/*" && !known.includes(h.name.toLowerCase()))
+    if (h.rule === "/*" && !siteNames.includes(h.name.toLowerCase()))
       r.failures.push(`the rule for /* sets ${h.name}, which is not a header of the site rule`);
 
   const { map: policy, repeated } = directives(policyLine.value);

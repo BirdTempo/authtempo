@@ -15,6 +15,10 @@
   // `astro build` then `wrangler deploy` ships a site with no CSP. It does not
   // build: a build here would rewrite dist while check.ts reads it (its
   // check-deploy row runs the dry run), and would build twice in preview.
+  // The command runs in the shell's folder, not in the folder of this file.
+  // So run each deploy from apps/site, or through
+  // `pnpm --filter @authtempo/site exec wrangler deploy`. From the repo root
+  // the guard is not found, and the deploy fails.
   "build": { "command": "node scripts/guard-deploy.ts" },
   "assets": {
     "directory": "./dist",

@@ -159,6 +159,7 @@ describe("checkCsp", () => {
   it("fails a second Content-Security-Policy line", () => {
     const r = check(PAGES, `${headers()}/x/\n  Content-Security-Policy: default-src *\n`);
     expect(r.failures).toEqual([
+      "the rule for /x/ sets Content-Security-Policy; only the rule for /* sets it",
       "_headers has 2 Content-Security-Policy lines (/*, /x/); it has one, in the rule for /*",
     ]);
   });
@@ -223,6 +224,10 @@ describe("checkCsp", () => {
   it("fails a policy that is not in the rule for /*", () => {
     const text = headers().replace("/*\n", "/docs/*\n");
     expect(check(PAGES, text).failures).toEqual([
+      "the rule for /docs/* sets Content-Security-Policy; only the rule for /* sets it",
+      "the rule for /docs/* sets Referrer-Policy; only the rule for /* sets it",
+      "the rule for /docs/* sets X-Content-Type-Options; only the rule for /* sets it",
+      "the rule for /docs/* sets Permissions-Policy; only the rule for /* sets it",
       "_headers has 0 rules for /*; it has one",
       "_headers has 1 Content-Security-Policy lines (/docs/*); it has one, in the rule for /*",
     ]);
@@ -273,6 +278,46 @@ describe("checkCsp", () => {
   it("fails a dist that still holds _headers.template", () => {
     expect(check(PAGES, headers(), new Set([...FILES, "_headers.template"])).failures).toEqual([
       "dist/_headers.template exists; write-headers.ts deletes it after the write",
+    ]);
+  });
+
+  // Ruling 15 of the plan 11b lane: the four probes of the re-review of 95ef3bd.
+  it("fails a detach line of the CSP under /docs/*", () => {
+    const text = `${headers()}/docs/*\n  ! Content-Security-Policy\n`;
+    expect(check(PAGES, text).failures).toEqual([
+      "_headers line 11 under /docs/* is not Name: value: ! Content-Security-Policy; the site detaches no header",
+    ]);
+  });
+
+  it("fails a detach line of the CSP under the openapi rule", () => {
+    const text = headers().replace(
+      "  Access-Control-Allow-Origin: *\n",
+      "  Access-Control-Allow-Origin: *\n  ! Content-Security-Policy\n",
+    );
+    expect(check(PAGES, text).failures).toEqual([
+      "_headers line 10 under /docs/reference/openapi.json is not Name: value: ! Content-Security-Policy; the site detaches no header",
+    ]);
+  });
+
+  it("fails a site header in a rule other than /*", () => {
+    const text = `${headers()}/docs/*\n  Referrer-Policy: unsafe-url\n`;
+    expect(check(PAGES, text).failures).toEqual([
+      "the rule for /docs/* sets Referrer-Policy; only the rule for /* sets it",
+    ]);
+  });
+
+  it("fails a detach line of X-Content-Type-Options", () => {
+    const text = `${headers()}/docs/*\n  ! X-Content-Type-Options\n`;
+    expect(check(PAGES, text).failures).toEqual([
+      "_headers line 11 under /docs/* is not Name: value: ! X-Content-Type-Options; the site detaches no header",
+    ]);
+  });
+
+  it("fails a second CSP in a rule other than /*", () => {
+    const text = `${headers()}/docs/*\n  Content-Security-Policy: default-src *\n`;
+    expect(check(PAGES, text).failures).toEqual([
+      "the rule for /docs/* sets Content-Security-Policy; only the rule for /* sets it",
+      "_headers has 2 Content-Security-Policy lines (/*, /docs/*); it has one, in the rule for /*",
     ]);
   });
 
