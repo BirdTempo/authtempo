@@ -118,6 +118,16 @@ describe("prompt=login, max_age, and auth_time (plan 12e, OIDC Core 3.1.2.1)", (
     expect(locationOf(done).searchParams.get("code")).toMatch(/^oc_/);
   });
 
+  it("compares in milliseconds: a session 400 ms older than prompt=login, in the same second, gets the sign-in step", async () => {
+    const h = oauthHandle();
+    const s = await setup(h);
+    // The test clock starts on a whole second, so the request is in the sign-in's second.
+    h.clock.advance(400);
+    const id = signInIdOf(await h.auth.handle(ask(s.input, { prompt: "login" }, s.cookie)));
+    expect(signInIdOf(await h.auth.handle(back(id, s.cookie)))).toBe(id);
+    expect(await codeRows(h)).toEqual([]);
+  });
+
   it("treats max_age=1 with an auth_time two seconds old as prompt=login", async () => {
     const h = oauthHandle();
     const s = await setup(h);
