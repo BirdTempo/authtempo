@@ -93,3 +93,15 @@ export function sectionOf(html: string, heading: string): string | null {
   }
   return null;
 }
+
+/** The CSS of a built page: each same-origin style sheet that it links, then each style element. */
+export function pageCss(html: string, read: (href: string) => string | null): string {
+  const linked = [...html.matchAll(/<link\b[^>]*>/g)]
+    .map((m) => m[0])
+    .filter((tag) => /\srel="stylesheet"/.test(tag))
+    .map((tag) => /\shref="(\/[^"]*)"/.exec(tag)?.[1])
+    .filter((href): href is string => href !== undefined)
+    .map((href) => read(href) ?? "");
+  const inline = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1] ?? "");
+  return [...linked, ...inline].join("\n");
+}

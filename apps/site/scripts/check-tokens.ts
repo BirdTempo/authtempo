@@ -9,6 +9,14 @@ export interface SourceFile {
 }
 
 const COLORS: readonly string[] = COLOR_TOKENS;
+/**
+ * The tokens of the light block that may hold a color literal and are not a
+ * color token. The one shadow of brand spec 6 is black at an alpha, not a
+ * color of the palette, so it is not a tenth color token. The rule narrows
+ * by name, so the list stays visible here, and the runner prints each use.
+ */
+export const SHADOW_TOKENS = ["--at-shadow-lift"] as const;
+const SHADOWS: readonly string[] = SHADOW_TOKENS;
 const STARLIGHT: readonly string[] = STARLIGHT_COLORS;
 /** A hex color of 3, 4, 6, or 8 digits, with no word character, dot, or dash after it. */
 const HEX = "#(?:[0-9a-f]{8}|[0-9a-f]{6}|[0-9a-f]{4}|[0-9a-f]{3})(?![\\w.-])";
@@ -57,8 +65,9 @@ export function checkTokens(input: {
   const t = parseTokens(input.css);
   const r: CheckReport = {
     name: "check-tokens",
-    counts: { colors: 0, starlight: 0, sources: input.sources.length },
+    counts: { colors: 0, starlight: 0, sources: input.sources.length, exempt: 0 },
     failures: [],
+    exempt: [],
   };
   for (const name of COLOR_TOKENS) {
     const light = t.light.get(name);
@@ -82,10 +91,15 @@ export function checkTokens(input: {
       if (!COLORS.includes(name))
         r.failures.push(`the ${label} block sets ${name}, which is not a color token`);
   // The light block also holds the scheme-free tokens of later tasks, so the
-  // rule reads the value's shape: a color value names a color token.
-  for (const [name, value] of t.light)
-    if (name.startsWith("--at-") && !COLORS.includes(name) && COLOR_VALUE.test(value))
-      r.failures.push(`the light block sets ${name} to ${value}, which is not a color token`);
+  // rule reads the value's shape: a color value names a color token, or
+  // it is a shadow of the list above.
+  for (const [name, value] of t.light) {
+    if (!name.startsWith("--at-") || COLORS.includes(name) || !COLOR_VALUE.test(value)) continue;
+    if (SHADOWS.includes(name)) {
+      r.counts.exempt = (r.counts.exempt ?? 0) + 1;
+      r.exempt?.push(`${name} is ${value}, the one shadow of brand spec 6`);
+    } else r.failures.push(`the light block sets ${name} to ${value}, which is not a color token`);
+  }
   for (const name of STARLIGHT_COLORS)
     if (!t.light.has(name)) r.failures.push(`tokens.css does not set ${name}`);
   for (const [name, value] of t.light) {

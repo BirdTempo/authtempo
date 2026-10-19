@@ -138,3 +138,197 @@
   --sl-font: var(--at-font-sans);
   --sl-font-mono: var(--at-font-mono);
 }
+
+/* Type (brand spec 5) and rhythm (brand spec 6). Desktop values; a phone takes 0.875 of each size. */
+:root {
+  --at-scale: 1;
+  --at-text-display: calc(3.5rem * var(--at-scale));
+  --at-text-h1: calc(2.5rem * var(--at-scale));
+  --at-text-h2: calc(1.75rem * var(--at-scale));
+  --at-text-h3: calc(1.25rem * var(--at-scale));
+  --at-text-body: calc(1.0625rem * var(--at-scale));
+  --at-text-small: calc(0.875rem * var(--at-scale));
+  --at-text-mono: calc(0.9375rem * var(--at-scale));
+  --at-leading-display: 1.05;
+  --at-leading-h1: 1.1;
+  --at-leading-h2: 1.2;
+  --at-leading-h3: 1.3;
+  --at-leading-body: 1.6;
+  --at-leading-small: 1.5;
+  --at-leading-mono: 1.6;
+  --at-tracking-display: -0.03em;
+  --at-tracking-h1: -0.03em;
+  --at-tracking-h2: -0.02em;
+  --at-tracking-h3: -0.01em;
+  /* The base unit is 8 px, and every block margin is a multiple of the 32 px rhythm. */
+  --at-unit: 0.5rem;
+  --at-rhythm: 2rem;
+  --at-measure: 40rem;
+  --at-measure-hero: 45rem;
+  --at-frame: 75rem;
+  --at-margin: 2rem;
+  --at-rail: 2px;
+  /* The one shadow of brand spec 6: a card that lifts on hover. */
+  --at-shadow-lift: 0 18px 40px rgba(0, 0, 0, 0.14);
+}
+@media (max-width: 47.99rem) {
+  :root {
+    --at-scale: 0.875;
+  }
+}
+@media (min-width: 48rem) {
+  :root {
+    --at-margin: 4rem;
+  }
+}
+@media (min-width: 80rem) {
+  :root {
+    --at-margin: 6rem;
+  }
+}
+
+/*
+ * Motion (brand spec 7). Each keyframe gives the start state only, and each
+ * one-time animation runs "backwards", so an element rests at its own style.
+ * With reduced motion every animation is none, and each element shows at
+ * rest. check-motion holds these rules; no other source declares an animation.
+ */
+:root {
+  --at-beat: 3.2s;
+  --at-ease-beat: cubic-bezier(0.45, 0, 0.2, 1);
+  --at-enter: 1.6s;
+  --at-ease-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --at-draw: 2.4s;
+  --at-ease-draw: cubic-bezier(0.4, 0, 0.2, 1);
+  --at-hover: 0.4s;
+}
+@keyframes at-beat {
+  50% {
+    transform: scaleY(0.6);
+  }
+}
+@keyframes at-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@keyframes at-draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+/* The beat: each bar of the mark scales on its base, 0.4 s after the bar before it. */
+.at-beat .at-mark rect {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: at-beat var(--at-beat) var(--at-ease-beat) infinite;
+}
+.at-beat .at-mark rect:nth-child(2) {
+  animation-delay: 0.4s;
+}
+.at-beat .at-mark rect:nth-child(3) {
+  animation-delay: 0.8s;
+}
+.at-beat .at-mark rect:nth-child(4) {
+  animation-delay: 1.2s;
+}
+/* The entrance: once, 0.15 s a block inside a .at-stagger parent. */
+.at-enter {
+  animation: at-enter var(--at-enter) var(--at-ease-enter) backwards;
+}
+.at-stagger > :nth-child(2) {
+  animation-delay: 0.15s;
+}
+.at-stagger > :nth-child(3) {
+  animation-delay: 0.3s;
+}
+.at-stagger > :nth-child(4) {
+  animation-delay: 0.45s;
+}
+.at-stagger > :nth-child(5) {
+  animation-delay: 0.6s;
+}
+.at-stagger > :nth-child(6) {
+  animation-delay: 0.75s;
+}
+/* The icon draw: once, 0.1 s an icon inside a .at-draw-list parent. Each shape of the sprite has pathLength="1". */
+.at-draw {
+  stroke-dasharray: 1;
+  animation: at-draw var(--at-draw) var(--at-ease-draw) backwards;
+}
+.at-draw-list > :nth-child(2) .at-draw {
+  animation-delay: 0.1s;
+}
+.at-draw-list > :nth-child(3) .at-draw {
+  animation-delay: 0.2s;
+}
+.at-draw-list > :nth-child(4) .at-draw {
+  animation-delay: 0.3s;
+}
+.at-draw-list > :nth-child(5) .at-draw {
+  animation-delay: 0.4s;
+}
+.at-draw-list > :nth-child(6) .at-draw {
+  animation-delay: 0.5s;
+}
+.at-draw-list > :nth-child(7) .at-draw {
+  animation-delay: 0.6s;
+}
+.at-draw-list > :nth-child(8) .at-draw {
+  animation-delay: 0.7s;
+}
+.at-draw-list > :nth-child(9) .at-draw {
+  animation-delay: 0.8s;
+}
+.at-draw-list > :nth-child(10) .at-draw {
+  animation-delay: 0.9s;
+}
+.at-draw-list > :nth-child(11) .at-draw {
+  animation-delay: 1s;
+}
+.at-draw-list > :nth-child(12) .at-draw {
+  animation-delay: 1.1s;
+}
+.at-draw-list > :nth-child(13) .at-draw {
+  animation-delay: 1.2s;
+}
+.at-draw-list > :nth-child(14) .at-draw {
+  animation-delay: 1.3s;
+}
+.at-draw-list > :nth-child(15) .at-draw {
+  animation-delay: 1.4s;
+}
+.at-draw-list > :nth-child(16) .at-draw {
+  animation-delay: 1.5s;
+}
+/* The hover lift of a card or a button. */
+.at-lift {
+  transition:
+    transform var(--at-hover) ease,
+    box-shadow var(--at-hover) ease;
+}
+.at-lift:hover {
+  transform: translateY(-3px);
+}
+.at-card:hover {
+  box-shadow: var(--at-shadow-lift);
+}
+/* The mark is still in print (brand spec 3). */
+@media print {
+  .at-beat .at-mark rect {
+    animation: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced motion must win over every animation of the page, Starlight's too. */
+    animation: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: the same rule for every transition. */
+    transition-duration: 0s !important;
+    /* biome-ignore lint/complexity/noImportantStyles: the same rule for a smooth scroll. */
+    scroll-behavior: auto !important;
+  }
+}

@@ -14,7 +14,7 @@ describe("checkTokens", () => {
   it("passes the token file of the site", () => {
     const r = checkTokens({ css, sources: [page], favicon: null });
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ colors: 9, starlight: 23, sources: 1 });
+    expect(r.counts).toEqual({ colors: 9, starlight: 23, sources: 1, exempt: 1 });
   });
 
   it("fails a color token that one dark block lacks", () => {
@@ -93,6 +93,22 @@ describe("checkTokens", () => {
     expect(broken).not.toBe(css);
     expect(checkTokens({ css: broken, sources: [page], favicon: null }).failures).toEqual([
       "the light block sets --at-warn to #ff0000, which is not a color token",
+    ]);
+  });
+
+  it("exempts the shadow of brand spec 6 by name, and no other color literal", () => {
+    const r = checkTokens({ css, sources: [page], favicon: null });
+    expect(r.failures).toEqual([]);
+    expect(r.exempt).toEqual([
+      "--at-shadow-lift is 0 18px 40px rgba(0, 0, 0, 0.14), the one shadow of brand spec 6",
+    ]);
+    const broken = css.replace(
+      "  --at-shadow-lift: 0 18px 40px rgba(0, 0, 0, 0.14);",
+      "  --at-shadow-lift: 0 18px 40px rgba(0, 0, 0, 0.14);\n  --at-glow: 0 0 8px rgba(0, 0, 0, 0.5);",
+    );
+    expect(broken).not.toBe(css);
+    expect(checkTokens({ css: broken, sources: [page], favicon: null }).failures).toEqual([
+      "the light block sets --at-glow to 0 0 8px rgba(0, 0, 0, 0.5), which is not a color token",
     ]);
   });
 

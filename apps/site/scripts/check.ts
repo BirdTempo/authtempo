@@ -23,6 +23,7 @@ import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
 import { checkLinks } from "./check-links.ts";
 import { checkLlms } from "./check-llms.ts";
 import { checkMcp } from "./check-mcp.ts";
+import { checkMotion } from "./check-motion.ts";
 import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
 import { checkSentences } from "./check-sentences.ts";
@@ -37,6 +38,7 @@ import {
   distFiles,
   distPageOrEmpty,
   distPages,
+  distRead,
   distTexts,
   docsPages,
   fontDir,
@@ -196,6 +198,17 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         distFiles: distFiles(),
       });
     },
+  },
+  {
+    // Brand spec 7 and 14: motion in tokens.css only, at rest under reduced motion, on every page.
+    name: "check-motion",
+    run: () =>
+      checkMotion({
+        tokensCss: readSiteFile("src/styles/tokens.css") ?? "",
+        sources: siteSources(),
+        pages: distPages(),
+        read: distRead,
+      }),
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },

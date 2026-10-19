@@ -118,3 +118,9 @@ export function distTexts(): Map<string, string> {
     walk(DIST, isBuiltText).map((p) => [p.slice(DIST.length), readFileSync(p, "utf8")]),
   );
 }
+
+/** A file of dist by its URL path, such as /_astro/x.css, or null when it does not exist. */
+export function distRead(href: string): string | null {
+  const abs = `${DIST}${decodeURIComponent(href.split(/[?#]/)[0] ?? "").slice(1)}`;
+  return existsSync(abs) ? readFileSync(abs, "utf8") : null;
+}
