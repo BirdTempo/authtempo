@@ -13,9 +13,23 @@ const SEVEN = [
   "Cut over",
 ];
 
+/** The real import and the verify on the copy, as ruling 15 of plan 11f asks before the cutover. */
+const MOVE = (stem: string) =>
+  `authtempo import ${stem} --users users.json --target postgres --url-env COPY_URL`;
+const VERIFY = (stem: string) =>
+  `authtempo import verify ${stem} --users users.json --target postgres --url-env COPY_URL`;
+
+/** The body of one phase. Move and Verify hold their command on the copy in a fence. */
+function body(stem: string, phase: string): string {
+  if (phase === "Move")
+    return `Run it on a copy. [One real import](/docs/migrate/cutover/#one-real-import) tells why.\n\n\`\`\`sh\n${MOVE(stem)}\n\`\`\`\n`;
+  if (phase === "Verify") return `One sentence.\n\n\`\`\`sh\n${VERIFY(stem)}\n\`\`\`\n`;
+  return "One sentence.\n";
+}
+
 /** A guide of `stem` with the H3 lines `phases` under Steps and both includes. */
 function guide(stem: string, phases: readonly string[] = SEVEN): Page {
-  const steps = phases.map((p) => `### ${p}\n\nOne sentence.\n`).join("\n");
+  const steps = phases.map((p) => `### ${p}\n\n${body(stem, p)}`).join("\n");
   const source = [
     "---",
     `title: From ${stem}`,
@@ -79,7 +93,14 @@ describe("checkMigrate", () => {
   it("passes a tree in the shape", () => {
     const r = checkMigrate(tree(), ["a"], HTML, REASONS);
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ guides: 2, phases: 14, providers: 1, rows: 2, anchors: 2 });
+    expect(r.counts).toEqual({
+      guides: 2,
+      phases: 14,
+      providers: 1,
+      rows: 2,
+      anchors: 2,
+      copies: 2,
+    });
     expect(r.exempt).toEqual([
       "better-auth: the compatibility package: the app keeps its tables (spec 16.2)",
     ]);
@@ -162,6 +183,51 @@ describe("checkMigrate", () => {
     ]);
     expect(run(at('import other from "../../../../../samples/migrate/b.test.ts?raw";'))).toEqual([
       "docs/migrate/a.mdx imports samples/migrate/b.test.ts?raw, which is not a file of the guide a",
+    ]);
+    // The parse of check-fences reads an import on two lines too.
+    expect(run(at('import other from\n  "../../../../../samples/migrate/b.test.ts?raw";'))).toEqual(
+      [
+        "docs/migrate/a.mdx imports samples/migrate/b.test.ts?raw, which is not a file of the guide a",
+      ],
+    );
+  });
+
+  it("refuses a real import or a verify on the real database in Move or Verify", () => {
+    const a = guide("a");
+    const run = (source: string) =>
+      checkMigrate(tree([{ ...a, source }, guide("better-auth")]), ["a"], HTML, REASONS).failures;
+    const real = (line: string) => line.replace("COPY_URL", "DATABASE_URL");
+    expect(run(a.source.replace(MOVE("a"), real(MOVE("a"))))).toEqual([
+      `docs/migrate/a.mdx: a command of the phase Move does not write to the copy (--url-env COPY_URL): ${real(MOVE("a"))}`,
+    ]);
+    expect(run(a.source.replace(VERIFY("a"), real(VERIFY("a"))))).toEqual([
+      `docs/migrate/a.mdx: a command of the phase Verify does not write to the copy (--url-env COPY_URL): ${real(VERIFY("a"))}`,
+    ]);
+    // A flag name that only starts with the right text is no copy.
+    expect(run(a.source.replace(MOVE("a"), `${MOVE("a")}_OLD`))).toEqual([
+      `docs/migrate/a.mdx: a command of the phase Move does not write to the copy (--url-env COPY_URL): ${MOVE("a")}_OLD`,
+    ]);
+  });
+
+  it("refuses a Move with no link to One real import, and a phase with no command", () => {
+    const a = guide("a");
+    const run = (source: string) =>
+      checkMigrate(tree([{ ...a, source }, guide("better-auth")]), ["a"], HTML, REASONS).failures;
+    expect(run(a.source.replace("#one-real-import", "#steps"))).toEqual([
+      "docs/migrate/a.mdx: the phase Move does not link /docs/migrate/cutover/#one-real-import",
+    ]);
+    expect(run(a.source.replace(VERIFY("a"), "authtempo check https://api.example.com"))).toEqual([
+      "docs/migrate/a.mdx: the phase Verify has no command `authtempo import verify a`",
+    ]);
+    expect(run(a.source.replace(MOVE("a"), "authtempo check https://api.example.com"))).toEqual([
+      "docs/migrate/a.mdx: the phase Move has no command `authtempo import a`",
+    ]);
+    // The command of the Move phase in the Verify phase is no command of Move.
+    const moved = a.source
+      .replace(`${MOVE("a")}\n`, "")
+      .replace(VERIFY("a"), `${VERIFY("a")}\n${MOVE("a")}`);
+    expect(run(moved)).toEqual([
+      "docs/migrate/a.mdx: the phase Move has no command `authtempo import a`",
     ]);
   });
 

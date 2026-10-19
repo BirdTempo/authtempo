@@ -33,21 +33,33 @@ import test from "../../../../../samples/migrate/clerk.test.ts?raw";
 ### Export
 
 1. Download the user export CSV from the Clerk dashboard as `export.csv`.
-2. Fetch every page of `GET /v1/users`, and join the pages into one array.
+2. Save the script below as `clerk-export.sh` in a folder that only you can read. It fetches every page of `GET /v1/users`, and joins the pages into one array.
+3. Run it with `bash clerk-export.sh`. Do not paste it into a shell: `set -e` closes that shell at the first error.
+4. The script stops at the first failed call. `curl` prints the HTTP error, such as 401 for a wrong key.
+5. A failed run writes no new file and keeps the old `users.json`. Run the script again. A complete run writes `users.json`.
 
-```sh
+```sh title="clerk-export.sh"
 set -euo pipefail
-o=0; : > pages.ndjson
+umask 077
+# Every page goes to a temporary folder first. Only a complete run moves users.json here.
+t=$(mktemp -d)
+trap 'rm -rf "$t"' EXIT
+o=0; : > "$t/pages.ndjson"
 while :; do
-  page=$(curl -sf -H "Authorization: Bearer $CLERK_SECRET_KEY" "https://api.clerk.com/v1/users?limit=500&offset=$o")
+  page=$(curl -sSf -H "Authorization: Bearer $CLERK_SECRET_KEY" "https://api.clerk.com/v1/users?limit=500&offset=$o")
   [ "$(printf '%s' "$page" | jq length)" -eq 0 ] && break
-  printf '%s\n' "$page" >> pages.ndjson
+  printf '%s\n' "$page" >> "$t/pages.ndjson"
   o=$((o + 500))
 done
-jq -s 'add // []' pages.ndjson > users.json
+jq -s 'add // []' "$t/pages.ndjson" > "$t/users.json"
+mv "$t/users.json" .
 ```
 
-3. For organizations, write `organizations.json`: an array of `GET /v1/organizations` objects, each with its `memberships` array.
+```sh
+bash clerk-export.sh
+```
+
+6. For organizations, write `organizations.json`: an array of `GET /v1/organizations` objects, each with its `memberships` array.
 
 ### Carry the passwords
 
@@ -68,16 +80,26 @@ authtempo import clerk --csv export.csv --users users.json --organizations organ
 
 ### Move
 
-1. Run the same command without `--dry-run`.
+Run the real import on a copy of the database only. The one real import into the real database runs at step 9 of [The cutover](/docs/migrate/cutover/), after the old sign-ins stop. If it runs earlier, a password, an address, or a delete that changes in the old system after it is lost. [One real import](/docs/migrate/cutover/#one-real-import) tells why.
+
+1. Make the copy. On Postgres, create an empty database, set `COPY_URL` to its URL, and load the real one into it with `pg_dump --no-owner "$DATABASE_URL" | psql "$COPY_URL"`.
+2. On D1, load the real database into the empty local copy of the import Worker with `wrangler d1 export <database> --remote --output copy.sql` and `wrangler d1 execute <database> --local --file copy.sql`.
+3. Run both in the folder of the import Worker. Delete its `.wrangler/state` first, or the load stops on a table that exists.
+4. Run the same command without `--dry-run`, with `--url-env COPY_URL`. On D1, run the import Worker without `"remote": true`, so it writes the local copy.
+
+```sh
+authtempo import clerk --csv export.csv --users users.json --organizations organizations.json --formats bcrypt --target postgres --url-env COPY_URL
+```
 
 ### Verify
 
-1. Run `authtempo import verify` with the same files. It exits 0 only when the database holds the whole export.
+1. Run `authtempo import verify` with the same files on the copy. It exits 0 only when the copy holds the whole export.
 2. Run `authtempo check <base url>` against the API.
-3. Sign in once with a known user and the old password, and once by each other method of the app.
+3. Sign in once with a known user and the old password, and once by each other method of the app. Do it at step 13 of [The cutover](/docs/migrate/cutover/): before that step, the real database holds no user.
+4. Drop the copy, and on D1 delete `copy.sql`, when `import verify` exits 0. The copy holds every user of the export.
 
 ```sh
-authtempo import verify clerk --csv export.csv --users users.json --organizations organizations.json --formats bcrypt --target postgres --url-env DATABASE_URL
+authtempo import verify clerk --csv export.csv --users users.json --organizations organizations.json --formats bcrypt --target postgres --url-env COPY_URL
 authtempo check https://api.example.com
 ```
 

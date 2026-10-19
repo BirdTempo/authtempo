@@ -9,7 +9,7 @@ metadata:
 
 **For:** a coding agent that moves the users of an app from Auth0 to authtempo for a person.
 
-**What it does:** you plan the import twice, the person reads the report, and one run writes the users. Then you do the cutover.
+**What it does:** you rehearse the import on a copy of the database, and the person reads each report. One real run at the cutover writes the users.
 
 ## Before you start
 
@@ -24,12 +24,20 @@ metadata:
 2. Before the import, set the password check of the page in the API.
 3. Call `migrate.plan` with `provider: "auth0"` and `against: "empty"`. Add the inputs `users`, `hashes`, `organizations`, `role_map`, and `formats`.
 4. Read the report. Fix each refused file or input, and plan again.
-5. Call `migrate.plan` with the same input and `against: "database"`. The answer holds a `plan_id`.
-6. Show the whole report to the person. Ask the person to read each line and to say yes.
-7. After the yes, call `migrate.run` with the same input, the `plan_id`, and `confirm: true`.
-8. Sign in once with a known user and the old password.
-9. Change each auth call of the app with the table of [The calls](/docs/migrate/auth0/#the-calls).
-10. Call `docs.read` with the path `/docs/migrate/cutover/`. Do its steps with the person.
+5. Ask the person to make a copy of the database, as the phase [Move](/docs/migrate/auth0/#move) of the guide says.
+6. Ask the person to start the server again with `--url-env COPY_URL`. If not, `migrate.run` writes the real database before the cutover, and a later change in the old system is lost.
+7. Call `migrate.plan` with the same input and `against: "database"`. The answer holds a `plan_id`.
+8. Show the whole report to the person. Ask the person to read each line and to say yes.
+9. After the yes, call `migrate.run` with the same input, the `plan_id`, and `confirm: true`.
+10. Ask the person to run `authtempo import verify` on the copy, as the phase [Verify](/docs/migrate/auth0/#verify) says. It must exit 0.
+11. Change each auth call of the app with the table of [The calls](/docs/migrate/auth0/#the-calls).
+12. Call `docs.read` with the path `/docs/migrate/cutover/`. Do its steps 1 to 8 with the person.
+13. At step 9 of the cutover, ask the person to start the server again on the real database.
+14. Call `migrate.plan` with the input of the new export and `against: "database"`. Show the whole report, and ask for a yes.
+15. After the yes, call `migrate.run` with the same input, the `plan_id`, and `confirm: true`. This is the one real import.
+16. Do steps 10 to 12 of the cutover with the person.
+17. Sign in once with a known user and the old password.
+18. Do steps 14 to 19 of the cutover with the person.
 
 ## If it fails
 

@@ -266,22 +266,35 @@ describe("the skill pack", () => {
     expect(tools).toBeGreaterThan(0);
     expect(commands).toBeGreaterThan(0);
   });
-  it("keeps the phases of each provider guide: the run, the sign-in, the calls, the cutover", () => {
+  it("keeps the phases of each provider guide: a run on a copy, the cutover, then one real run", () => {
     // Spec 23 item 9: "Verify" and "Change the calls" come between the move and the cutover.
+    // Ruling 15 of plan 11f: before the cutover, the run writes a copy of the database. The
+    // one real run writes the real database at step 9 of the cutover, after the old sign-ins stop.
     for (const provider of PROVIDERS) {
       const f = files.find((x) => x.folder === `authtempo-migrate-${provider}`);
       expect(f, provider).toBeDefined();
       const steps = (f?.body ?? "").split("\n").filter((l) => /^\d+\. /.test(l));
       const at = (re: RegExp) => steps.findIndex((l) => re.test(l));
-      const run = at(/call `migrate\.run`/);
-      const signIn = at(/^\d+\. Sign in once with a known user/);
-      const calls = at(new RegExp(`\\]\\(/docs/migrate/${provider}/#the-calls\\)`));
-      const cutover = at(/`\/docs\/migrate\/cutover\/`/);
+      const runs = steps.flatMap((l, i) => (/call `migrate\.run`/.test(l) ? [i] : []));
+      const order = [
+        at(/`--url-env COPY_URL`/),
+        runs[0] ?? -1,
+        at(/`authtempo import verify` on the copy/),
+        at(new RegExp(`\\]\\(/docs/migrate/${provider}/#the-calls\\)`)),
+        at(/`\/docs\/migrate\/cutover\/`/),
+        at(/^\d+\. At step 9 of the cutover, .* the real database\.$/),
+        runs[1] ?? -1,
+        at(/^\d+\. Sign in once with a known user/),
+      ];
+      expect(runs.length, provider).toBe(2);
       expect(
-        [run, signIn, calls, cutover].every((i) => i >= 0),
-        provider,
+        order.every((i) => i >= 0),
+        `${provider}: ${order.join(", ")}`,
       ).toBe(true);
-      expect(run < signIn && signIn < calls && calls < cutover, provider).toBe(true);
+      expect(
+        order.every((i, n) => n === 0 || (order[n - 1] ?? -1) < i),
+        `${provider}: ${order.join(", ")}`,
+      ).toBe(true);
     }
     // The Cognito guide signs in a second time, with capital letters in the address.
     const cognito = files.find((x) => x.folder === "authtempo-migrate-cognito")?.body ?? "";

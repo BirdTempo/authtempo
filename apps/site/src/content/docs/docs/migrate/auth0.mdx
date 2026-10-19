@@ -56,16 +56,26 @@ authtempo import auth0 --users users.ndjson --hashes hashes.ndjson --organizatio
 
 ### Move
 
-1. Run the same command without `--dry-run`.
+Run the real import on a copy of the database only. The one real import into the real database runs at step 9 of [The cutover](/docs/migrate/cutover/), after the old sign-ins stop. If it runs earlier, a password, an address, or a delete that changes in the old system after it is lost. [One real import](/docs/migrate/cutover/#one-real-import) tells why.
+
+1. Make the copy. On Postgres, create an empty database, set `COPY_URL` to its URL, and load the real one into it with `pg_dump --no-owner "$DATABASE_URL" | psql "$COPY_URL"`.
+2. On D1, load the real database into the empty local copy of the import Worker with `wrangler d1 export <database> --remote --output copy.sql` and `wrangler d1 execute <database> --local --file copy.sql`.
+3. Run both in the folder of the import Worker. Delete its `.wrangler/state` first, or the load stops on a table that exists.
+4. Run the same command without `--dry-run`, with `--url-env COPY_URL`. On D1, run the import Worker without `"remote": true`, so it writes the local copy.
+
+```sh
+authtempo import auth0 --users users.ndjson --hashes hashes.ndjson --organizations organizations.json --role-map lead=admin --formats bcrypt --target postgres --url-env COPY_URL
+```
 
 ### Verify
 
-1. Run `authtempo import verify` with the same files. It exits 0 only when the database holds the whole export.
+1. Run `authtempo import verify` with the same files on the copy. It exits 0 only when the copy holds the whole export.
 2. Run `authtempo check <base url>` against the API.
-3. Sign in once with a known user and the old password, and once by each other method of the app.
+3. Sign in once with a known user and the old password, and once by each other method of the app. Do it at step 13 of [The cutover](/docs/migrate/cutover/): before that step, the real database holds no user.
+4. Drop the copy, and on D1 delete `copy.sql`, when `import verify` exits 0. The copy holds every user of the export.
 
 ```sh
-authtempo import verify auth0 --users users.ndjson --hashes hashes.ndjson --organizations organizations.json --role-map lead=admin --formats bcrypt --target postgres --url-env DATABASE_URL
+authtempo import verify auth0 --users users.ndjson --hashes hashes.ndjson --organizations organizations.json --role-map lead=admin --formats bcrypt --target postgres --url-env COPY_URL
 authtempo check https://api.example.com
 ```
 

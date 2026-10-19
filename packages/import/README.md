@@ -119,7 +119,10 @@ verify: the database does not hold this export: 2 records would be written, 1 pa
 ```
 
 It refuses `--repair`, `--dry-run`, `--on-email-taken`, and `--target
-memory`. Run it after the real run, before the cutover. On D1, write a
+memory`. Run it after each real run: on a copy of the database before
+the cutover, and on the real database at the cutover. It reads that each
+row exists, not its text, so it does not see a change in the old system
+that a second import did not carry. On D1, write a
 verify bundle with `--target d1-bundle --out <file>` and run the Worker
 again (`worker/README.md`). `verifyReport` of this package is the one rule,
 and the D1 Worker reads it too.
@@ -163,19 +166,29 @@ authtempo import supabase --users users.csv --identities identities.csv --format
 
 Two files, joined on the exact user id. The dashboard CSV (Settings, User
 exports) has the password digests. `GET /v1/users` has the created date, the
-external accounts, and the address flag. Fetch every page and join them into
-one array:
+external accounts, and the address flag. Save the script below as
+`clerk-export.sh`, and run it with `bash clerk-export.sh`. It fetches every
+page and joins them into one array. A pasted `set -e` closes the shell at the
+first error. A failed run writes no new file and keeps the old `users.json`.
 
 ```bash
 set -euo pipefail
-o=0; : > pages.ndjson
+umask 077
+# Every page goes to a temporary folder first. Only a complete run moves users.json here.
+t=$(mktemp -d)
+trap 'rm -rf "$t"' EXIT
+o=0; : > "$t/pages.ndjson"
 while :; do
-  page=$(curl -sf -H "Authorization: Bearer $CLERK_SECRET_KEY" "https://api.clerk.com/v1/users?limit=500&offset=$o")
+  page=$(curl -sSf -H "Authorization: Bearer $CLERK_SECRET_KEY" "https://api.clerk.com/v1/users?limit=500&offset=$o")
   [ "$(printf '%s' "$page" | jq length)" -eq 0 ] && break
-  printf '%s\n' "$page" >> pages.ndjson
+  printf '%s\n' "$page" >> "$t/pages.ndjson"
   o=$((o + 500))
 done
-jq -s 'add // []' pages.ndjson > users.json
+jq -s 'add // []' "$t/pages.ndjson" > "$t/users.json"
+mv "$t/users.json" .
+```
+
+```bash
 authtempo import clerk --csv export.csv --users users.json [--organizations organizations.json] --formats bcrypt --target postgres --url-env DATABASE_URL
 ```
 

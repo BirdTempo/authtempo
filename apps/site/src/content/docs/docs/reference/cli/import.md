@@ -140,7 +140,7 @@ verify: the database holds this export: user 812, organization 3
 verify: the database does not hold this export: 2 records would be written, 1 partial, 0 need a person
 ```
 
-Run it after the real run, before the cutover. On D1, write a verify bundle with `--target d1-bundle --out <file>`, and run the Worker again. `--json` holds the result as `verify`.
+Run it after each real run. Before the cutover, run it on the copy of the database. At step 10 of [The cutover](/docs/migrate/cutover/), run it on the real database. The verify does not see a change in the old system that a second import did not carry, and [One real import](/docs/migrate/cutover/#one-real-import) tells why. On D1, write a verify bundle with `--target d1-bundle --out <file>`, and run the Worker again. `--json` holds the result as `verify`.
 
 ## The report
 

@@ -1,6 +1,7 @@
 // The guide shape of spec 23 items 9 and 10: one machine check, not a paragraph.
 // The providers come from `PROVIDER_FILES` of the importer, so a new reader
 // without a guide fails here.
+import { importSpecifiers } from "./check-fences.ts";
 import { idsOf } from "./lib/html.ts";
 import type { Page } from "./lib/markdown.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
@@ -25,6 +26,17 @@ export const PHASES: readonly string[] = [
 export const NO_READER: Readonly<Record<string, string>> = {
   "better-auth": "the compatibility package: the app keeps its tables (spec 16.2)",
 };
+
+/**
+ * Before the cutover, the real import and the verify of a provider guide write
+ * and read a copy of the database (ruling 15 of plan 11f, the final review M1).
+ * The one real import into the real database runs at the cutover, after the old
+ * sign-ins stop. An earlier import there keeps each user that a later import
+ * meets, so a change in the old system after it is lost.
+ */
+const COPY = /(^|\s)--url-env COPY_URL(\s|$)/;
+/** The section of the cutover page that tells why the Move phase writes a copy. */
+const WHY = "/docs/migrate/cutover/#one-real-import";
 
 const INDEX = "docs/migrate/index.md";
 const NOT_GUIDES = new Set([INDEX, "docs/migrate/cutover.md"]);
@@ -58,12 +70,26 @@ function stepHeadings(lines: readonly string[]): string[] | null {
   return out;
 }
 
-/** The import specifiers of an MDX page. */
-function importSpecifiers(lines: readonly string[]): string[] {
-  return lines.flatMap((l) => {
-    const m = /^import\s.*\sfrom\s+["']([^"']+)["']/.exec(l);
-    return m?.[1] !== undefined ? [m[1]] : [];
-  });
+/**
+ * The lines of the H3 phase `name` under Steps, with its code fences, up to
+ * the next H2 or H3 outside a fence. The caller reads a guide with the seven
+ * phases only, so the phase exists.
+ */
+function phaseLines(source: string, name: string): string[] {
+  const lines = source.split("\n");
+  const steps = lines.findIndex((l) => H2.test(l) && l.trim() === "## Steps");
+  const start = lines.findIndex(
+    (l, i) => i > steps && H3.test(l) && l.trim().slice(4).trim() === name,
+  );
+  if (steps < 0 || start < 0) return [];
+  const out: string[] = [];
+  let fence = false;
+  for (const line of lines.slice(start + 1)) {
+    if (line.trimStart().startsWith("```")) fence = !fence;
+    else if (!fence && (H2.test(line) || H3.test(line))) break;
+    out.push(line);
+  }
+  return out;
 }
 
 /** The cells of one table line, with the outer pipes removed. */
@@ -107,8 +133,9 @@ function codeSpan(cell: string): string | null {
 
 /**
  * Holds each guide of docs/migrate/ to the seven phases and to its own sample
- * and sample test. Holds the guides to the providers of the importer. Holds
- * the index table to the guides, and the import page to the conflict reasons.
+ * and sample test. Holds the Move and Verify phases of each provider guide to
+ * a copy of the database. Holds the guides to the providers of the importer.
+ * Holds the index table to the guides, and the import page to the conflict reasons.
  */
 export function checkMigrate(
   pages: readonly Page[],
@@ -123,6 +150,8 @@ export function checkMigrate(
     .map((p) => ({ page: p, stem: (p.path.split("/").at(-1) ?? "").replace(/\.[^.]+$/, "") }));
 
   let phases = 0;
+  /** The guides with the seven phases. The copy rule reads only these, so a wrong shape fails once. */
+  const shaped = new Set<string>();
   for (const { page, stem } of guides) {
     const lines = proseLines(page.source);
     const found = stepHeadings(lines);
@@ -130,7 +159,8 @@ export function checkMigrate(
       r.failures.push(`${page.path} has no ## Steps`);
     } else {
       phases += found.length;
-      if (found.join("\n") !== PHASES.join("\n"))
+      if (found.join("\n") === PHASES.join("\n")) shaped.add(page.path);
+      else
         r.failures.push(
           `${page.path}: the H3 lines under Steps are ${found.length === 0 ? "none" : found.join(", ")}; the phases are ${PHASES.join(", ")}`,
         );
@@ -138,7 +168,7 @@ export function checkMigrate(
     // Spec 23 item 9: each guide includes its own sample and its own sample test, by its stem.
     const own = `samples/migrate/${stem}.ts?raw`;
     const ownTest = `samples/migrate/${stem}.test.ts?raw`;
-    const included = importSpecifiers(lines).flatMap((s) => {
+    const included = importSpecifiers(lines.join("\n")).flatMap((s) => {
       const m = /(samples\/migrate\/[^/]+\?raw)$/.exec(s);
       return m?.[1] !== undefined ? [m[1]] : [];
     });
@@ -148,6 +178,32 @@ export function checkMigrate(
     for (const file of [own, ownTest]) {
       const n = included.filter((x) => x === file).length;
       if (n !== 1) r.failures.push(`${page.path} imports ${file} ${n} times; it needs one`);
+    }
+  }
+
+  // No "read 0" rule for copies: a provider guide with the seven phases and no
+  // command fails below, and one with no such guide fails its shape or its provider.
+  let copies = 0;
+  for (const { page, stem } of guides) {
+    if (!providers.includes(stem) || !shaped.has(page.path)) continue;
+    const move = phaseLines(page.source, "Move");
+    if (!move.some((l) => l.includes(WHY)))
+      r.failures.push(`${page.path}: the phase Move does not link ${WHY}`);
+    const phases: [string, string[], string][] = [
+      ["Move", move, `authtempo import ${stem} `],
+      ["Verify", phaseLines(page.source, "Verify"), `authtempo import verify ${stem} `],
+    ];
+    for (const [phase, lines, prefix] of phases) {
+      const runs = lines.map((l) => l.trim()).filter((l) => l.startsWith("authtempo import "));
+      if (!runs.some((l) => l.startsWith(prefix)))
+        r.failures.push(`${page.path}: the phase ${phase} has no command \`${prefix.trim()}\``);
+      for (const run of runs) {
+        copies += 1;
+        if (!COPY.test(run))
+          r.failures.push(
+            `${page.path}: a command of the phase ${phase} does not write to the copy (--url-env COPY_URL): ${run}`,
+          );
+      }
     }
   }
 
@@ -207,6 +263,7 @@ export function checkMigrate(
     providers: providers.length,
     rows: rows.length,
     anchors,
+    copies,
   };
   if (exempt.length > 0) r.exempt = exempt;
   return requireCounts(r, ["guides", "phases", "providers", "rows", "anchors"]);

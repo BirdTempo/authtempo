@@ -9,7 +9,7 @@ metadata:
 
 **For:** a coding agent that moves the users of an app from WorkOS to authtempo for a person.
 
-**What it does:** you plan the import twice, the person reads the report, and one run writes the users. Then you do the cutover.
+**What it does:** you rehearse the import on a copy of the database, and the person reads each report. One real run at the cutover writes the users.
 
 ## Before you start
 
@@ -26,12 +26,20 @@ metadata:
 3. Call `migrate.plan` with `provider: "workos"` and `against: "empty"`. Add the four file inputs.
 4. Give `memberships` and `organizations` together, or neither. Give no `formats` and no `legacy_verify`.
 5. Read the report. Fix each refused file or input, and plan again.
-6. Call `migrate.plan` with the same input and `against: "database"`. The answer holds a `plan_id`.
-7. Show the whole report to the person. Ask the person to read each line and to say yes.
-8. After the yes, call `migrate.run` with the same input, the `plan_id`, and `confirm: true`.
-9. Sign in once with a known user by a magic link.
-10. Change each auth call of the app with the table of [The calls](/docs/migrate/workos/#the-calls).
-11. Call `docs.read` with the path `/docs/migrate/cutover/`. Do its steps with the person.
+6. Ask the person to make a copy of the database, as the phase [Move](/docs/migrate/workos/#move) of the guide says.
+7. Ask the person to start the server again with `--url-env COPY_URL`. If not, `migrate.run` writes the real database before the cutover, and a later change in the old system is lost.
+8. Call `migrate.plan` with the same input and `against: "database"`. The answer holds a `plan_id`.
+9. Show the whole report to the person. Ask the person to read each line and to say yes.
+10. After the yes, call `migrate.run` with the same input, the `plan_id`, and `confirm: true`.
+11. Ask the person to run `authtempo import verify` on the copy, as the phase [Verify](/docs/migrate/workos/#verify) says. It must exit 0.
+12. Change each auth call of the app with the table of [The calls](/docs/migrate/workos/#the-calls).
+13. Call `docs.read` with the path `/docs/migrate/cutover/`. Do its steps 1 to 8 with the person.
+14. At step 9 of the cutover, ask the person to start the server again on the real database.
+15. Call `migrate.plan` with the input of the new export and `against: "database"`. Show the whole report, and ask for a yes.
+16. After the yes, call `migrate.run` with the same input, the `plan_id`, and `confirm: true`. This is the one real import.
+17. Do steps 10 to 12 of the cutover with the person.
+18. Sign in once with a known user by a magic link.
+19. Do steps 14 to 19 of the cutover with the person.
 
 ## If it fails
 
