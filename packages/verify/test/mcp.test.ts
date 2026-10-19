@@ -392,12 +392,95 @@ describe.each(["verifier", "core"] as const)("requireMcpAuth with the %s source"
     const metadata =
       'resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp"';
     // The Verifier names the refused proof in the DPoP challenge. Core's auth gives no algs
-    // to the wrapper, so its source writes the Bearer challenge alone.
+    // and no reason to the wrapper, so its DPoP challenge has no algs and names the token.
     expect(replay.headers.get("www-authenticate")).toBe(
       name === "verifier"
         ? `Bearer ${metadata}, scope="mcp:tools", DPoP error="invalid_dpop_proof", algs="EdDSA Ed25519 ES256 RS256 PS256", ${metadata}, scope="mcp:tools"`
-        : `Bearer error="invalid_token", ${metadata}, scope="mcp:tools"`,
+        : `Bearer ${metadata}, scope="mcp:tools", DPoP error="invalid_token", ${metadata}, scope="mcp:tools"`,
     );
     expect(r.seen).toHaveLength(1);
+  });
+
+  it("names the DPoP scheme in the 403 of a DPoP request", async () => {
+    const { server } = setup();
+    const s = await signedIn(server);
+    const key = await dpopKey();
+    const at = await boundToken(server, s.cookie, key, "openid mcp:tools");
+    const url = `${MCP}/tools`;
+    const request = async () =>
+      withDpop(url, at, await key.proof(server, { htm: "GET", htu: url, accessToken: at }));
+    const metadata =
+      'resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp"';
+    // RFC 9449 section 7.2: the challenge of the scheme of the request carries the error.
+    const algs = name === "verifier" ? 'algs="EdDSA Ed25519 ES256 RS256 PS256", ' : "";
+    const r = recorder();
+    const route = requireMcpAuth(sourceOf(name, server, true), r.handler, {
+      resource: MCP,
+      scopes: ["mcp:tools", "mcp:read"],
+    });
+    const res = await route(await request());
+    expect(res.status).toBe(403);
+    expect(res.headers.get("www-authenticate")).toBe(
+      `DPoP error="insufficient_scope", ${algs}${metadata}, scope="mcp:tools mcp:read"`,
+    );
+    expect(r.seen).toEqual([]);
+    // The 403 of a McpScopeError follows the same rule.
+    const scoped = requireMcpAuth(
+      sourceOf(name, server, true),
+      () => {
+        throw new McpScopeError(["mcp:read"]);
+      },
+      { resource: MCP, scopes: ["mcp:tools"] },
+    );
+    const thrown = await scoped(await request());
+    expect(thrown.status).toBe(403);
+    expect(thrown.headers.get("www-authenticate")).toBe(
+      `DPoP error="insufficient_scope", ${algs}${metadata}, scope="mcp:read"`,
+    );
+  });
+
+  it("refuses a client token: the wrapper needs a person (ruling 27 of plan 12e)", async () => {
+    const { server } = setup();
+    const clients = server.auth.api.oauth?.clients;
+    if (!clients) throw new Error("oauth is off");
+    const made = await clients.create({
+      name: "Service",
+      authMethod: "client_secret_basic",
+      grantTypes: ["client_credentials"],
+      credentialsScopes: ["mcp:tools"],
+    });
+    if (!made.ok || !made.value.clientSecret) throw new Error("no client");
+    const res = await server.auth.handle(
+      new Request(`${ISSUER}/oauth/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          authorization: `Basic ${btoa(`${made.value.client.id}:${made.value.clientSecret}`)}`,
+        },
+        body: new URLSearchParams({
+          grant_type: "client_credentials",
+          scope: "mcp:tools",
+          resource: MCP,
+        }).toString(),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const { access_token: token } = (await res.json()) as { access_token: string };
+    // Core's own caller takes the token as a client, so the refusal is the wrapper's.
+    if (name === "core") {
+      const caller = await server.auth.caller(withBearer(`${MCP}/tools`, token));
+      expect(caller?.kind).toBe("oauth-client");
+    }
+    const r = recorder();
+    const route = requireMcpAuth(sourceOf(name, server), r.handler, {
+      resource: MCP,
+      scopes: ["mcp:tools"],
+    });
+    const refused = await route(withBearer(`${MCP}/tools`, token));
+    expect(refused.status).toBe(401);
+    expect(refused.headers.get("www-authenticate")).toBe(
+      'Bearer error="invalid_token", resource_metadata="https://api.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp:tools"',
+    );
+    expect(r.seen).toEqual([]);
   });
 });

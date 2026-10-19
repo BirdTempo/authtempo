@@ -288,6 +288,35 @@ describe("DPoP in the verifier (plan 12e Task 10)", () => {
     expect(bearer.ok && bearer.value?.kind).toBe("session-jwt");
   });
 
+  it("names the scheme of the request in the 403, and finds a refused proof from a clone", async () => {
+    const server = makeServer();
+    const { token, proof } = await bound(server);
+    const v = verifierOf(server, { algs: ["ES256"] });
+    const passed = withDpop(TOOLS, token, await proof());
+    const r = await v.verifyRequest(passed);
+    expect(r.ok && r.value?.kind).toBe("oauth");
+    // RFC 9449 section 7.2: the DPoP challenge carries insufficient_scope for a DPoP request.
+    const res = v.insufficientScope({ resource: MCP, scope: "mcp:write", request: passed });
+    expect(res.status).toBe(403);
+    expect(res.headers.get("www-authenticate")).toBe(
+      `DPoP error="insufficient_scope", algs="ES256", ${METADATA}, scope="mcp:write"`,
+    );
+    // A Bearer request, or no request, keeps the Bearer 403.
+    expect(
+      v.insufficientScope({ resource: MCP, scope: "mcp:write" }).headers.get("www-authenticate"),
+    ).toBe(`Bearer error="insufficient_scope", scope="mcp:write", ${METADATA}`);
+    // A proof that passed: a later refusal of the request names the token.
+    expect(v.unauthorized({ request: passed }).headers.get("www-authenticate")).toBe(
+      'Bearer, DPoP error="invalid_token", algs="ES256"',
+    );
+    // A replay is refused. A clone of that request still gets invalid_dpop_proof.
+    const replay = withDpop(TOOLS, token, passed.headers.get("dpop") ?? "");
+    expect(await v.verifyRequest(replay)).toEqual({ ok: true, value: null });
+    expect(v.unauthorized({ request: replay.clone() }).headers.get("www-authenticate")).toBe(
+      'Bearer, DPoP error="invalid_dpop_proof", algs="ES256"',
+    );
+  });
+
   it("refuses a wrong dpop option at construction", () => {
     const server = makeServer();
     for (const dpop of [

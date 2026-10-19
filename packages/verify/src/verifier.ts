@@ -23,6 +23,7 @@ import {
   type ChallengeInput,
   dpopChallenge,
   insufficientScopeResponse,
+  insufficientScopeWith,
   unauthorizedWith,
 } from "./unauthorized.js";
 
@@ -78,6 +79,8 @@ export type VerifyResult = { ok: true; value: Caller | null } | ClientFailure;
 
 /** The longest `tk_` answer cache. A revoke then takes effect within a minute at most. */
 export const API_TOKEN_CACHE_MAX_SECONDS = 60;
+/** The refused proofs whose signature a verifier keeps, for the 401 of a clone of the request. */
+const REFUSED_PROOFS_MAX = 1000;
 /** The `tk_` answers a verifier keeps at most; the oldest goes first. */
 const API_TOKEN_CACHE_MAX = 1000;
 /** Core's rule of a `jwtMint.audience` entry (config.ts): 1 to 10 entries of 1 to 2048 characters. */
@@ -134,8 +137,13 @@ export interface Verifier {
    * route needs. With `dpop`, the `DPoP` challenge follows the `Bearer` one.
    */
   unauthorized(input?: UnauthorizedInput): Response;
-  /** The 403 of a valid token without a scope that the operation needs. */
-  insufficientScope(input: ChallengeInput & { scope: string | readonly string[] }): Response;
+  /**
+   * The 403 of a valid token without a scope that the operation needs. With `dpop` and a
+   * DPoP `request`, the `DPoP` challenge carries the error (RFC 9449 section 7.2).
+   */
+  insufficientScope(
+    input: ChallengeInput & { scope: string | readonly string[]; request?: Request | undefined },
+  ): Response;
 }
 
 function pathOf(operation: VerifyOperation): string {
@@ -355,10 +363,39 @@ export function createVerifier(options: VerifierOptions): Verifier {
   }
 
   /**
-   * The refusal of each DPoP request, by request, for the challenge of
-   * `unauthorized`. A request that passed has no entry.
+   * The result of the proof check of each DPoP request, for the challenge
+   * of `unauthorized`. "passed": the proof holds, so a refusal is of the token.
    */
-  const refusals = new WeakMap<Request, "invalid_token" | "invalid_dpop_proof">();
+  const refusals = new WeakMap<Request, "passed" | "invalid_dpop_proof">();
+  /**
+   * The signatures of the refused proofs, so a clone of a refused request
+   * gets its error too. A signature names its proof. The oldest goes first
+   * above the bound, so the memory has a bound.
+   */
+  const refusedProofs = new Set<string>();
+  const refuseProof = (request: Request) => {
+    refusals.set(request, "invalid_dpop_proof");
+    const signature = request.headers.get("dpop")?.split(".")[2];
+    if (signature === undefined) return;
+    refusedProofs.delete(signature);
+    refusedProofs.add(signature);
+    while (refusedProofs.size > REFUSED_PROOFS_MAX) {
+      const oldest = refusedProofs.values().next().value;
+      if (oldest === undefined) break;
+      refusedProofs.delete(oldest);
+    }
+  };
+  /** The error of a refused DPoP request: its record, else its proof, else the token. */
+  const dpopRefusal = (request: Request): "invalid_token" | "invalid_dpop_proof" => {
+    const record = refusals.get(request);
+    if (record !== undefined) return record === "passed" ? "invalid_token" : record;
+    const proof = request.headers.get("dpop");
+    if (proof === null) return "invalid_dpop_proof";
+    const signature = proof.split(".")[2];
+    return signature !== undefined && refusedProofs.has(signature)
+      ? "invalid_dpop_proof"
+      : "invalid_token";
+  };
   /**
    * The answer of each DPoP request, so a second `verifyRequest` of one
    * request answers the same. The proof's `jti` is spent at the first call,
@@ -445,10 +482,11 @@ export function createVerifier(options: VerifierOptions): Verifier {
         return { ok: false, code: "network", status: 0 };
       }
       if (!holds) {
-        refusals.set(request, "invalid_dpop_proof");
+        refuseProof(request);
         return none;
       }
       dpopJkt = jkt;
+      refusals.set(request, "passed");
     }
     // After the offline check, so a bad token costs no call (RFC 7662).
     if (introspect) {
@@ -528,11 +566,18 @@ export function createVerifier(options: VerifierOptions): Verifier {
       });
       if (!dpop) return unauthorizedWith(bearer);
       const dpopError =
-        scheme === "DPoP" ? ((request && refusals.get(request)) ?? "invalid_token") : undefined;
+        scheme === "DPoP" ? (request ? dpopRefusal(request) : "invalid_token") : undefined;
       return unauthorizedWith(
         `${bearer}, ${dpopChallenge({ ...challenge, algs: dpop.algs, ...(dpopError ? { error: dpopError } : {}) })}`,
       );
     },
-    insufficientScope: (input) => insufficientScopeResponse(input),
+    insufficientScope(input) {
+      const { request, ...challenge } = input;
+      if (!dpop || !request || schemeOf(request) !== "DPoP")
+        return insufficientScopeResponse(challenge);
+      return insufficientScopeWith(
+        dpopChallenge({ ...challenge, algs: dpop.algs, error: "insufficient_scope" }),
+      );
+    },
   };
 }

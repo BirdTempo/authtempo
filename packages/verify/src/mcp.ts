@@ -7,8 +7,11 @@
 import { isResourceUrl, readBearer, readDpopToken } from "@authtempo/core/credentials";
 import {
   bearerChallenge,
+  dpopChallenge,
   insufficientScopeResponse,
+  insufficientScopeWith,
   unauthorizedResponse,
+  unauthorizedWith,
 } from "./unauthorized.js";
 import type { Verifier } from "./verifier.js";
 
@@ -135,12 +138,23 @@ export function requireMcpAuth(
   if (scopes !== undefined) bearerChallenge({ resource, scope: scopes });
   if (challengeScopes !== undefined) bearerChallenge({ resource, scope: challengeScopes });
   const challenge = { resource, scope: challengeScopes };
-  // A Verifier writes its own 401: it knows the scheme of the request and its DPoP algs.
+  // A Verifier writes its own 401 and 403: it knows the scheme of the request and its DPoP algs.
   const verifier = "verifyRequest" in source ? source : null;
-  const refused = (request: Request): Response =>
-    verifier
-      ? verifier.unauthorized({ ...challenge, request })
-      : unauthorizedResponse({ ...challenge, invalidToken: true });
+  // Core's auth gives the wrapper no algs, and RFC 9449 makes `algs` a SHOULD. So for a
+  // DPoP request, the core source writes the DPoP challenge with no `algs` (section 7.2).
+  const refused = (request: Request): Response => {
+    if (verifier) return verifier.unauthorized({ ...challenge, request });
+    if (readDpopToken(request) === null)
+      return unauthorizedResponse({ ...challenge, invalidToken: true });
+    return unauthorizedWith(
+      `${bearerChallenge(challenge)}, ${dpopChallenge({ ...challenge, error: "invalid_token" })}`,
+    );
+  };
+  const tooFew = (request: Request, scope: readonly string[]): Response => {
+    if (verifier) return verifier.insufficientScope({ resource, scope, request });
+    if (readDpopToken(request) === null) return insufficientScopeResponse({ resource, scope });
+    return insufficientScopeWith(dpopChallenge({ resource, scope, error: "insufficient_scope" }));
+  };
 
   return async (request) => {
     // No bearer and no DPoP token: the plain 401. A session cookie is no credential here.
@@ -154,12 +168,11 @@ export function requireMcpAuth(
     if (caller.resource !== resource) return refused(request);
     // Spec 20 item 17: the 403 names every scope of the operation, not only the missing ones.
     if (scopes !== undefined && !scopes.every((s) => caller.scopes.includes(s)))
-      return insufficientScopeResponse({ resource, scope: scopes });
+      return tooFew(request, scopes);
     try {
       return await handler(request, caller);
     } catch (e) {
-      if (e instanceof McpScopeError)
-        return insufficientScopeResponse({ resource, scope: e.scopes });
+      if (e instanceof McpScopeError) return tooFew(request, e.scopes);
       throw e;
     }
   };

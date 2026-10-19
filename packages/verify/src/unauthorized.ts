@@ -78,20 +78,25 @@ const ALG = /^[A-Za-z0-9+._-]+$/;
 /**
  * The value of a `DPoP` challenge (RFC 9449 section 7.1): `error` first, as
  * Figure 16 of the RFC, then `algs` and the parameters of `bearerChallenge`.
- * `algs` lists the algs that the server accepts for a proof.
+ * `algs` lists the algs that the server accepts for a proof. The RFC makes
+ * `algs` a SHOULD, so a server that does not know its algs leaves it out.
  */
 export function dpopChallenge(
   input: ChallengeInput & {
-    algs: readonly string[];
-    error?: "invalid_dpop_proof" | "invalid_token" | undefined;
+    algs?: readonly string[] | undefined;
+    error?: "invalid_dpop_proof" | "invalid_token" | "insufficient_scope" | undefined;
   },
 ): string {
-  if (input.algs.length === 0 || !input.algs.every((a) => ALG.test(a)))
+  if (
+    input.algs !== undefined &&
+    (input.algs.length === 0 || !input.algs.every((a) => ALG.test(a)))
+  )
     throw new Error("authtempo verify: algs needs one or more alg names");
   // The parameters after `algs` follow the Bearer rule, so a wrong scope throws here too.
   const rest = challengeParams({ ...input, error: undefined });
   const error = input.error ? [`error="${input.error}"`] : [];
-  return `DPoP ${[...error, `algs="${input.algs.join(" ")}"`, ...rest].join(", ")}`;
+  const algs = input.algs !== undefined ? [`algs="${input.algs.join(" ")}"`] : [];
+  return `DPoP ${[...error, ...algs, ...rest].join(", ")}`;
 }
 
 /** A 401 with the value of `WWW-Authenticate`. */
@@ -112,13 +117,17 @@ export function unauthorizedResponse(input: ChallengeInput = {}): Response {
   );
 }
 
-/** 403: a valid token without a scope that the operation needs. Name every scope of the operation. */
-export function insufficientScopeResponse(
-  input: ChallengeInput & { scope: string | readonly string[] },
-): Response {
-  const challenge = bearerChallenge({ ...input, error: "insufficient_scope" });
+/** A 403 `insufficient_scope` with the value of `WWW-Authenticate`. */
+export function insufficientScopeWith(challenge: string): Response {
   return Response.json(
     { error: "insufficient_scope" },
     { status: 403, headers: { "www-authenticate": challenge } },
   );
+}
+
+/** 403: a valid token without a scope that the operation needs. Name every scope of the operation. */
+export function insufficientScopeResponse(
+  input: ChallengeInput & { scope: string | readonly string[] },
+): Response {
+  return insufficientScopeWith(bearerChallenge({ ...input, error: "insufficient_scope" }));
 }
