@@ -28,9 +28,11 @@ export interface Feature {
  * is on. The next row, `magicLink`, also shows the envelope. We accept the
  * repeat: no symbol of spec 8 means a removal, and spec 9 sets no rule against
  * a repeat. The two oauth rows also repeat.
- * The guide of `session` is the architecture page, and of `operator` the keys
- * command (plan 11b Task 4). `accountDelete` and `oauthRegistration` point to
- * the section of their guide that holds them. `openapi` has no guide: its
+ * The guide of `session` is the architecture page (plan 11b Task 4). The guide
+ * of `operator` is the Operator section of the routes page, which shows its
+ * four routes (ruling 18 of the plan 11b lane). `accountDelete` and
+ * `oauthRegistration` point to the section of their guide that holds them.
+ * `openapi` has no guide: its
  * reference page documents the route and the document.
  */
 export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
@@ -122,7 +124,7 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     title: "Operator routes",
     line: "Rotate the signing key and reseal the app secrets with a hashed operator secret.",
     icon: "cli",
-    guide: "/docs/reference/cli/keys/",
+    guide: "/docs/reference/routes/#operator",
   },
   oauth: {
     title: "OAuth provider",
@@ -239,10 +241,12 @@ export const PACKAGE_FEATURES: Readonly<Record<string, PackageFeature>> = {
     line: "Move users, social identities, password hashes, passkeys, organizations, and members into authtempo.",
     guide: "/docs/reference/cli/import/",
   },
+  // The start page names this package in its table. Each provider guide of
+  // /docs/migrate/ shows the chain for one provider only (ruling 18).
   "legacy-hashes": {
     title: "Legacy password hashes",
     line: "Verify the password hashes of another provider at sign-in, and rewrite each one as PBKDF2.",
-    guide: "/docs/migrate/",
+    guide: "/docs/start/",
   },
   mcp: {
     title: "MCP server",
