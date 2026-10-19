@@ -12,17 +12,33 @@ export const SYMBOL_ATTRS: Readonly<Record<string, string>> = {
   "stroke-linecap": "round",
   "stroke-linejoin": "round",
 };
+/**
+ * The attributes a shape may set, by tag. Every other attribute is a failure.
+ * A style, a transform, or an opacity changes the drawn shape past what the
+ * check reads, so the check refuses it by name.
+ */
+export const SHAPE_ATTRS: Readonly<Record<string, readonly string[]>> = {
+  path: ["d", "pathLength"],
+  circle: ["cx", "cy", "r", "pathLength"],
+  rect: ["x", "y", "width", "height", "rx", "ry", "pathLength"],
+};
+/** The three attributes that have their own failure line, so the allow-list does not name them twice. */
+const PAINT_ATTRS = ["fill", "stroke", "stroke-width"];
 
+/** Each attribute of a tag, in either quote form. */
 function attrs(text: string): Map<string, string> {
   return new Map(
-    [...text.matchAll(/([a-zA-Z:-]+)="([^"]*)"/g)].map((m) => [m[1] ?? "", m[2] ?? ""]),
+    [...text.matchAll(/([a-zA-Z:-]+)=(?:"([^"]*)"|'([^']*)')/g)].map((m) => [
+      m[1] ?? "",
+      m[2] ?? m[3] ?? "",
+    ]),
   );
 }
 
 /**
  * The points of a path: each end point and each control point. A cubic curve
  * lies inside the hull of its points, so these points bound the shape. Only
- * the absolute commands M, L, H, V, C, and Z are allowed: an arc or a
+ * the absolute commands M, L, H, V, C, and Z are allowed. An arc or a
  * relative command needs a wider reader, and the set needs neither.
  */
 export function pathPoints(d: string): { points: [number, number][] } | { error: string } {
@@ -66,31 +82,55 @@ export function pathPoints(d: string): { points: [number, number][] } | { error:
   return { points };
 }
 
-/** The points that bound a circle or a rect, or the points of a path. */
+/**
+ * The points that bound a circle or a rect, or the points of a path. A
+ * missing or non-numeric length is an error that names the attribute.
+ */
 function shapePoints(
   tag: string,
   a: Map<string, string>,
 ): { points: [number, number][] } | { error: string } {
-  const n = (k: string) => Number(a.get(k) ?? Number.NaN);
   if (tag === "path") return pathPoints(a.get("d") ?? "");
+  const keys = tag === "circle" ? ["cx", "cy", "r"] : ["x", "y", "width", "height"];
+  const n: Record<string, number> = {};
+  for (const k of keys) {
+    const v = a.get(k);
+    if (v === undefined || v.trim() === "" || Number.isNaN(Number(v)))
+      return { error: `a <${tag}> has no number for ${k}` };
+    n[k] = Number(v);
+  }
+  const g = (k: string): number => n[k] ?? Number.NaN;
   if (tag === "circle")
     return {
       points: [
-        [n("cx") - n("r"), n("cy") - n("r")],
-        [n("cx") + n("r"), n("cy") + n("r")],
+        [g("cx") - g("r"), g("cy") - g("r")],
+        [g("cx") + g("r"), g("cy") + g("r")],
       ],
     };
   return {
     points: [
-      [n("x"), n("y")],
-      [n("x") + n("width"), n("y") + n("height")],
+      [g("x"), g("y")],
+      [g("x") + g("width"), g("y") + g("height")],
     ],
   };
+}
+
+/** The root may hold the title, a comment, and the symbols. Any other child is a failure. */
+function rootChildren(sprite: string): string[] {
+  const rest = sprite
+    .replace(/<symbol\b[^>]*>[\s\S]*?<\/symbol>/g, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<title>[^<]*<\/title>/g, "")
+    .replace(/^\s*<svg\b[^>]*>/, "")
+    .replace(/<\/svg>\s*$/, "");
+  return [...rest.matchAll(/<([a-zA-Z]+)\b/g)].map((m) => m[1] ?? "");
 }
 
 export function checkIcons(sprite: string, names: readonly string[]): CheckReport {
   const r: CheckReport = { name: "check-icons", counts: { symbols: 0, shapes: 0 }, failures: [] };
   const seen = new Set<string>();
+  for (const tag of rootChildren(sprite))
+    r.failures.push(`the root holds <${tag}>; the root holds a title, a comment, and symbols only`);
   for (const m of sprite.matchAll(/<symbol\b([^>]*)>([\s\S]*?)<\/symbol>/g)) {
     const a = attrs(m[1] ?? "");
     const id = a.get("id") ?? "(no id)";
@@ -101,24 +141,37 @@ export function checkIcons(sprite: string, names: readonly string[]): CheckRepor
     for (const [k, v] of Object.entries(SYMBOL_ATTRS))
       if (a.get(k) !== v)
         r.failures.push(`${id}: ${k} is ${a.get(k) ?? "missing"}; it must be ${v}`);
+    for (const k of a.keys())
+      if (k !== "id" && !(k in SYMBOL_ATTRS))
+        r.failures.push(`${id}: the symbol sets ${k}, which is not id or a symbol attribute`);
     for (const s of (m[2] ?? "").matchAll(/<([a-zA-Z]+)\b([^>]*?)\/?>/g)) {
       const tag = s[1] ?? "";
       const sa = attrs(s[2] ?? "");
       r.counts.shapes = (r.counts.shapes ?? 0) + 1;
-      if (!["path", "circle", "rect"].includes(tag)) {
+      const allowed = SHAPE_ATTRS[tag];
+      if (allowed === undefined) {
         r.failures.push(`${id}: <${tag}> is not a path, a circle, or a rect`);
         continue;
       }
       if (sa.has("fill")) r.failures.push(`${id}: a <${tag}> sets a fill`);
       if (sa.has("stroke") || sa.has("stroke-width"))
         r.failures.push(`${id}: a <${tag}> sets its own stroke`);
+      for (const k of sa.keys())
+        if (!allowed.includes(k) && !PAINT_ATTRS.includes(k))
+          r.failures.push(`${id}: a <${tag}> sets ${k}, which is not one of ${allowed.join(", ")}`);
       if (sa.get("pathLength") !== "1")
         r.failures.push(`${id}: a <${tag}> lacks pathLength="1", so the draw motion cannot run`);
       if (tag === "rect" && (sa.get("rx") !== "2" || (sa.has("ry") && sa.get("ry") !== "2")))
-        r.failures.push(`${id}: a rect has the radius ${sa.get("rx") ?? "0"}; the radius is 2`);
+        r.failures.push(
+          `${id}: a rect has rx=${sa.get("rx") ?? "none"} ry=${sa.get("ry") ?? "none"}; the radius is 2`,
+        );
       const pts = shapePoints(tag, sa);
       if ("error" in pts) {
         r.failures.push(`${id}: ${pts.error}`);
+        continue;
+      }
+      if (pts.points.length === 0) {
+        r.failures.push(`${id}: a <${tag}> has no point`);
         continue;
       }
       const out = pts.points.find(

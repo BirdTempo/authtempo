@@ -5,6 +5,11 @@ import { SITE } from "../scripts/lib/paths.ts";
 import { ICON_NAMES } from "../src/data/icons.ts";
 
 const sprite = readFileSync(`${SITE}public/icons.svg`, "utf8");
+const SYMBOL =
+  'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"';
+/** A sprite of one symbol "a" with the given shapes, and any extra symbol attributes. */
+const one = (shapes: string, extra = "") =>
+  `<svg xmlns="http://www.w3.org/2000/svg"><title>t</title><symbol id="a" ${SYMBOL}${extra}>${shapes}</symbol></svg>`;
 
 describe("checkIcons", () => {
   it("passes the sprite of the site", () => {
@@ -63,5 +68,62 @@ describe("checkIcons", () => {
 
   it("fails on an empty sprite", () => {
     expect(checkIcons("<svg></svg>", []).failures).toEqual(["read 0 symbols", "read 0 shapes"]);
+  });
+
+  it("fails a single-quoted fill", () => {
+    expect(
+      checkIcons(one(`<path pathLength="1" fill='red' d="M4 12 H20"/>`), ["a"]).failures,
+    ).toEqual(["a: a <path> sets a fill"]);
+  });
+
+  it("fails a shape with a style attribute", () => {
+    expect(
+      checkIcons(one(`<path pathLength="1" style="fill:red;stroke-width:3" d="M4 12 H20"/>`), ["a"])
+        .failures,
+    ).toEqual(["a: a <path> sets style, which is not one of d, pathLength"]);
+  });
+
+  it("fails a shape with a transform", () => {
+    expect(
+      checkIcons(one(`<path pathLength="1" transform="translate(-10 0)" d="M4 12 H20"/>`), ["a"])
+        .failures,
+    ).toEqual(["a: a <path> sets transform, which is not one of d, pathLength"]);
+  });
+
+  it("fails a symbol with an attribute beyond its six", () => {
+    expect(
+      checkIcons(one(`<path pathLength="1" d="M4 12 H20"/>`, ` opacity="0.3"`), ["a"]).failures,
+    ).toEqual(["a: the symbol sets opacity, which is not id or a symbol attribute"]);
+  });
+
+  it("fails a path with no point", () => {
+    expect(
+      checkIcons(one(`<path pathLength="1"/><path pathLength="1" d=""/>`), ["a"]).failures,
+    ).toEqual(["a: a <path> has no point", "a: a <path> has no point"]);
+  });
+
+  it("fails a circle with no radius by name", () => {
+    expect(checkIcons(one(`<circle pathLength="1" cx="12" cy="12"/>`), ["a"]).failures).toEqual([
+      "a: a <circle> has no number for r",
+    ]);
+  });
+
+  it("names both radii of a rect", () => {
+    expect(
+      checkIcons(one(`<rect pathLength="1" x="3" y="6" width="18" height="12" rx="2" ry="3"/>`), [
+        "a",
+      ]).failures,
+    ).toEqual(["a: a rect has rx=2 ry=3; the radius is 2"]);
+  });
+
+  it("fails a root child that is not a title, a comment, or a symbol", () => {
+    const styled = sprite.replace("</svg>", "<style>path{fill:red}</style></svg>");
+    expect(checkIcons(styled, ICON_NAMES).failures).toEqual([
+      "the root holds <style>; the root holds a title, a comment, and symbols only",
+    ]);
+  });
+
+  it("fails a cubic command that reads one pair", () => {
+    expect(pathPoints("M4 12 C5 5 6 6")).toEqual({ error: "C needs pairs of numbers" });
   });
 });
