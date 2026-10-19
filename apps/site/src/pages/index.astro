@@ -10,6 +10,7 @@ import corePackage from "../../../../packages/core/package.json";
 import apiSample from "../../samples/start/first-sign-in-api.ts?raw";
 import Mark from "../assets/mark.svg";
 import Icon from "../components/Icon.astro";
+import Rail from "../components/Rail.astro";
 import { FEATURES, featureOrder } from "../data/features.ts";
 import { HOME } from "../data/home.ts";
 import { SITE } from "../data/site.ts";
@@ -37,7 +38,7 @@ const features = featureOrder(ROUTES);
 ---
 <Site title={HOME.title} description={HOME.description} path="/">
   <section class="hero">
-    <div class="rail" aria-hidden="true"><span></span><span class="rail-accent"></span><span></span><span></span><span></span></div>
+    <Rail />
     <div class="hero-text at-stagger">
       <span class="hero-mark at-beat at-enter"><Mark class="at-mark" /></span>
       <h1 class="at-enter">{HOME.headline}</h1>
@@ -75,9 +76,7 @@ const features = featureOrder(ROUTES);
   section { padding-block: calc(var(--at-rhythm) * 2); }
   .hero { display: grid; grid-template-columns: 1.5rem minmax(0, 1fr); gap: var(--at-rhythm); padding-block: calc(var(--at-rhythm) * 3); }
   @media (min-width: 48rem) { .hero { grid-template-columns: 3rem minmax(0, 1fr); } }
-  .rail { display: flex; flex-direction: column; align-items: center; gap: var(--at-unit); padding-top: calc(var(--at-unit) * 7); }
-  .rail span { display: block; width: var(--at-rail); height: 1.5rem; background: var(--at-line); }
-  .rail .rail-accent { height: 3rem; background: var(--at-accent); }
+  .hero :global(.rail) { padding-top: calc(var(--at-unit) * 7); }
   .hero-mark { display: block; color: var(--at-ink); }
   .hero-mark :global(svg) { display: block; width: 2rem; height: 2rem; }
   h1 { max-width: var(--at-measure-hero); margin: var(--at-rhythm) 0 0; font-size: var(--at-text-display); line-height: var(--at-leading-display); letter-spacing: var(--at-tracking-display); font-weight: 600; }

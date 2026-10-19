@@ -196,6 +196,26 @@ describe("the root layout (plan 11b)", () => {
 });
 
 describe("the features page (plan 11b)", () => {
+  // Brand spec 10 (ruling 17 of the plan 11b lane): the nav and the footer, then a hero with the rail and a one-line lede.
+  it("opens with the hero of brand spec 10: the rail, the h1, and a lede of one sentence", () => {
+    const html = page("features/index.html");
+    const main = html.split('<main id="main"')[1]?.split("</main>")[0] ?? "";
+    // The hero is the first element of main, before each section of the page.
+    const hero =
+      /^[^>]*>\s*<div class="hero[ "][^>]*>([\s\S]*?)<\/p>\s*<\/div>\s*<\/div>/.exec(main)?.[1] ??
+      "";
+    const rail = /<div class="rail[ "][^>]*>([\s\S]*?)<\/div>/.exec(hero)?.[1] ?? "";
+    expect(rail.match(/<span\b/g)?.length).toBe(5);
+    expect(rail.match(/rail-accent/g)?.length).toBe(1);
+    expect(/<h1\b[^>]*>Features<\/h1>/.test(hero)).toBe(true);
+    const lede = (hero.split(/<div class="lede[ "][^>]*>/)[1] ?? "").replace(/<[^>]+>/g, "").trim();
+    const sentences = lede.split(/(?<=[.?!])\s+/).filter((t) => t.length > 0);
+    expect({ sentences: sentences.length, words: lede.split(/\s+/).length <= 25 }).toEqual({
+      sentences: 1,
+      words: true,
+    });
+  });
+
   it("lists one section per feature in route order, then one per package folder", () => {
     const ids = [...page("features/index.html").matchAll(/<section\b[^>]* id="([^"]+)"/g)].map(
       (m) => m[1],

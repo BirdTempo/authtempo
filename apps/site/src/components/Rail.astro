@@ -1,0 +1,11 @@
+---
+// The margin rail of brand spec 9 and 10: five short marks, the second one
+// accent and taller, fixed, with no motion. The home hero and the hero of each
+// other root page show it. The page sets the column and the top padding.
+---
+<div class="rail" aria-hidden="true"><span></span><span class="rail-accent"></span><span></span><span></span><span></span></div>
+<style>
+  .rail { display: flex; flex-direction: column; align-items: center; gap: var(--at-unit); }
+  .rail span { display: block; width: var(--at-rail); height: 1.5rem; background: var(--at-line); }
+  .rail .rail-accent { height: 3rem; background: var(--at-accent); }
+</style>
