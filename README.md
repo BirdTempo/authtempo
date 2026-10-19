@@ -113,3 +113,6 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   needs a plan of the same server run and `confirm: true`.
 - The remote MCP server serves the docs only, holds no user data, and limits
   each caller in its own code before any supplier limit.
+- The OpenAPI document lists exactly the routes of `ROUTES`, and each code
+  that a route answers is in `ERRORS` or `OAUTH_ERRORS`. Core's test run
+  holds every answer to its schema.

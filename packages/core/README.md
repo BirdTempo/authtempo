@@ -162,10 +162,11 @@ does the same write.
 
 ## Entries for SDKs
 
-Two entries hold the facts that an SDK reads, so each fact has one copy (plan 11d).
+Three entries hold the facts that an SDK reads, so each fact has one copy (plans 11d and 11g).
 
 - `@authtempo/core/routes`: `ROUTES`, every route that core can serve, with literal types. `RoutePath<"GET">` is the type of a GET path that core serves, so a typo in an SDK's path fails its compile. It also exports `PROVIDER_NAME_RE` and `AUTH_ERROR_PARAM` (`auth_error`).
 - `@authtempo/core/credentials`: the prefixes `ts_` and `tk_`, the JWT `typ` values `JWT` and `at+jwt`, `DEFAULT_COOKIE_NAME` (`__Host-tempo_session`), `LEGACY_COOKIE_NAME` (`tempo_session`, read for one release), `readBearer`, `readSessionToken`, the compact JWS check on Web Crypto (`decodeJws`, `verifyJws`), and `resourceOf`, the rule that finds the resource a URL falls under.
+- `@authtempo/core/openapi`: `openApiDocument(options)` builds the OpenAPI 3.1 document of the routes; `openApiOptionsFrom(config)` gives the options of a config, with only the features that it turns on. `openapi: true` serves the same document at `GET <basePath>/openapi.json`. The key is off by default.
 
 `@authtempo/core/testing` still exports `ROUTES` for an app's own route tests.
 
