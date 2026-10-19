@@ -11,9 +11,12 @@ const FIXTURES = `${SITE}test/fixtures/site/pages/`;
 /** The entries of a fixture tree, read as the real collection is read. */
 const entries = (tree: string) => sitePages(`${FIXTURES}${tree}/site/`);
 
-/** The root pages of a fixture tree, read as the real build is read. */
+/**
+ * The root pages of a fixture tree, read as the real build is read. The folder
+ * is html/, not dist/, because the root .gitignore ignores each dist folder.
+ */
 function built(tree: string): Map<string, string> {
-  const dist = `${FIXTURES}${tree}/dist/`;
+  const dist = `${FIXTURES}${tree}/html/`;
   return rootPages(
     new Map(
       walk(dist, (p) => p.endsWith(".html")).map((p) => [
