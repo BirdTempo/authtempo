@@ -41,6 +41,15 @@ describe("the repository root of src/data/repo.ts (ruling 23 of the plan 11b lan
     expect(rootFrom("/")).toBe(ROOT);
   });
 
+  // A build started in another folder writes its chunks under that folder, so
+  // the config passes the root that it finds from its own file (ruling 24).
+  it("gives the Astro build the root of this checkout through vite.define", async () => {
+    const config = (await import("../astro.config.mjs")).default as {
+      vite?: { define?: Record<string, unknown> };
+    };
+    expect(config.vite?.define?.__AUTHTEMPO_REPO_ROOT__).toBe(JSON.stringify(ROOT));
+  });
+
   it("fails closed when no folder up to the file system root holds pnpm-workspace.yaml", () => {
     expect(() => findRoot("/")).toThrow("repo.ts: no pnpm-workspace.yaml at or above /");
   });

@@ -19,13 +19,23 @@ export function findRoot(from: string): string {
 }
 
 /**
- * The repository root, with no trailing slash. The walk starts at this
- * module's own file, never at the working folder, so a run started in another
- * checkout still reads this checkout. Under vitest and check.ts the file is
- * src/data/repo.ts. In the Astro build, Vite bundles it into a chunk under
- * apps/site/dist/.prerender/, and the walk from there reaches the same root.
+ * The root that astro.config.mjs found from its own file, which is never a
+ * chunk. The Astro build writes it in place of this name (vite.define). Under
+ * vitest and check.ts no define runs, and the name has no value.
  */
-export const REPO_ROOT = findRoot(dirname(fileURLToPath(import.meta.url)));
+declare const __AUTHTEMPO_REPO_ROOT__: string | undefined;
+
+/**
+ * The repository root, with no trailing slash (ruling 24 of the plan 11b lane).
+ * In the Astro build it is the root of the config. A build started in another
+ * folder writes its chunks under that folder, so a walk from a chunk can reach
+ * that folder's root. Elsewhere the walk starts at this module's own file,
+ * never at the working folder.
+ */
+export const REPO_ROOT =
+  typeof __AUTHTEMPO_REPO_ROOT__ === "string"
+    ? __AUTHTEMPO_REPO_ROOT__
+    : findRoot(dirname(fileURLToPath(import.meta.url)));
 
 /**
  * A repository file's text by its path from the root, or null when it does

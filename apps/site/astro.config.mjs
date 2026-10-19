@@ -4,16 +4,21 @@
 // beyond the registry. Astro reads the switch from the environment only
 // (@astrojs/telemetry 3.3.3, read 2026-10-14). test/scripts.test.ts holds it.
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import { FRAMEWORK_PAGES } from "./frameworks.mjs";
 import { parseTokens } from "./scripts/lib/tokens.ts";
+import { findRoot } from "./src/data/repo.ts";
 import { SITE } from "./src/data/site.ts";
 
 // One source for the paper color: the theme-color metas of the docs read tokens.css (brand spec 13).
 const tokens = parseTokens(
   readFileSync(new URL("./src/styles/tokens.css", import.meta.url), "utf8"),
 );
+
+/** The repository root of this checkout, from this file's own folder. */
+const REPO_ROOT = findRoot(fileURLToPath(new URL(".", import.meta.url)));
 
 /**
  * The sidebar. Each content task of plan 11a adds its group. A group with
@@ -62,6 +67,10 @@ export default defineConfig({
     // The pages import sample files of examples/ with ?raw. The dev server
     // serves files under its root only, unless this list allows them.
     server: { fs: { allow: ["../.."] } },
+    // The repository root for src/data/repo.ts (ruling 24 of the plan 11b
+    // lane). This file is the real source, never a chunk, so a walk from it
+    // reaches this checkout. A walk from a chunk can reach another checkout.
+    define: { __AUTHTEMPO_REPO_ROOT__: JSON.stringify(REPO_ROOT) },
   },
   integrations: [
     starlight({
