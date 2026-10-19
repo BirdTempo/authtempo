@@ -249,6 +249,7 @@ export async function addMethod(
         { field: "id", op: "ne", value: input.keepSessionId },
       ],
       ended ?? null,
+      now,
     );
     await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: input.userId }]);
     await deleteTwoFactorChallenges(tx, input.userId);

@@ -78,6 +78,8 @@ export interface DocumentationHost {
  * The hosts that core names in a documentation link only. No request of a
  * deployment goes to them, so they are not vendors in the path. Each entry
  * states its reason. Plan 11g adds spec.openapis.org, the first entry.
+ * Plan 12e adds schemas.openid.net: a URL that is the name of a claim, not
+ * a place that core calls.
  * unusedDocumentationHosts fails an entry that no core file names.
  */
 export const DOCUMENTATION_HOSTS: readonly DocumentationHost[] = [
@@ -85,6 +87,11 @@ export const DOCUMENTATION_HOSTS: readonly DocumentationHost[] = [
     host: "spec.openapis.org",
     reason:
       "a link to the OpenAPI 3.1 specification inside the text of the generated document (packages/core/src/openapi/responses.ts); no request goes to that host",
+  },
+  {
+    host: "schemas.openid.net",
+    reason:
+      "the name of the back-channel logout event: a key of the events claim of a logout token (OIDC Back-Channel Logout 1.0 section 2.4, in packages/core/src/engine/oauth-logout.ts). No request goes to that host",
   },
 ];
 

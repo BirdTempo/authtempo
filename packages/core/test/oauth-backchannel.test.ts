@@ -1,0 +1,845 @@
+import { createLocalJWKSet, decodeJwt, jwtVerify } from "jose";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { deleteAccount } from "../src/engine/account-delete.js";
+import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
+import { publicKeySet } from "../src/engine/jwt.js";
+import { createClient } from "../src/engine/oauth-client-store.js";
+import { DEVICE_GRANT, fetchCimd } from "../src/engine/oauth-clients.js";
+import { deliverLogouts } from "../src/engine/oauth-logout.js";
+import { changePassword, requestPasswordReset, resetPassword } from "../src/engine/password.js";
+import { revokeOtherSessions, revokeSession } from "../src/engine/session-list.js";
+import { endSessions, type ResolvedSession } from "../src/engine/sessions.js";
+import { sweepExpired } from "../src/engine/sweep.js";
+import { enableTotp, setupTotp } from "../src/engine/totp.js";
+import { createRouter } from "../src/http/router.js";
+import { coreRoutes } from "../src/http/routes/index.js";
+import { base32Decode } from "../src/primitives/totp.js";
+import type { OAuthLogoutRow } from "../src/schema.js";
+import type { StorageAdapter } from "../src/storage/port.js";
+import { BASE_URL, post, tokenFromMail } from "./helpers.js";
+import {
+  authorizeGet,
+  consentPost,
+  exchange,
+  ISSUER,
+  pkce,
+  REDIRECT,
+  RESOURCE,
+  requestIdOf,
+  SCOPES,
+  tokenPost,
+} from "./oauth-helpers.js";
+import { codeNow, EMAIL, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
+
+/**
+ * OIDC Back-Channel Logout 1.0 (final, errata set 1, 15 December 2023;
+ * read 2026-10-20). Plan 12e Task 16: each flow that ends a session writes
+ * one outbox row per linked client in its transaction, and delivers the
+ * user's due rows after its commit. The sweep retries the rest.
+ */
+
+const BC = "https://client.example.com/backchannel";
+const BC2 = "https://other.example.com/backchannel";
+const BYE = "https://client.example.com/bye";
+const EVENT = "http://schemas.openid.net/event/backchannel-logout";
+const MINUTE = 60_000;
+
+/**
+ * One turn of the event loop, with no timer: the fake timers of a test do
+ * not move it. Core's typecheck has no Node types, because core runs on
+ * Workers; vitest runs in Node.
+ */
+const nextTurn = (globalThis as unknown as { setImmediate: (fn: (v?: unknown) => void) => void })
+  .setImmediate;
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+/** One request that the fake `oauth.fetch` got. */
+interface Call {
+  url: string;
+  method: string | undefined;
+  type: string | null;
+  body: string;
+  redirect: RequestRedirect | undefined;
+  signal: boolean;
+  /** The session ids that the storage held when the request left: the commit came first. */
+  sessionsAtSend: string[];
+}
+
+/**
+ * The engine view and the routes, with a fake `oauth.fetch` that records
+ * each request and answers the status of `status` for its URL (default 200).
+ * No test reaches a network.
+ */
+function world(opts: { noFetch?: boolean; cimd?: boolean } = {}) {
+  const calls: Call[] = [];
+  const status = new Map<string, number>();
+  /** A whole answer for one URL, in place of the status. */
+  const answer = new Map<string, (init: RequestInit | undefined) => Promise<Response>>();
+  let storage: StorageAdapter | null = null;
+  const fetchFn = async (url: string | URL | Request, init?: RequestInit) => {
+    const sessions = storage ? await storage.findMany("session", []) : [];
+    calls.push({
+      url: String(url),
+      method: init?.method,
+      type: new Headers(init?.headers).get("content-type"),
+      body: typeof init?.body === "string" ? init.body : "",
+      redirect: init?.redirect,
+      signal: init?.signal instanceof AbortSignal,
+      sessionsAtSend: sessions.map((s) => s.id),
+    });
+    const custom = answer.get(String(url));
+    if (custom) return custom(init);
+    return new Response(null, { status: status.get(String(url)) ?? 200 });
+  };
+  const auth = totpAuth({
+    oauth: {
+      resources: [RESOURCE],
+      scopes: SCOPES,
+      registration: { cimd: opts.cimd === true, dynamic: true },
+      device: {},
+      ...(opts.noFetch ? {} : { fetch: fetchFn as typeof fetch }),
+    },
+  });
+  storage = auth.storage;
+  const handle = createRouter(auth.config, coreRoutes(auth.config));
+  return { auth, handle, calls, status, answer };
+}
+type World = ReturnType<typeof world>;
+
+const cookieOf = (w: World, token: string) => `${w.auth.config.cookieName}=${token}`;
+
+/** A client of the register route with a back-channel logout URI. */
+async function bcClient(w: World, uri: string | null, extra: Record<string, unknown> = {}) {
+  const res = await w.handle(
+    post("/auth/oauth/register", {
+      redirect_uris: [REDIRECT],
+      post_logout_redirect_uris: [BYE],
+      ...(uri !== null ? { backchannel_logout_uri: uri } : {}),
+      ...extra,
+    }),
+  );
+  if (res.status !== 201) throw new Error(`register answered ${res.status}`);
+  return ((await res.json()) as { client_id: string }).client_id;
+}
+
+/** The token answer of the authorize step and the code exchange for the session of `token`. */
+async function tokensOf(w: World, token: string, clientId: string, scope = "openid mcp:read") {
+  const p = await pkce();
+  const cookie = cookieOf(w, token);
+  const page = await w.handle(
+    authorizeGet({ clientId, challenge: p.challenge, scope, nonce: "n-1" }, cookie),
+  );
+  // A consent that covers the scopes already answers the redirect at once.
+  const done =
+    page.status === 200
+      ? await w.handle(
+          consentPost(
+            { request_id: requestIdOf(await page.text()), decision: "allow" },
+            { cookie },
+          ),
+        )
+      : page;
+  const code = new URL(done.headers.get("location") ?? "").searchParams.get("code");
+  if (!code) throw new Error(`authorize answered ${page.status} with no code`);
+  const res = await w.handle(exchange(code, clientId, p.verifier));
+  if (res.status !== 200) throw new Error(`the exchange answered ${res.status}`);
+  return (await res.json()) as { id_token?: string; refresh_token?: string };
+}
+
+const linksOf = (w: World, sessionId: string) =>
+  w.auth.storage.findMany("oauthSessionClient", [
+    { field: "sessionId", op: "eq", value: sessionId },
+  ]);
+const outbox = (w: World): Promise<OAuthLogoutRow[]> => w.auth.storage.findMany("oauthLogout", []);
+const live = async (w: World, sessionId: string) =>
+  (await w.auth.storage.findOne("session", [{ field: "id", op: "eq", value: sessionId }])) !== null;
+const tokenOfCall = (c: Call | undefined) => new URLSearchParams(c?.body).get("logout_token") ?? "";
+
+/**
+ * From now on every create of an outbox row throws, inside a transaction
+ * and outside it. A flow that writes the row in its transaction then
+ * changes nothing: the session and its links stay.
+ */
+function outboxThrows(w: World): void {
+  const store = w.auth.storage;
+  const create = store.create.bind(store);
+  const transaction = store.transaction.bind(store);
+  const refuse = () => Promise.reject(new Error("the outbox write failed"));
+  store.create = ((model, data) =>
+    model === "oauthLogout" ? refuse() : create(model, data)) as StorageAdapter["create"];
+  store.transaction = ((fn) =>
+    transaction((tx) =>
+      fn({
+        ...tx,
+        create: ((model, data) =>
+          model === "oauthLogout" ? refuse() : tx.create(model, data)) as StorageAdapter["create"],
+      }),
+    )) as StorageAdapter["transaction"];
+}
+
+/** Two sessions of one user, and the second one linked to two clients. */
+async function twoSessions(w: World) {
+  const actor = await verifiedSession(w.auth, EMAIL, "1.1.1.1");
+  const other = await verifiedSession(w.auth, EMAIL, "2.2.2.2");
+  return { actor, other };
+}
+
+type Signed = ResolvedSession & { token: string };
+
+interface Flow {
+  name: string;
+  /** Which session the flow ends: the actor's own, or the other one. */
+  target: "actor" | "other";
+  run: (w: World, actor: Signed, other: Signed) => Promise<unknown>;
+}
+
+const FLOWS: Flow[] = [
+  {
+    name: "a sign-out",
+    target: "actor",
+    run: (w, actor) => w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) })),
+  },
+  {
+    name: "a reset",
+    target: "other",
+    async run(w) {
+      await requestPasswordReset(w.auth.config, { email: EMAIL, ip: null });
+      const token = tokenFromMail(w.auth.mail.at(-1)?.text ?? "");
+      const r = await resetPassword(w.auth.config, {
+        token,
+        password: "a new long password",
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+    },
+  },
+  {
+    name: "a password change",
+    target: "other",
+    async run(w, actor) {
+      const r = await changePassword(w.auth.config, {
+        session: actor,
+        currentPassword: PASSWORD,
+        newPassword: "a new long password",
+      });
+      if (!r.ok) throw new Error(r.code);
+    },
+  },
+  {
+    name: "the second-factor enable",
+    target: "other",
+    async run(w, actor) {
+      const setup = await setupTotp(w.auth.config, { userId: actor.user.id, password: PASSWORD });
+      if (!setup.ok) throw new Error(setup.code);
+      const code = await codeNow(w.auth, base32Decode(setup.value.secret));
+      const r = await enableTotp(w.auth.config, { session: actor, code });
+      if (!r.ok) throw new Error(r.code);
+    },
+  },
+  {
+    name: "an end-session",
+    target: "actor",
+    async run(w, actor) {
+      // A valid hint of this session ends it at once (RP-Initiated Logout 1.0, Task 15).
+      const plain = await bcClient(w, null);
+      const { id_token } = await tokensOf(w, actor.token, plain);
+      const hint = new URLSearchParams({ id_token_hint: id_token ?? "", client_id: plain });
+      return w.handle(
+        new Request(`${BASE_URL}/auth/oauth/end-session?${hint}`, {
+          headers: { cookie: cookieOf(w, actor.token) },
+        }),
+      );
+    },
+  },
+  {
+    name: "a session revoke",
+    target: "other",
+    async run(w, actor, other) {
+      const r = await revokeSession(w.auth.config, { session: actor, id: other.session.id });
+      if (!r.ok) throw new Error(r.code);
+    },
+  },
+  {
+    name: "a revoke of the other sessions",
+    target: "other",
+    async run(w, actor) {
+      const r = await revokeOtherSessions(w.auth.config, { session: actor });
+      if (!r.ok) throw new Error(r.code);
+    },
+  },
+  {
+    name: "an email change",
+    target: "other",
+    async run(w, actor) {
+      const to = "ada.new@example.com";
+      const asked = await requestEmailChange(w.auth.config, { session: actor, newEmail: to });
+      if (!asked.ok) throw new Error(asked.code);
+      const text = [...w.auth.mail].reverse().find((m) => m.to === to)?.text ?? "";
+      const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+      const r = await confirmEmailChange(w.auth.config, { token, ip: null, userAgent: null });
+      if (!r.ok) throw new Error(r.code);
+    },
+  },
+  {
+    name: "an account delete",
+    target: "actor",
+    async run(w, actor) {
+      const r = await deleteAccount(w.auth.config, {
+        session: actor,
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+    },
+  },
+];
+
+describe("back-channel logout (plan 12e Task 16)", () => {
+  it("links a session to a client with backchannelLogoutUri at the code exchange that gives an ID token, and at a device grant", async () => {
+    const w = world();
+    const { actor, other } = await twoSessions(w);
+    const bc = await bcClient(w, BC, {
+      grant_types: ["authorization_code", "refresh_token", DEVICE_GRANT],
+    });
+    const plain = await bcClient(w, null);
+    // No ID token, no link: the client cannot name the session.
+    await tokensOf(w, actor.token, bc, "mcp:read");
+    expect(await linksOf(w, actor.session.id)).toEqual([]);
+    // A client with no back-channel URI gets no link.
+    await tokensOf(w, actor.token, plain);
+    expect(await linksOf(w, actor.session.id)).toEqual([]);
+    await tokensOf(w, actor.token, bc);
+    expect(await linksOf(w, actor.session.id)).toMatchObject([
+      { sessionId: actor.session.id, clientId: bc, userId: actor.user.id },
+    ]);
+    // A second ID token of the same pair keeps one link.
+    await tokensOf(w, actor.token, bc);
+    expect(await linksOf(w, actor.session.id)).toHaveLength(1);
+    // The device grant: the session that approved the code is the session of the ID token.
+    const formPost = (path: string, body: Record<string, string>, headers = {}) =>
+      new Request(`${BASE_URL}/auth${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+        body: new URLSearchParams(body).toString(),
+      });
+    const started = await w.handle(
+      formPost("/oauth/device_authorization", {
+        client_id: bc,
+        scope: "openid mcp:read",
+        resource: RESOURCE,
+      }),
+    );
+    const { device_code, user_code } = (await started.json()) as {
+      device_code: string;
+      user_code: string;
+    };
+    const approved = await w.handle(
+      formPost(
+        "/oauth/device",
+        { user_code, decision: "allow" },
+        { cookie: cookieOf(w, other.token), origin: BASE_URL },
+      ),
+    );
+    expect(await approved.text()).toContain("The device is connected.");
+    expect(await linksOf(w, other.session.id)).toEqual([]);
+    const polled = await w.handle(
+      tokenPost({ grant_type: DEVICE_GRANT, device_code, client_id: bc }),
+    );
+    expect(polled.status).toBe(200);
+    expect(((await polled.json()) as { id_token?: string }).id_token).toBeDefined();
+    expect(await linksOf(w, other.session.id)).toMatchObject([
+      { sessionId: other.session.id, clientId: bc, userId: other.user.id },
+    ]);
+    expect(w.calls).toEqual([]);
+  });
+
+  it("queues and sends a logout at the exchange when the session of the code ended before it", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    const p = await pkce();
+    const cookie = cookieOf(w, actor.token);
+    const page = await w.handle(
+      authorizeGet({ clientId: bc, challenge: p.challenge, scope: "openid mcp:read" }, cookie),
+    );
+    const done = await w.handle(
+      consentPost({ request_id: requestIdOf(await page.text()), decision: "allow" }, { cookie }),
+    );
+    const code = new URL(done.headers.get("location") ?? "").searchParams.get("code") ?? "";
+    // The person signs out between the redirect and the exchange.
+    await w.handle(post("/auth/sign-out", {}, { cookie }));
+    expect(w.calls).toEqual([]);
+    const res = await w.handle(exchange(code, bc, p.verifier));
+    expect(res.status).toBe(200);
+    const sid = decodeJwt(((await res.json()) as { id_token: string }).id_token).sid;
+    expect(sid).toBe(actor.session.id);
+    expect(w.calls.map((c) => c.url)).toEqual([BC]);
+    expect(decodeJwt(tokenOfCall(w.calls[0])).sid).toBe(actor.session.id);
+    expect(await linksOf(w, actor.session.id)).toEqual([]);
+    expect(await outbox(w)).toEqual([]);
+  });
+
+  describe("writes one outbox row per linked client in the transaction of each flow that ends a session", () => {
+    for (const flow of FLOWS) {
+      it(`${flow.name}: one row per client, sent after the commit; a throw inside the transaction leaves no row`, async () => {
+        for (const throws of [false, true]) {
+          const w = world();
+          const { actor, other } = await twoSessions(w);
+          const target = flow.target === "actor" ? actor : other;
+          const c1 = await bcClient(w, BC);
+          const c2 = await bcClient(w, BC2);
+          await tokensOf(w, target.token, c1);
+          await tokensOf(w, target.token, c2);
+          expect(await linksOf(w, target.session.id)).toHaveLength(2);
+          w.status.set(BC, 500);
+          w.status.set(BC2, 500);
+          if (throws) {
+            outboxThrows(w);
+            await Promise.resolve(flow.run(w, actor, other)).catch(() => null);
+            expect(await outbox(w)).toEqual([]);
+            expect(await live(w, target.session.id)).toBe(true);
+            expect(await linksOf(w, target.session.id)).toHaveLength(2);
+            expect(w.calls).toEqual([]);
+            continue;
+          }
+          await flow.run(w, actor, other);
+          expect(await live(w, target.session.id)).toBe(false);
+          expect(await linksOf(w, target.session.id)).toEqual([]);
+          const rows = await outbox(w);
+          expect(rows.map((r) => [r.clientId, r.sessionId, r.attempts]).sort()).toEqual(
+            [
+              [c1, target.session.id, 1],
+              [c2, target.session.id, 1],
+            ].sort(),
+          );
+          expect(w.calls.map((c) => c.url).sort()).toEqual([BC, BC2].sort());
+          for (const c of w.calls) expect(c.sessionsAtSend).not.toContain(target.session.id);
+        }
+      });
+    }
+  });
+
+  it("delivers a form POST of logout_token after the commit and deletes the row on 200 or 204", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const c1 = await bcClient(w, BC);
+    const c2 = await bcClient(w, BC2);
+    await tokensOf(w, actor.token, c1);
+    await tokensOf(w, actor.token, c2);
+    w.status.set(BC2, 204);
+    const res = await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    expect(res.status).toBe(200);
+    expect(w.calls.map((c) => c.url).sort()).toEqual([BC, BC2].sort());
+    for (const c of w.calls) {
+      expect(c.method).toBe("POST");
+      expect(c.type).toBe("application/x-www-form-urlencoded");
+      expect([...new URLSearchParams(c.body).keys()]).toEqual(["logout_token"]);
+      // No redirect is followed, and each request has its own time limit.
+      expect(c.redirect).toBe("manual");
+      expect(c.signal).toBe(true);
+      expect(c.sessionsAtSend).not.toContain(actor.session.id);
+    }
+    expect(await outbox(w)).toEqual([]);
+  });
+
+  it("keeps the row on a 500 with attempts 1 and nextAttemptAt one minute out, and the sweep delivers it", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    w.status.set(BC, 500);
+    const at = w.auth.clock.now();
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    expect(await live(w, actor.session.id)).toBe(false);
+    expect(await outbox(w)).toMatchObject([
+      { clientId: bc, sessionId: actor.session.id, attempts: 1 },
+    ]);
+    expect((await outbox(w))[0]?.nextAttemptAt.getTime()).toBe(at.getTime() + MINUTE);
+    // Not due yet: the sweep sends nothing.
+    expect((await sweepExpired(w.auth.config)).oauthLogouts).toBe(0);
+    expect(w.calls).toHaveLength(1);
+    w.auth.clock.advance(MINUTE);
+    w.status.set(BC, 200);
+    expect((await sweepExpired(w.auth.config)).oauthLogouts).toBe(1);
+    expect(w.calls).toHaveLength(2);
+    expect(decodeJwt(tokenOfCall(w.calls[1])).sid).toBe(actor.session.id);
+    expect(await outbox(w)).toEqual([]);
+  });
+
+  it("deletes a row after 6 attempts with one log line", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    w.status.set(BC, 500);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    // The waits after attempts 1 to 5: 1 minute, 5 minutes, 30 minutes, 2 hours, then 2 hours again.
+    for (const [i, wait] of [
+      MINUTE,
+      5 * MINUTE,
+      30 * MINUTE,
+      120 * MINUTE,
+      120 * MINUTE,
+    ].entries()) {
+      const row = (await outbox(w))[0];
+      expect(row?.attempts).toBe(i + 1);
+      expect(row?.nextAttemptAt.getTime()).toBe(w.auth.clock.now().getTime() + wait);
+      w.auth.clock.advance(wait);
+      await sweepExpired(w.auth.config);
+    }
+    expect(w.calls).toHaveLength(6);
+    expect((await outbox(w))[0]?.attempts).toBe(6);
+    expect(logged.mock.calls.filter((c) => String(c[0]).includes("back-channel"))).toEqual([]);
+    w.auth.clock.advance(120 * MINUTE);
+    expect((await sweepExpired(w.auth.config)).oauthLogouts).toBe(1);
+    // A seventh attempt never goes out.
+    expect(w.calls).toHaveLength(6);
+    expect(await outbox(w)).toEqual([]);
+    const lines = logged.mock.calls.filter((c) => String(c[0]).includes("back-channel"));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain(bc);
+  });
+
+  it("signs a logout token with events, sid, the client's sub, typ logout+jwt, a life of 120 seconds, and no nonce", async () => {
+    for (const subjectType of ["public", "pairwise"] as const) {
+      const w = world();
+      const { actor } = await twoSessions(w);
+      const bc = await bcClient(w, BC, { subject_type: subjectType });
+      const { id_token } = await tokensOf(w, actor.token, bc);
+      const idClaims = decodeJwt(id_token ?? "");
+      // The ID token carries a nonce; the logout token never does (Back-Channel Logout 2.4).
+      expect(idClaims.nonce).toBe("n-1");
+      await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+      const now = Math.floor(w.auth.clock.now().getTime() / 1000);
+      const { payload, protectedHeader } = await jwtVerify(
+        tokenOfCall(w.calls[0]),
+        createLocalJWKSet(await publicKeySet(w.auth.config)),
+        { issuer: ISSUER, audience: bc, currentDate: w.auth.clock.now(), typ: "logout+jwt" },
+      );
+      expect(protectedHeader.typ).toBe("logout+jwt");
+      expect(payload).toEqual({
+        iss: ISSUER,
+        aud: bc,
+        iat: now,
+        exp: now + 120,
+        jti: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
+        events: { [EVENT]: {} },
+        sub: idClaims.sub,
+        sid: actor.session.id,
+      });
+      expect(payload).not.toHaveProperty("nonce");
+      expect(idClaims.sid).toBe(actor.session.id);
+      if (subjectType === "pairwise") expect(payload.sub).not.toBe(actor.user.id);
+      else expect(payload.sub).toBe(actor.user.id);
+    }
+  });
+
+  it("counts a logout token as no id_token_hint at the end-session route", async () => {
+    const w = world();
+    const { actor, other } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    const logoutToken = tokenOfCall(w.calls[0]);
+    const params = new URLSearchParams({
+      id_token_hint: logoutToken,
+      post_logout_redirect_uri: BYE,
+      state: "s-1",
+    });
+    // With no session, a valid hint would redirect. A logout token is no hint: the signed-out page.
+    const bare = await w.handle(new Request(`${BASE_URL}/auth/oauth/end-session?${params}`));
+    expect(bare.status).toBe(200);
+    expect(bare.headers.get("location")).toBeNull();
+    // With a session, no hint means the confirmation page, and the session lives.
+    const asked = await w.handle(
+      new Request(`${BASE_URL}/auth/oauth/end-session?${params}`, {
+        headers: { cookie: cookieOf(w, other.token) },
+      }),
+    );
+    expect(asked.status).toBe(200);
+    expect(asked.headers.get("location")).toBeNull();
+    expect(await asked.text()).toContain('name="confirm" value="yes"');
+    expect(await live(w, other.session.id)).toBe(true);
+  });
+
+  it("writes no outbox row at the sweep's delete of expired sessions and deletes their links", async () => {
+    const w = world();
+    const { actor, other } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    await tokensOf(w, other.token, bc);
+    // The verify link's session, and the two sign-ins. Then past the life of each.
+    const sessions = await w.auth.storage.findMany("session", []);
+    expect(sessions).toHaveLength(3);
+    w.auth.clock.advance(400 * 24 * 60 * MINUTE);
+    const swept = await sweepExpired(w.auth.config);
+    expect(swept.sessions).toBe(3);
+    expect(swept.oauthSessionLinks).toBe(2);
+    expect(swept.oauthLogouts).toBe(0);
+    expect(await w.auth.storage.findMany("oauthSessionClient", [])).toEqual([]);
+    expect(await outbox(w)).toEqual([]);
+    expect(w.calls).toEqual([]);
+  });
+
+  it("ends no refresh token at a logout (Back-Channel Logout 2.7)", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    const { refresh_token } = await tokensOf(w, actor.token, bc, "openid mcp:read offline_access");
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    expect(w.calls).toHaveLength(1);
+    const res = await w.handle(
+      tokenPost({ grant_type: "refresh_token", refresh_token: refresh_token ?? "", client_id: bc }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("queues a logout when a request presents an expired linked session, and the sweep sends it", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    w.auth.clock.advance(400 * 24 * 60 * MINUTE);
+    const res = await w.handle(
+      new Request(`${BASE_URL}/auth/session`, { headers: { cookie: cookieOf(w, actor.token) } }),
+    );
+    expect(res.status).toBe(401);
+    expect(await live(w, actor.session.id)).toBe(false);
+    expect(await outbox(w)).toMatchObject([{ clientId: bc, attempts: 0 }]);
+    expect(w.calls).toEqual([]);
+    expect((await sweepExpired(w.auth.config)).oauthLogouts).toBe(1);
+    expect(decodeJwt(tokenOfCall(w.calls[0])).sid).toBe(actor.session.id);
+  });
+
+  it("fails an attempt on a throw, a redirect, or no answer in 2 seconds, and the session end stands", async () => {
+    const answers: [string, (init: RequestInit | undefined) => Promise<Response>][] = [
+      ["a throw", () => Promise.reject(new TypeError("network down"))],
+      // A redirect is not followed: a 302 is the answer, and it is no success.
+      [
+        "a redirect",
+        async () =>
+          new Response(null, { status: 302, headers: { location: "https://x.example/" } }),
+      ],
+      // A fetch that never answers and ignores the signal: the wait still ends at 2 seconds.
+      ["no answer", () => new Promise<Response>(() => {})],
+    ];
+    for (const [name, fn] of answers) {
+      const w = world();
+      const { actor } = await twoSessions(w);
+      const bc = await bcClient(w, BC);
+      await tokensOf(w, actor.token, bc);
+      w.answer.set(BC, fn);
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const out = w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+        while (w.calls.length === 0) await new Promise((r) => nextTurn(r));
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect((await out).status, name).toBe(200);
+      } finally {
+        vi.useRealTimers();
+      }
+      expect(await live(w, actor.session.id), name).toBe(false);
+      expect(await outbox(w), name).toMatchObject([{ clientId: bc, attempts: 1 }]);
+    }
+  });
+
+  it("posts a due row once when two deliveries of the user run at the same time", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    // An expired row that a request presents: its logout waits in the outbox, due now.
+    w.auth.clock.advance(400 * 24 * 60 * MINUTE);
+    await w.handle(
+      new Request(`${BASE_URL}/auth/session`, { headers: { cookie: cookieOf(w, actor.token) } }),
+    );
+    expect(await outbox(w)).toMatchObject([{ attempts: 0 }]);
+    await Promise.all([
+      deliverLogouts(w.auth.config, actor.user.id),
+      deliverLogouts(w.auth.config, actor.user.id),
+    ]);
+    expect(w.calls).toHaveLength(1);
+    expect(await outbox(w)).toEqual([]);
+  });
+
+  it("aborts every open request of a delivery at 5 seconds, whatever the time of each request", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    // The client read takes 4 seconds, then the request never answers.
+    let armed = false;
+    const store = w.auth.storage;
+    const findOne = store.findOne.bind(store);
+    store.findOne = (async (model, where) => {
+      if (model === "oauthClient" && w.calls.length === 0 && armed)
+        await new Promise((r) => setTimeout(r, 4_000));
+      return findOne(model, where);
+    }) as StorageAdapter["findOne"];
+    w.answer.set(BC, () => new Promise<Response>(() => {}));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      armed = true;
+      let done = false;
+      const out = w
+        .handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }))
+        .then((r) => {
+          done = true;
+          return r;
+        });
+      // The delivery starts its 5 seconds before the client read.
+      while (vi.getTimerCount() < 2) await new Promise((r) => nextTurn(r));
+      await vi.advanceTimersByTimeAsync(4_000);
+      while (w.calls.length === 0) await new Promise((r) => nextTurn(r));
+      // 1 second later the delivery ends: the request's own 2 seconds have not passed.
+      await vi.advanceTimersByTimeAsync(1_000);
+      for (let i = 0; i < 20 && !done; i++) await new Promise((r) => nextTurn(r));
+      expect(done).toBe(true);
+      expect((await out).status).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(await outbox(w)).toMatchObject([{ clientId: bc, attempts: 1 }]);
+  });
+
+  it("reads no byte of the answer", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const bc = await bcClient(w, BC);
+    await tokensOf(w, actor.token, bc);
+    let pulls = 0;
+    let cancelled = false;
+    w.answer.set(BC, async () => {
+      const body = new ReadableStream(
+        {
+          // 8 MB in all, so a read of the body ends and a test of it can fail.
+          pull(c) {
+            pulls++;
+            if (pulls > 8) c.close();
+            else c.enqueue(new Uint8Array(1 << 20));
+          },
+          cancel() {
+            cancelled = true;
+          },
+        },
+        { highWaterMark: 0 },
+      );
+      return new Response(body, { status: 200 });
+    });
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    expect(pulls).toBe(0);
+    expect(cancelled).toBe(true);
+    expect(await outbox(w)).toEqual([]);
+  });
+
+  it("serves a document client's backchannel_logout_uri on the document's host, and drops one on another host (ruling 24)", async () => {
+    const DOC = "https://client.example.com/oauth/client.json";
+    const w = world({ cimd: true });
+    const doc = (uri: string) => async () =>
+      new Response(
+        JSON.stringify({
+          client_id: DOC,
+          client_name: "Doc client",
+          redirect_uris: [REDIRECT],
+          backchannel_logout_uri: uri,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    const warned = vi.spyOn(console, "warn").mockImplementation(() => {});
+    w.answer.set(DOC, doc(BC2));
+    expect(await fetchCimd(w.auth.config, DOC)).toMatchObject({ backchannelLogoutUri: null });
+    expect(warned).toHaveBeenCalledWith(
+      "authtempo: client metadata member dropped",
+      "backchannel_logout_uri",
+    );
+    w.answer.set(DOC, doc("https://localhost/backchannel"));
+    expect(await fetchCimd(w.auth.config, DOC)).toMatchObject({ backchannelLogoutUri: null });
+    // On its own host, the document client gets the logout like any client.
+    w.answer.set(DOC, doc(BC));
+    expect(await fetchCimd(w.auth.config, DOC)).toMatchObject({ backchannelLogoutUri: BC });
+    const { actor } = await twoSessions(w);
+    await tokensOf(w, actor.token, DOC);
+    expect(await linksOf(w, actor.session.id)).toMatchObject([{ clientId: DOC }]);
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    const posts = w.calls.filter((c) => c.method === "POST");
+    expect(posts.map((c) => c.url)).toEqual([BC]);
+    expect(decodeJwt(tokenOfCall(posts[0])).aud).toBe(DOC);
+  });
+
+  it("refuses an endSessions call with no userId term: the outbox reads the user's links", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    await expect(
+      w.auth.storage.transaction((tx) =>
+        endSessions(
+          tx,
+          [{ field: "id", op: "eq", value: actor.session.id }],
+          null,
+          w.auth.clock.now(),
+        ),
+      ),
+    ).rejects.toThrow("authtempo: endSessions needs a userId term");
+    expect(await live(w, actor.session.id)).toBe(true);
+  });
+
+  it("refuses backchannel_logout_uri without oauth.fetch, on http, or on a private host", async () => {
+    const w = world();
+    const create = (extra: Record<string, unknown>) =>
+      // A value of any type, as an app in plain JS could pass it.
+      createClient(w.auth.config, { redirectUris: [REDIRECT], ...extra } as never);
+    const refused = { ok: false, error: "invalid_client_metadata" };
+    for (const uri of [
+      "http://client.example.com/backchannel",
+      "https://localhost/backchannel",
+      "https://10.0.0.1/backchannel",
+      "https://[::1]/backchannel",
+      "https://intranet/backchannel",
+      "https://client.example.com/backchannel#frag",
+      "https://user:pw@client.example.com/backchannel",
+      "https://api.example.com/backchannel",
+      "https://CLIENT.example.com/backchannel",
+      "client.example.com/backchannel",
+      42,
+    ])
+      expect(await create({ backchannelLogoutUri: uri }), String(uri)).toMatchObject(refused);
+    expect(
+      await create({ backchannelLogoutUri: BC, backchannelLogoutSessionRequired: "yes" }),
+    ).toMatchObject(refused);
+    // Back-Channel Logout 2.2: a query stays, and the session flag is stored.
+    const kept = await create({
+      backchannelLogoutUri: `${BC}?tenant=a`,
+      backchannelLogoutSessionRequired: true,
+    });
+    expect(kept).toMatchObject({
+      ok: true,
+      value: {
+        client: { backchannelLogoutUri: `${BC}?tenant=a`, backchannelLogoutSessionRequired: true },
+      },
+    });
+    // The register route holds the same rules, and answers both members.
+    const register = (body: Record<string, unknown>) =>
+      w.handle(post("/auth/oauth/register", { redirect_uris: [REDIRECT], ...body }));
+    const bad = await register({ backchannel_logout_uri: "https://localhost/backchannel" });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ error: "invalid_client_metadata" });
+    const good = await register({
+      backchannel_logout_uri: BC,
+      backchannel_logout_session_required: true,
+    });
+    expect(good.status).toBe(201);
+    expect(await good.json()).toMatchObject({
+      backchannel_logout_uri: BC,
+      backchannel_logout_session_required: true,
+    });
+    // With no fetch, core could never deliver a token.
+    const blind = world({ noFetch: true });
+    expect(
+      await createClient(blind.auth.config, { redirectUris: [REDIRECT], backchannelLogoutUri: BC }),
+    ).toMatchObject(refused);
+  });
+});

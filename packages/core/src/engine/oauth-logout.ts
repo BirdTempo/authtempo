@@ -1,10 +1,12 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { SESSION_JWT_TYPE } from "../primitives/credentials.js";
-import type { SessionRow } from "../schema.js";
-import { issuerOf, mintConfig, verifyLocal } from "./jwt.js";
+import { randomBase64Url } from "../primitives/crypto.js";
+import type { OAuthClientRow, OAuthLogoutRow, SessionRow } from "../schema.js";
+import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { findClient } from "./oauth-clients.js";
-import { userOfSubject } from "./oauth-subject.js";
+import { endSessionById, linkSession, queueLogouts } from "./oauth-outbox.js";
+import { storedSubject, userOfSubject } from "./oauth-subject.js";
 import { sessionsEnded } from "./sessions.js";
 
 /**
@@ -65,11 +67,12 @@ export async function endSession(
   config: ResolvedConfig,
   input: { session: SessionRow },
 ): Promise<boolean> {
-  const n = await config.storage.delete("session", [
-    { field: "id", op: "eq", value: input.session.id },
-  ]);
+  const { session } = input;
+  // The outbox rows of the session's client links, then the delete (Task 16).
+  const n = await endSessionById(config.storage, session, config.clock.now());
   if (n !== 1) return false;
-  await sessionsEnded(config, [input.session], "oidc_logout");
+  await sessionsEnded(config, [session], "oidc_logout");
+  await deliverLogouts(config, session.userId);
   return true;
 }
 
@@ -89,4 +92,254 @@ export async function logoutRedirect(
   const url = new URL(input.uri);
   url.searchParams.append("state", input.state);
   return url.toString();
+}
+
+// OIDC Back-Channel Logout 1.0 (final, errata set 1, 15 December 2023;
+// read 2026-10-20). Each flow that ends a session writes one `oauthLogout`
+// row per linked client in its transaction (`endSessions`, `queueLogouts`).
+// After its commit the flow calls `deliverLogouts`; the sweep retries.
+
+/** The header `typ` of a logout token (section 2.4: explicit typing). Not `JWT`, so no ID token check takes it. */
+export const LOGOUT_TOKEN_TYP = "logout+jwt";
+
+/**
+ * A new token signs at each attempt, so no token is stored. Two minutes of
+ * life: Back-Channel Logout 4. A captured token cannot replay later.
+ */
+export const LOGOUT_TOKEN_LIFE_S = 120;
+
+/**
+ * The wait after failed attempt 1, 2, 3, and 4 or later: the last value
+ * repeats. Section 2.5: send again only for an error that can pass, and
+ * after a delay.
+ */
+export const LOGOUT_BACKOFF_MS = [60_000, 300_000, 1_800_000, 7_200_000] as const;
+
+/**
+ * The attempts of one row. A row whose next attempt would be the seventh
+ * is deleted with one log line. Attempt 6 goes out about 4.6 hours after
+ * the first.
+ */
+export const LOGOUT_MAX_ATTEMPTS = 6;
+
+/** The due rows of one sweep. One sweep stays short; the next one takes the rest. */
+export const LOGOUT_SWEEP_MAX = 50;
+
+/** The due rows of one delivery: one request per row, all in parallel. */
+export const LOGOUT_REQUEST_MAX = 10;
+
+/** One request: 2 seconds. A client that does not answer in time fails the attempt. */
+const LOGOUT_FETCH_MS = 2_000;
+
+/** One delivery of up to `LOGOUT_REQUEST_MAX` rows: every open request aborts at 5 seconds. */
+const LOGOUT_DELIVERY_MS = 5_000;
+
+const LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout";
+
+/**
+ * Links the session of an ID token to its client (Task 16). The code
+ * exchange and the device grant call it before they sign the ID token. A
+ * session end that read the links before this write cannot see the link.
+ * So the call reads the session after the write. When the session is gone,
+ * the logout goes to the outbox now and is sent. A second logout of one
+ * session is harmless: section 2.7 treats it as a success.
+ */
+export async function linkIdToken(
+  config: ResolvedConfig,
+  input: { sessionId: string; clientId: string; userId: string },
+): Promise<void> {
+  const now = config.clock.now();
+  await linkSession(config.storage, input, now);
+  const session = await config.storage.findOne("session", [
+    { field: "id", op: "eq", value: input.sessionId },
+  ]);
+  if (session) return;
+  await queueLogouts(config.storage, input.userId, [input.sessionId], now);
+  await deliverLogouts(config, input.userId);
+}
+
+/**
+ * The logout token of one outbox row (section 2.4). `sub` is the subject
+ * that the client knows. An account delete removes a pairwise subject first.
+ * Then the token holds `sid` alone, which section 2.4 allows. It never holds
+ * a nonce.
+ */
+export async function logoutToken(
+  config: ResolvedConfig,
+  row: OAuthLogoutRow,
+  client: OAuthClientRow,
+): Promise<string> {
+  const iat = Math.floor(config.clock.now().getTime() / 1000);
+  const sub = await storedSubject(config, row.userId, client);
+  return signToken(config, LOGOUT_TOKEN_TYP, {
+    iss: issuerOf(config),
+    aud: client.id,
+    iat,
+    exp: iat + LOGOUT_TOKEN_LIFE_S,
+    jti: randomBase64Url(16),
+    events: { [LOGOUT_EVENT]: {} },
+    ...(sub !== null ? { sub } : {}),
+    sid: row.sessionId,
+  });
+}
+
+/** The wait after `attempts` failed attempts. */
+function backoffMs(attempts: number): number {
+  return (
+    LOGOUT_BACKOFF_MS[Math.min(attempts, LOGOUT_BACKOFF_MS.length) - 1] ?? LOGOUT_BACKOFF_MS[3]
+  );
+}
+
+/**
+ * Posts one logout token as a form (section 2.5). No redirect is followed.
+ * The request has 2 seconds, and `deadline` can end it sooner. The wait
+ * ends at the abort even when the app's fetch ignores the signal. Core
+ * reads no byte of the answer: the status is the whole answer (section 2.8).
+ */
+async function postLogoutToken(
+  fetchFn: typeof fetch | null,
+  uri: string,
+  token: string,
+  deadline: AbortSignal,
+): Promise<boolean> {
+  if (!fetchFn) return false;
+  const ctrl = new AbortController();
+  const stop = () => ctrl.abort();
+  // setTimeout, not AbortSignal.timeout: a test moves it with fake timers.
+  const timer = setTimeout(stop, LOGOUT_FETCH_MS);
+  const aborted = new Promise<never>((_resolve, reject) => {
+    ctrl.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+  });
+  // A rejection after the answer came has no reader: it must not count as unhandled.
+  aborted.catch(() => {});
+  deadline.addEventListener("abort", stop, { once: true });
+  if (deadline.aborted) stop();
+  try {
+    const res = await Promise.race([
+      fetchFn(uri, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ logout_token: token }).toString(),
+        redirect: "manual",
+        signal: ctrl.signal,
+      }),
+      aborted,
+    ]);
+    await res.body?.cancel().catch(() => {});
+    return res.status === 200 || res.status === 204;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+    deadline.removeEventListener("abort", stop);
+  }
+}
+
+type Delivery = "sent" | "dropped" | "failed" | "skipped";
+
+/**
+ * One attempt of one row. First the claim: a conditional update counts the
+ * attempt and moves `nextAttemptAt`. So of two deliveries of one row, one
+ * posts, and a crash during the post still counts. Then the post: 200 or
+ * 204 deletes the row.
+ */
+async function deliverRow(
+  config: ResolvedConfig,
+  row: OAuthLogoutRow,
+  deadline: AbortSignal,
+): Promise<Delivery> {
+  const { storage } = config;
+  const byId = [{ field: "id" as const, op: "eq" as const, value: row.id }];
+  if (row.attempts >= LOGOUT_MAX_ATTEMPTS) {
+    if ((await storage.delete("oauthLogout", byId)) !== 1) return "skipped";
+    // The client id only: never the token, the user, or the session.
+    console.error("authtempo: a back-channel logout is dropped after 6 attempts", row.clientId);
+    return "dropped";
+  }
+  const client = await storage.findOne("oauthClient", [
+    { field: "id", op: "eq", value: row.clientId },
+  ]);
+  // An update took the URI away: no client waits for this token.
+  if (!client?.backchannelLogoutUri)
+    return (await storage.delete("oauthLogout", byId)) === 1 ? "dropped" : "skipped";
+  const now = config.clock.now();
+  const attempts = row.attempts + 1;
+  const claimed = await storage.update(
+    "oauthLogout",
+    [...byId, { field: "attempts", op: "eq", value: row.attempts }],
+    { attempts, nextAttemptAt: new Date(now.getTime() + backoffMs(attempts)), updatedAt: now },
+  );
+  if (claimed !== 1) return "skipped";
+  const token = await logoutToken(config, row, client);
+  const ok = await postLogoutToken(
+    config.oauth?.fetch ?? null,
+    client.backchannelLogoutUri,
+    token,
+    deadline,
+  );
+  if (!ok) return "failed";
+  await storage.delete("oauthLogout", byId);
+  return "sent";
+}
+
+/** Delivers `rows` in parallel inside `LOGOUT_DELIVERY_MS`. Answers the rows sent or dropped. */
+async function deliverRows(config: ResolvedConfig, rows: OAuthLogoutRow[]): Promise<number> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), LOGOUT_DELIVERY_MS);
+  try {
+    const results = await Promise.allSettled(rows.map((r) => deliverRow(config, r, ctrl.signal)));
+    let n = 0;
+    for (const r of results) {
+      if (r.status === "rejected")
+        console.error(
+          "authtempo: a back-channel logout attempt failed",
+          r.reason instanceof Error ? r.reason.name : typeof r.reason,
+        );
+      else if (r.value === "sent" || r.value === "dropped") n++;
+    }
+    return n;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Delivers the due outbox rows of `userId`, at most `LOGOUT_REQUEST_MAX`.
+ * Each flow that ends a session calls it after its commit, beside its
+ * `sessionsEnded` call. It never throws: the session end that the person
+ * asked for is already done, and the sweep delivers what is left.
+ */
+export async function deliverLogouts(config: ResolvedConfig, userId: string): Promise<void> {
+  try {
+    const due = await config.storage.findMany(
+      "oauthLogout",
+      [
+        { field: "userId", op: "eq", value: userId },
+        { field: "nextAttemptAt", op: "lte", value: config.clock.now() },
+      ],
+      { sort: { field: "nextAttemptAt", dir: "asc" }, limit: LOGOUT_REQUEST_MAX },
+    );
+    if (due.length > 0) await deliverRows(config, due);
+  } catch (e) {
+    console.error(
+      "authtempo: the back-channel logout delivery failed",
+      e instanceof Error ? e.name : typeof e,
+    );
+  }
+}
+
+/**
+ * The sweep step: at most `LOGOUT_SWEEP_MAX` due rows, `LOGOUT_REQUEST_MAX`
+ * at a time. Answers the rows sent or dropped.
+ */
+export async function deliverDueLogouts(config: ResolvedConfig): Promise<number> {
+  const due = await config.storage.findMany(
+    "oauthLogout",
+    [{ field: "nextAttemptAt", op: "lte", value: config.clock.now() }],
+    { sort: { field: "nextAttemptAt", dir: "asc" }, limit: LOGOUT_SWEEP_MAX },
+  );
+  let n = 0;
+  for (let i = 0; i < due.length; i += LOGOUT_REQUEST_MAX)
+    n += await deliverRows(config, due.slice(i, i + LOGOUT_REQUEST_MAX));
+  return n;
 }

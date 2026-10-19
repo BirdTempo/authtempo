@@ -5,6 +5,8 @@ import type { StorageAdapter } from "../storage/port.js";
 import { requireFresh } from "./fresh.js";
 import type { FamilyEnds } from "./oauth-family.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
+import { deliverLogouts } from "./oauth-logout.js";
+import { endSessionById } from "./oauth-outbox.js";
 import { deleteTwoFactorChallenges } from "./second-factor.js";
 import {
   deleteEndedSessions,
@@ -101,13 +103,12 @@ export async function revokeSession(
     ...liveSessionWhere(config, user.id, config.clock.now()),
   ]);
   if (!row) return fail("not_found");
-  const n = await config.storage.delete("session", [
-    { field: "id", op: "eq", value: row.id },
-    { field: "userId", op: "eq", value: user.id },
-  ]);
+  // The outbox rows of the session's client links, then the delete by id and user (plan 12e Task 16).
+  const n = await endSessionById(config.storage, row, config.clock.now());
   // Zero rows: another call ended the row first and fired its event.
   if (n !== 1) return fail("not_found");
   await sessionsEnded(config, [row], "revoked");
+  await deliverLogouts(config, user.id);
   return ok({ current: row.id === input.session.session.id });
 }
 
@@ -137,6 +138,7 @@ export async function endOtherSessions(
   userId: string,
   keepSessionId: string,
   ended: SessionRow[] | null,
+  now: Date,
 ): Promise<number> {
   await deleteTwoFactorChallenges(tx, userId);
   const n = await endSessions(
@@ -146,6 +148,7 @@ export async function endOtherSessions(
       { field: "id", op: "ne", value: keepSessionId },
     ],
     ended,
+    now,
   );
   await deleteHandoffCodes(tx, userId);
   return n;
@@ -164,8 +167,9 @@ export async function endOtherAccess(
   keepSessionId: string,
   ended: SessionRow[] | null,
   families: FamilyEnds,
+  now: Date,
 ): Promise<number> {
-  const n = await endOtherSessions(tx, userId, keepSessionId, ended);
+  const n = await endOtherSessions(tx, userId, keepSessionId, ended, now);
   await deleteOAuthTokens(tx, userId, families);
   return n;
 }
@@ -185,10 +189,14 @@ export async function revokeOtherSessions(
   const { user, session } = input.session;
   if (!(await revokeAllowed(config, user.id))) return fail("rate_limited");
   const ended = endedList(config);
+  const now = config.clock.now();
   const n = await config.storage.transaction(async (tx) => {
-    await deleteEndedSessions(tx, config, user.id, config.clock.now());
-    return endOtherSessions(tx, user.id, session.id, ended ?? null);
+    // An ended row goes with no hook. Its client links go with no logout in
+    // `endSessions` below: an expiry is no sign-out, as at the sweep.
+    await deleteEndedSessions(tx, config, user.id, now);
+    return endOtherSessions(tx, user.id, session.id, ended ?? null, now);
   });
   await sessionsEnded(config, ended, "revoked");
+  await deliverLogouts(config, user.id);
   return ok({ ended: n });
 }

@@ -24,6 +24,7 @@ import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { clientAccessOf, type OAuthClientAccess } from "./oauth-credentials.js";
 import { familyEnded, revokeFamily } from "./oauth-family.js";
+import { linkIdToken } from "./oauth-logout.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { subjectFor, userOfSubject } from "./oauth-subject.js";
 import { consumeVerification } from "./verification.js";
@@ -304,6 +305,13 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
   }
   // OIDC Core 1.0 section 3.1.3.3: an ID token at the code exchange and the device poll. A refresh answers none.
   if (g.spentId === null && g.scopes.includes("openid")) {
+    // Before the ID token: once the client holds its sid, a logout of the session reaches it (Task 16).
+    if (g.sessionId !== null && g.client.backchannelLogoutUri !== null)
+      await linkIdToken(config, {
+        sessionId: g.sessionId,
+        clientId: g.client.id,
+        userId: g.user.id,
+      });
     const claims: Record<string, unknown> = {
       iss: issuer,
       sub,

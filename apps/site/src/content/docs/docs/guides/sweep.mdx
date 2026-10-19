@@ -38,7 +38,7 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `verificationExpired` | Every verification row past its expiry, spent or not: links, codes, states, challenges, held requests. |
 | `verificationConsumed` | A spent verification row one day after its spend. |
 | `invitations` | Invitations that are accepted or expired. |
-| `sessions` | Sessions past their expiry. |
+| `sessions` | Sessions past their expiry, at most 2000 in one sweep. The next sweep takes the rest. |
 | `apiTokens` | API tokens past their expiry. A token with no expiry stays. |
 | `trustedDevices` | Trusted devices past their expiry. |
 | `totpSetups` | Second factor setups that no enable confirmed within 15 minutes. |
@@ -47,8 +47,8 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `oauthClients` | Up to 100 OAuth clients unseen for 90 days, with no consent and no refresh token. A client of `api.oauth.clients.create` stays: you made it on purpose. |
 | `limits` | The limit windows that ended, when the limiter has a sweep. |
 | `oauthDevices` | Device grants past their expiry: pending, decided, and spent. A poll of such a code answers `expired_token` before the sweep, and `invalid_grant` after it. |
-| `oauthSessionLinks` | Links of a session to a client whose session is gone. Always 0 until the back-channel sign-out of plan 12e. |
-| `oauthLogouts` | Back-channel sign-out messages that are delivered or given up. Always 0 until the back-channel sign-out of plan 12e. |
+| `oauthSessionLinks` | The links of the swept sessions to the OAuth clients that got an ID token in them. The sweep sends no back-channel sign-out message for a session that it deletes. |
+| `oauthLogouts` | Back-channel sign-out messages, at most 50 in one sweep. Each due message gets one more attempt. The count holds the messages that a client took, and the messages that core deleted after their sixth attempt. |
 | `oauthClientSecrets` | Old OAuth client secrets past the overlap of a rotation. The sweep clears them from the client. |
 
 ## How it behaves

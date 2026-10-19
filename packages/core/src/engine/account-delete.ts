@@ -11,6 +11,7 @@ import { CONFIRM_PER_IP } from "./email-change.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
+import { deliverLogouts } from "./oauth-logout.js";
 import {
   deleteOrganizationRows,
   organizationsOfDelete,
@@ -236,6 +237,8 @@ async function runDelete(
     { field: "identifier", op: "in", value: [user.id, user.email] },
   ]);
   await sessionsEnded(config, ended, "account_deleted");
+  // Every outbox row of the user, the older ones too: the delete made them due.
+  await deliverLogouts(config, user.id);
   for (const organization of going)
     await runAfter(
       "organization.afterDelete",
@@ -314,9 +317,21 @@ export async function deleteAccountRows(
   for (const organization of owned)
     if ((await ownersOf(config, tx, organization.id)) < 1) stopWith("conflict");
   await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
-  await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], proof.ended);
+  await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], proof.ended, now);
+  // The back-channel outbox stays (plan 12e Task 16, review I3 of Task 1).
+  // Its rows are the logouts of this delete, and of earlier ends that wait
+  // for a retry. Each one is due now, so the delivery after the commit sends
+  // them. A row goes when it is sent, or after its last attempt.
+  await tx.update(
+    "oauthLogout",
+    [
+      { field: "userId", op: "eq", value: user.id },
+      { field: "nextAttemptAt", op: "gt", value: now },
+    ],
+    { nextAttemptAt: now, updatedAt: now },
+  );
   for (const model of USER_CHILD_MODELS) {
-    if (model === "session" || model === "member") continue;
+    if (model === "session" || model === "member" || model === "oauthLogout") continue;
     // Each model of the list has a `userId` field: USER_CHILD_MODELS reads
     // the schema. The port's types cannot see that over a union of models.
     await tx.delete(model, [{ field: "userId", op: "eq", value: user.id }] as never);

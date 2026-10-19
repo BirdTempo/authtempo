@@ -2,16 +2,19 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { secretMatches } from "../src/engine/oauth-client-secret.js";
 import { deleteClient, rotateClientSecret } from "../src/engine/oauth-client-store.js";
 import { DEVICE_GRANT, findClient } from "../src/engine/oauth-clients.js";
+import { createSession } from "../src/engine/sessions.js";
 import type { ModelName } from "../src/schema.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { post } from "./helpers.js";
 import {
   approvedDevice,
+  authorized,
   codeFor,
   exchange,
   type Handle,
   OTHER_RESOURCE,
   oauthHandle,
+  pkce,
   REDIRECT,
   RESOURCE,
   SCOPES,
@@ -288,44 +291,50 @@ describe("api.oauth.clients (plan 12e)", () => {
         scopes: SCOPES,
         registration: { cimd: false, dynamic: true },
         device: {},
+        // Each back-channel logout fails, so its outbox row stays. No test reaches a network.
+        fetch: (async () => new Response(null, { status: 500 })) as typeof fetch,
       },
     });
     const g = await codeFor(h);
     const res = await h.auth.handle(exchange(g.code, g.clientId, g.verifier));
     expect(res.status).toBe(200);
-    const now = h.clock.now();
-    // The device row comes from the device grant (Task 14). No flow writes the
-    // other two yet: the back-channel logout (Task 16) will. Those rows have the shape it writes.
+    // The device row comes from the device grant (Task 14). The session link
+    // and the outbox row come from the back-channel logout (Task 16): each
+    // client gets an ID token in the session of `g`, and in a second session
+    // that signs out while each client answers 500.
+    const second = await createSession(h.config, {
+      userId: g.user.id,
+      ip: null,
+      userAgent: null,
+    });
+    const secondCookie = `__Host-tempo_session=${second.token}`;
+    const idToken = async (cookie: string, clientId: string) => {
+      const p = await pkce();
+      const { code } = await authorized(h, cookie, {
+        clientId,
+        challenge: p.challenge,
+        scope: "openid mcp:read",
+      });
+      const tokens = await h.auth.handle(exchange(code, clientId, p.verifier));
+      if (tokens.status !== 200) throw new Error(`the exchange answered ${tokens.status}`);
+    };
     const seed = async (clientId: string) => {
       const client = await clientsOf(h).update({
         clientId,
         grantTypes: ["authorization_code", "refresh_token", DEVICE_GRANT],
+        backchannelLogoutUri: "https://client.example.com/backchannel",
       });
       if (!client.ok) throw new Error(client.error);
       await approvedDevice(h, clientId, g.cookie);
-      await h.storage.create("oauthSessionClient", {
-        id: `sc-${clientId}`,
-        sessionId: g.session.id,
-        clientId,
-        userId: g.user.id,
-        createdAt: now,
-        updatedAt: now,
-      });
-      await h.storage.create("oauthLogout", {
-        id: `lo-${clientId}`,
-        clientId,
-        userId: g.user.id,
-        sessionId: g.session.id,
-        attempts: 0,
-        nextAttemptAt: now,
-        createdAt: now,
-        updatedAt: now,
-      });
+      await idToken(g.cookie, clientId);
+      await idToken(secondCookie, clientId);
     };
     await seed(g.clientId);
     const other = await clientsOf(h).create({ redirectUris: [REDIRECT] });
     if (!other.ok) throw new Error(other.error);
     await seed(other.value.client.id);
+    const out = await h.auth.handle(post("/auth/sign-out", {}, { cookie: secondCookie }));
+    expect(out.status).toBe(200);
     const models: ModelName[] = [
       "oauthConsent",
       "oauthToken",

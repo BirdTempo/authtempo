@@ -62,6 +62,8 @@ export {
   TWO_FACTOR_TOKEN_RE,
 } from "./second-factor.js";
 
+import { deliverLogouts } from "./oauth-logout.js";
+
 /**
  * The TOTP second factor (plan 9f, spec 8.11). One `totp` row per user
  * holds the sealed secret, the last accepted 30-second step, and the keyed
@@ -486,7 +488,10 @@ export async function enableTotp(
     throw err;
   }
   if (!done.ok) return done;
-  if (done.value.first) await sessionsEnded(config, ended, "two_factor");
+  if (done.value.first) {
+    await sessionsEnded(config, ended, "two_factor");
+    await deliverLogouts(config, input.session.user.id);
+  }
   // After the commit (plan 12a), for the first method and for a later one.
   await sendNotice(config, {
     event: "factor_enabled",

@@ -68,6 +68,7 @@ import {
   updateClient,
 } from "./engine/oauth-client-store.js";
 import { listGrants, type OAuthGrantSummary, revokeGrant } from "./engine/oauth-grants.js";
+import { deliverLogouts } from "./engine/oauth-logout.js";
 import type { OAuthResult } from "./engine/oauth-result.js";
 import {
   addMember,
@@ -662,7 +663,10 @@ export function createAuth(input: AuthConfig): Auth {
       declineInvitation: (i) => declineInvitation(config, i),
       setActiveOrganization: (i) => setActiveOrganization(config, i),
       getSession: (token) => resolveSession(config, token),
-      signOut: (token) => destroySession(config, token),
+      async signOut(token) {
+        const ended = await destroySession(config, token);
+        if (ended) await deliverLogouts(config, ended.userId);
+      },
       tokens: {
         create: (i) => createApiToken(config, i),
         list: (i) => listApiTokens(config, i),

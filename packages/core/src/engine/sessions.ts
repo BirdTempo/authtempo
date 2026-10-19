@@ -19,6 +19,7 @@ import {
   type SessionVia,
   stopWith,
 } from "./hooks.js";
+import { endSessionById, writeLogouts } from "./oauth-outbox.js";
 import { holdUser, userStays } from "./user-hold.js";
 
 // The credential facts moved to primitives/credentials.ts (plan 11d). They stay exported here, so no importer changes.
@@ -331,12 +332,37 @@ export async function sessionOpened(
  * `where`. So a session that another request adds between the read and the
  * delete goes too, with no hook. With `ended` null, only the last delete
  * runs: one statement for any number of sessions (plan 9h).
+ *
+ * The back-channel outbox (plan 12e Task 16): first the user's client links.
+ * With none, nothing more runs. With some, each linked session that `where`
+ * matches gets one `oauthLogout` row per link, and its links go, in this
+ * transaction. A link whose session is gone goes with no row: an expired
+ * session ends with no logout, as at the sweep.
  */
 export async function endSessions(
   tx: StorageAdapter,
   where: Where<"session">[],
   ended: SessionRow[] | null,
+  now: Date,
 ): Promise<number> {
+  // The outbox reads the user's links; every flow ends the sessions of one user.
+  const user = where.find((w) => w.field === "userId" && w.op === "eq")?.value;
+  if (typeof user !== "string") throw new Error("authtempo: endSessions needs a userId term");
+  const links = await tx.findMany("oauthSessionClient", [
+    { field: "userId", op: "eq", value: user },
+  ]);
+  const ending = new Set<string>();
+  for (const id of new Set(links.map((l) => l.sessionId))) {
+    const byId: Where<"session"> = { field: "id", op: "eq", value: id };
+    if (await tx.findOne("session", [...where, byId])) ending.add(id);
+    else if (!(await tx.findOne("session", [byId])))
+      await tx.delete("oauthSessionClient", [{ field: "sessionId", op: "eq", value: id }]);
+  }
+  await writeLogouts(
+    tx,
+    links.filter((l) => ending.has(l.sessionId)),
+    now,
+  );
   let n = 0;
   if (ended)
     for (const row of await tx.findMany("session", where)) {
@@ -430,9 +456,8 @@ export async function resolveSession(
   // before `absoluteDays` was set (plan 12b).
   if (!sessionIsLive(config, session, now)) {
     if (!write) return null;
-    const n = await config.storage.delete("session", [
-      { field: "id", op: "eq", value: session.id },
-    ]);
+    // The links of the row go to the outbox before the delete (plan 12e Task 16). The sweep delivers them.
+    const n = await endSessionById(config.storage, session, now);
     // One row: this call ended it. Zero: another call or the sweep did, and the sweep fires no hook.
     if (n === 1) await sessionsEnded(config, [session], "expired");
     return null;
@@ -460,15 +485,26 @@ export async function resolveSession(
   return { user, session, refreshed: false };
 }
 
-export async function destroySession(config: ResolvedConfig, token: string): Promise<void> {
-  if (!TOKEN_RE.test(token)) return;
+/**
+ * The sign-out of one session, with the outbox rows of its client links
+ * first (`endSessionById`, plan 12e Task 16). Answers the ended row, or null
+ * when this call ended nothing. The caller delivers the user's back-channel
+ * logouts after it (`deliverLogouts`).
+ */
+export async function destroySession(
+  config: ResolvedConfig,
+  token: string,
+): Promise<SessionRow | null> {
+  if (!TOKEN_RE.test(token)) return null;
   const session = await config.storage.findOne("session", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
   ]);
-  if (!session) return;
+  if (!session) return null;
   // By id, so the row the after hook names is the row this call deleted.
-  const n = await config.storage.delete("session", [{ field: "id", op: "eq", value: session.id }]);
-  if (n === 1) await sessionsEnded(config, [session], "sign_out");
+  const n = await endSessionById(config.storage, session, config.clock.now());
+  if (n !== 1) return null;
+  await sessionsEnded(config, [session], "sign_out");
+  return session;
 }
 
 /** The live session row of `token`, with no write: no refresh, no delete (plan 12b, the cookie move). */

@@ -98,6 +98,26 @@ export async function subjectFor(
 }
 
 /**
+ * The `sub` of `userId` for `client` with no write, or null when a pairwise
+ * client has no stored subject of the user. The back-channel logout reads
+ * it: an account delete removes the user's subjects before the delivery.
+ */
+export async function storedSubject(
+  config: ResolvedConfig,
+  userId: string,
+  client: OAuthClientRow,
+): Promise<string | null> {
+  if (client.subjectType === "public") return userId;
+  const sector = sectorOf(client);
+  if (sector === null) return null;
+  const row = await config.storage.findOne("oauthSubject", [
+    { field: "sector", op: "eq", value: sector },
+    { field: "userId", op: "eq", value: userId },
+  ]);
+  return row?.subject ?? null;
+}
+
+/**
  * The user id of a `sub` that core wrote for `client`, or null. For a
  * pairwise client the sub must be a stored subject of the client's own
  * sector. So a subject of another sector, or of a sector the client left,

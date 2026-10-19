@@ -43,6 +43,10 @@ export interface ClientInput {
   /** True when this client may call the introspection endpoint. */
   introspect?: boolean;
   postLogoutRedirectUris?: string[];
+  /** The https URI that gets the back-channel logout token, or null: none. Needs `oauth.fetch`. */
+  backchannelLogoutUri?: string | null;
+  /** True when the logout token must hold `sid`. Core always sends it. */
+  backchannelLogoutSessionRequired?: boolean;
   subjectType?: "public" | "pairwise";
   dpopBound?: boolean;
 }
@@ -61,6 +65,8 @@ const METADATA_NAMES: Readonly<Record<keyof ClientInput, string>> = {
   credentialsScopes: "credentials_scopes",
   introspect: "introspect",
   postLogoutRedirectUris: "post_logout_redirect_uris",
+  backchannelLogoutUri: "backchannel_logout_uri",
+  backchannelLogoutSessionRequired: "backchannel_logout_session_required",
   subjectType: "subject_type",
   dpopBound: "dpop_bound_access_tokens",
 };
@@ -93,6 +99,8 @@ function inputOf(row: ClientFields): Required<ClientInput> {
     credentialsScopes: row.credentialsScopes,
     introspect: row.introspect,
     postLogoutRedirectUris: row.postLogoutRedirectUris,
+    backchannelLogoutUri: row.backchannelLogoutUri,
+    backchannelLogoutSessionRequired: row.backchannelLogoutSessionRequired,
     subjectType: row.subjectType,
     dpopBound: row.dpopBound,
   };

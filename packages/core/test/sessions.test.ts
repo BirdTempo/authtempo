@@ -156,7 +156,8 @@ describe("sessions engine", () => {
     const { token } = await createSession(config, { userId: user.id, ip: null, userAgent: null });
     await destroySession(config, token);
     expect(await resolveSession(config, token)).toBeNull();
-    await expect(destroySession(config, token)).resolves.toBeUndefined();
+    // The second call ends nothing (plan 12e Task 16: the answer names the ended row).
+    await expect(destroySession(config, token)).resolves.toBeNull();
   });
 
   it("reads the cookie first, then the bearer header", () => {

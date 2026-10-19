@@ -9,6 +9,7 @@ import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js
 import { StorageError } from "../storage/port.js";
 import { requireFresh } from "./fresh.js";
 import { sendNotice } from "./notices.js";
+import { deliverLogouts } from "./oauth-logout.js";
 import {
   checkSecondFactorPasskey,
   checkSignInAssertionOf,
@@ -145,7 +146,10 @@ export async function enableMethod(
       return fail("conflict");
     throw err;
   }
-  if (added.first) await sessionsEnded(config, ended, "two_factor");
+  if (added.first) {
+    await sessionsEnded(config, ended, "two_factor");
+    await deliverLogouts(config, session.user.id);
+  }
   // After the commit (plan 12a). The one enable of the passkey and the email
   // method, so each enable sends one notice. A method that was on already
   // changed nothing, so it sends none.

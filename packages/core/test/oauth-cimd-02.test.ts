@@ -433,13 +433,14 @@ describe("the members of a document that core does not serve (ruling 24 of plan 
         { grantTypes: ["authorization_code"] },
       ],
       [{ response_types: ["code", `id_token${marker}`] }, "response_types", {}],
+      // Task 16 serves a logout URI on the document's own host; another host is dropped.
       [
-        { backchannel_logout_uri: `https://app.example.com/bc-${marker}` },
+        { backchannel_logout_uri: `https://other.example.com/bc-${marker}` },
         "backchannel_logout_uri",
         { backchannelLogoutUri: null },
       ],
       [
-        { backchannel_logout_session_required: true },
+        { backchannel_logout_session_required: `yes-${marker}` },
         "backchannel_logout_session_required",
         { backchannelLogoutSessionRequired: false },
       ],

@@ -12,6 +12,7 @@ import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { endFamilies, type FamilyEnds, familyEnds } from "./oauth-family.js";
+import { deliverLogouts } from "./oauth-logout.js";
 import { unchanged } from "./profile.js";
 import { later, ROUNDS } from "./second-factor.js";
 import { endOtherAccess } from "./session-list.js";
@@ -277,7 +278,14 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
               { field: "purpose", op: "eq", value: "account-delete" },
               { field: "identifier", op: "eq", value: previous.id },
             ]);
-            await endOtherAccess(tx, previous.id, move.keep, move.ended ?? null, move.families);
+            await endOtherAccess(
+              tx,
+              previous.id,
+              move.keep,
+              move.ended ?? null,
+              move.families,
+              now,
+            );
             return ok({
               previous,
               user: { ...previous, email: data.newEmail, emailVerified: true, updatedAt },
@@ -326,6 +334,7 @@ async function finish(
     applied.user.id,
   );
   await sessionsEnded(config, move.ended, "email_change");
+  await deliverLogouts(config, applied.user.id);
   await sendNotice(config, {
     event: "email_changed",
     email: move.data.oldEmail,

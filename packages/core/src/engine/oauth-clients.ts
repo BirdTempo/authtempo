@@ -153,6 +153,8 @@ export interface RegisteredClient {
   jwks?: Record<string, unknown>;
   jwks_uri?: string;
   post_logout_redirect_uris?: string[];
+  backchannel_logout_uri?: string;
+  backchannel_logout_session_required?: boolean;
   subject_type: "public" | "pairwise";
   id_token_signed_response_alg: string;
   dpop_bound_access_tokens: boolean;
@@ -340,8 +342,9 @@ export function validClientMetadata(
  * 12e). The rules of -02 section 4.1 and the key rules stay strict. A
  * document cannot change at the request of this server. So a member that
  * core does not serve is dropped, not refused. These members are another
- * grant, another response type, `backchannel_logout_uri` (Task 16 decides),
- * and an `id_token_signed_response_alg` other than `jwtMint.alg`.
+ * grant, another response type, a `backchannel_logout_uri` off the
+ * document's host or against its rules (Task 16), and an
+ * `id_token_signed_response_alg` other than `jwtMint.alg`.
  */
 function readClientMetadata(
   config: ResolvedConfig,
@@ -413,12 +416,26 @@ function readClientMetadata(
     REDIRECT_MAX,
   );
   if (!postLogoutRedirectUris) return meta("post_logout_redirect_uris");
-  // Plan 12e Task 16 adds the back-channel logout and its checks.
-  for (const member of ["backchannel_logout_uri", "backchannel_logout_session_required"]) {
-    if (absent(m[member])) continue;
-    if (!cimd) return meta(member);
-    dropped.push(member);
+  // Back-Channel Logout 1.0 section 2.2 (read 2026-10-20). Core posts a
+  // logout token to this URI from the server, so the URI takes the host rule
+  // of `validCimdUrl`. With no fetch, core could never deliver a token.
+  let backchannelLogoutUri: string | null = null;
+  if (!absent(m.backchannel_logout_uri)) {
+    const uri = m.backchannel_logout_uri;
+    const valid = validLogoutUri(uri, config.baseURL) && oauth.fetch !== null;
+    // A document is a claim of its host alone. Its logout URI must be on that
+    // host, so a document cannot make core post to a third party (ruling 24).
+    if (cimd && !(valid && sameHost(uri, m.client_id))) dropped.push("backchannel_logout_uri");
+    else if (!valid) return meta("backchannel_logout_uri");
+    else backchannelLogoutUri = uri;
   }
+  // Core always sends `sid`, so a client that requires it gets it.
+  const sessionRequired = m.backchannel_logout_session_required ?? false;
+  let backchannelLogoutSessionRequired = false;
+  if (typeof sessionRequired !== "boolean") {
+    if (!cimd) return meta("backchannel_logout_session_required");
+    dropped.push("backchannel_logout_session_required");
+  } else backchannelLogoutSessionRequired = backchannelLogoutUri !== null && sessionRequired;
   const subjectType = m.subject_type ?? "public";
   if (subjectType !== "public" && subjectType !== "pairwise") return meta("subject_type");
   if (subjectType === "pairwise") {
@@ -477,8 +494,8 @@ function readClientMetadata(
       credentialsScopes,
       introspect,
       postLogoutRedirectUris,
-      backchannelLogoutUri: null,
-      backchannelLogoutSessionRequired: false,
+      backchannelLogoutUri,
+      backchannelLogoutSessionRequired,
       subjectType,
       dpopBound,
     },
@@ -503,6 +520,12 @@ function registeredAnswer(
     ...(row.jwksUri !== null ? { jwks_uri: row.jwksUri } : {}),
     ...(row.postLogoutRedirectUris.length > 0
       ? { post_logout_redirect_uris: [...row.postLogoutRedirectUris] }
+      : {}),
+    ...(row.backchannelLogoutUri !== null
+      ? {
+          backchannel_logout_uri: row.backchannelLogoutUri,
+          backchannel_logout_session_required: row.backchannelLogoutSessionRequired,
+        }
       : {}),
     subject_type: row.subjectType,
     id_token_signed_response_alg: config.jwtMint?.alg ?? "EdDSA",
@@ -588,6 +611,14 @@ export function validCimdUrl(value: string, baseURL: string): boolean {
   if (u.href !== value) return false;
   if (u.protocol !== "https:" || u.username !== "" || u.password !== "") return false;
   if (u.search !== "" || u.pathname === "/") return false;
+  return publicHost(u, baseURL);
+}
+
+/**
+ * The host rule of each URL that core fetches or posts to from the server.
+ * No IP literal, no local name, and not the host of this instance.
+ */
+function publicHost(u: URL, baseURL: string): boolean {
   // A trailing dot names the same host: `localhost.` is `localhost`.
   const host = u.hostname.replace(/\.$/, "");
   // An IP literal (IPv4 or IPv6, 127.0.0.1 and [::1] too): a public client has a DNS name, and an address may be internal.
@@ -599,6 +630,37 @@ export function validCimdUrl(value: string, baseURL: string): boolean {
   // of this host is refused too, which is stricter than the host and port.
   if (host === new URL(baseURL).hostname) return false;
   return true;
+}
+
+/**
+ * A back-channel logout URI (Back-Channel Logout 1.0 section 2.2, read
+ * 2026-10-20): absolute, https, no fragment, no user, in canonical form, on
+ * a host of `publicHost`. A query is allowed, and core keeps it. Section 2.2
+ * allows http for a confidential client; core refuses it, because the token
+ * ends a person's session.
+ */
+export function validLogoutUri(value: unknown, baseURL: string): value is string {
+  if (typeof value !== "string" || value.length > URI_MAX) return false;
+  if (value.includes("#") || hasControlChar(value)) return false;
+  let u: URL;
+  try {
+    u = new URL(value);
+  } catch {
+    return false;
+  }
+  if (u.href !== value) return false;
+  if (u.protocol !== "https:" || u.username !== "" || u.password !== "") return false;
+  return publicHost(u, baseURL);
+}
+
+/** True when `a` and `b` are URLs of one host name. */
+function sameHost(a: string, b: unknown): boolean {
+  if (typeof b !== "string") return false;
+  try {
+    return new URL(a).hostname === new URL(b).hostname;
+  } catch {
+    return false;
+  }
 }
 
 /** The body as text, or null past `max` bytes, on a read error, or when `signal` aborts. */

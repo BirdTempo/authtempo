@@ -1,3 +1,4 @@
+import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deleteAccount } from "../src/engine/account-delete.js";
 import { requestEmailChange } from "../src/engine/email-change.js";
@@ -97,18 +98,6 @@ async function userOf(w: World, id: string): Promise<UserRow | null> {
   return w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: id }]);
 }
 
-/**
- * The child models of schema version 11 that no flow writes yet (plan 12e
- * Task 1). A seeded row would be a state the product cannot reach. Tasks 11,
- * 14, and 16 of plan 12e write the flows, and each one takes its model out
- * of this set. Task 11 took `oauthSubject` out: a pairwise grant writes it.
- * Task 14 took `oauthDevice` out: a device grant that the user approves writes it.
- */
-const NO_FLOW_YET: ReadonlySet<(typeof USER_CHILD_MODELS)[number]> = new Set([
-  "oauthSessionClient",
-  "oauthLogout",
-]);
-
 /** The rows of `model` that name `userId`. */
 function childRows(w: World, model: (typeof USER_CHILD_MODELS)[number], userId: string) {
   // Each model of the list has a `userId` field; the port's types cannot see that over a union.
@@ -177,6 +166,58 @@ async function oauthGrant(w: World, token: string, subjectType: "public" | "pair
   if (tokens.status !== 200) throw new Error(`the exchange answered ${tokens.status}`);
 }
 
+/** The back-channel logout URI of the test client (plan 12e Task 16). */
+const BC = "https://client.example.com/backchannel";
+
+/**
+ * A fake `oauth.fetch` for the back-channel logout: it records each post and
+ * answers `status.code`. No test reaches a network.
+ */
+function backchannelFetch() {
+  const posts: string[] = [];
+  const status = { code: 200 };
+  const fetchFn = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+    posts.push(new URLSearchParams(String(init?.body)).get("logout_token") ?? "");
+    return new Response(null, { status: status.code });
+  }) as typeof fetch;
+  return { posts, status, fetchFn };
+}
+
+/**
+ * An ID token of the session of `token` for a client with a back-channel
+ * logout URI, through the routes. The exchange links the session to the
+ * client (plan 12e Task 16). Answers the client id.
+ */
+async function backchannelGrant(w: World, token: string, clientId?: string): Promise<string> {
+  let id = clientId;
+  if (id === undefined) {
+    const reg = await w.handle(
+      post("/auth/oauth/register", { redirect_uris: [REDIRECT], backchannel_logout_uri: BC }),
+    );
+    if (reg.status !== 201) throw new Error(`register answered ${reg.status}`);
+    id = ((await reg.json()) as { client_id: string }).client_id;
+  }
+  const p = await pkce();
+  const cookie = `${w.auth.config.cookieName}=${token}`;
+  const page = await w.handle(
+    authorizeGet({ clientId: id, challenge: p.challenge, scope: "openid mcp:read" }, cookie),
+  );
+  const done =
+    page.status === 200
+      ? await w.handle(
+          consentPost(
+            { request_id: requestIdOf(await page.text()), decision: "allow" },
+            { cookie },
+          ),
+        )
+      : page;
+  const code = new URL(done.headers.get("location") ?? "").searchParams.get("code");
+  if (!code) throw new Error("no code");
+  const tokens = await w.handle(exchange(code, id, p.verifier));
+  if (tokens.status !== 200) throw new Error(`the exchange answered ${tokens.status}`);
+  return id;
+}
+
 /** A device grant that the session's user approves, through the routes (plan 12e Task 14). */
 async function deviceGrant(w: World, token: string) {
   const reg = await w.handle(
@@ -235,8 +276,9 @@ function beforeUserWrite(w: World, write: () => Promise<unknown>, times = 1) {
 describe("the account delete (plan 12a, spec 8.15)", () => {
   it("deletes the user and every row that names it, takes a solo organization, and keeps a team", async () => {
     const events: string[] = [];
+    const backchannel = backchannelFetch();
     const w = world({
-      oauth: OAUTH,
+      oauth: { ...OAUTH, fetch: backchannel.fetchFn },
       hooks: {
         user: {
           beforeDelete: (e) =>
@@ -283,6 +325,40 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
     await oauthGrant(w, me.token);
     await oauthGrant(w, me.token, "pairwise");
     await deviceGrant(w, me.token);
+    // Back-channel logout (plan 12e Task 16, review I3 and R-L2 of Task 1).
+    // The session of the delete is linked to a client. A third session, of
+    // one more second-factor sign-in, is linked too. Its sign-out meets a
+    // 500, so its logout waits in the outbox.
+    const bcClient = await backchannelGrant(w, me.token);
+    w.auth.clock.advance(30_000);
+    const again = await passwordSignIn(w.auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!again.ok || !("twoFactor" in again.value)) throw new Error("no challenge");
+    const third = await verifyTwoFactor(w.auth.config, {
+      challenge: again.value.twoFactor.challenge,
+      code: await codeNow(w.auth, secret),
+      trustDevice: false,
+      ip: null,
+    });
+    if (!third.ok) throw new Error(third.code);
+    await backchannelGrant(w, third.value.token, bcClient);
+    backchannel.status.code = 500;
+    const out = await w.handle(
+      post("/auth/sign-out", {}, { cookie: `${w.auth.config.cookieName}=${third.value.token}` }),
+    );
+    expect(out.status).toBe(200);
+    const waiting = await w.auth.storage.findMany("oauthLogout", [
+      { field: "userId", op: "eq", value: me.user.id },
+    ]);
+    expect(waiting).toMatchObject([
+      { clientId: bcClient, sessionId: third.value.session.id, attempts: 1 },
+    ]);
+    backchannel.status.code = 200;
+    backchannel.posts.length = 0;
     // A solo organization, a team of Bob's where the user is an admin, and an
     // organization of Bob's that invites the user's address.
     const solo = await organization(w, me.user, "ada-solo");
@@ -314,12 +390,8 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
       ).ok,
     ).toBe(true);
     // Every child model holds a row of the user, so each check below can fail.
-    for (const model of USER_CHILD_MODELS.filter((m) => !NO_FLOW_YET.has(m)))
+    for (const model of USER_CHILD_MODELS)
       expect((await childRows(w, model, me.user.id)).length, model).toBeGreaterThan(0);
-    // A model of NO_FLOW_YET holds no row here. When a task's flow writes one, this fails,
-    // and the task takes the model out of the set and into the loop above.
-    for (const model of NO_FLOW_YET)
-      expect(await childRows(w, model, me.user.id), model).toEqual([]);
     const proofs = () =>
       w.auth.storage.findMany("verification", [
         { field: "identifier", op: "in", value: [me.user.id, EMAIL] },
@@ -336,6 +408,11 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
     expect(await userOf(w, me.user.id)).toBeNull();
     for (const model of USER_CHILD_MODELS)
       expect(await childRows(w, model, me.user.id), model).toEqual([]);
+    // The delete sent the logout of its own session, and the one that waited
+    // for a retry: the outbox rows stay through the delete, and both were due.
+    expect(backchannel.posts.map((t) => decodeJwt(t).sid).sort()).toEqual(
+      [me.session.id, third.value.session.id].sort(),
+    );
     expect(await proofs()).toEqual([]);
     expect(await organizationOf(w, solo.id)).toBeNull();
     expect(await membersOf(w, solo.id)).toEqual([]);

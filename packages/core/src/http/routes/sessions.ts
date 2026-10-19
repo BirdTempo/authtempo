@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { deliverLogouts } from "../../engine/oauth-logout.js";
 import { listSessions, revokeOtherSessions, revokeSession } from "../../engine/session-list.js";
 import {
   destroySession,
@@ -46,7 +47,10 @@ export async function clearSessionCookies(
   const legacy = config.legacyCookieName;
   const old = legacy === null ? null : readCookie(request, legacy);
   if (legacy !== null && old !== null) {
-    if (old !== token) await destroySession(config, old);
+    if (old !== token) {
+      const ended = await destroySession(config, old);
+      if (ended) await deliverLogouts(config, ended.userId);
+    }
     res.headers.append("set-cookie", clearSessionCookie(legacy, config.cookie.sameSite));
   }
   return res;
@@ -100,7 +104,9 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
       key: "POST /sign-out",
       async handler(ctx) {
         const token = readSessionToken(config, ctx.request);
-        if (token) await destroySession(config, token);
+        // After the commit: the back-channel logouts of the session (plan 12e Task 16).
+        const ended = token ? await destroySession(config, token) : null;
+        if (ended) await deliverLogouts(config, ended.userId);
         return signedOut(config, ctx.request, token);
       },
     },

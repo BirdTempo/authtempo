@@ -274,7 +274,15 @@ describe("the link of a social identity (plan 12a, spec 8.15)", () => {
     const me = await verifiedSession(w.auth);
     const s = await begin(w, me);
     await w.auth.storage.transaction((tx) =>
-      endSessions(tx, [{ field: "id", op: "eq", value: me.session.id }], null),
+      endSessions(
+        tx,
+        [
+          { field: "userId", op: "eq", value: me.user.id },
+          { field: "id", op: "eq", value: me.session.id },
+        ],
+        null,
+        w.auth.clock.now(),
+      ),
     );
     const calls = w.tokenCalls.length;
     expect(await finish(w, s, me.token)).toMatchObject({ ok: false, code: "invalid_token" });
