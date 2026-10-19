@@ -325,6 +325,24 @@ describe("DPoP at the token endpoint (RFC 9449 section 5)", () => {
     expect(plain).toMatchObject({ status: 200, body: { token_type: "Bearer" } });
   });
 
+  it("refuses a spent bound refresh token with no proof and keeps the family", async () => {
+    const h = instance();
+    const key = await dpopKey();
+    const c = await publicCode(h);
+    const issued = await exchangeWith(h, c, await tokenProof(h, key));
+    const parent = { refresh_token: String(issued.body.refresh_token), client_id: c.clientId };
+    const next = await refreshWith(h, parent, await tokenProof(h, key));
+    expect(next.status).toBe(200);
+    // A copy of the spent parent without the key fails the binding check before the reuse check.
+    expect(await refreshWith(h, parent, null)).toEqual(BAD_PROOF);
+    // So the family lives, and the key holder refreshes the child.
+    const child = { refresh_token: String(next.body.refresh_token), client_id: c.clientId };
+    expect(await refreshWith(h, child, await tokenProof(h, key))).toMatchObject({
+      status: 200,
+      body: { token_type: "DPoP" },
+    });
+  });
+
   it("refuses a replayed proof on a second instance", async () => {
     const first = instance();
     const second = instance(first);
