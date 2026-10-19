@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
+import { fetchCimd } from "../src/engine/oauth-clients.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { fromBase64Url, randomBase64Url, toBase64Url } from "../src/primitives/crypto.js";
 import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
@@ -709,6 +710,34 @@ describe("private_key_jwt (plan 12e Task 5, RFC 7523 with rfc7523bis-11)", () =>
     );
     expect(await answer(res)).toEqual(REFUSED);
     expect(fake.calls.length).toBe(1);
+  });
+
+  it("reads a key set served as application/jwk-set+json (RFC 7517 8.5)", async () => {
+    const fake = fakeFetch();
+    const { h } = setup(fake.fn);
+    const person = await signedIn(h);
+    const k1 = await keyOf("ES256", "k1");
+    const url = "https://client.example.com/jwks.json";
+    fake.answers.set(
+      url,
+      () =>
+        new Response(JSON.stringify({ keys: [k1.jwk] }), {
+          headers: { "content-type": "application/jwk-set+json; charset=utf-8" },
+        }),
+    );
+    const clientId = await keyClient(h, { jwks_uri: url });
+    const res = await h.auth.handle(
+      exchange(await codeOf(h, person.cookie, clientId), await assertion(h, k1, clientId)),
+    );
+    expect(await answer(res)).toEqual(PASSED);
+    // A client metadata document keeps application/json alone.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const doc = "https://client.example.com/client.json";
+    const asSet = (async () =>
+      new Response(JSON.stringify({ client_id: doc, redirect_uris: [REDIRECT] }), {
+        headers: { "content-type": "application/jwk-set+json" },
+      })) as unknown as typeof fetch;
+    expect(await fetchCimd(asSet, doc)).toBeNull();
   });
 
   it("refuses a jwks_uri client while oauth.fetch is null", async () => {

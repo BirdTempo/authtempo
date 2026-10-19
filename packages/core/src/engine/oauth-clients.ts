@@ -57,6 +57,10 @@ const JWKS_CACHE_MS = 3_600_000;
  * soon, and a stranger's unknown kid cannot make core fetch on each request.
  */
 const JWKS_REREAD_MS = 30_000;
+/** The media type of a client metadata document (the CIMD draft). */
+const CIMD_TYPES: readonly string[] = ["application/json"];
+/** A key set may also come as the JWK Set type that RFC 7517 section 8.5 registers. */
+const JWKS_TYPES: readonly string[] = ["application/json", "application/jwk-set+json"];
 
 /**
  * The fields of schema version 11 for a public client with no secret (plan
@@ -561,12 +565,13 @@ async function readCapped(res: Response, max: number, signal: AbortSignal): Prom
 /**
  * The JSON object at `url`, or the reason of a refusal. The fetch is the
  * app's guarded fetch; core adds `redirect: "manual"`, a 10-second timeout
- * for the answer and the body, and a 64 KB cap. It needs status 200 and
- * `application/json`. The body never reaches a log.
+ * for the answer and the body, and a 64 KB cap. It needs status 200 and a
+ * media type of `types`. The body never reaches a log.
  */
 async function guardedJson(
   fetchFn: typeof fetch | null,
   url: string,
+  types: readonly string[],
 ): Promise<{ doc: Record<string, unknown> } | { why: string }> {
   if (!fetchFn) return { why: "no fetch" };
   const ctrl = new AbortController();
@@ -588,9 +593,9 @@ async function guardedJson(
       return { why: `status ${res.status}` };
     }
     const type = (res.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
-    if (type !== "application/json") {
+    if (type === undefined || !types.includes(type)) {
       await res.body?.cancel().catch(() => {});
-      return { why: "not application/json" };
+      return { why: `not ${types.join(" or ")}` };
     }
     const text = await readCapped(res, CIMD_MAX_BYTES, ctrl.signal);
     if (text === null) return { why: "larger than 64 KB, not UTF-8, or not in time" };
@@ -621,7 +626,7 @@ export async function fetchCimd(
     console.error("authtempo: client metadata document refused", why);
     return null;
   };
-  const got = await guardedJson(fetchFn, url);
+  const got = await guardedJson(fetchFn, url, CIMD_TYPES);
   if ("why" in got) return refuse(got.why);
   const d = got.doc;
   if (d.client_id !== url) return refuse("client_id is not the document URL");
@@ -648,7 +653,7 @@ async function fetchJwks(
     console.error("authtempo: client key set refused", why);
     return null;
   };
-  const got = await guardedJson(fetchFn, url);
+  const got = await guardedJson(fetchFn, url, JWKS_TYPES);
   if ("why" in got) return refuse(got.why);
   const raw = got.doc.keys;
   if (!Array.isArray(raw)) return refuse("no keys array");
