@@ -1,9 +1,23 @@
 /**
+ * The site's own names (brand spec 9 and 13): the origin of the canonical
+ * and Open Graph URLs, the docs path, and the two labels of the header.
+ * One source for each: no template holds a copy.
+ */
+export const SITE = {
+  origin: "https://authtempo.com",
+  docs: "/docs/",
+  /** The aria-label of the header nav. */
+  nav: "Site",
+  /** The label of the repository link, shown when REPO_URL is set. */
+  repo: "GitHub",
+} as const;
+
+/**
  * The links of the root header (brand spec 9). Each page of plan 11b adds
  * its link with the page, so no link names a page that does not exist.
  */
 export const NAV_LINKS: readonly { label: string; href: string }[] = [
-  { label: "Docs", href: "/docs/" },
+  { label: "Docs", href: SITE.docs },
 ];
 
 /**

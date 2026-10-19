@@ -8,6 +8,7 @@ import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import { FRAMEWORK_PAGES } from "./frameworks.mjs";
 import { parseTokens } from "./scripts/lib/tokens.ts";
+import { SITE } from "./src/data/site.ts";
 
 // One source for the paper color: the theme-color metas of the docs read tokens.css (brand spec 13).
 const tokens = parseTokens(
@@ -46,7 +47,7 @@ const sidebar = [
 export default defineConfig({
   // The domain that the owner named (decision 1a of 2026-10-14). This plan
   // deploys to a preview only. The owner publishes the site on this domain.
-  site: "https://authtempo.com",
+  site: SITE.origin,
   // Every page builds to <path>/index.html. The Worker's assets answer such a
   // file at <path>/ and send <path> there (html_handling auto-trailing-slash,
   // Cloudflare docs read 2026-10-14). Every link in a page ends with /.
@@ -83,7 +84,7 @@ export default defineConfig({
             content: tokens.darkAttr.get("--at-paper"),
           },
         },
-        { tag: "meta", attrs: { property: "og:image", content: "https://authtempo.com/og.png" } },
+        { tag: "meta", attrs: { property: "og:image", content: `${SITE.origin}/og.png` } },
       ],
     }),
   ],

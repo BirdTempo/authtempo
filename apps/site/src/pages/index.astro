@@ -2,10 +2,11 @@
 // biome-ignore-all lint/correctness/noUnusedImports: the template uses each import, and Biome 2.5.15 reads the frontmatter only
 // The home page on the root layout (plan 11b1 Task 7). Task 10 builds brand spec 9 on it.
 import { HOME } from "../data/home.ts";
+import { SITE } from "../data/site.ts";
 import Site from "../layouts/Site.astro";
 ---
 <Site title={HOME.title} description={HOME.description} path="/">
   <h1>{HOME.headline}</h1>
   <p>{HOME.lede}</p>
-  <p><a href="/docs/">{HOME.cta}</a></p>
+  <p><a href={SITE.docs}>{HOME.cta}</a></p>
 </Site>

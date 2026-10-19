@@ -63,6 +63,27 @@ describe("the root layout (plan 11b1)", () => {
       expect({ part, found: home.includes(part) }).toEqual({ part, found: true });
   });
 
+  it("links the lockup of the header home, with the beat", () => {
+    const lockup = tags(page("index.html"), "a").find((t) => t.includes(' class="at-lockup'));
+    expect(lockup).toMatch(/ class="at-lockup at-beat[ "]/);
+    expect(lockup).toContain(' href="/"');
+  });
+
+  it("writes the title, the description, and the Open Graph values of the home page", () => {
+    const home = page("index.html");
+    expect(home).toContain(`<title>${HOME.title}</title>`);
+    for (const [tag, attrs] of [
+      ["meta", { name: "description", content: HOME.description }],
+      ["link", { rel: "canonical", href: "https://authtempo.com/" }],
+      ["meta", { property: "og:title", content: HOME.title }],
+      ["meta", { property: "og:description", content: HOME.description }],
+      ["meta", { property: "og:type", content: "website" }],
+      ["meta", { property: "og:url", content: "https://authtempo.com/" }],
+      ["meta", { name: "twitter:card", content: "summary_large_image" }],
+    ] as const)
+      expect({ tag, attrs, found: hasTag(home, tag, attrs) }).toEqual({ tag, attrs, found: true });
+  });
+
   it("sets the metadata of brand spec 13 on every page but the 404 page", () => {
     for (const path of html.filter((p) => p !== "404.html")) {
       const h = page(path);
@@ -109,10 +130,8 @@ describe("the root layout (plan 11b1)", () => {
     // A reference such as var(--at-paper) is not enough: the definition must reach each page.
     for (const path of ["index.html", "docs/index.html"]) {
       const css = pageCss(page(path), read).replace(/\s+/g, "");
-      expect({ path, defined: css.includes("--at-paper:#f6f5f2") }).toEqual({
-        path,
-        defined: true,
-      });
+      const defined = css.includes(`--at-paper:${tokens.light.get("--at-paper")}`);
+      expect({ path, defined }).toEqual({ path, defined: true });
     }
   });
 
