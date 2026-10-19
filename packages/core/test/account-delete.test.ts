@@ -97,7 +97,7 @@ async function userOf(w: World, id: string): Promise<UserRow | null> {
  * 14, and 16 of plan 12e write the flows, and each one takes its model out
  * of this set.
  */
-const NO_FLOW_YET: ReadonlySet<string> = new Set([
+const NO_FLOW_YET: ReadonlySet<(typeof USER_CHILD_MODELS)[number]> = new Set([
   "oauthDevice",
   "oauthSubject",
   "oauthSessionClient",
@@ -270,6 +270,10 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
     // Every child model holds a row of the user, so each check below can fail.
     for (const model of USER_CHILD_MODELS.filter((m) => !NO_FLOW_YET.has(m)))
       expect((await childRows(w, model, me.user.id)).length, model).toBeGreaterThan(0);
+    // A model of NO_FLOW_YET holds no row here. When a task's flow writes one, this fails,
+    // and the task takes the model out of the set and into the loop above.
+    for (const model of NO_FLOW_YET)
+      expect(await childRows(w, model, me.user.id), model).toEqual([]);
     const proofs = () =>
       w.auth.storage.findMany("verification", [
         { field: "identifier", op: "in", value: [me.user.id, EMAIL] },
