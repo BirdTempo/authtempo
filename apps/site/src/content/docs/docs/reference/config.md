@@ -229,7 +229,7 @@ Another key of `oauth` is refused.
 | `oauth.resources` | string list | required | 1 to 20 distinct absolute `http` or `https` URLs with no query, fragment, or credentials. |
 | `oauth.scopes` | map of scope to text | the built-in scopes `openid`, `profile`, `email`, and `offline_access` | A built-in name is refused. A scope is 1 to 64 printable ASCII characters with no space, quote, or backslash. Its text is 1 to 200 characters. |
 | `oauth.registration` | object | `{ dynamic: false, cimd: true }` | See the three registration keys. Both `dynamic` and `cimd` may be off: `api.oauth.clients.create` is then the way in. |
-| `oauth.fetch` | fetch | none | Required while `registration.cimd` is on. It must refuse private addresses. |
+| `oauth.fetch` | fetch | none | Required while `registration.cimd` is on, and for a client with a back-channel sign-out URI. Core fetches documents and key sets through it, and posts each back-channel sign-out message through it. It must refuse private addresses for each of them: core cannot resolve a host name. Each sign-out with such a client can take up to 2 seconds more while the client does not answer. |
 | `oauth.consentPage` | function of `ConsentPageInput` | `defaultConsentPage` | Answers the markup of the consent page. |
 | `oauth.accessTtlMinutes` | number | `jwtMint.ttlMinutes` | An integer from 1 to 60. |
 | `oauth.refreshTtlDays` | number | 30 | An integer from 1 to 365. |

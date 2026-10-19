@@ -78,9 +78,10 @@ export async function queueLogouts(
 
 /**
  * Ends one session by id, with the outbox rows of its client links. It runs
- * on the store, not in a transaction: a sign-out can land while another
- * flow's transaction is open, and the memory adapter runs one at a time. So
- * the outbox write comes first and the delete second. A failure between
+ * on the store, not in a transaction. A sign-out can land while another
+ * flow's transaction is open. The memory adapter runs one transaction at a
+ * time, so a transaction here would wait for ever. So the outbox write comes
+ * first and the delete second. A failure between
  * them sends a logout for a live session: the client ends its session too
  * early, never too late. Two parallel ends can both write a row; a second
  * logout is harmless (Back-Channel Logout 2.7). Answers the delete count.

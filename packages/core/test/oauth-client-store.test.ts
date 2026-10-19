@@ -299,9 +299,9 @@ describe("api.oauth.clients (plan 12e)", () => {
     const res = await h.auth.handle(exchange(g.code, g.clientId, g.verifier));
     expect(res.status).toBe(200);
     // The device row comes from the device grant (Task 14). The session link
-    // and the outbox row come from the back-channel logout (Task 16): each
-    // client gets an ID token in the session of `g`, and in a second session
-    // that signs out while each client answers 500.
+    // and the outbox row come from the back-channel logout (Task 16). Each
+    // client gets an ID token in the session of `g`. It gets one in a second
+    // session too, which signs out while each client answers 500.
     const second = await createSession(h.config, {
       userId: g.user.id,
       ip: null,

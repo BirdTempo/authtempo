@@ -408,8 +408,8 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
     expect(await userOf(w, me.user.id)).toBeNull();
     for (const model of USER_CHILD_MODELS)
       expect(await childRows(w, model, me.user.id), model).toEqual([]);
-    // The delete sent the logout of its own session, and the one that waited
-    // for a retry: the outbox rows stay through the delete, and both were due.
+    // The delete sent the logout of its own session and the one that waited
+    // for a retry. The outbox rows stay through the delete, and both were due.
     expect(backchannel.posts.map((t) => decodeJwt(t).sid).sort()).toEqual(
       [me.session.id, third.value.session.id].sort(),
     );

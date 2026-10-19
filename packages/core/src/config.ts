@@ -585,9 +585,12 @@ export interface OAuthConfig {
    */
   registration?: { dynamic?: boolean; cimd?: boolean; initialAccessTokenHash?: string };
   /**
-   * The fetch for a client metadata document: the app's own guarded fetch,
-   * which refuses private addresses (SSRF). Required while `cimd` is on.
-   * Core adds the timeout, the size cap, and `redirect: "manual"`.
+   * The fetch for a client metadata document, a client key set, and each
+   * back-channel logout post: the app's own guarded fetch. It must refuse
+   * private addresses (SSRF) for each of them. Core cannot resolve a name,
+   * so a public name of a private address passes the host rule of core.
+   * Required while `cimd` is on, and for a `backchannel_logout_uri`. Core
+   * adds the timeout, the size cap, and `redirect: "manual"`.
    */
   fetch?: typeof fetch;
   /** The HTML of the consent page. Default `defaultConsentPage`. */
