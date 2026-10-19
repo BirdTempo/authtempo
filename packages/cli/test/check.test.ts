@@ -1,4 +1,7 @@
 import { readdirSync } from "node:fs";
+import { expectedD1Shape } from "@authtempo/adapter-d1";
+import { expectedPostgresShape } from "@authtempo/adapter-postgres";
+import type { LiveShape, LiveTable } from "@authtempo/core/sql";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   ALL_CHECK_CODES,
@@ -12,49 +15,20 @@ import { main } from "../src/main.js";
 import { describeUrl } from "../src/output.js";
 import { adapterD1Dir } from "../src/seams/d1.js";
 import { SCHEMA_VERSION } from "../src/version.js";
+import {
+  BASE,
+  COOKIE,
+  deployment,
+  doc,
+  healthy,
+  KEY,
+  keySet,
+  type Route,
+  signedOut,
+  signOut,
+} from "./support/deployment.js";
 import { type FakeIo, fakeIo } from "./support/fake-io.js";
 import { ADMIN_URL, freshDatabase } from "./support/pg.js";
-
-const BASE = "https://api.example.com";
-const COOKIE = "__Host-tempo_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax";
-type Route = (init: RequestInit) => Response;
-
-const signedOut = (cookie: string | null) =>
-  new Response('{"ok":true}', {
-    status: 200,
-    headers: [
-      ["content-type", "application/json"],
-      ...(cookie === null ? [] : [["set-cookie", cookie] as [string, string]]),
-    ],
-  });
-/** Core's sign-out: 403 for a foreign Origin, else 200 with the clear cookie. */
-const signOut =
-  (cookie: string | null): Route =>
-  (init) =>
-    new Headers(init.headers).has("origin")
-      ? Response.json({ error: "origin_not_trusted" }, { status: 403 })
-      : signedOut(cookie);
-const keySet = (keys: unknown[], cache: string | null = "public, max-age=300") =>
-  Response.json({ keys }, { headers: cache === null ? {} : { "cache-control": cache } });
-const KEY = { kty: "OKP", crv: "Ed25519", x: "AAAA", kid: "K1", alg: "EdDSA", use: "sig" };
-const doc =
-  (issuer = `${BASE}/auth`, jwks = `${BASE}/auth/jwks`) =>
-  () =>
-    Response.json({ issuer, jwks_uri: jwks });
-
-/** A deployment that answers as core does, route by route. */
-function healthy(): Map<string, Route> {
-  return new Map<string, Route>([
-    ["GET /auth/session", () => Response.json({ error: "unauthorized" }, { status: 401 })],
-    ["POST /auth/sign-out", signOut(COOKIE)],
-    ["GET /auth/jwks", () => keySet([KEY])],
-    ["GET /.well-known/openid-configuration", doc()],
-    ["GET /.well-known/oauth-authorization-server", doc()],
-  ]);
-}
-const deployment = (routes: Map<string, Route>) => async (url: string, init: RequestInit) =>
-  routes.get(`${init.method ?? "GET"} ${new URL(url).pathname}`)?.(init) ??
-  Response.json({ error: "not_found" }, { status: 404 });
 
 /** Every code that a test of this file saw: the last test holds the set to ALL_CHECK_CODES. */
 const seen = new Set<string>();
@@ -81,8 +55,39 @@ function expectNoCredential(io: FakeIo): void {
 }
 const result = (r: CheckReport | null, id: CheckId) => r?.checks.find((c) => c.id === id);
 
+/**
+ * The rows that `wrangler d1 execute --json` gives for the two reads of
+ * D1_SHAPE_SQL on a fresh database, for the fake wrangler below.
+ * check-schema.test.ts reads a real local D1 database.
+ */
+const D1_COLUMN_ROWS = expectedD1Shape().flatMap((t) =>
+  t.columns.map((c) => ({
+    tableName: t.name,
+    name: c.name,
+    type: c.type,
+    notNull: c.notNull ? 1 : 0,
+    dflt: null,
+    pk: t.primaryKey.indexOf(c.name) + 1,
+  })),
+);
+const D1_INDEX_ROWS = expectedD1Shape().flatMap((t) =>
+  [
+    ...t.unique.map((ix) => ({ ix, isUnique: 1 })),
+    ...t.indexes.map((ix) => ({ ix, isUnique: 0 })),
+  ].flatMap(({ ix, isUnique }) =>
+    ix.columns.map((col, seqno) => ({
+      tableName: t.name,
+      name: ix.name,
+      isUnique,
+      origin: "c",
+      seqno,
+      col,
+    })),
+  ),
+);
+
 describe("authtempo check (spec 19)", () => {
-  it("passes each check of a healthy deployment, skips the schema check with no database, and prints the summary", async () => {
+  it("passes each check of a healthy deployment, skips the schema checks with no database, and prints the summary", async () => {
     const io = fakeIo({ fetch: deployment(healthy()) });
     expect(await main(["check", BASE], io)).toBe(0);
     expect(io.stdout.map((l) => l.split(":")[0])).toEqual([
@@ -93,9 +98,10 @@ describe("authtempo check (spec 19)", () => {
       "pass  jwks",
       "pass  well_known",
       "skip  schema_version no_database",
+      "skip  schema_shape no_database",
       "checks",
     ]);
-    expect(io.stdout.at(-1)).toBe("checks: 7 run, 6 pass, 0 fail, 1 skip");
+    expect(io.stdout.at(-1)).toBe("checks: 8 run, 6 pass, 0 fail, 2 skip");
     expect(io.stderr[0]).toBe(`reading ${BASE}/auth and ${BASE}/.well-known/`);
   });
 
@@ -110,7 +116,7 @@ describe("authtempo check (spec 19)", () => {
     expect(io.stdout).toHaveLength(1);
     expect(Object.keys(report ?? {}).sort()).toEqual(Object.keys(CHECK_JSON_KEYS).sort());
     expect(report?.checks.map((c) => c.id)).toEqual([...CHECK_IDS]);
-    expect(report?.summary).toEqual({ run: 7, pass: 6, fail: 0, skip: 1 });
+    expect(report?.summary).toEqual({ run: 8, pass: 6, fail: 0, skip: 2 });
   });
 
   it("fails with the named code of each fault, and exits 1", async () => {
@@ -379,7 +385,7 @@ describe("authtempo check (spec 19)", () => {
           readSchema: async () => version,
         }),
       );
-      expect(r.checks.at(-1)).toMatchObject({ id: "schema_version", status, code });
+      expect(result(r, "schema_version")).toMatchObject({ status, code });
     }
   });
 
@@ -434,7 +440,7 @@ describe("authtempo check (spec 19)", () => {
       expect((await run(["migrate", "--target", "postgres"])).code).toBe(0);
       const current = await run(["check", BASE, "--target", "postgres"]);
       expect(current.code).toBe(0);
-      expect(current.io.stdout.at(-1)).toBe("checks: 7 run, 7 pass, 0 fail, 0 skip");
+      expect(current.io.stdout.at(-1)).toBe("checks: 8 run, 8 pass, 0 fail, 0 skip");
 
       // Applied migrations with no version row: migrate stops on it, so check stops the same way.
       await db.sql`DELETE FROM ta_meta WHERE key = 'schema_version'`;
@@ -447,6 +453,154 @@ describe("authtempo check (spec 19)", () => {
     } finally {
       await db.drop();
     }
+  });
+
+  it("compares the table shape after a current schema version, and reports each code of schema_shape", async () => {
+    const expected = expectedPostgresShape();
+    const fresh = (): LiveTable[] =>
+      expected.map((t) => ({ ...t, columns: t.columns.map((c) => ({ ...c, hasDefault: false })) }));
+    /** The fresh shape with `change` applied to the table `name`; null drops the table. */
+    const drift = (name: string, change: (t: LiveTable) => LiveTable | null): LiveShape =>
+      fresh().flatMap((t) => {
+        if (t.name !== name) return [t];
+        const c = change(t);
+        return c === null ? [] : [c];
+      });
+    const calls: string[] = [];
+    const run = (o: { version?: number; compat?: boolean; live?: LiveShape }) =>
+      runChecks({
+        base: BASE,
+        basePath: "/auth",
+        fetch: deployment(healthy()),
+        timeoutMs: 1000,
+        schemaVersion: 7,
+        readSchema: async () => o.version ?? 7,
+        shape: {
+          expected,
+          read: async () => {
+            calls.push("read");
+            return o.live ?? fresh();
+          },
+          compat: async () => {
+            calls.push("compat");
+            return o.compat ?? false;
+          },
+        },
+      }).then(observe);
+    const shapeOf = (r: CheckReport) => result(r, "schema_shape");
+
+    // A schema version that does not pass reads no shape.
+    expect(shapeOf(await run({ version: 6 }))).toEqual({
+      id: "schema_shape",
+      status: "skip",
+      code: "schema_not_current",
+      detail: "the schema version did not pass: run authtempo migrate, then check again",
+    });
+    expect(calls).toEqual([]);
+    // A compat database reads no shape.
+    expect(shapeOf(await run({ compat: true }))).toEqual({
+      id: "schema_shape",
+      status: "skip",
+      code: "compat_database",
+      detail:
+        "the database holds the Better Auth compatibility tables; the shape of core's tables does not apply",
+    });
+    expect(calls).toEqual(["compat"]);
+    const pass = await run({});
+    expect(shapeOf(pass)?.status).toBe("pass");
+    expect(pass.warnings).toEqual([]);
+
+    // Each failure code, as the code of the check.
+    const withColumn = (t: LiveTable, name: string, change: object): LiveTable => ({
+      ...t,
+      columns: t.columns.map((c) => (c.name === name ? { ...c, ...change } : c)),
+    });
+    const fails: [string, LiveShape][] = [
+      ["schema_table_missing", drift("ta_api_token", () => null)],
+      [
+        "schema_column_missing",
+        drift("ta_user", (t) => ({ ...t, columns: t.columns.filter((c) => c.name !== "image") })),
+      ],
+      [
+        "schema_column_type",
+        drift("ta_session", (t) => withColumn(t, "expires_at", { type: "text" })),
+      ],
+      ["schema_column_null", drift("ta_user", (t) => withColumn(t, "name", { notNull: true }))],
+      ["schema_unique_missing", drift("ta_user", (t) => ({ ...t, unique: [] }))],
+    ];
+    for (const [code, live] of fails) {
+      const r = await run({ live });
+      expect(shapeOf(r), code).toMatchObject({ status: "fail", code });
+      expect(r.summary.fail).toBe(1);
+    }
+
+    // Six failures and four warnings at once: the detail names the first five.
+    let many = fresh();
+    for (const [name, change] of [
+      ["ta_api_token", () => null],
+      [
+        "ta_session",
+        (t: LiveTable) => ({
+          ...withColumn(withColumn(t, "expires_at", { type: "text" }), "ip", { notNull: true }),
+          indexes: t.indexes.filter((i) => i.name !== "ix_ta_session__user_id"),
+        }),
+      ],
+      [
+        "ta_user",
+        (t: LiveTable) => ({
+          ...t,
+          columns: [
+            ...t.columns.filter((c) => c.name !== "image"),
+            { name: "nickname", type: "text", notNull: false, hasDefault: false },
+            { name: "plan", type: "text", notNull: true, hasDefault: false },
+          ],
+          unique: [],
+        }),
+      ],
+      ["ta_verification", (t: LiveTable) => ({ ...t, unique: [] })],
+    ] as [string, (t: LiveTable) => LiveTable | null][]) {
+      many = many.flatMap((t) => {
+        if (t.name !== name) return [t];
+        const c = change(t);
+        return c === null ? [] : [c];
+      });
+    }
+    many = [
+      ...many,
+      {
+        name: "ta_app_note",
+        columns: [{ name: "id", type: "text", notNull: true, hasDefault: false }],
+        primaryKey: ["id"],
+        unique: [],
+        indexes: [],
+      },
+    ];
+    const r = await run({ live: many });
+    expect(shapeOf(r)).toEqual({
+      id: "schema_shape",
+      status: "fail",
+      code: "schema_table_missing",
+      detail:
+        "the table ta_api_token is missing; the column expires_at of ta_session has another type than the migrations make; the column ip of ta_session has another NOT NULL rule than the migrations make; the table ta_user has no column image; the table ta_user has no unique index ux_ta_user__email on the columns of the migrations; and 1 more",
+    });
+    expect(r.warnings).toEqual([
+      "schema_index_missing: the table ta_session has no index ix_ta_session__user_id on the columns of the migrations",
+      "schema_column_extra: the table ta_user has the column nickname, which the migrations do not make",
+      "schema_column_extra_required: the table ta_user has the NOT NULL column plan with no default: each insert of core into ta_user fails",
+      "schema_table_extra: the database has the table ta_app_note, which the migrations do not make",
+    ]);
+
+    // Warnings alone pass, and the detail counts them.
+    const warned = await run({
+      live: [...fresh(), ...many.filter((t) => t.name === "ta_app_note")],
+    });
+    expect(shapeOf(warned)).toEqual({
+      id: "schema_shape",
+      status: "pass",
+      code: null,
+      detail:
+        "each table of the adapter's migrations has its columns and its keys, with 1 warning(s)",
+    });
   });
 
   it("reads the schema version of D1 with --target d1, through the project's wrangler", async () => {
@@ -467,9 +621,13 @@ describe("authtempo check (spec 19)", () => {
           const sql = args[args.indexOf("--command") + 1] ?? "";
           const rows = sql.includes("d1_migrations")
             ? own.map((name) => ({ name }))
-            : version === null
-              ? []
-              : [{ value: version }];
+            : sql.includes("pragma_table_info")
+              ? D1_COLUMN_ROWS
+              : sql.includes("pragma_index_list")
+                ? D1_INDEX_ROWS
+                : sql.includes("compat_better_auth") || version === null
+                  ? []
+                  : [{ value: version }];
           return {
             status: 0,
             stdout: JSON.stringify([{ results: rows, success: true }]),
@@ -481,7 +639,7 @@ describe("authtempo check (spec 19)", () => {
     };
     const current = d1(String(SCHEMA_VERSION));
     expect(await main(["check", BASE, "--target", "d1"], current)).toBe(0);
-    expect(current.stdout.at(-1)).toBe("checks: 7 run, 7 pass, 0 fail, 0 skip");
+    expect(current.stdout.at(-1)).toBe("checks: 8 run, 8 pass, 0 fail, 0 skip");
     expect(current.stderr).toContain("reading the local D1 database cli-d1");
     expectNoCredential(current);
 

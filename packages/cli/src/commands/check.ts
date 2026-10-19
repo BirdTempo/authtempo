@@ -1,7 +1,9 @@
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { expectedD1Shape } from "@authtempo/adapter-d1";
+import { expectedPostgresShape } from "@authtempo/adapter-postgres";
 import { COMMON_OPTIONS, oneOf, parseOrUsage } from "../args.js";
-import { runChecks } from "../checks.js";
+import { type CheckInput, runChecks } from "../checks.js";
 import type { Command } from "../command.js";
 import { Stop, UsageError } from "../errors.js";
 import { CHECK_HELP } from "../help/check.js";
@@ -9,8 +11,14 @@ import type { CheckJson } from "../json.js";
 import { baseOf, basePathOf, timeoutOf } from "../net.js";
 import { describeUrl, printJson } from "../output.js";
 import { readableVersion, readD1Version } from "../schema-version.js";
-import { findWranglerConfig, readD1Project, wranglerOf } from "../seams/d1.js";
-import { openPostgres, storageFailure } from "../seams/postgres.js";
+import {
+  findWranglerConfig,
+  readD1CompatText,
+  readD1Project,
+  readD1Shape,
+  wranglerOf,
+} from "../seams/d1.js";
+import { openPostgres, readPostgresLiveShape, storageFailure } from "../seams/postgres.js";
 import { DEFAULT_URL_ENV, readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
 
@@ -27,12 +35,19 @@ const OPTIONS = {
   remote: { type: "boolean" },
 } as const;
 
+/**
+ * A database holds the compat tables when its `compat_better_auth` row has a
+ * text other than "0" (ruling 11 of plan 11c2). The compat migrations write
+ * "1" and up; a core database has no row.
+ */
+const compatRow = (text: string | null) => text !== null && text !== "0";
+
 const POSTGRES_FLAGS = ["url-env", "url-file"] as const;
 const D1_FLAGS = ["database", "config", "remote"] as const;
 
 /**
  * `authtempo check <base url>` (spec 19). It runs `runChecks` over the
- * network, with the schema check on the database that `--target` names.
+ * network, with the two schema checks on the database that `--target` names.
  * Exit 0 when no check fails, 1 when one fails, 2 when a host or the
  * database gives no answer.
  */
@@ -57,6 +72,7 @@ export const checkCommand: Command = {
       if (v[flag] !== undefined && target !== "d1")
         throw new UsageError(`--${flag} needs --target d1`);
     let readSchema: (() => Promise<number | null>) | undefined;
+    let shape: CheckInput["shape"];
     if (target === "postgres") {
       const url = readSecret(ctx, {
         envFlag: "url-env",
@@ -86,6 +102,20 @@ export const checkCommand: Command = {
           await pg.close();
         }
       };
+      shape = {
+        expected: expectedPostgresShape(),
+        read: () => readPostgresLiveShape(url),
+        async compat() {
+          const pg = openPostgres(url, 1);
+          try {
+            return compatRow(await pg.compatText());
+          } catch (e) {
+            throw new Stop(storageFailure(e, url));
+          } finally {
+            await pg.close();
+          }
+        },
+      };
     } else if (target === "d1") {
       const project = readD1Project(ctx, findWranglerConfig(ctx, v.config), v.database);
       if (!ctx.exists(wranglerOf(project.cwd)))
@@ -97,6 +127,11 @@ export const checkCommand: Command = {
         ctx.err(`reading the ${t.remote ? "remote" : "local"} D1 database ${t.database}`);
         return (await readD1Version(ctx, t)).version;
       };
+      shape = {
+        expected: expectedD1Shape(),
+        read: () => readD1Shape(ctx, t),
+        compat: async () => compatRow(await readD1CompatText(ctx, t)),
+      };
     }
     ctx.err(`reading ${base}${basePath} and ${base}/.well-known/`);
     const report = await runChecks({
@@ -107,6 +142,7 @@ export const checkCommand: Command = {
       schemaVersion: SCHEMA_VERSION,
       strict: v.strict === true,
       ...(readSchema ? { readSchema } : {}),
+      ...(shape ? { shape } : {}),
     });
     for (const w of report.warnings) ctx.err(`warning: ${w}`);
     const exit = report.summary.fail > 0 ? 1 : 0;

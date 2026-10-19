@@ -1,4 +1,5 @@
 import { env, SELF } from "cloudflare:test";
+import { D1_SHAPE_SQL, expectedD1Shape, parseD1Shape } from "@authtempo/adapter-d1";
 import { CHECK_IDS, type CheckReport, runChecks } from "@authtempo/cli";
 import { SCHEMA_VERSION } from "@authtempo/core";
 import { expect, it } from "vitest";
@@ -30,11 +31,11 @@ const wrap =
     return match(new URL(url)) ? change(res) : res;
   };
 
-it("passes each check against the example Worker on D1, and skips the schema check with no database (plan 11c)", async () => {
+it("passes each check against the example Worker on D1, and skips the schema checks with no database (plan 11c)", async () => {
   const r = await check(worker);
   expect(lines(r)).toEqual(
     CHECK_IDS.map((id) =>
-      id === "schema_version" ? "schema_version skip no_database" : `${id} pass`,
+      id === "schema_version" || id === "schema_shape" ? `${id} skip no_database` : `${id} pass`,
     ),
   );
 });
@@ -48,7 +49,35 @@ it("reads the schema version of the Worker's own D1 database", async () => {
     }>();
     return row ? Number(row.value) : null;
   });
-  expect(r.checks.at(-1)).toMatchObject({ id: "schema_version", status: "pass" });
+  expect(r.checks.find((c) => c.id === "schema_version")).toMatchObject({ status: "pass" });
+});
+
+it("compares the table shape of the Worker's own D1 database in workerd (plan 11c2)", async () => {
+  const rows = async (sql: string) => (await env.DB.prepare(sql).all()).results;
+  const r = await runChecks({
+    base: BASE,
+    basePath: "/auth",
+    fetch: worker,
+    timeoutMs: 10_000,
+    schemaVersion: SCHEMA_VERSION,
+    readSchema: async () => {
+      const row = await env.DB.prepare(
+        "SELECT value FROM ta_meta WHERE key = 'schema_version'",
+      ).first<{ value: string }>();
+      return row ? Number(row.value) : null;
+    },
+    shape: {
+      expected: expectedD1Shape(),
+      read: async () =>
+        parseD1Shape(await rows(D1_SHAPE_SQL.columns), await rows(D1_SHAPE_SQL.indexes)),
+      compat: async () => false,
+    },
+  });
+  expect(r.checks.find((c) => c.id === "schema_shape")).toMatchObject({
+    status: "pass",
+    code: null,
+  });
+  expect(r.warnings).toEqual([]);
 });
 
 it("fails with the named code of each fault of a deployment", async () => {

@@ -25,13 +25,13 @@ async function keyIds(): Promise<string[]> {
 }
 
 describe("the live runs (spec 19)", () => {
-  it("passes each check against wrangler dev of the example Worker, and skips the schema check", () => {
+  it("passes each check against wrangler dev of the example Worker, and skips the schema checks", () => {
     const r = runBin(["check", base()]);
     expect(r.status, `${r.stdout}${r.stderr}`).toBe(0);
-    expect(linesOf(r.stdout).at(-1)).toBe("checks: 7 run, 6 pass, 0 fail, 1 skip");
+    expect(linesOf(r.stdout).at(-1)).toBe("checks: 8 run, 6 pass, 0 fail, 2 skip");
   });
 
-  it("exits 1 with --strict, because the schema check skips", () => {
+  it("exits 1 with --strict, because the schema checks skip", () => {
     expect(runBin(["check", base(), "--strict"]).status).toBe(1);
   });
 

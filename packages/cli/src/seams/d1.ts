@@ -1,8 +1,11 @@
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
+import { D1_SHAPE_SQL, parseD1Shape } from "@authtempo/adapter-d1";
+import type { LiveShape } from "@authtempo/core/sql";
 import { Stop, UsageError } from "../errors.js";
 import { parseJsonc } from "../jsonc.js";
 import type { Ctx } from "../output.js";
+import { COMPAT_META_KEY } from "./postgres.js";
 
 /**
  * The D1 seam of the CLI (spec 19): the one module that runs wrangler. The
@@ -150,20 +153,35 @@ async function select(
 
 const NO_TABLE = /no such table/i;
 
-/**
- * The text of `ta_meta.schema_version` in the D1 database, or null when the
- * table or the row is missing. The command reads it through
- * `readableVersion`, the one rule of both targets: this seam converts no
- * number, so a value such as `9x` never becomes NaN here.
- */
-export async function readD1VersionText(ctx: Ctx, t: D1Target): Promise<string | null> {
-  const r = await select(ctx, t, "SELECT value FROM ta_meta WHERE key = 'schema_version'");
+/** The text of one row of `ta_meta`, or null when the table or the row is missing. */
+async function readD1MetaText(ctx: Ctx, t: D1Target, key: string): Promise<string | null> {
+  const r = await select(ctx, t, `SELECT value FROM ta_meta WHERE key = '${key}'`);
   if ("failure" in r) {
     if (NO_TABLE.test(r.failure)) return null;
     throw new Stop(`wrangler d1 execute: ${firstError(r.failure)}`);
   }
   const v = r.rows[0]?.value;
   return v === undefined || v === null ? null : String(v);
+}
+
+/**
+ * The text of `ta_meta.schema_version` in the D1 database, or null when the
+ * table or the row is missing. The command reads it through
+ * `readableVersion`, the one rule of both targets: this seam converts no
+ * number, so a value such as `9x` never becomes NaN here.
+ */
+export function readD1VersionText(ctx: Ctx, t: D1Target): Promise<string | null> {
+  return readD1MetaText(ctx, t, "schema_version");
+}
+
+/**
+ * The text of the compat mapping version of the D1 database, or null when
+ * the table or the row is missing. The failure rule is the one of
+ * `readD1VersionText`. The compat copy of `migrate` reads it first, so the
+ * database decides which compat files the app holds already (plan 11f Task 5).
+ */
+export function readD1CompatText(ctx: Ctx, t: D1Target): Promise<string | null> {
+  return readD1MetaText(ctx, t, COMPAT_META_KEY);
 }
 
 /** The migrations that wrangler applied, by name without `.sql`. */
@@ -181,6 +199,26 @@ export async function applyD1(ctx: Ctx, t: D1Target): Promise<void> {
   const r = await wrangler(ctx, t, ["d1", "migrations", "apply", t.database]);
   if (r.status !== 0)
     throw new Stop(`wrangler d1 migrations apply: ${firstError(`${r.stdout}\n${r.stderr}`)}`);
+}
+
+/**
+ * The live table shape of the D1 database (plan 11c2): the two reads of
+ * `D1_SHAPE_SQL` through `wrangler d1 execute --json`, then `parseD1Shape`.
+ * A refused read, or a row that the parse refuses, stops the run (exit 2).
+ */
+export async function readD1Shape(ctx: Ctx, t: D1Target): Promise<LiveShape> {
+  const rows = async (sql: string) => {
+    const r = await select(ctx, t, sql);
+    if ("failure" in r) throw new Stop(`wrangler d1 execute: ${firstError(r.failure)}`);
+    return r.rows;
+  };
+  const columns = await rows(D1_SHAPE_SQL.columns);
+  const indexes = await rows(D1_SHAPE_SQL.indexes);
+  try {
+    return parseD1Shape(columns, indexes);
+  } catch (e) {
+    throw new Stop(`wrangler d1 execute: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 const resolver = createRequire(import.meta.url);

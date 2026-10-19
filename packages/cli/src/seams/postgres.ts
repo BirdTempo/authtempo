@@ -2,17 +2,23 @@ import {
   applyPostgresMigrations,
   createPostgresAdapter,
   MIGRATIONS,
+  readPostgresShape,
 } from "@authtempo/adapter-postgres";
 import { betterAuthSchemaStorage, COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import type { StorageAdapter } from "@authtempo/core";
-import { META_TABLE, SCHEMA_VERSION_KEY } from "@authtempo/core/sql";
+import { type LiveShape, META_TABLE, SCHEMA_VERSION_KEY } from "@authtempo/core/sql";
 import postgres, { type Sql } from "postgres";
+import { Stop } from "../errors.js";
 import { describeUrl } from "../output.js";
 
 /** Postgres SQLSTATE for "undefined table": the migrations never ran. */
 const UNDEFINED_TABLE = "42P01";
-/** The meta key of the mapping version of the compatibility package (its src/storage/migration.ts). */
-const COMPAT_META_KEY = "compat_better_auth";
+/**
+ * The meta key of the mapping version of the compatibility package (its
+ * src/storage/migration.ts, which does not export it). The D1 seam reads the
+ * same constant, so both targets name one key (plan 11f Task 5).
+ */
+export const COMPAT_META_KEY = "compat_better_auth";
 /** The table where adapter-postgres records each applied migration (its src/migrations.ts). */
 const MIGRATIONS_TABLE = "ta_migrations";
 
@@ -75,6 +81,8 @@ export interface PostgresSeam {
   schemaVersionText(): Promise<string | null>;
   /** The mapping version of the compatibility package, 0 when it is missing. */
   compatVersion(): Promise<number>;
+  /** The raw text of the compat mapping version, or null when it is missing. `check` reads it (plan 11c2). */
+  compatText(): Promise<string | null>;
   /** The names in `ta_migrations`, or none when the table is missing. */
   appliedCore(): Promise<string[]>;
   /** `applyPostgresMigrations`: its advisory lock keeps two runs at once safe. */
@@ -105,6 +113,7 @@ export function openPostgres(url: string, max: number): PostgresSeam {
     async compatVersion() {
       return Number((await readMeta(sql, COMPAT_META_KEY)) ?? "0");
     },
+    compatText: () => readMeta(sql, COMPAT_META_KEY),
     async appliedCore() {
       try {
         const rows = await sql.unsafe<{ name: string }[]>(`SELECT name FROM ${MIGRATIONS_TABLE}`);
@@ -123,4 +132,20 @@ export function openPostgres(url: string, max: number): PostgresSeam {
     },
     close: () => sql.end({ timeout: 5 }),
   };
+}
+
+/**
+ * The live table shape of the database at `url` (plan 11c2): one connection,
+ * `readPostgresShape` of the adapter, then the close. A driver error stops
+ * the run with `storageFailure` (exit 2), as the schema version read does.
+ */
+export async function readPostgresLiveShape(url: string): Promise<LiveShape> {
+  const sql: Sql = postgres(url, { max: 1, onnotice: () => {} });
+  try {
+    return await readPostgresShape(sql);
+  } catch (e) {
+    throw new Stop(storageFailure(e, url));
+  } finally {
+    await sql.end({ timeout: 5 });
+  }
 }

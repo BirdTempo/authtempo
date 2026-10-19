@@ -135,9 +135,10 @@ const hostileAnswer = (base: string) => ({
       docs: `${PAGE}#well_known_issuer`,
     },
     { id: "schema_version", status: "skip", code: "no_database", docs: `${PAGE}#no_database` },
+    { id: "schema_shape", status: "skip", code: "no_database", docs: `${PAGE}#no_database` },
   ],
   warnings: ["cookie_samesite_none"],
-  summary: { run: 7, pass: 4, fail: 2, skip: 1 },
+  summary: { run: 8, pass: 4, fail: 2, skip: 2 },
   exit: 1,
   stopped: null,
 });
@@ -219,7 +220,7 @@ describe("check against the example Worker", () => {
     const checks = doc.checks as { id: string; status: string; code: string | null }[];
     expect(checks.map((c) => c.id)).toEqual([...CHECK_IDS]);
     for (const c of checks) if (c.code !== null) expect(ALL_CHECK_CODES).toContain(c.code);
-    // The live run of the CLI: six passes, and the schema check skips with no database.
+    // The live run of the CLI: six passes, and the two schema checks skip with no database.
     expect(checks.map((c) => [c.status, c.code])).toEqual([
       ["pass", null],
       ["pass", null],
@@ -228,11 +229,12 @@ describe("check against the example Worker", () => {
       ["pass", null],
       ["pass", null],
       ["skip", "no_database"],
+      ["skip", "no_database"],
     ]);
     expect(doc).toMatchObject({
       base,
       warnings: [],
-      summary: { run: 7, pass: 6, fail: 0, skip: 1 },
+      summary: { run: 8, pass: 6, fail: 0, skip: 2 },
       exit: 0,
       stopped: null,
     });
@@ -327,11 +329,12 @@ describe("check", () => {
       ["jwks", "fail", "no_mount"],
       ["well_known", "fail", "oauth_off"],
       ["schema_version", "fail", "no_database"],
+      ["schema_shape", "fail", "no_database"],
     ]);
-    expect(doc).toMatchObject({ summary: { run: 7, pass: 1, fail: 6, skip: 0 }, exit: 1 });
+    expect(doc).toMatchObject({ summary: { run: 8, pass: 1, fail: 7, skip: 0 }, exit: 1 });
 
     const hostileChecks = (hostile.structured?.checks ?? []) as typeof checks;
-    expect(hostileChecks).toHaveLength(7);
+    expect(hostileChecks).toHaveLength(8);
     for (const c of [...checks, ...hostileChecks]) {
       if (c.status === "pass") {
         expect(c.docs, c.id).toBeNull();

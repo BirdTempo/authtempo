@@ -1,4 +1,6 @@
+import type { ExpectedShape, LiveShape } from "@authtempo/core/sql";
 import { type Fetcher, fetchWithin, HostError, isLocalHost } from "./net.js";
+import { compareShape, findingText } from "./schema-shape.js";
 
 // The checks of `authtempo check` (spec 19). This file and its imports use
 // no Node.js module, so a Worker test runs them in workerd. Every request
@@ -13,6 +15,7 @@ export const CHECK_IDS = [
   "jwks",
   "well_known",
   "schema_version",
+  "schema_shape",
 ] as const;
 export type CheckId = (typeof CHECK_IDS)[number];
 export type CheckStatus = "pass" | "fail" | "skip";
@@ -77,6 +80,22 @@ export const CHECK_CODES = {
     warn: [],
     skip: ["no_database"],
   },
+  schema_shape: {
+    fail: [
+      "schema_table_missing",
+      "schema_column_missing",
+      "schema_column_type",
+      "schema_column_null",
+      "schema_unique_missing",
+    ],
+    warn: [
+      "schema_index_missing",
+      "schema_column_extra",
+      "schema_column_extra_required",
+      "schema_table_extra",
+    ],
+    skip: ["no_database", "schema_not_current", "compat_database"],
+  },
 } as const satisfies Record<
   CheckId,
   { fail: readonly string[]; warn: readonly string[]; skip: readonly string[] }
@@ -97,6 +116,15 @@ export interface CheckInput {
   schemaVersion: number;
   /** Reads the schema version of the database. Absent: the schema check skips. */
   readSchema?: () => Promise<number | null>;
+  /** The table shape of the database (plan 11c2). Absent: the shape check skips. */
+  shape?: {
+    /** The shape that the adapter's migrations make. */
+    expected: ExpectedShape;
+    /** Reads the live shape. A throw ends the run, as a throw of `readSchema` does. */
+    read: () => Promise<LiveShape>;
+    /** True when the database holds the compat tables, which have another shape (ruling 11). */
+    compat: () => Promise<boolean>;
+  };
   /** Each skip counts as a failure. */
   strict?: boolean;
 }
@@ -188,7 +216,7 @@ const goodKey = (k: Record<string, unknown>) =>
   typeof k.kid === "string" && (k.alg === "EdDSA" || k.alg === "ES256") && k.use === "sig";
 
 /**
- * Runs the seven checks in the order of CHECK_IDS. A host that gives no HTTP
+ * Runs the eight checks in the order of CHECK_IDS. A host that gives no HTTP
  * answer throws a HostError (exit 2); every answer is a result. The function
  * fails itself when it reports another list than CHECK_IDS, so a check that
  * does not run cannot pass in silence.
@@ -426,6 +454,55 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
         `the database is at version ${v}; this CLI knows ${input.schemaVersion}: use a newer CLI`,
       );
     else add("schema_version", "pass", null, `the database is at version ${v}`);
+  }
+
+  const version = results.at(-1);
+  if (!input.shape)
+    add(
+      "schema_shape",
+      "skip",
+      "no_database",
+      "give --target and the inputs of the database to compare its tables",
+    );
+  else if (version?.status !== "pass")
+    add(
+      "schema_shape",
+      "skip",
+      "schema_not_current",
+      "the schema version did not pass: run authtempo migrate, then check again",
+    );
+  else if (await input.shape.compat())
+    add(
+      "schema_shape",
+      "skip",
+      "compat_database",
+      "the database holds the Better Auth compatibility tables; the shape of core's tables does not apply",
+    );
+  else {
+    const findings = compareShape(input.shape.expected, await input.shape.read());
+    for (const f of findings) if (f.kind === "warn") warnings.push(`${f.code}: ${findingText(f)}`);
+    const failures = findings.filter((f) => f.kind === "fail");
+    const first = failures[0];
+    const warned = findings.length - failures.length;
+    if (first === undefined)
+      add(
+        "schema_shape",
+        "pass",
+        null,
+        warned === 0
+          ? "each table of the adapter's migrations has its columns, its keys, and its indexes"
+          : `each table of the adapter's migrations has its columns and its keys, with ${warned} warning(s)`,
+      );
+    else {
+      // The first five failures name the fix; the count of the rest keeps the line short.
+      const rest = failures.length - 5;
+      add(
+        "schema_shape",
+        "fail",
+        first.code,
+        `${failures.slice(0, 5).map(findingText).join("; ")}${rest > 0 ? `; and ${rest} more` : ""}`,
+      );
+    }
   }
 
   if (results.length !== CHECK_IDS.length || results.some((r, i) => r.id !== CHECK_IDS[i]))

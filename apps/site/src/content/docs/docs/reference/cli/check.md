@@ -7,6 +7,7 @@ sources:
   - packages/core/src/http/routes/sessions.ts
   - packages/core/src/http/cookies.ts
   - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 8"
+  - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 7"
 sidebar:
   order: 5
 ---
@@ -35,7 +36,7 @@ authtempo check https://api.example.com --target postgres --url-env DATABASE_URL
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |
 | `--timeout <seconds>` | The time limit of each request, from 1 to 120. The default is 10. |
 | `--strict` | Counts each skipped check as a failure. |
-| `--target postgres`, `--target d1` | Reads the schema version of the database. Without it, the schema check skips. |
+| `--target postgres`, `--target d1` | Read the schema version and the table shape from this kind of database. Without it, the two schema checks skip. |
 | `--url-env <NAME>`, `--url-file <path>` | Postgres: the connection string. The default variable is `DATABASE_URL`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--database <name>`, `--config <path>`, `--remote` | D1: the database of the wrangler config, as for `authtempo migrate`. |
 | `--json` | Prints `{ base, checks, warnings, summary, exit, stopped }`. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
@@ -47,7 +48,7 @@ authtempo check https://api.example.com --target postgres --url-env DATABASE_URL
 | 1 | A check failed. A person must look. |
 | 2 | A usage error, a host or a database that gives no answer, or a schema version that this CLI cannot read. |
 
-Each check reports `pass`, `fail` with a code, or `skip` with a reason. A skip never counts as a pass. The last line counts the checks, such as `checks: 7 run, 6 pass, 0 fail, 1 skip`.
+The command runs eight checks. Each check reports `pass`, `fail` with a code, or `skip` with a reason. A skip never counts as a pass. The last line counts the checks, such as `checks: 8 run, 6 pass, 0 fail, 2 skip`.
 
 The first read of the key set on a new database writes its first signing key. That is the first-use rule of core.
 
@@ -176,6 +177,54 @@ The database is at an older version than the core of the CLI. Run `authtempo mig
 <h3 id="schema_ahead"><code>schema_ahead</code></h3>
 
 The database is at a newer version than the core of the CLI. Use a newer CLI.
+
+## schema_shape
+
+The check compares each `ta_` table of the database with the tables that the migrations of the adapter make. It compares the columns, their types, the NOT NULL rules, the primary key, and the indexes. The order of the columns is no finding, and an extra index is no finding. A warning is a line that starts with its code. A name that is not a plain SQL name prints as "a name that is not a plain SQL name". The skip `no_database` is the one of `schema_version`.
+
+<h3 id="schema_not_current"><code>schema_not_current</code></h3>
+
+A skip: the `schema_version` check did not pass, so the tables are not the tables of this CLI. Run `authtempo migrate`, then check again.
+
+<h3 id="compat_database"><code>compat_database</code></h3>
+
+A skip: the database holds the Better Auth compatibility tables, which have another shape. The check is for a database of core's own tables.
+
+<h3 id="schema_table_missing"><code>schema_table_missing</code></h3>
+
+A table of the migrations is missing. Core fails on each operation that uses it. Run `authtempo migrate`, or restore the table from a backup.
+
+<h3 id="schema_column_missing"><code>schema_column_missing</code></h3>
+
+A column of the migrations is missing. Core fails on each read or write of the table. Add the column again as the migration makes it.
+
+<h3 id="schema_column_type"><code>schema_column_type</code></h3>
+
+A column has another type than the migration makes. Core can read wrong values from it. Change the column back to the type of the migration.
+
+<h3 id="schema_column_null"><code>schema_column_null</code></h3>
+
+A column has another NOT NULL rule than the migration makes. A NOT NULL column where core writes null fails each insert. Change the rule back to the rule of the migration.
+
+<h3 id="schema_unique_missing"><code>schema_unique_missing</code></h3>
+
+A unique index or the primary key is missing, or has another column order. Core maps a unique conflict to its fields by the index name, and the claim rule needs the unique email. Make the index again with the name and the columns of the migration.
+
+<h3 id="schema_index_missing"><code>schema_index_missing</code></h3>
+
+A warning, not a failure. A plain index of the migrations is missing, or has another column order. The reads of core become slow on a large table. Make the index again.
+
+<h3 id="schema_column_extra"><code>schema_column_extra</code></h3>
+
+A warning, not a failure. The table has a column that the migrations do not make. Core does not read or write it. Keep it only when your app needs it.
+
+<h3 id="schema_column_extra_required"><code>schema_column_extra_required</code></h3>
+
+A warning, not a failure. The table has an extra NOT NULL column with no default, so each insert of core into the table fails. Give the column a default, or make it nullable.
+
+<h3 id="schema_table_extra"><code>schema_table_extra</code></h3>
+
+A warning, not a failure. The database has a `ta_` table that the migrations do not make. The `ta_` prefix is for core's tables. Give the table of your app another name.
 
 ## Next
 

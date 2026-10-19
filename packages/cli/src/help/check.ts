@@ -39,7 +39,7 @@ export const CHECK_HELP: HelpText = {
     },
     {
       line: "authtempo check https://api.example.com --target postgres --url-env DATABASE_URL",
-      says: "Also compare the schema version of the database with the version of this CLI.",
+      says: "Also compare the schema version and the tables of the database with this CLI.",
     },
   ],
   flags: [
@@ -51,7 +51,7 @@ export const CHECK_HELP: HelpText = {
     { flag: "--strict", says: "Count each skipped check as a failure." },
     {
       flag: "--target <d1|postgres>",
-      says: "Read the schema version from this kind of database. Without it, the schema check skips.",
+      says: "Read the schema version and the table shape from this kind of database. Without it, the two schema checks skip.",
     },
     ...DATABASE_FLAGS,
     ...COMMON_FLAGS,
