@@ -126,3 +126,48 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   tracker. The site sets no cookie.
 - The demo holds no secret and sends no request out of its Worker. Each
   limit of the demo is our own code.
+
+## Owner-run items of the site and the demo
+
+The owner runs or decides each item below. No task of plan 11b runs one. This is the one list for `apps/site` and `apps/demo`.
+
+### Publication
+
+- The site: publish the site Worker and add its custom domain. Publication is on hold since 2026-10-11. Until then no reader sees the root pages.
+- `/pricing/` and `/security/`: do not publish them before plan 12j sets the license. Until then `/pricing/` says "The license is not set yet.", and `/security/` says that the reporting channel is not set yet.
+- `REPO_URL`: set the repository address for the GitHub link of the site header (ruling 7 of the plan 11b lane). Until then the header has no such link.
+- The docs search: at publication, search the docs for `passkey` under the new CSP of the site. A search that fails shows that the CSP blocks Pagefind.
+- The demo: deploy the demo Worker and add the custom domain `demo.authtempo.com` with its DNS record. Then set `workers_dev`, `preview_urls`, and the route in `apps/demo/wrangler.jsonc`, and set `DEMO_PUBLISHED` in `apps/demo/src/facts.ts` to `true`. Until then `/demo/` links no host and gives the local command.
+- The startup time: at the first upload of the demo, read the Worker startup time that wrangler prints. The platform limit is 1 s, and an upload over it fails.
+- A real device: after publication, sign in to the demo with a real phone and a real authenticator app.
+
+### The request budget of the demo (final review m7)
+
+- At publication, add a WAF rate rule on the demo zone, and choose the Workers plan. No owned limit holds the count of requests in full.
+- One request makes at most four Durable Object calls. The count of `apps/demo/src/flood.ts` takes 600 requests per IP per minute in each isolate, and it is weak, because each isolate counts alone.
+- Without the WAF rule, a flood across isolates can use up the 100,000 requests a day of Workers Free. The demo then stops for that day.
+- On Workers Paid, Cloudflare bills each request and each Durable Object call of such a flood.
+- The gate total of 600 sandboxes an hour is one pool for all visitors. One IPv6 /48 holds 65,536 /64 keys, so one host can fill the total in 120 requests. The /64 or /48 key of core `ipKey` is an owner choice.
+
+### The IP rule and point-in-time recovery (final review I4)
+
+- The demo deletes each IP within one hour: the gate alarm and the sandbox alarm delete the rows.
+- Cloudflare can restore the store of a SQLite-backed Durable Object to any point of the past 30 days. The SQLite storage API page says so. The page was last updated 2026-09-21, and it was read on 2026-10-20.
+- So the account can restore a deleted IP for 30 days. Spec 24 item 11 says that the demo stores no IP past one hour. Choose the words of the spec and of `/demo/`, or an owned change that keeps no clear IP.
+
+### The compare facts (final review m4 and m6)
+
+- `/compare/` states each Better Auth fact with its public source and the read date 2026-10-14. `FACT_MAX_DAYS` is 180.
+- From 2027-04-13, check-facts fails every site test run. Each later lane that runs the whole repository then fails, whatever its change. Before that day, read each source of `SOURCES` in `apps/site/src/data/compare.ts` again, and change each read date.
+- The plan 11b fix wave read the docs sitemap of better-auth.com on 2026-10-20. It did not read the GitHub and npm sources again, because it made no request to those hosts. Check them at the refresh.
+- check-claims allows three phrases that name Better Auth outside `/compare/`, for the compatibility package (`ALLOWED_PHRASES` in `apps/site/scripts/check-claims.ts`). Ruling 42 asked for a rule on any competitor name. The owner may change the list.
+
+### Each release
+
+- Add a `pkg@version` row with its date to `RELEASE_DATES` in `apps/site/src/data/releases.ts` (ruling 29 of the plan 11b lane). Without the row, `check-feed` fails the site build.
+
+### Owner inputs
+
+- `openapi` is in `DEMO_EXEMPT` by the default of the lead (ruling 33). The owner may move it.
+- The reason texts of `DEMO_EXEMPT` and `DEMO_OFF` in `apps/demo/src/facts.ts` are implementer text, and `/demo/` shows each one. The owner may change them.
+- `apps/site/scripts/build-agent.ts` writes git HEAD into `dist/agent/index.json`, and Turbo does not hash HEAD (ruling 24). So a cached site build can serve the commit of an older run. The fix drops the commit from the index or makes it a hashed input of the build. Each option changes the index of `@authtempo/mcp`.

@@ -42,14 +42,4 @@ This table is a copy for a reader. `src/facts.ts` is the source. `test/limits.te
 
 ## Owner-run items
 
-The owner runs each item below. No task of plan 11b runs one.
-
-- Publication: the owner deploys the Worker and adds the custom domain `demo.authtempo.com` with its DNS record. Then set `workers_dev`, `preview_urls`, and the route in `wrangler.jsonc`, and set `DEMO_PUBLISHED` in `src/facts.ts` to `true`. Until then the `/demo/` page links no host.
-- The WAF rule: at publication, add a WAF rate rule on the demo zone. No owned limit holds the count of requests in full. One request makes at most four Durable Object calls, and the count of `src/flood.ts` stops one client in one isolate only. Without the rule, a flood across isolates can use up the 100,000 requests a day of Workers Free and stop the demo for that day. On Workers Paid, Cloudflare bills each request and each Durable Object call of the flood (`src/limits.ts`, final review m7).
-- The startup time: at the first upload, read the Worker startup time that wrangler prints. The platform limit is 1 s. Without a pass, the upload fails.
-- A real device: after publication, sign in with a real phone and a real authenticator app.
-- Each release: add a `pkg@version` row with its date to `RELEASE_DATES` in `apps/site/src/data/releases.ts` (ruling 29 of the plan 11b lane). Without the row, `check-feed` fails the site build.
-- The owner inputs:
-  - `openapi` is in `DEMO_EXEMPT` by the lead's default (ruling 33). The owner may move it.
-  - The reason texts of the parts turned off on `/demo/` (`DEMO_OFF` in `src/facts.ts`) are implementer text. The owner may change them.
-  - The gate counts an IPv6 address by its /64, the key of core `ipKey`. The owner may choose /48 in core.
+The owner list of the site and the demo is one list, in the section "Owner-run items of the site and the demo" of the root `README.md`.
