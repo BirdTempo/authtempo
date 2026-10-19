@@ -225,14 +225,10 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
       // The same URIs as a public client pass: the refusal is the sector rule.
       expect((await register(h, { redirect_uris: uris })).status).toBe(201);
     }
-    // One host passes: https with two paths, or one loopback host on two ports.
-    for (const uris of [
-      [A, A2],
-      ["http://127.0.0.1:1/cb", "http://127.0.0.1:2/cb"],
-    ])
-      expect((await register(h, { redirect_uris: uris, subject_type: "pairwise" })).status).toBe(
-        201,
-      );
+    // One https host with two paths passes.
+    expect((await register(h, { redirect_uris: [A, A2], subject_type: "pairwise" })).status).toBe(
+      201,
+    );
     // api.oauth.clients takes the same rule, at create and at update.
     const clients = h.auth.api.oauth?.clients;
     if (!clients) throw new Error("oauth is off");
@@ -248,6 +244,52 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
       ok: false,
       error: "invalid_client_metadata",
     });
+  });
+
+  it("refuses pairwise for a client whose redirect URIs are all loopback", async () => {
+    const h = handle();
+    const refused = { status: 400, body: { error: "invalid_client_metadata" } };
+    for (const uris of [
+      ["http://127.0.0.1:1/cb", "http://127.0.0.1:2/cb"],
+      ["http://localhost:8080/callback"],
+      ["https://localhost/callback"],
+      ["https://[::1]/callback"],
+    ]) {
+      const r = await register(h, { redirect_uris: uris, subject_type: "pairwise" });
+      expect({ uris, status: r.status, body: r.body }).toEqual({ uris, ...refused });
+      expect((await register(h, { redirect_uris: uris })).status).toBe(201);
+    }
+    const clients = h.auth.api.oauth?.clients;
+    if (!clients) throw new Error("oauth is off");
+    const loop = ["http://127.0.0.1:3000/callback"];
+    expect(await clients.create({ redirectUris: loop, subjectType: "pairwise" })).toMatchObject({
+      ok: false,
+      error: "invalid_client_metadata",
+    });
+    const made = await clients.create({ redirectUris: loop });
+    if (!made.ok) throw new Error(made.error);
+    expect(
+      await clients.update({ clientId: made.value.client.id, subjectType: "pairwise" }),
+    ).toMatchObject({ ok: false, error: "invalid_client_metadata" });
+  });
+
+  it("refuses an update that changes the sector of a pairwise client", async () => {
+    const h = handle();
+    const ada = await signedIn(h);
+    const clients = h.auth.api.oauth?.clients;
+    if (!clients) throw new Error("oauth is off");
+    const made = await clients.create({ redirectUris: [A], subjectType: "pairwise" });
+    if (!made.ok) throw new Error(made.error);
+    const id = made.value.client.id;
+    const before = await subOf(h, ada.cookie, id, A);
+    expect(await clients.update({ clientId: id, redirectUris: [B] })).toMatchObject({
+      ok: false,
+      error: "invalid_client_metadata",
+    });
+    expect((await clientRowOf(h, id)).redirectUris).toEqual([A]);
+    // A change inside the sector passes, and the subject stays.
+    expect((await clients.update({ clientId: id, redirectUris: [A, A2] })).ok).toBe(true);
+    expect(await subOf(h, ada.cookie, id, A2)).toBe(before);
   });
 
   it("refuses sector_identifier_uri for a pairwise registration and never fetches it", async () => {
@@ -319,11 +361,15 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
       user: { id: ada.user.id },
     });
     expect(await ask(t.access_token)).toMatchObject({ active: true, sub, client_id: a });
-    // An update moves the client to another sector. The old subject is not of
-    // that sector, so its tokens map to no user.
+    // Two updates move the client to another sector: to public, then back to
+    // pairwise on another host. The old subject is not of that sector, so its
+    // tokens map to no user.
     const clients = h.auth.api.oauth?.clients;
     if (!clients) throw new Error("oauth is off");
-    expect((await clients.update({ clientId: a, redirectUris: [B] })).ok).toBe(true);
+    expect((await clients.update({ clientId: a, subjectType: "public" })).ok).toBe(true);
+    expect(
+      (await clients.update({ clientId: a, redirectUris: [B], subjectType: "pairwise" })).ok,
+    ).toBe(true);
     expect(await h.auth.caller(get("/mcp", bearer(t.access_token)))).toBeNull();
     expect(await ask(t.access_token)).toEqual({ active: false });
     const userinfo = await h.auth.handle(get("/auth/oauth/userinfo", bearer(t.access_token)));

@@ -5,6 +5,7 @@ import type { Where } from "../storage/port.js";
 import { newClientSecret } from "./oauth-client-secret.js";
 import { CLIENT_ID_PREFIX, type ClientFields, validClientMetadata } from "./oauth-clients.js";
 import { type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
+import { redirectSector, sectorOf } from "./oauth-subject.js";
 
 /**
  * The in-process client API of the provider (plan 12e, `api.oauth.clients`).
@@ -215,6 +216,14 @@ export async function updateClient(
   if (!change || !whole) return oauthFail("invalid_client_metadata");
   const fields = validClientMetadata(config, { ...whole, ...change }, "create");
   if (!fields.ok) return fields;
+  // A new sector gives each user of a pairwise client a new subject, and the
+  // client loses its users. So the sector stays (ruling 32 of plan 12e).
+  if (
+    row.subjectType === "pairwise" &&
+    fields.value.subjectType === "pairwise" &&
+    redirectSector(fields.value.redirectUris) !== sectorOf(row)
+  )
+    return oauthFail("invalid_client_metadata");
   const now = config.clock.now();
   await config.storage.update("oauthClient", [{ field: "id", op: "eq", value: row.id }], {
     ...fields.value,
