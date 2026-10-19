@@ -6,15 +6,22 @@ export { Gate, Sandbox };
 const COOKIE = "__Host-demo_sandbox";
 /** A sandbox id is 16 random bytes in lower-case hex, so a guess needs 128 bits. */
 const ID_RE = /^[0-9a-f]{32}$/;
+/** Each candidate costs one exists() call, so a request with many values costs at most this many. */
+const MAX_IDS = 4;
 
-function cookieId(request: Request): string | null {
+/**
+ * Each value of the sandbox cookie that has the id form, in header order, at
+ * most MAX_IDS. A browser sends one cookie of a __Host- name per host. A
+ * request can still hold more, so each value is a candidate (ruling 32).
+ */
+function cookieIds(request: Request): string[] {
+  const ids: string[] = [];
   for (const part of (request.headers.get("cookie") ?? "").split(";")) {
     const [name, ...rest] = part.trim().split("=");
-    if (name !== COOKIE) continue;
     const value = rest.join("=");
-    return ID_RE.test(value) ? value : null;
+    if (name === COOKIE && ID_RE.test(value)) ids.push(value);
   }
-  return null;
+  return ids.slice(0, MAX_IDS);
 }
 
 function newId(): string {
@@ -34,8 +41,8 @@ export default {
     const url = new URL(request.url);
     if (url.pathname.startsWith("/assets/")) return env.ASSETS.fetch(request);
 
-    const id = cookieId(request);
-    if (id !== null) {
+    // The first value that names a live sandbox takes the request.
+    for (const id of cookieIds(request)) {
       const stub = env.SANDBOX.get(env.SANDBOX.idFromName(id));
       if (await stub.exists()) return stub.handle(request);
     }

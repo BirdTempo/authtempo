@@ -88,6 +88,31 @@ describe("the demo Worker and its sandboxes", () => {
     expect(await res.text()).toBe("ok");
   });
 
+  it("takes the first cookie of the name that names a live sandbox", async () => {
+    const id = await visit();
+    const unknown = "0123456789abcdef0123456789abcdef";
+    for (const cookie of [
+      `__Host-demo_sandbox=x; __Host-demo_sandbox=${id}`,
+      `__Host-demo_sandbox=${unknown}; __Host-demo_sandbox=${id}`,
+    ]) {
+      const res = await SELF.fetch(`${ORIGIN}/`, { redirect: "manual", headers: { cookie } });
+      expect({ cookie, status: res.status, body: await res.text() }).toEqual({
+        cookie,
+        status: 200,
+        body: "ok",
+      });
+    }
+    expect(await stubOf(unknown).exists()).toBe(false);
+  });
+
+  it("reads at most four values of the sandbox cookie", async () => {
+    const id = await visit();
+    const unknown = ["1", "2", "3", "4"].map((d) => d.repeat(32));
+    const cookie = [...unknown, id].map((v) => `__Host-demo_sandbox=${v}`).join("; ");
+    const res = await SELF.fetch(`${ORIGIN}/`, { redirect: "manual", headers: { cookie } });
+    expect(res.status).toBe(303);
+  });
+
   it("an unknown id never initializes a sandbox", async () => {
     const unknown = "0123456789abcdef0123456789abcdef";
     const res = await SELF.fetch(`${ORIGIN}/`, {
