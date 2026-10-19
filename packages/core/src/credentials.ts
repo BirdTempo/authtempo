@@ -19,7 +19,9 @@ export {
 export {
   type DecodedJws,
   decodeJws,
+  isPublicJwk,
   JWKS_RETIRED_MAX,
+  JWS_ALGS,
   JWS_RE,
   type JwsAlg,
   type PublicJwk,

@@ -263,6 +263,30 @@ describe("authtempo check (spec 19)", () => {
     }
   });
 
+  it("accepts an RS256 key in the JWKS check", async () => {
+    // A real RSA key of 2048 bits, as core writes it under jwtMint.alg RS256 (plan 12e).
+    const pair = (await crypto.subtle.generateKey(
+      {
+        name: "RSASSA-PKCS1-v1_5",
+        modulusLength: 2048,
+        publicExponent: new Uint8Array([1, 0, 1]),
+        hash: "SHA-256",
+      },
+      true,
+      ["sign", "verify"],
+    )) as CryptoKeyPair;
+    const jwk = (await crypto.subtle.exportKey("jwk", pair.publicKey)) as JsonWebKey;
+    const rsa = { kty: "RSA", n: jwk.n, e: jwk.e, kid: "R1", alg: "RS256", use: "sig" };
+    const routes = healthy();
+    routes.set("GET /auth/jwks", () => keySet([rsa]));
+    const r = await check([], routes);
+    expect(result(r.report, "jwks")).toMatchObject({ status: "pass" });
+    expect(r.code).toBe(0);
+    // The same key with a private member fails.
+    routes.set("GET /auth/jwks", () => keySet([{ ...rsa, p: "AQAB" }]));
+    expect(result((await check([], routes)).report, "jwks")).toMatchObject({ status: "fail" });
+  });
+
   it("skips the checks that need the mount when the mount is missing", async () => {
     const routes = healthy();
     routes.delete("GET /auth/session");

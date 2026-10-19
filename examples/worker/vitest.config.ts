@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 
 // Option names checked against @cloudflare/vitest-plugin 1.3.7 on 2026-10-09.
 export default defineConfig(async () => {
@@ -31,6 +31,11 @@ export default defineConfig(async () => {
         },
       }),
     ],
-    test: { include: ["test/**/*.test.ts"], setupFiles: ["./test/setup.ts"] },
+    test: {
+      include: ["test/**/*.test.ts"],
+      // The RS256 cost measure runs by hand only, through vitest.cost.config.ts (plan 12e Task 2).
+      exclude: [...configDefaults.exclude, "test/rs256-cost.test.ts"],
+      setupFiles: ["./test/setup.ts"],
+    },
   };
 });

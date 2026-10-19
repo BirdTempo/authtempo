@@ -12,6 +12,7 @@ sources:
   - packages/core/src/secrets-entry.ts
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
   - docs/superpowers/plans/2026-10-14-11g-openapi.md
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
 ---
 
 **For:** a developer who calls core from server code, or looks for an export of `@authtempo/core`.
@@ -193,7 +194,8 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `readSessionToken` | The session token of a request: the cookie, then the bearer header. |
 | `readBearer` | The value of `Authorization: Bearer <value>`, or null. |
 | `JWS_RE`, `decodeJws`, `DecodedJws` | The shape of a compact JWS, and its parts with no check. |
-| `verifyJws`, `PublicJwk`, `JwsAlg` | The signature check on Web Crypto, for EdDSA and ES256. The header must name the alg and the kid of the key. |
+| `verifyJws`, `PublicJwk`, `JwsAlg` | The signature check on Web Crypto, for EdDSA, ES256, and RS256. The header must name the alg and the kid of the key. |
+| `JWS_ALGS`, `isPublicJwk` | The three values of `jwtMint.alg`, and the check of one public signing key: its members fit its alg, and it holds no private member. |
 | `JWKS_RETIRED_MAX` | The retired keys that the key set lists at most. |
 | `isResourceUrl`, `resourceOf` | The rule of an `oauth.resources` entry, and the entry that a request URL falls under. |
 

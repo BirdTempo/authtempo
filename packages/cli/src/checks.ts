@@ -1,3 +1,4 @@
+import { isPublicJwk } from "@authtempo/core/credentials";
 import type { ExpectedShape, LiveShape } from "@authtempo/core/sql";
 import { type Fetcher, fetchWithin, HostError, isLocalHost } from "./net.js";
 import { compareShape, findingText } from "./schema-shape.js";
@@ -211,10 +212,6 @@ function sharedCache(value: string): boolean {
   );
 }
 
-/** A public signing key as core serves it: a kid, EdDSA or ES256, and use sig. */
-const goodKey = (k: Record<string, unknown>) =>
-  typeof k.kid === "string" && (k.alg === "EdDSA" || k.alg === "ES256") && k.use === "sig";
-
 /**
  * Runs the eight checks in the order of CHECK_IDS. A host that gives no HTTP
  * answer throws a HostError (exit 2); every answer is a result. The function
@@ -352,12 +349,13 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
       else if (keys.length === 0) add("jwks", "fail", "jwks_empty", "the key set holds no key");
       else if (records.some((k) => "d" in k))
         add("jwks", "fail", "jwks_private_part", "a key of the key set holds a private part (d)");
-      else if (records.length !== keys.length || !records.every(goodKey))
+      // One rule with core and the verifier: `isPublicJwk` of `@authtempo/core/credentials` (plan 12e).
+      else if (records.length !== keys.length || !records.every(isPublicJwk))
         add(
           "jwks",
           "fail",
           "jwks_bad_key",
-          "a key has no kid, no alg of EdDSA or ES256, or no use of sig",
+          "a key is not a public signing key of EdDSA, ES256, or RS256",
         );
       else if (!cache)
         add("jwks", "fail", "jwks_no_cache_control", "the key set has no cache-control");

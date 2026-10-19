@@ -1,5 +1,5 @@
 import type { ClientFailure } from "@authtempo/client";
-import { JWKS_RETIRED_MAX, type PublicJwk } from "@authtempo/core/credentials";
+import { isPublicJwk, JWKS_RETIRED_MAX, type PublicJwk } from "@authtempo/core/credentials";
 import type { FetchLike } from "./fetch.js";
 
 /** The key set lives this long when its answer names no max-age. Core sends 300. */
@@ -63,12 +63,11 @@ async function cappedText(res: Response): Promise<string | null> {
   return new TextDecoder().decode(all);
 }
 
-const B64URL = /^[A-Za-z0-9_-]+$/;
-
 /**
  * The key of one entry of the set, or null (plan 11d, Task 1 review).
  * `PublicJwk` is a compile-time type only, so the cache checks each fetched entry here.
- * `kty`, `crv`, and `alg` must be OKP, Ed25519, and EdDSA, or EC, P-256, and ES256.
+ * The shape rule is `isPublicJwk` of core: OKP, Ed25519, and EdDSA; EC, P-256, and ES256;
+ * or RSA of 2048 bits or more and RS256 (plan 12e). A private member fails the entry.
  * An entry may leave out `use`; when it has one, the value must be `sig`.
  * An entry may leave out `key_ops`; when it has one, the list must hold `verify`.
  * An entry that fails is dropped, so a token that names it answers null: a bad key fails closed.
@@ -77,22 +76,17 @@ const B64URL = /^[A-Za-z0-9_-]+$/;
 export function publicKeyOf(entry: unknown): PublicJwk | null {
   if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
   const j = entry as Record<string, unknown>;
-  if (typeof j.kid !== "string" || j.kid === "") return null;
-  if (typeof j.x !== "string" || !B64URL.test(j.x)) return null;
+  if (j.kid === "") return null;
   if (j.use !== undefined && j.use !== "sig") return null;
   if (j.key_ops !== undefined && !(Array.isArray(j.key_ops) && j.key_ops.includes("verify")))
     return null;
-  if (j.kty === "OKP" && j.crv === "Ed25519" && j.alg === "EdDSA")
-    return { kty: "OKP", crv: "Ed25519", x: j.x, kid: j.kid, alg: "EdDSA", use: "sig" };
-  if (
-    j.kty === "EC" &&
-    j.crv === "P-256" &&
-    j.alg === "ES256" &&
-    typeof j.y === "string" &&
-    B64URL.test(j.y)
-  )
-    return { kty: "EC", crv: "P-256", x: j.x, y: j.y, kid: j.kid, alg: "ES256", use: "sig" };
-  return null;
+  const k: unknown = { ...j, use: "sig" };
+  if (!isPublicJwk(k)) return null;
+  if (k.kty === "OKP")
+    return { kty: "OKP", crv: k.crv, x: k.x, kid: k.kid, alg: k.alg, use: "sig" };
+  if (k.kty === "EC")
+    return { kty: "EC", crv: k.crv, x: k.x, y: k.y, kid: k.kid, alg: k.alg, use: "sig" };
+  return { kty: "RSA", n: k.n, e: k.e, kid: k.kid, alg: k.alg, use: "sig" };
 }
 
 /**

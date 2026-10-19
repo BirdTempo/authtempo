@@ -712,7 +712,7 @@ describe("jwtMint (plan 9g)", () => {
       "jwtMint.audience must be 1 to 10 strings of 1 to 2048 characters with no control character";
     const ROTATE = "jwtMint.rotateEvery must be a whole number of days from 1 to 365";
     const bad: [unknown, string][] = [
-      [{ alg: "RS256" }, "jwtMint.alg must be EdDSA or ES256"],
+      [{ alg: "RS512" }, "jwtMint.alg must be EdDSA, ES256, or RS256"],
       [{ ttlMinutes: 0 }, "jwtMint.ttlMinutes must be an integer from 1 to 60"],
       [{ ttlMinutes: 61 }, "jwtMint.ttlMinutes must be an integer from 1 to 60"],
       [{ ttlMinutes: 1.5 }, "jwtMint.ttlMinutes must be an integer from 1 to 60"],

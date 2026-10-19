@@ -8,6 +8,7 @@ sources:
   - packages/core/src/http/cookies.ts
   - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 8"
   - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 7"
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
 sidebar:
   order: 5
 ---
@@ -124,7 +125,7 @@ Warning: a key of the key set holds `d`, a private part. Rotate the key at once 
 
 <h3 id="jwks_bad_key"><code>jwks_bad_key</code></h3>
 
-A key has no `kid`, an `alg` other than `EdDSA` or `ES256`, or a `use` other than `sig`. Another handler answers this path.
+A key is not a public signing key of `EdDSA`, `ES256`, or `RS256`. It has no `kid`, or a `use` other than `sig`. Or its members do not fit its `alg`, it holds a private member, or its RSA modulus is under 2048 bits. Another handler answers this path.
 
 <h3 id="jwks_no_cache_control"><code>jwks_no_cache_control</code></h3>
 

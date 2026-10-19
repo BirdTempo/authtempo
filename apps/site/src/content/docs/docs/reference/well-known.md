@@ -6,6 +6,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
   - packages/core/src/http/well-known.ts
   - packages/core/README.md "OAuth 2.1 and OIDC provider"
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
 ---
 
 **For:** a developer who runs the OAuth provider, or a client that reads its metadata.
@@ -42,7 +43,7 @@ The issuer is `baseURL` plus `basePath`, such as `https://api.example.com/auth`.
 
 - `code_challenge_methods_supported` is `["S256"]`.
 - `token_endpoint_auth_methods_supported` is `["none"]`. Every client is public.
-- The signing algorithm list names the configured `jwtMint.alg` alone, EdDSA or ES256. Core does not sign with RS256.
+- The signing algorithm list names the configured `jwtMint.alg` alone: EdDSA, ES256, or RS256. A relying party that accepts RS256 only needs `jwtMint.alg: "RS256"`.
 - `registration_endpoint` is present while `oauth.registration.dynamic` is on.
 - `client_id_metadata_document_supported` tells whether `oauth.registration.cimd` is on.
 

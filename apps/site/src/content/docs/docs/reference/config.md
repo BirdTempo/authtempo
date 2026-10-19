@@ -7,6 +7,7 @@ sources:
   - packages/core/src/config.ts
   - apps/site/scripts/lib/config-keys.ts
   - docs/superpowers/plans/2026-10-14-11g-openapi.md
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
 ---
 
 **For:** a developer who writes the config of `createAuth`, or reads an error of construction.
@@ -209,11 +210,15 @@ Another key of `jwtMint` is refused.
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `jwtMint.alg` | `"EdDSA"` or `"ES256"` | `"EdDSA"` | A change retires the signing key at the next signature. |
+| `jwtMint.alg` | `"EdDSA"`, `"ES256"`, or `"RS256"` | `"EdDSA"` | Every JWT of the deployment signs with this alg. A change retires the signing key at the next signature. |
 | `jwtMint.audience` | string or string list | `[baseURL]` | 1 to 10 strings of 1 to 2048 characters with no control character, and none an `oauth.resources` entry. |
 | `jwtMint.ttlMinutes` | number | 15 | An integer from 1 to 60. |
 | `jwtMint.claims` | function of the user and the session | none | Answers an object of claims. Core sets the reserved claims itself. |
 | `jwtMint.rotateEvery` | number of days | none: no timer | A whole number from 1 to 365. The first signature with a key this old makes a new key. A JWKS read never rotates. |
+
+`jwtMint.alg: "RS256"` costs more CPU than EdDSA or ES256. One RSA key generation took tens of ms in local workerd. One RS256 signature took less than 1 ms. These are wall times on a loaded machine, measured on 2026-10-19.
+
+On Workers Free, a deployment with RS256 makes its first key at deploy time, with `api.jwt.rotate()` or `authtempo keys rotate`. A `rotateEvery` rotation or a change of `jwtMint.alg` makes a key inside a request. That request can pass the 10 ms CPU limit of Workers Free.
 
 ## OAuth provider
 

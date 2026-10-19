@@ -48,7 +48,7 @@ import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
 import { sessionCookieNames } from "./primitives/credentials.js";
-import type { JwsAlg } from "./primitives/jwk.js";
+import { JWS_ALGS, type JwsAlg } from "./primitives/jwk.js";
 import {
   createKeyring,
   ENTROPY_REFUSE_BITS,
@@ -512,7 +512,11 @@ export interface ResolvedTotp {
 }
 
 export interface JwtMintConfig {
-  /** `EdDSA` (Ed25519, default) or `ES256` (ECDSA P-256). A change retires the signing key at the next signature. */
+  /**
+   * `EdDSA` (Ed25519, default), `ES256` (ECDSA P-256), or `RS256` (RSA 2048, plan 12e).
+   * With `RS256`, every JWT of the deployment then signs with RS256 (plan 12e).
+   * A change retires the signing key at the next signature.
+   */
   alg?: JwsAlg;
   /** The `aud` of a session JWT: 1 to 10 strings, each 1 to 2048 characters. Default `[baseURL]`. */
   audience?: string | string[];
@@ -1467,8 +1471,7 @@ function resolveJwtMint(
         `jwtMint.${key} is not an option; core has alg, audience, ttlMinutes, claims, and rotateEvery`,
       );
   const alg = o.alg ?? "EdDSA";
-  if (alg !== "EdDSA" && alg !== "ES256")
-    throw new ConfigError("jwtMint.alg must be EdDSA or ES256");
+  if (!JWS_ALGS.includes(alg)) throw new ConfigError("jwtMint.alg must be EdDSA, ES256, or RS256");
   const audience: unknown =
     o.audience === undefined
       ? [baseURL]

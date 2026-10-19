@@ -6,6 +6,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.12
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 15
   - packages/core/README.md "JWT minting"
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
 sidebar:
   order: 3
 ---
@@ -50,6 +51,8 @@ The test below rotates the key and checks the key set.
 - `GET /auth/jwks` lists the signing key first, then at most 100 keys retired less than 24 hours ago.
 - A server that verifies session JWTs reads the key set again for a new `kid`. With a cache of the key set, the cache must be shorter than 24 hours.
 - The sweep deletes a key 24 hours after it retired.
+- With `jwtMint.alg: "RS256"`, one key generation took tens of ms in local workerd. One signature took less than 1 ms. These are wall times on a loaded machine, measured on 2026-10-19.
+- On Workers Free, a deployment with RS256 makes its first key at deploy time, with `api.jwt.rotate()` or `authtempo keys rotate`. A `rotateEvery` rotation or an alg change makes a key inside a request. That request can pass the 10 ms CPU limit of Workers Free.
 - Core signs the Apple client secret again at each token exchange, with a life of five minutes. No stored Apple secret expires.
 - The app `secret` is not a key that rotates. [Secrets](/docs/operations/secrets/) tells what a change of it breaks.
 

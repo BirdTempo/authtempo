@@ -26,8 +26,9 @@ const PRM_PATH = "/.well-known/oauth-protected-resource";
 /**
  * RFC 8414 section 2 and OIDC Discovery section 3. The auth method `none`
  * is stated: the RFC 8414 default is `client_secret_basic`, which core does
- * not take. OIDC Discovery asks for RS256 in the alg list; core signs only
- * EdDSA or ES256, so the list names the configured alg alone (spec 8.13 item 5).
+ * not take. The alg list names the configured `jwtMint.alg` alone, because
+ * core signs with one key of one alg (spec 8.13 item 5). OIDC Discovery asks
+ * for RS256 in the list: a deployment sets `jwtMint.alg: "RS256"` for that (plan 12e).
  */
 export function authorizationServerMetadata(config: ResolvedConfig): Record<string, unknown> {
   const oauth = oauthOf(config);

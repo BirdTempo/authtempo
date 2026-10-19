@@ -6,6 +6,7 @@ import {
   generateSigningKey,
   type JwsAlg,
   openPrivateKey,
+  type PublicJwk,
   sealPrivateKey,
   signJws,
   tokenHashClaim,
@@ -14,7 +15,15 @@ import {
 
 const SECRET = "0123456789abcdef0123456789abcdef";
 const OTHER = "another secret of 32 characters!";
-const ALGS: JwsAlg[] = ["EdDSA", "ES256"];
+const ALGS: JwsAlg[] = ["EdDSA", "ES256", "RS256"];
+/** The `crypto.subtle.sign` parameters of each alg, typed here from the RFC 7518 names. */
+const SUBTLE_SIGN = {
+  EdDSA: { name: "Ed25519" },
+  ES256: { name: "ECDSA", hash: "SHA-256" },
+  RS256: { name: "RSASSA-PKCS1-v1_5" },
+} as const;
+/** For each alg, another alg whose key the test puts under the same kid. */
+const OTHER_ALG = { EdDSA: "ES256", ES256: "RS256", RS256: "EdDSA" } as const;
 const enc = new TextEncoder();
 const part = (v: unknown) => toBase64Url(enc.encode(JSON.stringify(v)));
 const B64 = /^[A-Za-z0-9_-]{43}$/;
@@ -55,7 +64,7 @@ describe("signing keys (plan 9g)", () => {
     }
   });
 
-  it("signs a compact JWS that jose verifies, for both algorithms", async () => {
+  it("signs a compact JWS that jose verifies, for each algorithm", async () => {
     for (const alg of ALGS) {
       const k = await keyFor(alg);
       const token = await signJws({
@@ -95,22 +104,20 @@ describe("signing keys (plan 9g)", () => {
       });
       const [h, p, s] = signed.split(".");
       // A key of the other algorithm under the same kid.
-      const cross = await keyFor(alg === "EdDSA" ? "ES256" : "EdDSA", k.kid);
-      expect({ alg, ok: await verifyJws(decoded, { ...cross.publicJwk, alg }) }).toEqual({
+      const cross = await keyFor(OTHER_ALG[alg], k.kid);
+      // The union type refuses a key of one kty under another alg: the run-time verify is the subject.
+      const crossKey = { ...cross.publicJwk, alg } as unknown as PublicJwk;
+      expect({ alg, ok: await verifyJws(decoded, crossKey) }).toEqual({
         alg,
         ok: false,
       });
       // The alg guard alone (final fix wave): the header names the other alg,
       // and the key's own algorithm signs the input, so the signature itself
       // verifies under this key. Only the compare of the header alg refuses it.
-      const otherAlg = alg === "EdDSA" ? "ES256" : "EdDSA";
+      const otherAlg = OTHER_ALG[alg];
       const input = `${part({ alg: otherAlg, kid: k.kid, typ: "JWT" })}.${part({ sub: "u1" })}`;
       const sig = new Uint8Array(
-        await crypto.subtle.sign(
-          alg === "EdDSA" ? { name: "Ed25519" } : { name: "ECDSA", hash: "SHA-256" },
-          k.key,
-          new TextEncoder().encode(input),
-        ),
+        await crypto.subtle.sign(SUBTLE_SIGN[alg], k.key, new TextEncoder().encode(input)),
       );
       const forged = decodeJws(`${input}.${toBase64Url(sig)}`);
       expect(forged?.header.alg).toBe(otherAlg);

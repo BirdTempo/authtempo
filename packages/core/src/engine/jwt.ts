@@ -8,6 +8,7 @@ import {
   generateSigningKey,
   importPrivateKey,
   JWKS_RETIRED_MAX,
+  JWS_ALGS,
   type JwsAlg,
   openPrivateKeyBytes,
   type PublicJwk,
@@ -91,7 +92,7 @@ export function mintConfig(config: ResolvedConfig): ResolvedJwtMint {
 
 function algOf(row: JwkRow): JwsAlg | null {
   const alg = row.publicJwk.alg;
-  return alg === "EdDSA" || alg === "ES256" ? alg : null;
+  return JWS_ALGS.find((a) => a === alg) ?? null;
 }
 
 const asPublic = (row: JwkRow) => row.publicJwk as unknown as PublicJwk;
