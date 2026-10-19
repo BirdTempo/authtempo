@@ -200,6 +200,25 @@ describe("the demo pages", () => {
     expect(sandboxId(jar)).not.toBe(id);
   });
 
+  it("resets nothing on a cross-site post to /reset with no sandbox cookie", async () => {
+    const jar = await newSandbox();
+    const id = sandboxId(jar);
+    await signInByLink(jar, "pat@example.com");
+    // The cookie names SameSite=Lax. Chrome gives a cookie with no SameSite
+    // attribute two minutes of cross-site posts; an explicit Lax has none.
+    const first = await call({ cookies: new Map() }, "GET", "/");
+    expect(first.headers.get("set-cookie")).toContain("; SameSite=Lax;");
+    // A browser sends no Lax cookie on a cross-site post, so the post names no sandbox.
+    const res = await call({ cookies: new Map() }, "POST", "/reset", new URLSearchParams(), {
+      origin: "https://evil.example",
+      "sec-fetch-site": "cross-site",
+    });
+    expect(res.status).toBe(303);
+    expect(await stub(id).exists()).toBe(true);
+    expect(await rowsIn(jar, "SELECT count(*) AS n FROM ta_user")).toEqual([{ n: 1 }]);
+    expect((await call(jar, "GET", "/whoami")).status).toBe(200);
+  });
+
   it("links each method page to its guide", async () => {
     const { pages } = await allPages();
     let linked = 0;

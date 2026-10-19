@@ -68,8 +68,10 @@ function withPageHeaders(res: Response): Response {
 
 /**
  * Start again: deletes each live sandbox that the cookie names, clears the
- * cookie, and goes to the home page. No Origin check: the cookie is
- * SameSite=Lax, so a post from another site carries no sandbox id.
+ * cookie, and goes to the home page. No Origin check: the cookie names
+ * SameSite=Lax, so a post from another site carries no sandbox id. The
+ * attribute is explicit, because Chrome lets a cookie with no SameSite
+ * attribute ride a cross-site post for its first two minutes (ruling 35).
  */
 async function reset(request: Request, env: Cloudflare.Env, origin: string): Promise<Response> {
   if (request.method !== "POST") return json(405, { error: "method_not_allowed" });
