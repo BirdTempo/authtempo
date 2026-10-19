@@ -78,7 +78,9 @@ describe("introspection in the verifier (plan 12e Task 10)", () => {
       ok: true,
       value: null,
     });
-    expect(await v.verifyRequest(withBearer(TOOLS, `${token.slice(0, -2)}AA`))).toEqual({
+    // The edit always changes the signature: a signature can end in "AA" already.
+    const changed = `${token.slice(0, -2)}${token.endsWith("AA") ? "BB" : "AA"}`;
+    expect(await v.verifyRequest(withBearer(TOOLS, changed))).toEqual({
       ok: true,
       value: null,
     });
