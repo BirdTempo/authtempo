@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { subjectFor } from "../src/engine/oauth-subject.js";
 import { fromBase64Url } from "../src/primitives/crypto.js";
+import { HTTP_LOOPBACK, isLocalHost } from "../src/primitives/host.js";
 import type { OAuthClientRow } from "../src/schema.js";
 import { BASE_URL, get, post } from "./helpers.js";
 import {
@@ -246,7 +247,7 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
     });
   });
 
-  it("refuses pairwise for a client whose redirect URIs are all loopback", async () => {
+  it("refuses pairwise for a client whose redirect URIs are all on a loopback or local host", async () => {
     const h = handle();
     const refused = { status: 400, body: { error: "invalid_client_metadata" } };
     for (const uris of [
@@ -254,6 +255,18 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
       ["http://localhost:8080/callback"],
       ["https://localhost/callback"],
       ["https://[::1]/callback"],
+      // Ruling 34: every https form of a loopback or local host.
+      ["https://localhost./callback"],
+      ["https://127.0.0.2/callback"],
+      ["https://app.localhost/callback"],
+      ["https://[::ffff:127.0.0.1]/callback"],
+      ["https://[::7f00:1]/callback"],
+      ["https://0.0.0.0/callback"],
+      ["https://[::]/callback"],
+      ["https://intranet/callback"],
+      ["https://printer.local/callback"],
+      ["https://nas.home.arpa/callback"],
+      ["https://svc.internal/callback"],
     ]) {
       const r = await register(h, { redirect_uris: uris, subject_type: "pairwise" });
       expect({ uris, status: r.status, body: r.body }).toEqual({ uris, ...refused });
@@ -271,6 +284,21 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
     expect(
       await clients.update({ clientId: made.value.client.id, subjectType: "pairwise" }),
     ).toMatchObject({ ok: false, error: "invalid_client_metadata" });
+  });
+
+  it("keeps each http loopback host inside the one local host rule", () => {
+    expect([...HTTP_LOOPBACK].sort()).toEqual(["127.0.0.1", "localhost"]);
+    for (const host of HTTP_LOOPBACK)
+      expect({ host, local: isLocalHost(host) }).toEqual({ host, local: true });
+    // Hosts of other parties stay sectors: a public name, and a public IP literal.
+    for (const host of [
+      "a.example.com",
+      "localhost.example.com",
+      "127.0.0.1.example.com",
+      "203.0.113.5",
+      "[2001:db8::1]",
+    ])
+      expect({ host, local: isLocalHost(host) }).toEqual({ host, local: false });
   });
 
   it("refuses an update that changes the sector of a pairwise client", async () => {

@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { randomBase64Url } from "../primitives/crypto.js";
+import { isLocalHost } from "../primitives/host.js";
 import { newId } from "../primitives/ids.js";
 import type { OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
@@ -15,17 +16,14 @@ import { StorageError } from "../storage/port.js";
 export const PAIRWISE_PREFIX = "ps_";
 /** 128 random bits: no guess finds the subject of another user (spec 8.16 item 10). */
 const SUBJECT_BYTES = 16;
-/**
- * The loopback hosts. No one party owns them: every native app on a machine
- * can listen there. So a loopback host is no sector (ruling 32 of plan 12e).
- */
-const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(["127.0.0.1", "[::1]", "localhost"]);
 
 /**
  * The one host of a list of redirect URIs, or null (OIDC Core 8.1). Each
  * URI passed `validRedirectUri`: https, http on a loopback host, or a
  * private-use scheme. A private-use scheme has no host that one party owns,
- * so it gives no sector. Two hosts, or one loopback host, give no sector either.
+ * so it gives no sector. Two hosts give no sector either. A loopback or
+ * local host gives none: no one party owns it, and every app on a machine
+ * or a network can serve it (rulings 32 and 34 of plan 12e).
  */
 export function redirectSector(redirectUris: readonly string[]): string | null {
   const hosts = new Set<string>();
@@ -40,7 +38,7 @@ export function redirectSector(redirectUris: readonly string[]): string | null {
     hosts.add(u.hostname);
   }
   const [host] = hosts;
-  return hosts.size === 1 && host !== undefined && !LOOPBACK_HOSTS.has(host) ? host : null;
+  return hosts.size === 1 && host !== undefined && !isLocalHost(host) ? host : null;
 }
 
 /**

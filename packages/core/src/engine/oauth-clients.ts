@@ -3,6 +3,7 @@ import type { OAuthErrorCode } from "../errors.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { constantTimeEqual, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { FOREIGN_ALGS, keyFitsAlg } from "../primitives/foreign-jwk.js";
+import { HTTP_LOOPBACK, isLocalHost } from "../primitives/host.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
@@ -120,15 +121,6 @@ const BLOCKED_SCHEMES: ReadonlySet<string> = new Set([
   "ftp:",
 ]);
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:$/;
-/**
- * The loopback hosts of an http redirect URI. Not `[::1]`: a CSP host-source
- * has no IPv6 literal form, so the consent page cannot name it in
- * `form-action`, and the browser would stop at the allow. A client on the
- * loopback uses 127.0.0.1.
- */
-const LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
-/** Host suffixes of names that only a local network resolves. A host equal to the name without its dot is refused too. */
-const PRIVATE_SUFFIXES: readonly string[] = [".local", ".home.arpa", ".internal"];
 /** A parsed IPv4 host. The URL parser writes every IPv4 form (`127.1`, `0x7f.0.0.1`) as four decimal parts. */
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 
@@ -206,7 +198,7 @@ export function validRedirectUri(value: unknown): value is string {
   // `hostname` is the parsed form, so `127.1` and `0x7f.0.0.1` pass as
   // 127.0.0.1. The list keeps the raw value, and the authorize step matches
   // the raw value exactly, so an odd form is still a loopback URI: harmless.
-  if (u.protocol === "http:") return LOOPBACK.has(u.hostname);
+  if (u.protocol === "http:") return HTTP_LOOPBACK.has(u.hostname);
   return SCHEME_RE.test(u.protocol) && !BLOCKED_SCHEMES.has(u.protocol);
 }
 
@@ -225,7 +217,7 @@ export function redirectOrigins(redirectUris: readonly string[]): Set<string> {
     } catch {
       continue;
     }
-    if (u.protocol === "https:" || (u.protocol === "http:" && LOOPBACK.has(u.hostname)))
+    if (u.protocol === "https:" || (u.protocol === "http:" && HTTP_LOOPBACK.has(u.hostname)))
       origins.add(u.origin);
   }
   return origins;
@@ -591,14 +583,8 @@ export function validCimdUrl(value: string, baseURL: string): boolean {
   const host = u.hostname.replace(/\.$/, "");
   // An IP literal (IPv4 or IPv6, 127.0.0.1 and [::1] too): a public client has a DNS name, and an address may be internal.
   if (host.startsWith("[") || IPV4_RE.test(host)) return false;
-  // `localhost` and `*.localhost` resolve to the loopback (RFC 6761 section 6.3).
-  if (host === "localhost" || host.endsWith(".localhost")) return false;
-  // A single label (no dot) is an intranet name.
-  if (!host.includes(".")) return false;
-  // The special-use and private names that only a local network resolves:
-  // `.local` (RFC 6762 mDNS), `.home.arpa` (RFC 8375), and `.internal`
-  // (the ICANN private-use name, 2024).
-  if (PRIVATE_SUFFIXES.some((s) => host === s.slice(1) || host.endsWith(s))) return false;
+  // `localhost`, `*.localhost`, a single label, and the private names: the one local host rule.
+  if (isLocalHost(host)) return false;
   // This instance's own host: a document there would make core fetch itself.
   // The compare is by `hostname`, with no port: a document on another port
   // of this host is refused too, which is stricter than the host and port.
