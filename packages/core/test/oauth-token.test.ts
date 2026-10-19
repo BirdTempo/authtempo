@@ -399,6 +399,55 @@ describe("the scopes of a user access token (ruling 29 of plan 12e)", () => {
   });
 });
 
+describe("the refresh of a grant whose scope the config drops (ruling 30 of plan 12e)", () => {
+  /** A second instance on the storage and clock of `h` whose config names `mcp:read` only. */
+  const readOnly = (h: ReturnType<typeof oauthHandle>) =>
+    oauthHandle({
+      storage: h.storage,
+      clock: h.clock,
+      oauth: {
+        resources: [RESOURCE, OTHER_RESOURCE],
+        scopes: { "mcp:read": "Read your documents" },
+        registration: { cimd: false },
+      },
+    });
+
+  it("keeps only the served scopes of the grant, and the new access token passes", async () => {
+    const h = oauthHandle();
+    const c = await codeFor(h, "mcp:read mcp:write offline_access");
+    const t = await tokens(await h.auth.handle(exchange(c.code, c.clientId, c.verifier)));
+    const other = readOnly(h);
+    const next = await tokens(
+      await other.auth.handle(refreshWith(t.refresh_token ?? "", c.clientId)),
+    );
+    expect(next.scope).toBe("mcp:read offline_access");
+    const caller = await other.auth.caller(
+      new Request(`${RESOURCE}/tools`, {
+        headers: { authorization: `Bearer ${next.access_token}` },
+      }),
+    );
+    expect(caller).toMatchObject({ kind: "oauth", scopes: ["mcp:read", "offline_access"] });
+    // A narrower scope must be a served scope of the grant.
+    const again = await other.auth.handle(
+      refreshWith(next.refresh_token ?? "", c.clientId, { scope: "mcp:write" }),
+    );
+    expect(await answer(again)).toEqual({ status: 400, body: { error: "invalid_scope" } });
+  });
+
+  it("answers invalid_grant when no served scope but offline_access is left, and spends nothing", async () => {
+    const h = oauthHandle();
+    const c = await codeFor(h, "mcp:write offline_access");
+    const t = await tokens(await h.auth.handle(exchange(c.code, c.clientId, c.verifier)));
+    const refresh = t.refresh_token ?? "";
+    expect(await answer(await readOnly(h).auth.handle(refreshWith(refresh, c.clientId)))).toEqual(
+      GRANT,
+    );
+    // The token is not spent: an instance that still names mcp:write refreshes it.
+    const back = await tokens(await h.auth.handle(refreshWith(refresh, c.clientId)));
+    expect(back.scope).toBe("mcp:write offline_access");
+  });
+});
+
 describe("userinfo and the endpoint's edges (plan 9g)", () => {
   it("answers the claims by scope on GET and POST; 401 for no token, a changed token, an expired one, and an ID token; 403 without openid", async () => {
     const h = oauthHandle();

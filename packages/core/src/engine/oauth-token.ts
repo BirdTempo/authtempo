@@ -114,6 +114,20 @@ export async function liveUser(config: ResolvedConfig, userId: string): Promise<
   return user?.emailVerified ? user : null;
 }
 
+/**
+ * The scopes of a refresh grant that this config still serves, or null when
+ * none is left but `offline_access` (ruling 30 of plan 12e). That scope only
+ * keeps the grant, so a token of it alone serves nothing. The client then
+ * starts a new authorization.
+ */
+export function servedGrantScopes(
+  config: ResolvedConfig,
+  scopes: readonly string[],
+): string[] | null {
+  const served = scopes.filter((s) => oauthOf(config).scopes.has(s));
+  return served.some((s) => s !== "offline_access") ? served : null;
+}
+
 /** The refresh row of `token`, or null for a token of another form or an unknown one. */
 export async function refreshRowOf(
   config: ResolvedConfig,
@@ -382,10 +396,14 @@ export async function refreshGrant(
   if (row.usedAt !== null) return reuse(config, row);
   const now = config.clock.now();
   if (row.expiresAt.getTime() <= now.getTime()) return oauthFail("invalid_grant");
-  let scopes = row.scopes;
+  // A deploy can drop a scope. The new token gets the served scopes only,
+  // because resolveAccessToken refuses any other scope.
+  const served = servedGrantScopes(config, row.scopes);
+  if (!served) return oauthFail("invalid_grant");
+  let scopes = served;
   if (input.scope !== null) {
     const asked = [...new Set(input.scope.split(" ").filter((s) => s.length > 0))];
-    if (asked.length === 0 || asked.some((s) => !row.scopes.includes(s)))
+    if (asked.length === 0 || asked.some((s) => !served.includes(s)))
       return oauthFail("invalid_scope");
     scopes = asked;
   }
@@ -455,8 +473,8 @@ export type ResolvedAccess =
  * of this instance, with `typ: "at+jwt"`, this issuer, an `aud` in
  * `oauth.resources`, and a live `exp`. Then a user that exists, with each
  * scope still in `oauth.scopes`. For a `client_credentials` token, a client
- * that still holds the grant and each scope. A session JWT of `GET /token` and an ID token have `typ: "JWT"`
- * and never pass.
+ * that still holds the grant and each scope. A session JWT of `GET /token`
+ * and an ID token have `typ: "JWT"` and never pass.
  */
 export async function resolveAccessToken(
   config: ResolvedConfig,

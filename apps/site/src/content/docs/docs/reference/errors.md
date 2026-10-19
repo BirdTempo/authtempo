@@ -453,7 +453,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_grant"><code>invalid_grant</code> 400</h3>
 
-- **Meaning:** The code or the refresh token is spent, expired, of another client, or its verifier does not match. A code with no challenge takes no verifier. A reused refresh token deletes its family.
+- **Meaning:** The code or the refresh token is spent, expired, of another client, or its verifier does not match. A refresh token whose grant keeps no scope of the config but `offline_access` is refused too. A code with no challenge takes no verifier. A reused refresh token deletes its family.
 - **Do:** Start the authorize step again.
 
 | Routes |
