@@ -33,45 +33,49 @@ import test from "../../../../../samples/migrate/workos.test.ts?raw";
 1. Save the script below as `workos-export.sh` in a folder that only you can read.
 2. Run it with `bash workos-export.sh`. Do not paste it into a shell: `set -e` closes that shell at the first error.
 3. The script stops at the first failed call. `curl` prints the HTTP error, such as 401 for a wrong key.
-4. It writes `users.json`, `identities.json`, `memberships.json`, and `organizations.json`.
+4. A failed run writes no new file and keeps the old files. Run the script again.
+5. A complete run writes `users.json`, `identities.json`, `memberships.json`, and `organizations.json`.
 
 ```sh title="workos-export.sh"
 set -euo pipefail
 umask 077
 api=https://api.workos.com
+# Every file goes to a temporary folder first. Only a complete run moves the four files here.
+t=$(mktemp -d)
+trap 'rm -rf "$t"' EXIT
 page() { curl -sSf -H "Authorization: Bearer $WORKOS_API_KEY" "$api$1"; }
 list() {
-  after=""; : > "$2.ndjson"
+  after=""; : > "$t/$2.ndjson"
   while :; do
     p=$(page "$1${after:+&after=$after}")
-    printf '%s\n' "$p" | jq -c '.data' >> "$2.ndjson"
+    printf '%s\n' "$p" | jq -c '.data' >> "$t/$2.ndjson"
     after=$(printf '%s' "$p" | jq -r '.list_metadata.after // empty')
     [ -z "$after" ] && break
   done
-  jq -s 'add // []' "$2.ndjson" > "$2.json"
+  jq -s 'add // []' "$t/$2.ndjson" > "$t/$2.json"
 }
 # A user that WorkOS deleted after the user list answers 404: write [] and a note.
 identities() {
-  code=$(curl -sS -o identity.tmp -w '%{http_code}' -H "Authorization: Bearer $WORKOS_API_KEY" "$api/user_management/users/$1/identities")
+  code=$(curl -sS -o "$t/identity" -w '%{http_code}' -H "Authorization: Bearer $WORKOS_API_KEY" "$api/user_management/users/$1/identities")
   case "$code" in
-    200) cat identity.tmp ;;
+    200) cat "$t/identity" ;;
     404) echo "note: user $1 is deleted in WorkOS; it has no identities in the export" >&2; printf '[]' ;;
     *) echo "error: the identities of user $1 answered HTTP $code" >&2; return 1 ;;
   esac
 }
-trap 'rm -f ./*.ndjson ./m-*.json ./identity.tmp' EXIT
 list "/user_management/users?limit=100&order=asc" users
 list "/organizations?limit=100&order=asc" organizations
-: > memberships.ndjson
-for o in $(jq -r '.[].id' organizations.json); do
+: > "$t/memberships.ndjson"
+for o in $(jq -r '.[].id' "$t/organizations.json"); do
   list "/user_management/organization_memberships?organization_id=$o&statuses=active,inactive,pending&limit=100" "m-$o"
-  cat "m-$o.json" >> memberships.ndjson
+  cat "$t/m-$o.json" >> "$t/memberships.ndjson"
 done
-jq -s 'add // []' memberships.ndjson > memberships.json
-for u in $(jq -r '.[].id' users.json); do
+jq -s 'add // []' "$t/memberships.ndjson" > "$t/memberships.json"
+for u in $(jq -r '.[].id' "$t/users.json"); do
   i=$(identities "$u")
   printf '{"%s":%s}\n' "$u" "$i"
-done | jq -s 'add // {}' > identities.json
+done | jq -s 'add // {}' > "$t/identities.json"
+mv "$t/users.json" "$t/organizations.json" "$t/memberships.json" "$t/identities.json" .
 ```
 
 ```sh
