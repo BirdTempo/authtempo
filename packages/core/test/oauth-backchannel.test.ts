@@ -568,7 +568,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(await outbox(w)).toEqual([]);
   });
 
-  it("sends at most 10 rows of one client in a sweep, so a failing client cannot hold back the rows of another client", async () => {
+  it("takes the due rows of each client in turns, so a failing client cannot hold back the rows of another client (ruling 37 of plan 12f)", async () => {
     const w = world();
     const { actor } = await twoSessions(w);
     // A second person: a sign-out delivers the due rows of its own user, so
@@ -598,12 +598,13 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     const before = w.calls.length;
     expect((await sweepExpired(w.auth.config)).oauthLogouts).toBe(3);
     const posts = w.calls.slice(before).map((c) => c.url);
-    expect(posts.filter((u) => u === BC)).toHaveLength(10);
+    // The call budget of the sweep fits 6 rows: a row of each client in turn.
+    expect(posts.filter((u) => u === BC)).toHaveLength(3);
     expect(posts.filter((u) => u === BC2)).toHaveLength(3);
     const rows = await outbox(w);
     expect(rows.filter((r) => r.clientId === good)).toEqual([]);
-    expect(rows.filter((r) => r.clientId === failing && r.attempts === 2)).toHaveLength(10);
-    expect(rows.filter((r) => r.clientId === failing && r.attempts === 1)).toHaveLength(50);
+    expect(rows.filter((r) => r.clientId === failing && r.attempts === 2)).toHaveLength(3);
+    expect(rows.filter((r) => r.clientId === failing && r.attempts === 1)).toHaveLength(57);
   });
 
   it("deletes a row after 6 attempts with one log line", async () => {
@@ -1098,7 +1099,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     return count;
   }
 
-  it("keeps one sweep with full caps under 1000 storage calls, the D1 query limit of Workers Paid", async () => {
+  it("keeps one sweep with full caps inside 50 calls with its posts, the limits of Workers Free (ruling 37 of plan 12f)", async () => {
     for (const subjectType of ["public", "pairwise"] as const) {
       const w = world();
       const { actor } = await twoSessions(w);
@@ -1129,12 +1130,15 @@ describe("back-channel logout (plan 12e Task 16)", () => {
       // Past the session life, and inside the 90 days of the idle client sweep.
       w.auth.clock.advance(60 * 24 * 60 * MINUTE);
       const count = countCalls(w.auth.storage);
+      const before = w.calls.length;
       const swept = await sweepExpired(w.auth.config);
-      expect(swept.oauthSessionLinks).toBe(250);
-      expect(swept.oauthLogouts).toBe(0);
-      expect((await outbox(w)).filter((r) => r.attempts === 2)).toHaveLength(50);
-      // Measured 2026-10-20 on the memory adapter: 775 calls public, 825 pairwise.
-      expect(count.n, subjectType).toBeLessThan(1000);
+      const posts = w.calls.length - before;
+      const total = count.n + posts;
+      // The view of the store has no statementsSent, so each step counts its worst case. The
+      // pairwise subject costs 1 more call per row. The posts count as calls too.
+      expect([swept.oauthSessionLinks, swept.oauthLogouts, posts], subjectType).toEqual([17, 0, 2]);
+      expect((await outbox(w)).filter((r) => r.attempts === 2)).toHaveLength(2);
+      expect(total, subjectType).toBe(subjectType === "public" ? 46 : 48);
     }
   });
 

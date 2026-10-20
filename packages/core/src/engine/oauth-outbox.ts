@@ -48,19 +48,45 @@ export async function writeLogouts(
   now: Date,
 ): Promise<void> {
   for (const link of links) {
-    await tx.create("oauthLogout", {
-      id: newId(now),
-      clientId: link.clientId,
-      userId: link.userId,
-      sessionId: link.sessionId,
-      sid: link.sid,
-      attempts: 0,
-      nextAttemptAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
+    await createLogout(tx, link, now);
     await tx.delete("oauthSessionClient", [{ field: "id", op: "eq", value: link.id }]);
   }
+}
+
+/** The outbox row of one link, due at `now`. */
+async function createLogout(
+  tx: StorageAdapter,
+  link: OAuthSessionClientRow,
+  now: Date,
+): Promise<void> {
+  await tx.create("oauthLogout", {
+    id: newId(now),
+    clientId: link.clientId,
+    userId: link.userId,
+    sessionId: link.sessionId,
+    sid: link.sid,
+    attempts: 0,
+    nextAttemptAt: now,
+    createdAt: now,
+    updatedAt: now,
+  });
+}
+
+/**
+ * The outbox rows of a page of links, then one delete of the links by id,
+ * in the caller's transaction: one statement per link and one more. The
+ * sweep passes at most 50 links: the delete binds their ids, under the 100
+ * bound parameters of a D1 query (D1 limits page updated 21 April 2026,
+ * read 2026-10-21).
+ */
+export async function writeLogoutPage(
+  tx: StorageAdapter,
+  links: readonly OAuthSessionClientRow[],
+  now: Date,
+): Promise<void> {
+  if (links.length === 0) return;
+  for (const link of links) await createLogout(tx, link, now);
+  await tx.delete("oauthSessionClient", [{ field: "id", op: "in", value: links.map((l) => l.id) }]);
 }
 
 /**

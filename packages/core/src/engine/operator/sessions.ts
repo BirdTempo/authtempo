@@ -2,6 +2,7 @@ import type { ResolvedConfig } from "../../config.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SessionRow } from "../../schema.js";
 import { findManyIn, IN_CHUNK } from "../../storage/batch.js";
+import { meterOf } from "../../storage/meter.js";
 import type { StorageAdapter, Where } from "../../storage/port.js";
 import { deleteOAuthCodes } from "../oauth-grants.js";
 import { writeLogouts } from "../oauth-outbox.js";
@@ -78,26 +79,6 @@ function reasonOf(
  * The expired rows are the lock read of `lockInOrder` and 2 deletes.
  */
 const STEP_WORST = { hold: 3, expired: 3 } as const;
-
-/**
- * The statements of the work of an act so far (ruling 35 of plan 12f). It
- * starts at `fixed`, the calls before the transaction. With
- * `statementsSent`, the count is the difference since the start. With no
- * counter, each `step` adds its worst case.
- */
-function meterOf(storage: StorageAdapter, fixed: number) {
-  const start = storage.statementsSent?.();
-  let assumed = fixed;
-  return {
-    step(worst: number) {
-      assumed += worst;
-    },
-    get used(): number {
-      const now = storage.statementsSent?.();
-      return start === undefined || now === undefined ? assumed : fixed + now - start;
-    },
-  };
-}
 
 /** The calls of `targetOf`: the user, and for a user actor the platform organization and the member row. */
 const TARGET_CALLS: Readonly<Record<OperatorActor["kind"], number>> = {

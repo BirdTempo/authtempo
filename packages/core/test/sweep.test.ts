@@ -303,9 +303,12 @@ describe("sweepExpired", () => {
       }
       await idleClient(storage, "c-zzz", idle, now);
 
-      const first = await sweepExpired(config);
-      const second = await sweepExpired(config);
-      expect(first.oauthClients + second.oauthClients).toBe(1);
+      // Each sweep reaches the clients that its call budget allows (ruling 37 of plan 12f).
+      const counts: number[] = [];
+      while (counts.length < 40 && !counts.includes(1))
+        counts.push((await sweepExpired(config)).oauthClients);
+      // 102 idle clients, 7 of them in each sweep: the deletable one goes in sweep 15.
+      expect([counts.length, counts.reduce((a, b) => a + b, 0)]).toEqual([15, 1]);
       const left = await storage.findMany("oauthClient", []);
       expect(left.map((r) => r.id).sort()).toEqual(kept);
       // A kept client counts as seen by the sweep.

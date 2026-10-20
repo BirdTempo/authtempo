@@ -3,6 +3,7 @@ import { ipKey } from "../limiter/ip-key.js";
 import { SESSION_JWT_TYPE } from "../primitives/credentials.js";
 import { constantTimeEqual, randomBase64Url } from "../primitives/crypto.js";
 import type { OAuthClientRow, OAuthLogoutRow, SessionRow } from "../schema.js";
+import type { Meter } from "../storage/meter.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { findClient } from "./oauth-clients.js";
 import { endSessionById, linkSession, queueLogouts } from "./oauth-outbox.js";
@@ -147,15 +148,8 @@ export const LOGOUT_MAX_ATTEMPTS = 6;
 
 /**
  * The due rows of one sweep. One sweep stays short; the next one takes the
- * rest. The cap fits the D1 limit of Workers Paid. That limit is 1000
- * queries per invocation and 100 bound parameters per query (D1 limits page
- * updated 21 April 2026, read 2026-10-20). A test gave one sweep more links
- * to end and more failing rows than each cap (2026-10-20). It made 775
- * storage calls for a public client and 825 for a pairwise one. Each row
- * costs about 6 calls.
- * The Free plan has 50 queries per invocation, which no useful cap fits.
- * There the step stops at the limit with one log line. A row that the limit
- * stops before its post loses no attempt, so the next sweeps go on.
+ * rest. The call budget of the sweep (`SWEEP_CALL_BUDGET` in sweep.ts)
+ * stops the step sooner: each row costs about 5 calls with its post.
  */
 export const LOGOUT_SWEEP_MAX = 50;
 
@@ -308,51 +302,71 @@ async function postLogoutToken(
 
 type Delivery = "sent" | "dropped" | "failed" | "skipped";
 
+/** A row that its claim made ready to post, or the result of a row that needs no post. */
+type Claimed =
+  | { kind: "post"; row: OAuthLogoutRow; uri: string; token: string; now: Date }
+  | { kind: "done"; result: Delivery };
+
 /**
- * One attempt of one row. First the claim: a conditional update moves
- * `nextAttemptAt` from the value that this call read. So of two deliveries
- * of one row, one posts. The claim counts no attempt (ruling 50). A throw
- * before the post, at the signing read or at a storage limit, leaves
- * `attempts` as it was: the row waits and comes again. Only a post that went
- * out and failed adds one attempt. Then 200 or 204 deletes the row.
+ * The steps of one row before its post. First the claim: a conditional
+ * update moves `nextAttemptAt` from the value that this call read. So of
+ * two deliveries of one row, one posts. The claim counts no attempt
+ * (ruling 50). A throw before the post, at the signing read or at a
+ * storage limit, leaves `attempts` as it was: the row waits and comes
+ * again. `clients` keeps the client rows that one sweep read.
  */
-async function deliverRow(
+async function claimRow(
   config: ResolvedConfig,
   row: OAuthLogoutRow,
-  deadline: AbortSignal,
-): Promise<Delivery> {
+  clients?: Map<string, OAuthClientRow | null>,
+): Promise<Claimed> {
   const { storage } = config;
   const byId = [{ field: "id" as const, op: "eq" as const, value: row.id }];
   if (row.attempts >= LOGOUT_MAX_ATTEMPTS) {
-    if ((await storage.delete("oauthLogout", byId)) !== 1) return "skipped";
+    if ((await storage.delete("oauthLogout", byId)) !== 1)
+      return { kind: "done", result: "skipped" };
     // The client id only: never the token, the user, or the session.
     console.error("authtempo: a back-channel logout is dropped after 6 attempts", row.clientId);
-    return "dropped";
+    return { kind: "done", result: "dropped" };
   }
-  const client = await storage.findOne("oauthClient", [
-    { field: "id", op: "eq", value: row.clientId },
-  ]);
+  let client = clients?.get(row.clientId);
+  if (client === undefined) {
+    client = await storage.findOne("oauthClient", [{ field: "id", op: "eq", value: row.clientId }]);
+    clients?.set(row.clientId, client);
+  }
   // An update took the URI away: no client waits for this token.
   if (!client?.backchannelLogoutUri)
-    return (await storage.delete("oauthLogout", byId)) === 1 ? "dropped" : "skipped";
+    return {
+      kind: "done",
+      result: (await storage.delete("oauthLogout", byId)) === 1 ? "dropped" : "skipped",
+    };
   const now = config.clock.now();
-  const attempts = row.attempts + 1;
   const claimed = await storage.update(
     "oauthLogout",
     [...byId, { field: "nextAttemptAt", op: "eq", value: row.nextAttemptAt }],
-    { nextAttemptAt: new Date(now.getTime() + backoffMs(attempts)), updatedAt: now },
+    { nextAttemptAt: new Date(now.getTime() + backoffMs(row.attempts + 1)), updatedAt: now },
   );
-  if (claimed !== 1) return "skipped";
+  if (claimed !== 1) return { kind: "done", result: "skipped" };
   const token = await logoutToken(config, row, client);
-  const posted = await postLogoutToken(
-    config.oauth?.fetch ?? null,
-    client.backchannelLogoutUri,
-    token,
-    deadline,
-  );
+  return { kind: "post", row, uri: client.backchannelLogoutUri, token, now };
+}
+
+/**
+ * Posts one claimed row, then ends it. Only a post that went out and
+ * failed adds one attempt. Then 200 or 204 deletes the row, and so does a
+ * refusal.
+ */
+async function postClaimed(
+  config: ResolvedConfig,
+  c: Extract<Claimed, { kind: "post" }>,
+  deadline: AbortSignal,
+): Promise<Delivery> {
+  const { storage } = config;
+  const byId = [{ field: "id" as const, op: "eq" as const, value: c.row.id }];
+  const posted = await postLogoutToken(config.oauth?.fetch ?? null, c.uri, c.token, deadline);
   if (posted.kind === "retry") {
     // The post went out, or could not (no fetch), and failed: one attempt.
-    await storage.update("oauthLogout", byId, { attempts, updatedAt: now });
+    await storage.update("oauthLogout", byId, { attempts: c.row.attempts + 1, updatedAt: c.now });
     return "failed";
   }
   await storage.delete("oauthLogout", byId);
@@ -360,18 +374,34 @@ async function deliverRow(
   // The client id and the status only: never the token, the user, or the session.
   console.error(
     "authtempo: a back-channel logout is dropped: the client refused it",
-    row.clientId,
+    c.row.clientId,
     posted.status,
   );
   return "dropped";
 }
 
-/** Delivers `rows` in parallel inside `LOGOUT_DELIVERY_MS`. Answers the rows sent or dropped. */
-async function deliverRows(config: ResolvedConfig, rows: OAuthLogoutRow[]): Promise<number> {
+/** One attempt of one row: the claim, then the post. */
+async function deliverRow(
+  config: ResolvedConfig,
+  row: OAuthLogoutRow,
+  deadline: AbortSignal,
+): Promise<Delivery> {
+  const claimed = await claimRow(config, row);
+  return claimed.kind === "done" ? claimed.result : postClaimed(config, claimed, deadline);
+}
+
+/**
+ * Runs `each` for every item in parallel inside `LOGOUT_DELIVERY_MS`, with
+ * one deadline for all. Answers the rows sent or dropped.
+ */
+async function inParallel<T>(
+  items: readonly T[],
+  each: (item: T, deadline: AbortSignal) => Promise<Delivery>,
+): Promise<number> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), LOGOUT_DELIVERY_MS);
   try {
-    const results = await Promise.allSettled(rows.map((r) => deliverRow(config, r, ctrl.signal)));
+    const results = await Promise.allSettled(items.map((item) => each(item, ctrl.signal)));
     let n = 0;
     for (const r of results) {
       if (r.status === "rejected")
@@ -386,6 +416,10 @@ async function deliverRows(config: ResolvedConfig, rows: OAuthLogoutRow[]): Prom
     clearTimeout(timer);
   }
 }
+
+/** Delivers `rows` in parallel inside `LOGOUT_DELIVERY_MS`. Answers the rows sent or dropped. */
+const deliverRows = (config: ResolvedConfig, rows: OAuthLogoutRow[]) =>
+  inParallel(rows, (row, deadline) => deliverRow(config, row, deadline));
 
 /**
  * Delivers the due outbox rows of `userId`, at most `LOGOUT_REQUEST_MAX`.
@@ -413,15 +447,70 @@ export async function deliverLogouts(config: ResolvedConfig, userId: string): Pr
 }
 
 /**
- * The sweep step: at most `LOGOUT_SWEEP_MAX` due rows, at most
- * `LOGOUT_SWEEP_PER_CLIENT` of one client, `LOGOUT_REQUEST_MAX` at a time.
- * Answers the rows sent or dropped.
+ * The calls of one row of the sweep before its post, at the worst: the
+ * client, the claim, the pairwise subject, and the signing key. The key
+ * costs 4 when a rotation is due: the read, the retire, the read again,
+ * and the create. After a secret switch it costs 2: the read and the
+ * reseal. The rows go one by one, so only the first row of a sweep
+ * reseals or rotates.
  */
-export async function deliverDueLogouts(config: ResolvedConfig): Promise<number> {
+export const LOGOUT_ROW_BEFORE_POST = 7;
+
+/**
+ * The calls of one row from its post: the post, and the delete or the
+ * count of the attempt. The sweep counts the post as a call: Workers Free
+ * allows 50 subrequests per invocation, and the page names D1 a service
+ * that a subrequest reaches (Workers limits page updated 12 October 2026,
+ * read 2026-10-21). So one count of 50 holds the queries and the posts.
+ */
+export const LOGOUT_ROW_FROM_POST = 2;
+
+/** The rows of `due` in turns of their clients: the first row of each client, then the second. */
+function inTurns(due: readonly OAuthLogoutRow[]): OAuthLogoutRow[] {
+  const byClient = new Map<string, OAuthLogoutRow[]>();
+  for (const row of due) {
+    const rows = byClient.get(row.clientId);
+    if (rows) rows.push(row);
+    else byClient.set(row.clientId, [row]);
+  }
+  const lists = [...byClient.values()];
+  const out: OAuthLogoutRow[] = [];
+  for (let turn = 0; out.length < due.length; turn++)
+    for (const rows of lists) {
+      const row = rows[turn];
+      if (row) out.push(row);
+    }
+  return out;
+}
+
+/**
+ * The sweep step: at most `LOGOUT_SWEEP_MAX` due rows, at most
+ * `LOGOUT_SWEEP_PER_CLIENT` of one client, `LOGOUT_REQUEST_MAX` at a time,
+ * inside `limit` calls of `meter` (ruling 37 of plan 12f). Answers the rows
+ * sent or dropped.
+ *
+ * The rows go in turns of their clients, so a client that fails cannot use
+ * the calls of a sweep alone. Each row takes its claim and its token one
+ * by one. Before each row the step checks that the row's calls before the
+ * post, its post, its delete, and the post and the delete of each row that
+ * waits all fit `limit`. The step stops before a row that does not fit, so
+ * a posted row always has room for its delete and is never posted again.
+ * Then the rows that wait post in parallel. A throw before the posts, such
+ * as a storage limit, posts nothing of the group: each claimed row loses
+ * no attempt and comes again.
+ */
+export async function deliverDueLogouts(
+  config: ResolvedConfig,
+  meter: Meter,
+  limit: number,
+): Promise<number> {
   const now = config.clock.now();
+  const one = LOGOUT_ROW_BEFORE_POST + LOGOUT_ROW_FROM_POST;
   const due: OAuthLogoutRow[] = [];
   const seen = new Set<string>();
   for (let read = 0; read < LOGOUT_SWEEP_READS && due.length < LOGOUT_SWEEP_MAX; read++) {
+    // A read must leave room for one row.
+    if (meter.used + 1 + one > limit) break;
     const rows = await config.storage.findMany(
       "oauthLogout",
       [
@@ -430,6 +519,7 @@ export async function deliverDueLogouts(config: ResolvedConfig): Promise<number>
       ],
       { sort: { field: "nextAttemptAt", dir: "asc" }, limit: LOGOUT_SWEEP_MAX },
     );
+    meter.step(1);
     const taken = new Map<string, number>();
     for (const row of rows) {
       const count = taken.get(row.clientId) ?? 0;
@@ -441,8 +531,30 @@ export async function deliverDueLogouts(config: ResolvedConfig): Promise<number>
     // A short read found every due row of the clients that it did not leave out.
     if (rows.length < LOGOUT_SWEEP_MAX) break;
   }
+  const clients = new Map<string, OAuthClientRow | null>();
+  const order = inTurns(due);
   let n = 0;
-  for (let i = 0; i < due.length; i += LOGOUT_REQUEST_MAX)
-    n += await deliverRows(config, due.slice(i, i + LOGOUT_REQUEST_MAX));
+  let next = 0;
+  let full = false;
+  while (!full && next < order.length) {
+    const ready: Extract<Claimed, { kind: "post" }>[] = [];
+    while (ready.length < LOGOUT_REQUEST_MAX && next < order.length) {
+      if (meter.used + LOGOUT_ROW_FROM_POST * ready.length + one > limit) {
+        full = true;
+        break;
+      }
+      const row = order[next++];
+      if (!row) break;
+      const claimed = await claimRow(config, row, clients);
+      meter.step(LOGOUT_ROW_BEFORE_POST);
+      if (claimed.kind === "post") ready.push(claimed);
+      else if (claimed.result === "sent" || claimed.result === "dropped") n++;
+    }
+    if (ready.length === 0) continue;
+    // The posts are calls that the storage counter does not see.
+    meter.add(ready.length);
+    n += await inParallel(ready, (c, deadline) => postClaimed(config, c, deadline));
+    meter.step(ready.length);
+  }
   return n;
 }

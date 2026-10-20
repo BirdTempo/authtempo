@@ -47,8 +47,8 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `oauthClients` | Up to 100 OAuth clients unseen for 90 days, with no consent and no refresh token. A client of `api.oauth.clients.create` stays: you made it on purpose. |
 | `limits` | The limit windows that ended, when the limiter has a sweep. |
 | `oauthDevices` | Device grants past their expiry: pending, decided, and spent. A poll of such a code answers `expired_token` before the sweep, and `invalid_grant` after it. |
-| `oauthSessionLinks` | Links of OAuth clients to sessions that are gone, at most 250 in one sweep. Each link becomes a back-channel sign-out message: an expiry ends a session too. |
-| `oauthLogouts` | Back-channel sign-out messages, at most 50 in one sweep and at most 10 of one client. So a client that fails cannot hold back the messages of other clients. Each due message gets one more attempt. The count holds the messages that a client took, and the messages that core deleted after their sixth attempt. |
+| `oauthSessionLinks` | Links of OAuth clients to sessions that are gone, at most 250 in one sweep, and as many as the calls of the sweep allow. Each link becomes a back-channel sign-out message: an expiry ends a session too. |
+| `oauthLogouts` | Back-channel sign-out messages, at most 50 in one sweep and at most 10 of one client, as many as the calls of the sweep allow. The sweep takes the messages of each client in turns. So a client that fails cannot hold back the messages of other clients. Each due message gets one more attempt. The count holds the messages that a client took, and the messages that core deleted after their sixth attempt. |
 | `oauthClientSecrets` | Old OAuth client secrets past the overlap of a rotation. The sweep clears them from the client. |
 
 ## How it behaves
@@ -56,12 +56,15 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 - The sweep is an `api` function, not a route. It is safe to run at any time.
 - Without a trigger, expired rows stay in the database forever.
 - The sweep fires no hook. A replayed token answers `invalid_token` after the sweep, because its row is gone.
-- The two back-channel steps run last: `oauthSessionLinks`, then `oauthLogouts`. One sweep reads at most 250 links, in 5 pages of 50, and goes round all links. So a link whose session is gone waits at most ceil(links / 250) sweeps for its message. One sweep with full caps makes about 830 storage calls at most. On D1 that needs Workers Paid, which allows 1000 queries in one run. Workers Free allows 50 (D1 limits page updated 21 April 2026, read 2026-10-20).
+- The two back-channel steps run last: `oauthSessionLinks`, then `oauthLogouts`. One sweep reads at most 250 links, in 5 pages of 50, and goes round all links.
+- The whole sweep fits 50 calls: the queries and the posts of the messages. D1 Free allows 50 queries in one run (D1 limits page updated 21 April 2026). Workers Free allows 50 subrequests in one run (Workers limits page updated 12 October 2026). Both pages were read 2026-10-21. Each step stops before a call that does not fit, and the next sweep goes on. A posted message always has room for its delete, so no message goes out twice.
+- So one sweep sends about 6 messages, or makes about 17 messages from links. A test on D1 turned 90 links into messages and sent them all in 20 sweeps or fewer. To send them sooner, run the sweep more often, such as every 5 minutes.
+- An operator act sends no message in its call: the end of sessions, the ban, and the revoke of the platform role. The sweep sends their messages.
 
 ## If it fails
 
 - The sweep answers no error code. A storage error throws, and the scheduled run fails in the Worker's logs.
-- A storage error in one of the two back-channel steps does not throw. The step writes one log line, `authtempo: the sweep link step stopped` or `authtempo: the sweep outbox step stopped`, and counts 0. The counts above it stay, and the next sweep goes on. On Workers Free this is what a run past 50 queries shows. A stop loses no message. Each link becomes a message in its own write. A message that a stop holds before its post loses no attempt. Each sweep then sends a few messages, so they come later.
+- A storage error in one of the two back-channel steps does not throw. The step writes one log line, `authtempo: the sweep link step stopped` or `authtempo: the sweep outbox step stopped`, and counts 0. The counts above it stay, and the next sweep goes on. A stop loses no message. The messages of a page of links and the delete of those links are one write. A message that a stop holds before its post loses no attempt.
 - A `limits` count of 0 with the memory limiter is normal: the memory limiter deletes ended windows at each check.
 
 ## Next
