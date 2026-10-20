@@ -40,10 +40,13 @@ const REPO = resolve(PKG, "../..");
 
 /**
  * The bare specifiers that a copied file may import, each with the file of
- * core that it names. The client imports values from both (ruling 34).
+ * core that it names. The client imports values from the errors and routes
+ * entries (ruling 34). It re-exports `roleHasPermission` of the access entry
+ * (plan 12k Task 9). The access entry imports nothing, so a browser loads it.
  * @type {Readonly<Record<string, string>>}
  */
 export const ALLOWED = Object.freeze({
+  "@authtempo/core/access": "access.js",
   "@authtempo/core/errors": "errors.js",
   "@authtempo/core/routes": "routes.js",
 });

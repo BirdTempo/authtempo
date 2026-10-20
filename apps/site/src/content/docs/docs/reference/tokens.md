@@ -7,6 +7,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.8
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.11
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 29
 ---
 
 **For:** a developer who sees a token in a log, a URL, or a store, and must know what it is.
@@ -25,6 +26,7 @@ Each token is the prefix plus 43 base64url characters of 32 random bytes.
 | --- | --- | --- | --- |
 | `ts_` | Session token | The session cookie, or the bearer header of a native app | `session.ttlDays` |
 | `tk_` | API token | The bearer header only | `expiresInDays`, or none |
+| `to_` | Organization token. It belongs to an organization, not to a person | The bearer header only | `expiresInDays`, or none |
 | `ml_` | Magic link token | The link in the mail, then the confirm form | `magicLink.ttlMinutes` |
 | `pv_` | Password verify token | The verify link in the mail | `magicLink.ttlMinutes` |
 | `pr_` | Password reset token | The reset link in the mail | `password.resetTtlMinutes` |
@@ -40,6 +42,8 @@ Each token is the prefix plus 43 base64url characters of 32 random bytes.
 | `oq_` | OAuth held request id | The `request_id` of the sign-in page and the consent page | 10 minutes |
 
 A client id may also be the https URL of its metadata document. Such an id has no prefix.
+
+A key of `tokens.movedPrefixes`, such as `laaa_`, is a key that moved into core's token table from another system. Core looks up its hash as an API token. A moved key with no row answers `token_retired`.
 
 ## Tokens with no prefix
 

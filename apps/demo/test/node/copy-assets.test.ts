@@ -72,8 +72,9 @@ describe("copy-assets.mjs", () => {
     expect(imports).toBeGreaterThan(20);
   });
 
-  it("allows the errors and the routes entries of core, and no other", () => {
+  it("allows the access, the errors, and the routes entries of core, and no other", () => {
     expect(ALLOWED).toEqual({
+      "@authtempo/core/access": "access.js",
       "@authtempo/core/errors": "errors.js",
       "@authtempo/core/routes": "routes.js",
     });
@@ -93,6 +94,7 @@ describe("copy-assets.mjs", () => {
     for (const name of files(client))
       expect(readFileSync(join(client, name), "utf8"), name).not.toContain("@authtempo/");
     expect(files(join(dir, "assets/core"))).toEqual([
+      "access.js",
       "errors.js",
       "http/anchors.js",
       "http/redirect.js",

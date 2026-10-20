@@ -4,6 +4,7 @@ description: Turn on organizations, ranked roles, mailed invitations, and the ac
 type: how-to
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.6
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 29
   - packages/core/README.md "Organizations"
   - packages/core/README.md "Limits"
   - packages/client/README.md "Organizations"
@@ -26,15 +27,17 @@ import test from "../../../../../samples/guides/organizations.test.ts?raw";
 
 1. Add `organizations: {}` to the config. With no `organizations` key, the organization routes answer 404.
 2. Set `ranks` when the four default roles do not fit. The table must name `owner`.
+   - For rights by name, set `roles` in its place. [Roles and permissions](/docs/guides/roles-and-permissions/) tells how.
 3. Set `limits` for the counts that your plan sells. Each count is off by default.
 
 <Code code={config} lang="ts" title="The organizations config" />
 
-4. Call `client.organizations.create({ slug, name })`. The creator becomes `owner`.
-5. Call `client.organizations.invitations.invite({ organizationId, email, role })`. Core mails the link.
-6. On the page of the link, call `client.organizations.invitations.accept({ token })` for the signed-in person.
-7. Call `client.organizations.setActive({ organizationId })` when the person picks an organization.
-8. In each route of your app, check the member's rank again. The active organization is a choice, not a right.
+4. Call `client.organizations.checkSlug({ slug })` to show if the slug is free.
+5. Call `client.organizations.create({ slug, name })`. The creator becomes `owner`.
+6. Call `client.organizations.invitations.invite({ organizationId, email, role })`. Core mails the link.
+7. On the page of the link, call `client.organizations.invitations.accept({ token })` for the signed-in person.
+8. Call `client.organizations.setActive({ organizationId })` when the person picks an organization.
+9. In each route of your app, check the member's right again with `auth.hasPermission`. The active organization is a choice, not a right.
 
 <Code code={test} lang="ts" title="Create, invite, and accept as a test" />
 
@@ -49,6 +52,11 @@ import test from "../../../../../samples/guides/organizations.test.ts?raw";
 - To accept, the caller's verified address must equal the invited address.
 - Invite has two [limits](/docs/reference/limits/): `invite:user:<userId>` 20 per 15 minutes, and `invite:email:<email>` 5 per hour.
 - Accept has one [limit](/docs/reference/limits/): `invitation-accept:ip:<ip>` 20 per 15 minutes.
+- The slug check answers the folded slug and `available`, `taken`, `reserved`, or `invalid`. It needs a verified address.
+- `available` is a hint, not a hold. The create still answers `slug_taken` when another user takes the slug first.
+- The slug check, the create, and a rename to a new slug spend one [limit](/docs/reference/limits/): `slug-check:user:<userId>` 60 per minute.
+- [Teams](/docs/guides/teams/) group the members of an organization. A team has no role of its own.
+- A [flow point](/docs/guides/hooks/) runs your code before or after each organization write.
 
 ## If it fails
 
@@ -60,10 +68,10 @@ import test from "../../../../../samples/guides/organizations.test.ts?raw";
 - [`organization_limit`](/docs/reference/errors/#organization_limit), [`member_limit`](/docs/reference/errors/#member_limit), and [`invitation_limit`](/docs/reference/errors/#invitation_limit): a count of `limits` is full.
 - [`email_unverified`](/docs/reference/errors/#email_unverified): the caller must prove the address first.
 - [`invalid_token`](/docs/reference/errors/#invalid_token) and [`token_expired`](/docs/reference/errors/#token_expired): the invitation is spent, revoked, old, or its inviter lost the rank.
-- [`rate_limited`](/docs/reference/errors/#rate_limited): too many invitations or accepts.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many invitations, accepts, or slug reads.
 
 ## Next
 
-- [Run your code at a hook point](/docs/guides/hooks/)
+- [Roles and permissions](/docs/guides/roles-and-permissions/)
+- [Teams](/docs/guides/teams/)
 - [Give a script an API token](/docs/guides/api-tokens/)
-- [Routes](/docs/reference/routes/#post-organizations-create)

@@ -4,6 +4,7 @@ description: Let a signed-in person create an API token, and let a script or a C
 type: how-to
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.8
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 29
   - packages/core/README.md "API tokens"
   - packages/client/README.md "API tokens"
 ---
@@ -36,7 +37,10 @@ import test from "../../../../../samples/guides/api-tokens.test.ts?raw";
 
 <Code code={cli} lang="ts" title="The client of a CLI" />
 
-<Code code={test} lang="ts" title="Create and use a token as a test" />
+7. To meter a token, set its quota in process with `auth.api.tokens.create`.
+8. In a metered route, read the caller with `auth.authenticate(request)` to answer the code of a refusal.
+
+<Code code={test} lang="ts" title="Create, use, and meter a token as a test" />
 
 ## How it behaves
 
@@ -51,14 +55,85 @@ import test from "../../../../../samples/guides/api-tokens.test.ts?raw";
 - The create needs a [fresh session](/docs/concepts/fresh-sessions/). A stale one answers `session_not_fresh`. Wrap the call in `client.withFresh`.
 - `api.tokens.create` takes a user, so it applies no fresh rule. Call `api.session.requireFresh` first.
 
+### Scopes
+
+- `permissions` narrows a token to a statement set, such as `{ project: ["read"] }`. Each name must be a known action of [Roles and permissions](/docs/guides/roles-and-permissions/).
+- `null` or no `permissions` means the user's own rights. A set needs `organizations` in the config.
+- A bound token holds a subset of its user's set in the organization at its create. Else the create answers `forbidden_rank`.
+- At each request, the token's set is the intersection of its `permissions` and its user's role now. So a demotion narrows the token at the next request.
+- `metadata` holds the app's own data, at most 4096 bytes as JSON. It never grants a right, and core never reads it.
+
+### The narrow-only update
+
+`client.tokens.update({ id, name?, permissions?, expiresAt? })` changes a token, and it narrows only. A token has no refresh.
+
+- A new set is a subset of the old one. A set over `null` is a narrow.
+- `null` over a set, a wider set, and a later expiry answer `invalid_body`. So does `null` over a date.
+- The update needs a fresh session. A write that crosses another write of the token answers `conflict`.
+
+### The window and the quota
+
+These two limits are set in process only, with `auth.api.tokens.create` or `auth.api.tokens.update`. No route takes them.
+
+- The window `rateLimit: { seconds, max }` counts each call of one token under the [limit](/docs/reference/limits/) `token-use:tk:<tokenId>`. Over the window, a call answers `rate_limited`.
+- `tokens.defaultRateLimit` gives a window to each new token that names none. A token from `POST /tokens` always gets it.
+- The quota `quota: { remaining, refillAmount?, refillSeconds? }` counts the calls that the token has left. Each call spends one. At zero, a call answers `token_exhausted`.
+- A refill sets the count to `refillAmount` when `refillSeconds` passed since the last refill. It does not add to the count.
+- The window runs before the spend, so a refused call spends nothing.
+- An update may lower `remaining` or drop the refill, and nothing more.
+
+### The race rule
+
+Each spend is one conditional write on the count. No spend takes the count below zero, also when calls arrive at the same moment.
+
+- A spend that loses to another spend reads the row again and tries again, up to 20 tries.
+- A lost try that sees no change answers `conflict` at once. So does a spend after 20 lost tries.
+- `auth.caller` and `auth.authenticate` on one request spend once.
+
+### Organization tokens
+
+A `to_` token belongs to an organization, not to a person. It acts with its own fixed `permissions`, never with the role of its creator.
+
+- `client.organizations.tokens.create({ organizationId, name, permissions })` needs `apiToken:create`, a fresh session, and a set that is a subset of yours.
+- `permissions` is required. `{}` grants nothing. `null` answers `invalid_body`.
+- The list needs `apiToken:read`, the update `apiToken:update`, and the revoke `apiToken:revoke`.
+- An organization holds at most 50 live tokens. The create shares the limit `token-create:user:<userId>` with user tokens.
+- `auth.caller` answers it as `kind: "organizationToken"`, with `organization` and no `user`. Narrow the kind before you read `caller.user`.
+- `GET /organizations/tokens/current` takes a `to_` bearer only.
+
+### The creator rule
+
+- An organization token stays when its creator leaves the organization or deletes the account. The list shows `creatorIsMember: false`.
+- The creator has no right of their own on the token. Only a member with `apiToken:revoke` revokes it.
+- `client.organizations.members.remove({ organizationId, userId, revokeTokens: true })` deletes the person's organization tokens in the same write.
+- `revokeTokens: true` needs `apiToken:revoke` beside `member:delete`, and a fresh session.
+
+### Authenticate and its codes
+
+`auth.authenticate(request)` answers the caller of `auth.caller` as a result, or the code of the failure. `auth.caller` answers null for each code.
+
+| Code | When |
+| --- | --- |
+| `unauthorized` | The token is unknown, expired, or revoked, or its user or membership is gone |
+| `rate_limited` | The call is over the token's window |
+| `token_exhausted` | The token's quota is zero |
+| `token_retired` | The key has a prefix of `tokens.movedPrefixes` and no row |
+| `conflict` | A lost spend saw no other spend, or 20 spends lost |
+
 ## If it fails
 
 - [`unauthorized`](/docs/reference/errors/#unauthorized): the token is unknown, expired, or revoked, or a route needs a session.
 - [`email_unverified`](/docs/reference/errors/#email_unverified): only a verified user creates a token.
 - [`token_limit`](/docs/reference/errors/#token_limit): the user holds 50 tokens. Revoke one first.
+- [`organization_token_limit`](/docs/reference/errors/#organization_token_limit): the organization holds 50 live tokens. Revoke one first.
 - [`not_found`](/docs/reference/errors/#not_found): the organization or the token does not belong to the caller.
-- [`rate_limited`](/docs/reference/errors/#rate_limited): more than 20 creates in one hour.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): more than 20 creates in one hour, or a call over the token's window.
 - [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): the session is older than the fresh window. Re-authenticate, then send it again.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): an unknown action, a set with `organizations` off, or an update that widens.
+- [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the set is wider than yours, or you lack the `apiToken` action.
+- [`token_exhausted`](/docs/reference/errors/#token_exhausted): the quota is spent. Wait for the refill, or give a new quota.
+- [`token_retired`](/docs/reference/errors/#token_retired): a moved key has no row. Issue a new token.
+- [`conflict`](/docs/reference/errors/#conflict): another write or spend changed the token at the same moment. Retry.
 
 ## Next
 

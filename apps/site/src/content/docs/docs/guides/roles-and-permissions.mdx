@@ -1,0 +1,135 @@
+---
+title: Roles and permissions
+description: Give organization roles rights by name, let each organization store its own roles, and check a right on each request.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 29
+  - packages/core/README.md "Organizations"
+  - packages/client/README.md "Organizations"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/roles.ts?raw";
+import test from "../../../../../samples/guides/roles.test.ts?raw";
+
+**For:** an app developer whose organizations need rights by name, such as "write a project", and not only by rank.
+
+**What it does:** core gives each role a set of actions. Your routes ask `auth.hasPermission`, and core answers from the role that the person holds now.
+
+## Before you start
+
+- A working setup of [organizations](/docs/guides/organizations/).
+- A list of the resources of your app and their actions, for the [config key](/docs/reference/config/#organizations) `organizations.statements`.
+
+## Steps
+
+1. Add your resources to `organizations.statements`.
+2. Give each role its rank and its actions in `organizations.roles`, or keep `ranks`.
+3. Set `organizations.dynamicRoles` when each organization must store its own roles.
+4. In each route that writes, call `auth.hasPermission(caller, { organizationId, permissions })`.
+
+<Code code={config} lang="ts" title="The roles config and a checked route" />
+
+5. Create a stored role with `client.organizations.roles.create`, then give it to a member.
+6. Narrow the role with `client.organizations.roles.update`. The next request of each holder has the smaller set.
+
+<Code code={test} lang="ts" title="Narrow a stored role as a test" />
+
+## How it behaves
+
+### Statements
+
+A statement set maps a resource to a list of actions, such as `{ project: ["read", "write"] }`. A resource or an action name matches `^[a-z][a-zA-Z0-9-]{0,31}$`. Core owns six resources:
+
+| Resource | Actions |
+| --- | --- |
+| `organization` | `update`, `delete` |
+| `member` | `read`, `create`, `update`, `delete` |
+| `invitation` | `read`, `create`, `cancel` |
+| `team` | `create`, `update`, `delete` |
+| `ac` | `read`, `create`, `update`, `delete` (the stored roles) |
+| `apiToken` | `read`, `create`, `update`, `revoke` (the organization tokens) |
+
+`organizations.statements` adds the resources of your app. `createAuth` refuses a core name, a bad name, an empty list, and a repeated action.
+
+### The two role forms
+
+- `ranks` (the default) maps each role to a rank. Core derives the core actions of each role from the table below. A role of `ranks` holds no action of your own resources.
+- `roles` maps each role to `{ rank, permissions }`. The role holds exactly its `permissions`, and each one must be a known action.
+- Set one form, never both. Each form names `owner`, and a role name holds no comma.
+- A member may hold several roles joined by a comma, such as `member,billing`. The set is the union of the parts. A part that no table names adds nothing.
+
+### The derivation table
+
+In the `ranks` form, a role holds an action when its rank is at least the rank of the role in this table. With the default ranks, every answer equals the rank rules of earlier versions.
+
+| Action | Lowest role |
+| --- | --- |
+| `member:read`, `ac:read` | `viewer` |
+| `organization:update` | `admin` |
+| `member:create`, `member:update`, `member:delete` | `admin` |
+| `invitation:read`, `invitation:create`, `invitation:cancel` | `admin` |
+| `team:create`, `team:update`, `team:delete` | `admin` |
+| `ac:create`, `ac:update`, `ac:delete` | `admin` |
+| `apiToken:read`, `apiToken:create`, `apiToken:update`, `apiToken:revoke` | `admin` |
+| `organization:delete` | `owner` |
+
+A slug change needs `organization:update` and the owner rank too.
+
+### The grant and touch rules
+
+- A caller grants a role only when its rank is at most the caller's rank, and its actions are a subset of the caller's. This holds at an add, a role change, an invite, and a stored role write.
+- A caller changes or removes another member under the same two conditions.
+- An owner is a member who holds a config role at the owner rank. The last owner cannot leave, be demoted, or be removed.
+- Two owner writes at the same moment cannot both succeed. The second answers `conflict`.
+
+### Dynamic roles
+
+With `organizations.dynamicRoles`, each organization stores its own roles beside the config roles. The [role routes](/docs/reference/routes/#dynamic-roles) follow eight rules:
+
+1. A name is one role name. It is not a config role, the platform role, or `owner`. A taken name answers `role_taken`.
+2. A rank is from 1 to the caller's rank, and below the owner rank.
+3. The actions are known names and a subset of the caller's actions.
+4. The list and the get need `ac:read`. The create, the update, and the delete need `ac:create`, `ac:update`, and `ac:delete`, and a fresh session.
+5. A delete answers `role_in_use` while a member or a pending invitation holds the role. A create answers the same while one holds the name.
+6. Core keeps no cache. A narrow applies at the next request.
+7. A stored row with a bad shape grants nothing. Core writes one log line `authtempo: role row invalid <row id>`, and the list leaves the row out.
+8. The cap `maxPerOrganization` (default 50) counts inside the transaction, before the write. A create at the cap answers `role_limit`.
+
+An update or a delete of a stored role also needs the role's rank and actions. While dynamic roles are on, a grant refuses a role part that neither the config nor a stored role names.
+
+### The check on the server
+
+`auth.hasPermission(caller, { organizationId, permissions })` answers true only when the caller holds every action in the organization. Any failure answers false, and it never throws.
+
+- A session reads its member role at each request.
+- A user token reads its user's role, narrowed by its own `permissions`. It grants nothing outside its bound organization.
+- An organization token reads its own set, in its own organization only.
+- An OAuth caller grants nothing. Check its scopes yourself.
+- An empty request, an unknown resource, and an unknown action answer false.
+
+`auth.permissionsOf(caller, organizationId)` answers the role string and its set. `POST /organizations/has-permission` and `GET /organizations/permissions` give the same answers to a session.
+
+Core has no OR connector. To accept either of two actions, write two checks.
+
+### The check on the client
+
+`client.organizations.hasPermission` asks the server. `roleHasPermission(table, role, permissions)` of `@authtempo/client` checks a static role table with no request. A client check only hides a control. The server check decides.
+
+## If it fails
+
+- [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the caller lacks the action, or the role to grant has more actions than the caller.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): an unknown action, a name of the config, or a rank above the caller or at the owner rank.
+- [`role_taken`](/docs/reference/errors/#role_taken): the organization already stores a role of that name.
+- [`role_in_use`](/docs/reference/errors/#role_in_use): a member or a pending invitation holds the role. Change those roles first.
+- [`role_limit`](/docs/reference/errors/#role_limit): the organization stores `maxPerOrganization` roles. Delete one first.
+- [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): a role write needs a fresh session. Re-authenticate, then send it again.
+- [`conflict`](/docs/reference/errors/#conflict): another write changed the role or the owner at the same moment. Read it again and retry.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the route needs a session. A token answers 401.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): an accept of an invitation whose role no table names now.
+
+## Next
+
+- [Teams](/docs/guides/teams/)
+- [Give a script an API token](/docs/guides/api-tokens/)
+- [Routes](/docs/reference/routes/#dynamic-roles)

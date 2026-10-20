@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { API, call, harness, signIn } from "../support/harness.ts";
-import { createTokensAuth, whoami } from "./api-tokens.ts";
+import { createMeteredToken, createTokensAuth, metered, whoami } from "./api-tokens.ts";
 import { createCliClient } from "./api-tokens-cli.ts";
 
 describe("give a script an API token", () => {
@@ -51,5 +51,31 @@ describe("give a script an API token", () => {
       { authorization: `Bearer ${token}` },
     );
     expect(again.status).toBe(401);
+  });
+
+  it("a token with a quota of 2 acts twice", async () => {
+    const h = harness();
+    const auth = createTokensAuth(h);
+    const ada = await signIn(auth, h, "ada@example.com");
+    const resolved = await auth.session(
+      new Request(`${API}/settings`, { headers: { cookie: ada } }),
+    );
+    if (!resolved) throw new Error("no session");
+    const created = await createMeteredToken(auth, resolved.user, 2);
+    if (!created.ok) throw new Error(created.code);
+    expect(created.value.apiToken.remaining).toBe(2);
+
+    const send = () =>
+      metered(
+        auth,
+        new Request(`${API}/report`, {
+          headers: { authorization: `Bearer ${created.value.token}` },
+        }),
+      );
+    expect(await (await send()).json()).toEqual({ kind: "token" });
+    expect(await (await send()).json()).toEqual({ kind: "token" });
+    const third = await send();
+    expect(third.status).toBe(429);
+    expect(await third.json()).toEqual({ error: "token_exhausted" });
   });
 });

@@ -1,0 +1,99 @@
+---
+title: Teams
+description: Group the members of an organization into teams, with limits that core keeps and an active team on each session.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 29
+  - packages/core/README.md "Organizations"
+  - packages/client/README.md "Organizations"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/teams.ts?raw";
+import test from "../../../../../samples/guides/teams.test.ts?raw";
+
+**For:** an app developer whose organizations need named groups of members, such as "Design" or "Support".
+
+**What it does:** core keeps teams inside each organization. A team groups members and has no role of its own.
+
+## Before you start
+
+- A working setup of [organizations](/docs/guides/organizations/).
+- The roles of your organizations. [Roles and permissions](/docs/guides/roles-and-permissions/) gives the team actions.
+
+## Steps
+
+1. Add `organizations.teams` to the config.
+2. Set `defaultTeam` to give each new organization one team with its creator.
+3. Set `keepLastTeam` when an organization must always hold a team.
+4. Set the limits `teamsPerOrganization` and `membersPerTeam` for the counts that your plan sells.
+
+<Code code={config} lang="ts" title="The teams config" />
+
+5. Call `client.organizations.teams.create({ organizationId, name })`.
+6. Call `client.organizations.teams.members.add({ teamId, userId })` for a member of the organization.
+7. Call `client.organizations.teams.setActive({ teamId })` when the person picks a team.
+
+<Code code={test} lang="ts" title="Remove a member and their team rows as a test" />
+
+## How it behaves
+
+### No team role
+
+A team has no role. Every right comes from the organization role. A team member reads and writes only what the member's organization role allows.
+
+| Write | The action it needs |
+| --- | --- |
+| Create, update, delete a team | `team:create`, `team:update`, `team:delete` |
+| Add a person to a team | `member:update` |
+| Remove another person from a team | `member:delete` |
+| List the members of a team | `member:read` |
+| Invite with `teamIds` | `member:update`, beside the invite rule |
+
+- To add or remove another person, the caller also ranks at least as high as that person and holds each of their actions.
+- A member may leave a team with their own `userId`.
+- The five team writes need a verified address. The reads and `setActive` do not.
+- A team name follows the organization name rule. Two teams may have the same name.
+
+### The cascades
+
+- A member removal and a leave delete the person's team rows in the same write. The person's sessions lose their active team.
+- A team delete deletes its team rows. Each session in the team loses its active team, and each pending invitation loses the team.
+- An organization delete deletes its teams.
+- An accept adds the person to each team of the invitation's `teamIds` that still exists.
+- A change of the active organization sets the active team to `null`.
+
+### The limits
+
+- `teamsPerOrganization`: a team create at the limit answers `team_limit`.
+- `membersPerTeam`: a team member add at the limit answers `team_member_limit`. An accept to a full team answers the same, and the invitation stays pending.
+- `keepLastTeam`: the delete of the last team answers `last_team`.
+- Each count runs in the write's transaction, after a lock of the parent row. On Postgres, two writes at one moment cannot both pass a count.
+- D1 transactions are not isolated. On D1, two writes at one moment can both pass a count.
+
+### The hooks
+
+The ten team [hook points](/docs/guides/hooks/) are `beforeCreateTeam`, `afterCreateTeam`, `beforeUpdateTeam`, `afterUpdateTeam`, `beforeDeleteTeam`, `afterDeleteTeam`, `beforeAddTeamMember`, `afterAddTeamMember`, `beforeRemoveTeamMember`, and `afterRemoveTeamMember`. A cascade fires no team hook. The default team and the team rows of an accept fire none either.
+
+### The active team
+
+`POST /organizations/teams/active` sets `session.activeTeamId`. The team must belong to the active organization, and the person must be in it. The value is a choice, not a right. Check the organization role on each request.
+
+## If it fails
+
+- [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the caller lacks the team or member action, or ranks below the person.
+- [`email_unverified`](/docs/reference/errors/#email_unverified): a team write needs a verified address.
+- [`team_limit`](/docs/reference/errors/#team_limit): the organization holds `teamsPerOrganization` teams.
+- [`team_member_limit`](/docs/reference/errors/#team_member_limit): the team holds `membersPerTeam` members.
+- [`last_team`](/docs/reference/errors/#last_team): `keepLastTeam` keeps the last team. Create another team first.
+- [`already_member`](/docs/reference/errors/#already_member): the person is already in the team.
+- [`conflict`](/docs/reference/errors/#conflict): another write changed the person at the same moment. Retry.
+- [`hook_refused`](/docs/reference/errors/#hook_refused) and [`hook_failed`](/docs/reference/errors/#hook_failed): a before hook refused the write or threw.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): a bad name, a missing field, or another key.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the route needs a session. A token answers 401.
+
+## Next
+
+- [Roles and permissions](/docs/guides/roles-and-permissions/)
+- [Run your code at a flow point](/docs/guides/hooks/)
+- [Routes](/docs/reference/routes/#teams)

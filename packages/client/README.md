@@ -263,6 +263,23 @@ same type.
 | `organizations.invitations.accept({ token })` | `POST /organizations/invitations/accept` | `{ organization, member }` |
 | `organizations.invitations.decline({ token })` | `POST /organizations/invitations/decline` | `{ ok: true }` |
 | `organizations.setActive({ organizationId })` | `POST /organizations/active` | the session |
+| `organizations.hasPermission({ organizationId, permissions })` | `POST /organizations/has-permission` | `true` or `false` |
+| `organizations.permissions({ organizationId })` | `GET /organizations/permissions` | `{ role, permissions }` |
+| `organizations.checkSlug({ slug })` | `POST /organizations/check-slug` | `{ slug, status }` |
+| `organizations.roles.list({ organizationId })` | `GET /organizations/roles` | list of `RoleJSON` |
+| `organizations.roles.get({ organizationId, name })` | `GET /organizations/roles/get` | the role |
+| `organizations.roles.create({ organizationId, name, rank?, permissions })` | `POST /organizations/roles/create` | the role |
+| `organizations.roles.update({ organizationId, name, rank?, permissions? })` | `POST /organizations/roles/update` | the role |
+| `organizations.roles.delete({ organizationId, name })` | `POST /organizations/roles/delete` | `{ ok: true }` |
+| `organizations.teams.list({ organizationId })` | `GET /organizations/teams` | list of `TeamJSON` |
+| `organizations.teams.create({ organizationId, name })` | `POST /organizations/teams/create` | the team |
+| `organizations.teams.update({ teamId, name })` | `POST /organizations/teams/update` | the team |
+| `organizations.teams.delete({ teamId })` | `POST /organizations/teams/delete` | `{ ok: true }` |
+| `organizations.teams.members.list({ teamId })` | `GET /organizations/teams/members` | list of `TeamMemberJSON` |
+| `organizations.teams.members.add({ teamId, userId })` | `POST /organizations/teams/members/add` | the team member |
+| `organizations.teams.members.remove({ teamId, userId })` | `POST /organizations/teams/members/remove` | `{ ok: true }` |
+| `organizations.teams.setActive({ teamId })` | `POST /organizations/teams/active` | the session |
+| `organizations.teams.mine()` | `GET /organizations/teams/mine` | list of `TeamJSON` |
 | `organizations.tokens.create({ organizationId, name, permissions, expiresInDays?, metadata? })` | `POST /organizations/tokens` | `{ token, apiToken }`, the clear token once |
 | `organizations.tokens.list({ organizationId })` | `GET /organizations/tokens` | list of `OrganizationTokenSummaryJSON` |
 | `organizations.tokens.update({ organizationId, id, name?, permissions?, expiresAt? })` | `POST /organizations/tokens/update` | the token after the change |
@@ -275,6 +292,12 @@ person who gets the mail passes the token to `accept` or `decline`.
 
 `setActive` answers the session. Read `session.activeOrganizationId` in
 the answer. Pass `organizationId: null` to clear the active organization.
+
+`hasPermission` and `permissions` only help a page hide a control. The
+server check decides. For a static role table, `roleHasPermission` of this
+package answers with no request. The `roles` calls exist when the server
+sets `organizations.dynamicRoles`, and the `teams` calls when it sets
+`organizations.teams`. Else each one answers `not_found`.
 
 If you omit `metadata`, the client does not send the key. Pass `null` to
 `update` to clear the metadata of an organization.

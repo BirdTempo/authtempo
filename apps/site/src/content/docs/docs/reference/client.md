@@ -126,6 +126,23 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.organizations.invitations.accept({ token })` | `POST /organizations/invitations/accept` | `{ organization, member }` |
 | `client.organizations.invitations.decline({ token })` | `POST /organizations/invitations/decline` | `{ ok: true }` |
 | `client.organizations.setActive({ organizationId })` | `POST /organizations/active` | `PublicSession` |
+| `client.organizations.hasPermission({ organizationId, permissions })` | `POST /organizations/has-permission` | `boolean`. It only hides a control: the server check decides |
+| `client.organizations.permissions({ organizationId })` | `GET /organizations/permissions` | `{ role, permissions }`. A non-member gets `role: null` and `{}` |
+| `client.organizations.checkSlug({ slug })` | `POST /organizations/check-slug` | `{ slug, status }`. `available` is a hint, not a hold |
+| `client.organizations.roles.list({ organizationId })` | `GET /organizations/roles` | `RoleJSON[]` |
+| `client.organizations.roles.get({ organizationId, name })` | `GET /organizations/roles/get` | `RoleJSON` |
+| `client.organizations.roles.create({ organizationId, name, rank?, permissions })` | `POST /organizations/roles/create` | `RoleJSON` |
+| `client.organizations.roles.update({ organizationId, name, rank?, permissions? })` | `POST /organizations/roles/update` | `RoleJSON` |
+| `client.organizations.roles.delete({ organizationId, name })` | `POST /organizations/roles/delete` | `{ ok: true }` |
+| `client.organizations.teams.list({ organizationId })` | `GET /organizations/teams` | `TeamJSON[]` |
+| `client.organizations.teams.create({ organizationId, name })` | `POST /organizations/teams/create` | `TeamJSON` |
+| `client.organizations.teams.update({ teamId, name })` | `POST /organizations/teams/update` | `TeamJSON` |
+| `client.organizations.teams.delete({ teamId })` | `POST /organizations/teams/delete` | `{ ok: true }` |
+| `client.organizations.teams.members.list({ teamId })` | `GET /organizations/teams/members` | `TeamMemberJSON[]` |
+| `client.organizations.teams.members.add({ teamId, userId })` | `POST /organizations/teams/members/add` | `TeamMemberJSON` |
+| `client.organizations.teams.members.remove({ teamId, userId })` | `POST /organizations/teams/members/remove` | `{ ok: true }`. A member leaves a team with their own `userId` |
+| `client.organizations.teams.setActive({ teamId })` | `POST /organizations/teams/active` | `PublicSession`, with `session.activeTeamId` |
+| `client.organizations.teams.mine()` | `GET /organizations/teams/mine` | `TeamJSON[]`, the teams of the user in every organization |
 | `client.organizations.tokens.create({ organizationId, name, permissions, expiresInDays?, metadata? })` | `POST /organizations/tokens` | `{ token, apiToken: OrganizationTokenSummaryJSON }` |
 | `client.organizations.tokens.list({ organizationId })` | `GET /organizations/tokens` | `OrganizationTokenSummaryJSON[]` |
 | `client.organizations.tokens.update({ organizationId, id, name?, permissions?, expiresAt? })` | `POST /organizations/tokens/update` | `OrganizationTokenSummaryJSON`, after a narrow-only change |
@@ -178,6 +195,9 @@ These operations serve the settings page of the signed-in person. Each one needs
 - `identities.unlink`, `identities.link`
 - `passkey.register`, `passkeys.delete`
 - `tokens.create`, `tokens.update`
+- `organizations.roles.create`, `organizations.roles.update`, `organizations.roles.delete`
+- `organizations.tokens.create`, `organizations.tokens.update`
+- `organizations.members.remove` with `revokeTokens: true`
 - `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`
 - `secondFactor.passkey.enable`, `secondFactor.email.enable`, `secondFactor.disable`
 - `password.change` while the second factor is on, and for a first password
@@ -222,12 +242,13 @@ A failed re-authentication is the answer, and the change does not run again. A s
 | `errorAnchor` | The anchor of a code on the errors page. |
 | `ERROR_TEXT` | Every error text, by table. |
 | `DOCS_ORIGIN` | The origin of the docs, `https://authtempo.com`. |
+| `roleHasPermission` | True when a role string holds every wanted action in a static role table. It comes from `@authtempo/core/access`. A client check only hides a control: the server check decides. |
 
 The types of the package:
 
 | Area | Types |
 | --- | --- |
-| The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `ClientSessionState`, `SessionState`, `SessionStore`, `Locale`, `ErrorTexts` |
+| The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `Statements`, `ClientSessionState`, `SessionState`, `SessionStore`, `Locale`, `ErrorTexts` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions` |
 | Answers | `ApiTokenSummaryJSON`, `OrganizationTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `TeamJSON`, `TeamMemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 | Account settings | `SessionSummaryJSON`, `FreshJSON`, `PublicUserJSON`, `IdentityEntryJSON`, `IdentityListJSON` |

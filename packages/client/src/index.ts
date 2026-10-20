@@ -1,3 +1,5 @@
+// A client check of a static role table. It only hides a control: the server check decides (plan 12k).
+export { roleHasPermission, type Statements } from "@authtempo/core/access";
 export { ERRORS, type ErrorCode } from "@authtempo/core/errors";
 export { CLIENT_CALLS, type ClientCall, type ClientOperation } from "./calls.js";
 export {

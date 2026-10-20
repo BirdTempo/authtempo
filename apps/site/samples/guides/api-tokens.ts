@@ -1,4 +1,10 @@
-import { type Auth, createAuth, type MailPort, type StorageAdapter } from "@authtempo/core";
+import {
+  type Auth,
+  createAuth,
+  type MailPort,
+  type StorageAdapter,
+  type UserRow,
+} from "@authtempo/core";
 
 /** API tokens need no config key: the token routes exist in every deployment. */
 export function createTokensAuth(deps: {
@@ -30,4 +36,24 @@ export async function whoami(auth: Auth, request: Request): Promise<Response> {
   const renewed = c.kind === "session" ? auth.sessionCookie(request, c) : null;
   if (renewed) res.headers.append("set-cookie", renewed);
   return res;
+}
+
+/**
+ * A token with a quota of calls. No route takes a quota, so the app sets it
+ * in process. `api.tokens.create` applies no fresh rule: the settings page
+ * calls `api.session.requireFresh` first.
+ */
+export function createMeteredToken(auth: Auth, user: UserRow, calls: number) {
+  return auth.api.tokens.create({ user, name: "metered", quota: { remaining: calls } });
+}
+
+/**
+ * A route that answers the code of a refused token. `auth.caller` answers
+ * null for each failure; `auth.authenticate` names it, such as
+ * `token_exhausted` when the quota is spent.
+ */
+export async function metered(auth: Auth, request: Request): Promise<Response> {
+  const r = await auth.authenticate(request);
+  if (!r.ok) return Response.json({ error: r.code }, { status: r.status });
+  return Response.json({ kind: r.value.kind });
 }

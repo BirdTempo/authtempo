@@ -30,6 +30,10 @@ describe("checkConfig", () => {
     expect(keys).toContain("tokens.movedPrefixes");
     expect(keys).toContain("organizations.roles");
     expect(keys).toContain("organizations.statements");
+    expect(keys).toContain("organizations.dynamicRoles");
+    expect(keys).toContain("organizations.teams");
+    expect(keys).toContain("organizations.limits.teamsPerOrganization");
+    expect(keys).toContain("tokens.defaultRateLimit");
     expect(keys).toContain("oauth.defaultResource");
     expect(keys).toContain("oauth.device.interval");
     expect(keys).toContain("oauth.signInURL");

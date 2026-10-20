@@ -122,13 +122,13 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     title: "Dynamic roles",
     line: "Each organization stores its own roles, with a rank and a set of actions.",
     icon: "organization",
-    guide: "/docs/reference/routes/#dynamic-roles",
+    guide: "/docs/guides/roles-and-permissions/",
   },
   teams: {
     title: "Teams",
     line: "Named groups of members inside an organization, with an active team per session.",
     icon: "organization",
-    guide: "/docs/reference/routes/#teams",
+    guide: "/docs/guides/teams/",
   },
   tokens: {
     title: "API tokens",
