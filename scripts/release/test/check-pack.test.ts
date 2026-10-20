@@ -444,6 +444,49 @@ describe("check-pack", () => {
     }
   });
 
+  it("refuses a tarball entry that is not a regular file, or a path with a .. part", () => {
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    try {
+      const tarball = (file: string, entry: TarEntry) => {
+        const path = join(out, file);
+        writeTar(path, [manifestEntry("@authtempo/fixture"), entry]);
+        return path;
+      };
+      const symlink = tarball("symlink.tgz", {
+        name: "package/dist/leak.js",
+        type: "2",
+        link: "/etc/passwd",
+      });
+      expect(() => readTarball(symlink)).toThrow(
+        `${symlink}: package/dist/leak.js is not a regular file`,
+      );
+      const hardlink = tarball("hardlink.tgz", {
+        name: "package/dist/copy.js",
+        type: "1",
+        link: "package/package.json",
+      });
+      expect(() => readTarball(hardlink)).toThrow(
+        `${hardlink}: package/dist/copy.js is not a regular file`,
+      );
+      const dotdot = tarball("dotdot.tgz", { name: "package/dist/../../evil.js", body: "x" });
+      expect(() => readTarball(dotdot)).toThrow(
+        `${dotdot}: package/dist/../../evil.js has a .. part`,
+      );
+      // A folder entry is not a file, and the reader skips it.
+      const folder = tarball("folder.tgz", { name: "package/dist/", type: "5" });
+      expect(readTarball(folder).files).toEqual(["package.json"]);
+      // The entry turns a refusal into a failure line, so the summary line still prints.
+      expect(checkTarballs(fixture("root"), [symlink]).failures).toEqual([
+        `${symlink}: package/dist/leak.js is not a regular file`,
+        "@authtempo/fixture: no tarball",
+        "read 0 tarballs",
+        "read 0 files",
+      ]);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+
   it("reads a pnpm pack tarball and checks it against the tree", () => {
     const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
     try {

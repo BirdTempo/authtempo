@@ -193,13 +193,27 @@ export interface Tarball {
   changelog: string | null;
 }
 
-/** Reads a pnpm or npm tarball through the system tar. */
+/**
+ * Reads a pnpm or npm tarball through the system tar. It refuses an entry
+ * that is not a regular file or a folder, such as a link, and a path with a
+ * ".." part. pnpm pack writes neither, so a foreign tarball is the reach.
+ */
 export function readTarball(path: string): Tarball {
   const tar = (args: string[]) =>
     execFileSync("tar", args, { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-  const files = tar(["-tzf", path])
-    .split("\n")
-    .filter((e) => e !== "" && !e.endsWith("/"))
+  const lines = (args: string[]) => tar(args).split("\n").slice(0, -1);
+  const names = lines(["-tzf", path]);
+  // The first character of each long line is the entry type, in bsdtar and in GNU tar.
+  const types = lines(["-tvzf", path]).map((l) => l.charAt(0));
+  if (types.length !== names.length)
+    throw new Error(`${path}: tar lists ${names.length} names and ${types.length} entries`);
+  const files = names
+    .filter((e, i) => {
+      if (e.split("/").includes("..")) throw new Error(`${path}: ${e} has a .. part`);
+      if (types[i] === "d") return false;
+      if (types[i] !== "-") throw new Error(`${path}: ${e} is not a regular file`);
+      return true;
+    })
     .map((e) => {
       if (!e.startsWith("package/")) throw new Error(`${path}: ${e} is not under package/`);
       return e.slice("package/".length);
@@ -247,7 +261,13 @@ export function checkTarballs(root: string, paths: string[]): Report {
   const seen = new Set<string>();
   let files = 0;
   for (const path of paths) {
-    const t = readTarball(path);
+    let t: Tarball;
+    try {
+      t = readTarball(path);
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+      continue;
+    }
     const name = t.manifest.name;
     const dir = dirs.get(name);
     if (dir === undefined) {
