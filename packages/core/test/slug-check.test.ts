@@ -93,7 +93,13 @@ describe("the slug check (plan 12k Task 6)", () => {
     });
     expect(await s.check(h, "")).toEqual({ status: 400, body: { error: "invalid_body" } });
     expect(await s.check(h, 7)).toEqual({ status: 400, body: { error: "invalid_body" } });
-    // The check writes nothing: the two organizations stay, and no other row is new.
+    // The body is strict: another key answers invalid_body.
+    const extra = await s.handle(post(CHECK, { slug: "acme", extra: 1 }, h));
+    expect({ status: extra.status, body: await extra.json() }).toEqual({
+      status: 400,
+      body: { error: "invalid_body" },
+    });
+    // The check writes no organization: the two organizations stay, and no organization row is new.
     const slugs = (await s.auth.storage.findMany("organization", [])).map((o) => o.slug).sort();
     expect(slugs).toEqual(["acme", "platform-co"]);
   });
