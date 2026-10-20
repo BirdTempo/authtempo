@@ -177,6 +177,63 @@ describe("the platform role (plan 12f Task 8)", () => {
     expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
   });
 
+  /**
+   * A revoke that a parallel role change races. The change commits after
+   * the act reads the member row: the before hook writes the role outside
+   * the act's transaction. `lock` revokes ada's role "operator", so the
+   * owner lock guards the write. `plain` revokes root's part, and root
+   * keeps the owner rank, so the plain write runs.
+   */
+  async function racedRevoke(path: "lock" | "plain") {
+    const parallel = { userId: "", role: "" };
+    const change = async () => {
+      if (parallel.role === "") return;
+      const role = parallel.role;
+      parallel.role = "";
+      await auth.storage.update("member", [{ field: "userId", op: "eq", value: parallel.userId }], {
+        role,
+      });
+    };
+    const auth = await operatorAuth({
+      hooks: { organization: { beforeRemoveMember: change, beforeUpdateMemberRole: change } },
+    });
+    const { root, platformOrg } = await seedPlatform(auth);
+    const ada = await verifiedSession(auth, EMAIL);
+    expect((await grant(auth, ada.user.id)).ok).toBe(true);
+    const target = path === "lock" ? ada.user.id : root.id;
+    parallel.userId = target;
+    parallel.role = path === "lock" ? "admin,operator" : "owner,operator,admin";
+    const audited = (await auth.storage.findMany("operatorAudit", [])).length;
+    const answer = await revoke(auth, target);
+    return {
+      answer,
+      role: (await platformMember(auth, platformOrg.id, target))?.role,
+      operator: await isPlatformOperator(auth.config, target),
+      rows: (await auth.storage.findMany("operatorAudit", [])).length - audited,
+      session: (await resolveSession(auth.config, ada.token)) !== null,
+    };
+  }
+
+  it("answers conflict, keeps the role, writes no audit row, and ends no session when a role change races the revoke under the owner lock", async () => {
+    expect(await racedRevoke("lock")).toEqual({
+      answer: { ok: false, code: "conflict", status: 409 },
+      role: "admin,operator",
+      operator: true,
+      rows: 0,
+      session: true,
+    });
+  });
+
+  it("answers conflict, keeps the role, and writes no audit row when a role change races the plain revoke", async () => {
+    expect(await racedRevoke("plain")).toEqual({
+      answer: { ok: false, code: "conflict", status: 409 },
+      role: "owner,operator,admin",
+      operator: true,
+      rows: 0,
+      session: true,
+    });
+  });
+
   it("refuses an unverified target", async () => {
     const { auth, events } = await hooked();
     const { platformOrg } = await seedPlatform(auth);
