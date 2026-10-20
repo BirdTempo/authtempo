@@ -23,7 +23,13 @@ import {
   requestIdOf,
   SCOPES,
 } from "./oauth-helpers.js";
-import { type OperatorAuth, operatorAuth, operatorFixture } from "./operator-helpers.js";
+import {
+  OPERATOR_SECRETS,
+  type OperatorAuth,
+  operatorAuth,
+  operatorFixture,
+  secretActor,
+} from "./operator-helpers.js";
 import { PASSWORD, verifiedSession } from "./totp-helpers.js";
 
 const APP: OperatorActor = { kind: "app", name: "support-tool" };
@@ -524,7 +530,7 @@ describe("the platform role (plan 12f Task 8)", () => {
     });
     expect(await isPlatformOperator(auth.config, other.user.id)).toBe(true);
     // A secret with the scope users can revoke an operator.
-    const secret: OperatorActor = { kind: "secret", name: "support", scopes: ["users"] };
+    const secret = await secretActor(auth, OPERATOR_SECRETS.support);
     expect((await revoke(auth, other.user.id, secret)).ok).toBe(true);
     expect(await isPlatformOperator(auth.config, other.user.id)).toBe(false);
   });

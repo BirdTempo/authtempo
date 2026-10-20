@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
-import {
-  matchOperatorSecret,
-  type OperatorActor,
-  requireOperatorUser,
-} from "../src/engine/operator/guards.js";
+import { type OperatorActor, requireOperatorUser } from "../src/engine/operator/guards.js";
 import { operatorApi } from "../src/engine/operator/index.js";
 import { addMember } from "../src/engine/organizations.js";
 import { requestPasswordReset, resetPassword } from "../src/engine/password.js";
@@ -14,30 +10,19 @@ import { enableTotp, setupTotp } from "../src/engine/totp.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { base32Decode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { BASE_URL, seedPlatform, tokenFromMail } from "./helpers.js";
+import { seedPlatform, tokenFromMail } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
   type OperatorAuth,
   operatorAuth,
   operatorFixture,
-  operatorHeader,
+  secretActor,
 } from "./operator-helpers.js";
 import { FAST } from "./password-helpers.js";
 import { codeNow, PASSWORD, verifiedSession } from "./totp-helpers.js";
 
 const ADMIN = "admin@example.com";
 const APP: OperatorActor = { kind: "app", name: "setup-script" };
-
-/** The secret actor of a request with the named secret, as the routes build it. */
-async function secretActor(auth: OperatorAuth, secret: string): Promise<OperatorActor> {
-  const request = new Request(`${BASE_URL}/auth/operator/users/create-admin`, {
-    method: "POST",
-    headers: operatorHeader(secret),
-  });
-  const entry = await matchOperatorSecret(auth.config, request);
-  if (!entry) throw new Error("no secret matched");
-  return { kind: "secret", name: entry.name, scopes: entry.scopes };
-}
 
 /** The engine view with user and member hooks that write one line per event. */
 async function hooked(extra: Partial<AuthConfig> = {}) {

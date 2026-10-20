@@ -1,8 +1,9 @@
 import type { AuthConfig } from "../src/config.js";
+import { matchOperatorSecret, type OperatorActor } from "../src/engine/operator/guards.js";
 import { addMember } from "../src/engine/organizations.js";
 import { type ResolvedSession, resolveSession } from "../src/engine/sessions.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import { makeAuth, seedPlatform } from "./helpers.js";
+import { BASE_URL, makeAuth, seedPlatform } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { enrolled, verifiedSession } from "./totp-helpers.js";
 
@@ -94,4 +95,18 @@ export async function sessionOf(
   const resolved = await resolveSession(auth.config, token);
   if (!resolved) throw new Error("the session ended");
   return { ...resolved, token };
+}
+
+/**
+ * The secret actor of a request with the named secret, as the routes build
+ * it. The scopes come from the config, so the actor is one the product makes.
+ */
+export async function secretActor(auth: OperatorAuth, secret: string): Promise<OperatorActor> {
+  const request = new Request(`${BASE_URL}/auth/operator/users/create-admin`, {
+    method: "POST",
+    headers: operatorHeader(secret),
+  });
+  const entry = await matchOperatorSecret(auth.config, request);
+  if (!entry) throw new Error("no secret matched");
+  return { kind: "secret", name: entry.name, scopes: entry.scopes };
 }
