@@ -316,15 +316,49 @@ const accessControl: Rule = (v, p, out) => {
   }
 };
 
+/** `eachKey` whose refusal of a value that is no object names spec 29 item 18. */
+function eachAccessKey(
+  v: unknown,
+  p: string,
+  out: OptionCheck,
+  visit: (key: string, value: unknown, path: string) => void,
+): void {
+  if (plainObject(v)) eachKey(v, p, out, visit);
+  else refuse(out, p, `expected an object ${ITEM_18}`);
+}
+
 /** `roles`: the roles of `ac.newRole`. checkOptions checks each one against `ac` and the ranks. */
 const roleTable: Rule = (v, p, out) =>
-  eachKey(v, p, out, (_name, r, path) => {
+  eachAccessKey(v, p, out, (_name, r, path) => {
     const x = r as { statements?: unknown; authorize?: unknown } | null;
     if (typeof x?.authorize !== "function" || !plainObject(x.statements))
       refuse(out, path, `expected a role of ac.newRole(statements) ${ITEM_18}`);
     else if (Object.hasOwn(x.statements, CORE_KEY))
       refuse(out, `${path}.statements.${CORE_KEY}`, CORE_TOKEN_NAME);
   });
+
+/** `dynamicAccessControl`: core's dynamic roles. Each refusal names spec 29 item 18. */
+const dynamicAccess: Rule = (v, p, out) => {
+  if (!plainObject(v)) {
+    refuse(out, p, `expected { enabled, maximumRolesPerOrganization? } ${ITEM_18}`);
+    return;
+  }
+  object(
+    {
+      enabled: (x, q, o) => {
+        if (typeof x !== "boolean") refuse(o, q, `expected a boolean ${ITEM_18}`);
+      },
+      // The 9d rule for a limit: core takes a number, never a function.
+      maximumRolesPerOrganization: (x, q, o) => {
+        if (typeof x === "function")
+          refuse(o, q, `a function is refused; pass a positive integer from 1 to 1000 ${ITEM_18}`);
+        else if (typeof x !== "number" || !Number.isSafeInteger(x) || x < 1 || x > 1000)
+          refuse(o, q, `core takes an integer from 1 to 1000 ${ITEM_18}`);
+      },
+    },
+    `${NO_SUCH_OPTION} ${ITEM_18}`,
+  )(v, p, out);
+};
 
 const PLUGIN_RULES: Record<string, Rule> = {
   organization: object(
@@ -356,20 +390,7 @@ const PLUGIN_RULES: Record<string, Rule> = {
       // ranks come from authtempo.roleRanks, because Better Auth's roles have none.
       ac: accessControl,
       roles: roleTable,
-      dynamicAccessControl: object({
-        enabled: boolean,
-        // The 9d rule for a limit: core takes a number, never a function.
-        maximumRolesPerOrganization: (v, p, out) => {
-          if (typeof v === "function")
-            refuse(
-              out,
-              p,
-              `a function is refused; pass a positive integer from 1 to 1000 ${ITEM_18}`,
-            );
-          else if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > 1000)
-            refuse(out, p, `core takes an integer from 1 to 1000 ${ITEM_18}`);
-        },
-      }),
+      dynamicAccessControl: dynamicAccess,
     },
     "core's organizations refuse teams, schema, disableOrganizationDeletion, and this option",
   ),
@@ -799,7 +820,7 @@ const TOP: Record<string, Rule> = {
     },
     // Plan 12k Task 10: the rank of each Better Auth role; checkOptions holds it to the roles.
     roleRanks: (v, p, out) =>
-      eachKey(v, p, out, (_name, rank, path) => {
+      eachAccessKey(v, p, out, (_name, rank, path) => {
         if (typeof rank !== "number" || !Number.isSafeInteger(rank) || rank < 1)
           refuse(out, path, `expected a positive integer ${ITEM_18}`);
       }),
@@ -890,7 +911,8 @@ function roleChecks(options: BetterAuthOptions, out: OptionCheck): void {
   const given = plainObject(org.roles) ? org.roles : undefined;
   if (!given) {
     // The default roles have fixed ranks, so a rank table here would change nothing in silence.
-    if (ranks !== undefined)
+    // A roles value that is no object has its refusal from the walk already.
+    if (ranks !== undefined && org.roles === undefined)
       refuse(
         out,
         "authtempo.roleRanks",
@@ -910,7 +932,7 @@ function roleChecks(options: BetterAuthOptions, out: OptionCheck): void {
     refuse(
       out,
       "plugins[organization].roles",
-      `core needs the role owner, the creator role (spec 29 item 2)`,
+      `core needs the role owner, the creator role (spec 29 items 2 and 18)`,
     );
   const ac = org.ac as { statements?: unknown } | undefined;
   const app = plainObject(ac?.statements)

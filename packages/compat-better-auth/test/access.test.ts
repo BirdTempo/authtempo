@@ -351,6 +351,32 @@ describe("the access control shim (spec 29 item 18)", () => {
     expect(checkOptions({ ...given, authtempo: {} }).refusals).toEqual([]);
   });
 
+  it("names the spec item in each refusal of the access control map", () => {
+    // Better Auth's types admit none of these values, so each literal is cast.
+    const loose = (o: Record<string, unknown>) => o as unknown as OrganizationOptions;
+    const bad = options(loose({ ac, roles: "all", dynamicAccessControl: "on" }), {
+      roleRanks: 5 as unknown as Record<string, number>,
+    });
+    expect(checkOptions(bad).refusals).toEqual([
+      "authtempo.roleRanks: expected an object (spec 29 item 18)",
+      "plugins[organization].dynamicAccessControl: expected { enabled, maximumRolesPerOrganization? } (spec 29 item 18)",
+      "plugins[organization].roles: expected an object (spec 29 item 18)",
+    ]);
+    const keys = options(
+      loose({
+        ac,
+        roles: { admin: roles.admin },
+        dynamicAccessControl: { enabled: "yes", cache: true },
+      }),
+      { roleRanks: { admin: 1 } },
+    );
+    expect(checkOptions(keys).refusals).toEqual([
+      "plugins[organization].dynamicAccessControl.cache: authtempo has no such option (spec 29 item 18)",
+      "plugins[organization].dynamicAccessControl.enabled: expected a boolean (spec 29 item 18)",
+      "plugins[organization].roles: core needs the role owner, the creator role (spec 29 items 2 and 18)",
+    ]);
+  });
+
   it("refuses dynamicAccessControl as a function", () => {
     // Better Auth's type admits a function; this package's type does not, so the literal is cast.
     const dynamicAccessControl = {
