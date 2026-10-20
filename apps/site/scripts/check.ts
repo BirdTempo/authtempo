@@ -59,6 +59,7 @@ import {
 import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
 import { checkScript } from "./check-script.ts";
+import { checkSecurityPolicy, readPolicyInput } from "./check-security-policy.ts";
 import { checkSentences } from "./check-sentences.ts";
 import { checkSitePages, MINIMUM_ENTRIES } from "./check-site-pages.ts";
 import { checkSize, sizesOf } from "./check-size.ts";
@@ -426,6 +427,21 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         dates: RELEASE_DATES,
         start: FEED_START,
       }),
+  },
+  // Plan 12j Task 12: SECURITY.md against release/support.json, release/repository.json,
+  // and owner decision 4. A file that the check could not read is a failure.
+  {
+    name: "check-security-policy",
+    run: () => {
+      const input = readPolicyInput(readRepoFile);
+      const r = checkSecurityPolicy({
+        text: input.text ?? "",
+        rows: input.rows,
+        repository: input.repository,
+      });
+      r.failures.unshift(...input.failures);
+      return r;
+    },
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },
