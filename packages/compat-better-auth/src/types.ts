@@ -45,6 +45,11 @@ export interface Session {
   activeOrganizationId: string | null;
 }
 
+/** Better Auth's session with the admin plugin (plan 12f): the operator of an impersonation session, else null. */
+export interface AdminSession extends Session {
+  impersonatedBy: string | null;
+}
+
 /**
  * Better Auth 1.7.2's account row, as the shim answers it (plan 12a;
  * better-auth dist/api/routes/account.mjs:21 to :75, read 2026-10-17). `id` is
@@ -644,10 +649,10 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
   /**
    * `user.twoFactorEnabled` is set with the two-factor plugin (plan 9f).
    * `role`, `banned`, `banReason`, and `banExpires` are set with the admin
-   * plugin (plan 12f).
+   * plugin (plan 12f), and so is `session.impersonatedBy`.
    */
   getSession(input: { headers: Headers }): Promise<{
-    session: Session;
+    session: Session & Partial<Omit<AdminSession, keyof Session>>;
     user: User & { twoFactorEnabled?: boolean } & Partial<Omit<AdminUser, keyof User>>;
     /** With `session.deferSessionRefresh` on only (plan 12a): the refresh is due. */
     needsRefresh?: boolean;

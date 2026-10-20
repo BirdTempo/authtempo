@@ -9,7 +9,7 @@ import { checkOptions } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
 import { type Mapped, mapOptions } from "./map-options.js";
 import { getSessionRoute } from "./session.js";
-import { COOKIE_NAME } from "./shapes.js";
+import { sessionTokenOf } from "./shapes.js";
 import { twoFactorRoute, withTwoFactor } from "./two-factor.js";
 
 /** The JSON field that holds the new password, per core route (core http/routes/password.ts, read 2026-10-10). */
@@ -69,17 +69,6 @@ export async function withFreshCode(res: Response): Promise<Response> {
     { ...body, code: BETTER_AUTH_CODES.session_not_fresh },
     { status: 403, headers },
   );
-}
-
-/** The non-empty session token a response sets, or null. */
-function sessionTokenOf(cookies: string[]): string | null {
-  const prefix = `${COOKIE_NAME}=`;
-  for (const c of cookies) {
-    if (!c.startsWith(prefix)) continue;
-    const value = c.slice(prefix.length).split(";")[0];
-    if (value) return value;
-  }
-  return null;
 }
 
 /** Serves core's routes under basePath, with the behavior of the bearer, expo, and magicLink plugins. */

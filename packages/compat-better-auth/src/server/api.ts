@@ -16,7 +16,7 @@ import {
   passwordPolicyCode,
 } from "../errors.js";
 import type { Account, CompatServerApi } from "../types.js";
-import { roleOf, toAdminUser } from "./admin.js";
+import { roleOf, toAdminSession, toAdminUser } from "./admin.js";
 import { sha256Hex } from "./mail.js";
 import type { Mapped } from "./map-options.js";
 import {
@@ -187,7 +187,7 @@ export async function sessionAnswerOf(
       ? toAdminUser(s.user, await roleOf(mapped, s.user.id), new Date())
       : null;
   return {
-    session: toSession(s.session, token),
+    session: adminFields ? toAdminSession(s.session, token) : toSession(s.session, token),
     user: {
       ...(adminFields ?? toUser(s.user)),
       ...(factor?.ok ? { twoFactorEnabled: factor.value.enabled } : {}),

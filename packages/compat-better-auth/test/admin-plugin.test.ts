@@ -18,13 +18,14 @@ import {
 import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
+import { COOKIE_NAME, SESSION_KEYS } from "../src/server/shapes.js";
 import type { AdminOptions, BetterAuthOptions, CompatDatabase } from "../src/types.js";
 import { adminApp, cookieOf, OPERATOR, PASSWORD } from "./admin-helpers.js";
 
 // Plan 12f Task 13: Better Auth's admin plugin on core's operator tools
 // (spec section 26 item 14, ruling 39). This file holds the options, the
 // refusals, the mapping logic, and the calls that reach core's operator
-// routes of Task 10. The impersonation calls land with Task 11.
+// routes of Task 10, and the impersonation calls on the routes of Task 11.
 
 const BASE = "https://api.example.com";
 const fast = betterAuthPasswordHash({ pbkdf2: createPbkdf2PasswordHash({ iterations: 1000 }) });
@@ -692,6 +693,10 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
         "/admin/revoke-user-sessions",
         () => a.call("/admin/revoke-user-sessions", { userId: ann.id }, a.op),
       ],
+      [
+        "/admin/impersonate-user",
+        () => a.call("/admin/impersonate-user", { userId: ann.id }, a.op),
+      ],
     ];
     expect(calls.map(([p]) => p).sort()).toEqual(Object.keys(ADMIN_FORBIDDEN).sort());
     const codes: Record<string, unknown> = {};
@@ -706,7 +711,143 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
       "/admin/unban-user": [403, "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS"],
       "/admin/set-role": [403, "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE"],
       "/admin/revoke-user-sessions": [403, "YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS"],
+      "/admin/impersonate-user": [403, "YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS"],
     });
     expect(await a.audit(ann.id)).toEqual([]);
+  });
+});
+
+/** The value of a cookie that a response sets, or null. */
+const setCookie = (res: Response, name: string) => {
+  const c = res.headers.getSetCookie().find((v) => v.startsWith(`${name}=`));
+  return c === undefined ? null : (c.slice(name.length + 1).split(";")[0] ?? "");
+};
+const ACTOR = `${COOKIE_NAME}_actor`;
+const IMPERSONATE = "/admin/impersonate-user";
+const STOP = "/admin/stop-impersonating";
+
+describe("the impersonation calls on core's routes (plan 12f Task 11)", () => {
+  it("maps impersonate-user and stop-impersonating onto core's impersonation, with Better Auth's shapes", async () => {
+    const a = await adminApp(memoryDatabase());
+    const ann = await a.user("ann@example.com");
+    const opToken = a.op.slice(COOKIE_NAME.length + 1);
+
+    const before = Date.now();
+    const start = await a.call(IMPERSONATE, { userId: ann.id }, a.op);
+    const started = await json(start.clone());
+    expect(started.status).toBe(200);
+    expect(Object.keys(started.body).sort()).toEqual(["session", "user"]);
+    expect(Object.keys(started.body.session).sort()).toEqual(
+      [...SESSION_KEYS, "impersonatedBy"].sort(),
+    );
+    expect(started.body.session).toMatchObject({ userId: ann.id, impersonatedBy: a.opId });
+    expect(started.body.user).toMatchObject({ id: ann.id, role: "user", banned: false });
+    // Better Auth's default life of one hour, which the shim maps to 60 minutes.
+    const end = Date.parse(started.body.session.expiresAt);
+    expect(end).toBeGreaterThanOrEqual(before + 3_600_000);
+    expect(end).toBeLessThanOrEqual(Date.now() + 3_600_000);
+    // The session cookie holds the new token, and the actor cookie keeps the operator's.
+    const token = setCookie(start, COOKIE_NAME);
+    expect(token).toBe(started.body.session.token);
+    expect(setCookie(start, ACTOR)).toBe(opToken);
+    const imp = `${COOKIE_NAME}=${token}`;
+    const both = `${imp}; ${ACTOR}=${opToken}`;
+
+    // get-session names the operator of an impersonation session, and null for any other.
+    const read = async (cookie: string) => (await a.read("/get-session", cookie)).json();
+    expect(await read(imp)).toMatchObject({
+      session: { userId: ann.id, impersonatedBy: a.opId },
+      user: { id: ann.id, role: "user" },
+    });
+    expect(await read(a.op)).toMatchObject({ session: { impersonatedBy: null } });
+    const api = await a.auth.api.getSession({ headers: new Headers({ cookie: imp }) });
+    expect(api?.session.impersonatedBy).toBe(a.opId);
+
+    // An impersonation session cannot start another one.
+    expect(await json(await a.call(IMPERSONATE, { userId: ann.id }, both))).toMatchObject({
+      status: 403,
+      body: { code: "FORBIDDEN" },
+    });
+
+    // The stop ends the session, and the operator's session comes back.
+    const stop = await a.call(STOP, undefined, both);
+    const stopped = await json(stop.clone());
+    expect(stopped.status).toBe(200);
+    expect(stopped.body.session).toMatchObject({
+      userId: a.opId,
+      token: opToken,
+      impersonatedBy: null,
+    });
+    expect(stopped.body.user).toMatchObject({ id: a.opId, email: OPERATOR, role: "admin" });
+    expect(setCookie(stop, COOKIE_NAME)).toBe(opToken);
+    expect(setCookie(stop, ACTOR)).toBe("");
+    expect(await read(imp)).toBeNull();
+    expect(await read(a.op)).toMatchObject({ user: { id: a.opId } });
+
+    // Core's audit rows of the start and the stop, with the operator as the actor.
+    // Two ids of one millisecond have no order (a ULID), so the rows go by action.
+    const by = { actorKind: "user", actorId: a.opId };
+    const rows = (await a.audit(ann.id)).sort((x, y) => x.action.localeCompare(y.action));
+    expect(rows).toEqual([
+      { action: "impersonation_start", ...by, reason: `better-auth admin plugin ${IMPERSONATE}` },
+      { action: "impersonation_stop", ...by, reason: `better-auth admin plugin ${STOP}` },
+    ]);
+  });
+
+  it("answers Better Auth's refusals of an impersonation, and the bearer form", async () => {
+    const a = await adminApp(memoryDatabase());
+    const ann = await a.user("ann@example.com");
+    // A stop by a session that impersonates nobody: Better Auth's 400 and its text.
+    expect(await json(await a.call(STOP, undefined, a.op))).toEqual({
+      status: 400,
+      body: { message: "You are not impersonating anyone" },
+    });
+    // Core refuses the operator, a platform operator, and an absent user with one code.
+    for (const userId of [a.opId, "nobody"])
+      expect(await json(await a.call(IMPERSONATE, { userId }, a.op))).toEqual({
+        status: 403,
+        body: { code: "YOU_CANNOT_IMPERSONATE_ADMINS", message: "You cannot impersonate admins" },
+      });
+    expect((await a.call(IMPERSONATE, {}, a.op)).status).toBe(400);
+    for (const [path, body] of [
+      [IMPERSONATE, { userId: ann.id }],
+      [STOP, undefined],
+    ] as const)
+      expect(await json(await a.call(path, body))).toMatchObject({
+        status: 401,
+        body: { code: "UNAUTHORIZED" },
+      });
+
+    // A bearer caller gets the token in the session, and no cookie.
+    const bearer = (token: string) => `Bearer ${token}`;
+    const send = (path: string, auth: string, body?: unknown) =>
+      a.auth.handler(
+        new Request(`${BASE}/api/auth${path}`, {
+          method: "POST",
+          headers: {
+            origin: BASE,
+            authorization: auth,
+            ...(body === undefined ? {} : { "content-type": "application/json" }),
+          },
+          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        }),
+      );
+    const start = await send(IMPERSONATE, bearer(a.op.slice(COOKIE_NAME.length + 1)), {
+      userId: ann.id,
+    });
+    const started = await json(start.clone());
+    expect(started.status).toBe(200);
+    expect(started.body.session).toMatchObject({ userId: ann.id, impersonatedBy: a.opId });
+    expect(start.headers.getSetCookie()).toEqual([]);
+    // The stop of a bearer caller ends the session. Core holds no actor cookie, so no session comes back.
+    const stop = await send(STOP, bearer(started.body.session.token));
+    expect(await json(stop)).toEqual({ status: 200, body: { session: null, user: null } });
+    expect(
+      await (await a.read("/get-session", `${COOKIE_NAME}=${started.body.session.token}`)).json(),
+    ).toBeNull();
+    expect((await a.audit(ann.id)).map((r) => r.action).sort()).toEqual([
+      "impersonation_start",
+      "impersonation_stop",
+    ]);
   });
 });

@@ -1,8 +1,15 @@
-import { type Auth, holdsPlatformRole, type OperatorUser, type UserRow } from "@authtempo/core";
+import {
+  type Auth,
+  holdsPlatformRole,
+  type OperatorUser,
+  type ResolvedSession,
+  type SessionRow,
+  type UserRow,
+} from "@authtempo/core";
 import { BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
-import type { AdminOptions, AdminUser } from "../types.js";
+import type { AdminOptions, AdminSession, AdminUser } from "../types.js";
 import type { Mapped } from "./map-options.js";
-import { toUser } from "./shapes.js";
+import { sessionTokenOf, toSession, toUser } from "./shapes.js";
 
 /**
  * Better Auth 1.7.7's admin paths (dist/plugins/admin/routes.mjs, read
@@ -244,7 +251,21 @@ export const ADMIN_FORBIDDEN: Readonly<Record<string, string>> = {
   "/admin/unban-user": "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS",
   "/admin/set-role": "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE",
   "/admin/revoke-user-sessions": "YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS",
+  "/admin/impersonate-user": "YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS",
 };
+
+/**
+ * The stop of an impersonation. Core's stop needs the impersonation session
+ * only, not the operator guard, so the path has no FORBIDDEN code.
+ */
+const STOP_PATH = "/admin/stop-impersonating";
+/** Better Auth's text of a stop by a session that impersonates nobody (routes.mjs stopImpersonating, read 2026-10-21). */
+const NOT_IMPERSONATING = "You are not impersonating anyone";
+
+/** Better Auth's session with the admin plugin: `impersonatedBy` is core's `actorId`. */
+export function toAdminSession(row: SessionRow, token: string): AdminSession {
+  return { ...toSession(row, token), impersonatedBy: row.actorId };
+}
 
 /** Better Auth's code for an unknown user (@better-auth/core dist/error/codes.mjs:4, read 2026-10-21). */
 const USER_NOT_FOUND = "USER_NOT_FOUND";
@@ -352,17 +373,19 @@ function userIdOf(body: Body | null): string | null {
 }
 
 /**
- * The answer to one of the six admin paths that map onto the operator
- * routes of plan 12f Task 10, or null for any other request. Each call
- * posts core's own route with the caller's headers, so the session of the
- * caller is the actor. Core's guard runs there: the platform role, a
+ * The answer to one of the eight admin paths that map onto core's operator
+ * routes (plan 12f Tasks 10 and 11). Any other request gets null. Each
+ * call posts core's own route with the caller's headers, so the session of
+ * the caller is the actor. Core's guard runs there: the platform role, a
  * verified address, a second factor, and a fresh session (spec 26 item 2).
- * The shim adds no power and no check of its own past Better Auth's
- * shapes.
+ * The stop of an impersonation needs the impersonation session only. The
+ * shim adds no power and no check of its own past Better Auth's shapes.
  *
  * The cost on D1: an act answers Better Auth's `{ user }` from one read of
  * the user row after core's route. That read is the one statement on top
- * of the route's call budget (ruling 37 of plan 12f).
+ * of the route's call budget (ruling 37 of plan 12f). An impersonation
+ * start or stop reads the session of the token that core set, for
+ * `{ session, user }`, in 5 statements. The stop also reads the role in 2.
  */
 export async function adminRoute(
   auth: Auth,
@@ -372,7 +395,7 @@ export async function adminRoute(
   const url = new URL(request.url);
   if (!url.pathname.startsWith(`${mapped.basePath}/admin/`)) return null;
   const path = url.pathname.slice(mapped.basePath.length);
-  if (!Object.hasOwn(ADMIN_FORBIDDEN, path)) return null;
+  if (!Object.hasOwn(ADMIN_FORBIDDEN, path) && path !== STOP_PATH) return null;
   const get = path === "/admin/list-users" || path === "/admin/get-user";
   // Any other method, an OPTIONS preflight too, goes to core's router.
   if (request.method !== (get ? "GET" : "POST")) return null;
@@ -391,6 +414,13 @@ export async function adminRoute(
       }),
     );
   };
+  /** The session of a token that core's answer set: the session row and the user row. */
+  const sessionOf = (token: string): Promise<ResolvedSession | null> =>
+    auth.session(
+      new Request(`${mapped.origin}${mapped.basePath}/session`, {
+        headers: { authorization: `Bearer ${token}` },
+      }),
+    );
   /** The user row after an act, in Better Auth's shape with `role`. */
   const userAfter = async (res: Response, userId: string, role: string) => {
     const row = await storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
@@ -427,6 +457,36 @@ export async function adminRoute(
     // Better Auth answers the user itself, not `{ user }` (routes.mjs getUser).
     return withHeaders(one ?? null, 200, res);
   }
+  if (path === STOP_PATH) {
+    // Better Auth's stop takes no body. Core's stop ends the caller's
+    // impersonation session and sets the session cookie back to the
+    // operator's token while that session lives (plan 12f Task 11).
+    const res = await core("/operator/impersonate/stop", { reason: adminReason(path) });
+    if (!res.ok) {
+      const code = (
+        (await res
+          .clone()
+          .json()
+          .catch(() => null)) as Body | null
+      )?.error;
+      // Core answers not_found for a session that impersonates nobody.
+      return code === "not_found"
+        ? withHeaders({ message: NOT_IMPERSONATING }, 400, res)
+        : refusalOf(path, res);
+    }
+    const own = sessionTokenOf(res.headers.getSetCookie());
+    const back = own === null ? null : await sessionOf(own);
+    // A bearer caller, or an operator whose own session ended, gets no session back.
+    if (own === null || back === null) return withHeaders({ session: null, user: null }, 200, res);
+    return withHeaders(
+      {
+        session: toAdminSession(back.session, own),
+        user: toAdminUser(back.user, await roleOf(mapped, back.user.id), new Date()),
+      },
+      200,
+      res,
+    );
+  }
   const body = await objectOf(request);
   const userId = userIdOf(body);
   if (userId === null) return invalid();
@@ -457,6 +517,32 @@ export async function adminRoute(
       return res.ok
         ? userAfter(res, userId, change === "grant" ? platformRole : USER_ROLE)
         : refusalOf(path, res);
+    }
+    case "/admin/impersonate-user": {
+      const res = await core("/operator/impersonate", { userId, reason: adminReason(path) });
+      if (!res.ok) return refusalOf(path, res);
+      // A bearer caller gets the token in core's body. A cookie caller gets it
+      // in the session cookie, and the actor cookie keeps the operator's token.
+      const answer = (await res
+        .clone()
+        .json()
+        .catch(() => null)) as { token?: unknown } | null;
+      const token =
+        typeof answer?.token === "string"
+          ? answer.token
+          : sessionTokenOf(res.headers.getSetCookie());
+      const s = token === null ? null : await sessionOf(token);
+      if (token === null || s === null)
+        throw new Error("authtempo compat: the session of an answered impersonation is gone");
+      // Core impersonates no platform operator, so the user's role is `user`.
+      return withHeaders(
+        {
+          session: toAdminSession(s.session, token),
+          user: toAdminUser(s.user, USER_ROLE, new Date()),
+        },
+        200,
+        res,
+      );
     }
     case "/admin/revoke-user-sessions": {
       const res = await core("/operator/sessions/end-user", {

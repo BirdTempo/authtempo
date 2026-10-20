@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import { COOKIE_NAME } from "../src/server/shapes.js";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
 import { adminApp, adminShim, PASSWORD } from "./admin-helpers.js";
 import { BETTER_AUTH_PG } from "./fixtures.js";
@@ -6,7 +7,8 @@ import { freshBetterAuthSchema } from "./pg.js";
 
 // Plan 12f Task 13 on Postgres: a ban through Better Auth's admin path
 // lives in core's compat columns (taBannedAt, taBanReason, taBanUntil), so
-// a new instance of the shim on the same database reads it.
+// a new instance of the shim on the same database reads it. An
+// impersonation session keeps its operator in the compat column taActorId.
 
 const closers: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -54,5 +56,38 @@ describe("the admin plugin on Postgres (plan 12f Task 13)", () => {
     });
     if (!user.ok) throw new Error(user.code);
     expect(user.value.ban?.reason).toBe("Spam");
+  });
+
+  it("keeps the operator of an impersonation in taActorId, and the stop ends the row", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    closers.push(() => pg.close());
+    const storage = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+    await storage.migrate();
+    const a = await adminApp(storage);
+    const ann = await a.user("ann@example.com");
+    const start = await a.call("/admin/impersonate-user", { userId: ann.id }, a.op);
+    expect(start.status).toBe(200);
+    const { session } = (await start.json()) as { session: { id: string; token: string } };
+    const rows = () =>
+      pg.sql<
+        { taActorId: string | null }[]
+      >`SELECT "taActorId" FROM "session" WHERE "id" = ${session.id}`;
+    expect(await rows()).toEqual([{ taActorId: a.opId }]);
+    const actor = start.headers
+      .getSetCookie()
+      .find((c) => c.startsWith(`${COOKIE_NAME}_actor=`))
+      ?.split(";")[0];
+    const stop = await a.call(
+      "/admin/stop-impersonating",
+      undefined,
+      `${COOKIE_NAME}=${session.token}; ${actor}`,
+    );
+    expect(stop.status).toBe(200);
+    expect(await rows()).toEqual([]);
+    // Two ids of one millisecond have no order (a ULID), so the rows go by action.
+    expect((await a.audit(ann.id)).map((r) => [r.action, r.actorId]).sort()).toEqual([
+      ["impersonation_start", a.opId],
+      ["impersonation_stop", a.opId],
+    ]);
   });
 });

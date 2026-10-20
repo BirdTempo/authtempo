@@ -636,6 +636,8 @@ core's guard decides (plan 12f Task 10):
 | `POST /admin/unban-user` | `POST /operator/users/unban` | `{ user }`. |
 | `POST /admin/set-role` | `POST /operator/users/platform-role` | `{ user }`. |
 | `POST /admin/revoke-user-sessions` | `POST /operator/sessions/end-user` | `{ success: true }`. While sessions stay, `{ success: false, more: true, ended }`: call again. |
+| `POST /admin/impersonate-user` | `POST /operator/impersonate` | `{ session, user }` of the new session. The session cookie holds its token, and core's actor cookie keeps the operator's token. A bearer caller gets the token in `session.token` and no cookie. |
+| `POST /admin/stop-impersonating` | `POST /operator/impersonate/stop` | `{ session, user }` of the operator's own session, which the session cookie holds again. With no actor cookie, or when the operator's session ended, `{ session: null, user: null }`. |
 
 Each user in an answer has Better Auth's admin fields: `role` is the
 platform role or `user`, and `banned`, `banReason`, and `banExpires` show a
@@ -646,7 +648,10 @@ secret or the app (`auth.tempo.api.operator.platformRole.revoke`).
 
 | Core's refusal | Answer |
 | --- | --- |
-| `operator_required` (the guard, or a target that is a platform operator) | 403 with the code of the path: `YOU_ARE_NOT_ALLOWED_TO_LIST_USERS`, `YOU_ARE_NOT_ALLOWED_TO_GET_USER`, `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS` (ban and unban), `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`, or `YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS`. |
+| `operator_required` (the guard, or a target that is a platform operator) | 403 with the code of the path: `YOU_ARE_NOT_ALLOWED_TO_LIST_USERS`, `YOU_ARE_NOT_ALLOWED_TO_GET_USER`, `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS` (ban and unban), `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`, `YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS`, or `YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS`. |
+| `impersonation_refused` (the operator, a platform operator, a banned user, or an absent user) | 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. |
+| `impersonation_session` (an impersonation session starts another one) | 403 `FORBIDDEN`. |
+| `not_found` on a stop (the session impersonates nobody) | 400 with Better Auth's message `You are not impersonating anyone`. |
 | `operator_self` | 409 `YOU_CANNOT_BAN_YOURSELF` on a ban, else 409 `FORBIDDEN`. |
 | `not_found` | 404 `USER_NOT_FOUND`. |
 | `unauthorized` (no session) | 401 `UNAUTHORIZED`. |
@@ -654,7 +659,9 @@ secret or the app (`auth.tempo.api.operator.platformRole.revoke`).
 With `admin()`, `/get-session` and `auth.api.getSession` give the user
 `role`, `banned`, `banReason`, and `banExpires`, as Better Auth does. The
 role is the platform role or `user`. A banned user has no session, so
-`banned` is `false` there. With `adminClient()` from `better-auth/client/plugins`,
+`banned` is `false` there. With `admin()`, the session also has
+`impersonatedBy`: the operator's user id in an impersonation session, else
+null. With `adminClient()` from `better-auth/client/plugins`,
 the client's `getSession` and `useSession` read `/get-session`. So the user
 has the same four fields, and `banExpires` is a `Date` or null. Without
 `adminClient()`, the client reads core's own session, and its user has no
@@ -675,10 +682,18 @@ The deviations from Better Auth (ruling 53 of plan 12f):
 - An unknown user answers `USER_NOT_FOUND` on every path. Better Auth answers
   `{ success: true }` on `/admin/revoke-user-sessions`. The shim is stricter,
   so a typo in a user id does not look like a revoke that worked.
+- `/admin/impersonate-user` answers one code, `YOU_CANNOT_IMPERSONATE_ADMINS`,
+  for the operator, a platform operator, a banned user, and an absent user.
+  Better Auth answers `USER_NOT_FOUND` for an absent user. Core keeps one
+  code, so the answer does not tell a missing user from a protected one.
+- `/admin/stop-impersonating` answers `{ session: null, user: null }` when
+  no operator session comes back. Better Auth answers 500 there, and its
+  impersonation session stays. Core ends the impersonation session first.
 
 On D1, an act reads the user row once after core's route, for `{ user }`.
 A ban of a user with 60 sessions sends 34 queries in its invocation.
-The impersonation calls come with plan 12f Task 11.
+An impersonation start sends 32 queries and a stop 18, each with the
+shim's read of the session for `{ session, user }`.
 
 Better Auth requires a reason nowhere, and core writes an audit row with a
 reason for each act. A ban takes `banReason` as its reason. Every other call,

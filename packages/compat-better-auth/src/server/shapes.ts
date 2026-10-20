@@ -156,6 +156,17 @@ export const SESSION_KEYS = keys<Session>()([
  */
 export const COOKIE_NAME = DEFAULT_SESSION_COOKIE;
 
+/** The non-empty session token a response sets, or null. */
+export function sessionTokenOf(cookies: string[]): string | null {
+  const prefix = `${COOKIE_NAME}=`;
+  for (const c of cookies) {
+    if (!c.startsWith(prefix)) continue;
+    const value = c.slice(prefix.length).split(";")[0];
+    if (value) return value;
+  }
+  return null;
+}
+
 /**
  * The cookie or the bearer header, read by core's own `readSessionToken`
  * with this package's cookie name. Only the session token for Better Auth's

@@ -175,10 +175,11 @@ Better Auth's `admin` plugin runs on core's operator tools (spec section 26). A 
 | `/admin/list-users`, `/admin/get-user` | Core's `GET /operator/users`, `/operator/users/search`, and `/operator/users/get`. The list answers `total` only when the page ends the list, else `next`; pass `after` for the next page. |
 | `/admin/ban-user`, `/admin/unban-user`, `/admin/set-role` | Core's `POST /operator/users/ban`, `/operator/users/unban`, and `/operator/users/platform-role`. Each answers `{ user }` with `role`, `banned`, `banReason`, and `banExpires`. |
 | `/admin/revoke-user-sessions` | Core's `POST /operator/sessions/end-user`. While sessions stay, it answers `{ success: false, more: true, ended }`: call again. |
-| `/get-session` | With `admin`, the user also has `role`, `banned`, `banReason`, and `banExpires`. |
+| `/admin/impersonate-user`, `/admin/stop-impersonating` | Core's `POST /operator/impersonate` and `/operator/impersonate/stop`. Each answers `{ session, user }`. The stop answers `{ session: null, user: null }` when no operator session comes back. |
+| `/get-session` | With `admin`, the user also has `role`, `banned`, `banReason`, and `banExpires`, and the session has `impersonatedBy`. |
 | `adminClient()` | The client reads `/get-session`, so `getSession` and `useSession` give the same four fields. The client has no `admin.*` calls. |
 
-Core's guard decides each mapped call: the platform role, a verified address, a second factor, and a fresh session. Its refusal answers 403 with the code of the path, such as `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`. An operator cannot act on another platform operator through these calls. An unknown user answers 404 `USER_NOT_FOUND`, and a ban of the caller answers 409 `YOU_CANNOT_BAN_YOURSELF`. An `offset` above 0 is refused. The README of the package lists each deviation from Better Auth.
+Core's guard decides each mapped call: the platform role, a verified address, a second factor, and a fresh session. Its refusal answers 403 with the code of the path, such as `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`. An operator cannot act on another platform operator through these calls. An unknown user answers 404 `USER_NOT_FOUND`, and a ban of the caller answers 409 `YOU_CANNOT_BAN_YOURSELF`. An impersonation of the operator, a platform operator, a banned user, or an absent user answers 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. An `offset` above 0 is refused. The README of the package lists each deviation from Better Auth.
 
 Each `NOT_SUPPORTED` message names spec section 26. A call with no reason writes the audit reason `better-auth admin plugin <path>`. The README of the package gives the SQL that copies the bans of Better Auth into core's columns at the cutover.
 
