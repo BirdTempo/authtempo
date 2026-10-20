@@ -95,12 +95,73 @@ export const DOCUMENTATION_HOSTS: readonly DocumentationHost[] = [
   },
 ];
 
+/**
+ * One core file that names a host as a name, not as a place that core calls.
+ * The scan drops each host of `hosts` in this file only. The same host in
+ * another file counts, and another host in this file counts.
+ */
+export interface FileHostException {
+  /** The path of the file from the repository root. */
+  path: string;
+  hosts: readonly string[];
+  reason: string;
+}
+
+/**
+ * The exceptions of the scan: one entry for each file (plan 12d, ruling 22).
+ * A folder skip hides each later host in that folder, so an entry names one
+ * file and its hosts. unusedFileHostExceptions fails an entry whose file does
+ * not name its host.
+ */
+export const FILE_HOST_EXCEPTIONS: readonly FileHostException[] = [
+  {
+    path: "packages/core/src/saml/xml.ts",
+    hosts: ["www.w3.org"],
+    reason:
+      "the namespace names of the xml and xmlns prefixes (Namespaces in XML 1.0 section 3). A namespace name is a name, and the parser never fetches it",
+  },
+  {
+    path: "packages/core/src/saml/dsig.ts",
+    hosts: ["www.w3.org"],
+    reason:
+      "the XML Signature namespace name and the algorithm identifiers of the profile (XML Signature 1.1 section 6.1). The check compares each one as a name, and core never fetches it",
+  },
+];
+
+/** True when `path` is the file of `exception`, also with a prefix before the repository path. */
+function isExceptionFile(path: string, exception: FileHostException): boolean {
+  return path === exception.path || path.endsWith(`/${exception.path}`);
+}
+
 /** The site's own host. A URL on our own domain names no other party. */
 const OWN_HOST = new URL(SITE.origin).hostname;
 
 /** True when the host is our own domain or a subdomain of it. */
 function ownHost(host: string): boolean {
   return host === OWN_HOST || host.endsWith(`.${OWN_HOST}`);
+}
+
+/**
+ * The hosts that the URLs in the code of one file name, before any list
+ * applies. A file that the scan skips names no host.
+ */
+function fileUrlHosts(path: string, text: string): string[] {
+  if (!path.includes("packages/core/src/") || !path.endsWith(".ts")) return [];
+  if (
+    path.includes("/src/social/") ||
+    path.includes("/src/testing/") ||
+    path.endsWith("/src/storage/conformance.ts") ||
+    path.endsWith(".test.ts")
+  )
+    return [];
+  const hosts: string[] = [];
+  const code = stripComments(text, path);
+  for (const m of code.matchAll(SCHEME)) {
+    const rest = code.slice((m.index ?? 0) + m[0].length);
+    const host = urlHost(AUTHORITY.exec(rest)?.[0] ?? "", path);
+    if (host && !RESERVED.test(host) && !ownHost(host)) hosts.push(host);
+  }
+  return hosts;
 }
 
 /**
@@ -114,26 +175,38 @@ function ownHost(host: string): boolean {
  *   helpers that no deployment runs.
  * - the reserved names of RESERVED, and an IP literal.
  * - the host of SITE.origin and its subdomains: our own domain.
+ * - a host of an entry of FILE_HOST_EXCEPTIONS, in the file of that entry only.
  */
-export function coreUrlHosts(files: ReadonlyMap<string, string>): string[] {
+export function coreUrlHosts(
+  files: ReadonlyMap<string, string>,
+  exceptions: readonly FileHostException[] = FILE_HOST_EXCEPTIONS,
+): string[] {
   const hosts = new Set<string>();
   for (const [path, text] of files) {
-    if (!path.includes("packages/core/src/") || !path.endsWith(".ts")) continue;
-    if (
-      path.includes("/src/social/") ||
-      path.includes("/src/testing/") ||
-      path.endsWith("/src/storage/conformance.ts") ||
-      path.endsWith(".test.ts")
-    )
-      continue;
-    const code = stripComments(text, path);
-    for (const m of code.matchAll(SCHEME)) {
-      const rest = code.slice((m.index ?? 0) + m[0].length);
-      const host = urlHost(AUTHORITY.exec(rest)?.[0] ?? "", path);
-      if (host && !RESERVED.test(host) && !ownHost(host)) hosts.add(host);
-    }
+    const excepted = new Set(
+      exceptions.filter((e) => isExceptionFile(path, e)).flatMap((e) => e.hosts),
+    );
+    for (const host of fileUrlHosts(path, text)) if (!excepted.has(host)) hosts.add(host);
   }
   return [...hosts].sort();
+}
+
+/**
+ * Each host of an exception that its file does not name, as "path host".
+ * Each one is a stale entry. A file that is not in `files` names no host.
+ */
+export function unusedFileHostExceptions(
+  files: ReadonlyMap<string, string>,
+  exceptions: readonly FileHostException[] = FILE_HOST_EXCEPTIONS,
+): string[] {
+  const named = new Set<string>();
+  for (const [path, text] of files)
+    for (const e of exceptions)
+      if (isExceptionFile(path, e))
+        for (const host of fileUrlHosts(path, text)) named.add(`${e.path} ${host}`);
+  return exceptions.flatMap((e) =>
+    e.hosts.map((host) => `${e.path} ${host}`).filter((entry) => !named.has(entry)),
+  );
 }
 
 /**
@@ -144,9 +217,10 @@ export function coreUrlHosts(files: ReadonlyMap<string, string>): string[] {
 export function vendorHosts(
   files: ReadonlyMap<string, string>,
   documentation: readonly DocumentationHost[] = DOCUMENTATION_HOSTS,
+  exceptions: readonly FileHostException[] = FILE_HOST_EXCEPTIONS,
 ): string[] {
   const skip = new Set(documentation.map((d) => d.host));
-  return coreUrlHosts(files).filter((host) => !skip.has(host));
+  return coreUrlHosts(files, exceptions).filter((host) => !skip.has(host));
 }
 
 /** The hosts of the documentation list that no core file names. Each one is a stale entry. */
