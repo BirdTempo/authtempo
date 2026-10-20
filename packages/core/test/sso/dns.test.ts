@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DOH_BODY_MAX, dohCloudflare, dohGoogle } from "../../src/engine/sso/dns.js";
+import { fakeDns } from "./helpers.js";
 
 const NAME = "_authtempo-challenge.acme.example";
 
@@ -140,5 +141,14 @@ describe("the DoH adapters", () => {
     expect(settled).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(await answer).toBeNull();
+  });
+
+  it("has a test fake that answers null for a null entry, so a test reaches the null path", async () => {
+    const dns = fakeDns("a", { [NAME]: null, "other.example": ["v"], "bad.example": "throw" });
+    expect(await dns.txt(NAME)).toBeNull();
+    expect(await dns.txt("other.example")).toEqual(["v"]);
+    expect(await dns.txt("absent.example")).toEqual([]);
+    await expect(dns.txt("bad.example")).rejects.toThrow("the fake resolver a fails");
+    expect(dns.calls).toEqual([NAME, "other.example", "absent.example", "bad.example"]);
   });
 });
