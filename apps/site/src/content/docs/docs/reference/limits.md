@@ -7,6 +7,7 @@ sources:
   - packages/core/README.md "Limits in version 1"
   - packages/core/README.md "Limits"
   - docs/superpowers/plans/2026-10-14-09h-housekeeping.md
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.
@@ -89,6 +90,19 @@ For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives it
 `otp:email-day:<email>` and `totp:email-day:<email>` read one cap of 20 per 24 hours: one number, two keys. The keys are apart because an email code request needs no password. A person who knows the address must not use up the mails of the second factor.
 
 The stored key of an owned limiter is the key, the seconds, and the maximum, joined by U+001F.
+
+## The device code
+
+A user code of the device grant has 8 letters of a set of 20, about 34.5 bits. With n live codes, one guess passes with p = n / 20^8, about n × 3.9 × 10⁻¹¹.
+
+The device page counts each post on three keys of 15 minutes: the session, the IP, and a found code. The three owned limiters open a window at the first call after the last window ended. So a window that opened just before a code started still takes guesses in the code's first minutes. One key then gets at most max − 1 + max × ceil(life / 15 minutes) guesses at one code.
+
+| Code life | Per session | Per IP |
+| --- | --- | --- |
+| 10 minutes, the default | 9 guesses, p ≈ n × 3.5 × 10⁻¹⁰ | 39 guesses, p ≈ n × 1.5 × 10⁻⁹ |
+| 30 minutes, the most | 14 guesses, p ≈ n × 5.5 × 10⁻¹⁰ | 59 guesses, p ≈ n × 2.3 × 10⁻⁹ |
+
+The limiter port does not promise this window shape. A custom limiter with windows on the clock allows 10 guesses per session and 40 per IP for a 10-minute code. An attacker with k addresses multiplies the IP bound by k. A limiter that counts per isolate multiplies each bound by the count of isolates.
 
 ## The counts in rows
 

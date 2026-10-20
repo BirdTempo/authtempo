@@ -87,6 +87,8 @@ With `dpop`, the verifier reads `Authorization: DPoP <token>` and the `DPoP` hea
 - The token must be bound, and the proof key must have its thumbprint. The proof must hold `ath`, the method, and the URL.
 - A bound token sent as a Bearer answers `null` (RFC 9449 section 7.2).
 - The default store sees a replay only inside one isolate. A deployment with several isolates passes a shared store, or uses `auth.caller`, whose store is the database.
+- A shared store implements `seen(key, ttlSeconds)` in one atomic step. It answers true for a key that it holds and whose life has not ended. Else it keeps the key for `ttlSeconds` and answers false.
+- A store that answers false twice for one key lets a replay through. A read and a later write in two steps does that under load.
 - `memoryReplayStore(max)` keeps at most `max` keys, `REPLAY_STORE_DEFAULT_MAX` (10,000) by default, and drops the oldest key above the bound.
 - A store that throws gives `network`, never `null`.
 

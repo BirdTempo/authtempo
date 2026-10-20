@@ -7,6 +7,7 @@ sources:
   - packages/core/src/http/well-known.ts
   - packages/core/README.md "OAuth 2.1 and OIDC provider"
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 17"
 ---
 
 **For:** a developer who runs the OAuth provider, or a client that reads its metadata.
@@ -41,11 +42,36 @@ The issuer is `baseURL` plus `basePath`, such as `https://api.example.com/auth`.
 
 ## The fields
 
-- `code_challenge_methods_supported` is `["S256"]`.
-- `token_endpoint_auth_methods_supported` is `["none"]`. Every client is public.
-- The signing algorithm list names the configured `jwtMint.alg` alone: EdDSA, ES256, or RS256. A relying party that accepts RS256 only needs `jwtMint.alg: "RS256"`.
-- `registration_endpoint` is present while `oauth.registration.dynamic` is on.
-- `client_id_metadata_document_supported` tells whether `oauth.registration.cimd` is on.
+Each member states what the code does under the config, no more and no less. Each list reads the constant or the config value that the code reads.
+
+| Member | Value |
+| --- | --- |
+| `issuer` | `baseURL` plus `basePath` |
+| `authorization_endpoint`, `token_endpoint`, `revocation_endpoint`, `introspection_endpoint`, `end_session_endpoint`, `userinfo_endpoint` | The route under the issuer, such as `<issuer>/oauth/token` |
+| `registration_endpoint` | `<issuer>/oauth/register`, present only while `oauth.registration.dynamic` is on |
+| `device_authorization_endpoint` | `<issuer>/oauth/device_authorization`, present only while `oauth.device` is on |
+| `jwks_uri` | `<issuer>/jwks` |
+| `scopes_supported` | The built-in scopes and the keys of `oauth.scopes` |
+| `response_types_supported` | `["code"]` |
+| `response_modes_supported` | `["query"]`. Stated, because the RFC 8414 default adds `fragment` |
+| `grant_types_supported` | `authorization_code`, `refresh_token`, and `client_credentials`; the device grant while `oauth.device` is on |
+| `token_endpoint_auth_methods_supported`, `revocation_endpoint_auth_methods_supported` | `none`, `client_secret_basic`, `client_secret_post`, and `private_key_jwt` |
+| `introspection_endpoint_auth_methods_supported` | The same list without `none`: introspection takes a confidential client only |
+| `token_endpoint_auth_signing_alg_values_supported` | The algs of a client assertion: `EdDSA`, `Ed25519`, `ES256`, `RS256`, and `PS256` |
+| `code_challenge_methods_supported` | `["S256"]` |
+| `subject_types_supported` | `["public", "pairwise"]` |
+| `id_token_signing_alg_values_supported` | The configured `jwtMint.alg` alone: EdDSA, ES256, or RS256 |
+| `dpop_signing_alg_values_supported` | `oauth.dpop.algs` |
+| `claims_supported` | The ID token claims and the user claims of the `email` and `profile` scopes |
+| `request_parameter_supported`, `request_uri_parameter_supported`, `claims_parameter_supported` | `false` |
+| `backchannel_logout_supported`, `backchannel_logout_session_supported` | True while `oauth.fetch` is set: core posts each sign-out token through it |
+| `authorization_response_iss_parameter_supported` | `true`: every redirect to a client carries `iss` (RFC 9207) |
+| `client_id_metadata_document_supported` | True while `oauth.registration.cimd` is on |
+
+- A relying party that accepts RS256 only needs `jwtMint.alg: "RS256"`. Every JWT of the deployment then signs with RS256.
+- A registration may ask only for what this document names, and it refuses the rest. It also refuses `client_credentials`, which only `api.oauth.clients` gives.
+
+The document of a protected resource holds `resource`, `authorization_servers` (the issuer), `scopes_supported`, `bearer_methods_supported` (`["header"]`), and `dpop_signing_alg_values_supported` (`oauth.dpop.algs`).
 
 ## Next
 

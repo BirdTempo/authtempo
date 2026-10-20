@@ -7,6 +7,7 @@ sources:
   - packages/core/README.md "Limits in version 1"
   - packages/adapter-d1/README.md "Limiter"
   - packages/adapter-postgres/README.md "Limiter"
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -44,6 +45,8 @@ import d1Worker from "../../../../../../../examples/worker-d1/src/index.ts?raw";
 - For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives its IPv4 form. Any other IPv6 address gives its `/64` prefix, written `2001:db8:1:2::/64`. The users of one `/64` share each per-IP count.
 - On Workers, the default `clientIp` reads `cf-connecting-ip`, which Cloudflare sets and a caller cannot forge.
 - A per-code cap and a per-challenge cap live in their rows, so they hold under every limiter.
+- Each window of the owned limiters opens at the first call after the last window ended. The limiter port does not promise that shape.
+- A limiter of your own with windows on the clock lets more guesses through. A 10-minute device code then takes 10 guesses per session and 40 per IP, not 9 and 39. [Limits](/docs/reference/limits/#the-device-code) gives the odds.
 
 ## If it fails
 

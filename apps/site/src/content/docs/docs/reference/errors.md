@@ -442,9 +442,9 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`GET /oauth/authorize`](/docs/reference/routes/#get-oauth-authorize), [`POST /oauth/authorize`](/docs/reference/routes/#post-oauth-authorize), [`GET /oauth/sign-in`](/docs/reference/routes/#get-oauth-sign-in), [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization), [`POST /oauth/device`](/docs/reference/routes/#post-oauth-device). |
 
-<h3 id="oauth-invalid_client"><code>invalid_client</code> 401</h3>
+<h3 id="oauth-invalid_client"><code>invalid_client</code> 400 or 401</h3>
 
-- **Meaning:** The `client_id` is unknown, or its metadata document failed. At the token, revoke, and introspection routes, the client auth failed. At the introspection route, the caller is also not a confidential client with `introspect: true`. The secret is wrong, or a confidential client sent no secret, or a public client sent one. A `private_key_jwt` client sent a secret, or its client assertion failed a check of RFC 7523. At those routes a request with an `Authorization` header gets the 401 with `WWW-Authenticate: Basic` and the issuer as the realm. A request with no header gets a 400 with no challenge, so a browser shows no sign-in dialog.
+- **Meaning:** The `client_id` is unknown, or its metadata document failed. At the token, revoke, introspection, and device authorization routes, the client auth failed. At the introspection route, the caller is also not a confidential client with `introspect: true`. The secret is wrong, or a confidential client sent no secret, or a public client sent one. A `private_key_jwt` client sent a secret, or its client assertion failed a check of RFC 7523. At those routes a request with an `Authorization` header gets the 401 with `WWW-Authenticate: Basic` and the issuer as the realm. A request with no header gets a 400 with no challenge, so a browser shows no sign-in dialog.
 - **Do:** Register the client again, or fix its metadata document. Send the secret as HTTP Basic or as `client_secret` in the form, and send one method only.
 
 | Routes |
@@ -561,8 +561,8 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_client_metadata"><code>invalid_client_metadata</code> 400</h3>
 
-- **Meaning:** The registration metadata is malformed, or names an auth method, a grant type, or a response type that core does not serve.
-- **Do:** Send only the fields of a public client.
+- **Meaning:** The registration metadata is malformed, or names an auth method, a grant type, or a response type that core does not serve. A pairwise client has no single sector, or a key field breaks its rule. `api.oauth.clients` answers this code for the same fields.
+- **Do:** Fix the field. A metadata document drops a member that core does not serve, so only a broken rule refuses it.
 
 | Routes |
 | --- |
