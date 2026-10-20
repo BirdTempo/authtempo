@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -61,6 +69,28 @@ function copyRoot(edit: (dir: string) => void = () => {}): string {
   cpSync(fixture("root"), dir, { recursive: true });
   edit(dir);
   return dir;
+}
+
+/**
+ * Adds a released package to the tree at `dir`: a folder with a package.json,
+ * a name in fixed[0] of .changeset/config.json, and an entry in
+ * release/pack-needs.json.
+ */
+function addReleased(dir: string, name: string, version: string): void {
+  const folder = join(dir, "packages", name.slice(name.indexOf("/") + 1));
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(join(folder, "package.json"), JSON.stringify({ name, version }));
+  const editJson = (file: string, edit: (value: Record<string, unknown>) => void) => {
+    const value = JSON.parse(readFileSync(join(dir, file), "utf8")) as Record<string, unknown>;
+    edit(value);
+    writeFileSync(join(dir, file), JSON.stringify(value));
+  };
+  editJson(".changeset/config.json", (c) => {
+    (c.fixed as string[][])[0]?.push(name);
+  });
+  editJson("release/pack-needs.json", (n) => {
+    n[name] = ["package.json"];
+  });
 }
 
 /** Runs pnpm pack in `dir` and gives the path of the one new tarball in `out`. */
@@ -347,7 +377,15 @@ describe("check-pack", () => {
       } finally {
         rmSync(zero, { recursive: true, force: true });
       }
+      // Probe B of the Task 5 review: two released packages and one tarball.
+      const two = copyRoot((dir) => addReleased(dir, "@authtempo/second", "0.1.0"));
+      try {
+        expect(checkTarballs(two, [path]).failures).toEqual(["@authtempo/second: no tarball"]);
+      } finally {
+        rmSync(two, { recursive: true, force: true });
+      }
       expect(checkTarballs(fixture("root"), []).failures).toEqual([
+        "@authtempo/fixture: no tarball",
         "read 0 tarballs",
         "read 0 files",
       ]);

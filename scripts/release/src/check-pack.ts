@@ -272,6 +272,8 @@ export function checkTarballs(root: string, paths: string[]): Report {
     files += t.files.length;
     for (const f of r.failures) failures.push(`${name}@${t.manifest.version}: ${f}`);
   }
+  // A dry run that packs 23 of 24 packages must fail here, not on npm.
+  for (const name of released) if (!seen.has(name)) failures.push(`${name}: no tarball`);
   return requireCounts(
     { name: "check-pack", counts: { tarballs: seen.size, files }, failures, notes: [] },
     ["tarballs", "files"],
