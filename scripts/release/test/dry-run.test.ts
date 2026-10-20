@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkTarballs, readTarball } from "../src/check-pack.ts";
 import { readYaml, type YamlNode } from "../src/check-workflows.ts";
@@ -30,6 +31,7 @@ import {
   spawnRun,
   type ToolPaths,
 } from "../src/dry-run.ts";
+import { buildCommand } from "../src/lib/release-copy.ts";
 import { reportLines } from "../src/lib/report.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
 import { prepare } from "../src/prepare.ts";
@@ -357,7 +359,7 @@ describe("dry run", () => {
     expect(releaseCopyLines()).toEqual([
       "pnpm install --frozen-lockfile --offline",
       "node scripts/release/src/prepare.ts",
-      `pnpm turbo run build --force $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`,
+      `pnpm turbo run build --cache=local:w $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`,
       'pnpm --filter "$name" pack --ignore-scripts --pack-destination "$PWD/out"',
       "node scripts/release/src/check-pack.ts out/*.tgz",
     ]);
@@ -937,6 +939,71 @@ describe("dry run against a scope registry", () => {
           ],
           "",
         ]);
+      }
+    } finally {
+      listener.stop();
+    }
+  });
+});
+
+describe("dry run against a remote cache", () => {
+  it("sends no request to the remote cache of a committed turbo.json", async () => {
+    // turbo 2.11.7 reads the token of turbo login and of the Vercel CLI from
+    // HOME. With remoteCache in turbo.json, it sends the token and each build
+    // output to that host (review of the Task 6 fix, M1).
+    const temp = mkdtempSync(join(tmpdir(), "authtempo-cache-test-"));
+    made.push(temp);
+    const log = join(temp, "requests.log");
+    const listener = await listen(log);
+    try {
+      const home = join(temp, "person");
+      for (const file of [
+        "Library/Application Support/turborepo/config.json",
+        "Library/Application Support/com.vercel.cli/auth.json",
+      ]) {
+        mkdirSync(join(home, file, ".."), { recursive: true });
+        writeFileSync(join(home, file), '{"token":"FAKE-TEST-TOKEN"}\n');
+      }
+      const root = JSON.parse(readFileSync(new URL("package.json", repoRoot), "utf8")) as {
+        packageManager: string;
+      };
+      const repo = copyFixture((d) => {
+        const remoteCache = { apiUrl: listener.url.slice(0, -1), teamId: "team_test" };
+        const turbo = { tasks: { build: { outputs: [] } }, remoteCache };
+        writeFileSync(join(d, "turbo.json"), `${JSON.stringify(turbo, null, 2)}\n`);
+        // turbo reads the workspace of the packageManager of the root manifest.
+        for (const [file, key, value] of [
+          ["package.json", "packageManager", root.packageManager],
+          ["packages/core/package.json", "scripts", { build: "node -e 0" }],
+          ["packages/client/package.json", "scripts", { build: "node -e 0" }],
+        ] as const) {
+          const m = JSON.parse(readFileSync(join(d, file), "utf8")) as Record<string, unknown>;
+          m[key] = value;
+          writeFileSync(join(d, file), `${JSON.stringify(m, null, 2)}\n`);
+        }
+      });
+      made.push(repo);
+      const { files, paths } = childFiles(join(temp, "child"));
+      const env = childEnv({ ...process.env, HOME: home }, files, paths);
+      const turbo = fileURLToPath(new URL("node_modules/.bin/turbo", repoRoot));
+      const [pnpm, sub, ...args] = buildCommand(["@authtempo/client", "@authtempo/core"]);
+      expect([pnpm, sub]).toEqual(["pnpm", "turbo"]);
+      // Each guard holds alone: the empty HOME with the --force of the old
+      // command, and the cache flag with the HOME of the person.
+      const forced = args.map((a) => (a.startsWith("--cache=") ? "--force" : a));
+      const cases: [label: string, env: ChildEnv, args: readonly string[]][] = [
+        ["both", env, args],
+        ["empty HOME alone", env, forced],
+        ["cache flag alone", { ...env, HOME: home }, args],
+      ];
+      for (const [label, e, a] of cases) {
+        const r = spawnRun(turbo, a, repo, e);
+        expect([
+          label,
+          r.status,
+          /Tasks:\s+2 successful, 2 total/.test(r.stdout),
+          readFileSync(log, "utf8"),
+        ]).toEqual([label, 0, true, ""]);
       }
     } finally {
       listener.stop();

@@ -69,10 +69,10 @@ jobs:
       - name: Prepare the manifests
         run: node scripts/release/src/prepare.ts
         working-directory: ${{ runner.temp }}/release-copy
-      # The build with the cache off, of the released packages only. Without
-      # it, no dist file exists to pack. The site build fails on a changelog
-      # version with no release date, and the site ships in no tarball.
-      - run: pnpm turbo run build --force $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)
+      # The build of the released packages, with no cache read and no remote
+      # cache. Without it, no dist file exists to pack. The site build fails on
+      # a changelog version with no date, and the site ships in no tarball.
+      - run: pnpm turbo run build --cache=local:w $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)
         working-directory: ${{ runner.temp }}/release-copy
       # One tarball for each package of the fixed group, the one released list.
       - name: Pack each released package

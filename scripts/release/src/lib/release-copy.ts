@@ -16,8 +16,14 @@ export const COPY_PREPARE = ["node", "scripts/release/src/prepare.ts"] as const;
  * The site builds its feed from each changelog. Its build fails on a version
  * with no release date (read 2026-10-21 in a copy after changeset version).
  * The site ships in no tarball, so the build skips it.
+ *
+ * --cache=local:w reads no cache, and it writes only the local cache of the
+ * copy. With --force, turbo 2.11.7 also writes to the remote cache of turbo.json,
+ * with the token of turbo login (review of the Task 6 fix, M1).
+ * turbo 2.11.7 refuses --cache with --force, and --force is
+ * --cache=local:w,remote:w (read 2026-10-21).
  */
-export const COPY_BUILD = ["pnpm", "turbo", "run", "build", "--force"] as const;
+export const COPY_BUILD = ["pnpm", "turbo", "run", "build", "--cache=local:w"] as const;
 
 /** The build command for the released names: one filter for each. */
 export const buildCommand = (names: readonly string[]): readonly string[] => [
