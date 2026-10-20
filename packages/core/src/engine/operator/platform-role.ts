@@ -380,8 +380,8 @@ export async function revokePlatformRole(
     async (tx, _draft, ends: OperatorActEnds): Promise<Result<{ change: MemberChange }>> => {
       const meter = meterOf(tx, fixed);
       // The user row first (user-hold.ts). An impersonation start holds it
-      // too, so the start either sees the role gone or commits its start
-      // row before `endImpersonations` reads (ruling 42 of plan 12f).
+      // too (ruling 42 of plan 12f). So the start sees the role gone, or it
+      // commits its start row before `endImpersonations` reads.
       await holdUser(tx, user.id);
       meter.step(STEP_WORST.hold);
       const member = await memberOf(tx, organization.id, user.id);

@@ -115,14 +115,14 @@ function secondsUntil(config: ResolvedConfig, at: Date): number {
 
 /**
  * The impersonation routes (plan 12f Task 11, spec 26 item 9). Each needs
- * the session of the caller: a request with an operator secret and no
+ * the session of the caller. A request with an operator secret and no
  * session answers 401, and so does a request with both (plan 12f deviation
- * 5). The start moves the operator's token into the actor cookie and sets
- * the session cookie to the new token, each with the Max-Age of the new
- * session. A bearer caller gets the token in the body and no cookie. The
- * stop ends the session, clears the actor cookie, and sets the session
- * cookie back to the operator's token while that session lives, else
- * clears it.
+ * 5). The start moves the operator's token into the actor cookie. It sets
+ * the session cookie to the new token. Both cookies get the Max-Age of the
+ * new session. A bearer caller gets the token in the body and no cookie.
+ * The stop ends the session and clears the actor cookie. It sets the
+ * session cookie back to the operator's token while that session lives,
+ * else it clears the session cookie.
  */
 function impersonationRoutes(config: ResolvedConfig): Route[] {
   if (!config.operator?.impersonation) return [];

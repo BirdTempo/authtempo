@@ -166,7 +166,7 @@ describe("openApiDocument (plan 11g)", () => {
 
   it("marks the rewrap body as not required, and every other body as required", () => {
     // The rewrap reads an empty body as `{}` (plan 11c2), and so does the stop of an
-    // impersonation (plan 12f): their bodies are the ones that are not required.
+    // impersonation (plan 12f). Their bodies are the ones that are not required.
     const optional = operations(reference())
       .filter(({ op }) => op.requestBody?.required === false)
       .map(({ key }) => key);

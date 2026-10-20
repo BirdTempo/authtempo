@@ -606,8 +606,8 @@ export interface Auth {
 
 /**
  * The in-process door of an act that the router refuses to an impersonation
- * session (plan 12f, spec 26 item 9): `impersonation_session` for an input
- * whose session has `actorId`, as the route answers. A call that takes a
+ * session (plan 12f, spec 26 item 9). An input whose session has `actorId`
+ * gets `impersonation_session`, as the route answers. A call that takes a
  * user, not a session, cannot tell; its route refuses.
  */
 function refusesImpersonation<I extends { session: Pick<ResolvedSession, "session"> }, R>(

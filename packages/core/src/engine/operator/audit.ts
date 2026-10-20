@@ -73,9 +73,9 @@ export function operatorReason(raw: unknown): Result<string> {
 }
 
 /**
- * The actor of an audit row. A user actor needs the user id only: the stop
+ * The actor of an audit row. A user actor needs the user id only. The stop
  * of an impersonation (plan 12f Task 11) names the operator of the session
- * row, whose user row it does not read.
+ * row, and it does not read the operator's user row.
  */
 export type AuditActor = OperatorActor | { kind: "user"; user: Pick<UserRow, "id"> };
 
@@ -223,10 +223,10 @@ export async function operatorAct<T extends object>(
 }
 
 /**
- * The users whose impersonation `operatorId` started at or after `since`:
- * the `targetUserId` of each `impersonation_start` row of that user actor,
- * by the index on `actorId` (plan 12f Task 11, ruling 31). This file stays
- * the one reader of the audit table.
+ * The users whose impersonation `operatorId` started at or after `since`.
+ * They are the `targetUserId` of each `impersonation_start` row of that
+ * user actor, read by the index on `actorId` (plan 12f Task 11, ruling 31).
+ * This file stays the one reader of the audit table.
  */
 export async function impersonationTargets(
   storage: StorageAdapter,

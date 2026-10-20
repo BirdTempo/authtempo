@@ -9,8 +9,8 @@ import type { RouteKey } from "./route-list.js";
  * 9). An impersonation session acts as the user for support, so it reads
  * and changes what the user sees. It never gets a way in, a fresh session,
  * an operator act, or a grant that outlives it. Each route of `ROUTES` is
- * in exactly one of the two lists, and `impersonation-rules.test.ts` holds
- * them to `ROUTES` both ways, so a new route fails the test until it gets a
+ * in exactly one of the two lists. `impersonation-rules.test.ts` holds them
+ * to `ROUTES` both ways, so a new route fails the test until it gets a
  * class.
  */
 
@@ -30,7 +30,7 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /operator/secrets/rewrap",
   "GET /operator/info",
   "POST /operator/impersonate",
-  // The stop is the one way out: a sign-out would end the session with no
+  // The stop is the one way out. A sign-out would end the session with no
   // stop row and keep the actor cookie (ruling 6 for the end-session route).
   "POST /sign-out",
   // The re-authentication and its helpers: the session never becomes fresh,

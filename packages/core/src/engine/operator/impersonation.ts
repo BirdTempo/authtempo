@@ -54,13 +54,13 @@ export function refuseImpersonation(resolved: Pick<ResolvedSession, "session">):
 }
 
 /**
- * Starts an impersonation (spec 26 item 9). The checks, in order: the tool
- * is on (`not_found`); the operator's session is not an impersonation
- * session; `requireOperatorUser`; the count on
- * `operator-impersonate:user:<operatorId>`; the reason; the user id. A
- * target that is the operator, a platform operator, a user with an active
- * ban, or absent answers `impersonation_refused`: one code, so the route
- * does not tell a missing user from a protected one.
+ * Starts an impersonation (spec 26 item 9). The checks run in this order.
+ * The tool is on (`not_found`). The operator's session is not an
+ * impersonation session. Then `requireOperatorUser`, the count on
+ * `operator-impersonate:user:<operatorId>`, the reason, and the user id.
+ * A target that is the operator, a platform operator, a user with an active
+ * ban, or absent answers `impersonation_refused`. It is one code, so the
+ * route does not tell a missing user from a protected one.
  *
  * Through `operatorAct` with the action `impersonation_start`, one
  * transaction first holds the operator's user row and reads the operator
@@ -123,8 +123,8 @@ export async function startImpersonation(
     async (tx, draft) => {
       // The operator's user row first (user-hold.ts), then the operator again
       // through tx. A ban or a revoke that committed after the guard stops
-      // the start here; one that starts later waits for this commit, and
-      // then its `endImpersonations` reads the start row.
+      // the start here. One that starts later waits for this commit. Then
+      // its `endImpersonations` reads the start row.
       await holdUser(tx, actor.user.id);
       const self = await tx.findOne("user", [{ field: "id", op: "eq", value: actor.user.id }]);
       if (!self || activeBan(self, now)) return fail("operator_required");
@@ -156,8 +156,9 @@ export async function startImpersonation(
       },
     },
   );
-  // A ban or an account delete that commits after the read: the session
-  // write stops (`writeSession`), and the answer is the one code of a target.
+  // A ban or an account delete of the target can commit after the read.
+  // Then the session write stops (`writeSession`), and the answer is the
+  // one code of a target.
   if (!done.ok)
     return done.code === "account_banned" || done.code === "conflict"
       ? fail("impersonation_refused")
@@ -167,12 +168,12 @@ export async function startImpersonation(
 
 /**
  * Stops an impersonation (spec 26 item 9). A session with no `actorId`
- * answers `not_found`. Through `operatorAct` with the action
- * `impersonation_stop`, it ends the row by id (`endSessionById`, with the
- * outbox rows of its client links), and the audit row names the operator
- * of the row. A row that another call ended answers `not_found`. After the
+ * answers `not_found`. It runs through `operatorAct` with the action
+ * `impersonation_stop`. It ends the row by id (`endSessionById`, with the
+ * outbox rows of its client links). The audit row names the operator of
+ * the row. A row that another call ended answers `not_found`. After the
  * commit, `session.afterEnd` fires with `impersonation_end`. No logout goes
- * inline (ruling 37): an impersonation session cannot reach the authorize
+ * inline (ruling 37). An impersonation session cannot reach the authorize
  * step, so it has no client link, and the sweep delivers any outbox row.
  */
 export async function stopImpersonation(
