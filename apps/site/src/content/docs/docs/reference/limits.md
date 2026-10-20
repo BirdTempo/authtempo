@@ -121,7 +121,7 @@ These counts live in their rows, so they hold under every limiter.
 | Wrong codes of one second factor challenge | 5 | `too_many_attempts` |
 | Email code sends of one second factor challenge | 3 | `rate_limited` |
 | API tokens of one user | 50 | `token_limit` |
-| Calls of one API token with a quota | Its `remaining`. A due refill sets it to `refillAmount` | `token_exhausted`. One compare-and-set per try, three tries, then `conflict` |
+| Calls of one API token with a quota | Its `remaining`. A due refill sets it to `refillAmount` | `token_exhausted`. One compare-and-set per try. A lost try tries again while another call spent, 20 tries at most, then `conflict` |
 | The `metadata` of one API token | 4096 bytes as JSON | `invalid_body` |
 | Memberships of one user | `organizations.limits.perUser` | `organization_limit` |
 | Members of one organization | `organizations.limits.membersPerOrganization` | `member_limit` |

@@ -208,11 +208,11 @@ describe("the quota (plan 12k Task 7)", () => {
     expect(await remaining(h)).toEqual([3]);
   });
 
-  it("answers conflict after three lost spends, and spends nothing for it", async () => {
+  it("tries again while another call spends first, and answers conflict after 20 lost tries", async () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
     const { token } = mustOk(
-      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 10 } }),
+      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 100 } }),
     );
     // Before each spend of this instance, another instance on the same storage spends first.
     let rivals = 0;
@@ -245,8 +245,78 @@ describe("the quota (plan 12k Task 7)", () => {
     const res = await loser.handle(request(token, "/auth/tokens/current"));
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: "conflict" });
-    expect(rivals).toBe(3);
-    expect(await remaining(h)).toEqual([7]);
+    // Each lost try saw a new count, so the spend tried 20 times and spent nothing for itself.
+    expect(rivals).toBe(20);
+    expect(await remaining(h)).toEqual([80]);
+  });
+
+  it("spends after rival spends that end before the bound", async () => {
+    const h = useHandle();
+    const ada = await h.seedUser("ada@example.com");
+    const { token } = mustOk(
+      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 100 } }),
+    );
+    const rival = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: h.storage,
+      mail: { send: async () => {} },
+      clock: h.clock,
+    });
+    // The rival spends before each of the first 19 tries, so the 20th try wins.
+    let tries = 0;
+    const storage: StorageAdapter = {
+      ...h.storage,
+      async update(model, where, data) {
+        if (model === "apiToken" && "remaining" in data && ++tries < 20)
+          expect(await code({ ...h, auth: rival }, token)).toBe("ok");
+        return h.storage.update(model, where, data);
+      },
+    };
+    const winner = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage,
+      mail: { send: async () => {} },
+      clock: h.clock,
+    });
+    const r = mustOk(await winner.authenticate(request(token)));
+    expect(r.kind === "token" && r.apiToken.remaining).toBe(80);
+    expect(tries).toBe(20);
+    expect(await remaining(h)).toEqual([80]);
+  });
+
+  it("answers conflict at once when a try loses and the row shows no other spend", async () => {
+    const h = useHandle();
+    const ada = await h.seedUser("ada@example.com");
+    const { token } = mustOk(
+      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 10 } }),
+    );
+    // An adapter whose compare of the count never matches: each spend writes zero rows.
+    let spends = 0;
+    const storage: StorageAdapter = {
+      ...h.storage,
+      async update(model, where, data) {
+        if (model === "apiToken" && "remaining" in data) {
+          spends++;
+          return 0;
+        }
+        return h.storage.update(model, where, data);
+      },
+    };
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage,
+      mail: { send: async () => {} },
+      clock: h.clock,
+    });
+    expect(await auth.authenticate(request(token))).toMatchObject({ ok: false, code: "conflict" });
+    expect(spends).toBe(1);
+    expect(await remaining(h)).toEqual([10]);
   });
 
   it("lowers the quota and drops the refill in process, and refuses a raise", async () => {

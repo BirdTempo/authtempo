@@ -14,8 +14,17 @@ export const WINDOW_SECONDS_MAX = 86_400;
 export const WINDOW_CALLS_MAX = 100_000;
 /** The largest count: the Postgres column is `integer` (ruling 9 of plan 12k). */
 export const COUNT_MAX = 2_147_483_647;
-/** The tries of one spend. Each loss means another call spent first. */
-const SPEND_TRIES = 3;
+/**
+ * The most tries of one spend. A try loses only when another call wrote the
+ * count first, and each call writes it once. So in a burst of k calls, each
+ * call needs at most k tries, and 20 tries let a burst of 20 calls all spend.
+ * That is twice the default pool of 10 connections of postgres.js. On D1 the
+ * worst spend is 40 statements, 20 updates and 20 reads. With the 5 other
+ * statements of a token resolve, one call makes 45 at most. That is under the
+ * 50 queries of one Workers Free invocation (D1 limits page updated
+ * 2026-04-21, read 2026-10-20).
+ */
+const SPEND_TRIES = 20;
 
 /** A usage quota: `remaining` calls, and an optional refill that sets the count to `refillAmount`. */
 export interface TokenQuota {
@@ -89,11 +98,16 @@ export function useWindow(
  * of it. A next count below zero answers `token_exhausted` with no write.
  *
  * Each try is one `update` with `where` on `id`, `remaining`, and
- * `lastRefillAt` as read: one statement, so SQLite runs it alone and Postgres
- * locks the row for it. Zero rows means another call spent first: read the row
- * again and try again. Storage calls: one update per try, and one findOne per
- * lost try; three tries at most, then `conflict`. A row that is gone answers
- * `unauthorized`. It writes in every read mode: the quota is a sold limit.
+ * `lastRefillAt` as read. That is one statement, so SQLite runs it alone and
+ * Postgres locks the row for it. Zero rows means that the row changed: read it
+ * again. When the count or the refill time moved, another call spent, so try
+ * again with the new row. When neither moved, answer `conflict`. After
+ * `SPEND_TRIES` lost tries, answer `conflict` too.
+ *
+ * Storage calls: one update per try, and one findOne per lost try. So a spend
+ * is 1 statement when no other call spends, and 40 at most. A row that is gone
+ * answers `unauthorized`. It writes in every read mode: the quota is a sold
+ * limit.
  */
 export async function spendUse(
   config: ResolvedConfig,
@@ -125,7 +139,14 @@ export async function spendUse(
       { field: "id", op: "eq", value: current.id },
     ]);
     if (!again) return fail("unauthorized");
+    // A loss with no change of the count is no rival spend, so a new try would lose again.
+    if (again.remaining === current.remaining && sameTime(again.lastRefillAt, current.lastRefillAt))
+      return fail("conflict");
     current = again;
   }
   return fail("conflict");
+}
+
+function sameTime(a: Date | null, b: Date | null): boolean {
+  return a === null || b === null ? a === b : a.getTime() === b.getTime();
 }

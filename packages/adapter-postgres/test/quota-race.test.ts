@@ -21,11 +21,11 @@ afterEach(async () => {
   await db.close();
 });
 
-/** A client of one connection on the schema of `db`. */
-async function connection(): Promise<Sql> {
+/** A client of `max` connections, one by default, on the schema of `db`. */
+async function connection(max = 1): Promise<Sql> {
   const [row] = await db.sql<{ schema: string }[]>`select current_schema() as schema`;
   const sql = postgres(PG_URL, {
-    max: 1,
+    max,
     onnotice: () => {},
     connection: { search_path: row?.schema ?? "" },
   });
@@ -143,5 +143,31 @@ describe("token quota races on Postgres (plan 12k Task 7)", () => {
     expect(codes).toEqual(["ok", "token_exhausted"]);
     const [row] = await w.storage.findMany("apiToken", []);
     expect(row).toMatchObject({ remaining: 0, lastRefillAt: new Date(t0.getTime() + 60_000) });
+  });
+
+  it("spends each call of a burst of 20 on a pool of 10", async () => {
+    const w = await twoInstances();
+    const made = await w.plain.api.tokens.create({
+      user: w.user,
+      name: "ci",
+      quota: { remaining: 1000 },
+    });
+    if (!made.ok) throw new Error(made.code);
+    // One instance on a pool of 10 connections, as an app server under a parallel CI job.
+    const pooled = createAuth({
+      baseURL: "https://api.example.com",
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createPostgresAdapter(await connection(10)),
+      limiter: { allow: async () => true },
+      mail: { send: async () => {} },
+      clock: { now: () => t0 },
+    });
+    const answers = await Promise.all(
+      Array.from({ length: 20 }, () => pooled.authenticate(request(made.value.token))),
+    );
+    expect(answers.map((r) => (r.ok ? "ok" : r.code))).toEqual(Array(20).fill("ok"));
+    const [row] = await w.storage.findMany("apiToken", []);
+    expect(row?.remaining).toBe(980);
   });
 });

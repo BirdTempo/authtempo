@@ -348,7 +348,8 @@ export function createVerifier(options: VerifierOptions): Verifier {
       apiToken: ApiTokenSummaryJSON;
     }>("GET", "/tokens/current");
     // A retired or spent token is no caller, as in core's `auth.caller`. Over the window, or after
-    // three lost spends, the call fails: the token is valid, and a later call may act (plan 12k).
+    // a spend that core could not finish (conflict), the call fails. The token is valid, and a
+    // later call may act (plan 12k).
     if (!r.ok) return NO_TOKEN_CALLER.includes(r.code) ? none : r;
     const body: unknown = r.value;
     if (!isObject(body) || !hasId(body.user) || !hasId(body.apiToken)) return unexpected200;
