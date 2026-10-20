@@ -323,19 +323,23 @@ describe("the logouts of the operator acts and the sweep on D1 with a cap of 50 
     // read of the pending-end rows (ruling 50 of plan 12f) takes 1 call: it was 17 before.
     for (const s of sweeps) expect(s.queries + s.posts).toBeLessThanOrEqual(50);
     expect(sweeps.slice(0, 5).map((s) => s.links)).toEqual([16, 16, 16, 16, 16]);
-    // The posts of each sweep, the same in each run. The outbox rows of one link page have one
-    // due time, and the read gives them in the order of the page. A pairwise row costs 1 call more
-    // than a public row: the read of its subject. The outbox step reserves 9 calls for the next
-    // row, so a page that starts with a pairwise row sends 1 row, not 2. The link sweeps 1 to 6
-    // make 16, 16, 16, 16, 16, and 10 rows and send 2, 2, 2, 2, 2, and 3. Then 5 or 6 rows a
-    // sweep fit beside the 12 fixed steps and the pending-end read.
+    // The cost of the order (ruling 57 of plan 12f). The outbox rows of one link page have one
+    // due time, and the read gives them in the order of the page. A pairwise row costs 1 call
+    // more than a public row: the read of its subject. Before each row, the outbox step keeps 9
+    // calls for it and 2 for each claimed row that waits. Sweep 1 spends 1 more call on the
+    // reseal of the key. Sweeps 4 and 5 read the outbox twice, because 50 or more rows wait. So
+    // in sweeps 1, 4, and 5, a pairwise row first takes the call that a second row needs. The
+    // link sweeps 1 to 6 send 2, 2, 2, 2, 2, and 3 rows with a public row first. With a pairwise
+    // row first, they send 1, 2, 2, 1, 1, and 3. After the links, a sweep sends 6 rows when a
+    // public row is first and fewer than 50 rows wait. Every other sweep after the links sends 5.
+    // So no order sends fewer than 10 rows in the 6 link sweeps, or fewer than 5 in a later
+    // sweep: at most 6 + 80 / 5 = 22 sweeps. The best order takes 20.
     expect(sweeps.map((s) => s.posts)).toEqual([
       2, 2, 2, 2, 2, 3, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6,
     ]);
-    // All 90 rows are sent and deleted within 21 sweeps: 21 hours with an hourly cron. This loop
-    // takes 20. When each page starts with a pairwise row, it takes 21 (measured 2026-10-21). The
-    // bound was 20 before the read of the pending-end rows (ruling 50 of plan 12f).
-    expect(sweeps.length).toBeLessThanOrEqual(21);
+    // All 90 rows are sent and deleted within 22 sweeps in any order: 22 hours with an hourly
+    // cron. This order takes 20.
+    expect(sweeps.length).toBeLessThanOrEqual(22);
     // Each link gave one post: no row went out twice.
     const sent = posts.map((p) => `${p.aud}:${p.sid}`);
     expect(sent).toHaveLength(90);
