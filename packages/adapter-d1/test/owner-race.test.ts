@@ -23,20 +23,24 @@ describe("owner removal race on D1 (plan 6 review I-1)", () => {
     await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
   });
 
-  it("of two owners who leave at once, one answers conflict and one owner remains", async () => {
+  /**
+   * Two owners of one organization on a D1 storage whose transactions run
+   * `interleave` after their first organization update: the owner lock.
+   */
+  async function twoOwners() {
     const base = createD1Adapter(env.DB);
     const clock: Clock = { now: () => t0 };
     const sent: MailMessage[] = [];
-    let interleave: (() => Promise<void>) | null = null;
+    const race: { interleave: (() => Promise<void>) | null } = { interleave: null };
 
     // The wrapped storage hands each transaction a tx whose first organization update runs `interleave`.
     const wrapTx = (tx: StorageAdapter): StorageAdapter => ({
       ...tx,
       async update(model, where, data) {
         const n = await tx.update(model, where, data);
-        if (model === "organization" && interleave) {
-          const run = interleave;
-          interleave = null;
+        if (model === "organization" && race.interleave) {
+          const run = race.interleave;
+          race.interleave = null;
           await run();
         }
         return n;
@@ -89,19 +93,57 @@ describe("owner removal race on D1 (plan 6 review I-1)", () => {
     });
     expect(added.ok).toBe(true);
 
+    return { base, auth, sent, race, a, b, organizationId };
+  }
+
+  it("of two owners who leave at once, one answers conflict and one owner remains", async () => {
+    const { base, auth, sent, race, a, b, organizationId } = await twoOwners();
     let second: Awaited<ReturnType<typeof auth.api.removeMember>> | null = null;
-    interleave = async () => {
+    race.interleave = async () => {
       second = await auth.api.removeMember({ user: b, organizationId, userId: b.id });
     };
     const first = await auth.api.removeMember({ user: a, organizationId, userId: a.id });
 
-    expect(interleave).toBeNull();
+    expect(race.interleave).toBeNull();
     // The owner rows first: without the recount, both deletes commit and none remains.
     const members = await base.findMany("member", [
       { field: "organizationId", op: "eq", value: organizationId },
     ]);
     expect(members.map((m) => [m.userId, m.role])).toEqual([["a", "owner"]]);
     expect(second).toEqual({ ok: true, value: { ok: true } });
+    expect(first).toMatchObject({ ok: false, code: "conflict", status: 409 });
+    expect(sent).toEqual([]);
+  });
+
+  it("of two owners who demote each other, one answers conflict and one owner stays", async () => {
+    const { base, auth, sent, race, a, b, organizationId } = await twoOwners();
+    let second: Awaited<ReturnType<typeof auth.api.updateMemberRole>> | null = null;
+    // b demotes a inside a's transaction, after a's owner lock and before a's write.
+    race.interleave = async () => {
+      second = await auth.api.updateMemberRole({
+        user: b,
+        organizationId,
+        userId: a.id,
+        role: "admin",
+      });
+    };
+    const first = await auth.api.updateMemberRole({
+      user: a,
+      organizationId,
+      userId: b.id,
+      role: "admin",
+    });
+
+    expect(race.interleave).toBeNull();
+    // Without the recount after the write, both demotions commit and no owner stays.
+    const members = await base.findMany("member", [
+      { field: "organizationId", op: "eq", value: organizationId },
+    ]);
+    expect(members.map((m) => [m.userId, m.role]).sort()).toEqual([
+      ["a", "admin"],
+      ["b", "owner"],
+    ]);
+    expect(second).toMatchObject({ ok: true, value: { userId: "a", role: "admin" } });
     expect(first).toMatchObject({ ok: false, code: "conflict", status: 409 });
     expect(sent).toEqual([]);
   });

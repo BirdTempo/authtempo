@@ -1,3 +1,4 @@
+import { can } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
@@ -8,12 +9,14 @@ import { StorageError } from "../storage/port.js";
 import { HookStop, hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import {
   type Caller,
+  grantable,
   type MemberSummary,
   membership,
   type OrganizationSummary,
   publicOrganization,
 } from "./organizations.js";
-import { needs, type ResolvedOrganizations, ROLE_RE, rankOf, roleAllowedIn } from "./ranks.js";
+import { effectiveIn, grantCheck, type Standing } from "./permissions.js";
+import { RULE_STATEMENTS, rankOf, roleAllowedIn } from "./ranks.js";
 import { publicSession, type ResolvedSession } from "./sessions.js";
 import { holdUser, userStays } from "./user-hold.js";
 import { normalizeEmail } from "./users.js";
@@ -47,21 +50,21 @@ function summary(row: InvitationRow): InvitationSummary {
   };
 }
 
-/** The caller's standing for an admin rule on this organization. Same codes as the organizations engine. */
+/** The caller's standing for the statements of an admin rule on this organization. Same codes as the organizations engine. */
 async function adminStanding(
   config: ResolvedConfig,
-  o: ResolvedOrganizations,
   input: Caller & { organizationId: string },
   rule: "invite" | "invitations" | "revoke",
-) {
+): Promise<Result<{ organization: OrganizationRow; standing: Standing }>> {
   const organization = await config.storage.findOne("organization", [
     { field: "id", op: "eq", value: input.organizationId },
   ]);
-  if (!organization) return fail<{ organization: OrganizationRow; rank: number }>("not_found");
+  if (!organization) return fail("not_found");
   const m = await membership(config, input.organizationId, input.user.id);
-  if (!m || m.rank < needs(o, rule))
-    return fail<{ organization: OrganizationRow; rank: number }>("forbidden_rank");
-  return ok({ organization, rank: m.rank });
+  if (!m) return fail("forbidden_rank");
+  const standing = await effectiveIn(config, input.organizationId, m.member.role);
+  if (!can(standing.granted, RULE_STATEMENTS[rule])) return fail("forbidden_rank");
+  return ok({ organization, standing });
 }
 
 export async function inviteMember(
@@ -71,14 +74,12 @@ export async function inviteMember(
   const o = config.organizations;
   if (!o) return fail("not_found");
   if (!input.user.emailVerified) return fail("email_unverified");
-  const s = await adminStanding(config, o, input, "invite");
+  const s = await adminStanding(config, input, "invite");
   if (!s.ok) return s;
   const email = normalizeEmail(input.email);
   if (email === null) return fail("invalid_body");
-  if (!ROLE_RE.test(input.role) || !roleAllowedIn(o, input.role, s.value.organization.slug))
-    return fail("invalid_body");
-  const rank = rankOf(o.ranks, input.role);
-  if (rank === 0 || rank > s.value.rank) return fail("forbidden_rank");
+  const g = await grantable(config, o, s.value.organization, s.value.standing, input.role);
+  if (!g.ok) return g;
   // After the rank checks, so a stranger cannot spend an admin's budget.
   if (!(await config.limiter.allow(`invite:user:${input.user.id}`, INVITE_USER_LIMIT)))
     return fail("rate_limited");
@@ -159,7 +160,7 @@ export async function listInvitations(
 ): Promise<Result<InvitationSummary[]>> {
   const o = config.organizations;
   if (!o) return fail("not_found");
-  const s = await adminStanding(config, o, input, "invitations");
+  const s = await adminStanding(config, input, "invitations");
   if (!s.ok) return s;
   const now = config.clock.now();
   const rows = await config.storage.findMany(
@@ -186,7 +187,7 @@ export async function revokeInvitation(
   const o = config.organizations;
   if (!o) return fail("not_found");
   if (!input.user.emailVerified) return fail("email_unverified");
-  const s = await adminStanding(config, o, input, "revoke");
+  const s = await adminStanding(config, input, "revoke");
   if (!s.ok) return s;
   // The organization id is in the where, so an admin of another organization cannot reach this row.
   const where = [
@@ -279,13 +280,16 @@ export async function acceptInvitation(
         { field: "organizationId", op: "eq", value: inv.organizationId },
         { field: "userId", op: "eq", value: inv.inviterId },
       ]);
-      const inviterRank = inviter ? rankOf(o.ranks, inviter.role) : 0;
-      const grantRank = rankOf(o.ranks, inv.role);
-      // The rank table or the organization slug can change after the invite. A role that now ranks 0, or a
+      const by: Standing = inviter
+        ? await effectiveIn(config, inv.organizationId, inviter.role)
+        : { rank: 0, granted: {} };
+      const grant = await effectiveIn(config, inv.organizationId, inv.role);
+      const grantRank = grant.rank;
+      // The role table or the organization slug can change after the invite. A role that now ranks 0, or a
       // platform role outside the platform organization, is a grant no live caller could make.
       if (
-        inviterRank < needs(o, "invite") ||
-        inviterRank < grantRank ||
+        !can(by.granted, RULE_STATEMENTS.invite) ||
+        !grantCheck(by, grant) ||
         grantRank === 0 ||
         !roleAllowedIn(o, inv.role, organizationRow.slug)
       ) {

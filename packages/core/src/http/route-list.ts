@@ -1130,6 +1130,22 @@ export const ROUTES = Object.freeze([
   },
   {
     method: "POST",
+    path: "/organizations/has-permission",
+    feature: "organizations",
+    auth: ["session"],
+    codes: ["unauthorized", "invalid_body"],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/organizations/permissions",
+    feature: "organizations",
+    auth: ["session"],
+    codes: ["unauthorized", "invalid_body"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
     path: "/organizations/active",
     feature: "organizations",
     auth: ["session"],

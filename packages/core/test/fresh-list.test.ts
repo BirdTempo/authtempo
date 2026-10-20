@@ -29,6 +29,7 @@ const BODIES: Readonly<Record<string, unknown>> = {
   "/organizations/active": { organizationId: null },
   "/organizations/create": { slug: "acme", name: "Acme" },
   "/organizations/delete": { organizationId: "x" },
+  "/organizations/has-permission": { organizationId: "x", permissions: { member: ["read"] } },
   "/organizations/invitations/accept": { token: "x" },
   "/organizations/invitations/decline": { token: "x" },
   "/organizations/invitations/revoke": { organizationId: "x", invitationId: "y" },

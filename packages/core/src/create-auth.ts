@@ -1,3 +1,4 @@
+import type { Statements } from "./access.js";
 import { type AuthConfig, resolveConfig } from "./config.js";
 import {
   type AccountDelete,
@@ -116,6 +117,7 @@ import {
   verifyPassword,
   verifyPasswordEmail,
 } from "./engine/password.js";
+import { hasPermission, type PermissionInput, permissionsOf } from "./engine/permissions.js";
 import { type ProfileUpdate, updateProfile } from "./engine/profile.js";
 import {
   type ReauthInput,
@@ -590,6 +592,22 @@ export interface Auth {
    */
   caller(request: Request): Promise<Caller | null>;
   /**
+   * True when the caller holds every permission in the organization (plan
+   * 12k, spec 29 item 9). A session reads its member role now; a user token
+   * reads its user's role, narrowed by the token's set, and grants nothing
+   * outside its bound organization; an OAuth caller grants nothing. False,
+   * never a throw, on any failure.
+   */
+  hasPermission(caller: Caller, input: PermissionInput): Promise<boolean>;
+  /**
+   * The caller's role string and effective set in one organization, so a page
+   * can hide what the person cannot do. A non-member gets `role: null` and `{}`.
+   */
+  permissionsOf(
+    caller: Caller,
+    organizationId: string,
+  ): Promise<Result<{ role: string | null; permissions: Statements }>>;
+  /**
    * The Set-Cookie value to send after `session(request)` or `caller(request)` when it moved the
    * expiry forward, else null. Send it on the response, or a browser drops
    * the cookie at its old Max-Age while the session row is still valid.
@@ -652,6 +670,8 @@ export function createAuth(input: AuthConfig): Auth {
     handle,
     session: (request, options) => sessionFromRequest(config, request, options),
     caller: (request) => callerFromRequest(config, request),
+    hasPermission: (caller, input) => hasPermission(config, caller, input),
+    permissionsOf: (caller, organizationId) => permissionsOf(config, caller, organizationId),
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
     wellKnown: createWellKnownHandler(config),
     api: {

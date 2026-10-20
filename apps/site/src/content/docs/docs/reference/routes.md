@@ -779,6 +779,24 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Answer | `{ user, session }` with `session.activeOrganizationId` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
+<h3 id="post-organizations-has-permission"><code>POST /organizations/has-permission</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401 |
+| Input | JSON `{ organizationId, permissions }`. Another key answers `invalid_body` |
+| Answer | `{ success }`: `true` when the session's role in the organization holds every action. A non-member gets `false` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="get-organizations-permissions"><code>GET /organizations/permissions</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401 |
+| Input | Query `{ organizationId }` |
+| Answer | `{ role, permissions }`: the session's role string and its actions. A non-member gets `role: null` and `{}` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
 ## API tokens
 
 These routes exist in every deployment.

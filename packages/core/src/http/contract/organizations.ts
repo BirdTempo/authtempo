@@ -41,6 +41,14 @@ export const inviteBody = z.object({
 export const revokeBody = z.object({ organizationId: id, invitationId: id });
 export const tokenBody = z.object({ token: z.string().min(1).max(64) });
 export const activeBody = z.object({ organizationId: id.nullable() });
+/** A resource or an action name, as `NAME_RE` of the access entry bounds it. `can` decides the rest. */
+const statementName = z.string().min(1).max(32);
+/** A statement set in a request: at most 64 resources of at most 64 actions, so the read stays small. */
+const statements = z
+  .record(statementName, z.array(statementName).max(64))
+  .refine((set) => Object.keys(set).length <= 64);
+/** Strict: a key such as Better Auth's `permission` answers invalid_body, not a silent false. */
+export const hasPermissionBody = z.strictObject({ organizationId: id, permissions: statements });
 
 /** The query of the two lists: the route reads `organizationId` by hand and parses it with `id`. */
 export const orgQuery = z.object({ organizationId: id });
@@ -83,6 +91,9 @@ const organizationAndMember = z.strictObject({
 const memberAnswer = z.strictObject({ member: MemberJson });
 const jsonBody = <T extends z.ZodType>(schema: T) =>
   ({ schema, media: ["json"], parsedBy: "zod" }) as const;
+
+/** A statement set in an answer. */
+const StatementsJson = z.record(z.string(), z.array(z.string()));
 
 /** The contract of `routes/organizations.ts` (plan 11g). */
 export const ORGANIZATIONS_CONTRACT = {
@@ -143,6 +154,18 @@ export const ORGANIZATIONS_CONTRACT = {
   "POST /organizations/invitations/decline": {
     body: jsonBody(tokenBody),
     answer: { kind: "json", schema: OkAnswer },
+  },
+  "POST /organizations/has-permission": {
+    body: jsonBody(hasPermissionBody),
+    answer: { kind: "json", schema: z.strictObject({ success: z.boolean() }) },
+  },
+  "GET /organizations/permissions": {
+    query: { schema: orgQuery, parsedBy: "hand" },
+    // A non-member gets a null role and the empty set.
+    answer: {
+      kind: "json",
+      schema: z.strictObject({ role: z.string().nullable(), permissions: StatementsJson }),
+    },
   },
   "POST /organizations/active": {
     body: jsonBody(activeBody),

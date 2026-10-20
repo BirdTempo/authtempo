@@ -152,6 +152,7 @@ export {
   LEGACY_VERIFY_HASH,
   PENDING_HASH_PREFIX,
 } from "./engine/password.js";
+export type { PermissionInput } from "./engine/permissions.js";
 export type { ProfileUpdate } from "./engine/profile.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { ReauthInput, ReauthProof } from "./engine/reauth.js";

@@ -1,3 +1,4 @@
+import { can, type Statements } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
@@ -19,12 +20,13 @@ import { type ImpersonationStops, impersonationStops } from "./operator/audit.js
 import { writesPlatformRole } from "./operator/guards.js";
 import { holdImpersonations } from "./operator/impersonation.js";
 import { OPERATOR_CALL_BUDGET, STEP_WORST } from "./operator/sessions.js";
+import { effectiveIn, grantCheck, type Standing, touchCheck } from "./permissions.js";
 import {
   needs,
   normalizeSlug,
   type ResolvedOrganizations,
   ROLE_RE,
-  type RULES,
+  RULE_STATEMENTS,
   rankOf,
   roleAllowedIn,
 } from "./ranks.js";
@@ -98,33 +100,37 @@ export async function membership(
 }
 
 /**
- * The caller's standing for a rule. A missing id answers not_found and a
- * non-member forbidden_rank. Ids are ULIDs and slugs are public, so existence
- * is not a secret; the distinct codes let a client tell a dead link from a
- * missing right.
+ * The caller's standing for a statement set (plan 12k: `RULE_STATEMENTS` of
+ * each plan 6 rule). A missing id answers not_found and a non-member
+ * forbidden_rank. Ids are ULIDs and slugs are public, so existence is not a
+ * secret; the distinct codes let a client tell a dead link from a missing
+ * right. `granted` is the caller's effective set in the organization.
  */
 async function standing(
   config: ResolvedConfig,
-  o: ResolvedOrganizations,
   user: UserRow,
   organizationId: string,
-  rule: keyof typeof RULES | null,
-): Promise<Result<{ member: MemberRow; organization: OrganizationRow; rank: number }>> {
+  wanted: Statements | null,
+): Promise<
+  Result<{ member: MemberRow; organization: OrganizationRow; rank: number; granted: Statements }>
+> {
   const organization = await config.storage.findOne("organization", [
     { field: "id", op: "eq", value: organizationId },
   ]);
   if (!organization) return fail("not_found");
   const m = await membership(config, organizationId, user.id);
   if (!m) return fail("forbidden_rank");
-  // A null rule needs membership only: a member may leave at any rank, rank 0 included.
-  if (rule !== null && m.rank < needs(o, rule)) return fail("forbidden_rank");
-  return ok(m);
+  const { granted } = await effectiveIn(config, organizationId, m.member.role);
+  // A null set needs membership only: a member may leave at any rank, rank 0 included.
+  if (wanted !== null && !can(granted, wanted)) return fail("forbidden_rank");
+  return ok({ ...m, granted });
 }
 
 function verified(user: UserRow): Result<true> {
   return user.emailVerified ? ok(true) : fail("email_unverified");
 }
 
+/** A dynamic role never has the owner rank (Task 4), so the last-owner rule reads the config only. */
 async function ownerCount(
   storage: StorageAdapter,
   o: ResolvedOrganizations,
@@ -446,7 +452,7 @@ export async function updateOrganization(
   if (!o) return fail("not_found");
   const v = verified(input.user);
   if (!v.ok) return v;
-  const s = await standing(config, o, input.user, input.organizationId, "update");
+  const s = await standing(config, input.user, input.organizationId, RULE_STATEMENTS.update);
   if (!s.ok) return s;
   const data: OrganizationPatch = {};
   if (input.name !== undefined) {
@@ -523,7 +529,7 @@ export async function deleteOrganization(
   if (!o) return fail("not_found");
   const v = verified(input.user);
   if (!v.ok) return v;
-  const s = await standing(config, o, input.user, input.organizationId, "delete");
+  const s = await standing(config, input.user, input.organizationId, RULE_STATEMENTS.delete);
   if (!s.ok) return s;
   // The app seeds the platform organization; the engine never deletes it, because no route could create it again.
   if (s.value.organization.slug === o.platformOrganization) return fail("slug_reserved");
@@ -685,7 +691,7 @@ export async function listMembers(
 ): Promise<Result<MemberSummary[]>> {
   const o = on(config);
   if (!o) return fail("not_found");
-  const s = await standing(config, o, input.user, input.organizationId, "members");
+  const s = await standing(config, input.user, input.organizationId, RULE_STATEMENTS.members);
   if (!s.ok) return s;
   const members = await config.storage.findMany("member", [
     { field: "organizationId", op: "eq", value: input.organizationId },
@@ -693,19 +699,25 @@ export async function listMembers(
   return ok(await summaries(config, members));
 }
 
-/** The role is well-formed, allowed in this organization, and not above the caller's rank. */
-function grantable(
+/**
+ * The role is well-formed, allowed in this organization, and passes
+ * `grantCheck`: its rank is at most the caller's and its statements are a
+ * subset of the caller's. The answer is the role's standing. Exported for
+ * the invite and the accept, so one rule holds for every grant.
+ */
+export async function grantable(
+  config: ResolvedConfig,
   o: ResolvedOrganizations,
   organization: OrganizationRow,
-  callerRank: number,
+  caller: Standing,
   role: string,
-): Result<number> {
+): Promise<Result<Standing>> {
   if (!ROLE_RE.test(role) || !roleAllowedIn(o, role, organization.slug))
     return fail("invalid_body");
-  const rank = rankOf(o.ranks, role);
+  const target = await effectiveIn(config, organization.id, role);
   // An unknown role ranks 0 and would be a silent no-rights member; refuse it with the same code as an escalation, so the caller learns nothing about the table.
-  if (rank === 0 || rank > callerRank) return fail("forbidden_rank");
-  return ok(rank);
+  if (target.rank === 0 || !grantCheck(caller, target)) return fail("forbidden_rank");
+  return ok(target);
 }
 
 export async function addMember(
@@ -716,9 +728,9 @@ export async function addMember(
   if (!o) return fail("not_found");
   const v = verified(input.user);
   if (!v.ok) return v;
-  const s = await standing(config, o, input.user, input.organizationId, "addMember");
+  const s = await standing(config, input.user, input.organizationId, RULE_STATEMENTS.addMember);
   if (!s.ok) return s;
-  const g = grantable(o, s.value.organization, s.value.rank, input.role);
+  const g = await grantable(config, o, s.value.organization, s.value, input.role);
   if (!g.ok) return g;
   const target = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
@@ -809,14 +821,15 @@ export async function updateMemberRole(
   if (!o) return fail("not_found");
   const v = verified(input.user);
   if (!v.ok) return v;
-  const s = await standing(config, o, input.user, input.organizationId, "updateRole");
+  const s = await standing(config, input.user, input.organizationId, RULE_STATEMENTS.updateRole);
   if (!s.ok) return s;
-  const g = grantable(o, s.value.organization, s.value.rank, input.role);
+  const g = await grantable(config, o, s.value.organization, s.value, input.role);
   if (!g.ok) return g;
   const target = await membership(config, input.organizationId, input.userId);
   if (!target) return fail("not_found");
-  // A caller never touches a member above their own rank.
-  if (target.rank > s.value.rank) return fail("forbidden_rank");
+  // A caller never touches a member above their own rank or with a right the caller lacks.
+  if (!touchCheck(s.value, await effectiveIn(config, input.organizationId, target.member.role)))
+    return fail("forbidden_rank");
   // Read the user before any write, so a missing user never answers not_found after a change.
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
@@ -856,7 +869,7 @@ export async function updateMemberRole(
   const loss = await roleLossOf(config, s.value.organization, target.member);
   const written = await hookGuard(async (): Promise<Result<true>> => {
     // The demotion can remove an owner: count, lock, and write in one transaction.
-    if (isOwner(o, target.rank) && !isOwner(o, g.value))
+    if (isOwner(o, target.rank) && !isOwner(o, g.value.rank))
       return ownerWrite(config, o, s.value.organization, setRole, loss);
     // A zero-row update writes nothing, so the commit changes nothing.
     const n = await config.storage.transaction((tx) =>
@@ -894,15 +907,18 @@ export async function removeMember(
   // Leave needs membership only, at any rank. Remove of another member needs the removeOther rule.
   const s = await standing(
     config,
-    o,
     input.user,
     input.organizationId,
-    self ? null : "removeOther",
+    self ? null : RULE_STATEMENTS.removeOther,
   );
   if (!s.ok) return s;
   const target = self ? s.value : await membership(config, input.organizationId, input.userId);
   if (!target) return fail("not_found");
-  if (!self && target.rank > s.value.rank) return fail("forbidden_rank");
+  if (
+    !self &&
+    !touchCheck(s.value, await effectiveIn(config, input.organizationId, target.member.role))
+  )
+    return fail("forbidden_rank");
   // The member's user, for the hook event. Read before any write.
   const memberUser = self
     ? input.user

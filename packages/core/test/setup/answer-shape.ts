@@ -112,7 +112,12 @@ function walkPaths(node: Node, prefix: string, out: Paths): void {
   }
   const record = node.additionalProperties;
   // A record (`extensions`, `metadata`) has free keys: no key of it is optional or nullable.
-  if (typeof record === "object" && (record.properties || record.anyOf || record.items))
+  // A record of lists of scalars (a statement set, plan 12k) has no such key in its values either.
+  const shaped = (n: Node) => Boolean(n.properties || n.anyOf || n.items);
+  if (
+    typeof record === "object" &&
+    (record.properties || record.anyOf || (record.items && shaped(record.items)))
+  )
     out.blocked.push(`the walk cannot enter a record of shaped values at ${where}`);
   if (node.properties) {
     const required = new Set(node.required ?? []);

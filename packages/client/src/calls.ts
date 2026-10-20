@@ -129,6 +129,13 @@ export const CLIENT_CALLS = [
     path: "/organizations/invitations/decline",
   },
   { operation: "organizations.setActive", method: "POST", path: "/organizations/active" },
+  {
+    operation: "organizations.hasPermission",
+    method: "POST",
+    path: "/organizations/has-permission",
+    select: "success",
+  },
+  { operation: "organizations.permissions", method: "GET", path: "/organizations/permissions" },
   { operation: "tokens.create", method: "POST", path: "/tokens" },
   { operation: "tokens.list", method: "GET", path: "/tokens", select: "tokens" },
   { operation: "tokens.revoke", method: "POST", path: "/tokens/revoke" },

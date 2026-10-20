@@ -18,11 +18,13 @@ import {
   updateMemberRole,
   updateOrganization,
 } from "../../engine/organizations.js";
+import { hasPermission, permissionsOf } from "../../engine/permissions.js";
 import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
-import { fail, type Result } from "../../result.js";
+import { fail, ok, type Result } from "../../result.js";
 import {
   activeBody,
   createBody,
+  hasPermissionBody,
   id,
   inviteBody,
   memberBody,
@@ -187,6 +189,24 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
           ),
           s?.renewed ?? null,
         );
+      },
+    },
+    // A session only: a token never asks about rights in core's routes (spec 29 item 17).
+    post("/organizations/has-permission", hasPermissionBody, "success", async (s, b) =>
+      ok(await hasPermission(config, { kind: "session", ...s.resolved }, b)),
+    ),
+    {
+      // The answer carries two keys, so it builds its own body.
+      method: "GET",
+      path: "/organizations/permissions",
+      key: "GET /organizations/permissions",
+      async handler(ctx) {
+        const s = await withSession(ctx);
+        if (!s) return unauthorized();
+        const parsed = id.safeParse(ctx.url.searchParams.get("organizationId"));
+        if (!parsed.success) return send(respond(fail("invalid_body")), s.renewed);
+        const r = await permissionsOf(config, { kind: "session", ...s.resolved }, parsed.data);
+        return send(respond(r), s.renewed);
       },
     },
     // Active answers { user, session } as the engine returns it.

@@ -396,6 +396,18 @@ export interface Client {
     };
     /** Answers the session, so the caller reads `session.activeOrganizationId` from it. `null` clears it. */
     setActive(input: { organizationId: string | null }): Promise<ClientResult<PublicSessionJSON>>;
+    /**
+     * True when the session holds every permission in the organization (plan
+     * 12k). It only helps a page hide a control: the server check decides.
+     */
+    hasPermission(input: {
+      organizationId: string;
+      permissions: Record<string, string[]>;
+    }): Promise<ClientResult<boolean>>;
+    /** The session's role string and permissions in the organization. A non-member gets `role: null` and `{}`. */
+    permissions(input: {
+      organizationId: string;
+    }): Promise<ClientResult<{ role: string | null; permissions: Record<string, string[]> }>>;
   };
   /**
    * API tokens for scripts and CLIs. `create`, `list`, and `revoke` need a
@@ -1271,6 +1283,17 @@ export function createClient(options: ClientOptions): Client {
         decline: (input) => send<{ ok: true }>("organizations.invitations.decline", input),
       },
       setActive: (input) => changes(send<PublicSessionJSON>("organizations.setActive", input)),
+      hasPermission: (input) =>
+        part<{ success: boolean }, "organizations.hasPermission">(
+          "organizations.hasPermission",
+          input,
+        ),
+      permissions: (input) =>
+        send<{ role: string | null; permissions: Record<string, string[]> }>(
+          "organizations.permissions",
+          undefined,
+          { organizationId: input.organizationId },
+        ),
     },
     tokens: {
       create: ({ expiresInDays, organizationId, ...rest }) =>

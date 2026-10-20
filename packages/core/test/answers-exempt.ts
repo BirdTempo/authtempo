@@ -56,6 +56,8 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "GET /operator/users",
   "GET /operator/users/get",
   "GET /operator/users/search",
+  // An organization id that names no organization (plan 12k Task 3).
+  "GET /organizations/permissions",
   "GET /password/reset",
   "GET /password/verify",
   "GET /social/:provider/callback",
@@ -150,6 +152,7 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /organizations/active",
   "POST /organizations/create",
   "POST /organizations/delete",
+  "POST /organizations/has-permission",
   "POST /organizations/invitations/accept",
   "POST /organizations/invitations/decline",
   "POST /organizations/invitations/revoke",

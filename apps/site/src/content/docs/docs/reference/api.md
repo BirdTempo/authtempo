@@ -38,6 +38,8 @@ sources:
 | `handle(request)` | Serves the routes under `basePath`. Mount it for each path that starts with `basePath`. |
 | `session(request, options?)` | Answers the `ResolvedSession` of the cookie or the `ts_` bearer token, or null. A `tk_` token answers null. With `{ refresh: false }`, the read writes nothing: no sliding refresh and no delete of an ended row. |
 | `caller(request)` | Answers a `Caller`: a session, an API token, or an OAuth access token under its resource, or null. A `client_credentials` token answers `kind: "oauth-client"`, with no user. An `oauth` caller has `user` and `subject`, the token's `sub`: the user id, or the pairwise subject of a pairwise client. |
+| `hasPermission(caller, { organizationId, permissions })` | True when the caller holds every action in the organization. A session reads its role now. A user token reads its user's role, and grants nothing outside its bound organization. An OAuth caller grants nothing. Any failure answers false. |
+| `permissionsOf(caller, organizationId)` | Answers `{ role, permissions }` in the organization. A non-member gets `role: null` and `{}`. `not_found` with `organizations` off or for an unknown organization. |
 | `sessionCookie(request, resolved)` | Answers the `Set-Cookie` value after a sliding refresh, or null. Send it, or the browser drops the cookie early. |
 | `wellKnown(request)` | Serves the documents under `/.well-known/` at the origin root. 404 while `oauth` is off. |
 | `api` | The same operations in-process, as an `AuthApi`. |
@@ -153,7 +155,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | App secrets | `SecretsApi`, `SecretsStatus`, `SecretsRewrap`, `SecretVersionCount` |
 | Operator tools | `OperatorApi`, `OperatorActor`, `OperatorAuditDraft`, `OperatorUser` |
 | JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthClientsApi`, `OAuthAccess`, `OAuthClientAccess`, `CREDENTIALS_PER_CLIENT`, `DEVICE_GRANT`, `DEVICE_START_PER_IP`, `DEVICE_VERIFY_PER_SESSION`, `DEVICE_VERIFY_PER_IP`, `DEVICE_VERIFY_PER_CODE`, `DeviceAuthorizationAnswer`, `OAuthGrantSummary`, `OAuthResult`, `ClientInput`, `ClientSummary`, `ClientFields`, `RegisteredClient`, `CLIENT_SECRET_PREFIX` |
-| Organizations | `Statements`, `RoleTable`, `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |
+| Organizations | `Statements`, `RoleTable`, `PermissionInput`, `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |
 | Captcha | `CaptchaPort`, `CaptchaPage`, `CaptchaFlow` |
 | Hooks | `OrganizationHooks`, `OrganizationHookEvent`, `SessionHooks`, `SessionDraft`, `SessionPatch`, `SessionVia`, `SessionEndReason`, `MemberVia`, `RemoveVia`, `UserHooks`, `UserCreatePatch`, `UserPatch`, `UserCreateVia`, `UserUpdateVia`, `UserVerifyVia`, `IdentityHooks`, `IdentitySummary`, `IdentityLinkVia`, `OperatorHooks` |
 

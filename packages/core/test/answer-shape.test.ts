@@ -84,6 +84,16 @@ describe("the shape walk of the answer check (plan 11g)", () => {
     expect(shapePaths(tagged).blocked).toEqual(["the walk cannot enter oneOf at the answer"]);
   });
 
+  it("enters a record of lists of scalars and blocks a record of lists of objects", () => {
+    // A statement set (plan 12k): free resource keys, each a list of action names.
+    const statements = z.strictObject({ permissions: z.record(z.string(), z.array(z.string())) });
+    expect(shapePaths(statements)).toEqual({ paths: [], blocked: [] });
+    const lists = z.record(z.string(), z.array(z.strictObject({ at: z.string().optional() })));
+    expect(shapePaths(lists).blocked).toEqual([
+      "the walk cannot enter a record of shaped values at the answer",
+    ]);
+  });
+
   it("enters six keywords and reads twenty-one as keywords that hold no key", () => {
     // A keyword that holds keys, such as $ref or $defs, must never join NO_KEYS: it hides them.
     expect([...ENTERED]).toEqual([
