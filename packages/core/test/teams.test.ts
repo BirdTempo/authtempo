@@ -268,6 +268,102 @@ describe("teams (plan 12k Task 5)", () => {
     expect(sessions.map((s) => s.activeTeamId).sort()).toEqual([away.id, null, null]);
   });
 
+  it("removes the person's team rows and active team at a leave", async () => {
+    const w = world();
+    const { ada, carol, organizationId } = await acme(w);
+    const other = mustOk(
+      await w.auth.api.createOrganization({ user: ada, slug: "beta", name: "Beta" }),
+    ).organization.id;
+    mustOk(
+      await w.auth.api.addMember({
+        user: ada,
+        organizationId: other,
+        userId: carol.id,
+        role: "member",
+      }),
+    );
+    const core = mustOk(await w.auth.api.createTeam({ user: ada, organizationId, name: "Core" }));
+    const away = mustOk(
+      await w.auth.api.createTeam({ user: ada, organizationId: other, name: "Away" }),
+    );
+    for (const teamId of [core.id, away.id])
+      mustOk(await w.auth.api.addTeamMember({ user: ada, teamId, userId: carol.id }));
+    const h = bearer(await w.session("carol@example.com"));
+    await w.auth.handle(post("/auth/organizations/active", { organizationId }, h));
+    await w.auth.handle(post(`${P}/active`, { teamId: core.id }, h));
+    // carol leaves acme herself.
+    mustOk(await w.auth.api.removeMember({ user: carol, organizationId, userId: carol.id }));
+    const rows = await w.storage.findMany("teamMember", [
+      { field: "userId", op: "eq", value: carol.id },
+    ]);
+    expect(rows.map((r) => r.teamId)).toEqual([away.id]);
+    const sessions = await w.storage.findMany("session", [
+      { field: "userId", op: "eq", value: carol.id },
+    ]);
+    expect(sessions.map((s) => [s.activeOrganizationId, s.activeTeamId])).toEqual([[null, null]]);
+  });
+
+  it("refuses an invite that names a team of another organization", async () => {
+    const w = world();
+    const { ada, organizationId } = await acme(w);
+    const other = mustOk(
+      await w.auth.api.createOrganization({ user: ada, slug: "beta", name: "Beta" }),
+    ).organization.id;
+    const core = mustOk(await w.auth.api.createTeam({ user: ada, organizationId, name: "Core" }));
+    const away = mustOk(
+      await w.auth.api.createTeam({ user: ada, organizationId: other, name: "Away" }),
+    );
+    const owner = bearer(await w.session("ada@example.com"));
+    expect(
+      await json(
+        await w.auth.handle(
+          post(
+            "/auth/organizations/invite",
+            {
+              organizationId,
+              email: "dan@example.com",
+              role: "member",
+              teamIds: [core.id, away.id],
+            },
+            owner,
+          ),
+        ),
+      ),
+    ).toEqual({ status: 400, body: { error: "invalid_body" } });
+    expect(await w.storage.findMany("invitation", [])).toEqual([]);
+  });
+
+  it("refuses a team of another organization as the active team", async () => {
+    const w = world();
+    const { ada, carol, organizationId } = await acme(w);
+    const other = mustOk(
+      await w.auth.api.createOrganization({ user: ada, slug: "beta", name: "Beta" }),
+    ).organization.id;
+    mustOk(
+      await w.auth.api.addMember({
+        user: ada,
+        organizationId: other,
+        userId: carol.id,
+        role: "member",
+      }),
+    );
+    const away = mustOk(
+      await w.auth.api.createTeam({ user: ada, organizationId: other, name: "Away" }),
+    );
+    mustOk(await w.auth.api.addTeamMember({ user: ada, teamId: away.id, userId: carol.id }));
+    const h = bearer(await w.session("carol@example.com"));
+    await w.auth.handle(post("/auth/organizations/active", { organizationId }, h));
+    // carol is a member of the team, but the team is not a team of her active organization.
+    expect(await json(await w.auth.handle(post(`${P}/active`, { teamId: away.id }, h)))).toEqual({
+      status: 403,
+      body: { error: "forbidden_rank" },
+    });
+    const [row] = await w.storage.findMany("session", [
+      { field: "userId", op: "eq", value: carol.id },
+    ]);
+    expect([row?.activeOrganizationId, row?.activeTeamId]).toEqual([organizationId, null]);
+  });
+
   it("cleans every reference at a team delete", async () => {
     const w = world();
     const { ada, carol, organizationId } = await acme(w);
