@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative } from "node:path";
+import { join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkTarballs, readTarball } from "../src/check-pack.ts";
 import { readYaml, type YamlNode } from "../src/check-workflows.ts";
@@ -29,6 +29,7 @@ import {
   spawnRun,
 } from "../src/dry-run.ts";
 import { reportLines } from "../src/lib/report.ts";
+import { readWorkspace } from "../src/lib/workspace.ts";
 import { prepare } from "../src/prepare.ts";
 import { changesetVersion, copyFixture } from "./support/release-copy.ts";
 
@@ -130,13 +131,15 @@ function fake(change: Record<string, (call: Call) => RunResult | undefined> = {}
   return { run, calls, changesets };
 }
 
-/** What pnpm publish -r --dry-run prints for each packed tarball of the copy at `repo`. */
+/**
+ * What pnpm publish -r --dry-run prints in the copy at `repo`: one package for
+ * each workspace package with no private, as pnpm 12.8.1 does.
+ */
 function pnpmPublishLines(repo: string, skip = ""): string[] {
-  const out = join(dirname(repo), "out");
-  return readdirSync(out)
-    .sort()
-    .map((f) => readTarball(join(out, f)).manifest)
-    .filter((m) => m.name !== skip)
+  return readWorkspace(repo)
+    .map((p) => p.manifest)
+    .filter((m) => m.private !== true && m.name !== skip)
+    .sort((a, b) => a.name.localeCompare(b.name))
     .flatMap((m) => [
       `📦 ${m.name}@${m.version} → http://127.0.0.1:9/`,
       `[WARN] Skip publishing ${m.name}@${m.version} (dry run)`,
@@ -307,6 +310,27 @@ describe("dry run", () => {
     expect(report.exit).toBe(1);
     expect(dryRunLine(report)).toBe(
       "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
+    );
+    expect(f.calls.map((c) => c.kind)).not.toContain("smoke");
+  });
+
+  it("fails when the pnpm publish list names a package with no tarball", async () => {
+    // check-packages holds private only on a released package, so an
+    // unreleased package with no private reaches pnpm publish -r.
+    const { root, tmp } = setup((d) => {
+      const file = join(d, "packages/sdk-conformance/package.json");
+      const m = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+      delete m.private;
+      writeFileSync(file, `${JSON.stringify(m, null, 2)}\n`);
+    });
+    const f = fake();
+    const report = await dryRun({ root, run: f.run, tmp });
+    expect(failuresOf(report)).toEqual([
+      "pnpm publish -r --dry-run lists @authtempo/sdk-conformance@0.0.0, which has no tarball",
+    ]);
+    expect(report.exit).toBe(1);
+    expect(dryRunLine(report)).toBe(
+      "release-dry-run: FAIL packages=2 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
     );
     expect(f.calls.map((c) => c.kind)).not.toContain("smoke");
   });
