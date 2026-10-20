@@ -807,6 +807,28 @@ describe("the grant types of a client (review m1 of plan 12e, RFC 6749 5.2)", ()
     expect(await refreshRows(h)).toEqual([]);
   });
 
+  it("lists offline_access in the answer scope only for a client of the refresh grant (RFC 6749 5.1)", async () => {
+    const h = oauthHandle();
+    const s = await signedIn(h);
+    const scopeOf = async (grants: string[]) => {
+      const client = await clientOf(h, grants);
+      const p = await pkce();
+      const { code } = await authorized(h, s.cookie, {
+        clientId: client.client_id,
+        challenge: p.challenge,
+        scope: "mcp:read offline_access",
+      });
+      const t = await tokens(await h.auth.handle(exchange(code, client.client_id, p.verifier)));
+      return [t.scope, decodeJws(t.access_token)?.payload.scope];
+    };
+    // No refresh token, so the answer and the access token name no offline_access.
+    expect(await scopeOf(["authorization_code"])).toEqual(["mcp:read", "mcp:read"]);
+    expect(await scopeOf(["authorization_code", "refresh_token"])).toEqual([
+      "mcp:read offline_access",
+      "mcp:read offline_access",
+    ]);
+  });
+
   it("answers unauthorized_client at the refresh when the client lost refresh_token, and keeps the row", async () => {
     const h = oauthHandle();
     const client = await clientOf(h);

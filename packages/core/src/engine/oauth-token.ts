@@ -260,7 +260,10 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
   const now = config.clock.now();
   const iat = Math.floor(now.getTime() / 1000);
   const exp = iat + oauth.accessTtlMinutes * 60;
-  const scope = g.scopes.join(" ");
+  // A client without the refresh grant gets no refresh token (review m1 of plan 12e).
+  // So its scope names no offline_access (RFC 6749 section 5.1, ruling 58).
+  const refreshes = g.client.grantTypes.includes("refresh_token");
+  const scope = (refreshes ? g.scopes : g.scopes.filter((s) => s !== "offline_access")).join(" ");
   const issuer = issuerOf(config);
   // The user id, or the pairwise subject of the client's sector (plan 12e).
   const sub = await subjectFor(config, g.user.id, g.client);
@@ -282,7 +285,7 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
     scope,
   };
   // A refresh row only for a client of the refresh grant (review m1 of plan 12e).
-  if (g.grantScopes.includes("offline_access") && g.client.grantTypes.includes("refresh_token")) {
+  if (g.grantScopes.includes("offline_access") && refreshes) {
     const fresh = await writeRefresh(config, g, now);
     // The race of refreshGrant: a reuse, a reset, or a grant revoke deleted
     // the family before this write, so the spent row is gone. At the code
