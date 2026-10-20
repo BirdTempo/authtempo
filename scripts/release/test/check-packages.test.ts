@@ -69,6 +69,12 @@ describe("check-packages", () => {
     );
   });
 
+  it("fails on an unscoped workspace name that is not workspace:*", () => {
+    expect(run("unscoped-range").failures).toContain(
+      "@authtempo/core references authtempo-example-node as ^0.0.0, not workspace:*",
+    );
+  });
+
   it("fails on a listed name that is not a workspace package", () => {
     expect(run("stale").failures).toContain(
       "@authtempo/gone is in the fixed group and is not a workspace package",

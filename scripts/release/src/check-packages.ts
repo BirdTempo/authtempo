@@ -15,7 +15,7 @@ export interface PackagesInput {
   unreleased: Record<string, unknown>;
 }
 
-/** The dependency keys whose `@authtempo` references must be `workspace:*`. */
+/** The dependency keys whose workspace references must be `workspace:*`. */
 const DEPENDENCY_KEYS = [
   "dependencies",
   "devDependencies",
@@ -80,10 +80,12 @@ export function checkPackages(input: PackagesInput): Report {
     );
 
   // The pack writes the exact version only for `workspace:*` (spec 33 item 1.4).
+  // The rule holds for each workspace name, scoped or not. A range to an unscoped
+  // name resolves on the registry, where anyone can register a free name.
   for (const p of input.packages)
     for (const key of DEPENDENCY_KEYS)
       for (const [dep, range] of Object.entries(p.manifest[key] ?? {}))
-        if (dep.startsWith("@authtempo/") && range !== "workspace:*")
+        if ((names.has(dep) || dep.startsWith("@authtempo/")) && range !== "workspace:*")
           failures.push(`${p.name} references ${dep} as ${range}, not workspace:*`);
 
   return requireCounts(
