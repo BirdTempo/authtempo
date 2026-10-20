@@ -327,8 +327,12 @@ function parseDocument(s: string, limits: XmlLimits): XmlElement {
     }
   };
 
-  /** Character data at `i` up to the next `<`, with each reference replaced. */
+  /**
+   * Character data at `i` up to the next `<`, with each reference replaced. It takes at least
+   * one code unit or refuses, so the content loop cannot spin with no step (review L1).
+   */
   const text = (): string => {
+    const start = i;
     const parts: string[] = [];
     let from = i;
     while (i < n) {
@@ -344,6 +348,7 @@ function parseDocument(s: string, limits: XmlLimits): XmlElement {
       if (!isCharUnit(c)) throw new Refused("syntax", i);
       i++;
     }
+    if (i === start) throw new Refused("syntax", i);
     parts.push(s.slice(from, i));
     return parts.join("");
   };

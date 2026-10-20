@@ -70,6 +70,8 @@ describe("parseXml", () => {
     ["a name with a letter outside ASCII", "<ré/>", "name"],
     ["a < in a value", '<r a="<"/>', "syntax"],
     ["an end tag of another name", "<r></s>", "syntax"],
+    // The end check of the content loop refuses this first. With that check deleted, text()
+    // refuses because it takes no code unit, so the row still ends (review L1 of Task 6).
     ["an element with no end", "<r>", "syntax"],
     ["two roots", "<r/><s/>", "syntax"],
     ["a ]]> in text", "<r>]]></r>", "syntax"],
