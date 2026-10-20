@@ -1,5 +1,5 @@
 import { applyD1Migrations, createScheduledController, env } from "cloudflare:test";
-import { createD1Adapter } from "@authtempo/adapter-d1";
+import { createD1Adapter, expectedD1Shape } from "@authtempo/adapter-d1";
 import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
 import { FIREBASE } from "@authtempo/legacy-hashes/testing";
 import { describe, expect, it, vi } from "vitest";
@@ -17,8 +17,12 @@ await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 // The tests share one database (the pool gives each file its own storage), so
 // each one compares the rows after a run with the rows before it.
 
-/** Core's tables after the migrations in packages/adapter-d1/migrations (28 since 0013 of plan 12k). */
-const TABLES = 28;
+/**
+ * Core's tables after the migrations in packages/adapter-d1/migrations, sorted
+ * by name. The D1 adapter derives the list from core's schema, so a new model
+ * changes it without an edit here.
+ */
+const TABLES = expectedD1Shape().map((t) => t.name);
 
 /**
  * Every row of every core table, read with raw SQL and not through the
@@ -28,7 +32,7 @@ async function everyRow(): Promise<Record<string, string[]>> {
   const { results } = await env.DB.prepare(
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'ta\\_%' ESCAPE '\\' ORDER BY name",
   ).all<{ name: string }>();
-  expect(results).toHaveLength(TABLES);
+  expect(results.map((r) => r.name)).toEqual(TABLES);
   const rows: Record<string, string[]> = {};
   for (const { name } of results) {
     const { results: all } = await env.DB.prepare(`SELECT * FROM "${name}"`).all();
