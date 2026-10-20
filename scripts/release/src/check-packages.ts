@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { FIRST_RELEASE } from "./lib/release-facts.ts";
 import { readChangesetConfig } from "./lib/released.ts";
 import { type Report, requireCounts, summaryLine } from "./lib/report.ts";
 import { readWorkspace, type WorkspacePackage } from "./lib/workspace.ts";
@@ -109,6 +110,15 @@ export function checkPackages(input: PackagesInput): Report {
         .sort()
         .join(", ")}`,
     );
+
+  // The first release is FIRST_RELEASE (spec 33 item 1.2). A version pull
+  // request with only patch changesets writes 0.0.1, so this check fails it
+  // before the merge. The tree stays at 0.0.0 until that pull request.
+  for (const v of [...versions].sort())
+    if (/^0\.0\.\d+$/.test(v) && v !== "0.0.0")
+      failures.push(
+        `the fixed group is at ${v}; the first release is ${FIRST_RELEASE}, so no group version is 0.0.x above 0.0.0`,
+      );
 
   // The pack writes the exact version only for `workspace:*` (spec 33 item 1.4).
   // The rule holds for each workspace name, scoped or not. A range to an unscoped

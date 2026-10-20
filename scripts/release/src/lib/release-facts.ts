@@ -11,11 +11,12 @@ export const CI_FILE = "ci.yml";
 export const ENVIRONMENT = "release";
 
 /**
- * The version of the first release (spec 33 item 1.2). Read by check-pack (no
- * released package is at 0.0.x), check-tag (no tag is v0.0.x), and the site
- * check check-policy-pages, which holds the versioning page to it. A patch at
- * 0.0.0 would give 0.0.1, so both checks refuse it where the release reads the
- * version (rulings 28 and 30 of plan 12j).
+ * The version of the first release (spec 33 item 1.2). A patch at 0.0.0
+ * gives 0.0.1, so three checks refuse a release at 0.0.x (rulings 28, 30,
+ * and 31 of plan 12j). check-packages refuses the group version on the
+ * version pull request. check-tag refuses the tag v0.0.x. check-pack refuses
+ * a released package at 0.0.x in the release copy. The site check
+ * check-policy-pages holds the versioning page to this value.
  */
 export const FIRST_RELEASE = "0.1.0";
 

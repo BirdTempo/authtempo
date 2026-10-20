@@ -60,6 +60,26 @@ describe("check-packages", () => {
     );
   });
 
+  it("fails a group version at 0.0.x above 0.0.0", () => {
+    // A version pull request with only patch changesets writes 0.0.1. The first
+    // release is 0.1.0, so the pull request fails before the merge (ruling 31).
+    const ok = readInput(fixture("ok"));
+    const released = new Set(ok.fixed);
+    const at = (version: string) =>
+      checkPackages({
+        ...ok,
+        packages: ok.packages.map((p) =>
+          released.has(p.name) ? { ...p, manifest: { ...p.manifest, version } } : p,
+        ),
+      });
+    for (const version of ["0.0.1", "0.0.12"])
+      expect(at(version).failures).toEqual([
+        `the fixed group is at ${version}; the first release is 0.1.0, so no group version is 0.0.x above 0.0.0`,
+      ]);
+    for (const version of ["0.0.0", "0.1.0", "0.1.1", "1.0.0"])
+      expect(at(version).failures).toEqual([]);
+  });
+
   it("fails on an @authtempo reference that is not workspace:*", () => {
     expect(run("caret").failures).toContain(
       "@authtempo/client references @authtempo/core as workspace:^, not workspace:*",
