@@ -291,7 +291,7 @@ describe("check-workflows", () => {
         ),
       ),
     ).toEqual([
-      "release.yml: line 108: a token or a secret; trusted publishing uses no token",
+      "release.yml: line 110: a token or a secret; trusted publishing uses no token",
       "release.yml: jobs.publish: the key env is not in the rule of the job",
     ]);
   });
@@ -519,7 +519,7 @@ describe("check-workflows", () => {
           ),
         ),
       [
-        "release.yml: line 108: a token or a secret; trusted publishing uses no token",
+        "release.yml: line 110: a token or a secret; trusted publishing uses no token",
         "release.yml: jobs.publish: the key env is not in the rule of the job",
       ],
     ],
@@ -588,7 +588,7 @@ describe("check-workflows", () => {
           swap(RELEASE, DOWNLOAD, `${DOWNLOAD}          github-token: \${{ github.token }}\n`),
         ),
       [
-        "release.yml: line 129: a token or a secret; trusted publishing uses no token",
+        "release.yml: line 131: a token or a secret; trusted publishing uses no token",
         "release.yml: jobs.publish step 3: actions/download-artifact has the with key github-token; the rule names no such key",
       ],
     ],

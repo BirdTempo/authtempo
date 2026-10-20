@@ -256,13 +256,20 @@ describe("dry run", () => {
         if (c.kind === "pnpm pack")
           return `pnpm ${c.args.map((a, i) => (i === 1 ? '"$name"' : a === out ? '"$PWD/out"' : a)).join(" ")}`;
         if (c.kind === "node check-pack.ts") return `node ${c.args[0]} out/*.tgz`;
+        if (c.kind === "turbo run build") {
+          // One filter for each released package, which the shell reads from fixed[0].
+          const filters = c.args.filter((a) => a.startsWith("--filter="));
+          expect(filters).toEqual(["--filter=@authtempo/client", "--filter=@authtempo/core"]);
+          const rest = c.args.filter((a) => !a.startsWith("--filter="));
+          return `pnpm ${rest.join(" ")} $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`;
+        }
         return `${c.cmd} ${c.args.join(" ")}`;
       });
     expect(lines).toEqual(releaseCopyLines());
     expect(releaseCopyLines()).toEqual([
       "pnpm install --frozen-lockfile --offline",
       "node scripts/release/src/prepare.ts",
-      "pnpm turbo run build --force",
+      `pnpm turbo run build --force $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`,
       'pnpm --filter "$name" pack --pack-destination "$PWD/out"',
       "node scripts/release/src/check-pack.ts out/*.tgz",
     ]);

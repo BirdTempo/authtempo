@@ -8,6 +8,7 @@ import {
   COPY_PREPARE,
   packCommand,
   RELEASE_COPY_MARKER,
+  RELEASED_FILTERS_SHELL,
   shellLine,
 } from "./lib/release-copy.ts";
 import {
@@ -273,7 +274,7 @@ const JOBS: Record<string, Record<string, Job>> = {
         // which the dry run also runs (ruling 21 of plan 12j).
         { run: shellLine(COPY_INSTALL), copy: true },
         { name: "Prepare the manifests", run: shellLine(COPY_PREPARE), copy: true },
-        { run: shellLine(COPY_BUILD), copy: true },
+        { run: `${shellLine(COPY_BUILD)} ${RELEASED_FILTERS_SHELL}`, copy: true },
         {
           name: "Pack each released package",
           run: [

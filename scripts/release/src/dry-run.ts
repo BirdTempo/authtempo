@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readTarball } from "./check-pack.ts";
 import {
-  COPY_BUILD,
+  buildCommand,
   COPY_CHECK_PACK,
   COPY_INSTALL,
   COPY_PREPARE,
@@ -239,7 +239,7 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     }
     version = versions[0] ?? null;
     if (!copyStep("prepare", COPY_PREPARE)) return 1;
-    if (!copyStep("turbo run build", COPY_BUILD)) return 1;
+    if (!copyStep("turbo run build", buildCommand(names))) return 1;
 
     const tarballs: { name: string; path: string }[] = [];
     for (const name of names) {

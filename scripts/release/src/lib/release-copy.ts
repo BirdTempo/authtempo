@@ -11,8 +11,22 @@ export const COPY_INSTALL = ["pnpm", "install", "--frozen-lockfile", "--offline"
 /** The release fields from their one source each. */
 export const COPY_PREPARE = ["node", "scripts/release/src/prepare.ts"] as const;
 
-/** The build with the cache off. */
+/**
+ * The build with the cache off, of the released packages and what they need.
+ * The site builds its feed from each changelog, and its build fails on a
+ * version with no release date (read 2026-10-21 in a copy after changeset
+ * version). The site ships in no tarball, so the build skips it.
+ */
 export const COPY_BUILD = ["pnpm", "turbo", "run", "build", "--force"] as const;
+
+/** The build command for the released names: one filter for each. */
+export const buildCommand = (names: readonly string[]): readonly string[] => [
+  ...COPY_BUILD,
+  ...names.map((name) => `--filter=${name}`),
+];
+
+/** The released names as the shell of a workflow reads them: fixed[0] of the Changesets config. */
+export const RELEASED_FILTERS_SHELL = `$(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`;
 
 /** The pack of one released package, from the root of the copy, into `out`. */
 export const packCommand = (name: string, out: string): readonly string[] => [
