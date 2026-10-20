@@ -28,7 +28,7 @@ afterEach(() => {
  * one of client at `version`, and SHA256SUMS in the form of sha256sum (the
  * hash, two spaces, the file name). client depends on core.
  */
-function downloaded(version: string): string {
+function downloaded(version: string, react = false): string {
   const root = mkdtempSync(join(tmpdir(), "authtempo-release-publish-"));
   folders.push(root);
   const out = join(root, "out");
@@ -37,6 +37,10 @@ function downloaded(version: string): string {
   const manifests = [
     { name: "@authtempo/client", version, dependencies: { "@authtempo/core": version } },
     { name: "@authtempo/core", version },
+    // With react, a third package that depends on the client, so it publishes last.
+    ...(react
+      ? [{ name: "@authtempo/react", version, dependencies: { "@authtempo/client": version } }]
+      : []),
   ];
   for (const manifest of manifests) {
     const dir = join(root, manifest.name.replace("@authtempo/", ""));
@@ -63,6 +67,7 @@ function downloaded(version: string): string {
 
 const CORE = (v: string) => `authtempo-core-${v}.tgz`;
 const CLIENT = (v: string) => `authtempo-client-${v}.tgz`;
+const REACT = (v: string) => `authtempo-react-${v}.tgz`;
 
 /** Fake seams that record each call. The registry holds what `view` answers. */
 function fake(options: {
@@ -101,7 +106,11 @@ describe("publish", () => {
       ["npm", "publish", join(out, CORE("0.1.0")), "--access", "public", "--tag", "latest"],
       ["npm", "publish", join(out, CLIENT("0.1.0")), "--access", "public", "--tag", "latest"],
     ]);
-    expect(publishLines(outcome)).toEqual(["publish: PASS published=2 skipped=0 failures=0"]);
+    expect(publishLines(outcome)).toEqual([
+      "publish: PASS published=2 skipped=0 failures=0",
+      "  published: @authtempo/core@0.1.0 is on the registry",
+      "  published: @authtempo/client@0.1.0 is on the registry",
+    ]);
   });
 
   it("skips a version that the registry holds", () => {
@@ -118,6 +127,7 @@ describe("publish", () => {
     expect(f.published()).toEqual([CLIENT("0.1.0")]);
     expect(publishLines(outcome)).toEqual([
       "publish: PASS published=1 skipped=1 failures=0",
+      "  published: @authtempo/client@0.1.0 is on the registry",
       "  skipped: @authtempo/core@0.1.0 is on the registry",
     ]);
   });
@@ -191,7 +201,25 @@ describe("publish", () => {
     expect(publishLines(outcome)).toEqual([
       "publish: FAIL published=0 skipped=0 failures=1",
       `  npm publish ${CORE("0.1.0")} exited 1; rerun the workflow on the same tag`,
+      "  not published: @authtempo/core@0.1.0 is not on the registry",
+      "  not published: @authtempo/client@0.1.0 is not on the registry",
     ]);
+  });
+
+  it("names each version on the registry and each version not on it after a half release", () => {
+    // core publishes, the client fails, and react, which needs the client, gets no call.
+    const out = downloaded("0.1.0", true);
+    const f = fake({ publishCode: (file) => (file.endsWith(CLIENT("0.1.0")) ? 1 : 0) });
+    const outcome = publish(out, f.seams);
+    expect(f.published()).toEqual([CORE("0.1.0"), CLIENT("0.1.0")]);
+    expect(publishLines(outcome)).toEqual([
+      "publish: FAIL published=1 skipped=0 failures=1",
+      `  npm publish ${CLIENT("0.1.0")} exited 1; rerun the workflow on the same tag`,
+      "  published: @authtempo/core@0.1.0 is on the registry",
+      "  not published: @authtempo/client@0.1.0 is not on the registry",
+      "  not published: @authtempo/react@0.1.0 is not on the registry",
+    ]);
+    expect(f.calls.some((c) => (c[2] ?? "").endsWith(REACT("0.1.0")))).toBe(false);
   });
 
   it("publishes with --access public and no --provenance flag", () => {

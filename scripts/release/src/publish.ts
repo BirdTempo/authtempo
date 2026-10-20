@@ -199,7 +199,10 @@ function readSums(text: string, failures: string[]): Map<string, string> {
 }
 
 export interface Outcome {
+  /** Each <name>@<version> that this run published. */
   published: string[];
+  /** Each <name>@<version> of the plan that is not on the registry after a failed publish. */
+  pending: string[];
   skipped: string[];
   failures: string[];
 }
@@ -212,6 +215,7 @@ export function publish(dir: string, seams: Seams): Outcome {
   if (!existsSync(join(dir, "SHA256SUMS")))
     return {
       published: [],
+      pending: [],
       skipped: [],
       failures: ["the folder has no SHA256SUMS; the job check writes it"],
     };
@@ -225,7 +229,7 @@ export function publish(dir: string, seams: Seams): Outcome {
     });
   // The bytes of a tarball are read only after its hash matches.
   failures.push(...sumFailures(hashed, sums));
-  if (failures.length > 0) return { published: [], skipped: [], failures };
+  if (failures.length > 0) return { published: [], pending: [], skipped: [], failures };
   const tarballs: Tarball[] = hashed.map(({ file, bytes, sha256 }) => {
     const manifest = readManifest(bytes);
     return {
@@ -250,30 +254,43 @@ export function publish(dir: string, seams: Seams): Outcome {
   }
   const plan = publishPlan({ tarballs, sums, registry, npmVersion });
   if (failures.length > 0 || plan.failures.length > 0)
-    return { published: [], skipped: [], failures: [...failures, ...plan.failures] };
+    return {
+      published: [],
+      pending: [],
+      skipped: [],
+      failures: [...failures, ...plan.failures],
+    };
 
+  const spec = new Map(tarballs.map((t) => [t.file, `${t.name}@${t.version}`]));
   const published: string[] = [];
-  for (const { file, tag } of plan.publish) {
+  for (const [k, { file, tag }] of plan.publish.entries()) {
     // No --provenance flag and no token: publishConfig.provenance of the
     // prepared manifest and the OIDC token of the job give both.
     const r = seams.run("npm", ["publish", join(dir, file), "--access", "public", "--tag", tag]);
     if (r.code !== 0)
       return {
         published,
+        // The failed version and each later one. No later publish runs.
+        pending: plan.publish.slice(k).map((p) => spec.get(p.file) ?? p.file),
         skipped: plan.skip,
         failures: [`npm publish ${file} exited ${r.code}; rerun the workflow on the same tag`],
       };
-    published.push(file);
+    published.push(spec.get(file) ?? file);
   }
-  return { published, skipped: plan.skip, failures: [] };
+  return { published, pending: [], skipped: plan.skip, failures: [] };
 }
 
-/** The summary line, each failure, and each skipped version. */
+/**
+ * The summary line, each failure, and each version by its registry state. After
+ * a half release, the owner reads here which versions npm has.
+ */
 export function publishLines(o: Outcome): string[] {
   const verdict = o.failures.length === 0 ? "PASS" : "FAIL";
   return [
     `publish: ${verdict} published=${o.published.length} skipped=${o.skipped.length} failures=${o.failures.length}`,
     ...o.failures.map((f) => `  ${f}`),
+    ...o.published.map((s) => `  published: ${s} is on the registry`),
+    ...o.pending.map((s) => `  not published: ${s} is not on the registry`),
     ...o.skipped.map((s) => `  skipped: ${s} is on the registry`),
   ];
 }
