@@ -673,7 +673,7 @@ The deviations from Better Auth (ruling 53 of plan 12f):
   so a typo in a user id does not look like a revoke that worked.
 
 On D1, an act reads the user row once after core's route, for `{ user }`.
-A ban of a user with 60 sessions sends 32 queries in its invocation.
+A ban of a user with 60 sessions sends 34 queries in its invocation.
 The impersonation calls come with plan 12f Task 11.
 
 Better Auth requires a reason nowhere, and core writes an audit row with a
