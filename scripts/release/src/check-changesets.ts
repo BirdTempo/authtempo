@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseChangeset } from "./lib/changeset-file.ts";
-import { changedFiles, commitCount, mergeBase, showAt } from "./lib/git.ts";
+import { changedFiles, commitCount, mergeBase, NoMergeBase, showAt } from "./lib/git.ts";
 import { releasedNames } from "./lib/released.ts";
-import { type Report, summaryLine } from "./lib/report.ts";
+import { type Report, reportLines, unreadReport } from "./lib/report.ts";
 import { readWorkspace } from "./lib/workspace.ts";
 
 export { parseChangeset };
@@ -262,18 +262,31 @@ export function readInput(root: string, ref: string): ChangesetsInput {
   };
 }
 
-if (import.meta.main) {
-  const root = fileURLToPath(new URL("../../../", import.meta.url));
-  const ref = process.argv[2] ?? "main";
-  const report = checkChangesets(readInput(root, ref));
+/** Runs the check on the checkout at `root`, and returns the lines to print and the exit code. */
+export function entry(root: string, ref: string): { lines: string[]; code: number } {
+  let report: Report;
+  try {
+    report = checkChangesets(readInput(root, ref));
+  } catch (error) {
+    if (!(error instanceof NoMergeBase)) throw error;
+    // With no merge base, changeset status has no commit to read from either.
+    const keys = ["changed", "covered", "exempt", "empty"];
+    return { lines: reportLines(unreadReport("check-changesets", keys, error.message)), code: 1 };
+  }
   // Changesets runs beside the check as a note. Its exit code never decides.
   const status = spawnSync("pnpm", ["changeset", "status", `--since=${mergeBase(root, ref)}`], {
     cwd: root,
     stdio: "ignore",
   });
   report.notes.push(`changeset status exited ${status.status ?? "with no code"}`);
-  console.log(summaryLine(report));
-  for (const failure of report.failures) console.log(`  ${failure}`);
-  for (const note of report.notes) console.log(`  note: ${note}`);
-  if (report.failures.length > 0) process.exit(1);
+  return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
+}
+
+if (import.meta.main) {
+  const { lines, code } = entry(
+    fileURLToPath(new URL("../../../", import.meta.url)),
+    process.argv[2] ?? "main",
+  );
+  for (const line of lines) console.log(line);
+  process.exit(code);
 }

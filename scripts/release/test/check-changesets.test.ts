@@ -5,13 +5,14 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   type ChangedFile,
   checkChangesets,
+  entry,
   parseChangeset,
   RUNTIME_KEYS,
   readInput,
 } from "../src/check-changesets.ts";
 import { changedFiles, mergeBase } from "../src/lib/git.ts";
 import { summaryLine } from "../src/lib/report.ts";
-import { makeRepo, type Repo } from "./support/git-repo.ts";
+import { makeRepo, makeUnrelatedRepo, type Repo } from "./support/git-repo.ts";
 
 // The changesets CLI of the repository root, the one that writes each release branch.
 const CHANGESET_BIN = fileURLToPath(
@@ -406,6 +407,17 @@ describe("check-changesets", () => {
     expect(r.notes).toEqual([
       ".changeset/old.md is on main at the merge base, so it covers no change of this branch",
     ]);
+  });
+
+  it("prints a FAIL line with the reason when no merge base exists", () => {
+    repo = makeUnrelatedRepo();
+    expect(entry(repo.root, "main")).toEqual({
+      lines: [
+        "check-changesets: FAIL changed=0 covered=0 exempt=0 empty=0 failures=1",
+        "  no merge base of HEAD and main; fetch the full history (fetch-depth: 0)",
+      ],
+      code: 1,
+    });
   });
 
   it("reads only the changesets that are new since the merge base", () => {

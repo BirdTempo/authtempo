@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { filesAt, mergeBase, showAt, worktreeFiles } from "./lib/git.ts";
-import { type Report, requireCounts, summaryLine } from "./lib/report.ts";
+import { filesAt, mergeBase, NoMergeBase, showAt, worktreeFiles } from "./lib/git.ts";
+import { type Report, reportLines, requireCounts, unreadReport } from "./lib/report.ts";
 
 export interface RecordFile {
   path: string;
@@ -147,10 +147,27 @@ export function readInput(root: string, ref: string): { files: RecordFile[] } {
   };
 }
 
+/** Runs the check on the checkout at `root`, and returns the lines to print and the exit code. */
+export function entry(root: string, ref: string): { lines: string[]; code: number } {
+  let report: Report;
+  try {
+    report = checkRecords(readInput(root, ref));
+  } catch (error) {
+    if (!(error instanceof NoMergeBase)) throw error;
+    report = unreadReport(
+      "check-records",
+      ["files", "changelogs", "migrations", "advisories"],
+      error.message,
+    );
+  }
+  return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
+}
+
 if (import.meta.main) {
-  const root = fileURLToPath(new URL("../../../", import.meta.url));
-  const report = checkRecords(readInput(root, process.argv[2] ?? "main"));
-  console.log(summaryLine(report));
-  for (const failure of report.failures) console.log(`  ${failure}`);
-  if (report.failures.length > 0) process.exit(1);
+  const { lines, code } = entry(
+    fileURLToPath(new URL("../../../", import.meta.url)),
+    process.argv[2] ?? "main",
+  );
+  for (const line of lines) console.log(line);
+  process.exit(code);
 }

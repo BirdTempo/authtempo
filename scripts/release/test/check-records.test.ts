@@ -1,9 +1,9 @@
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { checkRecords, RECORD_GLOBS, readInput, recordOf } from "../src/check-records.ts";
+import { checkRecords, entry, RECORD_GLOBS, readInput, recordOf } from "../src/check-records.ts";
 import { summaryLine } from "../src/lib/report.ts";
-import { makeRepo, type Repo } from "./support/git-repo.ts";
+import { makeRepo, makeUnrelatedRepo, type Repo } from "./support/git-repo.ts";
 
 const read = (name: string) =>
   readFileSync(new URL(`./fixtures/records/${name}`, import.meta.url), "utf8");
@@ -134,6 +134,17 @@ describe("check-records", () => {
     expect(() =>
       checkRecords({ files: [{ path: "README.md", base: "a\n", head: "a\n" }] }),
     ).toThrow("README.md matches no row of RECORD_GLOBS");
+  });
+
+  it("prints a FAIL line with the reason when no merge base exists", () => {
+    repo = makeUnrelatedRepo();
+    expect(entry(repo.root, "main")).toEqual({
+      lines: [
+        "check-records: FAIL files=0 changelogs=0 migrations=0 advisories=0 failures=1",
+        "  no merge base of HEAD and main; fetch the full history (fetch-depth: 0)",
+      ],
+      code: 1,
+    });
   });
 
   it("reads the records at the merge base and in the working tree", () => {

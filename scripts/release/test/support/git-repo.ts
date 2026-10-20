@@ -51,3 +51,17 @@ export function makeRepo(): Repo {
     },
   };
 }
+
+/**
+ * A repository whose branch "work" shares no commit with main, as a shallow
+ * clone with no history of main does. git merge-base finds no commit.
+ */
+export function makeUnrelatedRepo(): Repo {
+  const repo = makeRepo();
+  repo.write("a.txt", "a\n");
+  repo.commit("main");
+  repo.git(["checkout", "--quiet", "--orphan", "work"]);
+  repo.write("b.txt", "b\n");
+  repo.commit("work");
+  return repo;
+}

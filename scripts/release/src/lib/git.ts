@@ -2,13 +2,31 @@ import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
+// The error of a failed call holds the stderr of git, so the entry prints only its own lines.
 function git(root: string, args: string[]): string {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  return execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
+
+/**
+ * No merge base of HEAD and the ref. A shallow clone, a ref that the checkout
+ * lacks, and an unrelated history each give it.
+ */
+export class NoMergeBase extends Error {}
 
 /** The commit where the checkout left `ref`. */
 export function mergeBase(root: string, ref: string): string {
-  return git(root, ["merge-base", "HEAD", ref]).trim();
+  try {
+    return git(root, ["merge-base", "HEAD", ref]).trim();
+  } catch {
+    throw new NoMergeBase(
+      `no merge base of HEAD and ${ref}; fetch the full history (fetch-depth: 0)`,
+    );
+  }
 }
 
 /** The text of `path` at `ref`, or null when the file does not exist there. */
