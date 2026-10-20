@@ -275,6 +275,56 @@ describe("organization tokens (plan 12k Task 8)", () => {
     ]);
   });
 
+  /** An admin of one organization and a token of another (ruling 32 of plan 12k). */
+  async function crossed() {
+    const h = orgHandle();
+    const ada = await signedIn(h, "ada@example.com");
+    const bob = await signedIn(h, "bob@example.com");
+    const cy = await signedIn(h, "cy@example.com");
+    const a = await organization(h, ada.user, "acme", [[bob.user, "admin"]]);
+    const b = await organization(h, cy.user, "beta");
+    const theirs = await mint(h, cy.session, b, { permissions: { project: ["read", "write"] } });
+    const before = await h.storage.findOne("organizationToken", [
+      { field: "id", op: "eq", value: theirs.apiToken.id },
+    ]);
+    return { h, bob, a, theirs, before };
+  }
+
+  it("answers not_found to an update of a token of another organization and keeps the row", async () => {
+    const { h, bob, a, theirs, before } = await crossed();
+    const res = await h.auth.handle(
+      post(
+        "/auth/organizations/tokens/update",
+        { organizationId: a, id: theirs.apiToken.id, name: "taken", permissions: {} },
+        bearer(bob.session),
+      ),
+    );
+    expect(await answer(res)).toEqual({ status: 404, body: { error: "not_found" } });
+    expect(
+      await h.storage.findOne("organizationToken", [
+        { field: "id", op: "eq", value: theirs.apiToken.id },
+      ]),
+    ).toEqual(before);
+  });
+
+  it("answers not_found to a revoke of a token of another organization and keeps the row", async () => {
+    const { h, bob, a, theirs, before } = await crossed();
+    const res = await h.auth.handle(
+      post(
+        "/auth/organizations/tokens/revoke",
+        { organizationId: a, id: theirs.apiToken.id },
+        bearer(bob.session),
+      ),
+    );
+    expect(await answer(res)).toEqual({ status: 404, body: { error: "not_found" } });
+    expect(
+      await h.storage.findOne("organizationToken", [
+        { field: "id", op: "eq", value: theirs.apiToken.id },
+      ]),
+    ).toEqual(before);
+    expect((await callerOf(h, theirs.token)).kind).toBe("organizationToken");
+  });
+
   it("refuses a set wider than the creator's, a null set, and a stale session", async () => {
     const h = orgHandle();
     const ada = await signedIn(h, "ada@example.com");
