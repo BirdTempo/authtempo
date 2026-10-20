@@ -1,4 +1,11 @@
 import type { LimiterPort, StorageAdapter } from "@authtempo/core";
+import {
+  adminAc,
+  createAccessControl,
+  defaultStatements,
+  memberAc,
+  ownerAc,
+} from "../src/access.js";
 import type { DrizzleAdapterConfig } from "../src/adapters/drizzle.js";
 import { expoClient } from "../src/client/expo.js";
 import {
@@ -104,6 +111,51 @@ export const consumeri = {
   ],
 };
 
+// consumerc services/identity/src/roles.ts, read 2026-10-21 (plan 12k Task 10): its
+// statements and its five roles, with the shim's createAccessControl.
+const consumercAc = createAccessControl({
+  ...defaultStatements,
+  project: ["read", "create", "update", "delete"],
+});
+const consumercRoles = {
+  owner: consumercAc.newRole({
+    ...ownerAc.statements,
+    project: ["read", "create", "update", "delete"],
+  }),
+  admin: consumercAc.newRole({
+    ...adminAc.statements,
+    project: ["read", "create", "update", "delete"],
+  }),
+  member: consumercAc.newRole({ ...memberAc.statements, project: ["read", "create", "update"] }),
+  viewer: consumercAc.newRole({ project: ["read"] }),
+  operator: consumercAc.newRole({ ac: ["read"], project: ["read"] }),
+};
+
+// consumerd apps/api/src/auth/access.ts, read 2026-10-21 (plan 12k Task 10).
+const consumerdAc = createAccessControl({
+  ...defaultStatements,
+  learner: ["read", "create", "update", "delete"],
+  consent: ["read", "create", "revoke"],
+  billing: ["read", "manage"],
+  transcript: ["read"],
+});
+const consumerdRoles = {
+  learner: consumerdAc.newRole({ learner: ["read"], consent: ["read"] }),
+  guardian: consumerdAc.newRole({
+    ...memberAc.statements,
+    invitation: ["create", "cancel"],
+    learner: ["read", "create", "update", "delete"],
+    consent: ["read", "create", "revoke"],
+    transcript: ["read"],
+  }),
+  teacher: consumerdAc.newRole({ ...memberAc.statements, learner: ["read", "update"] }),
+  admin: consumerdAc.newRole({
+    ...adminAc.statements,
+    learner: ["read", "create", "update", "delete"],
+  }),
+  owner: consumerdAc.newRole({ ...ownerAc.statements, billing: ["read", "manage"] }),
+};
+
 // consumerc services/identity/src/auth.ts, read through the usage report 2026-10-10.
 export const consumerc = {
   appName: "Consumerc",
@@ -122,9 +174,9 @@ export const consumerc = {
   plugins: [
     organization({
       creatorRole: "owner",
-      // @ts-expect-error since plan 9b a refused key fails the compile; TypeScript reports the first one per literal (ac)
-      ac: {},
-      roles: {},
+      // Mapped since plan 12k Task 10. consumerc still adds authtempo.roleRanks.
+      ac: consumercAc,
+      roles: consumercRoles,
       dynamicAccessControl: { enabled: true },
       organizationHooks: {},
     }),
@@ -163,8 +215,8 @@ export const consumerd = {
       disableOrganizationDeletion: true,
       requireEmailVerificationOnInvitation: true,
       sendInvitationEmail: async () => {},
-      ac: {},
-      roles: {},
+      ac: consumerdAc,
+      roles: consumerdRoles,
       organizationHooks: {},
     }),
     // Since plan 12f the admin plugin maps; consumerd still needs authtempo.platformOrganization.
@@ -205,7 +257,7 @@ export const consumerb = {
     organization({
       creatorRole: "owner",
       requireEmailVerificationOnInvitation: true,
-      // @ts-expect-error since plan 9b a refused key fails the compile; TypeScript reports the first one per literal (ac)
+      // @ts-expect-error since plan 12k Task 10 ac is the object of createAccessControl; this copy keeps the placeholder of the usage report
       ac: {},
       roles: {},
       organizationHooks: {},
@@ -226,9 +278,9 @@ export const consumerb = {
 // One guard per option type that lost its index signature in plan 9b. Each
 // line below the directive holds a key the type does not name. If an index
 // signature comes back on that type, the key compiles, the directive is
-// unused, and the typecheck fails (TS2578). The organization() literals of
-// consumerc, consumerd, and consumerb above guard OrganizationOptions:
-// consumer-i's has no refused key since plan 9d.
+// unused, and the typecheck fails (TS2578). The organization() literal of
+// consumerd above guards OrganizationOptions (teams): consumer-i's has no
+// refused key since plan 9d, and consumerc's none since plan 12k Task 10.
 export const strictOptionGuards = [
   passkey({
     rpID: "example.com",

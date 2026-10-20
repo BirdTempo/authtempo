@@ -54,7 +54,7 @@ runAdapterConformance(
     return { adapter: s.storage, close: () => pg.close() };
   },
   {
-    unmapped: ["apiToken", "organizationRole", "team", "teamMember", "organizationToken"],
+    unmapped: ["apiToken", "team", "teamMember", "organizationToken"],
     rowLocks: true,
   },
 );
@@ -68,7 +68,7 @@ runAdapterConformance(
     return { adapter: s.storage, close: () => pg.close() };
   },
   {
-    unmapped: ["apiToken", "organizationRole", "team", "teamMember", "organizationToken"],
+    unmapped: ["apiToken", "team", "teamMember", "organizationToken"],
     rowLocks: true,
   },
 );
@@ -542,7 +542,7 @@ describe("the compat migration on postgres", () => {
     }
   });
 
-  it("creates exactly core's ta_ tables (plans 9f, 9g, 12c, 12e, and 12f)", async () => {
+  it("creates exactly core's ta_ tables (plans 9f, 9g, 12c, 12e, and 12f), and Better Auth's organizationRole when it is absent (plan 12k)", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const before = await pg.sql.unsafe<{ t: string }[]>(
@@ -557,6 +557,8 @@ describe("the compat migration on postgres", () => {
         .filter((t) => !before.some((b) => b.t === t))
         .sort();
       expect(added).toEqual([
+        // Better Auth's own table of dynamicAccessControl, which the fixture lacks (migration 0010).
+        "organizationRole",
         "ta_jwk",
         "ta_limit",
         "ta_meta",

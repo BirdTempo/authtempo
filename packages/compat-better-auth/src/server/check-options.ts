@@ -1,5 +1,13 @@
 import { DELETE_CONFIRM_TTL_MINUTES, isAppScheme, normalizeSlug } from "@authtempo/core";
+import {
+  CORE_STATEMENTS,
+  NAME_RE,
+  type Statements,
+  statementFault,
+  union,
+} from "@authtempo/core/access";
 import { PASSWORD_MAX_LENGTH } from "../errors.js";
+import { CORE_RESOURCES, corePermissionsOf, toCoreNames } from "../role-map.js";
 import {
   type BetterAuthOptions,
   COMPAT_PLUGIN,
@@ -245,6 +253,55 @@ const ADMIN_RULES: Record<string, Rule> = {
     "custom permission statements and roles for operators are row 12k, not core's operator tools (spec section 26 item 15)",
   ),
 };
+/** Spec 29 item 18: the section that each refusal of the access control map names. */
+const ITEM_18 = "(spec 29 item 18)";
+
+const plainObject = (v: unknown): v is Record<string, unknown> => {
+  if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
+  const proto = Object.getPrototypeOf(v);
+  return proto === Object.prototype || proto === null;
+};
+
+/**
+ * `ac`: the object of `createAccessControl` from `better-auth/plugins/access`
+ * (this package's `./plugins/access`). Its own resources become core's
+ * `organizations.statements`, so each name follows core's name rule.
+ */
+const accessControl: Rule = (v, p, out) => {
+  const a = v as { statements?: unknown; newRole?: unknown } | null;
+  if (typeof a?.newRole !== "function" || !plainObject(a.statements)) {
+    refuse(
+      out,
+      p,
+      `expected createAccessControl(statements) of better-auth/plugins/access ${ITEM_18}`,
+    );
+    return;
+  }
+  for (const [resource, actions] of Object.entries(toCoreNames(a.statements) as object)) {
+    if (CORE_RESOURCES.includes(resource)) continue;
+    const at = `${p}.statements.${resource}`;
+    if (!NAME_RE.test(resource))
+      refuse(out, at, `core takes a resource name of ^[a-z][a-zA-Z0-9-]{0,31}$ ${ITEM_18}`);
+    else if (
+      !Array.isArray(actions) ||
+      actions.length === 0 ||
+      actions.some((x, i) => typeof x !== "string" || !NAME_RE.test(x) || actions.indexOf(x) !== i)
+    )
+      refuse(
+        out,
+        at,
+        `core takes a list of one or more distinct action names of ^[a-z][a-zA-Z0-9-]{0,31}$ ${ITEM_18}`,
+      );
+  }
+};
+
+/** `roles`: the roles of `ac.newRole`. checkOptions checks each one against `ac` and the ranks. */
+const roleTable: Rule = (v, p, out) =>
+  eachKey(v, p, out, (_name, r, path) => {
+    const x = r as { statements?: unknown; authorize?: unknown } | null;
+    if (typeof x?.authorize !== "function" || !plainObject(x.statements))
+      refuse(out, path, `expected a role of ac.newRole(statements) ${ITEM_18}`);
+  });
 
 const PLUGIN_RULES: Record<string, Rule> = {
   organization: object(
@@ -272,8 +329,26 @@ const PLUGIN_RULES: Record<string, Rule> = {
       ),
       sendInvitationEmail: fn,
       organizationHooks,
+      // Plan 12k Task 10: core's statements, roles, and dynamic roles. The
+      // ranks come from authtempo.roleRanks, because Better Auth's roles have none.
+      ac: accessControl,
+      roles: roleTable,
+      dynamicAccessControl: object({
+        enabled: boolean,
+        // The 9d rule for a limit: core takes a number, never a function.
+        maximumRolesPerOrganization: (v, p, out) => {
+          if (typeof v === "function")
+            refuse(
+              out,
+              p,
+              `a function is refused; pass a positive integer from 1 to 1000 ${ITEM_18}`,
+            );
+          else if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > 1000)
+            refuse(out, p, `core takes an integer from 1 to 1000 ${ITEM_18}`);
+        },
+      }),
     },
-    "core's organizations have fixed ranks; custom roles, access control, teams, and this option are refused",
+    "core's organizations refuse teams, schema, disableOrganizationDeletion, and this option",
   ),
   passkey: object({
     rpID: string,
@@ -699,6 +774,12 @@ const TOP: Record<string, Rule> = {
     platformOrganization: (v, p, out) => {
       if (typeof v !== "string" || normalizeSlug(v) === null) refuse(out, p, "expected a slug");
     },
+    // Plan 12k Task 10: the rank of each Better Auth role; checkOptions holds it to the roles.
+    roleRanks: (v, p, out) =>
+      eachKey(v, p, out, (_name, rank, path) => {
+        if (typeof rank !== "number" || !Number.isSafeInteger(rank) || rank < 1)
+          refuse(out, path, `expected a positive integer ${ITEM_18}`);
+      }),
   }),
   databaseHooks,
   hooks: refused(NO_REQUEST_HOOKS),
@@ -759,6 +840,65 @@ export function signUpClosed(options: BetterAuthOptions): boolean {
 export function appSchemes(options: BetterAuthOptions): string[] {
   const list = Array.isArray(options.trustedOrigins) ? options.trustedOrigins : [];
   return list.filter((o) => typeof o === "string" && isAppScheme(o));
+}
+
+/** Better Auth's three default role names, which the shim maps when `roles` is absent. */
+export const DEFAULT_ROLE_RANKS: Readonly<Record<string, number>> = {
+  member: 1,
+  admin: 2,
+  owner: 3,
+};
+
+/**
+ * The checks of the access control map that read two options: each role of
+ * `roles` has a rank in `authtempo.roleRanks`, each rank names a role, the
+ * table names owner (core's creator role), and each role's statements are
+ * known to `ac` (spec 29 items 2 and 18). A check that the walk refused
+ * already does not run again.
+ */
+function roleChecks(options: BetterAuthOptions, out: OptionCheck): void {
+  const org = pluginOf(options, "organization")?.options;
+  const ranks = options.authtempo?.roleRanks;
+  if (!org) {
+    if (ranks !== undefined)
+      refuse(out, "authtempo.roleRanks", `needs plugins[organization] ${ITEM_18}`);
+    return;
+  }
+  const given = plainObject(org.roles) ? org.roles : undefined;
+  const names = given ? Object.keys(given) : Object.keys(DEFAULT_ROLE_RANKS);
+  if (plainObject(ranks))
+    for (const name of Object.keys(ranks))
+      if (!names.includes(name))
+        refuse(
+          out,
+          `authtempo.roleRanks.${name}`,
+          `ranks no role of plugins[organization].roles ${ITEM_18}`,
+        );
+  if (!given) return;
+  if (!Object.hasOwn(given, "owner"))
+    refuse(
+      out,
+      "plugins[organization].roles",
+      `core needs the role owner, the creator role (spec 29 item 2)`,
+    );
+  const ac = org.ac as { statements?: unknown } | undefined;
+  const app = plainObject(ac?.statements)
+    ? (toCoreNames(ac.statements) as Record<string, string[]>)
+    : {};
+  // Core's resources with core's actions, and the app's own from ac.
+  const known: Statements = union(
+    Object.fromEntries(Object.entries(app).filter(([r]) => !CORE_RESOURCES.includes(r))),
+    CORE_STATEMENTS,
+  );
+  for (const [name, r] of Object.entries(given)) {
+    const path = `plugins[organization].roles.${name}`;
+    if (!plainObject(ranks) || !Object.hasOwn(ranks, name))
+      refuse(out, path, `authtempo.roleRanks must rank ${name} ${ITEM_18}`);
+    const statements = (r as { statements?: unknown } | null)?.statements;
+    if (!plainObject(statements)) continue;
+    const fault = statementFault(corePermissionsOf(statements), known);
+    if (fault !== null) refuse(out, path, `${fault} ${ITEM_18}`);
+  }
 }
 
 /** The allow list (spec 16.1). Pure: no I/O, no throw. */
@@ -830,6 +970,7 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
     }
   }
   const org = pluginOf(options, "organization")?.options;
+  roleChecks(options, out);
   if (org && typeof org.sendInvitationEmail !== "function") {
     refuse(
       out,

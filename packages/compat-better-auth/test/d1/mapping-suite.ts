@@ -5,8 +5,8 @@ import { columnName, TABLES, uniqueIndexName } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import {
-  BETTER_AUTH_TABLES,
   type BetterAuthTable,
+  MAPPED_TABLES,
   type NamingOptions,
   resolveNames,
   snake,
@@ -29,7 +29,7 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">) {
   const truncate = async () => {
     await env.DB.batch(
       [
-        ...BETTER_AUTH_TABLES.map(T),
+        ...MAPPED_TABLES.map(T),
         "ta_limit",
         "ta_totp",
         "ta_trusted_device",
@@ -100,7 +100,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
     },
     // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
     {
-      unmapped: ["apiToken", "organizationRole", "team", "teamMember", "organizationToken"],
+      unmapped: ["apiToken", "team", "teamMember", "organizationToken"],
       updateInTransaction: 2,
     },
   );

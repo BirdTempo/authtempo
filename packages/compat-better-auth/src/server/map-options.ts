@@ -6,7 +6,9 @@ import {
   normalizeSlug,
   type SignInPageInput,
 } from "@authtempo/core";
+import { defaultRoles } from "../access.js";
 import { betterAuthPasswordHash } from "../hash.js";
+import { CORE_RESOURCES, corePermissionsOf, toCoreNames } from "../role-map.js";
 import {
   type BetterAuthOptions,
   COMPAT_PLUGIN,
@@ -14,8 +16,8 @@ import {
   type CompatPlugin,
   type User,
 } from "../types.js";
-import { COMPAT_RANKS, IMPERSONATION_SECONDS, platformRoleOf } from "./admin.js";
-import { appSchemes, pluginOf, signUpClosed } from "./check-options.js";
+import { IMPERSONATION_SECONDS, platformRoleOf } from "./admin.js";
+import { appSchemes, DEFAULT_ROLE_RANKS, pluginOf, signUpClosed } from "./check-options.js";
 import { compatHooks } from "./hooks.js";
 import { compatAccountMail, compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
 import { COOKIE_NAME } from "./shapes.js";
@@ -127,6 +129,50 @@ function clientIpOf(options: BetterAuthOptions): ((request: Request) => string |
   };
 }
 
+type OrganizationsConfig = Extract<AuthConfig["organizations"], object>;
+
+/**
+ * `ac`, `roles`, and `dynamicAccessControl` on core's organizations (plan 12k
+ * Task 10, spec 29 item 18). `ac.statements` without the six core resources
+ * is the app's own statements; `apiKey` is core's `apiToken`. Each role gets
+ * its statements as core's permissions with Better Auth's list reads, and its
+ * rank from `authtempo.roleRanks`. With no `roles`, Better Auth's three
+ * default roles map, ranked member 1, admin 2, owner 3. checkOptions has
+ * refused every role with no rank, so each rank here is set.
+ */
+function accessConfig(
+  options: BetterAuthOptions,
+): Pick<OrganizationsConfig, "statements" | "roles" | "dynamicRoles"> {
+  const o = pluginOf(options, "organization")?.options ?? {};
+  const own = toCoreNames(o.ac?.statements ?? {}) as Record<string, readonly string[]>;
+  const statements = Object.fromEntries(
+    Object.entries(own)
+      .filter(([resource]) => !CORE_RESOURCES.includes(resource))
+      .map(([resource, actions]) => [resource, [...actions]]),
+  );
+  const ranks = o.roles ? (options.authtempo?.roleRanks ?? {}) : DEFAULT_ROLE_RANKS;
+  const table = o.roles ?? defaultRoles;
+  const roles = Object.fromEntries(
+    Object.entries(table).map(([name, r]) => [
+      name,
+      { rank: ranks[name] ?? 0, permissions: corePermissionsOf(r.statements) },
+    ]),
+  );
+  const dynamic = o.dynamicAccessControl;
+  return {
+    statements,
+    roles,
+    ...(dynamic?.enabled === true
+      ? {
+          dynamicRoles:
+            dynamic.maximumRolesPerOrganization !== undefined
+              ? { maxPerOrganization: dynamic.maximumRolesPerOrganization }
+              : {},
+        }
+      : {}),
+  };
+}
+
 /** Spread last into the config, so the type keeps it to the plugin sections. */
 type PluginConfig = Pick<AuthConfig, "organizations" | "passkey" | "handoff" | "operator">;
 
@@ -142,8 +188,6 @@ function pluginConfig(options: BetterAuthOptions): PluginConfig {
   if (org) {
     const o = org.options;
     out.organizations = {
-      // The ranks this package promises (README), and the one list the admin check reads.
-      ranks: { ...COMPAT_RANKS },
       // Plan 12f: Better Auth's admins are the platform operators (spec section 26 item 1).
       ...(admin && platformOrganization !== undefined
         ? { platformOrganization, platformRole: platformRoleOf(admin.options) }
@@ -158,6 +202,7 @@ function pluginConfig(options: BetterAuthOptions): PluginConfig {
         pendingInvitationsPerOrganization:
           o.invitationLimit ?? BETTER_AUTH_DEFAULTS.invitationLimit,
       },
+      ...accessConfig(options),
     };
   }
   if (admin) {

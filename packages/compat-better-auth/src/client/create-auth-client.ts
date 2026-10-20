@@ -7,12 +7,15 @@ import {
   type MemberJSON,
   type OrganizationJSON,
   type PasskeySummaryJSON,
+  type RoleJSON,
   type TwoFactorSessionJSON,
 } from "@authtempo/client";
 import { LEGACY_SESSION_COOKIE, type PublicSession } from "@authtempo/core";
 import { createHandoff } from "@authtempo/handoff";
 import { expoCrypto, expoOpener } from "@authtempo/handoff/expo";
+import { defaultRoles, type Role } from "../access.js";
 import { BETTER_AUTH_CODES, clientError, compatClientError } from "../errors.js";
+import { corePermissionsOf, toBetterAuthNames, toCoreNames } from "../role-map.js";
 import { ADMIN_NOT_SUPPORTED } from "../server/admin-lines.js";
 import { COOKIE_NAME, toNext } from "../server/shapes.js";
 import type {
@@ -33,6 +36,8 @@ import type {
   Invitation,
   Member,
   Organization,
+  OrganizationRoleData,
+  RoleRef,
   TwoFactorRedirect,
 } from "../types.js";
 import { createSessionStore } from "./session-store.js";
@@ -136,6 +141,41 @@ function passkeyOf(p: PasskeySummaryJSON): ClientPasskey {
     backedUp: p.backedUp,
     createdAt: new Date(p.createdAt),
   };
+}
+
+/** A stored role in Better Auth's shape, with Better Auth's resource names (plan 12k). */
+function roleDataOf(organizationId: string, r: RoleJSON): OrganizationRoleData {
+  return {
+    id: r.id,
+    organizationId,
+    role: r.name,
+    permission: toBetterAuthNames(r.permissions) as Record<string, string[]>,
+    createdAt: new Date(r.createdAt),
+    updatedAt: new Date(r.updatedAt),
+  };
+}
+
+/** Better Auth's codes of a refused role call (dist/plugins/organization/error-codes.mjs, read 2026-10-21). */
+const roleCode =
+  (action: "CREATE" | "UPDATE" | "DELETE" | "READ" | "LIST") =>
+  (f: ClientFailure): string | undefined =>
+    f.code === "forbidden_rank"
+      ? `YOU_ARE_NOT_ALLOWED_TO_${action}_A_ROLE`
+      : f.code === "not_found"
+        ? "ROLE_NOT_FOUND"
+        : undefined;
+
+/** The name of a role that Better Auth names by its id: core's role calls take the name. */
+async function roleName(
+  c: Client,
+  organizationId: string,
+  ref: RoleRef,
+): Promise<ClientResult<string>> {
+  if (ref.roleName !== undefined) return { ok: true, value: ref.roleName };
+  const list = await c.organizations.roles.list({ organizationId });
+  if (!list.ok) return list;
+  const found = list.value.find((r) => r.id === ref.roleId);
+  return found ? { ok: true, value: found.name } : { ok: false, code: "not_found", status: 404 };
 }
 
 type Exact<T, K extends readonly (keyof T)[]> = [Exclude<keyof T, K[number]>] extends [never]
@@ -269,6 +309,14 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
   const twoFactorPlugin = options.plugins?.find(
     (p): p is Extract<typeof p, { id: "two-factor" }> => p.id === "two-factor",
   );
+  const organizationPlugin = options.plugins?.find(
+    (p): p is Extract<typeof p, { id: "organization" }> => p.id === "organization",
+  );
+  // Better Auth's client check reads its three default roles and the roles of organizationClient.
+  const clientRoles: Record<string, Role> = {
+    ...defaultRoles,
+    ...organizationPlugin?.options?.roles,
+  };
   // The challenge of the last sign-in that answered one (plan 9f). In memory only: on the web
   // the browser also keeps it as the better-auth.two_factor cookie, for a page that reloads.
   let challenge: string | null = null;
@@ -893,6 +941,107 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
                 }
               : null,
         );
+      },
+      // Plan 12k Task 10: Better Auth's role calls on core's dynamic roles.
+      // Each write adds Better Auth's list reads, as the server's role map does.
+      async createRole({ role, permission, organizationId, additionalFields }) {
+        if (additionalFields !== undefined)
+          return notSupported("core keeps no additional field on a role");
+        const id = organizationId ?? (await activeOrganization());
+        if (id === null) return { data: null, error: compatClientError("NO_ACTIVE_ORGANIZATION") };
+        return run(
+          (c) =>
+            c.organizations.roles.create({
+              organizationId: id,
+              name: role,
+              permissions: corePermissionsOf(permission),
+            }),
+          (v) => ({ success: true as const, roleData: roleDataOf(id, v), statements: permission }),
+          roleCode("CREATE"),
+        );
+      },
+      async deleteRole({ organizationId, ...ref }) {
+        const id = organizationId ?? (await activeOrganization());
+        if (id === null) return { data: null, error: compatClientError("NO_ACTIVE_ORGANIZATION") };
+        return run(
+          async (c) => {
+            const name = await roleName(c, id, ref as RoleRef);
+            if (!name.ok) return name;
+            return c.organizations.roles.delete({ organizationId: id, name: name.value });
+          },
+          () => ({ success: true as const }),
+          roleCode("DELETE"),
+        );
+      },
+      async listRoles(input) {
+        const id = input?.query?.organizationId ?? (await activeOrganization());
+        if (id === null) return { data: null, error: compatClientError("NO_ACTIVE_ORGANIZATION") };
+        return run(
+          (c) => c.organizations.roles.list({ organizationId: id }),
+          (v) => v.map((r) => roleDataOf(id, r)),
+          roleCode("LIST"),
+        );
+      },
+      async getRole({ query: { organizationId, ...ref } }) {
+        const id = organizationId ?? (await activeOrganization());
+        if (id === null) return { data: null, error: compatClientError("NO_ACTIVE_ORGANIZATION") };
+        return run(
+          async (c) => {
+            const name = await roleName(c, id, ref as RoleRef);
+            if (!name.ok) return name;
+            return c.organizations.roles.get({ organizationId: id, name: name.value });
+          },
+          (v) => roleDataOf(id, v),
+          roleCode("READ"),
+        );
+      },
+      async updateRole({ organizationId, data, ...ref }) {
+        const { permission, roleName: rename, ...extra } = data;
+        if (rename !== undefined) return notSupported("core renames no role");
+        if (Object.values(extra).some((v) => v !== undefined))
+          return notSupported("core keeps no additional field on a role");
+        const id = organizationId ?? (await activeOrganization());
+        if (id === null) return { data: null, error: compatClientError("NO_ACTIVE_ORGANIZATION") };
+        return run(
+          async (c) => {
+            const name = await roleName(c, id, ref as RoleRef);
+            if (!name.ok) return name;
+            return c.organizations.roles.update({
+              organizationId: id,
+              name: name.value,
+              ...(permission !== undefined ? { permissions: corePermissionsOf(permission) } : {}),
+            });
+          },
+          (v) => ({ success: true as const, roleData: roleDataOf(id, v) }),
+          roleCode("UPDATE"),
+        );
+      },
+      async hasPermission({ permissions, permission, organizationId, allowCreatorAllPermissions }) {
+        // Core grants no right by the creator role: every right comes from the role's statements.
+        if (allowCreatorAllPermissions === true)
+          return notSupported("core grants the creator no permission outside its role");
+        const id = organizationId ?? (await activeOrganization());
+        if (id === null) return { data: null, error: compatClientError("NO_ACTIVE_ORGANIZATION") };
+        return run(
+          (c) =>
+            c.organizations.hasPermission({
+              organizationId: id,
+              permissions: toCoreNames(permissions ?? permission ?? {}) as Record<string, string[]>,
+            }),
+          (success) => ({ error: null, success }),
+        );
+      },
+      checkRolePermission({ role, permissions, permission }) {
+        const wanted = permissions ?? permission;
+        if (!wanted) return false;
+        // Better Auth's rule: one part of the role string that holds the request is enough.
+        return role
+          .split(",")
+          .some(
+            (part) =>
+              Object.hasOwn(clientRoles, part) &&
+              (clientRoles[part] as Role).authorize(wanted).success,
+          );
       },
     },
     passkey: {

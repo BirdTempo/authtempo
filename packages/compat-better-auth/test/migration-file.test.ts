@@ -699,7 +699,7 @@ describe("migration 0010 (plan 12k)", () => {
     ]);
   });
 
-  it("moves an app with the teams columns to 13 and 10 with its own 0010 of the two ta_meta updates", () => {
+  it("moves an app with the teams columns to 13 and 10 with its own 0010, the shipped file without its two ADD COLUMN lines", () => {
     const db = sqlite(BETTER_AUTH_SQLITE);
     // Better Auth's teams option adds these two columns before the compat files run.
     db.exec(`ALTER TABLE "session" ADD COLUMN "activeTeamId" TEXT`);
@@ -710,11 +710,17 @@ describe("migration 0010 (plan 12k)", () => {
     db.exec(
       `INSERT INTO "session" (id, expiresAt, token, createdAt, updatedAt, userId, activeTeamId) VALUES ('s1', '2026-11-01T00:00:00.000Z', 't1', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'u1', 'team-1')`,
     );
-    // The app's own 0010, as the compat README and the migrate page tell it to write.
-    const own0010 = `UPDATE ta_meta SET value = '13' WHERE key = 'schema_version';
-UPDATE ta_meta SET value = '10' WHERE key = 'compat_better_auth';`;
-    // The own file is the shipped file with no ALTER statement.
-    expect(normalize(shipped0010).endsWith(normalize(own0010))).toBe(true);
+    // The app's own 0010, as the compat README tells it to write (plan 12k Task 10): the
+    // shipped file without the two lines that add the teams columns.
+    const teamsLines = [
+      `ALTER TABLE "session" ADD COLUMN "activeTeamId" TEXT;`,
+      `ALTER TABLE "invitation" ADD COLUMN "teamId" TEXT;`,
+    ];
+    const own0010 = shipped0010
+      .split("\n")
+      .filter((l) => !teamsLines.includes(l))
+      .join("\n");
+    expect(shipped0010.split("\n").length - own0010.split("\n").length).toBe(2);
     for (const text of [
       shipped,
       shipped0002,
@@ -731,6 +737,11 @@ UPDATE ta_meta SET value = '10' WHERE key = 'compat_better_auth';`;
     expect(db.prepare(`SELECT "activeTeamId" AS t FROM "session"`).all()).toEqual([
       { t: "team-1" },
     ]);
+    // The own file keeps the organizationRole statements of Task 10.
+    expect(
+      (db.prepare(`PRAGMA table_info("organizationRole")`).all() as { name: string }[]).at(-1)
+        ?.name,
+    ).toBe("taRank");
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "10" },
       { key: "schema_version", value: "13" },

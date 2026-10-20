@@ -2,7 +2,7 @@ import { StorageError } from "@authtempo/core";
 import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@authtempo/core/sql";
 import type { Sql } from "postgres";
 import { ISSUERS } from "./mapping.js";
-import { BETTER_AUTH_TABLES, type BetterAuthTable, type Names } from "./names.js";
+import { type BaseTable, BETTER_AUTH_TABLES, type BetterAuthTable, type Names } from "./names.js";
 
 /**
  * The lowest `compat_better_auth` value this code reads. Migration 0002
@@ -575,19 +575,41 @@ export const MIGRATION_0010_NAME = "0010_compat_schema_v13";
  * `session.activeTeamId` and `invitation.teamId`. This migration adds the
  * two columns, nullable with no fill. On Postgres it adds each column only
  * when it is absent, so a table of an app with teams keeps its own. A SQLite
- * file is static and cannot test, so the D1 text adds both columns. The
- * apiToken fields and the four models have no table here yet. They are in
- * UNMAPPED_MODELS, and the later tasks of plan 12k add their tables to this
- * unshipped migration. The columns take the app's naming, so the text
- * depends on `names`, as for 0009. Append-only once it ships.
+ * file is static and cannot test, so the D1 text adds both columns. An app
+ * whose tables hold them already runs the file without its first two lines.
+ *
+ * `organizationRole` stays in place (Task 10): Better Auth's table of its
+ * dynamicAccessControl. When it is absent, the migration creates it with
+ * Better Auth 1.7.2's own DDL (test/fixtures, generated 2026-10-21). Then it
+ * adds `taRank` (NOT NULL, default 1, so a row that Better Auth writes later
+ * has a rank) and the unique key on (organizationId, role) that core's role
+ * rule 1 needs. The unique index fails on a table with two rows of one name
+ * in one organization: the README gives the query that finds them.
+ *
+ * The apiToken fields and the models team, teamMember, and organizationToken
+ * have no table here yet. They are in UNMAPPED_MODELS, and the later tasks
+ * of plan 12k add their tables to this unshipped migration. The columns take
+ * the app's naming, so the text depends on `names`, as for 0009.
+ * Append-only once it ships.
  */
 export function compatMigration0010Sql(dialect: "postgres" | "sqlite", n: Names): string {
   const pg = dialect === "postgres";
   const add = (table: "session" | "invitation", field: string) =>
     `ALTER TABLE ${n.table(table)} ADD COLUMN ${pg ? "IF NOT EXISTS " : ""}${n.column(table, field)} ${pg ? "text" : "TEXT"};`;
+  const R = n.table("organizationRole");
+  const C = (field: string) => n.column("organizationRole", field);
+  const date = pg ? "timestamptz" : "date";
+  // Better Auth's own index names: its generator joins the table and the field.
+  const baIndex = (field: string) =>
+    `CREATE INDEX IF NOT EXISTS "${n.rawTable("organizationRole")}_${n.rawColumn("organizationRole", field)}_idx" ON ${R} (${C(field)});`;
   return `${[
     add("session", "activeTeamId"),
     add("invitation", "teamId"),
+    `CREATE TABLE IF NOT EXISTS ${R} (${C("id")} text not null primary key, ${C("organizationId")} text not null references ${n.table("organization")} (${n.column("organization", "id")}) on delete cascade, ${C("role")} text not null, ${C("permission")} text not null, ${C("createdAt")} ${date}${pg ? " default CURRENT_TIMESTAMP" : ""} not null, ${C("updatedAt")} ${date});`,
+    baIndex("organizationId"),
+    baIndex("role"),
+    `ALTER TABLE ${R} ADD COLUMN ${pg ? "IF NOT EXISTS " : ""}${C("taRank")} ${pg ? "integer" : "INTEGER"} NOT NULL DEFAULT 1;`,
+    `CREATE UNIQUE INDEX ${pg ? "IF NOT EXISTS " : ""}ux_organization_role__organization_id__role ON ${R} (${C("organizationId")}, ${C("role")});`,
     "UPDATE ta_meta SET value = '13' WHERE key = 'schema_version';",
     "UPDATE ta_meta SET value = '10' WHERE key = 'compat_better_auth';",
   ].join("\n")}\n`;
@@ -630,7 +652,7 @@ export const sqliteIsoText = (col: string) => `strftime('%Y-%m-%dT%H:%M:%fZ', ${
  * must hold date text. A Drizzle schema with integer timestamps stores
  * numbers, which sort before every text and do not read as a date.
  */
-const BETTER_AUTH_DATES: Readonly<Record<BetterAuthTable, readonly string[]>> = {
+const BETTER_AUTH_DATES: Readonly<Record<BaseTable, readonly string[]>> = {
   user: ["createdAt", "updatedAt"],
   session: ["expiresAt", "createdAt", "updatedAt"],
   account: ["createdAt", "updatedAt"],

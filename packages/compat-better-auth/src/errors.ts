@@ -120,14 +120,15 @@ export const BETTER_AUTH_CODES = {
   // Better Auth lets an impersonation session reach every route, so it has no
   // name for this refusal.
   impersonation_session: "FORBIDDEN",
-  // Plan 12k Task 4. Core's own names for now: no Better Auth install was on the
-  // machine to read. Task 10 of plan 12k maps dynamicAccessControl and reads
-  // Better Auth's names for these three refusals.
-  role_in_use: "ROLE_IN_USE",
-  role_limit: "ROLE_LIMIT",
-  role_taken: "ROLE_TAKEN",
-  // Plan 12k Task 5. Core's own names for now, as for the role codes above. Task 11
-  // of plan 12k maps teams and reads Better Auth's names for these three refusals.
+  // Plan 12k Task 10 (ruling 22). Better Auth 1.7.2's own names
+  // (dist/plugins/organization/error-codes.mjs:57, :59, :61, and
+  // routes/crud-access-control.mjs, read 2026-10-21). Better Auth answers
+  // each 400; the status stays core's, 409.
+  role_in_use: "ROLE_IS_ASSIGNED_TO_MEMBERS",
+  role_limit: "TOO_MANY_ROLES",
+  role_taken: "ROLE_NAME_IS_ALREADY_TAKEN",
+  // Plan 12k Task 5. Core's own names for now. Task 11 of plan 12k maps
+  // teams and reads Better Auth's names for these three refusals.
   team_limit: "TEAM_LIMIT",
   team_member_limit: "TEAM_MEMBER_LIMIT",
   last_team: "LAST_TEAM",

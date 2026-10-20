@@ -1,6 +1,7 @@
 import { BetterAuthCompatError } from "../compat-error.js";
 
-export type BetterAuthTable =
+/** The tables of migration 0001. A shipped migration's text never changes, so this list never grows. */
+export type BaseTable =
   | "user"
   | "session"
   | "account"
@@ -10,7 +11,10 @@ export type BetterAuthTable =
   | "invitation"
   | "passkey";
 
-export const BETTER_AUTH_TABLES: readonly BetterAuthTable[] = [
+/** Every Better Auth table this package reads or writes: 0001's tables and `organizationRole` (plan 12k). */
+export type BetterAuthTable = BaseTable | "organizationRole";
+
+export const BETTER_AUTH_TABLES: readonly BaseTable[] = [
   "user",
   "session",
   "account",
@@ -19,6 +23,16 @@ export const BETTER_AUTH_TABLES: readonly BetterAuthTable[] = [
   "member",
   "invitation",
   "passkey",
+];
+
+/**
+ * Every table of `BetterAuthTable`, for the names. Better Auth's
+ * `organizationRole` (its dynamicAccessControl table) comes from migration
+ * 0010, which creates it when it is absent (plan 12k Task 10).
+ */
+export const MAPPED_TABLES: readonly BetterAuthTable[] = [
+  ...BETTER_AUTH_TABLES,
+  "organizationRole",
 ];
 
 /**
@@ -109,6 +123,16 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "aaguid",
     "taUpdatedAt",
   ],
+  // Better Auth 1.7.2's columns (organization.mjs, read 2026-10-21) and taRank of migration 0010.
+  organizationRole: [
+    "id",
+    "organizationId",
+    "role",
+    "permission",
+    "createdAt",
+    "updatedAt",
+    "taRank",
+  ],
 };
 
 /**
@@ -166,7 +190,7 @@ export function resolveNames(options: NamingOptions = {}): Names {
   const tables = new Map<BetterAuthTable, string>();
   const forward = new Map<BetterAuthTable, Map<string, string>>();
   const back = new Map<BetterAuthTable, Map<string, string>>();
-  for (const t of BETTER_AUTH_TABLES) {
+  for (const t of MAPPED_TABLES) {
     tables.set(t, ident(options.tables?.[t] ?? t, `tables.${t}`));
     const f = new Map<string, string>();
     const b = new Map<string, string>();

@@ -22,6 +22,7 @@ import {
   undoCreateWhere,
   whileNoChildRow,
 } from "@authtempo/core/sql";
+import { toBetterAuthNames, toCoreNames } from "../role-map.js";
 import { type AnyModelMap, MAPPING } from "./mapping.js";
 import { FILLED_DATES, sqliteIsoText } from "./migration.js";
 import { type BetterAuthTable, type Names, TABLE_FIELDS } from "./names.js";
@@ -90,11 +91,11 @@ export interface CompatStatements extends SqlStatements {
  * as for a where that never matches, so `sweepExpired` counts 0 and
  * `caller` answers null for a `tk_` bearer. A create throws `unknown_model`,
  * so a write never vanishes in silence. Plan 8b, 2026-10-11. Plan 12k Task 1
- * adds its four models until the later 12k tasks map them.
+ * adds its four models until the later 12k tasks map them. Task 10 maps
+ * `organizationRole` (mapping.ts).
  */
 export const UNMAPPED_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
   "apiToken",
-  "organizationRole",
   "team",
   "teamMember",
   "organizationToken",
@@ -248,8 +249,14 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
    */
   const value = (model: ModelName, field: string) => {
     const c = column(model, field);
-    if (pg) return c;
     const t = MAP[model].table;
+    // A nullable Better Auth column that core reads as another while it is null (plan 12k).
+    const or = MAP[model].fields[field]?.orColumn;
+    if (or) {
+      const from = names.column(t, or);
+      return `COALESCE(${c}, ${pg ? `date_trunc('milliseconds', ${from})` : sqliteIsoText(from)})`;
+    }
+    if (pg) return c;
     const baField = MAP[model].fields[field]?.column ?? field;
     const filled = FILLED_DATES.find((a) => a.table === t && a.field === baField);
     return filled ? `COALESCE(${c}, ${sqliteIsoText(names.column(t, filled.from))})` : c;
@@ -270,7 +277,12 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
   function encode(model: ModelName, field: string, value: unknown): unknown {
     const { type } = def(model, field);
     const codec = MAP[model].fields[field]?.codec;
-    const given = codec === "nullAsEmpty" && (value === null || value === undefined) ? "" : value;
+    const given =
+      codec === "nullAsEmpty" && (value === null || value === undefined)
+        ? ""
+        : codec === "permission"
+          ? toBetterAuthNames(value)
+          : value;
     // core's encodeValue checks the type and refuses NUL; it answers JSON text and SQLite 0 or 1.
     const v = encodeValue(d, type, given, model, field);
     if (v === null) return null;
@@ -298,6 +310,17 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
         // A date core cannot read would compare as NaN, so an expiry would never pass.
         if (Number.isNaN(at.getTime())) throw new StorageError("schema_mismatch", model, [field]);
         v = at;
+      } else if (codec === "permission") {
+        // Better Auth's JSON text. A text that does not parse reads as the
+        // text, and core's shape rule refuses the row (spec 29 item 6, rule 7).
+        let parsed: unknown = v;
+        if (typeof v === "string")
+          try {
+            parsed = JSON.parse(v);
+          } catch {
+            parsed = v;
+          }
+        v = toCoreNames(parsed);
       } else if (type === "json") {
         // App SQL can write any text here. Name the model and the field, as
         // for any other value core cannot read (final review L-10).
@@ -464,7 +487,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       const list = Object.keys(MAP[model].fields)
         .map(
           (f) =>
-            `${pg && def(model, f).type === "date" ? pgDate(column(model, f)) : value(model, f)} AS "${f}"`,
+            `${pg && def(model, f).type === "date" ? pgDate(value(model, f)) : value(model, f)} AS "${f}"`,
         )
         .join(", ");
       let sql = `SELECT ${list} FROM ${table(model)}${w.clause}`;

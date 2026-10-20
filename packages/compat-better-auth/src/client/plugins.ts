@@ -1,12 +1,19 @@
-import { type ClientPlugin, COMPAT_CLIENT_PLUGIN, type TwoFactorClientOptions } from "../types.js";
+import {
+  type ClientPlugin,
+  COMPAT_CLIENT_PLUGIN,
+  type OrganizationClientOptions,
+  type TwoFactorClientOptions,
+} from "../types.js";
 
-type Simple = Extract<
-  ClientPlugin,
-  { id: "organization" | "passkey" | "magic-link" | "email-otp" | "admin" }
->;
+type Simple = Extract<ClientPlugin, { id: "passkey" | "magic-link" | "email-otp" | "admin" }>;
 
-export function organizationClient(): Simple {
-  return { kind: COMPAT_CLIENT_PLUGIN, id: "organization" };
+/** Better Auth's `organizationClient({ ac, roles })`: `checkRolePermission` reads the roles (plan 12k). */
+export function organizationClient(
+  options?: OrganizationClientOptions,
+): Extract<ClientPlugin, { id: "organization" }> {
+  return options
+    ? { kind: COMPAT_CLIENT_PLUGIN, id: "organization", options }
+    : { kind: COMPAT_CLIENT_PLUGIN, id: "organization" };
 }
 export function passkeyClient(): Simple {
   return { kind: COMPAT_CLIENT_PLUGIN, id: "passkey" };

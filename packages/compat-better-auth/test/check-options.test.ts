@@ -88,12 +88,15 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
 
   // The exact lists, so a key accepted in silence fails here (final review L-6).
   const EXACT = {
+    // Since plan 12k Task 10 ac, roles, and dynamicAccessControl map; each role still needs its rank.
     consumerc: [
       "hooks",
       "plugins[expo]",
-      "plugins[organization].ac",
-      "plugins[organization].dynamicAccessControl",
-      "plugins[organization].roles",
+      "plugins[organization].roles.admin",
+      "plugins[organization].roles.member",
+      "plugins[organization].roles.operator",
+      "plugins[organization].roles.owner",
+      "plugins[organization].roles.viewer",
       "plugins[organization].sendInvitationEmail",
       "socialProviders.apple.clientSecret",
       "socialProviders.apple",
@@ -103,9 +106,12 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       "hooks",
       "plugins[admin]",
       "plugins[anonymous]",
-      "plugins[organization].ac",
       "plugins[organization].disableOrganizationDeletion",
-      "plugins[organization].roles",
+      "plugins[organization].roles.admin",
+      "plugins[organization].roles.guardian",
+      "plugins[organization].roles.learner",
+      "plugins[organization].roles.owner",
+      "plugins[organization].roles.teacher",
       "plugins[organization].teams",
       "plugins[passkey].origin",
       "rateLimit.customStorage",

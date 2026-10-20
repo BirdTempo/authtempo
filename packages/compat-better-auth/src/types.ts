@@ -1,6 +1,7 @@
 import type { BrowserWebAuthn } from "@authtempo/client";
 import type { Auth, LimiterPort, PasswordHashSeam, StorageAdapter } from "@authtempo/core";
 import type { ExpoCryptoLike, ExpoWebBrowserLike } from "@authtempo/handoff/expo";
+import type { AccessControl, Role } from "./access.js";
 
 // Shapes copied from Better Auth 1.7.2 (@better-auth/core src/db/schema/*.ts and
 // better-auth dist/client/react/index.d.mts), read on 2026-10-10. Only the fields
@@ -271,6 +272,12 @@ export interface OrganizationOptions {
   cancelPendingInvitationsOnReInvite?: boolean;
   sendInvitationEmail?: (data: InvitationEmailData, request?: Request) => Promise<void> | void;
   organizationHooks?: OrganizationHookOptions;
+  /** `createAccessControl` of `./plugins/access` (plan 12k): its own resources become core's statements. */
+  ac?: AccessControl;
+  /** The roles of `ac.newRole`. `authtempo.roleRanks` ranks each one. */
+  roles?: Record<string, Role>;
+  /** Core's dynamic roles. A function of `maximumRolesPerOrganization` is refused, as for the other limits. */
+  dynamicAccessControl?: { enabled?: boolean; maximumRolesPerOrganization?: number };
 }
 
 export interface PasskeyOptions {
@@ -597,7 +604,17 @@ export interface BetterAuthOptions {
    * spec section 26 item 1). The `admin` plugin needs it, and nothing else
    * takes it. `authtempo create-admin` creates the organization.
    */
-  authtempo?: { passwordHash?: PasswordHashSeam; appURL?: string; platformOrganization?: string };
+  authtempo?: {
+    passwordHash?: PasswordHashSeam;
+    appURL?: string;
+    platformOrganization?: string;
+    /**
+     * The rank of each role of `organization({ roles })` (plan 12k): Better
+     * Auth's roles have none. Without `roles` the defaults are member 1,
+     * admin 2, owner 3.
+     */
+    roleRanks?: Record<string, number>;
+  };
 }
 
 /** Better Auth 1.7.2's sign-in answer for a user with the factor on (dist/plugins/two-factor/index.mjs, the after hook, read 2026-10-13). */
@@ -930,10 +947,24 @@ export interface TwoFactorClientOptions {
 
 export const COMPAT_CLIENT_PLUGIN = "authtempo-compat-client-plugin";
 
+/** `organizationClient(options)` of Better Auth 1.7.2 (dist/plugins/organization/client.mjs, read 2026-10-21). */
+export interface OrganizationClientOptions {
+  ac?: AccessControl;
+  /** The roles that `checkRolePermission` reads, over Better Auth's three defaults. */
+  roles?: Record<string, Role>;
+  /** Accepted: the role calls are always on the client, and the server decides. */
+  dynamicAccessControl?: { enabled?: boolean };
+}
+
 export type ClientPlugin =
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
-      readonly id: "organization" | "passkey" | "magic-link" | "email-otp" | "admin";
+      readonly id: "passkey" | "magic-link" | "email-otp" | "admin";
+    }
+  | {
+      readonly kind: typeof COMPAT_CLIENT_PLUGIN;
+      readonly id: "organization";
+      readonly options?: OrganizationClientOptions;
     }
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
@@ -978,6 +1009,19 @@ export interface SessionStore {
   subscribe(listener: () => void): () => void;
   refetch(): Promise<void>;
 }
+
+/** A stored role as Better Auth's role calls answer it, with Better Auth's resource names. */
+export interface OrganizationRoleData {
+  id: string;
+  organizationId: string;
+  role: string;
+  permission: Record<string, string[]>;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** A stored role by name or by id, as Better Auth's role calls take it. */
+export type RoleRef = { roleName: string; roleId?: never } | { roleId: string; roleName?: never };
 
 export interface AuthClient<TF extends boolean = false> {
   signIn: {
@@ -1085,6 +1129,55 @@ export interface AuthClient<TF extends boolean = false> {
     }): Promise<
       CompatClientResult<(Organization & { members: Member[]; invitations: Invitation[] }) | null>
     >;
+    /**
+     * Core's dynamic roles in Better Auth's shapes (plan 12k). A role's
+     * `additionalFields` and a new `roleName` answer NOT_SUPPORTED (501): core
+     * keeps no extra field and renames no role.
+     */
+    createRole(input: {
+      role: string;
+      permission: Record<string, readonly string[]>;
+      organizationId?: string;
+      additionalFields?: Record<string, unknown>;
+    }): Promise<
+      CompatClientResult<{
+        success: true;
+        roleData: OrganizationRoleData;
+        statements: Record<string, readonly string[]>;
+      }>
+    >;
+    deleteRole(
+      input: { organizationId?: string } & RoleRef,
+    ): Promise<CompatClientResult<{ success: true }>>;
+    listRoles(input?: {
+      query?: { organizationId?: string };
+    }): Promise<CompatClientResult<OrganizationRoleData[]>>;
+    getRole(input: {
+      query: { organizationId?: string } & RoleRef;
+    }): Promise<CompatClientResult<OrganizationRoleData>>;
+    updateRole(
+      input: {
+        organizationId?: string;
+        data: {
+          permission?: Record<string, readonly string[]>;
+          roleName?: string;
+          [field: string]: unknown;
+        };
+      } & RoleRef,
+    ): Promise<CompatClientResult<{ success: true; roleData: OrganizationRoleData }>>;
+    /** Core's check of the session in the organization. `allowCreatorAllPermissions` answers NOT_SUPPORTED (501). */
+    hasPermission(input: {
+      permissions?: Record<string, readonly string[]>;
+      permission?: Record<string, readonly string[]>;
+      organizationId?: string;
+      allowCreatorAllPermissions?: boolean;
+    }): Promise<CompatClientResult<{ error: null; success: boolean }>>;
+    /** Better Auth's client check over the roles of `organizationClient`. It only hides a control. */
+    checkRolePermission(input: {
+      role: string;
+      permissions?: Record<string, readonly string[]>;
+      permission?: Record<string, readonly string[]>;
+    }): boolean;
   };
   passkey: {
     addPasskey(input?: { name?: string }): Promise<CompatClientResult<ClientPasskey>>;

@@ -5,12 +5,19 @@ import type { BetterAuthTable } from "./names.js";
  * `nullAsEmpty`: core null is "" in the table (Better Auth's `user.name` is NOT NULL).
  * `base64Std`: base64url in core, standard base64 with padding in the table (Better Auth's passkey key).
  * `emptyAsNull`: "" in the table reads as null (Better Auth writes "" for no transports).
+ * `permission`: a statement set in core, JSON text with Better Auth's names in
+ * the table (`organizationRole.permission`, plan 12k). The read parses it and
+ * maps `apiKey` onto `apiToken`; a text that does not parse reads as the text,
+ * so core's shape rule refuses the row (spec 29 item 6, rule 7). The write
+ * maps `apiToken` back onto `apiKey`.
  */
-export type Codec = "nullAsEmpty" | "base64Std" | "emptyAsNull";
+export type Codec = "nullAsEmpty" | "base64Std" | "emptyAsNull" | "permission";
 
 export interface FieldMap {
   readonly column: string;
   readonly codec?: Codec;
+  /** A column the read takes when this one is null (Better Auth's nullable `organizationRole.updatedAt`). */
+  readonly orColumn?: string;
 }
 
 export interface Scope {
@@ -43,6 +50,8 @@ export interface AnyModelMap {
 }
 
 const as = (column: string, codec?: Codec): FieldMap => (codec ? { column, codec } : { column });
+/** `column`, read as `orColumn` while it is null. */
+const or = (column: string, orColumn: string): FieldMap => ({ column, orColumn });
 function same<K extends string>(...keys: K[]): Record<K, FieldMap> {
   return Object.fromEntries(keys.map((k) => [k, { column: k }])) as unknown as Record<K, FieldMap>;
 }
@@ -97,7 +106,7 @@ function notCredential(provider: string): string {
  * Plan 12f added `operatorAudit`. Plan 12k Task 1 adds its four models
  * (`organizationRole`, `team`, `teamMember`, `organizationToken`) with no
  * table yet. `UNMAPPED_MODELS` holds them, and the later 12k tasks map
- * each one.
+ * each one. Task 10 maps `organizationRole` onto Better Auth's own table.
  */
 export type MappedModel = Exclude<
   ModelName,
@@ -114,7 +123,6 @@ export type MappedModel = Exclude<
   | "oauthLogout"
   | "secondFactor"
   | "operatorAudit"
-  | "organizationRole"
   | "team"
   | "teamMember"
   | "organizationToken"
@@ -231,5 +239,19 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
     updateExtras: (data) =>
       data.acceptedAt === undefined ? {} : { status: data.acceptedAt ? "accepted" : "pending" },
     scope: { column: "taTokenHash", op: "notNull" },
+  },
+  // Better Auth's dynamicAccessControl table, in place (plan 12k Task 10).
+  // Better Auth has no rank, so migration 0010 adds taRank with the default 1.
+  // Better Auth leaves updatedAt null until the first update; core reads it
+  // as createdAt, so the compare of updateRole matches the value it read.
+  organizationRole: {
+    table: "organizationRole",
+    fields: {
+      ...same("id", "organizationId", "createdAt"),
+      name: as("role"),
+      rank: as("taRank"),
+      permissions: as("permission", "permission"),
+      updatedAt: or("updatedAt", "createdAt"),
+    },
   },
 };

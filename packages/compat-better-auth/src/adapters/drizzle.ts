@@ -2,8 +2,8 @@ import type { Sql } from "postgres";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { betterAuthSchemaStorage, type D1DatabaseLike } from "../storage/index.js";
 import {
-  BETTER_AUTH_TABLES,
   type BetterAuthTable,
+  MAPPED_TABLES,
   type NamingOptions,
   snake,
   TABLE_FIELDS,
@@ -37,7 +37,7 @@ export function namesFromDrizzle(
   let snakeVotes = 0;
   let camelVotes = 0;
   let pgSchema: string | undefined;
-  for (const t of BETTER_AUTH_TABLES) {
+  for (const t of MAPPED_TABLES) {
     const table = schema?.[t] as Record<symbol, unknown> | undefined;
     if (!table) {
       if (usePlural) tables[t] = `${t}s`;
@@ -88,7 +88,7 @@ const SQLITE_TIMESTAMP = "SQLiteTimestamp";
 /** `<model>.<field>` of each Drizzle SQLite column that stores a date as an integer. */
 function integerTimestampColumns(schema: Record<string, unknown> | undefined): string[] {
   const found: string[] = [];
-  for (const t of BETTER_AUTH_TABLES) {
+  for (const t of MAPPED_TABLES) {
     const table = schema?.[t] as Record<symbol, unknown> | undefined;
     const cols = table?.[COLUMNS] as Record<string, { columnType?: unknown }> | undefined;
     for (const [f, c] of Object.entries(cols ?? {})) {
