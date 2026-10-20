@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { can, effectiveOf } from "../src/access.js";
 import type { OrganizationsConfig } from "../src/config.js";
-import { needs, RULE_STATEMENTS, RULES, rankOf } from "../src/engine/ranks.js";
+import { deriveRoles, needs, RULE_STATEMENTS, RULES, rankOf } from "../src/engine/ranks.js";
 import { makeAuth } from "./helpers.js";
 
 type Rule = keyof typeof RULES;
@@ -32,6 +32,26 @@ describe("the default role table", () => {
   it("gives each default role the answer of plan 6 for each rule", () => {
     expect(RULE_NAMES).toHaveLength(10);
     expect(compare(["viewer", "member", "admin", "owner"], {})).toEqual([]);
+  });
+
+  it("gives each default role the core actions of spec 29 item 2", () => {
+    // Written by hand from spec 29 item 2: ac:read and member:read viewer,
+    // organization:delete owner, each other core action admin.
+    const viewer = { member: ["read"], ac: ["read"] };
+    const admin = {
+      organization: ["update"],
+      member: ["read", "create", "update", "delete"],
+      invitation: ["read", "create", "cancel"],
+      team: ["create", "update", "delete"],
+      ac: ["read", "create", "update", "delete"],
+      apiToken: ["read", "create", "update", "revoke"],
+    };
+    expect(deriveRoles({ viewer: 1, member: 2, admin: 3, owner: 4 })).toEqual({
+      viewer: { rank: 1, permissions: viewer },
+      member: { rank: 2, permissions: viewer },
+      admin: { rank: 3, permissions: admin },
+      owner: { rank: 4, permissions: { ...admin, organization: ["update", "delete"] } },
+    });
   });
 
   it("gives the same answer on consumerd's rank table", () => {
