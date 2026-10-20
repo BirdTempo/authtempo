@@ -25,10 +25,12 @@ const FS_MODULE = "node:fs";
  *    `metadata`, HTML for `html`, a redirect with `Location` for `redirect`.
  *    A redirect has the status of its kind: a 302, or the 303 that the kind
  *    names. A redirect that carries a code is a 302.
- * 4. A route that takes `clientSecretBasic` answers `invalid_client` as a
- *    401 with a Basic challenge, or as a 400 with none (plan 12e, ruling 19).
+ * 4. A route that takes `clientSecretBasic` answers `invalid_client` after
+ *    an `Authorization` header as a 401 with a Basic challenge. With no
+ *    header it answers a 400 with no challenge (plan 12e, ruling 19).
  * 5. A route that takes `dpopAccessToken` answers `invalid_dpop_proof` as a
- *    401 (plan 12e, ruling 31).
+ *    401 with a `DPoP error="invalid_dpop_proof"` challenge (plan 12e,
+ *    ruling 31; RFC 7235 section 3.1 asks a challenge of each 401).
  * An answer for a path of no route has the key `null` and the verdict `ok`.
  */
 vi.mock("../../src/http/router.js", async (importOriginal) => {
@@ -178,13 +180,28 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
       if (code === null) return { ...base, verdict: "ok" };
       return { ...base, verdict: codeVerdict(key as RouteKey, code, status, true) };
     }
+    const challenge = res.headers.get("www-authenticate");
     if (code === "invalid_client" && ENTRIES.get(key)?.auth.includes("clientSecretBasic")) {
-      const challenged = (res.headers.get("www-authenticate") ?? "").startsWith("Basic realm=");
-      if (status === OAUTH_ERRORS.invalid_client && !challenged)
-        return { ...base, verdict: "an invalid_client 401 carries no Basic challenge" };
-      if (status === INVALID_CLIENT_NO_HEADER && res.headers.has("www-authenticate"))
-        return { ...base, verdict: "an invalid_client 400 carries a challenge" };
+      // Rule 4: the request decides the status (RFC 6749 section 5.2).
+      if (request.headers.has("authorization")) {
+        if (status !== OAUTH_ERRORS.invalid_client)
+          return { ...base, verdict: `an invalid_client after a header answered ${status}` };
+        if (!(challenge ?? "").startsWith("Basic realm="))
+          return { ...base, verdict: "an invalid_client 401 carries no Basic challenge" };
+      } else {
+        if (status !== INVALID_CLIENT_NO_HEADER)
+          return { ...base, verdict: `an invalid_client with no header answered ${status}` };
+        if (challenge !== null)
+          return { ...base, verdict: "an invalid_client 400 carries a challenge" };
+      }
     }
+    // Rule 5: the 401 of a bad proof at a route of a bound token names its error in the DPoP challenge.
+    if (
+      code === "invalid_dpop_proof" &&
+      ENTRIES.get(key)?.auth.includes("dpopAccessToken") &&
+      !/(^|,\s*)DPoP error="invalid_dpop_proof"/.test(challenge ?? "")
+    )
+      return { ...base, verdict: "an invalid_dpop_proof 401 carries no DPoP error challenge" };
     if (code !== null)
       return { ...base, verdict: codeVerdict(key as RouteKey, code, status, false) };
     if (status >= 400) return { ...base, verdict: `a ${status} ${type} answer carries no code` };
