@@ -745,7 +745,7 @@ describe("organization tokens (plan 12k Task 8)", () => {
     expect((await narrow()).status).toBe(200);
   });
 
-  it("answers conflict after three lost spends, and spends nothing for it", async () => {
+  it("answers conflict after 20 lost spends, and spends nothing for it", async () => {
     const h = orgHandle();
     const ada = await signedIn(h, "ada@example.com");
     const org = await organization(h, ada.user, "acme");
@@ -755,7 +755,7 @@ describe("organization tokens (plan 12k Task 8)", () => {
         organizationId: org,
         name: "ci",
         permissions: {},
-        quota: { remaining: 10 },
+        quota: { remaining: 100 },
       }),
     );
     // Before each spend of this instance, another instance on the same storage spends first.
@@ -773,9 +773,10 @@ describe("organization tokens (plan 12k Task 8)", () => {
     });
     const res = await loser.handle(get("/auth/organizations/tokens/current", bearer(token)));
     expect(await answer(res)).toEqual({ status: 409, body: { error: "conflict" } });
-    expect(rivals).toBe(3);
+    // Each lost try saw a new count, so the spend tried 20 times (ruling 30 of plan 12k).
+    expect(rivals).toBe(20);
     const [row] = await h.storage.findMany("organizationToken", []);
-    expect(row?.remaining).toBe(7);
+    expect(row?.remaining).toBe(80);
   });
 
   it("sweeps expired organization tokens and counts them", async () => {
