@@ -134,6 +134,7 @@ describe("check-policy-pages", () => {
     );
     expect(failures(changed)).toEqual([
       'packages/core/package.json is at 0.0.0, so docs/versioning.md, section "The versions today", must state: Every package is private and at version `0.0.0`. No release exists, and the owner decides when the packages publish.',
+      'docs/versioning.md, section "The versions today", states "Every package is at version `0.0.0`.", which no source holds',
     ]);
   });
 
@@ -195,14 +196,15 @@ describe("check-policy-pages", () => {
     ]);
   });
 
-  it("holds the In 0.x column to the From 1.0.0 column", () => {
-    const input = withText(
+  it("holds each In 0.x cell to its class in spec 33 item 1.2", () => {
+    // A new error code is a feature, so a patch cell fails in both columns.
+    const patch = withText(
       "versioning",
       "| A new error code | A minor version | A minor version |",
-      "| A new error code | A patch version | A minor version |",
+      "| A new error code | A patch version | A patch version |",
     );
-    expect(failures(input)).toEqual([
-      'docs/versioning.md: the row "A new error code" gives "A patch version" in 0.x; from 1.0.0 it gives "A minor version", so in 0.x it must give "A minor version"',
+    expect(failures(patch)).toEqual([
+      'docs/versioning.md: the row "A new error code" is a feature, so its In 0.x cell must be "A minor version" (spec 33 item 1.2), not "A patch version"',
     ]);
     const major = withText(
       "versioning",
@@ -210,7 +212,37 @@ describe("check-policy-pages", () => {
       "| A major version | A major version |",
     );
     expect(failures(major)).toEqual([
-      'docs/versioning.md: the row "A change that breaks a caller: a removed export, a changed answer, a removed route" gives "A major version" in 0.x; from 1.0.0 it gives "A major version", so in 0.x it must give "A minor version, with a `Breaking:` line in its changeset"',
+      'docs/versioning.md: the row "A change that breaks a caller: a removed export, a changed answer, a removed route" is a break, so its In 0.x cell must be "A minor version, with a `Breaking:` line in its changeset" (spec 33 item 1.2), not "A major version"',
+    ]);
+    // The spec gives the bump of each class, so a new bump in the spec moves the cells.
+    const spec = withText("spec", "a feature is a minor, and", "a feature is a patch, and");
+    expect(failures(spec)).toEqual([
+      'docs/versioning.md, section "One version", does not state: In 0.x a break is a minor with a "Breaking:" line in its changeset, a feature is a patch, and a fix is a patch. (from spec 33 item 1.2)',
+      'docs/versioning.md, section "One version", states "In 0.x a break is a minor with a "Breaking:" line in its changeset, a feature is a minor, and a fix is a patch.", which no source holds',
+      'docs/versioning.md: the row "A new error code" is a feature, so its In 0.x cell must be "A patch version" (spec 33 item 1.2), not "A minor version"',
+      'docs/versioning.md: the row "A new route, a new config key, a new export" is a feature, so its In 0.x cell must be "A patch version" (spec 33 item 1.2), not "A minor version"',
+      'docs/versioning.md: the row "A new schema version" is a feature, so its In 0.x cell must be "A patch version, with its migration in each adapter" (spec 33 item 1.2), not "A minor version, with its migration in each adapter"',
+    ]);
+    const unread = withText("spec", "a fix is a patch.", "a fix is small.");
+    expect(failures(unread)).toContain(
+      "spec 33 item 1.2 does not give the bump of a break, a feature, and a fix",
+    );
+    // A row with no class, and a class row that the table lost.
+    const extra = withText(
+      "versioning",
+      "| A new error code |",
+      "| A new page | A minor version | A minor version |\n| A new error code |",
+    );
+    expect(failures(extra)).toEqual([
+      'docs/versioning.md: the row "A new page" has no class (break, feature, or fix) in check-policy-pages',
+    ]);
+    const lost = withText(
+      "versioning",
+      "| A new error code | A minor version | A minor version |\n",
+      "",
+    );
+    expect(failures(lost)).toEqual([
+      'docs/versioning.md: the rule table has no row "A new error code"',
     ]);
     const noColumn = withText(
       "versioning",
@@ -223,8 +255,37 @@ describe("check-policy-pages", () => {
     ]);
   });
 
+  it("holds The versions today and The policy to their one text", () => {
+    const date = withText(
+      "versioning",
+      "the owner decides when the packages publish.",
+      "the owner decides when the packages publish. The first release ships on 2026-11-01 with a 12-month support window.",
+    );
+    expect(failures(date)).toEqual([
+      'docs/versioning.md, section "The versions today", states "The first release ships on 2026-11-01 with a 12-month support window.", which no source holds',
+    ]);
+    const bounty = withText(
+      "securityPage",
+      "at the repository root.",
+      "at the repository root. The owner pays a bounty for each Critical fault.",
+    );
+    expect(failures(bounty)).toEqual([
+      'docs/reference/security-policy.md, section "The policy", states "The owner pays a bounty for each Critical fault.", which no source holds',
+    ]);
+    // Neither section takes a pointer sentence.
+    const pointer = withText(
+      "securityPage",
+      "at the repository root.",
+      "at the repository root. Read [Versioning policy](/docs/versioning/).",
+    );
+    expect(failures(pointer)).toEqual([
+      'docs/reference/security-policy.md, section "The policy", states "Read [Versioning policy](/docs/versioning/).", which no source holds',
+    ]);
+  });
+
   it("fails a missing link", () => {
     expect(failures(withText("securityPage", "](/security/)", "](/docs/)"))).toEqual([
+      'docs/reference/security-policy.md, section "The policy", states "The full policy is on the [security page](/docs/) of this site, and in [SECURITY.md](https://github.com/authtempo/authtempo/blob/main/SECURITY.md) at the repository root.", which no source holds',
       'docs/reference/security-policy.md, section "The policy", does not link /security/',
     ]);
     const other = withText(
@@ -233,6 +294,7 @@ describe("check-policy-pages", () => {
       "](https://github.com/someone/authtempo/blob/main/SECURITY.md)",
     );
     expect(failures(other)).toEqual([
+      'docs/reference/security-policy.md, section "The policy", states "The full policy is on the [security page](/security/) of this site, and in [SECURITY.md](https://github.com/someone/authtempo/blob/main/SECURITY.md) at the repository root.", which no source holds',
       'docs/reference/security-policy.md, section "The policy", does not link https://github.com/authtempo/authtempo/blob/main/SECURITY.md',
     ]);
     expect(

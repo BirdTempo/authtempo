@@ -134,13 +134,25 @@ const TIES: readonly Tie[] = [
   },
 ];
 
+/** A section that holds only its allowed sentences. Some sections also take a pointer sentence. */
+interface Held {
+  page: string;
+  section: string;
+  pointer: boolean;
+}
+
 /** The sections that hold only copies of a source, and a pointer sentence at most. */
-const HELD: readonly { page: string; section: string }[] = [
-  { page: VERSIONING, section: "One version" },
-  { page: VERSIONING, section: "The support window" },
-  { page: SECURITY_PAGE, section: "How to report" },
-  { page: SECURITY_PAGE, section: "The times" },
+const HELD: readonly Held[] = [
+  { page: VERSIONING, section: "One version", pointer: true },
+  { page: VERSIONING, section: "The support window", pointer: true },
+  { page: SECURITY_PAGE, section: "How to report", pointer: true },
+  { page: SECURITY_PAGE, section: "The times", pointer: true },
 ];
+
+/** The section of the security page that links the full policy. It holds the one link sentence only. */
+const POLICY_SECTION = "The policy";
+const policySentence = (url: string) =>
+  `The full policy is on the [security page](/security/) of this site, and in [SECURITY.md](${url}/blob/main/SECURITY.md) at the repository root.`;
 
 /** A sentence that only points at a page, such as "Read [Security policy](/docs/reference/security-policy/)." */
 const POINTER = /^Read \[[^\]]+\]\([^)\s]+\)\.$/;
@@ -159,8 +171,28 @@ const DOCS_TODAY =
   "The site shows the docs of the current main only, at `/docs/`. A later plan adds a docs tree for each earlier minor.";
 /** The fact of the one fixed Changesets group (spec 33 item 1.1). */
 const ONE_VERSION = "Every released package has the same version.";
-/** The 0.x cell of a change that is a major version from 1.0.0 (spec 33 item 1.2). */
-const BREAK_CELL = "A minor version, with a `Breaking:` line in its changeset";
+/** The three classes of a change in spec 33 item 1.2. */
+type ChangeClass = "break" | "feature" | "fix";
+
+/**
+ * The class of each row of the rule table, by its Change cell. The spec
+ * gives the bump of each class, so the check holds each In 0.x cell to the
+ * spec through the class. A schema version also needs a migration in each
+ * adapter (spec 33 item 1.5 and spec 6), so its cells add that text.
+ */
+const ROWS: Readonly<Record<string, { class: ChangeClass; with?: string }>> = {
+  "A change that breaks a caller: a removed export, a changed answer, a removed route": {
+    class: "break",
+  },
+  "A new error code": { class: "feature" },
+  "A new route, a new config key, a new export": { class: "feature" },
+  "A fix that changes no answer that a caller reads": { class: "fix" },
+  "A new schema version": { class: "feature", with: "with its migration in each adapter" },
+};
+
+/** The spec sentence that gives the bump of each class in 0.x. */
+const CLASS_SENTENCE =
+  /^In 0\.x a break is a (major|minor|patch) with a "Breaking:" line in its changeset, a feature is a (major|minor|patch), and a fix is a (major|minor|patch)\.$/;
 
 /** The `## ` sections of a Markdown text, each with its lines up to the next one. */
 function sectionsOf(text: string): Map<string, string[]> {
@@ -304,10 +336,17 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
         );
   }
 
+  // The sections that hold only their allowed sentences. Some join below,
+  // each while its state holds.
+  const held: Held[] = [...HELD, { page: SECURITY_PAGE, section: POLICY_SECTION, pointer: false }];
+  allow(SECURITY_PAGE, POLICY_SECTION, policySentence(input.repository.url));
+
   // The versions today: the section exists only while core is at 0.0.0.
   if (pages.has(VERSIONING)) {
     const today = section(VERSIONING, TODAY_SECTION);
     if (input.coreVersion === "0.0.0") {
+      held.push({ page: VERSIONING, section: TODAY_SECTION, pointer: false });
+      for (const s of sentencesOf([TODAY])) allow(VERSIONING, TODAY_SECTION, s);
       if (today === null || !sentencesOf(today).join(" ").includes(TODAY))
         failures.push(
           `${PATHS.core} is at 0.0.0, so ${VERSIONING}, section "${TODAY_SECTION}", must state: ${TODAY}`,
@@ -323,9 +362,8 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
   const versioned = input.docsFolders.filter((f) => /^v\d+\.\d+$/.test(f));
   const docs = section(VERSIONING, DOCS_SECTION);
   const statesToday = docs !== null && sentencesOf(docs).join(" ").includes(DOCS_TODAY);
-  const held = [...HELD];
   if (pages.has(VERSIONING) && versioned.length === 0) {
-    held.push({ page: VERSIONING, section: DOCS_SECTION });
+    held.push({ page: VERSIONING, section: DOCS_SECTION, pointer: true });
     for (const s of sentencesOf([DOCS_TODAY])) allow(VERSIONING, DOCS_SECTION, s);
     if (!statesToday)
       failures.push(
@@ -341,13 +379,25 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
     if (lines === null) continue;
     const ok = allowed.get(`${h.page}#${h.section}`) ?? new Set<string>();
     for (const s of sentencesOf(lines))
-      if (!ok.has(s) && !POINTER.test(s))
+      if (!ok.has(s) && !(h.pointer && POINTER.test(s)))
         failures.push(`${h.page}, section "${h.section}", states "${s}", which no source holds`);
   }
 
-  // The rule table: the 0.x cell equals the cell from 1.0.0, and a major
-  // version becomes a minor with a "Breaking:" line (spec 33 item 1.2).
+  // The rule table: each row has a class of spec 33 item 1.2, and its In 0.x
+  // cell is the bump that the spec gives that class.
   let rows = 0;
+  const classLine = specSentences.find((x) => x.startsWith("In 0.x a break"));
+  const bump = classLine === undefined ? null : CLASS_SENTENCE.exec(classLine);
+  if (specLine !== undefined && bump === null)
+    failures.push("spec 33 item 1.2 does not give the bump of a break, a feature, and a fix");
+  const zeroCell = (row: { class: ChangeClass; with?: string }) => {
+    const [b, f, x] = bump?.slice(1) ?? [];
+    const to = { break: b, feature: f, fix: x }[row.class];
+    const parts = [`A ${to} version`];
+    if (row.class === "break") parts.push("with a `Breaking:` line in its changeset");
+    if (row.with !== undefined) parts.push(row.with);
+    return parts.join(", ");
+  };
   const table = (section(VERSIONING, "The rules") ?? []).filter((l) => l.trim().startsWith("|"));
   const header = table[0] === undefined ? [] : cellsOf(table[0]);
   const zero = header.indexOf("In 0.x");
@@ -356,17 +406,29 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
     if (zero < 0) failures.push(`${VERSIONING}: the rule table has no column "In 0.x"`);
     if (stable < 0) failures.push(`${VERSIONING}: the rule table has no column "From 1.0.0"`);
   }
-  if (zero >= 0 && stable >= 0)
+  if (zero >= 0 && stable >= 0) {
+    const seen = new Set<string>();
     for (const line of table.slice(2)) {
       rows++;
       const cells = cellsOf(line);
-      const [change, got, from] = [cells[0] ?? "", cells[zero] ?? "", cells[stable] ?? ""];
-      const want = from === "A major version" ? BREAK_CELL : from;
-      if (got !== want)
+      const [change, got] = [cells[0] ?? "", cells[zero] ?? ""];
+      seen.add(change);
+      const row = ROWS[change];
+      if (row === undefined) {
         failures.push(
-          `${VERSIONING}: the row "${change}" gives "${got}" in 0.x; from 1.0.0 it gives "${from}", so in 0.x it must give "${want}"`,
+          `${VERSIONING}: the row "${change}" has no class (break, feature, or fix) in check-policy-pages`,
+        );
+        continue;
+      }
+      const want = zeroCell(row);
+      if (bump !== null && got !== want)
+        failures.push(
+          `${VERSIONING}: the row "${change}" is a ${row.class}, so its In 0.x cell must be "${want}" (spec 33 item 1.2), not "${got}"`,
         );
     }
+    for (const change of Object.keys(ROWS))
+      if (!seen.has(change)) failures.push(`${VERSIONING}: the rule table has no row "${change}"`);
+  }
 
   // The links: each page points at the source that holds the full facts.
   let links = 0;
