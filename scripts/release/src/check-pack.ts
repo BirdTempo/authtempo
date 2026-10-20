@@ -37,6 +37,9 @@ export interface PackInput {
   deprecations: unknown[];
 }
 
+/** The version of every package on main. No release carries it (spec 33 item 11). */
+const UNPUBLISHED_VERSION = "0.0.0";
+
 /** The package whose manifest carries the upgrade facts (spec 33 item 10.5). */
 const CORE = "@authtempo/core";
 
@@ -102,6 +105,10 @@ export function checkPack(input: PackInput): Report {
         failures.push(`${key} holds ${dep} as ${range}, which npm cannot resolve`);
 
   if ("private" in manifest) failures.push("the manifest holds private");
+  // The scaffold reads 0.0.0 as unpublished, so a CLI at 0.0.0 on npm tells
+  // each app to run a clone. This is ruling 13 of the plan 12j lane.
+  if (manifest.version === UNPUBLISHED_VERSION)
+    failures.push(`the version is ${UNPUBLISHED_VERSION}, which the scaffold reads as unpublished`);
   if (manifest.version !== input.groupVersion)
     failures.push(
       `the version is ${manifest.version}, not the group version ${input.groupVersion}`,

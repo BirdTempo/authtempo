@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +54,27 @@ const withManifest = (edit: (m: Manifest) => void) => {
   edit(manifest);
   return failuresOf({ manifest });
 };
+
+/** A copy of fixtures/pack/root in a new temporary folder, after `edit`. */
+function copyRoot(edit: (dir: string) => void = () => {}): string {
+  const dir = mkdtempSync(join(tmpdir(), "authtempo-check-pack-root-"));
+  cpSync(fixture("root"), dir, { recursive: true });
+  edit(dir);
+  return dir;
+}
+
+/** Runs pnpm pack in `dir` and gives the path of the one new tarball in `out`. */
+function pack(dir: string, out: string): string {
+  const before = new Set(readdirSync(out));
+  execFileSync("pnpm", ["pack", "--pack-destination", out], {
+    cwd: dir,
+    env: { ...process.env, NO_COLOR: "1" },
+    stdio: "pipe",
+  });
+  const made = readdirSync(out).filter((f) => !before.has(f));
+  if (made.length !== 1) throw new Error(`pnpm pack wrote ${made.length} tarballs`);
+  return join(out, made[0] as string);
+}
 
 describe("check-pack", () => {
   it("passes a release tarball", () => {
@@ -168,6 +189,15 @@ describe("check-pack", () => {
   it("fails another version than the group's", () => {
     expect(failuresOf({ groupVersion: "0.2.0" })).toEqual([
       "the version is 0.1.0, not the group version 0.2.0",
+    ]);
+  });
+
+  it("fails a release at 0.0.0", () => {
+    // The scaffold reads 0.0.0 as unpublished (ruling 13 of the plan 12j lane).
+    const manifest = structuredClone(MANIFEST);
+    manifest.version = "0.0.0";
+    expect(failuresOf({ manifest, groupVersion: "0.0.0" })).toEqual([
+      "the version is 0.0.0, which the scaffold reads as unpublished",
     ]);
   });
 
@@ -301,6 +331,22 @@ describe("check-pack", () => {
       expect(checkTarballs(fixture("root"), [path, path]).failures).toEqual([
         `${path}: a second tarball of @authtempo/fixture`,
       ]);
+      // Probe A of the Task 5 review: the tree and its package at 0.0.0.
+      const zero = copyRoot((dir) => {
+        const file = join(dir, "packages/fixture/package.json");
+        writeFileSync(
+          file,
+          readFileSync(file, "utf8").replace('"version": "0.1.0"', '"version": "0.0.0"'),
+        );
+      });
+      try {
+        const packed = pack(join(zero, "packages/fixture"), out);
+        expect(checkTarballs(zero, [packed]).failures).toEqual([
+          "@authtempo/fixture@0.0.0: the version is 0.0.0, which the scaffold reads as unpublished",
+        ]);
+      } finally {
+        rmSync(zero, { recursive: true, force: true });
+      }
       expect(checkTarballs(fixture("root"), []).failures).toEqual([
         "read 0 tarballs",
         "read 0 files",
