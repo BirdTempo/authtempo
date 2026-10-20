@@ -245,6 +245,25 @@ describe("check-deprecations", () => {
     expect(run("0.1.0", { tree, sources }).failures).toEqual([
       "packages/next/src/index.ts:1 says for one release, and no marker of the register holds the line",
     ]);
+    // The marker text "for one release" of import-alias.ts holds no words of another file.
+    const lower = {
+      ...tree,
+      "packages/next/src/index.ts":
+        "// The old name counts too, for one release, as core reads it.",
+    };
+    expect(run("0.1.0", { tree: lower, sources }).failures).toEqual([
+      "packages/next/src/index.ts:1 says for one release, and no marker of the register holds the line",
+    ]);
+    // An empty or blank marker text holds no words. The marker check reports it too.
+    const blank = withEntry(1, (e) => {
+      e.markers.push({ file: "packages/next/src/index.ts", text: "" });
+      e.markers.push({ file: "packages/next/src/index.ts", text: "  " });
+    });
+    expect(run("0.1.0", { entries: blank, tree: lower, sources }).failures).toEqual([
+      "tempo-session-read: the marker packages/next/src/index.ts has an empty text",
+      "tempo-session-read: the marker packages/next/src/index.ts has an empty text",
+      "packages/next/src/index.ts:1 says for one release, and no marker of the register holds the line",
+    ]);
     // The line of import-alias.ts holds its marker text, so the register names it.
     expect(run("0.1.0", { sources: Object.keys(LIVE_TREE) }).failures).toEqual([]);
     expect(run("0.1.0", { sources: Object.keys(LIVE_TREE) }).notes).toEqual([
