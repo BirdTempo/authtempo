@@ -76,7 +76,7 @@ const byName = (a: TeamSummary, b: TeamSummary) =>
  * Locks one team row in the caller's transaction, and answers false when no
  * team has the id in that organization. The update writes `organizationId`
  * with its own value, so no field changes. On Postgres the update holds the
- * row lock until the commit: a team delete, or a second write of the team
+ * row lock until the commit. A team delete, or a second write of the team
  * rows, waits for it and then counts the committed rows. Read committed
  * gives no other guard (ruling 26). D1 transactions are not isolated (spec
  * 8.6), so there the lock holds nothing.
@@ -233,14 +233,16 @@ export async function updateTeam(
 
 /**
  * Deletes a team. Needs `team:delete`. With `keepLastTeam`, the last team of
- * the organization answers `last_team`. The cascade fires no team hook: the
- * team rows go, each session that acts in the team loses its active team,
- * and each pending invitation loses the team id.
+ * the organization answers `last_team`. The cascade fires no team hook. The
+ * team rows go, and each session that acts in the team loses its active
+ * team. Each pending invitation loses the team id.
  *
- * Cost: in one transaction, the count of at most two teams, three writes,
- * one read of the pending invitations of the organization, and one update
- * per invitation that names the team. `pendingInvitationsPerOrganization`
- * bounds the read when it is set.
+ * Cost: in one transaction, with `keepLastTeam` the lock of the organization
+ * row and the count of at most two teams. Then three writes, one read of
+ * every pending invitation of the organization, and one update per
+ * invitation that names the team. The read also takes the expired pending
+ * rows. So `pendingInvitationsPerOrganization`, which counts only the live
+ * rows, does not bound it.
  */
 export async function deleteTeam(
   config: ResolvedConfig,
@@ -335,8 +337,8 @@ export async function listTeams(
  * The members of a team, by address. Needs `member:read`.
  *
  * Cost: the team read, the standing reads, one read of the team rows, and
- * one user read for each 50 members (`findManyIn`), never one read per
- * member. `membersPerTeam` bounds the rows when it is set.
+ * one user read for each 50 members (`findManyIn`). It never reads one user
+ * per member. `membersPerTeam` bounds the rows when it is set.
  */
 export async function listTeamMembers(
   config: ResolvedConfig,

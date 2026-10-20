@@ -207,7 +207,7 @@ export interface OrganizationHooks {
   // The ten team points (plan 12k): Better Auth 1.7.2's names (`organization/types.d.mts`, read 2026-10-14).
   // A cascade fires none: a member removal, a team delete, and an organization delete drop team rows
   // with no team hook. The default team of a create and the team rows of an accept are part of that
-  // flow's own write, and fire no team hook either.
+  // flow's own write. They fire no team hook either.
   /** `user` is the caller. `team` holds the id that core minted; no row exists yet. */
   beforeCreateTeam?(e: {
     organization: OrganizationSummary;
