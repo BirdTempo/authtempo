@@ -263,7 +263,9 @@ export function parsePatch(
     return refuse("invalidSyntax", "schemas must be the PatchOp URN alone");
   }
   const list = body.Operations;
-  if (!Array.isArray(list) || list.length === 0 || list.length > PATCH_OPS_MAX) {
+  // A body with no list of operations does not fit the PatchOp schema.
+  if (!Array.isArray(list)) return refuse("invalidSyntax", "Operations must be a list");
+  if (list.length === 0 || list.length > PATCH_OPS_MAX) {
     return refuse("invalidValue", `Operations must hold 1 to ${PATCH_OPS_MAX} operations`);
   }
   const ops: PatchOp[] = [];

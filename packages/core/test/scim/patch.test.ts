@@ -270,10 +270,11 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
         "Operations that is not a list",
         { schemas: [URN], Operations: { op: "add" } },
         "User",
-        "invalidValue",
+        "invalidSyntax",
         400,
       ],
-      ["no Operations", { schemas: [URN] }, "User", "invalidValue", 400],
+      ["no Operations", { schemas: [URN] }, "User", "invalidSyntax", 400],
+      ["a null Operations", { schemas: [URN], Operations: null }, "Group", "invalidSyntax", 400],
       [
         "more than 100 operations from the no-path form",
         body(...Array.from({ length: 99 }, () => ({ op: "replace", path: "title", value: "t" })), {
