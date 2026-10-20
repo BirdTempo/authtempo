@@ -110,7 +110,16 @@ export async function checkOsv(input: OsvInput): Promise<Report> {
   const failures: string[] = [];
   const packages = [...new Map(input.closure.map((p) => [`${p.name}@${p.version}`, p])).values()];
 
-  // Each exemption holds a reason and a date range, used or not, so the file stays true.
+  const notes: string[] = [];
+  const url = input.url ?? OSV_BATCH_URL;
+  // A fake server can answer "no advisory" for each query. The summary line
+  // does not show the URL, so this note tells the reader of the log.
+  if (url !== OSV_BATCH_URL)
+    notes.push(`OSV_URL is ${url}, not ${OSV_BATCH_URL}: this run did not ask OSV`);
+
+  // Each exemption holds a reason, a date range, and a package of the closure,
+  // used or not, so the file stays true. A read date after today or after the
+  // expiry would stretch the 90 days.
   const live = new Set<string>();
   for (const e of input.exempt) {
     const at = `${e.id}: the exemption for ${e.name}@${e.version}`;
@@ -119,8 +128,18 @@ export async function checkOsv(input: OsvInput): Promise<Report> {
       failures.push(`${at} has no reason`);
       ok = false;
     }
+    if (!packages.some((p) => p.name === e.name && p.version === e.version)) {
+      failures.push(`${at} matches no package of the runtime closure, so it is stale`);
+      ok = false;
+    }
     if (Number.isNaN(days(e.read)) || Number.isNaN(days(e.expires))) {
       failures.push(`${at} has no read date or expiry in the form YYYY-MM-DD`);
+      ok = false;
+    } else if (days(e.read) > days(input.today)) {
+      failures.push(`${at} has the read date ${e.read}, after today ${input.today}`);
+      ok = false;
+    } else if (days(e.read) > days(e.expires)) {
+      failures.push(`${at} has the read date ${e.read}, after its expiry ${e.expires}`);
       ok = false;
     } else if (days(e.expires) < days(input.today)) {
       failures.push(`${at} expired on ${e.expires}`);
@@ -165,7 +184,7 @@ export async function checkOsv(input: OsvInput): Promise<Report> {
       name: "check-osv",
       counts: { packages: packages.length, advisories, exempt },
       failures,
-      notes: [],
+      notes,
     },
     ["packages"],
   );
@@ -181,7 +200,8 @@ if (import.meta.main) {
     query: globalThis.fetch,
     today: new Date().toISOString().slice(0, 10),
     // OSV_URL exists only for the break test of plan 12j Task 7: an address with
-    // no server proves that no answer is a failure. A release run never sets it.
+    // no server proves that no answer is a failure. A release run never sets it,
+    // and the check prints a note when it is set to another URL.
     ...(process.env.OSV_URL === undefined ? {} : { url: process.env.OSV_URL }),
   });
   console.log(summaryLine(report));

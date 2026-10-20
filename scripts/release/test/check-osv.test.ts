@@ -92,7 +92,8 @@ describe("check-osv", () => {
     const { query } = answering(ONE_ADVISORY);
     const expired = await checkOsv({
       closure: CLOSURE,
-      exempt: [{ ...EXEMPTION, expires: "2026-10-19" }],
+      // A read date after the expiry fails first, so this read date comes before it.
+      exempt: [{ ...EXEMPTION, read: "2026-10-01", expires: "2026-10-19" }],
       query,
       today: "2026-10-20",
     });
@@ -118,6 +119,72 @@ describe("check-osv", () => {
       "GHSA-35jh-r3h4-6jhm: the exemption for lodash@4.17.20 expires on 2027-01-19, more than 90 days after its read date 2026-10-20",
       "GHSA-35jh-r3h4-6jhm: an open advisory for lodash@4.17.20 with no live exemption",
     ]);
+  });
+
+  it("fails an exemption whose read date is after today or after its expiry", async () => {
+    const { query } = answering(ONE_ADVISORY);
+    // The two cases of the Task 7 review, on 2026-10-21: each one passed before ruling 33.
+    const future = await checkOsv({
+      closure: CLOSURE,
+      exempt: [
+        { ...EXEMPTION, read: "2027-06-01", expires: "2027-08-15" },
+        { ...EXEMPTION, read: "2099-01-01", expires: "2026-12-31" },
+      ],
+      query,
+      today: "2026-10-21",
+    });
+    expect(future.failures).toEqual([
+      "GHSA-35jh-r3h4-6jhm: the exemption for lodash@4.17.20 has the read date 2027-06-01, after today 2026-10-21",
+      "GHSA-35jh-r3h4-6jhm: the exemption for lodash@4.17.20 has the read date 2099-01-01, after today 2026-10-21",
+      "GHSA-35jh-r3h4-6jhm: an open advisory for lodash@4.17.20 with no live exemption",
+    ]);
+    const reversed = await checkOsv({
+      closure: CLOSURE,
+      exempt: [{ ...EXEMPTION, read: "2026-10-21", expires: "2026-10-20" }],
+      query,
+      today: "2026-10-21",
+    });
+    expect(reversed.failures).toEqual([
+      "GHSA-35jh-r3h4-6jhm: the exemption for lodash@4.17.20 has the read date 2026-10-21, after its expiry 2026-10-20",
+      "GHSA-35jh-r3h4-6jhm: an open advisory for lodash@4.17.20 with no live exemption",
+    ]);
+  });
+
+  it("fails an exemption that matches no package of the closure as stale", async () => {
+    const { query } = noAdvisory();
+    const r = await checkOsv({
+      closure: CLOSURE,
+      exempt: [{ ...EXEMPTION, name: "left-pad", version: "1.3.0" }],
+      query,
+      today: "2026-10-20",
+    });
+    expect(r.failures).toEqual([
+      "GHSA-35jh-r3h4-6jhm: the exemption for left-pad@1.3.0 matches no package of the runtime closure, so it is stale",
+    ]);
+  });
+
+  it("notes a URL other than the OSV batch query", async () => {
+    const { calls, query } = noAdvisory();
+    const r = await checkOsv({
+      closure: CLOSURE,
+      exempt: [],
+      query,
+      today: "2026-10-20",
+      url: "http://127.0.0.1:1/v1/querybatch",
+    });
+    expect(r.failures).toEqual([]);
+    expect(r.notes).toEqual([
+      "OSV_URL is http://127.0.0.1:1/v1/querybatch, not https://api.osv.dev/v1/querybatch: this run did not ask OSV",
+    ]);
+    expect(calls.map((c) => c.url)).toEqual(["http://127.0.0.1:1/v1/querybatch"]);
+    const same = await checkOsv({
+      closure: CLOSURE,
+      exempt: [],
+      query,
+      today: "2026-10-20",
+      url: "https://api.osv.dev/v1/querybatch",
+    });
+    expect(same.notes).toEqual([]);
   });
 
   it("fails an exemption with no reason", async () => {
