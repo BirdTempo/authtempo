@@ -237,6 +237,7 @@ describe("the first enable on Postgres (plan 12c)", () => {
       // Both enables hold the user row first (plan 12f Task 9), so they also run in turn. A
       // TOTP enable after the email enable answers 400 `totp_not_enabled`: the factor keeps
       // the codes of the email method, so the codes of the setup are stale.
+      // A retry gets the same 400; the old list had no 400, because the two never ran in turn.
       expect([200, 409]).toContain(email.status);
       expect([200, 400, 409]).toContain(totp.status);
       if (totp.status === 400)
