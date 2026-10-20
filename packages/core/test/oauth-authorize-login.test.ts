@@ -275,7 +275,7 @@ describe("prompt=login, max_age, and auth_time (plan 12e, OIDC Core 3.1.2.1)", (
     expect(await codeRows(h)).toEqual([]);
   });
 
-  it("writes auth_time as the later of createdAt and freshAt", async () => {
+  it("writes auth_time as freshAt, else createdAt (ruling 41)", async () => {
     const h = oauthHandle();
     const s = await setup(h);
     const signIn = Math.floor(h.clock.now().getTime() / 1000);
