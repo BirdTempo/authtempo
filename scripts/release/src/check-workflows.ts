@@ -1,0 +1,502 @@
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  CI_FILE,
+  ENVIRONMENT,
+  NODE_FLOOR,
+  TAG_PREFIX,
+  WORKFLOW_FILE,
+} from "./lib/release-facts.ts";
+import { type Report, reportLines, requireCounts } from "./lib/report.ts";
+
+/** One value of the YAML subset of the two workflows, with the line where it starts. */
+export type YamlNode =
+  | { kind: "map"; line: number; entries: Record<string, YamlNode> }
+  | { kind: "list"; line: number; items: YamlNode[] }
+  | { kind: "scalar"; line: number; value: string | null; comment: string | null };
+
+/** A form outside the YAML subset. The check refuses the file. */
+export class YamlForm extends Error {}
+
+const KEY = /^([A-Za-z0-9_-]+):(?: (.*))?$/;
+const isItem = (text: string) => text === "-" || text.startsWith("- ");
+const indentOf = (line: string) => line.length - line.trimStart().length;
+const isBlank = (line: string) => line.trim() === "" || line.trimStart().startsWith("#");
+
+/**
+ * Reads the YAML subset that the two workflows use: block mappings with plain
+ * keys, block lists, "|" blocks, plain and quoted scalars with a comment, and
+ * the flow forms {} and ["a", "b"]. Every other form throws, so a form that
+ * this reader does not know never passes unread.
+ */
+export function readYaml(text: string): YamlNode {
+  const lines = text.split("\n");
+  if (lines[lines.length - 1] === "") lines.pop();
+  lines.forEach((line, i) => {
+    if (line.includes("\t")) throw new YamlForm(`line ${i + 1}: a tab`);
+    if (/^(---|\.\.\.)\s*$/.test(line)) throw new YamlForm(`line ${i + 1}: a document marker`);
+  });
+  let i = 0;
+  const skip = () => {
+    while (i < lines.length && isBlank(lines[i] ?? "")) i++;
+  };
+  const current = () => lines[i] ?? "";
+
+  function scalar(rest: string, line: number): YamlNode {
+    if (/^[&*!]/.test(rest)) throw new YamlForm(`line ${line}: an anchor, an alias, or a tag`);
+    const tail = (after: string): string | null => {
+      const t = after.trim();
+      if (t === "") return null;
+      if (!t.startsWith("#")) throw new YamlForm(`line ${line}: text after a closed value`);
+      return t.slice(1).trim();
+    };
+    const quote = rest.charAt(0);
+    if (quote === '"' || quote === "'") {
+      const end = rest.indexOf(quote, 1);
+      if (end === -1) throw new YamlForm(`line ${line}: a quoted value with no end`);
+      const value = rest.slice(1, end);
+      if (value.includes("\\")) throw new YamlForm(`line ${line}: an escape in a quoted value`);
+      return { kind: "scalar", line, value, comment: tail(rest.slice(end + 1)) };
+    }
+    if (rest.startsWith("{")) {
+      if (!/^\{\}(\s|$)/.test(rest))
+        throw new YamlForm(`line ${line}: a flow mapping other than {}`);
+      tail(rest.slice(2));
+      return { kind: "map", line, entries: {} };
+    }
+    if (rest.startsWith("[")) {
+      const end = rest.indexOf("]");
+      if (end === -1) throw new YamlForm(`line ${line}: a flow list with no end`);
+      const inner = rest.slice(1, end).trim();
+      if (/[[\]{}]/.test(inner)) throw new YamlForm(`line ${line}: a flow form inside a flow list`);
+      tail(rest.slice(end + 1));
+      const items = inner === "" ? [] : inner.split(",").map((part) => scalar(part.trim(), line));
+      return { kind: "list", line, items };
+    }
+    if (/^[>|]/.test(rest)) throw new YamlForm(`line ${line}: a block scalar other than |`);
+    const at = rest.indexOf(" #");
+    const value = (at === -1 ? rest : rest.slice(0, at)).trim();
+    if (value.includes(": ")) throw new YamlForm(`line ${line}: a mapping on one line`);
+    return { kind: "scalar", line, value, comment: at === -1 ? null : rest.slice(at + 2).trim() };
+  }
+
+  /** The value after `key:` with nothing on its line: a deeper block, or null. */
+  function deeper(indent: number, line: number): YamlNode {
+    skip();
+    if (i < lines.length && indentOf(current()) > indent) return block(indentOf(current()));
+    return { kind: "scalar", line, value: null, comment: null };
+  }
+
+  /** A "|" block: each deeper line, without its common indent, with one line end. */
+  function literal(indent: number): string {
+    const body: string[] = [];
+    while (i < lines.length && (current().trim() === "" || indentOf(current()) > indent)) {
+      body.push(current());
+      i++;
+    }
+    while (body.length > 0 && (body[body.length - 1] ?? "").trim() === "") body.pop();
+    const cut = Math.min(...body.filter((l) => l.trim() !== "").map(indentOf));
+    return body.map((l) => l.slice(cut)).join("\n") + (body.length > 0 ? "\n" : "");
+  }
+
+  function map(indent: number): YamlNode {
+    const node: YamlNode = { kind: "map", line: i + 1, entries: {} };
+    for (skip(); i < lines.length; skip()) {
+      const at = indentOf(current());
+      if (at < indent) break;
+      const line = i + 1;
+      if (at > indent) throw new YamlForm(`line ${line}: an indent that no key opens`);
+      const text = current().slice(at);
+      if (isItem(text)) throw new YamlForm(`line ${line}: a list item beside a key`);
+      const m = KEY.exec(text);
+      if (m === null) throw new YamlForm(`line ${line}: a line that is not key: value`);
+      const key = m[1] ?? "";
+      if (key === "__proto__") throw new YamlForm(`line ${line}: the key __proto__`);
+      if (Object.hasOwn(node.entries, key))
+        throw new YamlForm(`line ${line}: the key ${key} again`);
+      const rest = (m[2] ?? "").trim();
+      i++;
+      if (rest === "") node.entries[key] = deeper(indent, line);
+      else if (rest === "|")
+        node.entries[key] = { kind: "scalar", line, value: literal(indent), comment: null };
+      else node.entries[key] = scalar(rest, line);
+    }
+    return node;
+  }
+
+  function list(indent: number): YamlNode {
+    const node: YamlNode = { kind: "list", line: i + 1, items: [] };
+    for (skip(); i < lines.length; skip()) {
+      const at = indentOf(current());
+      if (at < indent) break;
+      const line = i + 1;
+      if (at > indent) throw new YamlForm(`line ${line}: an indent that no item opens`);
+      const text = current().slice(at);
+      if (!isItem(text)) throw new YamlForm(`line ${line}: a key beside a list item`);
+      const rest = text.slice(2).trim();
+      if (rest === "") {
+        i++;
+        node.items.push(deeper(indent, line));
+      } else if (KEY.test(rest)) {
+        // The first key of a mapping item sits on the line of its "-".
+        lines[i] = `${" ".repeat(indent + 2)}${rest}`;
+        node.items.push(map(indent + 2));
+      } else {
+        i++;
+        node.items.push(scalar(rest, line));
+      }
+    }
+    return node;
+  }
+
+  function block(indent: number): YamlNode {
+    skip();
+    return isItem(current().slice(indent)) ? list(indent) : map(indent);
+  }
+
+  skip();
+  if (i >= lines.length) throw new YamlForm("line 1: an empty file");
+  if (indentOf(current()) !== 0) throw new YamlForm(`line ${i + 1}: an indent at the top`);
+  const root = block(0);
+  skip();
+  if (i < lines.length) throw new YamlForm(`line ${i + 1}: a line outside the top mapping`);
+  return root;
+}
+
+/** A JavaScript form of a YAML value: null, a string, a list, or a mapping. */
+type Shape = null | string | Shape[] | { [key: string]: Shape };
+
+/** True when `node` is exactly `shape`: the same keys, the same items, the same values. */
+function same(node: YamlNode | undefined, shape: Shape): boolean {
+  if (node === undefined) return false;
+  if (shape === null || typeof shape === "string")
+    return node.kind === "scalar" && node.value === shape;
+  if (Array.isArray(shape))
+    return (
+      node.kind === "list" &&
+      node.items.length === shape.length &&
+      shape.every((s, k) => same(node.items[k], s))
+    );
+  if (node.kind !== "map") return false;
+  const keys = Object.keys(shape);
+  return (
+    Object.keys(node.entries).length === keys.length &&
+    keys.every((k) => same(node.entries[k], shape[k] ?? null))
+  );
+}
+
+const entriesOf = (node: YamlNode | undefined): Record<string, YamlNode> =>
+  node?.kind === "map" ? node.entries : {};
+const scalarOf = (node: YamlNode | undefined): string | null | undefined =>
+  node?.kind === "scalar" ? node.value : undefined;
+
+/** The release copy of release.yml, where prepare, the build, and the pack run. */
+// biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+const COPY = "${{ runner.temp }}/release-copy";
+
+interface Step {
+  /** The action, owner/repo, of a uses step. */
+  uses?: string;
+  /** The text of a run step, without its last line end. */
+  run?: string;
+  /** The name of a run step in a failure, when the text has more than one line. */
+  label?: string;
+  /** A run step in the release copy. */
+  copy?: true;
+  /** A checkout with the full history (fetch-depth: 0). */
+  history?: true;
+}
+
+const checkout = (history: boolean): Step =>
+  history ? { uses: "actions/checkout", history: true } : { uses: "actions/checkout" };
+const PNPM: Step = { uses: "pnpm/action-setup" };
+const NODE: Step = { uses: "actions/setup-node" };
+
+/**
+ * The steps of each job, in order. A step that is gone, new, or moved fails,
+ * so a change of a workflow step changes this table in the same commit. The
+ * comment above each step in the workflow says what breaks without it.
+ */
+const STEPS: Record<string, Record<string, Step[]>> = {
+  [CI_FILE]: {
+    check: [
+      checkout(true),
+      PNPM,
+      NODE,
+      { run: "docker compose up -d --wait" },
+      { run: "pnpm install --frozen-lockfile" },
+      { run: "pnpm release:check --no-osv --no-dry-run --base origin/main" },
+    ],
+  },
+  [WORKFLOW_FILE]: {
+    check: [
+      checkout(true),
+      PNPM,
+      NODE,
+      { run: 'node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"' },
+      { run: "docker compose up -d --wait" },
+      { run: "pnpm install --frozen-lockfile" },
+      // A tag checkout has no local main (ruling 16 of plan 12j).
+      { run: "pnpm release:check --base origin/main" },
+      {
+        label: "the release copy",
+        run: [
+          'mkdir "$RUNNER_TEMP/release-copy"',
+          'git archive HEAD | tar -x -C "$RUNNER_TEMP/release-copy"',
+          'touch "$RUNNER_TEMP/release-copy/.release-copy"',
+        ].join("\n"),
+      },
+      { run: "pnpm install --frozen-lockfile --offline", copy: true },
+      { run: "node scripts/release/src/prepare.ts", copy: true },
+      { run: "pnpm turbo run build --force", copy: true },
+      {
+        label: "the pack of each released package",
+        run: [
+          "mkdir out",
+          "for name in $(jq -r '.fixed[0][]' .changeset/config.json); do",
+          '  pnpm --filter "$name" pack --pack-destination "$PWD/out"',
+          "done",
+        ].join("\n"),
+        copy: true,
+      },
+      { run: "node scripts/release/src/check-pack.ts out/*.tgz", copy: true },
+      { run: "cd out && sha256sum -- *.tgz > SHA256SUMS", copy: true },
+      { uses: "actions/upload-artifact" },
+    ],
+    publish: [
+      checkout(false),
+      NODE,
+      { uses: "actions/download-artifact" },
+      { run: "node scripts/release/src/publish.ts out" },
+    ],
+  },
+};
+
+/** The jobs of each file, and the one job that may mint an OIDC token. */
+const PUBLISH_JOB = "publish";
+
+const PIN = /^([\w.-]+\/[\w.-]+)@([0-9a-f]{40})$/;
+const VERSION = /^\d+\.\d+\.\d+$/;
+const PUBLISH_COMMAND = /\b(?:npm|pnpm|yarn|changeset)\s+publish\b/;
+const TOKEN = /\bsecrets\.|NODE_AUTH_TOKEN|NPM_TOKEN|_authToken/;
+
+/** -1, 0, or 1 for two versions of the form x.y.z. */
+function compare(a: string, b: string): number {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let k = 0; k < 3; k++) {
+    const d = (pa[k] ?? 0) - (pb[k] ?? 0);
+    if (d !== 0) return Math.sign(d);
+  }
+  return 0;
+}
+
+/** The rules of the `with` keys of one uses step. */
+function checkWith(action: string, step: Step | undefined, w: Record<string, YamlNode>): string[] {
+  const out: string[] = [];
+  if (action === "actions/checkout") {
+    if (scalarOf(w["persist-credentials"]) !== "false")
+      out.push("the checkout keeps its token in the git config");
+    if (step?.history === true && scalarOf(w["fetch-depth"]) !== "0")
+      out.push("the checkout has no full history (fetch-depth: 0)");
+  } else if (action === "actions/setup-node") {
+    const v = scalarOf(w["node-version"]) ?? "";
+    if (!VERSION.test(v) || compare(v, NODE_FLOOR) < 0)
+      out.push(`node-version ${v} is not a full version at or above ${NODE_FLOOR}`);
+    if (scalarOf(w["package-manager-cache"]) !== "false" || w.cache !== undefined)
+      out.push("the setup-node cache is on; a cache is never evidence");
+    if (w["registry-url"] !== undefined)
+      out.push("setup-node names registry-url, which writes an .npmrc for a token");
+  } else if (action === "pnpm/action-setup") {
+    if (w.version !== undefined)
+      out.push(
+        "pnpm/action-setup names a version; the packageManager field of package.json is the one source",
+      );
+    if (w.cache !== undefined && scalarOf(w.cache) !== "false")
+      out.push("the pnpm store cache is on; a cache is never evidence");
+  } else if (action === "actions/upload-artifact") {
+    if (scalarOf(w.name) !== "tarballs" || scalarOf(w["if-no-files-found"]) !== "error")
+      out.push("the upload is not the artifact tarballs with if-no-files-found: error");
+  } else if (action === "actions/download-artifact") {
+    if (scalarOf(w.name) !== "tarballs" || scalarOf(w.path) !== "out")
+      out.push("the download is not the artifact tarballs in out");
+  }
+  return out;
+}
+
+function checkJob(
+  file: string,
+  name: string,
+  job: YamlNode,
+  counts: { uses: number; pinned: number },
+  fail: (message: string) => void,
+): void {
+  const at = `jobs.${name}`;
+  const e = entriesOf(job);
+  const runsOn = e["runs-on"];
+  if (runsOn?.kind !== "scalar") fail(`${at}: runs-on is not one label`);
+  else if (!/^ubuntu-\d+\.\d+$/.test(runsOn.value ?? ""))
+    fail(`${at}: runs-on ${runsOn.value} is not an ubuntu-<version> runner of GitHub`);
+
+  const publishJob = file === WORKFLOW_FILE && name === PUBLISH_JOB;
+  if (publishJob) {
+    if (!same(e.permissions, { "id-token": "write", contents: "read" }))
+      fail(`${at}: the permissions are not { id-token: write, contents: read }`);
+    if (!same(e.environment, ENVIRONMENT)) fail(`${at}: the environment is not ${ENVIRONMENT}`);
+    if (!same(e.needs, "check")) fail(`${at}: needs is not check`);
+  } else if (e.permissions !== undefined) {
+    if (e.permissions.kind !== "map") fail(`${at}: the permissions are not a mapping`);
+    for (const [key, value] of Object.entries(entriesOf(e.permissions))) {
+      if (key === "id-token")
+        fail(`${at}: id-token: write; only jobs.${PUBLISH_JOB} may mint a token`);
+      else if (scalarOf(value) !== "read")
+        fail(`${at}: the permission ${key}: ${scalarOf(value)}; a job here only reads`);
+    }
+  }
+
+  const steps = e.steps?.kind === "list" ? e.steps.items : [];
+  const rule = STEPS[file]?.[name] ?? [];
+  steps.forEach((node, k) => {
+    const s = entriesOf(node);
+    const where = `${at} step ${k + 1}`;
+    const uses = scalarOf(s.uses);
+    if (typeof uses === "string") {
+      counts.uses++;
+      const pin = PIN.exec(uses);
+      if (pin === null) fail(`${where}: ${uses} is not pinned to a 40-character commit SHA`);
+      else {
+        counts.pinned++;
+        const comment = s.uses?.kind === "scalar" ? s.uses.comment : null;
+        if (!/^v\d+\.\d+\.\d+$/.test(comment ?? ""))
+          fail(`${where}: ${uses} has no version comment # v<major>.<minor>.<patch>`);
+      }
+      const action = uses.split("@")[0] ?? "";
+      for (const message of checkWith(action, rule[k], entriesOf(s.with)))
+        fail(`${where}: ${message}`);
+    }
+    const run = scalarOf(s.run);
+    if (typeof run === "string") {
+      if (run.includes("${{"))
+        fail(`${where}: an expression in a run line; pass the value through env`);
+      if (PUBLISH_COMMAND.test(run))
+        fail(`${where}: a publish command outside node scripts/release/src/publish.ts`);
+    }
+  });
+
+  if (steps.length !== rule.length) {
+    fail(`${at}: ${steps.length} steps, not the ${rule.length} steps of the rule`);
+    return;
+  }
+  steps.forEach((node, k) => {
+    const want = rule[k];
+    if (want === undefined) return;
+    const s = entriesOf(node);
+    const label = want.uses ?? want.label ?? want.run ?? "";
+    const uses = scalarOf(s.uses);
+    const run = scalarOf(s.run);
+    const ok =
+      want.uses !== undefined
+        ? typeof uses === "string" && uses.split("@")[0] === want.uses && run === undefined
+        : typeof run === "string" && run.replace(/\n$/, "") === want.run && uses === undefined;
+    if (!ok) {
+      fail(`${at}: step ${k + 1} is not ${label}`);
+      return;
+    }
+    const dir = scalarOf(s["working-directory"]);
+    if (want.copy === true && dir !== COPY) fail(`${at}: step ${k + 1} is not in the release copy`);
+    if (want.copy !== true && s["working-directory"] !== undefined)
+      fail(`${at}: step ${k + 1} has a working-directory, and it must have none`);
+  });
+}
+
+function checkFile(
+  file: string,
+  text: string,
+  counts: { uses: number; pinned: number },
+  fail: (message: string) => void,
+): void {
+  text.split("\n").forEach((line, k) => {
+    if (!line.trimStart().startsWith("#") && TOKEN.test(line))
+      fail(`line ${k + 1}: a token or a secret; trusted publishing uses no token`);
+  });
+  let root: YamlNode;
+  try {
+    root = readYaml(text);
+  } catch (error) {
+    if (!(error instanceof YamlForm)) throw error;
+    fail(error.message);
+    return;
+  }
+  const top = entriesOf(root);
+
+  const on = top.on;
+  for (const trigger of ["pull_request_target", "workflow_run"])
+    if (entriesOf(on)[trigger] !== undefined)
+      fail(`the trigger ${trigger} runs with the secrets of the repository`);
+  if (file === CI_FILE) {
+    if (!same(on, { pull_request: null, push: { branches: ["main"] } }))
+      fail('on is not { pull_request, push: { branches: ["main"] } }');
+  } else if (!same(on, { push: { tags: [`${TAG_PREFIX}*`] } }))
+    fail(`on is not { push: { tags: ["${TAG_PREFIX}*"] } }`);
+
+  const permissions = top.permissions;
+  if (file === CI_FILE) {
+    if (!same(permissions, { contents: "read" }))
+      fail("the top-level permissions are not { contents: read }");
+  } else if (!same(permissions, {})) fail("the top-level permissions are not {}");
+  if (entriesOf(permissions)["id-token"] !== undefined)
+    fail(`id-token: write at the top level; only jobs.${PUBLISH_JOB} may mint a token`);
+
+  const jobs = entriesOf(top.jobs);
+  const want = Object.keys(STEPS[file] ?? {});
+  if (Object.keys(jobs).join(",") !== want.join(",")) fail(`the jobs are not ${want.join(", ")}`);
+  for (const [name, job] of Object.entries(jobs)) checkJob(file, name, job, counts, fail);
+}
+
+/**
+ * The rules of spec 33 item 5 over the two workflows: each action pinned to a
+ * commit SHA with its version, the triggers, the least permissions with
+ * id-token: write only in the job publish, the environment, GitHub-hosted
+ * runners, no expression in a run line, no token, and each step in its order.
+ */
+export function checkWorkflows(input: { files: { name: string; text: string }[] }): Report {
+  const failures: string[] = [];
+  const counts = { files: 0, uses: 0, pinned: 0 };
+  const names = input.files.map((f) => f.name);
+  for (const file of [CI_FILE, WORKFLOW_FILE])
+    if (!names.includes(file)) failures.push(`${file}: the file is missing`);
+  for (const { name, text } of input.files) {
+    counts.files++;
+    const fail = (message: string) => failures.push(`${name}: ${message}`);
+    if (name !== CI_FILE && name !== WORKFLOW_FILE) {
+      fail(`another workflow; a workflow needs its rules in check-workflows`);
+      continue;
+    }
+    checkFile(name, text, counts, fail);
+  }
+  return requireCounts({ name: "check-workflows", counts, failures, notes: [] }, ["files"]);
+}
+
+/** Each file of .github/workflows/ under `root`. */
+export function readInput(root: string): { files: { name: string; text: string }[] } {
+  const dir = join(root, ".github/workflows");
+  if (!existsSync(dir)) return { files: [] };
+  return {
+    files: readdirSync(dir)
+      .sort()
+      .map((name) => ({ name, text: readFileSync(join(dir, name), "utf8") })),
+  };
+}
+
+/** Runs the check on the checkout at `root`, and returns the lines to print and the exit code. */
+export function entry(root: string): { lines: string[]; code: number } {
+  const report = checkWorkflows(readInput(root));
+  return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
+}
+
+if (import.meta.main) {
+  const { lines, code } = entry(fileURLToPath(new URL("../../../", import.meta.url)));
+  for (const line of lines) console.log(line);
+  process.exit(code);
+}
