@@ -521,11 +521,11 @@ CREATE INDEX ix_ta_operator_audit__actor_id ON ta_operator_audit (actor_id);`,
  * fields `bannedAt`, `banReason`, and `banUntil` to `user`, `actorId` to
  * `session`, and the model `operatorAudit`. Better Auth's `user` gets
  * `taBannedAt`, `taBanReason`, and `taBanUntil`, and its `session` gets
- * `taActorId` (deviation 11 of plan 12f): the admin plugin's own columns
+ * `taActorId` (deviation 11 of plan 12f). The admin plugin's own columns
  * exist only in some apps, and its `banned` is a boolean. Each column is
  * nullable with no default and no fill. `operatorAudit` is core's own table
  * (`CORE_TABLE_MODELS`), with the text of core 0012. The columns take the
- * app's naming, so the text depends on `names`: the D1 files in this package
+ * app's naming, so the text depends on `names`. The D1 files in this package
  * are the text of the default naming, as for 0007. Append-only.
  */
 export function compatMigration0009Sql(dialect: "postgres" | "sqlite", n: Names): string {
