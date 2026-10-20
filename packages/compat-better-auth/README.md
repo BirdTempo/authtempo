@@ -148,7 +148,7 @@ and drops it. The errors that a refused file gives:
 - `duplicate column name: issuer`: the `d1-before-1.7` file on 1.7 tables. Use the `d1` file.
 - `table ta_limit already exists`: the compat migration ran already.
 - `duplicate column name: activeTeamId`: the shipped 0010 on tables that hold the teams columns already. Use an own 0010 file: the shipped file without its two `ADD COLUMN` lines of `session` and `invitation`.
-- `UNIQUE constraint failed: organizationRole.organizationId, organizationRole.role` (Postgres: `could not create unique index "ux_organization_role__organization_id__role"`): two role rows of one name in one organization. Better Auth checks the name before a create but has no unique key. Find them with `SELECT "organizationId", role, count(*) FROM "organizationRole" GROUP BY "organizationId", role HAVING count(*) > 1`, delete or rename one of each pair, and run the file again.
+- `UNIQUE constraint failed: organizationRole.organizationId, organizationRole.role` (Postgres: `could not create unique index "ux_organization_role__organization_id__role"`): two role rows of one name in one organization. Better Auth checks the name before a create but has no unique key. Find them with `SELECT "organizationId", role, count(*) FROM "organizationRole" GROUP BY "organizationId", role HAVING count(*) > 1`. Delete or rename one row of each pair, and run the file again.
 - `CHECK constraint failed: tempo_auth_compat_every_better_auth_date_must_be_text`: a Better Auth date column holds a number (a Drizzle `integer({ mode: "timestamp" })` schema) or text that is not a date. authtempo on D1 reads dates as ISO 8601 text only.
 
 Dates are ISO 8601 text and booleans are 1 and 0, as Better Auth's Kysely
@@ -767,10 +767,10 @@ The `authtempo` option takes no operator secret, so the CLI's
 `create-admin` and `users` commands do not reach this app.
 ## Access control and roles
 
-Since plan 12k (Task 10, spec 29 item 18), `createAccessControl`, `role`,
-and Better Auth's default statements and roles come from
+Since plan 12k (Task 10, spec 29 item 18), the package has
 `better-auth/plugins/access` and `better-auth/plugins/organization/access`,
-with Better Auth 1.7.2's shapes. `role().authorize(request, connector?)`
+with Better Auth 1.7.2's shapes. They give `createAccessControl`, `role`, and
+Better Auth's default statements and roles. `role().authorize(request, connector?)`
 keeps Better Auth's AND and OR and its answer texts. It only hides a control:
 the server check is core's.
 
@@ -785,19 +785,20 @@ The server maps the options onto core's organizations:
 
 The roles of an organization stay in place in Better Auth's `organizationRole`
 table. Migration 0010 creates the table with Better Auth's own SQL when it is
-absent, adds `taRank` (integer, NOT NULL, default 1), and adds the unique key
-on (`organizationId`, `role`). `permission` stays Better Auth's JSON text:
-the storage parses it and maps `apiKey` onto `apiToken`. It adds the list
-reads of a static role in memory: `member: ["read"]`, and `invitation: ["read"]`
-when the row holds `invitation: ["create"]`. A write removes these reads and
-writes Better Auth's names back. So the text keeps Better Auth's form, and an
-update that changes nothing writes the same text, byte for byte. A row whose text does not parse, or whose permissions name an
-unknown resource or action, grants nothing, and core logs `authtempo: role
-row invalid <id>`. A row of Better Auth reads with rank 1 until an owner
+absent. It adds `taRank` (integer, NOT NULL, default 1) and the unique key on
+(`organizationId`, `role`). `permission` stays Better Auth's JSON text: the
+storage parses it and maps `apiKey` onto `apiToken`. It adds the list reads of
+a static role in memory: `member: ["read"]`, and `invitation: ["read"]` when
+the row holds `invitation: ["create"]`. A write removes these reads and writes
+Better Auth's names back. So the text keeps Better Auth's form, and an update
+that changes nothing writes the same text, byte for byte. A row whose text
+does not parse grants nothing, and so does a row whose permissions name an
+unknown resource or action. Core logs `authtempo: role row invalid <id>` for
+each. A row of Better Auth reads with rank 1 until an owner
 changes it, and its null `updatedAt` reads as its `createdAt`.
 
 A row named as a static role (a role of `roles`, or of the defaults) is never
-read: the static role wins (core's role rule 1). Better Auth let such a row add
+read. The static role wins (core's role rule 1). Better Auth let such a row add
 permissions to the static role. Find these rows before the cutover:
 
 ```sql
@@ -1042,7 +1043,7 @@ consumer-i (small edits):
 - The invite dialog posts to `/api/auth/organization/invite-member` by hand. Call `authClient.organization.inviteMember` instead.
 - Add the `passkey` table. Migration 0001 adds and fills `account.issuer` on Postgres (consumer-i's tables are from before Better Auth 1.7).
 
-consumerc (follow-ups first): `hooks` (the leave guard of `leave.ts` moves into `organizationHooks.beforeRemoveMember`, which core runs on a leave); `beforeCreateOrganization` writes the studio with `organization.id` and returns nothing, because a `{ data }` that changes the id stops the write (on Postgres with `max: 1`, on a second connection; see "Hooks"); `authtempo.roleRanks` for its five roles (its own RANKS ranks viewer 0, and core takes 1 or more), since `ac`, `roles`, and dynamic access control map (plan 12k); the import of `better-auth/db`; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts` (or `databaseHooks.session.create.after` and core's `afterEnd`); the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
+consumerc (follow-ups first): `hooks`, `beforeCreateOrganization`, `authtempo.roleRanks`, the import of `better-auth/db`, the Apple config, the session-end paths, the `getSchema()` test, and `advanced.ipAddress`. The leave guard of `leave.ts` moves into `organizationHooks.beforeRemoveMember`, which core runs on a leave. `beforeCreateOrganization` writes the studio with `organization.id` and returns nothing. A `{ data }` that changes the id stops the write (on Postgres with `max: 1`, on a second connection; see "Hooks"). `ac`, `roles`, and dynamic access control map since plan 12k, so `authtempo.roleRanks` ranks its five roles. Its own RANKS ranks viewer 0, and core takes 1 or more. The Apple config is `teamId`, `keyId`, `privateKey`. The session-end paths in `session-end.ts` move to `databaseHooks.session.create.after` and core's `afterEnd`. Set `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `hooks`, `plugins[expo]`, `plugins[organization].roles.admin`, `plugins[organization].roles.member`, `plugins[organization].roles.operator`, `plugins[organization].roles.owner`, `plugins[organization].roles.viewer`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
 consumerd (follow-ups first): the list after the refusals.

@@ -710,8 +710,8 @@ describe("migration 0010 (plan 12k)", () => {
     db.exec(
       `INSERT INTO "session" (id, expiresAt, token, createdAt, updatedAt, userId, activeTeamId) VALUES ('s1', '2026-11-01T00:00:00.000Z', 't1', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'u1', 'team-1')`,
     );
-    // The app's own 0010, as the compat README tells it to write (plan 12k Task 10): the
-    // shipped file without the two lines that add the teams columns.
+    // The app's own 0010, as the compat README tells it to write (plan 12k Task 10).
+    // It is the shipped file without the two lines that add the teams columns.
     const teamsLines = [
       `ALTER TABLE "session" ADD COLUMN "activeTeamId" TEXT;`,
       `ALTER TABLE "invitation" ADD COLUMN "teamId" TEXT;`,

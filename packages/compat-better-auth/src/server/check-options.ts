@@ -894,11 +894,11 @@ export const DEFAULT_ROLE_RANKS: Readonly<Record<string, number>> = {
 };
 
 /**
- * The checks of the access control map that read two options: each role of
- * `roles` has a rank in `authtempo.roleRanks`, each rank names a role, the
- * table names owner (core's creator role), and each role's statements are
- * known to `ac` (spec 29 items 2 and 18). A check that the walk refused
- * already does not run again.
+ * The checks of the access control map that read two options (spec 29 items
+ * 2 and 18). Each role of `roles` has a rank in `authtempo.roleRanks`, and
+ * each rank names a role. The table names owner, core's creator role. Each
+ * role's statements are known to `ac`. With no `roles`, a rank table is
+ * refused. A check that the walk refused already does not run again.
  */
 function roleChecks(options: BetterAuthOptions, out: OptionCheck): void {
   const org = pluginOf(options, "organization")?.options;

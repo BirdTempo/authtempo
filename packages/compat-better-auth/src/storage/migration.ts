@@ -581,9 +581,9 @@ export const MIGRATION_0010_NAME = "0010_compat_schema_v13";
  * `organizationRole` stays in place (Task 10): Better Auth's table of its
  * dynamicAccessControl. When it is absent, the migration creates it with
  * Better Auth 1.7.2's own DDL (test/fixtures, generated 2026-10-21). Then it
- * adds `taRank` (NOT NULL, default 1, so a row that Better Auth writes later
- * has a rank) and the unique key on (organizationId, role) that core's role
- * rule 1 needs. The unique index fails on a table with two rows of one name
+ * adds `taRank` and the unique key on (organizationId, role) that core's role
+ * rule 1 needs. `taRank` is NOT NULL with the default 1, so a row that Better
+ * Auth writes later has a rank. The unique index fails on a table with two rows of one name
  * in one organization: the README gives the query that finds them.
  *
  * The apiToken fields and the models team, teamMember, and organizationToken
