@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../../config.js";
 import { sha256Hex } from "../../primitives/crypto.js";
 import { newId } from "../../primitives/ids.js";
+import type { VerificationRow } from "../../schema.js";
 import type { Meter } from "../../storage/meter.js";
 import type { StorageAdapter, Where } from "../../storage/port.js";
 import type { SessionEndReason } from "../hooks.js";
@@ -159,34 +160,51 @@ export async function hasPendingEnd(tx: StorageAdapter, userId: string): Promise
 /** The pending-end rows of one sweep, oldest first. */
 export const PENDING_END_PAGE = 5;
 
-/** The least calls of one pending-end row: the session read, the lock, a link read, a delete, and the row delete. */
-const PENDING_ROW_LEAST = 5;
+/**
+ * The least calls of the page of one pending-end row: the session read,
+ * the lock, a link read, a delete, and the row delete. The sweep keeps
+ * them from the outbox while a row waits (ruling 50 of plan 12f).
+ */
+export const PENDING_PAGE_RESERVE = 5;
 
 /**
- * The sweep step of the pending-end rows (ruling 44 of plan 12f), inside
- * `limit` calls of `meter`. One read takes the oldest rows. For each row,
- * one transaction ends a page of the user's sessions from before
- * `data.before` (`endSessionPage`, with the locks by id), and deletes the
- * row when no such session stays. `session.afterEnd` fires after the
- * commit, with the reason of the row. A row that does not fit waits for
- * the next sweep. The answer is the count of ended sessions.
+ * The read of the sweep step of the pending-end rows (ruling 44 of plan
+ * 12f): the oldest rows, in 1 call of `meter`. It reads nothing when the
+ * read and one page do not fit `limit`.
  */
-export async function sweepPendingEnds(
-  config: ResolvedConfig,
+export async function readPendingEnds(
+  storage: StorageAdapter,
   meter: Meter,
   limit: number,
-): Promise<number> {
-  const { storage } = config;
-  if (meter.used + 1 + PENDING_ROW_LEAST > limit) return 0;
+): Promise<VerificationRow[]> {
+  if (meter.used + 1 + PENDING_PAGE_RESERVE > limit) return [];
   const pending = await storage.findMany(
     "verification",
     [{ field: "purpose", op: "eq", value: "session-end" }],
     { sort: { field: "id", dir: "asc" }, limit: PENDING_END_PAGE },
   );
   meter.step(1);
+  return pending;
+}
+
+/**
+ * The work of the sweep step of the pending-end rows, inside `limit` calls
+ * of `meter`. For each row, one transaction ends a page of the user's
+ * sessions from before `data.before` (`endSessionPage`, with the locks by
+ * id), and deletes the row when no such session stays. `session.afterEnd`
+ * fires after the commit, with the reason of the row. A row that does not
+ * fit waits for the next sweep. The answer is the count of ended sessions.
+ */
+export async function endPendingRows(
+  config: ResolvedConfig,
+  pending: readonly VerificationRow[],
+  meter: Meter,
+  limit: number,
+): Promise<number> {
+  const { storage } = config;
   let n = 0;
   for (const row of pending) {
-    if (meter.used + PENDING_ROW_LEAST > limit) break;
+    if (meter.used + PENDING_PAGE_RESERVE > limit) break;
     const before = new Date(String(row.data?.before));
     const reason: PendingEndReason = row.data?.reason === "operator" ? "operator" : "banned";
     const where: Where<"session">[] = [

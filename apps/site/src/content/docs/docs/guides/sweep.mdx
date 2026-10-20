@@ -39,7 +39,7 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `verificationConsumed` | A spent verification row one day after its spend. |
 | `invitations` | Invitations that are accepted or expired. |
 | `sessions` | Sessions past their expiry. |
-| `pendingSessions` | Sessions that a ban or a revoke of the platform role left for the sweep, past the calls of the act. Each gets `session.afterEnd`. Until the sweep ends it, every door refuses the session of a banned user, and every operator check refuses a former operator. |
+| `pendingSessions` | Sessions that a ban or a revoke of the platform role left for the sweep, past the calls of the act. Each gets `session.afterEnd`. The sweep reads their rows before the idle clients, and the outbox leaves the calls of one page for them. Until the sweep ends it, every door refuses the session of a banned user, and every operator check refuses a former operator. |
 | `apiTokens` | API tokens past their expiry. A token with no expiry stays. |
 | `trustedDevices` | Trusted devices past their expiry. |
 | `totpSetups` | Second factor setups that no enable confirmed within 15 minutes. |
@@ -59,7 +59,7 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 - The sweep fires no hook but one: `session.afterEnd` for each pending session. A replayed token answers `invalid_token` after the sweep, because its row is gone.
 - The two back-channel steps run near the end: `oauthSessionLinks`, then `oauthLogouts`. The pending sessions come last, in the calls that stay. One sweep reads at most 250 links, in 5 pages of 50, and goes round all links.
 - The whole sweep fits 50 calls: the queries and the posts of the messages. D1 Free allows 50 queries in one run (D1 limits page updated 21 April 2026). Workers Free allows 50 subrequests in one run (Workers limits page updated 12 October 2026). Both pages were read 2026-10-21. Each step stops before a call that does not fit, and the next sweep goes on. A posted message always has room for its delete, so no message goes out twice.
-- So one sweep sends about 6 messages, or makes about 17 messages from links. A test on D1 turned 90 links into messages and sent them all in 20 sweeps or fewer. To send them sooner, run the sweep more often, such as every 5 minutes.
+- So one sweep sends about 6 messages, or makes about 16 messages from links. A test on D1 turned 90 links into messages and sent them all in 21 sweeps or fewer. To send them sooner, run the sweep more often, such as every 5 minutes.
 - An operator act sends no message in its call: the end of sessions, the ban, and the revoke of the platform role. The sweep sends their messages.
 
 ## If it fails

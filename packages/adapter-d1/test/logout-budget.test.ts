@@ -314,12 +314,14 @@ describe("the logouts of the operator acts and the sweep on D1 with a cap of 50 
       if ((await rows("ta_oauth_session_client")) + (await rows("ta_oauth_logout")) === 0) break;
     }
     // Every sweep fits 50 calls with its posts: 47 at the most in the runs of 2026-10-21. While
-    // links stay, the link step makes 17 rows a sweep; then each sweep sends 5 or 6 rows.
+    // links stay, the link step makes 16 rows a sweep; then each sweep sends 5 or 6 rows. The
+    // read of the pending-end rows (ruling 50 of plan 12f) takes 1 call: it was 17 before.
     for (const s of sweeps) expect(s.queries + s.posts).toBeLessThanOrEqual(50);
-    expect(sweeps.slice(0, 5).map((s) => s.links)).toEqual([17, 17, 17, 17, 17]);
-    // All 90 rows are sent and deleted within 20 sweeps: 20 hours with an hourly cron. The
-    // order of links with one time can differ by run, so a run can take 19.
-    expect(sweeps.length).toBeLessThanOrEqual(20);
+    expect(sweeps.slice(0, 5).map((s) => s.links)).toEqual([16, 16, 16, 16, 16]);
+    // All 90 rows are sent and deleted within 21 sweeps: 21 hours with an hourly cron. The
+    // order of links with one time can differ by run, so a run can take fewer. The bound was
+    // 20 before the read of the pending-end rows (ruling 50 of plan 12f): a run of 2026-10-21 took 21.
+    expect(sweeps.length).toBeLessThanOrEqual(21);
     // Each link gave one post: no row went out twice.
     const sent = posts.map((p) => `${p.aud}:${p.sid}`);
     expect(sent).toHaveLength(90);

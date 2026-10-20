@@ -1,10 +1,11 @@
 import type { ResolvedConfig } from "../config.js";
 import { RETIRED_KEY_MS } from "../primitives/jwk.js";
+import type { VerificationRow } from "../schema.js";
 import { type Meter, meterOf } from "../storage/meter.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { deliverDueLogouts } from "./oauth-logout.js";
 import { writeLogoutPage } from "./oauth-outbox.js";
-import { sweepPendingEnds } from "./operator/access-end.js";
+import { endPendingRows, PENDING_PAGE_RESERVE, readPendingEnds } from "./operator/access-end.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
 export interface SweepResult {
@@ -319,6 +320,15 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   // A limiter on the database sends its delete outside the storage counter.
   if (config.limiter.sweep) meter.add(1);
   const limits = (await config.limiter.sweep?.(now)) ?? 0;
+  // The pending-end rows of a ban or a revoke are read here, before the
+  // idle clients: the read takes its 1 call from the clients and the links,
+  // not from the outbox. While a row waits, the outbox leaves the calls of
+  // one page for it (ruling 50 of plan 12f), so a backlog cannot hold it.
+  const pending: VerificationRow[] = [];
+  await softStep(
+    "pending end",
+    readPendingEnds(storage, meter, SWEEP_CALL_BUDGET).then((rows) => pending.push(...rows)),
+  );
   // After the refresh tokens, so a client whose last token just expired can go.
   // After the four single-statement steps too: the client step may use the
   // calls up to its limit, and the link step must still get `LINK_SHARE`.
@@ -338,15 +348,18 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   );
   const oauthLogouts = await softStep(
     "outbox",
-    deliverDueLogouts(config, meter, SWEEP_CALL_BUDGET),
+    deliverDueLogouts(
+      config,
+      meter,
+      SWEEP_CALL_BUDGET - (pending.length > 0 ? PENDING_PAGE_RESERVE : 0),
+    ),
   );
   // Last, in the calls that stay. Every door already refuses such a
   // session: `bannedFor` for a ban, and the live role read of each operator
-  // check for a revoke. So a logout, which reaches another party, comes
-  // first. The step reads nothing when its least work does not fit.
+  // check for a revoke. So a logout, which reaches another party, comes first.
   const pendingSessions = await softStep(
     "pending end",
-    sweepPendingEnds(config, meter, SWEEP_CALL_BUDGET),
+    endPendingRows(config, pending, meter, SWEEP_CALL_BUDGET),
   );
   return {
     verificationExpired,

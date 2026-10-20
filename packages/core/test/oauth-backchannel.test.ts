@@ -8,6 +8,7 @@ import { publicKeySet } from "../src/engine/jwt.js";
 import { createClient } from "../src/engine/oauth-client-store.js";
 import { DEVICE_GRANT, fetchCimd } from "../src/engine/oauth-clients.js";
 import { deliverLogouts, linkIdToken } from "../src/engine/oauth-logout.js";
+import { banUser } from "../src/engine/operator/ban.js";
 import { changePassword, requestPasswordReset, resetPassword } from "../src/engine/password.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { revokeOtherSessions, revokeSession } from "../src/engine/session-list.js";
@@ -77,7 +78,7 @@ interface Call {
  * each request and answers the status of `status` for its URL (default 200).
  * No test reaches a network.
  */
-function world(opts: { noFetch?: boolean; cimd?: boolean } = {}) {
+function world(opts: { noFetch?: boolean; cimd?: boolean; extra?: Partial<AuthConfig> } = {}) {
   const calls: Call[] = [];
   const status = new Map<string, number>();
   /** A whole answer for one URL, in place of the status. */
@@ -105,7 +106,7 @@ function world(opts: { noFetch?: boolean; cimd?: boolean } = {}) {
     device: {},
     ...(opts.noFetch ? {} : { fetch: fetchFn as typeof fetch }),
   };
-  const auth = totpAuth({ oauth });
+  const auth = totpAuth({ oauth, ...opts.extra });
   storage = auth.storage;
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   // A second instance of the same app, on the same storage and clock.
@@ -1099,6 +1100,72 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     return count;
   }
 
+  it("ends a page of a pending-end row beside an outbox over the budget, inside 50 calls (ruling 50 of plan 12f)", async () => {
+    const ended: string[] = [];
+    const w = world({
+      extra: {
+        organizations: {
+          platformRole: "operator",
+          platformOrganization: "platform-co",
+          ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+        },
+        operator: { users: true },
+        hooks: { session: { afterEnd: ({ session }) => void ended.push(session.id) } },
+      },
+    });
+    const { actor } = await twoSessions(w);
+    const uris = [1, 2, 3, 4, 5].map((k) => `${BC}/${k}`);
+    const clients: string[] = [];
+    for (const uri of uris) {
+      clients.push(await bcClient(w, uri));
+      w.status.set(uri, 500);
+    }
+    // 200 outbox rows that fail and are due again: more than the outbox can send in one sweep.
+    for (let i = 0; i < 200; i++) {
+      const s = await createSession(w.auth.config, {
+        userId: actor.user.id,
+        ip: null,
+        userAgent: null,
+      });
+      await linkIdToken(w.auth.config, {
+        sessionId: s.session.id,
+        clientId: clients[i % 5] ?? "",
+        userId: actor.user.id,
+        sid: s.session.id,
+      });
+      await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, s.token) }));
+    }
+    expect(await outbox(w)).toHaveLength(200);
+    // A ban of a user with 60 sessions and a hook leaves sessions with a pending-end row.
+    const bob = await verifiedSession(w.auth, "bob@example.com");
+    for (let i = 0; i < 59; i++)
+      await createSession(w.auth.config, { userId: bob.user.id, ip: null, userAgent: null });
+    const banned = await banUser(w.auth.config, {
+      actor: { kind: "app", name: "support-tool" },
+      userId: bob.user.id,
+      reason: "Abuse case 4711",
+      ip: null,
+      userAgent: null,
+    });
+    if (!banned.ok) throw new Error(banned.code);
+    const left = (
+      await w.auth.storage.findMany("session", [{ field: "userId", op: "eq", value: bob.user.id }])
+    ).length;
+    expect(left).toBeGreaterThan(0);
+    ended.length = 0;
+    // One day on: each failed row is due again.
+    w.auth.clock.advance(24 * 60 * MINUTE);
+    const count = countCalls(w.auth.storage);
+    const before = w.calls.length;
+    const swept = await sweepExpired(w.auth.config);
+    const posts = w.calls.length - before;
+    // The outbox spends its share and more, and the page of the pending row still runs.
+    expect(posts).toBeGreaterThan(0);
+    expect(swept.pendingSessions).toBeGreaterThan(0);
+    expect(ended).toHaveLength(swept.pendingSessions);
+    expect(count.n + posts).toBeLessThanOrEqual(50);
+  });
+
   it("keeps one sweep with full caps inside 50 calls with its posts, the limits of Workers Free (ruling 37 of plan 12f)", async () => {
     for (const subjectType of ["public", "pairwise"] as const) {
       const w = world();
@@ -1135,8 +1202,9 @@ describe("back-channel logout (plan 12e Task 16)", () => {
       const posts = w.calls.length - before;
       const total = count.n + posts;
       // The view of the store has no statementsSent, so each step counts its worst case. The
-      // pairwise subject costs 1 more call per row. The posts count as calls too.
-      expect([swept.oauthSessionLinks, swept.oauthLogouts, posts], subjectType).toEqual([17, 0, 2]);
+      // pairwise subject costs 1 more call per row. The posts count as calls too. The read of the
+      // pending-end rows (ruling 50 of plan 12f) takes 1 call from the links: 17 before it.
+      expect([swept.oauthSessionLinks, swept.oauthLogouts, posts], subjectType).toEqual([16, 0, 2]);
       expect((await outbox(w)).filter((r) => r.attempts === 2)).toHaveLength(2);
       expect(total, subjectType).toBe(subjectType === "public" ? 46 : 48);
     }

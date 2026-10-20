@@ -1350,7 +1350,7 @@ It answers one count for each kind of row:
 - `verificationConsumed`: consumed verification rows one day after the consume. This only matters when `magicLink.ttlMinutes` is above one day.
 - `invitations`: invitations that are accepted or expired.
 - `sessions`: sessions past their expiry.
-- `pendingSessions`: sessions that a ban or a revoke of the platform role left past its call budget, ended with `session.afterEnd`. The step runs last, in the calls that the outbox leaves, and a row of it waits for the next sweep when it does not fit. Every door refuses such a session in the meantime.
+- `pendingSessions`: sessions that a ban or a revoke of the platform role left past its call budget, ended with `session.afterEnd`. The sweep reads the rows before the idle clients, and the outbox leaves the calls of one page for them. The step runs last, and a row of it waits for the next sweep when it does not fit. Every door refuses such a session in the meantime.
 - `apiTokens`: API tokens past their expiry. A token with no expiry stays.
 - `trustedDevices`: trusted devices past their expiry.
 - `totpSetups`: TOTP setups that no enable confirmed within 15 minutes.
@@ -1360,7 +1360,7 @@ It answers one count for each kind of row:
 - `limits`: limit windows that ended; 0 when the limiter has no `sweep`.
 - `oauthDevices`: device grants past their expiry: pending, decided, and spent.
 - `oauthSessionLinks`: client links whose session is gone, at most 250 per sweep, and as many as the calls of the sweep allow. The sweep reads all links in turn. Each one becomes a back-channel logout: an expiry ends a session too.
-- `oauthLogouts`: back-channel logouts, at most 50 per sweep. The two back-channel steps run before the pending sessions. The whole sweep fits 50 calls, its posts too: D1 Free allows 50 queries per run (D1 limits page of 21 April 2026), and Workers Free allows 50 subrequests (Workers limits page of 12 October 2026), each read 2026-10-21. Each step stops before a call that does not fit, and a posted row always has room for its delete. A test on D1 sent 90 rows in 20 sweeps or fewer. Run the sweep more often than once an hour to send more. A storage error in either step writes one log line and counts 0. A stop loses no logout. The rows of a page of links and the delete of those links are one write, and only a post that went out and failed counts as an attempt. Each due row gets one more attempt. The count holds the rows that a client took, and the rows deleted after their sixth attempt.
+- `oauthLogouts`: back-channel logouts, at most 50 per sweep. The two back-channel steps run before the pending sessions. The whole sweep fits 50 calls, its posts too: D1 Free allows 50 queries per run (D1 limits page of 21 April 2026), and Workers Free allows 50 subrequests (Workers limits page of 12 October 2026), each read 2026-10-21. Each step stops before a call that does not fit, and a posted row always has room for its delete. A test on D1 sent 90 rows in 21 sweeps or fewer. Run the sweep more often than once an hour to send more. A storage error in either step writes one log line and counts 0. A stop loses no logout. The rows of a page of links and the delete of those links are one write, and only a post that went out and failed counts as an attempt. Each due row gets one more attempt. The count holds the rows that a client took, and the rows deleted after their sixth attempt.
 - `oauthClientSecrets`: old OAuth client secrets past the overlap of a rotation, cleared from the client.
 
 ```ts
