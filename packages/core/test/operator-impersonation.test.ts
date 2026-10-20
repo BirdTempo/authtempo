@@ -400,6 +400,9 @@ describe("the impersonation (plan 12f Task 11)", () => {
     for (const act of ["ban", "revoke"] as const) {
       const w = await world();
       const token = await started(w);
+      // Half an hour of support work: the act reads the start rows of the
+      // last 240 minutes, not of this instant.
+      w.auth.clock.advance(30 * MINUTE_MS);
       const api = operatorApi(w.auth.config);
       const done =
         act === "ban"
