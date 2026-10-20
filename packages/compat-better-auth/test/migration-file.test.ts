@@ -699,6 +699,44 @@ describe("migration 0010 (plan 12k)", () => {
     ]);
   });
 
+  it("moves an app with the teams columns to 13 and 10 with its own 0010 of the two ta_meta updates", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    // Better Auth's teams option adds these two columns before the compat files run.
+    db.exec(`ALTER TABLE "session" ADD COLUMN "activeTeamId" TEXT`);
+    db.exec(`ALTER TABLE "invitation" ADD COLUMN "teamId" TEXT`);
+    db.exec(
+      `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('u1', 'Ada', 'ada@example.com', 1, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')`,
+    );
+    db.exec(
+      `INSERT INTO "session" (id, expiresAt, token, createdAt, updatedAt, userId, activeTeamId) VALUES ('s1', '2026-11-01T00:00:00.000Z', 't1', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'u1', 'team-1')`,
+    );
+    // The app's own 0010, as the compat README and the migrate page tell it to write.
+    const own0010 = `UPDATE ta_meta SET value = '13' WHERE key = 'schema_version';
+UPDATE ta_meta SET value = '10' WHERE key = 'compat_better_auth';`;
+    // The own file is the shipped file with no ALTER statement.
+    expect(normalize(shipped0010).endsWith(normalize(own0010))).toBe(true);
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+      shipped0008,
+      shipped0009,
+      own0010,
+    ])
+      db.exec(text);
+    expect(db.prepare(`SELECT "activeTeamId" AS t FROM "session"`).all()).toEqual([
+      { t: "team-1" },
+    ]);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "10" },
+      { key: "schema_version", value: "13" },
+    ]);
+  });
+
   it("adds each column on Postgres only when it is absent", () => {
     const text = compatMigration0010Sql("postgres", resolveNames());
     expect(text).toContain(`ALTER TABLE "session" ADD COLUMN IF NOT EXISTS "activeTeamId" text;`);
