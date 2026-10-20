@@ -10,6 +10,7 @@ import { deleteTwoFactorChallenges } from "../second-factor.js";
 import { deleteHandoffCodes } from "../session-list.js";
 import { deleteEndedSessions, endedList, sessionsEnded } from "../sessions.js";
 import { type ImpersonationStops, impersonationStops, type OperatorActEnds } from "./audit.js";
+import type { ImpersonationHold } from "./impersonation.js";
 import { END_ALL_LIMIT, endSessionPage, FAMILY_CALLS, STEP_WORST } from "./sessions.js";
 
 /**
@@ -121,16 +122,76 @@ export async function endAllAccessPage(
 }
 
 /**
+ * Ends the impersonation sessions that the operator of `hold` opened. It
+ * runs in the act of a ban or a revoke of that operator (rulings 31 and 44
+ * of plan 12f).
+ * One read by the `userId` index takes them, and a page ends them with
+ * their stop rows (`endSessionPage`) inside `budget` calls of `meter`. It
+ * keeps the calls of the own sessions of the operator (`endAllAccessPage`)
+ * and one pending-end row. The rows that do not fit stay with a pending-end
+ * row that names the operator and the targets, and the sweep ends them.
+ * Until then the door of each session read refuses them
+ * (`impersonationLoss`). The answer is true when rows stay.
+ */
+export async function endImpersonationsPage(
+  tx: StorageAdapter,
+  config: ResolvedConfig,
+  hold: ImpersonationHold,
+  ends: OperatorActEnds,
+  now: Date,
+  meter: Meter,
+  budget: number,
+  reason: PendingEndReason,
+  stops: ImpersonationStops | null,
+): Promise<boolean> {
+  if (hold.targets.length === 0) return false;
+  const where = impersonationWhere(hold.operatorId, hold.targets);
+  const read = await tx.findMany("session", where, {
+    sort: { field: "id", dir: "asc" },
+    limit: END_ALL_LIMIT.default + 1,
+  });
+  meter.step(1);
+  if (read.length === 0) return false;
+  const rows = read.slice(0, END_ALL_LIMIT.default);
+  // The page counts its read again, so it gets 1 more. The own sessions and the row stay out.
+  const pageBudget = budget - meter.used + 1 - ACCESS_END_LEAST - PAGE_LEAST - 1;
+  // No lock of its own: holdImpersonations took the locks of these rows.
+  const page =
+    pageBudget >= PAGE_LEAST
+      ? await endSessionPage(tx, config, rows, ends.ended ?? null, now, pageBudget, null, stops)
+      : { deleted: 0, stopped: true, used: 1 };
+  meter.step(page.used - 1);
+  const left = page.stopped || read.length > rows.length;
+  if (left) {
+    await writePendingEnd(tx, config, hold.operatorId, reason, hold.targets);
+    meter.step(1);
+  }
+  return left;
+}
+
+/** The impersonation sessions of `operatorId` on `targets`: by the `userId` index. */
+function impersonationWhere(operatorId: string, targets: readonly string[]): Where<"session">[] {
+  return [
+    { field: "userId", op: "in", value: [...targets] },
+    { field: "actorId", op: "eq", value: operatorId },
+  ];
+}
+
+/**
  * The pending-end row of a user, in the act's transaction: a verification
  * row with the purpose `session-end`. `data.before` is the time of the
  * write, so the sweep ends only the sessions from before the act, never a
- * sign-in after it.
+ * sign-in after it. With `targets`, the row names the impersonation
+ * sessions that the user opened as an operator: the sessions of those
+ * users whose `actorId` is the user. The sweep never reads the audit
+ * table, so the row holds the ids.
  */
 async function writePendingEnd(
   tx: StorageAdapter,
   config: ResolvedConfig,
   userId: string,
   reason: PendingEndReason,
+  targets?: readonly string[],
 ): Promise<void> {
   const now = config.clock.now();
   const id = newId(now);
@@ -142,7 +203,10 @@ async function writePendingEnd(
     valueHash: await sha256Hex(`session-end:${id}`),
     expiresAt: new Date(now.getTime() + PENDING_END_MS),
     consumedAt: null,
-    data: { reason, before: now.toISOString() },
+    data:
+      targets === undefined
+        ? { reason, before: now.toISOString() }
+        : { reason, before: now.toISOString(), targets: [...targets] },
     secretVersion: config.keyring.current,
     createdAt: now,
     updatedAt: now,
@@ -208,8 +272,11 @@ export async function endPendingRows(
     if (meter.used + PENDING_PAGE_RESERVE > limit) break;
     const before = new Date(String(row.data?.before));
     const reason: PendingEndReason = row.data?.reason === "operator" ? "operator" : "banned";
+    const targets = row.data?.targets;
     const where: Where<"session">[] = [
-      { field: "userId", op: "eq", value: row.identifier },
+      ...(Array.isArray(targets)
+        ? impersonationWhere(row.identifier, targets.map(String))
+        : [{ field: "userId" as const, op: "eq" as const, value: row.identifier }]),
       { field: "createdAt", op: "lte", value: before },
     ];
     const ended = endedList(config);

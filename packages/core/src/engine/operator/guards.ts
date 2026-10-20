@@ -7,6 +7,7 @@ import type { StorageAdapter } from "../../storage/port.js";
 import { requireFresh } from "../fresh.js";
 import { holdsRolePart } from "../ranks.js";
 import type { ResolvedSession } from "../sessions.js";
+import { bannedFor } from "./ban-rule.js";
 
 /**
  * The actor of an operator act (plan 12f, spec 26 item 1): a named operator
@@ -103,6 +104,32 @@ async function platformMember(
 }
 
 /**
+ * Why the operator of an impersonation session no longer holds it, or null
+ * while the operator still does (the plan 12f Task 11 fix). Each door of a
+ * session reads it: `resolveSession`, the session JWT mint, and
+ * `sessionLive`. The answer is `account_delete` when the operator's user
+ * row is gone, and `ban` for a ban from after the start. It is `role_loss`
+ * when the platform role is gone or its member row is newer than the start
+ * (as in ruling 50).
+ * So an act that leaves an impersonation session for the sweep leaves no
+ * power with it. It costs 3 reads, and only for an impersonation session.
+ */
+export async function impersonationLoss(
+  config: ResolvedConfig,
+  session: Pick<SessionRow, "actorId" | "createdAt">,
+): Promise<"account_delete" | "ban" | "role_loss" | null> {
+  if (session.actorId === null) return null;
+  const actor = await config.storage.findOne("user", [
+    { field: "id", op: "eq", value: session.actorId },
+  ]);
+  if (!actor) return "account_delete";
+  if (bannedFor(actor, session.createdAt)) return "ban";
+  const member = await platformMember(config, actor.id);
+  if (!member || member.updatedAt.getTime() > session.createdAt.getTime()) return "role_loss";
+  return null;
+}
+
+/**
  * The id of the platform organization, or null when the config has no
  * platform role or no organization holds the slug.
  */
@@ -134,22 +161,23 @@ export function holdsPlatformRole(
 }
 
 /**
- * True when a member write in `organization` takes the platform role from
- * the member (ruling 42 I1 of plan 12f). `after` is the new role string,
- * or null for a removal or a leave. The platform organization keeps its
- * slug and is never deleted. So beside the revoke and the account delete,
- * these two writes are the only losses.
+ * True when a member write in `organization` touches the member row that
+ * gives the platform role (ruling 42 I1 of plan 12f). It is a removal, a
+ * leave, or any role change of a holder. Ruling 50 counts each write of that row
+ * as a new grant, so a session from before it holds no operator power.
+ * `impersonationLoss` reads the same rule, so the act ends the
+ * impersonation sessions that the door would refuse. The platform
+ * organization keeps its slug and is never deleted.
  */
-export function dropsPlatformRole(
+export function writesPlatformRole(
   config: ResolvedConfig,
   organization: Pick<OrganizationRow, "slug">,
   before: string,
-  after: string | null,
 ): boolean {
   const o = config.organizations;
   const role = o?.platformRole ?? null;
   if (!o || role === null || organization.slug !== o.platformOrganization) return false;
-  return holdsRolePart(before, role) && (after === null || !holdsRolePart(after, role));
+  return holdsRolePart(before, role);
 }
 
 /** True when the user has a second factor with one method or more (plan 12c). */

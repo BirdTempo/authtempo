@@ -22,6 +22,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { JwkRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { bannedFor } from "./operator/ban-rule.js";
+import { impersonationLoss } from "./operator/guards.js";
 import { sessionIsLive } from "./sessions.js";
 
 /**
@@ -349,6 +350,8 @@ export async function mintSessionJwt(
   ]);
   // The ban rule of resolveSession (ruling 28): a race row of a ban mints nothing.
   if (!user || bannedFor(user, session.createdAt)) return fail("unauthorized");
+  // An impersonation session whose operator lost the right mints nothing (plan 12f Task 11 fix).
+  if ((await impersonationLoss(config, session)) !== null) return fail("unauthorized");
   const extra = await appClaims(mint, user, session);
   if (extra === null) return fail("hook_failed");
   const own = Object.fromEntries(Object.entries(extra).filter(([k]) => !RESERVED_CLAIMS.has(k)));
@@ -419,7 +422,9 @@ export async function sessionLive(
   const now = config.clock.now();
   if (row === null || !sessionIsLive(config, row, now)) return false;
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: row.userId }]);
-  return user !== null && !bannedFor(user, row.createdAt);
+  if (user === null || bannedFor(user, row.createdAt)) return false;
+  // The door of the operator of an impersonation session (the plan 12f Task 11 fix).
+  return (await impersonationLoss(config, row)) === null;
 }
 
 /**

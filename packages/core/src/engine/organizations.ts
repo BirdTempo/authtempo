@@ -14,7 +14,7 @@ import {
   stopWith,
 } from "./hooks.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
-import { dropsPlatformRole } from "./operator/guards.js";
+import { writesPlatformRole } from "./operator/guards.js";
 import { endImpersonations, holdImpersonations } from "./operator/impersonation.js";
 import {
   needs,
@@ -223,9 +223,8 @@ function roleLossOf(
   config: ResolvedConfig,
   organization: OrganizationRow,
   member: MemberRow,
-  after: string | null,
 ): RoleLoss | null {
-  return dropsPlatformRole(config, organization, member.role, after)
+  return writesPlatformRole(config, organization, member.role)
     ? {
         config,
         userId: member.userId,
@@ -813,7 +812,7 @@ export async function updateMemberRole(
     );
   };
   // A change that drops the platform role ends the member's impersonations (ruling 42 I1).
-  const loss = roleLossOf(config, s.value.organization, target.member, input.role);
+  const loss = roleLossOf(config, s.value.organization, target.member);
   const written = await hookGuard(async (): Promise<Result<true>> => {
     // The demotion can remove an owner: count, lock, and write in one transaction.
     if (isOwner(o, target.rank) && !isOwner(o, g.value))
@@ -906,7 +905,7 @@ export async function removeMember(
   };
   // A removal or a leave of the platform organization ends the member's
   // impersonations (ruling 42 I1).
-  const loss = roleLossOf(config, s.value.organization, target.member, null);
+  const loss = roleLossOf(config, s.value.organization, target.member);
   const now = config.clock.now();
   const removed = await hookGuard(async (): Promise<Result<true>> => {
     // The removal of an owner: count, lock, and write in one transaction.

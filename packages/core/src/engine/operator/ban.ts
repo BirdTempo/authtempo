@@ -7,7 +7,7 @@ import { runAfter, runBefore, type UserPatch, type UserUpdateVia } from "../hook
 import { ROUNDS } from "../rounds.js";
 import { later } from "../second-factor.js";
 import { sessionsEnded } from "../sessions.js";
-import { ACCESS_END_LEAST, endAllAccessPage } from "./access-end.js";
+import { ACCESS_END_LEAST, endAllAccessPage, endImpersonationsPage } from "./access-end.js";
 import {
   auditDraft,
   impersonationStops,
@@ -17,7 +17,7 @@ import {
 } from "./audit.js";
 import { activeBan } from "./ban-rule.js";
 import { isPlatformOperator, type OperatorActor, requireScope } from "./guards.js";
-import { endImpersonations, holdImpersonations } from "./impersonation.js";
+import { holdImpersonations } from "./impersonation.js";
 import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
 
 const MINUTE_MS = 60_000;
@@ -270,6 +270,18 @@ export async function banUser(
       // the audit read and the lock read.
       const hold = await holdImpersonations(tx, config, input.userId, now, true);
       meter.step(2);
+      // The impersonation sessions first, inside the budget (rulings 31 and 44).
+      await endImpersonationsPage(
+        tx,
+        config,
+        hold,
+        ends,
+        now,
+        meter,
+        budget.value,
+        "banned",
+        stops,
+      );
       await endAllAccessPage(
         tx,
         config,
@@ -281,8 +293,6 @@ export async function banUser(
         "banned",
         stops,
       );
-      // A banned platform operator keeps no impersonation session (ruling 31).
-      await endImpersonations(tx, hold, ends.ended ?? null, now, stops);
       return written;
     },
     {

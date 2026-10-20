@@ -17,7 +17,12 @@ import { holdsRolePart, type ResolvedOrganizations, rankOf } from "../ranks.js";
 import { sessionsEnded } from "../sessions.js";
 import { holdUser, userStays } from "../user-hold.js";
 import { normalizeEmail, validUserName } from "../users.js";
-import { ACCESS_END_LEAST, endAllAccessPage, hasPendingEnd } from "./access-end.js";
+import {
+  ACCESS_END_LEAST,
+  endAllAccessPage,
+  endImpersonationsPage,
+  hasPendingEnd,
+} from "./access-end.js";
 import {
   auditDraft,
   impersonationStops,
@@ -28,7 +33,7 @@ import {
 import { targetOf } from "./ban.js";
 import { activeBan } from "./ban-rule.js";
 import { type OperatorActor, requireScope } from "./guards.js";
-import { endImpersonations, holdImpersonations } from "./impersonation.js";
+import { holdImpersonations } from "./impersonation.js";
 import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
 
 /** The input of a grant or a revoke of the platform role (spec 26 item 5). */
@@ -453,6 +458,18 @@ export async function revokePlatformRole(
       // the audit read and the lock read.
       const hold = await holdImpersonations(tx, config, user.id, now, true);
       meter.step(2);
+      // The impersonation sessions first, inside the budget (rulings 31 and 44).
+      await endImpersonationsPage(
+        tx,
+        config,
+        hold,
+        ends,
+        now,
+        meter,
+        budget.value,
+        "operator",
+        stops,
+      );
       await endAllAccessPage(
         tx,
         config,
@@ -464,8 +481,6 @@ export async function revokePlatformRole(
         "operator",
         stops,
       );
-      // The role started them, so they end with it (ruling 31).
-      await endImpersonations(tx, hold, ends.ended ?? null, now, stops);
       const change: MemberChange =
         rest === ""
           ? { kind: "remove", member }

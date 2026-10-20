@@ -22,6 +22,7 @@ import {
 import { endSessionById, writeLogouts } from "./oauth-outbox.js";
 import { type ImpersonationStops, impersonationStops, writeStopRow } from "./operator/audit.js";
 import { activeBan, bannedFor } from "./operator/ban-rule.js";
+import { impersonationLoss } from "./operator/guards.js";
 import { holdUser } from "./user-hold.js";
 
 // The credential facts moved to primitives/credentials.ts (plan 11d). They stay exported here, so no importer changes.
@@ -548,6 +549,15 @@ export async function resolveSession(
     const stops = impersonationStops(config, "ban");
     const n = await endSessionById(config.storage, session, now, stops);
     if (n === 1) await sessionsEnded(config, [session], "banned", stops);
+    return null;
+  }
+  // The door of the operator of an impersonation session (the plan 12f Task 11 fix).
+  const lost = await impersonationLoss(config, session);
+  if (lost !== null) {
+    if (!write) return null;
+    const stops = impersonationStops(config, lost);
+    const n = await endSessionById(config.storage, session, now, stops);
+    if (n === 1) await sessionsEnded(config, [session], "impersonation_end", stops);
     return null;
   }
   const sinceSeen = now.getTime() - session.lastSeenAt.getTime();

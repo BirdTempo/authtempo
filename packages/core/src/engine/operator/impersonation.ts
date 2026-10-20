@@ -269,11 +269,12 @@ export async function holdImpersonations(
 
 /**
  * Ends every impersonation session that the platform operator of `hold`
- * opened, in the caller's transaction (ruling 31 of plan 12f). Each loss of
- * the platform role calls it, so nothing of the operator's acts stays (spec
- * 26). The losses are the ban, the revoke, and the account delete. A
- * removal or a leave of the platform organization, and a role change that
- * drops the role, are losses too (ruling 42 I1). One `endSessions` per
+ * opened, in the caller's transaction (ruling 31 of plan 12f). The losses
+ * of the platform role outside the operator acts call it, so nothing of the
+ * operator's acts stays (spec 26). They are the account delete, and a
+ * removal, a leave, or a role change of the platform member row (ruling 42
+ * I1). The ban and the revoke have a call budget, so they end the sessions
+ * in pages (`endImpersonationsPage`). One `endSessions` per
  * target deletes the target's sessions whose `actorId` is the operator,
  * with the outbox rows of their links. The answer is the count of sessions.
  */

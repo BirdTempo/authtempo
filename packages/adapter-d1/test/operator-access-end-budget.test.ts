@@ -367,6 +367,58 @@ describe("the ban and the revoke on D1 (rulings 44 and 45 of plan 12f)", () => {
     expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
   });
 
+  it("bans an operator with 40 impersonation sessions in 50 queries, and the sweep ends the rest with stop rows", async () => {
+    const sent: MailMessage[] = [];
+    const on = {
+      operator: {
+        secrets: [
+          { name: "support", secretHash: await sha256Hex(SECRET), scopes: ["users", "sessions"] },
+        ],
+        users: true,
+        impersonation: {},
+      },
+    } satisfies Partial<AuthConfig>;
+    const { auth: setup } = await engine(env.DB, sent, undefined, on);
+    const token = await platformOperator(setup, sent);
+    const { userId: target } = await signIns(setup, sent, "ada@example.com", 1);
+    const operator = await setup.api.getSession(token);
+    if (!operator) throw new Error("the session ended");
+    for (let i = 0; i < 40; i++) {
+      const r = await setup.api.operator.impersonate({
+        operator,
+        userId: target,
+        reason: `Ticket ${i}`,
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+    }
+    endings.length = 0;
+    const r = await invoke(
+      sent,
+      "/operator/users/ban",
+      asSecret,
+      { userId: operator.user.id, reason: REASON },
+      on,
+    );
+    expect(r.status).toBe(200);
+    const inAct = endings.length;
+    const sweeps = await sweepAll(sent, on);
+    const left = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM ta_session WHERE actor_id IS NOT NULL",
+    ).first<{ n: number }>();
+    expect(left?.n).toBe(0);
+    const stops = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM ta_operator_audit WHERE action = 'impersonation_stop'",
+    ).first<{ n: number }>();
+    expect(stops?.n).toBe(40);
+    // The run of 2026-10-21: the act ends a page of the impersonation sessions, each
+    // with its stop row. With the operator's own sessions, it ends 12 in 46 queries. It keeps
+    // calls for the own page. Three sweeps end the rest, at 48 queries or fewer each.
+    expect([r.queries, inAct, sweeps]).toEqual([46, 12, [48, 48, 23]]);
+    expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+  });
+
   for (const sessions of [45, 60])
     for (const actor of ["secret", "user"] as const)
       it(`a ${actor} bans a user with ${sessions} sessions and a hook in 50 queries or fewer, and the sweep ends the rest`, async () => {

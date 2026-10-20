@@ -15,6 +15,7 @@ import {
 } from "../src/engine/password.js";
 import { revokeOtherSessions, revokeSession } from "../src/engine/session-list.js";
 import { destroySession, resolveSession } from "../src/engine/sessions.js";
+import { sweepExpired } from "../src/engine/sweep.js";
 import { enableTotp, setupTotp } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
@@ -286,6 +287,43 @@ describe("the stop rows of the impersonation (ruling 43 of plan 12f)", () => {
     ]);
   });
 
+  it("ends the impersonations of a banned operator in pages, with a door and the sweep for the rest", async () => {
+    const w = await world({
+      hooks: { session: { afterEnd: () => {} } },
+      limiter: { allow: async () => true },
+    });
+    // 50 impersonation sessions: a ban with a hook ends a page of them in its act (ruling 44).
+    const tokens: string[] = [];
+    for (let i = 0; i < 50; i++) tokens.push((await impersonate(w)).token);
+    const r = await operatorApi(w.auth.config).users.ban(input(w.operator.user.id));
+    expect(r.ok).toBe(true);
+    const live = () =>
+      w.auth.storage.findMany("session", [{ field: "actorId", op: "ne", value: null }]);
+    const left = (await live()).length;
+    expect(left).toBeGreaterThan(0);
+    expect((await stops(w)).length).toBe(50 - left);
+    // The door refuses a left session at once and ends it with its stop row.
+    const leftToken = await (async () => {
+      for (const t of tokens)
+        if (
+          await w.auth.storage.findOne("session", [
+            { field: "tokenHash", op: "eq", value: await sha256Hex(t) },
+          ])
+        )
+          return t;
+      throw new Error("no left session");
+    })();
+    expect(await resolveSession(w.auth.config, leftToken)).toBeNull();
+    expect((await stops(w)).length).toBe(51 - left);
+    // The sweep ends the rest, each with its stop row: every session ends once.
+    for (let i = 0; i < 10 && (await live()).length > 0; i++) await sweepExpired(w.auth.config);
+    expect(await live()).toEqual([]);
+    const all = await stops(w);
+    expect(all.map((s) => s.data)).toHaveLength(50);
+    expect(new Set(all.map((s) => (s.data as { sessionId: string }).sessionId)).size).toBe(50);
+    expect(new Set(all.map((s) => (s.data as { cause: string }).cause))).toEqual(new Set(["ban"]));
+  });
+
   it("writes revoke at a revoke of the platform role", async () => {
     const w = await world();
     const { sessionId } = await impersonate(w);
@@ -315,7 +353,7 @@ describe("the stop rows of the impersonation (ruling 43 of plan 12f)", () => {
         w,
         sessionId,
         "role_loss",
-        "A member change took the platform role, and the impersonation session ended.",
+        "A change of the operator's platform role ended the impersonation session.",
       ),
     ]);
   });

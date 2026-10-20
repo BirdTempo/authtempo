@@ -248,7 +248,7 @@ const STOP_REASONS: Readonly<Record<Exclude<StopCause, "stop">, string>> = {
   claim: "A claim of the address ended the impersonation session.",
   ban: "A ban ended the impersonation session.",
   revoke: "A revoke of the platform role ended the impersonation session.",
-  role_loss: "A member change took the platform role, and the impersonation session ended.",
+  role_loss: "A change of the operator's platform role ended the impersonation session.",
   account_delete: "An account delete ended the impersonation session.",
   operator_end: "An operator ended the sessions, and the impersonation session with them.",
 };

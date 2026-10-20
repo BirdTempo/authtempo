@@ -520,7 +520,9 @@ describe("the impersonation (plan 12f Task 11)", () => {
     }
   });
 
-  it("keeps the impersonation sessions at a member write that keeps the platform role", async () => {
+  it("ends the impersonation sessions at a role change that keeps the platform role", async () => {
+    // Ruling 50 counts each write of the platform member row as a new grant. A
+    // session from before it holds no operator power, so its impersonations end too.
     const w = await world();
     const token = await started(w);
     const kept = await updateMemberRole(w.auth.config, {
@@ -530,7 +532,10 @@ describe("the impersonation (plan 12f Task 11)", () => {
       role: "admin,operator",
     });
     expect(kept.ok).toBe(true);
-    expect((await resolveSession(w.auth.config, token))?.session.actorId).toBe(w.operator.user.id);
+    expect(
+      await w.auth.storage.findMany("session", [{ field: "actorId", op: "ne", value: null }]),
+    ).toEqual([]);
+    expect(await resolveSession(w.auth.config, token)).toBeNull();
   });
 
   it("refuses the start when a ban or a revoke of the operator commits during it", async () => {
