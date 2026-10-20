@@ -892,10 +892,10 @@ and its default team, unless `keepCurrentActiveOrganization` is true. After
 the create, call `organization.setActive` and then
 `organization.setActiveTeam`.
 
-The client has Better Auth's team calls, on core's routes under
-`/organizations/teams`: `organization.createTeam`, `updateTeam`, `removeTeam`,
-`listTeams`, `setActiveTeam`, `listUserTeams`, `listTeamMembers`,
-`addTeamMember`, and `removeTeamMember`, in Better Auth's shapes. A team's
+The client has Better Auth's team calls in Better Auth's shapes, on core's
+routes under `/organizations/teams`. They are `organization.createTeam`,
+`updateTeam`, `removeTeam`, `listTeams`, `setActiveTeam`, `listUserTeams`,
+`listTeamMembers`, `addTeamMember`, and `removeTeamMember`. A team's
 `additionalFields` answer `NOT_SUPPORTED` (501). `listUserTeams` lists the
 teams of the session's user only: a `userId` of another person answers
 `YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER` (403). `addTeamMember` of a user
