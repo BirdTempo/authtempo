@@ -35,6 +35,18 @@
       { "file": "packages/core/src/http/cookies.ts", "text": "For one release core reads it" },
       { "file": "packages/core/src/http/router.ts", "text": "async function moveLegacyCookie(" },
       {
+        "file": "packages/core/src/http/router.ts",
+        "text": "const old = readCookie(request, legacy);"
+      },
+      {
+        "file": "packages/core/src/http/routes/sessions.ts",
+        "text": "const old = legacy === null ? null : readCookie(request, legacy);"
+      },
+      {
+        "file": "packages/core/src/primitives/credentials.ts",
+        "text": "legacyCookieName: name === DEFAULT_COOKIE_NAME ? LEGACY_COOKIE_NAME : null"
+      },
+      {
         "file": "packages/core/src/primitives/credentials.ts",
         "text": "config.legacyCookieName ? readCookie(request, config.legacyCookieName)"
       },

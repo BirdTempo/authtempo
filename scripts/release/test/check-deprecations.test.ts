@@ -1,4 +1,12 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -53,6 +61,32 @@ const LIVE_TREE: Record<string, string> = {
 };
 
 const reader = (tree: Record<string, string>) => (file: string) => tree[file] ?? null;
+
+/** The old cookie name in the source of core: the constant and its alias in credentials.ts. */
+const OLD_NAME = /\b(LEGACY_SESSION_COOKIE|LEGACY_COOKIE_NAME)\b/g;
+
+/**
+ * The reads of the old cookie tempo_session in one source file of core. A
+ * read needs the old name. So a read is a readCookie call with a legacy
+ * name, a quoted "tempo_session", or a use of OLD_NAME as a value. The
+ * comments, the import and export lists, the declaration of a constant, and
+ * a comparison with `===` or `!==` are not reads.
+ */
+function oldCookieReads(source: string): string[] {
+  const code = source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/[^\n]*/g, "$1")
+    .replace(/^\s*(import|export)\s+(type\s+)?\{[^}]*\}\s*from\s*"[^"]*";/gm, "")
+    .replace(/^export const (LEGACY_SESSION_COOKIE|LEGACY_COOKIE_NAME) = [^;]*;/gm, "");
+  return code.split("\n").filter((line) => {
+    if (/readCookie\([^)]*legacy/i.test(line) || /["'`]tempo_session["'`]/.test(line)) return true;
+    return [...line.matchAll(OLD_NAME)].some((m) => {
+      const before = line.slice(0, m.index);
+      const after = line.slice(m.index + m[0].length);
+      return !/[!=]==\s*$/.test(before) && !/^\s*[!=]==/.test(after);
+    });
+  });
+}
 
 const run = (
   version: string,
@@ -251,6 +285,44 @@ describe("check-deprecations", () => {
     let text = readFileSync(join(repo, cookies), "utf8");
     for (const m of markers) if (m.file === cookies) text = text.split(m.text).join("");
     expect(text).toContain('export const LEGACY_SESSION_COOKIE = "tempo_session";');
+  });
+
+  it("leaves no read of tempo_session in core after each marker text is removed", () => {
+    // The 0.2.0 walk in a copy: remove each marker text of core from its file.
+    const entries = readDeprecations(repo);
+    const copy = mkdtempSync(join(tmpdir(), "authtempo-deprecations-walk-"));
+    try {
+      cpSync(join(repo, "packages/core"), join(copy, "packages/core"), {
+        recursive: true,
+        filter: (path) => !path.includes("node_modules") && !path.includes("/dist"),
+      });
+      for (const m of entries.flatMap((e) => e.markers)) {
+        if (!m.file.startsWith("packages/core/")) continue;
+        const path = join(copy, m.file);
+        writeFileSync(path, readFileSync(path, "utf8").split(m.text).join(""));
+      }
+      const src = join(copy, "packages/core/src");
+      const files = readdirSync(src, { recursive: true, encoding: "utf8" }).filter((f) =>
+        f.endsWith(".ts"),
+      );
+      expect(files.length).toBeGreaterThan(50);
+      const left = files.flatMap((f) =>
+        oldCookieReads(readFileSync(join(src, f), "utf8")).map((line) => `${f}: ${line.trim()}`),
+      );
+      expect(left).toEqual([]);
+      // The detection finds each read of the real source, so an empty list is not a blind scan.
+      const real = (f: string) =>
+        oldCookieReads(readFileSync(join(repo, "packages/core/src", f), "utf8"));
+      expect(real("http/routes/sessions.ts")).toHaveLength(1);
+      expect(real("http/router.ts")).toHaveLength(1);
+      expect(real("primitives/credentials.ts")).toHaveLength(2);
+      // The constant stays: the Expo storage key of the compat client reads it.
+      expect(readFileSync(join(src, "http/cookies.ts"), "utf8")).toContain(
+        'export const LEGACY_SESSION_COOKIE = "tempo_session";',
+      );
+    } finally {
+      rmSync(copy, { recursive: true, force: true });
+    }
   });
 
   it("refuses a register that is not a list of entries", () => {
