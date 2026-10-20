@@ -27,6 +27,7 @@ const BODIES: Readonly<Record<string, unknown>> = {
   "/magic-link/request": { email: EMAIL },
   "/oauth/grants/revoke": { clientId: "x" },
   "/organizations/active": { organizationId: null },
+  "/organizations/check-slug": { slug: "acme" },
   "/organizations/create": { slug: "acme", name: "Acme" },
   "/organizations/delete": { organizationId: "x" },
   "/organizations/has-permission": { organizationId: "x", permissions: { member: ["read"] } },

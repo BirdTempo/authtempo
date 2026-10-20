@@ -150,6 +150,7 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /operator/users/second-factor/disable",
   "POST /operator/users/unban",
   "POST /organizations/active",
+  "POST /organizations/check-slug",
   "POST /organizations/create",
   "POST /organizations/delete",
   "POST /organizations/has-permission",

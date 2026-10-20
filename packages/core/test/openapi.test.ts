@@ -84,7 +84,7 @@ describe("openApiDocument (plan 11g)", () => {
     const keys = operations(doc).map((o) => o.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect([...keys].sort()).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(123);
+    expect(keys.length).toBe(124);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(":provider", "{provider}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -177,7 +177,7 @@ describe("openApiDocument (plan 11g)", () => {
     const bodies = operations(reference()).filter(({ op }) => op.requestBody !== undefined);
     // Plan 12f adds the seven bodies of the operator writes, then the two of
     // the impersonation: 64 became 73.
-    expect(bodies.length).toBe(74);
+    expect(bodies.length).toBe(75);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -397,7 +397,7 @@ describe("openApiDocument (plan 11g)", () => {
     }
     // Plan 12f adds 11 JSON answers, 7 bodies, and 4 queries of the operator
     // routes, then 2 answers and 2 bodies of the impersonation.
-    expect([answers, bodies, queries]).toEqual([99, 74, 21]);
+    expect([answers, bodies, queries]).toEqual([100, 75, 21]);
   });
 
   it("takes the request_id form of the authorize query", () => {

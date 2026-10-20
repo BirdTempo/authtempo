@@ -166,6 +166,7 @@ export {
   type ResolvedSession,
   readSessionToken,
 } from "./engine/sessions.js";
+export { SLUG_CHECK_PER_USER, type SlugStatus } from "./engine/slug-check.js";
 export type {
   SocialComplete,
   SocialLinked,

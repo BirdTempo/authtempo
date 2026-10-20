@@ -20,9 +20,11 @@ import {
 } from "../../engine/organizations.js";
 import { hasPermission, permissionsOf } from "../../engine/permissions.js";
 import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
+import { checkSlug } from "../../engine/slug-check.js";
 import { fail, ok, type Result } from "../../result.js";
 import {
   activeBody,
+  checkSlugBody,
   createBody,
   hasPermissionBody,
   id,
@@ -209,6 +211,10 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
         return send(respond(r), s.renewed);
       },
     },
+    // A session only, as the create: a token never checks a slug (spec 29 items 8 and 17).
+    post("/organizations/check-slug", checkSlugBody, null, (s, b) =>
+      checkSlug(config, { user: s.user, slug: b.slug }),
+    ),
     // Active answers { user, session } as the engine returns it.
     post("/organizations/active", activeBody, null, (s, b) =>
       setActiveOrganization(config, { session: s.resolved, organizationId: b.organizationId }),

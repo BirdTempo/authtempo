@@ -120,6 +120,7 @@ The organization routes follow.
 | --- | --- | --- | --- |
 | POST | `/organizations/create` | session, `{ slug, name, metadata? }` | `{ organization, member }`; 400 `invalid_body`, `slug_reserved`; 401; 403 `email_unverified`; 409 `slug_taken` |
 | GET | `/organizations` | session | `{ organizations: [{ organization, role }] }`; 401 |
+| POST | `/organizations/check-slug` | session, `{ slug }` | `{ slug, status }` with `available`, `taken`, `reserved`, or `invalid` (a null slug); 400 `invalid_body`; 401 (a `tk_` bearer too); 403 `email_unverified`; 429 `rate_limited` at 60 per minute |
 | POST | `/organizations/update` | session, `{ organizationId, name?, slug?, metadata? }` | `{ organization }`; 400 `invalid_body`, `slug_reserved`; 401; 403 `forbidden_rank`, `email_unverified`; 404; 409 `slug_taken` |
 | POST | `/organizations/delete` | session, `{ organizationId }` | `{ ok: true }`; 400 `slug_reserved`; 401; 403 `forbidden_rank`, `email_unverified`; 404 |
 | GET | `/organizations/members` | session, `?organizationId=` | `{ members }`; 400 `invalid_body`; 401; 403 `forbidden_rank`; 404 |
@@ -907,6 +908,12 @@ hide a reserved word. The default reserved slugs are `admin`, `api`,
 `auth`, `internal`, `operator`, `ops`, `platform`, `system`, and `www`.
 Pass `reservedSlugs` to replace the list. A reserved slug answers
 `slug_reserved`. A slug in use answers `slug_taken`.
+
+`POST /organizations/check-slug` (`api.checkSlug`) answers the folded slug
+and its status before a create. The platform slug answers `reserved`. Each
+user gets 60 checks per minute (`slug-check:user:<userId>`). `available` is
+a hint, not a hold: the create still answers `slug_taken` when another user
+takes the slug first, because the unique key decides.
 
 **Platform role.** Set `platformOrganization` and `platformRole` to keep one
 role for staff. Core accepts that role in the platform organization only.

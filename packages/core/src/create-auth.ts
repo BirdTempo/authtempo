@@ -148,6 +148,7 @@ import {
   type SessionReadOptions,
   sessionFromRequest,
 } from "./engine/sessions.js";
+import { checkSlug, type SlugStatus } from "./engine/slug-check.js";
 import {
   completeSocial,
   type SocialComplete,
@@ -487,6 +488,15 @@ export interface AuthApi {
   listOrganizations(input: {
     user: UserRow;
   }): Promise<Result<{ organization: OrganizationSummary; role: string }[]>>;
+  /**
+   * The normalized slug and its status: `available`, `taken`, `reserved`, or
+   * `invalid` with a null slug (plan 12k). It needs a verified address and
+   * spends `slug-check:user:<userId>`. `available` is a hint, not a hold.
+   */
+  checkSlug(input: {
+    user: UserRow;
+    slug: string;
+  }): Promise<Result<{ slug: string | null; status: SlugStatus }>>;
   updateOrganization(input: {
     user: UserRow;
     organizationId: string;
@@ -693,6 +703,7 @@ export function createAuth(input: AuthConfig): Auth {
       redeemHandoff: (i) => redeemHandoff(config, i),
       createOrganization: (i) => createOrganization(config, i),
       listOrganizations: (i) => listOrganizations(config, i),
+      checkSlug: (i) => checkSlug(config, i),
       updateOrganization: (i) => updateOrganization(config, i),
       deleteOrganization: (i) => deleteOrganization(config, i),
       listMembers: (i) => listMembers(config, i),

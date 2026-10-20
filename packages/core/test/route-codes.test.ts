@@ -123,6 +123,7 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /handoff/continue": { h: `hs_${BODY43}` },
   "POST /handoff/redeem": { code: BODY43, verifier: BODY43 },
   "POST /organizations/create": { slug: "acme", name: "Acme" },
+  "POST /organizations/check-slug": { slug: "acme" },
   "POST /organizations/update": { organizationId: "$org", name: "Acme" },
   "POST /organizations/delete": { organizationId: "$org" },
   "POST /organizations/members/add": { organizationId: "$org", userId: "u2", role: "member" },

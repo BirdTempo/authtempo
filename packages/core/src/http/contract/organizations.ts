@@ -49,6 +49,8 @@ const statements = z
   .refine((set) => Object.keys(set).length <= 64);
 /** Strict: a key such as Better Auth's `permission` answers invalid_body, not a silent false. */
 export const hasPermissionBody = z.strictObject({ organizationId: id, permissions: statements });
+/** A slug to check: the same bound as the create, before the fold. normalizeSlug decides the rest. */
+export const checkSlugBody = z.strictObject({ slug: z.string().min(1).max(64) });
 
 /** The query of the two lists: the route reads `organizationId` by hand and parses it with `id`. */
 export const orgQuery = z.object({ organizationId: id });
@@ -165,6 +167,17 @@ export const ORGANIZATIONS_CONTRACT = {
     answer: {
       kind: "json",
       schema: z.strictObject({ role: z.string().nullable(), permissions: StatementsJson }),
+    },
+  },
+  "POST /organizations/check-slug": {
+    body: jsonBody(checkSlugBody),
+    // A null slug for `invalid`: the input does not fold to a slug.
+    answer: {
+      kind: "json",
+      schema: z.strictObject({
+        slug: z.string().nullable(),
+        status: z.enum(["available", "taken", "reserved", "invalid"]),
+      }),
     },
   },
   "POST /organizations/active": {
