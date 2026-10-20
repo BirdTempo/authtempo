@@ -108,7 +108,7 @@ A `to_` token belongs to an organization, not to a person. It acts with its own 
 - An organization token stays when its creator leaves the organization or deletes the account. The list shows `creatorIsMember: false`.
 - The creator has no right of their own on the token. Only a member with `apiToken:revoke` revokes it.
 - `client.organizations.members.remove({ organizationId, userId, revokeTokens: true })` deletes the person's organization tokens in the same write.
-- `revokeTokens: true` needs `apiToken:revoke` beside `member:delete`, and a fresh session.
+- `revokeTokens: true` needs `apiToken:revoke` and a fresh session. The removal of another member also needs `member:delete`. A leave needs no other action.
 
 ### Authenticate and its codes
 
