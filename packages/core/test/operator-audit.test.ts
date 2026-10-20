@@ -252,6 +252,29 @@ describe("the operator audit row (plan 12f Task 4)", () => {
     expect(operatorReason(" Spam. ")).toEqual({ ok: true, value: " Spam. " });
   });
 
+  it("refuses an act whose reason fails operatorReason before beforeAction: 400, no change, no row (spec 26 item 5)", async () => {
+    let before = 0;
+    const auth = await operatorAuth({
+      hooks: {
+        operator: {
+          beforeAction() {
+            before++;
+          },
+        },
+      },
+    });
+    const { user } = await verifiedSession(auth, TARGET);
+    const draft = { ...draftFor(user.id), reason: "a\nb" };
+    expect(await operatorAct(auth.config, draft, rename(user.id, "Ada"))).toEqual({
+      ok: false,
+      code: "invalid_body",
+      status: 400,
+    });
+    expect(await nameOf(auth.storage, user.id)).toBeNull();
+    expect(await auditRows(auth.storage)).toEqual([]);
+    expect(before).toBe(0);
+  });
+
   it("writes no secret and no control character in the row", async () => {
     const auth = await operatorAuth({
       operator: {

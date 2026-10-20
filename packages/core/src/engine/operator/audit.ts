@@ -134,6 +134,8 @@ export interface OperatorActSteps<T> {
 
 /**
  * The one way an operator write runs (spec 26 items 8 and 10). First
+ * `operatorReason` on the draft's reason: a refusal answers `invalid_body`
+ * and writes nothing (spec 26 item 5). Then
  * `hooks.operator.beforeAction`: a refusal answers `hook_refused` and
  * writes nothing. Then one transaction runs `work`, and the audit row is
  * its last statement. An error answer of `work` throws out of the
@@ -157,6 +159,8 @@ export async function operatorAct<T extends object>(
   ) => Promise<Result<T>>,
   steps: OperatorActSteps<T> = {},
 ): Promise<Result<T & { auditId: string }>> {
+  const reason = operatorReason(draft.reason);
+  if (!reason.ok) return reason;
   const ends: OperatorActEnds = { ended: endedList(config), families: familyEnds() };
   const done = await hookGuard(async () => {
     await runBefore("operator.beforeAction", config.hooks.operator.beforeAction, {
