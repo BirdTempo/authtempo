@@ -1,6 +1,6 @@
 /**
  * The SAML attack corpus (plan 12d Task 7). Each case takes a valid signed Response and the
- * test IdP that signed it, and answers the attack text: one named edit of the valid text.
+ * test IdP that signed it. It answers the attack text: one named edit of the valid text.
  * Each case asserts that its output differs from its input, so no case runs unchanged.
  *
  * XSW1 to XSW8 are the shapes of "On Breaking SAML: Be Whoever You Want to Be" (Somorovsky

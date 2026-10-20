@@ -125,9 +125,9 @@ interface Parsed {
 
 /** Steps 1 to 3: the shape, the algorithms, and the two values. */
 function parseSignature(target: XmlElement): Parsed {
-  // Step 1: exactly one Signature child. Ruling 19 of plan 12d: another Signature in the
-  // subtree is an inner enveloped signature (an IdP signs both the Response and the
-  // Assertion), so it must be the child of an element with its own ID, outside this Signature.
+  // Step 1: exactly one Signature child. Ruling 19 of plan 12d allows another Signature in
+  // the subtree only as an inner enveloped signature. An IdP signs both the Response and the
+  // Assertion. So the inner one is the child of an element with its own ID, outside this one.
   const signatures = childElements(target, NS_DSIG, "Signature");
   const signature = signatures[0];
   if (signatures.length !== 1 || signature === undefined) throw new Fail("signature_shape");

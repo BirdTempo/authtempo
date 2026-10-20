@@ -65,9 +65,9 @@ type Place = "root" | "assertion" | "each";
 
 /**
  * One generated Response: the text, and the PrefixList of its reference. Every prefix is
- * lower case, and no two attribute namespaces have one URI as the start of the other: on
- * those two inputs xml-crypto 6.3.3 leaves the W3C sort order, and two rows of this
- * file pin the W3C form of each.
+ * lower case. No two attribute namespaces have one URI as the start of the other. On those
+ * two inputs xml-crypto 6.3.3 leaves the W3C sort order. Two rows of this file pin the W3C
+ * form of each.
  */
 function generate(seed: number): { xml: string; prefixes: string[] } {
   const r = rng(seed);
@@ -453,12 +453,12 @@ describe("the differential test against xml-crypto 6.3.3", () => {
     },
   );
 
-  // Two findings of 2026-10-20 (test/saml/fixtures/real/FINDINGS.md): xml-crypto 6.3.3
+  // Two findings of 2026-10-20 are in test/saml/fixtures/real/FINDINGS.md. xml-crypto 6.3.3
   // sorts namespace declarations by `String.prototype.localeCompare` (case-insensitive
-  // first), and attributes by the joined text of namespace URI and local name. Canonical XML
-  // 1.0 section 2.3 sorts prefixes by code point, and attributes by namespace URI first, then
-  // by local name. Ruling 18: these rows pin the W3C form only, because a test must not
-  // depend on a supplier defect.
+  // first). It sorts attributes by the joined text of namespace URI and local name.
+  // Canonical XML 1.0 section 2.3 sorts prefixes by code point. It sorts attributes by
+  // namespace URI first, then by local name. Ruling 18: these rows pin the W3C form only,
+  // because a test must not depend on a supplier defect.
   it.each([
     [
       "a prefix in upper case",

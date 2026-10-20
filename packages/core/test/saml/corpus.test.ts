@@ -28,9 +28,9 @@ import {
 type Step = "parse" | "wrapping" | "subject" | DsigStep;
 
 /**
- * The wrapping guards of Task 8 Behavior 3, as this test's own copy until Task 8 moves them
- * into `assertion.ts`: the root is the Response, each `ID` is unique, the document holds one
- * Assertion, it is a child of the root, and no `EncryptedAssertion` exists.
+ * The wrapping guards of Task 8 Behavior 3. This test keeps its own copy until Task 8 moves
+ * them into `assertion.ts`. The root is the Response, and each `ID` is unique. The document
+ * holds one Assertion, as a child of the root, and no `EncryptedAssertion`.
  */
 function wrappingGuard(root: XmlElement): { ok: true; assertion: XmlElement } | { ok: false } {
   if (root.ns !== NS_SAMLP || root.local !== "Response") return { ok: false };
