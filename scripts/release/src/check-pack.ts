@@ -16,7 +16,7 @@ import {
 } from "./lib/pack-rules.ts";
 import { FIRST_RELEASE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
-import { type Report, requireCounts, summaryLine } from "./lib/report.ts";
+import { type Report, reportLines, requireCounts, unreadReport } from "./lib/report.ts";
 import { type Manifest, readWorkspace } from "./lib/workspace.ts";
 
 /** One release tarball and the sources that check-pack holds it to. */
@@ -376,10 +376,30 @@ export function checkTarballs(root: string, paths: string[]): Report {
   );
 }
 
+/**
+ * Runs the check on the tree at `root`. A source that the check cannot read,
+ * such as a missing or bad release/deprecations.json, gives a FAIL summary
+ * line with the reason, not a stack.
+ */
+export function entry(root: string, paths: string[]): { lines: string[]; code: number } {
+  let report: Report;
+  try {
+    report = checkTarballs(root, paths);
+  } catch (error) {
+    report = unreadReport(
+      "check-pack",
+      ["tarballs", "files"],
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
+}
+
 if (import.meta.main) {
-  const root = fileURLToPath(new URL("../../../", import.meta.url));
-  const report = checkTarballs(root, process.argv.slice(2));
-  console.log(summaryLine(report));
-  for (const failure of report.failures) console.log(`  ${failure}`);
-  if (report.failures.length > 0) process.exit(1);
+  const { lines, code } = entry(
+    fileURLToPath(new URL("../../../", import.meta.url)),
+    process.argv.slice(2),
+  );
+  for (const line of lines) console.log(line);
+  process.exit(code);
 }

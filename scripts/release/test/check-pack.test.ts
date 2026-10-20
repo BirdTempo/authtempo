@@ -17,6 +17,7 @@ import {
   breakingByMinor,
   checkPack,
   checkTarballs,
+  entry,
   type PackInput,
   readTarball,
 } from "../src/check-pack.ts";
@@ -582,14 +583,34 @@ describe("check-pack", () => {
   it("requires release/deprecations.json in the tree", () => {
     const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
     const noRegister = copyRoot((dir) => rmSync(join(dir, "release/deprecations.json")));
+    const badRegister = copyRoot();
     try {
       const path = pack(fixture("root/packages/fixture"), out);
       // Before plan 12j Task 9 an absent register read as no item. Now it is the
       // one source of core's authtempo.deprecations, so a tree without it stops.
       expect(() => checkTarballs(noRegister, [path])).toThrow("release/deprecations.json");
       expect(checkTarballs(fixture("root"), [path]).failures).toEqual([]);
+      // The entry prints a FAIL summary line and the reason, not a stack.
+      const missing = entry(noRegister, [path]);
+      expect(missing.lines).toHaveLength(2);
+      expect(missing.lines[0]).toBe("check-pack: FAIL tarballs=0 files=0 failures=1");
+      expect(missing.lines[1]).toMatch(/^ {2}ENOENT: .*release\/deprecations\.json'$/);
+      expect(missing.code).toBe(1);
+      writeFileSync(join(badRegister, "release/deprecations.json"), "{}");
+      expect(entry(badRegister, [path])).toEqual({
+        lines: [
+          "check-pack: FAIL tarballs=0 files=0 failures=1",
+          "  release/deprecations.json: the register is not a list",
+        ],
+        code: 1,
+      });
+      expect(entry(fixture("root"), [path])).toEqual({
+        lines: ["check-pack: PASS tarballs=1 files=9 failures=0"],
+        code: 0,
+      });
     } finally {
-      for (const dir of [out, noRegister]) rmSync(dir, { recursive: true, force: true });
+      for (const dir of [out, noRegister, badRegister])
+        rmSync(dir, { recursive: true, force: true });
     }
   });
 
