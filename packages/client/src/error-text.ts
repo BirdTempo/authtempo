@@ -70,7 +70,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   internal: "The server had an error. Try again later.",
   account_banned: "Your account is banned, so you cannot sign in.",
   operator_required: "You do not have the operator rights for this action.",
-  operator_self: "You cannot do this action on your own account or on another operator.",
+  operator_self: "You cannot do this action on your own account.",
   impersonation_refused: "You cannot act as this user.",
   impersonation_session: "You cannot do this while you act as another user.",
 };

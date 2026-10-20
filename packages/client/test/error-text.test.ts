@@ -33,6 +33,11 @@ describe("error texts and docs links (plan 11d)", () => {
     expect(errorText("redirect_mismatch", "oauth")).toBe(ERROR_TEXT.sdk.redirect_mismatch);
   });
 
+  it("tells a platform operator that operator_self is about the own account only (plan 12f)", () => {
+    // An act on another platform operator answers operator_required, as the error page says.
+    expect(errorText("operator_self")).toBe("You cannot do this action on your own account.");
+  });
+
   it("links a core code to its anchor, an OAuth code to its prefixed anchor, and an SDK code to its page", () => {
     expect(errorDocsURL("invalid_token")).toBe(
       `${DOCS_ORIGIN}/docs/reference/errors/#invalid_token`,
