@@ -570,11 +570,82 @@ answer type holds `twoFactorRedirect` only when the client options name
 | `expo` | Core's handoff for the system browser. `trustedOrigins` must hold the app scheme, for example `reception://`. `expo-origin` becomes `origin` when a request has none. On Expo, `signIn.social` and `signIn.magicLink` open core's sign-in page, which lists every method this server serves: the magic link form only with the `magicLink` plugin, the password form with `emailAndPassword`, a social button per provider, and the passkey button with the `passkey` plugin. The provider is not chosen in advance. A config with `expo` and none of these methods is refused at start. |
 | `twoFactor` | Core's TOTP second factor (plan 9f) on the password sign-in. Needs `emailAndPassword.enabled`. `/two-factor/enable` (the password) answers `{ method: "totp", totpURI, backupCodes }`; `/two-factor/verify-totp` with the session turns the factor on and ends the other sessions; at the next sign-in core answers a challenge and sets `better-auth.two_factor`, and `verify-totp` or `verify-backup-code` with that cookie opens the session. `trustDevice: true` sets `better-auth.trust_device` for `trustDeviceMaxAge` (whole days, default 30). `disable`, `get-totp-uri`, and `generate-backup-codes` take the password. `send-otp`, `verify-otp`, and `method: "otp"` answer `NOT_SUPPORTED` (501). Pass `accountLockout: { enabled: false }`: core has no account lockout. `user.twoFactorEnabled` comes from core's `ta_second_factor` row; the Better Auth `twoFactor` table is not read. Backup codes are 23 characters (`backupCodeOptions.length` 23 to 32). Core's gate on the magic link, the email code, and social stays off, as in Better Auth; a reset by code of a user with the factor on opens no session on a device that is not trusted (plan 12c). |
 
+| `admin` | Core's operator tools (plan 12f). Needs `organization` and `authtempo.platformOrganization`. See "The admin plugin". |
+
 Give each plugin once. A second entry with the same id is refused at start, because the server reads only the first.
 
 The `captcha` and `have-i-been-pwned` plugins are refused at start, and the refusal names core's option. Core has both checks (plan 12b): the `captcha` option with `@authtempo/captcha-turnstile`, and `password.breachCheck` with `@authtempo/breach-check`. This package does not pass these options to core.
 
 Only `auth.handler` keeps the plugin behavior in this table: the magic link 404, `set-auth-token`, and the `expo-origin` rule. `auth.tempo.handle` serves core's routes directly, without them.
+
+## The admin plugin
+
+Better Auth's `admin` plugin runs on core's operator tools (plan 12f, spec
+section 26). Core has no role on a user. A platform operator is a member of
+the platform organization with the platform role. Core checks that member at
+each call: the platform role, a verified address, a second factor, and a
+fresh session. A Better Auth admin with no second factor has no power.
+
+```ts
+import { admin, organization } from "better-auth/plugins";
+
+betterAuth({
+  // ...
+  authtempo: { platformOrganization: "platform" },
+  plugins: [organization({ sendInvitationEmail }), admin({ adminRoles: ["admin"] })],
+});
+```
+
+The options:
+
+| Option | On authtempo |
+| --- | --- |
+| `authtempo.platformOrganization` | Required with `admin`, refused without it. The slug of the platform organization. `authtempo create-admin` creates it with the first operator. |
+| `adminRoles` | One rank of `viewer`, `member`, `admin`, and `owner`; default `admin`. It is the platform role. A list with two ranks, or a role that is not a rank, is refused. |
+| `impersonationSessionDuration` | Seconds, a whole number of minutes from 5 to 240; default 3600. It is core's `operator.impersonation.ttlMinutes`. Core mails the user a notice at each start. |
+| `defaultRole` | `"user"` only, Better Auth's default. |
+| `allowImpersonatingAdmins` | `false` only: core never lets an operator impersonate a platform operator. |
+| `defaultBanReason`, `defaultBanExpiresIn`, `bannedUserMessage`, `adminUserIds`, `schema`, `ac`, `roles` | Refused. Each refusal names spec section 26. |
+
+The calls that core does not serve answer `NOT_SUPPORTED` (501) with a line
+that names spec section 26: `/admin/set-user-password` and
+`/admin/remove-user` (an operator bans; the person resets the password or
+deletes the account), `/admin/create-user`, `/admin/update-user`,
+`/admin/list-user-sessions`, `/admin/revoke-user-session`, and
+`/admin/has-permission`.
+
+`/admin/list-users` takes one search. `searchValue` needs `searchField`
+`email` (the default) and `searchOperator` `starts_with`: core searches the
+start of an address, never a part inside it or the name. `filterField`
+`email` or `id` with `filterOperator` `eq` (the default) is an exact search.
+Core lists by id ascending, 1 to 100 users per page, with a cursor and no
+total. So `sortBy`, `sortDirection: "desc"`, and an `offset` other than 0 are
+refused.
+
+`/admin/set-role` takes the platform role, which grants it, or `user`, which
+revokes it. Any other role is refused.
+
+Better Auth requires a reason nowhere, and core writes an audit row with a
+reason for each act. A ban takes `banReason` as its reason. Every other call,
+and a ban with no `banReason`, writes `better-auth admin plugin <path>`. Then
+the audit row holds no human reason.
+
+### Bans from Better Auth
+
+Core reads a ban from its own columns `taBannedAt`, `taBanReason`, and
+`taBanUntil`, never from Better Auth's `banned`. Run this SQL once at the
+cutover to copy the existing bans. It runs only where the admin plugin's
+columns exist. Better Auth keeps no ban time, so `taBannedAt` takes the
+row's `updatedAt`. With another naming, use the column names of your naming.
+
+```sql
+-- D1 and SQLite
+UPDATE "user" SET "taBannedAt" = "updatedAt", "taBanReason" = "banReason", "taBanUntil" = "banExpires"
+WHERE "banned" = 1 AND "taBannedAt" IS NULL;
+-- Postgres
+UPDATE "user" SET "taBannedAt" = "updatedAt", "taBanReason" = "banReason", "taBanUntil" = "banExpires"
+WHERE "banned" = true AND "taBannedAt" IS NULL;
+```
 
 ## Email codes
 
@@ -802,10 +873,10 @@ consumer-i (small edits):
 consumerc (follow-ups first): `hooks` (the leave guard of `leave.ts` moves into `organizationHooks.beforeRemoveMember`, which core runs on a leave); `beforeCreateOrganization` writes the studio with `organization.id` and returns nothing, because a `{ data }` that changes the id stops the write (on Postgres with `max: 1`, on a second connection; see "Hooks"); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts` (or `databaseHooks.session.create.after` and core's `afterEnd`); the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `hooks`, `plugins[expo]`, `plugins[organization].ac`, `plugins[organization].dynamicAccessControl`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
-consumerd (follow-ups first): admin and impersonation, anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, the rate limit storage. `freshAge: 600` and `deferSessionRefresh: true` run unchanged since plan 12a: core's window is 10 minutes, and the shim's client posts the deferred refresh. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e, and the tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` instead. With snake-case names, the column is `ta_purpose`. The row holds a keyed hash, never the code.
+consumerd (follow-ups first): `authtempo.platformOrganization` for the admin plugin (see "The admin plugin"), anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, the rate limit storage. `freshAge: 600` and `deferSessionRefresh: true` run unchanged since plan 12a: core's window is 10 minutes, and the shim's client posts the deferred refresh. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e, and the tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` instead. With snake-case names, the column is `ta_purpose`. The row holds a keyed hash, never the code.
 The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`.
 
-consumerb (follow-ups first): API keys (the api-key mapping, a later plan; see the plan index), the OAuth 2.1 provider through `mcp` and `cimd`, and `jwt` and JWKS (refused since plan 9g; see "JWT and the OAuth provider"), admin, `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
+consumerb (follow-ups first): API keys (the api-key mapping, a later plan; see the plan index), the OAuth 2.1 provider through `mcp` and `cimd`, and `jwt` and JWKS (refused since plan 9g; see "JWT and the OAuth provider"), `authtempo.platformOrganization` for the admin plugin (see "The admin plugin"), `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.
 
 ## JWT and the OAuth provider

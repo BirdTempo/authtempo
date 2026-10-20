@@ -8,6 +8,8 @@ sources:
   - packages/compat-better-auth/README.md "Plugins"
   - packages/compat-better-auth/README.md "Account operations"
   - packages/compat-better-auth/README.md "JWT and the OAuth provider"
+  - packages/compat-better-auth/README.md "The admin plugin"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16.1
 ---
 
@@ -56,6 +58,7 @@ An import of another subpath, such as `better-auth/db` or `better-auth/plugins/a
 | `bearer` | Adds `set-auth-token` to each answer that sets the session cookie. |
 | `expo` | Core's handoff through the system browser. `trustedOrigins` must hold the app scheme. |
 | `twoFactor` | Core's TOTP second factor on the password sign-in. Pass `accountLockout: { enabled: false }`. Core's gate on the magic link, the email code, and social stays off. A reset by code of a user with the factor on opens no session. |
+| `admin` | Core's operator tools. Needs `organization` and `authtempo.platformOrganization`. See [The admin plugin](#the-admin-plugin). |
 | `jwt`, `mcp`, `cimd`, `oidc-provider`, `oauth-provider` | Refused at start. Move to core's `createAuth` with `jwtMint` and `oauth`. |
 
 Any other plugin is refused at start by its id.
@@ -149,6 +152,28 @@ The shim's own codes `EMAIL_CAN_NOT_BE_UPDATED`, `FIELD_NOT_ALLOWED`, `ACCOUNT_N
 - A name has 1 to 64 characters after the trim, with no control or format character except the zero-width joiners. Else the answer is `VALIDATION_ERROR` with 400.
 - The passkey in the answer has no `publicKey`, `counter`, `transports`, or `aaguid`.
 - The [limit](/docs/reference/limits/) `passkey-rename:user:<userId>` allows 30 renames per 15 minutes.
+
+## The admin plugin
+
+Better Auth's `admin` plugin runs on core's operator tools (spec section 26). A platform operator is a member of the platform organization with the platform role, a verified address, a second factor, and a fresh session.
+
+| Option | On authtempo |
+| --- | --- |
+| `authtempo.platformOrganization` | Required with `admin`, refused without it. The slug of the platform organization. |
+| `adminRoles` | One rank of `viewer`, `member`, `admin`, and `owner`; default `admin`. It is the platform role. |
+| `impersonationSessionDuration` | Seconds, a whole number of minutes from 5 to 240; default 3600. |
+| `defaultRole` | `"user"` only. |
+| `allowImpersonatingAdmins` | `false` only. |
+| `defaultBanReason`, `defaultBanExpiresIn`, `bannedUserMessage`, `adminUserIds`, `schema`, `ac`, `roles` | Refused at start. |
+
+| Call | On authtempo |
+| --- | --- |
+| `/admin/set-user-password`, `/admin/remove-user` | `NOT_SUPPORTED` (501). An operator bans, and the person resets the password or deletes the account. |
+| `/admin/create-user`, `/admin/update-user`, `/admin/list-user-sessions`, `/admin/revoke-user-session`, `/admin/has-permission` | `NOT_SUPPORTED` (501). |
+| `/admin/list-users` | One search: `searchValue` with `searchOperator: "starts_with"` on the address, or `filterField` `email` or `id`. A search of the name, `contains`, `ends_with`, `sortBy`, and an `offset` other than 0 answer `NOT_SUPPORTED` (501). |
+| `/admin/set-role` | The platform role grants it, and `user` revokes it. Any other role answers `NOT_SUPPORTED` (501). |
+
+Each `NOT_SUPPORTED` message names spec section 26. A call with no reason writes the audit reason `better-auth admin plugin <path>`. The README of the package gives the SQL that copies the bans of Better Auth into core's columns at the cutover.
 
 ## Next
 
