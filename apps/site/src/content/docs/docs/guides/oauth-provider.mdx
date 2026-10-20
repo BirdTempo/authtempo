@@ -118,7 +118,7 @@ With `registration.cimd` on, a client id may be the https URL of its metadata do
 - A document with no `authorization_code` grant or no `code` response type is refused.
 - When a document changes from `private_key_jwt` to `none`, core revokes every refresh token of the client in the same write.
 
-## Device flow
+## The device flow
 
 The device grant of RFC 8628 serves a device with no browser, such as a TV or a CLI. Set `oauth.device: {}` to turn it on.
 
@@ -230,14 +230,6 @@ A client that registers an https `backchannel_logout_uri` gets a sign-out token 
 ## The conformance run
 
 `scripts/conformance/README.md` holds the steps of four plans of the OpenID conformance suite. The owner runs them on a machine with Docker. No CI job runs the suite. `scripts/conformance/expected-gaps.md` names each module that is expected to end other than passed, with its reason. The example Worker serves a conformance mode from its own entry and its own wrangler config.
-
-## The device flow
-
-A device with no browser, such as a command line tool, can get tokens with the device grant of RFC 8628. `oauth.device: {}` turns it on.
-
-1. The client asks at `POST /auth/oauth/device_authorization` and shows the person a short user code.
-2. The person opens `GET /auth/oauth/device` in a browser with a session, and types the code.
-3. The device polls `/auth/oauth/token` until the person approves or denies.
 
 ## If it fails
 
