@@ -128,9 +128,10 @@ export interface OperatorActEnds {
 /** The act's own steps after the commit. */
 export interface OperatorActSteps<T> {
   /**
-   * Runs after the commit and before `afterAction`: `sessionsEnded`,
-   * `deliverLogouts`, the notice, and the user hooks, in that order. The
-   * act is committed, so a throw writes one log line and the act stays.
+   * Runs after the commit and before `afterAction`: `sessionsEnded`, the
+   * notice, and the user hooks, in that order. No act sends a back-channel
+   * logout here: the sweep sends the outbox rows (ruling 37 of plan 12f).
+   * The act is committed, so a throw writes one log line and the act stays.
    */
   committed?(value: T, ends: OperatorActEnds): Promise<void>;
 }

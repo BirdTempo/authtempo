@@ -5,7 +5,6 @@ import type { MemberRow, OrganizationRow, UserRow } from "../../schema.js";
 import { type StorageAdapter, StorageError } from "../../storage/port.js";
 import { createSteps } from "../create-steps.js";
 import { runAfter, runBefore } from "../hooks.js";
-import { deliverLogouts } from "../oauth-logout.js";
 import {
   isOwner,
   type MemberSummary,
@@ -322,9 +321,10 @@ export async function grantPlatformRole(
  *
  * After the commit, the steps run in the order of ruling 2. First,
  * `session.afterEnd` fires with `operator` for each session. Then the
- * back-channel logouts go, and the member hooks run with `via: "operator"`
- * (the role hooks for a row that stays). Last, `operatorAct` runs
- * `afterAction` and `endFamilies`.
+ * member hooks run with `via: "operator"` (the role hooks for a row that
+ * stays). Last, `operatorAct` runs `afterAction` and `endFamilies`. The
+ * revoke sends no back-channel logout in its call: the outbox rows are due
+ * now, and the sweep sends them (ruling 37 of plan 12f).
  */
 export async function revokePlatformRole(
   config: ResolvedConfig,
@@ -412,7 +412,6 @@ export async function revokePlatformRole(
       async committed({ change }, ends) {
         if (change === null) return;
         await sessionsEnded(config, ends.ended, "operator");
-        await deliverLogouts(config, user.id);
         await memberChanged(config, summary, user, by, change);
       },
     },

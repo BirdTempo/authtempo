@@ -184,7 +184,7 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
     expect(invocation.storage.statementsSent?.()).toBe(49);
   });
 
-  it("an endUser of the app with a hook sends 43 queries, the hold batch too", async () => {
+  it("an endUser of the app with a hook sends 42 queries, the hold batch too", async () => {
     const sent: MailMessage[] = [];
     const { userId } = await signIns(engine(env.DB, sent).auth, sent, "ada@example.com", 60);
     const { db, count } = counting(env.DB);
@@ -197,9 +197,10 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
       userAgent: null,
     });
     if (!done.ok) throw new Error(done.code);
-    // A page keeps calls for the last page, so a page with a hook ends 31 sessions in 43 queries.
-    expect([done.value.ended, done.value.more, count.queries]).toEqual([31, true, 43]);
-    expect(invocation.storage.statementsSent?.()).toBe(43);
+    // A page keeps calls for the last page, so a page with a hook ends 31 sessions in 42
+    // queries. The call sends no logout, so it reads no outbox row (ruling 37).
+    expect([done.value.ended, done.value.more, count.queries]).toEqual([31, true, 42]);
+    expect(invocation.storage.statementsSent?.()).toBe(42);
   });
 
   for (const call of ["endAll", "endUser"] as const)
@@ -235,7 +236,7 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
       // The whole invocation on the binding, and the counter of the adapter, which
       // leaves out the 2 limiter queries: they go to the binding, not through the adapter.
       expect([done.value.ended, count.queries, invocation.storage.statementsSent?.()]).toEqual(
-        call === "endAll" ? [37, 49, 47] : [21, 43, 41],
+        call === "endAll" ? [37, 49, 47] : [21, 42, 40],
       );
     });
 });

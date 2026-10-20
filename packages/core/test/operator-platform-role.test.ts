@@ -8,6 +8,7 @@ import { operatorApi } from "../src/engine/operator/index.js";
 import { addMember, updateMemberRole } from "../src/engine/organizations.js";
 import { passwordSignUp } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
+import { sweepExpired } from "../src/engine/sweep.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -263,7 +264,7 @@ describe("the platform role (plan 12f Task 8)", () => {
     expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
   });
 
-  it("sends the back-channel logout of each linked client after the revoke", async () => {
+  it("writes the back-channel logout of each linked client at the revoke, and the sweep sends it (ruling 37)", async () => {
     const posts: string[] = [];
     const fetchFn = (async (_url: RequestInfo | URL, init?: RequestInit) => {
       posts.push(new URLSearchParams(String(init?.body)).get("logout_token") ?? "");
@@ -300,6 +301,12 @@ describe("the platform role (plan 12f Task 8)", () => {
     expect((await handle(exchange(code, clientId, p.verifier))).status).toBe(200);
     expect(posts).toEqual([]);
     expect((await revoke(auth, ada.user.id)).ok).toBe(true);
+    // The revoke sends none in its call: the row waits for the sweep.
+    expect(posts).toEqual([]);
+    expect((await auth.storage.findMany("oauthLogout", [])).map((r) => r.sessionId)).toEqual([
+      ada.session.id,
+    ]);
+    await sweepExpired(auth.config);
     expect(posts.map((t) => decodeJwt(t).sid)).toEqual([ada.session.id]);
     expect(await auth.storage.findMany("oauthLogout", [])).toEqual([]);
   });

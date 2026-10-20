@@ -4,7 +4,6 @@ import type { SessionRow } from "../../schema.js";
 import { findManyIn, IN_CHUNK } from "../../storage/batch.js";
 import type { StorageAdapter, Where } from "../../storage/port.js";
 import { deleteOAuthCodes } from "../oauth-grants.js";
-import { deliverLogouts, LOGOUT_ROW_CALLS } from "../oauth-logout.js";
 import { writeLogouts } from "../oauth-outbox.js";
 import { deleteTwoFactorChallenges } from "../second-factor.js";
 import { deleteHandoffCodes } from "../session-list.js";
@@ -127,9 +126,11 @@ const FAMILY_CALLS = 2;
  * again.
  *
  * After the commit, in the order of ruling 2: `session.afterEnd` with
- * `operator` per session, the back-channel logouts that the calls left
- * allow (the sweep sends the rest), then `afterAction` and `endFamilies` in
- * `operatorAct`. The work counts its statements with `meterOf`.
+ * `operator` per session, then `afterAction` and `endFamilies` in
+ * `operatorAct`. The call sends no back-channel logout: its outbox rows
+ * are due now, and the sweep sends them (ruling 37 of plan 12f). So the
+ * cost of a call does not depend on a signature, a reseal, or a key
+ * rotation. The work counts its statements with `meterOf`.
  */
 export async function endUserSessions(
   config: ResolvedConfig,
@@ -197,7 +198,6 @@ export async function endUserSessions(
       const sessionsLeft = page.stopped || read.length > rows.length;
       let familiesLeft = false;
       let late = 0;
-      let families = 0;
       if (!sessionsLeft) {
         // A sign-in that commits after the read loses its row here, with no hook (plan 9d).
         late = await tx.delete("session", [{ field: "userId", op: "eq", value: userId }]);
@@ -229,22 +229,13 @@ export async function endUserSessions(
         }
         await deleteOAuthCodes(tx, userId);
         meter.step(2);
-        families = take.length;
         familiesLeft = take.length < all.length;
       }
-      // The calls after the commit: the read and the revokes of endFamilies, then the delivery.
-      const after = families > 0 ? 1 + FAMILY_CALLS * families : 0;
-      const deliver = Math.floor((budget.value - meter.used - after - 1) / LOGOUT_ROW_CALLS);
       // The row is the last write of the act, so it can hold the count.
       draft.data = { ended: page.deleted + late };
-      return ok({ ended: page.deleted + late, more: sessionsLeft || familiesLeft, deliver });
+      return ok({ ended: page.deleted + late, more: sessionsLeft || familiesLeft });
     },
-    {
-      async committed(value, ends) {
-        await sessionsEnded(config, ends.ended, "operator");
-        await deliverLogouts(config, userId, value.deliver);
-      },
-    },
+    { committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator") },
   );
   if (!done.ok) return done;
   return ok({ ended: done.value.ended, more: done.value.more, auditId: done.value.auditId });

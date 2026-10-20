@@ -3,7 +3,6 @@ import { fail, ok, type Result } from "../../result.js";
 import type { UserRow } from "../../schema.js";
 import type { StorageAdapter, Where } from "../../storage/port.js";
 import { runAfter, runBefore, type UserPatch, type UserUpdateVia } from "../hooks.js";
-import { deliverLogouts } from "../oauth-logout.js";
 import { ROUNDS } from "../rounds.js";
 import { later } from "../second-factor.js";
 import { endAllAccess } from "../session-list.js";
@@ -198,8 +197,10 @@ async function userUpdated(
  * unban. A ban of a banned user replaces the time, the reason, and the end.
  *
  * After the commit, in the order of ruling 2: `session.afterEnd` with
- * `banned` per session, the back-channel logouts, `user.afterUpdate`, then
- * `afterAction` and `endFamilies` in `operatorAct`.
+ * `banned` per session, `user.afterUpdate`, then `afterAction` and
+ * `endFamilies` in `operatorAct`. The ban sends no back-channel logout in
+ * its call: the outbox rows are due now, and the sweep sends them (ruling
+ * 37 of plan 12f).
  */
 export async function banUser(
   config: ResolvedConfig,
@@ -243,7 +244,6 @@ export async function banUser(
     {
       async committed(value, ends) {
         await sessionsEnded(config, ends.ended, "banned");
-        await deliverLogouts(config, input.userId);
         await userUpdated(config, value, "ban");
       },
     },

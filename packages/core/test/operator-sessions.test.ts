@@ -506,7 +506,7 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     expect(await w.storage.findMany("oauthToken", [])).toEqual(tokens);
   });
 
-  it("sends the back-channel logout of one user's linked session after the commit", async () => {
+  it("writes the logout of one user's linked session, sends none in the call, and the sweep sends it (ruling 37)", async () => {
     const w = await world();
     const clientId = await backchannelClient(w);
     const ada = await userWith(w, "ada@example.com", 1);
@@ -525,10 +525,40 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       userAgent: null,
     });
     expect(done.ok && done.value.ended).toBe(2);
-    expect(w.sent).toEqual([BACKCHANNEL]);
-    expect(await w.storage.findMany("oauthLogout", [])).toEqual([]);
+    // The cost of the call does not depend on a signature: the row waits for the sweep.
+    expect(w.sent).toEqual([]);
+    const outbox = await w.storage.findMany("oauthLogout", []);
+    expect(outbox.map((r) => [r.sessionId, r.clientId])).toEqual([[open.session.id, clientId]]);
     // The ban list of deletes: the OAuth tokens of the user go too.
     expect(await w.storage.findMany("oauthToken", [])).toEqual([]);
+    expect(await sweepAll(w)).toBe(1);
+    expect(w.sent).toEqual([BACKCHANNEL]);
+  });
+
+  it("a ban writes the logout of a linked session, sends none in the call, and the sweep sends it (ruling 37)", async () => {
+    const w = await world();
+    const clientId = await backchannelClient(w);
+    const ada = await userWith(w, "ada@example.com", 1);
+    const open = await openSession(w.config, {
+      user: ada,
+      ip: null,
+      userAgent: null,
+      via: "password",
+    });
+    await linked(w, open.token, clientId);
+    const done = await w.api.users.ban({
+      actor: APP,
+      userId: ada.id,
+      reason: "Fraud",
+      ip: null,
+      userAgent: null,
+    });
+    expect(done.ok).toBe(true);
+    expect(w.sent).toEqual([]);
+    const outbox = await w.storage.findMany("oauthLogout", []);
+    expect(outbox.map((r) => [r.sessionId, r.clientId])).toEqual([[open.session.id, clientId]]);
+    expect(await sweepAll(w)).toBe(1);
+    expect(w.sent).toEqual([BACKCHANNEL]);
   });
 
   it("costs 22 storage calls for a call of 500 with no hook and no link", async () => {
@@ -780,17 +810,17 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
         pages.push({ ended: done.value.ended, more: done.value.more, calls: counts.calls });
         more = done.value.more;
       }
-      // The steps after the commit count too: the delivery and endFamilies. With the
-      // schema check of D1 each call stays at 50 or fewer.
+      // The steps after the commit count too: endFamilies. The call sends no logout
+      // (ruling 37). With the schema check of D1 each call stays at 50 or fewer.
       expect(pages, label).toEqual(
         hook
           ? [
-              { ended: 32, more: true, calls: 42 },
-              { ended: 32, more: true, calls: 42 },
-              { ended: 32, more: true, calls: 42 },
-              { ended: 4, more: false, calls: 30 },
+              { ended: 32, more: true, calls: 41 },
+              { ended: 32, more: true, calls: 41 },
+              { ended: 32, more: true, calls: 41 },
+              { ended: 4, more: false, calls: 29 },
             ]
-          : [{ ended: 100, more: false, calls: 47 }],
+          : [{ ended: 100, more: false, calls: 38 }],
       );
       expect(more, label).toBe(false);
       expect(await sessionsOf(w.storage, user.id), label).toEqual([]);
@@ -840,7 +870,7 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     expect(pages).toEqual([
       { ended: 2, more: true, calls: 48 },
       { ended: 0, more: true, calls: 48 },
-      { ended: 0, more: false, calls: 47 },
+      { ended: 0, more: false, calls: 38 },
     ]);
     expect(await w.storage.findMany("oauthToken", [])).toEqual([]);
     expect(await resolveSession(w.config, opened.token)).toBeNull();
@@ -889,8 +919,8 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     });
     if (!done.ok) throw new Error(done.code);
     const total = counts.calls + limited.calls + SCHEMA_CHECK;
-    // The reserve of 9 leaves the work 40 calls; the whole call makes 42.
-    expect([before, total, done.value.ended, done.value.more]).toEqual([8, 42, 22, true]);
+    // The reserve of 9 leaves the work 40 calls; the whole call makes 41.
+    expect([before, total, done.value.ended, done.value.more]).toEqual([8, 41, 22, true]);
   });
 
   it("ends 60 sessions with a hook in two pages, with no session lost or ended twice", async () => {
