@@ -247,6 +247,10 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
 
   it("refuses an index, a move, and 101 operations", () => {
     const deep = { op: "replace", value: { members: [{ value: ["u1"] }] } };
+    // 101 distinct keys of one no-path value, each a valid path.
+    const keys101 = Object.fromEntries(
+      Array.from({ length: 101 }, (_, n) => [`emails[type eq "${n}"].value`, "a"]),
+    );
     const rows: [string, unknown, "User" | "Group", string, number][] = [
       [
         "an index",
@@ -293,6 +297,38 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
           op: "replace",
           value: { title: "t", nickName: "n" },
         }),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      [
+        "more than 100 operations from paths after the no-path form",
+        body(
+          {
+            op: "replace",
+            value: Object.fromEntries(
+              Array.from({ length: 99 }, (_, n) => [`emails[type eq "${n}"].value`, "a"]),
+            ),
+          },
+          { op: "replace", path: "title", value: "t" },
+          { op: "replace", path: "nickName", value: "n" },
+        ),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      [
+        "one operation with 101 keys",
+        body({ op: "replace", value: keys101 }),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      [
+        // The unknown key after the bound would answer invalidPath, so this
+        // row shows that the parser stops at operation 101 (review l1).
+        "one operation with 101 keys and then an unknown key",
+        body({ op: "replace", value: { ...keys101, shoeSize: 1 } }),
         "User",
         "invalidValue",
         400,

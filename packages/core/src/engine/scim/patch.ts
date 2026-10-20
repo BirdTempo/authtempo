@@ -160,6 +160,10 @@ function refuse(scimType: ScimType, detail: string): Refusal {
   return { ok: false, status: SCIM_ERRORS[scimType], scimType, detail };
 }
 
+function tooManyOps(): Refusal {
+  return refuse("invalidValue", `the operations hold more than ${PATCH_OPS_MAX} changes`);
+}
+
 function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
@@ -323,10 +327,11 @@ export function parsePatch(
         const op = target(name, key, part, resource);
         if ("ok" in op) return { ...op, detail: `operation ${i}: ${op.detail}` };
         ops.push(op);
+        // One value can hold many keys, so the parser stops at the bound here.
+        if (ops.length > PATCH_OPS_MAX) return tooManyOps();
       }
     }
-    if (ops.length > PATCH_OPS_MAX)
-      return refuse("invalidValue", `the operations hold more than ${PATCH_OPS_MAX} changes`);
+    if (ops.length > PATCH_OPS_MAX) return tooManyOps();
   }
   return { ok: true, ops, id };
 }
