@@ -640,6 +640,78 @@ describe("teams (plan 12k Task 5)", () => {
     expect(row?.activeTeamId).toBeNull();
   });
 
+  it("asks member:read for the members list of a team", async () => {
+    const all = {
+      organization: ["update", "delete"],
+      member: ["read", "create", "update", "delete"],
+      invitation: ["read", "create", "cancel"],
+      team: ["create", "update", "delete"],
+    };
+    const w = world({
+      teams: {},
+      roles: { owner: { rank: 4, permissions: all }, guest: { rank: 1, permissions: {} } },
+    });
+    const ada = await w.user("ada@example.com");
+    const gus = await w.user("gus@example.com");
+    const organizationId = mustOk(
+      await w.auth.api.createOrganization({ user: ada, slug: "acme", name: "Acme" }),
+    ).organization.id;
+    mustOk(
+      await w.auth.api.addMember({ user: ada, organizationId, userId: gus.id, role: "guest" }),
+    );
+    const team = mustOk(await w.auth.api.createTeam({ user: ada, organizationId, name: "Core" }));
+    mustOk(await w.auth.api.addTeamMember({ user: ada, teamId: team.id, userId: gus.id }));
+    const h = bearer(await w.session("gus@example.com"));
+    // A guest has no member:read: the teams list needs membership only, the members list does not.
+    expect(
+      await json(await w.auth.handle(get(`${P}?organizationId=${organizationId}`, h))),
+    ).toMatchObject({ status: 200 });
+    expect(await json(await w.auth.handle(get(`${P}/members?teamId=${team.id}`, h)))).toEqual({
+      status: 403,
+      body: { error: "forbidden_rank" },
+    });
+  });
+
+  it("clears the active team of the person only at a team leave", async () => {
+    const w = world();
+    const { ada, bob, carol, organizationId } = await acme(w);
+    const core = mustOk(await w.auth.api.createTeam({ user: ada, organizationId, name: "Core" }));
+    for (const userId of [bob.id, carol.id])
+      mustOk(await w.auth.api.addTeamMember({ user: ada, teamId: core.id, userId }));
+    for (const email of ["bob@example.com", "carol@example.com"]) {
+      const h = bearer(await w.session(email));
+      await w.auth.handle(post("/auth/organizations/active", { organizationId }, h));
+      await w.auth.handle(post(`${P}/active`, { teamId: core.id }, h));
+    }
+    mustOk(await w.auth.api.removeTeamMember({ user: carol, teamId: core.id, userId: carol.id }));
+    const active = async (userId: string) =>
+      (await w.storage.findMany("session", [{ field: "userId", op: "eq", value: userId }])).map(
+        (s) => s.activeTeamId,
+      );
+    expect(await active(carol.id)).toEqual([null]);
+    expect(await active(bob.id)).toEqual([core.id]);
+  });
+
+  it("keeps the active team when the same organization is set active again", async () => {
+    const w = world();
+    const { ada, carol, organizationId } = await acme(w);
+    const core = mustOk(await w.auth.api.createTeam({ user: ada, organizationId, name: "Core" }));
+    mustOk(await w.auth.api.addTeamMember({ user: ada, teamId: core.id, userId: carol.id }));
+    const h = bearer(await w.session("carol@example.com"));
+    await w.auth.handle(post("/auth/organizations/active", { organizationId }, h));
+    await w.auth.handle(post(`${P}/active`, { teamId: core.id }, h));
+    expect(
+      await json(await w.auth.handle(post("/auth/organizations/active", { organizationId }, h))),
+    ).toMatchObject({
+      status: 200,
+      body: { session: { activeOrganizationId: organizationId, activeTeamId: core.id } },
+    });
+    const [row] = await w.storage.findMany("session", [
+      { field: "userId", op: "eq", value: carol.id },
+    ]);
+    expect(row?.activeTeamId).toBe(core.id);
+  });
+
   it("mounts no team route with teams off", async () => {
     const w = world({});
     const { ada, organizationId } = await acme(w);
