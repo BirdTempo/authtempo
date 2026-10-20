@@ -271,13 +271,16 @@ describe("check-changesets", () => {
   });
 
   it("refuses an empty changeset with no reason", () => {
+    // The reason line is the first line of the body, so a late one does not count.
     const r = run(paths("packages/core/test/a.test.ts"), [
       "empty-no-reason.md",
       "empty-other-body.md",
+      "empty-late-reason.md",
     ]);
     expect(r.failures).toEqual([
       '.changeset/empty-no-reason.md names no package and has no line "No release: <reason>"',
       '.changeset/empty-other-body.md names no package and has no line "No release: <reason>"',
+      '.changeset/empty-late-reason.md names no package and has no line "No release: <reason>"',
     ]);
   });
 
