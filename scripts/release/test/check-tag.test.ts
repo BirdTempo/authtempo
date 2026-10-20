@@ -62,6 +62,10 @@ describe("check-tag", () => {
       expect(tagAt(`v${version}`, version, "main").failures).toEqual([
         `the tag v${version} is at 0.0.x; the first release is 0.1.0, so no tag is v0.0.x`,
       ]);
+    // The rule holds off main too: a patch tag on release/0.0 is still 0.0.x.
+    expect(tagAt("v0.0.1", "0.0.1", "release").failures).toEqual([
+      "the tag v0.0.1 is at 0.0.x; the first release is 0.1.0, so no tag is v0.0.x",
+    ]);
     expect(tagAt("v0.1.0", "0.1.0", "main").failures).toEqual([]);
     expect(tagAt("v1.0.0", "1.0.0", "main").failures).toEqual([]);
   });
