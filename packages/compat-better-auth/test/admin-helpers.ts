@@ -14,7 +14,8 @@ const fast = betterAuthPasswordHash({ pbkdf2: createPbkdf2PasswordHash({ iterati
 export const PASSWORD = "correct horse battery";
 export const OPERATOR = "op@example.com";
 export const APP = { kind: "app", name: "setup" } as const;
-const cookieOf = (res: Response) =>
+/** The session cookie pair that a response sets, or an empty text. */
+export const cookieOf = (res: Response) =>
   (res.headers.getSetCookie().find((c) => c.startsWith(`${COOKIE_NAME}=`)) ?? "").split(";")[0] ??
   "";
 

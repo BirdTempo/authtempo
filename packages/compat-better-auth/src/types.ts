@@ -641,10 +641,14 @@ interface SignUpTokenOf {
 }
 
 export interface CompatServerApi<TF extends boolean = false, RV extends boolean = false> {
-  /** `user.twoFactorEnabled` is set with the two-factor plugin (plan 9f). */
+  /**
+   * `user.twoFactorEnabled` is set with the two-factor plugin (plan 9f).
+   * `role`, `banned`, `banReason`, and `banExpires` are set with the admin
+   * plugin (plan 12f).
+   */
   getSession(input: { headers: Headers }): Promise<{
     session: Session;
-    user: User & { twoFactorEnabled?: boolean };
+    user: User & { twoFactorEnabled?: boolean } & Partial<Omit<AdminUser, keyof User>>;
     /** With `session.deferSessionRefresh` on only (plan 12a): the refresh is due. */
     needsRefresh?: boolean;
   } | null>;

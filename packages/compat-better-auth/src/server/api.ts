@@ -16,6 +16,7 @@ import {
   passwordPolicyCode,
 } from "../errors.js";
 import type { Account, CompatServerApi } from "../types.js";
+import { roleOf, toAdminUser } from "./admin.js";
 import { sha256Hex } from "./mail.js";
 import type { Mapped } from "./map-options.js";
 import {
@@ -180,10 +181,15 @@ export async function sessionAnswerOf(
   const factor = mapped.plugins.has("two-factor")
     ? await auth.api.totp?.status({ userId: s.user.id })
     : undefined;
+  // With the admin plugin, Better Auth's user holds role and the ban fields (plan 12f, ruling 53).
+  const adminFields =
+    mapped.platformRole !== null
+      ? toAdminUser(s.user, await roleOf(mapped, s.user.id), new Date())
+      : null;
   return {
     session: toSession(s.session, token),
     user: {
-      ...toUser(s.user),
+      ...(adminFields ?? toUser(s.user)),
       ...(factor?.ok ? { twoFactorEnabled: factor.value.enabled } : {}),
     },
     ...(s.needsRefresh !== undefined ? { needsRefresh: s.needsRefresh } : {}),

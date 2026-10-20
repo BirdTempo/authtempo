@@ -18,7 +18,7 @@ import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
 import type { AdminOptions, BetterAuthOptions, CompatDatabase } from "../src/types.js";
-import { adminApp, OPERATOR, PASSWORD } from "./admin-helpers.js";
+import { adminApp, cookieOf, OPERATOR, PASSWORD } from "./admin-helpers.js";
 
 // Plan 12f Task 13: Better Auth's admin plugin on core's operator tools
 // (spec section 26 item 14, ruling 39). This file holds the options, the
@@ -226,6 +226,10 @@ describe("the admin calls that core does not serve (plan 12f)", () => {
       "sortBy=createdAt",
       "sortDirection=desc",
       "offset=10",
+      // An offset with core's cursor too: a silent offset would give a wrong page (ruling 53).
+      "offset=10&after=u2",
+      "offset=1&limit=2",
+      "offset=-1",
       "limit=101",
       "limit=0",
       "limit=ten",
@@ -512,6 +516,39 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
       "sessions_end_user",
       "sessions_end_user",
     ]);
+  });
+
+  it("gives get-session the role and the ban fields of the admin plugin (ruling 53)", async () => {
+    const a = await adminApp(memoryDatabase());
+    const ann = await a.user("ann@example.com");
+    const session = async (cookie: string) => {
+      const res = await a.read("/get-session", cookie);
+      const body = (await res.json()) as { user: Record<string, unknown> } | null;
+      return (
+        body && {
+          role: body.user.role,
+          banned: body.user.banned,
+          banReason: body.user.banReason,
+          banExpires: body.user.banExpires,
+        }
+      );
+    };
+    const none = { banned: false, banReason: null, banExpires: null };
+    expect(await session(a.op)).toEqual({ role: "admin", ...none });
+    expect(await session(ann.cookie)).toEqual({ role: "user", ...none });
+    // The server api gives the same fields.
+    const api = await a.auth.api.getSession({ headers: new Headers({ cookie: a.op }) });
+    expect(api?.user.role).toBe("admin");
+    // A banned user has no session: the ban ended it, and a sign-in is refused.
+    await a.call("/admin/ban-user", { userId: ann.id, banReason: "Spam" }, a.op);
+    expect(await session(ann.cookie)).toBeNull();
+    // After the unban, core's row keeps the ban time and the reason, and the ban no longer holds.
+    await a.call("/admin/unban-user", { userId: ann.id }, a.op);
+    const again = await a.call("/password/sign-in", {
+      email: "ann@example.com",
+      password: PASSWORD,
+    });
+    expect(await session(cookieOf(again))).toEqual({ role: "user", ...none });
   });
 
   it("refuses an admin with no second factor", async () => {
