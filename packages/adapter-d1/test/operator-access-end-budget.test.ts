@@ -190,9 +190,10 @@ async function invoke(
   path: string,
   headers: Record<string, string>,
   body: unknown,
+  extra: Partial<AuthConfig> = {},
 ) {
   const { db, count } = counting(env.DB);
-  const { auth } = await engine(db, sent, createD1Limiter(db, clock));
+  const { auth } = await engine(db, sent, createD1Limiter(db, clock), extra);
   const res = await auth.handle(
     new Request(`${BASE}/auth${path}`, {
       method: "POST",
@@ -212,7 +213,7 @@ async function invoke(
 }
 
 /** Sweeps, one invocation each, until no pending-end row stays: the queries of each sweep. */
-async function sweepAll(sent: MailMessage[]) {
+async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
   const queries: number[] = [];
   for (;;) {
     const left = await env.DB.prepare(
@@ -221,7 +222,7 @@ async function sweepAll(sent: MailMessage[]) {
     if (!left?.n) return queries;
     if (queries.length >= 20) throw new Error("the sweep makes no progress");
     const { db, count } = counting(env.DB);
-    const { auth } = await engine(db, sent, createD1Limiter(db, clock));
+    const { auth } = await engine(db, sent, createD1Limiter(db, clock), extra);
     await auth.api.sweepExpired();
     queries.push(count.queries);
   }
@@ -318,6 +319,52 @@ describe("the ban and the revoke on D1 (rulings 44 and 45 of plan 12f)", () => {
   beforeEach(async () => {
     await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
     endings.length = 0;
+  });
+
+  it("ends the left impersonation sessions of a banned target in the sweep, each with its stop row", async () => {
+    const sent: MailMessage[] = [];
+    const on = {
+      operator: {
+        secrets: [
+          { name: "support", secretHash: await sha256Hex(SECRET), scopes: ["users", "sessions"] },
+        ],
+        users: true,
+        impersonation: {},
+      },
+    } satisfies Partial<AuthConfig>;
+    const { auth: setup } = await engine(env.DB, sent, undefined, on);
+    const token = await platformOperator(setup, sent);
+    const { userId } = await signIns(setup, sent, "ada@example.com", 45);
+    // A core id is a ULID: a second later, the impersonation sessions sort after the 45.
+    current = new Date(current.getTime() + 1000);
+    const operator = await setup.api.getSession(token);
+    if (!operator) throw new Error("the session ended");
+    for (let i = 0; i < 3; i++) {
+      const r = await setup.api.operator.impersonate({
+        operator,
+        userId,
+        reason: `Ticket ${i}`,
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+    }
+    endings.length = 0;
+    const r = await invoke(sent, "/operator/users/ban", asSecret, { userId, reason: REASON }, on);
+    expect(r.status).toBe(200);
+    const inAct = endings.length;
+    const sweeps = await sweepAll(sent, on);
+    expect(await sessionsOf(userId)).toBe(0);
+    const stops = await env.DB.prepare(
+      "SELECT data FROM ta_operator_audit WHERE action = 'impersonation_stop' ORDER BY id",
+    ).all<{ data: string }>();
+    // The act ends the first page; the 3 impersonation sessions end in the sweep.
+    expect(stops.results.map((s) => JSON.parse(s.data).cause)).toEqual(["ban", "ban", "ban"]);
+    // The run of 2026-10-21: with the tool on, the act reads the audit table for
+    // the user's own impersonations, so it ends 30, not 31. The sweep ends 15
+    // sessions and writes 3 stop rows in 42 queries, inside SWEEP_CALL_BUDGET.
+    expect([r.queries, inAct, sweeps]).toEqual([50, 30, [42]]);
+    expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
   });
 
   for (const sessions of [45, 60])
