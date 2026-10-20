@@ -4,10 +4,12 @@ import {
   bitString,
   certificateDer,
   concat,
+  nullValue,
   OIDS,
   oid,
   pem,
   seq,
+  tlv,
   uint,
 } from "../../src/testing/der-writer.js";
 import { createTestIdp } from "../../src/testing/saml-idp.js";
@@ -37,6 +39,17 @@ async function certificate(spki: Uint8Array, signer: CryptoKey): Promise<Uint8Ar
     notBefore: NOT_BEFORE,
     notAfter: NOT_AFTER,
   });
+}
+
+/** The DER bytes with the one ASCII run `from` written as `to`, of the same length. */
+function patchAscii(der: Uint8Array, from: string, to: string): Uint8Array<ArrayBuffer> {
+  const text = Array.from(der, (b) => String.fromCharCode(b)).join("");
+  const at = text.indexOf(from);
+  if (at < 0 || text.indexOf(from, at + 1) >= 0 || from.length !== to.length)
+    throw new Error(`not exactly one: ${from}`);
+  const out = new Uint8Array(der);
+  out.set(new TextEncoder().encode(to), at);
+  return out;
 }
 
 describe("readCertificate and importVerifyKey", () => {
@@ -106,5 +119,35 @@ describe("readCertificate and importVerifyKey", () => {
       body,
     );
     expect(readCertificate(pem("CERTIFICATE", five))).toBeNull();
+  });
+
+  // Review L2 of Task 7: RFC 3279 section 2.3.1 gives an RSA key the parameters NULL.
+  it.each([
+    ["NULL", "rsa", nullValue()],
+    ["an OID", null, oid(OIDS.prime256v1)],
+    ["a NULL with one content byte", null, tlv(0x05, new Uint8Array([0]))],
+  ])("reads the RSA parameters %s: the key is %s", async (_name, key, params) => {
+    const signer = await rsaPair(2048);
+    const real = new Uint8Array(await crypto.subtle.exportKey("spki", signer.publicKey));
+    // The real SPKI: a SEQUENCE header of 4 bytes, then the algorithm SEQUENCE, then the key.
+    expect([real[0], real[1], real[4]]).toEqual([0x30, 0x82, 0x30]);
+    const keyBits = real.slice(6 + (real[5] ?? 0));
+    expect(keyBits[0]).toBe(0x03);
+    const spki = seq(seq(oid(OIDS.rsaEncryption), params), keyBits);
+    const info = readCertificate(pem("CERTIFICATE", await certificate(spki, signer.privateKey)));
+    expect(info?.key ?? null).toBe(key);
+  });
+
+  // The fields of a time in their range (RFC 5280 section 4.1.2.5), in notBefore and notAfter.
+  it.each([
+    ["no change", "250101000000Z", "250101000000Z", "rsa"],
+    ["a notBefore of month 13", "250101000000Z", "251301000000Z", null],
+    ["a notBefore of day 32", "250101000000Z", "250132000000Z", null],
+    ["a notAfter of second 60", "450101000000Z", "450101000060Z", null],
+  ])("reads a certificate with %s", async (_name, from, to, key) => {
+    const signer = await rsaPair(2048);
+    const spki = new Uint8Array(await crypto.subtle.exportKey("spki", signer.publicKey));
+    const der = patchAscii(await certificate(spki, signer.privateKey), from, to);
+    expect(readCertificate(pem("CERTIFICATE", der))?.key ?? null).toBe(key);
   });
 });
