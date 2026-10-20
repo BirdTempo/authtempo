@@ -73,9 +73,9 @@ import test from "../../../../../samples/guides/api-tokens.test.ts?raw";
 
 ### The window and the quota
 
-These two limits are set in process only, with `auth.api.tokens.create` or `auth.api.tokens.update`. No route takes them.
+These two limits are set in process only, with `auth.api.tokens.create` or `auth.api.tokens.update`. For an organization token, use `auth.api.organizationTokens.create` or `auth.api.organizationTokens.update`. No route takes them.
 
-- The window `rateLimit: { seconds, max }` counts each call of one token under the [limit](/docs/reference/limits/) `token-use:tk:<tokenId>`. Over the window, a call answers `rate_limited`.
+- The window `rateLimit: { seconds, max }` counts each call of one token under the [limit](/docs/reference/limits/) `token-use:tk:<tokenId>`. An organization token counts under `token-use:to:<tokenId>`. Over the window, a call answers `rate_limited`.
 - `tokens.defaultRateLimit` gives a window to each new token that names none. A token from `POST /tokens` always gets it.
 - The quota `quota: { remaining, refillAmount?, refillSeconds? }` counts the calls that the token has left. Each call spends one. At zero, a call answers `token_exhausted`.
 - A refill sets the count to `refillAmount` when `refillSeconds` passed since the last refill. It does not add to the count.
