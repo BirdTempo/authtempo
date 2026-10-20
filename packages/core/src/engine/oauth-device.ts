@@ -42,16 +42,23 @@ const DRAWS = 3;
  * The odds of a guessed user code. 20^8 is about 2^34.5. With n live codes
  * one guess passes with p = n / 20^8, about n × 3.9 × 10⁻¹¹.
  *
- * Each count below is a fixed window of the limiter port, which opens at
- * its first call. A window that opened just before a code started still
- * takes guesses in the first seconds of the code. More windows open in its
- * life. So one key gets at most max − 1 + max × ceil(life / 15 minutes)
- * guesses at one code (ruling 48 of plan 12e).
+ * The limiter port promises no window shape (limiter/port.ts). The three
+ * limiters of the repo (memory, D1, Postgres) keep a fixed window, which
+ * opens at its first call. A window that opened just before a code started
+ * still takes guesses in the first seconds of the code. More windows open in
+ * its life: a 10-minute code meets two windows, and a 30-minute code three.
+ * So one key gets at most max − 1 + max × ceil(life / 15 minutes) guesses at
+ * one code (ruling 48 of plan 12e).
  *
  * - A 10-minute code (the default): 9 guesses per session, p ≈ n × 3.5 × 10⁻¹⁰.
  *   39 guesses per IP, p ≈ n × 1.5 × 10⁻⁹.
  * - A 30-minute code (the maximum): 14 guesses per session, p ≈ n × 5.5 × 10⁻¹⁰.
  *   59 guesses per IP, p ≈ n × 2.3 × 10⁻⁹.
+ *
+ * A custom limiter whose windows start at fixed clock times gives at most
+ * max × (ceil(life / 15 minutes) + 1) guesses. That is 10 per session and 40
+ * per IP for a 10-minute code, and 15 and 60 for a 30-minute code. The odds
+ * stay below n × 2.4 × 10⁻⁹. A limiter of another shape holds its own bound.
  *
  * An attacker with k addresses multiplies the IP bound by k. A limiter that
  * counts per isolate, as the memory limiter on Workers does, multiplies each
