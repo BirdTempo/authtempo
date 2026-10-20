@@ -268,10 +268,12 @@ describe("the teams shim (spec 29 item 19)", () => {
         },
       ]),
     ) as OrganizationHookOptions;
-    // consumerd's teams option (packages/db/src/auth-options.ts at c43c307): teams on, Better Auth's defaults.
+    // consumerd's teams option (packages/db/src/auth-options.ts at c43c307) is teams on with Better Auth's
+    // defaults, and it sets no team hook. With the two create hooks the default team must be off (ruling 41).
     const { api, person } = app({
       creatorRole: "owner",
-      teams: { enabled: true },
+      // allowRemovingAllTeams: the delete of the one team below must pass.
+      teams: { enabled: true, defaultTeam: { enabled: false }, allowRemovingAllTeams: true },
       organizationHooks,
     });
     const owner = await person("owner@example.com");
@@ -279,7 +281,7 @@ describe("the teams shim (spec 29 item 19)", () => {
     const created = await api.createOrganization({ user: owner.user, slug: "acme", name: "Acme" });
     if (!created.ok) throw new Error(created.code);
     const organizationId = created.value.organization.id;
-    // Core fires no team hook for the default team of a create.
+    // The default team is off, so the create makes no team and fires no team hook.
     expect(calls).toEqual([]);
     expect(
       (
@@ -354,6 +356,46 @@ describe("the teams shim (spec 29 item 19)", () => {
       team: { id: teamId },
       user: { id: owner.user.id },
     });
+  });
+
+  it("refuses beforeCreateTeam and afterCreateTeam while the default team is on", () => {
+    const f = async () => {};
+    const refusals = (teams: NonNullable<OrganizationOptions["teams"]> | undefined) =>
+      checkOptions(
+        options({
+          ...(teams !== undefined ? { teams } : {}),
+          organizationHooks: { beforeCreateTeam: f, afterCreateTeam: f, beforeUpdateTeam: f },
+        }),
+      ).refusals;
+    const why =
+      "core fires no team hook for the default team of an organization create (spec 29 item 19); set teams.defaultTeam { enabled: false } and create the team in afterCreateOrganization";
+    expect(refusals({ enabled: true })).toEqual([
+      `plugins[organization].organizationHooks.afterCreateTeam: ${why}`,
+      `plugins[organization].organizationHooks.beforeCreateTeam: ${why}`,
+    ]);
+    expect(refusals({ enabled: true, defaultTeam: { enabled: true } })).toHaveLength(2);
+    // The way out: no default team, so every team create is a call of the app.
+    expect(refusals({ enabled: true, defaultTeam: { enabled: false } })).toEqual([]);
+    expect(refusals({ enabled: false })).toEqual([]);
+    expect(refusals(undefined)).toEqual([]);
+  });
+
+  it("leaves the active team of the session as it is at an organization create", async () => {
+    const { person, client, storage } = app({ teams: { enabled: true } });
+    const owner = await person("owner@example.com");
+    const c = client(owner.token);
+    const created = await c.organization.create({ name: "Acme", slug: "acme" });
+    expect(created.error).toBeNull();
+    // Better Auth sets the new organization and its default team active; core changes no session.
+    const rows = await storage.findMany("session", [
+      { field: "userId", op: "eq", value: owner.user.id },
+    ]);
+    // Two sessions: the one of the sign-up and the one of the sign-in.
+    expect(rows.map((r) => [r.activeOrganizationId, r.activeTeamId])).toEqual([
+      [null, null],
+      [null, null],
+    ]);
+    expect((await c.organization.listUserTeams()).data?.map((t) => t.name)).toEqual(["Acme"]);
   });
 
   it("maps allowRemovingAllTeams false onto keepLastTeam", async () => {

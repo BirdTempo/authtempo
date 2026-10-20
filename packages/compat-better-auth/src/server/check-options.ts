@@ -1057,6 +1057,18 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
       "required: core mails every invitation",
     );
   }
+  // Ruling 41 of plan 12k: Better Auth runs beforeCreateTeam and
+  // afterCreateTeam for the default team of an organization create
+  // (routes/crud-org.mjs:106 to :139, read 2026-10-21). Core creates that
+  // team inside the create and fires no team hook for it.
+  if (org?.teams?.enabled === true && org.teams.defaultTeam?.enabled !== false)
+    for (const name of ["beforeCreateTeam", "afterCreateTeam"] as const)
+      if (org.organizationHooks?.[name] !== undefined)
+        refuse(
+          out,
+          `plugins[organization].organizationHooks.${name}`,
+          `core fires no team hook for the default team of an organization create ${ITEM_19}; set teams.defaultTeam { enabled: false } and create the team in afterCreateOrganization`,
+        );
   const magic = pluginOf(options, "magic-link")?.options;
   if (magic && typeof magic.sendMagicLink !== "function")
     refuse(out, "plugins[magic-link].sendMagicLink", "required");

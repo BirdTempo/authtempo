@@ -878,7 +878,17 @@ Do not run Better Auth's team routes after the cutover.
 
 Core fires the ten team hooks of `organizationHooks` (see "Hooks"). It fires
 no team hook for the default team of a create, where Better Auth fires
-`beforeCreateTeam` and `afterCreateTeam`.
+`beforeCreateTeam` and `afterCreateTeam`. So the factory refuses these two
+hooks while teams and the default team are on (spec 29 item 19). To keep
+them, set `teams.defaultTeam: { enabled: false }`, and create the team in
+`afterCreateOrganization` through `auth.tempo.api.createTeam`. That create
+fires both hooks.
+
+An organization create changes no session: the active organization and the
+active team stay as they are. Better Auth sets both to the new organization
+and its default team, unless `keepCurrentActiveOrganization` is true. After
+the create, call `organization.setActive` and then
+`organization.setActiveTeam`.
 
 The client has Better Auth's team calls, on core's routes under
 `/organizations/teams`: `organization.createTeam`, `updateTeam`, `removeTeam`,
@@ -954,8 +964,9 @@ README, "Hooks").
   `afterCreateTeam`, `beforeUpdateTeam`, `afterUpdateTeam`,
   `beforeDeleteTeam`, `afterDeleteTeam`, `beforeAddTeamMember`,
   `afterAddTeamMember`, `beforeRemoveTeamMember`, and
-  `afterRemoveTeamMember`. `beforeCancelInvitation` and
-  `beforeRejectInvitation` are refused at start.
+  `afterRemoveTeamMember`. With the default team on, `beforeCreateTeam` and
+  `afterCreateTeam` are refused at start (see "Teams"). `beforeCancelInvitation`
+  and `beforeRejectInvitation` are refused at start.
 - A before hook runs inside core's transaction.
   `throw new APIError("FORBIDDEN", { message })` answers 403 `HOOK_REFUSED`
   with that message, on the server `api` and on the client. Any other throw
