@@ -257,8 +257,8 @@ export async function createOrganizationToken(
 /**
  * The organization's tokens, newest first, for a verified member with
  * `apiToken:read`. Storage calls: three findOne of `standing`, one findMany of
- * the tokens, and one findMany of the creators' member rows (none when the
- * list is empty; the cap keeps it to one chunk).
+ * the tokens, and one findMany of the creators' member rows. That last read
+ * runs only for a list with rows, and the cap keeps it to one chunk.
  */
 export async function listOrganizationTokens(
   config: ResolvedConfig,
@@ -294,7 +294,7 @@ export async function listOrganizationTokens(
  * `apiToken:update`, by the rules of a user token (spec 29 item 11). A token
  * of another organization answers `not_found`. The route checks the fresh
  * rule. The write is one update on `updatedAt` as read, and on the quota as
- * read when the quota changes; zero rows answers `conflict`. Storage calls:
+ * read when the quota changes. Zero rows answers `conflict`. Storage calls:
  * three findOne of `standing`, one findOne of the row, at most one update, and
  * one findOne of the creator's member row.
  */
@@ -370,10 +370,11 @@ export async function revokeOrganizationToken(
  * expired row is deleted on the way out. The creator does not count: the
  * token acts for the organization (owner decision 2 of plan 12k).
  *
- * Storage calls: none for a malformed bearer; one findOne of the hash; one
- * findOne of the organization; the spend of `spendUse` (none with no quota);
- * one update of `lastUsedAt` at most once per hour; one findOne of the
- * creator's member row. One limiter call for a token with a window.
+ * Storage calls: none for a malformed bearer. Else one findOne of the hash
+ * and one findOne of the organization. Then the spend of `spendUse` runs,
+ * none with no quota. One update of `lastUsedAt` runs at most once per hour.
+ * Last, one findOne of the creator's member row. One limiter call runs for a
+ * token with a window.
  *
  * On D1 a resolve runs at most 44 statements. It runs 4 of its own and the
  * 39 of the worst spend (20 updates and 19 reads). A cold isolate adds 1, the
