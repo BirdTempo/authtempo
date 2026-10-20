@@ -86,13 +86,14 @@ describe("the data of the home page (plan 11b1)", () => {
     expect(vendorHosts(files)).toEqual(["api.vendor.dev"]);
   });
 
-  it("skips the DNS resolver presets of src/engine/sso/ and counts a host of another engine folder", () => {
+  it("skips the DNS resolver presets of src/engine/sso/dns.ts and counts a host of another sso file", () => {
     const files = new Map([
       ["packages/core/src/engine/sso/dns.ts", '"https://cloudflare-dns.com/dns-query"'],
+      ["packages/core/src/engine/sso/oidc.ts", '"https://idp.vendor.dev/.well-known/x"'],
       ["packages/core/src/engine/oauth-clients.ts", 'fetch("https://api.vendor.dev/v1")'],
       ["packages/core/src/engine/ssox/a.ts", '"https://other.vendor.dev/"'],
     ]);
-    expect(vendorHosts(files)).toEqual(["api.vendor.dev", "other.vendor.dev"]);
+    expect(vendorHosts(files)).toEqual(["api.vendor.dev", "idp.vendor.dev", "other.vendor.dev"]);
   });
 
   it("does not count a host in a line comment or a block comment", () => {
@@ -262,6 +263,7 @@ describe("the data of the home page (plan 11b1)", () => {
     expect(FILE_HOST_EXCEPTIONS.map((e) => [e.path, [...e.hosts]])).toEqual([
       ["packages/core/src/saml/xml.ts", ["www.w3.org"]],
       ["packages/core/src/saml/dsig.ts", ["www.w3.org"]],
+      ["packages/core/src/engine/sso/dns.ts", ["cloudflare-dns.com", "dns.google"]],
     ]);
     expect(unusedFileHostExceptions(realCore())).toEqual([]);
     for (const e of FILE_HOST_EXCEPTIONS)
