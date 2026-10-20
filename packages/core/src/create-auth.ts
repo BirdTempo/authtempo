@@ -491,7 +491,10 @@ export interface AuthApi {
   /**
    * The normalized slug and its status: `available`, `taken`, `reserved`, or
    * `invalid` with a null slug (plan 12k). It needs a verified address and
-   * spends `slug-check:user:<userId>`. `available` is a hint, not a hold.
+   * spends `slug-check:user:<userId>`. The create and a rename to a new slug
+   * spend the same key, 60 per minute for the three. So after 60 checks, a
+   * create answers `rate_limited` until the minute ends. `available` is a
+   * hint, not a hold.
    */
   checkSlug(input: {
     user: UserRow;

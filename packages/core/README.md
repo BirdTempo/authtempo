@@ -911,9 +911,12 @@ Pass `reservedSlugs` to replace the list. A reserved slug answers
 
 `POST /organizations/check-slug` (`api.checkSlug`) answers the folded slug
 and its status before a create. The platform slug answers `reserved`. Each
-user gets 60 checks per minute (`slug-check:user:<userId>`). `available` is
-a hint, not a hold: the create still answers `slug_taken` when another user
-takes the slug first, because the unique key decides.
+user gets 60 slug reads per minute (`slug-check:user:<userId>`). The check,
+the create, and a rename to a new slug spend this one key before the read.
+So after 60 checks in one minute, a create answers `rate_limited` until the
+minute ends. `available` is a hint, not a hold: the create still answers
+`slug_taken` when another user takes the slug first, because the unique key
+decides.
 
 **Platform role.** Set `platformOrganization` and `platformRole` to keep one
 role for staff. Core accepts that role in the platform organization only.

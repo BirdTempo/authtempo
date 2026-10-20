@@ -3,8 +3,19 @@ import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import { normalizeSlug } from "./ranks.js";
 
-/** 60 checks per user per minute: a page may check at each key press, and no user may walk the slug space. */
+/**
+ * 60 slug reads per user per minute: a page may check at each key press, and
+ * no user may walk the slug space. The check, the create, and the rename each
+ * answer whether a slug is in use, so all three spend this one key. The cost
+ * to a normal user: after 60 checks in one minute, a create or a rename
+ * answers `rate_limited` until that minute ends.
+ */
 export const SLUG_CHECK_PER_USER = { seconds: 60, max: 60 };
+
+/** Spends one slug read of the user. The call runs before the read, and false means `rate_limited`. */
+export function spendSlugRead(config: ResolvedConfig, userId: string): Promise<boolean> {
+  return config.limiter.allow(`slug-check:user:${userId}`, SLUG_CHECK_PER_USER);
+}
 
 /** The answer of a slug check. `available` is a hint, not a hold. */
 export type SlugStatus = "available" | "taken" | "reserved" | "invalid";
@@ -22,8 +33,7 @@ export async function checkSlug(
   const o = config.organizations;
   if (!o) return fail("not_found");
   if (!input.user.emailVerified) return fail("email_unverified");
-  if (!(await config.limiter.allow(`slug-check:user:${input.user.id}`, SLUG_CHECK_PER_USER)))
-    return fail("rate_limited");
+  if (!(await spendSlugRead(config, input.user.id))) return fail("rate_limited");
   // normalizeSlug bounds the characters and the case. The slug is only a value in an eq read.
   const slug = normalizeSlug(input.slug);
   if (slug === null) return ok({ slug: null, status: "invalid" });

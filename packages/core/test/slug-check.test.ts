@@ -4,6 +4,7 @@ import { createApiToken } from "../src/engine/tokens.js";
 import { createRouter } from "../src/http/router.js";
 import { organizationRoutes } from "../src/http/routes/organizations.js";
 import type { UserRow } from "../src/schema.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { makeAuth, platformAuth, post, seedPlatform } from "./helpers.js";
 
 const CHECK = "/auth/organizations/check-slug";
@@ -23,6 +24,29 @@ function setup(auth: ReturnType<typeof makeAuth> = makeAuth({ organizations: {} 
     return { status: res.status, body: (await res.json()) as unknown };
   }
   return { auth, handle, cookieFor, check };
+}
+
+type Read = (model: string, where: { field: string }[], ...rest: unknown[]) => Promise<unknown>;
+
+/** Records each organization read by slug on `storage`, outside and inside a transaction. */
+function slugReads(storage: StorageAdapter): string[] {
+  const seen: string[] = [];
+  const watch = (st: StorageAdapter): StorageAdapter => {
+    const methods = st as unknown as Record<"findOne" | "findMany", Read>;
+    for (const name of ["findOne", "findMany"] as const) {
+      const real = methods[name].bind(st);
+      methods[name] = (model, where, ...rest) => {
+        if (model === "organization" && where.some((w) => w.field === "slug")) seen.push(name);
+        return real(model, where, ...rest);
+      };
+    }
+    return st;
+  };
+  watch(storage);
+  const transaction = storage.transaction.bind(storage);
+  storage.transaction = ((fn: (tx: StorageAdapter) => Promise<unknown>) =>
+    transaction((tx) => fn(watch(tx)))) as StorageAdapter["transaction"];
+  return seen;
 }
 
 describe("the slug check (plan 12k Task 6)", () => {
@@ -108,6 +132,49 @@ describe("the slug check (plan 12k Task 6)", () => {
       status: 200,
       body: { slug: "name-60", status: "available" },
     });
+  });
+
+  it("holds the check, the create, and the rename to one bound of 60 per user per minute", async () => {
+    const s = setup();
+    const ada = await s.auth.seedUser("ada@example.com");
+    const bob = await s.auth.seedUser("bob@example.com");
+    const h = await s.cookieFor(ada);
+    const create = async (headers: Record<string, string>, slug: string) => {
+      const res = await s.handle(
+        post("/auth/organizations/create", { slug, name: "Org" }, headers),
+      );
+      return { status: res.status, body: (await res.json()) as unknown };
+    };
+    const rename = async (organizationId: string, slug: string) => {
+      const res = await s.handle(post("/auth/organizations/update", { organizationId, slug }, h));
+      return { status: res.status, body: (await res.json()) as unknown };
+    };
+    const made = await create(h, "acme");
+    expect(made.status).toBe(200);
+    const organizationId = (made.body as { organization: { id: string } }).organization.id;
+    // A new window: 59 checks and one rename spend the 60 of this minute.
+    s.auth.clock.advance(60_000);
+    for (let i = 0; i < 59; i++) {
+      expect((await s.check(h, `name-${i}`)).status, `check ${i + 1}`).toBe(200);
+    }
+    expect((await rename(organizationId, "acme-2")).status).toBe(200);
+    // The 61st slug read answers rate_limited before the read, at the create and at the rename.
+    const seen = slugReads(s.auth.storage);
+    expect(await create(h, "beta")).toEqual({ status: 429, body: { error: "rate_limited" } });
+    expect(await rename(organizationId, "acme-3")).toEqual({
+      status: 429,
+      body: { error: "rate_limited" },
+    });
+    expect(seen).toEqual([]);
+    // The key is per user: another user still creates, and the watch sees that read.
+    expect((await create(await s.cookieFor(bob), "beta")).status).toBe(200);
+    expect(seen.length).toBeGreaterThan(0);
+    // The window is one minute.
+    s.auth.clock.advance(60_000);
+    expect((await create(h, "gamma")).status).toBe(200);
+    expect((await rename(organizationId, "acme-3")).status).toBe(200);
+    const slugs = (await s.auth.storage.findMany("organization", [])).map((o) => o.slug).sort();
+    expect(slugs).toEqual(["acme-3", "beta", "gamma"]);
   });
 
   it("needs a verified address", async () => {

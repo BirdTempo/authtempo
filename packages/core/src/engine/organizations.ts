@@ -31,6 +31,7 @@ import {
   roleAllowedIn,
 } from "./ranks.js";
 import { endedList, sessionsEnded } from "./sessions.js";
+import { spendSlugRead } from "./slug-check.js";
 import { holdUser, userStays } from "./user-hold.js";
 
 export interface Caller {
@@ -316,6 +317,8 @@ export async function createOrganization(
   const slug = normalizeSlug(input.slug);
   if (slug === null || !validOrganizationName(input.name)) return fail("invalid_body");
   if (o.reservedSlugs.has(slug)) return fail("slug_reserved");
+  // The slug read below answers in use or free, as the slug check does, so it spends the same key first.
+  if (!(await spendSlugRead(config, input.user.id))) return fail("rate_limited");
   const now = config.clock.now();
   const organization: OrganizationRow = {
     id: newId(now),
@@ -470,6 +473,10 @@ export async function updateOrganization(
     data.slug = slug;
   }
   if (Object.keys(data).length === 0) return ok(publicOrganization(s.value.organization));
+  // A new slug is read below, so the rename spends the key of the slug check first.
+  if (data.slug !== undefined && data.slug !== s.value.organization.slug) {
+    if (!(await spendSlugRead(config, input.user.id))) return fail("rate_limited");
+  }
   const now = config.clock.now();
   const hooks = config.hooks.organization;
   const current = publicOrganization(s.value.organization);
