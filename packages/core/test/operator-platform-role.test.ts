@@ -1,6 +1,7 @@
 import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../src/config.js";
+import { deleteAccount } from "../src/engine/account-delete.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import { isPlatformOperator, type OperatorActor } from "../src/engine/operator/guards.js";
 import { operatorApi } from "../src/engine/operator/index.js";
@@ -9,6 +10,8 @@ import { passwordSignUp } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import type { StorageAdapter } from "../src/storage/port.js";
+import { d1Like } from "./d1-like.js";
 import { get, post, seedPlatform, tokenFromMail } from "./helpers.js";
 import {
   authorizeGet,
@@ -27,6 +30,7 @@ const APP: OperatorActor = { kind: "app", name: "support-tool" };
 const EMAIL = "ada@example.com";
 /** The back-channel logout URI of the test client (plan 12e Task 16). */
 const BC = "https://client.example.com/backchannel";
+const DAY_MS = 86_400_000;
 
 /**
  * The engine view with member hooks that write one line per event: the
@@ -177,6 +181,80 @@ describe("the platform role (plan 12f Task 8)", () => {
     expect(await auth.storage.findMany("session", [])).toEqual([]);
     // One session.afterEnd with the reason operator for each session (ruling 2).
     expect([...ended].sort()).toEqual(sessions.map((s) => `${s.id}:operator`).sort());
+  });
+
+  it("deletes an expired session with no afterEnd event, and ends a live one with the reason operator", async () => {
+    const ended: string[] = [];
+    const auth = await operatorAuth({
+      hooks: {
+        session: {
+          afterEnd: ({ session, reason }) => {
+            ended.push(`${session.id}:${reason}`);
+          },
+        },
+      },
+    });
+    const { platformOrg } = await seedPlatform(auth);
+    const old = await verifiedSession(auth, EMAIL);
+    expect((await grant(auth, old.user.id)).ok).toBe(true);
+    // The sessions live 30 days: the first sign-in's rows end before the second's.
+    auth.clock.advance(20 * DAY_MS);
+    const live = await verifiedSession(auth, EMAIL);
+    auth.clock.advance(11 * DAY_MS);
+    const rows = await auth.storage.findMany("session", [
+      { field: "userId", op: "eq", value: old.user.id },
+    ]);
+    expect(rows.map((s) => s.id)).toContain(old.session.id);
+    expect(rows.filter((s) => s.expiresAt > auth.clock.now()).map((s) => s.id)).toEqual([
+      live.session.id,
+    ]);
+    ended.length = 0;
+    auth.clock.advance(1);
+    expect((await revoke(auth, old.user.id)).ok).toBe(true);
+    // An ended row goes with no hook (plan 12a review L3).
+    expect(ended).toEqual([`${live.session.id}:operator`]);
+    expect(await auth.storage.findMany("session", [])).toEqual([]);
+    expect(await platformMember(auth, platformOrg.id, old.user.id)).toBeNull();
+  });
+
+  it("answers conflict for a grant whose user an account delete takes before the member insert", async () => {
+    const auth = await operatorAuth();
+    const { platformOrg } = await seedPlatform(auth);
+    const ada = await verifiedSession(auth, EMAIL);
+    // D1 has no lock: the delete runs inside the grant's open transaction,
+    // just before its member insert. Only the read after the insert sees it.
+    const d1 = d1Like(auth.config);
+    const raw = d1.storage;
+    const state: { deleted: unknown } = { deleted: null };
+    const storage: StorageAdapter = {
+      ...raw,
+      transaction: (fn) =>
+        raw.transaction((tx) =>
+          fn({
+            ...tx,
+            create: async (model, data) => {
+              if (model === "member" && state.deleted === null)
+                state.deleted = await deleteAccount(d1, {
+                  session: ada,
+                  ip: null,
+                  userAgent: null,
+                });
+              return tx.create(model, data);
+            },
+          }),
+        ),
+    };
+    const answer = await operatorApi({ ...d1, storage }).platformRole.grant({
+      actor: APP,
+      userId: ada.user.id,
+      reason: "New support hire",
+      ip: null,
+      userAgent: null,
+    });
+    expect(answer).toEqual({ ok: false, code: "conflict", status: 409 });
+    expect(state.deleted).toEqual({ ok: true, value: { ok: true } });
+    expect(await platformMember(auth, platformOrg.id, ada.user.id)).toBeNull();
+    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
   });
 
   it("sends the back-channel logout of each linked client after the revoke", async () => {
