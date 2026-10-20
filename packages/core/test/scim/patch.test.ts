@@ -1,0 +1,572 @@
+import { describe, expect, it } from "vitest";
+import { parsePatch } from "../../src/engine/scim/patch.js";
+
+const URN = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
+const ENTERPRISE = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
+
+function body(...operations: unknown[]) {
+  return { schemas: [URN], Operations: operations };
+}
+
+function at(
+  attr: string,
+  sub: string | null = null,
+  filter: { attr: string; value: string } | null = null,
+) {
+  return { attr, sub, filter };
+}
+
+describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
+  it("reads each path form and each provider quirk", () => {
+    const rows: [string, unknown, "User" | "Group", unknown[]][] = [
+      [
+        "a capital op (Entra ID)",
+        body({ op: "Replace", path: "displayName", value: "A" }),
+        "User",
+        [{ op: "replace", path: at("displayName"), value: "A" }],
+      ],
+      [
+        "each op in any case",
+        body({ op: "ADD", path: "title", value: "t" }, { op: "remove", path: "title" }),
+        "User",
+        [
+          { op: "add", path: at("title"), value: "t" },
+          { op: "remove", path: at("title"), value: null },
+        ],
+      ],
+      [
+        "the no-path form, one operation per key (Entra ID)",
+        body({
+          op: "Replace",
+          value: { active: "False", displayName: "A", "name.givenName": "G" },
+        }),
+        "User",
+        [
+          { op: "replace", path: at("active"), value: false },
+          { op: "replace", path: at("displayName"), value: "A" },
+          { op: "replace", path: at("name", "givenName"), value: "G" },
+        ],
+      ],
+      [
+        'the strings "False" and "True" of a boolean (Entra ID)',
+        body(
+          { op: "replace", path: "active", value: "False" },
+          { op: "replace", path: "active", value: "True" },
+          { op: "replace", path: "active", value: false },
+          { op: "replace", path: "active", value: true },
+          { op: "replace", path: 'emails[type eq "work"].primary', value: "True" },
+          { op: "remove", path: "active" },
+        ),
+        "User",
+        [
+          { op: "replace", path: at("active"), value: false },
+          { op: "replace", path: at("active"), value: true },
+          { op: "replace", path: at("active"), value: false },
+          { op: "replace", path: at("active"), value: true },
+          {
+            op: "replace",
+            path: at("emails", "primary", { attr: "type", value: "work" }),
+            value: true,
+          },
+          { op: "remove", path: at("active"), value: null },
+        ],
+      ],
+      [
+        "name.givenName",
+        body({ op: "replace", path: "name.givenName", value: "G" }),
+        "User",
+        [{ op: "replace", path: at("name", "givenName"), value: "G" }],
+      ],
+      [
+        "an attribute of the enterprise URN",
+        body(
+          { op: "replace", path: `${ENTERPRISE}:department`, value: "Eng" },
+          {
+            op: "add",
+            path: "URN:IETF:params:scim:schemas:extension:enterprise:2.0:user:Manager",
+            value: "m1",
+          },
+        ),
+        "User",
+        [
+          { op: "replace", path: at(`${ENTERPRISE}:department`), value: "Eng" },
+          { op: "add", path: at(`${ENTERPRISE}:manager`), value: "m1" },
+        ],
+      ],
+      [
+        'emails[type eq "work"].value',
+        body({ op: "replace", path: 'emails[type eq "work"].value', value: "a@acme.example" }),
+        "User",
+        [
+          {
+            op: "replace",
+            path: at("emails", "value", { attr: "type", value: "work" }),
+            value: "a@acme.example",
+          },
+        ],
+      ],
+      [
+        "a filter with no sub-attribute, and names in any case",
+        body(
+          { op: "remove", path: 'PhoneNumbers[TYPE Eq "fax"]' },
+          { op: "add", path: "Name.FamilyName", value: "F" },
+        ),
+        "User",
+        [
+          {
+            op: "remove",
+            path: at("phoneNumbers", null, { attr: "type", value: "fax" }),
+            value: null,
+          },
+          { op: "add", path: at("name", "familyName"), value: "F" },
+        ],
+      ],
+      [
+        "a complex value",
+        body({
+          op: "add",
+          path: "emails",
+          value: [{ value: "a@acme.example", type: "work", primary: true }],
+        }),
+        "User",
+        [
+          {
+            op: "add",
+            path: at("emails"),
+            value: [{ value: "a@acme.example", type: "work", primary: true }],
+          },
+        ],
+      ],
+      [
+        "the member forms of a Group (Entra ID and Okta)",
+        body(
+          { op: "Add", path: "members", value: [{ value: "u1" }] },
+          { op: "Remove", path: "members", value: [{ value: "u2" }] },
+          { op: "remove", path: 'members[value eq "u3"]' },
+          { op: "replace", path: "displayName", value: "Eng" },
+          { op: "replace", value: { externalId: "g1" } },
+        ),
+        "Group",
+        [
+          { op: "add", path: at("members"), value: [{ value: "u1" }] },
+          { op: "remove", path: at("members"), value: [{ value: "u2" }] },
+          { op: "remove", path: at("members", null, { attr: "value", value: "u3" }), value: null },
+          { op: "replace", path: at("displayName"), value: "Eng" },
+          { op: "replace", path: at("externalId"), value: "g1" },
+        ],
+      ],
+      [
+        "100 operations",
+        body(...Array.from({ length: 100 }, () => ({ op: "replace", path: "title", value: "t" }))),
+        "User",
+        Array.from({ length: 100 }, () => ({ op: "replace", path: at("title"), value: "t" })),
+      ],
+      [
+        "a value three levels deep",
+        body({ op: "replace", value: { members: [{ value: "u1" }] } }),
+        "Group",
+        [{ op: "replace", path: at("members"), value: [{ value: "u1" }] }],
+      ],
+    ];
+    for (const [name, input, resource, ops] of rows) {
+      expect(parsePatch(input, resource), name).toEqual({ ok: true, ops });
+    }
+  });
+
+  it("refuses an index, a move, and 101 operations", () => {
+    const deep = { op: "replace", value: { members: [{ value: ["u1"] }] } };
+    const rows: [string, unknown, "User" | "Group", string, number][] = [
+      [
+        "an index",
+        body({ op: "replace", path: "emails[0]", value: "a" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "an index with a sub",
+        body({ op: "replace", path: "emails[0].value", value: "a" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      ["a move", body({ op: "move", path: "title", value: "t" }), "User", "invalidPath", 400],
+      [
+        "a copy in any case",
+        body({ op: "Copy", path: "title", value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "101 operations",
+        body(...Array.from({ length: 101 }, () => ({ op: "replace", path: "title", value: "t" }))),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      ["no operation", body(), "User", "invalidValue", 400],
+      [
+        "Operations that is not a list",
+        { schemas: [URN], Operations: { op: "add" } },
+        "User",
+        "invalidValue",
+        400,
+      ],
+      ["no Operations", { schemas: [URN] }, "User", "invalidValue", 400],
+      [
+        "more than 100 operations from the no-path form",
+        body(...Array.from({ length: 99 }, () => ({ op: "replace", path: "title", value: "t" })), {
+          op: "replace",
+          value: { title: "t", nickName: "n" },
+        }),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      ["a body that is not an object", [URN], "User", "invalidSyntax", 400],
+      ["a null body", null, "User", "invalidSyntax", 400],
+      [
+        "another schema URN",
+        { schemas: ["urn:example:patch"], Operations: [] },
+        "User",
+        "invalidSyntax",
+        400,
+      ],
+      [
+        "a second schema URN",
+        { schemas: [URN, URN], Operations: [] },
+        "User",
+        "invalidSyntax",
+        400,
+      ],
+      [
+        "a schemas text in place of a list",
+        { schemas: URN, Operations: [] },
+        "User",
+        "invalidSyntax",
+        400,
+      ],
+      [
+        "another key of the body",
+        { ...body({ op: "add", path: "title", value: "t" }), id: "x" },
+        "User",
+        "invalidSyntax",
+        400,
+      ],
+      ["an operation that is not an object", body("replace"), "User", "invalidSyntax", 400],
+      [
+        "another key of an operation",
+        body({ op: "add", path: "title", value: "t", from: "x" }),
+        "User",
+        "invalidSyntax",
+        400,
+      ],
+      [
+        "an unknown op",
+        body({ op: "test", path: "title", value: "t" }),
+        "User",
+        "invalidSyntax",
+        400,
+      ],
+      [
+        "an op that is not a text",
+        body({ op: 1, path: "title", value: "t" }),
+        "User",
+        "invalidSyntax",
+        400,
+      ],
+      [
+        "an unknown attribute",
+        body({ op: "replace", path: "shoeSize", value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "an unknown sub-attribute",
+        body({ op: "replace", path: "name.nick", value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a sub-attribute of a simple attribute",
+        body({ op: "replace", path: "title.value", value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a second sub-attribute",
+        body({ op: "replace", path: "name.givenName.x", value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "another filter attribute",
+        body({ op: "replace", path: 'emails[value eq "a"].type', value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "another filter operator",
+        body({ op: "replace", path: 'emails[type ne "work"].value', value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a filter value that is not a text",
+        body({ op: "replace", path: "emails[type eq work].value", value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a filter with no close",
+        body({ op: "replace", path: 'emails[type eq "work".value', value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a filter with a second clause",
+        body({ op: "remove", path: 'emails[type eq "a" or type eq "b"]' }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a filter on a simple attribute",
+        body({ op: "replace", path: 'title[type eq "a"]', value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a filter on a single complex attribute",
+        body({ op: "replace", path: 'name[type eq "a"]', value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "text after the filter",
+        body({ op: "remove", path: 'emails[type eq "work"]x' }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a sign in place of the close of the filter",
+        body({ op: "replace", path: 'emails[type eq "work"x.value', value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a sign in place of the dot after the filter",
+        body({ op: "replace", path: 'emails[type eq "work"]xvalue', value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "the member filter on a User",
+        body({ op: "remove", path: 'emails[value eq "a"]' }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a type filter on members",
+        body({ op: "remove", path: 'members[type eq "User"]' }),
+        "Group",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a sub after the member filter",
+        body({ op: "replace", path: 'members[value eq "u"].display', value: "d" }),
+        "Group",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a User attribute on a Group",
+        body({ op: "replace", path: "userName", value: "u" }),
+        "Group",
+        "invalidPath",
+        400,
+      ],
+      [
+        "the enterprise URN on a Group",
+        body({ op: "replace", path: `${ENTERPRISE}:department`, value: "d" }),
+        "Group",
+        "invalidPath",
+        400,
+      ],
+      [
+        "an unknown enterprise attribute",
+        body({ op: "replace", path: `${ENTERPRISE}:shoeSize`, value: "d" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a sub of an enterprise attribute",
+        body({ op: "replace", path: `${ENTERPRISE}:manager.value`, value: "m" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "the enterprise URN alone",
+        body({ op: "replace", path: ENTERPRISE, value: { department: "d" } }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "the core URN as a prefix",
+        body({
+          op: "replace",
+          path: "urn:ietf:params:scim:schemas:core:2.0:User:title",
+          value: "t",
+        }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a name of the object prototype",
+        body({ op: "replace", path: "__proto__", value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "constructor",
+        body({ op: "replace", path: "constructor", value: "t" }),
+        "Group",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a sign that lowercases to an ASCII letter",
+        body({ op: "replace", path: "nicKname", value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      ["an empty path", body({ op: "replace", path: "", value: "t" }), "User", "invalidPath", 400],
+      [
+        "a path that is not a text",
+        body({ op: "replace", path: 1, value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      ["a null path", body({ op: "replace", path: null, value: "t" }), "User", "invalidPath", 400],
+      [
+        "a path over 256 characters",
+        body({ op: "replace", path: `emails[type eq "${"w".repeat(240)}"].value`, value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "an unknown key of the no-path form",
+        body({ op: "replace", value: { title: "t", shoeSize: 1 } }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a password path",
+        body({ op: "replace", path: "password", value: "p" }),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      [
+        "a password in the no-path form",
+        body({ op: "replace", value: { Password: "p" } }),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      [
+        "a read-only attribute",
+        body({ op: "replace", path: "groups", value: [] }),
+        "User",
+        "mutability",
+        400,
+      ],
+      ["the id", body({ op: "replace", path: "id", value: "x" }), "User", "mutability", 400],
+      [
+        "the meta of a Group",
+        body({ op: "replace", value: { meta: {} } }),
+        "Group",
+        "mutability",
+        400,
+      ],
+      [
+        "a remove with no path",
+        body({ op: "remove", value: { title: "t" } }),
+        "User",
+        "noTarget",
+        400,
+      ],
+      ["an add with no value", body({ op: "add", path: "title" }), "User", "invalidValue", 400],
+      [
+        "a no-path value that is not an object",
+        body({ op: "replace", value: "t" }),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      [
+        "a no-path value that is a list",
+        body({ op: "replace", value: [{ title: "t" }] }),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      ["an empty no-path value", body({ op: "replace", value: {} }), "User", "invalidValue", 400],
+      [
+        "another text of a boolean",
+        body({ op: "replace", path: "active", value: "false" }),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      [
+        "a number of a boolean",
+        body({ op: "replace", path: "active", value: 0 }),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      [
+        "another text of a boolean sub",
+        body({ op: "replace", path: 'emails[type eq "w"].primary', value: "yes" }),
+        "User",
+        "invalidValue",
+        400,
+      ],
+      ["a value four levels deep", body(deep), "Group", "invalidValue", 400],
+    ];
+    for (const [name, input, resource, scimType, status] of rows) {
+      const r = parsePatch(input, resource);
+      expect(r.ok, name).toBe(false);
+      if (!r.ok) {
+        expect([r.status, r.scimType], name).toEqual([status, scimType]);
+        expect(r.detail.length, name).toBeGreaterThan(0);
+      }
+    }
+  });
+});
