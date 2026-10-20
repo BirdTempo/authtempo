@@ -146,7 +146,7 @@ The bans of the admin plugin need no step. Compat migration 0009 copies each ban
 
 A file number lower than the Better Auth table migration makes every new database fail at the compat file with `no such table`.
 
-Better Auth's `teams` option adds `session.activeTeamId` and `invitation.teamId`. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the shipped 0010 fails on these tables with `duplicate column name: activeTeamId`. An app whose tables hold these two columns already writes its own 0010 file: the shipped file without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole` table when it is absent, add `taRank` and the unique key on (`organizationId`, `role`), and move the versions.
+Better Auth's `teams` option adds `session.activeTeamId` and `invitation.teamId`. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the shipped 0010 fails on these tables with `duplicate column name: activeTeamId`. An app with these two columns writes its own 0010 file: the shipped file without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole` table when it is absent, add `taRank` and the unique key on (`organizationId`, `role`), and move the versions.
 
 The app applies the files to 0009 and its own 0010 with `wrangler d1 migrations apply` before `authtempo migrate --target d1 --tables compat`. Then the compat version is 10, and the command copies nothing. On Postgres, the 0010 adds each column only when it is absent, so no own file is necessary.
 
