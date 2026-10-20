@@ -86,6 +86,7 @@ describe("the DoH adapters", () => {
       ["an unquoted data", 200, txtAnswer(NAME, "authtempo-domain=abc")],
       ["an unquoted part before a quoted part", 200, txtAnswer(NAME, 'authtempo-domain=abc "def"')],
       ["text between the parts", 200, txtAnswer(NAME, '"a"x"b"')],
+      ["a tab between the parts", 200, txtAnswer(NAME, '"a"\t"b"')],
       ["an open quote", 200, txtAnswer(NAME, '"abc')],
       ["a decimal escape", 200, txtAnswer(NAME, '"\\065bc"')],
     ];
