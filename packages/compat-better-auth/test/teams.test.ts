@@ -22,6 +22,7 @@ import type {
   OrganizationOptions,
 } from "../src/types.js";
 import {
+  BETTER_AUTH_1421_TEAMS_PG,
   BETTER_AUTH_PG,
   BETTER_AUTH_SQLITE,
   BETTER_AUTH_TEAMS_PG,
@@ -98,9 +99,8 @@ async function organizationRow(storage: StorageAdapter, id: string) {
 }
 
 /** A shim app with passwords, so a test signs people up as an app does. */
-function app(org: OrganizationOptions) {
+function app(org: OrganizationOptions, database: CompatDatabase = memory()) {
   const mails: { email: string; token: string }[] = [];
-  const database = memory();
   const auth = betterAuth({
     ...options(org, database),
     emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
@@ -592,6 +592,68 @@ describe("the teams shim (spec 29 item 19)", () => {
         ]);
       }
     });
+  });
+
+  it("migrates the team tables of Better Auth 1.4.21 on Postgres, then creates an organization with its default team", async () => {
+    const pg = await freshBetterAuthSchema(
+      BETTER_AUTH_PG + BETTER_AUTH_1421_TEAMS_PG + TEAM_COLUMNS,
+    );
+    try {
+      // A team and a member row as Better Auth 1.4.21 writes them: no memberCount and no membershipKey.
+      await pg.sql.unsafe(
+        `INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt") VALUES ('u0', 'Bo', 'bo@example.com', true, $1, $1)`,
+        [at.toISOString()],
+      );
+      await pg.sql.unsafe(
+        `INSERT INTO "organization" ("id", "name", "slug", "createdAt") VALUES ('o0', 'Old', 'old', $1)`,
+        [at.toISOString()],
+      );
+      await pg.sql.unsafe(
+        `INSERT INTO "team" ("id", "name", "organizationId", "createdAt") VALUES ('t0', 'Old', 'o0', $1)`,
+        [at.toISOString()],
+      );
+      await pg.sql.unsafe(
+        `INSERT INTO "teamMember" ("id", "teamId", "userId", "createdAt") VALUES ('m0', 't0', 'u0', $1)`,
+        [at.toISOString()],
+      );
+      const database = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      await database.migrate();
+      const columns = await pg.sql.unsafe<
+        { t: string; c: string; type: string; nullable: string; dflt: string | null }[]
+      >(
+        `SELECT table_name AS t, column_name AS c, data_type AS type, is_nullable AS nullable, column_default AS dflt FROM information_schema.columns WHERE table_schema = current_schema() AND column_name IN ('memberCount', 'membershipKey') ORDER BY table_name`,
+      );
+      expect([...columns]).toEqual([
+        { t: "team", c: "memberCount", type: "integer", nullable: "NO", dflt: "0" },
+        { t: "teamMember", c: "membershipKey", type: "text", nullable: "YES", dflt: null },
+      ]);
+      expect([
+        ...(await pg.sql.unsafe(
+          `SELECT t."memberCount" AS n, m."membershipKey" AS k FROM "team" t JOIN "teamMember" m ON m."teamId" = t."id"`,
+        )),
+      ]).toEqual([{ n: 0, k: null }]);
+
+      const { api, storage } = app({ creatorRole: "owner", teams: { enabled: true } }, database);
+      const owner = await user(storage, "u1", "ada@example.com");
+      const created = await api.createOrganization({ user: owner, slug: "acme", name: "Acme" });
+      if (!created.ok) throw new Error(created.code);
+      const rows = await pg.sql.unsafe<{ name: string; n: number; u: string; k: string }[]>(
+        `SELECT t."name", t."memberCount" AS n, m."userId" AS u, m."membershipKey" AS k FROM "team" t JOIN "teamMember" m ON m."teamId" = t."id" WHERE t."organizationId" = $1`,
+        [created.value.organization.id],
+      );
+      expect([...rows]).toEqual([
+        { name: "Acme", n: 0, u: "u1", k: expect.stringMatching(/^[\w-]{43}$/) },
+      ]);
+      // The unique index of the added membershipKey.
+      await expect(
+        pg.sql.unsafe(
+          `INSERT INTO "teamMember" ("id", "teamId", "userId", "membershipKey", "createdAt") VALUES ('m9', 't0', 'u1', $1, now())`,
+          [rows[0]?.k ?? ""],
+        ),
+      ).rejects.toMatchObject({ code: "23505" });
+    } finally {
+      await pg.close();
+    }
   });
 
   it("answers check-slug in Better Auth's shape", async () => {

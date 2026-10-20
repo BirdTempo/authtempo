@@ -633,10 +633,21 @@ describe("migration 0009 (plan 12f)", () => {
 });
 
 describe("migration 0010 (plan 12k)", () => {
-  it("ships both D1 files as the default naming's SQLite text", () => {
-    const text = compatMigration0010Sql("sqlite", resolveNames());
-    expect(normalize(shipped0010)).toBe(normalize(text));
-    expect(normalize(shipped0010Before17)).toBe(normalize(text));
+  it("ships both D1 files as the default naming's SQLite text of their variant", () => {
+    expect(normalize(shipped0010)).toBe(
+      normalize(compatMigration0010Sql("sqlite", resolveNames())),
+    );
+    expect(normalize(shipped0010Before17)).toBe(
+      normalize(compatMigration0010Sql("sqlite", resolveNames(), "before-1.7")),
+    );
+    // Ruling 41: only the before-1.7 file adds the two team columns of Better Auth 1.7.
+    expect(shipped0010Before17).toContain(
+      `ALTER TABLE "team" ADD COLUMN "memberCount" INTEGER NOT NULL DEFAULT 0;`,
+    );
+    expect(shipped0010Before17).toContain(
+      `ALTER TABLE "teamMember" ADD COLUMN "membershipKey" TEXT;`,
+    );
+    expect(shipped0010).not.toContain(`ADD COLUMN "memberCount"`);
   });
 
   it("is the runner's step after 0009, and the step writes '10'", () => {

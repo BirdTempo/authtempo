@@ -135,8 +135,8 @@ number lower than the Better Auth table migration makes every new database
 - Better Auth 1.7 tables: copy `node_modules/@authtempo/compat-better-auth/migrations/d1/0001_compat_better_auth.sql`.
 - Tables from before Better Auth 1.7 (no `account.issuer` column): copy the file of the same name from `migrations/d1-before-1.7/`.
 - Every app: then copy each later file of the same directory (`0002_compat_schema_v5.sql` to `0010_compat_schema_v13.sql`), in order, and give each the next number.
-- Tables with other names: write the 0001 file from `storage.migrationSql()` or `storage.migrationSql("before-1.7")`. Write the 0006 file from `compatMigration0006Sql("sqlite", storage.names)`, not from the shipped file. The shipped 0006 adds `taSecretVersion` to Better Auth's default `verification` table, so on other names it fails with `no such table`. Write the 0007 file from `compatMigration0007Sql("sqlite", storage.names)` for the same reason: the shipped 0007 adds `taFreshAt` to the default `session` table. Write the 0009 file from `compatMigration0009Sql("sqlite", storage.names)` for the same reason. The shipped 0009 adds the ban columns to the default `user` table and `taActorId` to the default `session` table. Write the 0010 file from `compatMigration0010Sql("sqlite", storage.names)` for the same reason. The shipped 0010 adds `activeTeamId` to the default `session` table and `teamId` to the default `invitation` table.
-- Tables that hold `session.activeTeamId` and `invitation.teamId` already: Better Auth's `teams` option adds these two columns. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the shipped 0010 fails on these tables with `duplicate column name: activeTeamId`. Such an app writes its own 0010 file: the shipped file without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole`, `team`, and `teamMember` tables when they are absent. They add `taRank`, the `ta` columns, and the unique keys, and move the versions. It applies the files to 0009 and its own 0010 with `wrangler d1 migrations apply` before `authtempo migrate --target d1 --tables compat`. Then the compat version is 10, and the command copies nothing.
+- Tables with other names: write the 0001 file from `storage.migrationSql()` or `storage.migrationSql("before-1.7")`. Write the 0006 file from `compatMigration0006Sql("sqlite", storage.names)`, not from the shipped file. The shipped 0006 adds `taSecretVersion` to Better Auth's default `verification` table, so on other names it fails with `no such table`. Write the 0007 file from `compatMigration0007Sql("sqlite", storage.names)` for the same reason: the shipped 0007 adds `taFreshAt` to the default `session` table. Write the 0009 file from `compatMigration0009Sql("sqlite", storage.names)` for the same reason. The shipped 0009 adds the ban columns to the default `user` table and `taActorId` to the default `session` table. Write the 0010 file from `compatMigration0010Sql("sqlite", storage.names)` for the same reason, or from `compatMigration0010Sql("sqlite", storage.names, "before-1.7")` for tables from before 1.7. The shipped 0010 adds `activeTeamId` to the default `session` table and `teamId` to the default `invitation` table.
+- Tables that hold `session.activeTeamId` and `invitation.teamId` already: Better Auth's `teams` option adds these two columns. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the shipped 0010 fails on these tables with `duplicate column name: activeTeamId`. Such an app writes its own 0010 file: the shipped file of its directory (`d1` or `d1-before-1.7`) without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole`, `team`, and `teamMember` tables when they are absent. They add `taRank`, the `ta` columns, and the unique keys, and move the versions. It applies the files to 0009 and its own 0010 with `wrangler d1 migrations apply` before `authtempo migrate --target d1 --tables compat`. Then the compat version is 10, and the command copies nothing.
 
 `wrangler d1 migrations apply` rolls back a file that fails (wrangler
 4.148.0, read 2026-10-10), so a refused file changes nothing. A runner that
@@ -148,6 +148,7 @@ and drops it. The errors that a refused file gives:
 - `duplicate column name: issuer`: the `d1-before-1.7` file on 1.7 tables. Use the `d1` file.
 - `table ta_limit already exists`: the compat migration ran already.
 - `duplicate column name: activeTeamId`: the shipped 0010 on tables that hold the teams columns already. Use an own 0010 file: the shipped file without its two `ADD COLUMN` lines of `session` and `invitation`.
+- `duplicate column name: memberCount`: the `d1-before-1.7` 0010 on the team tables of Better Auth 1.7. Use the `d1` file.
 - `UNIQUE constraint failed: organizationRole.organizationId, organizationRole.role` (Postgres: `could not create unique index "ux_organization_role__organization_id__role"`): two role rows of one name in one organization. Better Auth checks the name before a create but has no unique key. Find them with `SELECT "organizationId", role, count(*) FROM "organizationRole" GROUP BY "organizationId", role HAVING count(*) > 1`. Delete or rename one row of each pair, and run the file again.
 - `CHECK constraint failed: tempo_auth_compat_every_better_auth_date_must_be_text`: a Better Auth date column holds a number (a Drizzle `integer({ mode: "timestamp" })` schema) or text that is not a date. authtempo on D1 reads dates as ISO 8601 text only.
 
@@ -848,6 +849,16 @@ right comes from the organization role (`team:create`, `team:update`, and
 
 The teams stay in place in Better Auth's `team` and `teamMember` tables.
 Migration 0010 creates both with Better Auth's own SQL when they are absent.
+Better Auth 1.7.2 has `team.memberCount` and `teamMember.membershipKey`, and
+the team tables of 1.4.21 have neither. Core writes both, so 0010 adds each
+column when it is absent: `memberCount` as `integer NOT NULL DEFAULT 0`, and
+`membershipKey` as nullable text with the unique index
+`ux_team_member__membership_key`. Postgres tests for each column. On D1 the
+`d1-before-1.7` file creates absent team tables in the 1.4.21 form and then
+adds both columns. A row from before 1.7 keeps a null `membershipKey`. The
+shim read the team schema of Better Auth 1.4.21 (from the pnpm store) and
+1.7.2 on 2026-10-21. No copy of 1.5 or 1.6 was on the machine, so the shim
+did not read their team schema.
 It adds `teamMember.taOrganizationId`, filled from the team's
 `organizationId`, and `teamMember.taUpdatedAt`, filled from `createdAt`, and
 the unique key on (`teamId`, `userId`). A team member row that Better Auth

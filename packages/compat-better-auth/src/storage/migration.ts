@@ -597,13 +597,28 @@ export const MIGRATION_0010_NAME = "0010_compat_schema_v13";
  * 0001. The unique index fails on a table with two rows of one pair; Better
  * Auth's unique membershipKey stops such rows.
  *
+ * Better Auth 1.7 added `team.memberCount` and `teamMember.membershipKey`.
+ * The team tables of 1.4.21 (dist/plugins/organization/organization.mjs,
+ * read 2026-10-21) have neither, and core writes both. So the migration adds
+ * `memberCount` (NOT NULL, default 0, deviation 11) and `membershipKey`
+ * (nullable, with a unique index) when they are absent. Postgres tests for
+ * each column. A SQLite file is static, so the "before-1.7" variant creates
+ * absent tables in the 1.4.21 form and then adds the two columns. On 1.7
+ * team tables that variant stops with `duplicate column name: memberCount`.
+ *
  * The apiToken fields and the model organizationToken have no table here
  * yet. They are in UNMAPPED_MODELS, and Task 12 of plan 12k adds them to
  * this unshipped migration. The columns take the app's naming, so the text
  * depends on `names`, as for 0009. Append-only once it ships.
  */
-export function compatMigration0010Sql(dialect: "postgres" | "sqlite", n: Names): string {
+export function compatMigration0010Sql(
+  dialect: "postgres" | "sqlite",
+  n: Names,
+  variant: SqliteVariant = "1.7",
+): string {
   const pg = dialect === "postgres";
+  // Postgres tests for the two columns of Better Auth 1.7, so one text serves every version.
+  const before17 = !pg && variant === "before-1.7";
   const add = (table: "session" | "invitation", field: string) =>
     `ALTER TABLE ${n.table(table)} ADD COLUMN ${pg ? "IF NOT EXISTS " : ""}${n.column(table, field)} ${pg ? "text" : "TEXT"};`;
   const R = n.table("organizationRole");
@@ -617,6 +632,7 @@ export function compatMigration0010Sql(dialect: "postgres" | "sqlite", n: Names)
   const t = (field: string) => n.column("team", field);
   const M = n.table("teamMember");
   const m = (field: string) => n.column("teamMember", field);
+  const membershipKeyIndex = "ux_team_member__membership_key";
   const ref = (table: "organization" | "team" | "user") =>
     `references ${n.table(table)} (${n.column(table, "id")}) on delete cascade`;
   return `${[
@@ -627,11 +643,29 @@ export function compatMigration0010Sql(dialect: "postgres" | "sqlite", n: Names)
     baIndex("role"),
     `ALTER TABLE ${R} ADD COLUMN ${pg ? "IF NOT EXISTS " : ""}${C("taRank")} ${pg ? "integer" : "INTEGER"} NOT NULL DEFAULT 1;`,
     `CREATE UNIQUE INDEX ${pg ? "IF NOT EXISTS " : ""}ux_organization_role__organization_id__role ON ${R} (${C("organizationId")}, ${C("role")});`,
-    `CREATE TABLE IF NOT EXISTS ${T} (${t("id")} text not null primary key, ${t("name")} text not null, ${t("memberCount")} integer not null, ${t("organizationId")} text not null ${ref("organization")}, ${t("createdAt")} ${date} not null, ${t("updatedAt")} ${date});`,
-    `CREATE TABLE IF NOT EXISTS ${M} (${m("id")} text not null primary key, ${m("teamId")} text not null ${ref("team")}, ${m("userId")} text not null ${ref("user")}, ${m("membershipKey")} text unique, ${m("createdAt")} ${date});`,
+    `CREATE TABLE IF NOT EXISTS ${T} (${t("id")} text not null primary key, ${t("name")} text not null, ${before17 ? "" : `${t("memberCount")} integer not null, `}${t("organizationId")} text not null ${ref("organization")}, ${t("createdAt")} ${date} not null, ${t("updatedAt")} ${date});`,
+    `CREATE TABLE IF NOT EXISTS ${M} (${m("id")} text not null primary key, ${m("teamId")} text not null ${ref("team")}, ${m("userId")} text not null ${ref("user")}, ${before17 ? "" : `${m("membershipKey")} text unique, `}${m("createdAt")} ${date});`,
     index("team", "organizationId"),
     index("teamMember", "teamId"),
     index("teamMember", "userId"),
+    ...(pg
+      ? [
+          `ALTER TABLE ${T} ADD COLUMN IF NOT EXISTS ${t("memberCount")} integer NOT NULL DEFAULT 0;`,
+          // The unique index goes with the column only: a 1.7 table has Better Auth's own unique key.
+          "DO $$ BEGIN",
+          `  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = ${n.pgSchema ? `'${n.pgSchema}'` : "current_schema()"} AND table_name = '${n.rawTable("teamMember")}' AND column_name = '${n.rawColumn("teamMember", "membershipKey")}') THEN`,
+          `    ALTER TABLE ${M} ADD COLUMN ${m("membershipKey")} text;`,
+          `    CREATE UNIQUE INDEX ${membershipKeyIndex} ON ${M} (${m("membershipKey")});`,
+          "  END IF;",
+          "END $$;",
+        ]
+      : before17
+        ? [
+            `ALTER TABLE ${T} ADD COLUMN ${t("memberCount")} INTEGER NOT NULL DEFAULT 0;`,
+            `ALTER TABLE ${M} ADD COLUMN ${m("membershipKey")} TEXT;`,
+            `CREATE UNIQUE INDEX ${membershipKeyIndex} ON ${M} (${m("membershipKey")});`,
+          ]
+        : []),
     `ALTER TABLE ${M} ADD COLUMN ${pg ? "IF NOT EXISTS " : ""}${m("taOrganizationId")} ${pg ? "text" : "TEXT"};`,
     `ALTER TABLE ${M} ADD COLUMN ${pg ? "IF NOT EXISTS " : ""}${m("taUpdatedAt")} ${pg ? "timestamptz" : "TEXT"};`,
     `UPDATE ${M} SET ${m("taOrganizationId")} = (SELECT ${t("organizationId")} FROM ${T} WHERE ${T}.${t("id")} = ${M}.${m("teamId")}) WHERE ${m("taOrganizationId")} IS NULL;`,
