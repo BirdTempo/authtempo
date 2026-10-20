@@ -96,7 +96,7 @@ function notCredential(provider: string): string {
  * `oauthDevice`, `oauthSubject`, `oauthSessionClient`, and `oauthLogout`.
  * Plan 12f added `operatorAudit`. Plan 12k Task 1 adds its four models
  * (`organizationRole`, `team`, `teamMember`, `organizationToken`) with no
- * table yet: `UNMAPPED_MODELS` holds them, and the later 12k tasks map
+ * table yet. `UNMAPPED_MODELS` holds them, and the later 12k tasks map
  * each one.
  */
 export type MappedModel = Exclude<
