@@ -83,7 +83,11 @@
       ]
     },
     "typecheck": { "dependsOn": ["^build"] },
-    "test": { "dependsOn": ["^build"], "cache": false },
+    // A build empties its dist first (scripts/clean-dist.mjs). A test that reads
+    // its own dist, or runs tsc into it as pack-files does, must not run while
+    // that build deletes it. So each test waits for its own build too.
+    // apps/site/test/clean-dist.test.ts holds this line.
+    "test": { "dependsOn": ["^build", "build"], "cache": false },
     "//#typecheck:configs": { "cache": false }
   }
 }

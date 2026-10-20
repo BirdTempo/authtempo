@@ -21,7 +21,7 @@
     "worker/proof"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.d1.json",
     "test": "vitest run && vitest run -c vitest.d1.config.ts && node worker/proof/bundle-no-node.mjs && node worker/proof/pack-files.mjs"
   },

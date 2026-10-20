@@ -29,7 +29,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json && node scripts/copy-templates.mjs",
+    "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json && node scripts/copy-templates.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run && node proof/pack-files.mjs"
   },

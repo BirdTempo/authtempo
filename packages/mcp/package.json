@@ -25,7 +25,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "index": "node scripts/copy-index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.pool.json",
     "test": "vitest run && vitest run -c vitest.pool.config.ts && node scripts/dry-run.mjs"
