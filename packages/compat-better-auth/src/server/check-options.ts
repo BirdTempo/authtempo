@@ -301,6 +301,7 @@ const CORE_TOKEN_NAME = `${CORE_KEY} is core's name of Better Auth's apiKey; nam
  * `organizations.statements`, so each name follows core's name rule. A core
  * resource keeps core's actions: an action that core lacks is refused, not
  * dropped. `apiKey` is core's `apiToken`, so `apiToken` itself is refused.
+ * Its `delete` is core's `revoke` by the map of role-map.ts (plan 12k Task 12).
  */
 const accessControl: Rule = (v, p, out) => {
   const a = v as { statements?: unknown; newRole?: unknown } | null;
@@ -321,7 +322,9 @@ const accessControl: Rule = (v, p, out) => {
     const resource = toCoreName(given);
     if (CORE_RESOURCES.includes(resource)) {
       const core: readonly string[] = CORE_STATEMENTS[resource as keyof typeof CORE_STATEMENTS];
-      if (!Array.isArray(actions) || actions.some((x) => !core.includes(x)))
+      // The one name map (role-map.ts): Better Auth's apiKey delete is core's apiToken revoke (Task 12).
+      const named = (toCoreNames({ [given]: actions }) as Record<string, unknown>)[resource] ?? [];
+      if (!Array.isArray(named) || named.some((x) => !core.includes(x)))
         refuse(out, at, `core's ${resource} takes only the actions ${core.join(", ")} ${ITEM_18}`);
       continue;
     }

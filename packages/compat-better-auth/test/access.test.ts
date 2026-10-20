@@ -285,11 +285,12 @@ describe("the access control shim (spec 29 item 18)", () => {
     ).toEqual([
       "plugins[organization].roles.owner.statements.apiToken: apiToken is core's name of Better Auth's apiKey; name the resource apiKey (spec 29 item 18)",
     ]);
-    // An action that core's resource lacks is refused, not dropped.
+    // An action that core's resource lacks is refused, not dropped. Better Auth's apiKey delete
+    // is core's apiToken revoke (ruling 39 of plan 12k), so the refused action is another one.
     const extra = createAccessControl({
       ...defaultStatements,
       member: ["create", "ban"],
-      apiKey: ["read", "delete"],
+      apiKey: ["read", "delete", "rotate"],
     });
     expect(
       checkOptions(
