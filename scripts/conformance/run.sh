@@ -6,10 +6,11 @@
 # goes into the repository, then calls the suite's run-test-plan.py.
 #
 # Usage: run.sh <basic|config|rp-logout|backchannel-logout>
-# Environment: SUITE_DIR (the clone of the suite), PORT (the wrangler dev
-# port), CONFORMANCE_PASSWORD, and for basic and config CLIENT_ID,
-# CLIENT_SECRET, CLIENT2_ID, CLIENT2_SECRET (the stderr lines of the Worker).
-# OUT_DIR (default ~/authtempo-conformance-out) gets the log and the result zip.
+# Each run needs SUITE_DIR (the clone of the suite), PORT (the wrangler dev
+# port), and CONFORMANCE_PASSWORD. The basic and config runs also need
+# CLIENT_ID, CLIENT_SECRET, CLIENT2_ID, and CLIENT2_SECRET from the stderr
+# lines of the Worker. OUT_DIR (default ~/authtempo-conformance-out) gets
+# the log and the result zip.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"

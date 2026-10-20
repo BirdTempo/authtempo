@@ -22,7 +22,7 @@ The run is owner-run (rulings 51 and 52 of plan 12e). No agent edits `/etc/hosts
 
 | File | What it holds |
 | --- | --- |
-| `suite-env.sh` | `IMAGE_TAG=release-v5.3.2` and `CONFORMANCE_SERVER`. It holds no secret. The plan named it `docker.env`, but the root `.gitignore` keeps every `*.env` file out. |
+| `suite-env.sh` | `IMAGE_TAG=release-v5.3.2`, `CONFORMANCE_SERVER`, and `CONFORMANCE_DEV_MODE=1`. It holds no secret. The plan named it `docker.env`, but the root `.gitignore` keeps every `*.env` file out. |
 | `plans/basic.json`, `plans/config.json` | The Basic OP and Config OP configs: the alias `authtempo` and the two static clients. |
 | `plans/rp-logout.json`, `plans/backchannel-logout.json` | The two logout configs: the suite registers its own clients. |
 | `run.sh` | Fills the placeholders of one plan JSON into a temporary file and calls `run-test-plan.py`. |
@@ -52,7 +52,8 @@ The plan JSON files hold placeholders, never a secret: `{PORT}`, `{PASSWORD}`, `
 
    ```sh
    CI=1 WRANGLER_SEND_METRICS=false NO_COLOR=1 WRANGLER_HIDE_BANNER=true \
-     pnpm --filter authtempo-example-worker exec wrangler d1 migrations apply authtempo-example --local
+     pnpm --filter authtempo-example-worker exec wrangler d1 migrations apply authtempo-example-conformance \
+     --local --config wrangler.conformance.jsonc
    ```
 
 4. Start the Worker in its conformance mode. Pick a password of your own for the test user. From the repository root:
@@ -60,9 +61,8 @@ The plan JSON files hold placeholders, never a secret: `{PORT}`, `{PASSWORD}`, `
    ```sh
    export PORT=8788 CONFORMANCE_PASSWORD='<a long test password>'
    CI=1 WRANGLER_SEND_METRICS=false NO_COLOR=1 WRANGLER_HIDE_BANNER=true \
-     pnpm --filter authtempo-example-worker exec wrangler dev \
+     pnpm --filter authtempo-example-worker exec wrangler dev --config wrangler.conformance.jsonc \
      --local-protocol https --ip 0.0.0.0 --port "$PORT" \
-     --var CONFORMANCE_MODE:1 \
      --var "BASE_URL:https://host.docker.internal:$PORT" \
      --var "AUTH_SECRET:<32 or more random characters>" \
      --var "CONFORMANCE_PASSWORD:$CONFORMANCE_PASSWORD"
@@ -104,7 +104,7 @@ One Basic OP run covers both secret methods. The plan switches to `client_secret
 
 ## What the mode changes
 
-The mode is on only when `CONFORMANCE_MODE` is exactly `"1"`. `wrangler.jsonc` keeps `"0"`, and a test of the example holds that value. In the mode:
+The mode has its own entry, `examples/worker/src/conformance-worker.ts`, and its own config, `examples/worker/wrangler.conformance.jsonc`. That config sets `CONFORMANCE_MODE` to `"1"`, and the entry serves nothing without that value. `wrangler.jsonc` names only `src/index.ts`. The proof `examples/worker/proof/default-bundle.mjs` reads the dry-run bundle of each config. The default bundle holds no seed code, no test address, no secret log line, and no suite origin. In the mode:
 
 - `jwtMint.alg` is `"RS256"`, because OIDC Discovery 1.0 section 3 asks for RS256.
 - `oauth.defaultResource` is the `/mcp` resource, because the suite never sends RFC 8707 `resource` (ruling 52).
@@ -127,8 +127,10 @@ Add one line per plan at the end of `docs/superpowers/plans/README.md`, in this 
 
 ## If it fails
 
-- **Every authorize answers `invalid_target`:** the mode is off. Check that `--var CONFORMANCE_MODE:1` is on the `wrangler dev` line.
+- **Every authorize answers `invalid_target`:** the mode is off. Check that `--config wrangler.conformance.jsonc` is on the `wrangler dev` line.
+- **The first request answers 500:** the seed failed. The Worker logs `conformance: the seed failed:` and the reason, such as a password that the sign-up refuses. The next request tries again.
 - **The suite cannot reach the Worker:** the suite runs in Docker and reaches the host as `host.docker.internal`. Check `--ip 0.0.0.0` and the port.
 - **A TLS error at the Worker:** `wrangler dev --local-protocol https` uses its own certificate. The suite's Java client and its browser must accept it. The first run may need that certificate in the suite's trust store.
 - **The browser stops at the sign-in page:** the steps fill `#password input[name=email]` and `#password input[name=password]`, then click the submit button of that form. The page posts by script, so the suite's browser must run JavaScript (it does: `BrowserControl.java` at the tag).
-- **A module that `expected-gaps.md` does not name fails:** stop. Find the cause in the task that owns it before you write a line.
+- **A KeyError on `CONFORMANCE_TOKEN`:** `CONFORMANCE_DEV_MODE` is not set. `run.sh` sets it from `suite-env.sh`.
+- **A module that `expected-gaps.md` does not name ends in a result other than PASSED:** stop. Find the cause in the task that owns it before you write a line.
