@@ -212,6 +212,7 @@ export const CLIENT_CALLS = [
   { operation: "tokens.create", method: "POST", path: "/tokens" },
   { operation: "tokens.list", method: "GET", path: "/tokens", select: "tokens" },
   { operation: "tokens.revoke", method: "POST", path: "/tokens/revoke" },
+  { operation: "tokens.update", method: "POST", path: "/tokens/update" },
   { operation: "tokens.current", method: "GET", path: "/tokens/current" },
   { operation: "jwt.token", method: "GET", path: "/token" },
   { operation: "oauth.grants", method: "GET", path: "/oauth/grants", select: "grants" },

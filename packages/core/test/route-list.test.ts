@@ -59,7 +59,7 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(138);
+    expect(listed.length).toBe(139);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {

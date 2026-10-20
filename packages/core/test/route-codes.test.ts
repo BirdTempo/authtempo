@@ -155,6 +155,7 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /organizations/teams/active": { teamId: "$team" },
   "POST /tokens": { name: "ci" },
   "POST /tokens/revoke": { id: "t1" },
+  "POST /tokens/update": { id: "t1" },
   "POST /oauth/register": { redirect_uris: ["https://client.example.com/callback"] },
   "POST /oauth/authorize": { request_id: BODY43, decision: "allow" },
   "POST /oauth/token": { grant_type: "authorization_code", client_id: "client-1" },
@@ -423,6 +424,14 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     );
     must(await enableEmailMethod(config, { session: me, password: PASSWORD }));
     const challenge = await challengeOf(w, me.user.email);
+    // A token with a window (plan 12k): its window is the limiter call of GET /tokens/current.
+    const windowed = must(
+      await createApiToken(config, {
+        user: me.user,
+        name: "windowed",
+        rateLimit: { seconds: 60, max: 100 },
+      }),
+    );
     const fills: Fills = {
       $org: org.organization.id,
       $resetToken: resetToken,
@@ -441,13 +450,15 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
       (key) =>
         key === "POST /token/live"
           ? { authorization: `Bearer ${jwt.token}` }
-          : // The device page counts a request with no session only.
-            key === "GET /oauth/device"
-            ? {}
-            : // The operator user tools count a secret call before the compare (plan 12f).
-              entryOf(key).feature === "operatorUsers"
-              ? { authorization: `Operator ${"x".repeat(32)}` }
-              : w.cookie(me.token),
+          : key === "GET /tokens/current"
+            ? { authorization: `Bearer ${windowed.token}` }
+            : // The device page counts a request with no session only.
+              key === "GET /oauth/device"
+              ? {}
+              : // The operator user tools count a secret call before the compare (plan 12f).
+                entryOf(key).feature === "operatorUsers"
+                ? { authorization: `Operator ${"x".repeat(32)}` }
+                : w.cookie(me.token),
       fills,
     );
     // The two routes that carry the code in a redirect to the app.
@@ -507,7 +518,9 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
       }),
     );
     const carol = await verifiedSession(w.auth, "carol@example.com");
-    const routes = declaring("forbidden_rank");
+    // POST /tokens answers it to a member whose role lacks the token's set (plan 12k Task 7);
+    // a user outside answers not_found there. token-scope.test.ts proves the route answer.
+    const routes = declaring("forbidden_rank").filter((key) => key !== "POST /tokens");
     expect(routes.length).toBeGreaterThan(0);
     const results = await probe(w, routes, () => w.cookie(carol.token), {
       $org: org.organization.id,

@@ -44,6 +44,7 @@ import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
 import { defaultExistingAccountMail, type ExistingAccountMailInput } from "./engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
 import { deriveRoles, normalizeSlug, ROLE_RE } from "./engine/ranks.js";
+import { validWindow, WINDOW_CALLS_MAX, WINDOW_SECONDS_MAX } from "./engine/token-use.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 import { LEGACY_SESSION_COOKIE } from "./http/cookies.js";
@@ -57,9 +58,9 @@ import { defaultResetPage, type ResetPageInput } from "./http/password-pages.js"
 import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js";
 import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
-import type { LimiterPort } from "./limiter/port.js";
+import type { LimiterPort, LimitWindow } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
-import { sessionCookieNames } from "./primitives/credentials.js";
+import { CORE_PREFIXES, sessionCookieNames } from "./primitives/credentials.js";
 import { DPOP_WINDOW_SECONDS } from "./primitives/dpop.js";
 import { FOREIGN_ALGS, type ForeignAlg } from "./primitives/foreign-jwk.js";
 import { JWS_ALGS, type JwsAlg } from "./primitives/jwk.js";
@@ -317,6 +318,8 @@ export interface AuthConfig {
   };
   /** Off when absent or `false`. `{}` turns it on with the defaults. */
   organizations?: OrganizationsConfig | false;
+  /** API tokens (plan 12k). Tokens are always on; this block only sets their limits. */
+  tokens?: TokensConfig;
   /**
    * Who may become a user (plan 12b). `"open"` (default): anyone who proves
    * an address or signs up. `"invited"`: only an address with a pending
@@ -844,6 +847,27 @@ export interface OrganizationLimits {
 
 type ResolvedLimits = { [K in keyof OrganizationLimits]-?: number | null };
 
+/** The API token options (plan 12k, spec 29 items 12 and 16). */
+export interface TokensConfig {
+  /**
+   * The window of a new token that names none: `seconds` 1 to 86400 and
+   * `max` 1 to 100000. Default null: no window. A token made through
+   * `POST /tokens` always gets it, because that route takes no window.
+   */
+  defaultRateLimit?: LimitWindow | null;
+  /**
+   * The key prefixes of keys that moved into core's token table, such as
+   * `laaa_` (rulings 4 and 12 of plan 12k). A bearer with one goes to the
+   * hash lookup: a row acts as its token, and no row answers `token_retired`.
+   * Each matches `^[a-z][a-z0-9]{0,15}_$` and never shadows a prefix of
+   * `CORE_PREFIXES`.
+   */
+  movedPrefixes?: string[];
+}
+
+/** A moved key prefix: a lower-case letter, at most 15 more letters or digits, and `_`. */
+const MOVED_PREFIX_RE = /^[a-z][a-z0-9]{0,15}_$/;
+
 export interface ResolvedConfig {
   basePath: string;
   baseURL: string;
@@ -901,6 +925,7 @@ export interface ResolvedConfig {
     /** Null: teams are off, and no team route is mounted (plan 12k). */
     teams: { defaultTeam: boolean; keepLastTeam: boolean } | null;
   } | null;
+  tokens: { defaultRateLimit: LimitWindow | null; movedPrefixes: readonly string[] };
   signUp: "open" | "invited" | false;
   password: {
     hash: PasswordHashSeam;
@@ -1287,6 +1312,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     webauthn: input.webauthn ?? createSimpleWebAuthnSeam(),
     handoff,
     organizations,
+    tokens: resolveTokens(input.tokens),
     signUp,
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
@@ -1316,6 +1342,25 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     ),
     configKeys: configKeyPaths(input),
   };
+}
+
+function resolveTokens(input: TokensConfig | undefined): ResolvedConfig["tokens"] {
+  const window = input?.defaultRateLimit ?? null;
+  if (window !== null && !validWindow(window))
+    throw new ConfigError(
+      `tokens.defaultRateLimit must have whole seconds from 1 to ${WINDOW_SECONDS_MAX} and a whole max from 1 to ${WINDOW_CALLS_MAX}`,
+    );
+  const moved: string[] = [];
+  for (const p of input?.movedPrefixes ?? []) {
+    if (!MOVED_PREFIX_RE.test(p))
+      throw new ConfigError(`tokens.movedPrefixes has a bad prefix: ${p}`);
+    // A moved key with a core prefix would reach a core lookup, and a core credential would reach the moved one.
+    if (CORE_PREFIXES.some((c) => c.startsWith(p) || p.startsWith(c)))
+      throw new ConfigError(`tokens.movedPrefixes must not shadow a core prefix: ${p}`);
+    if (moved.includes(p)) throw new ConfigError(`tokens.movedPrefixes repeats ${p}`);
+    moved.push(p);
+  }
+  return { defaultRateLimit: window === null ? null : { ...window }, movedPrefixes: moved };
 }
 
 function requireFields<T extends object>(path: string, obj: T, keys: (keyof T & string)[]): void {

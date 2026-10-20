@@ -1340,6 +1340,7 @@ export const ROUTES = Object.freeze([
       "rate_limited",
       "token_limit",
       "impersonation_session",
+      "forbidden_rank",
     ],
     oauthCodes: [],
   },
@@ -1360,11 +1361,19 @@ export const ROUTES = Object.freeze([
     oauthCodes: [],
   },
   {
+    method: "POST",
+    path: "/tokens/update",
+    feature: "tokens",
+    auth: ["session"],
+    codes: ["unauthorized", "session_not_fresh", "invalid_body", "email_unverified", "conflict"],
+    oauthCodes: [],
+  },
+  {
     method: "GET",
     path: "/tokens/current",
     feature: "tokens",
     auth: ["apiToken"],
-    codes: ["unauthorized"],
+    codes: ["unauthorized", "rate_limited", "token_exhausted", "token_retired", "conflict"],
     oauthCodes: [],
   },
   {

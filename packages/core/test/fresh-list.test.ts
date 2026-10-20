@@ -148,7 +148,8 @@ describe("the routes that answer session_not_fresh and the client README list", 
       .sort();
     const calls = clientCalls();
     const listed = readmeList();
-    expect(listed).toHaveLength(19);
+    // Plan 12k Task 7 adds tokens.update.
+    expect(listed).toHaveLength(20);
     const ops = (name: string) =>
       calls.filter((c) => c.operation === name || c.operation.startsWith(`${name}.`));
     // A listed call with no fresh route: the README promises a rule that the code lacks.

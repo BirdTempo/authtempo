@@ -116,6 +116,11 @@ describe("token routes", () => {
       expiresAt: null,
       lastUsedAt: null,
       organizationId: null,
+      permissions: null,
+      metadata: null,
+      rateLimit: null,
+      remaining: null,
+      retired: false,
       createdAt: h.clock.now().toISOString(),
     });
     const list = await h.auth.handle(get("/auth/tokens", bearer(ada.session)));

@@ -184,6 +184,8 @@ import {
 import {
   type ApiTokenCreate,
   type ApiTokenSummary,
+  type ApiTokenUpdate,
+  authenticateRequest,
   type Caller,
   callerFromRequest,
   createApiToken,
@@ -191,6 +193,7 @@ import {
   listApiTokens,
   type ResolvedApiToken,
   revokeApiToken,
+  updateApiToken,
 } from "./engine/tokens.js";
 import {
   disableTotp,
@@ -337,7 +340,18 @@ export interface TokensApi {
   create(input: ApiTokenCreate): Promise<Result<{ token: string; apiToken: ApiTokenSummary }>>;
   list(input: { user: UserRow }): Promise<Result<ApiTokenSummary[]>>;
   revoke(input: { user: UserRow; id: string }): Promise<Result<{ ok: true }>>;
-  /** The token's user and summary, or `unauthorized`. A `ts_` token answers `unauthorized`. */
+  /**
+   * Narrows a token of the user (plan 12k, spec 29 item 11): a smaller set,
+   * an earlier expiry, a new name. It also takes the window and the quota,
+   * which no route takes. A quota may only go down or lose its refill.
+   * Applies no fresh rule: call `api.session.requireFresh` first.
+   */
+  update(input: ApiTokenUpdate): Promise<Result<ApiTokenSummary>>;
+  /**
+   * The token's user and summary, or the code of the resolve: `unauthorized`,
+   * `rate_limited`, `token_exhausted`, `token_retired`, or `conflict`. A `ts_`
+   * token answers `unauthorized`. It spends one call of the quota.
+   */
   current(input: { token: string }): Promise<Result<ResolvedApiToken>>;
 }
 
@@ -690,8 +704,19 @@ export interface Auth {
    * `session(request)` stays session-only, so every route that calls it
    * answers 401 to a token. For a session caller, send
    * `sessionCookie(request, caller)`, or the browser drops the cookie at its old Max-Age.
+   * A token caller spends one call of its quota, in every read mode (plan 12k).
    */
   caller(request: Request): Promise<Caller | null>;
+  /**
+   * The caller of `caller(request)`, or the code of the failure (plan 12k,
+   * spec 29 item 16): a token answers `rate_limited` over its window,
+   * `token_exhausted` at a quota of zero, `token_retired` for a retired or
+   * moved key with no row, and `conflict` after three lost spends. Every
+   * other failure is `unauthorized`. `caller` answers null for each code. A
+   * token spends one call of its quota per request, in every read mode, so
+   * `caller` and `authenticate` on one request spend once.
+   */
+  authenticate(request: Request): Promise<Result<Caller>>;
   /**
    * True when the caller holds every permission in the organization (plan
    * 12k, spec 29 item 9). A session reads its member role now. A user token
@@ -771,6 +796,7 @@ export function createAuth(input: AuthConfig): Auth {
     handle,
     session: (request, options) => sessionFromRequest(config, request, options),
     caller: (request) => callerFromRequest(config, request),
+    authenticate: (request) => authenticateRequest(config, request),
     hasPermission: (caller, input) => hasPermission(config, caller, input),
     permissionsOf: (caller, organizationId) => permissionsOf(config, caller, organizationId),
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
@@ -830,6 +856,7 @@ export function createAuth(input: AuthConfig): Auth {
         create: (i) => createApiToken(config, i),
         list: (i) => listApiTokens(config, i),
         revoke: (i) => revokeApiToken(config, i),
+        update: (i) => updateApiToken(config, i),
         current: (i) => currentApiToken(config, i),
       },
       session: {

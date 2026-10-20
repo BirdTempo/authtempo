@@ -61,6 +61,11 @@ describe("createApiToken", () => {
       expiresAt: new Date(now.getTime() + 90 * DAY),
       lastUsedAt: null,
       organizationId: null,
+      permissions: null,
+      metadata: null,
+      rateLimit: null,
+      remaining: null,
+      retired: false,
       createdAt: now,
     });
     const [row] = await auth.storage.findMany("apiToken", []);

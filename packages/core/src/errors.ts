@@ -69,6 +69,9 @@ export const ERRORS = {
   team_limit: 409,
   team_member_limit: 409,
   last_team: 409,
+  // plan 12k: the token quota and the retired keys of the shim cutover
+  token_exhausted: 429,
+  token_retired: 401,
   // plan 11g: an unhandled error of a route. The router answers it; no route names it.
   internal: 500,
   // plan 12f: operator tools

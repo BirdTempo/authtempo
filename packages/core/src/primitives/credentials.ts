@@ -12,6 +12,36 @@ export const SESSION_TOKEN_PREFIX = "ts_";
 /** An API token: `tk_` and 32 random bytes as base64url (spec 8.8). */
 export const API_TOKEN_PREFIX = "tk_";
 
+/**
+ * Every prefix of a credential that core issues, `to_` (organization tokens,
+ * plan 12k Task 8) included. A moved key prefix (`tokens.movedPrefixes`)
+ * may not shadow one of them (ruling 12 of plan 12k). A test reads each
+ * `randomToken` call of core against this list.
+ */
+export const CORE_PREFIXES: readonly string[] = Object.freeze([
+  "ts_",
+  "tk_",
+  "to_",
+  "cs_",
+  "cl_",
+  "ml_",
+  "hs_",
+  "hc_",
+  "ps_",
+  "inv_",
+  "oc_",
+  "od_",
+  "oq_",
+  "or_",
+  "os_",
+  "tf_",
+  "td_",
+  "ad_",
+  "ec_",
+  "pv_",
+  "pr_",
+]);
+
 /** The header `typ` of a session JWT and of an ID token (spec 8.12). */
 export const SESSION_JWT_TYPE = "JWT";
 

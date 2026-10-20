@@ -185,15 +185,16 @@ config.
 ## API tokens
 
 A CLI or a script uses an API token that a person made in the app.
-`create`, `list`, and `revoke` need a session; a token answers
+`create`, `list`, `revoke`, and `update` need a session; a token answers
 `unauthorized` there, so a token cannot mint a token. `current` needs a
 token. The clear token appears once, in the `create` answer.
 
 | Operation | Route | Answer type |
 | --- | --- | --- |
-| `client.tokens.create({ name, expiresInDays?, organizationId? })` | `POST /tokens` | `ClientResult<{ token, apiToken: ApiTokenSummaryJSON }>` |
+| `client.tokens.create({ name, expiresInDays?, organizationId?, permissions?, metadata? })` | `POST /tokens` | `ClientResult<{ token, apiToken: ApiTokenSummaryJSON }>` |
 | `client.tokens.list()` | `GET /tokens` | `ClientResult<ApiTokenSummaryJSON[]>` |
 | `client.tokens.revoke({ id })` | `POST /tokens/revoke` | `ClientResult<{ ok: true }>` |
+| `client.tokens.update({ id, name?, permissions?, expiresAt? })` | `POST /tokens/update` | `ClientResult<ApiTokenSummaryJSON>`. It narrows only: a wider set, `null` over a set, or a later expiry answers `invalid_body` |
 | `client.tokens.current()` | `GET /tokens/current` | `ClientResult<{ user, apiToken }>` |
 
 A CLI passes the token as the bearer: `createClient({ baseURL, credentials: "omit", token: () => process.env.TEMPO_TOKEN ?? null })`.
@@ -363,7 +364,7 @@ can answer it:
 - `user.changeEmail`, `user.delete`
 - `identities.unlink`, `identities.link`
 - `passkey.register`, `passkeys.delete`
-- `tokens.create`
+- `tokens.create`, `tokens.update`
 - `organizations.roles.create`, `organizations.roles.update`,
   `organizations.roles.delete`
 - `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`

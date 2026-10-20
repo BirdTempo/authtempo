@@ -30,6 +30,7 @@ export type {
   PasswordConfig,
   ResolvedEmailOtp,
   TeamsConfig,
+  TokensConfig,
   TotpConfig,
   TotpGateConfig,
 } from "./config.js";
@@ -181,10 +182,13 @@ export type {
 } from "./engine/social.js";
 export type { SweepResult } from "./engine/sweep.js";
 export type { TeamMemberSummary, TeamSummary } from "./engine/teams.js";
+export type { TokenQuota } from "./engine/token-use.js";
 export {
   API_TOKEN_PREFIX,
   type ApiTokenCreate,
   type ApiTokenSummary,
+  type ApiTokenUpdate,
+  type AuthCode,
   type Caller,
   type ResolvedApiToken,
 } from "./engine/tokens.js";

@@ -67,11 +67,13 @@ export type InvitationJSON = Omit<InvitationSummary, "expiresAt" | "createdAt"> 
 };
 export type ApiTokenSummaryJSON = Omit<
   ApiTokenSummary,
-  "expiresAt" | "lastUsedAt" | "createdAt"
+  "expiresAt" | "lastUsedAt" | "createdAt" | "permissions"
 > & {
   expiresAt: string | null;
   lastUsedAt: string | null;
   createdAt: string;
+  /** The token's set as JSON holds it (plan 12k). Null: the rights of its user. */
+  permissions: Record<string, string[]> | null;
 };
 
 /** One OAuth grant of the signed-in person (plan 9g final fix wave). */
@@ -487,18 +489,33 @@ export interface Client {
     };
   };
   /**
-   * API tokens for scripts and CLIs. `create`, `list`, and `revoke` need a
-   * session: a token answers `unauthorized` there. `current` needs a token:
-   * a CLI passes `token: () => "tk_…"` to `createClient`.
+   * API tokens for scripts and CLIs. `create`, `list`, `revoke`, and `update`
+   * need a session: a token answers `unauthorized` there. `current` needs a
+   * token: a CLI passes `token: () => "tk_…"` to `createClient`.
    */
   tokens: {
     create(input: {
       name: string;
       expiresInDays?: number | null | undefined;
       organizationId?: string | undefined;
+      /** A set that narrows the token (plan 12k). Absent: the user's own rights. */
+      permissions?: Record<string, string[]> | undefined;
+      /** The app's own data, at most 4096 bytes as JSON. */
+      metadata?: Record<string, unknown> | undefined;
     }): Promise<ClientResult<{ token: string; apiToken: ApiTokenSummaryJSON }>>;
     list(): Promise<ClientResult<ApiTokenSummaryJSON[]>>;
     revoke(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+    /**
+     * Narrows a token (plan 12k): a smaller set, a set over none, an earlier
+     * expiry as an ISO date, or a new name. A wider set, `null` over a set,
+     * and a later expiry answer `invalid_body`. It needs a fresh session.
+     */
+    update(input: {
+      id: string;
+      name?: string | undefined;
+      permissions?: Record<string, string[]> | null | undefined;
+      expiresAt?: string | null | undefined;
+    }): Promise<ClientResult<ApiTokenSummaryJSON>>;
     current(): Promise<
       ClientResult<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>
     >;
@@ -1446,14 +1463,17 @@ export function createClient(options: ClientOptions): Client {
       },
     },
     tokens: {
-      create: ({ expiresInDays, organizationId, ...rest }) =>
+      create: ({ expiresInDays, organizationId, permissions, metadata, ...rest }) =>
         send<{ token: string; apiToken: ApiTokenSummaryJSON }>("tokens.create", {
           ...rest,
           ...(expiresInDays !== undefined ? { expiresInDays } : {}),
           ...(organizationId !== undefined ? { organizationId } : {}),
+          ...(permissions !== undefined ? { permissions } : {}),
+          ...(metadata !== undefined ? { metadata } : {}),
         }),
       list: () => part<{ tokens: ApiTokenSummaryJSON[] }, "tokens.list">("tokens.list"),
       revoke: (input) => send<{ ok: true }>("tokens.revoke", input),
+      update: (input) => send<ApiTokenSummaryJSON>("tokens.update", input),
       current: () =>
         send<{ user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }>("tokens.current"),
     },

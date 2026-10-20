@@ -131,6 +131,11 @@ export const BETTER_AUTH_CODES = {
   team_limit: "TEAM_LIMIT",
   team_member_limit: "TEAM_MEMBER_LIMIT",
   last_team: "LAST_TEAM",
+  // Plan 12k Task 7. authtempo's own names: no @better-auth/api-key source is in
+  // this repo (read 2026-10-21). Task 12 of plan 12k reads the plugin's codes
+  // and maps the shim's api-key answers to them.
+  token_exhausted: "TOKEN_EXHAUSTED",
+  token_retired: "TOKEN_RETIRED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

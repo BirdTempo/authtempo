@@ -52,7 +52,7 @@ describe("the call table of the client (plan 11d)", () => {
     for (const c of CLIENT_CALLS) expect(routes).toContain(`${c.method} ${c.path}`);
     const operations = CLIENT_CALLS.map((c) => c.operation);
     expect(new Set(operations).size).toBe(operations.length);
-    expect(CLIENT_CALLS).toHaveLength(92);
+    expect(CLIENT_CALLS).toHaveLength(93);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -130,6 +130,7 @@ describe("the call table of the client (plan 11d)", () => {
     await c.tokens.create({ name: "ci" });
     await c.tokens.list();
     await c.tokens.revoke({ id: "t" });
+    await c.tokens.update({ id: "t", name: "cd" });
     await c.tokens.current();
     await c.jwt.token();
     await c.oauth.grants();
@@ -182,11 +183,11 @@ describe("the call table of the client (plan 11d)", () => {
     const notCompared = NOT_COMPARED.map((r) => r.operation);
     // Every row is in one of the two lists, and no row is in both.
     expect([...COMPARED, ...notCompared].sort()).toEqual(operations);
-    expect(COMPARED).toHaveLength(86);
+    expect(COMPARED).toHaveLength(87);
     expect(NOT_COMPARED).toHaveLength(6);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.
-    expect(BODY_AS_INPUT).toHaveLength(48);
+    expect(BODY_AS_INPUT).toHaveLength(49);
     for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
     // Every row with `select` is compared: the type test reads the key.
     for (const r of CLIENT_CALLS)

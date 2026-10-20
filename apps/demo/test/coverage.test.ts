@@ -47,7 +47,8 @@ describe("the demo lists and the routes of core", () => {
       // Count what ran: the routes of the twelve demo features, less the Apple callback.
       // Plan 12k Task 3 added two organizations routes: has-permission and permissions.
       // Plan 12k Task 6 added one organizations route: check-slug.
-      expect(served).toBe(80);
+      // Plan 12k Task 7 added one tokens route: update.
+      expect(served).toBe(81);
     },
     LONG_TEST_MS,
   );
