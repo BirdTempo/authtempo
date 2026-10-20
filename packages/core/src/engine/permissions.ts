@@ -21,6 +21,11 @@ export interface Standing {
   granted: Statements;
 }
 
+/** A standing, and the count of its parts that neither the config nor a role row with a good shape names. */
+export interface RoleStanding extends Standing {
+  unnamed: number;
+}
+
 /**
  * The rank and the statements of a role string in one organization: static
  * parts from the config, other parts from the organization's role rows
@@ -37,6 +42,10 @@ export interface Standing {
  * holds rows that Better Auth wrote, so any text can be there. Core writes
  * one warn line with the row id per read, and never the permissions.
  *
+ * `unnamed` counts the parts with no role of the config and no good row. A
+ * grant refuses such a part while dynamic roles are on: a later create of
+ * that name would else give the holder rights that no caller granted.
+ *
  * `storage` is the handle to read through. Inside a transaction it is the
  * transaction handle `tx`. A read through `config.storage` there waits for a
  * second connection, and a Postgres pool of one then never ends the flow.
@@ -46,14 +55,14 @@ export async function effectiveIn(
   storage: StorageAdapter,
   organizationId: string,
   role: string,
-): Promise<Standing> {
+): Promise<RoleStanding> {
   const o = config.organizations;
-  if (!o) return { rank: 0, granted: {} };
+  if (!o) return { rank: 0, granted: {}, unnamed: 0 };
   let rank = rankOf(o.ranks, role);
   const granted = effectiveOf(role, o.roles);
-  if (o.dynamicRoles === null) return { rank, granted };
   const unknown = [...new Set(role.split(","))].filter((part) => !Object.hasOwn(o.roles, part));
-  if (unknown.length === 0) return { rank, granted };
+  if (o.dynamicRoles === null || unknown.length === 0)
+    return { rank, granted, unnamed: unknown.length };
   const rows = await storage.findMany(
     "organizationRole",
     [
@@ -63,16 +72,18 @@ export async function effectiveIn(
     { limit: unknown.length },
   );
   const sets: Statements[] = [granted];
+  let unnamed = unknown.length;
   for (const row of rows) {
     const def = roleRowDef(o, row);
     if (def === null) {
       console.warn(`authtempo: role row invalid ${row.id}`);
       continue;
     }
+    unnamed--;
     if (def.rank > rank) rank = def.rank;
     sets.push(def.permissions);
   }
-  return { rank, granted: union(...sets) };
+  return { rank, granted: union(...sets), unnamed };
 }
 
 /**

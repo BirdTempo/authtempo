@@ -17,6 +17,7 @@ const DAY = 86_400_000;
 function world(
   organizations: OrganizationsConfig = { dynamicRoles: {} },
   wrap = (s: StorageAdapter) => s,
+  base: StorageAdapter = createMemoryAdapter(),
 ) {
   let now = t0;
   const clock = {
@@ -25,7 +26,6 @@ function world(
       now = new Date(now.getTime() + ms);
     },
   };
-  const base = createMemoryAdapter();
   const storage = wrap(base);
   const sent: string[] = [];
   const auth = createAuth({
@@ -71,7 +71,10 @@ function world(
     if (!c) throw new Error("no caller");
     return c;
   }
-  return { auth, storage: base, clock, user, session, caller };
+  /** The token of the last invitation mail. */
+  const invitationToken = () =>
+    /invitation=(inv_[A-Za-z0-9_-]+)/.exec(sent.at(-1) ?? "")?.[1] ?? "";
+  return { auth, storage: base, clock, user, session, caller, invitationToken };
 }
 
 function mustOk<T>(r: { ok: true; value: T } | { ok: false; code: string }): T {
@@ -387,6 +390,89 @@ describe("dynamic roles (plan 12k Task 4)", () => {
     expect(await w.storage.findMany("organizationRole", [])).toEqual([]);
   });
 
+  it("refuses a role part that no table names, so a later create grants nothing (review probe P1)", async () => {
+    const w = world();
+    const { ada, bob, carol, organizationId } = await acme(w);
+    const dave = await w.user("dave@example.com");
+    // The admin writes an unknown part onto its own role.
+    expect(
+      await w.auth.api.updateMemberRole({
+        user: bob,
+        organizationId,
+        userId: bob.id,
+        role: "admin,closer",
+      }),
+    ).toMatchObject({ ok: false, code: "forbidden_rank" });
+    // The owner may not grant an unknown part either, by any of the three grant calls.
+    expect(
+      await w.auth.api.updateMemberRole({
+        user: ada,
+        organizationId,
+        userId: carol.id,
+        role: "member,closer",
+      }),
+    ).toMatchObject({ ok: false, code: "forbidden_rank" });
+    expect(
+      await w.auth.api.addMember({ user: ada, organizationId, userId: dave.id, role: "closer" }),
+    ).toMatchObject({ ok: false, code: "forbidden_rank" });
+    expect(
+      await w.auth.api.inviteMember({
+        user: ada,
+        organizationId,
+        email: "eve@example.com",
+        role: "viewer,closer",
+      }),
+    ).toMatchObject({ ok: false, code: "forbidden_rank" });
+    // Later the owner creates the role for another person.
+    mustOk(
+      await w.auth.api.createRole({
+        user: ada,
+        organizationId,
+        name: "closer",
+        rank: 3,
+        permissions: { organization: ["delete"] },
+      }),
+    );
+    const bobCaller = await w.caller(await w.session("bob@example.com"));
+    expect(
+      await w.auth.hasPermission(bobCaller, {
+        organizationId,
+        permissions: { organization: ["delete"] },
+      }),
+    ).toBe(false);
+    expect(await w.auth.api.deleteOrganization({ user: bob, organizationId })).toMatchObject({
+      ok: false,
+      code: "forbidden_rank",
+    });
+    const roles = (await w.storage.findMany("member", [])).map((m) => m.role).sort();
+    expect(roles).toEqual(["admin", "member", "owner"]);
+    expect(await w.storage.findMany("invitation", [])).toEqual([]);
+  });
+
+  it("refuses at the accept a part that no table names, from an invitation made with dynamicRoles off", async () => {
+    // Reachable: an invite with dynamicRoles off may name any part; the app then turns dynamicRoles on.
+    const base = createMemoryAdapter();
+    const off = world({}, (s) => s, base);
+    const { ada, organizationId } = await acme(off);
+    const dave = await off.user("dave@example.com");
+    mustOk(
+      await off.auth.api.inviteMember({
+        user: ada,
+        organizationId,
+        email: "dave@example.com",
+        role: "admin,auditor",
+      }),
+    );
+    const on = world({ dynamicRoles: {} }, (s) => s, base);
+    expect(
+      await on.auth.api.acceptInvitation({ user: dave, token: off.invitationToken(), ip: null }),
+    ).toMatchObject({ ok: false, code: "invalid_token" });
+    const members = await base.findMany("member", [{ field: "userId", op: "eq", value: dave.id }]);
+    expect(members).toEqual([]);
+    // The dead invitation is gone, as on every inviter_lost path.
+    expect(await base.findMany("invitation", [])).toEqual([]);
+  });
+
   it("answers role_limit at the cap", async () => {
     const w = world({ dynamicRoles: { maxPerOrganization: 2 } });
     const { organizationId } = await acme(w);
@@ -622,6 +708,15 @@ describe("dynamic roles (plan 12k Task 4)", () => {
       },
     }));
     const { ada, carol, organizationId } = await acme(w);
+    for (const name of ["editor", "ghost"])
+      mustOk(
+        await w.auth.api.createRole({
+          user: ada,
+          organizationId,
+          name,
+          permissions: { member: ["read"] },
+        }),
+      );
     mustOk(
       await w.auth.api.updateMemberRole({
         user: ada,

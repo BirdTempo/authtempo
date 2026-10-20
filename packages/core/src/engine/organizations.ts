@@ -730,6 +730,8 @@ export async function grantable(
   const target = await effectiveIn(config, config.storage, organization.id, role);
   // An unknown role ranks 0 and would be a silent no-rights member; refuse it with the same code as an escalation, so the caller learns nothing about the table.
   if (target.rank === 0 || !grantCheck(caller, target)) return fail("forbidden_rank");
+  // With dynamic roles on, a part that no table names could get rights later from a create of that name (ruling 24 M1).
+  if (o.dynamicRoles !== null && target.unnamed > 0) return fail("forbidden_rank");
   return ok(target);
 }
 

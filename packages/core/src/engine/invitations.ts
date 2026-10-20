@@ -294,11 +294,13 @@ export async function acceptInvitation(
         return "inviter_lost";
       };
       // The role table or the organization slug can change after the invite. A role that now ranks 0, or a
-      // platform role outside the platform organization, is a grant no live caller could make.
+      // platform role outside the platform organization, is a grant no live caller could make. So is a
+      // part that no table names while dynamic roles are on, as in grantable.
       if (
         !can(by.granted, RULE_STATEMENTS.invite) ||
         !grantCheck(by, grant) ||
         grantRank === 0 ||
+        (o.dynamicRoles !== null && grant.unnamed > 0) ||
         !roleAllowedIn(o, inv.role, organizationRow.slug)
       )
         return lost();

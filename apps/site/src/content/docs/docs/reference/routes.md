@@ -809,7 +809,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 
 ## Dynamic roles
 
-These routes exist when the config sets `organizations.dynamicRoles`. An organization stores its own roles beside the roles of the config. A role check reads them at each request, so a change applies at the next request.
+These routes exist when the config sets `organizations.dynamicRoles`. An organization stores its own roles beside the roles of the config. A role check reads them at each request, so a change applies at the next request. While they are on, a grant refuses a role part that neither the config nor a stored role names. The add, the role change, and the invite answer `forbidden_rank`; the accept answers `invalid_token`.
 
 <h3 id="get-organizations-roles"><code>GET /organizations/roles</code></h3>
 
