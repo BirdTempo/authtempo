@@ -440,3 +440,83 @@ describe("the moved prefixes (plan 12k Task 7, rulings 4 and 12)", () => {
     for (const p of used) expect(CORE_PREFIXES, p).toContain(p);
   });
 });
+
+describe("the bounds of the window and the quota (plan 12k Task 7, ruling 9)", () => {
+  const badQuotas = [
+    { remaining: -1 },
+    { remaining: 1.5 },
+    { remaining: Number.NaN },
+    { remaining: 2147483648 },
+    { remaining: 1, refillAmount: 2147483648, refillSeconds: 60 },
+    { remaining: 1, refillAmount: 1, refillSeconds: 0 },
+    { remaining: 1, refillAmount: 1 },
+    { remaining: 1, refillSeconds: 60 },
+  ];
+  const badWindows = [
+    { seconds: 0, max: 1 },
+    { seconds: 86401, max: 1 },
+    { seconds: 60, max: 100001 },
+    { seconds: 1.5, max: 1 },
+  ];
+  const topQuota = { remaining: 2147483647, refillAmount: 2147483647, refillSeconds: 2147483647 };
+  const topWindow = { seconds: 86400, max: 100000 };
+
+  it("refuses each value out of bounds at the create, and takes the largest", async () => {
+    const h = useHandle();
+    const ada = await h.seedUser("ada@example.com");
+    for (const quota of badQuotas)
+      expect(
+        await h.auth.api.tokens.create({ user: ada, name: "ci", quota }),
+        JSON.stringify(quota),
+      ).toMatchObject({ ok: false, code: "invalid_body" });
+    for (const rateLimit of badWindows)
+      expect(
+        await h.auth.api.tokens.create({ user: ada, name: "ci", rateLimit }),
+        JSON.stringify(rateLimit),
+      ).toMatchObject({ ok: false, code: "invalid_body" });
+    expect(await h.storage.findMany("apiToken", [])).toEqual([]);
+    const made = mustOk(
+      await h.auth.api.tokens.create({
+        user: ada,
+        name: "ci",
+        quota: topQuota,
+        rateLimit: topWindow,
+      }),
+    );
+    expect(made.apiToken).toMatchObject({ remaining: 2147483647, rateLimit: topWindow });
+  });
+
+  it("refuses each value out of bounds at the update, and takes the largest", async () => {
+    const h = useHandle();
+    const ada = await h.seedUser("ada@example.com");
+    // A token with no window and no quota takes any valid one, so only the bounds refuse.
+    const { apiToken } = mustOk(await h.auth.api.tokens.create({ user: ada, name: "ci" }));
+    const id = apiToken.id;
+    for (const quota of badQuotas)
+      expect(
+        await h.auth.api.tokens.update({ user: ada, id, quota }),
+        JSON.stringify(quota),
+      ).toMatchObject({ ok: false, code: "invalid_body" });
+    for (const rateLimit of badWindows)
+      expect(
+        await h.auth.api.tokens.update({ user: ada, id, rateLimit }),
+        JSON.stringify(rateLimit),
+      ).toMatchObject({ ok: false, code: "invalid_body" });
+    const [row] = await h.storage.findMany("apiToken", []);
+    expect(row).toMatchObject({ remaining: null, rateLimitSeconds: null, rateLimitMax: null });
+    expect(
+      mustOk(
+        await h.auth.api.tokens.update({ user: ada, id, quota: topQuota, rateLimit: topWindow }),
+      ),
+    ).toMatchObject({ remaining: 2147483647, rateLimit: topWindow });
+  });
+
+  it("refuses each window out of bounds in tokens.defaultRateLimit, and takes the largest", () => {
+    for (const defaultRateLimit of badWindows)
+      expect(
+        () => useHandle({ tokens: { defaultRateLimit } }),
+        JSON.stringify(defaultRateLimit),
+      ).toThrow(ConfigError);
+    expect(() => useHandle({ tokens: { defaultRateLimit: topWindow } })).not.toThrow();
+  });
+});
