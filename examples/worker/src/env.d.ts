@@ -2,8 +2,8 @@ interface Env {
   BASE_URL: string;
   AUTH_SECRET: string;
   TEST_MODE: string;
-  /** "1" turns on the conformance mode of plan 12e Task 17; wrangler.jsonc keeps "0". */
-  CONFORMANCE_MODE: string;
+  /** "1" in wrangler.conformance.jsonc only; the conformance entry of plan 12e serves nothing without it. */
+  CONFORMANCE_MODE?: string;
   /** The password of the conformance test user; read only while CONFORMANCE_MODE is "1". */
   CONFORMANCE_PASSWORD?: string;
   GOOGLE_CLIENT_ID?: string;
@@ -23,8 +23,6 @@ interface Env {
 declare namespace Cloudflare {
   interface Env {
     DB: D1Database;
-    /** From the vars of wrangler.jsonc; the conformance test reads that it is "0". */
-    CONFORMANCE_MODE: string;
     TEST_MIGRATIONS: import("cloudflare:test").D1Migration[];
     BA_DB: D1Database;
     COMPAT_MIGRATIONS: import("cloudflare:test").D1Migration[];

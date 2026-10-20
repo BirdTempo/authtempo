@@ -15,6 +15,8 @@ import {
   seedConformance,
   suiteFetch,
 } from "../src/conformance.js";
+import conformanceWorker from "../src/conformance-worker.js";
+import conformanceText from "../wrangler.conformance.jsonc?raw";
 import wranglerText from "../wrangler.jsonc?raw";
 import { BASE } from "./helpers.js";
 
@@ -43,10 +45,63 @@ function conformanceAuth(inner: typeof fetch = vi.fn()) {
 }
 
 describe("the conformance mode of the example Worker (plan 12e Task 17)", () => {
-  it("keeps CONFORMANCE_MODE at 0 in wrangler.jsonc, so a deploy never serves the mode", () => {
-    const values = [...wranglerText.matchAll(/"CONFORMANCE_MODE":\s*"([^"]*)"/g)].map((m) => m[1]);
-    expect(values).toEqual(["0"]);
-    expect(env.CONFORMANCE_MODE).toBe("0");
+  it("runs the real conformance entry: no seed and no answer off the mode, a dropped failed seed, then RS256 and the seeded user", async () => {
+    const LOCAL_ENV = { ...env, BASE_URL: LOCAL, TEST_MODE: "0" } as unknown as Env;
+    const ask = (path: string, extra: Partial<Env>, init?: RequestInit) =>
+      conformanceWorker.fetch(new Request(`${LOCAL}${path}`, init), { ...LOCAL_ENV, ...extra });
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(
+        ask("/auth/.well-known/openid-configuration", {
+          CONFORMANCE_MODE: "0",
+          CONFORMANCE_PASSWORD: "conformance password 1",
+        }),
+      ).rejects.toThrow("needs CONFORMANCE_MODE set to 1");
+      // A password that the sign-up refuses: the seed logs one line, and the next request tries again.
+      const on = { CONFORMANCE_MODE: "1" };
+      await expect(
+        ask("/auth/.well-known/openid-configuration", { ...on, CONFORMANCE_PASSWORD: "x" }),
+      ).rejects.toThrow("the sign-up of the test user failed");
+      expect(errors.mock.calls.map((c) => String(c[0]))).toEqual(["conformance: the seed failed:"]);
+      const good = { ...on, CONFORMANCE_PASSWORD: "conformance password 1" };
+      const doc = (await (
+        await ask("/auth/.well-known/openid-configuration", good)
+      ).json()) as Record<string, unknown>;
+      expect([
+        doc.id_token_signing_alg_values_supported,
+        doc.device_authorization_endpoint,
+      ]).toEqual([["RS256"], `${LOCAL}/auth/oauth/device_authorization`]);
+      const lines = errors.mock.calls.map((c) => String(c[0]));
+      expect(
+        lines.filter((l) => /^conformance: conformance client(?: 2)? client_id=cl_/.test(l)),
+      ).toHaveLength(2);
+      const signIn = await ask("/auth/password/sign-in", good, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: LOCAL,
+          "cf-connecting-ip": "203.0.113.172",
+        },
+        body: JSON.stringify({ email: CONFORMANCE_EMAIL, password: "conformance password 1" }),
+      });
+      expect(signIn.status).toBe(200);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+
+  it("keeps the mode out of wrangler.jsonc and names its own entry in wrangler.conformance.jsonc", () => {
+    const mainOf = (text: string) => /"main":\s*"([^"]*)"/.exec(text)?.[1];
+    const modeOf = (text: string) =>
+      [...text.matchAll(/"CONFORMANCE_MODE":\s*"([^"]*)"/g)].map((m) => m[1]);
+    expect({ main: mainOf(wranglerText), mode: modeOf(wranglerText) }).toEqual({
+      main: "src/index.ts",
+      mode: [],
+    });
+    expect({ main: mainOf(conformanceText), mode: modeOf(conformanceText) }).toEqual({
+      main: "src/conformance-worker.ts",
+      mode: ["1"],
+    });
   });
 
   it("turns on for the exact value 1 only", () => {

@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The conformance mode of plan 12e Task 17 (ruling 53): the local OpenID
+  // conformance run only, never a deploy. Its own entry keeps the seed code,
+  // the test address, and the suite origin out of the bundle of wrangler.jsonc.
+  // scripts/conformance/README.md runs it with --config wrangler.conformance.jsonc.
+  "name": "authtempo-example-conformance",
+  "main": "src/conformance-worker.ts",
+  // The same date and flags as wrangler.jsonc: the mode runs the same packages.
+  "compatibility_date": "2026-09-30",
+  "compatibility_flags": ["no_nodejs_compat", "no_nodejs_compat_v2"],
+  "vars": {
+    // The README overrides it with --var BASE_URL:https://host.docker.internal:<port>.
+    "BASE_URL": "https://host.docker.internal:8788",
+    "TEST_MODE": "0",
+    // The conformance entry serves nothing unless this is "1".
+    "CONFORMANCE_MODE": "1"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      // A local database of its own, apart from the example's.
+      "database_name": "authtempo-example-conformance",
+      "database_id": "authtempo-example-conformance",
+      "migrations_dir": "../../packages/adapter-d1/migrations"
+    }
+  ]
+  // AUTH_SECRET and CONFORMANCE_PASSWORD come with --var on the wrangler dev line.
+}

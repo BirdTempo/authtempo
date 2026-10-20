@@ -2,10 +2,11 @@ import type { Auth, AuthConfig } from "@authtempo/core";
 
 /**
  * The conformance mode of the example Worker (plan 12e Task 17, rulings 51
- * and 52). It is on only when the var CONFORMANCE_MODE is exactly "1", for
- * the local run of the OpenID conformance suite release-v5.3.2 that
- * scripts/conformance/README.md describes. wrangler.jsonc keeps "0", so a
- * deploy never serves it.
+ * to 53). Its entry is conformance-worker.ts, which only
+ * wrangler.conformance.jsonc names. The deployed bundle of wrangler.jsonc
+ * holds none of this file. The mode is for the local run of the OpenID
+ * conformance suite release-v5.3.2 that scripts/conformance/README.md
+ * describes.
  */
 
 /** The suite's own origin (docker-compose-prebuilt.yml at release-v5.3.2, read 2026-10-20). */
@@ -82,6 +83,7 @@ export async function seedConformance(
     ip: null,
     userAgent: null,
   });
+  if (signUp && !signUp.ok) throw new Error(`the sign-up of the test user failed: ${signUp.code}`);
   // The verify link of the sign-up mail. A second sign-up of the address mails a
   // sign-in hint with no token, and its text link is no verify link.
   const link = signUp?.ok ? takeLink() : null;
