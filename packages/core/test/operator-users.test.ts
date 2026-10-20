@@ -391,6 +391,38 @@ describe("operator user reads (plan 12f Task 5)", () => {
     expect(got.value.sessions).toBe(100);
   });
 
+  it("reads an active ban, and an ended or a lifted ban as no ban (ruling 24)", async () => {
+    const auth = await operatorAuth();
+    const api = operatorApi(auth.config);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const [id] = await signUpAll(auth, ["ada@example.com"]);
+    const userId = id ?? "";
+    const banOf = async () => {
+      const got = await api.users.get({ actor: APP, userId });
+      if (!got.ok) throw new Error(got.code);
+      return got.value.ban;
+    };
+    const act = { actor: APP, userId, reason: "Abuse report 7", ip: null, userAgent: null };
+    const bannedAt = auth.clock.now();
+    const until = new Date(bannedAt.getTime() + 60 * 60_000);
+    expect((await api.users.ban({ ...act, until: until.toISOString() })).ok).toBe(true);
+    expect(await banOf()).toEqual({
+      at: bannedAt.toISOString(),
+      reason: "Abuse report 7",
+      until: until.toISOString(),
+    });
+    auth.clock.advance(61 * 60_000);
+    expect(await banOf()).toBeNull();
+    expect((await api.users.ban(act)).ok).toBe(true);
+    expect(await banOf()).toMatchObject({ until: null });
+    auth.clock.advance(60_000);
+    expect((await api.users.unban(act)).ok).toBe(true);
+    // The unban keeps bannedAt (ruling 28): the read follows activeBan, not the field.
+    const row = await auth.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
+    expect(row?.bannedAt).not.toBeNull();
+    expect(await banOf()).toBeNull();
+  });
+
   it("is off unless operator.users is on", async () => {
     const off = makeAuth();
     const api = operatorApi(off.config);
