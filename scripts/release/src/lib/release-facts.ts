@@ -23,6 +23,16 @@ export const FIRST_RELEASE = "0.1.0";
 /** The prefix of the release tag `v<version>`. Read by check-tag, check-workflows, and the runbook test. */
 export const TAG_PREFIX = "v";
 
+/**
+ * The scope of each released name. Read by dry-run and publish. npm and pnpm
+ * send a scoped name to the scope registry of an npmrc, not to --registry. The
+ * review of Task 6 (M1) read that `npm login --scope=@authtempo` writes such a line.
+ */
+export const SCOPE = "@authtempo";
+
+/** The public registry, where the publish job publishes. Read by publish. */
+export const PUBLIC_REGISTRY = "https://registry.npmjs.org/";
+
 /** The lowest npm that publishes by trusted publishing. Read by publish, check-workflows, and the runbook test. */
 export const NPM_FLOOR = "11.5.1";
 

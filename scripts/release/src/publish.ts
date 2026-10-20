@@ -11,7 +11,26 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
-import { NPM_FLOOR } from "./lib/release-facts.ts";
+import { NPM_FLOOR, PUBLIC_REGISTRY, SCOPE } from "./lib/release-facts.ts";
+
+/**
+ * The registry arguments of each npm call. npm reads the project .npmrc of the
+ * checkout, and a scope registry there wins over --registry. So each call names
+ * both, and a committed .npmrc cannot move the publish (review of the Task 6 fix, I5).
+ */
+export const REGISTRY_ARGS = [
+  `--registry=${PUBLIC_REGISTRY}`,
+  `--${SCOPE}:registry=${PUBLIC_REGISTRY}`,
+] as const;
+
+/** The arguments of `npm view <spec> <field> --json` on the public registry. */
+export const viewArgs = (spec: string, field: string): string[] => [
+  "view",
+  spec,
+  field,
+  "--json",
+  ...REGISTRY_ARGS,
+];
 
 /** What one npm view call found: the value, no such package or version, or an error. */
 export type ViewAnswer = { found: string } | { missing: true } | { error: string };
@@ -266,7 +285,15 @@ export function publish(dir: string, seams: Seams): Outcome {
   for (const [k, { file, tag }] of plan.publish.entries()) {
     // No --provenance flag and no token: publishConfig.provenance of the
     // prepared manifest and the OIDC token of the job give both.
-    const r = seams.run("npm", ["publish", join(dir, file), "--access", "public", "--tag", tag]);
+    const r = seams.run("npm", [
+      "publish",
+      join(dir, file),
+      "--access",
+      "public",
+      "--tag",
+      tag,
+      ...REGISTRY_ARGS,
+    ]);
     if (r.code !== 0)
       return {
         published,
@@ -323,7 +350,7 @@ export const npmSeams: Seams = {
     return { code: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
   },
   npmView(spec, field) {
-    const r = spawnSync("npm", ["view", spec, field, "--json"], {
+    const r = spawnSync("npm", viewArgs(spec, field), {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });

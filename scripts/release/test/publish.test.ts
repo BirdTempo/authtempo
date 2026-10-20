@@ -12,10 +12,12 @@ import {
   publish,
   publishLines,
   publishPlan,
+  REGISTRY_ARGS,
   readView,
   type Seams,
   type Tarball,
   type ViewAnswer,
+  viewArgs,
 } from "../src/publish.ts";
 
 const folders: string[] = [];
@@ -103,8 +105,28 @@ describe("publish", () => {
     expect(outcome.failures).toEqual([]);
     // Core first: the client depends on it.
     expect(f.calls.filter((c) => c[1] === "publish")).toEqual([
-      ["npm", "publish", join(out, CORE("0.1.0")), "--access", "public", "--tag", "latest"],
-      ["npm", "publish", join(out, CLIENT("0.1.0")), "--access", "public", "--tag", "latest"],
+      [
+        "npm",
+        "publish",
+        join(out, CORE("0.1.0")),
+        "--access",
+        "public",
+        "--tag",
+        "latest",
+        "--registry=https://registry.npmjs.org/",
+        "--@authtempo:registry=https://registry.npmjs.org/",
+      ],
+      [
+        "npm",
+        "publish",
+        join(out, CLIENT("0.1.0")),
+        "--access",
+        "public",
+        "--tag",
+        "latest",
+        "--registry=https://registry.npmjs.org/",
+        "--@authtempo:registry=https://registry.npmjs.org/",
+      ],
     ]);
     expect(publishLines(outcome)).toEqual([
       "publish: PASS published=2 skipped=0 failures=0",
@@ -174,10 +196,9 @@ describe("publish", () => {
         field === "dist-tags.latest" ? { found: "0.2.0" } : { missing: true },
     });
     expect(publish(out, f.seams).failures).toEqual([]);
-    expect(f.calls.filter((c) => c[1] === "publish").map((c) => c.at(-1))).toEqual([
-      "release-0.1",
-      "release-0.1",
-    ]);
+    expect(f.calls.filter((c) => c[1] === "publish").map((c) => c[c.indexOf("--tag") + 1])).toEqual(
+      ["release-0.1", "release-0.1"],
+    );
   });
 
   it("stops on a registry error that is not E404", () => {
@@ -232,7 +253,7 @@ describe("publish", () => {
       // Provenance comes from publishConfig.provenance and the OIDC token.
       expect(call).not.toContain("--provenance");
       // The call holds no token.
-      expect(call.join(" ")).not.toMatch(/token|_auth|registry/i);
+      expect(call.join(" ")).not.toMatch(/token|_auth/i);
     }
     expect(f.calls.map((c) => c.slice(0, 2).join(" "))).toEqual([
       "npm --version",
@@ -407,6 +428,55 @@ describe("publish", () => {
       }),
     ).toEqual(["@authtempo/core", "@authtempo/client", "@authtempo/handoff"]);
     expect(dependencyNames({ name: "@authtempo/core" })).toEqual([]);
+  });
+
+  it("names the public registry at each npm call, over a committed .npmrc", () => {
+    // npm reads the project .npmrc of the checkout, where publish.ts runs, and
+    // a scope registry there wins over --registry (review of the Task 6 fix, I5).
+    // The real npm reads both values from the arguments, not from the .npmrc
+    // of the checkout. npm config get sends no request.
+    const root = mkdtempSync(join(tmpdir(), "authtempo-publish-npmrc-"));
+    folders.push(root);
+    const checkout = join(root, "checkout");
+    mkdirSync(checkout);
+    writeFileSync(join(checkout, "package.json"), '{ "name": "authtempo", "private": true }\n');
+    writeFileSync(
+      join(checkout, ".npmrc"),
+      "registry=http://127.0.0.1:1/\n@authtempo:registry=http://127.0.0.1:1/\n",
+    );
+    mkdirSync(join(root, "home"));
+    writeFileSync(join(root, "user"), "");
+    writeFileSync(join(root, "global"), "");
+    const env = {
+      PATH: process.env.PATH ?? "",
+      HOME: join(root, "home"),
+      NPM_CONFIG_USERCONFIG: join(root, "user"),
+      NPM_CONFIG_GLOBALCONFIG: join(root, "global"),
+    };
+    const get = (key: string, args: readonly string[]) =>
+      execFileSync("npm", ["config", "get", key, ...args], {
+        cwd: checkout,
+        env,
+        encoding: "utf8",
+      }).trim();
+    const keys = ["registry", "@authtempo:registry"];
+    expect(keys.map((k) => get(k, []))).toEqual(["http://127.0.0.1:1/", "http://127.0.0.1:1/"]);
+    expect(keys.map((k) => get(k, REGISTRY_ARGS))).toEqual([
+      "https://registry.npmjs.org/",
+      "https://registry.npmjs.org/",
+    ]);
+    expect(REGISTRY_ARGS).toEqual([
+      "--registry=https://registry.npmjs.org/",
+      "--@authtempo:registry=https://registry.npmjs.org/",
+    ]);
+    expect(viewArgs("@authtempo/core@0.1.0", "version")).toEqual([
+      "view",
+      "@authtempo/core@0.1.0",
+      "version",
+      "--json",
+      "--registry=https://registry.npmjs.org/",
+      "--@authtempo:registry=https://registry.npmjs.org/",
+    ]);
   });
 
   it("imports only Node modules and release-facts", () => {

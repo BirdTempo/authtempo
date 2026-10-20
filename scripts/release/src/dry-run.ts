@@ -21,6 +21,7 @@ import {
   packCommand,
   RELEASE_COPY_MARKER,
 } from "./lib/release-copy.ts";
+import { SCOPE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import type { Report } from "./lib/report.ts";
 import { readWorkspace } from "./lib/workspace.ts";
@@ -44,13 +45,6 @@ export type Run = (cmd: string, args: readonly string[], cwd: string, env: Child
  * so it is a flag.
  */
 export const DEAD_REGISTRY = "http://127.0.0.1:9";
-
-/**
- * The scope of each released name. npm and pnpm send a scoped name to the
- * scope registry of an npmrc, not to --registry. The review of Task 6 (M1)
- * read that `npm login --scope=@authtempo` writes such a line.
- */
-export const SCOPE = "@authtempo";
 
 /** The scope registry argument of npm 11.19.1. */
 export const NPM_SCOPE_REGISTRY = `--${SCOPE}:registry=${DEAD_REGISTRY}`;
