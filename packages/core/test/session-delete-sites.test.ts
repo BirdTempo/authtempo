@@ -165,9 +165,10 @@ const SITES: Site[] = [
     file: "engine/sweep.ts",
     fn: "sweepExpired",
     call: 'delete("session"',
-    count: 1,
+    count: 2,
     kind: "expired",
-    reason: "the sweep; its link step makes each link of a gone session a logout",
+    reason:
+      "the sweep, in a transaction after lockInOrder on an adapter with row locks, else in one statement; its link step makes each link of a gone session a logout",
   },
   {
     file: "engine/password.ts",
