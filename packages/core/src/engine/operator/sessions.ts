@@ -129,8 +129,8 @@ export const OPERATOR_CALL_BUDGET = 45;
  * Each step counts its calls before it runs. When the next session would
  * pass the budget, the page stops before it, so a session and its links
  * end together. The first session of a call always ends, so each call
- * ends one session or more. A session with 21 links or more then passes
- * the budget.
+ * ends one session or more. A session with 22 links or more then passes
+ * the budget: 21 links cost 45 calls and the audit row.
  *
  * A row goes to `ended` only when its delete count is 1 and it was live.
  * A sign-out between the read and the delete already fired its event
