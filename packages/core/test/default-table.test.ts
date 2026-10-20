@@ -9,9 +9,8 @@ const RULE_NAMES = Object.keys(RULES) as Rule[];
 
 /**
  * For each role and rule, the statement answer equals the plan 6 rank answer.
- * `slugChange` holds `organization:update` and keeps its owner rank check
- * (`updateOrganization` reads `needs(o, "slugChange")`), so its statement
- * answer is the statement check and that rank check.
+ * The statement of `slugChange` is `organization:update`, so its row compares
+ * with the `update` rule. `updateOrganization` keeps the owner rank check.
  */
 function compare(roles: readonly string[], organizations: OrganizationsConfig) {
   const o = makeAuth({ organizations }).config.organizations;
@@ -19,10 +18,9 @@ function compare(roles: readonly string[], organizations: OrganizationsConfig) {
   const rows: string[] = [];
   for (const role of roles)
     for (const rule of RULE_NAMES) {
-      const rank = rankOf(o.ranks, role) >= needs(o, rule);
-      const statement =
-        can(effectiveOf(role, o.roles), RULE_STATEMENTS[rule]) &&
-        (rule !== "slugChange" || rankOf(o.ranks, role) >= needs(o, "slugChange"));
+      const rankRule = rule === "slugChange" ? "update" : rule;
+      const rank = rankOf(o.ranks, role) >= needs(o, rankRule);
+      const statement = can(effectiveOf(role, o.roles), RULE_STATEMENTS[rule]);
       if (statement !== rank) rows.push(`${role} ${rule}: statements ${statement}, ranks ${rank}`);
     }
   return rows;
@@ -32,6 +30,13 @@ describe("the default role table", () => {
   it("gives each default role the answer of plan 6 for each rule", () => {
     expect(RULE_NAMES).toHaveLength(10);
     expect(compare(["viewer", "member", "admin", "owner"], {})).toEqual([]);
+  });
+
+  it("gives the slug change the update statement and keeps its owner rank", () => {
+    expect(RULE_STATEMENTS.slugChange).toEqual({ organization: ["update"] });
+    const o = makeAuth({ organizations: {} }).config.organizations;
+    if (o === null) throw new Error("organizations is off");
+    expect(needs(o, "slugChange")).toBe(4);
   });
 
   it("gives each default role the core actions of spec 29 item 2", () => {
