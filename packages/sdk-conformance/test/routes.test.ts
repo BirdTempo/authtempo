@@ -88,6 +88,72 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
   },
   {
     method: "GET",
+    path: "/operator/users",
+    reason:
+      "an operator tool: the users list command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "GET",
+    path: "/operator/users/search",
+    reason:
+      "an operator tool: the users search command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "GET",
+    path: "/operator/users/get",
+    reason:
+      "an operator tool: the users get command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "POST",
+    path: "/operator/users/ban",
+    reason:
+      "an operator tool: the users ban command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "POST",
+    path: "/operator/users/unban",
+    reason:
+      "an operator tool: the users unban command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "POST",
+    path: "/operator/users/platform-role",
+    reason:
+      "an operator tool: the users platform-role command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "POST",
+    path: "/operator/users/second-factor/disable",
+    reason:
+      "an operator tool: the users second-factor-off command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "POST",
+    path: "/operator/users/create-admin",
+    reason:
+      "an operator tool: the create-admin command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "POST",
+    path: "/operator/sessions/end-user",
+    reason:
+      "an operator tool: the sessions end command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "POST",
+    path: "/operator/sessions/end-all",
+    reason:
+      "an operator tool: the sessions end-all command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "GET",
+    path: "/operator/audit",
+    reason:
+      "an operator tool: the audit list command of the CLI calls it (plan 12f); the client SDK has no operator call",
+  },
+  {
+    method: "GET",
     path: "/user/change-email/confirm",
     reason: "the confirm page of the mailed change-of-address link; a browser opens it (plan 12a)",
   },
