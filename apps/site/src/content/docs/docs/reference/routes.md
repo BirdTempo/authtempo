@@ -909,7 +909,7 @@ These routes exist when the config sets `organizations.teams`. A team is a named
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `member:update` in the organization of the team |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `member:update` in the organization of the team. To add another person, the user ranks at least as high as that person and holds each of their rights |
 | Input | JSON `{ teamId, userId }`. The person is a member of the organization, else `not_found` |
 | Answer | `{ member }` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`already_member`](/docs/reference/errors/#already_member), [`team_member_limit`](/docs/reference/errors/#team_member_limit), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict) |
@@ -918,7 +918,7 @@ These routes exist when the config sets `organizations.teams`. A team is a named
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The removal of another person needs `member:delete` in the organization of the team. A member leaves a team with their own `userId` |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The removal of another person needs `member:delete` in the organization of the team, a rank at least as high as that person's, and each of their rights. A member leaves a team with their own `userId` |
 | Input | JSON `{ teamId, userId }` |
 | Answer | `{ ok: true }`. A session of the person that acts in the team loses its active team |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |

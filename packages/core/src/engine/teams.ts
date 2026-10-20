@@ -7,6 +7,7 @@ import { findManyIn } from "../storage/batch.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { hookGuard, runAfter, runBefore } from "./hooks.js";
 import { publicOrganization, standing, validOrganizationName } from "./organizations.js";
+import { effectiveIn, type Standing, touchCheck } from "./permissions.js";
 import type { ResolvedOrganizations } from "./ranks.js";
 import { type PublicSession, publicSession, type ResolvedSession } from "./sessions.js";
 import { holdUser, userStays } from "./user-hold.js";
@@ -118,7 +119,8 @@ async function lockOrganization(
 /**
  * The team and the caller's standing in its organization for `wanted`. A
  * missing team answers `not_found`; the standing answers as
- * `standing` does. A null set needs membership only.
+ * `standing` does. A null set needs membership only. `standing` is the
+ * caller's rank and set, for the touch rule.
  */
 async function teamStanding(
   config: ResolvedConfig,
@@ -130,7 +132,8 @@ async function teamStanding(
   if (!team) return fail("not_found");
   const s = await standing(config, user, team.organizationId, wanted);
   if (!s.ok) return s;
-  return ok({ team, organization: publicOrganization(s.value.organization) });
+  const caller: Standing = { rank: s.value.rank, granted: s.value.granted };
+  return ok({ team, organization: publicOrganization(s.value.organization), standing: caller });
 }
 
 /**
@@ -370,8 +373,10 @@ export async function listTeamMembers(
 /**
  * Adds a member of the organization to a team. Needs `member:update`. A
  * person who is not a member of the organization answers `not_found`; a
- * second add answers `already_member`. `membersPerTeam` counts inside the
- * transaction, after the lock of the team row and before the write.
+ * second add answers `already_member`. The add of another person runs the
+ * touch rule on that person (spec 29 item 5). `membersPerTeam` counts
+ * inside the transaction, after the lock of the team row and before the
+ * write.
  */
 export async function addTeamMember(
   config: ResolvedConfig,
@@ -387,6 +392,11 @@ export async function addTeamMember(
     { field: "userId", op: "eq", value: input.userId },
   ]);
   if (!member) return fail("not_found");
+  if (
+    input.userId !== input.user.id &&
+    !touchCheck(t.value.standing, await effectiveIn(config, team.organizationId, member.role))
+  )
+    return fail("forbidden_rank");
   const memberUser = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
   ]);
@@ -457,8 +467,9 @@ export async function addTeamMember(
 
 /**
  * Removes a person from a team. The removal of another person needs
- * `member:delete`; a member leaves a team with membership only. The person's
- * sessions that act in the team lose their active team.
+ * `member:delete` and passes the touch rule on that person (spec 29 item 5).
+ * A member leaves a team with membership only. The person's sessions that
+ * act in the team lose their active team.
  */
 export async function removeTeamMember(
   config: ResolvedConfig,
@@ -479,6 +490,15 @@ export async function removeTeamMember(
     { field: "userId", op: "eq", value: input.userId },
   ]);
   if (!row) return fail("not_found");
+  if (!self) {
+    const member = await config.storage.findOne("member", [
+      { field: "organizationId", op: "eq", value: team.organizationId },
+      { field: "userId", op: "eq", value: input.userId },
+    ]);
+    if (!member) return fail("not_found");
+    if (!touchCheck(t.value.standing, await effectiveIn(config, team.organizationId, member.role)))
+      return fail("forbidden_rank");
+  }
   const memberUser = self
     ? input.user
     : await config.storage.findOne("user", [{ field: "id", op: "eq", value: input.userId }]);

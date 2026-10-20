@@ -210,6 +210,29 @@ describe("teams (plan 12k Task 5)", () => {
     expect(await w.storage.findMany("teamMember", [])).toEqual([]);
   });
 
+  it("runs the touch rule on another person at a team add and a team removal", async () => {
+    const w = world();
+    const { ada, bob, carol, organizationId } = await acme(w);
+    const team = mustOk(await w.auth.api.createTeam({ user: ada, organizationId, name: "Core" }));
+    mustOk(await w.auth.api.addTeamMember({ user: ada, teamId: team.id, userId: ada.id }));
+    const admin = bearer(await w.session("bob@example.com"));
+    const call = (path: string, userId: string) =>
+      w.auth.handle(post(`${P}/members/${path}`, { teamId: team.id, userId }, admin)).then(json);
+    // bob is an admin: the owner ranks above bob (spec 29 item 5).
+    expect(await call("remove", ada.id)).toEqual({
+      status: 403,
+      body: { error: "forbidden_rank" },
+    });
+    mustOk(await w.auth.api.removeTeamMember({ user: ada, teamId: team.id, userId: ada.id }));
+    expect(await call("add", ada.id)).toEqual({ status: 403, body: { error: "forbidden_rank" } });
+    // A member below bob, and the add of bob by bob, pass.
+    expect(await call("add", carol.id)).toMatchObject({ status: 200 });
+    expect(await call("add", bob.id)).toMatchObject({ status: 200 });
+    expect(await call("remove", carol.id)).toEqual({ status: 200, body: { ok: true } });
+    const rows = await w.storage.findMany("teamMember", []);
+    expect(rows.map((r) => r.userId)).toEqual([bob.id]);
+  });
+
   it("refuses a team member who is not an organization member", async () => {
     const w = world();
     const { ada, organizationId } = await acme(w);
@@ -291,7 +314,7 @@ describe("teams (plan 12k Task 5)", () => {
     const h = bearer(await w.session("carol@example.com"));
     await w.auth.handle(post("/auth/organizations/active", { organizationId }, h));
     await w.auth.handle(post(`${P}/active`, { teamId: core.id }, h));
-    // carol leaves acme herself.
+    // A leave: carol is the caller and the member.
     mustOk(await w.auth.api.removeMember({ user: carol, organizationId, userId: carol.id }));
     const rows = await w.storage.findMany("teamMember", [
       { field: "userId", op: "eq", value: carol.id },
@@ -353,7 +376,7 @@ describe("teams (plan 12k Task 5)", () => {
     mustOk(await w.auth.api.addTeamMember({ user: ada, teamId: away.id, userId: carol.id }));
     const h = bearer(await w.session("carol@example.com"));
     await w.auth.handle(post("/auth/organizations/active", { organizationId }, h));
-    // carol is a member of the team, but the team is not a team of her active organization.
+    // carol is a member of the team, but the team is not a team of the session's active organization.
     expect(await json(await w.auth.handle(post(`${P}/active`, { teamId: away.id }, h)))).toEqual({
       status: 403,
       body: { error: "forbidden_rank" },
