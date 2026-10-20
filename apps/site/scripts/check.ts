@@ -19,6 +19,7 @@ import { REPO_ROOT } from "../src/data/repo.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
 import { checkClaims } from "./check-claims.ts";
 import { checkCli } from "./check-cli.ts";
+import { checkCompare } from "./check-compare.ts";
 import { checkConfig } from "./check-config.ts";
 import { checkContrast } from "./check-contrast.ts";
 import { checkCsp } from "./check-csp.ts";
@@ -364,6 +365,12 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         tracked: trackedFiles(REPO),
         today: new Date(),
       }),
+  },
+  // Ruling 55 of plan 12e: an authtempo cell of /compare/ that denies a route or a
+  // config key fails while ROUTES or the config keys hold it.
+  {
+    name: "check-compare",
+    run: () => checkCompare({ rows: COMPARE_ROWS, routes: ROUTES, keys: configKeyPaths() }),
   },
   // Plan 11b Task 7: the feed of dist is valid Atom, with one entry per version
   // heading and one row of RELEASE_DATES each. The root comes from repo.ts (ruling 24).
