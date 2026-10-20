@@ -126,7 +126,25 @@ function world() {
       return started.deleting;
     };
   }
-  return { auth, post, lastMail, lastToken, deleteAfter };
+  /** Arms the probe: after the next `op` on `model`, `start` runs and the transaction waits `HOLD_MS`. */
+  function during(model: string, op: Op, start: () => Promise<unknown>) {
+    const started: { flow: Promise<unknown> | null } = { flow: null };
+    probe = {
+      model,
+      op,
+      run: async () => {
+        started.flow = start();
+        // A rejection is read below, after the answer of the delete.
+        started.flow.catch(() => {});
+        await new Promise((r) => setTimeout(r, HOLD_MS));
+      },
+    };
+    return async () => {
+      while (started.flow === null) await new Promise((r) => setTimeout(r, 10));
+      return started.flow;
+    };
+  }
+  return { auth, post, lastMail, lastToken, deleteAfter, during };
 }
 
 type World = ReturnType<typeof world>;
@@ -332,5 +350,24 @@ describe("the second-factor writes beside the account delete on Postgres (plan 1
       .then((res) => res.status);
     expect(await settled(flow, deleting)).toBe(200);
     expect(await rowsOf(u.userId)).toEqual(NONE);
+  }, 60_000);
+
+  it("a first email enable that starts inside the delete's transaction: conflict, and no factor row of the user stays", async () => {
+    const w = world();
+    const u = await user(w, "gus@example.com");
+    const session = await w.auth.api.getSession(tokenOf(u.cookie));
+    if (!session) throw new Error("no session");
+    // The enable starts after the delete removed the user row, before its commit.
+    const enabling = w.during("user", "delete", () =>
+      w
+        .post("/second-factor/email/enable", { password: PASSWORD }, u.cookie)
+        .then((res) => res.status),
+    );
+    const deleted = await w.auth.api.user.delete({ session, ip: null, userAgent: null });
+    expect(deleted).toEqual({ ok: true, value: { ok: true } });
+    // The hold waited on the delete and found no row; the read after the insert answers conflict.
+    const status = await enabling();
+    expect(await rowsOf(u.userId)).toEqual(NONE);
+    expect(status).toBe(409);
   }, 60_000);
 });

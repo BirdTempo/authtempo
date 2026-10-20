@@ -8,6 +8,7 @@ import type { SecondFactorMethod, SecondFactorRow, UserRow, VerificationRow } fr
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
 import { StorageError } from "../storage/port.js";
 import { requireFresh } from "./fresh.js";
+import { HookStop } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { deliverLogouts } from "./oauth-logout.js";
 import {
@@ -30,7 +31,7 @@ import {
   TWO_FACTOR_TOKEN_RE,
 } from "./second-factor.js";
 import { endedList, type ResolvedSession, sessionsEnded } from "./sessions.js";
-import { holdUser } from "./user-hold.js";
+import { holdUser, userStays } from "./user-hold.js";
 import { MAILED_CODES_PER_EMAIL_DAY } from "./verification.js";
 
 /**
@@ -99,6 +100,10 @@ export async function provePassword(
  * first and the passkey rows second, so neither waits on the other in turn.
  * The enable holds the user row before both (user-hold.ts): the account
  * delete takes the passkey rows before the factor row (plan 12f Task 9).
+ * The hold alone does not stop a first enable: after a delete that started
+ * first, the hold finds no row and returns. So the first enable reads the
+ * user row after its insert (`userStays`), and answers `conflict` when the
+ * user is gone. On D1, with no lock, that read is the one check.
  */
 export async function enableMethod(
   config: ResolvedConfig,
@@ -126,6 +131,7 @@ export async function enableMethod(
         now,
         ended,
       );
+      if (a.first) await userStays(tx, session.user.id);
       if (method === "passkey") {
         const held = await tx.update(
           "passkey",
@@ -138,6 +144,8 @@ export async function enableMethod(
     });
   } catch (err) {
     if (err instanceof NoPasskeyError) return fail("passkey_failed");
+    // `userStays` found the user gone: `conflict`, and the undo keeps no row.
+    if (err instanceof HookStop) return err.result;
     // A parallel first enable of another method won the unique `userId`, or
     // the row changed under every round. Caught here, outside: inside,
     // Postgres has already aborted the transaction. The person retries.
