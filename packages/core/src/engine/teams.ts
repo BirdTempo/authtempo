@@ -415,7 +415,10 @@ export async function addTeamMember(
   if (!member) return fail("not_found");
   if (
     input.userId !== input.user.id &&
-    !touchCheck(t.value.standing, await effectiveIn(config, team.organizationId, member.role))
+    !touchCheck(
+      t.value.standing,
+      await effectiveIn(config, config.storage, team.organizationId, member.role),
+    )
   )
     return fail("forbidden_rank");
   const memberUser = await config.storage.findOne("user", [
@@ -519,7 +522,12 @@ export async function removeTeamMember(
       { field: "userId", op: "eq", value: input.userId },
     ]);
     if (!member) return fail("not_found");
-    if (!touchCheck(t.value.standing, await effectiveIn(config, team.organizationId, member.role)))
+    if (
+      !touchCheck(
+        t.value.standing,
+        await effectiveIn(config, config.storage, team.organizationId, member.role),
+      )
+    )
       return fail("forbidden_rank");
   }
   const memberUser = self
