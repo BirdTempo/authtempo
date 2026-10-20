@@ -108,8 +108,13 @@ function fake(change: Record<string, (call: Call) => RunResult | undefined> = {}
           }),
         );
       case "node check-pack.ts": {
-        const r = checkTarballs(cwd, args.slice(1));
-        return fromReport(reportLines(r), r.failures.length > 0);
+        // An error that check-pack throws ends the real process with exit 1 and no report.
+        try {
+          const r = checkTarballs(cwd, args.slice(1));
+          return fromReport(reportLines(r), r.failures.length > 0);
+        } catch (error) {
+          return { status: 1, stdout: "", stderr: `${String(error)}\n` };
+        }
       }
       case "npm publish": {
         const t = readTarball(args[1] ?? "");
@@ -388,6 +393,40 @@ describe("dry run", () => {
     ]);
     expect(dryRunLine(report)).toBe(
       "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
+    );
+  });
+
+  it("counts the packages that pass check-pack", async () => {
+    // A failure that names core holds back core only.
+    const { root, tmp } = setup((d) => {
+      const file = join(d, "packages/core/package.json");
+      const m = JSON.parse(readFileSync(file, "utf8")) as { files: string[] };
+      m.files = m.files.filter((f) => f !== "CHANGELOG.md");
+      writeFileSync(file, `${JSON.stringify(m, null, 2)}\n`);
+    });
+    const f = fake();
+    const report = await dryRun({ root, run: f.run, tmp });
+    expect(failuresOf(report)).toEqual([
+      "check-pack exited 1: check-pack: FAIL tarballs=2 files=9 failures=2",
+      "check-pack: @authtempo/core@0.1.0: the tarball has no CHANGELOG.md",
+      "check-pack: @authtempo/core@0.1.0: the needed file CHANGELOG.md of release/pack-needs.json is not in the tarball",
+    ]);
+    expect(dryRunLine(report)).toBe(
+      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=9 smoke=0 failures=3",
+    );
+    expect(f.calls.map((c) => c.kind)).not.toContain("npm publish");
+
+    // A failure that names no package holds back each package, so the line
+    // never reads 2 of 2 on a check that did not pass.
+    const broken = setup((d) => rmSync(join(d, "release/pack-needs.json")));
+    const g = fake();
+    const r2 = await dryRun({ root: broken.root, run: g.run, tmp: broken.tmp });
+    expect(failuresOf(r2)).toHaveLength(1);
+    expect(failuresOf(r2)[0]).toMatch(
+      /^check-pack exited 1: Error: ENOENT: no such file or directory, open '.*\/release\/pack-needs\.json'$/,
+    );
+    expect(dryRunLine(r2)).toBe(
+      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
     );
   });
 
