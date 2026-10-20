@@ -4,6 +4,7 @@ import { createAuth } from "../src/create-auth.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
 import { hookGuard } from "../src/engine/hooks.js";
 import { mintSessionJwt, sessionLive, signToken } from "../src/engine/jwt.js";
+import { DEVICE_GRANT } from "../src/engine/oauth-device.js";
 import { liveUser } from "../src/engine/oauth-token.js";
 import { activeBan } from "../src/engine/operator/ban-rule.js";
 import { requireOperatorUser } from "../src/engine/operator/guards.js";
@@ -21,8 +22,9 @@ import { ACCESS_TOKEN_TYPE } from "../src/primitives/credentials.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "./helpers.js";
 import {
+  approvedDevice,
   authorized,
   basicHeader,
   exchange,
@@ -52,6 +54,8 @@ async function world(extra: Partial<AuthConfig> = {}) {
   const base = makeAuth();
   const ended: string[] = [];
   const updates: string[] = [];
+  /** Steps that run once in the ban's user.afterUpdate: after its commit, before endFamilies. */
+  const afterBan: (() => Promise<void>)[] = [];
   // The unban keeps bannedAt (ruling 28), so the hooks read the one active-ban rule.
   const banState = (user: Parameters<typeof activeBan>[0]) =>
     activeBan(user, base.clock.now()) ? "banned" : "open";
@@ -73,6 +77,7 @@ async function world(extra: Partial<AuthConfig> = {}) {
       resources: [RESOURCE],
       scopes: SCOPES,
       registration: { cimd: false, dynamic: true },
+      device: {},
     },
     organizations: {
       platformRole: "operator",
@@ -99,8 +104,9 @@ async function world(extra: Partial<AuthConfig> = {}) {
         beforeUpdate: ({ user, via }) => {
           updates.push(`before:${via}:${banState(user)}`);
         },
-        afterUpdate: ({ user, previous, via }) => {
+        afterUpdate: async ({ user, previous, via }) => {
           updates.push(`after:${via}:${banState(previous)}>${banState(user)}`);
+          if (via === "ban") for (const step of afterBan.splice(0)) await step();
         },
       },
     },
@@ -114,7 +120,15 @@ async function world(extra: Partial<AuthConfig> = {}) {
     storage: base.storage,
     clock: base.clock,
   };
-  return { ...handle, engine, mail: base.mail, ended, updates, api: operatorApi(config) };
+  return {
+    ...handle,
+    engine,
+    mail: base.mail,
+    ended,
+    updates,
+    afterBan,
+    api: operatorApi(config),
+  };
 }
 
 type World = Awaited<ReturnType<typeof world>>;
@@ -642,6 +656,155 @@ describe("the ban (plan 12f Task 6)", () => {
       const token = await signToken(w.config, ACCESS_TOKEN_TYPE, { ...noIat, iat });
       expect(await caller(token)).toBeNull();
     }
+  });
+
+  it("refuses at the code exchange a code that an authorize wrote beside the ban", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    const clientId = await registered(w, [REDIRECT]);
+    // The authorize resolved its session before the ban. Its code write
+    // comes after the ban's commit, so the ban did not delete the code.
+    const storage = w.storage as StorageAdapter;
+    const create = storage.create.bind(storage);
+    let banned = false;
+    storage.create = async (model, data) => {
+      if (
+        model === "verification" &&
+        !banned &&
+        "purpose" in data &&
+        data.purpose === "oauth-code"
+      ) {
+        banned = true;
+        expect((await ban(w, s.user.id)).ok).toBe(true);
+      }
+      return create(model, data);
+    };
+    const p = await pkce();
+    const { code } = await authorized(w, s.cookie, {
+      clientId,
+      challenge: p.challenge,
+      scope: "mcp:read offline_access",
+    });
+    storage.create = create;
+    expect(banned).toBe(true);
+    const res = await w.auth.handle(exchange(code, clientId, p.verifier));
+    expect({ status: res.status, body: await res.json() }).toEqual(GRANT);
+  });
+
+  it("refuses at the device poll an approval that landed beside the ban", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    const registeredDevice = await w.auth.handle(
+      post("/auth/oauth/register", {
+        redirect_uris: [REDIRECT],
+        client_name: "Living room TV",
+        grant_types: ["authorization_code", "refresh_token", DEVICE_GRANT],
+      }),
+    );
+    const { client_id: clientId } = (await registeredDevice.json()) as { client_id: string };
+    // The device page resolved its session before the ban. Its approval
+    // comes after the ban's commit: the ban keeps a pending row.
+    const storage = w.storage as StorageAdapter;
+    const update = storage.update.bind(storage);
+    let banned = false;
+    storage.update = async (model, where, patch) => {
+      if (model === "oauthDevice" && !banned && "status" in patch && patch.status === "approved") {
+        banned = true;
+        expect((await ban(w, s.user.id)).ok).toBe(true);
+      }
+      return update(model, where, patch);
+    };
+    const deviceCode = await approvedDevice(w, clientId, s.cookie);
+    storage.update = update;
+    expect(banned).toBe(true);
+    const res = await w.auth.handle(
+      tokenPost({ grant_type: DEVICE_GRANT, device_code: deviceCode, client_id: clientId }),
+    );
+    expect({ status: res.status, body: await res.json() }).toEqual(GRANT);
+  });
+
+  it("answers inactive for a refresh token that an exchange wrote beside the ban", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    // A confidential client that introspects its own refresh tokens.
+    const made = await w.auth.api.oauth?.clients.create({
+      name: "Notes server",
+      authMethod: "client_secret_basic",
+      redirectUris: [REDIRECT],
+      introspect: true,
+    });
+    if (!made?.ok || !made.value.clientSecret) throw new Error("the create failed");
+    const rs = { clientId: made.value.client.id, secret: made.value.clientSecret };
+    const p = await pkce();
+    const { code } = await authorized(w, s.cookie, {
+      clientId: rs.clientId,
+      challenge: p.challenge,
+      scope: "mcp:read offline_access",
+    });
+    // The orders of two Postgres connections: the exchange reads the user
+    // before the ban. It writes its refresh row after the ban read the
+    // refresh rows, and reads its code row before the ban deletes it.
+    const storage = w.storage as StorageAdapter;
+    const create = storage.create.bind(storage);
+    let reached = () => {};
+    let release = () => {};
+    const atWrite = new Promise<void>((r) => {
+      reached = r;
+    });
+    const go = new Promise<void>((r) => {
+      release = r;
+    });
+    storage.create = async (model, data) => {
+      if (model === "oauthToken") {
+        storage.create = create;
+        reached();
+        await go;
+      }
+      return create(model, data);
+    };
+    const exchanged = w.auth.handle(
+      tokenPost(
+        {
+          grant_type: "authorization_code",
+          code,
+          code_verifier: p.verifier,
+          redirect_uri: REDIRECT,
+          resource: RESOURCE,
+        },
+        { authorization: basicHeader(rs.clientId, rs.secret) },
+      ),
+    );
+    await atWrite;
+    let answer: Response | null = null;
+    const transaction = storage.transaction.bind(storage);
+    storage.transaction = (fn) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          delete: async (model, where) => {
+            if (
+              model === "verification" &&
+              answer === null &&
+              JSON.stringify(where).includes("oauth-code")
+            ) {
+              release();
+              answer = await exchanged;
+            }
+            return tx.delete(model, where);
+          },
+        }),
+      );
+    // A request that comes after the ban's commit, before endFamilies ends the family.
+    let introspected: { active: boolean } | null = null;
+    w.afterBan.push(async () => {
+      if (!answer) return;
+      const body = (await answer.json()) as { refresh_token?: string };
+      introspected = await introspect(w, rs, body.refresh_token ?? "");
+    });
+    expect((await ban(w, s.user.id)).ok).toBe(true);
+    storage.transaction = transaction;
+    expect((answer as Response | null)?.status).toBe(200);
+    expect(introspected).toEqual({ active: false });
   });
 
   it("answers not_found while the user tools are off", async () => {
