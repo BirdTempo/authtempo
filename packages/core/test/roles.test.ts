@@ -619,15 +619,22 @@ describe("dynamic roles (plan 12k Task 4)", () => {
       ok: true,
       value: { role: "member,ranked", permissions: { member: ["read"], ac: ["read"] } },
     });
-    // The list leaves out both rows, and the get answers not_found for each.
+    // The list leaves out both rows, and the get answers not_found. Each read writes one line per bad row.
+    warn.mockClear();
     expect(await w.auth.api.listRoles({ user: ada, organizationId })).toEqual({
       ok: true,
       value: [],
     });
+    expect(warn.mock.calls).toEqual([
+      [`authtempo: role row invalid ${editor.id}`],
+      [`authtempo: role row invalid ${ranked.id}`],
+    ]);
+    warn.mockClear();
     expect(await w.auth.api.getRole({ user: ada, organizationId, name: "editor" })).toMatchObject({
       ok: false,
       code: "not_found",
     });
+    expect(warn.mock.calls).toEqual([[`authtempo: role row invalid ${editor.id}`]]);
   });
 
   it("applies a narrow at the next request", async () => {
