@@ -1,6 +1,7 @@
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 import { outboundLog } from "./test/outbound-log.js";
+import { LONG_TEST_MS } from "./test/test-time.js";
 
 // The Workers pool of the demo Worker (plan 11b Task 8), on @cloudflare/vitest-plugin
 // 1.4.0. The tests run on workerd with the settings of wrangler.jsonc: the two
@@ -28,6 +29,8 @@ export default defineConfig({
   test: {
     include: ["test/**/*.test.ts"],
     exclude: ["test/node/**"],
+    // Each pool test runs a full Worker sandbox; test-time.ts holds the measures.
+    testTimeout: LONG_TEST_MS,
     // The teardown fails the run on any request that left the Worker, from any file.
     globalSetup: ["./test/outbound-teardown.ts"],
     // After each pool file, the cookie rule reads every Set-Cookie line of call().
