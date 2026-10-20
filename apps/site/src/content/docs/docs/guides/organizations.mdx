@@ -56,7 +56,7 @@ import test from "../../../../../samples/guides/organizations.test.ts?raw";
 - `available` is a hint, not a hold. The create still answers `slug_taken` when another user takes the slug first.
 - The slug check, the create, and a rename to a new slug spend one [limit](/docs/reference/limits/): `slug-check:user:<userId>` 60 per minute.
 - [Teams](/docs/guides/teams/) group the members of an organization. A team has no role of its own.
-- A [flow point](/docs/guides/hooks/) runs your code before or after each organization write.
+- A [hook point](/docs/guides/hooks/#the-hook-points) runs your code before or after each organization write.
 
 ## If it fails
 
