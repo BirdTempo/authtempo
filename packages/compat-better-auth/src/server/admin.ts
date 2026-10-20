@@ -18,10 +18,10 @@ export { ADMIN_NOT_SUPPORTED };
 /**
  * Better Auth 1.7.7's admin paths (dist/plugins/admin/routes.mjs, read
  * 2026-10-21), served by `auth.handler` with the `admin` plugin (plan 12f,
- * spec section 26 item 14). The shim maps list-users, get-user, ban-user,
- * unban-user, revoke-user-sessions, impersonate-user, stop-impersonating,
- * and set-role onto core's operator routes, with the caller's session as a
- * user actor (ruling 39). The calls of `ADMIN_NOT_SUPPORTED` (admin-lines.ts)
+ * spec section 26 item 14). The shim maps eight paths onto core's operator
+ * routes: list-users, get-user, ban-user, unban-user, revoke-user-sessions,
+ * impersonate-user, stop-impersonating, and set-role. The caller's session
+ * is the user actor (ruling 39). The calls of `ADMIN_NOT_SUPPORTED` (admin-lines.ts)
  * have no core tool, so each one answers NOT_SUPPORTED with a line that
  * names section 26.
  */
@@ -123,8 +123,8 @@ export function listUsersTarget(q: URLSearchParams): ListUsersTarget {
 /**
  * The reason of an act that Better Auth sends with no reason. Better Auth
  * requires a reason nowhere, and core requires one for each act (spec
- * section 26 item 5), so the audit row then names the path, not a person's
- * reason.
+ * section 26 item 5). So the audit row then names the path, not a
+ * person's reason.
  */
 export const adminReason = (path: string) => `better-auth admin plugin ${path}`;
 
@@ -194,9 +194,10 @@ function failure(code: string, status: number, message: string): AdminAnswer {
 }
 
 /**
- * The shim's own answer to an admin path: each call core does not serve, a
- * list-users query that core's reads cannot answer, and a set-role to a role
- * that is not the platform role or `user`. Null for every other request.
+ * The shim's own answer to an admin path. It refuses each call that core
+ * does not serve, and each list-users query that core's reads cannot
+ * answer. It refuses a set-role to a role that is not the platform role or
+ * `user`. Null for every other request.
  * These refusals name a config fact only, so they come before the session read.
  */
 export async function adminRefusal(mapped: Mapped, request: Request): Promise<Response | null> {
@@ -270,8 +271,8 @@ const BAN_YOURSELF = "YOU_CANNOT_BAN_YOURSELF";
 /**
  * Better Auth's user with the admin fields, from core's user row. `role`
  * is the platform role or `user`. The ban fields hold a ban that holds
- * now, by core's rule `activeBan` (spec 26 item 6), so the shim keeps no
- * copy (ruling 60 L1). A ban that ended reads as no ban.
+ * now, by core's rule `activeBan` (spec 26 item 6). The shim keeps no copy
+ * of the rule (ruling 60 L1). A ban that ended reads as no ban.
  * `twoFactorEnabled` is there with the twoFactor plugin only (ruling 60 L2).
  */
 export function toAdminUser(
@@ -347,9 +348,9 @@ function withHeaders(body: unknown, status: number, from: Response): AdminAnswer
 
 /**
  * Core's refusal in Better Auth's form, with core's status and headers.
- * `operator_required` answers the path's own name, `not_found` answers
- * `USER_NOT_FOUND`, and `operator_self` on a ban answers
- * `YOU_CANNOT_BAN_YOURSELF`: the shim's actor is always a user, so
+ * `operator_required` answers the path's own name, and `not_found`
+ * answers `USER_NOT_FOUND`. `operator_self` on a ban answers
+ * `YOU_CANNOT_BAN_YOURSELF`. The shim's actor is always a user, so
  * `operator_self` names the caller's own user. Each other code answers its
  * name in `BETTER_AUTH_CODES`.
  */

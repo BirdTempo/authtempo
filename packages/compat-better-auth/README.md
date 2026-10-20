@@ -607,12 +607,12 @@ The options:
 | `allowImpersonatingAdmins` | `false` only: core never lets an operator impersonate a platform operator. |
 | `defaultBanReason`, `defaultBanExpiresIn`, `bannedUserMessage`, `adminUserIds`, `schema`, `ac`, `roles` | Refused. Each refusal names spec section 26. |
 
-The calls that core does not serve answer `NOT_SUPPORTED` (501) with a line
-that names spec section 26: `/admin/set-user-password` and
-`/admin/remove-user` (an operator bans; the person resets the password or
-deletes the account), `/admin/create-user`, `/admin/update-user`,
+Seven calls that core does not serve answer `NOT_SUPPORTED` (501) with a
+line that names spec section 26. They are `/admin/set-user-password`,
+`/admin/remove-user`, `/admin/create-user`, `/admin/update-user`,
 `/admin/list-user-sessions`, `/admin/revoke-user-session`, and
-`/admin/has-permission`.
+`/admin/has-permission`. In place of a password set or a remove, an operator
+bans, and the person resets the password or deletes the account.
 
 `/admin/list-users` takes one search. `searchValue` needs `searchField`
 `email` (the default) and `searchOperator` `starts_with`: core searches the
@@ -647,8 +647,8 @@ path. So it answers what the path answers, with dates as `Date` values. A
 refusal throws `APIError` with the status and the code of the path. Without
 `admin()`, each call throws 404.
 
-Each user in an answer has Better Auth's admin fields: `role` is the
-platform role or `user`, and `banned`, `banReason`, and `banExpires` show a
+Each user in an answer has Better Auth's admin fields. `role` is the
+platform role or `user`. `banned`, `banReason`, and `banExpires` show a
 ban that holds now. With `twoFactor()`, each user also has
 `twoFactorEnabled`, read from core's `ta_second_factor` rows in one read per
 answer. An operator cannot act on another platform operator through these

@@ -6,7 +6,7 @@ import { BETTER_AUTH_PG } from "./fixtures.js";
 import { freshBetterAuthSchema } from "./pg.js";
 
 // Plan 12f Task 13 on Postgres: a ban through Better Auth's admin path
-// lives in core's compat columns (taBannedAt, taBanReason, taBanUntil), so
+// lives in core's compat columns (taBannedAt, taBanReason, taBanUntil). So
 // a new instance of the shim on the same database reads it. An
 // impersonation session keeps its operator in the compat column taActorId.
 

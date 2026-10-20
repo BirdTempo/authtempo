@@ -10,8 +10,8 @@ import { execD1 } from "./schema.js";
 // route, by a platform operator. D1 Free allows 50 queries per invocation
 // (D1 limits page updated 21 April 2026, read 2026-10-21). The shim reads
 // the user row once after the route, for Better Auth's `{ user }`. This
-// test counts each statement that reaches the binding, each statement of a
-// batch as one, and checks the ban across a restart of the shim.
+// test counts each statement that reaches the binding, and each statement
+// of a batch as one. It also checks the ban across a restart of the shim.
 
 await execD1(BETTER_AUTH_SQLITE);
 await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS);

@@ -25,8 +25,8 @@ import { adminApp, cookieOf, OPERATOR, PASSWORD } from "./admin-helpers.js";
 
 // Plan 12f Task 13: Better Auth's admin plugin on core's operator tools
 // (spec section 26 item 14, ruling 39). This file holds the options, the
-// refusals, the mapping logic, and the calls that reach core's operator
-// routes of Task 10, and the impersonation calls on the routes of Task 11.
+// refusals, and the mapping logic. It also holds the calls that reach
+// core's operator routes of Task 10 and the impersonation routes of Task 11.
 
 const BASE = "https://api.example.com";
 const fast = betterAuthPasswordHash({ pbkdf2: createPbkdf2PasswordHash({ iterations: 1000 }) });

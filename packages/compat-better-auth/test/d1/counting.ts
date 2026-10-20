@@ -1,4 +1,4 @@
-// The statement counter of the D1 tests of plan 12f (ruling 37): it counts
+// The statement counter of the D1 tests of plan 12f (ruling 37). It counts
 // each statement that reaches the binding, and each statement of a batch as one.
 
 /** The key that gives the statement of the binding under a counting view. */
