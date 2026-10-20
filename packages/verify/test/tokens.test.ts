@@ -49,6 +49,72 @@ describe("an API token and a session token (plan 11d)", () => {
     expect(server.count("/auth/tokens/current")).toBe(2);
   });
 
+  it("answers null for a spent token and a failure over the window (plan 12k)", async () => {
+    const server = makeServer();
+    const s = await apiToken(server);
+    const spent = await server.auth.api.tokens.create({
+      user: s.user,
+      name: "spent",
+      quota: { remaining: 0 },
+    });
+    const windowed = await server.auth.api.tokens.create({
+      user: s.user,
+      name: "windowed",
+      rateLimit: { seconds: 60, max: 1 },
+    });
+    if (!spent.ok || !windowed.ok) throw new Error("no token");
+    const v = createVerifier({
+      issuer: ISSUER,
+      accept: ["api-token"],
+      fetch: server.fetch,
+      clock: server.clock,
+    });
+    expect(await v.verifyRequest(withBearer(FILES, spent.value.token))).toEqual({
+      ok: true,
+      value: null,
+    });
+    const first = await v.verifyRequest(withBearer(FILES, windowed.value.token));
+    expect(first.ok && first.value?.kind).toBe("api-token");
+    expect(await v.verifyRequest(withBearer(FILES, windowed.value.token))).toMatchObject({
+      ok: false,
+      code: "rate_limited",
+      status: 429,
+    });
+  });
+
+  it("keeps no answer of a token with a quota or a window", async () => {
+    const server = makeServer();
+    const s = await apiToken(server);
+    const quota = await server.auth.api.tokens.create({
+      user: s.user,
+      name: "quota",
+      quota: { remaining: 10 },
+    });
+    const windowed = await server.auth.api.tokens.create({
+      user: s.user,
+      name: "windowed",
+      rateLimit: { seconds: 60, max: 10 },
+    });
+    if (!quota.ok || !windowed.ok) throw new Error("no token");
+    const v = createVerifier({
+      issuer: ISSUER,
+      accept: ["api-token"],
+      cache: { apiTokenSeconds: 30 },
+      fetch: server.fetch,
+      clock: server.clock,
+    });
+    for (const token of [quota.value.token, windowed.value.token]) {
+      await v.verifyRequest(withBearer(FILES, token));
+      await v.verifyRequest(withBearer(FILES, token));
+    }
+    // Each call reached core, so core spent the quota and counted the window each time.
+    expect(server.count("/auth/tokens/current")).toBe(4);
+    const [row] = await server.storage.findMany("apiToken", [
+      { field: "id", op: "eq", value: quota.value.apiToken.id },
+    ]);
+    expect(row?.remaining).toBe(8);
+  });
+
   it("answers null with no call for a kind that accept does not list", async () => {
     const server = makeServer();
     const t = await apiToken(server);

@@ -96,6 +96,8 @@ const REFUSED_PROOFS_MAX = 1000;
  * most about 1.4 MB.
  */
 const SIGNATURE_MAX = 683;
+/** The codes of `GET /tokens/current` that mean "no caller" (plan 12k, ruling 6). */
+const NO_TOKEN_CALLER: readonly string[] = ["unauthorized", "token_retired", "token_exhausted"];
 /** The `tk_` answers a verifier keeps at most; the oldest goes first. */
 const API_TOKEN_CACHE_MAX = 1000;
 /** Core's rule of a `jwtMint.audience` entry (config.ts): 1 to 10 entries of 1 to 2048 characters. */
@@ -115,7 +117,10 @@ export interface VerifierOptions {
   accept?: readonly CallerKind[] | undefined;
   /** Ask `POST /token/live` for each session JWT, so a sign-out ends access at once. Default false. */
   checkSessionEnd?: boolean | undefined;
-  /** `apiTokenSeconds`: how long a `tk_` answer is kept, 0 to 60. Default 0: a revoke takes effect at once. */
+  /**
+   * `apiTokenSeconds`: how long a `tk_` answer is kept, 0 to 60. Default 0: a
+   * revoke takes effect at once. A token with a window or a quota is never kept.
+   */
   cache?: { apiTokenSeconds?: number | undefined } | undefined;
   /** The deadline of each call to the auth app, 100 to 30000 ms. Default 5000. */
   timeoutMs?: number | undefined;
@@ -342,7 +347,9 @@ export function createVerifier(options: VerifierOptions): Verifier {
       user: PublicSession["user"];
       apiToken: ApiTokenSummaryJSON;
     }>("GET", "/tokens/current");
-    if (!r.ok) return r.code === "unauthorized" ? none : r;
+    // A retired or spent token is no caller, as in core's `auth.caller`. Over the window, or after
+    // three lost spends, the call fails: the token is valid, and a later call may act (plan 12k).
+    if (!r.ok) return NO_TOKEN_CALLER.includes(r.code) ? none : r;
     const body: unknown = r.value;
     if (!isObject(body) || !hasId(body.user) || !hasId(body.apiToken)) return unexpected200;
     const caller: Caller = {
@@ -350,7 +357,10 @@ export function createVerifier(options: VerifierOptions): Verifier {
       user: body.user as PublicSession["user"],
       apiToken: body.apiToken as ApiTokenSummaryJSON,
     };
-    if (apiTokenSeconds > 0) {
+    // A kept answer skips core, so core would count no call of a window or a quota. Such a
+    // token is never kept: the limits are ours, and only core enforces them.
+    const limited = caller.apiToken.remaining !== null || caller.apiToken.rateLimit !== null;
+    if (apiTokenSeconds > 0 && !limited) {
       apiCache.delete(hash);
       apiCache.set(hash, { until: now() + apiTokenSeconds * 1000, caller });
       while (apiCache.size > API_TOKEN_CACHE_MAX) {
