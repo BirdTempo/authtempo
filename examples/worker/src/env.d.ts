@@ -12,6 +12,13 @@ interface Env {
   DEV_REDIRECT_PATTERN?: string;
   /** The SHA-256 hex of the operator secret. It turns on POST /auth/operator/keys/rotate (plan 11c). */
   OPERATOR_SECRET_HASH?: string;
+  /**
+   * A JSON text of [{ name, secretHash, scopes }]: the named operator secrets of plan 12f.
+   * When it is set, the Worker reads it and not OPERATOR_SECRET_HASH.
+   */
+  OPERATOR_SECRETS?: string;
+  /** "1" turns on the operator user, session, and audit tools of plan 12f, with the organization "platform". */
+  OPERATOR_USERS?: string;
   DB: D1Database;
   /** Better Auth 1.7's tables with compat migration 0001, for the compat instance (plan 9). */
   BA_DB: D1Database;

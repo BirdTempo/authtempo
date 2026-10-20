@@ -127,3 +127,55 @@ describe("the live runs (spec 19)", () => {
     );
   });
 });
+
+// The user tools of plan 12f on a second Worker: a named secret with the scopes
+// users and sessions, and OPERATOR_USERS "1" (plan 12f Task 12).
+describe("the live runs of the operator user tools (plan 12f)", () => {
+  let tools: ExampleWorker | null = null;
+  beforeAll(async () => {
+    tools = await startExampleWorker({ operatorUsers: true });
+  }, START_LIMIT_MS + 30_000);
+  afterAll(async () => {
+    await tools?.stop();
+  });
+
+  it("bans and unbans a user of the example Worker", async () => {
+    const at = tools?.base ?? "";
+    const env = { AUTHTEMPO_OPERATOR_SECRET: tools?.operatorSecret ?? "" };
+    const email = "live-ban@example.com";
+    const post = (path: string, body: unknown) =>
+      fetch(`${at}/auth${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: at },
+        body: JSON.stringify(body),
+      });
+    await post("/password/sign-up", { email, password: "correct horse battery" });
+    const signIn = () => post("/password/sign-in", { email, password: "correct horse battery" });
+    expect((await signIn()).status).toBe(200);
+
+    const found = runBin(["users", "search", at, "--email", email, "--json"], { env });
+    expect(found.status, found.stderr).toBe(0);
+    const users = (JSON.parse(found.stdout) as { users: { id: string; sessions: number }[] }).users;
+    expect(users).toHaveLength(1);
+    const id = users[0]?.id ?? "";
+    expect(users[0]?.sessions).toBeGreaterThanOrEqual(1);
+    expect(found.stderr).not.toContain(email);
+
+    const ban = runBin(["users", "ban", at, id, "--reason", "live test", "--yes"], { env });
+    expect(ban.status, ban.stderr).toBe(0);
+    expect(ban.stdout).toMatch(new RegExp(`^banned ${id}; audit row \\S+\\n$`));
+    const banned = runBin(["users", "get", at, id, "--json"], { env });
+    const user = (JSON.parse(banned.stdout) as { user: { ban: unknown; sessions: number } }).user;
+    expect(user.ban).toMatchObject({ reason: "live test", until: null });
+    expect(user.sessions).toBe(0);
+    expect((await signIn()).status).toBe(403);
+
+    const unban = runBin(["users", "unban", at, id, "--reason", "live test", "--yes"], { env });
+    expect(unban.status, unban.stderr).toBe(0);
+    const lifted = runBin(["users", "get", at, id, "--json"], { env });
+    expect((JSON.parse(lifted.stdout) as { user: { ban: unknown } }).user.ban).toBeNull();
+    expect((await signIn()).status).toBe(200);
+    for (const r of [found, ban, banned, unban, lifted])
+      expect(r.stdout + r.stderr).not.toContain(tools?.operatorSecret ?? "-");
+  });
+});

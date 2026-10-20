@@ -122,9 +122,13 @@ export interface ExampleWorker {
  * before wrangler binds it. So the start proves that the answering server is
  * its own. The Worker holds a secret of this run only, and the operator info
  * route must accept it. Another Worker on the port refuses it, and the start
- * fails with that name.
+ * fails with that name. With `operatorUsers`, the Worker holds the secret
+ * as the named secret "live" with the scopes users and sessions, and the
+ * user tools of plan 12f are on.
  */
-export async function startExampleWorker(): Promise<ExampleWorker> {
+export async function startExampleWorker(
+  options: { operatorUsers?: boolean } = {},
+): Promise<ExampleWorker> {
   const deadline = Date.now() + START_LIMIT_MS;
   const port = await freePort();
   // wrangler picks the devtools port itself: 9229, else the next free one. That pick is a
@@ -173,8 +177,17 @@ export async function startExampleWorker(): Promise<ExampleWorker> {
       "TEST_MODE:0",
       "--var",
       "AUTH_SECRET:0123456789abcdef0123456789abcdef",
-      "--var",
-      `OPERATOR_SECRET_HASH:${operatorHash}`,
+      // The user tools of plan 12f need a named secret with their scopes (OPERATOR_SECRETS).
+      ...(options.operatorUsers === true
+        ? [
+            "--var",
+            `OPERATOR_SECRETS:${JSON.stringify([
+              { name: "live", secretHash: operatorHash, scopes: ["users", "sessions"] },
+            ])}`,
+            "--var",
+            "OPERATOR_USERS:1",
+          ]
+        : ["--var", `OPERATOR_SECRET_HASH:${operatorHash}`]),
     ],
     { cwd: WORKER, env: ENV, stdio: ["ignore", "pipe", "pipe"], detached: true },
   );

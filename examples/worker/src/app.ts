@@ -1,5 +1,12 @@
 import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
-import { type Auth, type AuthConfig, createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
+import {
+  type Auth,
+  type AuthConfig,
+  createAuth,
+  createPbkdf2PasswordHash,
+  type OperatorConfig,
+  type OperatorSecretEntry,
+} from "@authtempo/core";
 import { readBearer, readSessionToken, sessionCookieNames } from "@authtempo/core/credentials";
 import { createLegacyPasswordHash } from "@authtempo/legacy-hashes";
 import {
@@ -92,7 +99,16 @@ export function exampleConfig(env: Env): AuthConfig {
       return { schemes: ["example-app://"], ...(pattern ? { devRedirectPattern: pattern } : {}) };
     })(),
     // Organizations, members, and mailed invitations. The routes need the 0002 migration.
-    organizations: {},
+    // With OPERATOR_USERS "1" (plan 12f), the organization "platform" holds the platform
+    // operators, and the rank operator is their platform role.
+    organizations:
+      env.OPERATOR_USERS === "1"
+        ? {
+            ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+            platformOrganization: "platform",
+            platformRole: "operator",
+          }
+        : {},
     // Email codes (plan 9e): /auth/otp/request and /auth/otp/verify, and with the password
     // config below the reset by code. They are on by default; `{}` keeps the defaults (6 digits,
     // 10 minutes, 5 guesses), and `emailOtp: false` turns them off.
@@ -111,9 +127,9 @@ export function exampleConfig(env: Env): AuthConfig {
       registration: { cimd: false, dynamic: true },
       scopes: { "mcp:tools": "Use the example tools" },
     },
-    // The operator route (plan 11c) for `authtempo keys rotate`: on only when the var
-    // OPERATOR_SECRET_HASH is set. The Worker holds the hash, never the secret.
-    ...(env.OPERATOR_SECRET_HASH ? { operator: { secretHash: env.OPERATOR_SECRET_HASH } } : {}),
+    // The operator routes (plans 11c and 12f): on only when a var names a secret hash or
+    // turns the user tools on. The Worker holds the hashes, never a secret.
+    ...exampleOperator(env),
     // TEST_MODE only (plan 9d): the hooks the end-to-end test proves on D1. They write
     // app_tenant, a table of the test setup, so a deploy without the table sets none.
     ...(env.TEST_MODE === "1" ? { hooks: exampleHooks(env.DB) } : {}),
@@ -136,6 +152,25 @@ export function exampleConfig(env: Env): AuthConfig {
       }),
     },
   };
+}
+
+/**
+ * The operator block of the example (plans 11c and 12f). OPERATOR_SECRETS is a
+ * JSON text of [{ name, secretHash, scopes }]: named secrets, each with its
+ * scopes. Without it, OPERATOR_SECRET_HASH is the one secret of plan 11c, with
+ * the scopes keys and secrets only. OPERATOR_USERS "1" turns on the user,
+ * session, and audit tools. Core checks each entry at construction, so a bad
+ * text stops the Worker at its first request, not at a call of the tools.
+ */
+function exampleOperator(env: Env): { operator?: OperatorConfig } {
+  const users: Pick<OperatorConfig, "users"> = env.OPERATOR_USERS === "1" ? { users: true } : {};
+  if (env.OPERATOR_SECRETS) {
+    const secrets = JSON.parse(env.OPERATOR_SECRETS) as OperatorSecretEntry[];
+    return { operator: { secrets, ...users } };
+  }
+  if (env.OPERATOR_SECRET_HASH)
+    return { operator: { secretHash: env.OPERATOR_SECRET_HASH, ...users } };
+  return env.OPERATOR_USERS === "1" ? { operator: { users: true } } : {};
 }
 
 // Built once per isolate. Bindings in `env` are fixed for the isolate's life,
