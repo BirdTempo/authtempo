@@ -55,11 +55,7 @@ Read [Security policy](/docs/reference/security-policy/).
 
 ## The docs
 
-- The docs version follows the package versions.
-- Until the first release, the site has one docs tree, at `/docs/`.
-- From the first minor release: one docs tree for each minor, the current tree at `/docs/`, and each earlier minor at `/docs/v<major>.<minor>/`.
-- Each earlier tree builds from the git tag of its minor.
-- A page carries no "since version" note until a second minor exists.
+The site shows the docs of the current main only, at `/docs/`. A later plan adds a docs tree for each earlier minor.
 
 ## Next
 

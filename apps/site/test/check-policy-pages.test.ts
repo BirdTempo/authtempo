@@ -33,7 +33,7 @@ describe("check-policy-pages", () => {
     const r = checkPolicyPages(REAL);
     expect(r.failures).toEqual([]);
     expect(summaryLine(r)).toBe(
-      "check-policy-pages: PASS pages=2 ties=18 states=3 rows=5 links=3 failures=0",
+      "check-policy-pages: PASS pages=2 ties=18 states=4 rows=5 links=3 failures=0",
     );
   });
 
@@ -44,7 +44,7 @@ describe("check-policy-pages", () => {
       'docs/versioning.md, section "The support window", states "The previous minor gets security fixes for 6 months after the next minor ships.", which no source holds',
     ]);
     expect(summaryLine(checkPolicyPages(input))).toBe(
-      "check-policy-pages: FAIL pages=2 ties=18 states=3 rows=5 links=3 failures=2",
+      "check-policy-pages: FAIL pages=2 ties=18 states=4 rows=5 links=3 failures=2",
     );
   });
 
@@ -173,6 +173,26 @@ describe("check-policy-pages", () => {
         `${file} has no message with \${FIRST_RELEASE}, so no rule keeps the sentence: The first release is \`0.1.0\`.`,
       ]);
     }
+  });
+
+  it("holds the docs today to the absence of a versioned docs tree, both ways", () => {
+    const today =
+      "The site shows the docs of the current main only, at `/docs/`. A later plan adds a docs tree for each earlier minor.";
+    expect(REAL.docsFolders).not.toContain("v0.1");
+    // A versioned tree exists, and the page still says that none exists.
+    expect(failures({ ...REAL, docsFolders: [...REAL.docsFolders, "v0.1"] })).toEqual([
+      `apps/site/src/content/docs/docs/v0.1 exists, so docs/versioning.md, section "The docs", must not state: ${today}`,
+    ]);
+    // No versioned tree exists, and the page promises one.
+    const promise = withText(
+      "versioning",
+      "A later plan adds a docs tree for each earlier minor.",
+      "Each earlier minor has its own docs tree.",
+    );
+    expect(failures(promise)).toEqual([
+      `no folder v<major>.<minor> is in apps/site/src/content/docs/docs, so docs/versioning.md, section "The docs", must state: ${today}`,
+      'docs/versioning.md, section "The docs", states "Each earlier minor has its own docs tree.", which no source holds',
+    ]);
   });
 
   it("holds the In 0.x column to the From 1.0.0 column", () => {

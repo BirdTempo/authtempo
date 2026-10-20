@@ -8,7 +8,9 @@
 // (one version), the version of core (the state today),
 // release/repository.json (the link to the file), and FIRST_RELEASE with the
 // two release checks that refuse another first release.
+import { readdirSync } from "node:fs";
 import { type Repository, readPolicyInput } from "./check-security-policy.ts";
+import { REPO } from "./lib/paths.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** The versioning page, by its path under src/content/docs/. */
@@ -25,6 +27,7 @@ const PATHS = {
   releaseFacts: "scripts/release/src/lib/release-facts.ts",
   checkTag: "scripts/release/src/check-tag.ts",
   checkPack: "scripts/release/src/check-pack.ts",
+  docs: "apps/site/src/content/docs/docs",
 } as const;
 
 export interface PolicyPagesInput {
@@ -39,6 +42,8 @@ export interface PolicyPagesInput {
   releaseFacts: string;
   checkTag: string;
   checkPack: string;
+  /** The folder names under the docs tree. A versioned tree is a folder v<major>.<minor>. */
+  docsFolders: string[];
 }
 
 /**
@@ -144,6 +149,14 @@ const POINTER = /^Read \[[^\]]+\]\([^)\s]+\)\.$/;
 const TODAY_SECTION = "The versions today";
 const TODAY =
   "Every package is private and at version `0.0.0`. No release exists, and the owner decides when the packages publish.";
+/**
+ * The docs of today (ruling 29 of plan 12j). Spec 33 item 13 puts the
+ * versioned docs trees outside plan 12j, so the page says that only the docs
+ * of main exist, until a versioned tree exists.
+ */
+const DOCS_SECTION = "The docs";
+const DOCS_TODAY =
+  "The site shows the docs of the current main only, at `/docs/`. A later plan adds a docs tree for each earlier minor.";
 /** The fact of the one fixed Changesets group (spec 33 item 1.1). */
 const ONE_VERSION = "Every released package has the same version.";
 /** The 0.x cell of a change that is a major version from 1.0.0 (spec 33 item 1.2). */
@@ -305,15 +318,31 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
       );
   }
 
-  for (const held of HELD) {
-    const lines = section(held.page, held.section);
+  // The docs of today: the sentences hold while no versioned tree exists.
+  // After that the section is not held, and it must not state them.
+  const versioned = input.docsFolders.filter((f) => /^v\d+\.\d+$/.test(f));
+  const docs = section(VERSIONING, DOCS_SECTION);
+  const statesToday = docs !== null && sentencesOf(docs).join(" ").includes(DOCS_TODAY);
+  const held = [...HELD];
+  if (pages.has(VERSIONING) && versioned.length === 0) {
+    held.push({ page: VERSIONING, section: DOCS_SECTION });
+    for (const s of sentencesOf([DOCS_TODAY])) allow(VERSIONING, DOCS_SECTION, s);
+    if (!statesToday)
+      failures.push(
+        `no folder v<major>.<minor> is in ${PATHS.docs}, so ${VERSIONING}, section "${DOCS_SECTION}", must state: ${DOCS_TODAY}`,
+      );
+  } else if (statesToday)
+    failures.push(
+      `${PATHS.docs}/${versioned[0]} exists, so ${VERSIONING}, section "${DOCS_SECTION}", must not state: ${DOCS_TODAY}`,
+    );
+
+  for (const h of held) {
+    const lines = section(h.page, h.section);
     if (lines === null) continue;
-    const ok = allowed.get(`${held.page}#${held.section}`) ?? new Set<string>();
+    const ok = allowed.get(`${h.page}#${h.section}`) ?? new Set<string>();
     for (const s of sentencesOf(lines))
       if (!ok.has(s) && !POINTER.test(s))
-        failures.push(
-          `${held.page}, section "${held.section}", states "${s}", which no source holds`,
-        );
+        failures.push(`${h.page}, section "${h.section}", states "${s}", which no source holds`);
   }
 
   // The rule table: the 0.x cell equals the cell from 1.0.0, and a major
@@ -359,7 +388,7 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
   return requireCounts(
     {
       name: "check-policy-pages",
-      counts: { pages: pages.size, ties: TIES.length, states: 3, rows, links },
+      counts: { pages: pages.size, ties: TIES.length, states: 4, rows, links },
       failures,
     },
     ["pages", "rows", "links"],
@@ -372,7 +401,13 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
  * not read. SECURITY.md and release/repository.json come through
  * readPolicyInput, the reader of check-security-policy.
  */
-export function readPolicyPagesInput(read: (path: string) => string | null): {
+export function readPolicyPagesInput(
+  read: (path: string) => string | null,
+  folders: (path: string) => string[] = (path) =>
+    readdirSync(`${REPO}${path}`, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name),
+): {
   input: PolicyPagesInput;
   failures: string[];
 } {
@@ -409,6 +444,7 @@ export function readPolicyPagesInput(read: (path: string) => string | null): {
       releaseFacts: text(PATHS.releaseFacts),
       checkTag: text(PATHS.checkTag),
       checkPack: text(PATHS.checkPack),
+      docsFolders: folders(PATHS.docs),
     },
     failures,
   };
