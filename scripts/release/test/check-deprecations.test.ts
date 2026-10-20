@@ -276,6 +276,70 @@ describe("check-deprecations", () => {
     ]);
   });
 
+  it("scans the shipped files of each released package", () => {
+    const dir = mkdtempSync(join(tmpdir(), "authtempo-deprecations-scan-"));
+    try {
+      const put = (file: string, text: string) => {
+        mkdirSync(join(dir, file, ".."), { recursive: true });
+        writeFileSync(join(dir, file), text);
+      };
+      const manifest = (name: string, files?: string[]) =>
+        JSON.stringify({ name, version: "0.1.0", ...(files ? { files } : {}) });
+      put("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+      put(
+        ".changeset/config.json",
+        JSON.stringify({ fixed: [["@authtempo/import", "@authtempo/mcp"]], ignore: [] }),
+      );
+      put("packages/import/package.json", manifest("@authtempo/import", ["dist", "worker/src"]));
+      put("packages/import/README.md", "# import\n\nThe alias stays.\n");
+      put("packages/import/src/index.ts", "export {};\n");
+      put("packages/import/dist/index.js", "// The old field stays for one release.\n");
+      put("packages/import/test/a.test.ts", "// The old field stays for one release.\n");
+      // Probe P2 of the review: the shipped worker source of import.
+      put(
+        "packages/import/worker/src/run.ts",
+        "export {};\n// The old field stays for one release.\n",
+      );
+      put("packages/mcp/package.json", manifest("@authtempo/mcp", ["dist", "skills"]));
+      // Probe P3: a shipped skill of mcp.
+      put(
+        "packages/mcp/skills/node/SKILL.md",
+        "# node\n\nThe old tool name stays for one release.\n",
+      );
+      // Probe P4: the README of a package that is not released does not ship.
+      put("packages/sdk-conformance/package.json", manifest("@authtempo/sdk-conformance"));
+      put("packages/sdk-conformance/README.md", "The old helper stays for one release.\n");
+      put(
+        "release/deprecations.json",
+        JSON.stringify([
+          {
+            ...ENTRIES[0],
+            markers: [{ file: "packages/import/README.md", text: "The alias stays." }],
+          },
+        ]),
+      );
+      expect(sourceFiles(dir)).toEqual([
+        "packages/import/README.md",
+        "packages/import/src/index.ts",
+        "packages/import/worker/src/run.ts",
+        "packages/mcp/skills/node/SKILL.md",
+      ]);
+      expect(entry(dir, "0.1.0").lines).toEqual([
+        "check-deprecations: FAIL items=1 live=1 due=0 failures=2",
+        "  packages/import/worker/src/run.ts:2 says for one release, and no marker of the register holds the line",
+        "  packages/mcp/skills/node/SKILL.md:3 says for one release, and no marker of the register holds the line",
+        "  note: 4 shipped files, 2 with for one release",
+      ]);
+      // A files entry with a glob could match nothing, so the scan refuses it.
+      put("packages/mcp/package.json", manifest("@authtempo/mcp", ["dist", "skills/*.md"]));
+      expect(() => sourceFiles(dir)).toThrow(
+        "packages/mcp/package.json: the files entry skills/*.md is not a file or a folder name",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("reads the real register", () => {
     const entries = readDeprecations(repo);
     expect(entries.map((e) => e.id)).toEqual([
@@ -295,6 +359,10 @@ describe("check-deprecations", () => {
     expect(files).toContain("packages/core/src/http/cookies.ts");
     expect(files).toContain("packages/handoff/README.md");
     expect(files.some((f) => f.includes("/test/") || f.includes("/dist/"))).toBe(false);
+    expect(files).toContain("packages/import/worker/src/index.ts");
+    expect(files).toContain("packages/import/worker/README.md");
+    expect(files).toContain("packages/mcp/skills/authtempo-integrate-bun/SKILL.md");
+    expect(files.some((f) => f.startsWith("packages/sdk-conformance/"))).toBe(false);
   });
 
   it("keeps the Expo storage key and the cookie constant out of the markers", () => {

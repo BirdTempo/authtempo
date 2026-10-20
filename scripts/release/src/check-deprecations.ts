@@ -136,26 +136,38 @@ export function checkDeprecations(input: DeprecationsInput): Report {
 }
 
 /**
- * The shipped text of the packages: each file under `packages/<name>/src/`
- * and each `packages/<name>/README.md`. Tests and the docs pages are not in
- * a tarball; the site check of the deprecations page holds the docs.
+ * The shipped text of each released package (`releasedNames`): its
+ * README.md, each file under src/, and each file of its `files` field but
+ * dist. The scan reads src/ for dist, which is built from it. Tests, the
+ * docs pages, and a package that is not released are not in a tarball. The
+ * site check of the deprecations page holds the docs.
  */
 export function sourceFiles(root: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string) => {
-    for (const d of readdirSync(join(root, dir), { withFileTypes: true })) {
-      const path = `${dir}/${d.name}`;
-      if (d.isDirectory()) walk(path);
-      else if (d.isFile()) out.push(path);
+  const out = new Set<string>();
+  const add = (path: string) => {
+    if (!existsSync(join(root, path))) return;
+    if (!statSync(join(root, path)).isDirectory()) {
+      out.add(path);
+      return;
     }
+    for (const d of readdirSync(join(root, path), { withFileTypes: true }))
+      if (d.isDirectory() || d.isFile()) add(`${path}/${d.name}`);
   };
-  for (const name of readdirSync(join(root, "packages")).sort()) {
-    const dir = `packages/${name}`;
-    if (!statSync(join(root, dir)).isDirectory()) continue;
-    if (existsSync(join(root, dir, "src"))) walk(`${dir}/src`);
-    if (existsSync(join(root, dir, "README.md"))) out.push(`${dir}/README.md`);
+  const released = new Set(releasedNames(root));
+  for (const p of readWorkspace(root)) {
+    if (!released.has(p.name)) continue;
+    add(`${p.dir}/README.md`);
+    add(`${p.dir}/src`);
+    for (const f of p.manifest.files ?? []) {
+      // A glob could match nothing, and the scan would miss the file in silence.
+      if (!/^[\w.-]+(\/[\w.-]+)*$/.test(f))
+        throw new Error(
+          `${p.dir}/package.json: the files entry ${f} is not a file or a folder name`,
+        );
+      if (f !== "dist" && !f.startsWith("dist/")) add(`${p.dir}/${f}`);
+    }
   }
-  return out.sort();
+  return [...out].sort();
 }
 
 /** The version of the first released package. check-packages holds the group to one version. */
