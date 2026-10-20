@@ -1799,6 +1799,15 @@ export function runAdapterConformance(
         if (none.includes("teamMember")) await holdsNone("teamMember", teamMember);
         if (none.length > 0) return;
         await db.create("user", user("u1", "a@example.com", at));
+        // Its organization first: a storage with foreign keys (the Better Auth tables) needs the parent row.
+        await db.create("organization", {
+          id: "o1",
+          slug: "o1",
+          name: "O",
+          metadata: null,
+          createdAt: at,
+          updatedAt: at,
+        });
         await db.create("team", team);
         await db.create("teamMember", teamMember);
         expect(await db.findOne("team", [{ field: "id", op: "eq", value: "t1" }])).toEqual(team);
