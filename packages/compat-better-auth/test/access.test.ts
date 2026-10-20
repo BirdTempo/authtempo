@@ -300,6 +300,57 @@ describe("the access control shim (spec 29 item 18)", () => {
     ]);
   });
 
+  it("refuses an ac resource or action that core's name rule refuses", () => {
+    const bad = createAccessControl({
+      ...defaultStatements,
+      Project: ["read"],
+      billing: [],
+      ledger: ["read", "read"],
+      report: ["Read"],
+      notes: ["read"],
+    });
+    expect(
+      checkOptions(
+        options({ ac: bad, roles: { owner: bad.newRole({}) } }, { roleRanks: { owner: 1 } }),
+      ).refusals,
+    ).toEqual([
+      "plugins[organization].ac.statements.Project: core takes a resource name of ^[a-z][a-zA-Z0-9-]{0,31}$ (spec 29 item 18)",
+      "plugins[organization].ac.statements.billing: core takes a list of one or more distinct action names of ^[a-z][a-zA-Z0-9-]{0,31}$ (spec 29 item 18)",
+      "plugins[organization].ac.statements.ledger: core takes a list of one or more distinct action names of ^[a-z][a-zA-Z0-9-]{0,31}$ (spec 29 item 18)",
+      "plugins[organization].ac.statements.report: core takes a list of one or more distinct action names of ^[a-z][a-zA-Z0-9-]{0,31}$ (spec 29 item 18)",
+    ]);
+  });
+
+  it("takes maximumRolesPerOrganization from 1 to 1000 only", () => {
+    const at = (n: number) =>
+      checkOptions(
+        options(
+          { ac, roles, dynamicAccessControl: { enabled: true, maximumRolesPerOrganization: n } },
+          { roleRanks },
+        ),
+      ).refusals;
+    for (const n of [0, 1001, 1.5, -1])
+      expect(at(n)).toEqual([
+        "plugins[organization].dynamicAccessControl.maximumRolesPerOrganization: core takes an integer from 1 to 1000 (spec 29 item 18)",
+      ]);
+    expect(at(1)).toEqual([]);
+    expect(at(1000)).toEqual([]);
+  });
+
+  it("refuses authtempo.roleRanks with no organization plugin", () => {
+    const given: BetterAuthOptions = {
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      database: memory(),
+      authtempo: { roleRanks },
+    };
+    expect(checkOptions(given).refusals).toEqual([
+      "authtempo.roleRanks: needs plugins[organization] (spec 29 item 18)",
+    ]);
+    expect(checkOptions({ ...given, authtempo: {} }).refusals).toEqual([]);
+  });
+
   it("refuses dynamicAccessControl as a function", () => {
     // Better Auth's type admits a function; this package's type does not, so the literal is cast.
     const dynamicAccessControl = {
