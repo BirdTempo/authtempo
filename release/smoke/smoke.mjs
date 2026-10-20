@@ -6,9 +6,13 @@
 // For each @authtempo dependency of package.json, it imports each entry of the
 // exports map. An entry of exempt.json needs a runtime that plain Node does
 // not give: React, Electron, a browser, or workerd. For such an entry, the
-// smoke checks that its target file exists, and does not import it. Then it
-// runs the packed CLI: `authtempo --help`, and
-// `authtempo init <tmp>/app --stack node --json`.
+// smoke checks that its target file exists, and does not import it.
+//
+// Then it runs the packed CLI three times: `authtempo --help`,
+// `authtempo init <tmp>/node --stack node --json`, and
+// `authtempo init <tmp>/workers-d1 --stack workers-d1 --json`. The node stack
+// has no authtempo step. The workers-d1 stack has one, so the rule for the
+// steps can fail (ruling 14a of the plan 12j lane).
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -88,32 +92,44 @@ const help = run(["--help"], here);
 if (help.status !== 0 || !help.stdout.includes("authtempo"))
   failures.push(`authtempo --help exited ${help.status}: ${help.stderr.trim()}`);
 
+/** A step that runs the CLI: the word authtempo, or a path that ends in authtempo.js. */
+const RUNS_CLI = /(^|[\s/])authtempo(\.js)?(\s|$)/;
+
+/**
+ * Checks one scaffold against the published branch of plan 12j Task 11. No
+ * step gives the run form of a clone, and each authtempo step runs through
+ * pnpm exec. Each @authtempo range of the app is the exact version of the
+ * packed CLI. `steps` is true for a stack whose next steps must run the CLI.
+ */
+function checkInit(tmp, stack, steps) {
+  const app = join(tmp, stack);
+  const init = run(["init", app, "--stack", stack, "--json"], tmp);
+  if (init.status !== 0) {
+    failures.push(`authtempo init --stack ${stack} exited ${init.status}: ${init.stderr.trim()}`);
+    return;
+  }
+  const out = JSON.parse(init.stdout);
+  if (`${out.next.join("\n")}\n${init.stderr}`.includes("/path/to/authtempo"))
+    failures.push(`${stack}: authtempo init gives the run form of a clone: /path/to/authtempo`);
+  const cliSteps = out.next.filter((step) => RUNS_CLI.test(step));
+  for (const step of cliSteps)
+    if (!step.startsWith("pnpm exec authtempo "))
+      failures.push(`${stack}: the step ${step} does not run pnpm exec authtempo`);
+  if (steps && cliSteps.length === 0)
+    failures.push(`${stack}: no next step runs authtempo, so the step rule proves nothing`);
+  const scaffold = readJson(join(app, "package.json"));
+  const ranges = { ...scaffold.dependencies, ...scaffold.devDependencies };
+  if (scaffold.devDependencies?.["@authtempo/cli"] === undefined)
+    failures.push(`${stack}: the scaffold has no @authtempo/cli in devDependencies`);
+  for (const [dep, range] of Object.entries(ranges))
+    if (dep.startsWith("@authtempo/") && range !== cliVersion)
+      failures.push(`${stack}: the scaffold names ${dep} as ${range}, not ${cliVersion}`);
+}
+
 const tmp = mkdtempSync(join(tmpdir(), "authtempo-smoke-"));
 try {
-  const app = join(tmp, "app");
-  const init = run(["init", app, "--stack", "node", "--json"], tmp);
-  if (init.status !== 0)
-    failures.push(`authtempo init exited ${init.status}: ${init.stderr.trim()}`);
-  else {
-    const out = JSON.parse(init.stdout);
-    const next = out.next.join("\n");
-    // The published branch of plan 12j Task 11: no run form of a clone, and
-    // each authtempo step through pnpm exec. The node stack has no authtempo
-    // step today, so the second rule holds for a later step.
-    if (next.includes("/path/to/authtempo") || `${init.stderr}`.includes("/path/to/authtempo"))
-      failures.push("authtempo init gives the run form of a clone: node /path/to/authtempo");
-    for (const step of out.next)
-      if (/^authtempo\b/.test(step))
-        failures.push(`the step ${step} does not run pnpm exec authtempo`);
-    // Each @authtempo range of the app is the exact version of the packed CLI.
-    const scaffold = readJson(join(app, "package.json"));
-    const ranges = { ...scaffold.dependencies, ...scaffold.devDependencies };
-    if (ranges["@authtempo/cli"] === undefined)
-      failures.push("the scaffold has no @authtempo/cli in devDependencies");
-    for (const [dep, range] of Object.entries(ranges))
-      if (dep.startsWith("@authtempo/") && range !== cliVersion)
-        failures.push(`the scaffold names ${dep} as ${range}, not ${cliVersion}`);
-  }
+  checkInit(tmp, "node", false);
+  checkInit(tmp, "workers-d1", true);
 } finally {
   rmSync(tmp, { recursive: true, force: true });
 }
