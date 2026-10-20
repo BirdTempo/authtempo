@@ -85,6 +85,11 @@ const byName = (a: TeamSummary, b: TeamSummary) =>
  * rows, waits for it and then counts the committed rows. Read committed
  * gives no other guard (ruling 26). D1 transactions are not isolated (spec
  * 8.6), so there the lock holds nothing.
+ *
+ * Why no `updatedAt` stamp, as `ownerWrite` writes (ruling 27): the second
+ * racer then counts again and answers its true code (`team_member_limit`),
+ * not `conflict`. The team's `updatedAt` also stays as it is at a member
+ * add, so the team in each answer shows only the last rename.
  */
 export async function lockTeam(
   tx: StorageAdapter,
@@ -105,10 +110,14 @@ export async function lockTeam(
 /**
  * Locks the organization row in the caller's transaction, before a count of
  * its teams, and answers false when the organization is gone. The update
- * writes `createdAt` with its own value, so no field changes, and an owner
- * write that compares `updatedAt` gets no false conflict. On Postgres a
+ * writes `createdAt` with its own value, so no field changes. On Postgres a
  * second team create or delete waits at this lock and then counts the
  * committed teams (ruling 26).
+ *
+ * Why no `updatedAt` stamp, as `ownerWrite` writes (ruling 27): the second
+ * racer then answers its true code (`team_limit`, `last_team`), not
+ * `conflict`. Also, a parallel owner write compares `updatedAt` with its own
+ * read, so a stamp of a team write would give it a false `conflict`.
  */
 async function lockOrganization(
   tx: StorageAdapter,
