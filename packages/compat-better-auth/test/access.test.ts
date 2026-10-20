@@ -499,7 +499,7 @@ describe("the access control shim (spec 29 item 18)", () => {
         )
       )[0]?.permission;
 
-    it("lets the holder of a Better Auth era row list the members", async () => {
+    it("lets the holder of a Better Auth era row list the members, and not the invitations (ruling 35)", async () => {
       const { pg, auth, person, clientOf, owner, organizationId } = await era();
       try {
         // Better Auth lets every member list the members, so its row holds no member:read.
@@ -517,6 +517,38 @@ describe("the access control shim (spec 29 item 18)", () => {
         expect(full.data?.members.map((m) => m.role).sort()).toEqual(["closer", "owner"]);
         // The read added member:read in memory only: the text stays Better Auth's.
         expect(await textOf(pg, "closer")).toBe('{"project":["delete"]}');
+        // Better Auth lets every member list the invitations; the shim is stricter and fails closed.
+        const invitations = await auth.tempo.api.listInvitations({
+          user: (pat.caller as SessionCaller).user,
+          organizationId,
+        });
+        expect(invitations).toMatchObject({ ok: false, code: "forbidden_rank" });
+      } finally {
+        await pg.close();
+      }
+    });
+
+    it("lets the holder of a Better Auth era row that invites list the members and the invitations", async () => {
+      const { pg, auth, person, clientOf, owner, organizationId } = await era();
+      try {
+        await insertRow(pg, organizationId, "inviter", '{"invitation":["create"]}');
+        const pat = await person("pat@example.com");
+        const added = await auth.tempo.api.addMember({
+          user: (owner.caller as SessionCaller).user,
+          organizationId,
+          userId: (pat.caller as SessionCaller).user.id,
+          role: "inviter",
+        });
+        expect(added.ok).toBe(true);
+        const full = await clientOf(pat.token).organization.getFullOrganization({ organizationId });
+        expect(full.error).toBeNull();
+        expect(full.data?.members.map((m) => m.role).sort()).toEqual(["inviter", "owner"]);
+        const invitations = await auth.tempo.api.listInvitations({
+          user: (pat.caller as SessionCaller).user,
+          organizationId,
+        });
+        expect(invitations).toEqual({ ok: true, value: [] });
+        expect(await textOf(pg, "inviter")).toBe('{"invitation":["create"]}');
       } finally {
         await pg.close();
       }
