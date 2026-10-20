@@ -153,9 +153,13 @@ function world() {
       userAgent: null,
     });
     if (!admin.ok) throw new Error(admin.code);
-    const resolved = await auth.api.getSession(s.token);
-    if (!resolved) throw new Error("the enable ended the session");
-    return { ...resolved, token: s.token, cookie: s.cookie, backupCodes: keys.backupCodes };
+    // The operator guard refuses a session from before the grant (ruling 50 of plan 12f),
+    // so the operator signs in again after it, with a backup code for the second factor.
+    await new Promise((r) => setTimeout(r, 5));
+    const after = await signIn(email, keys.backupCodes[0]);
+    // The session from before the grant has no power; it goes, so each test counts its own rows.
+    await auth.api.signOut(s.token);
+    return { ...after, backupCodes: keys.backupCodes.slice(1) };
   }
   /** Arms the probe: after the next statement of `trigger`, `start` runs and the transaction waits `HOLD_MS`. */
   function during(trigger: Trigger, start: () => Promise<unknown>) {
