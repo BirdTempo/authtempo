@@ -4,6 +4,13 @@ import type { OperatorAuditRow } from "../../schema.js";
 import { listAudit } from "./audit.js";
 import { type BanInput, banUser, type UnbanInput, unbanUser } from "./ban.js";
 import { checkActor, type OperatorActor } from "./guards.js";
+import {
+  type CreateAdminInput,
+  createAdmin,
+  grantPlatformRole,
+  type PlatformRoleInput,
+  revokePlatformRole,
+} from "./platform-role.js";
 import { getUser, listUsers, type OperatorUser, searchUsers } from "./users.js";
 
 /**
@@ -46,6 +53,20 @@ export interface OperatorApi {
     /** Lifts a ban. It restores no session. Needs the scope `users`. */
     unban(input: UnbanInput): Promise<Result<{ auditId: string }>>;
   };
+  platformRole: {
+    /** Grants the platform role to a verified user with no active ban (plan 12f Task 8). Needs the scope `users`. */
+    grant(input: PlatformRoleInput): Promise<Result<{ auditId: string }>>;
+    /** Revokes the platform role and ends all access of the user but the API tokens. Needs the scope `users`. */
+    revoke(input: PlatformRoleInput): Promise<Result<{ auditId: string }>>;
+  };
+  /**
+   * Creates the first operator: the platform organization when absent, the
+   * user when absent (not verified, no password), and the member row. A
+   * secret or the app only. Needs the scope `users`.
+   */
+  createAdmin(
+    input: CreateAdminInput,
+  ): Promise<Result<{ userId: string; created: boolean; auditId: string }>>;
 }
 
 /**
@@ -74,5 +95,10 @@ export function operatorApi(config: ResolvedConfig): OperatorApi {
       ban: entry((i) => banUser(config, i)),
       unban: entry((i) => unbanUser(config, i)),
     },
+    platformRole: {
+      grant: entry((i) => grantPlatformRole(config, i)),
+      revoke: entry((i) => revokePlatformRole(config, i)),
+    },
+    createAdmin: entry((i) => createAdmin(config, i)),
   };
 }

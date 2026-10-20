@@ -20,10 +20,14 @@ import type { MemberSummary, OrganizationSummary } from "./organizations.js";
 
 export type Awaitable<T> = T | Promise<T>;
 
-/** How a member row came: the creator's owner row, an add by an admin, or an accepted invitation. */
-export type MemberVia = "create" | "add" | "invitation";
-/** A remove by another member, or a leave by the member. */
-export type RemoveVia = "remove" | "leave";
+/**
+ * How a member row came: the creator's owner row, an add by an admin, an
+ * accepted invitation, or an operator act of plan 12f (the grant of the
+ * platform role and `createAdmin`).
+ */
+export type MemberVia = "create" | "add" | "invitation" | "operator";
+/** A remove by another member, a leave by the member, or the revoke of the platform role (plan 12f). */
+export type RemoveVia = "remove" | "leave" | "operator";
 export type SessionVia = "password" | "magic_link" | "social" | "passkey" | "handoff" | "email_otp";
 /**
  * Each value of `SessionVia` (plan 12f). The ban doors test reads it, so a
@@ -54,7 +58,9 @@ export type SessionEndReason =
   // plan 12e: a relying party asks for the end (OIDC RP-Initiated Logout 1.0).
   | "oidc_logout"
   // plan 12f: an operator bans the user, or a session of a banned user is presented.
-  | "banned";
+  | "banned"
+  // plan 12f: an operator ends the sessions of one user or of all users.
+  | "operator";
 
 /** The member a before hook sees: no row exists yet. */
 export interface ProposedMember {
@@ -91,12 +97,16 @@ export interface OrganizationHooks {
   }): Awaitable<void>;
   beforeDelete?(e: { organization: OrganizationSummary; user: UserRow }): Awaitable<void>;
   afterDelete?(e: { organization: OrganizationSummary; user: UserRow }): Awaitable<void>;
-  /** `invitation` is null unless `via` is `invitation`. */
+  /**
+   * `invitation` is null unless `via` is `invitation`. In the six member
+   * points, `by` is the user who acts. It is null for an operator act of a
+   * secret or of the app (plan 12f), which has no user.
+   */
   beforeAddMember?(e: {
     organization: OrganizationSummary;
     member: ProposedMember;
     memberUser: UserRow;
-    by: UserRow;
+    by: UserRow | null;
     via: MemberVia;
     invitation: InvitationSummary | null;
   }): Awaitable<void>;
@@ -104,7 +114,7 @@ export interface OrganizationHooks {
     organization: OrganizationSummary;
     member: MemberSummary;
     memberUser: UserRow;
-    by: UserRow;
+    by: UserRow | null;
     via: MemberVia;
     invitation: InvitationSummary | null;
   }): Awaitable<void>;
@@ -113,7 +123,7 @@ export interface OrganizationHooks {
     member: MemberSummary;
     role: string;
     memberUser: UserRow;
-    by: UserRow;
+    by: UserRow | null;
   }): Awaitable<void>;
   /** `member` holds the new role. */
   afterUpdateMemberRole?(e: {
@@ -121,20 +131,20 @@ export interface OrganizationHooks {
     member: MemberSummary;
     previousRole: string;
     memberUser: UserRow;
-    by: UserRow;
+    by: UserRow | null;
   }): Awaitable<void>;
   beforeRemoveMember?(e: {
     organization: OrganizationSummary;
     member: MemberSummary;
     memberUser: UserRow;
-    by: UserRow;
+    by: UserRow | null;
     via: RemoveVia;
   }): Awaitable<void>;
   afterRemoveMember?(e: {
     organization: OrganizationSummary;
     member: MemberSummary;
     memberUser: UserRow;
-    by: UserRow;
+    by: UserRow | null;
     via: RemoveVia;
   }): Awaitable<void>;
   beforeInvite?(e: {
@@ -206,7 +216,8 @@ export interface SessionHooks {
 }
 
 /** How a user row came: the flow's sign-in, or a reset that created the user (plan 12a). */
-export type UserCreateVia = SessionVia | "password_reset";
+/** `operator`: `createAdmin` of plan 12f creates the user, with no proof of the address. */
+export type UserCreateVia = SessionVia | "password_reset" | "operator";
 /** The profile update, the change of address (plan 12a), or an operator's ban and unban (plan 12f). */
 export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban";
 /**

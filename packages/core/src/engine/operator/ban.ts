@@ -94,12 +94,13 @@ function reasonOf(config: ResolvedConfig, input: { actor: OperatorActor; reason:
  * The target checks (spec 26 item 1). The user must exist. A user actor
  * does not act on their own user (`operator_self`). A user actor does not
  * act on a platform operator (`operator_required`). A secret and the app
- * can act on a platform operator.
+ * can act on a platform operator. The answer is the user row. The grant and
+ * the revoke of the platform role (plan 12f Task 8) use the same checks.
  */
-async function targetOf(
+export async function targetOf(
   config: ResolvedConfig,
   input: { actor: OperatorActor; userId: unknown },
-): Promise<Result<true>> {
+): Promise<Result<UserRow>> {
   if (typeof input.userId !== "string") return fail("invalid_body");
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
@@ -109,7 +110,7 @@ async function targetOf(
     if (input.actor.user.id === user.id) return fail("operator_self");
     if (await isPlatformOperator(config, user.id)) return fail("operator_required");
   }
-  return ok(true);
+  return ok(user);
 }
 
 /** The ban fields that an act writes, from the row that it read. */
