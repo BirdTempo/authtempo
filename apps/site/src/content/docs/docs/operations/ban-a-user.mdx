@@ -28,7 +28,7 @@ Do the steps in this order. Each step names what breaks when you skip it.
    - The ban takes a user id, not an address.
 2. Run `authtempo users ban <base url> <user id> --reason "<reason>" --yes`. Add `--until <date>` for a ban with an end.
    - The reason goes into the audit row. A later reader sees why you acted.
-   - The deployment answers `banned <user id>; audit row <id>`.
+   - The command prints `banned <user id>; audit row <id>` on stdout.
    - Exit 1 with a `warning:` line on stderr means that the end of the OAuth refresh families failed. Do the step of the warning below.
 3. Run `authtempo users get <base url> <user id>`. Read the `BAN` column: `no-end`, or the end of the ban.
    - A `-` means that no ban holds. Read the stop text of step 2.
