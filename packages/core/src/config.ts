@@ -649,7 +649,7 @@ export interface OAuthConfig {
    * presents the superseded child and deletes the family. So an attacker
    * who holds a copy has N seconds to act. Its access then lasts until the
    * client's next refresh, plus at most `accessTtlMinutes`. For a
-   * confidential client or a DPoP-bound grant, the copy is useless without
+   * confidential client or a bound refresh token, the copy is useless without
    * the secret or the key. The use: a client whose answer was lost on the
    * network retries and keeps its grant.
    *
