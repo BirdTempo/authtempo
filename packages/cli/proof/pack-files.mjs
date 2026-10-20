@@ -4,9 +4,9 @@
 // `pnpm pack --dry-run --json` (checked 2026-10-12 for packages/import).
 //
 // The pack holds package.json, README.md, LICENSE, CHANGELOG.md, and dist/
-// only. It must never hold a test, a source file, a scaffold of the tests, or
-// local state: a .env, a .dev.vars, a .wrangler folder, or a node_modules
-// folder.
+// only. It must never hold a test, a source file, or a scaffold of the tests.
+// It must never hold local state: a .env, a .dev.vars, a .wrangler folder, or
+// a node_modules folder.
 //
 // LICENSE ships because an MIT package must carry its notice, and pnpm
 // 12.8.1 copies the root LICENSE into the pack (its CHANGELOG, 12.0.0-rc.8,

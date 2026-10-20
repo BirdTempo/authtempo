@@ -13,13 +13,13 @@
 //   inlined input in `tmp/`.
 // - worker/input/: import.local.json holds every password hash of an import.
 //
-// The check fails when any packed path is outside the allowlist below, when
-// a path is under worker/input/ or matches a forbidden name of plan 12j (such
-// as .wrangler/, src/ outside worker/src, or test/), or when a file that the
-// Worker or the CLI needs is absent. It makes a fake
+// The check fails when any packed path is outside the allowlist below. It
+// fails on a path under worker/input/, and on a forbidden name of plan 12j,
+// such as .wrangler/, src/ outside worker/src, or test/. It fails when a file
+// that the Worker or the CLI needs is absent. It makes a fake
 // worker/.wrangler/cache/cf.json and a fake worker/input/import.local.json
-// when they do not exist, so a tree with no rehearsal shows the leak too,
-// and it removes only what it made.
+// when they do not exist, so a tree with no rehearsal shows the leak too. It
+// removes only what it made.
 //
 // LICENSE ships because an MIT package must carry its notice, and pnpm
 // 12.8.1 copies the root LICENSE into the pack (its CHANGELOG, 12.0.0-rc.8,

@@ -5,9 +5,10 @@
 //
 // For each @authtempo dependency of package.json, it imports each entry of the
 // exports map. An entry of exempt.json needs a runtime that plain Node does
-// not give (React, Electron, a browser, or workerd); the smoke checks that its
-// target file exists and does not import it. Then it runs the packed CLI:
-// `authtempo --help`, and `authtempo init <tmp>/app --stack node --json`.
+// not give: React, Electron, a browser, or workerd. For such an entry, the
+// smoke checks that its target file exists, and does not import it. Then it
+// runs the packed CLI: `authtempo --help`, and
+// `authtempo init <tmp>/app --stack node --json`.
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

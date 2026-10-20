@@ -1,9 +1,9 @@
 {
   "@authtempo/client": {
-    "./conformance": "It imports vitest. It runs only inside the test run of an SDK, which installs vitest. The package does not declare vitest as an optional peer dependency (finding of plan 12j Task 5, 2026-10-20)."
+    "./conformance": "It imports vitest. It runs only inside the test run of an SDK, which installs vitest. The package does not declare vitest as an optional peer dependency. Plan 12j Task 5 found this on 2026-10-20, and Task 3b adds the peer dependency."
   },
   "@authtempo/core": {
-    "./conformance": "It imports vitest. It runs only inside the test run of an adapter, which installs vitest. The package does not declare vitest as an optional peer dependency (finding of plan 12j Task 5, 2026-10-20).",
-    "./limiter-conformance": "It imports vitest. It runs only inside the test run of a limiter, which installs vitest. The package does not declare vitest as an optional peer dependency (finding of plan 12j Task 5, 2026-10-20)."
+    "./conformance": "It imports vitest. It runs only inside the test run of an adapter, which installs vitest. The package does not declare vitest as an optional peer dependency. Plan 12j Task 5 found this on 2026-10-20, and Task 3b adds the peer dependency.",
+    "./limiter-conformance": "It imports vitest. It runs only inside the test run of a limiter, which installs vitest. The package does not declare vitest as an optional peer dependency. Plan 12j Task 5 found this on 2026-10-20, and Task 3b adds the peer dependency."
   }
 }

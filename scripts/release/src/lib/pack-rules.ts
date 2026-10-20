@@ -44,7 +44,7 @@ export const RELEASE_LICENSE = "MIT";
 
 /**
  * The forbidden name that `path` matches, or null. `files` is the `files` list
- * of the package: a path under an entry that names a src folder, such as
+ * of the package. A path under an entry that names a src folder, such as
  * worker/src of @authtempo/import, does not match "src/".
  */
 export function forbiddenMatch(path: string, files: readonly string[] = []): string | null {
