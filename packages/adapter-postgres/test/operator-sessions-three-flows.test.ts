@@ -194,3 +194,21 @@ describe("the sweep of expired sessions beside endAll on Postgres (ruling 37 m1)
       expect(await db.sql`SELECT id FROM ta_session`).toEqual([]);
     }, 60_000);
 });
+
+describe("endAll beside the ban on Postgres while a third flow holds a row (ruling 36, review m2)", () => {
+  for (let round = 1; round <= 2; round++)
+    it(`round ${round}: no deadlock, and no session stays`, async () => {
+      const w = world();
+      const st = await state(w);
+      // endAll takes s1 and waits on x; the ban of u needs s1, s2, and s3. Each flow takes its
+      // locks by id, so the ban of u waits on endAll, and endAll waits on the ban of v alone.
+      const outcomes = await race(
+        w,
+        st.x.user.id,
+        () => endAll(w),
+        () => ban(w, st.s1.user.id),
+      );
+      expect(outcomes).toEqual(["ok", "ok", "ok"]);
+      expect(await db.sql`SELECT id FROM ta_session`).toEqual([]);
+    }, 60_000);
+});
