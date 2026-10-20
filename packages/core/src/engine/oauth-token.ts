@@ -702,8 +702,9 @@ export async function resolveAccessToken(
   if (userId === null) return null;
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
   // A token from before the end of the user's last ban answers as no token
-  // here (rulings 5, 25, and 28 of plan 12f), also after the unban or the
-  // end. A resource server that verifies the JWT alone accepts it to its exp.
+  // here (rulings 5, 25, and 28 of plan 12f). This holds also after the
+  // unban or the end. A resource server that verifies the JWT alone accepts
+  // it to its exp.
   if (!user || bannedFor(user, new Date(p.iat * 1000))) return null;
   return {
     kind: "oauth",

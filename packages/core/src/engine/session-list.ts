@@ -193,7 +193,7 @@ export async function endOtherAccess(
 
 /**
  * Ends all access of the user in the caller's transaction (plan 12f, ASVS
- * 5.0.0 7.4.2): every session, challenge, and handoff code through
+ * 5.0.0 7.4.2). It ends every session, challenge, and handoff code through
  * `endAccess`, then the OAuth refresh tokens and codes. The API tokens stay:
  * each has its own revoke, and they work again after an unban (spec 26 item
  * 6). The caller runs, after its commit, `sessionsEnded`, `deliverLogouts`,

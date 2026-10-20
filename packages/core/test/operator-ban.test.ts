@@ -46,9 +46,9 @@ const MINUTE_MS = 60_000;
 
 /**
  * The HTTP view and the engine view of one config input on one storage,
- * clock, limiter, and mail list: password sign-in, the OAuth provider, the
- * handoff, and the operator tools. The hooks record the session ends and
- * the user updates.
+ * clock, limiter, and mail list. The config has password sign-in, the
+ * OAuth provider, the handoff, and the operator tools. The hooks record
+ * the session ends and the user updates.
  */
 async function world(extra: Partial<AuthConfig> = {}) {
   const base = makeAuth();

@@ -16,8 +16,8 @@ export function activeBan(user: Pick<UserRow, "bannedAt" | "banUntil">, now: Dat
  * True when a credential issued at `issuedAt` came before the end of the
  * last ban of the user (ruling 28): `bannedAt` is set, and the ban has no
  * end or ends after `issuedAt`. The ban ended every session in its
- * transaction. So a session that exists while a ban holds is a race row,
- * and this rule ends it also after the unban or the end of the ban. A
+ * transaction. So a session that exists while a ban holds is a race row.
+ * This rule ends it also after the unban or the end of the ban. A
  * credential issued at or after the end passes. A ban that holds now makes
  * this rule true for each credential that exists now.
  */

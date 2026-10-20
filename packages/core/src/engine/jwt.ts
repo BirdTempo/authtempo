@@ -386,11 +386,11 @@ export async function verifySessionJwt(
 
 /**
  * True while the session of `sid` exists, is not expired, and is inside the
- * absolute cap of `session.absoluteDays` (plan 12b) (plan 9g final
- * fix wave, review M-1). A resource server that must end access at a
+ * absolute cap of `session.absoluteDays` (plan 12b). This is plan 9g, final
+ * fix wave, review M-1. A resource server that must end access at a
  * sign-out asks this with the `sid` of a verified session JWT. It reads the
- * row by id and renews nothing. It reads the user for the ban (plan 12f):
- * a session from before the end of the user's last ban is not live, as in
+ * row by id and renews nothing. It reads the user for the ban (plan 12f).
+ * A session from before the end of the user's last ban is not live, as in
  * resolveSession (`bannedFor`, ruling 28).
  */
 export async function sessionLive(

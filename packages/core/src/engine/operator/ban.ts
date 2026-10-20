@@ -91,10 +91,10 @@ function reasonOf(config: ResolvedConfig, input: { actor: OperatorActor; reason:
 }
 
 /**
- * The target checks: the user exists, a user actor does not act on their
- * own user (`operator_self`), and a user actor does not act on a platform
- * operator (`operator_required`, spec 26 item 1). A secret and the app can
- * act on a platform operator.
+ * The target checks (spec 26 item 1). The user must exist. A user actor
+ * does not act on their own user (`operator_self`). A user actor does not
+ * act on a platform operator (`operator_required`). A secret and the app
+ * can act on a platform operator.
  */
 async function targetOf(
   config: ResolvedConfig,
@@ -116,11 +116,12 @@ async function targetOf(
 type BanPatch = Pick<UserPatch, "bannedAt" | "banReason" | "banUntil">;
 
 /**
- * The write of the ban fields in the act's transaction: `user.beforeUpdate`,
- * then a compare-and-set on `updatedAt` (spec 8.15 item 10: the user row
- * first, the lock order of every account write). A lost round reads the
- * row again, and makes the patch and runs the hook again with it. After
- * `ROUNDS` lost rounds the answer is `conflict`.
+ * The write of the ban fields in the act's transaction. It runs
+ * `user.beforeUpdate`, then a compare-and-set on `updatedAt`. Spec 8.15
+ * item 10 puts the user row first, in the lock order of every account
+ * write. A lost round reads the row again, and makes the patch and runs
+ * the hook again with it. After `ROUNDS` lost rounds the answer is
+ * `conflict`.
  */
 async function writeBanFields(
   config: ResolvedConfig,
