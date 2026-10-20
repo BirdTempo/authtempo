@@ -17,8 +17,9 @@ export interface Feature {
 /**
  * One row per member of RouteFeature. It had 17 at 0ef9665. Plan 11g adds
  * `openapi`, the 18th, and plan 12e adds `oauthDevice`, the 19th. Plan 12f
- * adds `operatorUsers`, the 20th, and `operatorImpersonation`, the 21st. Plan 12k adds `dynamicRoles`, the 22nd. A Record over the union fails the site's typecheck when core
- * adds a member, so a new feature cannot
+ * adds `operatorUsers`, the 20th, and `operatorImpersonation`, the 21st.
+ * Plan 12k adds `dynamicRoles`, the 22nd. A Record over the union fails the
+ * site's typecheck when core adds a member, so a new feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
  * icons, and decision 3 keeps the list). `account` takes `verify`: its first
