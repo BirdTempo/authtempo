@@ -136,7 +136,8 @@ export async function endUserSessions(
   const fixed = TARGET_CALLS[input.actor.kind];
   // The least call: the target, the hold (3), the challenges, the lock and the expired rows (3 at
   // most), the read, and the handoff codes (6), a page of one session (2 more), and the last page.
-  const budget = workBudget(
+  const budget = await workBudget(
+    config.storage,
     input.actor,
     input.callsUsed,
     fixed + 3 + 6 + 2 + LAST_PAGE_CALLS + FAMILY_CALLS,
@@ -254,33 +255,47 @@ export const OPERATOR_CALL_BUDGET = 50;
 
 /**
  * The D1 statements before a session call when the caller passes no
- * `callsUsed`: the worst case of each actor (rulings 34 and 35 of plan
- * 12f). A user actor through the route: the route limiter 1, the schema
- * check 1, `resolveSession` 3 (the session, the user, and the sliding
- * refresh), and `requireOperatorUser` 4 (the platform organization, the
- * member row, the second factor, and its limiter). The D1 test
- * `operator-sessions-budget.test.ts` counts these 9 on the binding. The
- * app: the schema check, which the same test counts in an endAll of 50.
- * A secret actor: the route limiter and the schema check; Task 10 adds
- * the route. The adapter's `statementsSent` cannot give these: an app
- * keeps one adapter for many invocations, and the limiter queries go to
- * the binding. A caller that made more calls passes its count as
+ * `callsUsed`, the ready check of the storage left out: the worst case of
+ * each actor (rulings 34, 35, and 37 of plan 12f). A user actor through
+ * the route: the route limiter 1, `resolveSession` 3 (the session, the
+ * user, and the sliding refresh), and `requireOperatorUser` 4 (the
+ * platform organization, the member row, the second factor, and its
+ * limiter). The app: none. A secret actor: the route limiter; Task 10
+ * adds the route. The adapter's `statementsSent` cannot give these: an
+ * app keeps one adapter for many invocations, and the limiter queries go
+ * to the binding. A caller that made more calls passes its count as
  * `callsUsed`.
+ *
+ * The ready check comes on top: `readyStatements` of the storage, or 1
+ * when the storage has none. The check of a core D1 adapter is 1 query,
+ * and the check of the D1 storage of the Better Auth tables is 4 or more.
+ * The D1 tests count each whole invocation on the binding: 9 before a
+ * user-actor call on core D1 (`operator-sessions-budget.test.ts`).
  */
 export const OPERATOR_CALLS_BEFORE: Readonly<Record<OperatorActor["kind"], number>> = {
-  user: 9,
-  secret: 2,
-  app: 1,
+  user: 8,
+  secret: 1,
+  app: 0,
 };
 
 /**
  * The calls that the work of a session call may make: the budget less the
  * calls before the act and the audit row. `callsUsed` is the count of the
- * caller, an integer from 0 to 49, else `invalid_body`. The answer is
- * `invalid_body` too when the work would get fewer than `least` calls.
+ * caller, an integer from 0 to 49, else `invalid_body`. With no
+ * `callsUsed`, the calls before are `OPERATOR_CALLS_BEFORE` of the actor
+ * and the ready check of the storage. The answer is `invalid_body` too
+ * when the work would get fewer than `least` calls.
  */
-function workBudget(actor: OperatorActor, callsUsed: unknown, least: number): Result<number> {
-  const before = callsUsed === undefined ? OPERATOR_CALLS_BEFORE[actor.kind] : callsUsed;
+async function workBudget(
+  storage: StorageAdapter,
+  actor: OperatorActor,
+  callsUsed: unknown,
+  least: number,
+): Promise<Result<number>> {
+  const before =
+    callsUsed === undefined
+      ? OPERATOR_CALLS_BEFORE[actor.kind] + ((await storage.readyStatements?.()) ?? 1)
+      : callsUsed;
   if (
     typeof before !== "number" ||
     !Number.isInteger(before) ||
@@ -413,7 +428,7 @@ export async function endAllSessions(
   if (!Number.isInteger(limit) || limit < 1 || limit > END_ALL_LIMIT.max)
     return fail("invalid_body");
   // The least page: the read, the lock, one link read, and one delete.
-  const budget = workBudget(input.actor, input.callsUsed, 4);
+  const budget = await workBudget(config.storage, input.actor, input.callsUsed, 4);
   if (!budget.ok) return budget;
   const drafted = auditDraft(input.actor, {
     action: "sessions_end_all",

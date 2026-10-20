@@ -182,6 +182,8 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
     expect([done.value.ended, done.value.more, count.queries]).toEqual([45, true, 49]);
     // The counter of the adapter agrees with the binding.
     expect(invocation.storage.statementsSent?.()).toBe(49);
+    // The schema check is the whole ready check of a core adapter (ruling 37).
+    expect(await invocation.storage.readyStatements?.()).toBe(1);
   });
 
   it("an endUser of the app with a hook sends 42 queries, the hold batch too", async () => {

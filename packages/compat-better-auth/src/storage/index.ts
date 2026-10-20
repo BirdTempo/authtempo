@@ -63,6 +63,9 @@ export function betterAuthSchemaStorage(
   if (options.dialect === "d1") {
     const st = compatStatements("sqlite", names);
     const db = options.db as unknown as D1;
+    // One count for the statements and the ready check, so the call budget
+    // of the operator session calls sees its queries (ruling 37 of plan 12f).
+    const sent = { statements: 0, ready: 0 };
     return {
       kind: "authtempo-compat-database",
       dialect: "d1",
@@ -70,7 +73,8 @@ export function betterAuthSchemaStorage(
       storage: createD1AdapterOn(db, {
         statements: st,
         toStorageError: st.toStorageError,
-        ready: d1CompatReady(options.db, names),
+        ready: d1CompatReady(options.db, names, sent),
+        sent,
       }),
       limiter: createD1Limiter(db),
       migrationSql: (variant?: SqliteVariant) => compatMigrationSql("sqlite", names, variant),

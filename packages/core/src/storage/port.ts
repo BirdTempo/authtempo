@@ -124,4 +124,14 @@ export interface StorageAdapter {
    * and memory have no row lock and leave it out. It costs one statement.
    */
   lockInOrder?<M extends ModelName>(model: M, where: Where<M>[]): Promise<void>;
+  /**
+   * Optional. Runs the ready check of the adapter, such as its schema
+   * version check, when it has not run, and answers the count of statements
+   * that the check sent in the life of the adapter (ruling 37 of plan 12f).
+   * The operator session calls reserve it in their call budget. A core D1
+   * adapter answers 1. The D1 storage of the Better Auth tables answers 4
+   * or more: its check also reads the indexes of the account table. An
+   * adapter that leaves it out counts as 1.
+   */
+  readyStatements?(): Promise<number>;
 }

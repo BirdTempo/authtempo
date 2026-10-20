@@ -922,11 +922,23 @@ interface D1Readable {
  * Better Auth's own. So the check also needs a unique, non-partial index on
  * exactly these two columns, by any name. Without it two OAuth callbacks
  * for one subject both insert, and two users own one identity. The check
- * runs once per storage; a failed check is not kept.
+ * runs once per storage; a failed check is not kept. Each query counts in
+ * `sent`, the count of `statementsSent` of the storage, and in its
+ * `readyStatements` (ruling 37 of plan 12f): 2 version reads, the index
+ * list, and one read per unique index that it checks.
  */
-export function d1CompatReady(db: unknown, names: Names): () => Promise<void> {
+export function d1CompatReady(
+  db: unknown,
+  names: Names,
+  sent: { statements: number; ready?: number } = { statements: 0 },
+): () => Promise<void> {
   const d1 = db as D1Readable;
+  const count = () => {
+    sent.statements++;
+    if (sent.ready !== undefined) sent.ready++;
+  };
   const read = async (key: string) => {
+    count();
     try {
       const v = await d1
         .prepare(`SELECT value FROM ${META_TABLE} WHERE key = ?`)
@@ -949,9 +961,11 @@ export function d1CompatReady(db: unknown, names: Names): () => Promise<void> {
     .join(",");
   const quote = (s: string) => `"${s.replaceAll('"', '""')}"`;
   const hasIssuerKey = async () => {
+    count();
     const list = await d1.prepare(`PRAGMA index_list(${quote(names.rawTable("account"))})`).all();
     for (const i of list.results) {
       if (i.unique !== 1 || i.partial !== 0) continue;
+      count();
       const cols = await d1.prepare(`PRAGMA index_info(${quote(String(i.name))})`).all();
       const got = cols.results
         .map((c) => String(c.name).toLowerCase())

@@ -8,11 +8,15 @@ import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@authtempo/co
  */
 export function schemaVersionCheck(
   db: D1Database,
-  sent?: { statements: number },
+  sent?: { statements: number; ready?: number },
 ): () => Promise<void> {
   return schemaVersionGate(async () => {
-    // The query counts in `statementsSent` of the adapter (ruling 35 of plan 12f).
-    if (sent) sent.statements++;
+    // The query counts in `statementsSent` of the adapter (ruling 35 of plan
+    // 12f), and in its `readyStatements` (ruling 37).
+    if (sent) {
+      sent.statements++;
+      if (sent.ready !== undefined) sent.ready++;
+    }
     try {
       return await db
         .prepare(`SELECT value FROM ${META_TABLE} WHERE key = ?`)

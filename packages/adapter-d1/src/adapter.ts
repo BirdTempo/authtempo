@@ -26,15 +26,17 @@ export interface D1AdapterOptions {
   ready(): Promise<void>;
   /**
    * The count of `statementsSent`, shared with each transaction (ruling 35
-   * of plan 12f). Pass the same object to the schema check, so its query
-   * counts too. Default: a new count.
+   * of plan 12f). Pass the same object to the schema check, so its queries
+   * count too. With `ready`, the check also counts its own queries there,
+   * and the adapter answers it as `readyStatements` (ruling 37). Default: a
+   * new count with no `ready`.
    */
-  sent?: { statements: number };
+  sent?: { statements: number; ready?: number };
 }
 
 interface Ctx extends D1AdapterOptions {
   undo: Undo[] | null;
-  sent: { statements: number };
+  sent: { statements: number; ready?: number };
 }
 
 async function run(db: D1Database, s: Statement, sent: Ctx["sent"]): Promise<D1Result<Row>> {
@@ -198,6 +200,13 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       return ctx.sent.statements;
     },
   };
+  if (ctx.sent.ready !== undefined) {
+    const counts = ctx.sent;
+    self.readyStatements = async () => {
+      await ctx.ready();
+      return counts.ready ?? 0;
+    };
+  }
   return self;
 }
 
