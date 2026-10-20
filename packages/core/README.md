@@ -1664,6 +1664,15 @@ writes each value under version 1.
   `Response.redirect` or a proxied fetch answer, must copy it first. Every
   route core ships builds its own `Response`.
 
+## Dev dependencies
+
+`xml-crypto` 6.3.3 is a dev dependency of this package only (plan 12d).
+The differential test signs the same SAML Responses with a second,
+independent canonicalizer, so one bug in the owned C14N cannot cancel out
+in both the signer and the verifier. It never ships: `files` is `dist`,
+and no file under `src/` imports it. The test
+`test/saml/no-dev-import.test.ts` holds both facts.
+
 ## The storage port
 
 Six methods: `create`, `findOne`, `findMany`, `update`, `delete`,
