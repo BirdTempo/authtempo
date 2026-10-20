@@ -70,6 +70,38 @@ function secretCodesOf(pick: (route: RouteEntry) => boolean): Set<string> {
   return new Set([...codesOf(pick)].filter((c) => !session.includes(c)));
 }
 
+/**
+ * The words of the guide's refused list for each route that answers
+ * `impersonation_session` (the routes of `IMPERSONATION_REFUSED`, which a
+ * core test holds to `ROUTES`). A refused route with no rule fails, a rule
+ * with no refused route fails, and words that the list lacks fail.
+ */
+const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
+  [/^\/operator\/(?!impersonate\/stop$)/, "each operator route but the stop"],
+  [/^\/sign-out$/, "the sign-out"],
+  [/^\/reauth(\/|$)/, "the re-authentication"],
+  [/^\/password\/change$/, "the password"],
+  [/^\/passkey\/register\/|^\/passkeys\/delete$/, "a passkey"],
+  [/^\/user\/change-email(\/verify)?$/, "the address"],
+  [/^\/identities\/unlink$/, "an unlink"],
+  [/^\/social\/:provider\/link$/, "a social link"],
+  [/^\/tokens$/, "a new API token"],
+  [/^\/user\/delete(\/confirm)?$/, "the account delete"],
+  [/^\/totp(\/|$)|^\/second-factor\//, "each second-factor route"],
+  [/^\/handoff\/start$/, "the handoff start"],
+  [/^\/handoff\/continue$/, "the handoff continue"],
+  [/^\/oauth\/authorize$/, "the OAuth authorize"],
+  [/^\/oauth\/sign-in$/, "sign-in"],
+  [/^\/oauth\/device$/, "device approval"],
+  [/^\/oauth\/grants\/revoke$/, "grant revoke"],
+  [/^\/oauth\/end-session$/, "end-session routes"],
+  [/^\/organizations\/delete$/, "the organization delete"],
+  [/^\/organizations\/members\/add$/, "the add"],
+  [/^\/organizations\/members\/role$/, "the role change"],
+  [/^\/organizations\/members\/remove$/, "the removal"],
+  [/^\/organizations\/invite$/, "the invitation of a member"],
+];
+
 /** A router code that a page names when its flow can meet it. `internal` is no answer of a flow. */
 const ROUTER = ROUTER_CODES.filter((c) => c !== "internal");
 
@@ -82,6 +114,31 @@ describe("the operator pages", () => {
     expect(codes.size).toBeGreaterThan(10);
     const page = "guides/operator-tools.mdx";
     expectLinks(page, section(page, "If it fails"), [...codes, ...ROUTER]);
+  });
+
+  it("names each refused route of an impersonation session in the guide", () => {
+    const page = "guides/operator-tools.mdx";
+    const text = section(page, "The impersonation");
+    const list = text.slice(text.indexOf("An impersonation session can never reach"));
+    const listed: readonly RouteEntry[] = ROUTES;
+    const refused = listed.filter((r) => r.codes.includes("impersonation_session"));
+    // IMPERSONATION_REFUSED holds 61 routes at plan 12f Task 14, so the list is never empty.
+    expect(refused.length).toBeGreaterThan(50);
+    const used = new Set<number>();
+    for (const r of refused) {
+      const at = REFUSED_WORDS.findIndex(([path]) => path.test(r.path));
+      expect({ route: `${r.method} ${r.path}`, rule: at >= 0 }).toEqual({
+        route: `${r.method} ${r.path}`,
+        rule: true,
+      });
+      used.add(at);
+    }
+    for (const [i, [path, words]] of REFUSED_WORDS.entries())
+      expect({ words, used: used.has(i), named: list.includes(words) }, String(path)).toEqual({
+        words,
+        used: true,
+        named: true,
+      });
   });
 
   it("links each code of create-admin and users get in the first operator runbook", () => {
