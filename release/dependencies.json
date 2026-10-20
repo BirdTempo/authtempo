@@ -1,0 +1,971 @@
+[
+  {
+    "name": "@astrojs/markdown-remark",
+    "kind": "dev",
+    "versions": ["7.3.2"],
+    "users": ["@authtempo/site"],
+    "reason": "The docs site renders its Markdown with it at build time.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@astrojs/node",
+    "kind": "runtime",
+    "versions": ["11.1.7"],
+    "users": ["authtempo-example-astro"],
+    "reason": "The Astro example serves its pages on Node with it.",
+    "read": "2026-10-20",
+    "seam": "examples/astro: the example app. No released package imports it."
+  },
+  {
+    "name": "@astrojs/starlight",
+    "kind": "dev",
+    "versions": ["0.42.6"],
+    "users": ["@authtempo/site"],
+    "reason": "The docs site builds its pages with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@biomejs/biome",
+    "kind": "dev",
+    "versions": ["2.5.15"],
+    "users": ["authtempo"],
+    "reason": "The repository formats and lints each file with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@changesets/cli",
+    "kind": "dev",
+    "versions": ["3.0.3"],
+    "users": ["authtempo"],
+    "reason": "The repository writes the versions and the changelogs with it; it never publishes (spec 33 item 2).",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@cloudflare/vitest-plugin",
+    "kind": "dev",
+    "versions": ["1.4.0"],
+    "users": [
+      "@authtempo/adapter-d1",
+      "@authtempo/compat-better-auth",
+      "@authtempo/demo",
+      "@authtempo/import",
+      "@authtempo/mcp",
+      "authtempo-example-mcp-server",
+      "authtempo-example-worker",
+      "authtempo-example-worker-d1"
+    ],
+    "reason": "The Worker tests run in workerd with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@cloudflare/workers-types",
+    "kind": "dev",
+    "versions": ["5.20261007.1"],
+    "users": [
+      "@authtempo/adapter-d1",
+      "@authtempo/breach-check",
+      "@authtempo/captcha-turnstile",
+      "@authtempo/compat-better-auth",
+      "@authtempo/demo",
+      "@authtempo/import",
+      "@authtempo/legacy-hashes",
+      "@authtempo/mcp",
+      "@authtempo/verify",
+      "authtempo-example-mcp-server",
+      "authtempo-example-pbkdf2-probe",
+      "authtempo-example-worker",
+      "authtempo-example-worker-d1",
+      "authtempo-example-worker-postgres"
+    ],
+    "reason": "The Worker code typechecks against the Workers runtime types with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@modelcontextprotocol/client",
+    "kind": "dev",
+    "versions": ["2.3.1"],
+    "users": ["@authtempo/mcp"],
+    "reason": "The MCP server tests call the server as a client with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@modelcontextprotocol/server",
+    "kind": "runtime",
+    "versions": ["2.3.1"],
+    "users": ["@authtempo/mcp", "authtempo-example-mcp-server"],
+    "reason": "The MCP server package and the MCP example answer the protocol with it (spec 13, update of 2026-10-14).",
+    "read": "2026-10-14",
+    "seam": "packages/mcp/src/protocol.ts; examples/mcp-server/src/mcp.ts"
+  },
+  {
+    "name": "@nestjs/common",
+    "kind": "runtime",
+    "versions": ["12.1.3"],
+    "users": ["authtempo-example-nestjs"],
+    "reason": "The NestJS example declares its module and controllers with it.",
+    "read": "2026-10-20",
+    "seam": "examples/nestjs: the example app. No released package imports it."
+  },
+  {
+    "name": "@nestjs/core",
+    "kind": "runtime",
+    "versions": ["12.1.3"],
+    "users": ["authtempo-example-nestjs"],
+    "reason": "The NestJS example starts its application with it.",
+    "read": "2026-10-20",
+    "seam": "examples/nestjs: the example app. No released package imports it."
+  },
+  {
+    "name": "@nestjs/platform-express",
+    "kind": "runtime",
+    "versions": ["12.1.3"],
+    "users": ["authtempo-example-nestjs"],
+    "reason": "The NestJS example runs on the Express platform with it.",
+    "read": "2026-10-20",
+    "seam": "examples/nestjs: the example app. No released package imports it."
+  },
+  {
+    "name": "@noble/hashes",
+    "kind": "runtime",
+    "versions": ["2.4.0"],
+    "users": ["@authtempo/compat-better-auth", "@authtempo/legacy-hashes"],
+    "reason": "The compat package verifies Better Auth scrypt hashes with it, and legacy-hashes derives the old hash forms with it (spec 13).",
+    "read": "2026-10-11",
+    "seam": "packages/compat-better-auth/src/hash.ts; packages/legacy-hashes/src/derive.ts"
+  },
+  {
+    "name": "@simplewebauthn/server",
+    "kind": "runtime",
+    "versions": ["14.0.3"],
+    "users": ["@authtempo/core"],
+    "reason": "Core runs the WebAuthn ceremonies with it (spec 13).",
+    "read": "2026-10-09",
+    "seam": "packages/core/src/seams/webauthn.ts"
+  },
+  {
+    "name": "@sinclair/typebox",
+    "kind": "runtime",
+    "versions": ["0.34.52"],
+    "users": ["authtempo-example-elysia"],
+    "reason": "The Elysia example installs it, because Elysia 1.4.30 declares it as a peer dependency.",
+    "read": "2026-10-20",
+    "seam": "examples/elysia: the example app. No released package imports it."
+  },
+  {
+    "name": "@solidjs/start",
+    "kind": "dev",
+    "versions": ["2.0.6"],
+    "users": ["@authtempo/solid"],
+    "reason": "The Solid package tests its SolidStart binding with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@solidjs/start",
+    "kind": "peer",
+    "versions": ["^2.0.6"],
+    "users": ["@authtempo/solid"],
+    "reason": "The app brings its own SolidStart; the Solid package binds to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@solidjs/start",
+    "kind": "runtime",
+    "versions": ["2.0.6"],
+    "users": ["authtempo-example-solid-start"],
+    "reason": "The SolidStart example renders and serves with it.",
+    "read": "2026-10-20",
+    "seam": "examples/solid-start: the example app. No released package imports it."
+  },
+  {
+    "name": "@sveltejs/adapter-node",
+    "kind": "dev",
+    "versions": ["6.0.0"],
+    "users": ["authtempo-example-sveltekit"],
+    "reason": "The SvelteKit example builds for Node with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@sveltejs/kit",
+    "kind": "dev",
+    "versions": ["3.0.1"],
+    "users": ["@authtempo/sveltekit", "authtempo-example-sveltekit"],
+    "reason": "The SvelteKit package tests its binding with it, and the SvelteKit example runs on it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@sveltejs/kit",
+    "kind": "peer",
+    "versions": ["^3.0.1"],
+    "users": ["@authtempo/sveltekit"],
+    "reason": "The app brings its own SvelteKit; the SvelteKit package binds to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@sveltejs/vite-plugin-svelte",
+    "kind": "dev",
+    "versions": ["7.3.1"],
+    "users": ["@authtempo/sveltekit", "authtempo-example-sveltekit"],
+    "reason": "The SvelteKit package and example compile Svelte files with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@tanstack/react-router",
+    "kind": "runtime",
+    "versions": ["1.170.44"],
+    "users": ["authtempo-example-tanstack-start"],
+    "reason": "The TanStack Start example routes its pages with it.",
+    "read": "2026-10-20",
+    "seam": "examples/tanstack-start: the example app. No released package imports it."
+  },
+  {
+    "name": "@tanstack/react-start",
+    "kind": "dev",
+    "versions": ["1.169.1"],
+    "users": ["@authtempo/tanstack-start"],
+    "reason": "The TanStack Start package tests its React binding with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@tanstack/react-start",
+    "kind": "runtime",
+    "versions": ["1.169.1"],
+    "users": ["authtempo-example-tanstack-start"],
+    "reason": "The TanStack Start example renders and serves with it.",
+    "read": "2026-10-20",
+    "seam": "examples/tanstack-start: the example app. No released package imports it."
+  },
+  {
+    "name": "@tanstack/solid-start",
+    "kind": "dev",
+    "versions": ["1.169.1"],
+    "users": ["@authtempo/tanstack-start"],
+    "reason": "The TanStack Start package tests its Solid binding with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@types/bun",
+    "kind": "dev",
+    "versions": ["1.4.3"],
+    "users": ["authtempo-example-node"],
+    "reason": "The Node example typechecks its Bun entry with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@types/express",
+    "kind": "dev",
+    "versions": ["5.0.6"],
+    "users": ["@authtempo/express", "authtempo-example-express", "authtempo-example-nestjs"],
+    "reason": "The Express package and the Express and NestJS examples typecheck against Express with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@types/node",
+    "kind": "dev",
+    "versions": ["24.19.1"],
+    "users": [
+      "@authtempo/cli",
+      "@authtempo/compat-better-auth",
+      "@authtempo/express",
+      "@authtempo/fastify",
+      "@authtempo/import",
+      "@authtempo/legacy-hashes",
+      "@authtempo/mcp",
+      "@authtempo/next",
+      "@authtempo/site",
+      "@authtempo/solid",
+      "authtempo",
+      "authtempo-example-astro",
+      "authtempo-example-electron",
+      "authtempo-example-elysia",
+      "authtempo-example-express",
+      "authtempo-example-fastify",
+      "authtempo-example-nestjs",
+      "authtempo-example-next",
+      "authtempo-example-node",
+      "authtempo-example-nuxt",
+      "authtempo-example-solid-start",
+      "authtempo-example-sveltekit",
+      "authtempo-example-tanstack-start",
+      "authtempo-example-worker-postgres",
+      "authtempo-release"
+    ],
+    "reason": "Each Node package typechecks against the Node APIs with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@types/parseurl",
+    "kind": "dev",
+    "versions": ["1.3.3"],
+    "users": ["@authtempo/express"],
+    "reason": "The Express package typechecks its parseurl call with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@types/react",
+    "kind": "dev",
+    "versions": ["19.3.0"],
+    "users": [
+      "@authtempo/compat-better-auth",
+      "@authtempo/react",
+      "@authtempo/sdk-conformance",
+      "authtempo-example-next",
+      "authtempo-example-react",
+      "authtempo-example-tanstack-start"
+    ],
+    "reason": "The React packages and examples typecheck against React with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "@types/react-dom",
+    "kind": "dev",
+    "versions": ["19.3.0"],
+    "users": [
+      "@authtempo/compat-better-auth",
+      "@authtempo/react",
+      "@authtempo/sdk-conformance",
+      "authtempo-example-next",
+      "authtempo-example-react",
+      "authtempo-example-tanstack-start"
+    ],
+    "reason": "The React packages and examples typecheck against React DOM with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "ajv",
+    "kind": "dev",
+    "versions": ["8.20.0"],
+    "users": ["@authtempo/core"],
+    "reason": "The core tests validate the OpenAPI document with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "astro",
+    "kind": "dev",
+    "versions": ["7.3.8"],
+    "users": ["@authtempo/astro", "@authtempo/site"],
+    "reason": "The Astro package tests its binding with it, and the docs site builds on it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "astro",
+    "kind": "peer",
+    "versions": ["^7.3.8"],
+    "users": ["@authtempo/astro"],
+    "reason": "The app brings its own Astro; the Astro package binds to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "astro",
+    "kind": "runtime",
+    "versions": ["7.3.8"],
+    "users": ["authtempo-example-astro"],
+    "reason": "The Astro example renders its pages with it.",
+    "read": "2026-10-20",
+    "seam": "examples/astro: the example app. No released package imports it."
+  },
+  {
+    "name": "bcryptjs",
+    "kind": "runtime",
+    "versions": ["3.0.3"],
+    "users": ["@authtempo/legacy-hashes"],
+    "reason": "legacy-hashes verifies imported bcrypt hashes with it (spec 13, amendment of 2026-10-11).",
+    "read": "2026-10-11",
+    "seam": "packages/legacy-hashes/src/derive.ts"
+  },
+  {
+    "name": "bun",
+    "kind": "dev",
+    "versions": ["1.4.3"],
+    "users": ["authtempo-example-elysia", "authtempo-example-node"],
+    "reason": "The Node and Elysia examples run their Bun tests with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "electron",
+    "kind": "dev",
+    "versions": ["44.7.0"],
+    "users": ["authtempo-example-electron"],
+    "reason": "The Electron example runs its main process test with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "elysia",
+    "kind": "runtime",
+    "versions": ["1.4.30"],
+    "users": ["authtempo-example-elysia"],
+    "reason": "The Elysia example serves its routes with it.",
+    "read": "2026-10-20",
+    "seam": "examples/elysia: the example app. No released package imports it."
+  },
+  {
+    "name": "exact-mirror",
+    "kind": "runtime",
+    "versions": ["0.2.7"],
+    "users": ["authtempo-example-elysia"],
+    "reason": "The Elysia example installs it, because Elysia 1.4.30 declares it as a peer dependency.",
+    "read": "2026-10-20",
+    "seam": "examples/elysia: the example app. No released package imports it."
+  },
+  {
+    "name": "express",
+    "kind": "dev",
+    "versions": ["5.3.0"],
+    "users": ["@authtempo/express"],
+    "reason": "The Express package tests its binding with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "express",
+    "kind": "peer",
+    "versions": ["^5.2.1"],
+    "users": ["@authtempo/express"],
+    "reason": "The app brings its own Express; the Express package binds to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "express",
+    "kind": "runtime",
+    "versions": ["5.2.1", "5.3.0"],
+    "users": ["authtempo-example-express", "authtempo-example-nestjs"],
+    "reason": "The Express and NestJS examples serve their routes with it.",
+    "read": "2026-10-20",
+    "seam": "examples/express; examples/nestjs: the example app. No released package imports it."
+  },
+  {
+    "name": "fastify",
+    "kind": "dev",
+    "versions": ["5.12.5"],
+    "users": ["@authtempo/fastify"],
+    "reason": "The Fastify package tests its binding with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "fastify",
+    "kind": "peer",
+    "versions": ["^5.12.5"],
+    "users": ["@authtempo/fastify"],
+    "reason": "The app brings its own Fastify; the Fastify package binds to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "fastify",
+    "kind": "runtime",
+    "versions": ["5.12.5"],
+    "users": ["authtempo-example-fastify"],
+    "reason": "The Fastify example serves its routes with it.",
+    "read": "2026-10-20",
+    "seam": "examples/fastify: the example app. No released package imports it."
+  },
+  {
+    "name": "file-type",
+    "kind": "runtime",
+    "versions": ["22.1.1"],
+    "users": ["authtempo-example-elysia"],
+    "reason": "The Elysia example installs it, because Elysia 1.4.30 declares it as a peer dependency.",
+    "read": "2026-10-20",
+    "seam": "examples/elysia: the example app. No released package imports it."
+  },
+  {
+    "name": "h3",
+    "kind": "dev",
+    "versions": ["1.15.11"],
+    "users": ["@authtempo/vue"],
+    "reason": "The Vue package tests its server helpers with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "h3",
+    "kind": "peer",
+    "versions": ["^1.15.11"],
+    "users": ["@authtempo/vue"],
+    "reason": "The app brings its own h3; the Vue package binds its server helpers to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "h3",
+    "kind": "runtime",
+    "versions": ["1.15.11"],
+    "users": ["authtempo-example-nuxt"],
+    "reason": "The Nuxt example reads the request events of its server routes with it.",
+    "read": "2026-10-20",
+    "seam": "examples/nuxt: the example app. No released package imports it."
+  },
+  {
+    "name": "happy-dom",
+    "kind": "dev",
+    "versions": ["20.14.6"],
+    "users": [
+      "@authtempo/react",
+      "@authtempo/sdk-conformance",
+      "@authtempo/solid",
+      "@authtempo/sveltekit",
+      "@authtempo/tanstack-start",
+      "@authtempo/vue",
+      "authtempo-example-next",
+      "authtempo-example-react",
+      "authtempo-example-solid"
+    ],
+    "reason": "The client hook tests run in a DOM with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "hono",
+    "kind": "dev",
+    "versions": ["4.13.13"],
+    "users": ["@authtempo/hono"],
+    "reason": "The Hono package tests its binding with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "hono",
+    "kind": "peer",
+    "versions": ["^4.13.13"],
+    "users": ["@authtempo/hono"],
+    "reason": "The app brings its own Hono; the Hono package binds to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "hono",
+    "kind": "runtime",
+    "versions": ["4.13.13"],
+    "users": ["authtempo-example-hono"],
+    "reason": "The Hono example serves its routes with it.",
+    "read": "2026-10-20",
+    "seam": "examples/hono: the example app. No released package imports it."
+  },
+  {
+    "name": "jose",
+    "kind": "dev",
+    "versions": ["6.2.12"],
+    "users": ["@authtempo/site"],
+    "reason": "The docs site tests sign and verify sample tokens with it.",
+    "read": "2026-10-09"
+  },
+  {
+    "name": "jose",
+    "kind": "runtime",
+    "versions": ["6.2.12"],
+    "users": ["@authtempo/core"],
+    "reason": "Core verifies ID tokens and fetches each JWKS with it (spec 13).",
+    "read": "2026-10-09",
+    "seam": "packages/core/src/seams/jwt.ts"
+  },
+  {
+    "name": "next",
+    "kind": "dev",
+    "versions": ["16.4.0"],
+    "users": ["@authtempo/next"],
+    "reason": "The Next.js package tests its binding with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "next",
+    "kind": "peer",
+    "versions": ["^16.4.0"],
+    "users": ["@authtempo/next"],
+    "reason": "The app brings its own Next.js; the Next.js package binds to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "next",
+    "kind": "runtime",
+    "versions": ["16.4.0"],
+    "users": ["authtempo-example-next"],
+    "reason": "The Next.js example renders and serves with it.",
+    "read": "2026-10-20",
+    "seam": "examples/next: the example app. No released package imports it."
+  },
+  {
+    "name": "nuxt",
+    "kind": "runtime",
+    "versions": ["4.6.1"],
+    "users": ["authtempo-example-nuxt"],
+    "reason": "The Nuxt example renders and serves with it.",
+    "read": "2026-10-20",
+    "seam": "examples/nuxt: the example app. No released package imports it."
+  },
+  {
+    "name": "openapi-types",
+    "kind": "runtime",
+    "versions": ["12.1.3"],
+    "users": ["authtempo-example-elysia"],
+    "reason": "The Elysia example installs it, because Elysia 1.4.30 declares it as a peer dependency.",
+    "read": "2026-10-20",
+    "seam": "examples/elysia: the example app. No released package imports it."
+  },
+  {
+    "name": "parseurl",
+    "kind": "runtime",
+    "versions": ["1.3.3"],
+    "users": ["@authtempo/express"],
+    "reason": "The Express adapter reads the raw path and query of the request line with it, as the Express router does.",
+    "read": "2026-10-20",
+    "seam": "packages/express/src/index.ts"
+  },
+  {
+    "name": "postgres",
+    "kind": "dev",
+    "versions": ["3.4.9"],
+    "users": [
+      "@authtempo/adapter-postgres",
+      "@authtempo/compat-better-auth",
+      "@authtempo/import",
+      "@authtempo/site"
+    ],
+    "reason": "The adapter, compat, import, and docs site tests open their Postgres databases with it.",
+    "read": "2026-10-09"
+  },
+  {
+    "name": "postgres",
+    "kind": "peer",
+    "versions": ["^3.4.9"],
+    "users": ["@authtempo/adapter-postgres", "@authtempo/compat-better-auth"],
+    "reason": "The app brings its own postgres driver and opens the database; the Postgres adapter and the compat package use that client.",
+    "read": "2026-10-09"
+  },
+  {
+    "name": "postgres",
+    "kind": "runtime",
+    "versions": ["3.4.9"],
+    "users": ["@authtempo/cli", "authtempo-example-node", "authtempo-example-worker-postgres"],
+    "reason": "The CLI connects to Postgres with it for migrate and import, and two examples open their database with it (spec 13).",
+    "read": "2026-10-09",
+    "seam": "packages/cli/src/seams/postgres.ts; examples/node/src/app.ts; examples/worker-postgres/src/index.ts"
+  },
+  {
+    "name": "react",
+    "kind": "dev",
+    "versions": ["19.3.0"],
+    "users": [
+      "@authtempo/compat-better-auth",
+      "@authtempo/next",
+      "@authtempo/react",
+      "@authtempo/react-router",
+      "@authtempo/sdk-conformance",
+      "@authtempo/tanstack-start"
+    ],
+    "reason": "The React packages test their hooks with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "react",
+    "kind": "peer",
+    "versions": ["^19.0.0"],
+    "users": ["@authtempo/compat-better-auth", "@authtempo/react"],
+    "reason": "The app brings its own React; the React package and the compat client hooks bind to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "react",
+    "kind": "runtime",
+    "versions": ["19.3.0"],
+    "users": [
+      "authtempo-example-next",
+      "authtempo-example-react",
+      "authtempo-example-react-router",
+      "authtempo-example-tanstack-start"
+    ],
+    "reason": "Four examples render their pages with it.",
+    "read": "2026-10-20",
+    "seam": "examples/next; examples/react; examples/react-router; examples/tanstack-start: the example app. No released package imports it."
+  },
+  {
+    "name": "react-dom",
+    "kind": "dev",
+    "versions": ["19.3.0"],
+    "users": [
+      "@authtempo/compat-better-auth",
+      "@authtempo/next",
+      "@authtempo/react",
+      "@authtempo/react-router",
+      "@authtempo/sdk-conformance",
+      "@authtempo/tanstack-start"
+    ],
+    "reason": "The React packages render their test components with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "react-dom",
+    "kind": "runtime",
+    "versions": ["19.3.0"],
+    "users": [
+      "authtempo-example-next",
+      "authtempo-example-react",
+      "authtempo-example-react-router",
+      "authtempo-example-tanstack-start"
+    ],
+    "reason": "Four examples render their pages into the DOM with it.",
+    "read": "2026-10-20",
+    "seam": "examples/next; examples/react; examples/react-router; examples/tanstack-start: the example app. No released package imports it."
+  },
+  {
+    "name": "react-router",
+    "kind": "dev",
+    "versions": ["8.4.0"],
+    "users": ["@authtempo/react-router"],
+    "reason": "The React Router package tests its binding with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "react-router",
+    "kind": "peer",
+    "versions": ["^8.4.0"],
+    "users": ["@authtempo/react-router"],
+    "reason": "The app brings its own React Router; the React Router package binds to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "react-router",
+    "kind": "runtime",
+    "versions": ["8.4.0"],
+    "users": ["authtempo-example-react-router"],
+    "reason": "The React Router example routes and serves its pages with it.",
+    "read": "2026-10-20",
+    "seam": "examples/react-router: the example app. No released package imports it."
+  },
+  {
+    "name": "reflect-metadata",
+    "kind": "runtime",
+    "versions": ["0.2.2"],
+    "users": ["authtempo-example-nestjs"],
+    "reason": "The NestJS example loads it once, because the NestJS decorators read its metadata.",
+    "read": "2026-10-20",
+    "seam": "examples/nestjs: the example app. No released package imports it."
+  },
+  {
+    "name": "rxjs",
+    "kind": "runtime",
+    "versions": ["7.8.2"],
+    "users": ["authtempo-example-nestjs"],
+    "reason": "The NestJS example installs it, because NestJS declares it as a peer dependency.",
+    "read": "2026-10-20",
+    "seam": "examples/nestjs: the example app. No released package imports it."
+  },
+  {
+    "name": "solid-js",
+    "kind": "dev",
+    "versions": ["1.9.17"],
+    "users": ["@authtempo/sdk-conformance", "@authtempo/solid", "@authtempo/tanstack-start"],
+    "reason": "The Solid packages test their bindings with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "solid-js",
+    "kind": "peer",
+    "versions": ["^1.9.17"],
+    "users": ["@authtempo/solid"],
+    "reason": "The app brings its own Solid; the Solid package binds to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "solid-js",
+    "kind": "runtime",
+    "versions": ["1.9.17"],
+    "users": ["authtempo-example-solid", "authtempo-example-solid-start"],
+    "reason": "The Solid and SolidStart examples render their pages with it.",
+    "read": "2026-10-20",
+    "seam": "examples/solid; examples/solid-start: the example app. No released package imports it."
+  },
+  {
+    "name": "svelte",
+    "kind": "dev",
+    "versions": ["5.57.2"],
+    "users": ["@authtempo/sveltekit", "authtempo-example-sveltekit"],
+    "reason": "The SvelteKit package and example compile their components with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "turbo",
+    "kind": "dev",
+    "versions": ["2.11.7"],
+    "users": ["authtempo"],
+    "reason": "The repository runs each task in each package with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "typescript",
+    "kind": "dev",
+    "versions": ["6.0.3", "7.0.2"],
+    "users": [
+      "@authtempo/adapter-d1",
+      "@authtempo/adapter-postgres",
+      "@authtempo/astro",
+      "@authtempo/breach-check",
+      "@authtempo/captcha-turnstile",
+      "@authtempo/cli",
+      "@authtempo/client",
+      "@authtempo/compat-better-auth",
+      "@authtempo/core",
+      "@authtempo/demo",
+      "@authtempo/express",
+      "@authtempo/fastify",
+      "@authtempo/handoff",
+      "@authtempo/hono",
+      "@authtempo/import",
+      "@authtempo/legacy-hashes",
+      "@authtempo/mcp",
+      "@authtempo/next",
+      "@authtempo/react",
+      "@authtempo/react-router",
+      "@authtempo/sdk-conformance",
+      "@authtempo/site",
+      "@authtempo/solid",
+      "@authtempo/sveltekit",
+      "@authtempo/tanstack-start",
+      "@authtempo/verify",
+      "@authtempo/vue",
+      "authtempo",
+      "authtempo-example-astro",
+      "authtempo-example-electron",
+      "authtempo-example-elysia",
+      "authtempo-example-express",
+      "authtempo-example-fastify",
+      "authtempo-example-hono",
+      "authtempo-example-mcp-server",
+      "authtempo-example-nestjs",
+      "authtempo-example-next",
+      "authtempo-example-node",
+      "authtempo-example-nuxt",
+      "authtempo-example-pbkdf2-probe",
+      "authtempo-example-react",
+      "authtempo-example-react-router",
+      "authtempo-example-solid",
+      "authtempo-example-solid-start",
+      "authtempo-example-sveltekit",
+      "authtempo-example-tanstack-start",
+      "authtempo-example-worker",
+      "authtempo-example-worker-d1",
+      "authtempo-example-worker-postgres",
+      "authtempo-release"
+    ],
+    "reason": "Each package typechecks with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "vite",
+    "kind": "dev",
+    "versions": ["8.3.3"],
+    "users": [
+      "@authtempo/compat-better-auth",
+      "@authtempo/import",
+      "@authtempo/solid",
+      "@authtempo/sveltekit",
+      "@authtempo/tanstack-start",
+      "authtempo-example-solid",
+      "authtempo-example-solid-start",
+      "authtempo-example-sveltekit",
+      "authtempo-example-tanstack-start"
+    ],
+    "reason": "The Vite-based packages and examples build and test with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "vitest",
+    "kind": "dev",
+    "versions": ["5.0.3"],
+    "users": [
+      "@authtempo/adapter-d1",
+      "@authtempo/adapter-postgres",
+      "@authtempo/astro",
+      "@authtempo/breach-check",
+      "@authtempo/captcha-turnstile",
+      "@authtempo/cli",
+      "@authtempo/client",
+      "@authtempo/compat-better-auth",
+      "@authtempo/core",
+      "@authtempo/demo",
+      "@authtempo/express",
+      "@authtempo/fastify",
+      "@authtempo/handoff",
+      "@authtempo/hono",
+      "@authtempo/import",
+      "@authtempo/legacy-hashes",
+      "@authtempo/mcp",
+      "@authtempo/next",
+      "@authtempo/react",
+      "@authtempo/react-router",
+      "@authtempo/sdk-conformance",
+      "@authtempo/site",
+      "@authtempo/solid",
+      "@authtempo/sveltekit",
+      "@authtempo/tanstack-start",
+      "@authtempo/verify",
+      "@authtempo/vue",
+      "authtempo-example-elysia",
+      "authtempo-example-express",
+      "authtempo-example-fastify",
+      "authtempo-example-hono",
+      "authtempo-example-mcp-server",
+      "authtempo-example-nestjs",
+      "authtempo-example-next",
+      "authtempo-example-pbkdf2-probe",
+      "authtempo-example-react",
+      "authtempo-example-react-router",
+      "authtempo-example-solid",
+      "authtempo-example-worker",
+      "authtempo-example-worker-d1",
+      "authtempo-example-worker-postgres",
+      "authtempo-release"
+    ],
+    "reason": "Each package runs its tests with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "vue",
+    "kind": "dev",
+    "versions": ["3.5.43"],
+    "users": ["@authtempo/sdk-conformance", "@authtempo/vue"],
+    "reason": "The Vue package tests its binding with it.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "vue",
+    "kind": "peer",
+    "versions": ["^3.5.43"],
+    "users": ["@authtempo/vue"],
+    "reason": "The app brings its own Vue; the Vue package binds to that copy.",
+    "read": "2026-10-20"
+  },
+  {
+    "name": "vue",
+    "kind": "runtime",
+    "versions": ["3.5.43"],
+    "users": ["authtempo-example-nuxt"],
+    "reason": "The Nuxt example renders its pages with it.",
+    "read": "2026-10-20",
+    "seam": "examples/nuxt: the example app. No released package imports it."
+  },
+  {
+    "name": "wrangler",
+    "kind": "dev",
+    "versions": ["4.148.0"],
+    "users": [
+      "@authtempo/adapter-d1",
+      "@authtempo/breach-check",
+      "@authtempo/captcha-turnstile",
+      "@authtempo/compat-better-auth",
+      "@authtempo/demo",
+      "@authtempo/import",
+      "@authtempo/legacy-hashes",
+      "@authtempo/mcp",
+      "@authtempo/site",
+      "@authtempo/verify",
+      "authtempo-example-mcp-server",
+      "authtempo-example-pbkdf2-probe",
+      "authtempo-example-worker",
+      "authtempo-example-worker-d1",
+      "authtempo-example-worker-postgres"
+    ],
+    "reason": "The Worker packages and examples run and dry-run their Workers with it.",
+    "read": "2026-10-09"
+  },
+  {
+    "name": "zod",
+    "kind": "runtime",
+    "versions": ["4.6.5"],
+    "users": ["@authtempo/core", "@authtempo/mcp"],
+    "reason": "Core validates each request body with it, and the MCP server declares its tool schemas with it (spec 13).",
+    "read": "2026-10-09",
+    "seam": "packages/core/src/http/body.ts and packages/core/src/http/contract/ (direct, in the routes only, spec 13); packages/mcp/src/protocol.ts and its tool files"
+  }
+]

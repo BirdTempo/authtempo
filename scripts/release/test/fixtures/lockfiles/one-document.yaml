@@ -1,0 +1,106 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  .:
+    devDependencies:
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
+  apps/site:
+    dependencies:
+      '@fixture/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      site-only:
+        specifier: 1.0.0
+        version: 1.0.0
+
+  packages/core:
+    dependencies:
+      '@fixture/util':
+        specifier: workspace:*
+        version: link:../util
+      copyleft:
+        specifier: 1.0.0
+        version: 1.0.0(peer-lib@2.0.0)
+    devDependencies:
+      dev-only:
+        specifier: 3.0.0
+        version: 3.0.0
+
+  packages/util:
+    dependencies:
+      '@scope/tiny':
+        specifier: 1.2.3
+        version: 1.2.3
+    optionalDependencies:
+      native-bit:
+        specifier: 0.1.0
+        version: 0.1.0
+
+packages:
+
+  '@scope/tiny@1.2.3':
+    resolution: {integrity: sha512-BBBB}
+
+  copyleft@1.0.0:
+    resolution: {integrity: sha512-CCCC}
+    peerDependencies:
+      peer-lib: ^2.0.0
+
+  dev-only@3.0.0:
+    resolution: {integrity: sha512-DDDD}
+
+  inner@4.5.6:
+    resolution: {integrity: sha512-EEEE}
+
+  native-bit@0.1.0:
+    resolution: {integrity: sha512-FFFF}
+    cpu: [arm64]
+    os: [darwin]
+
+  peer-lib@2.0.0:
+    resolution: {integrity: sha512-GGGG}
+
+  site-only@1.0.0:
+    resolution: {integrity: sha512-HHHH}
+
+  string-width@4.2.3:
+    resolution: {integrity: sha512-IIII}
+
+  typescript@7.0.2:
+    resolution: {integrity: sha512-JJJJ}
+    hasBin: true
+
+snapshots:
+
+  '@scope/tiny@1.2.3':
+    dependencies:
+      inner: 4.5.6
+      string-width-cjs: string-width@4.2.3
+
+  copyleft@1.0.0(peer-lib@2.0.0):
+    dependencies:
+      inner: 4.5.6
+      peer-lib: 2.0.0
+
+  dev-only@3.0.0: {}
+
+  inner@4.5.6: {}
+
+  native-bit@0.1.0:
+    optional: true
+
+  peer-lib@2.0.0: {}
+
+  site-only@1.0.0: {}
+
+  string-width@4.2.3: {}
+
+  typescript@7.0.2: {}
