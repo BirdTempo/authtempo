@@ -759,6 +759,41 @@ describe("migration 0010 (plan 12k)", () => {
     ]);
   });
 
+  it("creates core's two token tables with core's columns and indexes on D1 (Task 12)", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+      shipped0008,
+      shipped0009,
+      shipped0010,
+    ])
+      db.exec(text);
+    for (const [model, table, indexes] of [
+      ["apiToken", "ta_api_token", ["ix_ta_api_token__user_id", "ux_ta_api_token__token_hash"]],
+      [
+        "organizationToken",
+        "ta_organization_token",
+        ["ix_ta_organization_token__organization_id", "ux_ta_organization_token__token_hash"],
+      ],
+    ] as const) {
+      const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
+        (c) => c.name,
+      );
+      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+      const found = (db.prepare(`PRAGMA index_list(${table})`).all() as { name: string }[])
+        .map((i) => i.name)
+        .filter((name) => !name.startsWith("sqlite_autoindex_"))
+        .sort();
+      expect({ model, found }).toEqual({ model, found: [...indexes] });
+    }
+  });
+
   it("adds each column on Postgres only when it is absent", () => {
     const text = compatMigration0010Sql("postgres", resolveNames());
     expect(text).toContain(`ALTER TABLE "session" ADD COLUMN IF NOT EXISTS "activeTeamId" text;`);

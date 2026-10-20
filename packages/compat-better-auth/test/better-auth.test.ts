@@ -406,28 +406,6 @@ describe("betterAuth", () => {
     expect(sent.filter((m) => m.kind === "verify")).toHaveLength(2);
   });
 
-  it("answers 404 under /tokens: the package holds no API token until its api-key plan (plan 8b)", async () => {
-    const { auth } = app();
-    for (const [method, path] of [
-      ["POST", "/tokens"],
-      ["GET", "/tokens"],
-      ["POST", "/tokens/revoke"],
-      ["GET", "/tokens/current"],
-    ] as const) {
-      const res = await auth.handler(
-        new Request(`${BASE}/api/auth${path}`, {
-          method,
-          headers: { origin: BASE, "content-type": "application/json" },
-          ...(method === "POST" ? { body: "{}" } : {}),
-        }),
-      );
-      expect({ path, status: res.status }).toEqual({ path, status: 404 });
-    }
-    // Core under the shim has the routes: the 404 is the shim's.
-    const core = await auth.tempo.handle(new Request(`${BASE}/api/auth/tokens/current`));
-    expect(core.status).toBe(401);
-  });
-
   it("skips the unknown-IP key of the resend, which has a per-email limit (plan 8b)", async () => {
     const keys: string[] = [];
     const limiter = skipUnknownIp({

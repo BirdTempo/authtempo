@@ -4,6 +4,7 @@ import { betterAuthSchemaStorage, type D1DatabaseLike } from "../storage/index.j
 import {
   type BetterAuthTable,
   MAPPED_TABLES,
+  NAMED_TABLES,
   type NamingOptions,
   snake,
   TABLE_FIELDS,
@@ -37,7 +38,7 @@ export function namesFromDrizzle(
   let snakeVotes = 0;
   let camelVotes = 0;
   let pgSchema: string | undefined;
-  for (const t of MAPPED_TABLES) {
+  for (const t of NAMED_TABLES) {
     const table = schema?.[t] as Record<symbol, unknown> | undefined;
     if (!table) {
       if (usePlural) tables[t] = `${t}s`;

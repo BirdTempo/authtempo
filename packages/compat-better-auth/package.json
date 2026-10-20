@@ -24,6 +24,14 @@
       "types": "./dist/access.d.ts",
       "default": "./dist/access.js"
     },
+    "./api-key": {
+      "types": "./dist/api-key.d.ts",
+      "default": "./dist/api-key.js"
+    },
+    "./api-key/client": {
+      "types": "./dist/client/api-key.d.ts",
+      "default": "./dist/client/api-key.js"
+    },
     "./client": {
       "types": "./dist/client/index.d.ts",
       "default": "./dist/client/index.js"

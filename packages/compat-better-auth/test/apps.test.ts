@@ -12,6 +12,7 @@ import {
   memberAc,
   ownerAc,
 } from "../src/access.js";
+import { apiKey } from "../src/api-key.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { emailOTP, magicLink, organization, passkey } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
@@ -215,6 +216,57 @@ function consumerd(): BetterAuthOptions {
   };
 }
 
+/**
+ * consumerb apps/api/src/auth.ts at f4518c7, read 2026-10-21. The README still
+ * lists these as a refusal or a required edit, so they are removed: the
+ * `admin`, `jwt`, `mcp`, and `cimd` plugins. So are `passkey`, `magicLink`,
+ * and the Drizzle database. Added: `sendInvitationEmail`, and `authtempo.roleRanks`
+ * from its own RANK (src/roles.ts).
+ */
+function consumerb(): BetterAuthOptions {
+  const KEY_ACTIONS = ["create", "read", "update", "delete"] as const;
+  const ac = createAccessControl({ ...defaultStatements, apiKey: KEY_ACTIONS });
+  return {
+    appName: "Level AAA",
+    baseURL: "https://api.example.com",
+    basePath: "/api/auth",
+    secret: SECRET,
+    trustedOrigins: ["https://app.example.com"],
+    database: database(),
+    telemetry: { enabled: false },
+    plugins: [
+      organization({
+        creatorRole: "owner",
+        requireEmailVerificationOnInvitation: true,
+        ac,
+        roles: {
+          owner: ac.newRole({ ...ownerAc.statements, apiKey: [...KEY_ACTIONS] }),
+          admin: ac.newRole({ ...adminAc.statements, apiKey: [...KEY_ACTIONS] }),
+          member: ac.newRole({ ...memberAc.statements, apiKey: [] }),
+          viewer: ac.newRole({
+            organization: [],
+            member: [],
+            invitation: [],
+            team: [],
+            ac: [],
+            apiKey: [],
+          }),
+        },
+        organizationHooks: {},
+        sendInvitationEmail: async () => {},
+      }),
+      apiKey({
+        defaultPrefix: "laaa_",
+        enableMetadata: true,
+        references: "organization",
+        enableSessionForAPIKeys: false,
+        rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 600 },
+      }),
+    ],
+    authtempo: { roleRanks: { viewer: 1, member: 2, admin: 3, owner: 4 } },
+  };
+}
+
 describe("the apps' access control (plan 12k Task 10)", () => {
   it("constructs consumerc's option set with no refusal for ac, roles, or dynamicAccessControl", () => {
     const o = consumerc();
@@ -267,5 +319,20 @@ describe("the apps' access control (plan 12k Task 10)", () => {
       membersPerOrganization: 100,
       pendingInvitationsPerOrganization: 100,
     });
+  });
+
+  it("constructs consumerb's option set with no refusal for api-key", () => {
+    const o = consumerb();
+    expect(checkOptions(o).refusals).toEqual([]);
+    expect(() => betterAuth(o)).not.toThrow();
+    const config = mapOptions(o).config;
+    expect(config.tokens).toEqual({
+      defaultRateLimit: { seconds: 60, max: 600 },
+      movedPrefixes: ["laaa_"],
+    });
+    // Better Auth's apiKey delete is core's apiToken revoke: the four roles construct.
+    const org = organizationsOf(o).config.organizations;
+    expect(org.roles?.admin?.permissions.apiToken).toEqual(["create", "read", "update", "revoke"]);
+    expect(org.roles?.member?.permissions.apiToken).toBeUndefined();
   });
 });

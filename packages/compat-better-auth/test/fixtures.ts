@@ -6,6 +6,8 @@ import pgRole from "./fixtures/better-auth-1.7.2-organization-role.postgres.sql?
 import sqliteRole from "./fixtures/better-auth-1.7.2-organization-role.sqlite.sql?raw";
 import pgTeams from "./fixtures/better-auth-1.7.2-teams.postgres.sql?raw";
 import sqliteTeams from "./fixtures/better-auth-1.7.2-teams.sqlite.sql?raw";
+import pgApiKey from "./fixtures/better-auth-api-key-1.7.5.postgres.sql?raw";
+import sqliteApiKey from "./fixtures/better-auth-api-key-1.7.5.sqlite.sql?raw";
 import pgSnake from "./fixtures/consumer-i-snake.postgres.sql?raw";
 
 export const BETTER_AUTH_PG = pgCamel;
@@ -20,6 +22,9 @@ export const BETTER_AUTH_TEAMS_SQLITE = sqliteTeams;
 /** The team tables of Better Auth 1.4.21, with no memberCount and no membershipKey (ruling 41 of plan 12k). */
 export const BETTER_AUTH_1421_TEAMS_PG = pgTeams1421;
 export const BETTER_AUTH_1421_TEAMS_SQLITE = sqliteTeams1421;
+/** @better-auth/api-key 1.7.5's own apikey table, to apply after the fixture of its dialect (plan 12k Task 12). */
+export const BETTER_AUTH_API_KEY_PG = pgApiKey;
+export const BETTER_AUTH_API_KEY_SQLITE = sqliteApiKey;
 
 const FOREIGN_KEY = / references "\w+" \("id"\) on delete cascade/g;
 

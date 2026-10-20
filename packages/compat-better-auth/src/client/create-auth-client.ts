@@ -1,4 +1,5 @@
 import {
+  type ApiTokenSummaryJSON,
   type Client,
   type ClientFailure,
   type ClientResult,
@@ -6,6 +7,7 @@ import {
   type InvitationJSON,
   type MemberJSON,
   type OrganizationJSON,
+  type OrganizationTokenSummaryJSON,
   type PasskeySummaryJSON,
   type RoleJSON,
   type TeamJSON,
@@ -25,6 +27,7 @@ import type {
   AdminListUsersQuery,
   AdminSession,
   AdminUser,
+  ApiKey,
   AuthClient,
   ClientOptions,
   ClientPasskey,
@@ -175,6 +178,63 @@ function teamOf(t: TeamJSON): Team {
 function teamMemberOf(m: TeamMemberJSON): TeamMember {
   return { id: m.id, teamId: m.teamId, userId: m.userId, createdAt: new Date(m.createdAt) };
 }
+
+/**
+ * Core's token as Better Auth's key (plan 12k Task 12), as the server's
+ * toApiKey builds it: `start` is core's hint, and the refill fields are null.
+ */
+function keyOf(
+  t: ApiTokenSummaryJSON | OrganizationTokenSummaryJSON,
+  referenceId: string,
+): Omit<ApiKey, "key"> {
+  const date = (v: string | null) => (v === null ? null : new Date(v));
+  return {
+    id: t.id,
+    configId: "default",
+    name: t.name,
+    start: t.hint,
+    prefix: null,
+    referenceId,
+    refillInterval: null,
+    refillAmount: null,
+    lastRefillAt: null,
+    enabled: true,
+    rateLimitEnabled: t.rateLimit !== null,
+    rateLimitTimeWindow: t.rateLimit === null ? null : t.rateLimit.seconds * 1000,
+    rateLimitMax: t.rateLimit === null ? null : t.rateLimit.max,
+    requestCount: 0,
+    remaining: t.remaining,
+    lastRequest: date(t.lastUsedAt),
+    expiresAt: date(t.expiresAt),
+    createdAt: new Date(t.createdAt),
+    updatedAt: new Date(t.createdAt),
+    metadata: t.metadata,
+    permissions:
+      t.permissions === null
+        ? null
+        : (toBetterAuthNames(t.permissions) as Record<string, string[]>),
+  };
+}
+
+/** Better Auth's api-key codes of a refused key call (@better-auth/api-key 1.7.5, read 2026-10-21). */
+const keyCode = (f: ClientFailure): string | undefined =>
+  f.code === "not_found"
+    ? "KEY_NOT_FOUND"
+    : f.code === "forbidden_rank"
+      ? "INSUFFICIENT_API_KEY_PERMISSIONS"
+      : undefined;
+
+/** The server-only fields of a key create or update (dist/index.mjs:734 and :1485). */
+const SERVER_ONLY_KEY_FIELDS = [
+  "refillAmount",
+  "refillInterval",
+  "rateLimitMax",
+  "rateLimitTimeWindow",
+  "rateLimitEnabled",
+  "remaining",
+  "permissions",
+  "userId",
+] as const;
 
 /** Better Auth's codes of a refused team call (dist/plugins/organization/error-codes.mjs, read 2026-10-21). */
 const teamCode =
@@ -1239,6 +1299,117 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
               Object.hasOwn(clientRoles, part) &&
               (clientRoles[part] as Role).authorize(permissions).success,
           );
+      },
+    },
+    apiKey: {
+      async create({ name, expiresIn, prefix: _prefix, metadata, organizationId, ...rest }) {
+        // Better Auth refuses the server-only fields from a client (dist/index.mjs:734).
+        if (SERVER_ONLY_KEY_FIELDS.some((k) => rest[k] !== undefined && rest[k] !== null))
+          return { data: null, error: clientError("SERVER_ONLY_PROPERTY", 400) };
+        if (name === undefined || name === "")
+          return { data: null, error: clientError("NAME_REQUIRED", 400) };
+        let expiresInDays: number | null = null;
+        if (expiresIn !== undefined && expiresIn !== null) {
+          if (!Number.isSafeInteger(expiresIn) || expiresIn % 86_400 !== 0)
+            return notSupported("core takes expiresIn in whole days");
+          expiresInDays = expiresIn / 86_400;
+        }
+        const extra = metadata !== undefined ? { metadata } : {};
+        if (organizationId !== undefined)
+          return run(
+            (c) =>
+              c.organizations.tokens.create({
+                organizationId,
+                name,
+                // An organization token holds a set; none grants nothing (deviation 4 of plan 12k).
+                permissions: {},
+                expiresInDays,
+                ...extra,
+              }),
+            (v) => ({ ...keyOf(v.apiToken, organizationId), key: v.token }),
+            keyCode,
+          );
+        const userId = (await readSession(true)).data?.session.userId ?? "";
+        return run(
+          (c) => c.tokens.create({ name, expiresInDays, ...extra }),
+          (v) => ({ ...keyOf(v.apiToken, userId), key: v.token }),
+          keyCode,
+        );
+      },
+      async list(input) {
+        const organizationId = input?.query?.organizationId;
+        if (organizationId !== undefined)
+          return run(
+            (c) => c.organizations.tokens.list({ organizationId }),
+            (v) => v.map((t) => keyOf(t, organizationId)),
+            keyCode,
+          );
+        const userId = (await readSession(true)).data?.session.userId ?? "";
+        return run(
+          (c) => c.tokens.list(),
+          (v) => v.map((t) => keyOf(t, userId)),
+          keyCode,
+        );
+      },
+      async get({ query }) {
+        const { id, organizationId } = query;
+        const userId = (await readSession(true)).data?.session.userId ?? "";
+        const owner = organizationId ?? userId;
+        return run(
+          async (c): Promise<ClientResult<ApiTokenSummaryJSON | OrganizationTokenSummaryJSON>> => {
+            const list =
+              organizationId !== undefined
+                ? await c.organizations.tokens.list({ organizationId })
+                : await c.tokens.list();
+            if (!list.ok) return list;
+            const found = (
+              list.value as (ApiTokenSummaryJSON | OrganizationTokenSummaryJSON)[]
+            ).find((t) => t.id === id);
+            return found
+              ? { ok: true, value: found }
+              : { ok: false, code: "not_found", status: 404 };
+          },
+          (t) => keyOf(t, owner),
+          keyCode,
+        );
+      },
+      async update({ keyId, name, expiresIn, organizationId, ...rest }) {
+        if (SERVER_ONLY_KEY_FIELDS.some((k) => rest[k] !== undefined))
+          return { data: null, error: clientError("SERVER_ONLY_PROPERTY", 400) };
+        if (rest.enabled === false)
+          return notSupported("core has no disabled token; delete the key");
+        if (rest.metadata !== undefined)
+          return notSupported("core keeps the metadata of a token's create");
+        const expiresAt =
+          expiresIn === undefined
+            ? {}
+            : { expiresAt: new Date(Date.now() + expiresIn * 1000).toISOString() };
+        const named = name !== undefined ? { name } : {};
+        if (Object.keys(named).length === 0 && expiresIn === undefined)
+          return { data: null, error: clientError("NO_VALUES_TO_UPDATE", 400) };
+        if (organizationId !== undefined)
+          return run(
+            (c) =>
+              c.organizations.tokens.update({ organizationId, id: keyId, ...named, ...expiresAt }),
+            (t) => keyOf(t, organizationId),
+            keyCode,
+          );
+        const userId = (await readSession(true)).data?.session.userId ?? "";
+        return run(
+          (c) => c.tokens.update({ id: keyId, ...named, ...expiresAt }),
+          (t) => keyOf(t, userId),
+          keyCode,
+        );
+      },
+      delete({ keyId, organizationId }) {
+        return run(
+          (c) =>
+            organizationId !== undefined
+              ? c.organizations.tokens.revoke({ organizationId, id: keyId })
+              : c.tokens.revoke({ id: keyId }),
+          () => ({ success: true as const }),
+          keyCode,
+        );
       },
     },
     passkey: {

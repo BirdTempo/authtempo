@@ -11,8 +11,12 @@ export type BaseTable =
   | "invitation"
   | "passkey";
 
-/** Every Better Auth table this package reads or writes: 0001's tables and the three tables of plan 12k. */
-export type BetterAuthTable = BaseTable | "organizationRole" | "team" | "teamMember";
+/**
+ * Every Better Auth table this package reads or writes: 0001's tables, the
+ * three tables of plan 12k, and `apikey`. Only `moveBetterAuthApiKeys` reads
+ * `apikey` (plan 12k Task 12).
+ */
+export type BetterAuthTable = BaseTable | "organizationRole" | "team" | "teamMember" | "apikey";
 
 export const BETTER_AUTH_TABLES: readonly BaseTable[] = [
   "user",
@@ -37,6 +41,13 @@ export const MAPPED_TABLES: readonly BetterAuthTable[] = [
   "team",
   "teamMember",
 ];
+
+/**
+ * Every table that has names: the mapped tables and `apikey`. The api-key
+ * table is not mapped, and an app without the plugin has none. So no check
+ * or test walks it as a mapped table.
+ */
+export const NAMED_TABLES: readonly BetterAuthTable[] = [...MAPPED_TABLES, "apikey"];
 
 /**
  * The Better Auth 1.7 field names this package reads or writes, per table,
@@ -148,6 +159,32 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "taOrganizationId",
     "taUpdatedAt",
   ],
+  // @better-auth/api-key 1.7.5's columns (dist/types-y22rgFHR.d.mts, read 2026-10-21).
+  // No migration writes this table, and the storage never maps a model onto it.
+  apikey: [
+    "id",
+    "configId",
+    "name",
+    "start",
+    "referenceId",
+    "prefix",
+    "key",
+    "refillInterval",
+    "refillAmount",
+    "lastRefillAt",
+    "enabled",
+    "rateLimitEnabled",
+    "rateLimitTimeWindow",
+    "rateLimitMax",
+    "requestCount",
+    "remaining",
+    "lastRequest",
+    "expiresAt",
+    "createdAt",
+    "updatedAt",
+    "permissions",
+    "metadata",
+  ],
 };
 
 /**
@@ -205,7 +242,7 @@ export function resolveNames(options: NamingOptions = {}): Names {
   const tables = new Map<BetterAuthTable, string>();
   const forward = new Map<BetterAuthTable, Map<string, string>>();
   const back = new Map<BetterAuthTable, Map<string, string>>();
-  for (const t of MAPPED_TABLES) {
+  for (const t of NAMED_TABLES) {
     tables.set(t, ident(options.tables?.[t] ?? t, `tables.${t}`));
     const f = new Map<string, string>();
     const b = new Map<string, string>();

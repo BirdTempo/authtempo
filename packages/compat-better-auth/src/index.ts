@@ -1,5 +1,6 @@
 // The server entry. Under the alias it answers `better-auth`,
 // `@better-auth/drizzle-adapter`, `@better-auth/expo`, and `@better-auth/passkey`.
+// `@better-auth/api-key` is the entry `./api-key` (plan 12k Task 12).
 
 export { type DrizzleAdapterConfig, drizzleAdapter } from "./adapters/drizzle.js";
 export { BetterAuthCompatError } from "./compat-error.js";
@@ -13,6 +14,11 @@ export {
 export { betterAuthPasswordHash, SCRYPT, type ScryptFn } from "./hash.js";
 export { expo, passkey } from "./plugins.js";
 export { betterAuth } from "./server/better-auth.js";
+export {
+  type ApiKeyMoveInput,
+  type ApiKeyMoveReport,
+  moveBetterAuthApiKeys,
+} from "./storage/api-keys.js";
 export {
   betterAuthSchemaStorage,
   type D1DatabaseLike,

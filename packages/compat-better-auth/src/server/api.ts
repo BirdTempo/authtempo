@@ -15,8 +15,9 @@ import {
   compatApiError,
   passwordPolicyCode,
 } from "../errors.js";
-import type { Account, CompatServerApi } from "../types.js";
+import type { Account, ApiKeyServerApi, CompatServerApi } from "../types.js";
 import { type AdminCallInput, adminCall, roleOf, toAdminSession, toAdminUser } from "./admin.js";
+import { apiKeyApi } from "./api-key.js";
 import { sha256Hex } from "./mail.js";
 import type { Mapped } from "./map-options.js";
 import {
@@ -199,7 +200,10 @@ export async function sessionAnswerOf(
 /** Better Auth unlinks a credential account; core has no password removal. */
 export const CREDENTIAL_UNLINK = "core has no password removal; the credential account stays";
 
-export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true, true> {
+export function createApi(
+  auth: Auth,
+  mapped: Mapped,
+): CompatServerApi<true, true> & Partial<ApiKeyServerApi> {
   const { clientIp, plugins, appOrigin, minPasswordLength } = mapped;
   const storage = mapped.config.storage;
   const caller = (headers: Headers) => callerOf(auth, mapped, headers);
@@ -214,6 +218,8 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true, tru
   const admin = <T>(method: "GET" | "POST", path: string, input: AdminCallInput) =>
     adminCall(auth, mapped, method, path, input) as Promise<T>;
   return {
+    // Plan 12k Task 12: the api-key calls, with the plugin only, as in Better Auth.
+    ...apiKeyApi(auth, mapped, caller),
     async getSession({ headers }) {
       // A GET request: with session.deferSessionRefresh on, core reads with no write (plan 12a).
       const s = await auth.session(reqOf(headers));

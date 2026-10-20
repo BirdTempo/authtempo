@@ -71,6 +71,40 @@ export interface Account {
   updatedAt: Date;
 }
 
+/**
+ * Better Auth's API key, as @better-auth/api-key 1.7.5 answers it
+ * (dist/types-y22rgFHR.d.mts `ApiKey`, read 2026-10-21), from core's token
+ * (plan 12k Task 12). `start` holds core's hint, and `prefix` is null:
+ * core keeps no prefix per key. `enabled` is always true, because core has
+ * no disabled token. `requestCount` is 0: core's limiter holds the window.
+ */
+export interface ApiKey {
+  id: string;
+  configId: string;
+  name: string | null;
+  start: string | null;
+  prefix: string | null;
+  /** The user id, or the organization id of an organization key. */
+  referenceId: string;
+  /** Milliseconds, as in Better Auth. */
+  refillInterval: number | null;
+  refillAmount: number | null;
+  lastRefillAt: Date | null;
+  enabled: boolean;
+  rateLimitEnabled: boolean;
+  /** Milliseconds, as in Better Auth. */
+  rateLimitTimeWindow: number | null;
+  rateLimitMax: number | null;
+  requestCount: number;
+  remaining: number | null;
+  lastRequest: Date | null;
+  expiresAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+  metadata: Record<string, unknown> | null;
+  permissions: Record<string, string[]> | null;
+}
+
 /** What an account hook of the shim gets. Core's identity hook carries no row id (plan 12a). */
 export interface AccountHookFields {
   providerId: string;
@@ -475,6 +509,48 @@ export interface BearerOptions {
 /** `expo()` takes no option that authtempo maps. */
 export type ExpoOptions = Record<string, never>;
 
+/**
+ * Better Auth's api-key options (@better-auth/api-key 1.7.5
+ * dist/types-y22rgFHR.d.mts `ApiKeyConfigurationOptions`, read 2026-10-21).
+ * Plan 12k Task 12 maps `references`, `defaultPrefix`, `rateLimit`,
+ * `enableMetadata`, `requireName`, the name bounds, `keyExpiration`, and
+ * `permissions.defaultPermissions` (a set), and checks the rest
+ * (check-options.ts). Every key is here, so a refused key fails at
+ * construction by name, not in the compile.
+ */
+export interface ApiKeyOptions {
+  configId?: string;
+  apiKeyHeaders?: string | string[];
+  disableKeyHashing?: boolean;
+  customAPIKeyGetter?: unknown;
+  customAPIKeyValidator?: unknown;
+  customKeyGenerator?: unknown;
+  startingCharactersConfig?: { shouldStore?: boolean; charactersLength?: number };
+  defaultKeyLength?: number;
+  defaultPrefix?: string;
+  maximumPrefixLength?: number;
+  minimumPrefixLength?: number;
+  requireName?: boolean;
+  maximumNameLength?: number;
+  minimumNameLength?: number;
+  enableMetadata?: boolean;
+  keyExpiration?: {
+    defaultExpiresIn?: number | null;
+    disableCustomExpiresTime?: boolean;
+    minExpiresIn?: number;
+    maxExpiresIn?: number;
+  };
+  rateLimit?: { enabled?: boolean; timeWindow?: number; maxRequests?: number };
+  enableSessionForAPIKeys?: boolean;
+  permissions?: { defaultPermissions?: unknown };
+  storage?: "database" | "secondary-storage";
+  fallbackToDatabase?: boolean;
+  customStorage?: unknown;
+  deferUpdates?: boolean;
+  references?: "user" | "organization";
+  schema?: unknown;
+}
+
 interface Marker<I extends string, O> {
   readonly kind: typeof COMPAT_PLUGIN;
   readonly id: I;
@@ -488,6 +564,7 @@ export type BearerPlugin = Marker<"bearer", BearerOptions>;
 export type ExpoPlugin = Marker<"expo", ExpoOptions>;
 export type TwoFactorPlugin = Marker<"two-factor", TwoFactorOptions>;
 export type AdminPlugin = Marker<"admin", AdminOptions>;
+export type ApiKeyPlugin = Marker<"api-key", ApiKeyOptions>;
 export type CompatPlugin =
   | AdminPlugin
   | OrganizationPlugin
@@ -496,9 +573,10 @@ export type CompatPlugin =
   | EmailOtpPlugin
   | BearerPlugin
   | ExpoPlugin
-  | TwoFactorPlugin;
+  | TwoFactorPlugin
+  | ApiKeyPlugin;
 
-/** A plugin from a package this one does not replace, for example `@better-auth/api-key`. The check refuses it by id. */
+/** A plugin from a package this one does not replace, for example `@better-auth/sso`. The check refuses it by id. */
 export interface ForeignPlugin {
   id: string;
   [key: string]: unknown;
@@ -703,6 +781,12 @@ export interface BetterAuthOptions {
      * admin 2, owner 3.
      */
     roleRanks?: Record<string, number>;
+    /**
+     * The prefixes of moved Better Auth keys beside the api-key plugin's
+     * `defaultPrefix` (plan 12k Task 12). `moveBetterAuthApiKeys` reports
+     * each stored prefix. Core's `tokens.movedPrefixes` rule checks them.
+     */
+    movedKeyPrefixes?: string[];
   };
 }
 
@@ -726,6 +810,95 @@ export type HasTwoFactor<O extends BetterAuthOptions> = O extends {
       ? false
       : true
   : false;
+
+/** True when the option type names the api-key plugin, as `HasTwoFactor` does. */
+export type HasApiKey<O extends BetterAuthOptions> = O extends {
+  plugins: readonly (infer P)[];
+}
+  ? BetterAuthPlugin extends P
+    ? false
+    : [Extract<P, ApiKeyPlugin>] extends [never]
+      ? false
+      : true
+  : false;
+
+/** Better Auth's answer of a key check. `error` holds Better Auth's code. */
+export interface ApiKeyVerifyResult {
+  valid: boolean;
+  error: { code: string; message: string } | null;
+  key: Omit<ApiKey, "key"> | null;
+}
+
+/**
+ * The api-key calls of `auth.api` (@better-auth/api-key 1.7.5, plan 12k
+ * Task 12), on core's tokens. With `references: "organization"` each call
+ * acts on `api.organizationTokens`. With `headers` the caller is the session;
+ * without them the body's `userId` is, as in Better Auth. The server-only
+ * fields answer SERVER_ONLY_PROPERTY with `headers`.
+ */
+export interface ApiKeyServerApi {
+  createApiKey(input: {
+    body: {
+      configId?: string;
+      name?: string;
+      /** Seconds, whole days only. */
+      expiresIn?: number | null;
+      /** Accepted and not used: a new key has core's prefix. */
+      prefix?: string;
+      remaining?: number | null;
+      metadata?: Record<string, unknown>;
+      refillAmount?: number;
+      /** Milliseconds, whole seconds only. */
+      refillInterval?: number;
+      /** Milliseconds, whole seconds only. */
+      rateLimitTimeWindow?: number;
+      rateLimitMax?: number;
+      rateLimitEnabled?: boolean;
+      permissions?: Record<string, string[]>;
+      userId?: string;
+      organizationId?: string;
+    };
+    headers?: Headers;
+  }): Promise<ApiKey & { key: string }>;
+  /** Through `auth.authenticate`: it spends one call of the key's quota, as Better Auth does. */
+  verifyApiKey(input: {
+    body: { key: string; configId?: string; permissions?: Record<string, string[]> };
+  }): Promise<ApiKeyVerifyResult>;
+  getApiKey(input: {
+    query: { id: string; configId?: string };
+    headers: Headers;
+  }): Promise<Omit<ApiKey, "key">>;
+  listApiKeys(input: {
+    query?: { configId?: string; organizationId?: string };
+    headers: Headers;
+  }): Promise<Omit<ApiKey, "key">[]>;
+  /** Narrows only, as core's update. A wider value answers Better Auth's error for a bad body. */
+  updateApiKey(input: {
+    body: {
+      keyId: string;
+      configId?: string;
+      userId?: string;
+      name?: string;
+      enabled?: boolean;
+      remaining?: number;
+      refillAmount?: number;
+      refillInterval?: number;
+      metadata?: Record<string, unknown>;
+      expiresIn?: number | null;
+      rateLimitEnabled?: boolean;
+      rateLimitTimeWindow?: number;
+      rateLimitMax?: number;
+      permissions?: Record<string, string[]>;
+    };
+    headers?: Headers;
+  }): Promise<Omit<ApiKey, "key">>;
+  deleteApiKey(input: {
+    body: { keyId: string; configId?: string };
+    headers: Headers;
+  }): Promise<{ success: true }>;
+  /** Through core's `sweepExpired`, which deletes every expired row of core. */
+  deleteAllExpiredApiKeys(): Promise<{ success: boolean; error: unknown }>;
+}
 
 /**
  * True when the option type has the key
@@ -915,7 +1088,8 @@ export interface AdminUserList {
 
 export interface BetterAuthInstance<O extends BetterAuthOptions = BetterAuthOptions> {
   handler(request: Request): Promise<Response>;
-  api: CompatServerApi<HasTwoFactor<O>, RequiresVerification<O>>;
+  api: CompatServerApi<HasTwoFactor<O>, RequiresVerification<O>> &
+    (HasApiKey<O> extends true ? ApiKeyServerApi : unknown);
   /** Type-only, as in Better Auth: `Auth["$Infer"]["Session"]["user"]`. The runtime value is an empty object. */
   $Infer: { Session: { session: Session; user: User } };
   options: O;
@@ -1050,7 +1224,7 @@ export interface OrganizationClientOptions {
 export type ClientPlugin =
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
-      readonly id: "passkey" | "magic-link" | "email-otp" | "admin";
+      readonly id: "passkey" | "magic-link" | "email-otp" | "admin" | "api-key";
     }
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
@@ -1321,6 +1495,43 @@ export interface AuthClient<TF extends boolean = false> {
      * that core's rule refuses answers VALIDATION_ERROR (400).
      */
     checkSlug(input: { slug: string }): Promise<CompatClientResult<{ status: true }>>;
+  };
+  /**
+   * Better Auth's api-key calls on core's tokens (plan 12k Task 12). A call
+   * with `organizationId` acts on the organization's tokens, else on the
+   * session user's own. The server-only fields answer SERVER_ONLY_PROPERTY,
+   * as in Better Auth. `enabled` and a `metadata` change answer
+   * NOT_SUPPORTED (501): core has no disabled token and keeps its metadata.
+   */
+  apiKey: {
+    create(input: {
+      name?: string;
+      /** Seconds, whole days only. */
+      expiresIn?: number | null;
+      /** Accepted and not used: a new key has core's prefix. */
+      prefix?: string;
+      metadata?: Record<string, unknown>;
+      organizationId?: string;
+      [field: string]: unknown;
+    }): Promise<CompatClientResult<ApiKey & { key: string }>>;
+    list(input?: {
+      query?: { organizationId?: string };
+    }): Promise<CompatClientResult<Omit<ApiKey, "key">[]>>;
+    get(input: {
+      query: { id: string; organizationId?: string };
+    }): Promise<CompatClientResult<Omit<ApiKey, "key">>>;
+    update(input: {
+      keyId: string;
+      name?: string;
+      /** Seconds from now, whole days only. Earlier than the key's expiry only. */
+      expiresIn?: number;
+      organizationId?: string;
+      [field: string]: unknown;
+    }): Promise<CompatClientResult<Omit<ApiKey, "key">>>;
+    delete(input: {
+      keyId: string;
+      organizationId?: string;
+    }): Promise<CompatClientResult<{ success: true }>>;
   };
   passkey: {
     addPasskey(input?: { name?: string }): Promise<CompatClientResult<ClientPasskey>>;

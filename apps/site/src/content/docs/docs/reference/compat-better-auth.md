@@ -10,6 +10,7 @@ sources:
   - packages/compat-better-auth/README.md "JWT and the OAuth provider"
   - packages/compat-better-auth/README.md "The admin plugin"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
+  - packages/compat-better-auth/README.md "API keys"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16.1
 ---
 
@@ -44,6 +45,8 @@ Point each Better Auth package name that the app imports at the compatibility pa
 | `@better-auth/expo/client` | `./client`, the `expoClient` plugin |
 | `@better-auth/passkey` | `.`, the `passkey` plugin |
 | `@better-auth/passkey/client` | `./client`, the `passkeyClient` plugin |
+| `@better-auth/api-key` | `./api-key`, the `apiKey` plugin |
+| `@better-auth/api-key/client` | `./api-key/client`, the `apiKeyClient` plugin |
 
 An import of another subpath, such as `better-auth/db` or `better-auth/plugins/access`, fails at build. Remove those imports first.
 
@@ -59,6 +62,7 @@ An import of another subpath, such as `better-auth/db` or `better-auth/plugins/a
 | `expo` | Core's handoff through the system browser. `trustedOrigins` must hold the app scheme. |
 | `twoFactor` | Core's TOTP second factor on the password sign-in. Pass `accountLockout: { enabled: false }`. Core's gate on the magic link, the email code, and social stays off. A reset by code of a user with the factor on opens no session. |
 | `admin` | Core's operator tools. Needs `organization` and `authtempo.platformOrganization`. See [The admin plugin](#the-admin-plugin). |
+| `apiKey` | Core's API tokens: `tk_` for `references: "user"`, `to_` for `"organization"`. `rateLimit` is the window of a new key. `enableSessionForAPIKeys: true`, `disableKeyHashing: true`, and a custom generator are refused. [Cutover of API tokens](/docs/migrate/better-auth/#cutover-of-api-tokens) moves the old keys. |
 | `jwt`, `mcp`, `cimd`, `oidc-provider`, `oauth-provider` | Refused at start. Move to core's `createAuth` with `jwtMint` and `oauth`. |
 
 Any other plugin is refused at start by its id.

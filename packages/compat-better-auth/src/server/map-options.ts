@@ -10,6 +10,7 @@ import { defaultRoles } from "../access.js";
 import { betterAuthPasswordHash } from "../hash.js";
 import { CORE_RESOURCES, corePermissionsOf, toCoreNames } from "../role-map.js";
 import {
+  type ApiKeyOptions,
   type BetterAuthOptions,
   COMPAT_PLUGIN,
   type CompatDatabase,
@@ -76,6 +77,8 @@ export interface Mapped {
   changeVerifyBefore: ((user: User) => unknown) | null;
   /** The platform role of the `admin` plugin (plan 12f), or null without it. */
   platformRole: string | null;
+  /** The api-key plugin's options, or null without the plugin (plan 12k Task 12). */
+  apiKey: ApiKeyOptions | null;
 }
 
 /**
@@ -128,6 +131,37 @@ function clientIpOf(options: BetterAuthOptions): ((request: Request) => string |
     }
     return null;
   };
+}
+
+/**
+ * Better Auth 1.7.5's key window when `rateLimit` names none: 10 calls a day
+ * (@better-auth/api-key dist/index.mjs:2333 to :2337, read 2026-10-21).
+ */
+export const API_KEY_DEFAULT_WINDOW = { seconds: 86_400, max: 10 } as const;
+
+/**
+ * The api-key plugin as core's `tokens` (plan 12k Task 12). `rateLimit` is
+ * the window of a new key: check-options keeps `timeWindow` in whole
+ * seconds. The moved prefixes are `defaultPrefix` and
+ * `authtempo.movedKeyPrefixes`, each once. A bearer with one goes to the
+ * hash lookup of the moved keys (ruling 4 of plan 12k).
+ */
+function apiKeyTokens(options: BetterAuthOptions): Pick<AuthConfig, "tokens"> {
+  const keys = pluginOf(options, "api-key")?.options;
+  if (!keys) return {};
+  const rate = keys.rateLimit;
+  const defaultRateLimit =
+    rate?.enabled === false
+      ? null
+      : {
+          seconds: (rate?.timeWindow ?? API_KEY_DEFAULT_WINDOW.seconds * 1000) / 1000,
+          max: rate?.maxRequests ?? API_KEY_DEFAULT_WINDOW.max,
+        };
+  const prefixes = [
+    ...(keys.defaultPrefix !== undefined ? [keys.defaultPrefix] : []),
+    ...(options.authtempo?.movedKeyPrefixes ?? []),
+  ];
+  return { tokens: { defaultRateLimit, movedPrefixes: [...new Set(prefixes)] } };
 }
 
 type OrganizationsConfig = Extract<AuthConfig["organizations"], object>;
@@ -455,6 +489,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
         }
       : {}),
     ...pluginConfig(options),
+    ...apiKeyTokens(options),
     hooks: compatHooks(options),
   };
   return {
@@ -472,5 +507,6 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     },
     changeVerifyBefore: options.emailVerification?.beforeEmailVerification ?? null,
     platformRole: admin ? platformRoleOf(admin.options) : null,
+    apiKey: pluginOf(options, "api-key")?.options ?? null,
   };
 }

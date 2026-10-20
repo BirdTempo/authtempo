@@ -53,10 +53,7 @@ runAdapterConformance(
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
   },
-  {
-    unmapped: ["apiToken", "organizationToken"],
-    rowLocks: true,
-  },
+  { rowLocks: true },
 );
 
 runAdapterConformance(
@@ -67,10 +64,7 @@ runAdapterConformance(
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
   },
-  {
-    unmapped: ["apiToken", "organizationToken"],
-    rowLocks: true,
-  },
+  { rowLocks: true },
 );
 
 /** Rows as Better Auth 1.7 writes them, inserted before the migration, on the fixture with its foreign keys. */
@@ -559,6 +553,8 @@ describe("the compat migration on postgres", () => {
       expect(added).toEqual([
         // Better Auth's own table of dynamicAccessControl, which the fixture lacks (migration 0010).
         "organizationRole",
+        // Core's own token tables (migration 0010, Task 12).
+        "ta_api_token",
         "ta_jwk",
         "ta_limit",
         "ta_meta",
@@ -570,6 +566,7 @@ describe("the compat migration on postgres", () => {
         "ta_oauth_subject",
         "ta_oauth_token",
         "ta_operator_audit",
+        "ta_organization_token",
         "ta_second_factor",
         "ta_totp",
         "ta_trusted_device",
@@ -595,6 +592,8 @@ describe("the compat migration on postgres", () => {
         "oauthSessionClient",
         "oauthLogout",
         "operatorAudit",
+        "apiToken",
+        "organizationToken",
       ] as const) {
         const cols = await pg.sql.unsafe<{ c: string }[]>(
           "SELECT column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
@@ -624,6 +623,8 @@ describe("the compat migration on postgres", () => {
         "oauthSessionClient",
         "oauthLogout",
         "operatorAudit",
+        "apiToken",
+        "organizationToken",
       ] as const) {
         const cols = await pg.sql.unsafe<
           { column_name: string; is_nullable: string; data_type: string }[]
@@ -668,6 +669,8 @@ describe("the compat migration on postgres", () => {
         "oauthSessionClient",
         "oauthLogout",
         "operatorAudit",
+        "apiToken",
+        "organizationToken",
       ] as const) {
         const rows = await pg.sql.unsafe<{ indexname: string; indexdef: string }[]>(
           "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1 AND indexname <> $2",
@@ -747,6 +750,8 @@ describe("the compat undo of a created user", () => {
         ' AND NOT EXISTS (SELECT 1 FROM "session" WHERE "user_id" = ?)' +
         ' AND NOT EXISTS (SELECT 1 FROM "passkey" WHERE "user_id" = ?)' +
         ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "user_id" = ?)' +
+        // Core's own token table since plan 12k Task 12.
+        " AND NOT EXISTS (SELECT 1 FROM ta_api_token WHERE user_id = ?)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_totp WHERE user_id = ?)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = ?)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_consent WHERE user_id = ?)" +
@@ -758,7 +763,7 @@ describe("the compat undo of a created user", () => {
         " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = ?)" +
         // Better Auth's teamMember table keeps its own name, as organizationRole does (plan 12k Task 11).
         ' AND NOT EXISTS (SELECT 1 FROM "teamMember" WHERE "user_id" = ?)',
-      params: ["u4", 0, ...Array(14).fill("u4")],
+      params: ["u4", 0, ...Array(15).fill("u4")],
     });
     expect(st.undoCreate("user", user("u5", "y@example.com"))).toEqual({
       sql:
@@ -767,17 +772,18 @@ describe("the compat undo of a created user", () => {
         ' AND NOT EXISTS (SELECT 1 FROM "session" WHERE "userId" = $3)' +
         ' AND NOT EXISTS (SELECT 1 FROM "passkey" WHERE "userId" = $4)' +
         ' AND NOT EXISTS (SELECT 1 FROM "member" WHERE "userId" = $5)' +
-        " AND NOT EXISTS (SELECT 1 FROM ta_totp WHERE user_id = $6)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = $7)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_consent WHERE user_id = $8)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_token WHERE user_id = $9)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_device WHERE user_id = $10)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_subject WHERE user_id = $11)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_session_client WHERE user_id = $12)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_logout WHERE user_id = $13)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = $14)" +
-        ' AND NOT EXISTS (SELECT 1 FROM "teamMember" WHERE "userId" = $15)',
-      params: Array(15).fill("u5"),
+        " AND NOT EXISTS (SELECT 1 FROM ta_api_token WHERE user_id = $6)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_totp WHERE user_id = $7)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_trusted_device WHERE user_id = $8)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_consent WHERE user_id = $9)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_token WHERE user_id = $10)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_device WHERE user_id = $11)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_subject WHERE user_id = $12)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_session_client WHERE user_id = $13)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_oauth_logout WHERE user_id = $14)" +
+        " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = $15)" +
+        ' AND NOT EXISTS (SELECT 1 FROM "teamMember" WHERE "userId" = $16)',
+      params: Array(16).fill("u5"),
     });
   });
 

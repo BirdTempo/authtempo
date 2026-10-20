@@ -6,6 +6,7 @@ export { CLIENT_SESSION_KEYS, CLIENT_USER_KEYS, createAuthClient } from "./creat
 export { expoClient } from "./expo.js";
 export {
   adminClient,
+  apiKeyClient,
   emailOTPClient,
   magicLinkClient,
   organizationClient,

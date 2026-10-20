@@ -10,6 +10,8 @@ sources:
   - packages/compat-better-auth/README.md "Account operations"
   - packages/compat-better-auth/README.md "JWT and the OAuth provider"
   - packages/compat-better-auth/README.md "The admin plugin"
+  - packages/compat-better-auth/README.md "API keys"
+  - packages/compat-better-auth/README.md "Cutover of API keys"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
   - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 9"
@@ -75,6 +77,7 @@ authtempo migrate --target d1 --database <database> --remote --tables compat --d
     "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.0.0",
     "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.0.0",
     "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/api-key": "npm:@authtempo/compat-better-auth@0.0.0",
     "@authtempo/core": "0.0.0",
     "@authtempo/client": "0.0.0",
     "@authtempo/handoff": "0.0.0",
@@ -142,7 +145,7 @@ The bans of the admin plugin need no step. Compat migration 0009 copies each ban
 | `0007_compat_schema_v10.sql` | Adds `taFreshAt` to `session`, nullable, with no fill. Tables with other names take the text of `compatMigration0007Sql("sqlite", storage.names)`. |
 | `0008_compat_schema_v11.sql` | Adds the version 11 columns to `ta_oauth_client` and `ta_oauth_token`, and adds `ta_oauth_device`, `ta_oauth_subject`, `ta_oauth_session_client`, and `ta_oauth_logout`. The same text for every naming. |
 | `0009_compat_schema_v12.sql` | Adds `taBannedAt`, `taBanReason`, and `taBanUntil` to `user` and `taActorId` to `session`, nullable, and adds `ta_operator_audit`. It copies each ban of the admin plugin into the three ban columns. Tables with other names take the text of `compatMigration0009Sql("sqlite", storage.names)`. |
-| `0010_compat_schema_v13.sql` | Adds `activeTeamId` to `session` and `teamId` to `invitation`, nullable, with no fill. Creates Better Auth's `organizationRole` when it is absent, and adds `taRank` (default 1) and the unique key on (`organizationId`, `role`). Creates Better Auth's `team` and `teamMember` when they are absent. Adds `teamMember.taOrganizationId` and `taUpdatedAt` with a fill, and the unique key on (`teamId`, `userId`). The `d1-before-1.7` file also adds `team.memberCount` (default 0) and `teamMember.membershipKey` (unique), which the team tables of Better Auth 1.4.21 lack. Tables with other names take the text of `compatMigration0010Sql("sqlite", storage.names)`, with `"before-1.7"` as the third argument for tables from before 1.7. |
+| `0010_compat_schema_v13.sql` | Adds `activeTeamId` to `session` and `teamId` to `invitation`, nullable, with no fill. Creates Better Auth's `organizationRole` when it is absent, and adds `taRank` (default 1) and the unique key on (`organizationId`, `role`). Creates Better Auth's `team` and `teamMember` when they are absent. Adds `teamMember.taOrganizationId` and `taUpdatedAt` with a fill, and the unique key on (`teamId`, `userId`). Adds core's `ta_api_token` and `ta_organization_token`. The `d1-before-1.7` file also adds `team.memberCount` (default 0) and `teamMember.membershipKey` (unique), which the team tables of Better Auth 1.4.21 lack. Tables with other names take the text of `compatMigration0010Sql("sqlite", storage.names)`, with `"before-1.7"` as the third argument for tables from before 1.7. |
 
 A file number lower than the Better Auth table migration makes every new database fail at the compat file with `no such table`.
 
@@ -151,6 +154,20 @@ Better Auth's `teams` option adds `session.activeTeamId` and `invitation.teamId`
 The app applies the files to 0009 and its own 0010 with `wrangler d1 migrations apply` before `authtempo migrate --target d1 --tables compat`. Then the compat version is 10, and the command copies nothing. On Postgres, the 0010 adds each column only when it is absent, so no own file is necessary.
 
 The table prefix `ta_` keeps the old product name tempo-auth for compatibility. [Schema and migrations](/docs/reference/schema/) states the rule.
+
+## Cutover of API tokens
+
+The `apiKey` plugin maps onto core's API tokens. Better Auth stores the SHA-256 of the whole key. So `moveBetterAuthApiKeys` moves each key into core's token table, and the key keeps working under the same secret. A new key has core's prefix, `tk_` for a user or `to_` for an organization. Each step states what breaks without it.
+
+1. Before the cutover, run `moveBetterAuthApiKeys` with `dryRun: true` against a copy of the database. The report gives the count of keys per owner and the stored prefixes. Without it, you do not know whom to tell, or which prefixes to list.
+2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Without it, a moved key with that prefix answers `INVALID_API_KEY`.
+3. Tell each owner whose key the report skips: a disabled key, an expired key, or a key with no digest. After the cutover such a key answers 401 `token_retired`, and every script that uses one stops.
+4. Deploy the shim build with the compat migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
+5. Run `moveBetterAuthApiKeys` with `dryRun: false` once. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
+6. Change the app code that reads the `apikey` table itself, and each check of the old prefix. Without it, a new `to_` key never authenticates, and the key list shows only the old table.
+7. When every owner moved, drop the `apikey` table yourself. No migration of authtempo drops it, because it is your record.
+
+A moved key counts against the cap of 50 live tokens per owner, because it acts.
 
 ## How it behaves
 
@@ -187,6 +204,7 @@ Warning: a `secret` other than the app's value locks every user with the second 
 - `no such column: issuer` on D1: the 1.7 file ran on tables from before Better Auth 1.7. The failed run left its compat copies in `migrations_dir`. Delete each copy whose name ends in `_compat_better_auth.sql`, or in `_compat_schema_v5.sql` to `_compat_schema_v10.sql`. Then run the command again with `--before-1.7`.
 - `duplicate column name: memberCount` on D1: the `d1-before-1.7` 0010 ran on the team tables of Better Auth 1.7. Use the `d1` file.
 - [`invalid_token`](/docs/reference/errors/#invalid_token): a magic link, an invitation, or a delete link from before the cutover. Send it again.
+- [`token_retired`](/docs/reference/errors/#token_retired): an old Better Auth key that did not move, because Better Auth held it disabled, expired, or with no digest. Create a new key.
 
 ## Next
 

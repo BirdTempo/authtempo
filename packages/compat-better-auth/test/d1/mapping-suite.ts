@@ -43,6 +43,8 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">) {
         "ta_oauth_session_client",
         "ta_oauth_logout",
         "ta_operator_audit",
+        "ta_api_token",
+        "ta_organization_token",
       ].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
     );
   };
@@ -99,10 +101,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
       return { adapter: db(), close: truncate };
     },
     // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
-    {
-      unmapped: ["apiToken", "organizationToken"],
-      updateInTransaction: 2,
-    },
+    { updateInTransaction: 2 },
   );
 
   describe(`the Better Auth mapping on D1, ${label}`, () => {

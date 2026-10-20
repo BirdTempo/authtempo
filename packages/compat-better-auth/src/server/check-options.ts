@@ -384,6 +384,97 @@ const dynamicAccess: Rule = (v, p, out) => {
   )(v, p, out);
 };
 
+/** Spec 29 item 20: the section that each refusal of the api-key map names. */
+const ITEM_20 = "(spec 29 item 20)";
+
+/** A Better Auth length in milliseconds that core takes in whole seconds. */
+const wholeSecondsMs: Rule = (v, p, out) => {
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1000 || v % 1000 !== 0)
+    refuse(out, p, `core takes whole seconds: a positive multiple of 1000 ms ${ITEM_20}`);
+};
+
+/** `apiKeyHeaders`: core reads a key from `Authorization: Bearer` only. */
+const bearerHeader: Rule = (v, p, out) => {
+  const list = Array.isArray(v) ? v : [v];
+  if (
+    list.length === 0 ||
+    list.some((h) => typeof h !== "string" || h.toLowerCase() !== "authorization")
+  )
+    refuse(out, p, `core reads a key from Authorization: Bearer only ${ITEM_20}`);
+};
+
+/** A statement set of Better Auth's names: an object of lists of strings. Core checks the names. */
+const statementSet: Rule = (v, p, out) => {
+  if (typeof v === "function") {
+    refuse(out, p, `a function is refused; pass a set ${ITEM_20}`);
+    return;
+  }
+  eachKey(v, p, out, (_resource, actions, path) => stringList(actions, path, out));
+};
+
+/**
+ * `apiKey` of @better-auth/api-key 1.7.5 (dist/types-y22rgFHR.d.mts
+ * `ApiKeyConfigurationOptions` and the defaults of dist/index.mjs:2318 to
+ * :2350, read 2026-10-21): every key. Each one maps onto core's tokens
+ * (map-options.ts, server/api-key.ts), is a note, or is refused here.
+ */
+const apiKeyRule = object({
+  configId: noted("core keeps one token model; the id names no second configuration"),
+  apiKeyHeaders: bearerHeader,
+  disableKeyHashing: only(false, `core keeps the SHA-256 of a key, never the key ${ITEM_20}`),
+  customAPIKeyGetter: refused(`core reads a key from Authorization: Bearer only ${ITEM_20}`),
+  customAPIKeyValidator: refused(`core checks a key itself ${ITEM_20}`),
+  customKeyGenerator: refused(`core makes each key from 32 random bytes ${ITEM_20}`),
+  startingCharactersConfig: object({
+    shouldStore: only(true, `core always keeps a hint of 8 characters ${ITEM_20}`),
+    charactersLength: refused(`core's hint holds 8 characters after the prefix ${ITEM_20}`),
+  }),
+  defaultKeyLength: noted("core's key holds 32 random bytes in base64url after its prefix"),
+  defaultPrefix: string,
+  maximumPrefixLength: noted(
+    "a new key has core's prefix, so the create body's prefix is not used",
+  ),
+  minimumPrefixLength: noted(
+    "a new key has core's prefix, so the create body's prefix is not used",
+  ),
+  requireName: boolean,
+  maximumNameLength: (v, p, out) => {
+    if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > 80)
+      refuse(out, p, `core takes a name of 1 to 80 characters ${ITEM_20}`);
+  },
+  minimumNameLength: (v, p, out) => {
+    if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > 80)
+      refuse(out, p, `core takes a name of 1 to 80 characters ${ITEM_20}`);
+  },
+  enableMetadata: boolean,
+  keyExpiration: object({
+    defaultExpiresIn: (v, p, out) => {
+      if (v !== null) seconds(DAY, DAY, 3650 * DAY, `core takes whole days ${ITEM_20}`)(v, p, out);
+    },
+    disableCustomExpiresTime: boolean,
+    minExpiresIn: positiveInteger,
+    maxExpiresIn: (v, p, out) => {
+      if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > 3650)
+        refuse(out, p, `core takes a life of 1 to 3650 days ${ITEM_20}`);
+    },
+  }),
+  rateLimit: object({
+    enabled: boolean,
+    timeWindow: wholeSecondsMs,
+    maxRequests: positiveInteger,
+  }),
+  enableSessionForAPIKeys: only(false, "a key never acts as a session, spec 8.8 item 6"),
+  permissions: object({ defaultPermissions: statementSet }),
+  storage: only("database", `core keeps every token in its own table ${ITEM_20}`),
+  fallbackToDatabase: only(false, `core keeps every token in its own table ${ITEM_20}`),
+  customStorage: refused(`core keeps every token in its own table ${ITEM_20}`),
+  deferUpdates: only(false, `core writes the spend before it answers ${ITEM_20}`),
+  references: (v, p, out) => {
+    if (v !== "user" && v !== "organization") refuse(out, p, 'expected "user" or "organization"');
+  },
+  schema: refused(`core keeps its own token tables ${ITEM_20}`),
+});
+
 const PLUGIN_RULES: Record<string, Rule> = {
   organization: object(
     {
@@ -533,6 +624,12 @@ const PLUGIN_RULES: Record<string, Rule> = {
   }),
   expo: object({}, "core's handoff serves the Expo client; this option is refused"),
   admin: object(ADMIN_RULES, "not mapped onto core's operator tools (spec section 26 item 14)"),
+  "api-key": (v, p, out) => {
+    // Better Auth 1.7.5 takes a list of configurations, each with a configId (deviation 15 of plan 12k).
+    if (Array.isArray(v))
+      refuse(out, p, `core keeps one token model; pass one options object ${ITEM_20}`);
+    else apiKeyRule(v, p, out);
+  },
 };
 
 const FOREIGN_PLUGINS: Record<string, string> = {
@@ -541,7 +638,6 @@ const FOREIGN_PLUGINS: Record<string, string> = {
   cimd: PROVIDER_NOT_MAPPED,
   "oidc-provider": PROVIDER_NOT_MAPPED,
   "oauth-provider": PROVIDER_NOT_MAPPED,
-  "api-key": "not mapped; see the plan index",
   anonymous: "authtempo has no anonymous sign-in",
   username: "authtempo has no username sign-in",
   // Better Auth 1.7.2 ids (dist/plugins/captcha and dist/plugins/haveibeenpwned, read 2026-10-15).
@@ -850,6 +946,8 @@ const TOP: Record<string, Rule> = {
         if (typeof rank !== "number" || !Number.isSafeInteger(rank) || rank < 1)
           refuse(out, path, `expected a positive integer ${ITEM_18}`);
       }),
+    // Plan 12k Task 12: core's tokens.movedPrefixes rule checks each entry at createAuth.
+    movedKeyPrefixes: stringList,
   }),
   databaseHooks,
   hooks: refused(NO_REQUEST_HOOKS),
@@ -1115,6 +1213,16 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
         refuse(out, `plugins[passkey].${key}`, "required");
     }
   }
+  const keys = pluginOf(options, "api-key")?.options;
+  // Better Auth 1.7.5 answers ORGANIZATION_PLUGIN_REQUIRED at the first call (dist/index.mjs:526).
+  if (keys?.references === "organization" && !org)
+    refuse(
+      out,
+      "plugins[api-key].references",
+      `"organization" needs plugins[organization] ${ITEM_20}`,
+    );
+  if (options.authtempo?.movedKeyPrefixes !== undefined && !keys)
+    refuse(out, "authtempo.movedKeyPrefixes", `needs plugins[api-key] ${ITEM_20}`);
   const tf = pluginOf(options, "two-factor")?.options;
   if (tf && options.emailAndPassword?.enabled !== true)
     refuse(

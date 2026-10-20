@@ -100,20 +100,20 @@ function notCredential(provider: string): string {
 }
 
 /**
- * Core's models that have a Better Auth table. Core's `apiToken` (plan 8b)
- * has none yet. The plan that maps Better Auth's api-key plugin puts it on
- * the `apikey` table, so that the keys an app already holds keep working.
- * `UNMAPPED_MODELS` in statements.ts is the runtime half of this rule.
- * Some core models keep core's own tables beside the Better Auth tables
- * (`CORE_TABLE_MODELS` in statements.ts). Plan 9f added `totp` and
- * `trustedDevice`. Plan 9g added `jwk`, `oauthClient`, `oauthConsent`, and
- * `oauthToken`. Plan 12c added `secondFactor`. Plan 12e added
- * `oauthDevice`, `oauthSubject`, `oauthSessionClient`, and `oauthLogout`.
- * Plan 12f added `operatorAudit`. Plan 12k Task 1 adds its four models
- * (`organizationRole`, `team`, `teamMember`, `organizationToken`) with no
- * table yet. `UNMAPPED_MODELS` holds them, and the later 12k tasks map
- * each one. Task 10 maps `organizationRole` onto Better Auth's own table,
- * and Task 11 maps `team` and `teamMember` onto Better Auth's own tables.
+ * Core's models that have a Better Auth table. Some core models keep core's
+ * own tables beside the Better Auth tables (`CORE_TABLE_MODELS` in
+ * statements.ts). Plan 9f added `totp` and `trustedDevice`. Plan 9g added
+ * `jwk`, `oauthClient`, `oauthConsent`, and `oauthToken`. Plan 12c added
+ * `secondFactor`. Plan 12e added `oauthDevice`, `oauthSubject`,
+ * `oauthSessionClient`, and `oauthLogout`. Plan 12f added `operatorAudit`.
+ * Plan 12k Task 1 added its four models with no table, and the later 12k
+ * tasks map each one. Task 10 maps `organizationRole` onto Better Auth's own
+ * table, and Task 11 maps `team` and `teamMember` onto Better Auth's own
+ * tables. Core's `apiToken` and `organizationToken` keep core's own tables
+ * (owner decision 4 of 2026-10-14, plan 12k): Better Auth keys are
+ * re-issued at the cutover, and `moveBetterAuthApiKeys` moves the rows as
+ * retired rows. By ruling 2 of plan 12k a moved row acts: the move writes
+ * no retired mark.
  */
 export type MappedModel = Exclude<
   ModelName,

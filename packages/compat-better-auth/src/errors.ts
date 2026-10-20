@@ -181,6 +181,74 @@ export const COMPAT_CODES = {
 
 export type CompatCode = keyof typeof COMPAT_CODES;
 
+/**
+ * The codes of @better-auth/api-key 1.7.5 that the shim's api-key calls
+ * answer, with Better Auth's status and text (plan 12k Task 12). They come
+ * from dist/version-DPvml-_8.mjs and each throw of dist/index.mjs, read
+ * 2026-10-21. `KEY_DISABLED` also answers a moved prefix with no row.
+ */
+export const API_KEY_CODES = {
+  INVALID_API_KEY: { status: 401, message: "Invalid API key." },
+  KEY_DISABLED: { status: 401, message: "API Key is disabled" },
+  KEY_NOT_FOUND: { status: 404, message: "API Key not found" },
+  USAGE_EXCEEDED: { status: 429, message: "API Key has reached its usage limit" },
+  RATE_LIMITED: { status: 429, message: "Rate limit exceeded." },
+  SERVER_ONLY_PROPERTY: {
+    status: 400,
+    message:
+      "The property you're trying to set can only be set from the server auth instance only.",
+  },
+  UNAUTHORIZED_SESSION: { status: 401, message: "Unauthorized or invalid session" },
+  ORGANIZATION_ID_REQUIRED: {
+    status: 400,
+    message: "Organization ID is required for organization-owned API keys.",
+  },
+  USER_NOT_MEMBER_OF_ORGANIZATION: {
+    status: 403,
+    message: "You are not a member of the organization that owns this API key.",
+  },
+  INSUFFICIENT_API_KEY_PERMISSIONS: {
+    status: 403,
+    message: "You do not have permission to perform this action on organization API keys.",
+  },
+  NAME_REQUIRED: { status: 400, message: "API Key name is required." },
+  INVALID_NAME_LENGTH: {
+    status: 400,
+    message: "The name length is either too large or too small.",
+  },
+  METADATA_DISABLED: { status: 400, message: "Metadata is disabled." },
+  INVALID_METADATA_TYPE: { status: 400, message: "metadata must be an object or undefined" },
+  KEY_DISABLED_EXPIRATION: { status: 400, message: "Custom key expiration values are disabled." },
+  EXPIRES_IN_IS_TOO_SMALL: {
+    status: 400,
+    message: "The expiresIn is smaller than the predefined minimum value.",
+  },
+  EXPIRES_IN_IS_TOO_LARGE: {
+    status: 400,
+    message: "The expiresIn is larger than the predefined maximum value.",
+  },
+  REFILL_AMOUNT_AND_INTERVAL_REQUIRED: {
+    status: 400,
+    message: "refillAmount is required when refillInterval is provided",
+  },
+  REFILL_INTERVAL_AND_AMOUNT_REQUIRED: {
+    status: 400,
+    message: "refillInterval is required when refillAmount is provided",
+  },
+  NO_VALUES_TO_UPDATE: { status: 400, message: "No values to update." },
+} as const;
+
+export type ApiKeyCode = keyof typeof API_KEY_CODES;
+
+/** The text of a moved prefix with no row: the key was replaced at the cutover (plan 12k Task 12). */
+export const REPLACED_KEY_MESSAGE = "This key was replaced. Create a new key.";
+
+/** The server `APIError` of an api-key code, with Better Auth's status and text. */
+export function apiKeyError(code: ApiKeyCode, message?: string): APIError {
+  const c = API_KEY_CODES[code];
+  return new APIError(c.status, code, message ?? c.message);
+}
+
 /** The code of a call that authtempo does not serve, with HTTP status 501. */
 export const NOT_SUPPORTED = "NOT_SUPPORTED" satisfies CompatCode;
 

@@ -86,18 +86,15 @@ export interface CompatStatements extends SqlStatements {
 }
 
 /**
- * The core models with no Better Auth table: `MappedModel` in mapping.ts
- * leaves them out. This storage holds no row of them. A read answers empty,
- * as for a where that never matches, so `sweepExpired` counts 0 and
- * `caller` answers null for a `tk_` bearer. A create throws `unknown_model`,
- * so a write never vanishes in silence. Plan 8b, 2026-10-11. Plan 12k Task 1
- * adds its four models until the later 12k tasks map them. Task 10 maps
- * `organizationRole`, and Task 11 maps `team` and `teamMember` (mapping.ts).
+ * The core models with no table in this storage. A read answers empty, as
+ * for a where that never matches. A create throws `unknown_model`, so a
+ * write never vanishes in silence. Plan 8b put `apiToken` here on
+ * 2026-10-11, and plan 12k Task 1 its four models. Tasks 10 and 11 map
+ * three of them onto Better Auth tables. Task 12 gives `apiToken` and
+ * `organizationToken` core's own tables (`CORE_TABLE_MODELS`). So the set
+ * is empty, and it stays for the next model that a core plan adds first.
  */
-export const UNMAPPED_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
-  "apiToken",
-  "organizationToken",
-]);
+export const UNMAPPED_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([]);
 
 function withoutUnmapped(st: CompatStatements): CompatStatements {
   const none = (model: ModelName) => UNMAPPED_MODELS.has(model);
@@ -168,6 +165,10 @@ export const CORE_TABLE_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
   // Plan 12f: migration 0009 creates it. The Better Auth admin plugin keeps
   // no audit table, so no Better Auth table is read or written.
   "operatorAudit",
+  // Plan 12k Task 12: migration 0010 creates both (owner decision 4). The
+  // Better Auth apikey table is read only by moveBetterAuthApiKeys.
+  "apiToken",
+  "organizationToken",
 ]);
 
 function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): CompatStatements {

@@ -13,6 +13,9 @@
 -- createdAt, and adds the unique key on (teamId, userId). The text of the
 -- default naming (camel case). Another naming: run
 -- compatMigration0010Sql("sqlite", resolveNames(options)) for its text.
+-- ta_api_token and ta_organization_token are core's own token tables
+-- (plan 12k Task 12). The file creates them with core's names. Better Auth's
+-- apikey table stays as it is: no migration writes it or drops it.
 ALTER TABLE "session" ADD COLUMN "activeTeamId" TEXT;
 ALTER TABLE "invitation" ADD COLUMN "teamId" TEXT;
 CREATE TABLE IF NOT EXISTS "organizationRole" ("id" text not null primary key, "organizationId" text not null references "organization" ("id") on delete cascade, "role" text not null, "permission" text not null, "createdAt" date not null, "updatedAt" date);
@@ -31,5 +34,51 @@ UPDATE "teamMember" SET "taOrganizationId" = (SELECT "organizationId" FROM "team
 UPDATE "teamMember" SET "taUpdatedAt" = strftime('%Y-%m-%dT%H:%M:%fZ', "createdAt") WHERE "taUpdatedAt" IS NULL;
 CREATE UNIQUE INDEX ux_team_member__team_id__user_id ON "teamMember" ("teamId", "userId");
 CREATE INDEX ix_team_member__ta_organization_id__user_id ON "teamMember" ("taOrganizationId", "userId");
+CREATE TABLE ta_api_token (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  hint TEXT NOT NULL,
+  expires_at INTEGER,
+  last_used_at INTEGER,
+  organization_id TEXT,
+  permissions TEXT,
+  metadata TEXT,
+  rate_limit_seconds INTEGER,
+  rate_limit_max INTEGER,
+  remaining INTEGER,
+  refill_amount INTEGER,
+  refill_seconds INTEGER,
+  last_refill_at INTEGER,
+  retired_at INTEGER
+);
+CREATE UNIQUE INDEX ux_ta_api_token__token_hash ON ta_api_token (token_hash);
+CREATE INDEX ix_ta_api_token__user_id ON ta_api_token (user_id);
+CREATE TABLE ta_organization_token (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  organization_id TEXT NOT NULL,
+  created_by_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  hint TEXT NOT NULL,
+  permissions TEXT NOT NULL,
+  metadata TEXT,
+  expires_at INTEGER,
+  last_used_at INTEGER,
+  rate_limit_seconds INTEGER,
+  rate_limit_max INTEGER,
+  remaining INTEGER,
+  refill_amount INTEGER,
+  refill_seconds INTEGER,
+  last_refill_at INTEGER,
+  retired_at INTEGER
+);
+CREATE UNIQUE INDEX ux_ta_organization_token__token_hash ON ta_organization_token (token_hash);
+CREATE INDEX ix_ta_organization_token__organization_id ON ta_organization_token (organization_id);
 UPDATE ta_meta SET value = '13' WHERE key = 'schema_version';
 UPDATE ta_meta SET value = '10' WHERE key = 'compat_better_auth';

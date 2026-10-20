@@ -14,6 +14,14 @@ export function toCoreName(resource: string): string {
   return resource === BETTER_AUTH_KEY ? CORE_KEY : resource;
 }
 
+/**
+ * Better Auth 1.7.5 asks `apiKey:delete` before it deletes an organization
+ * key (@better-auth/api-key dist/index.mjs:923, read 2026-10-21). Core
+ * names the act `apiToken:revoke` (plan 12k Task 12).
+ */
+const BETTER_AUTH_DELETE = "delete";
+const CORE_REVOKE = "revoke";
+
 /** The six resources of core (`CORE_STATEMENTS`). An app's own statements never hold them. */
 export const CORE_RESOURCES: readonly string[] = [
   "organization",
@@ -32,11 +40,20 @@ function plain(value: unknown): value is Bag {
   return proto === Object.prototype || proto === null;
 }
 
-/** Renames one key, and joins its list to a list that holds the new name already. */
-function renamed(set: Bag, from: string, to: string): Bag {
+/** One action of the key resource renamed. Every other value stays as it is. */
+function actionsRenamed(actions: unknown, from: string, to: string): unknown {
+  return Array.isArray(actions) ? actions.map((a) => (a === from ? to : a)) : actions;
+}
+
+/**
+ * Renames one key and one of its actions, and joins its list to a list that
+ * holds the new name already.
+ */
+function renamed(set: Bag, from: string, to: string, action: { from: string; to: string }): Bag {
   const out = new Map<string, unknown>();
-  for (const [resource, actions] of Object.entries(set)) {
+  for (const [resource, list] of Object.entries(set)) {
     const name = resource === from ? to : resource;
+    const actions = resource === from ? actionsRenamed(list, action.from, action.to) : list;
     const before = out.get(name);
     out.set(
       name,
@@ -50,22 +67,25 @@ function renamed(set: Bag, from: string, to: string): Bag {
 }
 
 /**
- * Better Auth's names to core's: `apiKey` becomes `apiToken`, and an empty
- * list goes, because it grants nothing and core refuses it. A value that is
- * not a plain object comes back as it is, so core's shape rule refuses it.
+ * Better Auth's names to core's: `apiKey` becomes `apiToken`, its `delete`
+ * becomes `revoke`, and an empty list goes, because it grants nothing and
+ * core refuses it. A value that is not a plain object comes back as it is,
+ * so core's shape rule refuses it.
  */
 export function toCoreNames(value: unknown): unknown {
   if (!plain(value)) return value;
+  const action = { from: BETTER_AUTH_DELETE, to: CORE_REVOKE };
   return Object.fromEntries(
-    Object.entries(renamed(value, BETTER_AUTH_KEY, CORE_KEY)).filter(
+    Object.entries(renamed(value, BETTER_AUTH_KEY, CORE_KEY, action)).filter(
       ([, actions]) => !(Array.isArray(actions) && actions.length === 0),
     ),
   );
 }
 
-/** Core's names to Better Auth's: `apiToken` becomes `apiKey`. */
+/** Core's names to Better Auth's: `apiToken` becomes `apiKey`, and its `revoke` becomes `delete`. */
 export function toBetterAuthNames(value: unknown): unknown {
-  return plain(value) ? renamed(value, CORE_KEY, BETTER_AUTH_KEY) : value;
+  const action = { from: CORE_REVOKE, to: BETTER_AUTH_DELETE };
+  return plain(value) ? renamed(value, CORE_KEY, BETTER_AUTH_KEY, action) : value;
 }
 
 /**

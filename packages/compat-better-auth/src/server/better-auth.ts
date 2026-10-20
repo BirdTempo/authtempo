@@ -80,18 +80,13 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
   // Better Auth has no re-authentication code, and the shim maps no mail for it.
   const reauthCodePath = `${basePath}/reauth/email`;
   const magicLinkPath = `${basePath}/magic-link/`;
-  // Core serves API tokens in every deployment (plan 8b). This package maps
-  // no `apiToken` row until its api-key plan (UNMAPPED_MODELS), and Better
-  // Auth has no such route, so the paths answer 404 here.
-  const tokensPath = `${basePath}/tokens`;
+  // Core's /tokens and /organizations/tokens routes pass through since plan
+  // 12k Task 12: both token models keep core's own tables here.
   return async (request) => {
     const { pathname } = new URL(request.url);
     // Core answers 404 outside basePath: one source for that rule (Task 7 ruling).
     // Core always mounts the magic link routes. Better Auth serves them only with the plugin.
     if (!plugins.has("magic-link") && pathname.startsWith(magicLinkPath)) {
-      return Response.json({ error: "not_found" }, { status: 404 });
-    }
-    if (pathname === tokensPath || pathname.startsWith(`${tokensPath}/`)) {
       return Response.json({ error: "not_found" }, { status: 404 });
     }
     if (

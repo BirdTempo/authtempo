@@ -10,6 +10,7 @@ import {
   type SqliteVariant,
 } from "./migration.js";
 import { type Names, type NamingOptions, resolveNames } from "./names.js";
+import { registerRawRead } from "./raw.js";
 import { compatStatements } from "./statements.js";
 
 export interface PostgresSchemaStorageOptions extends NamingOptions {
@@ -66,7 +67,7 @@ export function betterAuthSchemaStorage(
     // One count holds the statements and the ready check. So the call budget
     // of the operator session calls sees its queries (ruling 37 of plan 12f).
     const sent = { statements: 0, ready: 0 };
-    return {
+    const d1: D1SchemaStorage = {
       kind: "authtempo-compat-database",
       dialect: "d1",
       names,
@@ -79,19 +80,27 @@ export function betterAuthSchemaStorage(
       limiter: createD1Limiter(db),
       migrationSql: (variant?: SqliteVariant) => compatMigrationSql("sqlite", names, variant),
     };
+    const binding = options.db as unknown as {
+      prepare(q: string): { all(): Promise<{ results: Record<string, unknown>[] }> };
+    };
+    registerRawRead(d1, async (q) => (await binding.prepare(q).all()).results);
+    return d1;
   }
   const st = compatStatements("postgres", names);
-  return {
+  const sql = options.sql;
+  const pg: PostgresSchemaStorage = {
     kind: "authtempo-compat-database",
     dialect: "postgres",
     names,
-    storage: createPostgresAdapterOn(options.sql, {
+    storage: createPostgresAdapterOn(sql, {
       statements: st,
       toStorageError: st.toStorageError,
-      ready: postgresCompatReady(options.sql),
+      ready: postgresCompatReady(sql),
     }),
-    limiter: createPostgresLimiter(options.sql),
+    limiter: createPostgresLimiter(sql),
     migrationSql: () => compatMigrationSql("postgres", names),
-    migrate: () => applyBetterAuthCompatMigrations(options.sql, names),
+    migrate: () => applyBetterAuthCompatMigrations(sql, names),
   };
+  registerRawRead(pg, async (q) => [...(await sql.unsafe(q))] as Record<string, unknown>[]);
+  return pg;
 }

@@ -15,6 +15,7 @@ pnpm and npm, in the app's `package.json`:
     "@better-auth/drizzle-adapter": "npm:@authtempo/compat-better-auth@0.0.0",
     "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.0.0",
     "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/api-key": "npm:@authtempo/compat-better-auth@0.0.0",
     "@authtempo/core": "0.0.0",
     "@authtempo/client": "0.0.0",
     "@authtempo/handoff": "0.0.0",
@@ -29,7 +30,7 @@ required peers, also in an app that uses one database: the server entry
 loads both. Neither has a runtime dependency.
 
 Map only the names the app imports. A Better Auth package with no alias, for
-example `@better-auth/api-key`, stays the real package, and `betterAuth`
+example `@better-auth/sso`, stays the real package, and `betterAuth`
 refuses its plugin by id at construction.
 
 | Import in the app | Answered by |
@@ -49,6 +50,8 @@ refuses its plugin by id at construction.
 | `@better-auth/expo/client` | `./client` (`expoClient`) |
 | `@better-auth/passkey` | `.` (`passkey`) |
 | `@better-auth/passkey/client` | `./client` (`passkeyClient`) |
+| `@better-auth/api-key` | `./api-key` (`apiKey`, plan 12k) |
+| `@better-auth/api-key/client` | `./api-key/client` (`apiKeyClient`, plan 12k) |
 
 `better-auth/api` maps to `./api`, which exports `APIError` only (plan 9b).
 An import of another name from it, such as `createAuthMiddleware`, fails at
@@ -107,6 +110,8 @@ What the migration does (`0001_compat_better_auth`, append-only):
 - It needs every table in the list, also when the plugin is off: `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation`, `passkey`. Create a missing table with Better Auth's own SQL for it. Core's claim rule deletes passkey rows on every app, and the sweep deletes invitations.
 
 Migration `0002_compat_schema_v5` (plan 8b) moves `schema_version` to 5 and `compat_better_auth` to 2. It changes no table: core 5 adds API tokens, and this package does not hold them until its api-key plan. Core's routes under `/tokens` answer 404 here. `tempo.api.tokens.*` is not usable on this storage: `create` throws `unknown_model`, and the reads answer empty. `migrate()` runs both migrations. On D1, copy `0002_compat_schema_v5.sql` after the 0001 file, for both variants and every naming: it touches `ta_meta` only. Without it the storage refuses to start with `schema_mismatch`.
+
+Plan 12k: core's token routes work in the shim. Migration 0010 creates core's own `ta_api_token` and `ta_organization_token`, so `/tokens`, `/organizations/tokens`, and `tempo.api.tokens.*` act on this storage (see "API keys").
 
 What changes at cutover:
 
@@ -574,6 +579,7 @@ answer type holds `twoFactorRedirect` only when the client options name
 | `emailOTP` | Core's email codes (plan 9e): the sign-in code and the reset code. `sendVerificationOTP` is required. It gets `type: "sign-in"` or `type: "forget-password"`, never another type, and a reset code goes only to an address with a user, as in Better Auth. Without the plugin core's code routes answer 404. See "Email codes". |
 | `bearer` | Core reads `Authorization: Bearer` on every route already. The plugin adds `set-auth-token` to every response that sets the session cookie. |
 | `expo` | Core's handoff for the system browser. `trustedOrigins` must hold the app scheme, for example `reception://`. `expo-origin` becomes `origin` when a request has none. On Expo, `signIn.social` and `signIn.magicLink` open core's sign-in page, which lists every method this server serves: the magic link form only with the `magicLink` plugin, the password form with `emailAndPassword`, a social button per provider, and the passkey button with the `passkey` plugin. The provider is not chosen in advance. A config with `expo` and none of these methods is refused at start. |
+| `apiKey` | Core's API tokens (plan 12k Task 12): `references: "user"` gives user tokens (`tk_`), and `"organization"` gives organization tokens (`to_`). See "API keys". |
 | `twoFactor` | Core's TOTP second factor (plan 9f) on the password sign-in. Needs `emailAndPassword.enabled`. `/two-factor/enable` (the password) answers `{ method: "totp", totpURI, backupCodes }`; `/two-factor/verify-totp` with the session turns the factor on and ends the other sessions; at the next sign-in core answers a challenge and sets `better-auth.two_factor`, and `verify-totp` or `verify-backup-code` with that cookie opens the session. `trustDevice: true` sets `better-auth.trust_device` for `trustDeviceMaxAge` (whole days, default 30). `disable`, `get-totp-uri`, and `generate-backup-codes` take the password. `send-otp`, `verify-otp`, and `method: "otp"` answer `NOT_SUPPORTED` (501). Pass `accountLockout: { enabled: false }`: core has no account lockout. `user.twoFactorEnabled` comes from core's `ta_second_factor` row; the Better Auth `twoFactor` table is not read. Backup codes are 23 characters (`backupCodeOptions.length` 23 to 32). Core's gate on the magic link, the email code, and social stays off, as in Better Auth; a reset by code of a user with the factor on opens no session on a device that is not trusted (plan 12c). |
 
 | `admin` | Core's operator tools (plan 12f). Needs `organization` and `authtempo.platformOrganization`. See "The admin plugin". |
@@ -780,7 +786,7 @@ The server maps the options onto core's organizations:
 
 - `ac.statements` without Better Auth's five resources (and without `apiKey`) is core's `organizations.statements`: the app's own resources.
 - Each role of `roles` is a role of core's `organizations.roles`, with its statements as its permissions. An empty list goes. Each role also gets `member: ["read"]`, and a role with `invitation: ["create"]` gets `invitation: ["read"]`. Better Auth 1.7.2 lets every member list the members and the invitations, and core asks for the statement. So the shim is stricter on the invitations, and fails closed: a role that does not invite cannot list them (a deviation, ruling 35).
-- `apiKey` is core's `apiToken`, in `ac`, in `roles`, and in a stored role. Core's actions of `apiToken` are `read`, `create`, `update`, and `revoke`, so a role with another action (Better Auth's `delete`) is refused at start. An `ac` resource or a role resource named `apiToken` is refused, because it would get core's token rights. An `ac` action of a core resource that core lacks is refused, not dropped.
+- `apiKey` is core's `apiToken`, in `ac`, in `roles`, and in a stored role. Core's actions of `apiToken` are `read`, `create`, `update`, and `revoke`. Since plan 12k Task 12, Better Auth's `delete` of `apiKey` is core's `revoke`, both ways. Better Auth asks `apiKey:delete` before it deletes an organization key. A role with any other action of `apiKey` is refused at start. An `ac` resource or a role resource named `apiToken` is refused, because it would get core's token rights. An `ac` action of a core resource that core lacks is refused, not dropped.
 - Better Auth's roles have no rank, and core's owner rules need one. `authtempo.roleRanks` gives each role of `roles` its rank, a positive integer. A role with no rank is refused at start (`authtempo.roleRanks must rank <name>`), and so is a rank of a name that `roles` lacks. `authtempo.roleRanks` with no `roles` is refused too, because the default ranks are fixed. `roles` must name `owner`, the creator role. With no `roles`, the roles are Better Auth's `defaultRoles`, ranked member 1, admin 2, owner 3, with the two reads above.
 - `dynamicAccessControl: { enabled: true }` turns on core's `organizations.dynamicRoles`. `maximumRolesPerOrganization` takes an integer from 1 to 1000; a function is refused, as for the other limits. Better Auth has no cap by default; core caps at 50 when the option is absent.
 - A role string with two parts, for example `admin,closer`, holds the union of both parts on the server (core's rule). Better Auth's check needs one part that holds the whole request, and `checkRolePermission` on the client keeps that rule. So the client can hide a control that the server allows.
@@ -1153,15 +1159,77 @@ The follow-ups of consumerd:
 `freshAge: 600` and `deferSessionRefresh: true` run unchanged since plan 12a: core's window is 10 minutes, and the shim's client posts the deferred refresh. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. `teams: { enabled: true }` runs unchanged since plan 12k: Better Auth's default team and its last-team rule hold. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e. The tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` instead. With snake-case names, the column is `ta_purpose`. The row holds a keyed hash, never the code.
 
 consumerb (follow-ups first): the list after the refusals.
-The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.
+The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.
 
 The follow-ups of consumerb:
-- API keys: the api-key mapping, a later plan (see the plan index).
+- The API key edits of "Cutover of API keys" (the `to_` bearer and the Drizzle reads of `apikey`).
 - The OAuth 2.1 provider through `mcp` and `cimd`.
 - `jwt` and JWKS, refused since plan 9g (see "JWT and the OAuth provider").
 - `authtempo.platformOrganization` for the admin plugin (see "The admin plugin").
 - `defaultCookieAttributes.secure` and the `.well-known` routes.
 - `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
+
+## API keys
+
+Since plan 12k (Task 12, spec 29 item 20), `apiKey(options)` of
+`@better-auth/api-key` maps onto core's API tokens. Every option of
+@better-auth/api-key 1.7.5 maps, is a note, or is refused at start. Core's
+tokens keep core's own tables, `ta_api_token` and `ta_organization_token`
+(owner decision 4 of 2026-10-14). Migration 0010 creates them. Better Auth's
+`apikey` table stays as it is: no migration writes it or drops it.
+
+- `references: "user"` (the default) gives user tokens with the prefix `tk_`. `"organization"` gives organization tokens with the prefix `to_`, and needs the `organization` plugin. A new key has core's prefix: the app shows it once, at the create. The create body's `prefix` is accepted and not used.
+- `rateLimit` is the window of a new key (core's `tokens.defaultRateLimit`). `timeWindow` takes whole seconds in milliseconds. With no `rateLimit`, a key gets Better Auth's default of 10 calls a day. `enabled: false` gives no window.
+- `defaultPrefix`, and each entry of `authtempo.movedKeyPrefixes`, is a moved prefix (core's `tokens.movedPrefixes`). A bearer with one goes to the hash lookup of the moved keys.
+- `enableMetadata`, `requireName`, the name bounds, `keyExpiration`, and `permissions.defaultPermissions` (a set, not a function) keep Better Auth's rules at the create. Core keeps a name on every token, so a create with no name answers `NAME_REQUIRED`. `expiresIn` takes whole days in seconds. With no `expiresIn` and no `defaultExpiresIn`, a key never expires, as in Better Auth.
+- Refused at start: `enableSessionForAPIKeys: true`, because a key never acts as a session (spec 8.8 item 6). Also refused: `disableKeyHashing: true`, a custom key generator, getter, or validator, and a storage other than the database. So are `deferUpdates: true`, `schema`, `startingCharactersConfig.charactersLength`, and `apiKeyHeaders` other than `authorization`. A list of configurations is refused: core keeps one token model. `configId`, `defaultKeyLength`, and the prefix bounds are notes.
+
+The server calls are Better Auth's: `api.createApiKey`, `api.verifyApiKey`,
+`api.listApiKeys`, `api.getApiKey`, `api.updateApiKey`, `api.deleteApiKey`,
+and `api.deleteAllExpiredApiKeys` (through `tempo.api.sweepExpired`). With
+`headers` the caller is the session, and the server-only fields answer
+`SERVER_ONLY_PROPERTY`. With no headers the body's `userId` is the caller, as
+in Better Auth. An organization key with no `permissions` gets `{}`, which
+grants nothing. `verifyApiKey` runs `tempo.authenticate`, so it spends one
+call of the quota and one of the window. Its codes are Better Auth's:
+`INVALID_API_KEY`, `RATE_LIMITED`, `USAGE_EXCEEDED`, and `KEY_DISABLED` for a
+moved prefix with no row. With `permissions`, it checks the key's own set
+after the spend; a key with no set passes no check. `updateApiKey` narrows
+only: a wider set or a later expiry answers Better Auth's error for a bad
+body. `enabled: false` and a `metadata` change answer `NOT_SUPPORTED`: core
+has no disabled token and keeps the metadata of the create. The client has
+`authClient.apiKey.create`, `list`, `get`, `update`, and `delete`. A call with
+`organizationId` acts on the organization's tokens.
+
+An answer's `start` holds core's hint, and `prefix` is null. `requestCount` is
+0, because core's limiter holds the window. The refill fields are there only
+in the answer of the create.
+
+### Cutover of API keys
+
+`moveBetterAuthApiKeys(storage, { names, references, dryRun, statements })`
+moves each `apikey` row into core's token table. Better Auth stores the
+SHA-256 of the whole key in base64url, so the digest moves. A moved key acts
+under the same secret, with no re-issue (ruling 2 of plan 12k). A row
+with `enabled` false, a row past `expiresAt`, and a row whose digest is not
+43 base64url characters are skipped. A second run moves nothing. The report
+holds counts, owner ids, and the stored prefixes, never a key, a digest, or
+metadata. A set loses each resource and action that core's statements do not
+know, and `dropped` counts them. An organization key gets its creator from
+`metadata.createdByUserId`, else the organization's first owner
+(`ownerFallback`). A moved key acts, so it counts against core's cap of 50
+live tokens per owner. An owner with more moved keys can create no new key
+until they revoke some.
+
+Each step is a runbook line, with what breaks without it:
+
+1. Before the cutover, run `moveBetterAuthApiKeys` with `dryRun: true` against a copy of the database. The report gives the count of keys per owner and the stored prefixes. Without it, you do not know whom to tell, or which prefixes to list.
+2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Without it, a moved key with that prefix answers `INVALID_API_KEY`, because core does not send it to the hash lookup.
+3. Tell each owner whose key the report skips. After the cutover a skipped key answers 401 `token_retired` (`KEY_DISABLED` from `verifyApiKey`), and every script that uses one stops.
+4. Deploy the shim build with migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
+5. Run `moveBetterAuthApiKeys` with `dryRun: false` once. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
+6. Change the app code that reads the `apikey` table itself. consumerb lists, reads, and deletes keys through Drizzle (`routes/api-keys.ts`). It sends a bearer to `verifyApiKey` only when it starts with `laaa_` (`middleware/identity.ts`). A new key starts with `to_`, so that check must also take `to_`. Without these edits, a new key never authenticates, and the key list shows only the old table.
+7. When every owner moved, drop the `apikey` table yourself. No migration of authtempo drops it, because it is your record. Without the drop, nothing breaks; the table only holds stale rows.
 
 ## JWT and the OAuth provider
 

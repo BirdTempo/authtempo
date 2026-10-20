@@ -7,6 +7,7 @@ import {
   ownerAc,
 } from "../src/access.js";
 import type { DrizzleAdapterConfig } from "../src/adapters/drizzle.js";
+import { apiKey } from "../src/api-key.js";
 import { expoClient } from "../src/client/expo.js";
 import {
   admin,
@@ -265,7 +266,14 @@ export const consumerb = {
     }),
     // Since plan 12f the admin plugin maps; consumerb still needs authtempo.platformOrganization.
     admin(),
-    { id: "api-key", defaultPrefix: "laaa_" },
+    // consumerb apps/api/src/auth.ts at f4518c7, read 2026-10-21 (plan 12k Task 12).
+    apiKey({
+      defaultPrefix: "laaa_",
+      enableMetadata: true,
+      references: "organization",
+      enableSessionForAPIKeys: false,
+      rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 600 },
+    }),
     // Refused at construction since plan 9g, with JWT_NOT_MAPPED and PROVIDER_NOT_MAPPED
     // (check-options.ts); the type admits the literal, the runtime check refuses it.
     { id: "jwt" },

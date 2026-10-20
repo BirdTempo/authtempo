@@ -568,6 +568,109 @@ export function compatMigration0009Sql(dialect: "postgres" | "sqlite", n: Names)
 export const MIGRATION_0010_NAME = "0010_compat_schema_v13";
 
 /**
+ * The core statements of migration 0010, by dialect (plan 12k Task 12). They
+ * create core's `ta_api_token` with every field to version 13, as core 0005
+ * and 0013 leave it. They also create core 0013's `ta_organization_token`,
+ * with the indexes of both.
+ * This package never had a `ta_api_token` (plan 8b left `apiToken`
+ * unmapped), so the migration creates it whole.
+ */
+const COMPAT_0010_CORE: Readonly<Record<"postgres" | "sqlite", string>> = {
+  postgres: `CREATE TABLE ta_api_token (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  user_id text NOT NULL,
+  name text NOT NULL,
+  token_hash text NOT NULL,
+  hint text NOT NULL,
+  expires_at timestamptz,
+  last_used_at timestamptz,
+  organization_id text,
+  permissions jsonb,
+  metadata jsonb,
+  rate_limit_seconds integer,
+  rate_limit_max integer,
+  remaining integer,
+  refill_amount integer,
+  refill_seconds integer,
+  last_refill_at timestamptz,
+  retired_at timestamptz
+);
+CREATE UNIQUE INDEX ux_ta_api_token__token_hash ON ta_api_token (token_hash);
+CREATE INDEX ix_ta_api_token__user_id ON ta_api_token (user_id);
+CREATE TABLE ta_organization_token (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  organization_id text NOT NULL,
+  created_by_id text NOT NULL,
+  name text NOT NULL,
+  token_hash text NOT NULL,
+  hint text NOT NULL,
+  permissions jsonb NOT NULL,
+  metadata jsonb,
+  expires_at timestamptz,
+  last_used_at timestamptz,
+  rate_limit_seconds integer,
+  rate_limit_max integer,
+  remaining integer,
+  refill_amount integer,
+  refill_seconds integer,
+  last_refill_at timestamptz,
+  retired_at timestamptz
+);
+CREATE UNIQUE INDEX ux_ta_organization_token__token_hash ON ta_organization_token (token_hash);
+CREATE INDEX ix_ta_organization_token__organization_id ON ta_organization_token (organization_id);`,
+  sqlite: `CREATE TABLE ta_api_token (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  user_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  hint TEXT NOT NULL,
+  expires_at INTEGER,
+  last_used_at INTEGER,
+  organization_id TEXT,
+  permissions TEXT,
+  metadata TEXT,
+  rate_limit_seconds INTEGER,
+  rate_limit_max INTEGER,
+  remaining INTEGER,
+  refill_amount INTEGER,
+  refill_seconds INTEGER,
+  last_refill_at INTEGER,
+  retired_at INTEGER
+);
+CREATE UNIQUE INDEX ux_ta_api_token__token_hash ON ta_api_token (token_hash);
+CREATE INDEX ix_ta_api_token__user_id ON ta_api_token (user_id);
+CREATE TABLE ta_organization_token (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  organization_id TEXT NOT NULL,
+  created_by_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  token_hash TEXT NOT NULL,
+  hint TEXT NOT NULL,
+  permissions TEXT NOT NULL,
+  metadata TEXT,
+  expires_at INTEGER,
+  last_used_at INTEGER,
+  rate_limit_seconds INTEGER,
+  rate_limit_max INTEGER,
+  remaining INTEGER,
+  refill_amount INTEGER,
+  refill_seconds INTEGER,
+  last_refill_at INTEGER,
+  retired_at INTEGER
+);
+CREATE UNIQUE INDEX ux_ta_organization_token__token_hash ON ta_organization_token (token_hash);
+CREATE INDEX ix_ta_organization_token__organization_id ON ta_organization_token (organization_id);`,
+};
+
+/**
  * Migration 0010 (plan 12k): core's schema version 13. Core 13 adds
  * `activeTeamId` to `session`, `teamIds` to `invitation`, the scope and quota
  * fields to `apiToken`, and the models `organizationRole`, `team`,
@@ -608,10 +711,12 @@ export const MIGRATION_0010_NAME = "0010_compat_schema_v13";
  * absent tables in the 1.4.21 form and then adds the two columns. On 1.7
  * team tables that variant stops with `duplicate column name: memberCount`.
  *
- * The apiToken fields and the model organizationToken have no table here
- * yet. They are in UNMAPPED_MODELS, and Task 12 of plan 12k adds them to
- * this unshipped migration. The columns take the app's naming, so the text
- * depends on `names`, as for 0009. Append-only once it ships.
+ * `apiToken` and `organizationToken` keep core's own tables (Task 12, owner
+ * decision 4): the migration creates `ta_api_token` and
+ * `ta_organization_token` with core's names (`COMPAT_0010_CORE`). Better
+ * Auth's `apikey` table stays as it is: no migration writes or drops it.
+ * The Better Auth columns take the app's naming, so the text depends on
+ * `names`, as for 0009. Append-only once it ships.
  */
 export function compatMigration0010Sql(
   dialect: "postgres" | "sqlite",
@@ -674,6 +779,7 @@ export function compatMigration0010Sql(
     `UPDATE ${M} SET ${m("taUpdatedAt")} = ${pg ? `date_trunc('milliseconds', ${m("createdAt")})` : sqliteIsoText(m("createdAt"))} WHERE ${m("taUpdatedAt")} IS NULL;`,
     `CREATE UNIQUE INDEX ${pg ? "IF NOT EXISTS " : ""}ux_team_member__team_id__user_id ON ${M} (${m("teamId")}, ${m("userId")});`,
     `CREATE INDEX ${pg ? "IF NOT EXISTS " : ""}ix_team_member__ta_organization_id__user_id ON ${M} (${m("taOrganizationId")}, ${m("userId")});`,
+    COMPAT_0010_CORE[dialect],
     "UPDATE ta_meta SET value = '13' WHERE key = 'schema_version';",
     "UPDATE ta_meta SET value = '10' WHERE key = 'compat_better_auth';",
   ].join("\n")}\n`;

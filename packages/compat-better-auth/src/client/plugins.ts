@@ -5,7 +5,10 @@ import {
   type TwoFactorClientOptions,
 } from "../types.js";
 
-type Simple = Extract<ClientPlugin, { id: "passkey" | "magic-link" | "email-otp" | "admin" }>;
+type Simple = Extract<
+  ClientPlugin,
+  { id: "passkey" | "magic-link" | "email-otp" | "admin" | "api-key" }
+>;
 
 /** Better Auth's `organizationClient({ ac, roles })`: `checkRolePermission` reads the roles (plan 12k). */
 export function organizationClient(
@@ -35,4 +38,8 @@ export function twoFactorClient(
   options: TwoFactorClientOptions = {},
 ): Extract<ClientPlugin, { id: "two-factor" }> {
   return { kind: COMPAT_CLIENT_PLUGIN, id: "two-factor", options };
+}
+/** Better Auth's `apiKeyClient()` (plan 12k Task 12). `authClient.apiKey` is there with or without it. */
+export function apiKeyClient(): Simple {
+  return { kind: COMPAT_CLIENT_PLUGIN, id: "api-key" };
 }
