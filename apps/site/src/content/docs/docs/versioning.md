@@ -3,6 +3,7 @@ title: Versioning policy
 description: How the packages of authtempo take their versions, what a change of each kind costs, and how the docs follow them.
 type: reference
 sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 6
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 10
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 12
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 33

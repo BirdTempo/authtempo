@@ -205,6 +205,7 @@ describe("check-policy-pages", () => {
     );
     expect(failures(patch)).toEqual([
       'docs/versioning.md: the row "A new error code" is a feature, so its In 0.x cell must be "A minor version" (spec 33 item 1.2), not "A patch version"',
+      'docs/versioning.md: the row "A new error code" is a feature, so its From 1.0.0 cell must be "A minor version" (Semantic Versioning 2.0.0), not "A patch version"',
     ]);
     const major = withText(
       "versioning",
@@ -252,6 +253,34 @@ describe("check-policy-pages", () => {
     expect(failures(noColumn)).toEqual([
       'docs/versioning.md: the rule table has no column "In 0.x"',
       "read 0 rows",
+    ]);
+  });
+
+  it("holds each From 1.0.0 cell to its class, and The rules to their fixed text", () => {
+    const fix = withText(
+      "versioning",
+      "| A fix that changes no answer that a caller reads | A patch version | A patch version |",
+      "| A fix that changes no answer that a caller reads | A patch version | A minor version |",
+    );
+    expect(failures(fix)).toEqual([
+      'docs/versioning.md: the row "A fix that changes no answer that a caller reads" is a fix, so its From 1.0.0 cell must be "A patch version" (Semantic Versioning 2.0.0), not "A minor version"',
+    ]);
+    const mix = withText(
+      "versioning",
+      "Keep every `@authtempo` package of an app at the same version.",
+      "Each package keeps its own version, so mix versions as you like.",
+    );
+    expect(failures(mix)).toEqual([
+      'docs/versioning.md, section "The rules", does not state: Keep every `@authtempo` package of an app at the same version. (from spec 33 items 1.1 and 10.2)',
+      'docs/versioning.md, section "The rules", states "Each package keeps its own version, so mix versions as you like.", which no source holds',
+    ]);
+    const lost = withText(
+      "versioning",
+      "- Keep every `@authtempo` package of an app at the same version.\n",
+      "",
+    );
+    expect(failures(lost)).toEqual([
+      'docs/versioning.md, section "The rules", does not state: Keep every `@authtempo` package of an app at the same version. (from spec 33 items 1.1 and 10.2)',
     ]);
   });
 

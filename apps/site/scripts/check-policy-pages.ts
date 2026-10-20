@@ -147,6 +147,7 @@ const HELD: readonly Held[] = [
   { page: VERSIONING, section: "The support window", pointer: true },
   { page: SECURITY_PAGE, section: "How to report", pointer: true },
   { page: SECURITY_PAGE, section: "The times", pointer: true },
+  { page: VERSIONING, section: "The rules", pointer: false },
 ];
 
 /** The section of the security page that links the full policy. It holds the one link sentence only. */
@@ -189,6 +190,39 @@ const ROWS: Readonly<Record<string, { class: ChangeClass; with?: string }>> = {
   "A fix that changes no answer that a caller reads": { class: "fix" },
   "A new schema version": { class: "feature", with: "with its migration in each adapter" },
 };
+
+/**
+ * The bump of each class from 1.0.0: Semantic Versioning 2.0.0, items 6 to
+ * 8. Spec 33 item 1.2 leaves 1.0.0 to a later decision of the owner, so no
+ * spec line holds this column. The column is a rule of the page, and this
+ * check holds it to the class of each row.
+ */
+const STABLE: Readonly<Record<ChangeClass, string>> = {
+  break: "major",
+  feature: "minor",
+  fix: "patch",
+};
+
+/**
+ * The bullets of the section The rules, each with its source. The page
+ * states them as written, so a changed or a new bullet fails.
+ */
+const RULES: readonly { sentence: string; from: string }[] = [
+  { sentence: "The error codes are stable strings.", from: "spec 10" },
+  {
+    sentence: "A code never changes its meaning, and a new code is a minor version.",
+    from: "spec 10",
+  },
+  {
+    sentence: "The schema version is a constant in core, apart from the package version.",
+    from: "spec 6 and spec 33 item 1.5",
+  },
+  { sentence: "Each adapter refuses a database with an older schema version.", from: "spec 6" },
+  {
+    sentence: "Keep every `@authtempo` package of an app at the same version.",
+    from: "spec 33 items 1.1 and 10.2",
+  },
+];
 
 /** The spec sentence that gives the bump of each class in 0.x. */
 const CLASS_SENTENCE =
@@ -313,6 +347,16 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
       );
   }
 
+  // The rules: each bullet as written, from its source.
+  const rules = sectionOrFail(VERSIONING, "The rules");
+  for (const r of RULES) {
+    allow(VERSIONING, "The rules", r.sentence);
+    if (rules !== null && !sentencesOf(rules).includes(r.sentence))
+      failures.push(
+        `${VERSIONING}, section "The rules", does not state: ${r.sentence} (from ${r.from})`,
+      );
+  }
+
   // The first release: FIRST_RELEASE gives the version, and check-pack and
   // check-tag refuse another one where the release reads the version. Each
   // names FIRST_RELEASE in its failure message, so a rule that goes takes that
@@ -390,13 +434,13 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
   const bump = classLine === undefined ? null : CLASS_SENTENCE.exec(classLine);
   if (specLine !== undefined && bump === null)
     failures.push("spec 33 item 1.2 does not give the bump of a break, a feature, and a fix");
+  const cell = (to: string | undefined, extra: (string | undefined)[]) =>
+    [`A ${to} version`, ...extra.filter((e) => e !== undefined)].join(", ");
   const zeroCell = (row: { class: ChangeClass; with?: string }) => {
     const [b, f, x] = bump?.slice(1) ?? [];
     const to = { break: b, feature: f, fix: x }[row.class];
-    const parts = [`A ${to} version`];
-    if (row.class === "break") parts.push("with a `Breaking:` line in its changeset");
-    if (row.with !== undefined) parts.push(row.with);
-    return parts.join(", ");
+    const line = row.class === "break" ? "with a `Breaking:` line in its changeset" : undefined;
+    return cell(to, [line, row.with]);
   };
   const table = (section(VERSIONING, "The rules") ?? []).filter((l) => l.trim().startsWith("|"));
   const header = table[0] === undefined ? [] : cellsOf(table[0]);
@@ -411,7 +455,7 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
     for (const line of table.slice(2)) {
       rows++;
       const cells = cellsOf(line);
-      const [change, got] = [cells[0] ?? "", cells[zero] ?? ""];
+      const [change, got, from] = [cells[0] ?? "", cells[zero] ?? "", cells[stable] ?? ""];
       seen.add(change);
       const row = ROWS[change];
       if (row === undefined) {
@@ -424,6 +468,11 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
       if (bump !== null && got !== want)
         failures.push(
           `${VERSIONING}: the row "${change}" is a ${row.class}, so its In 0.x cell must be "${want}" (spec 33 item 1.2), not "${got}"`,
+        );
+      const wantStable = cell(STABLE[row.class], [row.with]);
+      if (from !== wantStable)
+        failures.push(
+          `${VERSIONING}: the row "${change}" is a ${row.class}, so its From 1.0.0 cell must be "${wantStable}" (Semantic Versioning 2.0.0), not "${from}"`,
         );
     }
     for (const change of Object.keys(ROWS))
