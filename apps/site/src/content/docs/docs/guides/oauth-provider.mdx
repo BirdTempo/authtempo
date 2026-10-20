@@ -1,27 +1,32 @@
 ---
 title: Be the OAuth and OIDC provider for MCP clients
-description: Let agents and MCP clients get access tokens for a resource of your app, with consent, PKCE, and rotating refresh tokens.
+description: Let agents, MCP clients, services, and devices get access tokens for a resource of your app, with consent, PKCE, DPoP, and rotating refresh tokens.
 type: how-to
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.16
   - packages/core/README.md "OAuth 2.1 and OIDC provider"
   - packages/client/README.md "Connected apps"
   - examples/worker/src/app.ts
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
 ---
 
 import { Code } from "@astrojs/starlight/components";
 import config from "../../../../../samples/guides/oauth-provider.ts?raw";
 import test from "../../../../../samples/guides/oauth-provider.test.ts?raw";
+import clients from "../../../../../samples/guides/oauth-clients.ts?raw";
+import clientsTest from "../../../../../samples/guides/oauth-clients.test.ts?raw";
 
-**For:** an app developer whose users connect agents, MCP clients, or other apps to the app.
+**For:** an app developer whose users connect agents, MCP clients, services, devices, or other apps to the app.
 
-**What it does:** core becomes an OAuth 2.1 authorization server and an OpenID Connect provider for public clients.
+**What it does:** core becomes an OAuth 2.1 authorization server and an OpenID Connect provider for public and confidential clients.
 
 ## Before you start
 
 - A working setup from a [getting started tutorial](/docs/start/).
 - `jwtMint` on. It is on by default. An access token is a JWT that core signs. [JWT minting](/docs/reference/config/#jwt-minting) lists its keys.
+- Node 22.18 or newer for the tools of the project.
 
 ## Steps
 
@@ -44,19 +49,187 @@ import test from "../../../../../samples/guides/oauth-provider.test.ts?raw";
 
 ## How it behaves
 
-- A client of the registration is public unless it names a secret method: no secret, and PKCE S256 on every code. A redirect URI must match exactly.
+- A client of the registration is public unless it names a secret method or `private_key_jwt`. A public client has no secret and sends PKCE S256 on every code. A redirect URI must match exactly.
 - A client registers at `POST /auth/oauth/register` while `registration.dynamic` is on, or its client id is the https URL of its metadata document. `api.oauth.clients.create` makes a client in your own code. The sweep deletes a client of the registration after 90 idle days, and keeps a client of `api.oauth.clients.create`.
 - A browser with no session goes to core's sign-in page and comes back. An unverified user is refused.
 - The sign-in page and the consent page carry `request_id`, the id of a request that core holds for 10 minutes. The consent decides on the held request, not on the form.
 - A consent covers its scopes for every resource. A new scope asks again.
 - An access token has `typ: "at+jwt"`, `aud` the resource, and lives `accessTtlMinutes`. It passes only under its own resource, and nobody can revoke it.
-- A refresh token (`offline_access`) rotates at each use. A used refresh token sent again deletes its whole family.
-- A password reset and a password change delete every refresh token and every pending code of the user. The consents stay.
+- A refresh token (`offline_access`) rotates at each use. A used refresh token sent again deletes its whole family, unless [the reuse window](#the-refresh-reuse-window) is on.
+- A password reset and a password change delete every refresh token, every pending code, and every decided device code of the user. The consents stay.
 - A revoke under another client's `client_id` answers `unauthorized_client` and revokes nothing.
-- A service with a confidential client of `api.oauth.clients.create` can use the `client_credentials` grant. Its token acts for the client, with no user. Keep the token until its `expires_in` ends. A service on one IP gets 60 tokens per 15 minutes ([limits](/docs/reference/limits/)).
-- A browser client on another origin can call `/auth/oauth/token` from a web origin of its own redirect URIs. The answer carries `access-control-allow-origin` with that origin and no credentials. Its form post to `/auth/oauth/revoke`, and its `POST /auth/oauth/userinfo` with no body, answer 403 [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted). Every other foreign origin also gets that 403 at `/auth/oauth/token`. A trusted origin gets credentialed CORS there.
+- A browser client on another origin can call `/auth/oauth/token` from a web origin of its own redirect URIs. That holds for a public client only. The answer carries `access-control-allow-origin` with that origin and no credentials. Its form post to `/auth/oauth/revoke`, and its `POST /auth/oauth/userinfo` with no body, answer 403 [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted). Every other foreign origin also gets that 403 at `/auth/oauth/token`. A trusted origin gets credentialed CORS there.
 - The resource answers its 401 with `resource_metadata` and `scope`, and its 403 with `error="insufficient_scope"`. The functions `unauthorizedResponse` and `insufficientScopeResponse` of [the verify package](/docs/reference/verify/) write both.
 - The 401 names `error="invalid_token"` only for a request with a bearer and no session cookie. Core reads a session cookie first and does not read the bearer then.
+- An authorize request with no `resource` answers `invalid_target`. Set `oauth.defaultResource` to one entry of `oauth.resources` for a client that cannot send `resource`. A named `resource` always wins.
+
+## Confidential clients
+
+A confidential client holds a credential. The token, revoke, introspection, and device routes take four client auth methods:
+
+| Method | What the client sends |
+| --- | --- |
+| `none` | `client_id` alone. A public client. |
+| `client_secret_basic` | HTTP Basic of the form-encoded id and secret. |
+| `client_secret_post` | `client_secret` in the form. |
+| `private_key_jwt` | A JWT client assertion of RFC 7523, signed by a key of its `jwks` or `jwks_uri`. |
+
+- A client with a secret may send it by either secret method, one method per request (RFC 6749 section 2.3.1). Two methods answer `invalid_request`.
+- A public client and a `private_key_jwt` client take their own method only. An empty `client_secret` counts as omitted.
+- After an `Authorization` header, a failed client auth answers 401 `invalid_client` with `WWW-Authenticate: Basic`. With no header it answers 400 with no challenge, so a browser shows no sign-in dialog.
+- A failed client auth spends nothing. It counts on `oauth-token:ip`, and no limit counts per client, so a stranger cannot lock a real client out.
+- A public client sends PKCE S256 on every code. A confidential client may omit PKCE only when it asks `openid` with a `nonce` (RFC 9700 section 2.1.1).
+- The assertion of `private_key_jwt` has the client id as `iss` and `sub`, and the issuer alone as `aud`. The token endpoint URL as `aud` is refused (draft-ietf-oauth-rfc7523bis-11).
+- An assertion lives at most 300 seconds, with 30 seconds of skew. Its `jti` works once. The algs are EdDSA, Ed25519, ES256, RS256, and PS256.
+- A registration that omits `token_endpoint_auth_method` gets `none`, not the `client_secret_basic` of RFC 7591. An MCP client that omits the field works as a public client.
+- A registration of a secret method answers `client_secret` (`cs_` and 32 random bytes) and `client_secret_expires_at: 0` once. Core stores the SHA-256 of the secret only.
+
+`api.oauth.clients` makes clients in your own code. No route answers it. It has six calls:
+
+- `create` makes a client of kind `api`. It answers the secret of a secret client once. The 90-day idle sweep keeps the client: an operator made it on purpose.
+- `get`, `list`, `update`, and `delete`. `list` answers newest first, 100 per page, with a cursor. `update` changes every field but the id, the method, and the secret.
+- `delete` removes the client with its consents, refresh tokens, device grants, session links, and pending sign-out posts.
+- `rotateSecret` answers a new secret. The old one passes for `keepOldHours` more, 0 to 168, 24 by default.
+- Each call answers an OAuth result. An unknown id answers `invalid_client`.
+- Only `create` and `update` take `client_credentials`, `credentialsScopes`, and `introspect`.
+
+A service that acts for no person uses the `client_credentials` grant:
+
+- Its client is confidential, and its `grantTypes` hold the grant. A public client, or a client without the grant, answers `unauthorized_client`.
+- A scope of the grant must be in both `credentialsScopes` and `oauth.scopes`. With no `scope`, the token gets every scope in both.
+- The answer holds no refresh token and no ID token. `auth.caller` answers the token as `kind: "oauth-client"`, with no user.
+- The token passes only while its client exists and holds the grant. A delete or an update of the client ends it at once.
+- `oauth-token:ip` counts each request first, so a service on one IP gets 60 tokens per 15 minutes ([limits](/docs/reference/limits/)). Keep the token until its `expires_in` ends.
+
+<Code code={clients} lang="ts" title="A service client and a device client in code" />
+
+<Code code={clientsTest} lang="ts" title="The client_credentials grant and the device flow as a test" />
+
+## Client metadata documents
+
+With `registration.cimd` on, a client id may be the https URL of its metadata document. Core implements draft-ietf-oauth-client-id-metadata-document-02 (`CIMD_REVISION`). It accepts the documents of -00, which MCP 2026-07-28 pins.
+
+- Core fetches the document through `oauth.fetch`, with `redirect: "manual"`, 10 seconds, and 8 KB at most. It keeps the document one hour per isolate.
+- The document's `client_id` must equal its URL.
+- A document with `client_secret` or `client_secret_expires_at` is refused (-02 section 4.1). So is a method other than `none` or `private_key_jwt`.
+- A `private_key_jwt` document with `jwks` or `jwks_uri` is a confidential client. It signs a client assertion at the token route.
+- A document cannot change at the request of this server. So core drops each member that it does not serve, and writes a warning with the member name.
+- The dropped members are another grant, another response type, and an `id_token_signed_response_alg` other than `jwtMint.alg`. A `backchannel_logout_uri` off the host of the document goes too.
+- A document with no `authorization_code` grant or no `code` response type is refused.
+- When a document changes from `private_key_jwt` to `none`, core revokes every refresh token of the client in the same write.
+
+## Device flow
+
+The device grant of RFC 8628 serves a device with no browser, such as a TV or a CLI. Set `oauth.device: {}` to turn it on.
+
+1. Give a client the grant `urn:ietf:params:oauth:grant-type:device_code`.
+2. The device posts to `POST /auth/oauth/device_authorization` with its client auth, `scope`, and `resource`.
+3. The device shows `user_code` and `verification_uri` to the person.
+4. The person opens `GET /auth/oauth/device`, signs in, and types the code.
+5. The page shows the client, the scopes, and the line "Approve only a device that is in front of you."
+6. The device polls `/auth/oauth/token` with `device_code`, every `interval` seconds.
+
+- The user code is `XXXX-XXXX` of the letters `BCDFGHJKLMNPQRSTVWXZ`. It lives `oauth.device.codeTtlMinutes`, 10 minutes by default.
+- `verification_uri_complete` fills the field. The person still submits it.
+- A poll before the decision answers `authorization_pending`. A poll within `interval` seconds answers `slow_down`, and the interval grows by 5 seconds.
+- A deny answers `access_denied`, and an expired code `expired_token`. An approved code gives its tokens once, then `invalid_grant`.
+- Only the client that asked may poll. A DPoP proof at the device request binds the code to its key.
+- Core stores a SHA-256 of the device code and an HMAC of the user code under the app secret, never a code.
+- With `oauth.signInURL`, the person types the code again after the sign-in. Core never stores a user code in clear.
+- A pairwise client cannot take the grant. It has no redirect that ties a sector to the client.
+- A reset, a password change, and a grant revoke delete the device codes that the user decided.
+
+The device page counts each post: 5 per session and 20 per IP per 15 minutes. Each window opens at its first call, so one code life can meet two windows. A 10-minute code then takes at most 9 guesses per session and 39 per IP. A custom limiter with windows on the clock allows 10 and 40. [Limits](/docs/reference/limits/#the-device-code) gives the odds.
+
+## DPoP
+
+DPoP of RFC 9449 binds a token to a key of the client. A copy of a bound token is useless without the key.
+
+- The client sends a `DPoP` header with a proof on a grant at `/auth/oauth/token`. The access token then holds `cnf.jkt`, and `token_type` is `DPoP`.
+- A public client's refresh token is bound to the key too. A confidential client's refresh token stays unbound (RFC 9449 section 5).
+- `dpop_jkt` at the authorize step binds the code to a key. The exchange then needs a proof of that key.
+- A client of `dpop_bound_access_tokens` must send a proof on every grant.
+- A resource gets `Authorization: DPoP <token>` and a proof for its URL and method. `auth.caller` checks the proof, and `c.dpopJkt` holds the thumbprint.
+- `auth.caller` spends the `jti` of each proof in the `verification` table. So a replay answers null on every instance.
+- A bound token sent as a bearer answers null (RFC 9449 section 7.2).
+- At `/auth/oauth/token` and `/auth/oauth/userinfo`, the `htu` of a proof is `baseURL` plus `basePath` plus the route path. `auth.caller` compares `htu` with the request URL.
+- `oauth.dpop.algs` lists the algs of a proof, and `oauth.dpop.windowSeconds` the window of its `iat`, 60 seconds by default.
+- Another server checks a proof with the `dpop` option of [the verify package](/docs/reference/verify/#dpop). Its default replay store sees one isolate only.
+
+## Pairwise subjects
+
+A client of `subject_type: "pairwise"` gets one subject per user and sector, so two clients of two sectors cannot join their users.
+
+- The subject is `ps_` and 16 random bytes. Core stores it, so a secret rotation never changes it.
+- The ID token, the access token, userinfo, and introspection carry the subject. `auth.caller` maps it back to the user.
+- The sector of a `cl_` client is the one host of its redirect URIs. A document's sector is the host of its client id.
+- Two hosts, a private-use scheme, a loopback host, or an IP literal give no sector. Such a pairwise client is refused.
+- Core never fetches `sector_identifier_uri`. A registration with it is refused, and a document drops it.
+- An update that changes the sector of a pairwise client is refused. Delete the client and make a new one.
+- The `userId` of [the verify package](/docs/reference/verify/) is the token subject. Only `auth.caller` in the app knows the user.
+
+## Introspection
+
+A resource server asks `POST /auth/oauth/introspect` whether a token is live now (RFC 7662).
+
+- The caller is a confidential client with `introspect: true`. Only `api.oauth.clients` sets it.
+- Set `oauth.introspection` to map each client id to the resources whose access tokens it may see.
+- Without the map, a client sees the one resource of a single-entry `oauth.resources`, and none of several.
+- A refresh token answers only its own client, with no map entry.
+- Every other token answers `{ "active": false }` with no other member. A revoke or a delete ends a token there at once.
+- Each call counts on `oauth-introspect:ip` and `oauth-introspect:client`, 600 per minute each.
+- The `introspect` option of [the verify package](/docs/reference/verify/#introspection) asks this route for each token.
+
+## Sign-in and auth_time
+
+- `oauth.signInURL` replaces core's sign-in page with the app's own route. The route gets `?request_id=oq_…` alone.
+- After the sign-in, send the browser to `continueAuthorizeURL` of `@authtempo/client/oauth`.
+- The route must ask for a new sign-in each time, also when the browser has a live session. A route that skips its form makes a redirect loop.
+- `prompt=login`, `max_age=0`, and a sign-in older than `max_age` seconds send the person to the sign-in step again.
+- The held request then goes on only with a session signed in at or after the request.
+- The ID token carries `auth_time`: the session's `freshAt`, else its `createdAt`. A handoff session keeps the sign-in time of the browser session.
+- `request`, `request_uri`, and `registration` go back to the client as `request_not_supported`, `request_uri_not_supported`, and `registration_not_supported`.
+
+## The refresh reuse window
+
+`oauth.refreshReuseSeconds` is 0, off, by default. The most is 60 seconds. With it on, a spent refresh token that its own client presents again within N seconds of its use answers a new child. The client auth and the DPoP key check run first. The child of the first use is then spent, so the family keeps one live branch.
+
+The odds. Without the window, a copy of a refresh token presented after the client's own use deletes the family at once. Take a window of N seconds. A copy presented within N seconds of the client's use gets an access token and a refresh token. The holder of the copy can rotate that refresh token until the client's next refresh. That refresh presents the superseded child and deletes the family. So an attacker who holds a copy has N seconds to act. Its access then lasts until the client's next refresh, plus at most `accessTtlMinutes`. For a confidential client or a bound refresh token, the copy is useless without the secret or the key. The use: a client whose answer was lost on the network retries and keeps its grant.
+
+RFC 9700 section 4.14.2 gives no grace period for rotation, so the window is off by default. Turn it on only for clients that lose answers on bad networks.
+
+## Sign-out at the provider
+
+A relying party ends the person's session at `end_session_endpoint`, `GET` or `POST /auth/oauth/end-session` (`OIDC RP-Initiated Logout 1.0`).
+
+- A valid `id_token_hint` of the session that the request carries ends that session at once. An expired hint still counts.
+- Any other request with a session answers a confirmation page. Only its yes, posted from `baseURL`, ends the session.
+- The answer redirects to `post_logout_redirect_uri` with `state` only for a valid hint and an exact entry of the client's `post_logout_redirect_uris`. Else core shows the signed-out page.
+- A cross-site form post carries no `SameSite=Lax` cookie. So a post with no session answers 303 to the GET of the same fields, which carries the cookie.
+- `session.afterEnd` fires with the reason `oidc_logout`.
+- The route counts on `oauth-end-session:ip`, 60 per 15 minutes.
+
+**Warning: a page with an ID token of its own account can learn whether a visitor has a session at the provider.** Core redirects at once with no session, and shows the confirmation page with a session. The specification allows this.
+
+## Back-channel sign-out
+
+A client that registers an https `backchannel_logout_uri` gets a sign-out token from the server when a linked session ends (`OIDC Back-Channel Logout 1.0`).
+
+- The URI needs `oauth.fetch`. That fetch must refuse private addresses for these posts too: core cannot resolve a name.
+- A code exchange or a device grant that answers an ID token links the session to the client.
+- Each end of a linked session sends one token to each linked client, an expiry too. Core first writes a row in an outbox.
+- After the commit, the flow posts the token as a form. A race between a link and a sign-out delays a token, and never loses it.
+- Each post has 2 seconds, and all posts of one request have 5 seconds. Core reads no byte of the answer.
+- A 200 or 204 deletes the row. A throw, a timeout, 408, 429, or 5xx keeps it, and the sweep sends it again.
+- The waits are 1 minute, 5 minutes, 30 minutes, then 2 hours. A row goes after its sixth attempt. Any other answer deletes the row with one log line.
+- The token has `typ` `logout+jwt`, `sid`, the client's `sub`, the `events` claim, no nonce, and 2 minutes of life.
+- A refresh token stays (section 2.7). The client decides what to do with it.
+- Each sign-out with a linked client can take up to 2 seconds more while that client does not answer.
+- On D1, the sweep steps of these posts need Workers Paid. [Delete expired rows](/docs/guides/sweep/) gives the counts.
+
+## The conformance run
+
+`scripts/conformance/README.md` holds the steps of four plans of the OpenID conformance suite. The owner runs them on a machine with Docker. No CI job runs the suite. `scripts/conformance/expected-gaps.md` names each module that is expected to end other than passed, with its reason. The example Worker serves a conformance mode from its own entry and its own wrangler config.
 
 ## The device flow
 
@@ -71,17 +244,22 @@ A device with no browser, such as a command line tool, can get tokens with the d
 The provider routes answer the codes of the OAuth table:
 
 - [`invalid_request`](/docs/reference/errors/#oauth-invalid_request): a parameter is missing, repeated, or wrong, or the held request is spent or older than 10 minutes.
-- [`invalid_client`](/docs/reference/errors/#oauth-invalid_client): the client id is unknown.
-- [`invalid_grant`](/docs/reference/errors/#oauth-invalid_grant): the code or the refresh token is spent, expired, or of another client.
-- [`invalid_target`](/docs/reference/errors/#oauth-invalid_target): the `resource` is not one of `oauth.resources`, or not the grant's.
+- [`invalid_client`](/docs/reference/errors/#oauth-invalid_client): the client id is unknown, or the client auth failed.
+- [`invalid_grant`](/docs/reference/errors/#oauth-invalid_grant): the code, the refresh token, or the device code is spent, expired, or of another client.
+- [`invalid_target`](/docs/reference/errors/#oauth-invalid_target): the `resource` is not one of `oauth.resources`, not the grant's, or absent with no default.
+- [`invalid_scope`](/docs/reference/errors/#oauth-invalid_scope): a scope is unknown, or not in both scope sets of a `client_credentials` request.
 - [`access_denied`](/docs/reference/errors/#oauth-access_denied): the person refused, or the user is unverified.
 - [`login_required`](/docs/reference/errors/#oauth-login_required) and [`consent_required`](/docs/reference/errors/#oauth-consent_required): `prompt=none` with no session or no consent.
 - [`invalid_token`](/docs/reference/errors/#oauth-invalid_token) and [`insufficient_scope`](/docs/reference/errors/#oauth-insufficient_scope): the userinfo bearer is not valid, or lacks `openid`.
-- [`unauthorized_client`](/docs/reference/errors/#oauth-unauthorized_client): a revoke under another client's id.
+- [`invalid_dpop_proof`](/docs/reference/errors/#oauth-invalid_dpop_proof): a DPoP proof failed a check, or the grant is bound to another key.
+- [`unauthorized_client`](/docs/reference/errors/#oauth-unauthorized_client): a revoke under another client's id, or a grant that the client does not hold.
+- [`invalid_client_metadata`](/docs/reference/errors/#oauth-invalid_client_metadata) and [`invalid_redirect_uri`](/docs/reference/errors/#oauth-invalid_redirect_uri): a registration or a client call has a field that core refuses.
+- [`authorization_pending`](/docs/reference/errors/#oauth-authorization_pending), [`slow_down`](/docs/reference/errors/#oauth-slow_down), and [`expired_token`](/docs/reference/errors/#oauth-expired_token): the answers of a device poll.
+- [`request_not_supported`](/docs/reference/errors/#oauth-request_not_supported), [`request_uri_not_supported`](/docs/reference/errors/#oauth-request_uri_not_supported), and [`registration_not_supported`](/docs/reference/errors/#oauth-registration_not_supported): the authorize request holds a parameter that core does not take.
 - [`rate_limited`](/docs/reference/errors/#oauth-rate_limited): a limit of the provider is full.
 
 ## Next
 
 - [Well-known documents](/docs/reference/well-known/)
-- [Tokens and prefixes](/docs/reference/tokens/)
-- [Mint a JWT for your other services](/docs/guides/jwt/)
+- [Routes](/docs/reference/routes/#post-oauth-token)
+- [The verify package](/docs/reference/verify/)
