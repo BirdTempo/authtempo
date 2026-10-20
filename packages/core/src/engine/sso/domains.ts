@@ -20,11 +20,13 @@ const ASCII_RE = /^[\u0000-\u007f]*$/;
 /**
  * The lowercase A-label form of an email domain, or null (spec 30 item 2).
  * The URL parser maps a Unicode label to its IDNA A-label (`xn--`). It also
- * maps a full-width letter, an ideographic dot, or a soft hyphen to ASCII:
- * such a host differs from the input in more than case, so it is refused.
- * Refused: a trailing dot, `*`, `/`, `:`, `@`, white space, a control
- * character, an IP literal, a single label, and a label that is not a host
- * name label.
+ * maps a full-width letter or a soft hyphen to ASCII. A label with such a
+ * character must come out as an A-label, or it is refused. So a full-width
+ * `xn--` label passes: the answer is the canonical form of the same name.
+ * An ideographic dot adds a label, so it is refused too.
+ * Refused: a trailing dot, `*`, `/`, `:`, `@`, and white space. Also
+ * refused: a control character, an IP literal, a single label, and a label
+ * that is not a host name label.
  */
 export function normalizeDomain(raw: unknown): string | null {
   if (typeof raw !== "string" || raw.length < 1 || raw.length > DOMAIN_MAX) return null;

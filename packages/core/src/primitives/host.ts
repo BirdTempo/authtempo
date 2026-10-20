@@ -65,8 +65,8 @@ export function isPublicHost(hostname: string, baseURL: string): boolean {
   // A trailing dot names the same host: `localhost.` is `localhost`.
   const host = hostname.replace(/\.$/, "");
   // An empty label (`a.internal...`, `a..example`) is no DNS name. Without
-  // this check, a second trailing dot hides a local name or the own host
-  // (ruling 20 of plan 12d, a change of the 12e rule).
+  // this check, a second trailing dot hides a local name or the own host.
+  // Ruling 20 of plan 12d adds the check, a change of the 12e rule.
   if (host.split(".").some((label) => label === "")) return false;
   // An IP literal (IPv4 or IPv6, 127.0.0.1 and [::1] too): a public client has a DNS name, and an address may be internal.
   if (isIpLiteral(host)) return false;

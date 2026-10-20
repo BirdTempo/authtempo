@@ -3,9 +3,9 @@ import { PROVIDER_TIMEOUT_MS } from "../../social/provider.js";
 
 /**
  * The DNS port of the domain proof (plan 12d, spec 30 item 3). `txt` answers
- * the TXT strings at `name`, each with its parts joined, `[]` when the name
- * does not exist, or null when the resolver gives no usable answer. A port
- * binds its fetch at construction (deviation 9 of the plan). Core has no
+ * the TXT strings at `name`, each with its parts joined. It answers `[]`
+ * when the name does not exist, and null when the resolver gives no usable
+ * answer. A port binds its fetch at construction (deviation 9 of the plan). Core has no
  * default resolver (ruling 15 of plan 12d): an app passes its ports, and
  * `dohCloudflare` and `dohGoogle` are presets that it may pick.
  */
@@ -41,10 +41,11 @@ export function dohGoogle(fetchFn: typeof fetch): DnsTxtPort {
 }
 
 /**
- * One DoH JSON resolver. The answer is null on a fetch error, a status other
- * than 200 (also a redirect: core follows none), a body past
- * `DOH_BODY_MAX`, a body that is not JSON of the read form, no answer in
- * `PROVIDER_TIMEOUT_MS`, or a `Status` other than NOERROR and NXDOMAIN.
+ * One DoH JSON resolver. The answer is null on a fetch error or a status
+ * other than 200. A redirect is such a status: core follows none. The answer
+ * is also null on a body past `DOH_BODY_MAX` or a body that is not JSON of
+ * the read form. It is null with no answer in `PROVIDER_TIMEOUT_MS`, and on
+ * a `Status` other than NOERROR and NXDOMAIN.
  */
 function dohJson(portName: string, endpoint: string, fetchFn: typeof fetch): DnsTxtPort {
   return {
@@ -102,9 +103,9 @@ function dohJson(portName: string, endpoint: string, fetchFn: typeof fetch): Dns
 /**
  * The TXT strings of a DoH JSON answer for `name`, or null when the answer
  * is not of the read form. Each `Answer` entry of type 16 gives one string.
- * An entry of another type (a CNAME, an RRSIG) is skipped, and so is an
- * entry of another owner name: the strings of a CNAME target are not the
- * strings of `name`.
+ * An entry of another type (a CNAME, an RRSIG) is skipped. An entry of
+ * another owner name is skipped too: the strings of a CNAME target are not
+ * the strings of `name`.
  */
 function txtStrings(body: unknown, name: string): string[] | null {
   if (!isRecord(body) || typeof body.Status !== "number") return null;
