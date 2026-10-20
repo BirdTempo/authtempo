@@ -162,6 +162,18 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
         Array.from({ length: 100 }, () => ({ op: "replace", path: at("title"), value: "t" })),
       ],
       [
+        "a path of 256 characters",
+        body({ op: "replace", path: `emails[type eq "${"w".repeat(232)}"].value`, value: "t" }),
+        "User",
+        [
+          {
+            op: "replace",
+            path: at("emails", "value", { attr: "type", value: "w".repeat(232) }),
+            value: "t",
+          },
+        ],
+      ],
+      [
         "a value three levels deep",
         body({ op: "replace", value: { members: [{ value: "u1" }] } }),
         "Group",
@@ -316,6 +328,15 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
         400,
       ],
       ["an operation that is not an object", body("replace"), "User", "invalidSyntax", 400],
+      ["a null operation", body(null), "User", "invalidSyntax", 400],
+      ["a number operation", body(5), "Group", "invalidSyntax", 400],
+      [
+        "an array-like schemas object",
+        { schemas: { 0: URN, length: 1 }, Operations: [{ op: "add", path: "title", value: "t" }] },
+        "User",
+        "invalidSyntax",
+        400,
+      ],
       [
         "another key of an operation",
         body({ op: "add", path: "title", value: "t", from: "x" }),
@@ -553,6 +574,13 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
         400,
       ],
       ["a null path", body({ op: "replace", path: null, value: "t" }), "User", "invalidPath", 400],
+      [
+        "a path of 257 characters",
+        body({ op: "replace", path: `emails[type eq "${"w".repeat(233)}"].value`, value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
       [
         "a path over 256 characters",
         body({ op: "replace", path: `emails[type eq "${"w".repeat(240)}"].value`, value: "t" }),
