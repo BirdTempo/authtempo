@@ -515,6 +515,12 @@ export async function removeTeamMember(
  * Sets the team the session acts in. The team must be a team of the
  * session's active organization, and the caller a member of the team, else
  * `forbidden_rank`. `null` clears it.
+ *
+ * The checks and the write run in one transaction after the lock of the
+ * team row (ruling 26). A team delete waits for the commit, then clears the
+ * active team. The session update names the active organization: a member
+ * removal clears it in its own transaction, so after a removal zero rows
+ * match.
  */
 export async function setActiveTeam(
   config: ResolvedConfig,
@@ -522,31 +528,40 @@ export async function setActiveTeam(
 ): Promise<Result<PublicSession>> {
   if (!scope(config)) return fail("not_found");
   const { session, user } = input.session;
-  if (input.teamId !== null) {
-    const team = await config.storage.findOne("team", [
-      { field: "id", op: "eq", value: input.teamId },
-    ]);
-    if (
-      !team ||
-      session.activeOrganizationId === null ||
-      team.organizationId !== session.activeOrganizationId
-    )
-      return fail("forbidden_rank");
-    const row = await config.storage.findOne("teamMember", [
-      { field: "teamId", op: "eq", value: team.id },
-      { field: "userId", op: "eq", value: user.id },
-    ]);
-    if (!row) return fail("forbidden_rank");
-  }
   const now = config.clock.now();
-  await config.storage.update("session", [{ field: "id", op: "eq", value: session.id }], {
-    activeTeamId: input.teamId,
-    updatedAt: now,
-  });
+  const teamId = input.teamId;
+  if (teamId === null) {
+    await config.storage.update("session", [{ field: "id", op: "eq", value: session.id }], {
+      activeTeamId: null,
+      updatedAt: now,
+    });
+  } else {
+    const organizationId = session.activeOrganizationId;
+    if (organizationId === null) return fail("forbidden_rank");
+    const set = await config.storage.transaction(async (tx): Promise<boolean> => {
+      // Zero rows: no team of the active organization has the id.
+      if (!(await lockTeam(tx, teamId, organizationId))) return false;
+      const row = await tx.findOne("teamMember", [
+        { field: "teamId", op: "eq", value: teamId },
+        { field: "userId", op: "eq", value: user.id },
+      ]);
+      if (!row) return false;
+      const n = await tx.update(
+        "session",
+        [
+          { field: "id", op: "eq", value: session.id },
+          { field: "activeOrganizationId", op: "eq", value: organizationId },
+        ],
+        { activeTeamId: teamId, updatedAt: now },
+      );
+      return n > 0;
+    });
+    if (!set) return fail("forbidden_rank");
+  }
   return ok(
     publicSession({
       ...input.session,
-      session: { ...session, activeTeamId: input.teamId, updatedAt: now },
+      session: { ...session, activeTeamId: teamId, updatedAt: now },
     }),
   );
 }

@@ -46,6 +46,26 @@ function watch(model: ModelName, reached: () => void): StorageAdapter {
   return { ...base, transaction: (fn) => base.transaction((tx) => fn(wrap(tx))) };
 }
 
+/** A storage on the shared pool that runs `fire` once, after the first read of `model`, also in a transaction. */
+function onRead(model: ModelName, fire: () => Promise<void>): StorageAdapter {
+  let armed = true;
+  const wrap = (s: StorageAdapter): StorageAdapter =>
+    ({
+      ...s,
+      async findOne(m: ModelName, where: never) {
+        const r = await s.findOne(m, where);
+        if (m === model && armed) {
+          armed = false;
+          await fire();
+        }
+        return r;
+      },
+      transaction: (fn: (tx: StorageAdapter) => Promise<unknown>) =>
+        s.transaction((tx) => fn(wrap(tx))),
+    }) as StorageAdapter;
+  return wrap(createPostgresAdapter(db.sql));
+}
+
 /** A promise that resolves at the first call of `reach`. */
 function gate() {
   let reach = () => {};
@@ -103,6 +123,27 @@ async function organization(auth: Auth, owner: UserRow): Promise<string> {
   return must(await auth.api.createOrganization({ user: owner, slug: "acme", name: "Acme" }))
     .organization.id;
 }
+
+/** A session of `email` through the magic link, as its `ts_` bearer. */
+async function sessionOf(auth: Auth, sent: MailMessage[], email: string): Promise<string> {
+  await auth.api.requestMagicLink({ email, ip: null });
+  const text = sent.at(-1)?.text ?? "";
+  const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+  const r = await auth.api.verifyMagicLink({ token, ip: null, userAgent: null });
+  if (!r.ok || !("token" in r.value)) throw new Error("no session");
+  return r.value.token;
+}
+
+const post = (path: string, body: unknown, token: string) =>
+  new Request(`https://api.example.com/auth${path}`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      origin: "https://app.example.com",
+      authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
 
 const teams = () => createPostgresAdapter(db.sql).findMany("team", []);
 const teamRows = () => createPostgresAdapter(db.sql).findMany("teamMember", []);
@@ -237,5 +278,75 @@ describe("team races on Postgres (plan 12k Task 5, ruling 26)", () => {
     expect(first).toMatchObject({ ok: true });
     expect(await second).toMatchObject({ ok: false, code: "last_team" });
     expect((await teams()).map((t) => t.id)).toEqual([web]);
+  });
+
+  it("refuses an active team after a member removal between the checks and the write", async () => {
+    const sent: MailMessage[] = [];
+    const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
+    const one = instance(
+      onRead("teamMember", async () => {
+        must(await plain.api.removeMember({ user: a, organizationId, userId: b.id }));
+      }),
+      { teams: {} },
+      sent,
+    );
+    const a = await user("a");
+    const b = await user("b");
+    const organizationId = await organization(plain, a);
+    must(await plain.api.addMember({ user: a, organizationId, userId: b.id, role: "member" }));
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+    must(await plain.api.addTeamMember({ user: a, teamId, userId: b.id }));
+    const token = await sessionOf(plain, sent, "b@example.com");
+    expect(
+      (await plain.handle(post("/organizations/active", { organizationId }, token))).status,
+    ).toBe(200);
+
+    const res = await one.handle(post("/organizations/teams/active", { teamId }, token));
+
+    expect({ status: res.status, body: await res.json() }).toEqual({
+      status: 403,
+      body: { error: "forbidden_rank" },
+    });
+    const sessions = await createPostgresAdapter(db.sql).findMany("session", [
+      { field: "userId", op: "eq", value: b.id },
+    ]);
+    expect(sessions.map((s) => [s.activeOrganizationId, s.activeTeamId])).toEqual([[null, null]]);
+  });
+
+  it("holds a team delete until the active team is written, so the delete clears it", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let deleted: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
+    const two = instance(watch("team", g.reach), { teams: {} }, sent);
+    const one = instance(
+      onRead("teamMember", async () => {
+        deleted = two.api.deleteTeam({ user: a, teamId });
+        await Promise.race([g.at, deleted]);
+      }),
+      { teams: {} },
+      sent,
+    );
+    const a = await user("a");
+    const b = await user("b");
+    const organizationId = await organization(plain, a);
+    must(await plain.api.addMember({ user: a, organizationId, userId: b.id, role: "member" }));
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+    must(await plain.api.addTeamMember({ user: a, teamId, userId: b.id }));
+    const token = await sessionOf(plain, sent, "b@example.com");
+    expect(
+      (await plain.handle(post("/organizations/active", { organizationId }, token))).status,
+    ).toBe(200);
+
+    await one.handle(post("/organizations/teams/active", { teamId }, token));
+
+    expect(await deleted).toMatchObject({ ok: true });
+    expect(await teams()).toEqual([]);
+    const sessions = await createPostgresAdapter(db.sql).findMany("session", [
+      { field: "userId", op: "eq", value: b.id },
+    ]);
+    expect(sessions.map((s) => [s.activeOrganizationId, s.activeTeamId])).toEqual([
+      [organizationId, null],
+    ]);
   });
 });
