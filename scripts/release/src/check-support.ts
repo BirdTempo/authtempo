@@ -142,6 +142,24 @@ export function checkSupport(input: SupportInput): Report {
       `${only.minor} is current and ${newest.minor} is newer; the newest minor is the current minor`,
     );
 
+  // One row for each minor, and the minors ship in their number order, so
+  // the security date of each minor reads the release of the right next minor.
+  const seen = new Map<string, number>();
+  for (const row of rows) {
+    const key = minorParts(row.minor).join(".");
+    seen.set(key, (seen.get(key) ?? 0) + 1);
+  }
+  for (const [minor, n] of seen)
+    if (n > 1) failures.push(`the minor ${minor} has ${n} rows; each minor has one row`);
+  for (const [i, row] of rows.entries()) {
+    const older = rows[i - 1];
+    if (older === undefined || seen.get(minorParts(row.minor).join(".")) !== 1) continue;
+    if (row.released <= older.released)
+      failures.push(
+        `${row.minor} released ${row.released}, not after ${older.minor} released ${older.released}; a newer minor is released later`,
+      );
+  }
+
   for (const [i, row] of rows.entries()) {
     if (row.status === "security") {
       const next = rows[i + 1];

@@ -95,6 +95,34 @@ describe("check-support", () => {
     ).toEqual([]);
   });
 
+  it("fails two rows of one minor (review L1)", () => {
+    const rows: SupportRow[] = [
+      {
+        minor: "0.1",
+        status: "security",
+        released: "2026-11-02",
+        securityUntil: "2027-02-02",
+        schemaFrom: [11],
+      },
+      current("0.1", "2026-11-02"),
+    ];
+    expect(check(rows).failures).toContain("the minor 0.1 has 2 rows; each minor has one row");
+  });
+
+  it("fails a minor that is not released after the older minor (review L1)", () => {
+    const rows = (released: string): SupportRow[] => [
+      { minor: "0.1", status: "unsupported", released: "2027-03-01", schemaFrom: [] },
+      current("0.2", released),
+    ];
+    expect(check(rows("2027-01-01"), "2027-06-01").failures).toEqual([
+      "0.2 released 2027-01-01, not after 0.1 released 2027-03-01; a newer minor is released later",
+    ]);
+    expect(check(rows("2027-03-01"), "2027-06-01").failures).toEqual([
+      "0.2 released 2027-03-01, not after 0.1 released 2027-03-01; a newer minor is released later",
+    ]);
+    expect(check(rows("2027-03-02"), "2027-06-01").failures).toEqual([]);
+  });
+
   it("fails a security date that is not 3 months after the next minor's release", () => {
     const ok = check(twoMinors("2027-04-02"));
     expect(ok.failures).toEqual([]);
