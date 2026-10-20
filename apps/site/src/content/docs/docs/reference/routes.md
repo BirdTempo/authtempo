@@ -730,7 +730,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Field | Value |
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The user has the rank `admin` |
-| Input | JSON `{ organizationId, email, role }` |
+| Input | JSON `{ organizationId, email, role, teamIds? }`. `teamIds` needs `organizations.teams`: at most 20 distinct teams of the organization, else `invalid_body` |
 | Answer | `{ invitation }`, with no token |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`invitation_limit`](/docs/reference/errors/#invitation_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
@@ -758,8 +758,8 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The address is the invited address, and it is verified |
 | Input | JSON `{ token }` |
-| Answer | `{ organization, member }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`email_unverified`](/docs/reference/errors/#email_unverified), [`already_member`](/docs/reference/errors/#already_member), [`member_limit`](/docs/reference/errors/#member_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict) |
+| Answer | `{ organization, member }`. The accept adds the person to each team of the invitation that still exists. A full team answers `team_member_limit`, and the invitation stays pending |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`email_unverified`](/docs/reference/errors/#email_unverified), [`already_member`](/docs/reference/errors/#already_member), [`member_limit`](/docs/reference/errors/#member_limit), [`team_member_limit`](/docs/reference/errors/#team_member_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict) |
 
 <h3 id="post-organizations-invitations-decline"><code>POST /organizations/invitations/decline</code></h3>
 
@@ -776,7 +776,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The user is a member of the organization |
 | Input | JSON `{ organizationId }`. `organizationId` is a string or `null` |
-| Answer | `{ user, session }` with `session.activeOrganizationId` |
+| Answer | `{ user, session }` with `session.activeOrganizationId`. A change of the organization sets `session.activeTeamId` to `null` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 <h3 id="post-organizations-has-permission"><code>POST /organizations/has-permission</code></h3>
@@ -855,6 +855,91 @@ These routes exist when the config sets `organizations.dynamicRoles`. An organiz
 | Input | JSON `{ organizationId, name }` |
 | Answer | `{ ok: true }`. A member or a pending invitation that holds the role answers `role_in_use` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`role_in_use`](/docs/reference/errors/#role_in_use), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+## Teams
+
+These routes exist when the config sets `organizations.teams`. A team is a named group of members of one organization. A team has no role: every right comes from the organization role. A member removal, a team delete, and an organization delete remove the team rows and fire no team hook.
+
+<h3 id="get-organizations-teams"><code>GET /organizations/teams</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user is a member of the organization |
+| Input | Query `{ organizationId }` |
+| Answer | `{ teams }`: each team with `id`, `organizationId`, `name`, `createdAt`, and `updatedAt`, by name |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="post-organizations-teams-create"><code>POST /organizations/teams/create</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `team:create` in the organization |
+| Input | JSON `{ organizationId, name }`. `name` follows the organization name rule. Names are not unique. Another key answers `invalid_body` |
+| Answer | `{ team }` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`team_limit`](/docs/reference/errors/#team_limit), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+
+<h3 id="post-organizations-teams-update"><code>POST /organizations/teams/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `team:update` in the organization of the team |
+| Input | JSON `{ teamId, name }`. Another key answers `invalid_body` |
+| Answer | `{ team }` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+
+<h3 id="post-organizations-teams-delete"><code>POST /organizations/teams/delete</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `team:delete` in the organization of the team |
+| Input | JSON `{ teamId }` |
+| Answer | `{ ok: true }`. The team rows go, each session that acts in the team loses its active team, and each pending invitation loses the team. With `organizations.teams.keepLastTeam`, the last team answers `last_team` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`last_team`](/docs/reference/errors/#last_team), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+
+<h3 id="get-organizations-teams-members"><code>GET /organizations/teams/members</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `member:read` in the organization of the team |
+| Input | Query `{ teamId }` |
+| Answer | `{ members }`: each with `id`, `teamId`, `userId`, `email`, `name`, and `createdAt`, by address |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="post-organizations-teams-members-add"><code>POST /organizations/teams/members/add</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `member:update` in the organization of the team |
+| Input | JSON `{ teamId, userId }`. The person is a member of the organization, else `not_found` |
+| Answer | `{ member }` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`already_member`](/docs/reference/errors/#already_member), [`team_member_limit`](/docs/reference/errors/#team_member_limit), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict) |
+
+<h3 id="post-organizations-teams-members-remove"><code>POST /organizations/teams/members/remove</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The removal of another person needs `member:delete` in the organization of the team. A member leaves a team with their own `userId` |
+| Input | JSON `{ teamId, userId }` |
+| Answer | `{ ok: true }`. A session of the person that acts in the team loses its active team |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+
+<h3 id="post-organizations-teams-active"><code>POST /organizations/teams/active</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The team is a team of the session's active organization, and the user is a member of the team |
+| Input | JSON `{ teamId }`. `teamId` is a string or `null` |
+| Answer | `{ user, session }` with `session.activeTeamId` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="get-organizations-teams-mine"><code>GET /organizations/teams/mine</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401 |
+| Input | None |
+| Answer | `{ teams }`: the teams of the user in every organization, by name |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 ## API tokens
 

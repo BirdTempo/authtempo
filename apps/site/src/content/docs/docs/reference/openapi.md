@@ -70,6 +70,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `handoff` | `handoff` | off |
 | `organizations` | `organizations` | off |
 | `dynamicRoles` | `organizations.dynamicRoles` | off |
+| `teams` | `organizations.teams` | off |
 | `tokens` | always on | on |
 | `jwtMint` | `jwtMint` | on |
 | `operator` | `operator` | off |

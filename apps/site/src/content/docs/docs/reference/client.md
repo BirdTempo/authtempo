@@ -223,7 +223,7 @@ The types of the package:
 | --- | --- |
 | The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `ClientSessionState`, `SessionState`, `SessionStore`, `Locale`, `ErrorTexts` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions` |
-| Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
+| Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `TeamJSON`, `TeamMemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 | Account settings | `SessionSummaryJSON`, `FreshJSON`, `PublicUserJSON`, `IdentityEntryJSON`, `IdentityListJSON` |
 
 ## Next

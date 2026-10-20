@@ -28,6 +28,7 @@ export const DEMO_EXEMPT = {
   operatorUsers: "An operator tool, not a sign-in method.",
   operatorImpersonation: "An operator tool, not a sign-in method.",
   dynamicRoles: "An organization tool, not a sign-in method.",
+  teams: "An organization tool, not a sign-in method.",
   // Ruling 33 of the lane: the owner may move it later.
   openapi: "A machine document of the routes, not a sign-in method; the docs serve it.",
 } as const satisfies Partial<Record<RouteFeature, string>>;

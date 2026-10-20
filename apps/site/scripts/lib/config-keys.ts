@@ -23,6 +23,7 @@ import type {
   OrganizationsConfig,
   PasswordConfig,
   SecretVersion,
+  TeamsConfig,
   TotpConfig,
   TotpGateConfig,
 } from "@authtempo/core";
@@ -153,14 +154,21 @@ export const CONFIG_KEYS = {
     invitationLinkBuilder: true,
     limits: true,
     dynamicRoles: true,
+    teams: true,
   } satisfies Keys<OrganizationsConfig>,
   "organizations.dynamicRoles": {
     maxPerOrganization: true,
   } satisfies Keys<DynamicRolesConfig>,
+  "organizations.teams": {
+    defaultTeam: true,
+    keepLastTeam: true,
+  } satisfies Keys<TeamsConfig>,
   "organizations.limits": {
     perUser: true,
     membersPerOrganization: true,
     pendingInvitationsPerOrganization: true,
+    teamsPerOrganization: true,
+    membersPerTeam: true,
   } satisfies Keys<OrganizationLimits>,
   password: {
     hash: true,

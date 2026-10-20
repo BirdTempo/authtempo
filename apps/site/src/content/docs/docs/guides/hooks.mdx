@@ -39,7 +39,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 
 | Group | Hook points |
 | --- | --- |
-| `hooks.organization` | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeAddMember`, `afterAddMember`, `beforeUpdateMemberRole`, `afterUpdateMemberRole`, `beforeRemoveMember`, `afterRemoveMember`, `beforeInvite`, `afterInvite`, `afterAcceptInvitation`, `afterDeclineInvitation`, `afterRevokeInvitation` |
+| `hooks.organization` | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeAddMember`, `afterAddMember`, `beforeUpdateMemberRole`, `afterUpdateMemberRole`, `beforeRemoveMember`, `afterRemoveMember`, `beforeInvite`, `afterInvite`, `afterAcceptInvitation`, `afterDeclineInvitation`, `afterRevokeInvitation`; with `organizations.teams`, `beforeCreateTeam`, `afterCreateTeam`, `beforeUpdateTeam`, `afterUpdateTeam`, `beforeDeleteTeam`, `afterDeleteTeam`, `beforeAddTeamMember`, `afterAddTeamMember`, `beforeRemoveTeamMember`, `afterRemoveTeamMember` |
 | `hooks.session` | `beforeCreate`, `afterCreate`, `afterEnd` |
 | `hooks.user` | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeVerify`, `afterVerify` |
 | `hooks.identity` | `beforeLink`, `afterLink`, `beforeUnlink`, `afterUnlink` |
@@ -56,6 +56,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 
 - A before hook runs inside the flow's transaction, after the rank checks and the limits, and before the first write. A throw leaves no row.
 - An after hook runs after the commit, before the answer. A throw cannot undo the row: core logs one line and answers success.
+- A cascade fires no team hook. A member removal, a team delete, and an organization delete remove team rows with no team hook. The default team of an organization create and the team rows of an accept fire none either.
 - Each hook gets a copy of its event. Only two hooks may change a row. `session.beforeCreate` may change `ip`, `userAgent`, and `activeOrganizationId`. `user.beforeCreate` may change `name` and `image`.
 - Answer a plain object. Core reads its own enumerable fields only. A class instance or another object that is not plain answers `hook_failed`.
 - In one sign-in that creates a user, the order is `user.beforeCreate`, `identity.beforeLink`, and `session.beforeCreate`, all before the first write. After the commit, the order is `user.afterCreate`, `identity.afterLink`, and `session.afterCreate`.

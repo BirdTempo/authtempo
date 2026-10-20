@@ -180,12 +180,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="already_member"><code>already_member</code> 409</h3>
 
-- **Meaning:** The user is already a member of the organization.
-- **Do:** Change the member's role instead.
+- **Meaning:** The user is already a member of the organization, or of the team.
+- **Do:** Change the member's role instead. For a team, no change is needed.
 
 | Routes |
 | --- |
-| [`POST /organizations/members/add`](/docs/reference/routes/#post-organizations-members-add), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept). |
+| [`POST /organizations/members/add`](/docs/reference/routes/#post-organizations-members-add), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept), [`POST /organizations/teams/members/add`](/docs/reference/routes/#post-organizations-teams-members-add). |
 
 <h3 id="email_mismatch"><code>email_mismatch</code> 403</h3>
 
@@ -203,7 +203,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /totp/setup`](/docs/reference/routes/#post-totp-setup), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes), [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), [`POST /organizations/members/remove`](/docs/reference/routes/#post-organizations-members-remove), [`POST /organizations/roles/update`](/docs/reference/routes/#post-organizations-roles-update), [`POST /user/update`](/docs/reference/routes/#post-user-update), [`POST /user/change-email/confirm`](/docs/reference/routes/#post-user-change-email-confirm), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). The sign-in routes answer it when an account delete commits during the request. So do the organization create, the member add, the accept, and the password reset. |
+| [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /totp/setup`](/docs/reference/routes/#post-totp-setup), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes), [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), [`POST /organizations/members/remove`](/docs/reference/routes/#post-organizations-members-remove), [`POST /organizations/roles/update`](/docs/reference/routes/#post-organizations-roles-update), [`POST /user/update`](/docs/reference/routes/#post-user-update), [`POST /user/change-email/confirm`](/docs/reference/routes/#post-user-change-email-confirm), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). The sign-in routes answer it when an account delete commits during the request. So do the organization create, the member add, the team member add, the accept, and the password reset. |
 
 <h3 id="invalid_credentials"><code>invalid_credentials</code> 401</h3>
 
@@ -275,7 +275,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/verify`](/docs/reference/routes/#post-password-verify), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /handoff/redeem`](/docs/reference/routes/#post-handoff-redeem), [`POST /organizations/create`](/docs/reference/routes/#post-organizations-create), [`POST /organizations/update`](/docs/reference/routes/#post-organizations-update), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), [`POST /organizations/members/add`](/docs/reference/routes/#post-organizations-members-add), [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), [`POST /organizations/members/remove`](/docs/reference/routes/#post-organizations-members-remove), [`POST /organizations/invite`](/docs/reference/routes/#post-organizations-invite), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept), [`POST /user/update`](/docs/reference/routes/#post-user-update), [`POST /user/change-email/confirm`](/docs/reference/routes/#post-user-change-email-confirm), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
+| [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/verify`](/docs/reference/routes/#post-password-verify), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /handoff/redeem`](/docs/reference/routes/#post-handoff-redeem), [`POST /organizations/create`](/docs/reference/routes/#post-organizations-create), [`POST /organizations/update`](/docs/reference/routes/#post-organizations-update), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), [`POST /organizations/members/add`](/docs/reference/routes/#post-organizations-members-add), [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), [`POST /organizations/members/remove`](/docs/reference/routes/#post-organizations-members-remove), [`POST /organizations/invite`](/docs/reference/routes/#post-organizations-invite), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept), [`POST /organizations/teams/create`](/docs/reference/routes/#post-organizations-teams-create), [`POST /organizations/teams/update`](/docs/reference/routes/#post-organizations-teams-update), [`POST /organizations/teams/delete`](/docs/reference/routes/#post-organizations-teams-delete), [`POST /organizations/teams/members/add`](/docs/reference/routes/#post-organizations-teams-members-add), [`POST /organizations/teams/members/remove`](/docs/reference/routes/#post-organizations-teams-members-remove), [`POST /user/update`](/docs/reference/routes/#post-user-update), [`POST /user/change-email/confirm`](/docs/reference/routes/#post-user-change-email-confirm), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
 
 <h3 id="hook_failed"><code>hook_failed</code> 500</h3>
 
@@ -284,7 +284,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/verify`](/docs/reference/routes/#post-password-verify), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /handoff/redeem`](/docs/reference/routes/#post-handoff-redeem), [`POST /organizations/create`](/docs/reference/routes/#post-organizations-create), [`POST /organizations/update`](/docs/reference/routes/#post-organizations-update), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), [`POST /organizations/members/add`](/docs/reference/routes/#post-organizations-members-add), [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), [`POST /organizations/members/remove`](/docs/reference/routes/#post-organizations-members-remove), [`POST /organizations/invite`](/docs/reference/routes/#post-organizations-invite), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept), [`GET /token`](/docs/reference/routes/#get-token), [`POST /user/update`](/docs/reference/routes/#post-user-update), [`POST /user/change-email/confirm`](/docs/reference/routes/#post-user-change-email-confirm), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
+| [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/verify`](/docs/reference/routes/#post-password-verify), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /handoff/redeem`](/docs/reference/routes/#post-handoff-redeem), [`POST /organizations/create`](/docs/reference/routes/#post-organizations-create), [`POST /organizations/update`](/docs/reference/routes/#post-organizations-update), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), [`POST /organizations/members/add`](/docs/reference/routes/#post-organizations-members-add), [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), [`POST /organizations/members/remove`](/docs/reference/routes/#post-organizations-members-remove), [`POST /organizations/invite`](/docs/reference/routes/#post-organizations-invite), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept), [`POST /organizations/teams/create`](/docs/reference/routes/#post-organizations-teams-create), [`POST /organizations/teams/update`](/docs/reference/routes/#post-organizations-teams-update), [`POST /organizations/teams/delete`](/docs/reference/routes/#post-organizations-teams-delete), [`POST /organizations/teams/members/add`](/docs/reference/routes/#post-organizations-teams-members-add), [`POST /organizations/teams/members/remove`](/docs/reference/routes/#post-organizations-teams-members-remove), [`GET /token`](/docs/reference/routes/#get-token), [`POST /user/update`](/docs/reference/routes/#post-user-update), [`POST /user/change-email/confirm`](/docs/reference/routes/#post-user-change-email-confirm), [`POST /user/change-email/verify`](/docs/reference/routes/#post-user-change-email-verify), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
 
 <h3 id="internal"><code>internal</code> 500</h3>
 
@@ -500,6 +500,33 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | [`POST /organizations/roles/create`](/docs/reference/routes/#post-organizations-roles-create). |
+
+<h3 id="team_limit"><code>team_limit</code> 409</h3>
+
+- **Meaning:** The organization holds `organizations.limits.teamsPerOrganization` teams.
+- **Do:** Delete a team, or raise the limit in the config.
+
+| Routes |
+| --- |
+| [`POST /organizations/teams/create`](/docs/reference/routes/#post-organizations-teams-create). |
+
+<h3 id="team_member_limit"><code>team_member_limit</code> 409</h3>
+
+- **Meaning:** The team holds `organizations.limits.membersPerTeam` members. At an accept, the invitation stays pending, and the person joins nothing.
+- **Do:** Remove a member from the team, or raise the limit in the config. Then add the person or accept again.
+
+| Routes |
+| --- |
+| [`POST /organizations/teams/members/add`](/docs/reference/routes/#post-organizations-teams-members-add), [`POST /organizations/invitations/accept`](/docs/reference/routes/#post-organizations-invitations-accept). |
+
+<h3 id="last_team"><code>last_team</code> 409</h3>
+
+- **Meaning:** The team is the last team of the organization, and `organizations.teams.keepLastTeam` is on.
+- **Do:** Create another team first, then delete this one.
+
+| Routes |
+| --- |
+| [`POST /organizations/teams/delete`](/docs/reference/routes/#post-organizations-teams-delete). |
 
 ## OAuth codes
 
