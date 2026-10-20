@@ -621,6 +621,8 @@ describe("databaseHooks.session.create (plan 9d)", () => {
         ipAddress: "198.51.100.9",
         userAgent: "Agent/2",
         activeOrganizationId: null,
+        // Better Auth's teams column (plan 12k ruling 41).
+        activeTeamId: null,
       },
     ]);
   });
