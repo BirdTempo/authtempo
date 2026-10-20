@@ -112,6 +112,23 @@ export interface Invitation {
   createdAt: Date;
 }
 
+/** Better Auth 1.7.2's team, as its routes answer it: no `memberCount` (plan 12k Task 11). */
+export interface Team {
+  id: string;
+  name: string;
+  organizationId: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+/** Better Auth 1.7.2's team member, as its routes answer it: no `membershipKey` (plan 12k Task 11). */
+export interface TeamMember {
+  id: string;
+  teamId: string;
+  userId: string;
+  createdAt: Date;
+}
+
 /** What `drizzleAdapter` and `betterAuthSchemaStorage` answer. `betterAuth` refuses any other `database`. */
 export interface CompatDatabase {
   readonly kind: "authtempo-compat-database";
@@ -155,9 +172,9 @@ type BeforeHookAnswer = void | { data: object };
  * and argument shapes (dist/plugins/organization/types.d.mts:296-690, read
  * 2026-10-13), with the fields authtempo fills. A before hook may return
  * `{ data }` only with the values it was given: a core hook cannot change a
- * row. The team hooks, `beforeCancelInvitation`, and `beforeRejectInvitation`
- * are not here, so a literal that names one fails the compile; the start
- * check refuses them by name.
+ * row. `beforeCancelInvitation` and `beforeRejectInvitation` are not here,
+ * so a literal that names one fails the compile; the start check refuses
+ * them by name. The ten team hooks map since plan 12k Task 11.
  */
 export interface OrganizationHookOptions {
   beforeCreateOrganization?: (data: {
@@ -251,6 +268,64 @@ export interface OrganizationHookOptions {
     cancelledBy: User;
     organization: Organization;
   }) => HookResult<void>;
+  // The ten team hooks (plan 12k Task 11). In the team hooks, `user` is the
+  // caller. In the member hooks, `user` is the person who joins or leaves, as
+  // in Better Auth 1.7.2 (routes/crud-team.mjs, read 2026-10-21).
+  beforeCreateTeam?: (data: {
+    team: { name: string; organizationId: string };
+    user: User;
+    organization: Organization;
+  }) => HookResult<BeforeHookAnswer>;
+  afterCreateTeam?: (data: {
+    team: Team;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  beforeUpdateTeam?: (data: {
+    team: Team;
+    updates: { name: string };
+    user: User;
+    organization: Organization;
+  }) => HookResult<BeforeHookAnswer>;
+  afterUpdateTeam?: (data: {
+    team: Team;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  beforeDeleteTeam?: (data: {
+    team: Team;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  afterDeleteTeam?: (data: {
+    team: Team;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  beforeAddTeamMember?: (data: {
+    teamMember: { teamId: string; userId: string };
+    team: Team;
+    user: User;
+    organization: Organization;
+  }) => HookResult<BeforeHookAnswer>;
+  afterAddTeamMember?: (data: {
+    teamMember: TeamMember;
+    team: Team;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  beforeRemoveTeamMember?: (data: {
+    teamMember: TeamMember;
+    team: Team;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
+  afterRemoveTeamMember?: (data: {
+    teamMember: TeamMember;
+    team: Team;
+    user: User;
+    organization: Organization;
+  }) => HookResult<void>;
 }
 
 /** The session fields core fills before the write, in Better Auth's names (plan 9d). */
@@ -278,6 +353,18 @@ export interface OrganizationOptions {
   roles?: Record<string, Role>;
   /** Core's dynamic roles. A function of `maximumRolesPerOrganization` is refused, as for the other limits. */
   dynamicAccessControl?: { enabled?: boolean; maximumRolesPerOrganization?: number };
+  /**
+   * Core's teams (plan 12k Task 11). Better Auth's defaults hold: a default
+   * team at each create, and no delete of the last team. A function of a
+   * limit and `defaultTeam.customCreateDefaultTeam` are refused.
+   */
+  teams?: {
+    enabled: boolean;
+    defaultTeam?: { enabled: boolean };
+    maximumTeams?: number;
+    maximumMembersPerTeam?: number;
+    allowRemovingAllTeams?: boolean;
+  };
 }
 
 export interface PasskeyOptions {
@@ -1185,6 +1272,51 @@ export interface AuthClient<TF extends boolean = false> {
       role: string;
       permissions: Record<string, readonly string[]>;
     }): boolean;
+    /**
+     * Core's teams in Better Auth's shapes (plan 12k Task 11). Each call with
+     * no `organizationId` takes the active organization. A team's
+     * `additionalFields` answer NOT_SUPPORTED (501): core keeps no extra field.
+     */
+    createTeam(input: {
+      name: string;
+      organizationId?: string;
+      [field: string]: unknown;
+    }): Promise<CompatClientResult<Team>>;
+    updateTeam(input: {
+      teamId: string;
+      data: { name?: string; organizationId?: string; [field: string]: unknown };
+    }): Promise<CompatClientResult<Team>>;
+    removeTeam(input: {
+      teamId: string;
+      organizationId?: string;
+    }): Promise<CompatClientResult<{ message: string }>>;
+    listTeams(input?: { query?: { organizationId?: string } }): Promise<CompatClientResult<Team[]>>;
+    /** `null` clears the active team. */
+    setActiveTeam(input?: { teamId?: string | null }): Promise<CompatClientResult<Team | null>>;
+    /** The session user's teams. A `userId` of another person answers NOT_SUPPORTED (501). */
+    listUserTeams(input?: {
+      query?: { userId?: string; organizationId?: string };
+    }): Promise<CompatClientResult<Team[]>>;
+    /** With no `teamId`, the members of the active team. */
+    listTeamMembers(input?: {
+      query?: { teamId?: string };
+    }): Promise<CompatClientResult<TeamMember[]>>;
+    addTeamMember(input: {
+      teamId: string;
+      userId: string;
+      organizationId?: string;
+    }): Promise<CompatClientResult<TeamMember>>;
+    removeTeamMember(input: {
+      teamId: string;
+      userId: string;
+      organizationId?: string;
+    }): Promise<CompatClientResult<{ message: string }>>;
+    /**
+     * Core's slug check. A free slug answers `{ status: true }`. A taken or
+     * reserved slug answers ORGANIZATION_SLUG_ALREADY_TAKEN (409), and a slug
+     * that core's rule refuses answers VALIDATION_ERROR (400).
+     */
+    checkSlug(input: { slug: string }): Promise<CompatClientResult<{ status: true }>>;
   };
   passkey: {
     addPasskey(input?: { name?: string }): Promise<CompatClientResult<ClientPasskey>>;

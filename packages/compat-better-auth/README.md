@@ -136,7 +136,7 @@ number lower than the Better Auth table migration makes every new database
 - Tables from before Better Auth 1.7 (no `account.issuer` column): copy the file of the same name from `migrations/d1-before-1.7/`.
 - Every app: then copy each later file of the same directory (`0002_compat_schema_v5.sql` to `0010_compat_schema_v13.sql`), in order, and give each the next number.
 - Tables with other names: write the 0001 file from `storage.migrationSql()` or `storage.migrationSql("before-1.7")`. Write the 0006 file from `compatMigration0006Sql("sqlite", storage.names)`, not from the shipped file. The shipped 0006 adds `taSecretVersion` to Better Auth's default `verification` table, so on other names it fails with `no such table`. Write the 0007 file from `compatMigration0007Sql("sqlite", storage.names)` for the same reason: the shipped 0007 adds `taFreshAt` to the default `session` table. Write the 0009 file from `compatMigration0009Sql("sqlite", storage.names)` for the same reason. The shipped 0009 adds the ban columns to the default `user` table and `taActorId` to the default `session` table. Write the 0010 file from `compatMigration0010Sql("sqlite", storage.names)` for the same reason. The shipped 0010 adds `activeTeamId` to the default `session` table and `teamId` to the default `invitation` table.
-- Tables that hold `session.activeTeamId` and `invitation.teamId` already: Better Auth's `teams` option adds these two columns. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the shipped 0010 fails on these tables with `duplicate column name: activeTeamId`. Such an app writes its own 0010 file: the shipped file without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole` table when it is absent, add `taRank` and the unique key on (`organizationId`, `role`), and move the versions. It applies the files to 0009 and its own 0010 with `wrangler d1 migrations apply` before `authtempo migrate --target d1 --tables compat`. Then the compat version is 10, and the command copies nothing.
+- Tables that hold `session.activeTeamId` and `invitation.teamId` already: Better Auth's `teams` option adds these two columns. SQLite has no `ADD COLUMN IF NOT EXISTS`, so the shipped 0010 fails on these tables with `duplicate column name: activeTeamId`. Such an app writes its own 0010 file: the shipped file without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole`, `team`, and `teamMember` tables when they are absent. They add `taRank`, the `ta` columns, and the unique keys, and move the versions. It applies the files to 0009 and its own 0010 with `wrangler d1 migrations apply` before `authtempo migrate --target d1 --tables compat`. Then the compat version is 10, and the command copies nothing.
 
 `wrangler d1 migrations apply` rolls back a file that fails (wrangler
 4.148.0, read 2026-10-10), so a refused file changes nothing. A runner that
@@ -566,7 +566,7 @@ answer type holds `twoFactorRedirect` only when the client options name
 
 | Plugin | What it does on authtempo |
 | --- | --- |
-| `organization` | Core's organizations, mailed invitations, and Better Auth's roles: `ac`, `roles`, and `dynamicAccessControl` map onto core's statements, roles, and dynamic roles (see "Access control and roles"). With no `roles`, the roles are Better Auth's member < admin < owner. `sendInvitationEmail` is required. Its `data.id` and `data.invitation.id` hold the invitation token, not the row id: build the accept link from it, and `acceptInvitation({ invitationId })` sends it back. `api.createInvitation` and `api.cancelInvitation` use the row id. |
+| `organization` | Core's organizations, mailed invitations, and Better Auth's roles: `ac`, `roles`, and `dynamicAccessControl` map onto core's statements, roles, and dynamic roles (see "Access control and roles"). `teams` maps onto core's teams (see "Teams"). With no `roles`, the roles are Better Auth's member < admin < owner. `sendInvitationEmail` is required. Its `data.id` and `data.invitation.id` hold the invitation token, not the row id: build the accept link from it, and `acceptInvitation({ invitationId })` sends it back. `api.createInvitation` and `api.cancelInvitation` use the row id. |
 | `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required; each origin must be `baseURL` or in `trustedOrigins`. |
 | `magicLink` | Core's magic link with its confirm page. `sendMagicLink` is required. Without the plugin the magic link paths answer 404. |
 | `emailOTP` | Core's email codes (plan 9e): the sign-in code and the reset code. `sendVerificationOTP` is required. It gets `type: "sign-in"` or `type: "forget-password"`, never another type, and a reset code goes only to an address with a user, as in Better Auth. Without the plugin core's code routes answer 404. See "Email codes". |
@@ -822,6 +822,66 @@ Better Auth's: `ROLE_NAME_IS_ALREADY_TAKEN`, `TOO_MANY_ROLES`, and
 `ROLE_IS_ASSIGNED_TO_MEMBERS`, with core's status 409, where Better Auth answers
 400. The handler serves none of Better Auth's role paths.
 
+## Teams
+
+Since plan 12k (Task 11, spec 29 item 19), `organization({ teams })` maps
+onto core's `organizations.teams` and two limits. A team has no role: every
+right comes from the organization role (`team:create`, `team:update`, and
+`team:delete`; `member:update` for a team member add).
+
+- `teams: { enabled: true }` turns teams on, with Better Auth's defaults. A
+  create of an organization also creates a team named as the organization,
+  with the creator in it. The delete of the last team answers
+  `UNABLE_TO_REMOVE_LAST_TEAM`.
+- `defaultTeam: { enabled: false }` maps onto `defaultTeam: false`.
+  `allowRemovingAllTeams: true` maps onto `keepLastTeam: false`, and `false`
+  or no value maps onto `keepLastTeam: true`.
+- `maximumTeams` maps onto `limits.teamsPerOrganization`, and
+  `maximumMembersPerTeam` onto `limits.membersPerTeam`. Each takes a positive
+  integer. Core counts inside a transaction after a lock, so the limit holds
+  under a race on Postgres. A function form is refused, as for the other
+  limits. `defaultTeam.customCreateDefaultTeam` is refused: core creates the
+  default team itself.
+- The codes are Better Auth's: `YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_TEAMS`,
+  `TEAM_MEMBER_LIMIT_REACHED`, and `UNABLE_TO_REMOVE_LAST_TEAM`, with core's
+  status 409, where Better Auth answers 400, 403, and 400.
+
+The teams stay in place in Better Auth's `team` and `teamMember` tables.
+Migration 0010 creates both with Better Auth's own SQL when they are absent.
+It adds `teamMember.taOrganizationId`, filled from the team's
+`organizationId`, and `teamMember.taUpdatedAt`, filled from `createdAt`, and
+the unique key on (`teamId`, `userId`). A team member row that Better Auth
+writes after the migration has no `taOrganizationId`, so core cannot read it.
+Do not run Better Auth's team routes after the cutover.
+
+- `team.memberCount` is written 0 at the create and never updated. Core counts
+  the rows. Better Auth counts the rows again before its next add, so a
+  rollback finds the right count.
+- `teamMember.membershipKey` is Better Auth's own key: the base64url SHA-256
+  of `JSON.stringify([teamId, userId])`, with no padding. A Better Auth read by
+  the key and a core write agree.
+- `invitation.teamId` holds the team ids joined by `,`, as Better Auth writes
+  it. Core reads it as `teamIds`.
+- `session.activeTeamId` is Better Auth's own column.
+
+Core fires the ten team hooks of `organizationHooks` (see "Hooks"). It fires
+no team hook for the default team of a create, where Better Auth fires
+`beforeCreateTeam` and `afterCreateTeam`.
+
+The client has Better Auth's team calls, on core's routes under
+`/organizations/teams`: `organization.createTeam`, `updateTeam`, `removeTeam`,
+`listTeams`, `setActiveTeam`, `listUserTeams`, `listTeamMembers`,
+`addTeamMember`, and `removeTeamMember`, in Better Auth's shapes. A team's
+`additionalFields` answer `NOT_SUPPORTED` (501). `listUserTeams` lists the
+teams of the session's user only: a `userId` of another person answers
+`YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER` (403).
+
+`organization.checkSlug({ slug })` runs core's slug check. A free slug answers
+`{ status: true }`, as in Better Auth. A taken or reserved slug answers
+`ORGANIZATION_SLUG_ALREADY_TAKEN` with core's status 409, where Better Auth
+answers 400. A slug that core's slug rule refuses answers `VALIDATION_ERROR`
+(400). The check runs in core's limiter.
+
 ## Email codes
 
 `emailOTP({ sendVerificationOTP, … })` maps onto core's `emailOtp` (plan 9e).
@@ -878,8 +938,12 @@ README, "Hooks").
   `beforeCreateInvitation`, `afterCreateInvitation`,
   `beforeAcceptInvitation`, `afterAcceptInvitation`, `afterRejectInvitation`,
   and `afterCancelInvitation`. Each hook gets Better Auth's argument keys.
-  The team hooks, `beforeCancelInvitation`, and `beforeRejectInvitation` are
-  refused at start.
+  Since plan 12k Task 11, the ten team hooks map too: `beforeCreateTeam`,
+  `afterCreateTeam`, `beforeUpdateTeam`, `afterUpdateTeam`,
+  `beforeDeleteTeam`, `afterDeleteTeam`, `beforeAddTeamMember`,
+  `afterAddTeamMember`, `beforeRemoveTeamMember`, and
+  `afterRemoveTeamMember`. `beforeCancelInvitation` and
+  `beforeRejectInvitation` are refused at start.
 - A before hook runs inside core's transaction.
   `throw new APIError("FORBIDDEN", { message })` answers 403 `HOOK_REFUSED`
   with that message, on the server `api` and on the client. Any other throw
@@ -1049,15 +1113,15 @@ consumerc (follow-ups first): `hooks`, `beforeCreateOrganization`, `authtempo.ro
 The factory refuses exactly these: `hooks`, `plugins[expo]`, `plugins[organization].roles.admin`, `plugins[organization].roles.member`, `plugins[organization].roles.operator`, `plugins[organization].roles.owner`, `plugins[organization].roles.viewer`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
 consumerd (follow-ups first): the list after the refusals.
-The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles.admin`, `plugins[organization].roles.guardian`, `plugins[organization].roles.learner`, `plugins[organization].roles.owner`, `plugins[organization].roles.teacher`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`.
+The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles.admin`, `plugins[organization].roles.guardian`, `plugins[organization].roles.learner`, `plugins[organization].roles.owner`, `plugins[organization].roles.teacher`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`.
 
 The follow-ups of consumerd:
 - `authtempo.platformOrganization` for the admin plugin (see "The admin plugin").
-- Anonymous sign-in, teams, `$context`, `getOrgAdapter`, and the rate limit storage.
+- Anonymous sign-in, `$context`, `getOrgAdapter`, and the rate limit storage.
 - `authtempo.roleRanks` from its ROLE_RANK (`ac` and `roles` map since plan 12k).
 - `hooks`: wrap the handler (see "Request hooks").
 
-`freshAge: 600` and `deferSessionRefresh: true` run unchanged since plan 12a: core's window is 10 minutes, and the shim's client posts the deferred refresh. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e. The tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` instead. With snake-case names, the column is `ta_purpose`. The row holds a keyed hash, never the code.
+`freshAge: 600` and `deferSessionRefresh: true` run unchanged since plan 12a: core's window is 10 minutes, and the shim's client posts the deferred refresh. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. `teams: { enabled: true }` runs unchanged since plan 12k: Better Auth's default team and its last-team rule hold. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e. The tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` instead. With snake-case names, the column is `ta_purpose`. The row holds a keyed hash, never the code.
 
 consumerb (follow-ups first): the list after the refusals.
 The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.

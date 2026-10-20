@@ -92,12 +92,10 @@ export interface CompatStatements extends SqlStatements {
  * `caller` answers null for a `tk_` bearer. A create throws `unknown_model`,
  * so a write never vanishes in silence. Plan 8b, 2026-10-11. Plan 12k Task 1
  * adds its four models until the later 12k tasks map them. Task 10 maps
- * `organizationRole` (mapping.ts).
+ * `organizationRole`, and Task 11 maps `team` and `teamMember` (mapping.ts).
  */
 export const UNMAPPED_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
   "apiToken",
-  "team",
-  "teamMember",
   "organizationToken",
 ]);
 
@@ -286,6 +284,12 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     // core's encodeValue checks the type and refuses NUL; it answers JSON text and SQLite 0 or 1.
     const v = encodeValue(d, type, given, model, field);
     if (v === null) return null;
+    if (codec === "commaList") {
+      // Each entry is an id: a "," in one would split it into two at the read.
+      if (!Array.isArray(given) || given.some((x) => typeof x !== "string" || x.includes(",")))
+        throw invalid(model, field, "expected a list of ids with no comma");
+      return given.length === 0 ? null : given.join(",");
+    }
     if (type === "date") return (given as Date).toISOString();
     if (codec === "base64Std") return base64UrlToStd(v as string);
     return v;
@@ -310,6 +314,10 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
         // A date core cannot read would compare as NaN, so an expiry would never pass.
         if (Number.isNaN(at.getTime())) throw new StorageError("schema_mismatch", model, [field]);
         v = at;
+      } else if (codec === "commaList") {
+        // Better Auth's comma-joined ids (invitation.teamId). An empty text is no list.
+        if (typeof v !== "string") throw new StorageError("schema_mismatch", model, [field]);
+        v = v === "" ? null : v.split(",");
       } else if (codec === "permission") {
         // Better Auth's JSON text. A text that does not parse reads as the
         // text, and core's shape rule refuses the row (spec 29 item 6, rule 7).
@@ -441,6 +449,9 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       if (model === "identity") return ["provider", "subject"];
       return [];
     }
+    // Better Auth's unique membershipKey names the pair (mapping.ts teamMembershipKey).
+    if (t === "teamMember" && baFields.length === 1 && baFields[0] === "membershipKey")
+      return ["teamId", "userId"];
     const entries = Object.entries(MAP[model].fields);
     return baFields
       .map((f) => entries.find(([, m]) => m.column === f)?.[0])

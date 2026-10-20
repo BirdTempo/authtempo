@@ -54,7 +54,7 @@ runAdapterConformance(
     return { adapter: s.storage, close: () => pg.close() };
   },
   {
-    unmapped: ["apiToken", "team", "teamMember", "organizationToken"],
+    unmapped: ["apiToken", "organizationToken"],
     rowLocks: true,
   },
 );
@@ -68,7 +68,7 @@ runAdapterConformance(
     return { adapter: s.storage, close: () => pg.close() };
   },
   {
-    unmapped: ["apiToken", "team", "teamMember", "organizationToken"],
+    unmapped: ["apiToken", "organizationToken"],
     rowLocks: true,
   },
 );
@@ -513,12 +513,12 @@ describe("the compat migration on postgres", () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       // Better Auth's teams option adds these two columns. The migration keeps
-      // each one and adds no second column.
+      // each one and adds no second column. teamMember.teamId is another table (Task 11).
       await pg.sql.unsafe(`ALTER TABLE "session" ADD COLUMN "activeTeamId" text`);
       await pg.sql.unsafe(`ALTER TABLE "invitation" ADD COLUMN "teamId" text`);
       await betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql }).migrate();
       const cols = await pg.sql.unsafe<{ t: string; c: string }[]>(
-        `SELECT table_name AS t, column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND column_name IN ('activeTeamId', 'teamId') ORDER BY table_name`,
+        `SELECT table_name AS t, column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND table_name IN ('session', 'invitation') AND column_name IN ('activeTeamId', 'teamId') ORDER BY table_name`,
       );
       expect([...cols]).toEqual([
         { t: "invitation", c: "teamId" },
@@ -531,7 +531,7 @@ describe("the compat migration on postgres", () => {
     try {
       await betterAuthSchemaStorage({ dialect: "postgres", sql: none.sql }).migrate();
       const cols = await none.sql.unsafe<{ t: string; c: string; n: string }[]>(
-        `SELECT table_name AS t, column_name AS c, is_nullable AS n FROM information_schema.columns WHERE table_schema = current_schema() AND column_name IN ('activeTeamId', 'teamId') ORDER BY table_name`,
+        `SELECT table_name AS t, column_name AS c, is_nullable AS n FROM information_schema.columns WHERE table_schema = current_schema() AND table_name IN ('session', 'invitation') AND column_name IN ('activeTeamId', 'teamId') ORDER BY table_name`,
       );
       expect([...cols]).toEqual([
         { t: "invitation", c: "teamId", n: "YES" },
@@ -542,7 +542,7 @@ describe("the compat migration on postgres", () => {
     }
   });
 
-  it("creates exactly core's ta_ tables (plans 9f, 9g, 12c, 12e, and 12f), and Better Auth's organizationRole when it is absent (plan 12k)", async () => {
+  it("creates exactly core's ta_ tables (plans 9f, 9g, 12c, 12e, and 12f), and Better Auth's organizationRole, team, and teamMember when they are absent (plan 12k)", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const before = await pg.sql.unsafe<{ t: string }[]>(
@@ -573,6 +573,9 @@ describe("the compat migration on postgres", () => {
         "ta_second_factor",
         "ta_totp",
         "ta_trusted_device",
+        // Better Auth's own tables of its teams option, which the fixture lacks (migration 0010, Task 11).
+        "team",
+        "teamMember",
       ]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
         { key: "compat_better_auth", value: "10" },
@@ -752,8 +755,10 @@ describe("the compat undo of a created user", () => {
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_subject WHERE user_id = ?)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_session_client WHERE user_id = ?)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_logout WHERE user_id = ?)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = ?)",
-      params: ["u4", 0, ...Array(13).fill("u4")],
+        " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = ?)" +
+        // Better Auth's teamMember table keeps its own name, as organizationRole does (plan 12k Task 11).
+        ' AND NOT EXISTS (SELECT 1 FROM "teamMember" WHERE "user_id" = ?)',
+      params: ["u4", 0, ...Array(14).fill("u4")],
     });
     expect(st.undoCreate("user", user("u5", "y@example.com"))).toEqual({
       sql:
@@ -770,8 +775,9 @@ describe("the compat undo of a created user", () => {
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_subject WHERE user_id = $11)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_session_client WHERE user_id = $12)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_logout WHERE user_id = $13)" +
-        " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = $14)",
-      params: Array(14).fill("u5"),
+        " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = $14)" +
+        ' AND NOT EXISTS (SELECT 1 FROM "teamMember" WHERE "userId" = $15)',
+      params: Array(15).fill("u5"),
     });
   });
 

@@ -11,8 +11,8 @@ export type BaseTable =
   | "invitation"
   | "passkey";
 
-/** Every Better Auth table this package reads or writes: 0001's tables and `organizationRole` (plan 12k). */
-export type BetterAuthTable = BaseTable | "organizationRole";
+/** Every Better Auth table this package reads or writes: 0001's tables and the three tables of plan 12k. */
+export type BetterAuthTable = BaseTable | "organizationRole" | "team" | "teamMember";
 
 export const BETTER_AUTH_TABLES: readonly BaseTable[] = [
   "user",
@@ -28,11 +28,14 @@ export const BETTER_AUTH_TABLES: readonly BaseTable[] = [
 /**
  * Every table of `BetterAuthTable`, for the names. Better Auth's
  * `organizationRole` (its dynamicAccessControl table) comes from migration
- * 0010, which creates it when it is absent (plan 12k Task 10).
+ * 0010, which creates it when it is absent (plan 12k Task 10). So do `team`
+ * and `teamMember`, the tables of its teams option (Task 11).
  */
 export const MAPPED_TABLES: readonly BetterAuthTable[] = [
   ...BETTER_AUTH_TABLES,
   "organizationRole",
+  "team",
+  "teamMember",
 ];
 
 /**
@@ -132,6 +135,18 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "createdAt",
     "updatedAt",
     "taRank",
+  ],
+  // Better Auth 1.7.2's columns of its teams option (organization.mjs:587 to :662, read
+  // 2026-10-21) and the two ta columns of migration 0010.
+  team: ["id", "name", "memberCount", "organizationId", "createdAt", "updatedAt"],
+  teamMember: [
+    "id",
+    "teamId",
+    "userId",
+    "membershipKey",
+    "createdAt",
+    "taOrganizationId",
+    "taUpdatedAt",
   ],
 };
 

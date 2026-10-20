@@ -1,4 +1,5 @@
 import { type ModelName, type Models, StorageError } from "@authtempo/core";
+import { sha256 } from "@noble/hashes/sha2.js";
 import type { BetterAuthTable } from "./names.js";
 
 /**
@@ -11,8 +12,12 @@ import type { BetterAuthTable } from "./names.js";
  * that does not parse reads as the text, so core's shape rule refuses the row
  * (spec 29 item 6, rule 7). The write maps `apiToken` back onto `apiKey` and
  * removes no action (`toStoredPermissions`, ruling 37).
+ * `commaList`: a list of ids in core, the ids joined by "," in the table
+ * (`invitation.teamId`, plan 12k Task 11). An empty list and null are null.
+ * Better Auth refuses a team id that holds "," (INVALID_TEAM_ID), so the
+ * join loses nothing.
  */
-export type Codec = "nullAsEmpty" | "base64Std" | "emptyAsNull" | "permission";
+export type Codec = "nullAsEmpty" | "base64Std" | "emptyAsNull" | "permission" | "commaList";
 
 export interface FieldMap {
   readonly column: string;
@@ -107,7 +112,8 @@ function notCredential(provider: string): string {
  * Plan 12f added `operatorAudit`. Plan 12k Task 1 adds its four models
  * (`organizationRole`, `team`, `teamMember`, `organizationToken`) with no
  * table yet. `UNMAPPED_MODELS` holds them, and the later 12k tasks map
- * each one. Task 10 maps `organizationRole` onto Better Auth's own table.
+ * each one. Task 10 maps `organizationRole` onto Better Auth's own table,
+ * and Task 11 maps `team` and `teamMember` onto Better Auth's own tables.
  */
 export type MappedModel = Exclude<
   ModelName,
@@ -124,8 +130,6 @@ export type MappedModel = Exclude<
   | "oauthLogout"
   | "secondFactor"
   | "operatorAudit"
-  | "team"
-  | "teamMember"
   | "organizationToken"
 >;
 
@@ -232,9 +236,9 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       tokenHash: as("taTokenHash"),
       acceptedAt: as("taAcceptedAt"),
       updatedAt: as("taUpdatedAt"),
-      // Better Auth's own column of its teams option (plan 12k). Core writes
-      // null until the teams task; that task adds the comma-joined form.
-      teamIds: as("teamId"),
+      // Better Auth's own column of its teams option (plan 12k): the ids
+      // joined by "," (organization/adapter.mjs createInvitation, read 2026-10-21).
+      teamIds: as("teamId", "commaList"),
     },
     insertExtras: (row) => ({ status: row.acceptedAt ? "accepted" : "pending" }),
     updateExtras: (data) =>
@@ -255,4 +259,47 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       updatedAt: or("updatedAt", "createdAt"),
     },
   },
+  // Better Auth's teams option, in place (plan 12k Task 11). Core never reads
+  // memberCount (deviation 11): the create writes 0, as Better Auth's own
+  // createTeam does, and no write keeps it. Better Auth counts the rows again
+  // before its next add (syncTeamMemberCount). Better Auth's default team has
+  // a null updatedAt, which core reads as createdAt.
+  team: {
+    table: "team",
+    fields: {
+      ...same("id", "organizationId", "name", "createdAt"),
+      updatedAt: or("updatedAt", "createdAt"),
+    },
+    insertExtras: () => ({ memberCount: 0 }),
+  },
+  // Migration 0010 adds taOrganizationId (filled from team.organizationId) and
+  // taUpdatedAt (filled from createdAt). The unique membershipKey holds Better
+  // Auth's own value (deviation 12). So a Better Auth read by the key and a
+  // core write agree.
+  teamMember: {
+    table: "teamMember",
+    fields: {
+      ...same("id", "teamId", "userId", "createdAt"),
+      organizationId: as("taOrganizationId"),
+      // A row that Better Auth writes after the migration has no taUpdatedAt.
+      updatedAt: or("taUpdatedAt", "createdAt"),
+    },
+    // No updateExtras: core never updates a team member row, so the pair of the key never changes.
+    insertExtras: (row) => ({ membershipKey: teamMembershipKey(row.teamId, row.userId) }),
+  },
 };
+
+/**
+ * Better Auth 1.7.2's `computeTeamMembershipKey` (organization/adapter.mjs:9,
+ * read 2026-10-21): the SHA-256 of `JSON.stringify([teamId, userId])` in
+ * base64url with no padding. Better Auth hashes through WebCrypto, which is
+ * async. A statement is built in sync code, so this uses the sync SHA-256 of
+ * @noble/hashes, a dependency of this package already. test/teams.test.ts
+ * pins the value against rows that Better Auth itself wrote.
+ */
+export function teamMembershipKey(teamId: string, userId: string): string {
+  const digest = sha256(new TextEncoder().encode(JSON.stringify([teamId, userId])));
+  let text = "";
+  for (const byte of digest) text += String.fromCharCode(byte);
+  return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}

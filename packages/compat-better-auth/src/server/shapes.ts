@@ -8,9 +8,20 @@ import {
   readSessionToken,
   type SessionRow,
   type SessionSummary,
+  type TeamMemberSummary,
+  type TeamSummary,
   type UserRow,
 } from "@authtempo/core";
-import type { Invitation, Member, Organization, Passkey, Session, User } from "../types.js";
+import type {
+  Invitation,
+  Member,
+  Organization,
+  Passkey,
+  Session,
+  Team,
+  TeamMember,
+  User,
+} from "../types.js";
 
 // Each converter builds an object literal under the declared return type, so
 // a field added to the type and not filled here fails the compile, and an
@@ -117,6 +128,22 @@ export function toInvitation(
     expiresAt: i.expiresAt,
     createdAt: i.createdAt,
   };
+}
+
+/** Better Auth's team (plan 12k Task 11). */
+export function toTeam(t: TeamSummary): Team {
+  return {
+    id: t.id,
+    name: t.name,
+    organizationId: t.organizationId,
+    createdAt: t.createdAt,
+    updatedAt: t.updatedAt,
+  };
+}
+
+/** Better Auth's team member (plan 12k Task 11). */
+export function toTeamMember(m: TeamMemberSummary): TeamMember {
+  return { id: m.id, teamId: m.teamId, userId: m.userId, createdAt: m.createdAt };
 }
 
 type Exact<T, K extends readonly (keyof T)[]> = [Exclude<keyof T, K[number]>] extends [never]

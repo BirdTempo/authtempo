@@ -124,9 +124,10 @@ function consumerc(): BetterAuthOptions {
  * consumerd apps/api/src/auth/access.ts and create-auth.ts at c43c307, read
  * 2026-10-21. Removed, because the README still lists each as a refusal:
  * `hooks`, the `admin` and `anonymous` plugins, `disableOrganizationDeletion`,
- * `teams`, `rateLimit.customStorage`, and `requireEmailVerificationOnInvitation:
+ * `rateLimit.customStorage`, and `requireEmailVerificationOnInvitation:
  * false`. Added: `baseURL`, `secret`, the passkey `origin`, and
- * `authtempo.roleRanks` from its own ROLE_RANK.
+ * `authtempo.roleRanks` from its own ROLE_RANK. `teams: { enabled: true }`
+ * is consumerd's fixed key of packages/db/src/auth-options.ts (plan 12k Task 11).
  */
 function consumerd(): BetterAuthOptions {
   const statement = {
@@ -186,6 +187,7 @@ function consumerd(): BetterAuthOptions {
     rateLimit: { enabled: true },
     plugins: [
       organization({
+        teams: { enabled: true },
         creatorRole: "owner",
         membershipLimit: 100,
         organizationLimit: 1,
@@ -251,5 +253,19 @@ describe("the apps' access control (plan 12k Task 10)", () => {
       member: ["read"],
     });
     expect(org?.dynamicRoles).toBeUndefined();
+  });
+
+  it("constructs consumerd's option set with no refusal for teams", () => {
+    const o = consumerd();
+    expect(checkOptions(o).refusals).toEqual([]);
+    expect(() => betterAuth(o)).not.toThrow();
+    const org = organizationsOf(o).config.organizations;
+    // Better Auth's defaults: a default team at each create, and no delete of the last team.
+    expect(org?.teams).toEqual({ defaultTeam: true, keepLastTeam: true });
+    expect(org?.limits).toEqual({
+      perUser: 1,
+      membersPerOrganization: 100,
+      pendingInvitationsPerOrganization: 100,
+    });
   });
 });

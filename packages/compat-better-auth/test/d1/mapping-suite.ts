@@ -100,7 +100,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
     },
     // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
     {
-      unmapped: ["apiToken", "team", "teamMember", "organizationToken"],
+      unmapped: ["apiToken", "organizationToken"],
       updateInTransaction: 2,
     },
   );

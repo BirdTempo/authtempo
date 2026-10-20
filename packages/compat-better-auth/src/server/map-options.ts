@@ -14,6 +14,7 @@ import {
   COMPAT_PLUGIN,
   type CompatDatabase,
   type CompatPlugin,
+  type OrganizationOptions,
   type User,
 } from "../types.js";
 import { IMPERSONATION_SECONDS, platformRoleOf } from "./admin.js";
@@ -173,6 +174,35 @@ function accessConfig(
   };
 }
 
+/**
+ * `teams` on core's `organizations.teams` (plan 12k Task 11, spec 29 item
+ * 19). Better Auth 1.7.2's defaults apply first (rule 16.1). A create makes
+ * a default team unless `defaultTeam.enabled` is false (routes/crud-org.mjs:106).
+ * The last team stays unless `allowRemovingAllTeams` is true
+ * (routes/crud-team.mjs:179). checkOptions refused the function limits.
+ */
+function teamsConfig(o: OrganizationOptions): Pick<OrganizationsConfig, "teams"> {
+  if (o.teams?.enabled !== true) return {};
+  return {
+    teams: {
+      defaultTeam: o.teams.defaultTeam?.enabled !== false,
+      keepLastTeam: o.teams.allowRemovingAllTeams !== true,
+    },
+  };
+}
+
+/** `maximumTeams` and `maximumMembersPerTeam` on core's two team limits. Absent: no limit, as in Better Auth. */
+function teamLimits(
+  o: OrganizationOptions,
+): Pick<NonNullable<OrganizationsConfig["limits"]>, "teamsPerOrganization" | "membersPerTeam"> {
+  const t = o.teams;
+  if (t?.enabled !== true) return {};
+  return {
+    ...(t.maximumTeams !== undefined ? { teamsPerOrganization: t.maximumTeams } : {}),
+    ...(t.maximumMembersPerTeam !== undefined ? { membersPerTeam: t.maximumMembersPerTeam } : {}),
+  };
+}
+
 /** Spread last into the config, so the type keeps it to the plugin sections. */
 type PluginConfig = Pick<AuthConfig, "organizations" | "passkey" | "handoff" | "operator">;
 
@@ -201,8 +231,10 @@ function pluginConfig(options: BetterAuthOptions): PluginConfig {
         membersPerOrganization: o.membershipLimit ?? BETTER_AUTH_DEFAULTS.membershipLimit,
         pendingInvitationsPerOrganization:
           o.invitationLimit ?? BETTER_AUTH_DEFAULTS.invitationLimit,
+        ...teamLimits(o),
       },
       ...accessConfig(options),
+      ...teamsConfig(o),
     };
   }
   if (admin) {

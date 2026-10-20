@@ -8,6 +8,8 @@ import {
   type OrganizationJSON,
   type PasskeySummaryJSON,
   type RoleJSON,
+  type TeamJSON,
+  type TeamMemberJSON,
   type TwoFactorSessionJSON,
 } from "@authtempo/client";
 import { LEGACY_SESSION_COOKIE, type PublicSession } from "@authtempo/core";
@@ -38,6 +40,8 @@ import type {
   Organization,
   OrganizationRoleData,
   RoleRef,
+  Team,
+  TeamMember,
   TwoFactorRedirect,
 } from "../types.js";
 import { createSessionStore } from "./session-store.js";
@@ -154,6 +158,28 @@ function roleDataOf(organizationId: string, r: RoleJSON): OrganizationRoleData {
     updatedAt: new Date(r.updatedAt),
   };
 }
+
+/** A team in Better Auth's shape (plan 12k Task 11). */
+function teamOf(t: TeamJSON): Team {
+  return {
+    id: t.id,
+    name: t.name,
+    organizationId: t.organizationId,
+    createdAt: new Date(t.createdAt),
+    updatedAt: new Date(t.updatedAt),
+  };
+}
+
+/** A team member in Better Auth's shape: no address and no name (plan 12k Task 11). */
+function teamMemberOf(m: TeamMemberJSON): TeamMember {
+  return { id: m.id, teamId: m.teamId, userId: m.userId, createdAt: new Date(m.createdAt) };
+}
+
+/** Better Auth's codes of a refused team call (dist/plugins/organization/error-codes.mjs, read 2026-10-21). */
+const teamCode =
+  (forbidden: string) =>
+  (f: ClientFailure): string | undefined =>
+    f.code === "forbidden_rank" ? forbidden : f.code === "not_found" ? "TEAM_NOT_FOUND" : undefined;
 
 /** Better Auth's codes of a refused role call (dist/plugins/organization/error-codes.mjs, read 2026-10-21). */
 const roleCode =
@@ -1034,6 +1060,158 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
               permissions: toCoreNames(permissions ?? permission ?? {}) as Record<string, string[]>,
             }),
           (success) => ({ error: null, success }),
+        );
+      },
+      // Plan 12k Task 11: Better Auth's team calls on core's teams.
+      async createTeam({ name, organizationId, ...extra }) {
+        if (Object.values(extra).some((v) => v !== undefined))
+          return notSupported("core keeps no additional field on a team");
+        const id = organizationId ?? (await activeOrganization());
+        if (id === null) return { data: null, error: compatClientError("NO_ACTIVE_ORGANIZATION") };
+        return run(
+          (c) => c.organizations.teams.create({ organizationId: id, name }),
+          teamOf,
+          teamCode("YOU_ARE_NOT_ALLOWED_TO_CREATE_TEAMS_IN_THIS_ORGANIZATION"),
+        );
+      },
+      async updateTeam({ teamId, data }) {
+        const { name, organizationId: _, ...extra } = data;
+        if (Object.values(extra).some((v) => v !== undefined))
+          return notSupported("core keeps no additional field on a team");
+        return run(
+          async (c): Promise<ClientResult<TeamJSON>> => {
+            if (name !== undefined) return c.organizations.teams.update({ teamId, name });
+            // Better Auth answers the team for an update with no field; core needs a name.
+            const id = await activeOrganization();
+            if (id === null) return { ok: false, code: "not_found", status: 404 };
+            const list = await c.organizations.teams.list({ organizationId: id });
+            if (!list.ok) return list;
+            const found = list.value.find((t) => t.id === teamId);
+            return found
+              ? { ok: true, value: found }
+              : { ok: false, code: "not_found", status: 404 };
+          },
+          teamOf,
+          teamCode("YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_TEAM"),
+        );
+      },
+      async removeTeam({ teamId }) {
+        const r = await run(
+          (c) => c.organizations.teams.delete({ teamId }),
+          () => ({ message: "Team removed successfully." }),
+          teamCode("YOU_ARE_NOT_ALLOWED_TO_DELETE_TEAMS_IN_THIS_ORGANIZATION"),
+        );
+        // Core clears the active team of each session in a deleted team.
+        store.refetchIfStarted();
+        return r;
+      },
+      async listTeams(input) {
+        const id = input?.query?.organizationId ?? (await activeOrganization());
+        if (id === null) return { data: null, error: compatClientError("NO_ACTIVE_ORGANIZATION") };
+        return run(
+          (c) => c.organizations.teams.list({ organizationId: id }),
+          (v) => v.map(teamOf),
+        );
+      },
+      async setActiveTeam(input) {
+        const teamId = input?.teamId ?? null;
+        const r = await run(
+          async (c): Promise<ClientResult<TeamJSON | null>> => {
+            const set = await c.organizations.teams.setActive({ teamId });
+            if (!set.ok) return set;
+            const organizationId = set.value.session.activeOrganizationId;
+            if (teamId === null || organizationId === null) return { ok: true, value: null };
+            const list = await c.organizations.teams.list({ organizationId });
+            if (!list.ok) return list;
+            return { ok: true, value: list.value.find((t) => t.id === teamId) ?? null };
+          },
+          (v) => (v ? teamOf(v) : null),
+          teamCode("USER_IS_NOT_A_MEMBER_OF_THE_TEAM"),
+        );
+        store.refetchIfStarted();
+        return r;
+      },
+      async listUserTeams(input) {
+        const { userId, organizationId } = input?.query ?? {};
+        return run(
+          async (c): Promise<ClientResult<TeamJSON[]>> => {
+            if (userId !== undefined) {
+              const me = await c.session();
+              if (!me.ok) return me;
+              // Core lists the teams of the session's user only.
+              if (me.value?.user.id !== userId)
+                return { ok: false, code: "forbidden_rank", status: 403 };
+            }
+            const mine = await c.organizations.teams.mine();
+            if (!mine.ok || organizationId === undefined) return mine;
+            return {
+              ok: true,
+              value: mine.value.filter((t) => t.organizationId === organizationId),
+            };
+          },
+          (v) => v.map(teamOf),
+          (f) =>
+            f.code === "forbidden_rank" ? "YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER" : undefined,
+        );
+      },
+      listTeamMembers(input) {
+        const given = input?.query?.teamId;
+        let noTeam = false;
+        return run(
+          async (c): Promise<ClientResult<TeamMemberJSON[]>> => {
+            let teamId = given ?? null;
+            if (teamId === null) {
+              const me = await c.session();
+              if (!me.ok) return me;
+              teamId = me.value?.session.activeTeamId ?? null;
+            }
+            if (teamId === null) {
+              noTeam = true;
+              return { ok: false, code: "invalid_body", status: 400 };
+            }
+            return c.organizations.teams.members.list({ teamId });
+          },
+          (v) => v.map(teamMemberOf),
+          // Better Auth's code for no team id and no active team (routes/crud-team.mjs:562).
+          (f) =>
+            noTeam
+              ? "YOU_DO_NOT_HAVE_AN_ACTIVE_TEAM"
+              : teamCode("YOU_CAN_NOT_ACCESS_THE_MEMBERS_OF_THIS_TEAM")(f),
+        );
+      },
+      addTeamMember({ teamId, userId }) {
+        return run(
+          (c) => c.organizations.teams.members.add({ teamId, userId }),
+          teamMemberOf,
+          teamCode("YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_TEAM_MEMBER"),
+        );
+      },
+      async removeTeamMember({ teamId, userId }) {
+        const r = await run(
+          (c) => c.organizations.teams.members.remove({ teamId, userId }),
+          () => ({ message: "Team member removed successfully." }),
+          teamCode("YOU_ARE_NOT_ALLOWED_TO_REMOVE_A_TEAM_MEMBER"),
+        );
+        store.refetchIfStarted();
+        return r;
+      },
+      checkSlug({ slug }) {
+        return run(
+          async (c): Promise<ClientResult<true>> => {
+            const r = await c.organizations.checkSlug({ slug });
+            if (!r.ok) return r;
+            // Better Auth answers { status: true } for a free slug and an error for a taken one
+            // (routes/crud-org.mjs:157, read 2026-10-21).
+            if (r.value.status === "available") return { ok: true, value: true };
+            if (r.value.status === "invalid")
+              return { ok: false, code: "invalid_body", status: 400 };
+            return {
+              ok: false,
+              code: r.value.status === "taken" ? "slug_taken" : "slug_reserved",
+              status: 409,
+            };
+          },
+          () => ({ status: true as const }),
         );
       },
       checkRolePermission({ role, permissions }) {

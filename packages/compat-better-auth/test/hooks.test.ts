@@ -27,8 +27,12 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-/** The argument keys of each mapped hook in Better Auth 1.7.2's typings (types.d.mts:296-690, read 2026-10-13). */
-const SHAPES: Record<keyof OrganizationHookOptions, string[]> = {
+/**
+ * The argument keys of each mapped hook in Better Auth 1.7.2's typings
+ * (types.d.mts:296-690, read 2026-10-13). The ten team hooks of plan 12k
+ * Task 11 have their own test in teams.test.ts.
+ */
+const SHAPES: Record<Exclude<keyof OrganizationHookOptions, `${string}Team${string}`>, string[]> = {
   beforeCreateOrganization: ["organization", "user"],
   afterCreateOrganization: ["member", "organization", "user"],
   beforeUpdateOrganization: ["member", "organization", "user"],
@@ -157,7 +161,7 @@ describe("organizationHooks (plan 9d)", () => {
     for (const [name, data] of calls)
       expect({ name, keys: Object.keys(data).sort() }).toEqual({
         name,
-        keys: SHAPES[name as keyof OrganizationHookOptions],
+        keys: SHAPES[name as keyof typeof SHAPES],
       });
     // Better Auth fires its member hooks for the creator's row and for an add, not for an accept.
     expect(calls.filter(([name]) => name === "beforeAddMember")).toHaveLength(2);
@@ -362,7 +366,7 @@ describe("organizationHooks (plan 9d)", () => {
     expect((await api.removeMember({ user: bob, organizationId, userId: bob.id })).ok).toBe(true);
     expect(calls.map(([name]) => name)).toEqual(["beforeRemoveMember", "afterRemoveMember"]);
     for (const [name, data] of calls) {
-      expect(Object.keys(data).sort()).toEqual(SHAPES[name as keyof OrganizationHookOptions]);
+      expect(Object.keys(data).sort()).toEqual(SHAPES[name as keyof typeof SHAPES]);
       expect(data).toMatchObject({
         member: { userId: bob.id, organizationId, role: "member" },
         user: { id: bob.id },
@@ -421,7 +425,7 @@ describe("organizationHooks (plan 9d)", () => {
     expect(calls[1]?.[1]).toMatchObject({ previousRole: "member", member: { role: "admin" } });
   });
 
-  it("refuses the team hooks, beforeCancelInvitation, beforeRejectInvitation, an unknown name, and a value that is not a function", () => {
+  it("accepts the team hooks, and refuses beforeCancelInvitation, beforeRejectInvitation, an unknown name, and a value that is not a function", () => {
     const f = async () => {};
     const c = checkOptions({
       plugins: [
@@ -443,9 +447,7 @@ describe("organizationHooks (plan 9d)", () => {
       c.refusals.filter((r) => r.startsWith("plugins[organization].organizationHooks")),
     ).toEqual([
       "plugins[organization].organizationHooks.afterCreateOrganization: expected a function",
-      "plugins[organization].organizationHooks.afterRemoveTeamMember: core has no teams",
       "plugins[organization].organizationHooks.beforeCancelInvitation: core runs no hook before a revoke; use afterCancelInvitation",
-      "plugins[organization].organizationHooks.beforeCreateTeam: core has no teams",
       "plugins[organization].organizationHooks.beforeRejectInvitation: core runs no hook before a decline; use afterRejectInvitation",
       "plugins[organization].organizationHooks.beforeSomething: authtempo has no such option",
     ]);

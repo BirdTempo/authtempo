@@ -19,7 +19,15 @@ import type {
   User,
 } from "../types.js";
 import { pluginOf } from "./check-options.js";
-import { toInvitation, toMember, toOrganization, toSession, toUser } from "./shapes.js";
+import {
+  toInvitation,
+  toMember,
+  toOrganization,
+  toSession,
+  toTeam,
+  toTeamMember,
+  toUser,
+} from "./shapes.js";
 
 /**
  * Where Better Auth 1.7.2 calls `emailVerification.beforeEmailVerification`
@@ -354,7 +362,155 @@ function organizationHooksOf(
         },
         null,
       );
+  teamHooksOf(h, out);
   return out;
+}
+
+/**
+ * The ten team hooks onto core's team points (plan 12k Task 11). In the team
+ * hooks, Better Auth 1.7.2 passes the caller as `user`. In the member hooks,
+ * `user` is the person who joins or leaves (routes/crud-team.mjs, read
+ * 2026-10-21). Better Auth ignores the `data` of
+ * beforeAddTeamMember (:660), so that answer is not compared. Core fires no
+ * team hook for the default team of a create; Better Auth fires the two
+ * create hooks there (routes/crud-org.mjs:112 and :131).
+ */
+function teamHooksOf(h: OrganizationHookOptions, out: OrganizationHooks): void {
+  const beforeCreate = h.beforeCreateTeam;
+  if (beforeCreate)
+    out.beforeCreateTeam = (e) => {
+      const team = { name: e.team.name, organizationId: e.organization.id };
+      return callHook(
+        "beforeCreateTeam",
+        beforeCreate,
+        { team, user: toUser(e.user), organization: toOrganization(e.organization) },
+        team,
+      );
+    };
+  const afterCreate = h.afterCreateTeam;
+  if (afterCreate)
+    out.afterCreateTeam = (e) =>
+      callHook(
+        "afterCreateTeam",
+        afterCreate,
+        {
+          team: toTeam(e.team),
+          user: toUser(e.user),
+          organization: toOrganization(e.organization),
+        },
+        null,
+      );
+  const beforeUpdate = h.beforeUpdateTeam;
+  if (beforeUpdate)
+    out.beforeUpdateTeam = (e) => {
+      const updates = { name: e.patch.name };
+      return callHook(
+        "beforeUpdateTeam",
+        beforeUpdate,
+        {
+          team: toTeam(e.team),
+          updates,
+          user: toUser(e.user),
+          organization: toOrganization(e.organization),
+        },
+        updates,
+      );
+    };
+  const afterUpdate = h.afterUpdateTeam;
+  if (afterUpdate)
+    out.afterUpdateTeam = (e) =>
+      callHook(
+        "afterUpdateTeam",
+        afterUpdate,
+        {
+          team: toTeam(e.team),
+          user: toUser(e.user),
+          organization: toOrganization(e.organization),
+        },
+        null,
+      );
+  const beforeDelete = h.beforeDeleteTeam;
+  if (beforeDelete)
+    out.beforeDeleteTeam = (e) =>
+      callHook(
+        "beforeDeleteTeam",
+        beforeDelete,
+        {
+          team: toTeam(e.team),
+          user: toUser(e.user),
+          organization: toOrganization(e.organization),
+        },
+        null,
+      );
+  const afterDelete = h.afterDeleteTeam;
+  if (afterDelete)
+    out.afterDeleteTeam = (e) =>
+      callHook(
+        "afterDeleteTeam",
+        afterDelete,
+        {
+          team: toTeam(e.team),
+          user: toUser(e.user),
+          organization: toOrganization(e.organization),
+        },
+        null,
+      );
+  const beforeAdd = h.beforeAddTeamMember;
+  if (beforeAdd)
+    out.beforeAddTeamMember = (e) =>
+      callHook(
+        "beforeAddTeamMember",
+        beforeAdd,
+        {
+          teamMember: { teamId: e.teamMember.teamId, userId: e.teamMember.userId },
+          team: toTeam(e.team),
+          user: toUser(e.memberUser),
+          organization: toOrganization(e.organization),
+        },
+        null,
+      );
+  const afterAdd = h.afterAddTeamMember;
+  if (afterAdd)
+    out.afterAddTeamMember = (e) =>
+      callHook(
+        "afterAddTeamMember",
+        afterAdd,
+        {
+          teamMember: toTeamMember(e.teamMember),
+          team: toTeam(e.team),
+          user: toUser(e.memberUser),
+          organization: toOrganization(e.organization),
+        },
+        null,
+      );
+  const beforeRemove = h.beforeRemoveTeamMember;
+  if (beforeRemove)
+    out.beforeRemoveTeamMember = (e) =>
+      callHook(
+        "beforeRemoveTeamMember",
+        beforeRemove,
+        {
+          teamMember: toTeamMember(e.teamMember),
+          team: toTeam(e.team),
+          user: toUser(e.memberUser),
+          organization: toOrganization(e.organization),
+        },
+        null,
+      );
+  const afterRemove = h.afterRemoveTeamMember;
+  if (afterRemove)
+    out.afterRemoveTeamMember = (e) =>
+      callHook(
+        "afterRemoveTeamMember",
+        afterRemove,
+        {
+          teamMember: toTeamMember(e.teamMember),
+          team: toTeam(e.team),
+          user: toUser(e.memberUser),
+          organization: toOrganization(e.organization),
+        },
+        null,
+      );
 }
 
 /**

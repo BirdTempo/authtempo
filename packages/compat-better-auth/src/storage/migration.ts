@@ -586,11 +586,21 @@ export const MIGRATION_0010_NAME = "0010_compat_schema_v13";
  * Auth writes later has a rank. The unique index fails on a table with two rows of one name
  * in one organization: the README gives the query that finds them.
  *
- * The apiToken fields and the models team, teamMember, and organizationToken
- * have no table here yet. They are in UNMAPPED_MODELS, and the later tasks
- * of plan 12k add their tables to this unshipped migration. The columns take
- * the app's naming, so the text depends on `names`, as for 0009.
- * Append-only once it ships.
+ * `team` and `teamMember` stay in place too (Task 11): the tables of Better
+ * Auth's teams option. When they are absent, the migration creates them
+ * with Better Auth 1.7.2's own DDL (test/fixtures, generated 2026-10-21).
+ * Then it adds `teamMember.taOrganizationId`, filled from the team's
+ * `organizationId`, and `teamMember.taUpdatedAt`, filled from `createdAt`.
+ * It adds core's unique key on (teamId, userId) and its index on
+ * (organizationId, userId). Better Auth's own index serves userId. A
+ * row that Better Auth writes after the migration has no `ta` value, as for
+ * 0001. The unique index fails on a table with two rows of one pair; Better
+ * Auth's unique membershipKey stops such rows.
+ *
+ * The apiToken fields and the model organizationToken have no table here
+ * yet. They are in UNMAPPED_MODELS, and Task 12 of plan 12k adds them to
+ * this unshipped migration. The columns take the app's naming, so the text
+ * depends on `names`, as for 0009. Append-only once it ships.
  */
 export function compatMigration0010Sql(dialect: "postgres" | "sqlite", n: Names): string {
   const pg = dialect === "postgres";
@@ -600,8 +610,15 @@ export function compatMigration0010Sql(dialect: "postgres" | "sqlite", n: Names)
   const C = (field: string) => n.column("organizationRole", field);
   const date = pg ? "timestamptz" : "date";
   // Better Auth's own index names: its generator joins the table and the field.
-  const baIndex = (field: string) =>
-    `CREATE INDEX IF NOT EXISTS "${n.rawTable("organizationRole")}_${n.rawColumn("organizationRole", field)}_idx" ON ${R} (${C(field)});`;
+  const index = (table: "organizationRole" | "team" | "teamMember", field: string) =>
+    `CREATE INDEX IF NOT EXISTS "${n.rawTable(table)}_${n.rawColumn(table, field)}_idx" ON ${n.table(table)} (${n.column(table, field)});`;
+  const baIndex = (field: string) => index("organizationRole", field);
+  const T = n.table("team");
+  const t = (field: string) => n.column("team", field);
+  const M = n.table("teamMember");
+  const m = (field: string) => n.column("teamMember", field);
+  const ref = (table: "organization" | "team" | "user") =>
+    `references ${n.table(table)} (${n.column(table, "id")}) on delete cascade`;
   return `${[
     add("session", "activeTeamId"),
     add("invitation", "teamId"),
@@ -610,6 +627,17 @@ export function compatMigration0010Sql(dialect: "postgres" | "sqlite", n: Names)
     baIndex("role"),
     `ALTER TABLE ${R} ADD COLUMN ${pg ? "IF NOT EXISTS " : ""}${C("taRank")} ${pg ? "integer" : "INTEGER"} NOT NULL DEFAULT 1;`,
     `CREATE UNIQUE INDEX ${pg ? "IF NOT EXISTS " : ""}ux_organization_role__organization_id__role ON ${R} (${C("organizationId")}, ${C("role")});`,
+    `CREATE TABLE IF NOT EXISTS ${T} (${t("id")} text not null primary key, ${t("name")} text not null, ${t("memberCount")} integer not null, ${t("organizationId")} text not null ${ref("organization")}, ${t("createdAt")} ${date} not null, ${t("updatedAt")} ${date});`,
+    `CREATE TABLE IF NOT EXISTS ${M} (${m("id")} text not null primary key, ${m("teamId")} text not null ${ref("team")}, ${m("userId")} text not null ${ref("user")}, ${m("membershipKey")} text unique, ${m("createdAt")} ${date});`,
+    index("team", "organizationId"),
+    index("teamMember", "teamId"),
+    index("teamMember", "userId"),
+    `ALTER TABLE ${M} ADD COLUMN ${pg ? "IF NOT EXISTS " : ""}${m("taOrganizationId")} ${pg ? "text" : "TEXT"};`,
+    `ALTER TABLE ${M} ADD COLUMN ${pg ? "IF NOT EXISTS " : ""}${m("taUpdatedAt")} ${pg ? "timestamptz" : "TEXT"};`,
+    `UPDATE ${M} SET ${m("taOrganizationId")} = (SELECT ${t("organizationId")} FROM ${T} WHERE ${T}.${t("id")} = ${M}.${m("teamId")}) WHERE ${m("taOrganizationId")} IS NULL;`,
+    `UPDATE ${M} SET ${m("taUpdatedAt")} = ${pg ? `date_trunc('milliseconds', ${m("createdAt")})` : sqliteIsoText(m("createdAt"))} WHERE ${m("taUpdatedAt")} IS NULL;`,
+    `CREATE UNIQUE INDEX ${pg ? "IF NOT EXISTS " : ""}ux_team_member__team_id__user_id ON ${M} (${m("teamId")}, ${m("userId")});`,
+    `CREATE INDEX ${pg ? "IF NOT EXISTS " : ""}ix_team_member__ta_organization_id__user_id ON ${M} (${m("taOrganizationId")}, ${m("userId")});`,
     "UPDATE ta_meta SET value = '13' WHERE key = 'schema_version';",
     "UPDATE ta_meta SET value = '10' WHERE key = 'compat_better_auth';",
   ].join("\n")}\n`;

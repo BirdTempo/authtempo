@@ -127,11 +127,13 @@ export const BETTER_AUTH_CODES = {
   role_in_use: "ROLE_IS_ASSIGNED_TO_MEMBERS",
   role_limit: "TOO_MANY_ROLES",
   role_taken: "ROLE_NAME_IS_ALREADY_TAKEN",
-  // Plan 12k Task 5. Core's own names for now. Task 11 of plan 12k maps
-  // teams and reads Better Auth's names for these three refusals.
-  team_limit: "TEAM_LIMIT",
-  team_member_limit: "TEAM_MEMBER_LIMIT",
-  last_team: "LAST_TEAM",
+  // Plan 12k Task 11. Better Auth 1.7.2's own names
+  // (dist/plugins/organization/error-codes.mjs:32, :41, :33, read
+  // 2026-10-21). Better Auth answers 400, 403, and 400; the status stays
+  // core's, 409.
+  team_limit: "YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_TEAMS",
+  team_member_limit: "TEAM_MEMBER_LIMIT_REACHED",
+  last_team: "UNABLE_TO_REMOVE_LAST_TEAM",
   // Plan 12k Task 7. authtempo's own names: no @better-auth/api-key source is in
   // this repo (read 2026-10-21). Task 12 of plan 12k reads the plugin's codes
   // and maps the shim's api-key answers to them.

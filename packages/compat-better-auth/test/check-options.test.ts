@@ -89,6 +89,7 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
   // The exact lists, so a key accepted in silence fails here (final review L-6).
   const EXACT = {
     // Since plan 12k Task 10 ac, roles, and dynamicAccessControl map; each role still needs its rank.
+    // Since Task 11 teams maps.
     consumerc: [
       "hooks",
       "plugins[expo]",
@@ -112,7 +113,6 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
       "plugins[organization].roles.learner",
       "plugins[organization].roles.owner",
       "plugins[organization].roles.teacher",
-      "plugins[organization].teams",
       "plugins[passkey].origin",
       "rateLimit.customStorage",
       "secret",

@@ -184,25 +184,21 @@ const MAPPED_ORGANIZATION_HOOKS: Record<keyof OrganizationHookOptions, Rule> = {
   afterAcceptInvitation: fn,
   afterRejectInvitation: fn,
   afterCancelInvitation: fn,
+  // Plan 12k Task 11: core's ten team hook points.
+  beforeCreateTeam: fn,
+  afterCreateTeam: fn,
+  beforeUpdateTeam: fn,
+  afterUpdateTeam: fn,
+  beforeDeleteTeam: fn,
+  afterDeleteTeam: fn,
+  beforeAddTeamMember: fn,
+  afterAddTeamMember: fn,
+  beforeRemoveTeamMember: fn,
+  afterRemoveTeamMember: fn,
 };
-
-/** Better Auth 1.7.2's team hooks, refused by name: core has no teams. */
-const TEAM_HOOKS = [
-  "beforeCreateTeam",
-  "afterCreateTeam",
-  "beforeUpdateTeam",
-  "afterUpdateTeam",
-  "beforeDeleteTeam",
-  "afterDeleteTeam",
-  "beforeAddTeamMember",
-  "afterAddTeamMember",
-  "beforeRemoveTeamMember",
-  "afterRemoveTeamMember",
-];
 
 const organizationHooks = object({
   ...MAPPED_ORGANIZATION_HOOKS,
-  ...Object.fromEntries(TEAM_HOOKS.map((name) => [name, refused("core has no teams")])),
   beforeCancelInvitation: refused("core runs no hook before a revoke; use afterCancelInvitation"),
   beforeRejectInvitation: refused("core runs no hook before a decline; use afterRejectInvitation"),
 });
@@ -261,6 +257,34 @@ const ADMIN_RULES: Record<string, Rule> = {
 };
 /** Spec 29 item 18: the section that each refusal of the access control map names. */
 const ITEM_18 = "(spec 29 item 18)";
+/** Spec 29 item 19: the section that each refusal of the teams map names. */
+const ITEM_19 = "(spec 29 item 19)";
+
+/** The two team limits: core takes a number, never a function (the 9d rule). */
+const teamLimit: Rule = (v, p, out) => {
+  if (typeof v === "function")
+    refuse(out, p, `a function is refused; pass a positive integer ${ITEM_19}`);
+  else if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1)
+    refuse(out, p, `core takes a positive integer ${ITEM_19}`);
+};
+
+/**
+ * `teams` of Better Auth 1.7.2 (types.d.mts:83 to :143, read 2026-10-21):
+ * every key. Each one maps onto core's `organizations.teams` and the two
+ * limits (map-options.ts), or is refused here.
+ */
+const teams = object({
+  enabled: boolean,
+  defaultTeam: object({
+    enabled: boolean,
+    customCreateDefaultTeam: refused(
+      `core creates the default team itself, named as the organization ${ITEM_19}`,
+    ),
+  }),
+  maximumTeams: teamLimit,
+  maximumMembersPerTeam: teamLimit,
+  allowRemovingAllTeams: boolean,
+});
 
 const plainObject = (v: unknown): v is Record<string, unknown> => {
   if (typeof v !== "object" || v === null || Array.isArray(v)) return false;
@@ -390,9 +414,11 @@ const PLUGIN_RULES: Record<string, Rule> = {
       // ranks come from authtempo.roleRanks, because Better Auth's roles have none.
       ac: accessControl,
       roles: roleTable,
+      // Plan 12k Task 11: core's teams and the two team limits.
+      teams,
       dynamicAccessControl: dynamicAccess,
     },
-    "core's organizations refuse teams, schema, disableOrganizationDeletion, and this option",
+    "core's organizations refuse schema, disableOrganizationDeletion, and this option",
   ),
   passkey: object({
     rpID: string,

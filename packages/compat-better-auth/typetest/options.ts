@@ -207,11 +207,12 @@ export const consumerd = {
   hooks: { before: async () => {}, after: async () => {} },
   plugins: [
     organization({
-      // @ts-expect-error since plan 9b a refused key fails the compile; TypeScript reports the first one per literal (teams)
+      // Since plan 12k Task 11 consumerd's teams option maps.
       teams: { enabled: true },
       creatorRole: "owner",
       membershipLimit: 50,
       organizationLimit: 3,
+      // @ts-expect-error since plan 9b a refused key fails the compile; TypeScript reports the first one per literal (disableOrganizationDeletion)
       disableOrganizationDeletion: true,
       requireEmailVerificationOnInvitation: true,
       sendInvitationEmail: async () => {},
