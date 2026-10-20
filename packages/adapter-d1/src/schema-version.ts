@@ -6,8 +6,13 @@ import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@authtempo/co
  * never ran. Every other error passes through, so a D1 outage never reads as
  * "run the migrations".
  */
-export function schemaVersionCheck(db: D1Database): () => Promise<void> {
+export function schemaVersionCheck(
+  db: D1Database,
+  sent?: { statements: number },
+): () => Promise<void> {
   return schemaVersionGate(async () => {
+    // The query counts in `statementsSent` of the adapter (ruling 35 of plan 12f).
+    if (sent) sent.statements++;
     try {
       return await db
         .prepare(`SELECT value FROM ${META_TABLE} WHERE key = ?`)

@@ -123,13 +123,13 @@ const auditRows = (storage: StorageAdapter) =>
  * Counts each storage call on `storage`, also inside a transaction, and
  * the session rows that each read answers. `log` holds each call as
  * `<method>:<model>`. The memory adapter gives a
- * transaction its own adapter object, so no call counts twice. An update
- * inside a transaction counts 2, as on D1: the D1 adapter sends the prior
- * read and the write as one batch of two statements.
+ * transaction its own adapter object, so no call counts twice. It counts
+ * as the memory adapter's `statementsSent` does: one per port call. The D1
+ * test `operator-sessions-budget.test.ts` counts the statements of D1.
  */
 function countCalls(storage: StorageAdapter) {
   const counts = { calls: 0, sessionRowsRead: 0, log: [] as string[] };
-  const wrap = (target: StorageAdapter, inTransaction = false): StorageAdapter => ({
+  const wrap = (target: StorageAdapter): StorageAdapter => ({
     ...target,
     create: ((model, data) => {
       counts.calls++;
@@ -149,7 +149,7 @@ function countCalls(storage: StorageAdapter) {
       return rows;
     }) as StorageAdapter["findMany"],
     update: ((model, where, data) => {
-      counts.calls += inTransaction ? 2 : 1;
+      counts.calls++;
       counts.log.push(`update:${model}`);
       return target.update(model, where, data);
     }) as StorageAdapter["update"],
@@ -175,7 +175,7 @@ function countCalls(storage: StorageAdapter) {
   storage.update = plain.update;
   storage.delete = plain.delete;
   storage.transaction = ((fn) =>
-    transaction((tx) => fn(wrap(tx, true)))) as StorageAdapter["transaction"];
+    transaction((tx) => fn(wrap(tx)))) as StorageAdapter["transaction"];
   return counts;
 }
 
@@ -782,12 +782,12 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       expect(pages, label).toEqual(
         hook
           ? [
-              { ended: 31, more: true, calls: 42 },
-              { ended: 31, more: true, calls: 42 },
-              { ended: 31, more: true, calls: 42 },
-              { ended: 7, more: false, calls: 34 },
+              { ended: 32, more: true, calls: 42 },
+              { ended: 32, more: true, calls: 42 },
+              { ended: 32, more: true, calls: 42 },
+              { ended: 4, more: false, calls: 30 },
             ]
-          : [{ ended: 100, more: false, calls: 44 }],
+          : [{ ended: 100, more: false, calls: 47 }],
       );
       expect(more, label).toBe(false);
       expect(await sessionsOf(w.storage, user.id), label).toEqual([]);
@@ -835,9 +835,9 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     }
     // Each call takes the families that its calls left allow, and answers more while some stay.
     expect(pages).toEqual([
-      { ended: 2, more: true, calls: 49 },
-      { ended: 0, more: true, calls: 49 },
-      { ended: 0, more: false, calls: 44 },
+      { ended: 2, more: true, calls: 48 },
+      { ended: 0, more: true, calls: 48 },
+      { ended: 0, more: false, calls: 47 },
     ]);
     expect(await w.storage.findMany("oauthToken", [])).toEqual([]);
     expect(await resolveSession(w.config, opened.token)).toBeNull();
@@ -887,7 +887,7 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     if (!done.ok) throw new Error(done.code);
     const total = counts.calls + limited.calls + SCHEMA_CHECK;
     // The reserve of 9 leaves the work 40 calls; the whole call makes 42.
-    expect([before, total, done.value.ended, done.value.more]).toEqual([8, 42, 21, true]);
+    expect([before, total, done.value.ended, done.value.more]).toEqual([8, 42, 22, true]);
   });
 
   it("ends 60 sessions with a hook in two pages, with no session lost or ended twice", async () => {

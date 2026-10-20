@@ -126,7 +126,12 @@ function assertPrefixes<M extends ModelName>(model: M, where: Where<M>[]): void 
  * step that reverses it, so a rollback touches only this transaction's rows
  * and keeps rows that other callers wrote in the meantime.
  */
-function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter {
+function adapterOn(
+  store: Store,
+  lock: Lock,
+  log: Undo[] | null,
+  sent: { statements: number },
+): StorageAdapter {
   const table = (model: ModelName) => {
     if (!Object.hasOwn(schema, model)) throw new StorageError("unknown_model", model);
     let t = store.get(model);
@@ -151,6 +156,7 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
 
   return {
     async create<M extends ModelName>(model: M, data: Models[M]): Promise<Models[M]> {
+      sent.statements++;
       const t = table(model);
       assertFields(model, Object.keys(data));
       const row = clone(data as unknown as Record<string, unknown>);
@@ -161,6 +167,7 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
       return clone(row) as unknown as Models[M];
     },
     async findOne<M extends ModelName>(model: M, where: Where<M>[]): Promise<Models[M] | null> {
+      sent.statements++;
       const rows = select(model, where);
       return rows.length ? (clone(rows[0]) as unknown as Models[M]) : null;
     },
@@ -169,6 +176,7 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
       where: Where<M>[],
       opts?: FindManyOptions<M>,
     ): Promise<Models[M][]> {
+      sent.statements++;
       let rows = select(model, where);
       const limit = opts?.limit;
       if (limit !== undefined && !(Number.isInteger(limit) && limit >= 0)) {
@@ -200,6 +208,7 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
       where: Where<M>[],
       data: Partial<Omit<Models[M], "id">>,
     ): Promise<number> {
+      sent.statements++;
       const t = table(model);
       assertFields(model, Object.keys(data));
       if (Object.hasOwn(data, "id")) throw new StorageError("unknown_field", model, ["id"]);
@@ -223,6 +232,7 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
       return rows.length;
     },
     async delete<M extends ModelName>(model: M, where: Where<M>[]): Promise<number> {
+      sent.statements++;
       const t = table(model);
       if (where.length === 0) throw new StorageError("invalid_argument", model, ["where"]);
       const rows = select(model, where);
@@ -236,7 +246,7 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
       const run = async (): Promise<T> => {
         const own: Undo[] = [];
         try {
-          const value = await fn(adapterOn(store, lock, own));
+          const value = await fn(adapterOn(store, lock, own, sent));
           // A nested transaction hands its steps to the outer one, so an
           // outer rollback also reverses them.
           log?.push(...own);
@@ -257,10 +267,14 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
       );
       return result;
     },
+    statementsSent() {
+      return sent.statements;
+    },
   };
 }
 
 /** An adapter that keeps rows in memory. For tests and the example Worker only. */
 export function createMemoryAdapter(): StorageAdapter {
-  return adapterOn(new Map(), { tail: Promise.resolve() }, null);
+  // The count of port calls, shared with each transaction (ruling 35 of plan 12f).
+  return adapterOn(new Map(), { tail: Promise.resolve() }, null, { statements: 0 });
 }

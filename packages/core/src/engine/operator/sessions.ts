@@ -2,7 +2,6 @@ import type { ResolvedConfig } from "../../config.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SessionRow } from "../../schema.js";
 import { findManyIn, IN_CHUNK } from "../../storage/batch.js";
-import { countedStorage } from "../../storage/call-count.js";
 import type { StorageAdapter, Where } from "../../storage/port.js";
 import { deleteOAuthCodes } from "../oauth-grants.js";
 import { deliverLogouts, LOGOUT_ROW_CALLS } from "../oauth-logout.js";
@@ -62,6 +61,33 @@ function reasonOf(
   return operatorReason(input.reason);
 }
 
+/**
+ * The worst case of each step of `endUserSessions` in D1 statements, for an
+ * adapter with no `statementsSent`. Each number is the count of the D1 test
+ * `operator-sessions-budget.test.ts`. The hold is a read and a batch of 2.
+ */
+const STEP_WORST = { hold: 3, expired: 2 } as const;
+
+/**
+ * The statements of the work of an act so far (ruling 35 of plan 12f). It
+ * starts at `fixed`, the calls before the transaction. With
+ * `statementsSent`, the count is the difference since the start. With no
+ * counter, each `step` adds its worst case.
+ */
+function meterOf(storage: StorageAdapter, fixed: number) {
+  const start = storage.statementsSent?.();
+  let assumed = fixed;
+  return {
+    step(worst: number) {
+      assumed += worst;
+    },
+    get used(): number {
+      const now = storage.statementsSent?.();
+      return start === undefined || now === undefined ? assumed : fixed + now - start;
+    },
+  };
+}
+
 /** The calls of `targetOf`: the user, and for a user actor the platform organization and the member row. */
 const TARGET_CALLS: Readonly<Record<OperatorActor["kind"], number>> = {
   user: 3,
@@ -102,7 +128,7 @@ const FAMILY_CALLS = 2;
  * After the commit, in the order of ruling 2: `session.afterEnd` with
  * `operator` per session, the back-channel logouts that the calls left
  * allow (the sweep sends the rest), then `afterAction` and `endFamilies` in
- * `operatorAct`. The work counts its calls through `countedStorage`.
+ * `operatorAct`. The work counts its statements with `meterOf`.
  */
 export async function endUserSessions(
   config: ResolvedConfig,
@@ -135,25 +161,29 @@ export async function endUserSessions(
   const done = await operatorAct(
     config,
     drafted.value,
-    async (raw, draft, ends) => {
-      const count = { calls: fixed };
-      const tx = countedStorage(raw, count, true);
+    async (tx, draft, ends) => {
+      const meter = meterOf(tx, fixed);
       // The user row first: the lock order of every account write (user-hold.ts).
       await holdUser(tx, userId);
+      meter.step(STEP_WORST.hold);
       // A challenge first, as in endAllAccess: a verify spends its challenge as its last statement.
       await deleteTwoFactorChallenges(tx, userId);
+      meter.step(1);
       // An ended row goes with no hook, as in the ban: it gets no `operator` event.
       await deleteEndedSessions(tx, config, userId, now);
+      meter.step(STEP_WORST.expired);
       const read = await tx.findMany("session", [{ field: "userId", op: "eq", value: userId }], {
         sort: { field: "id", dir: "asc" },
         limit: END_ALL_LIMIT.default + 1,
       });
+      meter.step(1);
       const rows = read.slice(0, END_ALL_LIMIT.default);
       // The page counts its read again, so it gets 1 more; the handoff delete and the last page stay out.
-      const pageBudget = budget.value - count.calls + 1 - 1 - LAST_PAGE_CALLS - FAMILY_CALLS;
-      const page = await endSessionPage(raw, config, rows, ends.ended ?? null, now, pageBudget);
-      count.calls += page.used - 1;
+      const pageBudget = budget.value - meter.used + 1 - 1 - LAST_PAGE_CALLS - FAMILY_CALLS;
+      const page = await endSessionPage(tx, config, rows, ends.ended ?? null, now, pageBudget);
+      meter.step(page.used - 1);
       await deleteHandoffCodes(tx, userId);
+      meter.step(1);
       const sessionsLeft = page.stopped || read.length > rows.length;
       let familiesLeft = false;
       let late = 0;
@@ -168,9 +198,10 @@ export async function endUserSessions(
             sort: { field: "id", dir: "asc" },
           },
         );
+        meter.step(2);
         const all = [...new Set(tokens.map((t) => t.familyId))];
         // The calls left after the token delete, the codes, and the read of endFamilies.
-        const room = Math.floor((budget.value - count.calls - 4) / FAMILY_CALLS);
+        const room = Math.floor((budget.value - meter.used - 4) / FAMILY_CALLS);
         const take = all.slice(0, Math.min(room, IN_CHUNK));
         if (take.length > 0) {
           // The last families take the whole user, so the read of endFamilies
@@ -184,14 +215,16 @@ export async function endUserSessions(
           for (const id of take) ends.families.ids.add(id);
           ends.families.scopes.push(where);
           await tx.delete("oauthToken", where);
+          meter.step(1);
         }
         await deleteOAuthCodes(tx, userId);
+        meter.step(2);
         families = take.length;
         familiesLeft = take.length < all.length;
       }
       // The calls after the commit: the read and the revokes of endFamilies, then the delivery.
       const after = families > 0 ? 1 + FAMILY_CALLS * families : 0;
-      const deliver = Math.floor((budget.value - count.calls - after - 1) / LOGOUT_ROW_CALLS);
+      const deliver = Math.floor((budget.value - meter.used - after - 1) / LOGOUT_ROW_CALLS);
       // The row is the last write of the act, so it can hold the count.
       draft.data = { ended: page.deleted + late };
       return ok({ ended: page.deleted + late, more: sessionsLeft || familiesLeft, deliver });
@@ -218,14 +251,19 @@ export async function endUserSessions(
 export const OPERATOR_CALL_BUDGET = 50;
 
 /**
- * The storage calls before a session call when the caller passes no
- * `callsUsed`: the worst case of each actor (ruling 34 of plan 12f). A
- * user actor through the route: the route limiter 1, `resolveSession` 3
- * (the session, the user, and the sliding refresh), `requireOperatorUser`
- * 4 (the platform organization, the member row, the second factor, and
- * its limiter), and the D1 schema check 1. A secret actor: the route
- * limiter and the schema check. The app: the schema check. A caller that
- * made more calls passes its count as `callsUsed`.
+ * The D1 statements before a session call when the caller passes no
+ * `callsUsed`: the worst case of each actor (rulings 34 and 35 of plan
+ * 12f). A user actor through the route: the route limiter 1, the schema
+ * check 1, `resolveSession` 3 (the session, the user, and the sliding
+ * refresh), and `requireOperatorUser` 4 (the platform organization, the
+ * member row, the second factor, and its limiter). The D1 test
+ * `operator-sessions-budget.test.ts` counts these 9 on the binding. The
+ * app: the schema check, which the same test counts in an endAll of 50.
+ * A secret actor: the route limiter and the schema check; Task 10 adds
+ * the route. The adapter's `statementsSent` cannot give these: an app
+ * keeps one adapter for many invocations, and the limiter queries go to
+ * the binding. A caller that made more calls passes its count as
+ * `callsUsed`.
  */
 export const OPERATOR_CALLS_BEFORE: Readonly<Record<OperatorActor["kind"], number>> = {
   user: 9,
@@ -381,17 +419,20 @@ export async function endAllSessions(
     config,
     drafted.value,
     async (tx, draft, ends) => {
+      const meter = meterOf(tx, 0);
       const read = await tx.findMany("session", keep, {
         sort: { field: "id", dir: "asc" },
         limit: limit + 1,
       });
+      meter.step(1);
+      // The page counts the read as its call 1.
       const page = await endSessionPage(
         tx,
         config,
         read.slice(0, limit),
         ends.ended ?? null,
         now,
-        budget.value,
+        budget.value - meter.used + 1,
       );
       // The row is the last write of the act, so it can hold the count.
       draft.data = { ended: page.deleted };

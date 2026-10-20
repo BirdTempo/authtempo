@@ -16,9 +16,13 @@ export interface PostgresAdapterOptions {
 interface Ctx extends PostgresAdapterOptions {
   conn: Conn;
   inTransaction: boolean;
+  /** The statements sent, shared with each transaction (`statementsSent`, ruling 35 of plan 12f). */
+  sent: { statements: number };
 }
 
-async function query(conn: Conn, s: Statement): Promise<{ rows: Row[]; count: number }> {
+async function query(ctx: Ctx, s: Statement): Promise<{ rows: Row[]; count: number }> {
+  ctx.sent.statements++;
+  const conn = ctx.conn;
   // The builder casts json parameters with `$n::text::jsonb`, so postgres.js
   // sends the serialized text unchanged and the server parses it.
   const res = await conn.unsafe<Row[]>(s.sql, s.params as never[]);
@@ -31,7 +35,7 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       await ctx.ready();
       assertModel(model);
       try {
-        await query(ctx.conn, ctx.statements.insert(model, data));
+        await query(ctx, ctx.statements.insert(model, data));
       } catch (e) {
         throw ctx.toStorageError(model, e) ?? e;
       }
@@ -41,21 +45,21 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       await ctx.ready();
       const s = ctx.statements.select(model, where, { limit: 1 });
       if (!s) return null;
-      const { rows } = await query(ctx.conn, s);
+      const { rows } = await query(ctx, s);
       return rows[0] ? ctx.statements.decode(model, rows[0]) : null;
     },
     async findMany(model, where, opts) {
       await ctx.ready();
       const s = ctx.statements.select(model, where, opts);
       if (!s) return [];
-      return (await query(ctx.conn, s)).rows.map((r) => ctx.statements.decode(model, r));
+      return (await query(ctx, s)).rows.map((r) => ctx.statements.decode(model, r));
     },
     async update(model, where, data) {
       await ctx.ready();
       const s = ctx.statements.update(model, where, data);
       if (!s) return 0;
       try {
-        return (await query(ctx.conn, s)).count;
+        return (await query(ctx, s)).count;
       } catch (e) {
         throw ctx.toStorageError(model, e) ?? e;
       }
@@ -64,7 +68,7 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       await ctx.ready();
       const s = ctx.statements.delete(model, where);
       if (!s) return 0;
-      return (await query(ctx.conn, s)).count;
+      return (await query(ctx, s)).count;
     },
     async transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
       await ctx.ready();
@@ -77,6 +81,9 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       return begin(ctx.conn as Sql, (tx) =>
         fn(adapterOn({ ...ctx, conn: tx, inTransaction: true })),
       );
+    },
+    statementsSent() {
+      return ctx.sent.statements;
     },
   };
 }
@@ -94,5 +101,5 @@ async function savepoint<T>(
 }
 
 export function createPostgresAdapterOn(sql: Sql, options: PostgresAdapterOptions): StorageAdapter {
-  return adapterOn({ ...options, conn: sql, inTransaction: false });
+  return adapterOn({ ...options, conn: sql, inTransaction: false, sent: { statements: 0 } });
 }

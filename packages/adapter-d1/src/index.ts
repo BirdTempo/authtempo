@@ -8,10 +8,13 @@ import { schemaVersionCheck } from "./schema-version.js";
 export const D1_MIGRATIONS_DIR = "node_modules/@authtempo/adapter-d1/migrations";
 
 export function createD1Adapter(db: D1Database): StorageAdapter {
+  // One count for the statements and the schema check (ruling 35 of plan 12f).
+  const sent = { statements: 0 };
   return createD1AdapterOn(db, {
     statements: coreStatements(SQLITE),
     toStorageError,
-    ready: schemaVersionCheck(db),
+    ready: schemaVersionCheck(db, sent),
+    sent,
   });
 }
 

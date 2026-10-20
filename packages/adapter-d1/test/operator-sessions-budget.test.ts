@@ -1,8 +1,17 @@
 import { env } from "cloudflare:test";
-import { type AuthConfig, createAuth, type MailMessage } from "@authtempo/core";
+import {
+  type AuthConfig,
+  createAuth,
+  createPbkdf2PasswordHash,
+  type MailMessage,
+} from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createD1Adapter } from "../src/index.js";
+// The guard of a user actor and the config resolve are not in the package
+// exports: the test reads them from core's built output.
+import { resolveConfig } from "../../core/dist/config.js";
+import { requireOperatorUser } from "../../core/dist/engine/operator/guards.js";
+import { createD1Adapter, createD1Limiter } from "../src/index.js";
 
 // The call budget of the operator session calls on real D1 (plan 12f Task 7
 // review M2 and m2, ruling 34). D1 Free allows 50 queries per invocation
@@ -54,19 +63,31 @@ function counting(db: D1Database) {
   return { db: counted, count };
 }
 
-/** The engine on `db`, with a `session.afterEnd` hook. */
-function engine(db: D1Database, sent: MailMessage[]) {
+let current = new Date("2026-10-21T00:00:00.000Z");
+const clock = { now: () => current };
+
+/**
+ * The engine on `db`, with a `session.afterEnd` hook, `limiter`, and a
+ * slide of 6 hours, so a read of the session after 7 hours writes its
+ * refresh. Each call makes a new adapter: one invocation.
+ */
+function engine(db: D1Database, sent: MailMessage[], limiter: AuthConfig["limiter"] = OPEN) {
+  const storage = createD1Adapter(db);
   const input: AuthConfig = {
     baseURL: BASE,
     secret: "0123456789abcdef0123456789abcdef",
     trustedOrigins: [],
-    storage: createD1Adapter(db),
-    limiter: OPEN,
+    storage,
+    clock,
+    limiter,
     mail: {
       send: async (m) => {
         sent.push(m);
       },
     },
+    // A low iteration count: the test is about the count of statements, not hash work.
+    password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }), uniformSignUp: false },
+    session: { slidingRefreshDays: 0.25 },
     organizations: {
       platformRole: "operator",
       platformOrganization: "platform-co",
@@ -75,17 +96,18 @@ function engine(db: D1Database, sent: MailMessage[]) {
     operator: { users: true },
     hooks: { session: { afterEnd: () => {} } },
   };
-  return createAuth(input);
+  return { auth: createAuth(input), storage, input };
 }
 
-/** `count` sign-ins of one address by a magic link: the user and its sessions. */
+/** `count` sign-ins of one address by a magic link: the user id and the token of the last session. */
 async function signIns(
-  auth: ReturnType<typeof engine>,
+  auth: ReturnType<typeof engine>["auth"],
   sent: MailMessage[],
   email: string,
   count: number,
 ) {
   let userId = "";
+  let last = "";
   for (let i = 0; i < count; i++) {
     await auth.api.requestMagicLink({ email, ip: null });
     const text = sent.filter((m) => m.to === email).at(-1)?.text ?? "";
@@ -95,8 +117,46 @@ async function signIns(
     const s = await auth.api.getSession(r.value.token);
     if (!s) throw new Error("no session");
     userId = s.user.id;
+    last = r.value.token;
   }
-  return userId;
+  return { userId, token: last };
+}
+
+/**
+ * A platform operator through the flows: `createAdmin`, a magic link
+ * sign-in, the first password, and the email method of the second factor.
+ * Answers the token of a fresh session.
+ */
+async function platformOperator(auth: ReturnType<typeof engine>["auth"], sent: MailMessage[]) {
+  const email = "op@example.com";
+  const made = await auth.api.operator.createAdmin({
+    actor: APP,
+    email,
+    reason: "First operator",
+    ip: null,
+    userAgent: null,
+  });
+  if (!made.ok) throw new Error(made.code);
+  const { token } = await signIns(auth, sent, email, 1);
+  const session = await auth.api.getSession(token);
+  if (!session) throw new Error("no session");
+  const changed = await auth.api.password?.change({
+    session,
+    newPassword: "correct horse battery",
+  });
+  if (!changed?.ok) throw new Error("no password");
+  const res = await auth.handle(
+    new Request(`${BASE}/auth/second-factor/email/enable`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `__Host-tempo_session=${token}`,
+      },
+      body: JSON.stringify({ password: "correct horse battery" }),
+    }),
+  );
+  if (res.status !== 200) throw new Error(`enable answered ${res.status}`);
+  return token;
 }
 
 describe("the operator session calls on D1 (plan 12f Task 7)", () => {
@@ -106,10 +166,11 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
 
   it("an endAll of the app with a hook and a full page sends 50 queries, the schema check too", async () => {
     const sent: MailMessage[] = [];
-    await signIns(engine(env.DB, sent), sent, "ada@example.com", 60);
+    await signIns(engine(env.DB, sent).auth, sent, "ada@example.com", 60);
     // One invocation: a new adapter, so its first query is the schema check.
     const { db, count } = counting(env.DB);
-    const done = await engine(db, sent).api.operator.sessions.endAll({
+    const invocation = engine(db, sent);
+    const done = await invocation.auth.api.operator.sessions.endAll({
       actor: APP,
       reason: "Key leak",
       ip: null,
@@ -118,13 +179,16 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
     if (!done.ok) throw new Error(done.code);
     // The schema check, the read, the link read, 46 deletes, and the audit row.
     expect([done.value.ended, done.value.more, count.queries]).toEqual([46, true, 50]);
+    // The counter of the adapter agrees with the binding.
+    expect(invocation.storage.statementsSent?.()).toBe(50);
   });
 
   it("an endUser of the app with a hook sends 43 queries, the hold batch too", async () => {
     const sent: MailMessage[] = [];
-    const userId = await signIns(engine(env.DB, sent), sent, "ada@example.com", 60);
+    const { userId } = await signIns(engine(env.DB, sent).auth, sent, "ada@example.com", 60);
     const { db, count } = counting(env.DB);
-    const done = await engine(db, sent).api.operator.sessions.endUser({
+    const invocation = engine(db, sent);
+    const done = await invocation.auth.api.operator.sessions.endUser({
       actor: APP,
       userId,
       reason: "Lost laptop",
@@ -134,5 +198,43 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
     if (!done.ok) throw new Error(done.code);
     // A page keeps calls for the last page, so a page with a hook ends 31 sessions in 43 queries.
     expect([done.value.ended, done.value.more, count.queries]).toEqual([31, true, 43]);
+    expect(invocation.storage.statementsSent?.()).toBe(43);
   });
+
+  for (const call of ["endAll", "endUser"] as const)
+    it(`a whole user-actor ${call} sends 50 queries or fewer: the route limiter, the session, the guard, and the act`, async () => {
+      const sent: MailMessage[] = [];
+      const setup = engine(env.DB, sent).auth;
+      const token = await platformOperator(setup, sent);
+      const { userId } = await signIns(setup, sent, "ada@example.com", 60);
+      // Past the slide of 6 hours, inside the 1440 fresh minutes of the sign-in.
+      current = new Date(current.getTime() + 7 * 60 * 60 * 1000);
+      const { db, count } = counting(env.DB);
+      const invocation = engine(db, sent, createD1Limiter(db, clock));
+      const route = createD1Limiter(db, clock);
+      // The limiter of the route, as each operator route runs first.
+      expect(await route.allow("operator-users:ip:203.0.113.9", { seconds: 3600, max: 600 })).toBe(
+        true,
+      );
+      const resolved = await invocation.auth.api.getSession(token);
+      if (!resolved) throw new Error("the session ended");
+      const actor = await requireOperatorUser(resolveConfig(invocation.input), resolved);
+      if (!actor.ok) throw new Error(actor.code);
+      const before = count.queries;
+      const input = { actor: actor.value, reason: "Breach", ip: null, userAgent: null };
+      const done =
+        call === "endAll"
+          ? await invocation.auth.api.operator.sessions.endAll(input)
+          : await invocation.auth.api.operator.sessions.endUser({ ...input, userId });
+      if (!done.ok) throw new Error(done.code);
+      // The route limiter, the schema check, the session, the user, the refresh, the
+      // platform organization, the member, the factor, and the guard limiter: 9.
+      expect(before).toBe(9);
+      expect(done.value.more).toBe(true);
+      // The whole invocation on the binding, and the counter of the adapter, which
+      // leaves out the 2 limiter queries: they go to the binding, not through the adapter.
+      expect([done.value.ended, count.queries, invocation.storage.statementsSent?.()]).toEqual(
+        call === "endAll" ? [38, 50, 48] : [21, 43, 41],
+      );
+    });
 });

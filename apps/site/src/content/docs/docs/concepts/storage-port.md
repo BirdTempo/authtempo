@@ -7,6 +7,7 @@ sources:
   - packages/core/README.md "The storage port"
   - packages/adapter-d1/README.md "Transactions"
   - packages/adapter-postgres/README.md "Transactions"
+  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 7"
 ---
 
 **For:** a developer who writes an adapter, or who must know what core asks of a database.
@@ -29,6 +30,14 @@ The port is generic. Core names a model and its fields. The adapter maps them to
 | `update` | Writes the fields to every row that matches, and answers the count. |
 | `delete` | Deletes every row that matches, and answers the count. |
 | `transaction` | Runs a function with a port whose writes commit together. |
+
+## The optional methods
+
+An adapter can leave these out. Core then takes a fixed worst case.
+
+| Method | What it does |
+| --- | --- |
+| `statementsSent` | Answers the count of statements that the adapter sent since its creation. D1 counts each statement of a batch. The operator session calls read it, so each call fits the 50 queries of D1 Free. |
 
 ## The rules
 

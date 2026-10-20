@@ -106,4 +106,13 @@ export interface StorageAdapter {
   ): Promise<number>;
   delete<M extends ModelName>(model: M, where: Where<M>[]): Promise<number>;
   transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T>;
+  /**
+   * Optional. The count of statements that this adapter sent to its
+   * database since its creation, its transactions included (ruling 35 of
+   * plan 12f). D1 counts each statement, and each statement of a batch:
+   * D1 Free allows 50 queries per invocation. Memory and Postgres count
+   * their port calls. A caller reads it twice and takes the difference, so
+   * a count of a shared adapter can only be too high, never too low.
+   */
+  statementsSent?(): number;
 }

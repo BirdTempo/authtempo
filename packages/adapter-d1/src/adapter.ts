@@ -24,20 +24,29 @@ export interface D1AdapterOptions {
   toStorageError(model: ModelName, err: unknown): StorageError | null;
   /** The schema version check, run once per adapter. */
   ready(): Promise<void>;
+  /**
+   * The count of `statementsSent`, shared with each transaction (ruling 35
+   * of plan 12f). Pass the same object to the schema check, so its query
+   * counts too. Default: a new count.
+   */
+  sent?: { statements: number };
 }
 
 interface Ctx extends D1AdapterOptions {
   undo: Undo[] | null;
+  sent: { statements: number };
 }
 
-async function run(db: D1Database, s: Statement): Promise<D1Result<Row>> {
+async function run(db: D1Database, s: Statement, sent: Ctx["sent"]): Promise<D1Result<Row>> {
+  sent.statements++;
   return db
     .prepare(s.sql)
     .bind(...s.params)
     .run<Row>();
 }
 
-async function all(db: D1Database, s: Statement): Promise<Row[]> {
+async function all(db: D1Database, s: Statement, sent: Ctx["sent"]): Promise<Row[]> {
+  sent.statements++;
   const res = await db
     .prepare(s.sql)
     .bind(...s.params)
@@ -59,12 +68,13 @@ async function rethrowAfterUndo(
   db: D1Database,
   entries: Undo[],
   original: unknown,
+  sent: Ctx["sent"],
 ): Promise<never> {
   const failures: unknown[] = [];
   const fields: string[] = [];
   for (const u of [...entries].reverse()) {
     try {
-      await run(db, u);
+      await run(db, u, sent);
     } catch (f) {
       failures.push(f);
       fields.push(`${u.model}:${u.op}`);
@@ -83,7 +93,7 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       assertModel(model);
       const s = st.insert(model, data);
       try {
-        await run(db, s);
+        await run(db, s, ctx.sent);
       } catch (e) {
         throw ctx.toStorageError(model, e) ?? e;
       }
@@ -102,14 +112,14 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       await ctx.ready();
       const s = st.select(model, where, { limit: 1 });
       if (!s) return null;
-      const rows = await all(db, s);
+      const rows = await all(db, s, ctx.sent);
       return rows[0] ? st.decode(model, rows[0]) : null;
     },
     async findMany(model, where, opts) {
       await ctx.ready();
       const s = st.select(model, where, opts);
       if (!s) return [];
-      return (await all(db, s)).map((r) => st.decode(model, r));
+      return (await all(db, s, ctx.sent)).map((r) => st.decode(model, r));
     },
     async update(model, where, data) {
       await ctx.ready();
@@ -117,7 +127,7 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       if (!s) return 0;
       if (!ctx.undo) {
         try {
-          return (await run(db, s)).meta.changes;
+          return (await run(db, s, ctx.sent)).meta.changes;
         } catch (e) {
           throw ctx.toStorageError(model, e) ?? e;
         }
@@ -128,6 +138,8 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       const sel = st.undoSelect(model, where);
       if (!sel) return 0;
       let results: D1Result<Row>[];
+      // A batch sends each of its statements.
+      ctx.sent.statements += 2;
       try {
         results = await db.batch<Row>([
           db.prepare(sel.sql).bind(...sel.params),
@@ -145,7 +157,7 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       if (!ctx.undo) {
         const s = st.delete(model, where);
         if (!s) return 0;
-        return (await run(db, s)).meta.changes;
+        return (await run(db, s, ctx.sent)).meta.changes;
       }
       // A foreign key's ON DELETE CASCADE deletes child rows inside SQLite.
       // RETURNING lists only this table's rows, so the log holds no entry for
@@ -157,7 +169,7 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       // An impossible where (an empty `in`) answers null here as in `delete`.
       const returning = st.deleteReturning(model, where);
       if (!returning) return 0;
-      const rows = await all(db, returning);
+      const rows = await all(db, returning, ctx.sent);
       for (const row of rows) ctx.undo.push({ model, op: "delete", ...st.reinsertRow(model, row) });
       return rows.length;
     },
@@ -171,7 +183,7 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
           return await fn(self);
         } catch (e) {
           const own = log.splice(mark);
-          return rethrowAfterUndo(db, own, e);
+          return rethrowAfterUndo(db, own, e, ctx.sent);
         }
       }
       const inner: Ctx = { ...ctx, undo: [] };
@@ -179,15 +191,18 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       try {
         return await fn(tx);
       } catch (e) {
-        return rethrowAfterUndo(db, inner.undo ?? [], e);
+        return rethrowAfterUndo(db, inner.undo ?? [], e, ctx.sent);
       }
+    },
+    statementsSent() {
+      return ctx.sent.statements;
     },
   };
   return self;
 }
 
 export function createD1AdapterOn(db: D1Database, options: D1AdapterOptions): StorageAdapter {
-  return adapterOn(db, { ...options, undo: null });
+  return adapterOn(db, { ...options, undo: null, sent: options.sent ?? { statements: 0 } });
 }
 
 export { StorageError };
