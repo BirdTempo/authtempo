@@ -21,6 +21,7 @@ import { readSessionToken } from "../../primitives/credentials.js";
 import { fail, ok, type Result } from "../../result.js";
 import { SCHEMA_VERSION } from "../../schema.js";
 import { VERSION } from "../../version.js";
+import { isJsonRequest } from "../body.js";
 import {
   auditQuery,
   banBody,
@@ -258,7 +259,8 @@ function under<K extends string, V>(key: K, r: Result<V>): Result<Record<K, V>> 
 /**
  * The routes of the user, session, and audit tools (plan 12f, spec 26 item
  * 7), only with `operator.users`. Each route reads the actor first. Then it
- * reads its query or its JSON body with the contract schema. Then it calls
+ * reads its query or its JSON body with the contract schema. A write with
+ * another content type, or with none, answers `invalid_body`. Then it calls
  * one entry of `auth.api.operator` with the caller's IP and user agent. A session
  * caller's POST keeps the Origin rule and the Fetch Metadata rule of the
  * router. A secret caller sends no cookie, and a POST with no Origin passes.
@@ -302,7 +304,11 @@ function toolRoutes(config: ResolvedConfig): Route[] {
     async handler(ctx) {
       const caller = await readOperatorActor(config, ctx, `POST ${path}`);
       if (!caller.ok) return respond(caller);
-      const body = await readJson(ctx.request, schema);
+      // JSON only (ruling 38): a JSON body forces a preflight. A text/plain
+      // body or a body with no content type is a simple request with none.
+      const body = isJsonRequest(ctx.request)
+        ? await readJson(ctx.request, schema)
+        : fail("invalid_body");
       if (!body.ok) return send(respond(body), caller.value.renewed);
       const meta = { ip: ctx.ip, userAgent: ctx.request.headers.get("user-agent") };
       return send(respond(await run(caller.value.actor, body.value, meta)), caller.value.renewed);

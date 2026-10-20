@@ -60,6 +60,8 @@ interface Call {
   body?: unknown;
   /** Send the body as a form, not as JSON. */
   form?: true;
+  /** The content type of a JSON body, default `application/json`. Null sends the bytes with none. */
+  contentType?: string | null;
   headers?: Record<string, string>;
   /** Null sends no `cf-connecting-ip` and no `user-agent`. */
   ip?: string | null;
@@ -84,10 +86,14 @@ function request(key: string, call: Call = {}): Request {
       body: params.toString(),
     });
   }
+  const text = JSON.stringify(call.body ?? {});
+  // A string body gets text/plain from the Request; bytes get no content type.
+  if (call.contentType === null)
+    return new Request(url, { method, headers, body: new TextEncoder().encode(text) });
   return new Request(url, {
     method,
-    headers: { "content-type": "application/json", ...headers },
-    body: JSON.stringify(call.body ?? {}),
+    headers: { "content-type": call.contentType ?? "application/json", ...headers },
+    body: text,
   });
 }
 
@@ -175,11 +181,15 @@ function badInputsOf(key: ToolKey, userId: string): Call[] {
     default: {
       const valid = inputOf(key, userId);
       // An empty body, an unknown key, a reason with a line feed, and the valid body as a form.
+      // The valid JSON body as text/plain and with no content type: a simple request has no
+      // preflight, so the JSON media type is the reason of ruling 38.
       return [
         { body: {} },
         { body: { ...(valid.body as object), bogus: 1 } },
         { body: { ...(valid.body as object), reason: "a\nb" } },
         { ...valid, form: true },
+        { ...valid, contentType: "text/plain" },
+        { ...valid, contentType: null },
       ];
     }
   }
