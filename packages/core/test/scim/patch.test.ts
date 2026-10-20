@@ -387,6 +387,27 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
         400,
       ],
       [
+        "a NUL in a path filter",
+        body({ op: "replace", path: 'emails[type eq "\\u0000"].value', value: "t" }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a CR LF in a path filter",
+        body({ op: "remove", path: 'emails[type eq "a\\r\\nb"]' }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "a lone surrogate in a path filter",
+        body({ op: "remove", path: 'members[value eq "\\ud800"]' }),
+        "Group",
+        "invalidPath",
+        400,
+      ],
+      [
         "a filter with no close",
         body({ op: "replace", path: 'emails[type eq "work".value', value: "t" }),
         "User",

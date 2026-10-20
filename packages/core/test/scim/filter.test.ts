@@ -25,6 +25,11 @@ describe("parseScimFilter (plan 12d Task 9, RFC 7644 section 3.4.2.2)", () => {
       ['id eq "g" and members[value eq "u"]', "Group", { attr: "id", value: "g", member: "u" }],
       ['ID Eq "g" AND Members[Value eQ "u"]', "Group", { attr: "id", value: "g", member: "u" }],
       [`userName eq "${"a".repeat(1010)}"`, "User", { attr: "userName", value: "a".repeat(1010) }],
+      [
+        'userName eq "\\ud83d\\ude00 \\u00e9"',
+        "User",
+        { attr: "userName", value: "\u{1f600} \u00e9" },
+      ],
     ] as const;
     for (const [text, resource, expected] of rows) {
       expect(parseScimFilter(text, resource), text).toEqual(expected);
@@ -75,6 +80,14 @@ describe("parseScimFilter (plan 12d Task 9, RFC 7644 section 3.4.2.2)", () => {
       ['id eq "g" and memberz[value eq "u"]', "Group"],
       ['id eq "g" and members[value eq "u"] and members[value eq "v"]', "Group"],
       [`userName eq "${"a".repeat(1011)}"`, "User"],
+      // An escape gives a control character or a lone surrogate (review m2).
+      ['id eq "\\u0000"', "User"],
+      ['externalId eq "a\\r\\nb"', "User"],
+      ['userName eq "\\ud800"', "User"],
+      ['userName eq "a\\udc00"', "User"],
+      ['displayName eq "\\u007f"', "Group"],
+      ['externalId eq "\\u001f"', "Group"],
+      ['id eq "g" and members[value eq "\\u0000"]', "Group"],
     ] as const;
     for (const [text, resource] of rows) {
       expect(parseScimFilter(text, resource), text).toBeNull();

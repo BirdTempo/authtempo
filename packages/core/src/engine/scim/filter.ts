@@ -7,6 +7,8 @@
  * the route answers 400 `invalidFilter`.
  */
 
+import { hasControlChar } from "../../primitives/text.js";
+
 type FilterAttr = "userName" | "externalId" | "emails.value" | "id" | "displayName";
 
 export type ScimFilter =
@@ -30,6 +32,11 @@ const GROUP_ATTRS: ReadonlyMap<string, FilterAttr> = new Map([
   ["id", "id"],
 ]);
 
+// A lone surrogate is not text (the rule of engine/users.ts). The u flag
+// reads a pair as one code point, so only a lone half matches. The core lib is
+// ES2023, which does not type String.prototype.isWellFormed.
+const LONE_SURROGATE_RE = /\p{Cs}/u;
+
 const MEMBER_ATTRS: ReadonlyMap<string, "value"> = new Map([["value", "value"]]);
 
 // The text between the group clause and the member clause, in lowercase.
@@ -46,7 +53,9 @@ export function asciiLower(s: string): string {
 /**
  * Reads the JSON string literal that starts at `at`. The scan finds the first
  * quote that no backslash escapes, and `JSON.parse` of the literal reads the
- * escapes and refuses a raw control character. Answers null for any other form.
+ * escapes and refuses a raw control character. An escape can still give a C0
+ * control character, DEL, or a lone surrogate, so the value is checked after
+ * the parse. Postgres text refuses a NUL. Answers null for any other form.
  */
 export function readJsonString(text: string, at: number): { value: string; end: number } | null {
   if (text[at] !== '"') return null;
@@ -59,7 +68,9 @@ export function readJsonString(text: string, at: number): { value: string; end: 
   } catch {
     return null;
   }
-  return typeof value === "string" ? { value, end: i + 1 } : null;
+  if (typeof value !== "string" || hasControlChar(value) || LONE_SURROGATE_RE.test(value))
+    return null;
+  return { value, end: i + 1 };
 }
 
 /**
