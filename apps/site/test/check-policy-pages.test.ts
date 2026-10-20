@@ -29,10 +29,61 @@ function withText(
 
 const failures = (input: PolicyPagesInput) => checkPolicyPages(input).failures;
 
+/**
+ * The group version of the tree: check-packages holds every released package,
+ * core too, at one version. At 0.0.0 no release exists. The version pull
+ * request moves it, and the tests then hold the state of the release day.
+ */
+const UNRELEASED = REAL.coreVersion === "0.0.0";
+
+/** The sentence of SECURITY.md and of the security page before the first release. */
+const CLOSED =
+  "Until the first release, the two channels are not open, and the times of this policy do not apply.";
+/** The sentences of SECURITY.md and of the versioning page before the first release. */
+const NONE = "No release exists yet. The first minor is the current minor at its release.";
+/** The section of the versioning page before the first release. */
+const TODAY_TEXT =
+  "Every package is private and at version `0.0.0`. No release exists, and the owner decides when the packages publish.";
+
+/**
+ * One file text with the paragraph `line` as the first paragraph under
+ * `heading`, and the same text without it. The real text is one of the two,
+ * so each test holds both states at any group version.
+ */
+function both(
+  key: "versioning" | "securityPage" | "security",
+  heading: string,
+  line: string,
+): { on: string; off: string } {
+  const text = REAL[key];
+  expect(text).toContain(`${heading}\n\n`);
+  const on = text.includes(`${heading}\n\n${line}\n\n`)
+    ? text
+    : text.replace(`${heading}\n\n`, `${heading}\n\n${line}\n\n`);
+  return { on, off: on.replace(`${heading}\n\n${line}\n\n`, `${heading}\n\n`) };
+}
+
+/** The versioning page with and without the section The versions today, above One version. */
+function todayStates(): { on: string; off: string } {
+  const section = `## The versions today\n\n${TODAY_TEXT}\n\n`;
+  const text = REAL.versioning;
+  const on = text.includes(section)
+    ? text
+    : text.replace("## One version\n", `${section}## One version\n`);
+  return { on, off: on.replace(section, "") };
+}
+const TODAY = todayStates();
+/** A version of the release day, for the state after the first release. */
+const RELEASED = UNRELEASED ? "0.1.0" : REAL.coreVersion;
+
 describe("check-policy-pages", () => {
   it("passes the real pages", () => {
     expect(real.failures).toEqual([]);
-    expect(REAL.coreVersion).toBe("0.0.0");
+    expect(REAL.coreVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    // The real tree holds the state of its group version.
+    expect(REAL.versioning.includes("## The versions today\n")).toBe(UNRELEASED);
+    expect(REAL.security.includes(CLOSED)).toBe(UNRELEASED);
+    expect(REAL.security.includes(NONE)).toBe(UNRELEASED);
     expect(REAL.repository.url).toBe("https://github.com/authtempo/authtempo");
     const r = checkPolicyPages(REAL);
     expect(r.failures).toEqual([]);
@@ -104,25 +155,31 @@ describe("check-policy-pages", () => {
   });
 
   it("holds the closed channels to SECURITY.md both ways", () => {
-    const closed =
-      "Until the first release, the two channels are not open, and the times of this policy do not apply.";
+    const page = both("securityPage", "## How to report", CLOSED);
+    const file = both("security", "## How to report", CLOSED);
+    // Before the first release, and on the release day: each passes.
+    expect(failures({ ...REAL, securityPage: page.on, security: file.on })).toEqual([]);
+    expect(failures({ ...REAL, securityPage: page.off, security: file.off })).toEqual([]);
     // The page drops the sentence while SECURITY.md keeps it.
-    expect(failures(withText("securityPage", `${closed}\n`, ""))).toEqual([
-      `docs/reference/security-policy.md, section "How to report", does not state: ${closed} (from SECURITY.md, section "How to report")`,
+    expect(failures({ ...REAL, securityPage: page.off, security: file.on })).toEqual([
+      `docs/reference/security-policy.md, section "How to report", does not state: ${CLOSED} (from SECURITY.md, section "How to report")`,
     ]);
     // SECURITY.md drops the sentence at the first release, and the page keeps it.
-    expect(failures(withText("security", `${closed}\n`, ""))).toEqual([
-      `docs/reference/security-policy.md, section "How to report", states "${closed}", which no source holds`,
+    expect(failures({ ...REAL, securityPage: page.on, security: file.off })).toEqual([
+      `docs/reference/security-policy.md, section "How to report", states "${CLOSED}", which no source holds`,
     ]);
   });
 
   it("holds the support window state to SECURITY.md both ways", () => {
-    const none = "No release exists yet. The first minor is the current minor at its release.";
-    expect(failures(withText("security", `${none}\n`, ""))).toEqual([
+    const page = both("versioning", "## The support window", NONE);
+    const file = both("security", "## Supported versions", NONE);
+    expect(failures({ ...REAL, versioning: page.on, security: file.on })).toEqual([]);
+    expect(failures({ ...REAL, versioning: page.off, security: file.off })).toEqual([]);
+    expect(failures({ ...REAL, versioning: page.on, security: file.off })).toEqual([
       'docs/versioning.md, section "The support window", states "No release exists yet.", which no source holds',
       'docs/versioning.md, section "The support window", states "The first minor is the current minor at its release.", which no source holds',
     ]);
-    expect(failures(withText("versioning", `${none}\n`, ""))).toEqual([
+    expect(failures({ ...REAL, versioning: page.off, security: file.on })).toEqual([
       'docs/versioning.md, section "The support window", does not state: No release exists yet. (from SECURITY.md, section "Supported versions")',
       'docs/versioning.md, section "The support window", does not state: The first minor is the current minor at its release. (from SECURITY.md, section "Supported versions")',
     ]);
@@ -142,22 +199,18 @@ describe("check-policy-pages", () => {
   });
 
   it("holds the versions today to the version of core both ways", () => {
-    expect(failures({ ...REAL, coreVersion: "0.1.0" })).toEqual([
-      'packages/core/package.json is at 0.1.0, so docs/versioning.md must not have the section "The versions today"',
+    expect(failures({ ...REAL, versioning: TODAY.on, coreVersion: "0.0.0" })).toEqual([]);
+    expect(failures({ ...REAL, versioning: TODAY.off, coreVersion: RELEASED })).toEqual([]);
+    expect(failures({ ...REAL, versioning: TODAY.on, coreVersion: RELEASED })).toEqual([
+      `packages/core/package.json is at ${RELEASED}, so docs/versioning.md must not have the section "The versions today"`,
     ]);
-    const today =
-      "## The versions today\n\nEvery package is private and at version `0.0.0`. No release exists, and the owner decides when the packages publish.\n\n";
-    expect(failures(withText("versioning", today, ""))).toEqual([
-      'packages/core/package.json is at 0.0.0, so docs/versioning.md, section "The versions today", must state: Every package is private and at version `0.0.0`. No release exists, and the owner decides when the packages publish.',
+    expect(failures({ ...REAL, versioning: TODAY.off, coreVersion: "0.0.0" })).toEqual([
+      `packages/core/package.json is at 0.0.0, so docs/versioning.md, section "The versions today", must state: ${TODAY_TEXT}`,
     ]);
     // The heading stays and the text changes.
-    const changed = withText(
-      "versioning",
-      "Every package is private and at",
-      "Every package is at",
-    );
-    expect(failures(changed)).toEqual([
-      'packages/core/package.json is at 0.0.0, so docs/versioning.md, section "The versions today", must state: Every package is private and at version `0.0.0`. No release exists, and the owner decides when the packages publish.',
+    const changed = TODAY.on.replace("Every package is private and at", "Every package is at");
+    expect(failures({ ...REAL, versioning: changed, coreVersion: "0.0.0" })).toEqual([
+      `packages/core/package.json is at 0.0.0, so docs/versioning.md, section "The versions today", must state: ${TODAY_TEXT}`,
       'docs/versioning.md, section "The versions today", states "Every package is at version `0.0.0`.", which no source holds',
     ]);
   });
@@ -334,12 +387,11 @@ describe("check-policy-pages", () => {
   });
 
   it("holds The versions today and The policy to their one text", () => {
-    const date = withText(
-      "versioning",
+    const date = TODAY.on.replace(
       "the owner decides when the packages publish.",
       "the owner decides when the packages publish. The first release ships on 2026-11-01 with a 12-month support window.",
     );
-    expect(failures(date)).toEqual([
+    expect(failures({ ...REAL, versioning: date, coreVersion: "0.0.0" })).toEqual([
       'docs/versioning.md, section "The versions today", states "The first release ships on 2026-11-01 with a 12-month support window.", which no source holds',
     ]);
     const bounty = withText(

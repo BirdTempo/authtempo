@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -257,16 +257,32 @@ describe("check-support", () => {
   });
 
   it("passes the real tree: support.json, SCHEMA_VERSION, and each adapter's migrations", () => {
-    const { lines, code } = entry(new URL("../../../", import.meta.url).pathname, "2026-10-21");
+    const root = new URL("../../../", import.meta.url).pathname;
+    // The group version of the tree: check-packages holds core at it. The
+    // version pull request moves it, and the test then holds the released table.
+    const { version } = JSON.parse(readFileSync(join(root, "packages/core/package.json"), "utf8"));
+    const { lines, code } = entry(root, new Date().toISOString().slice(0, 10));
+    if (version === "0.0.0") {
+      expect(lines.slice(0, 2)).toEqual([
+        "check-support: PASS minors=0 current=0 security=0 failures=0",
+        "  note: no release exists",
+      ]);
+      expect(lines).toHaveLength(3);
+    } else {
+      // The current minor is the minor of the group version.
+      const { rows } = readSupport(readFileSync(join(root, "release/support.json"), "utf8"));
+      expect(rows.find((r) => r.status === "current")?.minor).toBe(
+        version.split(".").slice(0, 2).join("."),
+      );
+      expect(lines[0]).toMatch(
+        /^check-support: PASS minors=[1-9]\d* current=1 security=\d+ failures=0$/,
+      );
+      expect(lines).toHaveLength(2);
+    }
     // Later plans add adapters and schema versions, so the last note has a pattern.
-    expect(lines.slice(0, 2)).toEqual([
-      "check-support: PASS minors=0 current=0 security=0 failures=0",
-      "  note: no release exists",
-    ]);
-    expect(lines[2]).toMatch(
+    expect(lines.at(-1)).toMatch(
       /^ {2}note: adapters=[1-9]\d* \(adapter-d1, adapter-postgres.*\), SCHEMA_VERSION \d+$/,
     );
-    expect(lines).toHaveLength(3);
     expect(code).toBe(0);
   });
 });
