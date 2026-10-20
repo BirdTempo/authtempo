@@ -3,7 +3,7 @@ import { hasControlChar } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { UserRow } from "../../schema.js";
 import type { Where } from "../../storage/port.js";
-import { liveSessionWhere } from "../sessions.js";
+import { sessionIsLive } from "../sessions.js";
 import { normalizeEmail, normalizeEmailPrefix } from "../users.js";
 import { activeBan } from "./ban-rule.js";
 import { type OperatorActor, requireScope } from "./guards.js";
@@ -41,7 +41,7 @@ export const PREFIX_MIN = 3;
 
 /**
  * The highest session count that a read gives. A support person needs to
- * know "a few" or "many", and the bound keeps the read to 100 rows.
+ * know "a few" or "many", not the exact count.
  */
 const SESSION_COUNT_MAX = 100;
 
@@ -103,11 +103,24 @@ async function platformOrganizationId(config: ResolvedConfig): Promise<string | 
 }
 
 /**
- * The `OperatorUser` of each row, in the order of the rows. Each user
- * costs four reads, which run in parallel. They read the member row of the
- * platform organization, the second-factor row, up to `SESSION_COUNT_MAX`
- * live sessions, and the identities. One more read per call finds the
- * platform organization. A page of 100 users costs at most 401 reads.
+ * The `OperatorUser` of each row, in the order of the rows. A call costs
+ * a fixed count of storage calls, whatever the count of rows: one read
+ * finds the platform organization, and one `in` read each takes the
+ * member, second-factor, session, and identity rows of every user of the
+ * page. That is 5 calls, or 4 with no platform role. A list or a search
+ * adds its user reads, so a page costs at most 7.
+ *
+ * Each `in` read binds only the user ids: at most 100, the page bound.
+ * The D1 limit is 100 bound parameters per query and 1000 queries per
+ * invocation on Workers Paid, 50 on Workers Free (D1 limits page updated
+ * 21 April 2026, read 2026-10-20). The Workers limits page (updated 12
+ * October 2026, read 2026-10-20) gives Free 50 subrequests and 1,000 to
+ * internal services. A page fits both Free figures.
+ *
+ * So the reads filter the platform organization and the live sessions
+ * here, not in storage. The session read takes every session row of the
+ * page users: the sweep deletes the rows past `expiresAt`, and the count
+ * stops at `SESSION_COUNT_MAX`.
  */
 async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<OperatorUser[]> {
   if (rows.length === 0) return [];
@@ -115,22 +128,21 @@ async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<O
   const now = config.clock.now();
   const platformId = await platformOrganizationId(config);
   const platformRole = config.organizations?.platformRole ?? null;
-  const users: OperatorUser[] = [];
-  for (const user of rows) {
-    const [member, factor, sessions, identities] = await Promise.all([
-      platformId === null
-        ? null
-        : storage.findOne("member", [
-            { field: "organizationId", op: "eq", value: platformId },
-            { field: "userId", op: "eq", value: user.id },
-          ]),
-      storage.findOne("secondFactor", [{ field: "userId", op: "eq", value: user.id }]),
-      storage.findMany("session", liveSessionWhere(config, user.id, now), {
-        limit: SESSION_COUNT_MAX,
-      }),
-      storage.findMany("identity", [{ field: "userId", op: "eq", value: user.id }]),
-    ]);
-    users.push({
+  const ids = rows.map((user) => user.id);
+  const [members, factors, sessions, identities] = await Promise.all([
+    platformId === null
+      ? []
+      : storage.findMany("member", [{ field: "userId", op: "in", value: ids }]),
+    storage.findMany("secondFactor", [{ field: "userId", op: "in", value: ids }]),
+    storage.findMany("session", [{ field: "userId", op: "in", value: ids }]),
+    storage.findMany("identity", [{ field: "userId", op: "in", value: ids }]),
+  ]);
+  return rows.map((user) => {
+    const member = members.find((m) => m.userId === user.id && m.organizationId === platformId);
+    const factor = factors.find((f) => f.userId === user.id);
+    const live = sessions.filter((s) => s.userId === user.id && sessionIsLive(config, s, now));
+    const providers = identities.filter((i) => i.userId === user.id).map((i) => i.provider);
+    return {
       id: user.id,
       email: user.email,
       emailVerified: user.emailVerified,
@@ -147,11 +159,10 @@ async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<O
       platformOperator:
         platformRole !== null && (member?.role.split(",").includes(platformRole) ?? false),
       secondFactor: factor ? [...factor.methods] : [],
-      sessions: sessions.length,
-      identities: [...new Set(identities.map((i) => i.provider))],
-    });
-  }
-  return users;
+      sessions: Math.min(live.length, SESSION_COUNT_MAX),
+      identities: [...new Set(providers)],
+    };
+  });
 }
 
 /**
@@ -159,8 +170,8 @@ async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<O
  * is the `next` of the page before. `limit` is 1 to 100, default 50. The
  * read takes `limit + 1` rows, so `next` is set only when more users
  * follow. No total count: a count of every row scans the table on D1.
- * Needs `operator.users` (else `not_found`) and the scope `users`. Each
- * user costs four more reads (`operatorUsers`).
+ * Needs `operator.users` (else `not_found`) and the scope `users`. A page
+ * costs at most 6 storage calls, whatever its size (`operatorUsers`).
  */
 export async function listUsers(
   config: ResolvedConfig,
@@ -202,7 +213,8 @@ export async function listUsers(
  * of 10 000 users a miss reads 10 000 rows. `limit` bounds the rows that
  * come back, not the rows read. The per-IP limit of the route
  * (`OPERATOR_USERS_PER_IP`) and the per-user limit of a platform operator
- * bound the scans per hour. Each user found costs four more reads.
+ * bound the scans per hour. A page costs at most 7 storage calls
+ * (`operatorUsers`).
  *
  * Needs `operator.users` (else `not_found`) and the scope `users`.
  */

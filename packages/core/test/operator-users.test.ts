@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { matchOperatorSecret, type OperatorActor } from "../src/engine/operator/guards.js";
 import { operatorApi } from "../src/engine/operator/index.js";
+import { createSession } from "../src/engine/sessions.js";
 import { normalizeEmailPrefix } from "../src/engine/users.js";
-import { BASE_URL, makeAuth } from "./helpers.js";
+import { BASE_URL, makeAuth, seedPlatform } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
   type OperatorAuth,
@@ -296,6 +297,49 @@ describe("operator user reads (plan 12f Task 5)", () => {
     const later = await api.users.get({ actor: APP, userId: operator.user.id });
     if (!later.ok) throw new Error(later.code);
     expect(later.value.sessions).toBe(0);
+  });
+
+  it("costs the same count of storage calls for a page of 1, 50, and 100 users", async () => {
+    const auth = await operatorAuth();
+    await seedPlatform(auth);
+    for (let i = 0; i < 100; i++) await auth.seedUser(`user${i}@example.com`);
+    let calls = 0;
+    const counted = new Proxy(auth.storage, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver);
+        if (typeof value !== "function") return value;
+        return (...args: unknown[]) => {
+          calls += 1;
+          return value.apply(target, args);
+        };
+      },
+    });
+    const api = operatorApi({ ...auth.config, storage: counted });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    for (const limit of [1, 50, 100]) {
+      calls = 0;
+      const page = await api.users.list({ actor: APP, limit });
+      if (!page.ok) throw new Error(page.code);
+      expect(page.value.users).toHaveLength(limit);
+      // The user page, the platform organization, and one read each of
+      // member, secondFactor, session, and identity.
+      expect(calls).toBe(6);
+    }
+  });
+
+  it("caps the session count at 100", async () => {
+    const auth = await operatorAuth();
+    const [id] = await signUpAll(auth, ["ada@example.com"]);
+    for (let i = 0; i < 101; i++)
+      await createSession(auth.config, { userId: id ?? "", ip: null, userAgent: null });
+    const live = await auth.storage.findMany("session", [
+      { field: "userId", op: "eq", value: id ?? "" },
+    ]);
+    expect(live.length).toBeGreaterThan(100);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const got = await operatorApi(auth.config).users.get({ actor: APP, userId: id ?? "" });
+    if (!got.ok) throw new Error(got.code);
+    expect(got.value.sessions).toBe(100);
   });
 
   it("is off unless operator.users is on", async () => {
