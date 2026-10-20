@@ -45,7 +45,8 @@ describe("the demo lists and the routes of core", () => {
       }
       expect(missing).toEqual([]);
       // Count what ran: the routes of the twelve demo features, less the Apple callback.
-      expect(served).toBe(77);
+      // Plan 12k Task 3 added two organizations routes: has-permission and permissions.
+      expect(served).toBe(79);
     },
     LONG_TEST_MS,
   );
