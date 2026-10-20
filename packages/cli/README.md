@@ -273,8 +273,11 @@ only, as for `keys rotate`.
 - `users ban|unban|platform-role|second-factor-off`, `sessions end|end-all`,
   and `create-admin` need `--reason` (1 to 500 characters with no control
   character, checked before any request). With no terminal, or with
-  `--no-input`, they need `--yes`. Each act writes one audit row, and the
-  command prints its id.
+  `--no-input`, they need `--yes`. Each `users` write and `create-admin`
+  writes one audit row, and the command prints its id.
+- `sessions end` and `sessions end-all` write one audit row for each call.
+  In text mode they print no audit row id. `sessions end --json` lists the
+  ids in `auditIds`; the document of `sessions end-all --json` has no ids.
 - `sessions end` and `sessions end-all` call again while the answer has
   `more: true`, up to `--max-calls`, with one stderr line per call.
 - No stderr line holds an address. An address on stdout is the result that
