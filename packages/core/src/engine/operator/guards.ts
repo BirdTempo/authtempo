@@ -2,7 +2,7 @@ import type { OperatorScope, ResolvedConfig, ResolvedOperatorSecret } from "../.
 import { isOperatorSecret, OPERATOR_USERS_PER_IP } from "../../operator-secret.js";
 import { constantTimeEqual, sha256Hex } from "../../primitives/crypto.js";
 import { fail, ok, type Result } from "../../result.js";
-import type { MemberRow, SessionRow, UserRow } from "../../schema.js";
+import type { MemberRow, OrganizationRow, SessionRow, UserRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
 import { requireFresh } from "../fresh.js";
 import { holdsRolePart } from "../ranks.js";
@@ -131,6 +131,25 @@ export function holdsPlatformRole(
   const role = config.organizations?.platformRole ?? null;
   if (role === null || platformId === null || !member) return false;
   return member.organizationId === platformId && holdsRolePart(member.role, role);
+}
+
+/**
+ * True when a member write in `organization` takes the platform role from
+ * the member (ruling 42 I1 of plan 12f). `after` is the new role string,
+ * or null for a removal or a leave. The platform organization keeps its
+ * slug and is never deleted. So beside the revoke and the account delete,
+ * these two writes are the only losses.
+ */
+export function dropsPlatformRole(
+  config: ResolvedConfig,
+  organization: Pick<OrganizationRow, "slug">,
+  before: string,
+  after: string | null,
+): boolean {
+  const o = config.organizations;
+  const role = o?.platformRole ?? null;
+  if (!o || role === null || organization.slug !== o.platformOrganization) return false;
+  return holdsRolePart(before, role) && (after === null || !holdsRolePart(after, role));
 }
 
 /** True when the user has a second factor with one method or more (plan 12c). */

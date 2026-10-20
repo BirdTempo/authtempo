@@ -1,12 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
+import { deleteAccount } from "../src/engine/account-delete.js";
 import { HookRefusal } from "../src/engine/hooks.js";
 import { mintSessionJwt, verifySessionJwt } from "../src/engine/jwt.js";
 import { defaultNoticeMail } from "../src/engine/notices.js";
 import { requireOperatorUser } from "../src/engine/operator/guards.js";
 import { startImpersonation } from "../src/engine/operator/impersonation.js";
 import { operatorApi } from "../src/engine/operator/index.js";
-import { addMember } from "../src/engine/organizations.js";
+import { addMember, removeMember, updateMemberRole } from "../src/engine/organizations.js";
 import { listSessions } from "../src/engine/session-list.js";
 import { destroySession, resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
@@ -486,6 +487,50 @@ describe("the impersonation (plan 12f Task 11)", () => {
         w.target.user.id,
       );
     }
+  });
+
+  it("ends the impersonation sessions of an operator at each other loss of the platform role", async () => {
+    for (const loss of ["remove", "leave", "role", "delete"] as const) {
+      const w = await world();
+      const token = await started(w);
+      w.auth.clock.advance(MINUTE_MS);
+      const platform = { organizationId: w.platformOrg.id, userId: w.operator.user.id };
+      const done =
+        loss === "remove"
+          ? await removeMember(w.auth.config, { user: w.root, ...platform })
+          : loss === "leave"
+            ? await removeMember(w.auth.config, { user: w.operator.user, ...platform })
+            : loss === "role"
+              ? await updateMemberRole(w.auth.config, { user: w.root, ...platform, role: "member" })
+              : await deleteAccount(w.auth.config, {
+                  session: w.operator,
+                  ip: null,
+                  userAgent: null,
+                });
+      expect(done.ok, loss).toBe(true);
+      expect(await resolveSession(w.auth.config, token), loss).toBeNull();
+      expect(
+        await w.auth.storage.findMany("session", [{ field: "actorId", op: "ne", value: null }]),
+        loss,
+      ).toEqual([]);
+      // The target's own session stays.
+      expect((await resolveSession(w.auth.config, w.target.token))?.user.id, loss).toBe(
+        w.target.user.id,
+      );
+    }
+  });
+
+  it("keeps the impersonation sessions at a member write that keeps the platform role", async () => {
+    const w = await world();
+    const token = await started(w);
+    const kept = await updateMemberRole(w.auth.config, {
+      user: w.root,
+      organizationId: w.platformOrg.id,
+      userId: w.operator.user.id,
+      role: "admin,operator",
+    });
+    expect(kept.ok).toBe(true);
+    expect((await resolveSession(w.auth.config, token))?.session.actorId).toBe(w.operator.user.id);
   });
 
   it("refuses the start when a ban or a revoke of the operator commits during it", async () => {

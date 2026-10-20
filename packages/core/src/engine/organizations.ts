@@ -2,7 +2,7 @@ import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
-import type { MemberRow, OrganizationRow, UserRow } from "../schema.js";
+import type { MemberRow, OrganizationRow, SessionRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import {
@@ -13,6 +13,8 @@ import {
   runBefore,
   stopWith,
 } from "./hooks.js";
+import { dropsPlatformRole } from "./operator/guards.js";
+import { endImpersonations, holdImpersonations } from "./operator/impersonation.js";
 import {
   needs,
   normalizeSlug,
@@ -22,6 +24,7 @@ import {
   rankOf,
   roleAllowedIn,
 } from "./ranks.js";
+import { endedList, sessionsEnded } from "./sessions.js";
 import { holdUser, userStays } from "./user-hold.js";
 
 export interface Caller {
@@ -189,9 +192,63 @@ async function ownerWrite(
   o: ResolvedOrganizations,
   organization: OrganizationRow,
   write: (tx: StorageAdapter) => Promise<number>,
+  loss: RoleLoss | null = null,
 ): Promise<Result<true>> {
   const now = config.clock.now();
-  return config.storage.transaction((tx) => ownerLock(tx, o, organization, write, now));
+  return config.storage.transaction((tx) =>
+    withRoleLoss(
+      tx,
+      loss,
+      now,
+      (t) => ownerLock(t, o, organization, write, now),
+      (r) => r.ok,
+    ),
+  );
+}
+
+/**
+ * A member write that takes the platform role from `userId` (ruling 42 I1
+ * of plan 12f). `ended` collects the ended sessions for `session.afterEnd`.
+ */
+interface RoleLoss {
+  userId: string;
+  ended: SessionRow[] | undefined;
+}
+
+/** The loss of a member write, or null when the write keeps the platform role. */
+function roleLossOf(
+  config: ResolvedConfig,
+  organization: OrganizationRow,
+  member: MemberRow,
+  after: string | null,
+): RoleLoss | null {
+  return dropsPlatformRole(config, organization, member.role, after)
+    ? { userId: member.userId, ended: endedList(config) }
+    : null;
+}
+
+/**
+ * Runs `work` in `tx`. With a loss, the member's user row comes first
+ * (user-hold.ts), then the locks of the member's sessions and impersonation
+ * rows in one read (`holdImpersonations`). An impersonation start holds the
+ * same user row, so it sees the role gone or commits first. When `wrote`
+ * says that the write took effect, the impersonation sessions that the
+ * member opened end in the same transaction. No logout goes inline (ruling
+ * 37): an impersonation session has no client link.
+ */
+async function withRoleLoss<T>(
+  tx: StorageAdapter,
+  loss: RoleLoss | null,
+  now: Date,
+  work: (tx: StorageAdapter) => Promise<T>,
+  wrote: (value: T) => boolean,
+): Promise<T> {
+  if (!loss) return work(tx);
+  await holdUser(tx, loss.userId);
+  const hold = await holdImpersonations(tx, loss.userId, now, true);
+  const value = await work(tx);
+  if (wrote(value)) await endImpersonations(tx, hold, loss.ended ?? null, now);
+  return value;
 }
 
 export async function createOrganization(
@@ -747,15 +804,20 @@ export async function updateMemberRole(
       { role: input.role, updatedAt: now },
     );
   };
+  // A change that drops the platform role ends the member's impersonations (ruling 42 I1).
+  const loss = roleLossOf(config, s.value.organization, target.member, input.role);
   const written = await hookGuard(async (): Promise<Result<true>> => {
     // The demotion can remove an owner: count, lock, and write in one transaction.
     if (isOwner(o, target.rank) && !isOwner(o, g.value))
-      return ownerWrite(config, o, s.value.organization, setRole);
+      return ownerWrite(config, o, s.value.organization, setRole, loss);
     // A zero-row update writes nothing, so the commit changes nothing.
-    const n = await config.storage.transaction((tx) => setRole(tx));
+    const n = await config.storage.transaction((tx) =>
+      withRoleLoss(tx, loss, now, setRole, (rows) => rows > 0),
+    );
     return n === 0 ? fail("conflict") : ok(true);
   });
   if (!written.ok) return written;
+  await sessionsEnded(config, loss?.ended, "impersonation_end");
   const updated: MemberSummary = { ...current, role: input.role };
   await runAfter(
     "organization.afterUpdateMemberRole",
@@ -834,14 +896,21 @@ export async function removeMember(
     );
     return n;
   };
+  // A removal or a leave of the platform organization ends the member's
+  // impersonations (ruling 42 I1).
+  const loss = roleLossOf(config, s.value.organization, target.member, null);
+  const now = config.clock.now();
   const removed = await hookGuard(async (): Promise<Result<true>> => {
     // The removal of an owner: count, lock, and write in one transaction.
-    if (isOwner(o, target.rank)) return ownerWrite(config, o, s.value.organization, drop);
+    if (isOwner(o, target.rank)) return ownerWrite(config, o, s.value.organization, drop, loss);
     // A delete of zero rows writes nothing, so the commit changes nothing.
-    const n = await config.storage.transaction((tx) => drop(tx));
+    const n = await config.storage.transaction((tx) =>
+      withRoleLoss(tx, loss, now, drop, (rows) => rows > 0),
+    );
     return n === 0 ? fail("conflict") : ok(true);
   });
   if (!removed.ok) return removed;
+  await sessionsEnded(config, loss?.ended, "impersonation_end");
   await runAfter(
     "organization.afterRemoveMember",
     hooks.afterRemoveMember,

@@ -12,6 +12,7 @@ import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { deliverLogouts } from "./oauth-logout.js";
+import { endImpersonations, holdImpersonations } from "./operator/impersonation.js";
 import {
   deleteOrganizationRows,
   organizationsOfDelete,
@@ -317,7 +318,11 @@ export async function deleteAccountRows(
   for (const organization of owned)
     if ((await ownersOf(config, tx, organization.id)) < 1) stopWith("conflict");
   await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
+  // The user's sessions and the impersonation sessions that the user opened
+  // as an operator go together, after one lock read (ruling 42 of plan 12f).
+  const hold = await holdImpersonations(tx, user.id, now, true);
   await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], proof.ended, now);
+  await endImpersonations(tx, hold, proof.ended, now);
   // The back-channel outbox stays (plan 12e Task 16, review I3 of Task 1).
   // Its rows are the logouts of this delete, and of earlier ends that wait
   // for a retry. Each one is due now, so the delivery after the commit sends
