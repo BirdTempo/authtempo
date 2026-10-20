@@ -212,6 +212,7 @@ async function ownerWrite(
  * of plan 12f). `ended` collects the ended sessions for `session.afterEnd`.
  */
 interface RoleLoss {
+  config: ResolvedConfig;
   userId: string;
   ended: SessionRow[] | undefined;
   stops: ImpersonationStops | null;
@@ -226,6 +227,7 @@ function roleLossOf(
 ): RoleLoss | null {
   return dropsPlatformRole(config, organization, member.role, after)
     ? {
+        config,
         userId: member.userId,
         ended: endedList(config),
         stops: impersonationStops(config, "role_loss"),
@@ -251,7 +253,7 @@ async function withRoleLoss<T>(
 ): Promise<T> {
   if (!loss) return work(tx);
   await holdUser(tx, loss.userId);
-  const hold = await holdImpersonations(tx, loss.userId, now, true);
+  const hold = await holdImpersonations(tx, loss.config, loss.userId, now, true);
   const value = await work(tx);
   if (wrote(value)) await endImpersonations(tx, hold, loss.ended ?? null, now, loss.stops);
   return value;

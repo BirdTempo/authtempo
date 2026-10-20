@@ -324,7 +324,7 @@ export async function deleteAccountRows(
   await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
   // The user's sessions and the impersonation sessions that the user opened
   // as an operator go together, after one lock read (ruling 42 of plan 12f).
-  const hold = await holdImpersonations(tx, user.id, now, true);
+  const hold = await holdImpersonations(tx, config, user.id, now, true);
   await endSessions(
     tx,
     [{ field: "userId", op: "eq", value: user.id }],

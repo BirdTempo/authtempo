@@ -235,7 +235,8 @@ export interface ImpersonationHold {
  * longer.
  *
  * With `own`, the same read also locks the operator's own sessions, which
- * the caller deletes next. A page of `endAll` locks by id across users.
+ * the caller deletes next. While `operator.impersonation` is off, it reads
+ * nothing and answers no target. A page of `endAll` locks by id across users.
  * With two lock reads, it could hold a row of one set and wait on the
  * other (ruling 36). The port has no OR, so the read locks every session
  * of the operator and of each target. Call it before any session delete of
@@ -244,10 +245,13 @@ export interface ImpersonationHold {
  */
 export async function holdImpersonations(
   tx: StorageAdapter,
+  config: Pick<ResolvedConfig, "operator">,
   operatorId: string,
   now: Date,
   own: boolean,
 ): Promise<ImpersonationHold> {
+  // While the tool is off, no act reads the audit table for it (ruling 43).
+  if (!config.operator?.impersonation) return { operatorId, targets: [] };
   const since = new Date(now.getTime() - IMPERSONATION_TTL_MAX_MINUTES * MINUTE_MS);
   const targets = await impersonationTargets(tx, operatorId, since);
   if (targets.length > 0)

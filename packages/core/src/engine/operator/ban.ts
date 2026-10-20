@@ -268,7 +268,7 @@ export async function banUser(
       // The locks of the user's sessions and of the impersonation sessions
       // that the user opened, in one read, before any delete (ruling 42 L3):
       // the audit read and the lock read.
-      const hold = await holdImpersonations(tx, input.userId, now, true);
+      const hold = await holdImpersonations(tx, config, input.userId, now, true);
       meter.step(2);
       await endAllAccessPage(
         tx,
