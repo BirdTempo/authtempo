@@ -19,6 +19,7 @@ import {
 import { effectiveIn, grantCheck, type Standing, touchCheck } from "./permissions.js";
 import { RULE_STATEMENTS, rankOf, roleAllowedIn } from "./ranks.js";
 import { publicSession, type ResolvedSession } from "./sessions.js";
+import { lockTeam } from "./teams.js";
 import { holdUser, userStays } from "./user-hold.js";
 import { normalizeEmail } from "./users.js";
 
@@ -361,11 +362,16 @@ export async function acceptInvitation(
         if (held.length >= limit) return "member_limit";
       }
       // Plan 12k: the teams of the invitation that still exist. A missing team is skipped. A full
-      // team answers before any write, so the invitation stays pending.
+      // team answers before any write, so the invitation stays pending. The lock of each team row
+      // holds a team delete until the commit (ruling 26). The id order keeps two accepts from a
+      // deadlock.
       const joins: TeamRow[] = [];
-      for (const team of await findManyIn(tx, "team", "id", teamIds, [
+      const found = await findManyIn(tx, "team", "id", teamIds, [
         { field: "organizationId", op: "eq", value: inv.organizationId },
-      ])) {
+      ]);
+      for (const team of found.sort((a, b) => (a.id < b.id ? -1 : 1))) {
+        // Zero rows: a delete ran after the read, so the team is skipped as a missing one.
+        if (!(await lockTeam(tx, team.id, inv.organizationId))) continue;
         if (
           await tx.findOne("teamMember", [
             { field: "teamId", op: "eq", value: team.id },

@@ -73,6 +73,31 @@ const byName = (a: TeamSummary, b: TeamSummary) =>
   a.name < b.name ? -1 : a.name > b.name ? 1 : a.id < b.id ? -1 : 1;
 
 /**
+ * Locks one team row in the caller's transaction, and answers false when no
+ * team has the id in that organization. The update writes `organizationId`
+ * with its own value, so no field changes. On Postgres the update holds the
+ * row lock until the commit: a team delete, or a second write of the team
+ * rows, waits for it and then counts the committed rows. Read committed
+ * gives no other guard (ruling 26). D1 transactions are not isolated (spec
+ * 8.6), so there the lock holds nothing.
+ */
+export async function lockTeam(
+  tx: StorageAdapter,
+  teamId: string,
+  organizationId: string,
+): Promise<boolean> {
+  const n = await tx.update(
+    "team",
+    [
+      { field: "id", op: "eq", value: teamId },
+      { field: "organizationId", op: "eq", value: organizationId },
+    ],
+    { organizationId },
+  );
+  return n > 0;
+}
+
+/**
  * The team and the caller's standing in its organization for `wanted`. A
  * missing team answers `not_found`; the standing answers as
  * `standing` does. A null set needs membership only.
@@ -322,7 +347,7 @@ export async function listTeamMembers(
  * Adds a member of the organization to a team. Needs `member:update`. A
  * person who is not a member of the organization answers `not_found`; a
  * second add answers `already_member`. `membersPerTeam` counts inside the
- * transaction, before the write.
+ * transaction, after the lock of the team row and before the write.
  */
 export async function addTeamMember(
   config: ResolvedConfig,
@@ -357,6 +382,8 @@ export async function addTeamMember(
   try {
     const written = await hookGuard(() =>
       config.storage.transaction(async (tx): Promise<Result<true>> => {
+        // Zero rows: a delete ran after the read. A zero-row update writes nothing.
+        if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
         // A no-op add runs no hook. The unique key stays the guard for a race.
         if (
           await tx.findOne("teamMember", [
