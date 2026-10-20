@@ -24,6 +24,8 @@ import {
   HINT_LENGTH,
   knownSet,
   lastUsedDue,
+  movedFormed,
+  movedPrefixOf,
   narrowFormed,
   narrowPatch,
   spendTokenCreate,
@@ -361,12 +363,13 @@ export async function revokeOrganizationToken(
 }
 
 /**
- * The organization and the summary of a `to_` token. The checks run in the
- * order of a user token. The order is the form, the hash lookup, the expiry,
- * the retired mark, the organization, the window, and the spend. So a refused
- * call spends nothing.
+ * The organization and the summary of a `to_` token or of a moved key. The
+ * checks run in the order of a user token. The order is the form, the hash
+ * lookup, the expiry, the retired mark, the organization, the window, and the
+ * spend. So a refused call spends nothing.
  * `unauthorized` for a malformed, unknown, or expired token, a token whose
- * organization is gone, and any token while organizations are off. An
+ * organization is gone, and any token while organizations are off. A moved
+ * key with no row answers `token_retired` (ruling 28 of plan 12k). An
  * expired row is deleted on the way out. The creator does not count: the
  * token acts for the organization (owner decision 2 of plan 12k).
  *
@@ -379,17 +382,21 @@ export async function revokeOrganizationToken(
  * On D1 a resolve runs at most 44 statements. It runs 4 of its own and the
  * 39 of the worst spend (20 updates and 19 reads). A cold isolate adds 1, the
  * schema version check. A D1 test holds the count at 50 or fewer, the queries
- * of one Workers Free invocation.
+ * of one Workers Free invocation. A moved key reads the user token table
+ * first, so it runs 1 more, 45 at most.
  */
 export async function authenticateOrganizationToken(
   config: ResolvedConfig,
   token: string,
 ): Promise<Result<ResolvedOrganizationToken>> {
-  if (!config.organizations || !ORGANIZATION_TOKEN_RE.test(token)) return fail("unauthorized");
+  const moved = movedPrefixOf(config, token);
+  const formed =
+    moved === undefined ? ORGANIZATION_TOKEN_RE.test(token) : movedFormed(moved, token);
+  if (!config.organizations || !formed) return fail("unauthorized");
   const row = await config.storage.findOne("organizationToken", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
   ]);
-  if (!row) return fail("unauthorized");
+  if (!row) return fail(moved === undefined ? "unauthorized" : "token_retired");
   const now = config.clock.now();
   if (row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime()) {
     await config.storage.delete("organizationToken", [{ field: "id", op: "eq", value: row.id }]);

@@ -46,6 +46,16 @@ export { API_TOKEN_PREFIX, ORGANIZATION_TOKEN_PREFIX };
 const API_TOKEN_RE = new RegExp(`^${API_TOKEN_PREFIX}[A-Za-z0-9_-]{43}$`);
 /** The part of a moved key after its prefix (ruling 4 of plan 12k). */
 const MOVED_REST_RE = /^[A-Za-z0-9_-]{1,256}$/;
+
+/** The prefix of `tokens.movedPrefixes` that the bearer starts with, or undefined. */
+export function movedPrefixOf(config: ResolvedConfig, bearer: string): string | undefined {
+  return config.tokens.movedPrefixes.find((p) => bearer.startsWith(p));
+}
+
+/** True when the bearer is its moved prefix and 1 to 256 characters of `[A-Za-z0-9_-]`. */
+export function movedFormed(prefix: string, bearer: string): boolean {
+  return MOVED_REST_RE.test(bearer.slice(prefix.length));
+}
 /** The JSON of `metadata`, in UTF-8 bytes. */
 const METADATA_MAX_BYTES = 4096;
 /** The characters after the prefix that a list shows. */
@@ -335,9 +345,8 @@ export async function authenticateApiToken(
   config: ResolvedConfig,
   token: string,
 ): Promise<Result<ResolvedApiToken>> {
-  const moved = config.tokens.movedPrefixes.find((p) => token.startsWith(p));
-  const formed =
-    moved === undefined ? API_TOKEN_RE.test(token) : MOVED_REST_RE.test(token.slice(moved.length));
+  const moved = movedPrefixOf(config, token);
+  const formed = moved === undefined ? API_TOKEN_RE.test(token) : movedFormed(moved, token);
   if (!formed) return fail("unauthorized");
   const row = await config.storage.findOne("apiToken", [
     { field: "tokenHash", op: "eq", value: await sha256Hex(token) },
@@ -591,7 +600,12 @@ function once(
   return answer;
 }
 
-/** The token caller of a bearer, once per request: `to_` is an organization token, else a user token. */
+/**
+ * The token caller of a bearer, once per request: `to_` is an organization
+ * token, else a user token. A moved key is in one table or the other, as
+ * the move of Better Auth keys wrote it. So a moved key with no user token
+ * row is looked up as an organization token next (ruling 28 of plan 12k).
+ */
 function tokenCaller(config: ResolvedConfig, request: Request, bearer: string) {
   return once(config, request, async () => {
     if (bearer.startsWith(ORGANIZATION_TOKEN_PREFIX)) {
@@ -599,7 +613,15 @@ function tokenCaller(config: ResolvedConfig, request: Request, bearer: string) {
       return o.ok ? ok<Caller>({ kind: "organizationToken", ...o.value }) : o;
     }
     const t = await authenticateApiToken(config, bearer);
-    return t.ok ? ok<Caller>({ kind: "token", ...t.value }) : t;
+    if (t.ok) return ok<Caller>({ kind: "token", ...t.value });
+    if (
+      t.code !== "token_retired" ||
+      !config.organizations ||
+      movedPrefixOf(config, bearer) === undefined
+    )
+      return t;
+    const o = await authenticateOrganizationToken(config, bearer);
+    return o.ok ? ok<Caller>({ kind: "organizationToken", ...o.value }) : o;
   });
 }
 
@@ -619,16 +641,20 @@ export function apiTokenFromRequest(
 }
 
 /**
- * The caller of `GET /organizations/tokens/current`: a `to_` bearer only
- * (plan 12k). Any other credential answers `unauthorized` with no storage
- * read.
+ * The caller of `GET /organizations/tokens/current`: a `to_` bearer or a
+ * moved key only (plan 12k). Any other credential answers `unauthorized`
+ * with no storage read. A moved key of a user answers `unauthorized` after
+ * its resolve, so it spends one call, as at `GET /tokens/current`.
  */
 export function organizationTokenFromRequest(
   config: ResolvedConfig,
   request: Request,
 ): Promise<Result<Caller>> {
   const bearer = readBearer(request);
-  if (bearer === null || !bearer.startsWith(ORGANIZATION_TOKEN_PREFIX))
+  if (
+    bearer === null ||
+    (!bearer.startsWith(ORGANIZATION_TOKEN_PREFIX) && movedPrefixOf(config, bearer) === undefined)
+  )
     return Promise.resolve(fail("unauthorized"));
   return tokenCaller(config, request, bearer);
 }
