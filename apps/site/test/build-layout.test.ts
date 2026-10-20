@@ -792,7 +792,7 @@ describe("the demo page (plan 11b Task 12)", () => {
     );
     // The nine exempt features, typed here (plan 12e adds oauthDevice, plan 12f
     // operatorUsers and operatorImpersonation), so a lost member fails this test too.
-    expect(exempt).toHaveLength(8);
+    expect(exempt).toHaveLength(9);
     for (const m of exempt) {
       const f = (/ id="off-([^"]+)"/.exec(m[1] ?? "")?.[1] ?? "") as keyof typeof DEMO_EXEMPT;
       expect({ f, dt: textOf(m[2] ?? ""), dd: textOf(m[3] ?? "") }).toEqual({
