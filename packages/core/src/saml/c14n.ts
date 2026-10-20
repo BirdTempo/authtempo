@@ -80,6 +80,7 @@ export function excC14n(
 ): string {
   // The InclusiveNamespaces PrefixList: `#default` names the default namespace.
   const inclusive = options.inclusivePrefixes.map((p) => (p === "#default" ? "" : p));
+  const inclusiveSet = new Set(inclusive);
   const omit = options.omit ?? null;
   const out: string[] = [];
 
@@ -89,10 +90,17 @@ export function excC14n(
     const scope = declare(e, parentScope);
 
     // Exclusive C14N section 3: a prefix is visibly used by the element name or an attribute name.
-    // Each prefix of the PrefixList in scope follows Canonical XML, which on a subtree gives the same test.
+    // Each prefix of the PrefixList follows Canonical XML: the apex writes each one in scope.
+    // Below the apex, a list prefix that the element does not declare keeps the URI in effect
+    // from its output parent, so only the element's own declarations need the test (review M1).
+    // This keeps the cost at one pass of the list, not elements x entries x frames.
     const used = new Set<string>([e.prefix ?? ""]);
     for (const a of e.attrs) if (a.prefix !== null) used.add(a.prefix);
-    for (const p of inclusive) if (p === "" || lookup(scope, p) !== undefined) used.add(p);
+    if (e === el) {
+      for (const p of inclusive) if (p === "" || lookup(scope, p) !== undefined) used.add(p);
+    } else {
+      for (const d of e.nsDecls) if (inclusiveSet.has(d.prefix ?? "")) used.add(d.prefix ?? "");
+    }
     used.delete("xml");
 
     const decls: [string, string][] = [];

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { excC14n } from "../../src/saml/c14n.js";
 import { parseXml, type XmlElement } from "../../src/saml/xml.js";
+import { referenceExcC14n } from "./c14n-reference.js";
 import c32in from "./fixtures/c14n/c14n-3.2.in.xml?raw";
 import c32out from "./fixtures/c14n/c14n-3.2.out.xml?raw";
 import c34in from "./fixtures/c14n/c14n-3.4-body.in.xml?raw";
@@ -42,6 +43,40 @@ const SAML =
   "<saml:Subject><saml:NameID>al<!-- x -->ice</saml:NameID></saml:Subject>" +
   "</saml:Assertion>" +
   "</samlp:Response>";
+
+/** A seeded generator, so each run builds the same documents. */
+function seeded(seed: number): (n: number) => number {
+  let state = seed;
+  return (n) => {
+    state = (state * 1103515245 + 12345) & 0x7fffffff;
+    return state % n;
+  };
+}
+
+const PREFIXES = ["", "p", "q", "s"];
+const URIS = ["u1", "u2", ""];
+
+/** One random element with random declarations, attributes, text, and children. */
+function randomElement(rnd: (n: number) => number, depth: number): string {
+  const prefix = PREFIXES[rnd(4)] ?? "";
+  const name = prefix === "" ? "e" : `${prefix}:e`;
+  const parts = [name];
+  for (const p of PREFIXES) {
+    if (rnd(3) !== 0) continue;
+    const uri = URIS[rnd(3)] ?? "";
+    if (p === "") parts.push(`xmlns="${uri}"`);
+    else if (uri !== "") parts.push(`xmlns:${p}="${uri}"`);
+  }
+  if (rnd(3) === 0) parts.push(`${PREFIXES[1 + rnd(3)]}:a="1"`);
+  const kids = depth < 4 ? Array.from({ length: rnd(3) }, () => randomElement(rnd, depth + 1)) : [];
+  return `<${parts.join(" ")}>${rnd(2) === 0 ? "t" : ""}${kids.join("")}</${name}>`;
+}
+
+function elementsOf(el: XmlElement): XmlElement[] {
+  const all = [el];
+  for (const c of el.children) if (c.kind === "element") all.push(...elementsOf(c));
+  return all;
+}
 
 describe("excC14n", () => {
   it.each([
@@ -117,4 +152,47 @@ describe("excC14n", () => {
         'a&lt;b&amp;c&gt;"d"&#xD;</r>',
     );
   });
+
+  it("gives the output of the direct reading of section 3 on seeded documents", () => {
+    const rnd = seeded(7);
+    const differences: string[] = [];
+    let compared = 0;
+    for (let k = 0; k < 3000; k++) {
+      const doc = `<r xmlns:p="u1" xmlns:q="u2" xmlns:s="u1" xmlns="u2">${randomElement(rnd, 0)}</r>`;
+      const all = elementsOf(parsed(doc));
+      for (const apex of all) {
+        const inclusivePrefixes = PREFIXES.filter(() => rnd(2) === 0).map((p) =>
+          p === "" ? "#default" : p,
+        );
+        const below = elementsOf(apex);
+        const omit = rnd(4) === 0 ? (below[rnd(below.length)] ?? null) : null;
+        const options = { inclusivePrefixes, omit: omit === apex ? null : omit };
+        compared++;
+        if (excC14n(apex, options) !== referenceExcC14n(apex, options)) {
+          differences.push(`${doc} apex ${all.indexOf(apex)} list ${inclusivePrefixes.join(" ")}`);
+        }
+      }
+    }
+    expect(compared).toBe(17_946);
+    expect(differences.slice(0, 3)).toEqual([]);
+  });
+
+  // Review M1 of Task 6: one document inside every bound of spec 30 item 7, with a PrefixList of
+  // 30 000 entries. The form that tested each entry at each element took 21 s (load 2.35)
+  // and 22 s (load 8.59). This form takes 4 to 18 ms (load 12.54, 2026-10-20). The bound is 1 s.
+  it("keeps a long PrefixList on a deep and wide document inside 1 s", () => {
+    const list = Array.from({ length: 30_000 }, (_, k) => `n${k.toString(36)}`).join(" ");
+    const chain = Array.from({ length: 60 }, (_, d) => `<a xmlns:d${d}="u">`).join("");
+    const body = `${chain}${"<e/>".repeat(4900)}${"</a>".repeat(60)}`;
+    const doc = `<r><il PrefixList="${list}"/>${body}</r>`;
+    expect(new TextEncoder().encode(doc).length).toBe(169_543);
+    const root = parsed(doc);
+    const inclusivePrefixes = find(root, "il").attrs[0]?.value.split(" ") ?? [];
+    expect(inclusivePrefixes).toHaveLength(30_000);
+    const start = performance.now();
+    const output = excC14n(find(root, "a"), { inclusivePrefixes });
+    const elapsed = performance.now() - start;
+    expect(output).toBe(`${"<a>".repeat(60)}${"<e></e>".repeat(4900)}${"</a>".repeat(60)}`);
+    expect(elapsed).toBeLessThan(1000);
+  }, 120_000);
 });
