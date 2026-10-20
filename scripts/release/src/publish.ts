@@ -29,7 +29,7 @@ export interface Tarball {
   name: string;
   version: string;
   sha256: string;
-  /** The names of its runtime dependencies. */
+  /** The names of its dependencies, peer dependencies, and optional dependencies. */
   dependencies: string[];
 }
 
@@ -145,6 +145,21 @@ export function publishPlan(input: {
   return plan;
 }
 
+/**
+ * The names of the packages that a manifest needs, peers and optional ones
+ * too. A peer that publishes later leaves a version on npm that no install can
+ * resolve until the rerun.
+ */
+export function dependencyNames(manifest: Record<string, unknown>): string[] {
+  const names = new Set<string>();
+  for (const field of ["dependencies", "peerDependencies", "optionalDependencies"]) {
+    const deps = manifest[field];
+    if (deps !== null && typeof deps === "object")
+      for (const name of Object.keys(deps)) names.add(name);
+  }
+  return [...names];
+}
+
 /** The package.json of a pnpm pack tarball, read from its tar headers. */
 function readManifest(bytes: Buffer): Record<string, unknown> {
   const tar = gunzipSync(bytes);
@@ -207,13 +222,12 @@ export function publish(dir: string, seams: Seams): Outcome {
   if (failures.length > 0) return { published: [], skipped: [], failures };
   const tarballs: Tarball[] = hashed.map(({ file, bytes, sha256 }) => {
     const manifest = readManifest(bytes);
-    const deps = manifest.dependencies;
     return {
       file,
       name: String(manifest.name),
       version: String(manifest.version),
       sha256,
-      dependencies: deps !== null && typeof deps === "object" ? Object.keys(deps) : [],
+      dependencies: dependencyNames(manifest),
     };
   });
   const registry: Record<string, RegistryState> = {};

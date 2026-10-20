@@ -3,8 +3,12 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { releasedNames } from "../src/lib/released.ts";
+import { readWorkspace } from "../src/lib/workspace.ts";
 import {
+  dependencyNames,
   publish,
   publishLines,
   publishPlan,
@@ -305,6 +309,55 @@ describe("publish", () => {
       "publish: FAIL published=0 skipped=0 failures=1",
       "  read 0 tarballs",
     ]);
+  });
+
+  it("publishes each released package after each package that it needs, peers too", () => {
+    // The real manifests of the fixed group. The pack writes workspace:* as the
+    // exact version in dependencies, peerDependencies, and optionalDependencies.
+    const root = fileURLToPath(new URL("../../../", import.meta.url));
+    const released = new Set(releasedNames(root));
+    const manifests = readWorkspace(root)
+      .filter((p) => released.has(p.name))
+      .map((p) => p.manifest as unknown as Record<string, unknown>);
+    expect(manifests.length).toBe(released.size);
+    const tarballs: Tarball[] = manifests.map((m) => ({
+      file: `${String(m.name)}.tgz`,
+      name: String(m.name),
+      version: "0.1.0",
+      sha256: "a".repeat(64),
+      dependencies: dependencyNames(m),
+    }));
+    const plan = publishPlan({
+      tarballs,
+      sums: new Map(tarballs.map((t) => [t.file, t.sha256])),
+      registry: Object.fromEntries(tarballs.map((t) => [t.name, { held: false, latest: null }])),
+      npmVersion: "11.19.1",
+    });
+    expect(plan.failures).toEqual([]);
+    const order = plan.publish.map((p) => p.file.replace(/\.tgz$/, ""));
+    const at = (name: string) => order.indexOf(name);
+    expect(at("@authtempo/compat-better-auth")).toBeGreaterThan(at("@authtempo/client"));
+    expect(at("@authtempo/compat-better-auth")).toBeGreaterThan(at("@authtempo/handoff"));
+    // Each edge of the group in the three fields, in the order of the plan.
+    const late: string[] = [];
+    for (const m of manifests)
+      for (const field of ["dependencies", "peerDependencies", "optionalDependencies"])
+        for (const dep of Object.keys((m[field] as Record<string, string> | undefined) ?? {}))
+          if (released.has(dep) && at(dep) > at(String(m.name)))
+            late.push(`${String(m.name)} before its ${field} entry ${dep}`);
+    expect(late).toEqual([]);
+  });
+
+  it("reads the graph from dependencies, peerDependencies, and optionalDependencies", () => {
+    // No real manifest has an optional entry of the group today, so this row holds the field.
+    expect(
+      dependencyNames({
+        dependencies: { "@authtempo/core": "0.1.0" },
+        peerDependencies: { "@authtempo/client": "0.1.0", "@authtempo/core": "0.1.0" },
+        optionalDependencies: { "@authtempo/handoff": "0.1.0" },
+      }),
+    ).toEqual(["@authtempo/core", "@authtempo/client", "@authtempo/handoff"]);
+    expect(dependencyNames({ name: "@authtempo/core" })).toEqual([]);
   });
 
   it("imports only Node modules and release-facts", () => {
