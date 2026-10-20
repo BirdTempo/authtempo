@@ -262,6 +262,30 @@ describe("the stop rows of the impersonation (ruling 43 of plan 12f)", () => {
     }
   });
 
+  it("writes ban when a request presents an impersonation session that the ban left for the sweep", async () => {
+    // Every request passes: the 60 sign-ins would fill the sign-in limit.
+    const w = await world({
+      hooks: { session: { afterEnd: () => {} } },
+      limiter: { allow: async () => true },
+    });
+    // 60 sessions of the target, then the impersonation: a ban with a hook ends a page of
+    // the first rows in its act and leaves the rest for the sweep (ruling 44).
+    for (let i = 0; i < 59; i++) await verifiedSession(w.auth, TARGET);
+    w.auth.clock.advance(1000);
+    const { token, sessionId } = await impersonate(w);
+    const r = await operatorApi(w.auth.config).users.ban(input(w.target.user.id));
+    expect(r.ok).toBe(true);
+    expect(
+      await w.auth.storage.findOne("session", [{ field: "id", op: "eq", value: sessionId }]),
+    ).not.toBeNull();
+    expect(await stops(w)).toEqual([]);
+    // The door of the ban ends the left row at its next use.
+    expect(await resolveSession(w.auth.config, token)).toBeNull();
+    expect(await stops(w)).toEqual([
+      stopOf(w, sessionId, "ban", "A ban ended the impersonation session."),
+    ]);
+  });
+
   it("writes revoke at a revoke of the platform role", async () => {
     const w = await world();
     const { sessionId } = await impersonate(w);
