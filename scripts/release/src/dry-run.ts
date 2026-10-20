@@ -189,11 +189,13 @@ export interface ToolPaths {
 /**
  * The read of each tool path, under the HOME of the person. pnpm 12.8.1 and
  * npm 11.19.1 print one absolute path for each (read 2026-10-21).
+ * npm config get cache refuses a path that looks like a secret, such as a path
+ * with a UUID in it. npm exec gives the same value to its child, with no such check.
  */
 const PATH_READS: [key: keyof ToolPaths, cmd: string, args: readonly string[]][] = [
   ["store", "pnpm", ["store", "path"]],
   ["pnpmCache", "pnpm", ["cache", "path"]],
-  ["npmCache", "npm", ["config", "get", "cache"]],
+  ["npmCache", "npm", ["exec", "--offline", "-c", "node -p process.env.npm_config_cache"]],
 ];
 
 /**

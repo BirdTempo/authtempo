@@ -28,6 +28,8 @@ import {
   PNPM_SCOPE_REGISTRY,
   type Run,
   type RunResult,
+  readEnv,
+  readToolPaths,
   spawnRun,
   type ToolPaths,
 } from "../src/dry-run.ts";
@@ -45,7 +47,7 @@ const PERSON: ToolPaths = {
 };
 
 /** The kinds of the three path reads, which come before each other call. */
-const READS = ["pnpm store", "pnpm cache", "npm config"];
+const READS = ["pnpm store", "pnpm cache", "npm exec"];
 
 /** The files of childEnv and some tool paths in a new temp folder, for a call of a real tool. */
 function childFiles(temp: string): { files: ChildFiles; paths: ToolPaths } {
@@ -115,7 +117,7 @@ function fake(change: Record<string, (call: Call) => RunResult | undefined> = {}
         return ok(`${PERSON.store}\n`);
       case "pnpm cache":
         return ok(`${PERSON.pnpmCache}\n`);
-      case "npm config":
+      case "npm exec":
         return ok(`${PERSON.npmCache}\n`);
       case "git status":
         return ok();
@@ -753,17 +755,37 @@ describe("dry run", () => {
     expect(homes.slice(3).filter((h) => !h.endsWith(" 0"))).toEqual([]);
   });
 
+  it("reads each tool path from the real tools under a HOME with a UUID in its path", () => {
+    // npm 11.19.1 refuses npm config get cache for such a path (read 2026-10-21).
+    // The scratch folder of a test run, or the HOME of a person, can hold one.
+    const temp = mkdtempSync(join(tmpdir(), "authtempo-paths-test-"));
+    made.push(temp);
+    const home = join(temp, "1d7dbbd2-d6ae-4374-aa2c-2cb5aa1a5566", "person");
+    mkdirSync(home, { recursive: true });
+    const { files } = childFiles(join(temp, "child"));
+    const read = readToolPaths(
+      spawnRun,
+      readEnv({ PATH: process.env.PATH, HOME: home }, files),
+      files.home,
+    );
+    expect(read.failures).toEqual([]);
+    expect(read.paths.npmCache).toBe(join(home, ".npm"));
+    // The pnpm folders differ by platform, and each one is under the HOME.
+    for (const path of [read.paths.store, read.paths.pnpmCache])
+      expect([path, path.startsWith(`${home}/`)]).toEqual([path, true]);
+  });
+
   it("fails when a tool path read fails", async () => {
     const { root, tmp } = setup();
     const f = fake({
       "pnpm store": () => ({ status: 1, stdout: "", stderr: "ERR_PNPM_SOMETHING\n" }),
-      "npm config": () => ok("undefined\n"),
+      "npm exec": () => ok("undefined\n"),
     });
     const report = await dryRun({ root, run: f.run, tmp });
     expect(report.exit).toBe(1);
     expect(failuresOf(report)).toEqual([
       "pnpm store path exited 1: ERR_PNPM_SOMETHING",
-      "npm config get cache printed no one absolute path: undefined",
+      "npm exec --offline -c node -p process.env.npm_config_cache printed no one absolute path: undefined",
     ]);
     expect(f.calls.map((c) => c.kind)).toEqual(READS);
     expect(readdirSync(tmp)).toEqual([]);
