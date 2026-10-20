@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -237,6 +237,20 @@ describe("check-deprecations", () => {
     expect(files).toContain("packages/core/src/http/cookies.ts");
     expect(files).toContain("packages/handoff/README.md");
     expect(files.some((f) => f.includes("/test/") || f.includes("/dist/"))).toBe(false);
+  });
+
+  it("keeps the Expo storage key and the cookie constant out of the markers", () => {
+    // Ruling 22: the Expo storage key of the compat client reads the constant.
+    // A new key signs every Expo user out (plan 12b), so the key stays after 0.2.0.
+    const markers = readDeprecations(repo).flatMap((e) => e.markers);
+    const client = "packages/compat-better-auth/src/client/create-auth-client.ts";
+    expect(markers.filter((m) => m.file === client)).toEqual([]);
+    expect(readFileSync(join(repo, client), "utf8")).toContain(`_\${LEGACY_SESSION_COOKIE}`);
+    // The removal of each marker text of cookies.ts keeps the constant line.
+    const cookies = "packages/core/src/http/cookies.ts";
+    let text = readFileSync(join(repo, cookies), "utf8");
+    for (const m of markers) if (m.file === cookies) text = text.split(m.text).join("");
+    expect(text).toContain('export const LEGACY_SESSION_COOKIE = "tempo_session";');
   });
 
   it("refuses a register that is not a list of entries", () => {
