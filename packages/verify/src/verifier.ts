@@ -1,4 +1,10 @@
-import { type ApiTokenSummaryJSON, type ClientFailure, createTransport } from "@authtempo/client";
+import {
+  type ApiTokenSummaryJSON,
+  type ClientFailure,
+  createTransport,
+  type OrganizationJSON,
+  type OrganizationTokenSummaryJSON,
+} from "@authtempo/client";
 import type { PublicSession } from "@authtempo/core";
 import {
   ACCESS_TOKEN_TYPE,
@@ -6,6 +12,8 @@ import {
   decodeJws,
   isResourceUrl,
   JWS_RE,
+  movedPrefixFault,
+  ORGANIZATION_TOKEN_PREFIX,
   readBearer,
   readDpopToken,
   resourceOf,
@@ -27,12 +35,19 @@ import {
   unauthorizedWith,
 } from "./unauthorized.js";
 
-export type CallerKind = "session-jwt" | "oauth" | "oauth-client" | "api-token" | "session-token";
+export type CallerKind =
+  | "session-jwt"
+  | "oauth"
+  | "oauth-client"
+  | "api-token"
+  | "organization-token"
+  | "session-token";
 const KINDS: readonly CallerKind[] = [
   "session-jwt",
   "oauth",
   "oauth-client",
   "api-token",
+  "organization-token",
   "session-token",
 ];
 
@@ -80,6 +95,12 @@ export type Caller =
       dpopJkt: string | null;
     }
   | { kind: "api-token"; user: PublicSession["user"]; apiToken: ApiTokenSummaryJSON }
+  | {
+      /** A token that an organization owns (`to_`, plan 12k): it acts for the organization, never a user. */
+      kind: "organization-token";
+      organization: OrganizationJSON;
+      apiToken: OrganizationTokenSummaryJSON;
+    }
   | { kind: "session-token"; user: PublicSession["user"]; session: PublicSession["session"] };
 
 /** A caller, null for no valid credential, or a failure when the auth app did not answer. */
@@ -126,6 +147,20 @@ export interface VerifierOptions {
    * the old fields, and only a call to core reads the new ones.
    */
   cache?: { apiTokenSeconds?: number | undefined } | undefined;
+  /**
+   * The prefixes of keys that moved into core's token tables, such as
+   * `laaa_`: the app's `tokens.movedPrefixes` (plan 12k, review finding m6).
+   * A bearer with one goes to the route of `movedKind`. Each entry follows
+   * core's moved prefix rule. Default none.
+   */
+  movedPrefixes?: readonly string[] | undefined;
+  /**
+   * The kind of every moved key: `"api-token"` (`GET /tokens/current`, the
+   * default) for keys of users, `"organization-token"`
+   * (`GET /organizations/tokens/current`) for keys of organizations. It must
+   * be in `accept` while `movedPrefixes` has an entry.
+   */
+  movedKind?: "api-token" | "organization-token" | undefined;
   /** The deadline of each call to the auth app, 100 to 30000 ms. Default 5000. */
   timeoutMs?: number | undefined;
   /** The fetch of the calls to the auth app. Any function of a request and its init that answers a Response. */
@@ -248,7 +283,8 @@ function accessClaimsPass(
 /**
  * The resource-server SDK (plan 11d, spec 20).
  * A session JWT and an access token verify offline against the key set.
- * A `tk_` token and a `ts_` token verify by one call to the auth app.
+ * A `tk_` token, a `to_` token, a moved key, and a `ts_` token verify by one
+ * call to the auth app.
  * It reads the `Authorization` header only: a resource server never reads the session cookie.
  * A wrong config throws here.
  */
@@ -316,6 +352,17 @@ export function createVerifier(options: VerifierOptions): Verifier {
     throw new Error(
       `authtempo verify: cache.apiTokenSeconds must be an integer from 0 to ${API_TOKEN_CACHE_MAX_SECONDS}`,
     );
+  const movedPrefixes = [...(options.movedPrefixes ?? [])];
+  const movedKind = options.movedKind ?? "api-token";
+  if (movedKind !== "api-token" && movedKind !== "organization-token")
+    throw new Error('authtempo verify: movedKind must be "api-token" or "organization-token"');
+  for (const [i, p] of movedPrefixes.entries())
+    if (typeof p !== "string" || movedPrefixFault(p) !== null || movedPrefixes.indexOf(p) !== i)
+      throw new Error(
+        `authtempo verify: the moved prefix ${JSON.stringify(p)} must follow core's tokens.movedPrefixes rule, once`,
+      );
+  if (movedPrefixes.length > 0 && !accept.includes(movedKind))
+    throw new Error(`authtempo verify: movedPrefixes needs ${movedKind} in accept`);
   const timeoutMs = options.timeoutMs ?? TIMEOUT_DEFAULT_MS;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < TIMEOUT_MIN_MS || timeoutMs > TIMEOUT_MAX_MS)
     throw new Error(
@@ -375,6 +422,25 @@ export function createVerifier(options: VerifierOptions): Verifier {
       }
     }
     return { ok: true, value: caller };
+  }
+
+  /** A `to_` token, or a moved key of an organization: one call, never kept. */
+  async function organizationToken(bearer: string): Promise<VerifyResult> {
+    const r = await transport(bearer)<{
+      organization: OrganizationJSON;
+      apiToken: OrganizationTokenSummaryJSON;
+    }>("GET", "/organizations/tokens/current");
+    if (!r.ok) return NO_TOKEN_CALLER.includes(r.code) ? none : r;
+    const body: unknown = r.value;
+    if (!isObject(body) || !hasId(body.organization) || !hasId(body.apiToken)) return unexpected200;
+    return {
+      ok: true,
+      value: {
+        kind: "organization-token",
+        organization: body.organization as OrganizationJSON,
+        apiToken: body.apiToken as OrganizationTokenSummaryJSON,
+      },
+    };
   }
 
   async function sessionToken(token: string): Promise<VerifyResult> {
@@ -582,6 +648,11 @@ export function createVerifier(options: VerifierOptions): Verifier {
       if (bearer === null) return none;
       if (bearer.startsWith(API_TOKEN_PREFIX))
         return accept.includes("api-token") ? apiToken(bearer) : none;
+      if (bearer.startsWith(ORGANIZATION_TOKEN_PREFIX))
+        return accept.includes("organization-token") ? organizationToken(bearer) : none;
+      // A moved key keeps its old prefix. The constructor checked movedKind against accept.
+      if (movedPrefixes.some((p) => bearer.startsWith(p)))
+        return movedKind === "api-token" ? apiToken(bearer) : organizationToken(bearer);
       if (bearer.startsWith(SESSION_TOKEN_PREFIX))
         return accept.includes("session-token") ? sessionToken(bearer) : none;
       if (JWS_RE.test(bearer)) return jwt(bearer, request, "Bearer");

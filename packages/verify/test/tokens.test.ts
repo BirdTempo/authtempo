@@ -184,3 +184,170 @@ describe("an API token and a session token (plan 11d)", () => {
     });
   });
 });
+
+/** The hex SHA-256 of a bearer: core's tokenHash. */
+async function hashOf(bearer: string): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(bearer)));
+  return [...d].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** A moved key of Better Auth's form: its old prefix and 64 letters. */
+const movedKey = () => `laaa_${"Ab".repeat(32)}`;
+
+describe("an organization token and a moved key (plan 12k, review finding m6)", () => {
+  /** An organization with its owner, on a server that takes `laaa_` as a moved prefix. */
+  async function organizationOf(server: ReturnType<typeof makeServer>) {
+    const s = await apiToken(server);
+    const org = await server.auth.api.createOrganization({
+      user: s.user,
+      slug: "acme",
+      name: "Acme",
+    });
+    if (!org.ok) throw new Error(org.code);
+    return { ...s, organizationId: org.value.organization.id };
+  }
+  const movedServer = () => makeServer({ organizations: {}, tokens: { movedPrefixes: ["laaa_"] } });
+
+  it("answers the organization-token caller of a to_ bearer by one call, when accepted", async () => {
+    const server = movedServer();
+    const o = await organizationOf(server);
+    const t = await server.auth.api.organizationTokens.create({
+      user: o.user,
+      organizationId: o.organizationId,
+      name: "deploy",
+      permissions: {},
+    });
+    if (!t.ok) throw new Error(t.code);
+    const v = createVerifier({
+      issuer: ISSUER,
+      accept: ["organization-token"],
+      fetch: server.fetch,
+      clock: server.clock,
+    });
+    const r = await v.verifyRequest(withBearer(FILES, t.value.token));
+    if (!r.ok || r.value?.kind !== "organization-token") throw new Error("no organization caller");
+    expect({ organization: r.value.organization.id, name: r.value.apiToken.name }).toEqual({
+      organization: o.organizationId,
+      name: "deploy",
+    });
+    expect(server.count("/auth/organizations/tokens/current")).toBe(1);
+    // Not in accept: null with no call.
+    const users = createVerifier({
+      issuer: ISSUER,
+      accept: ["api-token"],
+      fetch: server.fetch,
+      clock: server.clock,
+    });
+    expect(await users.verifyRequest(withBearer(FILES, t.value.token))).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(server.count("/auth/organizations/tokens/current")).toBe(1);
+  });
+
+  it("sends a moved key of a user to GET /tokens/current with movedPrefixes", async () => {
+    const server = movedServer();
+    const s = await apiToken(server);
+    const key = movedKey();
+    // The row form that moveBetterAuthApiKeys of the compat package writes for a user key.
+    const at = server.clock.now();
+    await server.storage.create("apiToken", {
+      id: "moved1",
+      userId: s.user.id,
+      organizationId: null,
+      name: "ci",
+      tokenHash: await hashOf(key),
+      hint: key.slice(0, 6),
+      expiresAt: null,
+      lastUsedAt: null,
+      permissions: {},
+      metadata: null,
+      rateLimitSeconds: null,
+      rateLimitMax: null,
+      remaining: null,
+      refillAmount: null,
+      refillSeconds: null,
+      lastRefillAt: null,
+      retiredAt: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+    const v = createVerifier({
+      issuer: ISSUER,
+      accept: ["api-token"],
+      movedPrefixes: ["laaa_"],
+      fetch: server.fetch,
+      clock: server.clock,
+    });
+    const r = await v.verifyRequest(withBearer(FILES, key));
+    if (!r.ok || r.value?.kind !== "api-token") throw new Error("no api-token caller");
+    expect(r.value.user.id).toBe(s.user.id);
+    expect(server.count("/auth/tokens/current")).toBe(1);
+    // With no movedPrefixes, the old prefix is no credential: null with no call.
+    const plain = createVerifier({
+      issuer: ISSUER,
+      accept: ["api-token"],
+      fetch: server.fetch,
+      clock: server.clock,
+    });
+    expect(await plain.verifyRequest(withBearer(FILES, key))).toEqual({ ok: true, value: null });
+    expect(server.count("/auth/tokens/current")).toBe(1);
+  });
+
+  it("sends a moved key of an organization to GET /organizations/tokens/current", async () => {
+    const server = movedServer();
+    const o = await organizationOf(server);
+    const key = movedKey();
+    // The row form that moveBetterAuthApiKeys writes for an organization key.
+    const at = server.clock.now();
+    await server.storage.create("organizationToken", {
+      id: "moved2",
+      organizationId: o.organizationId,
+      createdById: o.user.id,
+      name: "deploy",
+      tokenHash: await hashOf(key),
+      hint: key.slice(0, 6),
+      permissions: {},
+      metadata: null,
+      expiresAt: null,
+      lastUsedAt: null,
+      rateLimitSeconds: null,
+      rateLimitMax: null,
+      remaining: null,
+      refillAmount: null,
+      refillSeconds: null,
+      lastRefillAt: null,
+      retiredAt: null,
+      createdAt: at,
+      updatedAt: at,
+    });
+    const v = createVerifier({
+      issuer: ISSUER,
+      accept: ["organization-token"],
+      movedPrefixes: ["laaa_"],
+      movedKind: "organization-token",
+      fetch: server.fetch,
+      clock: server.clock,
+    });
+    const r = await v.verifyRequest(withBearer(FILES, key));
+    if (!r.ok || r.value?.kind !== "organization-token") throw new Error("no organization caller");
+    expect(r.value.organization.id).toBe(o.organizationId);
+    expect(server.count("/auth/organizations/tokens/current")).toBe(1);
+    expect(server.count("/auth/tokens/current")).toBe(0);
+  });
+
+  it("throws for a moved prefix outside core's rule and for a moved kind outside accept", () => {
+    const base = { issuer: ISSUER, accept: ["api-token"] as const };
+    for (const p of ["tk_", "to_", "Laaa_", "laaa"])
+      expect(() => createVerifier({ ...base, movedPrefixes: [p] })).toThrow(
+        `authtempo verify: the moved prefix "${p}" must follow core's tokens.movedPrefixes rule, once`,
+      );
+    expect(() => createVerifier({ ...base, movedPrefixes: ["laaa_", "laaa_"] })).toThrow(
+      "must follow core's tokens.movedPrefixes rule, once",
+    );
+    expect(() =>
+      createVerifier({ ...base, movedPrefixes: ["laaa_"], movedKind: "organization-token" }),
+    ).toThrow("authtempo verify: movedPrefixes needs organization-token in accept");
+    expect(() => createVerifier({ ...base, movedPrefixes: ["laaa_"] })).not.toThrow();
+  });
+});

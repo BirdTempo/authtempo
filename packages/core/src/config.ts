@@ -60,7 +60,7 @@ import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.j
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort, LimitWindow } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
-import { CORE_PREFIXES, sessionCookieNames } from "./primitives/credentials.js";
+import { movedPrefixFault, sessionCookieNames } from "./primitives/credentials.js";
 import { DPOP_WINDOW_SECONDS } from "./primitives/dpop.js";
 import { FOREIGN_ALGS, type ForeignAlg } from "./primitives/foreign-jwk.js";
 import { JWS_ALGS, type JwsAlg } from "./primitives/jwk.js";
@@ -866,9 +866,6 @@ export interface TokensConfig {
   movedPrefixes?: string[];
 }
 
-/** A moved key prefix: a lower-case letter, at most 15 more letters or digits, and `_`. */
-const MOVED_PREFIX_RE = /^[a-z][a-z0-9]{0,15}_$/;
-
 export interface ResolvedConfig {
   basePath: string;
   baseURL: string;
@@ -1353,10 +1350,9 @@ function resolveTokens(input: TokensConfig | undefined): ResolvedConfig["tokens"
     );
   const moved: string[] = [];
   for (const p of input?.movedPrefixes ?? []) {
-    if (!MOVED_PREFIX_RE.test(p))
-      throw new ConfigError(`tokens.movedPrefixes has a bad prefix: ${p}`);
-    // A moved key with a core prefix would reach a core lookup, and a core credential would reach the moved one.
-    if (CORE_PREFIXES.some((c) => c.startsWith(p) || p.startsWith(c)))
+    const fault = movedPrefixFault(p);
+    if (fault === "form") throw new ConfigError(`tokens.movedPrefixes has a bad prefix: ${p}`);
+    if (fault === "shadow")
       throw new ConfigError(`tokens.movedPrefixes must not shadow a core prefix: ${p}`);
     if (moved.includes(p)) throw new ConfigError(`tokens.movedPrefixes repeats ${p}`);
     moved.push(p);

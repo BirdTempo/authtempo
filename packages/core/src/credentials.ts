@@ -10,6 +10,7 @@ export {
   API_TOKEN_PREFIX,
   DEFAULT_COOKIE_NAME,
   LEGACY_COOKIE_NAME,
+  movedPrefixFault,
   ORGANIZATION_TOKEN_PREFIX,
   readBearer,
   readDpopToken,

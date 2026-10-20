@@ -34,7 +34,8 @@ if (r.value === null) return verifier.unauthorized({ request });
 | `session-jwt` | A session JWT, `typ: "JWT"` | Offline: the signature against the key set, `iss`, `sub`, `sid`, `aud` (one of `audience`), and `exp` |
 | `oauth` | An access token of a person, `typ: "at+jwt"` | Offline: the signature against the key set, `iss`, `sub`, `client_id`, `scope`, `jti`, and `exp`. `aud` must be the entry of `resources` that the request URL falls under. `dpopJkt` is the key of a DPoP request, else null |
 | `oauth-client` | An access token of the `client_credentials` grant, whose `sub` is its `client_id` | The checks of `oauth`. The caller has no `userId`: the client acts for no person |
-| `api-token` | A `tk_` bearer | One `GET <basePath>/tokens/current`; `cache.apiTokenSeconds` (0 to 60, default 0) keeps the answer |
+| `api-token` | A `tk_` bearer, or a moved key with `movedKind` `"api-token"` | One `GET <basePath>/tokens/current`; `cache.apiTokenSeconds` (0 to 60, default 0) keeps the answer |
+| `organization-token` | A `to_` bearer, or a moved key with `movedKind` `"organization-token"` | One `GET <basePath>/organizations/tokens/current`. The answer is never kept. The caller has `organization` and `apiToken`, and no user |
 | `session-token` | A `ts_` bearer | One `GET <basePath>/session`. Off by default: it sends the person's session token to the auth app. Each check can extend the person's session, as a visit does |
 
 The `userId` of an `oauth` caller is the token's `sub`. That is the user id
@@ -55,6 +56,8 @@ that `accept` does not list answers null with no network call.
 | `accept` | `["session-jwt"]` | one or more kinds | The kinds to accept. |
 | `checkSessionEnd` | `false` | a boolean | Ask the live route for each session JWT. |
 | `cache.apiTokenSeconds` | 0 | an integer from 0 to 60 | How long the verifier keeps a `tk_` answer. |
+| `movedPrefixes` | none | entries of core's `tokens.movedPrefixes` rule, each once | The prefixes of keys that moved into core's token tables, such as `laaa_`. A bearer with one goes to the route of `movedKind`. Without it, a moved key answers null with no call. |
+| `movedKind` | `"api-token"` | `"api-token"` or `"organization-token"` | The kind of every moved key: the app's Better Auth `references`. It must be in `accept` while `movedPrefixes` has an entry. |
 | `timeoutMs` | 5000 | an integer from 100 to 30000 | The deadline of each call to the auth app, and of the read of its body. |
 | `fetch` | the global `fetch` | a fetch function | Tests give a stub. |
 | `dpop` | none | see "DPoP" | Accept `Authorization: DPoP` with a proof. |
@@ -68,6 +71,7 @@ that `accept` does not list answers null with no network call.
   `oauth-client`;
 - `dpop` or `introspect` without `oauth` or `oauth-client` in `accept`;
 - a resource that core's resource rule refuses;
+- a moved prefix that core's `tokens.movedPrefixes` rule refuses, a repeated one, or a `movedKind` that `accept` does not list;
 - a URL that is both an audience and a resource;
 - a number outside its range.
 

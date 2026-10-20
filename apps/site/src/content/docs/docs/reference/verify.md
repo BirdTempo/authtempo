@@ -18,7 +18,7 @@ sources:
 
 **For:** a developer of a server that is not the auth app and must know the caller of a request.
 
-**What it does:** this page lists the options of `createVerifier`, the five caller kinds, the answers, and every export of the package. The export check holds this page to `packages/verify/src/index.ts`.
+**What it does:** this page lists the options of `createVerifier`, the six caller kinds, the answers, and every export of the package. The export check holds this page to `packages/verify/src/index.ts`.
 
 ## Before you start
 
@@ -36,6 +36,8 @@ sources:
 | `accept` | `["session-jwt"]` | The caller kinds to accept, of the type `CallerKind`. |
 | `checkSessionEnd` | `false` | Asks `POST /token/live` for each session JWT, so a sign-out ends access at once. |
 | `cache` | `{ apiTokenSeconds: 0 }` | How long the verifier keeps an API token answer: 0 to `API_TOKEN_CACHE_MAX_SECONDS` (60) seconds. A token with a window or a quota is never kept. An answer kept before the app adds a window or a quota lives up to `apiTokenSeconds`, as after a revoke. |
+| `movedPrefixes` | none | The app's `tokens.movedPrefixes`, such as `laaa_`: the prefixes of keys that moved into core's token tables. A bearer with one goes to the route of `movedKind`. Each entry follows core's moved prefix rule, once. |
+| `movedKind` | `"api-token"` | The kind of every moved key: `"api-token"` (`GET /tokens/current`) or `"organization-token"` (`GET /organizations/tokens/current`). It must be in `accept` while `movedPrefixes` has an entry. |
 | `timeoutMs` | `TIMEOUT_DEFAULT_MS` (5000) | The deadline of each call to the auth app, from `TIMEOUT_MIN_MS` (100) to `TIMEOUT_MAX_MS` (30000). |
 | `fetch` | `globalThis.fetch` | The fetch of every call to the auth app. Any function of a request and its init that answers a `Response`. |
 | `clock` | the system clock | Tests inject one. |
@@ -55,7 +57,8 @@ sources:
 | `session-jwt` | A session JWT, header `typ` `JWT` | Offline: the signature, `iss`, `sub`, `sid`, `aud`, and `exp` | `userId`, `sessionId`, `email`, `emailVerified`, `name`, `organizationId`, `claims`, `expiresAt` |
 | `oauth` | An access token of a person, header `typ` `at+jwt` | Offline: the signature, `iss`, `sub`, `client_id`, `scope`, `jti`, and `exp`. `aud` must be the resource that the request URL falls under | `userId`, `clientId`, `scopes`, `resource`, `tokenId`, `expiresAt`, `dpopJkt` |
 | `oauth-client` | An access token of the `client_credentials` grant: its `sub` is its `client_id` | The checks of `oauth`. The client acts for no person | `clientId`, `scopes`, `resource`, `tokenId`, `expiresAt`, `dpopJkt` |
-| `api-token` | A `tk_` bearer token | One call to `GET /tokens/current` | `user`, `apiToken` |
+| `api-token` | A `tk_` bearer token, or a moved key with `movedKind` `"api-token"` | One call to `GET /tokens/current` | `user`, `apiToken` |
+| `organization-token` | A `to_` bearer token, or a moved key with `movedKind` `"organization-token"` | One call to `GET /organizations/tokens/current`. The answer is never kept. | `organization`, `apiToken` |
 | `session-token` | A `ts_` bearer token | One call to `GET /session`. Each check can extend the session, as a visit does. | `user`, `session` |
 
 An impersonation session (plan 12f) shows in two callers. A `session-jwt` caller has `claims.act`, `{ sub }` with the operator's user id (RFC 8693 section 4.1). A `session-token` caller has `session.actorId`, which is null for every other session.

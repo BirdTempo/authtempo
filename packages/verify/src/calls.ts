@@ -10,6 +10,11 @@ export const VERIFY_CALLS = [
   { operation: "verify.jwks", method: "GET", path: "/jwks" },
   { operation: "verify.live", method: "POST", path: "/token/live" },
   { operation: "verify.apiToken", method: "GET", path: "/tokens/current" },
+  {
+    operation: "verify.organizationToken",
+    method: "GET",
+    path: "/organizations/tokens/current",
+  },
   { operation: "verify.session", method: "GET", path: "/session" },
   { operation: "verify.introspect", method: "POST", path: "/oauth/introspect" },
 ] as const satisfies readonly ClientCall[];

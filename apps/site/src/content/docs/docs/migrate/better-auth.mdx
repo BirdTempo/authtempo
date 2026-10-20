@@ -164,8 +164,9 @@ The `apiKey` plugin maps onto core's API tokens. Better Auth stores the SHA-256 
 3. Tell each owner whose key the report skips. `skippedKeys` names each row id, its owner, and the reason: `disabled`, `expired`, `noDigest` (a key with no digest), or `noCreator` (an organization key with no creator and no owner). `present` is a row that an earlier run moved. After the cutover each other skipped key answers 401 `token_retired`, and every script that uses one stops.
 4. Deploy the shim build with the compat migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
 5. Run `moveBetterAuthApiKeys` with `dryRun: false`. It records each moved row in `ta_moved_token`, so a second run skips it, and a revoked key stays revoked. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
-6. Change the app code that reads the `apikey` table itself, and each check of the old prefix. Without it, a new `to_` key never authenticates, and the key list shows only the old table.
-7. When every owner moved, drop the `apikey` table yourself. No migration of authtempo drops it, because it is your record.
+6. A resource server with `@authtempo/verify` passes `movedPrefixes` (the same list) and `movedKind` (`"api-token"` for `references: "user"`, `"organization-token"` for `"organization"`), with that kind in `accept`. Without them, the verifier answers null for every moved key.
+7. Change the app code that reads the `apikey` table itself, and each check of the old prefix. Without it, a new `to_` key never authenticates, and the key list shows only the old table.
+8. When every owner moved, drop the `apikey` table yourself. No migration of authtempo drops it, because it is your record.
 
 A moved key counts against the cap of 50 live tokens per owner, because it acts.
 

@@ -45,6 +45,22 @@ export const CORE_PREFIXES: readonly string[] = Object.freeze([
   "pr_",
 ]);
 
+/** A moved key prefix: a lower-case letter, at most 15 more letters or digits, and `_`. */
+const MOVED_PREFIX_RE = /^[a-z][a-z0-9]{0,15}_$/;
+
+/**
+ * Why a moved key prefix (`tokens.movedPrefixes`, rulings 4 and 12 of plan
+ * 12k) is refused, or null. "form": it fails `MOVED_PREFIX_RE`. "shadow": a
+ * core prefix starts it, or it starts a core prefix. Core's config and the
+ * verifier read this one rule.
+ */
+export function movedPrefixFault(prefix: string): "form" | "shadow" | null {
+  if (!MOVED_PREFIX_RE.test(prefix)) return "form";
+  // A moved key with a core prefix would reach a core lookup, and a core credential would reach the moved one.
+  if (CORE_PREFIXES.some((c) => c.startsWith(prefix) || prefix.startsWith(c))) return "shadow";
+  return null;
+}
+
 /** The header `typ` of a session JWT and of an ID token (spec 8.12). */
 export const SESSION_JWT_TYPE = "JWT";
 

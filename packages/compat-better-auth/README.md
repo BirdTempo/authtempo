@@ -1253,8 +1253,9 @@ Each step is a runbook line, with what breaks without it:
 3. Tell each owner whose key the report skips: `skippedKeys` names each row id, its owner, and the reason (`disabled`, `expired`, `noDigest`, or `noCreator`; `present` moved at an earlier run). After the cutover a skipped key answers 401 `token_retired` (`KEY_DISABLED` from `verifyApiKey`), and every script that uses one stops.
 4. Deploy the shim build with migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
 5. Run `moveBetterAuthApiKeys` with `dryRun: false`. A second run is safe: it skips each recorded row. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
-6. Change the app code that reads the `apikey` table itself. consumerb lists, reads, and deletes keys through Drizzle (`routes/api-keys.ts`). It sends a bearer to `verifyApiKey` only when it starts with `laaa_` (`middleware/identity.ts`). A new key starts with `to_`, so that check must also take `to_`. Without these edits, a new key never authenticates, and the key list shows only the old table.
-7. When every owner moved, drop the `apikey` table yourself. No migration of authtempo drops it, because it is your record. Without the drop, nothing breaks; the table only holds stale rows.
+6. A resource server with `@authtempo/verify` passes `movedPrefixes` (the same list) and `movedKind` (`"api-token"` for `references: "user"`, `"organization-token"` for `"organization"`), with that kind in `accept`. Without them, the verifier answers null for every moved key. A new `to_` key needs `"organization-token"` in `accept`.
+7. Change the app code that reads the `apikey` table itself. consumerb lists, reads, and deletes keys through Drizzle (`routes/api-keys.ts`). It sends a bearer to `verifyApiKey` only when it starts with `laaa_` (`middleware/identity.ts`). A new key starts with `to_`, so that check must also take `to_`. Without these edits, a new key never authenticates, and the key list shows only the old table.
+8. When every owner moved, drop the `apikey` table yourself. No migration of authtempo drops it, because it is your record. Without the drop, nothing breaks; the table only holds stale rows.
 
 ## JWT and the OAuth provider
 
