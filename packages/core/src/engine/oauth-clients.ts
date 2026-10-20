@@ -470,7 +470,7 @@ function readClientMetadata(
     // A cl_ client needs one host over all its redirect URIs. A document's redirect hosts never set its sector.
     if (!cimd && redirectSector(redirectUris) === null) return meta("subject_type");
     // The device grant has no redirect, so nothing ties the sector to this
-    // client: a dynamic client could name a host it does not own (ruling 34).
+    // client. A dynamic client could name a host it does not own (ruling 34).
     if (grantTypes.includes(DEVICE_GRANT)) {
       if (!cimd) return meta("grant_types");
       grantTypes = grantTypes.filter((g) => g !== DEVICE_GRANT);

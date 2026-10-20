@@ -529,7 +529,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     // the request could not see the session. A cross-site POST carries no
     // SameSite=Lax cookie, so a POST with no session goes on as a GET of the
     // same request, without the yes. A top-level GET carries the Lax cookie.
-    // A GET in a frame carries none either: with Sec-Fetch-Dest present and
+    // A GET in a frame carries none either. With Sec-Fetch-Dest present and
     // not `document`, and no session, a page offers the same GET at the top.
     // A request with no Sec-Fetch-Dest keeps the GET rules.
     const query = new URLSearchParams(

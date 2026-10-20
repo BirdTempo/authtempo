@@ -13,7 +13,7 @@ import { resolveNames } from "../src/storage/names.js";
 import { BETTER_AUTH_PG } from "./fixtures.js";
 import { freshBetterAuthSchema } from "./pg.js";
 
-// Compat migration 0008 on Postgres (plan 12e): a client and a token row of
+// Compat migration 0008 on Postgres (plan 12e). A client and a token row of
 // version 10 read every default of version 11 through the compat storage.
 
 it("reads a version 10 client and token row with every default after 0008 on Postgres (plan 12e)", async () => {

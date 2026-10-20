@@ -131,7 +131,7 @@ export interface SessionOpen {
   via: SessionVia;
   /**
    * The time of the sign-in that this session carries on, when no
-   * credential was checked now: a handoff takes the browser session's
+   * credential was checked now. A handoff takes the browser session's
    * sign-in (plan 12e ruling 41). Default now.
    */
   signedInAt?: Date;

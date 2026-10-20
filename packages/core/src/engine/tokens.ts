@@ -62,9 +62,9 @@ export interface ResolvedApiToken {
  * Who called: a person with a session, a script with an API token, or an
  * OAuth client for a person (plan 9g). `oauth-client` is an OAuth client
  * that acts for itself, with no user (`client_credentials`, plan 12e).
- * The `subject` of an `oauth` caller is the token's `sub`: the user id for a
- * public client, the pairwise subject for a pairwise client (ruling 34 of
- * plan 12e). `user` is always the user.
+ * The `subject` of an `oauth` caller is the token's `sub` (ruling 34 of plan
+ * 12e). It is the user id for a public client, and the pairwise subject for
+ * a pairwise client. `user` is always the user.
  */
 export type Caller =
   | ({ kind: "session" } & ResolvedSession)

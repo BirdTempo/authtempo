@@ -77,7 +77,7 @@ function portTaken(host: string, port: number): Promise<boolean> {
 /**
  * A port that no listener holds now, from the system (port 0). Each run then
  * starts its Worker on its own port, so two runs at once never share one
- * Worker (plan 12e, review I1: two runs on the fixed port 8797 shared one).
+ * Worker. Plan 12e, review I1: two runs on the fixed port 8797 shared one.
  */
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -120,16 +120,16 @@ export interface ExampleWorker {
  *
  * The port is free when the run starts, but another process can take it
  * before wrangler binds it. So the start proves that the answering server is
- * its own: the Worker holds a secret of this run only, and the operator info
+ * its own. The Worker holds a secret of this run only, and the operator info
  * route must accept it. Another Worker on the port refuses it, and the start
  * fails with that name.
  */
 export async function startExampleWorker(): Promise<ExampleWorker> {
   const deadline = Date.now() + START_LIMIT_MS;
   const port = await freePort();
-  // wrangler's own pick of the devtools port (9229, else the next free one) is a check and
-  // then a bind, so two starts at once can pick one port, and one workerd fails with
-  // "bind(): Address already in use" (seen 2026-10-19). So the run names that port too.
+  // wrangler picks the devtools port itself: 9229, else the next free one. That pick is a
+  // check and then a bind, so two starts at once can pick one port. Then one workerd fails
+  // with "bind(): Address already in use" (seen 2026-10-19). So the run names that port too.
   const inspectorPort = await freePort();
   const operatorSecret = `authtempo-live-${randomBytes(24).toString("hex")}`;
   const operatorHash = createHash("sha256").update(operatorSecret, "utf8").digest("hex");

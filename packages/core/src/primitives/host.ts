@@ -8,9 +8,9 @@
 
 /**
  * The loopback hosts of an http redirect URI: a subset of `isLocalHost`.
- * Not `[::1]`: a CSP host-source has no IPv6 literal form, so the consent
- * page cannot name it in `form-action`, and the browser would stop at the
- * allow. A client on the loopback uses 127.0.0.1.
+ * Not `[::1]`, because a CSP host-source has no IPv6 literal form. The
+ * consent page cannot name it in `form-action`, and the browser would stop
+ * at the allow. A client on the loopback uses 127.0.0.1.
  */
 export const HTTP_LOOPBACK: ReadonlySet<string> = new Set(["127.0.0.1", "localhost"]);
 
@@ -37,12 +37,12 @@ const LOOPBACK_V4_RE = /^(127\.\d{1,3}\.\d{1,3}\.\d{1,3}|0\.0\.0\.0)$/;
 const LOOPBACK_V6_RE = /^\[(::1|::|::(ffff:)?(7f[0-9a-f]{2}:[0-9a-f]{1,4}|0:0))\]$/;
 
 /**
- * True for a host that only this machine or a local network serves: a
- * loopback or unspecified address in either IP form, `localhost` and
- * `*.localhost` (RFC 6761 section 6.3), a single label (an intranet name),
- * and the names `.local` (RFC 6762), `.home.arpa` (RFC 8375), and
- * `.internal` (the ICANN private-use name, 2024). A trailing dot names the
- * same host, so it is ignored.
+ * True for a host that only this machine or a local network serves. That is
+ * a loopback or unspecified address in either IP form, `localhost`, and
+ * `*.localhost` (RFC 6761 section 6.3). It is also a single label (an
+ * intranet name), and the names `.local` (RFC 6762) and `.home.arpa`
+ * (RFC 8375). `.internal` counts too: the ICANN private-use name of 2024.
+ * A trailing dot names the same host, so it is ignored.
  */
 export function isLocalHost(hostname: string): boolean {
   const host = hostname.toLowerCase().replace(/\.$/, "");

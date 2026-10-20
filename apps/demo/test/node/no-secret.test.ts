@@ -114,8 +114,8 @@ const PUBLIC_RUNS: Readonly<Record<string, string>> = {
  * 43 characters or more with a digit, a capital, and a small letter. That is
  * 32 bytes or more, as a sandbox secret, quoted or not. The fourth is 32
  * bytes in standard base64 with its padding. The last is a string that a
- * name with "secret" in it takes, other than a bare prefix of core: the
- * bundle of core holds `CLIENT_SECRET_PREFIX = "cs_"` (plan 12e), and the first
+ * name with "secret" in it takes, other than a bare prefix of core. The
+ * bundle of core holds `CLIENT_SECRET_PREFIX = "cs_"` (plan 12e). The first
  * form finds each token of that prefix. A random value of 32 bytes in base64url
  * has all three kinds of character. So the rule of three misses almost none,
  * and it passes plain words.

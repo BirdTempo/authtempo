@@ -217,8 +217,8 @@ async function assertionClient(
   // The replay store: the unique key on valueHash refuses a second use of a
   // jti on every instance over the same storage. claimsHold compares exp
   // with the whole second of now, and RFC 7519 lets exp be a fraction. So
-  // the row lives to ceil(exp) plus the skew plus one second: past the last
-  // instant that the claims pass, so no sweep frees a live jti.
+  // the row lives to ceil(exp) plus the skew plus one second. That is past
+  // the last instant that the claims pass, so no sweep frees a live jti.
   const at = config.clock.now();
   try {
     await config.storage.create("verification", {

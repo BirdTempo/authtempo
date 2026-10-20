@@ -22,8 +22,8 @@ const SUBJECT_BYTES = 16;
  * URI passed `validRedirectUri`: https, http on a loopback host, or a
  * private-use scheme. A private-use scheme has no host that one party owns,
  * so it gives no sector. Two hosts give no sector either. A loopback or
- * local host gives none: no one party owns it, and every app on a machine
- * or a network can serve it (rulings 32 and 34 of plan 12e). An IP literal
+ * local host gives none (rulings 32 and 34 of plan 12e). No one party owns
+ * it, and every app on a machine or a network can serve it. An IP literal
  * gives none (ruling 36).
  */
 export function redirectSector(redirectUris: readonly string[]): string | null {
