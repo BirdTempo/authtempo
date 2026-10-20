@@ -13,6 +13,7 @@ import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { endFamilies, type FamilyEnds, familyEnds } from "./oauth-family.js";
 import { deliverLogouts } from "./oauth-logout.js";
+import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { unchanged } from "./profile.js";
 import { later, ROUNDS } from "./second-factor.js";
 import { endOtherAccess } from "./session-list.js";
@@ -214,6 +215,8 @@ interface Move {
   /** Spends the proof in the transaction. A failure undoes the move. */
   consume: (tx: StorageAdapter) => Promise<Result<VerificationRow>>;
   ended: SessionRow[] | undefined;
+  /** The stop rows of the move's session end (ruling 43 of plan 12f). */
+  stops: ImpersonationStops | null;
   /** The refresh families that the move deletes, to end after its commit (ruling 43 of plan 12e). */
   families: FamilyEnds;
 }
@@ -285,6 +288,7 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
               move.ended ?? null,
               move.families,
               now,
+              move.stops,
             );
             return ok({
               previous,
@@ -333,7 +337,7 @@ async function finish(
     { user: applied.user, previous: applied.previous, via: "email_change" },
     applied.user.id,
   );
-  await sessionsEnded(config, move.ended, "email_change");
+  await sessionsEnded(config, move.ended, "email_change", move.stops);
   await deliverLogouts(config, applied.user.id);
   await sendNotice(config, {
     event: "email_changed",
@@ -376,6 +380,7 @@ export async function confirmEmailChange(
     keep: data.sessionId,
     consume: (tx) => consumeVerification(tx, { purpose: "email-change", valueHash, now }),
     ended: endedList(config),
+    stops: impersonationStops(config, "user_end"),
     families: familyEnds(),
   };
   const applied = await applyChange(config, move);
@@ -415,6 +420,7 @@ export async function verifyEmailChange(
     keep: session.id,
     consume: (tx) => consumeCode(tx, row, now),
     ended: endedList(config),
+    stops: impersonationStops(config, "user_end"),
     families: familyEnds(),
   };
   const applied = await applyChange(config, move);

@@ -362,7 +362,7 @@ export async function verifyEmailOtp(
   // After the commit, before the session hook and before a challenge answer (plan 12a).
   await verified.after(user);
   await made.after(user);
-  await sessionsEnded(config, ended, "claim");
+  await sessionsEnded(config, ended, "claim", verified.stops);
   if (after.kind === "challenge") return ok(after.pending);
   await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, after.session, user, "email_otp");

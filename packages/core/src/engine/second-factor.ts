@@ -8,6 +8,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
 import { stopWith } from "./hooks.js";
+import type { ImpersonationStops } from "./operator/audit.js";
 import { activeBan } from "./operator/ban-rule.js";
 import { ROUNDS } from "./rounds.js";
 import { endSessions, type PreparedSession, prepareSession, writeSession } from "./sessions.js";
@@ -228,6 +229,7 @@ export async function addMethod(
   },
   now: Date,
   ended: SessionRow[] | undefined,
+  stops: ImpersonationStops | null,
 ): Promise<AddedMethod> {
   let current = await factorRow(tx, input.userId);
   if (!current) {
@@ -253,6 +255,7 @@ export async function addMethod(
       ],
       ended ?? null,
       now,
+      stops,
     );
     await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: input.userId }]);
     await deleteTwoFactorChallenges(tx, input.userId);

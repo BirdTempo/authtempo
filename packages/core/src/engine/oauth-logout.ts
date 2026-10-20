@@ -8,6 +8,7 @@ import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { findClient } from "./oauth-clients.js";
 import { endSessionById, linkSession, queueLogouts } from "./oauth-outbox.js";
 import { sidNames, storedSubject, userOfSubject } from "./oauth-subject.js";
+import { impersonationStops } from "./operator/audit.js";
 import { sessionsEnded } from "./sessions.js";
 
 /**
@@ -93,9 +94,11 @@ export async function endSession(
 ): Promise<boolean> {
   const { session } = input;
   // The outbox rows of the session's client links, then the delete (Task 16).
-  const n = await endSessionById(config.storage, session, config.clock.now());
+  // An impersonation session gets no ID token, but the end still writes its stop row (ruling 43).
+  const stops = impersonationStops(config, "sign_out");
+  const n = await endSessionById(config.storage, session, config.clock.now(), stops);
   if (n !== 1) return false;
-  await sessionsEnded(config, [session], "oidc_logout");
+  await sessionsEnded(config, [session], "oidc_logout", stops);
   await deliverLogouts(config, session.userId);
   return true;
 }

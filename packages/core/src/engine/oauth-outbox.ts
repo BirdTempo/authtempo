@@ -1,6 +1,7 @@
 import { newId } from "../primitives/ids.js";
 import type { OAuthSessionClientRow, SessionRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { type ImpersonationStops, writeStopRow } from "./operator/audit.js";
 
 // The writes of the back-channel outbox (plan 12e Task 16). This file signs
 // nothing and imports no engine flow, so `sessions.ts` can call it with no
@@ -126,12 +127,17 @@ export async function queueLogouts(
  */
 export async function endSessionById(
   storage: StorageAdapter,
-  session: Pick<SessionRow, "id" | "userId">,
+  session: Pick<SessionRow, "id" | "userId" | "actorId">,
   now: Date,
+  stops: ImpersonationStops | null,
 ): Promise<number> {
   await queueLogouts(storage, session.userId, [session.id], now);
-  return storage.delete("session", [
+  const n = await storage.delete("session", [
     { field: "id", op: "eq", value: session.id },
     { field: "userId", op: "eq", value: session.userId },
   ]);
+  // The stop row of an impersonation session that this call ended (ruling
+  // 43 of plan 12f). On a transaction it commits with the delete.
+  if (n === 1 && stops) await writeStopRow(storage, stops, session, now);
+  return n;
 }

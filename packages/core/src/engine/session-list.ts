@@ -7,6 +7,7 @@ import type { FamilyEnds } from "./oauth-family.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { deliverLogouts } from "./oauth-logout.js";
 import { endSessionById } from "./oauth-outbox.js";
+import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { deleteTwoFactorChallenges } from "./second-factor.js";
 import {
   deleteEndedSessions,
@@ -110,11 +111,16 @@ export async function revokeSession(
     ...liveSessionWhere(config, user.id, config.clock.now()),
   ]);
   if (!row) return fail("not_found");
+  const now = config.clock.now();
   // The outbox rows of the session's client links, then the delete by id and user (plan 12e Task 16).
-  const n = await endSessionById(config.storage, row, config.clock.now());
+  // An impersonation session ends in a transaction with its stop row (ruling 43 of plan 12f).
+  const stops = row.actorId === null ? null : impersonationStops(config, "user_end");
+  const n = stops
+    ? await config.storage.transaction((tx) => endSessionById(tx, row, now, stops))
+    : await endSessionById(config.storage, row, now, null);
   // Zero rows: another call ended the row first and fired its event.
   if (n !== 1) return fail("not_found");
-  await sessionsEnded(config, [row], "revoked");
+  await sessionsEnded(config, [row], "revoked", stops);
   await deliverLogouts(config, user.id);
   return ok({ current: row.id === input.session.session.id });
 }
@@ -145,9 +151,10 @@ async function endAccess(
   sessionWhere: Where<"session">[],
   ended: SessionRow[] | null,
   now: Date,
+  stops: ImpersonationStops | null,
 ): Promise<number> {
   await deleteTwoFactorChallenges(tx, userId);
-  const n = await endSessions(tx, sessionWhere, ended, now);
+  const n = await endSessions(tx, sessionWhere, ended, now, stops);
   await deleteHandoffCodes(tx, userId);
   return n;
 }
@@ -165,6 +172,7 @@ export async function endOtherSessions(
   keepSessionId: string,
   ended: SessionRow[] | null,
   now: Date,
+  stops: ImpersonationStops | null,
 ): Promise<number> {
   return endAccess(
     tx,
@@ -175,6 +183,7 @@ export async function endOtherSessions(
     ],
     ended,
     now,
+    stops,
   );
 }
 
@@ -192,8 +201,9 @@ export async function endOtherAccess(
   ended: SessionRow[] | null,
   families: FamilyEnds,
   now: Date,
+  stops: ImpersonationStops | null,
 ): Promise<number> {
-  const n = await endOtherSessions(tx, userId, keepSessionId, ended, now);
+  const n = await endOtherSessions(tx, userId, keepSessionId, ended, now, stops);
   await deleteOAuthTokens(tx, userId, families);
   return n;
 }
@@ -216,8 +226,16 @@ export async function endAllAccess(
   ended: SessionRow[] | null,
   families: FamilyEnds,
   now: Date,
+  stops: ImpersonationStops | null,
 ): Promise<number> {
-  const n = await endAccess(tx, userId, [{ field: "userId", op: "eq", value: userId }], ended, now);
+  const n = await endAccess(
+    tx,
+    userId,
+    [{ field: "userId", op: "eq", value: userId }],
+    ended,
+    now,
+    stops,
+  );
   await deleteOAuthTokens(tx, userId, families);
   return n;
 }
@@ -237,14 +255,15 @@ export async function revokeOtherSessions(
   const { user, session } = input.session;
   if (!(await revokeAllowed(config, user.id))) return fail("rate_limited");
   const ended = endedList(config);
+  const stops = impersonationStops(config, "user_end");
   const now = config.clock.now();
   const n = await config.storage.transaction(async (tx) => {
     // An ended row goes with no hook. Its client links become logouts in
     // `endSessions` below: an expiry ends a session too (ruling 49).
     await deleteEndedSessions(tx, config, user.id, now);
-    return endOtherSessions(tx, user.id, session.id, ended ?? null, now);
+    return endOtherSessions(tx, user.id, session.id, ended ?? null, now, stops);
   });
-  await sessionsEnded(config, ended, "revoked");
+  await sessionsEnded(config, ended, "revoked", stops);
   await deliverLogouts(config, user.id);
   return ok({ ended: n });
 }

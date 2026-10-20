@@ -20,6 +20,7 @@ import {
   stopWith,
 } from "./hooks.js";
 import { endSessionById, writeLogouts } from "./oauth-outbox.js";
+import { type ImpersonationStops, impersonationStops, writeStopRow } from "./operator/audit.js";
 import { activeBan, bannedFor } from "./operator/ban-rule.js";
 import { holdUser } from "./user-hold.js";
 
@@ -377,6 +378,7 @@ export async function endSessions(
   where: Where<"session">[],
   ended: SessionRow[] | null,
   now: Date,
+  stops: ImpersonationStops | null,
 ): Promise<number> {
   // The outbox reads the user's links; every flow ends the sessions of one user.
   const user = where.find((w) => w.field === "userId" && w.op === "eq")?.value;
@@ -405,6 +407,22 @@ export async function endSessions(
     now,
   );
   let n = 0;
+  // Each impersonation session goes by id, with its stop row in this
+  // transaction (ruling 43 of plan 12f). With `stops` null, the tool is off
+  // and the read does not run.
+  if (stops) {
+    const impersonations = await tx.findMany(
+      "session",
+      [...where, { field: "actorId", op: "ne", value: null }],
+      { sort: { field: "id", dir: "asc" } },
+    );
+    for (const row of impersonations)
+      if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
+        ended?.push(row);
+        n++;
+        await writeStopRow(tx, stops, row, now);
+      }
+  }
   if (ended)
     for (const row of await tx.findMany("session", where, { sort: { field: "id", dir: "asc" } })) {
       if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
@@ -425,11 +443,17 @@ export function endedList(config: ResolvedConfig): SessionRow[] | undefined {
   return config.hooks.session.afterEnd ? [] : undefined;
 }
 
-/** `session.afterEnd` once per row, in order, after the commit that deleted them (plan 9d). No list: no hook listens. */
+/**
+ * `session.afterEnd` once per row, in order, after the commit that deleted
+ * them (plan 9d). No list: no hook listens. Then `operator.afterAction`
+ * once per stop row of the flow (ruling 43 of plan 12f), as for the row of
+ * an operator act.
+ */
 export async function sessionsEnded(
   config: ResolvedConfig,
   sessions: readonly SessionRow[] | undefined,
   reason: SessionEndReason,
+  stops: ImpersonationStops | null,
 ): Promise<void> {
   for (const session of sessions ?? [])
     await runAfter(
@@ -438,6 +462,8 @@ export async function sessionsEnded(
       { session, reason },
       session.id,
     );
+  for (const audit of stops?.rows ?? [])
+    await runAfter("operator.afterAction", config.hooks.operator.afterAction, { audit }, audit.id);
 }
 
 /**
@@ -506,9 +532,10 @@ export async function resolveSession(
   if (!sessionIsLive(config, session, now)) {
     if (!write) return null;
     // The links of the row go to the outbox before the delete (plan 12e Task 16). The sweep delivers them.
-    const n = await endSessionById(config.storage, session, now);
+    // An expiry writes no stop row (spec 26 item 9).
+    const n = await endSessionById(config.storage, session, now, null);
     // One row: this call ended it. Zero: another call or the sweep did, and the sweep fires no hook.
-    if (n === 1) await sessionsEnded(config, [session], "expired");
+    if (n === 1) await sessionsEnded(config, [session], "expired", null);
     return null;
   }
   const user = await config.storage.findOne("user", [
@@ -518,8 +545,9 @@ export async function resolveSession(
   if (bannedFor(user, session.createdAt)) {
     if (!write) return null;
     // As for an expired row: the links go to the outbox, and the sweep delivers them.
-    const n = await endSessionById(config.storage, session, now);
-    if (n === 1) await sessionsEnded(config, [session], "banned");
+    const stops = impersonationStops(config, "ban");
+    const n = await endSessionById(config.storage, session, now, stops);
+    if (n === 1) await sessionsEnded(config, [session], "banned", stops);
     return null;
   }
   const sinceSeen = now.getTime() - session.lastSeenAt.getTime();
@@ -557,9 +585,12 @@ export async function destroySession(
   ]);
   if (!session) return null;
   // By id, so the row the after hook names is the row this call deleted.
-  const n = await endSessionById(config.storage, session, config.clock.now());
+  // The route refuses an impersonation session; `api.signOut` cannot tell,
+  // so its end writes a stop row (ruling 43 of plan 12f).
+  const stops = impersonationStops(config, "sign_out");
+  const n = await endSessionById(config.storage, session, config.clock.now(), stops);
   if (n !== 1) return null;
-  await sessionsEnded(config, [session], "sign_out");
+  await sessionsEnded(config, [session], "sign_out", stops);
   return session;
 }
 

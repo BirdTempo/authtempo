@@ -1353,6 +1353,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
           [{ field: "id", op: "eq", value: actor.session.id }],
           null,
           w.auth.clock.now(),
+          null,
         ),
       ),
     ).rejects.toThrow("authtempo: endSessions needs a userId term");

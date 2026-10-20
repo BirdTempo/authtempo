@@ -231,7 +231,7 @@ export async function endPendingRows(
     });
     meter.step(done.page.used + (done.finished ? 1 : 0));
     n += done.page.deleted;
-    await sessionsEnded(config, ended, reason);
+    await sessionsEnded(config, ended, reason, null);
     if (!done.finished) break;
   }
   return n;

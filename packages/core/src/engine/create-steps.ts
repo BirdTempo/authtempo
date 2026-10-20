@@ -10,6 +10,7 @@ import {
   type UserCreateVia,
   type UserVerifyVia,
 } from "./hooks.js";
+import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { signUpRule, validImageUrl, validUserName } from "./users.js";
 
 /**
@@ -129,19 +130,28 @@ export interface VerifySteps {
   claimed(userId: string): void;
   /** Fires `afterVerify` once, when this attempt claimed `user`. */
   after(user: UserRow): Promise<void>;
+  /**
+   * The stop rows of the impersonation sessions that the claim ends (ruling
+   * 43 of plan 12f), or null while the tool is off. `begin` empties it, so
+   * a retry keeps no row of an attempt that rolled back.
+   */
+  readonly stops: ImpersonationStops | null;
 }
 
 export function verifySteps(
-  config: Pick<ResolvedConfig, "hooks">,
+  config: Pick<ResolvedConfig, "hooks"> & Partial<Pick<ResolvedConfig, "operator">>,
   via: UserVerifyVia,
 ): VerifySteps {
   const hooks = config.hooks;
   let checked: string | null = null;
   let claimed: string | null = null;
+  const stops = impersonationStops(config, "claim");
   return {
+    stops,
     begin() {
       checked = null;
       claimed = null;
+      if (stops) stops.rows.length = 0;
     },
     async before(user) {
       await runBefore("user.beforeVerify", hooks.user.beforeVerify, { user, via });

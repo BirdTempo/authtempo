@@ -12,7 +12,13 @@ import {
   sessionsEnded,
 } from "../sessions.js";
 import { holdUser } from "../user-hold.js";
-import { auditDraft, impersonationTargets, operatorAct, operatorReason } from "./audit.js";
+import {
+  auditDraft,
+  type ImpersonationStops,
+  impersonationTargets,
+  operatorAct,
+  operatorReason,
+} from "./audit.js";
 import { activeBan } from "./ban-rule.js";
 import { IMPERSONATE_PER_USER, isPlatformOperator, requireOperatorUser } from "./guards.js";
 
@@ -189,7 +195,7 @@ export async function stopImpersonation(
       action: "impersonation_stop",
       targetUserId: user.id,
       reason: input.reason ?? STOP_REASON,
-      data: { sessionId: session.id },
+      data: { sessionId: session.id, cause: "stop" },
       ip: input.ip,
       userAgent: input.userAgent,
     },
@@ -200,11 +206,12 @@ export async function stopImpersonation(
     config,
     drafted.value,
     async (tx, _draft, ends) => {
-      if ((await endSessionById(tx, session, now)) !== 1) return fail("not_found");
+      // The act's own audit row is the stop row, so the delete writes none.
+      if ((await endSessionById(tx, session, now, null)) !== 1) return fail("not_found");
       ends.ended?.push(session);
       return ok({});
     },
-    { committed: (_value, ends) => sessionsEnded(config, ends.ended, "impersonation_end") },
+    { committed: (_value, ends) => sessionsEnded(config, ends.ended, "impersonation_end", null) },
   );
   if (!done.ok) return done;
   return ok({ auditId: done.value.auditId });
@@ -271,6 +278,7 @@ export async function endImpersonations(
   hold: ImpersonationHold,
   ended: SessionRow[] | null,
   now: Date,
+  stops: ImpersonationStops | null,
 ): Promise<number> {
   let n = 0;
   for (const userId of hold.targets) {
@@ -282,6 +290,7 @@ export async function endImpersonations(
       ],
       ended,
       now,
+      stops,
     );
   }
   return n;

@@ -18,7 +18,13 @@ import { sessionsEnded } from "../sessions.js";
 import { holdUser, userStays } from "../user-hold.js";
 import { normalizeEmail, validUserName } from "../users.js";
 import { ACCESS_END_LEAST, endAllAccessPage, hasPendingEnd } from "./access-end.js";
-import { auditDraft, type OperatorActEnds, operatorAct, operatorReason } from "./audit.js";
+import {
+  auditDraft,
+  impersonationStops,
+  type OperatorActEnds,
+  operatorAct,
+  operatorReason,
+} from "./audit.js";
 import { targetOf } from "./ban.js";
 import { activeBan } from "./ban-rule.js";
 import { type OperatorActor, requireScope } from "./guards.js";
@@ -374,6 +380,7 @@ export async function revokePlatformRole(
   const by = byOf(input.actor);
   const summary = publicOrganization(organization);
   const hooks = config.hooks.organization;
+  const stops = impersonationStops(config, "revoke");
   const done = await operatorAct(
     config,
     drafted.value,
@@ -438,7 +445,7 @@ export async function revokePlatformRole(
       meter.step(2);
       await endAllAccessPage(tx, config, user.id, ends, now, meter, budget.value, "operator");
       // The role started them, so they end with it (ruling 31).
-      await endImpersonations(tx, hold, ends.ended ?? null, now);
+      await endImpersonations(tx, hold, ends.ended ?? null, now, stops);
       const change: MemberChange =
         rest === ""
           ? { kind: "remove", member }
@@ -452,7 +459,7 @@ export async function revokePlatformRole(
     {
       async committed({ change }, ends) {
         // A retry with no change can end sessions too.
-        await sessionsEnded(config, ends.ended, "operator");
+        await sessionsEnded(config, ends.ended, "operator", stops);
         if (change === null) return;
         await memberChanged(config, summary, user, by, change);
       },

@@ -8,7 +8,13 @@ import { ROUNDS } from "../rounds.js";
 import { later } from "../second-factor.js";
 import { sessionsEnded } from "../sessions.js";
 import { ACCESS_END_LEAST, endAllAccessPage } from "./access-end.js";
-import { auditDraft, type OperatorActEnds, operatorAct, operatorReason } from "./audit.js";
+import {
+  auditDraft,
+  impersonationStops,
+  type OperatorActEnds,
+  operatorAct,
+  operatorReason,
+} from "./audit.js";
 import { activeBan } from "./ban-rule.js";
 import { isPlatformOperator, type OperatorActor, requireScope } from "./guards.js";
 import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
@@ -242,6 +248,7 @@ export async function banUser(
     userAgent: input.userAgent,
   });
   if (!drafted.ok) return drafted;
+  const stops = impersonationStops(config, "ban");
   const done = await operatorAct(
     config,
     drafted.value,
@@ -265,12 +272,12 @@ export async function banUser(
       meter.step(2);
       await endAllAccessPage(tx, config, input.userId, ends, now, meter, budget.value, "banned");
       // A banned platform operator keeps no impersonation session (ruling 31).
-      await endImpersonations(tx, hold, ends.ended ?? null, now);
+      await endImpersonations(tx, hold, ends.ended ?? null, now, stops);
       return written;
     },
     {
       async committed(value, ends) {
-        await sessionsEnded(config, ends.ended, "banned");
+        await sessionsEnded(config, ends.ended, "banned", stops);
         await userUpdated(config, value, "ban");
       },
       answerFamilyEnd: true,

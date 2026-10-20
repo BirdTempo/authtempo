@@ -282,6 +282,7 @@ describe("the link of a social identity (plan 12a, spec 8.15)", () => {
         ],
         null,
         w.auth.clock.now(),
+        null,
       ),
     );
     const calls = w.tokenCalls.length;

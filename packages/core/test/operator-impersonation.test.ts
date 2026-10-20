@@ -164,7 +164,7 @@ describe("the impersonation (plan 12f Task 11)", () => {
     expect(rows[1]?.reason).toBe("The operator stopped the impersonation.");
     expect(rows[0]?.data).toEqual({ sessionId: expect.any(String), expiresAt: body.expiresAt });
     const startData = rows[0]?.data as { sessionId: string } | undefined;
-    expect(rows[1]?.data).toEqual({ sessionId: startData?.sessionId });
+    expect(rows[1]?.data).toEqual({ sessionId: startData?.sessionId, cause: "stop" });
     expect(stopBody.auditId).toBe(rows[1]?.id);
     expect(body.auditId).toBe(rows[0]?.id);
   });

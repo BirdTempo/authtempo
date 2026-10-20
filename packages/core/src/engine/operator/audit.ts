@@ -223,6 +223,87 @@ export async function operatorAct<T extends object>(
 }
 
 /**
+ * Why an impersonation session ended, for its `impersonation_stop` row
+ * (ruling 43 of plan 12f). `stop` is the stop act. An expiry writes no row
+ * (spec 26 item 9): the start row holds `expiresAt`.
+ */
+export type StopCause =
+  | "stop"
+  | "user_end"
+  | "sign_out"
+  | "claim"
+  | "ban"
+  | "revoke"
+  | "role_loss"
+  | "account_delete";
+
+/**
+ * The fixed reason of each stop row that a flow writes. The stop act keeps
+ * its own reason, so it has none here.
+ */
+const STOP_REASONS: Readonly<Record<Exclude<StopCause, "stop">, string>> = {
+  user_end: "The user ended the impersonation session.",
+  sign_out: "A sign-out ended the impersonation session.",
+  claim: "A claim of the address ended the impersonation session.",
+  ban: "A ban ended the impersonation session.",
+  revoke: "A revoke of the platform role ended the impersonation session.",
+  role_loss: "A member change took the platform role, and the impersonation session ended.",
+  account_delete: "An account delete ended the impersonation session.",
+};
+
+/**
+ * The stop rows of one flow (ruling 43 of plan 12f). The flow makes it with
+ * `impersonationStops`, and each end of an impersonation session in the
+ * flow's transaction adds its row here. After the commit, `sessionsEnded`
+ * runs `afterAction` once per row.
+ */
+export interface ImpersonationStops {
+  readonly cause: Exclude<StopCause, "stop">;
+  readonly rows: OperatorAuditRow[];
+}
+
+/**
+ * The stop rows of a flow, or null while `operator.impersonation` is off.
+ * With null, no end reads the impersonation sessions, so the tool costs
+ * nothing while it is off.
+ */
+export function impersonationStops(
+  config: Partial<Pick<ResolvedConfig, "operator">>,
+  cause: Exclude<StopCause, "stop">,
+): ImpersonationStops | null {
+  return config.operator?.impersonation ? { cause, rows: [] } : null;
+}
+
+/**
+ * The `impersonation_stop` row of one impersonation session that the flow
+ * ended, on the flow's handle (ruling 43 of plan 12f). The actor is the
+ * operator of the session, the target is its user, and `data` holds
+ * `{ sessionId, cause }`. A session with no `actorId` writes nothing.
+ */
+export async function writeStopRow(
+  tx: StorageAdapter,
+  stops: ImpersonationStops,
+  session: Pick<SessionRow, "id" | "userId" | "actorId">,
+  now: Date,
+): Promise<void> {
+  if (session.actorId === null) return;
+  const row = await tx.create("operatorAudit", {
+    id: newId(now),
+    createdAt: now,
+    updatedAt: now,
+    actorKind: "user",
+    actorId: session.actorId,
+    action: "impersonation_stop",
+    targetUserId: session.userId,
+    reason: STOP_REASONS[stops.cause],
+    data: { sessionId: session.id, cause: stops.cause },
+    ip: null,
+    userAgent: null,
+  });
+  stops.rows.push(row);
+}
+
+/**
  * The users whose impersonation `operatorId` started at or after `since`.
  * They are the `targetUserId` of each `impersonation_start` row of that
  * user actor, read by the index on `actorId` (plan 12f Task 11, ruling 31).

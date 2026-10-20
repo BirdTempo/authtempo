@@ -11,6 +11,7 @@ import { requireFresh } from "./fresh.js";
 import { HookStop } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { deliverLogouts } from "./oauth-logout.js";
+import { impersonationStops } from "./operator/audit.js";
 import {
   checkSecondFactorPasskey,
   checkSignInAssertionOf,
@@ -116,6 +117,7 @@ export async function enableMethod(
   const id = newId(now);
   const { codes, hashes } = await newBackupCodes(config, totp, id);
   const ended = endedList(config);
+  const stops = impersonationStops(config, "user_end");
   let added: AddedMethod;
   try {
     added = await config.storage.transaction(async (tx) => {
@@ -130,6 +132,7 @@ export async function enableMethod(
         },
         now,
         ended,
+        stops,
       );
       if (a.first) await userStays(tx, session.user.id);
       if (method === "passkey") {
@@ -159,7 +162,7 @@ export async function enableMethod(
     throw err;
   }
   if (added.first) {
-    await sessionsEnded(config, ended, "two_factor");
+    await sessionsEnded(config, ended, "two_factor", stops);
     await deliverLogouts(config, session.user.id);
   }
   // After the commit (plan 12a). The one enable of the passkey and the email

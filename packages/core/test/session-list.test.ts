@@ -788,7 +788,7 @@ describe("endOtherAccess (plan 12a)", () => {
     const ended: NonNullable<Parameters<typeof endOtherAccess>[3]> = [];
     expect(
       await auth.storage.transaction((tx) =>
-        endOtherAccess(tx, me.user.id, me.session.id, ended, familyEnds(), auth.clock.now()),
+        endOtherAccess(tx, me.user.id, me.session.id, ended, familyEnds(), auth.clock.now(), null),
       ),
     ).toBe(1);
     expect(ended.map((s) => s.id)).toEqual([other.id]);

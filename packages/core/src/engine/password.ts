@@ -15,6 +15,7 @@ import { sendNotice } from "./notices.js";
 import { endFamilies, type FamilyEnds, familyEnds } from "./oauth-family.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { deliverLogouts } from "./oauth-logout.js";
+import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { activeBan } from "./operator/ban-rule.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
 import { gateRead, touchTrust, writeChallenge } from "./second-factor.js";
@@ -938,7 +939,7 @@ export async function verifyPasswordEmail(
   if (verified.ok) {
     // After the commit, before the session hooks (plan 12a).
     await verify.after(verified.value.user);
-    await sessionsEnded(config, ended, "claim");
+    await sessionsEnded(config, ended, "claim", verify.stops);
     if (verified.value.signedIn)
       await sessionOpened(config, verified.value.signedIn.session, verified.value.user, "password");
   }
@@ -1093,7 +1094,11 @@ export async function runReset(
   hash: string,
   now: Date,
 ): Promise<Result<ResetResult>> {
-  const ended: ResetEnded = { claim: endedList(config), reset: endedList(config) };
+  const ended: ResetEnded = {
+    claim: endedList(config),
+    reset: endedList(config),
+    stops: impersonationStops(config, "user_end"),
+  };
   // The trust row that skipped the gate, for its `lastSeenAt` after the commit.
   const trust: { id: string | null } = { id: null };
   // The user hooks of a user that the reset creates (plan 12a). The
@@ -1139,8 +1144,8 @@ export async function runReset(
     await made.after(reset.value.user);
     // One reason for one cause: the claim's rows end with `claim`, the
     // verified user's own rows with `password_reset` (fix round 1).
-    await sessionsEnded(config, ended.claim, "claim");
-    await sessionsEnded(config, ended.reset, "password_reset");
+    await sessionsEnded(config, ended.claim, "claim", verify.stops);
+    await sessionsEnded(config, ended.reset, "password_reset", ended.stops);
     // After the commit: the back-channel logouts of the ended sessions (plan 12e Task 16).
     await deliverLogouts(config, reset.value.user.id);
     // A gated reset opened no session: the verify of its challenge fires the hook.
@@ -1207,6 +1212,8 @@ export async function resetWithProof(
 interface ResetEnded {
   claim: SessionRow[] | undefined;
   reset: SessionRow[] | undefined;
+  /** The stop rows of the reset's session end (ruling 43 of plan 12f). The claim keeps its own. */
+  stops: ImpersonationStops | null;
 }
 
 /** The consume of a reset refused: a throw, so the transaction undoes the older-row deletes. */
@@ -1233,6 +1240,7 @@ function applyReset(
     // A retry runs again from the consume. The rows of an attempt that rolled back did not end.
     if (ended.claim) ended.claim.length = 0;
     if (ended.reset) ended.reset.length = 0;
+    if (ended.stops) ended.stops.rows.length = 0;
     families.ids.clear();
     families.scopes.length = 0;
     trust.id = null;
@@ -1355,6 +1363,7 @@ function applyReset(
         [{ field: "userId", op: "eq", value: user.id }],
         ended.reset ?? null,
         now,
+        ended.stops,
       );
       await deleteHandoffCodes(tx, user.id);
     }
@@ -1480,6 +1489,7 @@ export async function changePassword(
   const hash = await pw.hash.hash(input.newPassword);
   const now = config.clock.now();
   const ended = endedList(config);
+  const stops = impersonationStops(config, "user_end");
   // The refresh families that the change deletes, to end after its commit (ruling 43 of plan 12e).
   const families = familyEnds();
   let changed: Result<{ ok: true }>;
@@ -1538,7 +1548,7 @@ export async function changePassword(
       // refresh tokens and codes, in one function with the change of
       // address (plan 12a). The challenges go before the session delete, as
       // in a reset (plan 9f).
-      await endOtherAccess(tx, user.id, session.id, ended ?? null, families, now);
+      await endOtherAccess(tx, user.id, session.id, ended ?? null, families, now, stops);
       // The pending reset links and codes of the address go, as in a reset.
       // A person who changes the password after a mailbox exposure must not
       // leave a live proof there that sets a password and ends every session.
@@ -1560,7 +1570,7 @@ export async function changePassword(
     throw err;
   }
   if (changed.ok) {
-    await sessionsEnded(config, ended, "password_change");
+    await sessionsEnded(config, ended, "password_change", stops);
     await deliverLogouts(config, user.id);
     // After the commit (plan 12a). A first password is a change of a way in too.
     await sendNotice(config, {

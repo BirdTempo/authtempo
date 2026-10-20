@@ -19,6 +19,7 @@ import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard } from "./hooks.js";
 import { sendNotice } from "./notices.js";
+import { impersonationStops } from "./operator/audit.js";
 import { checkUserPassword } from "./password.js";
 import {
   addMethod,
@@ -432,6 +433,7 @@ export async function enableTotp(
   const step = await matchStep(await openSecret(config, row), input.code, now);
   if (step === null) return fail("invalid_code");
   const ended = endedList(config);
+  const stops = impersonationStops(config, "user_end");
   let done: Result<{ first: boolean }>;
   try {
     done = await config.storage.transaction(async (tx): Promise<Result<{ first: boolean }>> => {
@@ -466,6 +468,7 @@ export async function enableTotp(
         },
         now,
         ended,
+        stops,
       );
       if (!added.first && row.backupCodes.length > 0) throw new StaleSetupCodesError();
       return ok({ first: added.first });
@@ -493,7 +496,7 @@ export async function enableTotp(
   }
   if (!done.ok) return done;
   if (done.value.first) {
-    await sessionsEnded(config, ended, "two_factor");
+    await sessionsEnded(config, ended, "two_factor", stops);
     await deliverLogouts(config, input.session.user.id);
   }
   // After the commit (plan 12a), for the first method and for a later one.

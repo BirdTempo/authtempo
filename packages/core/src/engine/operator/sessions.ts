@@ -232,7 +232,8 @@ export async function endUserSessions(
       return ok({ ended: page.deleted + late, more: sessionsLeft || familiesLeft });
     },
     {
-      committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator"),
+      // The stop rows of these pages come with the rebase onto plan 12f Task 7 (ruling 43).
+      committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator", null),
       answerFamilyEnd: true,
     },
   );
@@ -468,7 +469,7 @@ export async function endAllSessions(
       draft.data = { ended: page.deleted };
       return ok({ ended: page.deleted, more: page.stopped || read.length > limit });
     },
-    { committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator") },
+    { committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator", null) },
   );
   if (!done.ok) return done;
   return ok({ ended: done.value.ended, more: done.value.more, auditId: done.value.auditId });

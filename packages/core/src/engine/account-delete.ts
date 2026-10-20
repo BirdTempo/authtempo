@@ -12,6 +12,7 @@ import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { deliverLogouts } from "./oauth-logout.js";
+import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { endImpersonations, holdImpersonations } from "./operator/impersonation.js";
 import {
   deleteOrganizationRows,
@@ -206,10 +207,12 @@ async function runDelete(
   const userId = input.session.user.id;
   const now = config.clock.now();
   const ended = endedList(config);
+  const stops = impersonationStops(config, "account_delete");
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
   const done = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<Deleted>> => {
       if (ended) ended.length = 0;
+      if (stops) stops.rows.length = 0;
       let seen = await tx.findOne("user", byId);
       let user: UserRow | null = null;
       for (let round = 0; round < ROUNDS && !user; round++) {
@@ -228,6 +231,7 @@ async function runDelete(
       const going = await deleteAccountRows(tx, config, user, now, {
         sessionId: input.session.session.id,
         ended: ended ?? null,
+        stops,
       });
       return ok({ user, going });
     }),
@@ -237,7 +241,7 @@ async function runDelete(
   await config.storage.delete("verification", [
     { field: "identifier", op: "in", value: [user.id, user.email] },
   ]);
-  await sessionsEnded(config, ended, "account_deleted");
+  await sessionsEnded(config, ended, "account_deleted", stops);
   // Every outbox row of the user, the older ones too: the delete made them due.
   await deliverLogouts(config, user.id);
   for (const organization of going)
@@ -281,7 +285,7 @@ export async function deleteAccountRows(
   config: ResolvedConfig,
   user: UserRow,
   now: Date,
-  proof: { sessionId: string; ended: SessionRow[] | null },
+  proof: { sessionId: string; ended: SessionRow[] | null; stops: ImpersonationStops | null },
 ): Promise<OrganizationRow[]> {
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: user.id }];
   const session = await tx.findOne("session", [{ field: "id", op: "eq", value: proof.sessionId }]);
@@ -321,8 +325,14 @@ export async function deleteAccountRows(
   // The user's sessions and the impersonation sessions that the user opened
   // as an operator go together, after one lock read (ruling 42 of plan 12f).
   const hold = await holdImpersonations(tx, user.id, now, true);
-  await endSessions(tx, [{ field: "userId", op: "eq", value: user.id }], proof.ended, now);
-  await endImpersonations(tx, hold, proof.ended, now);
+  await endSessions(
+    tx,
+    [{ field: "userId", op: "eq", value: user.id }],
+    proof.ended,
+    now,
+    proof.stops,
+  );
+  await endImpersonations(tx, hold, proof.ended, now, proof.stops);
   // The back-channel outbox stays (plan 12e Task 16, review I3 of Task 1).
   // Its rows are the logouts of this delete, and of earlier ends that wait
   // for a retry. Each one is due now, so the delivery after the commit sends

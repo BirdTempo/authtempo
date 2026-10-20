@@ -13,6 +13,7 @@ import {
   runBefore,
   stopWith,
 } from "./hooks.js";
+import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { dropsPlatformRole } from "./operator/guards.js";
 import { endImpersonations, holdImpersonations } from "./operator/impersonation.js";
 import {
@@ -213,6 +214,7 @@ async function ownerWrite(
 interface RoleLoss {
   userId: string;
   ended: SessionRow[] | undefined;
+  stops: ImpersonationStops | null;
 }
 
 /** The loss of a member write, or null when the write keeps the platform role. */
@@ -223,7 +225,11 @@ function roleLossOf(
   after: string | null,
 ): RoleLoss | null {
   return dropsPlatformRole(config, organization, member.role, after)
-    ? { userId: member.userId, ended: endedList(config) }
+    ? {
+        userId: member.userId,
+        ended: endedList(config),
+        stops: impersonationStops(config, "role_loss"),
+      }
     : null;
 }
 
@@ -247,7 +253,7 @@ async function withRoleLoss<T>(
   await holdUser(tx, loss.userId);
   const hold = await holdImpersonations(tx, loss.userId, now, true);
   const value = await work(tx);
-  if (wrote(value)) await endImpersonations(tx, hold, loss.ended ?? null, now);
+  if (wrote(value)) await endImpersonations(tx, hold, loss.ended ?? null, now, loss.stops);
   return value;
 }
 
@@ -817,7 +823,7 @@ export async function updateMemberRole(
     return n === 0 ? fail("conflict") : ok(true);
   });
   if (!written.ok) return written;
-  await sessionsEnded(config, loss?.ended, "impersonation_end");
+  await sessionsEnded(config, loss?.ended, "impersonation_end", loss?.stops ?? null);
   const updated: MemberSummary = { ...current, role: input.role };
   await runAfter(
     "organization.afterUpdateMemberRole",
@@ -910,7 +916,7 @@ export async function removeMember(
     return n === 0 ? fail("conflict") : ok(true);
   });
   if (!removed.ok) return removed;
-  await sessionsEnded(config, loss?.ended, "impersonation_end");
+  await sessionsEnded(config, loss?.ended, "impersonation_end", loss?.stops ?? null);
   await runAfter(
     "organization.afterRemoveMember",
     hooks.afterRemoveMember,
