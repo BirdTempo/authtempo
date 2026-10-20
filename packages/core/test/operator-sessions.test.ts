@@ -5,6 +5,7 @@ import { requireOperatorUser } from "../src/engine/operator/guards.js";
 import { operatorApi } from "../src/engine/operator/index.js";
 import { addMember } from "../src/engine/organizations.js";
 import { openSession, resolveSession } from "../src/engine/sessions.js";
+import { sweepExpired } from "../src/engine/sweep.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { UserRow } from "../src/schema.js";
@@ -174,6 +175,22 @@ function countCalls(storage: StorageAdapter) {
   storage.transaction = ((fn) =>
     transaction((tx) => fn(wrap(tx)))) as StorageAdapter["transaction"];
   return counts;
+}
+
+/**
+ * Runs the sweep until no client link and no outbox row stays, 10 times at
+ * most. Each sweep makes the logouts of the links with no session, and
+ * sends the due rows. Answers the count of sweeps.
+ */
+async function sweepAll(w: World): Promise<number> {
+  for (let n = 1; n <= 10; n++) {
+    w.clock.advance(1);
+    await sweepExpired(w.config);
+    const links = await w.storage.findMany("oauthSessionClient", []);
+    const outbox = await w.storage.findMany("oauthLogout", []);
+    if (links.length === 0 && outbox.length === 0) return n;
+  }
+  throw new Error("links or outbox rows stay after 10 sweeps");
 }
 
 /** A client of the register route with a back-channel logout URI. */
@@ -563,40 +580,82 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
         }
         expect([more, ended], label).toEqual([false, size]);
         expect(await sessionsOf(w.storage), label).toEqual([]);
-        expect(await w.storage.findMany("oauthSessionClient", []), label).toEqual([]);
-        expect(await w.storage.findMany("oauthLogout", []), label).toHaveLength(linkCount);
+        // The calls write the logouts that fit; the sweep writes the rest and sends them all.
+        await sweepAll(w);
+        expect(w.sent, label).toHaveLength(linkCount);
         if (hook)
           expect([...w.ended].sort(), label).toEqual(all.map((x) => `${x.id}:operator`).sort());
       }
   });
 
-  it("stops before a link read that the budget cannot hold", async () => {
+  it("ends 60 sessions in one call and leaves the links past the budget to the sweep", async () => {
     const w = await world();
     const clientId = await backchannelClient(w);
     const user = await userWith(w, "ada@example.com", 1);
     const open = () => openSession(w.config, { user, ip: null, userAgent: null, via: "password" });
     for (let i = 0; i < 21; i++) await linked(w, (await open()).token, clientId);
-    // The id is time-ordered across milliseconds: the 22 sessions so far come first.
-    w.clock.advance(1);
     for (let i = 0; i < 38; i++) await open();
     expect(await sessionsOf(w.storage)).toHaveLength(60);
     const counts = countCalls(w.storage);
-    const first = await w.api.sessions.endAll({
+    const done = await w.api.sessions.endAll({
       actor: APP,
       reason: "Key leak",
       ip: null,
       userAgent: null,
     });
-    // The read, the link read, 42 outbox calls, and the delete fill 45; the next link read would pass it.
-    expect(first.ok && [first.value.ended, first.value.more, counts.calls]).toEqual([50, true, 46]);
-    const second = await w.api.sessions.endAll({
-      actor: APP,
-      reason: "Key leak",
+    // The read, 2 link reads, and 2 deletes cost 5; 20 links take 40 of the 45; then the audit row.
+    expect(done.ok && [done.value.ended, done.value.more, counts.calls]).toEqual([60, false, 46]);
+    expect(await sessionsOf(w.storage)).toEqual([]);
+    expect(await w.storage.findMany("oauthLogout", [])).toHaveLength(20);
+    expect(await w.storage.findMany("oauthSessionClient", [])).toHaveLength(1);
+    await sweepAll(w);
+    expect(w.sent).toHaveLength(21);
+  });
+
+  it("ends a session with 30 client links in one call inside the budget (review M1)", async () => {
+    const w = await world({ hook: true });
+    const clients: string[] = [];
+    // The register limit is 10 per IP per hour: the gap of the sign-ups keeps 30 under it.
+    for (let i = 0; i < 30; i++) {
+      w.clock.advance(SIGN_UP_GAP_MS);
+      clients.push(await backchannelClient(w));
+    }
+    const user = await userWith(w, "ada@example.com", 1);
+    const opened = await openSession(w.config, {
+      user,
       ip: null,
       userAgent: null,
+      via: "password",
     });
-    expect(second.ok && [second.value.ended, second.value.more]).toEqual([10, false]);
-    expect(await w.storage.findMany("oauthLogout", [])).toHaveLength(21);
+    for (const clientId of clients) await linked(w, opened.token, clientId);
+    expect(await w.storage.findMany("oauthSessionClient", [])).toHaveLength(30);
+    w.ended.length = 0;
+    const counts = countCalls(w.storage);
+    const calls: number[] = [];
+    let more = true;
+    for (let call = 0; more && call < 5; call++) {
+      counts.calls = 0;
+      const done = await w.api.sessions.endAll({
+        actor: APP,
+        reason: "Key leak",
+        ip: null,
+        userAgent: null,
+      });
+      if (!done.ok) throw new Error(done.code);
+      calls.push(counts.calls);
+      more = done.value.more;
+      // The linked session goes in the first call, with its event.
+      if (call === 0) expect(await resolveSession(w.config, opened.token)).toBeNull();
+    }
+    expect(calls.every((n) => n <= 46)).toBe(true);
+    expect(w.ended).toContain(`${opened.session.id}:operator`);
+    expect(await sessionsOf(w.storage)).toEqual([]);
+    // Two sessions: the read, the link read, and 2 deletes cost 4. So 20 logouts fit the
+    // first call, and the sweep makes the other 10 and sends all 30.
+    expect(await w.storage.findMany("oauthLogout", [])).toHaveLength(20);
+    expect(await w.storage.findMany("oauthSessionClient", [])).toHaveLength(10);
+    await sweepAll(w);
+    expect(w.sent).toHaveLength(30);
   });
 
   it("ends 60 sessions with a hook in two pages, with no session lost or ended twice", async () => {

@@ -119,24 +119,28 @@ export const OPERATOR_CALL_BUDGET = 45;
 
 /**
  * Ends a page of the listed session rows of any users in the caller's
- * transaction, inside `OPERATOR_CALL_BUDGET`. The read of `rows` was call
+ * transaction, inside `budget` storage calls. The read of `rows` was call
  * 1. Each chunk of `IN_CHUNK` rows costs one read of its client links.
- * Each session costs 2 calls per link: one `oauthLogout` row, due now, and
- * the delete of the link (plan 12e Task 16). With `ended` null (no
- * `session.afterEnd` hook), the chunk costs one delete by id. With a list,
- * each session costs one delete by id.
+ * With `ended` null (no `session.afterEnd` hook), each chunk costs one
+ * delete by id. With a list, each session costs one delete by id.
  *
- * Each step counts its calls before it runs. When the next session would
- * pass the budget, the page stops before it, so a session and its links
- * end together. The first session of a call always ends, so each call
- * ends one session or more. A session with 22 links or more then passes
- * the budget: 21 links cost 45 calls and the audit row.
+ * The sessions come first (ruling 34 of plan 12f). The page takes the
+ * most rows whose link reads and deletes fit the budget, and one row
+ * at the least. Then each link costs 2 calls: one `oauthLogout` row, due
+ * now, and the delete of the link (plan 12e Task 16). The links that fit
+ * the calls left get their rows, by link id. The other links stay with no
+ * session, and the sweep step `sweepLinks` makes their logouts (ruling 49
+ * of plan 12e). So a session ends in its call, whatever its count of links.
+ *
+ * In the transaction the link writes come before the session deletes, and
+ * each step takes its rows by id. That is the order of `endSessions`, so
+ * the page and a ban of a user take the rows in one order on Postgres.
  *
  * A row goes to `ended` only when its delete count is 1 and it was live.
  * A sign-out between the read and the delete already fired its event
  * (final fix wave M-1). An expired row gets no event (plan 12a review L3).
- * The answer is the count of deleted rows, and `stopped` when the budget
- * left rows of the list.
+ * The answer is the count of deleted rows, `stopped` when the budget left
+ * rows of the list, and `used`, the calls of the page.
  */
 async function endSessionPage(
   tx: StorageAdapter,
@@ -144,51 +148,42 @@ async function endSessionPage(
   rows: readonly SessionRow[],
   ended: SessionRow[] | null,
   now: Date,
-): Promise<{ deleted: number; stopped: boolean }> {
-  let used = 1;
-  let taken = 0;
+  budget: number,
+): Promise<{ deleted: number; stopped: boolean; used: number }> {
+  const chunks = (k: number) => Math.ceil(k / IN_CHUNK);
+  // The read, the link reads, and the deletes of the first k rows.
+  const cost = (k: number) => 1 + chunks(k) + (ended ? k : chunks(k));
+  let k = rows.length;
+  while (k > 1 && cost(k) > budget) k--;
+  const take = rows.slice(0, k);
+  // The unique index (sessionId, clientId) leads with sessionId, so each read is by index.
+  const links = await findManyIn(
+    tx,
+    "oauthSessionClient",
+    "sessionId",
+    take.map((r) => r.id),
+  );
+  let used = cost(k);
+  const room = Math.max(0, Math.floor((budget - used) / 2));
+  const written = [...links]
+    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    .slice(0, room);
+  await writeLogouts(tx, written, now);
+  used += 2 * written.length;
   let deleted = 0;
-  for (let i = 0; i < rows.length; i += IN_CHUNK) {
-    const chunk = rows.slice(i, i + IN_CHUNK);
-    // The least next step: the link read and one delete.
-    if (taken > 0 && used + 2 > OPERATOR_CALL_BUDGET) return { deleted, stopped: true };
-    // The unique index (sessionId, clientId) leads with sessionId, so the read is by index.
-    const links = await findManyIn(
-      tx,
-      "oauthSessionClient",
-      "sessionId",
-      chunk.map((r) => r.id),
-    );
-    used++;
-    const take: SessionRow[] = [];
-    let cost = ended ? 0 : 1;
-    for (const row of chunk) {
-      const own = links.filter((l) => l.sessionId === row.id).length;
-      const next = 2 * own + (ended ? 1 : 0);
-      if (taken + take.length > 0 && used + cost + next > OPERATOR_CALL_BUDGET) break;
-      take.push(row);
-      cost += next;
+  if (ended) {
+    for (const row of take)
+      if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
+        deleted++;
+        if (sessionIsLive(config, row, now)) ended.push(row);
+      }
+  } else {
+    for (let i = 0; i < take.length; i += IN_CHUNK) {
+      const ids = take.slice(i, i + IN_CHUNK).map((r) => r.id);
+      deleted += await tx.delete("session", [{ field: "id", op: "in", value: ids }]);
     }
-    const ids = new Set(take.map((r) => r.id));
-    await writeLogouts(
-      tx,
-      links.filter((l) => ids.has(l.sessionId)),
-      now,
-    );
-    if (ended) {
-      for (const row of take)
-        if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
-          deleted++;
-          if (sessionIsLive(config, row, now)) ended.push(row);
-        }
-    } else if (take.length > 0) {
-      deleted += await tx.delete("session", [{ field: "id", op: "in", value: [...ids] }]);
-    }
-    used += cost;
-    taken += take.length;
-    if (take.length < chunk.length) return { deleted, stopped: true };
   }
-  return { deleted, stopped: false };
+  return { deleted, stopped: k < rows.length, used };
 }
 
 /**
@@ -204,21 +199,21 @@ async function endSessionPage(
  * It ends the sessions only. The challenges, the handoff codes, and the
  * OAuth tokens of every user stay; `endUserSessions` ends them for one
  * user. The links of the ended sessions become outbox rows that are due
- * now, and the sweep sends them (ruling 1). A call sends none, because
+ * now, as far as the budget allows, and the sweep makes the rest. The
+ * sweep sends them all (ruling 1). A call sends none, because
  * 500 users can mean 5000 HTTP calls in one request. It holds no user
  * row: a hold costs calls per user, and the page touches only the session
  * and link rows, so it waits on no user row that another flow holds.
  *
- * The cost of a page of n sessions with L client links has five parts.
- * They are 1 read, ceil(n / 50) link reads, 2 calls per link, the
- * deletes, and the audit row. With no hook the deletes are ceil(n / 50)
- * statements. The sum is 2 + 2 ceil(n / 50) + 2L: 22 for 500 sessions
- * with no link, and 42 for 1000. With a `session.afterEnd` hook there is
- * one delete per session, and the sum is 2 + ceil(n / 50) + n + 2L. The
- * budget holds the sum less the audit row at 45 or less, so a page with a
- * hook ends about 43 sessions with no link. D1 allows 50 queries per
- * invocation on Workers Free and 1000 on Workers Paid (D1 limits page
- * updated 21 April 2026, read 2026-10-20). A call fits both.
+ * The cost of a page of n sessions has four parts: 1 read, ceil(n / 50)
+ * link reads, the deletes, and the audit row. With no hook the deletes are
+ * ceil(n / 50) statements, so the sum is 2 + 2 ceil(n / 50): 22 for 500
+ * sessions, and 42 for 1000. With a `session.afterEnd` hook there is one
+ * delete per session, and the sum is 2 + ceil(n / 50) + n, so a page ends
+ * about 43 sessions. The calls left in the budget write the logouts of the
+ * client links, 2 calls per link, and the sweep logs out the rest. D1
+ * allows 50 queries per invocation on Workers Free and 1000 on Workers Paid
+ * (D1 limits page updated 21 April 2026, read 2026-10-21). A call fits both.
  */
 export async function endAllSessions(
   config: ResolvedConfig,
@@ -250,7 +245,14 @@ export async function endAllSessions(
         sort: { field: "id", dir: "asc" },
         limit: limit + 1,
       });
-      const page = await endSessionPage(tx, config, read.slice(0, limit), ends.ended ?? null, now);
+      const page = await endSessionPage(
+        tx,
+        config,
+        read.slice(0, limit),
+        ends.ended ?? null,
+        now,
+        OPERATOR_CALL_BUDGET,
+      );
       // The row is the last write of the act, so it can hold the count.
       draft.data = { ended: page.deleted };
       return ok({ ended: page.deleted, more: page.stopped || read.length > limit });
