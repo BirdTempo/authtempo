@@ -200,6 +200,8 @@ export async function endOtherAccess(
  * and the sweep sends them: the caller posts none (ruling 37). After its
  * commit the caller runs `sessionsEnded`, and `endFamilies` last (ruling
  * 2). The answer is the count of sessions.
+ * It has no call budget. The ban and the revoke of the platform role use
+ * `endAllAccessPage` of `operator/access-end.ts` (ruling 44 of plan 12f).
  */
 export async function endAllAccess(
   tx: StorageAdapter,

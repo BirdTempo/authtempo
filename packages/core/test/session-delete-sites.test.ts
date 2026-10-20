@@ -162,6 +162,15 @@ const SITES: Site[] = [
       "the last page of the end of one user's sessions: a session that a sign-in wrote after the read; the sweep makes its links logouts",
   },
   {
+    file: "engine/operator/access-end.ts",
+    fn: "endAllAccessPage",
+    call: 'delete("session"',
+    count: 1,
+    kind: "late",
+    reason:
+      "the ban and the revoke of the platform role, when no session stays for the sweep: a session that a sign-in wrote after the read; the sweep makes its links logouts",
+  },
+  {
     file: "engine/sweep.ts",
     fn: "sweepExpired",
     call: 'delete("session"',

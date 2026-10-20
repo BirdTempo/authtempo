@@ -924,7 +924,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | --- | --- |
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | JSON { userId, reason, until? }. `reason` is 1 to 500 characters with no control character. `until` is a date and time with a zone, 1 minute to 3650 days from now; with no `until` the ban has no end |
-| Answer | `{ auditId }`. The ban ends every session, challenge, handoff code, and OAuth refresh token and code of the user. API tokens stay, and work again after an unban |
+| Answer | `{ auditId }`, and `familyEndFailed: true` when the end of the OAuth families failed after the commit. The ban ends every challenge, handoff code, and OAuth refresh token and code of the user, and the sessions that fit the call. The sweep ends the other sessions, and until then every door refuses them. API tokens stay, and work again after an unban |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 <h3 id="post-operator-users-unban"><code>POST /operator/users/unban</code></h3>
@@ -942,7 +942,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | --- | --- |
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | JSON { userId, grant, reason }. `grant` true grants the platform role, and false revokes it. `reason` is 1 to 500 characters with no control character |
-| Answer | `{ auditId }`. A grant needs a verified address and no ban. A revoke ends every session of the user, and keeps one owner of the platform organization |
+| Answer | `{ auditId }`, and `familyEndFailed: true` when the end of the OAuth families failed after the commit. A grant needs a verified address and no ban. A revoke ends the sessions of the user that fit the call, and keeps one owner of the platform organization. The sweep ends the other sessions, and a second revoke ends them too. Until then each operator check refuses them |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`email_unverified`](/docs/reference/errors/#email_unverified), [`account_banned`](/docs/reference/errors/#account_banned), [`member_limit`](/docs/reference/errors/#member_limit), [`last_owner`](/docs/reference/errors/#last_owner), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 <h3 id="post-operator-users-second-factor-disable"><code>POST /operator/users/second-factor/disable</code></h3>

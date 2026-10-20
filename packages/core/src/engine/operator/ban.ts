@@ -1,15 +1,17 @@
 import type { ResolvedConfig } from "../../config.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { UserRow } from "../../schema.js";
+import { meterOf } from "../../storage/meter.js";
 import type { StorageAdapter, Where } from "../../storage/port.js";
 import { runAfter, runBefore, type UserPatch, type UserUpdateVia } from "../hooks.js";
 import { ROUNDS } from "../rounds.js";
 import { later } from "../second-factor.js";
-import { endAllAccess } from "../session-list.js";
-import { deleteEndedSessions, sessionsEnded } from "../sessions.js";
+import { sessionsEnded } from "../sessions.js";
+import { ACCESS_END_LEAST, endAllAccessPage } from "./access-end.js";
 import { auditDraft, type OperatorActEnds, operatorAct, operatorReason } from "./audit.js";
 import { activeBan } from "./ban-rule.js";
 import { isPlatformOperator, type OperatorActor, requireScope } from "./guards.js";
+import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
 
 const MINUTE_MS = 60_000;
 
@@ -191,10 +193,17 @@ async function userUpdated(
  * Bans a user (spec 26 items 5 and 6). ASVS 5.0.0 7.4.2: "Verify that the
  * application terminates all active sessions when a user account is
  * disabled or deleted (such as an employee leaving the company)." One
- * transaction writes the ban fields, ends every session, challenge,
- * handoff code, and OAuth refresh token and code (`endAllAccess`), and
- * writes the audit row. The API tokens stay, and work again after an
- * unban. A ban of a banned user replaces the time, the reason, and the end.
+ * transaction writes the ban fields, ends every challenge, handoff code,
+ * and OAuth refresh token and code, and a page of the sessions
+ * (`endAllAccessPage`), and writes the audit row. The API tokens stay, and
+ * work again after an unban. A ban of a banned user replaces the time, the
+ * reason, and the end.
+ *
+ * The whole invocation fits `OPERATOR_CALL_BUDGET`, the steps after the
+ * commit too (rulings 37 and 44 of plan 12f). The sessions that do not fit
+ * stay with a pending-end row, and the sweep ends them with `banned`.
+ * Until then `bannedFor` refuses each of them at every door. A throw of
+ * `endFamilies` after the commit answers ok with `familyEndFailed: true`.
  *
  * After the commit, in the order of ruling 2: `session.afterEnd` with
  * `banned` per session, `user.afterUpdate`, then `afterAction` and
@@ -205,12 +214,20 @@ async function userUpdated(
 export async function banUser(
   config: ResolvedConfig,
   input: BanInput,
-): Promise<Result<{ auditId: string }>> {
+): Promise<Result<{ auditId: string; familyEndFailed?: true }>> {
   const reason = reasonOf(config, input);
   if (!reason.ok) return reason;
   const now = config.clock.now();
   const until = banEnd(input.until, now);
   if (!until.ok) return until;
+  const fixed = TARGET_CALLS[input.actor.kind];
+  const budget = await workBudget(
+    config.storage,
+    input.actor,
+    undefined,
+    fixed + STEP_WORST.hold + ACCESS_END_LEAST,
+  );
+  if (!budget.ok) return budget;
   const target = await targetOf(config, input);
   if (!target.ok) return target;
   const drafted = auditDraft(input.actor, {
@@ -226,6 +243,7 @@ export async function banUser(
     config,
     drafted.value,
     async (tx, _draft, ends: OperatorActEnds) => {
+      const meter = meterOf(tx, fixed);
       const written = await writeBanFields(
         config,
         tx,
@@ -235,10 +253,9 @@ export async function banUser(
         now,
       );
       if (!written.ok) return written;
-      // An ended row goes with no hook, as in the revoke of the other
-      // sessions: it gets no `banned` event (plan 12a review L3).
-      await deleteEndedSessions(tx, config, input.userId, now);
-      await endAllAccess(tx, input.userId, ends.ended ?? null, ends.families, now);
+      // The read and the update: a batch of 2 on D1.
+      meter.step(STEP_WORST.hold);
+      await endAllAccessPage(tx, config, input.userId, ends, now, meter, budget.value, "banned");
       return written;
     },
     {
@@ -246,10 +263,12 @@ export async function banUser(
         await sessionsEnded(config, ends.ended, "banned");
         await userUpdated(config, value, "ban");
       },
+      answerFamilyEnd: true,
     },
   );
   if (!done.ok) return done;
-  return ok({ auditId: done.value.auditId });
+  const { auditId, familyEndFailed } = done.value;
+  return ok(familyEndFailed ? { auditId, familyEndFailed } : { auditId });
 }
 
 /**

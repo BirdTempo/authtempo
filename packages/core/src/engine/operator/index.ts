@@ -56,16 +56,24 @@ export interface OperatorApi {
     }): Promise<Result<{ users: OperatorUser[]; next: string | null }>>;
     /** One user by id. Needs the scope `users`. */
     get(input: { actor: OperatorActor; userId: string }): Promise<Result<OperatorUser>>;
-    /** Bans a user and ends all access but the API tokens (plan 12f Task 6). Needs the scope `users`. */
-    ban(input: BanInput): Promise<Result<{ auditId: string }>>;
+    /**
+     * Bans a user and ends all access but the API tokens (plan 12f Task 6).
+     * The sessions past the call budget go at the next sweeps (ruling 44).
+     * Needs the scope `users`.
+     */
+    ban(input: BanInput): Promise<Result<{ auditId: string; familyEndFailed?: true }>>;
     /** Lifts a ban. It restores no session. Needs the scope `users`. */
     unban(input: UnbanInput): Promise<Result<{ auditId: string }>>;
   };
   platformRole: {
     /** Grants the platform role to a verified user with no active ban (plan 12f Task 8). Needs the scope `users`. */
     grant(input: PlatformRoleInput): Promise<Result<{ auditId: string }>>;
-    /** Revokes the platform role and ends all access of the user but the API tokens. Needs the scope `users`. */
-    revoke(input: PlatformRoleInput): Promise<Result<{ auditId: string }>>;
+    /**
+     * Revokes the platform role and ends all access of the user but the API
+     * tokens. The sessions past the call budget go at the next sweeps, or at
+     * a retry (rulings 44 and 45). Needs the scope `users`.
+     */
+    revoke(input: PlatformRoleInput): Promise<Result<{ auditId: string; familyEndFailed?: true }>>;
   };
   secondFactor: {
     /**

@@ -2,6 +2,7 @@ import type { ResolvedConfig } from "../../config.js";
 import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { MemberRow, OrganizationRow, UserRow } from "../../schema.js";
+import { meterOf } from "../../storage/meter.js";
 import { type StorageAdapter, StorageError } from "../../storage/port.js";
 import { createSteps } from "../create-steps.js";
 import { runAfter, runBefore } from "../hooks.js";
@@ -13,14 +14,15 @@ import {
   publicOrganization,
 } from "../organizations.js";
 import { holdsRolePart, type ResolvedOrganizations, rankOf } from "../ranks.js";
-import { endAllAccess } from "../session-list.js";
-import { deleteEndedSessions, sessionsEnded } from "../sessions.js";
+import { sessionsEnded } from "../sessions.js";
 import { holdUser, userStays } from "../user-hold.js";
 import { normalizeEmail, validUserName } from "../users.js";
+import { ACCESS_END_LEAST, endAllAccessPage, hasPendingEnd } from "./access-end.js";
 import { auditDraft, type OperatorActEnds, operatorAct, operatorReason } from "./audit.js";
 import { targetOf } from "./ban.js";
 import { activeBan } from "./ban-rule.js";
 import { type OperatorActor, requireScope } from "./guards.js";
+import { TARGET_CALLS, workBudget } from "./sessions.js";
 
 /** The input of a grant or a revoke of the platform role (spec 26 item 5). */
 export interface PlatformRoleInput {
@@ -313,11 +315,18 @@ export async function grantPlatformRole(
  * the platform organization. A row with no part left goes. When the change
  * takes the owner rank from the row, the owner lock of plan 6 guards the
  * write. A revoke that leaves no owner answers `last_owner`. Then
- * `endAllAccess` ends every session, challenge, and handoff code of the
- * target. It also ends the OAuth refresh tokens and codes. An open session
- * holds power that the role no longer gives (ASVS 5.0.0 8.3.2). The audit
- * row `platform_role_revoke` comes last. A target with no role part gets
- * no change, no end of access, and the audit row.
+ * `endAllAccessPage` ends every challenge and handoff code of the target,
+ * the OAuth refresh tokens and codes, and a page of the sessions. An open
+ * session holds power that the role no longer gives (ASVS 5.0.0 8.3.2).
+ * The audit row `platform_role_revoke` comes last.
+ *
+ * The whole invocation fits `OPERATOR_CALL_BUDGET`, the steps after the
+ * commit too (rulings 37 and 44 of plan 12f). The sessions that do not fit
+ * stay with a pending-end row, and the sweep ends them with `operator`.
+ * Until then each operator check reads the role again and refuses them. A
+ * target with no role part gets no change and the audit row. When a
+ * pending-end row of the target exists, such a revoke ends a page of the
+ * sessions again (ruling 45), so a retry does what the first call left.
  *
  * After the commit, the steps run in the order of ruling 2. First,
  * `session.afterEnd` fires with `operator` for each session. Then the
@@ -329,9 +338,18 @@ export async function grantPlatformRole(
 export async function revokePlatformRole(
   config: ResolvedConfig,
   input: PlatformRoleInput,
-): Promise<Result<{ auditId: string }>> {
+): Promise<Result<{ auditId: string; familyEndFailed?: true }>> {
   const p = platformOf(config, input);
   if (!p.ok) return p;
+  // The target and the organization before the act.
+  const fixed = TARGET_CALLS[input.actor.kind] + 1;
+  const budget = await workBudget(
+    config.storage,
+    input.actor,
+    undefined,
+    fixed + REVOKE_WRITE_WORST + ACCESS_END_LEAST,
+  );
+  if (!budget.ok) return budget;
   const target = await targetOf(config, input);
   if (!target.ok) return target;
   const user = target.value;
@@ -357,8 +375,17 @@ export async function revokePlatformRole(
     config,
     drafted.value,
     async (tx, _draft, ends: OperatorActEnds): Promise<Result<{ change: MemberChange }>> => {
+      const meter = meterOf(tx, fixed);
       const member = await memberOf(tx, organization.id, user.id);
-      if (!member || !holdsRolePart(member.role, role)) return ok({ change: null });
+      meter.step(1);
+      if (!member || !holdsRolePart(member.role, role)) {
+        // A retry after a revoke that left sessions (ruling 45): the pending-end row names them.
+        const pending = await hasPendingEnd(tx, user.id);
+        meter.step(1);
+        if (pending)
+          await endAllAccessPage(tx, config, user.id, ends, now, meter, budget.value, "operator");
+        return ok({ change: null });
+      }
       const rest = member.role
         .split(",")
         .filter((part) => part !== role)
@@ -395,9 +422,8 @@ export async function revokePlatformRole(
         const locked = await ownerLock(tx, o, organization, write, now);
         if (!locked.ok) return locked;
       } else if ((await write(tx)) === 0) return fail("conflict");
-      // An ended row goes with no hook, as in the ban (plan 12a review L3).
-      await deleteEndedSessions(tx, config, user.id, now);
-      await endAllAccess(tx, user.id, ends.ended ?? null, ends.families, now);
+      meter.step(losesOwner ? REVOKE_WRITE_WORST : 2);
+      await endAllAccessPage(tx, config, user.id, ends, now, meter, budget.value, "operator");
       const change: MemberChange =
         rest === ""
           ? { kind: "remove", member }
@@ -410,15 +436,25 @@ export async function revokePlatformRole(
     },
     {
       async committed({ change }, ends) {
-        if (change === null) return;
+        // A retry with no change can end sessions too.
         await sessionsEnded(config, ends.ended, "operator");
+        if (change === null) return;
         await memberChanged(config, summary, user, by, change);
       },
+      answerFamilyEnd: true,
     },
   );
   if (!done.ok) return done;
-  return ok({ auditId: done.value.auditId });
+  const { auditId, familyEndFailed } = done.value;
+  return ok(familyEndFailed ? { auditId, familyEndFailed } : { auditId });
 }
+
+/**
+ * The worst case of the member write of a revoke in D1 statements, for an
+ * adapter with no `statementsSent`: the owner lock reads the owners, updates
+ * the organization (2), writes the member row (2), and reads the owners again.
+ */
+const REVOKE_WRITE_WORST = 6;
 
 /**
  * Creates the first operator (spec 26 items 5 and 11). A secret or the app

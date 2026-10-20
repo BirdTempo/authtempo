@@ -85,9 +85,9 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | GET | `/operator/users` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `?after=&limit=` | `{ users, next }`: the users by id, 1 to 100 per page; 401 `unauthorized`; 403 `operator_required`; 429 `rate_limited`. Only with `operator.users` |
 | GET | `/operator/users/search` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, one of `?email=`, `?emailPrefix=`, `?id=` | `{ users, next }`; a prefix search reads the whole user table. Only with `operator.users` |
 | GET | `/operator/users/get` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `?userId=` | `{ user }`; 404 `not_found`. Only with `operator.users` |
-| POST | `/operator/users/ban` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `{ userId, reason, until? }` | `{ auditId }`; ends every session, challenge, handoff code, and OAuth refresh token and code of the user. Only with `operator.users` |
+| POST | `/operator/users/ban` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `{ userId, reason, until? }` | `{ auditId }`; ends every challenge, handoff code, and OAuth refresh token and code of the user, and the sessions that fit the call. The sweep ends the rest. Only with `operator.users` |
 | POST | `/operator/users/unban` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `{ userId, reason }` | `{ auditId }`; restores no session. Only with `operator.users` |
-| POST | `/operator/users/platform-role` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `{ userId, grant, reason }` | `{ auditId }`; a revoke ends every session of the user. Only with `operator.users` and `organizations.platformRole` |
+| POST | `/operator/users/platform-role` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `{ userId, grant, reason }` | `{ auditId }`; a revoke ends the sessions of the user that fit the call, and the sweep or a second revoke ends the rest. Only with `operator.users` and `organizations.platformRole` |
 | POST | `/operator/users/second-factor/disable` | `Authorization: Operator <secret>` with the scope `users`, or a platform operator's session, `{ userId, reason, proof: { method, reference, checkedAt } }` | `{ auditId }`; ASVS 5.0.0 6.4.4. Only with `operator.users` |
 | POST | `/operator/users/create-admin` | `Authorization: Operator <secret>` with the scope `users`; a session caller gets 403 `operator_required` | `{ userId, created, auditId }`. Only with `operator.users` and `organizations.platformRole` |
 | POST | `/operator/sessions/end-user` | `Authorization: Operator <secret>` with the scope `sessions`, or a platform operator's session, `{ userId, reason }` | `{ ended, more, auditId }`; call again while `more` is true. Only with `operator.users` |
@@ -1192,7 +1192,7 @@ const auth = createAuth({
   (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`,
   `expired`, `two_factor`, `revoked`, `email_change`, or `account_deleted` since plan 12a, or
   `oidc_logout` since plan 12e), once per ended
-  row. `sweepExpired` deletes expired rows in bulk and fires no hook, so
+  row. `sweepExpired` deletes expired rows in bulk and fires no hook for them, so
   `expired` fires only when a request presents the token after its expiry. A claim ends a claimant's sessions with
   `claim` in every flow that proves the address: the magic link, the
   social sign-in, the verify link, and the reset of an unverified user. A
@@ -1350,6 +1350,7 @@ It answers one count for each kind of row:
 - `verificationConsumed`: consumed verification rows one day after the consume. This only matters when `magicLink.ttlMinutes` is above one day.
 - `invitations`: invitations that are accepted or expired.
 - `sessions`: sessions past their expiry.
+- `pendingSessions`: sessions that a ban or a revoke of the platform role left past its call budget, ended with `session.afterEnd`. The step runs last, in the calls that the outbox leaves, and a row of it waits for the next sweep when it does not fit. Every door refuses such a session in the meantime.
 - `apiTokens`: API tokens past their expiry. A token with no expiry stays.
 - `trustedDevices`: trusted devices past their expiry.
 - `totpSetups`: TOTP setups that no enable confirmed within 15 minutes.
@@ -1359,7 +1360,7 @@ It answers one count for each kind of row:
 - `limits`: limit windows that ended; 0 when the limiter has no `sweep`.
 - `oauthDevices`: device grants past their expiry: pending, decided, and spent.
 - `oauthSessionLinks`: client links whose session is gone, at most 250 per sweep, and as many as the calls of the sweep allow. The sweep reads all links in turn. Each one becomes a back-channel logout: an expiry ends a session too.
-- `oauthLogouts`: back-channel logouts, at most 50 per sweep. The two back-channel steps run last. The whole sweep fits 50 calls, its posts too: D1 Free allows 50 queries per run (D1 limits page of 21 April 2026), and Workers Free allows 50 subrequests (Workers limits page of 12 October 2026), each read 2026-10-21. Each step stops before a call that does not fit, and a posted row always has room for its delete. A test on D1 sent 90 rows in 20 sweeps or fewer. Run the sweep more often than once an hour to send more. A storage error in either step writes one log line and counts 0. A stop loses no logout. The rows of a page of links and the delete of those links are one write, and only a post that went out and failed counts as an attempt. Each due row gets one more attempt. The count holds the rows that a client took, and the rows deleted after their sixth attempt.
+- `oauthLogouts`: back-channel logouts, at most 50 per sweep. The two back-channel steps run before the pending sessions. The whole sweep fits 50 calls, its posts too: D1 Free allows 50 queries per run (D1 limits page of 21 April 2026), and Workers Free allows 50 subrequests (Workers limits page of 12 October 2026), each read 2026-10-21. Each step stops before a call that does not fit, and a posted row always has room for its delete. A test on D1 sent 90 rows in 20 sweeps or fewer. Run the sweep more often than once an hour to send more. A storage error in either step writes one log line and counts 0. A stop loses no logout. The rows of a page of links and the delete of those links are one write, and only a post that went out and failed counts as an attempt. Each due row gets one more attempt. The count holds the rows that a client took, and the rows deleted after their sixth attempt.
 - `oauthClientSecrets`: old OAuth client secrets past the overlap of a rotation, cleared from the client.
 
 ```ts

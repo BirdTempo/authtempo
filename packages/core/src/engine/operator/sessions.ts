@@ -78,10 +78,10 @@ function reasonOf(
  * `operator-sessions-budget.test.ts`. The hold is a read and a batch of 2.
  * The expired rows are the lock read of `lockInOrder` and 2 deletes.
  */
-const STEP_WORST = { hold: 3, expired: 3 } as const;
+export const STEP_WORST = { hold: 3, expired: 3 } as const;
 
 /** The calls of `targetOf`: the user, and for a user actor the platform organization and the member row. */
-const TARGET_CALLS: Readonly<Record<OperatorActor["kind"], number>> = {
+export const TARGET_CALLS: Readonly<Record<OperatorActor["kind"], number>> = {
   user: 3,
   secret: 1,
   app: 1,
@@ -95,7 +95,7 @@ const TARGET_CALLS: Readonly<Record<OperatorActor["kind"], number>> = {
  * one family at the least: 2 calls of `revokeFamily`.
  */
 const LAST_PAGE_CALLS = 6;
-const FAMILY_CALLS = 2;
+export const FAMILY_CALLS = 2;
 
 /**
  * Ends the access of one user, one page per call (spec 26 item 5; ASVS
@@ -111,7 +111,7 @@ const FAMILY_CALLS = 2;
  * user row first (`holdUser`, the lock order of every account write). Then
  * it deletes the challenges, the expired sessions with no hook, a page of
  * the live sessions by id (`endSessionPage`), and the handoff codes. That
- * is the order of `endAllAccess`. When no session stays, the same call
+ * is the order of `endAllAccessPage`. When no session stays, the same call
  * deletes the refresh tokens of as many OAuth families as the calls left
  * allow, and the OAuth codes. The audit row holds `data: { ended }`.
  * `more` is true while sessions or families stay, and the caller calls
@@ -164,7 +164,7 @@ export async function endUserSessions(
       // The user row first: the lock order of every account write (user-hold.ts).
       await holdUser(tx, userId);
       meter.step(STEP_WORST.hold);
-      // A challenge first, as in endAllAccess: a verify spends its challenge as its last statement.
+      // A challenge first, as in endAllAccessPage: a verify spends its challenge as its last statement.
       await deleteTwoFactorChallenges(tx, userId);
       meter.step(1);
       // An ended row goes with no hook, as in the ban: it gets no `operator` event.
@@ -287,7 +287,7 @@ export const OPERATOR_CALLS_BEFORE: Readonly<Record<OperatorActor["kind"], numbe
  * and the ready check of the storage. The answer is `invalid_body` too
  * when the work would get fewer than `least` calls.
  */
-async function workBudget(
+export async function workBudget(
   storage: StorageAdapter,
   actor: OperatorActor,
   callsUsed: unknown,
@@ -334,7 +334,7 @@ async function workBudget(
  * The answer is the count of deleted rows, `stopped` when the budget left
  * rows of the list, and `used`, the calls of the page.
  */
-async function endSessionPage(
+export async function endSessionPage(
   tx: StorageAdapter,
   config: ResolvedConfig,
   rows: readonly SessionRow[],

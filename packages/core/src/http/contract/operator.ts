@@ -135,10 +135,16 @@ const OperatorAuditJson = z.strictObject({
 
 /** The answer of each write but create-admin and the session ends: the id of its audit row. */
 const auditAnswer = z.strictObject({ auditId: z.string() });
+/** The ban and the revoke: `familyEndFailed` when `endFamilies` threw after the commit (ruling 37). */
+const accessEndAnswer = z.strictObject({
+  auditId: z.string(),
+  familyEndFailed: z.literal(true).optional(),
+});
 const sessionsEnded = z.strictObject({
   ended: z.number().int(),
   more: z.boolean(),
   auditId: z.string(),
+  familyEndFailed: z.literal(true).optional(),
 });
 const jsonBody = <T extends z.ZodType>(schema: T) =>
   ({ schema, media: ["json"], parsedBy: "zod" }) as const;
@@ -197,7 +203,7 @@ export const OPERATOR_CONTRACT = {
   },
   "POST /operator/users/ban": {
     body: jsonBody(banBody),
-    answer: { kind: "json", schema: auditAnswer },
+    answer: { kind: "json", schema: accessEndAnswer },
   },
   "POST /operator/users/unban": {
     body: jsonBody(userReasonBody),
@@ -205,7 +211,7 @@ export const OPERATOR_CONTRACT = {
   },
   "POST /operator/users/platform-role": {
     body: jsonBody(platformRoleBody),
-    answer: { kind: "json", schema: auditAnswer },
+    answer: { kind: "json", schema: accessEndAnswer },
   },
   "POST /operator/users/second-factor/disable": {
     body: jsonBody(factorDisableBody),

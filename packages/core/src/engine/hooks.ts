@@ -211,7 +211,10 @@ export interface SessionHooks {
     via: SessionVia;
   }): Awaitable<SessionPatchAnswer>;
   afterCreate?(e: { session: SessionRow; user: UserRow; via: SessionVia }): Awaitable<void>;
-  /** Once per session row that a flow deleted. The sweep fires none. */
+  /**
+   * Once per session row that a flow deleted. The sweep fires it only for
+   * a session that a ban or a revoke left for it (ruling 44 of plan 12f).
+   */
   afterEnd?(e: { session: SessionRow; reason: SessionEndReason }): Awaitable<void>;
 }
 

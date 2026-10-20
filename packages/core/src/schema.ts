@@ -127,7 +127,14 @@ export type VerificationPurpose =
    * the user id, so one user has one live link; valueHash: the SHA-256 hex
    * of the `ad_` token; data: null.
    */
-  | "account-delete";
+  | "account-delete"
+  /**
+   * The sessions that a ban or a revoke of the platform role left for the
+   * sweep (ruling 44 of plan 12f). identifier: the user id; valueHash: the
+   * SHA-256 hex of `session-end:<id>`; data: { reason, before }. Lives
+   * 3650 days; the sweep deletes it when no session from before `before` stays.
+   */
+  | "session-end";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;

@@ -4,6 +4,7 @@ import { type Meter, meterOf } from "../storage/meter.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { deliverDueLogouts } from "./oauth-logout.js";
 import { writeLogoutPage } from "./oauth-outbox.js";
+import { sweepPendingEnds } from "./operator/access-end.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
 export interface SweepResult {
@@ -12,6 +13,11 @@ export interface SweepResult {
   invitations: number;
   /** Session rows past `expiresAt`. */
   sessions: number;
+  /**
+   * Sessions that a ban or a revoke of the platform role left past its call
+   * budget, ended with `session.afterEnd` (ruling 44 of plan 12f).
+   */
+  pendingSessions: number;
   /** API token rows past `expiresAt`. A token with no expiry is never swept. */
   apiTokens: number;
   /** Trusted device rows past `expiresAt` (plan 9f). */
@@ -334,11 +340,20 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
     "outbox",
     deliverDueLogouts(config, meter, SWEEP_CALL_BUDGET),
   );
+  // Last, in the calls that stay. Every door already refuses such a
+  // session: `bannedFor` for a ban, and the live role read of each operator
+  // check for a revoke. So a logout, which reaches another party, comes
+  // first. The step reads nothing when its least work does not fit.
+  const pendingSessions = await softStep(
+    "pending end",
+    sweepPendingEnds(config, meter, SWEEP_CALL_BUDGET),
+  );
   return {
     verificationExpired,
     verificationConsumed,
     invitations: accepted + expired,
     sessions,
+    pendingSessions,
     apiTokens,
     trustedDevices,
     jwks,

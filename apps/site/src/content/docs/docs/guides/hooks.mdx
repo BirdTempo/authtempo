@@ -74,7 +74,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 - The rows that the delete removes fire no member or identity hook.
 - A refusal message of 1 to 200 characters with no control character reaches the caller. Any other message becomes "The app refused this request.".
 - Hooks have no timeout. A hook that never settles holds the request, and a before hook holds the transaction.
-- The sweep fires no hook. `expired` fires only when a request presents a token after its expiry.
+- The sweep fires one hook only: `session.afterEnd` with `banned` or `operator` for a session that a ban or a revoke left for it. `expired` fires only when a request presents a token after its expiry.
 - Core has no request hooks. Wrap `auth.handle`, and read `auth.caller(request)`.
 
 :::caution
