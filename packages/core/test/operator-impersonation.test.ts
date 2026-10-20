@@ -158,6 +158,8 @@ describe("the impersonation (plan 12f Task 11)", () => {
       ["impersonation_stop", "user", w.operator.user.id, w.target.user.id],
     ]);
     expect(rows[0]?.reason).toBe(REASON);
+    // The stop named no reason: the row holds the fixed text.
+    expect(rows[1]?.reason).toBe("The operator stopped the impersonation.");
     expect(rows[0]?.data).toEqual({ sessionId: expect.any(String), expiresAt: body.expiresAt });
     const startData = rows[0]?.data as { sessionId: string } | undefined;
     expect(rows[1]?.data).toEqual({ sessionId: startData?.sessionId });
