@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { HookRefusal } from "../src/engine/hooks.js";
 import { mintSessionJwt, verifySessionJwt } from "../src/engine/jwt.js";
+import { defaultNoticeMail } from "../src/engine/notices.js";
 import { requireOperatorUser } from "../src/engine/operator/guards.js";
 import { startImpersonation } from "../src/engine/operator/impersonation.js";
 import { operatorApi } from "../src/engine/operator/index.js";
@@ -375,6 +376,31 @@ describe("the impersonation (plan 12f Task 11)", () => {
     );
     expect(stop.status).toBe(200);
     expect(reasons).toEqual(["impersonation_end"]);
+  });
+
+  it("sends the notice with no IP when the request has one", async () => {
+    const seen: (string | null)[] = [];
+    const w = await world(
+      {},
+      {
+        account: {
+          notices: {
+            mail: (input) => {
+              if (input.event === "impersonation_started") seen.push(input.ip);
+              return defaultNoticeMail(input);
+            },
+          },
+        },
+      },
+    );
+    const res = await startRequest(w, w.target.user.id, {
+      cookie: sessionCookie(w.operator.token),
+      "cf-connecting-ip": "203.0.113.7",
+    });
+    expect(res.status).toBe(200);
+    expect(seen).toEqual([null]);
+    // The IP reached the act: the audit row holds it (spec 26 item 8).
+    expect((await auditRows(w)).map((r) => r.ip)).toEqual(["203.0.113.7"]);
   });
 
   it("refuses an impersonation session at the operator guard", async () => {
