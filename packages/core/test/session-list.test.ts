@@ -119,6 +119,7 @@ describe("the session list (plan 12a, ASVS 5.0.0 7.5.2)", () => {
     ]);
     expect(Object.keys(r.value[0] ?? {}).sort()).toEqual([
       "activeOrganizationId",
+      "activeTeamId",
       "createdAt",
       "current",
       "expiresAt",

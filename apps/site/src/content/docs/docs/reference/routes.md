@@ -99,7 +99,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token |
 | Input | None |
-| Answer | `{ sessions }`: the live sessions of the user, newest first, at most 100. Each has `id`, `createdAt`, `lastSeenAt`, `expiresAt`, `freshAt`, `ip`, `userAgent`, `activeOrganizationId`, `current`, and `impersonation`. `impersonation` is true for a session that a platform operator opened, and the list names no operator. `lastSeenAt` moves only at the sliding refresh. `expiresAt` is the earlier of the row's expiry and the absolute cap |
+| Answer | `{ sessions }`: the live sessions of the user, newest first, at most 100. Each has `id`, `createdAt`, `lastSeenAt`, `expiresAt`, `freshAt`, `ip`, `userAgent`, `activeOrganizationId`, `activeTeamId`, `current`, and `impersonation`. `impersonation` is true for a session that a platform operator opened, and the list names no operator. `lastSeenAt` moves only at the sliding refresh. `expiresAt` is the earlier of the row's expiry and the absolute cap |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 <h3 id="post-sessions-revoke"><code>POST /sessions/revoke</code></h3>

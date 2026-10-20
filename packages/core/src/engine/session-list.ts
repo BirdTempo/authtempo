@@ -49,6 +49,8 @@ export interface SessionSummary {
   ip: string | null;
   userAgent: string | null;
   activeOrganizationId: string | null;
+  /** The team the session acts in, a team of the active organization (plan 12k). */
+  activeTeamId: string | null;
   /** True for the session of the caller. */
   current: boolean;
   /**
@@ -84,6 +86,7 @@ export async function listSessions(
       ip: s.ip,
       userAgent: s.userAgent,
       activeOrganizationId: s.activeOrganizationId,
+      activeTeamId: s.activeTeamId,
       current: s.id === input.session.session.id,
       impersonation: s.actorId !== null,
     })),

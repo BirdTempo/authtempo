@@ -617,6 +617,11 @@ describe("teams (plan 12k Task 5)", () => {
       status: 200,
       body: { session: { activeOrganizationId: organizationId, activeTeamId: core.id } },
     });
+    // The session list names the active team too (ruling 15).
+    expect(await json(await w.auth.handle(get("/auth/sessions", h)))).toMatchObject({
+      status: 200,
+      body: { sessions: [{ activeOrganizationId: organizationId, activeTeamId: core.id }] },
+    });
     expect(await active(null)).toMatchObject({
       status: 200,
       body: { session: { activeOrganizationId: organizationId, activeTeamId: null } },
