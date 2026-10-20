@@ -21,9 +21,9 @@ import type { MemberSummary, OrganizationSummary } from "./organizations.js";
 export type Awaitable<T> = T | Promise<T>;
 
 /**
- * How a member row came: the creator's owner row, an add by an admin, an
- * accepted invitation, or an operator act of plan 12f (the grant of the
- * platform role and `createAdmin`).
+ * How a member row came. `create`: the creator's owner row. `add`: an add by
+ * an admin. `invitation`: an accepted invitation. `operator`: an operator act
+ * of plan 12f, the grant of the platform role or `createAdmin`.
  */
 export type MemberVia = "create" | "add" | "invitation" | "operator";
 /** A remove by another member, a leave by the member, or the revoke of the platform role (plan 12f). */
@@ -215,8 +215,11 @@ export interface SessionHooks {
   afterEnd?(e: { session: SessionRow; reason: SessionEndReason }): Awaitable<void>;
 }
 
-/** How a user row came: the flow's sign-in, or a reset that created the user (plan 12a). */
-/** `operator`: `createAdmin` of plan 12f creates the user, with no proof of the address. */
+/**
+ * How a user row came: the flow's sign-in, or a reset that created the user
+ * (plan 12a). `operator`: `createAdmin` of plan 12f creates the user, with no
+ * proof of the address.
+ */
 export type UserCreateVia = SessionVia | "password_reset" | "operator";
 /** The profile update, the change of address (plan 12a), or an operator's ban and unban (plan 12f). */
 export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban";

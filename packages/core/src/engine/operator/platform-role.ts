@@ -50,9 +50,9 @@ interface Platform {
 }
 
 /**
- * The first checks of the three acts, in order: the tool is on (`users` and
- * `organizations.platformRole`, else `not_found`), the actor holds the
- * scope `users`, and the reason is valid.
+ * The first checks of the three acts, in this order. The tool is on:
+ * `operator.users` and `organizations.platformRole`, else `not_found`. The
+ * actor holds the scope `users`. The reason is valid.
  */
 function platformOf(
   config: ResolvedConfig,
@@ -237,11 +237,11 @@ function raced(err: unknown): Result<never> {
  * platform organization must exist (`not_found`): `createAdmin` makes it.
  *
  * One transaction adds the role part to the target's member row of the
- * platform organization, or creates the row with the role alone, and
- * writes the audit row `platform_role_grant`. A target that holds the role
- * already gets no change and the audit row. The member hooks of plan 9d
- * run with `via: "operator"`; a change of the parts of a row runs the role
- * hooks. `by` is null for a secret and the app.
+ * platform organization. When no row exists, it creates the row with the
+ * role alone. The audit row `platform_role_grant` comes last. A target
+ * that holds the role already gets no change and the audit row. The member
+ * hooks of plan 9d run with `via: "operator"`; a change of the parts of a
+ * row runs the role hooks. `by` is null for a secret and the app.
  */
 export async function grantPlatformRole(
   config: ResolvedConfig,
@@ -313,17 +313,18 @@ export async function grantPlatformRole(
  * One transaction removes the role part from the target's member row of
  * the platform organization. A row with no part left goes. When the change
  * takes the owner rank from the row, the owner lock of plan 6 guards the
- * write, and a revoke that leaves no owner answers `last_owner`. Then
- * `endAllAccess` ends every session, challenge, handoff code, and OAuth
- * refresh token and code of the target, because an open session holds
- * power that the role no longer gives (ASVS 5.0.0 8.3.2). The audit row
- * `platform_role_revoke` comes last. A target with no role part gets no
- * change, no end of access, and the audit row.
+ * write. A revoke that leaves no owner answers `last_owner`. Then
+ * `endAllAccess` ends every session, challenge, and handoff code of the
+ * target. It also ends the OAuth refresh tokens and codes. An open session
+ * holds power that the role no longer gives (ASVS 5.0.0 8.3.2). The audit
+ * row `platform_role_revoke` comes last. A target with no role part gets
+ * no change, no end of access, and the audit row.
  *
- * After the commit, in the order of ruling 2: `session.afterEnd` with
- * `operator` per session, the back-channel logouts, the member hooks with
- * `via: "operator"` (the role hooks for a row that stays), then
- * `afterAction` and `endFamilies` in `operatorAct`.
+ * After the commit, the steps run in the order of ruling 2. First,
+ * `session.afterEnd` fires with `operator` for each session. Then the
+ * back-channel logouts go, and the member hooks run with `via: "operator"`
+ * (the role hooks for a row that stays). Last, `operatorAct` runs
+ * `afterAction` and `endFamilies`.
  */
 export async function revokePlatformRole(
   config: ResolvedConfig,
@@ -442,14 +443,14 @@ export async function revokePlatformRole(
  * `created` is true only when the user row is new. The audit row names the
  * user in `targetUserId`, with `data` `{ created, organizationCreated }`.
  * The new operator has no power before the first proof of the mailbox and
- * a second factor, because `requireOperatorUser` refuses an unverified
- * address and a user with no factor (spec 26 item 2). A proof of the
+ * a second factor (spec 26 item 2). `requireOperatorUser` refuses an
+ * unverified address and a user with no factor. A proof of the
  * mailbox claims the address (`claimEmail`), so a stranger who signed up
  * at the address first loses every credential.
  *
  * The reads before the act give the draft its user id. The act reads the
- * organization and the user again, and a parallel change answers
- * `conflict`, as does a unique key that a parallel call took first.
+ * organization and the user again. A parallel change answers `conflict`. A
+ * unique key that a parallel call took first also answers `conflict`.
  */
 export async function createAdmin(
   config: ResolvedConfig,

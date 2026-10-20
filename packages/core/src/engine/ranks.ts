@@ -17,8 +17,8 @@ export function rankOf(ranks: Readonly<Record<string, number>>, role: string): n
 
 /**
  * True when the role string holds `part` as one of its comma parts. This is
- * the one part rule: the platform guard, the platform role acts, and
- * `roleAllowedIn` read it, so a platform operator is the same user for all.
+ * the one part rule. The platform guard, the platform role acts, and
+ * `roleAllowedIn` read it, so all three agree on a platform operator.
  */
 export function holdsRolePart(role: string, part: string): boolean {
   return role.split(",").includes(part);

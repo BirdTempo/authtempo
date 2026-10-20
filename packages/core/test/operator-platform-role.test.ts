@@ -39,9 +39,9 @@ const BC = "https://client.example.com/backchannel";
 const DAY_MS = 86_400_000;
 
 /**
- * The engine view with member hooks that write one line per event: the
- * point, `via` (or `-` for a role change, which has none), the role, and
- * whether `by` is null.
+ * The engine view with member hooks that write one line per event. A line
+ * holds the point, `via`, the role, and whether `by` is null. A role change
+ * has no `via`, so its line holds `-`.
  */
 async function hooked(extra: Partial<AuthConfig> = {}) {
   const events: string[] = [];
