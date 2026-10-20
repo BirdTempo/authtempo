@@ -206,6 +206,15 @@ describe("the grant and touch checks (plan 12k Task 3)", () => {
     return { w, sent, owner, admin, grader, organizationId };
   }
 
+  it("refuses the removal of a member of a lower rank whose statements the caller lacks", async () => {
+    const { w, admin, grader, organizationId } = await graded();
+    expect(
+      await w.auth.api.removeMember({ user: admin, organizationId, userId: grader.id }),
+    ).toMatchObject({ ok: false, code: "forbidden_rank" });
+    const roles = (await w.storage.findMany("member", [])).map((m) => m.role).sort();
+    expect(roles).toEqual(["admin", "grader", "owner"]);
+  });
+
   it("refuses an accept that raises a member whom the inviter may not touch", async () => {
     const { w, sent, admin, grader, organizationId } = await graded();
     // member ranks above grader and is a subset of admin, so the invite is a valid grant.
@@ -225,6 +234,63 @@ describe("the grant and touch checks (plan 12k Task 3)", () => {
     });
     const roles = (await w.storage.findMany("member", [])).map((m) => m.role).sort();
     expect(roles).toEqual(["admin", "grader", "owner"]);
+    expect(await w.storage.findMany("invitation", [])).toEqual([]);
+  });
+
+  it("refuses an accept after the inviter moves to a role of one rank without the granted statements", async () => {
+    const sent: string[] = [];
+    const w = world({
+      organizations: {
+        roles: {
+          ...CONSUMER_D_ROLES,
+          recruiter: { rank: 2, permissions: { invitation: ["read", "create"] } },
+        },
+      },
+      mail: {
+        send: async (m) => {
+          sent.push(m.text);
+        },
+      },
+    });
+    const owner = await w.user("owner@example.com");
+    const guardian = await w.user("guardian@example.com");
+    const x = await w.user("x@example.com");
+    const org = mustOk(
+      await w.auth.api.createOrganization({ user: owner, slug: "school", name: "School" }),
+    );
+    const organizationId = org.organization.id;
+    mustOk(
+      await w.auth.api.addMember({
+        user: owner,
+        organizationId,
+        userId: guardian.id,
+        role: "guardian",
+      }),
+    );
+    mustOk(
+      await w.auth.api.inviteMember({
+        user: guardian,
+        organizationId,
+        email: x.email,
+        role: "learner",
+      }),
+    );
+    const token = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(sent.at(-1) ?? "")?.[1] ?? "";
+    // recruiter keeps rank 2 and invitation:create, but not member:read, which learner holds.
+    mustOk(
+      await w.auth.api.updateMemberRole({
+        user: owner,
+        organizationId,
+        userId: guardian.id,
+        role: "recruiter",
+      }),
+    );
+    expect(await w.auth.api.acceptInvitation({ user: x, token, ip: null })).toMatchObject({
+      ok: false,
+      code: "invalid_token",
+    });
+    const roles = (await w.storage.findMany("member", [])).map((m) => m.role).sort();
+    expect(roles).toEqual(["owner", "recruiter"]);
     expect(await w.storage.findMany("invitation", [])).toEqual([]);
   });
 });
