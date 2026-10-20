@@ -3,7 +3,6 @@ import { BODY_CAP_BYTES, textOf } from "./checks.js";
 import { Stop, UsageError } from "./errors.js";
 import { fetchWithin, HostError } from "./net.js";
 import type { Ctx } from "./output.js";
-import { CALLS_PER_HOUR } from "./rewrap-limits.js";
 import { DEFAULT_TOKEN_ENV, readSecret } from "./secrets.js";
 
 /** One call of an operator route of core (plan 11c2). */
@@ -23,7 +22,49 @@ export interface OperatorCall {
   ms: number;
   /** The largest body that the call reads, in bytes. A larger body is a stop. Without it, `BODY_CAP_BYTES`. */
   maxBytes?: number;
+  /**
+   * The query of a GET (plan 12f). It goes in the URL only: no stop text
+   * names it, because a search query can hold an address.
+   */
+  query?: Readonly<Record<string, string>>;
+  /**
+   * The calls per IP per hour of the route's limiter, for the 429 text
+   * (plan 12f Task 12): `CALLS_PER_HOUR` for the routes of 11c2, and
+   * `OPERATOR_USERS_PER_IP.max` for the user tools of 12f.
+   */
+  perHour: number;
+  /** The scope that the route needs (spec 26 item 3). The 403 text names it. */
+  scope?: OperatorScope;
+  /**
+   * True for a route of the user, session, and audit tools of plan 12f.
+   * Their 404 text names `operator.users` and the scope, not the secret
+   * routes of 11c2.
+   */
+  tool?: boolean;
+  /** What the command checks for an `invalid_body` answer: the text after the code. */
+  invalid?: string;
 }
+
+/** The scopes of a named operator secret (spec 26 item 3). */
+export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit";
+
+/**
+ * The text of each refusal code that a write of plan 12f can answer, by its
+ * cause. `operator_required` and `invalid_body` have their own texts in
+ * `operatorCall`; 401, 404, and 429 have theirs by status.
+ */
+const REFUSALS: Readonly<Record<string, string>> = {
+  account_banned: "the user is banned; unban the user first",
+  email_unverified:
+    "the user has not verified the address; the platform role needs a verified address",
+  member_limit: "the platform organization has its largest count of members",
+  last_owner: "the user is the last owner of the platform organization; add another owner first",
+  conflict: "another change of this user ran at the same time; read the user, then run it again",
+  operator_self: "an operator cannot act on their own user",
+  totp_not_enabled: "the user has no second factor on",
+  hook_refused: "a hook of the deployment refused the act (hooks.operator.beforeAction)",
+  hook_failed: "a hook of the deployment failed; read the log of the deployment",
+};
 
 /** The parsed values of the four operator flags of `OPERATOR_FLAGS`. */
 export interface OperatorValues {
@@ -76,15 +117,18 @@ export class OperatorStop extends Stop {
 }
 
 /**
- * The shared call of the operator routes of plan 11c2: `secret status`,
- * `secret rewrap`, and the deployment part of `info`. It sends `Operator
- * <secret>` through `fetchWithin`, which follows no redirect. A 404, a 401,
- * and a 429 are stops with their own text. Any other status, or a body that
- * is not JSON, is a stop that names the request. A 200 answers its parsed
- * body, which the caller validates.
+ * The shared call of the operator routes: `secret status`, `secret
+ * rewrap`, the deployment part of `info` (plan 11c2), and the commands of
+ * plan 12f. It sends `Operator <secret>` through `fetchWithin`, which
+ * follows no redirect. A 404, a 401, and a 429 are stops with their own
+ * text. A 403 `operator_required` names the scope, and each other refusal
+ * code of `REFUSALS` names its cause. Any other status, or a body that is
+ * not JSON, is a stop that names the request with no query. A 200 answers
+ * its parsed body, which the caller validates.
  */
 export async function operatorCall(ctx: Ctx, call: OperatorCall): Promise<unknown> {
   const url = `${call.base}${call.basePath}${call.path}`;
+  const query = call.query === undefined ? "" : new URLSearchParams(call.query).toString();
   const init: RequestInit = {
     method: call.method,
     headers: {
@@ -93,8 +137,16 @@ export async function operatorCall(ctx: Ctx, call: OperatorCall): Promise<unknow
     },
     ...(call.body === undefined ? {} : { body: JSON.stringify(call.body) }),
   };
-  const res = await fetchWithin(ctx.fetch, url, init, call.ms);
+  const res = await fetchWithin(ctx.fetch, query === "" ? url : `${url}?${query}`, init, call.ms);
   if (res.status === 404) {
+    if (call.tool === true) {
+      const why = "the operator user tools are off";
+      throw new OperatorStop(
+        404,
+        why,
+        `${why}: set operator.users and a secret with the ${call.scope ?? "users"} scope in the config of the deployment`,
+      );
+    }
     const why = "the operator route is off, or core is older than 11c2";
     throw new OperatorStop(
       404,
@@ -104,7 +156,7 @@ export async function operatorCall(ctx: Ctx, call: OperatorCall): Promise<unknow
   }
   if (res.status === 401) throw new OperatorStop(401, "the deployment refused the operator secret");
   if (res.status === 429) {
-    const why = `the operator routes allow ${CALLS_PER_HOUR} calls per IP per hour`;
+    const why = `the operator routes allow ${call.perHour} calls per IP per hour`;
     throw new OperatorStop(429, why, `${why}; wait, then run it again`);
   }
   // The capped reader of the checks: it cancels the stream at the cap, so a
@@ -123,6 +175,21 @@ export async function operatorCall(ctx: Ctx, call: OperatorCall): Promise<unknow
   } catch {
     body = undefined;
   }
+  const code = res.status === 200 ? undefined : (body as { error?: unknown } | null)?.error;
+  if (code === "operator_required" && res.status === 403)
+    throw new OperatorStop(
+      403,
+      call.scope === undefined
+        ? "the operator secret has no scope for this route"
+        : `the operator secret has no ${call.scope} scope`,
+    );
+  if (code === "invalid_body" && res.status === 400)
+    throw new OperatorStop(
+      400,
+      `the deployment refused a value (invalid_body)${call.invalid === undefined ? "" : `: ${call.invalid}`}`,
+    );
+  if (typeof code === "string" && Object.hasOwn(REFUSALS, code))
+    throw new OperatorStop(res.status, REFUSALS[code] ?? code);
   if (res.status !== 200 || body === undefined)
     throw new OperatorStop(
       res.status,

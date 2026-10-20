@@ -16,7 +16,7 @@ import type { SecretJson, SecretRewrapJson, SecretStatusJson } from "../json.js"
 import { baseOf, basePathOf, timeoutOf } from "../net.js";
 import { type OperatorValues, operatorCall, readOperatorSecret } from "../operator-client.js";
 import { type Ctx, printJson } from "../output.js";
-import { DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "../rewrap-limits.js";
+import { CALLS_PER_HOUR, DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "../rewrap-limits.js";
 import { DEFAULT_TOKEN_ENV } from "../secrets.js";
 
 const OPTIONS = {
@@ -173,7 +173,14 @@ async function runStatus(argv: string[], ctx: Ctx): Promise<number> {
   const secret = readOperatorSecret(ctx, values);
   const path = "/operator/secrets/status";
   ctx.err(`reading ${t.base}${t.basePath}${path}`);
-  const body = await operatorCall(ctx, { ...t, path, method: "GET", secret });
+  const body = await operatorCall(ctx, {
+    ...t,
+    path,
+    method: "GET",
+    secret,
+    perHour: CALLS_PER_HOUR,
+    scope: "secrets",
+  });
   const versions = versionCounts(body);
   if (versions === null)
     throw new Stop(`GET ${t.base}${t.basePath}${path} answered 200 with no list of version counts`);
@@ -266,6 +273,8 @@ async function runRewrap(argv: string[], ctx: Ctx): Promise<number> {
         method: "POST",
         body: { limit, ...(after === null ? {} : { after }) },
         secret,
+        perHour: CALLS_PER_HOUR,
+        scope: "secrets",
       });
       const answer = rewrapAnswer(body);
       if (answer === null)

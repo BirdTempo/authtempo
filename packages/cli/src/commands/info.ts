@@ -10,6 +10,7 @@ import { parseJsonc } from "../jsonc.js";
 import { baseOf, basePathOf, HostError, timeoutOf } from "../net.js";
 import { OperatorStop, operatorCall, readOperatorSecret } from "../operator-client.js";
 import { type Ctx, printJson } from "../output.js";
+import { CALLS_PER_HOUR } from "../rewrap-limits.js";
 import { readableVersion, readD1Version } from "../schema-version.js";
 import { type D1Target, findWranglerConfig, readD1Project, wranglerOf } from "../seams/d1.js";
 import { openPostgres, type PostgresSeam, storageCode } from "../seams/postgres.js";
@@ -283,6 +284,7 @@ async function readDeployment(
       path: "/operator/info",
       method: "GET",
       maxBytes: INFO_MAX_BYTES,
+      perHour: CALLS_PER_HOUR,
     });
   } catch (e) {
     if (e instanceof OperatorStop)
