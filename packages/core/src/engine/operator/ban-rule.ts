@@ -23,5 +23,6 @@ export function activeBan(user: Pick<UserRow, "bannedAt" | "banUntil">, now: Dat
  */
 export function bannedFor(user: Pick<UserRow, "bannedAt" | "banUntil">, issuedAt: Date): boolean {
   if (user.bannedAt === null) return false;
+  // Strict at banUntil (ruling 29): a real race row is written before the unban reads its clock.
   return user.banUntil === null || issuedAt.getTime() < user.banUntil.getTime();
 }

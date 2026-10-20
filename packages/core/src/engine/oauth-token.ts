@@ -151,11 +151,20 @@ export const tokenLimited = async (config: ResolvedConfig, ip: string | null) =>
 /**
  * The user, while it exists, its address is verified, and no ban is active
  * (plan 12f). The refresh grant, the code exchange, the device poll, and
- * introspection read it.
+ * introspection read it. `issuedAt` is the time of the row that grants the
+ * tokens. With it, the call also refuses a row from before the end of the
+ * last ban (`bannedFor`, ruling 29). The ban deleted every such row, so it is a row
+ * that a race wrote beside the ban. It gives no token after the unban or
+ * the end either.
  */
-export async function liveUser(config: ResolvedConfig, userId: string): Promise<UserRow | null> {
+export async function liveUser(
+  config: ResolvedConfig,
+  userId: string,
+  issuedAt?: Date,
+): Promise<UserRow | null> {
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
   if (!user?.emailVerified || activeBan(user, config.clock.now())) return null;
+  if (issuedAt && bannedFor(user, issuedAt)) return null;
   return user;
 }
 
@@ -396,7 +405,8 @@ export async function exchangeCode(
     return oauthFail("invalid_dpop_proof");
   const askedResource = namedResource(input.resource);
   if (askedResource !== null && askedResource !== data.resource) return oauthFail("invalid_target");
-  const user = await liveUser(config, data.userId);
+  // The code row's time: a code that an authorize wrote beside the ban gives nothing (ruling 29).
+  const user = await liveUser(config, data.userId, consumed.value.createdAt);
   if (!user) return oauthFail("invalid_grant");
   // Every code comes from a consent that covers its scopes. A grant revoke
   // after the authorize step deletes the consent, and the code gives nothing.

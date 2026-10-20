@@ -694,42 +694,117 @@ describe("the ban (plan 12f Task 6)", () => {
     }
   });
 
-  it("refuses at the code exchange a code that an authorize wrote beside the ban", async () => {
-    const w = await world();
-    const s = await signedIn(w);
-    const clientId = await registered(w, [REDIRECT]);
-    // The authorize resolved its session before the ban. Its code write
-    // comes after the ban's commit, so the ban did not delete the code.
-    const storage = w.storage as StorageAdapter;
-    const create = storage.create.bind(storage);
-    let banned = false;
-    storage.create = async (model, data) => {
-      if (
-        model === "verification" &&
-        !banned &&
-        "purpose" in data &&
-        data.purpose === "oauth-code"
-      ) {
-        banned = true;
-        expect((await ban(w, s.user.id)).ok).toBe(true);
-      }
-      return create(model, data);
-    };
-    const p = await pkce();
-    const { code } = await authorized(w, s.cookie, {
-      clientId,
-      challenge: p.challenge,
-      scope: "mcp:read offline_access",
-    });
-    storage.create = create;
-    expect(banned).toBe(true);
-    const res = await w.auth.handle(exchange(code, clientId, p.verifier));
-    expect({ status: res.status, body: await res.json() }).toEqual(GRANT);
-  });
+  // Each moment of a race row: while the ban holds, after the unban, and
+  // after the end of a timed ban (rulings 28 and 29). Nothing comes back.
+  const MOMENTS = [
+    { moment: "while the ban holds", until: undefined, elapse: async () => {} },
+    {
+      moment: "after the unban",
+      until: undefined,
+      elapse: async (w: World, userId: string) => {
+        w.clock.advance(MINUTE_MS);
+        expect((await unban(w, userId)).ok).toBe(true);
+      },
+    },
+    {
+      moment: "after a timed ban ends",
+      until: MINUTE_MS,
+      elapse: async (w: World) => {
+        w.clock.advance(MINUTE_MS);
+      },
+    },
+  ];
 
-  it("refuses at the device poll an approval that landed beside the ban", async () => {
+  it.each(MOMENTS)(
+    "refuses at the code exchange a code that an authorize wrote beside the ban, $moment",
+    async ({ until, elapse }) => {
+      const w = await world();
+      const s = await signedIn(w);
+      const clientId = await registered(w, [REDIRECT]);
+      const end = until === undefined ? undefined : new Date(w.clock.now().getTime() + until);
+      // The authorize resolved its session before the ban. Its code write
+      // comes after the ban's commit, so the ban did not delete the code.
+      const storage = w.storage as StorageAdapter;
+      const create = storage.create.bind(storage);
+      let banned = false;
+      storage.create = async (model, data) => {
+        if (
+          model === "verification" &&
+          !banned &&
+          "purpose" in data &&
+          data.purpose === "oauth-code"
+        ) {
+          banned = true;
+          expect((await ban(w, s.user.id, end?.toISOString())).ok).toBe(true);
+        }
+        return create(model, data);
+      };
+      const p = await pkce();
+      const { code } = await authorized(w, s.cookie, {
+        clientId,
+        challenge: p.challenge,
+        scope: "mcp:read offline_access",
+      });
+      storage.create = create;
+      expect(banned).toBe(true);
+      await elapse(w, s.user.id);
+      const res = await w.auth.handle(exchange(code, clientId, p.verifier));
+      expect({ status: res.status, body: await res.json() }).toEqual(GRANT);
+    },
+  );
+
+  it.each(MOMENTS)(
+    "refuses at the device poll an approval that landed beside the ban, $moment",
+    async ({ until, elapse }) => {
+      const w = await world();
+      const s = await signedIn(w);
+      const registeredDevice = await w.auth.handle(
+        post("/auth/oauth/register", {
+          redirect_uris: [REDIRECT],
+          client_name: "Living room TV",
+          grant_types: ["authorization_code", "refresh_token", DEVICE_GRANT],
+        }),
+      );
+      const { client_id: clientId } = (await registeredDevice.json()) as { client_id: string };
+      const end = until === undefined ? undefined : new Date(w.clock.now().getTime() + until);
+      // The device page resolved its session before the ban. Its approval
+      // comes after the ban's commit: the ban keeps a pending row.
+      const storage = w.storage as StorageAdapter;
+      const update = storage.update.bind(storage);
+      let banned = false;
+      storage.update = async (model, where, patch) => {
+        if (
+          model === "oauthDevice" &&
+          !banned &&
+          "status" in patch &&
+          patch.status === "approved"
+        ) {
+          banned = true;
+          expect((await ban(w, s.user.id, end?.toISOString())).ok).toBe(true);
+        }
+        return update(model, where, patch);
+      };
+      const deviceCode = await approvedDevice(w, clientId, s.cookie);
+      storage.update = update;
+      expect(banned).toBe(true);
+      await elapse(w, s.user.id);
+      const res = await w.auth.handle(
+        tokenPost({ grant_type: DEVICE_GRANT, device_code: deviceCode, client_id: clientId }),
+      );
+      expect({ status: res.status, body: await res.json() }).toEqual(GRANT);
+    },
+  );
+
+  it("gives tokens for a code and a device approval made after the unban", async () => {
     const w = await world();
     const s = await signedIn(w);
+    expect((await ban(w, s.user.id)).ok).toBe(true);
+    w.clock.advance(MINUTE_MS);
+    expect((await unban(w, s.user.id)).ok).toBe(true);
+    w.clock.advance(1000);
+    const again = await signedIn(w);
+    const clientId = await registered(w, [REDIRECT]);
+    expect((await grant(w, again.cookie, clientId)).access_token).toEqual(expect.any(String));
     const registeredDevice = await w.auth.handle(
       post("/auth/oauth/register", {
         redirect_uris: [REDIRECT],
@@ -737,26 +812,12 @@ describe("the ban (plan 12f Task 6)", () => {
         grant_types: ["authorization_code", "refresh_token", DEVICE_GRANT],
       }),
     );
-    const { client_id: clientId } = (await registeredDevice.json()) as { client_id: string };
-    // The device page resolved its session before the ban. Its approval
-    // comes after the ban's commit: the ban keeps a pending row.
-    const storage = w.storage as StorageAdapter;
-    const update = storage.update.bind(storage);
-    let banned = false;
-    storage.update = async (model, where, patch) => {
-      if (model === "oauthDevice" && !banned && "status" in patch && patch.status === "approved") {
-        banned = true;
-        expect((await ban(w, s.user.id)).ok).toBe(true);
-      }
-      return update(model, where, patch);
-    };
-    const deviceCode = await approvedDevice(w, clientId, s.cookie);
-    storage.update = update;
-    expect(banned).toBe(true);
+    const { client_id: deviceClient } = (await registeredDevice.json()) as { client_id: string };
+    const deviceCode = await approvedDevice(w, deviceClient, again.cookie);
     const res = await w.auth.handle(
-      tokenPost({ grant_type: DEVICE_GRANT, device_code: deviceCode, client_id: clientId }),
+      tokenPost({ grant_type: DEVICE_GRANT, device_code: deviceCode, client_id: deviceClient }),
     );
-    expect({ status: res.status, body: await res.json() }).toEqual(GRANT);
+    expect(res.status).toBe(200);
   });
 
   it("answers inactive for a refresh token that an exchange wrote beside the ban", async () => {

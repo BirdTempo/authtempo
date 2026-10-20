@@ -401,7 +401,10 @@ export async function pollDevice(
     { status: "spent", updatedAt: now },
   );
   if (spent !== 1) return oauthFail("invalid_grant");
-  const user = await liveUser(config, row.userId);
+  // The device row's time (ruling 29): an approval that landed beside the ban
+  // gives nothing. A row that started before the end of a ban gives nothing
+  // either, also with an approval after the unban: the device starts again.
+  const user = await liveUser(config, row.userId, row.createdAt);
   if (!user) return oauthFail("invalid_grant");
   // A grant revoke after the approval deletes the consent, and the row gives nothing.
   if (!(await consentCovers(config, user.id, client.id, row.scopes)))
