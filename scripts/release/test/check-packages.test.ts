@@ -95,6 +95,20 @@ describe("check-packages", () => {
     ]);
   });
 
+  it("fails on a second fixed group", () => {
+    expect(run("two-groups").failures).toEqual(["fixed holds 2 groups, not 1 group"]);
+  });
+
+  it("fails on a linked group", () => {
+    expect(run("linked").failures).toEqual(["linked holds 1 group, not 0 groups"]);
+  });
+
+  it("throws on a linked value that is not a list of name lists", () => {
+    expect(() => run("bad-linked")).toThrow(
+      ".changeset/config.json: linked is not a list of name lists",
+    );
+  });
+
   it("fails on a listed name that is not a workspace package", () => {
     expect(run("stale").failures).toContain(
       "@authtempo/gone is in the fixed group and is not a workspace package",

@@ -4,20 +4,26 @@ import { join } from "node:path";
 /** The parts of .changeset/config.json that the release checks read. */
 export interface ChangesetConfig {
   fixed: string[][];
+  /** Changesets reads an absent `linked` as an empty list. */
+  linked: string[][];
   ignore: string[];
 }
 
 export function readChangesetConfig(root: string): ChangesetConfig {
   const config = JSON.parse(readFileSync(join(root, ".changeset/config.json"), "utf8")) as {
     fixed?: unknown;
+    linked?: unknown;
     ignore?: unknown;
   };
   const isNames = (v: unknown): v is string[] =>
     Array.isArray(v) && v.every((n) => typeof n === "string");
   if (!Array.isArray(config.fixed) || !config.fixed.every(isNames))
     throw new Error(".changeset/config.json: fixed is not a list of name lists");
+  const linked = config.linked ?? [];
+  if (!Array.isArray(linked) || !linked.every(isNames))
+    throw new Error(".changeset/config.json: linked is not a list of name lists");
   if (!isNames(config.ignore)) throw new Error(".changeset/config.json: ignore is not a name list");
-  return { fixed: config.fixed, ignore: config.ignore };
+  return { fixed: config.fixed, linked, ignore: config.ignore };
 }
 
 /**

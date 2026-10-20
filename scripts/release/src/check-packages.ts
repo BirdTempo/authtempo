@@ -9,6 +9,10 @@ export interface PackagesInput {
   packages: WorkspacePackage[];
   /** `fixed[0]` of .changeset/config.json: the released packages. */
   fixed: string[];
+  /** The count of groups in `fixed` of .changeset/config.json. */
+  fixedGroups: number;
+  /** The count of groups in `linked` of .changeset/config.json. */
+  linkedGroups: number;
   /** `ignore` of .changeset/config.json. */
   ignore: string[];
   /** release/unreleased.json: each package outside the group, with its reason. */
@@ -37,6 +41,14 @@ export function checkPackages(input: PackagesInput): Report {
   const ignore = new Set(input.ignore);
   const unreleased = new Set(Object.keys(input.unreleased));
   const names = new Set(input.packages.map((p) => p.name));
+
+  // One version needs one fixed group (spec 33 item 1.1). A second group or a
+  // linked group lets the versions of the released packages differ.
+  const groups = (n: number) => `${n} group${n === 1 ? "" : "s"}`;
+  if (input.fixedGroups !== 1)
+    failures.push(`fixed holds ${groups(input.fixedGroups)}, not 1 group`);
+  if (input.linkedGroups !== 0)
+    failures.push(`linked holds ${groups(input.linkedGroups)}, not 0 groups`);
 
   // A set of names hides a second folder with one name, so count the folders.
   const dirs = new Map<string, string[]>();
@@ -128,6 +140,8 @@ export function readInput(root: string): PackagesInput {
   return {
     packages: readWorkspace(root),
     fixed: config.fixed[0] ?? [],
+    fixedGroups: config.fixed.length,
+    linkedGroups: config.linked.length,
     ignore: config.ignore,
     unreleased: JSON.parse(readFileSync(join(root, "release/unreleased.json"), "utf8")) as Record<
       string,
