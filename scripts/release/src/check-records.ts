@@ -20,6 +20,9 @@ export type Growth = "top" | "end" | "never";
  * grows at the top, because `changeset version` writes the new section there.
  * The advisory record grows at the end (Task 12). A shipped migration never
  * changes, because a database that ran it does not run it again.
+ *
+ * The spec, the plan index, the plan files, and the ledgers are records too.
+ * No check holds them: a review holds them.
  */
 export const RECORD_GLOBS: readonly {
   glob: string;
@@ -101,8 +104,8 @@ function checkTop(path: string, base: string, head: string, failures: string[]):
 
 /**
  * Each record at the merge base of `main` is in the working tree with the same
- * bytes, and each new part is where its rule puts it (spec 33 item 3). A fault
- * in an old entry gets a correction in the next entry, never an edit.
+ * bytes (spec 33 item 3). Each new part is where its rule puts it. A fault in
+ * an old entry gets a correction in the next entry, never an edit.
  */
 export function checkRecords(input: { files: RecordFile[] }): Report {
   const failures: string[] = [];
@@ -130,8 +133,8 @@ export function checkRecords(input: { files: RecordFile[] }): Report {
 }
 
 /**
- * Reads each record path at the merge base with `ref` (git ls-tree) and in the
- * working tree, so a change that is not committed yet counts too.
+ * Reads each record path at the merge base with `ref` (git ls-tree). It also
+ * reads the working tree, so a change that is not committed yet counts too.
  */
 export function readInput(root: string, ref: string): { files: RecordFile[] } {
   const base = mergeBase(root, ref);

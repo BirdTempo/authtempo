@@ -39,7 +39,7 @@ export function showAt(root: string, ref: string, path: string): string | null {
 /**
  * Each path that differs between `base` and the working tree, with each
  * untracked file that git does not ignore. A change that is not committed yet
- * counts too. A move lists the old path and the new path: with the rename
+ * counts too. A move lists the old path and the new path. With the rename
  * detection of git, a move out of a released package lists only the new path.
  */
 export function changedFiles(root: string, base: string): string[] {
