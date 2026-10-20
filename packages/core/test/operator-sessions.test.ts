@@ -21,6 +21,8 @@ const USERS_ONLY = { kind: "secret", name: "support", scopes: ["users", "audit"]
 const BACKCHANNEL = "https://client.example.com/backchannel";
 /** The sign-up limit is 10 per IP per hour: a gap of 7 minutes keeps a run of sign-ups under it. */
 const SIGN_UP_GAP_MS = 7 * 60_000;
+const HOUR_MS = 60 * 60_000;
+const DAY_MS = 24 * HOUR_MS;
 
 /**
  * The HTTP view and the engine view of one config input on one storage,
@@ -202,6 +204,49 @@ async function linked(w: World, token: string, clientId: string): Promise<void> 
 }
 
 describe("the end of sessions by an operator (plan 12f Task 7)", () => {
+  it("deletes an expired session of one user with no operator event", async () => {
+    const w = await world({ hook: true });
+    const user = await userWith(w, "ada@example.com", 1);
+    // One hour before the old row expires, a new sign-in; two hours later only the new row is live.
+    w.clock.advance(w.config.session.ttlDays * DAY_MS - HOUR_MS);
+    const fresh = await openSession(w.config, { user, ip: null, userAgent: null, via: "password" });
+    w.clock.advance(2 * HOUR_MS);
+    expect(await sessionsOf(w.storage, user.id)).toHaveLength(2);
+    w.ended.length = 0;
+    const done = await w.api.sessions.endUser({
+      actor: APP,
+      userId: user.id,
+      reason: "Lost laptop",
+      ip: null,
+      userAgent: null,
+    });
+    if (!done.ok) throw new Error(done.code);
+    expect(done.value.ended).toBe(1);
+    expect(w.ended).toEqual([`${fresh.session.id}:operator`]);
+    expect(await sessionsOf(w.storage, user.id)).toEqual([]);
+  });
+
+  it("deletes an expired session in the end of all sessions with no operator event", async () => {
+    const w = await world({ hook: true });
+    const user = await userWith(w, "ada@example.com", 1);
+    w.clock.advance(w.config.session.ttlDays * DAY_MS - HOUR_MS);
+    const fresh = await openSession(w.config, { user, ip: null, userAgent: null, via: "password" });
+    w.clock.advance(2 * HOUR_MS);
+    expect(await sessionsOf(w.storage, user.id)).toHaveLength(2);
+    w.ended.length = 0;
+    const done = await w.api.sessions.endAll({
+      actor: APP,
+      reason: "Key leak",
+      ip: null,
+      userAgent: null,
+    });
+    if (!done.ok) throw new Error(done.code);
+    // The count holds every deleted row; the event goes to the live row only.
+    expect([done.value.ended, done.value.more]).toEqual([2, false]);
+    expect(w.ended).toEqual([`${fresh.session.id}:operator`]);
+    expect(await sessionsOf(w.storage)).toEqual([]);
+  });
+
   it("ends every session of one user, and fires afterEnd with the reason operator", async () => {
     const w = await world({ hook: true });
     const user = await userWith(w, "ada@example.com", 3);
