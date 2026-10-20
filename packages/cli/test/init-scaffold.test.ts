@@ -51,9 +51,9 @@ const fileOf = (files: TemplateFile[], path: string): string => {
 };
 
 /**
- * Each reference of a scaffold manifest that an app cannot install from the
- * registry at `version`: a workspace: range, or a workspace name or an
- * @authtempo name outside the fixed group, or a group name at another version.
+ * The references of a scaffold manifest that an app cannot install from the
+ * registry at `version`. These are a workspace: range, a workspace name or an
+ * @authtempo name outside the fixed group, and a group name at another version.
  */
 function unreleasedRefs(
   pkg: Manifest,
