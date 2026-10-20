@@ -196,8 +196,10 @@ export async function endOtherAccess(
  * 5.0.0 7.4.2). It ends every session, challenge, and handoff code through
  * `endAccess`, then the OAuth refresh tokens and codes. The API tokens stay:
  * each has its own revoke, and they work again after an unban (spec 26 item
- * 6). The caller runs, after its commit, `sessionsEnded`, `deliverLogouts`,
- * and `endFamilies` last (ruling 2). The answer is the count of sessions.
+ * 6). The logouts of the links go to the outbox in the same transaction,
+ * and the sweep sends them: the caller posts none (ruling 37). After its
+ * commit the caller runs `sessionsEnded`, and `endFamilies` last (ruling
+ * 2). The answer is the count of sessions.
  */
 export async function endAllAccess(
   tx: StorageAdapter,
