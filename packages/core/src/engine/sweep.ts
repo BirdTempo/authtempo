@@ -1,7 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { RETIRED_KEY_MS } from "../primitives/jwk.js";
 import { type Meter, meterOf } from "../storage/meter.js";
-import type { StorageAdapter } from "../storage/port.js";
+import type { StorageAdapter, Where } from "../storage/port.js";
 import { deliverDueLogouts } from "./oauth-logout.js";
 import { writeLogoutPage } from "./oauth-outbox.js";
 import { SETUP_TTL_MS } from "./totp.js";
@@ -252,8 +252,18 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   // A session row goes on its own only when someone presents its token
   // after the expiry. A row that nobody presents again keeps its IP address
   // and user agent with no limit (final review M-2, 2026-10-10).
-  const sessions = await storage.delete("session", [{ field: "expiresAt", op: "lt", value: now }]);
-  meter.step(1);
+  const expiredSessions: Where<"session">[] = [{ field: "expiresAt", op: "lt", value: now }];
+  // The row locks first, by id, in a transaction, as every multi-row
+  // session delete takes them (rulings 36 and 37 of plan 12f). One DELETE
+  // locks rows in the order of its scan, so it and endAll can wait on each
+  // other. An adapter with no row lock deletes in one statement.
+  const sessions = storage.lockInOrder
+    ? await storage.transaction(async (tx) => {
+        await tx.lockInOrder?.("session", expiredSessions);
+        return tx.delete("session", expiredSessions);
+      })
+    : await storage.delete("session", expiredSessions);
+  meter.step(storage.lockInOrder ? 2 : 1);
   // An expired token goes on its own only when a script presents it again.
   // A null expiry never matches lt (port.ts null rules), so it stays.
   // A row at exactly `expiresAt` is refused by `resolveApiToken` (`<=`) and goes at the next sweep.
