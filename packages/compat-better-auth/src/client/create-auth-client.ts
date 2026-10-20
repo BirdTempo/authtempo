@@ -1036,16 +1036,16 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
           (success) => ({ error: null, success }),
         );
       },
-      checkRolePermission({ role, permissions, permission }) {
-        const wanted = permissions ?? permission;
-        if (!wanted) return false;
+      checkRolePermission({ role, permissions }) {
+        // Better Auth reads `permissions` only; with none it answers false (permission.mjs:3).
+        if (!permissions) return false;
         // Better Auth's rule: one part of the role string that holds the request is enough.
         return role
           .split(",")
           .some(
             (part) =>
               Object.hasOwn(clientRoles, part) &&
-              (clientRoles[part] as Role).authorize(wanted).success,
+              (clientRoles[part] as Role).authorize(permissions).success,
           );
       },
     },

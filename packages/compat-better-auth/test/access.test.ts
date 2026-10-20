@@ -842,5 +842,8 @@ describe("the access control shim (spec 29 item 18)", () => {
         permissions: { project: ["write"] },
       }),
     ).toBe(false);
+    // Better Auth reads permissions only, so a request in permission is no request.
+    const singular = { role: "lead", permission: { invitation: ["create"] } };
+    expect(client.organization.checkRolePermission(singular as never)).toBe(false);
   });
 });

@@ -1165,18 +1165,25 @@ export interface AuthClient<TF extends boolean = false> {
         };
       } & RoleRef,
     ): Promise<CompatClientResult<{ success: true; roleData: OrganizationRoleData }>>;
-    /** Core's check of the session in the organization. `allowCreatorAllPermissions` answers NOT_SUPPORTED (501). */
+    /**
+     * Core's check of the session in the organization. `allowCreatorAllPermissions`
+     * answers NOT_SUPPORTED (501). Better Auth's body takes `permission` or
+     * `permissions` (organization.mjs:21, read 2026-10-21), so this call takes both.
+     */
     hasPermission(input: {
       permissions?: Record<string, readonly string[]>;
       permission?: Record<string, readonly string[]>;
       organizationId?: string;
       allowCreatorAllPermissions?: boolean;
     }): Promise<CompatClientResult<{ error: null; success: boolean }>>;
-    /** Better Auth's client check over the roles of `organizationClient`. It only hides a control. */
+    /**
+     * Better Auth's client check over the roles of `organizationClient`. It only
+     * hides a control. Better Auth reads `permissions` only (client.mjs:44 and
+     * client.d.mts:130, read 2026-10-21), so this call takes no `permission`.
+     */
     checkRolePermission(input: {
       role: string;
-      permissions?: Record<string, readonly string[]>;
-      permission?: Record<string, readonly string[]>;
+      permissions: Record<string, readonly string[]>;
     }): boolean;
   };
   passkey: {

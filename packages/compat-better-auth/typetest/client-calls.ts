@@ -160,3 +160,14 @@ export async function isAdmin() {
   const until: Date | null | undefined = r.data?.user.banExpires;
   return role === "admin" && !r.data?.user.banned && until !== undefined;
 }
+
+// Better Auth's checkRolePermission reads permissions only (plan 12k Task 10 fix).
+export const canInvite: boolean = dashboard.organization.checkRolePermission({
+  role: "admin",
+  permissions: { invitation: ["create"] },
+});
+export const singular: boolean = dashboard.organization.checkRolePermission({
+  role: "admin",
+  // @ts-expect-error Better Auth's checkRolePermission takes no permission field
+  permission: { invitation: ["create"] },
+});
