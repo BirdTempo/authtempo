@@ -76,6 +76,23 @@ describe("check-workflows", () => {
     expect(NODE_FLOOR).toBe("22.18.0");
   });
 
+  it("names the Allowed actions rule of npm beside the publish step (ruling 19)", () => {
+    const lines = RELEASE.split("\n");
+    const at = lines.indexOf("      - run: node scripts/release/src/publish.ts out");
+    const comment: string[] = [];
+    for (let k = at - 1; (lines[k] ?? "").trimStart().startsWith("# "); k--)
+      comment.unshift((lines[k] ?? "").trim().slice(2));
+    const text = comment.join(" ");
+    expect(text).toContain("(docs.npmjs.com/trusted-publishers, read 2026-10-20)");
+    expect(text).toContain(
+      "a trusted publisher made after 2026-09-03 allows only npm stage publish by default.",
+    );
+    expect(text).toContain(
+      "The owner must select npm publish under Allowed actions for each released package.",
+    );
+    expect(text).toContain("Without it, this step fails.");
+  });
+
   it("fails a uses with a tag or a branch", () => {
     expect(
       releaseFailures(swap(RELEASE, CHECKOUT + HISTORY, `actions/checkout@v5${HISTORY}`)),

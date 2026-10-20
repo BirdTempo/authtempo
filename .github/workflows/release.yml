@@ -128,4 +128,8 @@ jobs:
           path: out
       # Each SHA-256, the npm floor, and the registry, then one npm publish
       # for each version that the registry lacks.
+      # npm trusted publishing (docs.npmjs.com/trusted-publishers, read
+      # 2026-10-20): a trusted publisher made after 2026-09-03 allows only npm
+      # stage publish by default. The owner must select npm publish under
+      # Allowed actions for each released package. Without it, this step fails.
       - run: node scripts/release/src/publish.ts out
