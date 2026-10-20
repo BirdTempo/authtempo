@@ -1,0 +1,10 @@
+[
+  {
+    "id": "authtempo-import-bin",
+    "what": "The alias binary authtempo-import. Run authtempo import instead.",
+    "since": "0.1.0",
+    "removeIn": "0.2.0",
+    "markers": [{ "file": "packages/cli/package.json", "text": "\"authtempo-import\"" }],
+    "docs": "/docs/reference/deprecations/"
+  }
+]
