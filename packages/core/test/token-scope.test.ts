@@ -398,4 +398,21 @@ describe("token permissions (plan 12k Task 7)", () => {
     const [row] = await h.storage.findMany("apiToken", []);
     expect(row?.metadata).toEqual(fits);
   });
+
+  it("takes metadata of 4096 bytes and refuses 4097 bytes", async () => {
+    const h = scopeHandle();
+    const ada = await signedIn(h, "ada@example.com");
+    const edge = { note: "x".repeat(4085) };
+    const over = { note: "x".repeat(4086) };
+    expect(new TextEncoder().encode(JSON.stringify(edge)).length).toBe(4096);
+    expect(new TextEncoder().encode(JSON.stringify(over)).length).toBe(4097);
+    const res = await h.auth.handle(
+      post("/auth/tokens", { name: "over", metadata: over }, bearer(ada.session)),
+    );
+    expect(await answer(res)).toEqual({ status: 400, body: { error: "invalid_body" } });
+    const made = await mint(h, ada.session, { metadata: edge });
+    expect((made.apiToken as unknown as { metadata: unknown }).metadata).toEqual(edge);
+    const rows = await h.storage.findMany("apiToken", []);
+    expect(rows.map((r) => r.metadata)).toEqual([edge]);
+  });
 });
