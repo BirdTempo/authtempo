@@ -89,6 +89,7 @@ Each spend is one conditional write on the count. No spend takes the count below
 - A spend that loses to another spend reads the row again and tries again, up to 20 tries.
 - A lost try that sees no change answers `conflict` at once. So does a spend after 20 lost tries.
 - `auth.caller` and `auth.authenticate` on one request spend once.
+- On D1, one call of a user token runs at most 45 statements, and one call of an organization token at most 44. Both stay under the 50 queries of one Workers Free invocation.
 
 ### Organization tokens
 
@@ -98,6 +99,7 @@ A `to_` token belongs to an organization, not to a person. It acts with its own 
 - `permissions` is required. `{}` grants nothing. `null` answers `invalid_body`.
 - The list needs `apiToken:read`, the update `apiToken:update`, and the revoke `apiToken:revoke`.
 - An organization holds at most 50 live tokens. The create shares the limit `token-create:user:<userId>` with user tokens.
+- The create reads the creator's member row again under a lock of the organization. A create that crosses the creator's removal answers `forbidden_rank`.
 - `auth.caller` answers it as `kind: "organizationToken"`, with `organization` and no `user`. Narrow the kind before you read `caller.user`.
 - `GET /organizations/tokens/current` takes a `to_` bearer only.
 
