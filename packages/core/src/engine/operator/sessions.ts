@@ -7,6 +7,7 @@ import { deliverLogouts } from "../oauth-logout.js";
 import { writeLogouts } from "../oauth-outbox.js";
 import { endAllAccess } from "../session-list.js";
 import { deleteEndedSessions, sessionIsLive, sessionsEnded } from "../sessions.js";
+import { holdUser } from "../user-hold.js";
 import { auditDraft, operatorAct, operatorReason } from "./audit.js";
 import { targetOf } from "./ban.js";
 import { type OperatorActor, requireScope } from "./guards.js";
@@ -52,10 +53,10 @@ function reasonOf(
  * Ends every session of one user (spec 26 item 5; ASVS 5.0.0 7.4.5:
  * "Verify that application administrators are able to terminate active
  * sessions for an individual user or for all users."). One transaction
- * runs `endAllAccess`. It ends every session, challenge, and handoff code
- * of the user, and the OAuth refresh tokens and codes. Then it writes the
- * audit row with `data: { ended }`. The API tokens stay: each has its own
- * revoke. A user
+ * holds the user row first (`holdUser`), then runs `endAllAccess`. It
+ * ends every session, challenge, and handoff code of the user, and the
+ * OAuth refresh tokens and codes. Then it writes the audit row with
+ * `data: { ended }`. The API tokens stay: each has its own revoke. A user
  * actor ends their own sessions through the session list of plan 12a, so
  * their own user answers `operator_self`. A user actor gets
  * `operator_required` for a platform operator target.
@@ -86,6 +87,8 @@ export async function endUserSessions(
     config,
     drafted.value,
     async (tx, draft, ends) => {
+      // The user row first: the lock order of every account write (user-hold.ts).
+      await holdUser(tx, input.userId);
       // An ended row goes with no hook, as in the ban: it gets no `operator` event.
       await deleteEndedSessions(tx, config, input.userId, now);
       const ended = await endAllAccess(tx, input.userId, ends.ended ?? null, ends.families, now);
@@ -202,7 +205,9 @@ async function endSessionPage(
  * OAuth tokens of every user stay; `endUserSessions` ends them for one
  * user. The links of the ended sessions become outbox rows that are due
  * now, and the sweep sends them (ruling 1). A call sends none, because
- * 500 users can mean 5000 HTTP calls in one request.
+ * 500 users can mean 5000 HTTP calls in one request. It holds no user
+ * row: a hold costs calls per user, and the page touches only the session
+ * and link rows, so it waits on no user row that another flow holds.
  *
  * The cost of a page of n sessions with L client links has five parts.
  * They are 1 read, ceil(n / 50) link reads, 2 calls per link, the

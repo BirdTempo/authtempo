@@ -118,33 +118,39 @@ const auditRows = (storage: StorageAdapter) =>
 
 /**
  * Counts each storage call on `storage`, also inside a transaction, and
- * the session rows that each read answers. The memory adapter gives a
+ * the session rows that each read answers. `log` holds each call as
+ * `<method>:<model>`. The memory adapter gives a
  * transaction its own adapter object, so no call counts twice.
  */
 function countCalls(storage: StorageAdapter) {
-  const counts = { calls: 0, sessionRowsRead: 0 };
+  const counts = { calls: 0, sessionRowsRead: 0, log: [] as string[] };
   const wrap = (target: StorageAdapter): StorageAdapter => ({
     ...target,
     create: ((model, data) => {
       counts.calls++;
+      counts.log.push(`create:${model}`);
       return target.create(model, data);
     }) as StorageAdapter["create"],
     findOne: ((model, where) => {
       counts.calls++;
+      counts.log.push(`findOne:${model}`);
       return target.findOne(model, where);
     }) as StorageAdapter["findOne"],
     findMany: (async (model, where, opts) => {
       counts.calls++;
+      counts.log.push(`findMany:${model}`);
       const rows = await target.findMany(model, where, opts);
       if (model === "session") counts.sessionRowsRead += rows.length;
       return rows;
     }) as StorageAdapter["findMany"],
     update: ((model, where, data) => {
       counts.calls++;
+      counts.log.push(`update:${model}`);
       return target.update(model, where, data);
     }) as StorageAdapter["update"],
     delete: ((model, where) => {
       counts.calls++;
+      counts.log.push(`delete:${model}`);
       return target.delete(model, where);
     }) as StorageAdapter["delete"],
   });
@@ -278,6 +284,23 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       ["sessions_end_all", "user", f.operator.user.id, null, { ended: 500 }],
       ["sessions_end_all", "user", f.operator.user.id, null, { ended: 200 }],
     ]);
+  });
+
+  it("holds the user row before the first delete of one user's sessions", async () => {
+    const w = await world();
+    const user = await userWith(w, "ada@example.com", 2);
+    const counts = countCalls(w.storage);
+    const done = await w.api.sessions.endUser({
+      actor: APP,
+      userId: user.id,
+      reason: "Lost laptop",
+      ip: null,
+      userAgent: null,
+    });
+    expect(done.ok && done.value.ended).toBe(2);
+    // The target read, then the hold: a read and a write of the user row (user-hold.ts).
+    const first = counts.log.findIndex((c) => c.startsWith("delete:"));
+    expect(counts.log.slice(0, first)).toEqual(["findOne:user", "findOne:user", "update:user"]);
   });
 
   it("refuses the actor's own user and a platform operator target for a user actor", async () => {
