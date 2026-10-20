@@ -1103,7 +1103,7 @@ Plan 12f gives the operator of a deployment the support tools of day one. `opera
 - The guard of a platform operator: no impersonation session, the platform role, a verified address, a second factor, and a fresh session. Each failure answers 403 `operator_required`.
 - The routes under `<basePath>/operator/` are in the table above. `POST users/create-admin` takes a secret only.
 - A request with an operator secret and a session answers 401. A route of a tool that is off answers 404. With `operator.users` and no secret entry, the four secret routes of plans 11c and 11c2 answer 404 too.
-- The limits: every secret call counts on `operator-users:ip:<ip>`, 600 per hour, before the secret compare. A platform operator counts on `operator:user:<userId>`, 600 per hour.
+- The limits: every secret call counts on `operator-users:ip:<ip>`, 600 per hour, before the secret compare. A secret that matches also counts on `operator-users:secret:<name>`, 600 per hour from any address. A platform operator counts on `operator:user:<userId>`, 600 per hour.
 - `auth.api.operator` holds the same tools in process, with the actor as an input. Its entries are `users`, `platformRole`, `secondFactor`, `createAdmin`, `sessions`, and `audit`.
 - The audit table `ta_operator_audit` is append-only: core never updates or deletes a row. `hooks.operator.afterAction` sends each row to a separate system.
 

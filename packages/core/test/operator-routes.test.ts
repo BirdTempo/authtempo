@@ -3,6 +3,7 @@ import type { AuthConfig } from "../src/config.js";
 import { hookRefusal } from "../src/engine/hooks.js";
 import { updateMemberRole } from "../src/engine/organizations.js";
 import { passwordSignUp } from "../src/engine/password.js";
+import { openSession } from "../src/engine/sessions.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
 import type { RouteContract } from "../src/http/contract/types.js";
 import { ROUTES } from "../src/http/route-list.js";
@@ -298,6 +299,69 @@ describe("the operator routes (plan 12f Task 10)", () => {
     // One hour later the IP counts from zero again.
     w.auth.clock.advance(3600_000);
     expect((await w.handle(request(users, { headers: SUPPORT }))).status).toBe(200);
+  });
+
+  it("holds a stolen secret to 600 calls per hour in total, from many addresses (ruling 38)", async () => {
+    const w = await world();
+    const users = "GET /operator/users";
+    // One call from each of 600 addresses: no count per IP is near its limit.
+    for (let i = 0; i < 600; i++) {
+      const ip = `198.51.${Math.floor(i / 250)}.${i % 250}`;
+      const res = await w.handle(request(users, { headers: SUPPORT, ip }));
+      if (res.status !== 200) throw new Error(`call ${i + 1} answered ${res.status}`);
+    }
+    // The 601st call of the secret, from a new address, meets the count of the secret.
+    const next = await w.handle(request(users, { headers: SUPPORT, ip: "198.51.9.1" }));
+    expect(await answerOf(next)).toEqual({ status: 429, code: "rate_limited" });
+    // Another secret has its own count, and a wrong secret matches no entry, so it counts on none.
+    const audit = await w.handle(
+      request("GET /operator/audit", { headers: AUDIT, ip: "198.51.9.2" }),
+    );
+    expect(audit.status).toBe(200);
+    const wrong = await w.handle(request(users, { headers: WRONG, ip: "198.51.9.3" }));
+    expect(await answerOf(wrong)).toEqual({ status: 401, code: "unauthorized" });
+    // One hour later the secret counts from zero again.
+    w.auth.clock.advance(3600_000);
+    expect((await w.handle(request(users, { headers: SUPPORT, ip: "198.51.9.4" }))).status).toBe(
+      200,
+    );
+  });
+
+  it("fits a whole secret call of end-all with a hook and a full page in 50 calls (rulings 35 and 38)", async () => {
+    const limited = { calls: 0 };
+    const w = await world({
+      config: {
+        // The D1 limiter sends one statement per check.
+        limiter: {
+          allow: async () => {
+            limited.calls++;
+            return true;
+          },
+        },
+        hooks: { session: { afterEnd: () => {} } },
+      },
+    });
+    const user = (await verifiedSession(w.auth, "ada@example.com")).user;
+    for (let i = 0; i < 60; i++)
+      await openSession(w.auth.config, { user, ip: null, userAgent: null, via: "password" });
+    // The D1 adapter checks the schema version with one query before the first call of an invocation.
+    const SCHEMA_CHECK = 1;
+    const sent = () => w.auth.storage.statementsSent?.() ?? 0;
+    const start = sent();
+    limited.calls = 0;
+    const res = await w.handle(
+      request("POST /operator/sessions/end-all", { body: { reason: REASON }, headers: SUPPORT }),
+    );
+    const body = (await res.json()) as { ended: number; more: boolean };
+    // The two limiter checks and the schema check come before the act: 3, the reserve of a secret.
+    // The work gets 46 calls: the read, the lock, the link read, and 43 deletes with the hook. The
+    // audit row is the last call. Memory sends no lock, so the whole call makes 49; an adapter that sends it makes 50.
+    expect({
+      limiter: limited.calls,
+      total: sent() - start + limited.calls + SCHEMA_CHECK,
+      ended: body.ended,
+      more: body.more,
+    }).toEqual({ limiter: 2, total: 49, ended: 43, more: true });
   });
 
   it("serves each route to a secret with its scope and to a platform operator", async () => {

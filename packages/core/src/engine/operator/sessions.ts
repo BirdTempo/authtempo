@@ -260,8 +260,9 @@ export const OPERATOR_CALL_BUDGET = 50;
  * the route costs 8. The route limiter is 1. `resolveSession` is 3: the
  * session, the user, and the sliding refresh. `requireOperatorUser` is 4:
  * the platform organization, the member row, the second factor, and its
- * limiter. The app: none. A secret actor: the route limiter; Task 10 adds
- * the route. The adapter's `statementsSent` cannot give these: an
+ * limiter. The app: none. A secret actor: the limiter per IP and the
+ * limiter per secret (ruling 38); the route test counts these 2. The
+ * adapter's `statementsSent` cannot give these: an
  * app keeps one adapter for many invocations, and the limiter queries go
  * to the binding. A caller that made more calls passes its count as
  * `callsUsed`.
@@ -274,7 +275,7 @@ export const OPERATOR_CALL_BUDGET = 50;
  */
 export const OPERATOR_CALLS_BEFORE: Readonly<Record<OperatorActor["kind"], number>> = {
   user: 8,
-  secret: 1,
+  secret: 2,
   app: 0,
 };
 
@@ -414,8 +415,8 @@ async function endSessionPage(
  * `session.afterEnd` hook there is one delete per session, and the sum is
  * 3 + ceil(n / 50) + n. D1 has no row lock and sends 1 less. The calls
  * left write the logouts of the client links, 2 calls per link, and the
- * sweep logs out the rest. The work gets 48 calls for the app, 47 for a
- * secret, and 40 for a user actor, so a page with a hook ends 45, 44, or
+ * sweep logs out the rest. The work gets 48 calls for the app, 46 for a
+ * secret, and 40 for a user actor, so a page with a hook ends 45, 43, or
  * 37 sessions. A call fits D1 Free, and so it fits Workers Paid too.
  */
 export async function endAllSessions(

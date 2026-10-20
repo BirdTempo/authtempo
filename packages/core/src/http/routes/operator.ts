@@ -15,6 +15,7 @@ import {
   OPERATOR_PER_IP,
   OPERATOR_SECRETS_PER_IP,
   OPERATOR_USERS_PER_IP,
+  OPERATOR_USERS_PER_SECRET,
 } from "../../operator-secret.js";
 import { readSessionToken } from "../../primitives/credentials.js";
 import { fail, ok, type Result } from "../../result.js";
@@ -194,7 +195,9 @@ export interface OperatorCaller {
  * counts on `operator-users:ip:<ip>` first, so every secret call counts,
  * right or wrong. Then a session cookie or a `ts_` bearer beside it answers
  * 401 `unauthorized` (deviation 5): the request has no single actor. Then
- * the secret must match an entry, else 401. A request with no operator
+ * the secret must match an entry, else 401. Then the entry counts on
+ * `operator-users:secret:<name>`, so a stolen secret has one count for all
+ * addresses (ruling 38). A request with no operator
  * scheme needs a session, else 401, and then `requireOperatorUser`, which
  * counts on `operator:user:<userId>`. A user actor exists only through that
  * guard. The scope check of a secret is the engine's, at each entry.
@@ -211,6 +214,13 @@ export async function readOperatorActor(
     if (readSessionToken(config, request) !== null) return fail("unauthorized");
     const entry = await matchOperatorSecret(config, request);
     if (entry === null) return fail("unauthorized");
+    if (
+      !(await config.limiter.allow(
+        `operator-users:secret:${entry.name}`,
+        OPERATOR_USERS_PER_SECRET,
+      ))
+    )
+      return fail("rate_limited");
     return ok({ actor: { kind: "secret", name: entry.name, scopes: entry.scopes }, renewed: null });
   }
   const resolved = await sessionFromRequest(config, request);
