@@ -234,7 +234,13 @@ describe("the first enable on Postgres (plan 12c)", () => {
         r.post("/second-factor/email/enable", { password: PASSWORD }, u.cookie),
       ]);
       // A loser answers 409 `conflict`, never a 500: the unique violation is caught outside.
-      for (const a of [totp, email]) expect([200, 409]).toContain(a.status);
+      // Both enables hold the user row first (plan 12f Task 9), so they also run in turn. A
+      // TOTP enable after the email enable answers 400 `totp_not_enabled`: the factor keeps
+      // the codes of the email method, so the codes of the setup are stale.
+      expect([200, 409]).toContain(email.status);
+      expect([200, 400, 409]).toContain(totp.status);
+      if (totp.status === 400)
+        expect(await totp.json()).toMatchObject({ error: "totp_not_enabled" });
       const won = [totp.status === 200 ? "totp" : null, email.status === 200 ? "email" : null]
         .filter((m): m is string => m !== null)
         .sort();
