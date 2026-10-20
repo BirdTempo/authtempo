@@ -92,6 +92,9 @@ const UNREAD_KEYS = [
   "catalogs",
 ] as const;
 
+/** The keys of the root package.json that change what pnpm installs, and that no rule here reads yet. */
+const ROOT_UNREAD_KEYS = ["pnpm", "resolutions"] as const;
+
 const unquoteName = (v: string) => v.trim().replace(/^'(.*)'$|^"(.*)"$/, "$1$2");
 
 /**
@@ -227,6 +230,22 @@ function checkWorkspaceYaml(
 export function checkDependencies(input: DependenciesInput): Report {
   const failures: string[] = [];
   const builds = checkWorkspaceYaml(input.workspaceYaml, input.rows, failures);
+
+  // The root package.json can also change the install: pnpm reads its "pnpm"
+  // field (overrides, onlyBuiltDependencies, and others) and "resolutions".
+  // No rule reads them yet, so each one fails while present.
+  const root = input.packages.find((p) => p.dir === ".")?.manifest;
+  for (const key of ROOT_UNREAD_KEYS) {
+    const value = root?.[key];
+    if (value === undefined) continue;
+    const fields =
+      key === "pnpm" && typeof value === "object" && value !== null
+        ? ` (${Object.keys(value).join(", ")})`
+        : "";
+    failures.push(
+      `${key}${fields} is in the root package.json: no rule of check-dependencies reads it yet`,
+    );
+  }
 
   // What the manifests take, by name and kind. A workspace reference is owned
   // code; check-packages holds its form.

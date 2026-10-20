@@ -468,6 +468,21 @@ describe("check-dependencies", () => {
     ]);
   });
 
+  it("fails the keys pnpm and resolutions of the root package.json", () => {
+    const clean = real();
+    const cleanRoot = manifestOf(clean, "authtempo");
+    expect([cleanRoot.pnpm, cleanRoot.resolutions]).toEqual([undefined, undefined]);
+    expect(checkDependencies(clean).failures).toEqual([]);
+    const input = real();
+    const root = manifestOf(input, "authtempo");
+    root.pnpm = { overrides: { jose: "6.2.13" }, onlyBuiltDependencies: ["esbuild"] };
+    root.resolutions = { zod: "4.6.6" };
+    expect(checkDependencies(input).failures).toEqual([
+      "pnpm (overrides, onlyBuiltDependencies) is in the root package.json: no rule of check-dependencies reads it yet",
+      "resolutions is in the root package.json: no rule of check-dependencies reads it yet",
+    ]);
+  });
+
   it("fails when it reads zero rows", () => {
     const input = real();
     input.rows = [];
