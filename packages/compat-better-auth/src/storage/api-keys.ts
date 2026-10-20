@@ -30,6 +30,8 @@ export interface ApiKeyMoveReport {
     present: number;
     /** An organization key with no creator in its metadata and no owner in its organization. */
     noCreator: number;
+    /** The user or the organization of `referenceId` is gone, so the key could never act. */
+    noOwner: number;
   };
   /**
    * Each skipped row: its apikey id (never the key), its owner, and the
@@ -47,7 +49,7 @@ export interface ApiKeyMoveReport {
 }
 
 /** Why the move skipped a row: a key of `ApiKeyMoveReport.skipped`. */
-export type SkipReason = "disabled" | "expired" | "noDigest" | "present" | "noCreator";
+export type SkipReason = "disabled" | "expired" | "noDigest" | "present" | "noCreator" | "noOwner";
 
 export interface ApiKeyMoveInput {
   names: Names;
@@ -251,7 +253,8 @@ function unroutable(
  * no prefix, throws (`unroutable`).
  *
  * Storage calls: one raw read of apikey. Then per row: one findOne of the
- * record, and one transaction of two creates unless `dryRun`. An
+ * record, one findOne of the owner, and one transaction of two creates
+ * unless `dryRun`. An
  * organization key with no creator in its metadata adds one findMany of
  * members. A digest that a core token holds already fails the unique index,
  * and the run stops with that row and its record undone.
@@ -269,7 +272,7 @@ export async function moveBetterAuthApiKeys(
   const known: Record<string, readonly string[]> = { ...input.statements, ...CORE_STATEMENTS };
   const report: ApiKeyMoveReport = {
     moved: 0,
-    skipped: { disabled: 0, expired: 0, noDigest: 0, present: 0, noCreator: 0 },
+    skipped: { disabled: 0, expired: 0, noDigest: 0, present: 0, noCreator: 0, noOwner: 0 },
     skippedKeys: [],
     byOwner: {},
     dropped: 0,
@@ -322,6 +325,16 @@ export async function moveBetterAuthApiKeys(
     }
     const tokenHash = hexOf(digest);
     const ownerId = String(row.referenceId);
+    // A key of a gone owner would move and then answer INVALID_API_KEY (review finding L2).
+    const byId = [{ field: "id" as const, op: "eq" as const, value: ownerId }];
+    const owner =
+      input.references === "organization"
+        ? await db.findOne("organization", byId)
+        : await db.findOne("user", byId);
+    if (owner === null) {
+      skip("noOwner");
+      continue;
+    }
     const { set, dropped } = narrowSet(row.permissions, known);
     const metadata = jsonObjectOf(row.metadata);
     const window = input.rateLimitEnabled ? windowOf(row) : null;

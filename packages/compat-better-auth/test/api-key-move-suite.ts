@@ -202,7 +202,7 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
         const report = await move(m, "user");
         expect(report).toEqual({
           moved: 1,
-          skipped: { disabled: 1, expired: 1, noDigest: 1, present: 0, noCreator: 0 },
+          skipped: { disabled: 1, expired: 1, noDigest: 1, present: 0, noCreator: 0, noOwner: 0 },
           skippedKeys: [
             { id: "k_1", owner: ada.user.id, reason: "disabled" },
             { id: "k_2", owner: ada.user.id, reason: "expired" },
@@ -427,6 +427,36 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
             (await on.auth.api.verifyApiKey({ body: { key: held } })).error?.code ?? "ok",
           );
         expect(limited).toEqual(["ok", "ok", "RATE_LIMITED"]);
+      }),
+    );
+
+    it(
+      "skips a key whose user or organization is gone, with its reason",
+      fresh(async (m) => {
+        const { person } = app(m, "user");
+        const ada = await person("ada@example.com");
+        // Probe P5 of the Task 12 review: such a key moved, counted, and then never acted.
+        await m.insertKey(
+          await keyRow(generatedKey("laaa_"), { id: "k_user", referenceId: "gone-user" }),
+        );
+        const user = await move(m, "user");
+        expect({ moved: user.moved, keys: user.skippedKeys }).toEqual({
+          moved: 0,
+          keys: [{ id: "k_user", owner: "gone-user", reason: "noOwner" }],
+        });
+        await m.insertKey(
+          await keyRow(generatedKey("laaa_"), {
+            id: "k_org",
+            referenceId: "gone-org",
+            metadata: JSON.stringify({ createdByUserId: ada.user.id }),
+          }),
+        );
+        const org = await move(m, "organization");
+        expect({ moved: org.moved, noOwner: org.skipped.noOwner }).toEqual({
+          moved: 0,
+          noOwner: 2,
+        });
+        expect(await m.database.storage.findMany("organizationToken", [])).toEqual([]);
       }),
     );
 
