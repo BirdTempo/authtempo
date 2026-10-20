@@ -1770,6 +1770,15 @@ export function runAdapterConformance(
 
       it("round-trips an organization role with its json permissions", async () => {
         if (unmapped("organizationRole").length > 0) return holdsNone("organizationRole", role);
+        // Its organization first: a storage with foreign keys (the Better Auth tables) needs the parent row.
+        await db.create("organization", {
+          id: "o1",
+          slug: "o1",
+          name: "O",
+          metadata: null,
+          createdAt: at,
+          updatedAt: at,
+        });
         await db.create("organizationRole", role);
         const where = [
           { field: "organizationId" as const, op: "eq" as const, value: "o1" },
