@@ -292,8 +292,8 @@ export function checkDependencies(input: DependenciesInput): Report {
       failures.push(`${at}: the license exemption has no reason`);
       ok = false;
     }
-    if (!isText(e.readAt)) {
-      failures.push(`${at}: the license exemption has no readAt`);
+    if (!isDate(e.read)) {
+      failures.push(`${at}: the license exemption has no read date in the form YYYY-MM-DD`);
       ok = false;
     }
     const match = input.closure.some(

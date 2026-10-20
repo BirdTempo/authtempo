@@ -3,7 +3,7 @@
     "name": "postgres",
     "version": "3.4.9",
     "license": "Unlicense",
-    "reason": "The Unlicense is a public-domain grant, and the OSI approves it. postgres is a runtime dependency of the released @authtempo/cli and a peer of adapter-postgres and compat-better-auth. The license was read from node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/package.json. The owner confirms this entry or adds Unlicense to the allow list (ruling 15 of plan 12j).",
-    "readAt": "2026-10-20 21:58 CST"
+    "reason": "The Unlicense is a public-domain grant, and the OSI approves it. postgres is a runtime dependency of the released @authtempo/cli and a peer of adapter-postgres and compat-better-auth. The license was read from node_modules/.pnpm/postgres@3.4.9/node_modules/postgres/package.json. The owner confirms this entry or adds Unlicense to the allow list (ruling 15 of plan 12j). The read was at 21:58 CST.",
+    "read": "2026-10-20"
   }
 ]

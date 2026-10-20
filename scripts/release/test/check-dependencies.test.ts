@@ -206,14 +206,14 @@ describe("check-dependencies", () => {
       version: "1.3.0",
       license: "WTFPL",
       reason: "No package takes it.",
-      readAt: "2026-10-20 22:10 CST",
+      read: "2026-10-20",
     });
     expect(checkDependencies(input).failures).toEqual([
       "left-pad@1.3.0 (WTFPL): the license exemption matches no package in the runtime closure",
     ]);
   });
 
-  it("fails a license exemption with no reason or no readAt", () => {
+  it("fails a license exemption with no reason, or with no read date in the form YYYY-MM-DD", () => {
     const noReason = real();
     const [entry] = noReason.licenseExempt;
     if (entry === undefined) throw new Error("no license exemption");
@@ -222,14 +222,28 @@ describe("check-dependencies", () => {
       "postgres@3.4.9: the license exemption has no reason",
       "postgres@3.4.9 has the license Unlicense in the runtime closure of @authtempo/cli, outside the allow list",
     ]);
-    const noRead = real();
-    const [read] = noRead.licenseExempt;
-    if (read === undefined) throw new Error("no license exemption");
-    delete read.readAt;
-    expect(checkDependencies(noRead).failures).toEqual([
-      "postgres@3.4.9: the license exemption has no readAt",
-      "postgres@3.4.9 has the license Unlicense in the runtime closure of @authtempo/cli, outside the allow list",
-    ]);
+    // The old field readAt, a time in the date, and other text each fail.
+    for (const change of [
+      (e: Record<string, unknown>) => {
+        e.readAt = e.read;
+        delete e.read;
+      },
+      (e: Record<string, unknown>) => {
+        e.read = "2026-10-20 21:58 CST";
+      },
+      (e: Record<string, unknown>) => {
+        e.read = "x";
+      },
+    ]) {
+      const noRead = real();
+      const [read] = noRead.licenseExempt;
+      if (read === undefined) throw new Error("no license exemption");
+      change(read);
+      expect(checkDependencies(noRead).failures).toEqual([
+        "postgres@3.4.9: the license exemption has no read date in the form YYYY-MM-DD",
+        "postgres@3.4.9 has the license Unlicense in the runtime closure of @authtempo/cli, outside the allow list",
+      ]);
+    }
   });
 
   it("throws on a lockfile version other than 9.0", () => {
