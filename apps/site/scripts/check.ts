@@ -57,6 +57,7 @@ import {
   PERFORMANCE_PAGE,
   type PerformanceData,
 } from "./check-performance.ts";
+import { checkPolicyPages, readPolicyPagesInput } from "./check-policy-pages.ts";
 import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
 import { checkScript } from "./check-script.ts";
@@ -442,6 +443,17 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         origin: SITE.origin,
       });
       r.failures.unshift(...input.failures);
+      return r;
+    },
+  },
+  // Plan 12j Task 13a: each fact of the versioning page and the security
+  // policy page against its source. A file that the check could not read is a failure.
+  {
+    name: "check-policy-pages",
+    run: () => {
+      const read = readPolicyPagesInput(readRepoFile);
+      const r = checkPolicyPages(read.input);
+      r.failures.unshift(...read.failures);
       return r;
     },
   },
