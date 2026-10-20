@@ -74,10 +74,10 @@ async function createLogout(
 
 /**
  * The outbox rows of a page of links, then one delete of the links by id,
- * in the caller's transaction: one statement per link and one more. The
- * sweep passes at most 50 links: the delete binds their ids, under the 100
- * bound parameters of a D1 query (D1 limits page updated 21 April 2026,
- * read 2026-10-21).
+ * in the caller's transaction. It sends one statement per link and one
+ * more. The sweep passes at most 50 links, and the delete binds their ids.
+ * That stays under the 100 bound parameters of a D1 query (D1 limits page
+ * updated 21 April 2026, read 2026-10-21).
  */
 export async function writeLogoutPage(
   tx: StorageAdapter,

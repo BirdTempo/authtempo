@@ -458,10 +458,10 @@ export const LOGOUT_ROW_BEFORE_POST = 7;
 
 /**
  * The calls of one row from its post: the post, and the delete or the
- * count of the attempt. The sweep counts the post as a call: Workers Free
- * allows 50 subrequests per invocation, and the page names D1 a service
- * that a subrequest reaches (Workers limits page updated 12 October 2026,
- * read 2026-10-21). So one count of 50 holds the queries and the posts.
+ * count of the attempt. The sweep counts the post as a call. Workers Free
+ * allows 50 subrequests per invocation (Workers limits page updated 12
+ * October 2026, read 2026-10-21). The page names D1 a service that a
+ * subrequest reaches. So one count of 50 holds the queries and the posts.
  */
 export const LOGOUT_ROW_FROM_POST = 2;
 
@@ -485,19 +485,19 @@ function inTurns(due: readonly OAuthLogoutRow[]): OAuthLogoutRow[] {
 
 /**
  * The sweep step: at most `LOGOUT_SWEEP_MAX` due rows, at most
- * `LOGOUT_SWEEP_PER_CLIENT` of one client, `LOGOUT_REQUEST_MAX` at a time,
- * inside `limit` calls of `meter` (ruling 37 of plan 12f). Answers the rows
- * sent or dropped.
+ * `LOGOUT_SWEEP_PER_CLIENT` of one client, `LOGOUT_REQUEST_MAX` at a time.
+ * It stays inside `limit` calls of `meter` (ruling 37 of plan 12f). Answers
+ * the rows sent or dropped.
  *
  * The rows go in turns of their clients, so a client that fails cannot use
  * the calls of a sweep alone. Each row takes its claim and its token one
- * by one. Before each row the step checks that the row's calls before the
- * post, its post, its delete, and the post and the delete of each row that
- * waits all fit `limit`. The step stops before a row that does not fit, so
- * a posted row always has room for its delete and is never posted again.
- * Then the rows that wait post in parallel. A throw before the posts, such
- * as a storage limit, posts nothing of the group: each claimed row loses
- * no attempt and comes again.
+ * by one. Before each row the step checks its calls against `limit`. These
+ * are the row's calls before the post, its post, and its delete. The post
+ * and the delete of each row that waits count too. The step stops before a
+ * row that does not fit, so a posted row always has room for its delete
+ * and is never posted again. Then the rows that wait post in parallel. A
+ * throw before the posts, such as a storage limit, posts nothing of the
+ * group: each claimed row loses no attempt and comes again.
  */
 export async function deliverDueLogouts(
   config: ResolvedConfig,

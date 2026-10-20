@@ -56,9 +56,9 @@ const CLIENT_SWEEP_MAX = 100;
 /**
  * The calls of one sweep (ruling 37 of plan 12f). D1 Free allows 50
  * queries per invocation (D1 limits page updated 21 April 2026, read
- * 2026-10-21). Workers Free allows 50 subrequests per invocation, and a
- * subrequest is a fetch or a request to a service such as D1 (Workers
- * limits page updated 12 October 2026, read 2026-10-21). So the queries
+ * 2026-10-21). Workers Free allows 50 subrequests per invocation (Workers
+ * limits page updated 12 October 2026, read 2026-10-21). A subrequest is a
+ * fetch or a request to a service such as D1. So the queries
  * and the posts of the outbox share one count of 50. The product runs on
  * Workers Free, so the sweep fits it everywhere; run the sweep more often
  * to send more logouts in an hour.
@@ -133,15 +133,15 @@ async function sweepClients(
 
 /**
  * The client links of one sweep (plan 12e Task 16, rulings 49 and 50). A
- * link whose session is gone means that the session ended: an expiry, a
- * crash, or a race between a link write and a session end. Each such link
+ * link whose session is gone means that the session ended. The cause is an
+ * expiry, a crash, or a race between a link write and a session end. Each such link
  * gets one `oauthLogout` row in place of a silent delete. The sweep reads
  * the links that it saw longest ago, a page of `LINK_SWEEP_PAGE` at a time,
  * and moves each live link to now. So the reads go round all links.
  *
  * The step stays inside `limit` calls of `meter` (ruling 37 of plan 12f).
  * A page costs the link read, the session read, and the update of the live
- * links, and each link with no session costs 1 more, with one delete of
+ * links. Each link with no session costs 1 more, and one delete removes
  * those links. The rows of a page go in one transaction with their delete.
  * A link that does not fit keeps its time, so the next sweep reads it
  * first. 50 ids and one more term stay under the 100 bound parameters of a

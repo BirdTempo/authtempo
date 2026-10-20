@@ -120,10 +120,10 @@ export interface StorageAdapter {
   statementsSent?(): number;
   /**
    * Optional. Inside a transaction, takes the row locks of the rows that
-   * `where` matches, by `id` ascending, before the caller writes them
-   * (ruling 36 of plan 12f). One DELETE locks rows in the order of its
-   * scan, so two flows that delete the same rows in one statement each can
-   * wait on each other. Postgres runs SELECT ... ORDER BY id FOR UPDATE. D1
+   * `where` matches, by `id` ascending (ruling 36 of plan 12f). The caller
+   * then writes them. One DELETE locks rows in the order of its scan. So
+   * two flows that delete the same rows in one statement each can wait on
+   * each other. Postgres runs SELECT ... ORDER BY id FOR UPDATE. D1
    * and memory have no row lock and leave it out. It costs one statement.
    * An adapter on a database with row locks must have it (ruling 37):
    * without it the session deletes of two flows can deadlock. The
@@ -132,7 +132,7 @@ export interface StorageAdapter {
   lockInOrder?<M extends ModelName>(model: M, where: Where<M>[]): Promise<void>;
   /**
    * Optional. Runs the ready check of the adapter, such as its schema
-   * version check, when it has not run, and answers the count of statements
+   * version check, when it has not run. It answers the count of statements
    * that the check sent in the life of the adapter (ruling 37 of plan 12f).
    * The operator session calls reserve it in their call budget. A core D1
    * adapter answers 1. The D1 storage of the Better Auth tables answers 4

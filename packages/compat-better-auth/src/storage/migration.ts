@@ -923,9 +923,9 @@ interface D1Readable {
  * exactly these two columns, by any name. Without it two OAuth callbacks
  * for one subject both insert, and two users own one identity. The check
  * runs once per storage; a failed check is not kept. Each query counts in
- * `sent`, the count of `statementsSent` of the storage, and in its
- * `readyStatements` (ruling 37 of plan 12f): 2 version reads, the index
- * list, and one read per unique index that it checks.
+ * `sent`, the count of `statementsSent` of the storage. It counts in the
+ * `readyStatements` of the storage too (ruling 37 of plan 12f). The check
+ * sends 2 version reads, the index list, and one read per unique index.
  */
 export function d1CompatReady(
   db: unknown,

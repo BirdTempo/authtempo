@@ -63,7 +63,7 @@ export function betterAuthSchemaStorage(
   if (options.dialect === "d1") {
     const st = compatStatements("sqlite", names);
     const db = options.db as unknown as D1;
-    // One count for the statements and the ready check, so the call budget
+    // One count holds the statements and the ready check. So the call budget
     // of the operator session calls sees its queries (ruling 37 of plan 12f).
     const sent = { statements: 0, ready: 0 };
     return {

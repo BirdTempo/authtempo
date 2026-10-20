@@ -117,8 +117,8 @@ const FAMILY_CALLS = 2;
  * `more` is true while sessions or families stay, and the caller calls
  * again. The calls of `endFamilies` after the commit are in the budget. A
  * throw there still answers ok, with `familyEndFailed: true` and `more`
- * true: the next call reads the user's refresh tokens again and ends the
- * family of each row that a parallel exchange wrote (ruling 37).
+ * true (ruling 37). The next call reads the user's refresh tokens again.
+ * It ends the family of each row that a parallel exchange wrote.
  *
  * After the commit, in the order of ruling 2: `session.afterEnd` with
  * `operator` per session, then `afterAction` and `endFamilies` in
@@ -254,21 +254,21 @@ export async function endUserSessions(
 export const OPERATOR_CALL_BUDGET = 50;
 
 /**
- * The D1 statements before a session call when the caller passes no
- * `callsUsed`, the ready check of the storage left out: the worst case of
- * each actor (rulings 34, 35, and 37 of plan 12f). A user actor through
- * the route: the route limiter 1, `resolveSession` 3 (the session, the
- * user, and the sliding refresh), and `requireOperatorUser` 4 (the
- * platform organization, the member row, the second factor, and its
- * limiter). The app: none. A secret actor: the route limiter; Task 10
- * adds the route. The adapter's `statementsSent` cannot give these: an
+ * The worst case of D1 statements before a session call, for each actor
+ * (rulings 34, 35, and 37 of plan 12f). It holds when the caller passes no
+ * `callsUsed`, and it leaves out the ready check. A user actor through
+ * the route costs 8. The route limiter is 1. `resolveSession` is 3: the
+ * session, the user, and the sliding refresh. `requireOperatorUser` is 4:
+ * the platform organization, the member row, the second factor, and its
+ * limiter. The app: none. A secret actor: the route limiter; Task 10 adds
+ * the route. The adapter's `statementsSent` cannot give these: an
  * app keeps one adapter for many invocations, and the limiter queries go
  * to the binding. A caller that made more calls passes its count as
  * `callsUsed`.
  *
  * The ready check comes on top: `readyStatements` of the storage, or 1
- * when the storage has none. The check of a core D1 adapter is 1 query,
- * and the check of the D1 storage of the Better Auth tables is 4 or more.
+ * when the storage has none. The check of a core D1 adapter is 1 query.
+ * The check of the D1 storage of the Better Auth tables is 4 or more.
  * The D1 tests count each whole invocation on the binding: 9 before a
  * user-actor call on core D1 (`operator-sessions-budget.test.ts`).
  */

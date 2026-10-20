@@ -9,13 +9,13 @@ import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
 // The row locks of the session deletes with three flows on Postgres
-// (rulings 36 and 37 of plan 12f), through core's built output, with
+// (rulings 36 and 37 of plan 12f). The test runs core's built output on
 // separate connections. A third flow holds the lock of one session row
 // between two rows of the target in id order. Then the two flows under
 // test start: each must take its row locks by id, or each waits on the
 // other. Every row comes from the flows. The one device is the pause of
-// the race test: a transaction waits after a session delete that removed a
-// row, while the other flows start.
+// the race test. A transaction waits after a session delete that removed
+// a row, while the other flows start.
 
 const API = "https://api.example.com";
 /** Every request passes: the race, not the limit, is under test. */
@@ -115,7 +115,7 @@ type World = ReturnType<typeof world>;
 /**
  * User u has the sessions s1 < x < s2 < s3 by id, and x is the session of
  * user v. s1 sets an organization active, so its row leaves the id order
- * of the heap: a DELETE in scan order takes s1 last.
+ * of the heap. A DELETE in scan order takes s1 last.
  */
 async function state(w: World) {
   const s1 = await w.signIn("u@example.com");
