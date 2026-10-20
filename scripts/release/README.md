@@ -2,7 +2,7 @@
 
 The release checks of plan 12j. Never published: the name has no scope, and `private` is true.
 
-Each check is a `.ts` file that Node runs by type stripping. Each check has a pure function, a vitest test over the fixtures in `test/fixtures/`, and an entry that reads the repository and prints one summary line:
+Each check is a `.ts` file that Node runs by type stripping. Each check has a pure function and a vitest test over the fixtures in `test/fixtures/`. Its entry reads the repository and prints one summary line:
 
 ```
 <name>: PASS|FAIL <key>=<n> ... failures=<n>

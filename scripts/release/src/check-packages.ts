@@ -76,8 +76,8 @@ export function checkPackages(input: PackagesInput): Report {
       failures.push(`${name} has no reason in release/unreleased.json`);
   }
 
-  // A name stays in a list after a rename or a removal. Changesets also refuses an
-  // unknown name in `fixed`, but no supplier is the only guard of the split.
+  // A name stays in a list after a rename or a removal. Changesets 3.0.3 only warns
+  // on an unknown name in `fixed` and goes on, so this check is the guard.
   for (const [list, set] of [
     ["the fixed group", fixed],
     ["ignore", ignore],
