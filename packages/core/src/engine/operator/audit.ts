@@ -7,7 +7,7 @@ import type { StorageAdapter } from "../../storage/port.js";
 import { HookStop, hookGuard, runAfter, runBefore } from "../hooks.js";
 import { endFamilies, type FamilyEnds, familyEnds } from "../oauth-family.js";
 import { endedList } from "../sessions.js";
-import { type OperatorActor, requireScope } from "./guards.js";
+import { checkActor, type OperatorActor, requireScope } from "./guards.js";
 
 /**
  * Every action of an audit row (spec 26 item 8). A Record, so a value added
@@ -77,9 +77,10 @@ export function operatorReason(raw: unknown): Result<string> {
 
 /**
  * The draft of one act. The actor is named by the secret's name, the user
- * id, or the app's name, never by a secret. The user agent loses each
- * control character and is cut to `USER_AGENT_MAX` code points, so the cut
- * splits no character.
+ * id, or the app's name, never by a secret. An app name outside the rule of
+ * `checkActor` answers `invalid_body`. The user agent loses each control
+ * character and is cut to `USER_AGENT_MAX` code points, so the cut splits
+ * no character.
  */
 export function auditDraft(
   actor: OperatorActor,
@@ -91,13 +92,15 @@ export function auditDraft(
     ip: string | null;
     userAgent: string | null;
   },
-): OperatorAuditDraft {
+): Result<OperatorAuditDraft> {
+  const named = checkActor(actor);
+  if (!named.ok) return named;
   const actorId = actor.kind === "user" ? actor.user.id : actor.name;
   const userAgent =
     input.userAgent === null
       ? null
       : Array.from(removeControlChars(input.userAgent)).slice(0, USER_AGENT_MAX).join("");
-  return {
+  return ok({
     actorKind: actor.kind,
     actorId,
     action: input.action,
@@ -106,7 +109,7 @@ export function auditDraft(
     data: input.data,
     ip: input.ip,
     userAgent,
-  };
+  });
 }
 
 /**
@@ -198,13 +201,16 @@ function idInput(value: unknown): boolean {
  * `after` is the `next` of the page before. `limit` is 1 to 100, default
  * 50. `next` is the last id when the page is full, else null; so a full
  * last page is followed by one empty page. Needs `operator.users` (else
- * `not_found`, as the user reads) and the scope `audit`.
+ * `not_found`, as the user reads), an actor that passes `checkActor`, and
+ * the scope `audit`.
  */
 export async function listAudit(
   config: ResolvedConfig,
   input: { actor: OperatorActor; targetUserId?: string; after?: string; limit?: number },
 ): Promise<Result<{ rows: OperatorAuditRow[]; next: string | null }>> {
   if (!config.operator?.users) return fail("not_found");
+  const named = checkActor(input.actor);
+  if (!named.ok) return named;
   const scoped = requireScope(input.actor, "audit");
   if (!scoped.ok) return scoped;
   const limit = input.limit ?? PAGE.default;

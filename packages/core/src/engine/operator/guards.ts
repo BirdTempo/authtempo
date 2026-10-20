@@ -152,3 +152,14 @@ export function appActor(name: string): Result<OperatorActor & { kind: "app" }> 
   if (!APP_NAME.test(name)) return fail("invalid_body");
   return ok({ kind: "app", name });
 }
+
+/**
+ * The name rule of an app actor at each entry (spec 26 item 1). The app
+ * builds the actor in process, so core checks the name before any read or
+ * row. A name outside the rule answers `invalid_body`.
+ */
+export function checkActor(actor: OperatorActor): Result<true> {
+  if (actor.kind === "app" && (typeof actor.name !== "string" || !APP_NAME.test(actor.name)))
+    return fail("invalid_body");
+  return ok(true);
+}

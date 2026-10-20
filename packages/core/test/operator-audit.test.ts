@@ -48,9 +48,19 @@ async function secretActor(auth: OperatorAuth, secret: string): Promise<Operator
 
 const APP: OperatorActor = { kind: "app", name: "support-tool" };
 
+/** The draft of `auditDraft`, or a throw for a refused actor. */
+function draftOf(
+  actor: OperatorActor,
+  input: Parameters<typeof auditDraft>[1],
+): OperatorAuditDraft {
+  const draft = auditDraft(actor, input);
+  if (!draft.ok) throw new Error(draft.code);
+  return draft.value;
+}
+
 /** A draft of a ban by the app, as the acts of Tasks 6 to 9 build one. */
 function draftFor(targetUserId: string, actor: OperatorActor = APP): OperatorAuditDraft {
-  return auditDraft(actor, {
+  return draftOf(actor, {
     action: "ban",
     targetUserId,
     reason: "Spam from this account.",
@@ -253,7 +263,7 @@ describe("the operator audit row (plan 12f Task 4)", () => {
     const actor = await secretActor(auth, CI_SECRET);
     const agent = `Mozilla/5.0\r\n${"a".repeat(587)}`;
     expect(agent).toHaveLength(600);
-    const draft = auditDraft(actor, {
+    const draft = draftOf(actor, {
       action: "ban",
       targetUserId: user.id,
       reason: "Spam.",
@@ -286,11 +296,11 @@ describe("the operator audit row (plan 12f Task 4)", () => {
       ip: null,
       userAgent: null,
     } as const;
-    expect(auditDraft(ci, input)).toMatchObject({ actorKind: "secret", actorId: "ci" });
+    expect(draftOf(ci, input)).toMatchObject({ actorKind: "secret", actorId: "ci" });
     expect(
-      auditDraft({ kind: "user", user: operator.user, session: operator.session }, input),
+      draftOf({ kind: "user", user: operator.user, session: operator.session }, input),
     ).toMatchObject({ actorKind: "user", actorId: operator.user.id });
-    expect(auditDraft(APP, input)).toMatchObject({ actorKind: "app", actorId: "support-tool" });
+    expect(draftOf(APP, input)).toMatchObject({ actorKind: "app", actorId: "support-tool" });
   });
 
   it("pages the rows by id", async () => {
@@ -356,6 +366,28 @@ describe("the operator audit row (plan 12f Task 4)", () => {
       code: "not_found",
       status: 404,
     });
+  });
+
+  it("refuses an app name outside the rule at operatorApi, auditDraft, and listAudit (spec 26 item 1)", async () => {
+    const name = `Ada@example.com\r\n${"x".repeat(283)}`;
+    expect(name).toHaveLength(300);
+    const bad: OperatorActor = { kind: "app", name };
+    const refused = { ok: false, code: "invalid_body", status: 400 };
+    // operatorApi checks the actor before the tool switch, so a deployment
+    // with the tools off answers invalid_body, not not_found.
+    expect(await operatorApi(makeAuth().config).audit.list({ actor: bad })).toEqual(refused);
+    const auth = await operatorAuth();
+    expect(await listAudit(auth.config, { actor: bad })).toEqual(refused);
+    expect(
+      auditDraft(bad, {
+        action: "ban",
+        targetUserId: "u1",
+        reason: "r",
+        data: null,
+        ip: null,
+        userAgent: null,
+      }),
+    ).toEqual(refused);
   });
 
   it("serves auth.api.operator.audit.list in every deployment", async () => {
