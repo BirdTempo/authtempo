@@ -3,6 +3,7 @@ import { matchOperatorSecret, type OperatorActor } from "../src/engine/operator/
 import { operatorApi } from "../src/engine/operator/index.js";
 import { createSession } from "../src/engine/sessions.js";
 import { normalizeEmailPrefix } from "../src/engine/users.js";
+import { sha256Hex } from "../src/primitives/crypto.js";
 import { BASE_URL, makeAuth, seedPlatform } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
@@ -378,6 +379,33 @@ describe("operator user reads (plan 12f Task 5)", () => {
         expect(log).not.toHaveBeenCalled();
       });
     }
+  });
+
+  it("checks the tool before the scope", async () => {
+    // A secret with no scope `users` on an auth with no `operator.users` key.
+    const auth = await operatorAuth({
+      operator: {
+        secrets: [
+          {
+            name: "keys",
+            secretHash: await sha256Hex(OPERATOR_SECRETS.keys),
+            scopes: ["keys", "secrets"],
+          },
+        ],
+      },
+    });
+    const [id] = await signUpAll(auth, ["ada@example.com"]);
+    const api = operatorApi(auth.config);
+    const actor = await secretActor(auth, OPERATOR_SECRETS.keys);
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await api.users.list({ actor })).toMatchObject({ code: "not_found" });
+    expect(await api.users.search({ actor, email: "ada@example.com" })).toMatchObject({
+      code: "not_found",
+    });
+    expect(await api.users.get({ actor, userId: id ?? "" })).toMatchObject({
+      code: "not_found",
+    });
+    expect(log).not.toHaveBeenCalled();
   });
 
   it("refuses a secret without the users scope", async () => {
