@@ -1,5 +1,6 @@
 import {
   type Auth,
+  activeBan,
   holdsPlatformRole,
   type OperatorUser,
   type ResolvedSession,
@@ -275,11 +276,11 @@ const BAN_YOURSELF = "YOU_CANNOT_BAN_YOURSELF";
 /**
  * Better Auth's user with the admin fields, from core's user row. `role`
  * is the platform role or `user`. The ban fields hold a ban that holds
- * now, by core's rule (spec 26 item 6). A ban that ended reads as no ban.
+ * now, by core's rule `activeBan` (spec 26 item 6), so the shim keeps no
+ * copy (ruling 60 L1). A ban that ended reads as no ban.
  */
 export function toAdminUser(row: UserRow, role: string, now: Date): AdminUser {
-  const holds =
-    row.bannedAt !== null && (row.banUntil === null || row.banUntil.getTime() > now.getTime());
+  const holds = activeBan(row, now);
   return {
     ...toUser(row),
     role,

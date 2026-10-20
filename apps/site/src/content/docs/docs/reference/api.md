@@ -93,6 +93,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `validImageUrl` | The image rule of core: an `https://` URL with a host, of at most 2048 characters, with no `@` and no `%` in its authority. It holds no whitespace, no control or format character, no backslash, and none of `"<>{}\|^` or a backtick. |
 | `rankOf` | The rank of a role string in a rank table. |
 | `holdsPlatformRole` | Takes a config, the id of the platform organization, and a member row. True when the row is of that organization and its role parts hold `organizations.platformRole`. The Better Auth shim reads this rule. |
+| `activeBan` | Takes a user row and a time. True while a ban holds at that time: the ban has no end, or it ends after that time. A ban that ended reads as no ban. The Better Auth shim reads this rule. |
 | `readSessionToken` | Reads the session token of a request, from the cookie and then the bearer header. |
 | `isAppScheme`, `isGithubSubject` | The app scheme rule, and the rule of a GitHub subject. |
 | `newId` | Makes a row id. |

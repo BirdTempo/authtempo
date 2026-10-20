@@ -121,6 +121,7 @@ export type { OAuthGrantSummary } from "./engine/oauth-grants.js";
 export type { OAuthResult } from "./engine/oauth-result.js";
 export type { OAuthAccess, TokenAnswer } from "./engine/oauth-token.js";
 export type { OperatorAuditDraft } from "./engine/operator/audit.js";
+export { activeBan } from "./engine/operator/ban-rule.js";
 export { holdsPlatformRole, type OperatorActor } from "./engine/operator/guards.js";
 export type { OperatorApi } from "./engine/operator/index.js";
 export type { OperatorUser } from "./engine/operator/users.js";
