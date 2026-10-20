@@ -52,7 +52,7 @@ The command asks one question: `End the sessions of every user?` With `--yes` it
 
 Each call ends one page of sessions inside the budget of the deployment, and answers `more`. The command calls again while `more` is true, up to `--max-calls`. A call that stops early at the budget is normal. Each call prints one line on stderr: `call <i>: ended <n>, more <true|false>`. The sums go to stdout at the end: `calls <n>, ended <n>, more <true|false>`.
 
-Each call writes its own audit row. A stop in the middle keeps the sums of the calls before it, with exit 2.
+Each call writes its own audit row. A stop in the middle keeps the sums of the calls before it, with exit 2. The sums line then goes to stdout, or the sums go in the JSON document.
 
 The end of all sessions leaves the OAuth refresh tokens and the API tokens of each user. Revoke them in their own steps.
 

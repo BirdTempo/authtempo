@@ -440,6 +440,59 @@ describe("the operator commands (plan 12f Task 12)", () => {
     );
   });
 
+  it("prints the sums of the calls before a 429 in the middle of an end, with exit 2", async () => {
+    const stop = "the operator routes allow 600 calls per IP per hour; wait, then run it again";
+    /** `left` calls of this IP stay in the hour: the wrong secret spends the rest. */
+    const spend = async (f: Fixture, left: number) => {
+      for (let i = 0; i < 600 - left; i++)
+        await f.fetch(`${OPERATOR}/users?limit=1`, {
+          headers: { authorization: `Operator ${WRONG}` },
+        });
+    };
+    // end-all: two calls of two sessions each, then the 429.
+    for (const json of [false, true]) {
+      const f = fixture();
+      for (let i = 0; i < 5; i++) await signUp(f, `m${i}@example.com`);
+      await spend(f, 2);
+      const args = ["sessions", "end-all", BASE, "--reason", "breach", "--limit", "2", "--yes"];
+      const r = await run(json ? [...args, "--json"] : args, f);
+      expect(r.code).toBe(2);
+      expect(r.io.stderr.at(-1)).toBe(`stopped: ${stop}`);
+      expect(r.io.stderr).toContain("call 2: ended 2, more true");
+      if (json)
+        expect(docOf(r.io.stdout)).toEqual({
+          ended: 4,
+          calls: 2,
+          more: true,
+          exit: 2,
+          stopped: stop,
+        });
+      else expect(r.io.stdout).toEqual(["calls 2, ended 4, more true"]);
+    }
+    // end of one user: a session.afterEnd hook makes each call end one page only.
+    for (const json of [false, true]) {
+      const f = fixture(undefined, { hooks: { session: { afterEnd: () => {} } } });
+      const id = await signUp(f, "bea@example.com");
+      for (let i = 0; i < 79; i++) {
+        if (i % 9 === 8) f.advance(15 * 60_000);
+        await signIn(f, "bea@example.com");
+      }
+      await spend(f, 1);
+      const args = ["sessions", "end", BASE, id, "--reason", "reset", "--yes"];
+      const r = await run(json ? [...args, "--json"] : args, f);
+      expect(r.code).toBe(2);
+      expect(r.io.stderr.at(-1)).toBe(`stopped: ${stop}`);
+      const first = r.io.stderr.find((l) => l.startsWith("call 1: "));
+      const ended = Number(/^call 1: ended (\d+), more true$/.exec(first ?? "")?.[1]);
+      expect(ended).toBeGreaterThan(0);
+      if (json) {
+        const doc = docOf(r.io.stdout);
+        expect(doc).toMatchObject({ ended, calls: 1, more: true, exit: 2, stopped: stop });
+        expect(doc.auditIds).toHaveLength(1);
+      } else expect(r.io.stdout).toEqual([`calls 1, ended ${ended}, more true`]);
+    }
+  });
+
   it("ends the sessions of one user and prints the total", async () => {
     const f = fixture();
     const id = await signUp(f, "ada@example.com");

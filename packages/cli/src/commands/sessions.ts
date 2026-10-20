@@ -89,9 +89,14 @@ async function endLoop(
   return { sums, stopped: null };
 }
 
+/** The sums line on stdout. */
+function printSums(ctx: Ctx, sums: Sums): void {
+  ctx.out(`calls ${sums.calls}, ended ${sums.ended}, more ${sums.more}`);
+}
+
 /** The sums on stdout, and exit 1 with a warning when sessions are left after the last call. */
 function finish(ctx: Ctx, json: boolean, sums: Sums, maxCalls: number): 0 | 1 {
-  if (!json) ctx.out(`calls ${sums.calls}, ended ${sums.ended}, more ${sums.more}`);
+  if (!json) printSums(ctx, sums);
   if (sums.more)
     ctx.err(`warning: the run reached --max-calls ${maxCalls} with sessions left; run it again`);
   return sums.more ? 1 : 0;
@@ -126,7 +131,9 @@ async function runEnd(argv: string[], ctx: Ctx): Promise<number> {
     maxCalls,
   );
   if (stopped !== null) {
+    // A stop in the middle prints the sums of the calls before it (review of plan 12f Task 12).
     if (json) printJson(ctx, { ...sums, exit: 2, stopped } satisfies SessionsEndJson);
+    else printSums(ctx, sums);
     return 2;
   }
   const exit = finish(ctx, json, sums, maxCalls);
@@ -170,6 +177,7 @@ async function runEndAll(argv: string[], ctx: Ctx): Promise<number> {
   const { auditIds: _ids, ...counts } = sums;
   if (stopped !== null) {
     if (json) printJson(ctx, { ...counts, exit: 2, stopped } satisfies SessionsEndAllJson);
+    else printSums(ctx, sums);
     return 2;
   }
   const exit = finish(ctx, json, sums, maxCalls);
