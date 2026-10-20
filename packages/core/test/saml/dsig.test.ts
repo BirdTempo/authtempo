@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { excC14n } from "../../src/saml/c14n.js";
 import { importVerifyKey, readCertificate } from "../../src/saml/der.js";
-import { DSIG_ALGORITHMS, verifyEnveloped } from "../../src/saml/dsig.js";
+import { DSIG_ALGORITHMS, NS_DSIG, verifyEnveloped } from "../../src/saml/dsig.js";
 import { parseXml, type XmlElement } from "../../src/saml/xml.js";
 import { createTestIdp, type TestIdp } from "../../src/testing/saml-idp.js";
 import { attackerKeyInfo, find, NS_SAML, sha1Digest, validInput } from "./corpus.js";
@@ -27,6 +28,46 @@ function edit(xml: string, from: string, to: string): string {
   const at = xml.indexOf(from);
   if (at < 0 || xml.indexOf(from, at + 1) >= 0) throw new Error(`not exactly one: ${from}`);
   return xml.slice(0, at) + to + xml.slice(at + from.length);
+}
+
+/**
+ * The text with a new SignatureValue: the canonical SignedInfo of the Assertion, signed by
+ * `signer` with `params`. The IdP writes no PrefixList, so the list is empty.
+ */
+async function resigned(
+  xml: string,
+  signer: CryptoKey,
+  params: AlgorithmIdentifier | EcdsaParams,
+): Promise<string> {
+  const [signedInfo] = find(assertionOf(xml), NS_DSIG, "SignedInfo");
+  if (signedInfo === undefined) throw new Error("no SignedInfo");
+  const bytes = new TextEncoder().encode(excC14n(signedInfo, { inclusivePrefixes: [] }));
+  const value = new Uint8Array(await crypto.subtle.sign(params, signer, bytes));
+  let bin = "";
+  for (const b of value) bin += String.fromCharCode(b);
+  const from = /<ds:SignatureValue>[^<]+<\/ds:SignatureValue>/;
+  if (!from.test(xml)) throw new Error("no SignatureValue");
+  return xml.replace(from, `<ds:SignatureValue>${btoa(bin)}</ds:SignatureValue>`);
+}
+
+function rsaPair(bits: number, hash: string): Promise<CryptoKeyPair> {
+  return crypto.subtle.generateKey(
+    {
+      name: "RSASSA-PKCS1-v1_5",
+      modulusLength: bits,
+      publicExponent: new Uint8Array([1, 0, 1]),
+      hash,
+    },
+    false,
+    ["sign", "verify"],
+  ) as Promise<CryptoKeyPair>;
+}
+
+function ecPair(namedCurve: string): Promise<CryptoKeyPair> {
+  return crypto.subtle.generateKey({ name: "ECDSA", namedCurve }, false, [
+    "sign",
+    "verify",
+  ]) as Promise<CryptoKeyPair>;
 }
 
 let rsa: TestIdp;
@@ -67,6 +108,26 @@ describe("verifyEnveloped", () => {
       ok: false,
       step: "algorithm",
     });
+  });
+
+  // Review L1 of Task 7: the check holds the key profile itself, not only importVerifyKey.
+  // In RSASSA-PKCS1-v1_5 the key carries the hash, so a SHA-1 key verifies a SHA-1 value.
+  it.each<["rsa" | "ec", string, "ok" | "algorithm", () => Promise<CryptoKeyPair>]>([
+    ["rsa", "an RSA key of 2048 bits with SHA-256", "ok", () => rsaPair(2048, "SHA-256")],
+    ["rsa", "an RSA key with SHA-1", "algorithm", () => rsaPair(2048, "SHA-1")],
+    ["rsa", "an RSA key of 1024 bits", "algorithm", () => rsaPair(1024, "SHA-256")],
+    ["ec", "an ECDSA key on P-256", "ok", () => ecPair("P-256")],
+    ["ec", "an ECDSA key on P-384", "algorithm", () => ecPair("P-384")],
+  ])("checks the %s key profile: %s answers %s", async (alg, _name, answer, pair) => {
+    const keys = await pair();
+    const base = alg === "rsa" ? signed : await ec.response(validInput(now));
+    const params =
+      alg === "rsa" ? { name: "RSASSA-PKCS1-v1_5" } : { name: "ECDSA", hash: "SHA-256" };
+    const xml = await resigned(base, keys.privateKey, params);
+    expect(xml).not.toBe(base);
+    expect(await verifyEnveloped(assertionOf(xml), [keys.publicKey])).toEqual(
+      answer === "ok" ? { ok: true } : { ok: false, step: answer },
+    );
   });
 
   it("accepts a Response and an Assertion each signed", async () => {

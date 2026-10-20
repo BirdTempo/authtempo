@@ -9,7 +9,7 @@
  */
 import { constantTimeEqual } from "../primitives/crypto.js";
 import { excC14n } from "./c14n.js";
-import { strictBase64 } from "./der.js";
+import { RSA_MIN_BITS, strictBase64 } from "./der.js";
 import { childElements, textOf, type XmlElement } from "./xml.js";
 
 export const NS_DSIG = "http://www.w3.org/2000/09/xmldsig#";
@@ -245,6 +245,22 @@ function idCount(target: XmlElement, id: string): number {
   return count;
 }
 
+/**
+ * True when `key` is of the profile for `method`. RSASSA-PKCS1-v1_5 with SHA-256 and a
+ * modulus of at least RSA_MIN_BITS, or ECDSA on P-256. The check holds the profile itself,
+ * so a key from another importer cannot widen it. In RSASSA-PKCS1-v1_5 the key carries the
+ * hash: a SHA-1 key verifies a SHA-1 value under the rsa-sha256 method.
+ */
+function profileKey(key: CryptoKey, method: string): boolean {
+  if (method === DSIG_ALGORITHMS.rsaSha256) {
+    if (key.algorithm.name !== "RSASSA-PKCS1-v1_5") return false;
+    const rsa = key.algorithm as RsaHashedKeyAlgorithm;
+    return rsa.hash.name === "SHA-256" && rsa.modulusLength >= RSA_MIN_BITS;
+  }
+  if (key.algorithm.name !== "ECDSA") return false;
+  return (key.algorithm as EcKeyAlgorithm).namedCurve === "P-256";
+}
+
 async function verifyOne(
   key: CryptoKey,
   method: string,
@@ -285,9 +301,8 @@ export async function verifyEnveloped(
     throw err;
   }
 
-  // The SignatureMethod matches the key type: no key of the type answers algorithm.
-  const wanted = parsed.method === DSIG_ALGORITHMS.rsaSha256 ? "RSASSA-PKCS1-v1_5" : "ECDSA";
-  const usable = keys.filter((k) => k.algorithm.name === wanted);
+  // The SignatureMethod matches the key profile: no key of the profile answers algorithm.
+  const usable = keys.filter((k) => profileKey(k, parsed.method));
   if (usable.length === 0) return { ok: false, step: "algorithm" };
 
   // Step 4: the reference. A second element with the target's ID anywhere is a wrapping shape.

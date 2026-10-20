@@ -26,7 +26,7 @@ const OID_EC_PUBLIC_KEY = [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01];
 const OID_PRIME256V1 = [0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07];
 
 /** The smallest RSA modulus that the profile accepts (spec 30 item 7). */
-const RSA_MIN_BITS = 2048;
+export const RSA_MIN_BITS = 2048;
 
 const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
 
