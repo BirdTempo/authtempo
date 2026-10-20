@@ -38,8 +38,29 @@ const dirs = {
   "@authtempo/import": "packages/import",
   "authtempo-example-node": "examples/node",
 };
-const run = (changed: ChangedFile[], names: string[], commits = 1) =>
-  checkChangesets({ changed, changesets: names.map(changeset), released, dirs, commits });
+// The files field of each package, as on the tree of 2026-10-20.
+const files: Record<string, readonly string[] | undefined> = {
+  "@authtempo/cli": ["dist"],
+  "@authtempo/compat-better-auth": ["dist", "migrations"],
+  "@authtempo/core": ["dist"],
+  "@authtempo/import": [
+    "dist",
+    "worker/README.md",
+    "worker/wrangler.jsonc",
+    "worker/src",
+    "worker/proof",
+  ],
+  "authtempo-example-node": undefined,
+};
+const run = (changed: ChangedFile[], names: string[], commits = 1, packs = files) =>
+  checkChangesets({
+    changed,
+    changesets: names.map(changeset),
+    released,
+    dirs,
+    files: packs,
+    commits,
+  });
 const paths = (...list: string[]) => list.map((path) => ({ path }));
 
 let repo: Repo | undefined;
@@ -70,7 +91,7 @@ function fixtureRepo(onMain: Record<string, string> = {}): Repo {
   );
   r.write(
     "packages/a/package.json",
-    '{\n  "name": "@fixture/a",\n  "version": "0.0.0",\n  "private": true,\n  "files": ["dist"]\n}\n',
+    '{\n  "name": "@fixture/a",\n  "version": "0.0.0",\n  "private": true,\n  "files": ["dist", "CHANGELOG.md"]\n}\n',
   );
   r.write("packages/a/src/foo.ts", "export const foo = 1;\n");
   r.write(
@@ -121,6 +142,45 @@ describe("check-changesets", () => {
     expect(summaryLine(r)).toBe(
       "check-changesets: PASS changed=0 covered=0 exempt=5 empty=0 failures=0",
     );
+  });
+
+  it("needs a changeset for a file that the files field packs", () => {
+    // The import tarball ships its worker proof and the worker README.
+    const r = run(
+      paths(
+        "packages/import/worker/proof/pack-files.mjs",
+        "packages/import/worker/README.md",
+        "packages/core/src/test/x.ts",
+      ),
+      [],
+    );
+    expect(r.failures).toEqual([
+      "@authtempo/core changes and no changeset names it: packages/core/src/test/x.ts",
+      "@authtempo/import changes and no changeset names it: packages/import/worker/proof/pack-files.mjs, packages/import/worker/README.md",
+    ]);
+    expect(summaryLine(r)).toBe(
+      "check-changesets: FAIL changed=3 covered=0 exempt=0 empty=0 failures=2",
+    );
+    // A package with no files field packs each file, so no row exempts a file of it.
+    const all = run(paths("packages/core/test/a.test.ts"), [], 1, {
+      ...files,
+      "@authtempo/core": undefined,
+    });
+    expect(all.failures).toEqual([
+      "@authtempo/core changes and no changeset names it: packages/core/test/a.test.ts",
+    ]);
+  });
+
+  it("fails on a files entry that is not a plain path", () => {
+    const r = run(paths("packages/core/test/a.test.ts"), [], 1, {
+      ...files,
+      "@authtempo/core": ["./dist", "types/*.d.ts"],
+    });
+    expect(r.failures).toEqual([
+      '@authtempo/core: the files entry "./dist" is not a plain path; the check reads only a plain path, so it exempts no file of the package',
+      '@authtempo/core: the files entry "types/*.d.ts" is not a plain path; the check reads only a plain path, so it exempts no file of the package',
+      "@authtempo/core changes and no changeset names it: packages/core/test/a.test.ts",
+    ]);
   });
 
   it("needs a changeset for a runtime key of package.json", () => {
@@ -228,7 +288,7 @@ describe("check-changesets", () => {
       name: "@fixture/a",
       version: "0.1.0",
       private: true,
-      files: ["dist"],
+      files: ["dist", "CHANGELOG.md"],
     });
     expect(summaryLine(checkChangesets(readInput(repo.root, "main")))).toBe(
       "check-changesets: PASS changed=0 covered=0 exempt=2 empty=0 failures=0",

@@ -28,15 +28,18 @@ export interface ChangesetsInput {
   released: string[];
   /** The folder of each workspace package, by name. */
   dirs: Record<string, string>;
+  /** The `files` field of each workspace package, by name; undefined when the manifest has none. */
+  files: Record<string, readonly string[] | undefined>;
   /** The count of commits since the merge base. */
   commits: number;
 }
 
 /**
  * The files of a released package that need no changeset, each with its reason
- * (spec 33 item 2). A path is relative to the package folder.
+ * (spec 33 item 2). A path is relative to the package folder. A row exempts no
+ * file that the `files` field packs, unless the row says `packed: true`.
  */
-export const EXEMPT_PATTERNS: readonly { pattern: RegExp; reason: string }[] = [
+export const EXEMPT_PATTERNS: readonly { pattern: RegExp; reason: string; packed?: true }[] = [
   // Each fixture of a released package is under test/, so this row holds it too.
   { pattern: /^test\//, reason: "a test or a fixture is not in the pack" },
   { pattern: /(^|\/)proof\//, reason: "a proof checks the pack and changes no runtime code" },
@@ -47,8 +50,22 @@ export const EXEMPT_PATTERNS: readonly { pattern: RegExp; reason: string }[] = [
   {
     pattern: /^CHANGELOG\.md$/,
     reason: "changeset version writes it from the changesets; check-records holds it",
+    // Each released package lists CHANGELOG.md in files (spec 33 item 3).
+    packed: true,
   },
 ];
+
+/** A files entry that the check reads: folder names and file names with "/", and no glob. */
+const PLAIN_PATH = /^[\w@-][\w@.-]*(\/[\w@.-]+)*$/;
+
+/**
+ * True when the `files` field packs `inner`. An entry packs the path that it
+ * names and each path below it. With no `files` field, the pack holds each file.
+ */
+function packedBy(inner: string, files: readonly string[] | undefined): boolean {
+  if (files === undefined) return true;
+  return files.some((entry) => inner === entry || inner.startsWith(`${entry}/`));
+}
 
 /** The keys of package.json that change what an app installs or loads. */
 export const RUNTIME_KEYS = [
@@ -119,6 +136,18 @@ export function checkChangesets(input: ChangesetsInput): Report {
       );
   }
 
+  // A glob or a "./" entry would need the full pack rules. The check does not
+  // guess, so each file of the package then counts as packed.
+  const files = { ...input.files };
+  for (const name of input.released)
+    for (const entry of files[name] ?? [])
+      if (!PLAIN_PATH.test(entry)) {
+        failures.push(
+          `${name}: the files entry "${entry}" is not a plain path; the check reads only a plain path, so it exempts no file of the package`,
+        );
+        files[name] = undefined;
+      }
+
   let changed = 0;
   let covered = 0;
   let exempt = 0;
@@ -129,7 +158,9 @@ export function checkChangesets(input: ChangesetsInput): Report {
     const [name, dir] = owner;
     const inner = file.path.slice(dir.length + 1);
     let label = file.path;
-    if (EXEMPT_PATTERNS.some((row) => row.pattern.test(inner))) {
+    // A file in the tarball changes what an app installs, so it is never exempt.
+    const packed = packedBy(inner, files[name]);
+    if (EXEMPT_PATTERNS.some((row) => row.pattern.test(inner) && (!packed || row.packed))) {
       exempt++;
       continue;
     }
@@ -191,11 +222,13 @@ export function readInput(root: string, ref: string): ChangesetsInput {
     const text = readHead(path);
     if (text !== null) changesets.push({ file: path, text });
   }
+  const workspace = readWorkspace(root);
   return {
     changed,
     changesets,
     released: releasedNames(root),
-    dirs: Object.fromEntries(readWorkspace(root).map((p) => [p.name, p.dir])),
+    dirs: Object.fromEntries(workspace.map((p) => [p.name, p.dir])),
+    files: Object.fromEntries(workspace.map((p) => [p.name, p.manifest.files])),
     commits: commitCount(root, base),
   };
 }
