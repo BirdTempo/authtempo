@@ -1,5 +1,5 @@
 import { COMMON_FLAGS, type HelpText } from "./types.js";
-import { GROUP_EXITS, PAGE_FLAGS, READ_FLAGS, toolStop } from "./users.js";
+import { GROUP_EXITS, PAGE_CUT_EXIT, PAGE_FLAGS, READ_FLAGS, toolStop } from "./users.js";
 
 export const AUDIT_HELP: HelpText = {
   command: "audit",
@@ -23,7 +23,7 @@ export const AUDIT_LIST_HELP: HelpText = {
   purpose:
     "List the audit rows of the operator acts by id, the oldest first. A row names a secret by its name, never by its value.",
   usage: [
-    "authtempo audit list <base url> [--user <id>] [--after <id>] [--limit <n>] [--all] [--token-env <NAME> | --token-file <path>]",
+    "authtempo audit list <base url> [--user <id>] [--after <id>] [--limit <n>] [--all [--max-calls <n>]] [--token-env <NAME> | --token-file <path>]",
   ],
   examples: [
     {
@@ -42,6 +42,7 @@ export const AUDIT_LIST_HELP: HelpText = {
   ],
   exits: [
     { code: 0, says: "The command printed the rows." },
+    PAGE_CUT_EXIT,
     { code: 2, says: toolStop("audit") },
   ],
 };

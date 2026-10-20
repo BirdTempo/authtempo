@@ -266,7 +266,10 @@ for `users` and `create-admin`, `sessions` for `sessions`, and `audit` for
 only, as for `keys rotate`.
 
 - `users list|search|get` and `audit list` print a table on stdout, or one
-  JSON document with `--json`. `--all` follows `next` until it is null.
+  JSON document with `--json`. `--all` follows `next` until it is null,
+  with pages of 100 rows, up to `--max-calls` (100 by default, then exit 1
+  and a warning). A `next` that does not move, or a stop after the first
+  page, stops with exit 2, and the command prints the rows read before it.
 - `users ban|unban|platform-role|second-factor-off`, `sessions end|end-all`,
   and `create-admin` need `--reason` (1 to 500 characters with no control
   character, checked before any request). With no terminal, or with

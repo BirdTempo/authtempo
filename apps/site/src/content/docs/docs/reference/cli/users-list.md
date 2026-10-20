@@ -32,7 +32,8 @@ authtempo users list https://api.example.com
 | `<base url>` | The origin of the API, with no path. |
 | `--after <id>` | Start after this id. The cursor of the page before gives it. |
 | `--limit <n>` | The rows of one page, from 1 to 100. The default is 50. |
-| `--all` | Read each page after the first until the last page. |
+| `--all` | Read each page after the first until the last page. A page then holds 100 rows unless --limit gives another count. |
+| `--max-calls <n>` | The most calls of one run with --all, from 1 to 10000. The default is 100. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--token-file <path>` | The file of the operator secret. A dash reads stdin. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |
@@ -43,22 +44,25 @@ authtempo users list https://api.example.com
 | Exit code | What it means |
 | --- | --- |
 | 0 | The command printed the users. |
+| 1 | The read reached --max-calls with more rows. The command printed the rows that it read. |
 | 2 | A usage error, or a stop. A stop names its cause: no answer, the tools are off, a refused secret, no users scope, or the limit of 600 calls an hour. |
 
 The users go to stdout as a table: `ID`, `EMAIL`, `VERIFIED`, `BAN`, `OPERATOR`, `FACTORS`, `SESSIONS`, and `CREATED`. `BAN` is `-` for no ban, `no-end` for a ban with no end, or the end of the ban. The name is in the JSON only.
 
 With no `--all`, the command reads one page. When more users follow, stderr names the cursor: `more users after <id>: give --after <id>, or give --all`. With `--all`, the command reads each page until `next` is null. Each page costs one of the 600 calls of an hour.
 
+With `--all`, the command stops at `--max-calls` with a warning and exit 1: `warning: the read reached --max-calls <n> with more users; give --after <id> to read on`. It also stops with exit 2 when `next` equals the `after` of its own call, because that read never ends. A stop after the first page prints the users that the run read before it.
+
 ## The JSON
 
 | Key | What it holds |
 | --- | --- |
 | `users` | The users of the run, each with `id`, `email`, `emailVerified`, `name`, `createdAt`, `ban`, `platformOperator`, `secondFactor`, `sessions`, and `identities`. |
-| `next` | The cursor of the next page, or null after the last page. A run with `--all` ends with null. |
+| `next` | The cursor of the next page, or null after the last page. A run with `--all` ends with null, unless it stops. |
 | `exit` | The exit code of the run. |
 | `stopped` | The reason of a stop or a usage error, or null. |
 
-The document of a stop holds `users: []` and `next: null`. [The output](/docs/reference/cli/#the-output) gives the rule for every command.
+The document of a stop at the first call holds `users: []` and `next: null`. A stop after the first page holds the users read before it, and `next` is the cursor to read on from. [The output](/docs/reference/cli/#the-output) gives the rule for every command.
 
 ## The route
 

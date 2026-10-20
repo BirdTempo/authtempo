@@ -284,7 +284,8 @@ describe("the operator commands (plan 12f Task 12)", () => {
     for (let i = 0; i < 120; i++) await signUp(f, `user${String(i).padStart(3, "0")}@example.com`);
     const { code, io } = await run(["users", "list", BASE, "--all"], f);
     expect(code).toBe(0);
-    expect(f.paths.filter((p) => p === "GET /auth/operator/users")).toHaveLength(3);
+    // With --all and no --limit, each page holds 100 users, so 120 users take two calls.
+    expect(f.paths.filter((p) => p === "GET /auth/operator/users")).toHaveLength(2);
     // One table: the header and 120 rows.
     expect(io.stdout).toHaveLength(121);
     expect(io.stdout[0]).toMatch(
@@ -304,6 +305,103 @@ describe("the operator commands (plan 12f Task 12)", () => {
     expect(page.io.stderr.at(-1)).toMatch(
       /^more users after \S+: give --after \S+, or give --all$/,
     );
+  });
+
+  it("stops --all at --max-calls with exit 1, and on a 429 after the first page with its rows", async () => {
+    const f = fixture();
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++) ids.push(await signUp(f, `p${i}@example.com`));
+    // The read goes by id, and ids of one millisecond do not sort by the order of the sign-ups.
+    ids.sort();
+    // --max-calls 2 with one user a page: two pages, a warning, and exit 1.
+    const cut = await run(["users", "list", BASE, "--all", "--limit", "1", "--max-calls", "2"], f);
+    expect(cut.code).toBe(1);
+    expect(cut.io.stdout).toHaveLength(3);
+    expect(cut.io.stderr.at(-1)).toBe(
+      `warning: the read reached --max-calls 2 with more users; give --after ${ids[1]} to read on`,
+    );
+    const cutJson = await run(
+      ["users", "list", BASE, "--all", "--limit", "1", "--max-calls", "2", "--json"],
+      f,
+    );
+    expect(cutJson.code).toBe(1);
+    const cutDoc = docOf(cutJson.io.stdout);
+    expect(cutDoc).toMatchObject({ next: ids[1], exit: 1, stopped: null });
+    expect((cutDoc.users as { id: string }[]).map((u) => u.id)).toEqual(ids.slice(0, 2));
+    const audit = await run(
+      ["audit", "list", BASE, "--all", "--limit", "1", "--max-calls", "1"],
+      f,
+    );
+    expect(audit.code).toBe(0);
+    // --max-calls needs --all.
+    const alone = await run(["users", "list", BASE, "--max-calls", "2"], f);
+    expect(alone.code).toBe(2);
+    expect(alone.io.stderr[0]).toBe("--max-calls goes with --all");
+    expect(f.paths.filter((p) => p === "GET /auth/operator/users")).toHaveLength(4);
+
+    // A 429 at the second call: 599 calls of this IP before the run.
+    for (const json of [false, true]) {
+      const g = fixture();
+      const gIds: string[] = [];
+      for (let i = 0; i < 5; i++) gIds.push(await signUp(g, `q${i}@example.com`));
+      gIds.sort();
+      for (let i = 0; i < 599; i++)
+        await g.fetch(`${OPERATOR}/users?limit=1`, {
+          headers: { authorization: `Operator ${WRONG}` },
+        });
+      const args = ["users", "list", BASE, "--all", "--limit", "2"];
+      const r = await run(json ? [...args, "--json"] : args, g);
+      const stop = "the operator routes allow 600 calls per IP per hour; wait, then run it again";
+      expect(r.code).toBe(2);
+      expect(r.io.stderr.at(-1)).toBe(`stopped: ${stop}`);
+      if (json) {
+        const doc = docOf(r.io.stdout);
+        expect(doc).toMatchObject({ next: gIds[1], exit: 2, stopped: stop });
+        expect((doc.users as { id: string }[]).map((u) => u.id)).toEqual(gIds.slice(0, 2));
+      } else {
+        // The header and the two users of the first page.
+        expect(r.io.stdout).toHaveLength(3);
+        expect(r.io.stdout.slice(1).map((l) => l.split(/ +/)[0])).toEqual(gIds.slice(0, 2));
+      }
+    }
+  });
+
+  it("stops --all when next does not move, and prints the rows before the stop", async () => {
+    const createdAt = "2026-03-01T00:00:00.000Z";
+    const user = {
+      ...{ id: "u1", email: "u1@example.com", emailVerified: true, name: null, createdAt },
+      ...{ ban: null, platformOperator: false, secondFactor: [], sessions: 0, identities: [] },
+    };
+    const row = {
+      ...{ id: "a1", createdAt, updatedAt: createdAt, actorKind: "secret", actorId: "support" },
+      ...{ action: "ban", targetUserId: null, reason: "spam", data: null, ip: null },
+      userAgent: null,
+    };
+    // A server that answers the same page with next "u1" (or "a1") to every call.
+    for (const [command, body, stop] of [
+      ["users", { users: [user], next: "u1" }, "users"],
+      ["audit", { rows: [row], next: "a1" }, "audit"],
+    ] as const) {
+      for (const json of [false, true]) {
+        let calls = 0;
+        const fetch = async () => {
+          calls++;
+          return Response.json(body);
+        };
+        const io = fakeIo({ env: { AUTHTEMPO_OPERATOR_SECRET: SUPPORT }, fetch });
+        const args = [command, "list", BASE, "--all"];
+        const code = await main(json ? [...args, "--json"] : args, io);
+        expect(code, command).toBe(2);
+        expect(calls, command).toBe(2);
+        const text = `GET ${OPERATOR}${stop === "users" ? "/users" : "/audit"} answered the cursor of its own call as next: the read stops`;
+        expect(io.stderr.at(-1), command).toBe(`stopped: ${text}`);
+        if (json) {
+          const doc = docOf(io.stdout);
+          expect(doc, command).toMatchObject({ next: body.next, exit: 2, stopped: text });
+          expect(doc[command === "users" ? "users" : "rows"], command).toHaveLength(1);
+        } else expect(io.stdout, command).toHaveLength(2);
+      }
+    }
   });
 
   it("ends all sessions until more is false, or stops at --max-calls with exit 1", async () => {

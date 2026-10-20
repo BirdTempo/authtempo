@@ -13,16 +13,19 @@ import {
   USERS_SECOND_FACTOR_OFF_HELP,
   USERS_UNBAN_HELP,
 } from "../help/users.js";
-import type { OperatorUserJson, OperatorWriteJson, UserJson, UsersListJson } from "../json.js";
+import type { OperatorWriteJson, UserJson, UsersListJson } from "../json.js";
 import { readOperatorSecret } from "../operator-client.js";
 import {
   ask,
   auditIdOf,
-  countOf,
   needYes,
   operatorUser,
-  PAGE_MAX,
+  type PageRule,
+  type PageValues,
   PROOF_METHODS,
+  pageRule,
+  pagesExit,
+  readPages,
   reasonOf,
   TOOL_OPTIONS,
   type ToolTarget,
@@ -41,7 +44,12 @@ const PAGE_OPTIONS = {
   after: { type: "string" },
   limit: { type: "string" },
   all: { type: "boolean" },
+  "max-calls": { type: "string" },
 } as const;
+
+/** The text after `invalid_body` of a user read. */
+const READ_INVALID =
+  "--email-prefix is 3 to 254 characters after the address rule, and --after is an id of the page before";
 
 const LIST_OPTIONS = { ...TOOL_OPTIONS, ...PAGE_OPTIONS } as const;
 const SEARCH_OPTIONS = {
@@ -89,67 +97,55 @@ function reading(ctx: Ctx, t: ToolTarget, path: string): void {
 }
 
 /**
- * The pages of a user read: one page, or with `--all` every page until
- * `next` is null. Each page goes through `toolCall`, so each call counts
- * on the limiter of 600 calls an hour.
+ * The pages of a user read through `readPages`, then the table or the JSON
+ * document. A stop after the first page prints the users read before it.
  */
-async function readUsers(
+async function listUsers(
   ctx: Ctx,
   t: ToolTarget & { secret: string },
   path: string,
   query: Record<string, string>,
-  values: { after?: string | undefined; limit?: string | undefined; all?: boolean | undefined },
-): Promise<{ users: OperatorUserJson[]; next: string | null }> {
-  const limit = countOf("limit", values.limit, PAGE_MAX);
-  const users: OperatorUserJson[] = [];
-  let after = values.after ?? null;
-  for (;;) {
-    const body = await toolCall(ctx, t, {
-      path,
-      method: "GET",
-      query: {
-        ...query,
-        ...(after === null ? {} : { after }),
-        ...(limit === undefined ? {} : { limit: String(limit) }),
-      },
-      scope: "users",
-      invalid:
-        "--email-prefix is 3 to 254 characters after the address rule, and --after is an id of the page before",
-    });
-    const page = usersPage(body);
-    if (page === null)
-      throw new Stop(`GET ${t.base}${t.basePath}${path} answered 200 with no user list`);
-    users.push(...page.users);
-    if (values.all !== true || page.next === null) return { users, next: page.next };
-    after = page.next;
+  values: PageValues & { json?: boolean | undefined },
+  rule: PageRule,
+  invalid: string,
+): Promise<number> {
+  const read = await readPages(
+    ctx,
+    t,
+    { path, method: "GET", query, scope: "users", invalid },
+    values,
+    rule,
+    (body) => {
+      const page = usersPage(body);
+      return page === null ? null : { rows: page.users, next: page.next };
+    },
+    "user list",
+  );
+  const exit = pagesExit(ctx, read, rule, "users");
+  if (values.json === true) {
+    printJson(ctx, {
+      users: read.rows,
+      next: read.next,
+      exit,
+      stopped: read.stopped,
+    } satisfies UsersListJson);
+    return exit;
   }
-}
-
-/** The users as a table on stdout, or as one JSON document. A next page is a stderr line. */
-function printUsers(
-  ctx: Ctx,
-  json: boolean,
-  page: { users: OperatorUserJson[]; next: string | null },
-) {
-  if (json) {
-    printJson(ctx, { ...page, exit: 0, stopped: null } satisfies UsersListJson);
-    return;
-  }
-  for (const line of tableLines(USER_HEADER, page.users.map(userRow))) ctx.out(line);
-  if (page.next !== null)
-    ctx.err(`more users after ${page.next}: give --after ${page.next}, or give --all`);
+  for (const line of tableLines(USER_HEADER, read.rows.map(userRow))) ctx.out(line);
+  if (exit === 0 && read.next !== null)
+    ctx.err(`more users after ${read.next}: give --after ${read.next}, or give --all`);
+  return exit;
 }
 
 /** `authtempo users list <base url>` (plan 12f Task 12): the users by id. */
 async function runList(argv: string[], ctx: Ctx): Promise<number> {
   const { values, positionals } = parse(argv, LIST_OPTIONS);
   const t = toolTarget(onePositional(positionals), values);
-  countOf("limit", values.limit, PAGE_MAX);
+  const rule = pageRule(values);
   const secret = readOperatorSecret(ctx, values);
   const path = "/operator/users";
   reading(ctx, t, path);
-  printUsers(ctx, values.json === true, await readUsers(ctx, { ...t, secret }, path, {}, values));
-  return 0;
+  return listUsers(ctx, { ...t, secret }, path, {}, values, rule, READ_INVALID);
 }
 
 /**
@@ -167,13 +163,12 @@ async function runSearch(argv: string[], ctx: Ctx): Promise<number> {
   ].filter((k): k is [string, string] => k[1] !== undefined);
   if (keys.length !== 1)
     throw new UsageError("give exactly one of --email, --email-prefix, and --id");
-  countOf("limit", values.limit, PAGE_MAX);
+  const rule = pageRule(values);
   const secret = readOperatorSecret(ctx, values);
   const path = "/operator/users/search";
   reading(ctx, t, path);
-  const page = await readUsers(ctx, { ...t, secret }, path, Object.fromEntries(keys), values);
-  printUsers(ctx, values.json === true, page);
-  return 0;
+  const query = Object.fromEntries(keys);
+  return listUsers(ctx, { ...t, secret }, path, query, values, rule, READ_INVALID);
 }
 
 /** `authtempo users get <base url> <user id>` (plan 12f Task 12): one user. */

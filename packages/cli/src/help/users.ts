@@ -10,6 +10,7 @@ import {
 /** The age limit of a proof in whole days, for the help: 7. */
 export const PROOF_DAYS = PROOF_MAX_AGE_MS / 86_400_000;
 
+import { DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "../rewrap-limits.js";
 import { OPERATOR_FLAGS, operatorFlagsWithYes } from "./keys.js";
 import { COMMON_FLAGS, type HelpFlag, type HelpText } from "./types.js";
 
@@ -53,8 +54,21 @@ export const PAGE_FLAGS: readonly HelpFlag[] = [
     flag: "--limit <n>",
     says: `The rows of one page, from 1 to ${PAGE_MAX}. The default is 50.`,
   },
-  { flag: "--all", says: "Read each page after the first until the last page." },
+  {
+    flag: "--all",
+    says: `Read each page after the first until the last page. A page then holds ${PAGE_MAX} rows unless --limit gives another count.`,
+  },
+  {
+    flag: "--max-calls <n>",
+    says: `The most calls of one run with --all, from 1 to ${MAX_CALLS_MAX}. The default is ${DEFAULT_MAX_CALLS}.`,
+  },
 ];
+
+/** The exit 1 line of a paged read. */
+export const PAGE_CUT_EXIT = {
+  code: 1,
+  says: "The read reached --max-calls with more rows. The command printed the rows that it read.",
+} as const;
 
 const TOKEN = "[--token-env <NAME> | --token-file <path>]";
 
@@ -91,7 +105,9 @@ export const USERS_LIST_HELP: HelpText = {
   page: "users-list",
   purpose:
     "List the users of a deployment by id, one page in each call. No answer holds a hash or a token.",
-  usage: [`authtempo users list <base url> [--after <id>] [--limit <n>] [--all] ${TOKEN}`],
+  usage: [
+    `authtempo users list <base url> [--after <id>] [--limit <n>] [--all [--max-calls <n>]] ${TOKEN}`,
+  ],
   examples: [
     {
       line: "authtempo users list https://api.example.com",
@@ -105,6 +121,7 @@ export const USERS_LIST_HELP: HelpText = {
   flags: [...PAGE_FLAGS, ...READ_FLAGS],
   exits: [
     { code: 0, says: "The command printed the users." },
+    PAGE_CUT_EXIT,
     { code: 2, says: toolStop("users") },
   ],
 };
@@ -115,7 +132,7 @@ export const USERS_SEARCH_HELP: HelpText = {
   purpose:
     "Find users by an exact address, an exact id, or the start of an address. The address goes to stdout only.",
   usage: [
-    `authtempo users search <base url> --email <address> | --email-prefix <prefix> | --id <id> [--after <id>] [--limit <n>] [--all] ${TOKEN}`,
+    `authtempo users search <base url> --email <address> | --email-prefix <prefix> | --id <id> [--after <id>] [--limit <n>] [--all [--max-calls <n>]] ${TOKEN}`,
   ],
   examples: [
     {
@@ -139,6 +156,7 @@ export const USERS_SEARCH_HELP: HelpText = {
   ],
   exits: [
     { code: 0, says: "The command printed the users that match. No match prints the header only." },
+    PAGE_CUT_EXIT,
     { code: 2, says: toolStop("users") },
   ],
 };

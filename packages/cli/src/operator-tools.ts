@@ -14,6 +14,7 @@ import {
   operatorCall,
 } from "./operator-client.js";
 import type { Ctx } from "./output.js";
+import { DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "./rewrap-limits.js";
 
 /**
  * The shared parts of the commands of plan 12f Task 12: `users`, `sessions`,
@@ -305,6 +306,110 @@ export function auditPage(body: unknown): { rows: AuditRowJson[]; next: string |
     rows.push(row);
   }
   return { rows, next: b.next };
+}
+
+/** The flags of a paged read. */
+export interface PageValues {
+  after?: string | undefined;
+  limit?: string | undefined;
+  all?: boolean | undefined;
+  "max-calls"?: string | undefined;
+}
+
+/** The page size and the call bound of a paged read, or a usage error. */
+export interface PageRule {
+  /** The `limit` of each call. With `--all` and no `--limit`, `PAGE_MAX`, so a long read costs fewer calls. */
+  limit: number | undefined;
+  maxCalls: number;
+}
+
+/**
+ * The rule of a paged read, before any read of the secret. `--max-calls`
+ * goes with `--all` only: a read of one page makes one call.
+ */
+export function pageRule(values: PageValues): PageRule {
+  const limit = countOf("limit", values.limit, PAGE_MAX);
+  const maxCalls = countOf("max-calls", values["max-calls"], MAX_CALLS_MAX);
+  if (maxCalls !== undefined && values.all !== true)
+    throw new UsageError("--max-calls goes with --all");
+  return {
+    limit: limit ?? (values.all === true ? PAGE_MAX : undefined),
+    maxCalls: maxCalls ?? DEFAULT_MAX_CALLS,
+  };
+}
+
+/** The rows of a paged read, the cursor after them, and how the read ended. */
+export interface PagesRead<R> {
+  rows: R[];
+  next: string | null;
+  /** The text of a stop after the first page, or null. */
+  stopped: string | null;
+  /** True when `--all` reached `--max-calls` with a next page. */
+  cut: boolean;
+}
+
+/**
+ * The pages of a read: one page, or with `--all` each page until `next` is
+ * null. Each call counts on the limiter of 600 calls an hour (review of
+ * plan 12f Task 12). So the loop stops at `--max-calls`, and it stops when
+ * `next` equals the `after` of its call, because that loop never ends. A
+ * stop of the first call throws. A stop after it keeps the rows read, so
+ * the command prints them with exit 2.
+ */
+export async function readPages<R>(
+  ctx: Ctx,
+  t: ToolTarget & { secret: string },
+  call: ToolCall,
+  values: PageValues,
+  rule: PageRule,
+  pageOf: (body: unknown) => { rows: R[]; next: string | null } | null,
+  what: string,
+): Promise<PagesRead<R>> {
+  const request = `GET ${t.base}${t.basePath}${call.path}`;
+  const rows: R[] = [];
+  let after = values.after ?? null;
+  let calls = 0;
+  try {
+    for (;;) {
+      const body = await toolCall(ctx, t, {
+        ...call,
+        query: {
+          ...call.query,
+          ...(after === null ? {} : { after }),
+          ...(rule.limit === undefined ? {} : { limit: String(rule.limit) }),
+        },
+      });
+      const page = pageOf(body);
+      if (page === null) throw new Stop(`${request} answered 200 with no ${what}`);
+      if (values.all === true && page.next !== null && page.next === after)
+        throw new Stop(`${request} answered the cursor of its own call as next: the read stops`);
+      calls++;
+      rows.push(...page.rows);
+      if (values.all !== true || page.next === null)
+        return { rows, next: page.next, stopped: null, cut: false };
+      after = page.next;
+      if (calls >= rule.maxCalls) return { rows, next: after, stopped: null, cut: true };
+    }
+  } catch (e) {
+    if (!(e instanceof Stop) || calls === 0) throw e;
+    ctx.err(`stopped: ${e.message}`);
+    return { rows, next: after, stopped: e.message, cut: false };
+  }
+}
+
+/** The exit of a paged read: 2 after a stop, 1 with a warning when `--max-calls` cut it, else 0. */
+export function pagesExit(
+  ctx: Ctx,
+  read: PagesRead<unknown>,
+  rule: PageRule,
+  what: string,
+): 0 | 1 | 2 {
+  if (read.stopped !== null) return 2;
+  if (!read.cut) return 0;
+  ctx.err(
+    `warning: the read reached --max-calls ${rule.maxCalls} with more ${what}; give --after ${read.next} to read on`,
+  );
+  return 1;
 }
 
 /** The `auditId` of a write's answer, or a stop that names the request. */
