@@ -175,6 +175,19 @@ describe("the platform role (plan 12f Task 8)", () => {
     });
     expect(await resolveSession(auth.config, rootSession.token)).not.toBeNull();
     expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    // A rest below the owner rank also leaves no owner: "member" stays of "member,operator".
+    const member = await updateMemberRole(auth.config, {
+      user: root,
+      organizationId: platformOrg.id,
+      userId: root.id,
+      role: "member,operator",
+    });
+    if (!member.ok) throw new Error(member.code);
+    expect(await revoke(auth, root.id)).toEqual({ ok: false, code: "last_owner", status: 409 });
+    expect(await platformMember(auth, platformOrg.id, root.id)).toMatchObject({
+      role: "member,operator",
+    });
+    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
   });
 
   /**
