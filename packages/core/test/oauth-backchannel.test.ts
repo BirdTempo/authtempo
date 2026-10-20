@@ -581,7 +581,12 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     /** One linked session of `clientId` that a sign-out ends while the client fails: one due row. */
     const endLinked = async (clientId: string, userId: string) => {
       const s = await createSession(w.auth.config, { userId, ip: null, userAgent: null });
-      await linkIdToken(w.auth.config, { sessionId: s.session.id, clientId, userId });
+      await linkIdToken(w.auth.config, {
+        sessionId: s.session.id,
+        clientId,
+        userId,
+        sid: s.session.id,
+      });
       await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, s.token) }));
     };
     // 60 rows of the failing client fall due first, more than one read of 50.
