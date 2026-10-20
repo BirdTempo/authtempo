@@ -136,19 +136,22 @@ describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
     expect(org.roles?.owner?.permissions.apiToken).toEqual(["create", "read", "update", "revoke"]);
   });
 
-  it("refuses enableSessionForAPIKeys true, disableKeyHashing true, and a custom generator", () => {
+  it("refuses enableSessionForAPIKeys true, disableKeyHashing true, a custom generator, and requireName false", () => {
     const refusals = checkOptions(
       options({
         enableSessionForAPIKeys: true,
         disableKeyHashing: true,
         customKeyGenerator: () => "k",
+        requireName: false,
       }),
     ).refusals;
     expect(refusals).toEqual([
       "plugins[api-key].customKeyGenerator: core makes each key from 32 random bytes (spec 29 item 20)",
       "plugins[api-key].disableKeyHashing: core keeps the SHA-256 of a key, never the key (spec 29 item 20)",
       "plugins[api-key].enableSessionForAPIKeys: a key never acts as a session, spec 8.8 item 6",
+      "plugins[api-key].requireName: core keeps a name on every token (spec 29 item 20)",
     ]);
+    expect(checkOptions(options({ requireName: true })).refusals).toEqual([]);
     expect(() => betterAuth(options({ enableSessionForAPIKeys: true }))).toThrowError(
       /a key never acts as a session, spec 8\.8 item 6/,
     );

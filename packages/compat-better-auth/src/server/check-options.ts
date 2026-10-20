@@ -437,7 +437,8 @@ const apiKeyRule = object({
   minimumPrefixLength: noted(
     "a new key has core's prefix, so the create body's prefix is not used",
   ),
-  requireName: boolean,
+  // Core keeps a name on every token, so a create with no name answers NAME_REQUIRED (review finding L5).
+  requireName: only(true, `core keeps a name on every token ${ITEM_20}`),
   maximumNameLength: (v, p, out) => {
     if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > 80)
       refuse(out, p, `core takes a name of 1 to 80 characters ${ITEM_20}`);
