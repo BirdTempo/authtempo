@@ -114,7 +114,9 @@ const PUBLIC_RUNS: Readonly<Record<string, string>> = {
  * 43 characters or more with a digit, a capital, and a small letter. That is
  * 32 bytes or more, as a sandbox secret, quoted or not. The fourth is 32
  * bytes in standard base64 with its padding. The last is a string that a
- * name with "secret" in it takes. A random value of 32 bytes in base64url
+ * name with "secret" in it takes, other than a bare prefix of core: the
+ * bundle of core holds `CLIENT_SECRET_PREFIX = "cs_"` (plan 12e), and the first
+ * form finds each token of that prefix. A random value of 32 bytes in base64url
  * has all three kinds of character. So the rule of three misses almost none,
  * and it passes plain words.
  */
@@ -136,7 +138,13 @@ function credentials(text: string): string[] {
   const assigned = /[A-Za-z0-9_$]*secret[A-Za-z0-9_$]*["']?\s*[:=]\s*(["'`])([^"'`\n]*)\1/gi;
   for (const m of open.matchAll(assigned)) {
     const value = m[2] ?? "";
-    if (value !== "" && !value.includes("${") && value !== DEMO_CLIENT_SECRET) found.push(value);
+    if (
+      value !== "" &&
+      !value.includes("${") &&
+      value !== DEMO_CLIENT_SECRET &&
+      !PREFIXES.includes(value)
+    )
+      found.push(value);
   }
   return [...new Set(found)];
 }
@@ -191,6 +199,7 @@ describe("no secret in the demo", () => {
     expect(PREFIXES).toContain(SESSION_TOKEN_PREFIX);
     expect(PREFIXES).toContain(API_TOKEN_PREFIX);
     expect(PREFIXES).toContain("ml_");
+    expect(PREFIXES).toContain("cs_");
     expect(PREFIXES.length).toBeGreaterThanOrEqual(17);
   });
 
@@ -215,6 +224,9 @@ describe("no secret in the demo", () => {
     // The allowed forms: the client secret by name, an empty value, a word, a public run.
     expect(credentials(`const CLIENT_SECRET = "${DEMO_CLIENT_SECRET}"`)).toEqual([]);
     expect(credentials(`secretTypeId = ""`)).toEqual([]);
+    // A bare prefix of core is no secret (plan 12e). A value after the prefix is still found.
+    expect(credentials(`var CLIENT_SECRET_PREFIX = "cs_";`)).toEqual([]);
+    expect(credentials(`clientSecret: "cs_short"`)).toEqual(["cs_short"]);
     expect(credentials(`"authorization_response_iss_parameter_supported"`)).toEqual([]);
     expect(credentials(`"sec-ordinary-object-internal-methods-and-slots-2"`)).toEqual([]);
     expect(credentials(`var c = "${Object.keys(PUBLIC_RUNS)[1]}";`)).toEqual([]);
