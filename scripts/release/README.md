@@ -12,7 +12,7 @@ A check that reads zero items fails. Read the failure count from the summary lin
 
 ## The checks
 
-- `src/check-packages.ts`: each workspace package is in exactly one list. The released list is `fixed[0]` of `.changeset/config.json`. The unreleased list is `release/unreleased.json`, with one reason for each package, and the same names are in `ignore` of `.changeset/config.json`. Each released package is private on `main` and has the group version. Each reference to a workspace package, scoped or not, and each `@authtempo` reference is `workspace:*`.
+- `src/check-packages.ts`: each workspace package is in exactly one list. The released list is `fixed[0]` of `.changeset/config.json`. The unreleased list is `release/unreleased.json`, with one reason for each package, and the same names are in `ignore` of `.changeset/config.json`. Each released package is private on `main` and has the group version. Each reference to a workspace package, scoped or not, and each `@authtempo` reference is `workspace:*`. A released package names no unreleased package in `dependencies`, `peerDependencies`, or `optionalDependencies`.
 
 Run a check from the repository root:
 

@@ -75,6 +75,14 @@ describe("check-packages", () => {
     );
   });
 
+  it("fails on a runtime reference of a released package to an unreleased one", () => {
+    expect(run("runtime-unreleased").failures).toEqual([
+      "@authtempo/cli is released and names the unreleased authtempo-example-node in optionalDependencies",
+      "@authtempo/client is released and names the unreleased @authtempo/site in peerDependencies",
+      "@authtempo/core is released and names the unreleased authtempo-example-node in dependencies",
+    ]);
+  });
+
   it("fails on a listed name that is not a workspace package", () => {
     expect(run("stale").failures).toContain(
       "@authtempo/gone is in the fixed group and is not a workspace package",

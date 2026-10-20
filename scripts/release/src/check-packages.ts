@@ -23,6 +23,9 @@ const DEPENDENCY_KEYS = [
   "optionalDependencies",
 ] as const;
 
+/** The dependency keys that an app installs with a released package. */
+const RUNTIME_KEYS = ["dependencies", "peerDependencies", "optionalDependencies"] as const;
+
 /**
  * Each workspace package is in exactly one list: the fixed group or the
  * unreleased list (spec 33 item 2). `ignore` holds the unreleased list again,
@@ -69,6 +72,15 @@ export function checkPackages(input: PackagesInput): Report {
   for (const p of released)
     if (p.manifest.private !== true)
       failures.push(`${p.name} is released and not private: true on main`);
+
+  // An app gets each runtime reference of a released package from the registry,
+  // and no release publishes an unreleased package. Changesets skips a private
+  // dependent, so it does not catch this reference.
+  for (const p of released)
+    for (const key of RUNTIME_KEYS)
+      for (const dep of Object.keys(p.manifest[key] ?? {}))
+        if (names.has(dep) && !fixed.has(dep))
+          failures.push(`${p.name} is released and names the unreleased ${dep} in ${key}`);
 
   const versions = new Set(released.map((p) => p.manifest.version));
   if (versions.size > 1)
