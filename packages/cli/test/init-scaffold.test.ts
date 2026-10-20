@@ -135,6 +135,14 @@ describe("the scaffold after publication (plan 12j)", () => {
     const text = readFileSync(join(REPO, "examples/node/package.json"), "utf8");
     const published = JSON.parse(rewrite("node", "package.json", text, "0.1.0", true)) as Manifest;
     expect(published.devDependencies?.["@authtempo/cli"]).toBe("0.1.0");
+    // The keys in the sorted order that pnpm writes, so the CLI comes first, not last.
+    expect(Object.keys(published.devDependencies ?? {})).toEqual([
+      "@authtempo/cli",
+      "@types/bun",
+      "@types/node",
+      "bun",
+      "typescript",
+    ]);
     const unpublished = JSON.parse(
       rewrite("node", "package.json", text, "0.0.0", false),
     ) as Manifest;
