@@ -4,6 +4,7 @@ import { matchOperatorSecret, type OperatorActor } from "../src/engine/operator/
 import { operatorApi } from "../src/engine/operator/index.js";
 import { createSession } from "../src/engine/sessions.js";
 import { normalizeEmailPrefix } from "../src/engine/users.js";
+import type { OperatorUser } from "../src/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { BASE_URL, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
 import {
@@ -287,7 +288,9 @@ describe("operator user reads (plan 12f Task 5)", () => {
 
     const got = await api.users.get({ actor: APP, userId: user.id });
     if (!got.ok) throw new Error(got.code);
-    expect(got.value).toEqual({
+    // The core entry names the row type, so an app can type its admin page.
+    const row: OperatorUser = got.value;
+    expect(row).toEqual({
       id: user.id,
       email: EMAIL,
       emailVerified: true,
