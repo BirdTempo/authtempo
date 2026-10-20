@@ -147,8 +147,15 @@ export function checkSecurityPolicy(input: {
 
   for (const p of PLACEHOLDERS)
     if (text.includes(p)) failures.push(`SECURITY.md holds the placeholder "${p}"`);
-  for (const m of text.matchAll(/https:\/\/github\.com\/([^/\s)]+)\/([^/\s)]+)/g)) {
-    const [owner, name] = [m[1] ?? "", m[2] ?? ""];
+  for (const m of text.matchAll(/\bhttp:\/\/[^\s)]+/g))
+    failures.push(`SECURITY.md links ${m[0]}; each link uses https`);
+  // Each host form of GitHub, so a link to www.github.com or over http is read too.
+  for (const m of text.matchAll(
+    /\bhttps?:\/\/(www\.)?github\.com\/([^/\s)]+)\/([^/\s)]+)[^\s)]*/g,
+  )) {
+    if (m[1] !== undefined)
+      failures.push(`SECURITY.md links ${m[0]}; a GitHub link uses the host github.com`);
+    const [owner, name] = [m[2] ?? "", m[3] ?? ""];
     if (owner !== repository.owner || name !== repository.name)
       failures.push(
         `SECURITY.md links the repository ${owner}/${name}; release/repository.json names ${repository.owner}/${repository.name}`,

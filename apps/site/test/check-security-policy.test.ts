@@ -208,6 +208,33 @@ describe("check-security-policy", () => {
     ).toEqual(['the section "How to report" names 3 channels; it must name 2']);
   });
 
+  it("fails a GitHub link of another host form, and an http link", () => {
+    const advisory = "https://github.com/authtempo/authtempo/security/advisories/new";
+    const channel = (to: string) =>
+      `the first channel is ${to}; it must be ${advisory}, from release/repository.json`;
+    const www = "https://www.github.com/authtempo/authtempo/security/advisories/new";
+    expect(check(textWith(advisory, www)).failures).toEqual([
+      `SECURITY.md links ${www}; a GitHub link uses the host github.com`,
+      channel(www),
+    ]);
+    const fork = "https://www.github.com/someone/fork/security/advisories/new";
+    expect(check(textWith(advisory, fork)).failures).toEqual([
+      `SECURITY.md links ${fork}; a GitHub link uses the host github.com`,
+      "SECURITY.md links the repository someone/fork; release/repository.json names authtempo/authtempo",
+      channel(fork),
+    ]);
+    const http = "http://github.com/authtempo/authtempo/security/advisories/new";
+    expect(check(textWith(advisory, http)).failures).toEqual([
+      `SECURITY.md links ${http}; each link uses https`,
+      channel(http),
+    ]);
+    // An http link to another host fails too.
+    expect(
+      check(textWith("a fault in authtempo,", "a fault in [authtempo](http://authtempo.com/),"))
+        .failures,
+    ).toEqual(["SECURITY.md links http://authtempo.com/; each link uses https"]);
+  });
+
   it("fails a mailbox link whose text is not its target", () => {
     // A reporter reads the text of the link, so the text is the address of the target.
     expect(
