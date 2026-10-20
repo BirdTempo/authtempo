@@ -1,8 +1,13 @@
 import { env } from "cloudflare:test";
-import { type AuthConfig, createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
+import {
+  type AuthConfig,
+  createAuth,
+  createPbkdf2PasswordHash,
+  type LimiterPort,
+} from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createD1Adapter } from "../src/index.js";
+import { createD1Adapter, createD1Limiter } from "../src/index.js";
 
 // The call budget of the sweep on real D1 (ruling 37 of plan 12f, review
 // m3). D1 Free allows 50 queries per invocation (D1 limits page updated 21
@@ -16,6 +21,7 @@ const APP_ORIGIN = "https://app.example.com";
 const REDIRECT = "https://client.example.com/callback";
 const APP = { kind: "app", name: "support-tool" } as const;
 const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 /** The key that gives the statement of the binding under a counting view. */
 const RAW = Symbol("raw");
 
@@ -78,9 +84,15 @@ function claims(token: string): Record<string, unknown> {
  * The engine on `db`, with a `session.afterEnd` hook and the OAuth
  * provider. `switched` adds secret version 2 as the current one, so a key
  * sealed under version 1 reseals at its first signature. Each call makes a
- * new adapter: one invocation.
+ * new adapter: one invocation. `limiter` replaces the limiter that allows
+ * all and has no sweep.
  */
-function engine(db: D1Database, mail: string[], switched = false) {
+function engine(
+  db: D1Database,
+  mail: string[],
+  switched = false,
+  limiter: LimiterPort = { allow: async () => true },
+) {
   const storage = createD1Adapter(db);
   const input: AuthConfig = {
     baseURL: BASE,
@@ -95,7 +107,7 @@ function engine(db: D1Database, mail: string[], switched = false) {
     trustedOrigins: [APP_ORIGIN],
     storage,
     clock,
-    limiter: { allow: async () => true },
+    limiter,
     mail: {
       send: async (m) => {
         mail.push(m.text);
@@ -320,5 +332,82 @@ describe("the logouts of the operator acts and the sweep on D1 with a cap of 50 
     ).toEqual(sessions.map((s) => s.sessionId).sort());
     expect(await rows("ta_oauth_session_client")).toBe(0);
     expect(await rows("ta_oauth_logout")).toBe(0);
+  }, 300_000);
+
+  it("makes link rows in each sweep beside 30 idle clients, and sends each of 90 links once", async () => {
+    const mail: string[] = [];
+    const setup = engine(env.DB, mail);
+    // A client of the register route that no flow sees for 90 days is idle: the sweep deletes it.
+    for (let i = 0; i < 30; i++) await client(setup, `idle${i}`, false);
+    current = new Date(current.getTime() + 91 * DAY_MS);
+    const sessions: { token: string }[] = [];
+    for (let i = 0; i < 45; i++) sessions.push(await signIn(setup, mail, "ada@example.com"));
+    const publicClient = await client(setup, "public", false);
+    const pairwiseClient = await client(setup, "pairwise", true);
+    for (const s of sessions) {
+      await link(setup, s.token, publicClient);
+      await link(setup, s.token, pairwiseClient);
+    }
+    const ended = await engine(env.DB, mail).auth.api.operator.sessions.endAll({
+      actor: APP,
+      reason: "Key leak",
+      ip: null,
+      userAgent: null,
+    });
+    if (!ended.ok) throw new Error(ended.code);
+    expect([await rows("ta_oauth_session_client"), await rows("ta_oauth_client")]).toEqual([
+      90, 32,
+    ]);
+    const sweeps: {
+      queries: number;
+      posts: number;
+      links: number;
+      clients: number;
+      waiting: number;
+    }[] = [];
+    for (let i = 0; i < 60; i++) {
+      current = new Date(current.getTime() + HOUR_MS);
+      const waiting = await rows("ta_oauth_session_client");
+      const { db, count } = counting(env.DB, 50);
+      const before = posts.length;
+      // The limiter on D1 adds its delete to the count of the sweep.
+      const swept = await engine(
+        db,
+        mail,
+        false,
+        createD1Limiter(db, clock),
+      ).auth.api.sweepExpired();
+      expect(count.refused, `sweep ${i + 1}`).toBe(0);
+      sweeps.push({
+        queries: count.queries,
+        posts: posts.length - before,
+        links: swept.oauthSessionLinks,
+        clients: swept.oauthClients,
+        waiting,
+      });
+      if ((await rows("ta_oauth_session_client")) + (await rows("ta_oauth_logout")) === 0) break;
+    }
+    for (const s of sweeps) expect(s.queries + s.posts).toBeLessThanOrEqual(50);
+    // The idle client step ends at 50 - 16 - 8 = 26 calls, after every single-statement step. So
+    // the link step gets 8 calls or more: its page makes at least 4 rows while links wait. The
+    // outbox step gets 16 calls or more, so it sends at least 1 row. These floors do not change
+    // with the count of idle clients. So the 90 links go out within 90 sweeps for any count.
+    expect(sweeps.reduce((n, s) => n + s.clients, 0)).toBe(30);
+    expect(sweeps[0]?.clients).toBeGreaterThan(0);
+    for (const [i, s] of sweeps.entries()) {
+      expect(s.links, `sweep ${i + 1}`).toBeGreaterThanOrEqual(Math.min(4, s.waiting));
+      expect(s.posts, `sweep ${i + 1}`).toBeGreaterThanOrEqual(1);
+    }
+    expect(sweeps.length).toBeLessThanOrEqual(90);
+    // Measured 2026-10-21: 7 link rows and 3 idle clients a sweep, at most 46 calls, and the last row
+    // at sweep 24. Before the change, sweeps 1 to 6 made no link row, and the last row went out at
+    // sweep 27 (review m1, probe N2).
+    expect(sweeps.length).toBeLessThanOrEqual(30);
+    const sent = posts.map((p) => `${p.aud}:${p.sid}`);
+    expect(sent).toHaveLength(90);
+    expect(new Set(sent).size).toBe(90);
+    expect(await rows("ta_oauth_session_client")).toBe(0);
+    expect(await rows("ta_oauth_logout")).toBe(0);
+    expect(await rows("ta_oauth_client")).toBe(2);
   }, 300_000);
 });

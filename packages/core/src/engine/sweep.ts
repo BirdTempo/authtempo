@@ -286,13 +286,6 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
     { field: "expiresAt", op: "lt", value: now },
   ]);
   meter.step(1);
-  // After the refresh tokens, so a client whose last token just expired can go.
-  const oauthClients = await sweepClients(
-    storage,
-    now,
-    meter,
-    SWEEP_CALL_BUDGET - LINK_SHARE - OUTBOX_SHARE,
-  );
   // The check of a client secret refuses an old secret past its time
   // (`secretMatches`). This clear keeps no dead hash in the row.
   const oauthClientSecrets = await storage.update(
@@ -320,6 +313,16 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   // A limiter on the database sends its delete outside the storage counter.
   if (config.limiter.sweep) meter.add(1);
   const limits = (await config.limiter.sweep?.(now)) ?? 0;
+  // After the refresh tokens, so a client whose last token just expired can go.
+  // After the four single-statement steps too: the client step may use the
+  // calls up to its limit, and the link step must still get `LINK_SHARE`.
+  // A page of links needs 5 calls (review m1 of the 12f Task 7 fix 2).
+  const oauthClients = await sweepClients(
+    storage,
+    now,
+    meter,
+    SWEEP_CALL_BUDGET - LINK_SHARE - OUTBOX_SHARE,
+  );
   // Last, so a storage limit met here leaves every count above done. The
   // links of the sessions that ended become outbox rows, and the outbox
   // sends its due rows (plan 12e Task 16).
