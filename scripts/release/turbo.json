@@ -1,0 +1,10 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    // The git tests make each repository in the temp folder of the caller, by
+    // os.tmpdir(), which reads TMPDIR. Turbo drops TMPDIR in strict mode, so
+    // without this key each repository goes to /tmp. The key does not change the hash.
+    "test": { "passThroughEnv": ["TMPDIR"] }
+  }
+}

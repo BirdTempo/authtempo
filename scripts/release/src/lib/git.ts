@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 function git(root: string, args: string[]): string {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -25,4 +27,29 @@ export function changedFiles(root: string, base: string): string[] {
   const changed = git(root, ["diff", "--name-only", "-z", base]).split("\0");
   const untracked = git(root, ["ls-files", "--others", "--exclude-standard", "-z"]).split("\0");
   return [...new Set([...changed, ...untracked].filter((p) => p !== ""))].sort();
+}
+
+/** The count of commits on HEAD since `base`. */
+export function commitCount(root: string, base: string): number {
+  return Number(git(root, ["rev-list", "--count", `${base}..HEAD`]).trim());
+}
+
+/** Each file path in the tree of `ref`, sorted. */
+export function filesAt(root: string, ref: string): string[] {
+  return git(root, ["ls-tree", "-r", "--name-only", "-z", ref])
+    .split("\0")
+    .filter((p) => p !== "")
+    .sort();
+}
+
+/**
+ * Each file in the working tree that git tracks or does not ignore, sorted. The
+ * index still lists a tracked file that is deleted and not staged, so each path
+ * must exist on disk.
+ */
+export function worktreeFiles(root: string): string[] {
+  return git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"])
+    .split("\0")
+    .filter((p) => p !== "" && existsSync(join(root, p)))
+    .sort();
 }
