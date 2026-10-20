@@ -348,6 +348,33 @@ describe("the impersonation (plan 12f Task 11)", () => {
     expect(quiet.auth.mail.slice(quietBefore)).toEqual([]);
   });
 
+  it("fires session.afterEnd with impersonation_end at the stop", async () => {
+    const reasons: string[] = [];
+    const w = await world(
+      {},
+      {
+        hooks: {
+          session: {
+            afterEnd: ({ reason }) => {
+              reasons.push(reason);
+            },
+          },
+        },
+      },
+    );
+    const res = await startRequest(w, w.target.user.id, {
+      authorization: `Bearer ${w.operator.token}`,
+    });
+    expect(res.status).toBe(200);
+    const { token } = (await res.json()) as { token: string };
+    reasons.length = 0;
+    const stop = await w.handle(
+      post("/auth/operator/impersonate/stop", {}, { authorization: `Bearer ${token}` }),
+    );
+    expect(stop.status).toBe(200);
+    expect(reasons).toEqual(["impersonation_end"]);
+  });
+
   it("refuses an impersonation session at the operator guard", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const w = await world();
