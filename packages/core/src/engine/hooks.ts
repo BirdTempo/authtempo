@@ -62,15 +62,22 @@ export type SessionEndReason =
   | "revoked"
   // plan 12a: a change of address ends every other session and grant.
   | "email_change"
-  // plan 12a: the account delete ends every session of the user.
+  // plan 12a: the account delete ends every session of the user. Since plan
+  // 12f it also ends the impersonation sessions that the user opened.
   | "account_deleted"
   // plan 12e: a relying party asks for the end (OIDC RP-Initiated Logout 1.0).
   | "oidc_logout"
   // plan 12f: an operator bans the user, or a session of a banned user is presented.
+  // It also ends the impersonation sessions that a banned operator opened.
   | "banned"
-  // plan 12f: an operator ends the sessions of one user or of all users.
+  // plan 12f: an operator ends the sessions of one user or of all users, or
+  // revokes the platform role. A revoke also ends the impersonation sessions
+  // that the user opened.
   | "operator"
-  // plan 12f: the operator stops an impersonation.
+  // plan 12f: the end of an impersonation session for one of three causes.
+  // The operator stops it. A removal, a leave, or a role change takes the
+  // platform role from its operator. Or a session read finds its operator
+  // banned, deleted, or without the platform role.
   | "impersonation_end";
 
 /** The member a before hook sees: no row exists yet. */

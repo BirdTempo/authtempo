@@ -91,7 +91,13 @@ Warning: on Postgres with a pool of one connection, a before hook that queries t
 - `afterAction` also gets each `impersonation_stop` row that another flow writes, such as the user's end of an impersonation session. No `beforeAction` runs for such a row.
 - In the six member points, `by` is null for an act of an operator secret or of the app. Those acts have no user.
 - `via: "operator"` of a member is the grant or the revoke of the platform role, or `createAdmin`.
-- `banned`: a ban, or a session of a banned user that a request or the sweep ends. `operator`: an operator ends the sessions, or revokes the platform role. `impersonation_end`: the stop of an impersonation.
+- `banned`: a ban, or a session of a banned user that a request or the sweep ends.
+- `operator`: an operator ends the sessions of a user or of all users, or revokes the platform role.
+- `banned`, `operator`, and `account_deleted` also end the impersonation sessions that the user opened as an operator. Each of those sessions belongs to another user, so `afterEnd` gets the session of that user.
+- `impersonation_end` has three causes:
+  - the stop of an impersonation;
+  - the loss of the platform role at a removal, a leave, or a role change of a platform operator's member row;
+  - the door of a request: the operator of the impersonation session is banned, deleted, or without the platform role.
 - `user.beforeUpdate` with `via: "ban"` can run more than once for one ban, when a parallel write lands first.
 
 ## If it fails
