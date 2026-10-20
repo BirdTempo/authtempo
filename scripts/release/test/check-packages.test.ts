@@ -69,6 +69,12 @@ describe("check-packages", () => {
     );
   });
 
+  it("fails on a devDependencies reference that is not workspace:*", () => {
+    expect(run("dev-caret").failures).toEqual([
+      "@authtempo/site references @authtempo/cli as workspace:^, not workspace:*",
+    ]);
+  });
+
   it("fails on an unscoped workspace name that is not workspace:*", () => {
     expect(run("unscoped-range").failures).toContain(
       "@authtempo/core references authtempo-example-node as ^0.0.0, not workspace:*",
