@@ -53,14 +53,29 @@ function dohJson(portName: string, endpoint: string, fetchFn: typeof fetch): Dns
       const ctrl = new AbortController();
       // setTimeout, not AbortSignal.timeout: a test moves it with fake timers.
       const timer = setTimeout(() => ctrl.abort(), PROVIDER_TIMEOUT_MS);
+      // The deadline must not depend on the fetch: a fetch that ignores its
+      // signal never settles. The race with this promise ends the wait.
+      const aborted = new Promise<never>((_resolve, reject) => {
+        ctrl.signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+      });
+      // A rejection after the answer has no reader: it must not count as unhandled.
+      aborted.catch(() => {});
       try {
         let res: Response;
         try {
-          res = await fetchFn(`${endpoint}?name=${encodeURIComponent(name)}&type=TXT`, {
+          const request = fetchFn(`${endpoint}?name=${encodeURIComponent(name)}&type=TXT`, {
             headers: { accept: "application/dns-json" },
             redirect: "manual",
             signal: ctrl.signal,
           });
+          // A response after the deadline has no reader, so its body is cancelled.
+          request.then(
+            (late) => {
+              if (ctrl.signal.aborted) late.body?.cancel().catch(() => {});
+            },
+            () => {},
+          );
+          res = await Promise.race([request, aborted]);
         } catch {
           return null;
         }

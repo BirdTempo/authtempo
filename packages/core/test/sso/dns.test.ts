@@ -143,6 +143,23 @@ describe("the DoH adapters", () => {
     expect(await answer).toBeNull();
   });
 
+  it("answers null in 10 seconds when the fetch ignores its abort signal", async () => {
+    vi.useFakeTimers();
+    // A fetch that never settles and never reads its signal.
+    const deaf = (() => new Promise<Response>(() => {})) as typeof fetch;
+    let settled = false;
+    const answer = dohGoogle(deaf)
+      .txt(NAME)
+      .finally(() => {
+        settled = true;
+      });
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(true);
+    expect(await answer).toBeNull();
+  });
+
   it("has a test fake that answers null for a null entry, so a test reaches the null path", async () => {
     const dns = fakeDns("a", { [NAME]: null, "other.example": ["v"], "bad.example": "throw" });
     expect(await dns.txt(NAME)).toBeNull();
