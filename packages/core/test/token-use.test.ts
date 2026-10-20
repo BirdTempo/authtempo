@@ -508,8 +508,9 @@ describe("the moved prefixes (plan 12k Task 7, rulings 4 and 12)", () => {
         expect(value, m[1]).toBeDefined();
         used.add(value as string);
       }
-    // Count what ran: 20 calls give 19 prefixes (two calls use CLIENT_ID_PREFIX).
-    expect(used.size).toBe(19);
+    // Count what ran: 21 calls give 20 prefixes (two calls use CLIENT_ID_PREFIX).
+    // Plan 12k Task 8 adds the call of ORGANIZATION_TOKEN_PREFIX.
+    expect(used.size).toBe(20);
     for (const p of used) expect(CORE_PREFIXES, p).toContain(p);
   });
 });

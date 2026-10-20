@@ -5,6 +5,7 @@ import type {
   MemberSummary,
   OAuthGrantSummary,
   OrganizationSummary,
+  OrganizationTokenSummary,
   PasskeySummary,
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -74,6 +75,17 @@ export type ApiTokenSummaryJSON = Omit<
   createdAt: string;
   /** The token's set as JSON holds it (plan 12k). Null: the rights of its user. */
   permissions: Record<string, string[]> | null;
+};
+
+/** One token of an organization as JSON holds it (plan 12k). Never the hash, never the token. */
+export type OrganizationTokenSummaryJSON = Omit<
+  OrganizationTokenSummary,
+  "expiresAt" | "lastUsedAt" | "createdAt" | "permissions"
+> & {
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  createdAt: string;
+  permissions: Record<string, string[]>;
 };
 
 /** One OAuth grant of the signed-in person (plan 9g final fix wave). */
@@ -392,9 +404,14 @@ export interface Client {
         userId: string;
         role: string;
       }): Promise<ClientResult<MemberJSON>>;
+      /**
+       * With `revokeTokens: true`, the person's organization tokens go too (plan
+       * 12k). That needs `apiToken:revoke` and a fresh session.
+       */
       remove(input: {
         organizationId: string;
         userId: string;
+        revokeTokens?: boolean | undefined;
       }): Promise<ClientResult<{ ok: true }>>;
     };
     invitations: {
@@ -486,6 +503,38 @@ export interface Client {
       setActive(input: { teamId: string | null }): Promise<ClientResult<PublicSessionJSON>>;
       /** The teams of the session's user in every organization. */
       mine(): Promise<ClientResult<TeamJSON[]>>;
+    };
+    /**
+     * Tokens that the organization owns (plan 12k). A token acts for the
+     * organization with its own set, and stays when its creator leaves.
+     * `create`, `list`, `update`, and `revoke` need a session and a right of
+     * `apiToken`; `create` and `update` need a fresh session. `current` needs
+     * the organization token: a script passes `token: () => "to_…"`.
+     */
+    tokens: {
+      /** The set is a subset of your own; `{}` grants nothing. The clear token appears once. */
+      create(input: {
+        organizationId: string;
+        name: string;
+        permissions: Record<string, string[]>;
+        expiresInDays?: number | null | undefined;
+        metadata?: Record<string, unknown> | null | undefined;
+      }): Promise<ClientResult<{ token: string; apiToken: OrganizationTokenSummaryJSON }>>;
+      list(input: {
+        organizationId: string;
+      }): Promise<ClientResult<OrganizationTokenSummaryJSON[]>>;
+      /** Narrows only: a wider set or a later expiry answers `invalid_body`. */
+      update(input: {
+        organizationId: string;
+        id: string;
+        name?: string | undefined;
+        permissions?: Record<string, string[]> | undefined;
+        expiresAt?: string | null | undefined;
+      }): Promise<ClientResult<OrganizationTokenSummaryJSON>>;
+      revoke(input: { organizationId: string; id: string }): Promise<ClientResult<{ ok: true }>>;
+      current(): Promise<
+        ClientResult<{ organization: OrganizationJSON; apiToken: OrganizationTokenSummaryJSON }>
+      >;
     };
   };
   /**
@@ -1460,6 +1509,29 @@ export function createClient(options: ClientOptions): Client {
           changes(send<PublicSessionJSON>("organizations.teams.setActive", input)),
         mine: () =>
           part<{ teams: TeamJSON[] }, "organizations.teams.mine">("organizations.teams.mine"),
+      },
+      tokens: {
+        create: ({ expiresInDays, metadata, ...rest }) =>
+          send<{ token: string; apiToken: OrganizationTokenSummaryJSON }>(
+            "organizations.tokens.create",
+            {
+              ...rest,
+              ...(expiresInDays !== undefined ? { expiresInDays } : {}),
+              ...(metadata !== undefined ? { metadata } : {}),
+            },
+          ),
+        list: (input) =>
+          part<{ tokens: OrganizationTokenSummaryJSON[] }, "organizations.tokens.list">(
+            "organizations.tokens.list",
+            undefined,
+            { organizationId: input.organizationId },
+          ),
+        update: (input) => send<OrganizationTokenSummaryJSON>("organizations.tokens.update", input),
+        revoke: (input) => send<{ ok: true }>("organizations.tokens.revoke", input),
+        current: () =>
+          send<{ organization: OrganizationJSON; apiToken: OrganizationTokenSummaryJSON }>(
+            "organizations.tokens.current",
+          ),
       },
     },
     tokens: {

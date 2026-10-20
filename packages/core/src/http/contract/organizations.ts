@@ -32,7 +32,12 @@ export const updateBody = z.object({
 });
 export const orgBody = z.object({ organizationId: id });
 export const memberBody = z.object({ organizationId: id, userId: id, role });
-export const removeBody = z.object({ organizationId: id, userId: id });
+/** `revokeTokens` (plan 12k): the person's organization tokens go with the member row. */
+export const removeBody = z.object({
+  organizationId: id,
+  userId: id,
+  revokeTokens: z.boolean().optional(),
+});
 export const inviteBody = z.object({
   organizationId: id,
   email: z.string().min(1).max(320),
@@ -53,6 +58,28 @@ const statements = z
 export const hasPermissionBody = z.strictObject({ organizationId: id, permissions: statements });
 /** A slug to check: the same bound as the create, before the fold. normalizeSlug decides the rest. */
 export const checkSlugBody = z.strictObject({ slug: z.string().min(1).max(64) });
+/**
+ * An organization token create (plan 12k). Strict, so a window or a quota from
+ * a client answers `invalid_body`: only the app sets them, in process. The
+ * set is required; `{}` grants nothing. The engine refuses a name over 80
+ * code units; this cap only bounds the body.
+ */
+export const orgTokenCreateBody = z.strictObject({
+  organizationId: id,
+  name: z.string().max(200),
+  expiresInDays: z.number().int().min(1).max(3650).nullable().optional(),
+  permissions: statements,
+  metadata,
+});
+/** The narrow-only update of an organization token. Strict, as the create. */
+export const orgTokenUpdateBody = z.strictObject({
+  organizationId: id,
+  id,
+  name: z.string().max(200).optional(),
+  permissions: statements.optional(),
+  expiresAt: z.iso.datetime().nullable().optional(),
+});
+export const orgTokenRevokeBody = z.object({ organizationId: id, id });
 
 /** The query of the two lists: the route reads `organizationId` by hand and parses it with `id`. */
 export const orgQuery = z.object({ organizationId: id });
@@ -98,6 +125,24 @@ const jsonBody = <T extends z.ZodType>(schema: T) =>
 
 /** A statement set in an answer. */
 const StatementsJson = z.record(z.string(), z.array(z.string()));
+
+/** One organization token, as `publicOrganizationToken` answers it. Never the hash, never the token. */
+export const OrganizationTokenJson = z.strictObject({
+  id: z.string(),
+  organizationId: z.string(),
+  name: z.string(),
+  hint: z.string(),
+  permissions: StatementsJson,
+  metadata: z.record(z.string(), z.unknown()).nullable(),
+  expiresAt: z.iso.datetime().nullable(),
+  lastUsedAt: z.iso.datetime().nullable(),
+  rateLimit: z.strictObject({ seconds: z.number().int(), max: z.number().int() }).nullable(),
+  remaining: z.number().int().nullable(),
+  retired: z.boolean(),
+  createdById: z.string(),
+  creatorIsMember: z.boolean(),
+  createdAt: z.iso.datetime(),
+});
 
 /** The contract of `routes/organizations.ts` (plan 11g). */
 export const ORGANIZATIONS_CONTRACT = {
@@ -180,6 +225,33 @@ export const ORGANIZATIONS_CONTRACT = {
         slug: z.string().nullable(),
         status: z.enum(["available", "taken", "reserved", "invalid"]),
       }),
+    },
+  },
+  "POST /organizations/tokens": {
+    body: jsonBody(orgTokenCreateBody),
+    // The token is answered once. Every later answer holds the hint only.
+    answer: {
+      kind: "json",
+      schema: z.strictObject({ token: z.string(), apiToken: OrganizationTokenJson }),
+    },
+  },
+  "GET /organizations/tokens": {
+    query: { schema: orgQuery, parsedBy: "hand" },
+    answer: { kind: "json", schema: z.strictObject({ tokens: z.array(OrganizationTokenJson) }) },
+  },
+  "POST /organizations/tokens/update": {
+    body: jsonBody(orgTokenUpdateBody),
+    answer: { kind: "json", schema: OrganizationTokenJson },
+  },
+  "POST /organizations/tokens/revoke": {
+    body: jsonBody(orgTokenRevokeBody),
+    answer: { kind: "json", schema: OkAnswer },
+  },
+  "GET /organizations/tokens/current": {
+    // The organization, and no user: the token acts for the organization.
+    answer: {
+      kind: "json",
+      schema: z.strictObject({ organization: OrganizationJson, apiToken: OrganizationTokenJson }),
     },
   },
   "POST /organizations/active": {

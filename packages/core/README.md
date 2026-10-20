@@ -127,13 +127,18 @@ The organization routes follow.
 | GET | `/organizations/members` | session, `?organizationId=` | `{ members }`; 400 `invalid_body`; 401; 403 `forbidden_rank`; 404 |
 | POST | `/organizations/members/add` | session, `{ organizationId, userId, role }` | `{ member }`; 400; 401; 403 `forbidden_rank`, `email_unverified`; 404; 409 `already_member` |
 | POST | `/organizations/members/role` | session, `{ organizationId, userId, role }` | `{ member }`; 400; 401; 403 `forbidden_rank`, `email_unverified`; 404 `not_found`; 409 `last_owner`, `conflict` |
-| POST | `/organizations/members/remove` | session, `{ organizationId, userId }` | `{ ok: true }`; 400; 401; 403 `forbidden_rank`, `email_unverified`; 404 `not_found`; 409 `last_owner`, `conflict` |
+| POST | `/organizations/members/remove` | session, `{ organizationId, userId, revokeTokens? }` | `{ ok: true }`; 400; 401; 403 `forbidden_rank` (with `revokeTokens: true`, also without `apiToken:revoke`), `email_unverified`, `session_not_fresh` (with `revokeTokens: true` only); 404 `not_found`; 409 `last_owner`, `conflict` |
 | POST | `/organizations/invite` | session, `{ organizationId, email, role }` | `{ invitation }` with no token; 400; 401; 403 `forbidden_rank`, `email_unverified`; 404 `not_found`; 429 `rate_limited` |
 | GET | `/organizations/invitations` | session, `?organizationId=` | `{ invitations }`; 400; 401; 403 `forbidden_rank`; 404 `not_found` |
 | POST | `/organizations/invitations/revoke` | session, `{ organizationId, invitationId }` | `{ ok: true }`; 400; 401; 403 `forbidden_rank`, `email_unverified`; 404 |
 | POST | `/organizations/invitations/accept` | session, `{ token }` | `{ organization, member }`; 400 `invalid_token`, `token_expired`; 401; 403 `email_mismatch`, `email_unverified`; 409 `already_member`; 429 `rate_limited` |
 | POST | `/organizations/invitations/decline` | `{ token }`, no session | `{ ok: true }`; 400 `invalid_token`, `token_expired` |
 | POST | `/organizations/active` | session, `{ organizationId }` (a string or `null`) | `{ user, session }` with `session.activeOrganizationId`; 401; 403 `forbidden_rank` |
+| POST | `/organizations/tokens` | session (fresh), `{ organizationId, name, permissions, expiresInDays?, metadata? }` | `{ token, apiToken }`, the `to_` token once; 400 `invalid_body` (also `permissions: null`, a window, or a quota); 401 (a token bearer too); 403 `forbidden_rank` without `apiToken:create` or for a set wider than yours, `email_unverified`, `session_not_fresh`; 404; 409 `organization_token_limit` at 50 live tokens; 429 `rate_limited` (the key of `POST /tokens`) |
+| GET | `/organizations/tokens` | session, `?organizationId=` | `{ tokens }`, newest first, each with `createdById` and `creatorIsMember`; 400; 401; 403 `forbidden_rank` without `apiToken:read`, `email_unverified`; 404 |
+| POST | `/organizations/tokens/update` | session (fresh), `{ organizationId, id, name?, permissions?, expiresAt? }` | the token after the change; it narrows only, as `POST /tokens/update`; 400; 401; 403 `forbidden_rank` without `apiToken:update`, `email_unverified`, `session_not_fresh`; 404; 409 `conflict` |
+| POST | `/organizations/tokens/revoke` | session, `{ organizationId, id }` | `{ ok: true }`; 400; 401; 403 `forbidden_rank` without `apiToken:revoke` (the creator has no right of their own), `email_unverified`; 404 |
+| GET | `/organizations/tokens/current` | `Authorization: Bearer to_…` only | `{ organization, apiToken }`, and one call of the quota spent; 401 for any other credential; 429 `rate_limited`, `token_exhausted`; 409 `conflict` |
 
 Without an `organizations` config none of the organization routes exist, and the router answers 404.
 
@@ -818,11 +823,12 @@ the create answer, and core stores its SHA-256 only.
 ```ts
 // A route that a script may call: a session or a token.
 const c = await auth.caller(request);
-// A client_credentials token acts for no user, so this route has no one to name.
-if (!c || c.kind === "oauth-client")
+// A client_credentials token and an organization token act for no user, so this route has no one to name.
+if (!c || c.kind === "oauth-client" || c.kind === "organizationToken")
   return Response.json({ error: "unauthorized" }, { status: 401 });
 // c.kind === "session": c.user, c.session, c.refreshed
 // c.kind === "token":   c.user, c.apiToken, c.activeOrganizationId
+// c.kind === "organizationToken": c.organization, c.apiToken, and no user (plan 12k)
 // c.kind === "oauth":   c.user, c.clientId, c.scopes, c.resource, c.tokenId, c.expiresAt (plan 9g), c.dpopJkt, c.subject (plan 12e)
 //   c.subject is the token sub: the user id, or the pairwise subject of a pairwise client
 // c.kind === "oauth-client": c.clientId, c.scopes, c.resource, c.tokenId, c.expiresAt, c.dpopJkt (plan 12e)
@@ -918,6 +924,17 @@ So after 60 checks in one minute, a create answers `rate_limited` until the
 minute ends. `available` is a hint, not a hold: the create still answers
 `slug_taken` when another user takes the slug first, because the unique key
 decides.
+
+**Organization tokens.** A `to_` token belongs to the organization, not to
+a person (plan 12k). It acts with its own fixed `permissions`, never with
+the role of its creator, and it stays when the creator leaves or deletes
+the account. `auth.caller` answers it as `kind: "organizationToken"` with
+`organization` and no `user`. `auth.hasPermission` reads its set in its own
+organization only. A token never manages: each route above but
+`GET /organizations/tokens/current` takes a session, so a token bearer
+answers 401. Each organization holds at most 50 live tokens. Pass
+`revokeTokens: true` to the member removal to delete the tokens that the
+person made there, in the same write; that needs `apiToken:revoke` too.
 
 **Platform role.** Set `platformOrganization` and `platformRole` to keep one
 role for staff. Core accepts that role in the platform organization only.
@@ -1382,6 +1399,7 @@ It answers one count for each kind of row:
 - `sessions`: sessions past their expiry.
 - `pendingSessions`: sessions that an act left past its call budget, ended with `session.afterEnd`. A ban and a revoke of the platform role leave the sessions of the user and the impersonation sessions that the user opened. An account delete of an operator, and a removal, a leave, or a role change of the platform member row, leave only those impersonation sessions. Each of them ends a page in the act (ruling 63 of plan 12f). The sweep reads the rows before the idle clients, and the outbox leaves the calls of one page for them. The step runs last, and a row of it waits for the next sweep when it does not fit. Every door refuses such a session in the meantime.
 - `apiTokens`: API tokens past their expiry. A token with no expiry stays.
+- `organizationTokens`: organization tokens past their expiry. A token with no expiry stays.
 - `trustedDevices`: trusted devices past their expiry.
 - `totpSetups`: TOTP setups that no enable confirmed within 15 minutes.
 - `jwks`: signing keys retired more than 24 hours ago.

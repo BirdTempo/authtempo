@@ -50,6 +50,7 @@ export {
   type JwtApi,
   type OAuthApi,
   type OAuthClientsApi,
+  type OrganizationTokensApi,
   type PasswordApi,
   type SecretsApi,
   type SessionApi,
@@ -131,6 +132,14 @@ export { activeBan } from "./engine/operator/ban-rule.js";
 export { holdsPlatformRole, type OperatorActor } from "./engine/operator/guards.js";
 export type { OperatorApi } from "./engine/operator/index.js";
 export type { OperatorUser } from "./engine/operator/users.js";
+export {
+  ORGANIZATION_TOKEN_CAP,
+  ORGANIZATION_TOKEN_PREFIX,
+  type OrganizationTokenCreate,
+  type OrganizationTokenSummary,
+  type OrganizationTokenUpdate,
+  type ResolvedOrganizationToken,
+} from "./engine/organization-tokens.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";

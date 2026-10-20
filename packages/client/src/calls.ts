@@ -209,6 +209,28 @@ export const CLIENT_CALLS = [
     path: "/organizations/teams/mine",
     select: "teams",
   },
+  { operation: "organizations.tokens.create", method: "POST", path: "/organizations/tokens" },
+  {
+    operation: "organizations.tokens.list",
+    method: "GET",
+    path: "/organizations/tokens",
+    select: "tokens",
+  },
+  {
+    operation: "organizations.tokens.update",
+    method: "POST",
+    path: "/organizations/tokens/update",
+  },
+  {
+    operation: "organizations.tokens.revoke",
+    method: "POST",
+    path: "/organizations/tokens/revoke",
+  },
+  {
+    operation: "organizations.tokens.current",
+    method: "GET",
+    path: "/organizations/tokens/current",
+  },
   { operation: "tokens.create", method: "POST", path: "/tokens" },
   { operation: "tokens.list", method: "GET", path: "/tokens", select: "tokens" },
   { operation: "tokens.revoke", method: "POST", path: "/tokens/revoke" },

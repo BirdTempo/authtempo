@@ -75,6 +75,8 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   last_team: "This is the last team of the organization. Create another team first.",
   token_exhausted: "This API token has no calls left. Wait for its refill, or use another token.",
   token_retired: "This API token does not work now. Make a new token in the app.",
+  organization_token_limit:
+    "This organization has the most tokens it can have. Revoke a token first.",
   internal: "The server had an error. Try again later.",
   account_banned: "Your account is banned, so you cannot sign in.",
   operator_required: "You do not have the operator rights for this action.",

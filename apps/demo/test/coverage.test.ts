@@ -48,7 +48,8 @@ describe("the demo lists and the routes of core", () => {
       // Plan 12k Task 3 added two organizations routes: has-permission and permissions.
       // Plan 12k Task 6 added one organizations route: check-slug.
       // Plan 12k Task 7 added one tokens route: update.
-      expect(served).toBe(81);
+      // Plan 12k Task 8 added five organizations routes: the organization tokens.
+      expect(served).toBe(86);
     },
     LONG_TEST_MS,
   );

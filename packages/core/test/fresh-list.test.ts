@@ -36,7 +36,8 @@ const BODIES: Readonly<Record<string, unknown>> = {
   "/organizations/invitations/revoke": { organizationId: "x", invitationId: "y" },
   "/organizations/invite": { organizationId: "x", email: "bob@example.com", role: "member" },
   "/organizations/members/add": { organizationId: "x", userId: "y", role: "member" },
-  "/organizations/members/remove": { organizationId: "x", userId: "y" },
+  // revokeTokens asks the fresh rule (plan 12k Task 8); a plain removal does not.
+  "/organizations/members/remove": { organizationId: "x", userId: "y", revokeTokens: true },
   "/organizations/members/role": { organizationId: "x", userId: "y", role: "member" },
   "/organizations/roles/create": { organizationId: "x", name: "editor", permissions: {} },
   "/organizations/roles/delete": { organizationId: "x", name: "editor" },
@@ -47,6 +48,9 @@ const BODIES: Readonly<Record<string, unknown>> = {
   "/organizations/teams/members/add": { teamId: "x", userId: "y" },
   "/organizations/teams/members/remove": { teamId: "x", userId: "y" },
   "/organizations/teams/update": { teamId: "x", name: "Core" },
+  "/organizations/tokens": { organizationId: "x", name: "CI", permissions: {} },
+  "/organizations/tokens/revoke": { organizationId: "x", id: "y" },
+  "/organizations/tokens/update": { organizationId: "x", id: "y" },
   "/organizations/update": { organizationId: "x" },
   "/otp/request": { email: EMAIL },
   "/otp/reset": { email: EMAIL, code: "000000", password: "another long password" },
@@ -148,8 +152,9 @@ describe("the routes that answer session_not_fresh and the client README list", 
       .sort();
     const calls = clientCalls();
     const listed = readmeList();
-    // Plan 12k Task 7 adds tokens.update.
-    expect(listed).toHaveLength(20);
+    // Plan 12k Task 7 adds tokens.update; Task 8 adds the two organization token
+    // calls and organizations.members.remove.
+    expect(listed).toHaveLength(23);
     const ops = (name: string) =>
       calls.filter((c) => c.operation === name || c.operation.startsWith(`${name}.`));
     // A listed call with no fresh route: the README promises a rule that the code lacks.

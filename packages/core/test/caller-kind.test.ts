@@ -14,6 +14,8 @@ function kindName(c: Caller): string {
       return "a person with a session";
     case "token":
       return "a script with an API token";
+    case "organizationToken":
+      return "a script of an organization (plan 12k)";
     case "oauth":
       return "an OAuth client for a person";
     case "oauth-client":
@@ -29,6 +31,7 @@ function missesOne(c: Caller): string {
   switch (c.kind) {
     case "session":
     case "token":
+    case "organizationToken":
     case "oauth":
       return c.kind;
     default: {
@@ -40,8 +43,10 @@ function missesOne(c: Caller): string {
 }
 
 describe("the kinds of a caller (spec 5)", () => {
-  it("has four kinds, and an exhaustive switch names each", () => {
-    expectTypeOf<Caller["kind"]>().toEqualTypeOf<"session" | "token" | "oauth" | "oauth-client">();
+  it("has five kinds, and an exhaustive switch names each", () => {
+    expectTypeOf<Caller["kind"]>().toEqualTypeOf<
+      "session" | "token" | "organizationToken" | "oauth" | "oauth-client"
+    >();
     expect(kindName({ kind: "oauth-client" } as Caller)).toBe("an OAuth client for itself");
     expect(missesOne({ kind: "token" } as Caller)).toBe("token");
   });

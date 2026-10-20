@@ -225,7 +225,8 @@ export function exampleWorker(
       if (url.pathname === "/whoami") {
         const c = await a.caller(request);
         // A client_credentials token acts for no user, so this route has no one to name (plan 12e).
-        if (!c || c.kind === "oauth-client")
+        // An organization token acts for its organization, not a user (plan 12k).
+        if (!c || c.kind === "oauth-client" || c.kind === "organizationToken")
           return Response.json({ error: "unauthorized" }, { status: 401 });
         const res = Response.json({ kind: c.kind, id: c.user.id, email: c.user.email });
         // After a sliding refresh, renew the cookie or the browser drops it early.

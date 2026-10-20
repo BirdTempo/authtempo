@@ -74,6 +74,17 @@ import type { OAuthResult } from "./engine/oauth-result.js";
 import { refuseImpersonation } from "./engine/operator/impersonation.js";
 import { type OperatorApi, operatorApi } from "./engine/operator/index.js";
 import {
+  createOrganizationToken,
+  currentOrganizationToken,
+  listOrganizationTokens,
+  type OrganizationTokenCreate,
+  type OrganizationTokenSummary,
+  type OrganizationTokenUpdate,
+  type ResolvedOrganizationToken,
+  revokeOrganizationToken,
+  updateOrganizationToken,
+} from "./engine/organization-tokens.js";
+import {
   addMember,
   createOrganization,
   deleteOrganization,
@@ -356,6 +367,38 @@ export interface TokensApi {
 }
 
 /**
+ * Tokens that an organization owns (plan 12k, spec 29 items 14 to 16). Each
+ * call answers `not_found` while organizations are off. A token acts for the
+ * organization with its own fixed set, and stays when its creator leaves.
+ * Only a person manages one: `create` needs `apiToken:create`, `list`
+ * `apiToken:read`, `update` `apiToken:update`, and `revoke` `apiToken:revoke`.
+ * `create` and `update` apply no fresh rule: call `api.session.requireFresh` first.
+ */
+export interface OrganizationTokensApi {
+  /** The set is required and a subset of the creator's set; `{}` grants nothing. The cap is 50 live tokens. */
+  create(
+    input: OrganizationTokenCreate,
+  ): Promise<Result<{ token: string; apiToken: OrganizationTokenSummary }>>;
+  list(input: {
+    user: UserRow;
+    organizationId: string;
+  }): Promise<Result<OrganizationTokenSummary[]>>;
+  /** Narrows only, as `tokens.update`: a smaller set, an earlier expiry, a new name, a window, or a lower quota. */
+  update(input: OrganizationTokenUpdate): Promise<Result<OrganizationTokenSummary>>;
+  revoke(input: {
+    user: UserRow;
+    organizationId: string;
+    id: string;
+  }): Promise<Result<{ ok: true }>>;
+  /**
+   * The organization and the summary of a `to_` token, or the code of the
+   * resolve: `unauthorized`, `rate_limited`, `token_exhausted`,
+   * `token_retired`, or `conflict`. It spends one call of the quota.
+   */
+  current(input: { token: string }): Promise<Result<ResolvedOrganizationToken>>;
+}
+
+/**
  * The app secrets (plan 12b, spec 22). Present in every deployment, in
  * process only: no route answers them. The rotation runbook runs passes of
  * `rewrap` and reads `status` before it removes a version.
@@ -559,10 +602,16 @@ export interface AuthApi {
     userId: string;
     role: string;
   }): Promise<Result<MemberSummary>>;
+  /**
+   * With `revokeTokens: true`, the person's organization tokens go too, in the
+   * same transaction (plan 12k). That needs `apiToken:revoke` as well. It applies
+   * no fresh rule: call `api.session.requireFresh` first.
+   */
   removeMember(input: {
     user: UserRow;
     organizationId: string;
     userId: string;
+    revokeTokens?: boolean;
   }): Promise<Result<{ ok: true }>>;
   /** `teamIds` (plan 12k): the teams that the accept adds the person to, at most 20, each a team of the organization. */
   inviteMember(input: {
@@ -660,6 +709,7 @@ export interface AuthApi {
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
   tokens: TokensApi;
+  organizationTokens: OrganizationTokensApi;
   session: SessionApi;
   user: UserApi;
   identities: IdentitiesApi;
@@ -705,6 +755,8 @@ export interface Auth {
    * answers 401 to a token. For a session caller, send
    * `sessionCookie(request, caller)`, or the browser drops the cookie at its old Max-Age.
    * A token caller spends one call of its quota, in every read mode (plan 12k).
+   * A `to_` bearer answers `kind: "organizationToken"` with `organization` and
+   * no `user` (plan 12k): narrow the kind before you read `caller.user`.
    */
   caller(request: Request): Promise<Caller | null>;
   /**
@@ -859,6 +911,13 @@ export function createAuth(input: AuthConfig): Auth {
         revoke: (i) => revokeApiToken(config, i),
         update: (i) => updateApiToken(config, i),
         current: (i) => currentApiToken(config, i),
+      },
+      organizationTokens: {
+        create: (i) => createOrganizationToken(config, i),
+        list: (i) => listOrganizationTokens(config, i),
+        update: (i) => updateOrganizationToken(config, i),
+        revoke: (i) => revokeOrganizationToken(config, i),
+        current: (i) => currentOrganizationToken(config, i),
       },
       session: {
         requireFresh: (resolved) => requireFresh(config, resolved.session),

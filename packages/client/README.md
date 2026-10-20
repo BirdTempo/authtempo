@@ -256,13 +256,18 @@ same type.
 | `organizations.members.list({ organizationId })` | `GET /organizations/members` | list of members |
 | `organizations.members.add({ organizationId, userId, role })` | `POST /organizations/members/add` | the member |
 | `organizations.members.role({ organizationId, userId, role })` | `POST /organizations/members/role` | the member |
-| `organizations.members.remove({ organizationId, userId })` | `POST /organizations/members/remove` | `{ ok: true }` |
+| `organizations.members.remove({ organizationId, userId, revokeTokens? })` | `POST /organizations/members/remove` | `{ ok: true }` |
 | `organizations.invitations.invite({ organizationId, email, role })` | `POST /organizations/invite` | the invitation |
 | `organizations.invitations.list({ organizationId })` | `GET /organizations/invitations` | list of invitations |
 | `organizations.invitations.revoke({ organizationId, invitationId })` | `POST /organizations/invitations/revoke` | `{ ok: true }` |
 | `organizations.invitations.accept({ token })` | `POST /organizations/invitations/accept` | `{ organization, member }` |
 | `organizations.invitations.decline({ token })` | `POST /organizations/invitations/decline` | `{ ok: true }` |
 | `organizations.setActive({ organizationId })` | `POST /organizations/active` | the session |
+| `organizations.tokens.create({ organizationId, name, permissions, expiresInDays?, metadata? })` | `POST /organizations/tokens` | `{ token, apiToken }`, the clear token once |
+| `organizations.tokens.list({ organizationId })` | `GET /organizations/tokens` | list of `OrganizationTokenSummaryJSON` |
+| `organizations.tokens.update({ organizationId, id, name?, permissions?, expiresAt? })` | `POST /organizations/tokens/update` | the token after the change |
+| `organizations.tokens.revoke({ organizationId, id })` | `POST /organizations/tokens/revoke` | `{ ok: true }` |
+| `organizations.tokens.current()` | `GET /organizations/tokens/current` | `{ organization, apiToken }` |
 
 The server sends each invitation by mail. The token is only in the mail.
 The answer to `invite` has no token, and the inviter never sees it. The
@@ -273,6 +278,17 @@ the answer. Pass `organizationId: null` to clear the active organization.
 
 If you omit `metadata`, the client does not send the key. Pass `null` to
 `update` to clear the metadata of an organization.
+
+An organization token (`to_`) acts for the organization with its own
+`permissions`, and it stays when its creator leaves. Its `createdById`
+and `creatorIsMember` show who made it and if that person is still a
+member. `create` needs `apiToken:create` and a set that is a subset of
+your own; `{}` grants nothing. `list`, `update`, and `revoke` need
+`apiToken:read`, `apiToken:update`, and `apiToken:revoke`. `update`
+narrows only. `current` needs the organization token as the bearer:
+a script passes `token: () => "to_…"` to `createClient`. Pass
+`revokeTokens: true` to `members.remove` to delete the tokens that the
+person made in the organization; that needs `apiToken:revoke` too.
 
 ## Passkeys
 
@@ -367,6 +383,8 @@ can answer it:
 - `tokens.create`, `tokens.update`
 - `organizations.roles.create`, `organizations.roles.update`,
   `organizations.roles.delete`
+- `organizations.tokens.create`, `organizations.tokens.update`
+- `organizations.members.remove` with `revokeTokens: true`
 - `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`
 - `secondFactor.passkey.enable`, `secondFactor.email.enable`,
   `secondFactor.disable`

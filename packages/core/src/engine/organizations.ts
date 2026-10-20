@@ -1,4 +1,4 @@
-import { can, type Statements } from "../access.js";
+import { can, type Statements, union } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
@@ -595,6 +595,9 @@ export async function deleteOrganizationRows(
 ): Promise<void> {
   const byOrganization: Where<"member">[] = [{ field: "organizationId", op: "eq", value: id }];
   await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
+  // The tokens and the role rows of the organization have no use without it (plan 12k).
+  await tx.delete("organizationToken", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("organizationRole", [{ field: "organizationId", op: "eq", value: id }]);
   await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
   if (
     alone !== null &&
@@ -925,22 +928,31 @@ export async function updateMemberRole(
   return ok(updated);
 }
 
+/** The second right of `revokeTokens` (deviation 9 of plan 12k): a creator has no right of their own on a token. */
+const REVOKE_TOKENS: Statements = { apiToken: ["revoke"] };
+
+/**
+ * Removes a member, or the caller (a leave). The organization tokens of the
+ * person stay (owner decision 2 of plan 12k). With `revokeTokens: true` the
+ * rows of this organization with the person as `createdById` go in the same
+ * transaction as the member row. That needs `apiToken:revoke` as well, also
+ * for a leave, checked before any write. The route also checks the fresh
+ * rule then; an in-process call is the app's own act (ruling 8 of plan 12k).
+ */
 export async function removeMember(
   config: ResolvedConfig,
-  input: Caller & { organizationId: string; userId: string },
+  input: Caller & { organizationId: string; userId: string; revokeTokens?: boolean },
 ): Promise<Result<{ ok: true }>> {
   const o = on(config);
   if (!o) return fail("not_found");
   const v = verified(input.user);
   if (!v.ok) return v;
   const self = input.userId === input.user.id;
+  const revokeTokens = input.revokeTokens === true;
   // Leave needs membership only, at any rank. Remove of another member needs the removeOther rule.
-  const s = await standing(
-    config,
-    input.user,
-    input.organizationId,
-    self ? null : RULE_STATEMENTS.removeOther,
-  );
+  const rule = self ? null : RULE_STATEMENTS.removeOther;
+  const wanted = revokeTokens ? union(rule ?? {}, REVOKE_TOKENS) : rule;
+  const s = await standing(config, input.user, input.organizationId, wanted);
   if (!s.ok) return s;
   const target = self ? s.value : await membership(config, input.organizationId, input.userId);
   if (!target) return fail("not_found");
@@ -993,6 +1005,11 @@ export async function removeMember(
       ],
       { activeOrganizationId: null },
     );
+    if (revokeTokens)
+      await storage.delete("organizationToken", [
+        { field: "organizationId", op: "eq", value: organizationId },
+        { field: "createdById", op: "eq", value: target.member.userId },
+      ]);
     return n;
   };
   // A removal or a leave of the platform organization ends the member's

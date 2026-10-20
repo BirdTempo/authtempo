@@ -136,6 +136,8 @@ export const BETTER_AUTH_CODES = {
   // and maps the shim's api-key answers to them.
   token_exhausted: "TOKEN_EXHAUSTED",
   token_retired: "TOKEN_RETIRED",
+  // Plan 12k Task 8. authtempo's own name: Better Auth has no cap of organization tokens.
+  organization_token_limit: "ORGANIZATION_TOKEN_LIMIT",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

@@ -52,7 +52,8 @@ describe("the call table of the client (plan 11d)", () => {
     for (const c of CLIENT_CALLS) expect(routes).toContain(`${c.method} ${c.path}`);
     const operations = CLIENT_CALLS.map((c) => c.operation);
     expect(new Set(operations).size).toBe(operations.length);
-    expect(CLIENT_CALLS).toHaveLength(93);
+    // Plan 12k Task 8 adds the five organization token calls.
+    expect(CLIENT_CALLS).toHaveLength(98);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -127,6 +128,11 @@ describe("the call table of the client (plan 11d)", () => {
     await c.organizations.teams.members.remove({ teamId: "t", userId: "u" });
     await c.organizations.teams.setActive({ teamId: null });
     await c.organizations.teams.mine();
+    await c.organizations.tokens.create({ ...org, name: "ci", permissions: {} });
+    await c.organizations.tokens.list(org);
+    await c.organizations.tokens.update({ ...org, id: "t", name: "cd" });
+    await c.organizations.tokens.revoke({ ...org, id: "t" });
+    await c.organizations.tokens.current();
     await c.tokens.create({ name: "ci" });
     await c.tokens.list();
     await c.tokens.revoke({ id: "t" });
@@ -183,11 +189,11 @@ describe("the call table of the client (plan 11d)", () => {
     const notCompared = NOT_COMPARED.map((r) => r.operation);
     // Every row is in one of the two lists, and no row is in both.
     expect([...COMPARED, ...notCompared].sort()).toEqual(operations);
-    expect(COMPARED).toHaveLength(87);
+    expect(COMPARED).toHaveLength(92);
     expect(NOT_COMPARED).toHaveLength(6);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.
-    expect(BODY_AS_INPUT).toHaveLength(49);
+    expect(BODY_AS_INPUT).toHaveLength(52);
     for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
     // Every row with `select` is compared: the type test reads the key.
     for (const r of CLIENT_CALLS)

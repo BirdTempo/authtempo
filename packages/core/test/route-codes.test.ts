@@ -9,6 +9,10 @@ import { hookRefusal } from "../src/engine/hooks.js";
 import { inviteMember } from "../src/engine/invitations.js";
 import { mintSessionJwt } from "../src/engine/jwt.js";
 import { requestMagicLink } from "../src/engine/magic-link.js";
+import {
+  createOrganizationToken,
+  ORGANIZATION_TOKEN_CAP,
+} from "../src/engine/organization-tokens.js";
 import { addMember, createOrganization } from "../src/engine/organizations.js";
 import {
   passkeyAuthenticationOptions,
@@ -153,6 +157,9 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /organizations/teams/members/add": { teamId: "$team", userId: "u2" },
   "POST /organizations/teams/members/remove": { teamId: "$team", userId: "u2" },
   "POST /organizations/teams/active": { teamId: "$team" },
+  "POST /organizations/tokens": { organizationId: "$org", name: "ci", permissions: {} },
+  "POST /organizations/tokens/update": { organizationId: "$org", id: "t1" },
+  "POST /organizations/tokens/revoke": { organizationId: "$org", id: "t1" },
   "POST /tokens": { name: "ci" },
   "POST /tokens/revoke": { id: "t1" },
   "POST /tokens/update": { id: "t1" },
@@ -178,6 +185,7 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /organizations/roles/get": { organizationId: "$org", name: "editor" },
   "GET /organizations/teams": { organizationId: "$org" },
   "GET /organizations/teams/members": { teamId: "$team" },
+  "GET /organizations/tokens": { organizationId: "$org" },
 };
 
 /** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
@@ -432,6 +440,16 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
         rateLimit: { seconds: 60, max: 100 },
       }),
     );
+    // The same for GET /organizations/tokens/current, with a token of the organization.
+    const orgWindowed = must(
+      await createOrganizationToken(config, {
+        user: me.user,
+        organizationId: org.organization.id,
+        name: "windowed",
+        permissions: {},
+        rateLimit: { seconds: 60, max: 100 },
+      }),
+    );
     const fills: Fills = {
       $org: org.organization.id,
       $resetToken: resetToken,
@@ -452,13 +470,15 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
           ? { authorization: `Bearer ${jwt.token}` }
           : key === "GET /tokens/current"
             ? { authorization: `Bearer ${windowed.token}` }
-            : // The device page counts a request with no session only.
-              key === "GET /oauth/device"
-              ? {}
-              : // The operator user tools count a secret call before the compare (plan 12f).
-                entryOf(key).feature === "operatorUsers"
-                ? { authorization: `Operator ${"x".repeat(32)}` }
-                : w.cookie(me.token),
+            : key === "GET /organizations/tokens/current"
+              ? { authorization: `Bearer ${orgWindowed.token}` }
+              : // The device page counts a request with no session only.
+                key === "GET /oauth/device"
+                ? {}
+                : // The operator user tools count a secret call before the compare (plan 12f).
+                  entryOf(key).feature === "operatorUsers"
+                  ? { authorization: `Operator ${"x".repeat(32)}` }
+                  : w.cookie(me.token),
       fills,
     );
     // The two routes that carry the code in a redirect to the app.
@@ -603,6 +623,28 @@ describe("the codes of one route (plan 11g)", () => {
       status: 409,
       code: "token_limit",
     });
+  });
+
+  it("POST /organizations/tokens answers organization_token_limit at the cap", async () => {
+    const w = world();
+    const me = await verifiedSession(w.auth, "ada@example.com");
+    const org = must(
+      await createOrganization(w.auth.config, { user: me.user, slug: "acme", name: "Acme" }),
+    );
+    for (let i = 0; i < ORGANIZATION_TOKEN_CAP; i++)
+      must(
+        await createOrganizationToken(w.auth.config, {
+          user: me.user,
+          organizationId: org.organization.id,
+          name: `t${i}`,
+          permissions: {},
+        }),
+      );
+    expect(
+      await call(w, "POST /organizations/tokens", w.cookie(me.token), undefined, {
+        $org: org.organization.id,
+      }),
+    ).toEqual({ status: 409, code: "organization_token_limit" });
   });
 
   it("the organization routes answer organization_limit, member_limit, and invitation_limit at each limit", async () => {

@@ -14,6 +14,7 @@ export {
   type MemberJSON,
   type OAuthGrantJSON,
   type OrganizationJSON,
+  type OrganizationTokenSummaryJSON,
   type PasskeySummaryJSON,
   type PasswordSignIn,
   type PublicUserJSON,

@@ -105,6 +105,8 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /organizations/teams/members/add",
   "POST /organizations/teams/members/remove",
   "POST /organizations/teams/update",
+  "POST /organizations/tokens/revoke",
+  "POST /organizations/tokens/update",
   "POST /organizations/update",
   "POST /otp/request",
   "POST /otp/reset",
@@ -187,6 +189,9 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /organizations/teams/members/add",
   "POST /organizations/teams/members/remove",
   "POST /organizations/teams/update",
+  "POST /organizations/tokens",
+  "POST /organizations/tokens/revoke",
+  "POST /organizations/tokens/update",
   "POST /organizations/update",
   "POST /otp/request",
   "POST /otp/reset",
@@ -475,6 +480,13 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     form: "null",
     reason:
       "the bearer check stamps lastUsedAt before the route answers; GET /tokens answers the null form; tokens.test.ts proves the stamp",
+  },
+  {
+    key: "GET /organizations/tokens/current",
+    field: "apiToken.lastUsedAt",
+    form: "null",
+    reason:
+      "the bearer check stamps lastUsedAt before the route answers; GET /organizations/tokens answers the null form; organization-tokens.test.ts proves the stamp",
   },
   // The enable answers the status after the write, where both keys are set.
   {

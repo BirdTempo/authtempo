@@ -133,7 +133,8 @@ async function memberIn(
 /**
  * The caller's role in the organization and its effective set, by the table
  * of spec 29 item 9. A caller with no rights there gets a null role and the
- * empty set. Every read is a read of now: nothing is cached across requests.
+ * empty set. An organization token has no role and answers its own set.
+ * Every read is a read of now: nothing is cached across requests.
  */
 async function effectiveFor(
   config: ResolvedConfig,
@@ -167,6 +168,16 @@ async function effectiveFor(
         role: member.role,
         permissions: row.permissions === null ? role : intersect(role, row.permissions),
       };
+    }
+    case "organizationToken": {
+      // The token's own set, in its own organization only. No role of its creator counts (spec 29 item 14).
+      if (caller.organization.id !== organizationId) return none;
+      // The row of now: a token that was revoked since its resolve grants nothing.
+      const row = await config.storage.findOne("organizationToken", [
+        { field: "id", op: "eq", value: caller.apiToken.id },
+      ]);
+      if (!row) return none;
+      return { role: null, permissions: row.permissions };
     }
     // An app checks the scopes of an OAuth access token itself.
     case "oauth":

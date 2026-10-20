@@ -12,9 +12,12 @@ export const SESSION_TOKEN_PREFIX = "ts_";
 /** An API token: `tk_` and 32 random bytes as base64url (spec 8.8). */
 export const API_TOKEN_PREFIX = "tk_";
 
+/** An organization token: `to_` and 32 random bytes as base64url (plan 12k, spec 29 item 14). */
+export const ORGANIZATION_TOKEN_PREFIX = "to_";
+
 /**
  * Every prefix of a credential that core issues, `to_` (organization tokens,
- * plan 12k Task 8) included. A moved key prefix (`tokens.movedPrefixes`)
+ * plan 12k) included. A moved key prefix (`tokens.movedPrefixes`)
  * may not shadow one of them (ruling 12 of plan 12k). A test reads each
  * `randomToken` call of core against this list.
  */

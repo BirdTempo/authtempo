@@ -45,6 +45,7 @@ export type AuthForm =
   | "none" // no credential
   | "session" // the session cookie or a ts_ bearer
   | "apiToken" // a tk_ bearer
+  | "organizationToken" // a `to_` bearer (plan 12k)
   | "sessionJwt" // a session JWT as the bearer (POST /token/live, plan 11d)
   | "accessToken" // an OAuth access token of the provider (userinfo)
   | "dpopAccessToken" // a DPoP-bound access token with its proof, RFC 9449 section 7.1 (plan 12e)
@@ -1060,6 +1061,7 @@ export const ROUTES = Object.freeze([
     auth: ["session"],
     codes: [
       "unauthorized",
+      "session_not_fresh",
       "invalid_body",
       "email_unverified",
       "forbidden_rank",
@@ -1157,6 +1159,61 @@ export const ROUTES = Object.freeze([
     feature: "organizations",
     auth: ["session"],
     codes: ["unauthorized", "invalid_body", "email_unverified", "rate_limited"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/organizations/tokens",
+    feature: "organizations",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "session_not_fresh",
+      "invalid_body",
+      "email_unverified",
+      "rate_limited",
+      "forbidden_rank",
+      "organization_token_limit",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/organizations/tokens",
+    feature: "organizations",
+    auth: ["session"],
+    codes: ["unauthorized", "invalid_body", "email_unverified", "forbidden_rank"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/organizations/tokens/update",
+    feature: "organizations",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "session_not_fresh",
+      "invalid_body",
+      "email_unverified",
+      "forbidden_rank",
+      "conflict",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/organizations/tokens/revoke",
+    feature: "organizations",
+    auth: ["session"],
+    codes: ["unauthorized", "invalid_body", "email_unverified", "forbidden_rank"],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/organizations/tokens/current",
+    feature: "organizations",
+    auth: ["organizationToken"],
+    codes: ["unauthorized", "rate_limited", "token_exhausted", "conflict"],
     oauthCodes: [],
   },
   {

@@ -1,7 +1,7 @@
 import { isSubset, type Statements, statementFault } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
 import type { LimitWindow } from "../limiter/port.js";
-import { API_TOKEN_PREFIX } from "../primitives/credentials.js";
+import { API_TOKEN_PREFIX, ORGANIZATION_TOKEN_PREFIX } from "../primitives/credentials.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { JWS_RE } from "../primitives/jwk.js";
@@ -17,6 +17,10 @@ import {
   resolveAccessToken,
 } from "./oauth-token.js";
 import { activeBan } from "./operator/ban-rule.js";
+import {
+  authenticateOrganizationToken,
+  type ResolvedOrganizationToken,
+} from "./organization-tokens.js";
 import { membership } from "./organizations.js";
 import { effectiveIn } from "./permissions.js";
 import {
@@ -36,7 +40,7 @@ import {
 } from "./token-use.js";
 
 // Moved to primitives/credentials.ts (plan 11d); still exported here.
-export { API_TOKEN_PREFIX };
+export { API_TOKEN_PREFIX, ORGANIZATION_TOKEN_PREFIX };
 
 // Built from the prefix, so the pattern and the prefix cannot drift (the prefix has no regex character).
 const API_TOKEN_RE = new RegExp(`^${API_TOKEN_PREFIX}[A-Za-z0-9_-]{43}$`);
@@ -44,7 +48,8 @@ const API_TOKEN_RE = new RegExp(`^${API_TOKEN_PREFIX}[A-Za-z0-9_-]{43}$`);
 const MOVED_REST_RE = /^[A-Za-z0-9_-]{1,256}$/;
 /** The JSON of `metadata`, in UTF-8 bytes. */
 const METADATA_MAX_BYTES = 4096;
-const HINT_LENGTH = 8;
+/** The characters after the prefix that a list shows. */
+export const HINT_LENGTH = 8;
 const DAY_MS = 86_400_000;
 const NAME_MAX = 80;
 const DEFAULT_EXPIRES_IN_DAYS = 90;
@@ -54,6 +59,7 @@ const LAST_USED_EVERY_MS = 3_600_000;
 /** Per user. More is a list nobody reviews. */
 export const API_TOKEN_CAP = 50;
 // 20 per hour per user: a person makes a few tokens; a stolen session that mints many is slowed.
+// The user tokens and the organization tokens of one user share this key (spec 29 item 14).
 const CREATE_PER_USER = { seconds: 3600, max: 20 };
 
 /** What a list shows. Never the hash, never the token. */
@@ -90,11 +96,14 @@ export interface ResolvedApiToken {
  * that acts for itself, with no user (`client_credentials`, plan 12e).
  * The `subject` of an `oauth` caller is the token's `sub` (ruling 34 of plan
  * 12e). It is the user id for a public client, and the pairwise subject for
- * a pairwise client. `user` is always the user.
+ * a pairwise client. `user` is always the user. `organizationToken` is a
+ * `to_` token that acts for its organization, with no user (plan 12k): an
+ * app narrows the kind before it reads `caller.user`.
  */
 export type Caller =
   | ({ kind: "session" } & ResolvedSession)
   | ({ kind: "token" } & ResolvedApiToken)
+  | ({ kind: "organizationToken" } & ResolvedOrganizationToken)
   | ({ kind: "oauth"; subject: string } & OAuthAccess)
   | ({ kind: "oauth-client" } & OAuthClientAccess);
 
@@ -167,18 +176,18 @@ export function publicApiToken(row: ApiTokenRow): ApiTokenSummary {
 }
 
 /** True for a set that `organizations.statements` knows. False with organizations off. */
-function knownSet(config: ResolvedConfig, set: unknown): set is Statements {
+export function knownSet(config: ResolvedConfig, set: unknown): set is Statements {
   const o = config.organizations;
   return o !== null && statementFault(set, o.statements) === null;
 }
 
 /** A plain copy of a valid set, as the row stores it. */
-function copySet(set: Statements): Record<string, string[]> {
+export function copySet(set: Statements): Record<string, string[]> {
   return Object.fromEntries(Object.entries(set).map(([k, v]) => [k, [...v]]));
 }
 
 /** True for a plain object whose JSON is at most 4096 bytes of UTF-8. */
-function validMetadata(value: unknown): value is Record<string, unknown> {
+export function validMetadata(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
   try {
     const text = JSON.stringify(value);
@@ -187,6 +196,32 @@ function validMetadata(value: unknown): value is Record<string, unknown> {
     // A cycle or a BigInt has no JSON.
     return false;
   }
+}
+
+/**
+ * The life of a new token in days, or `invalid_body`: an integer from 1 to
+ * 3650. Absent: 90 days. Null: the token never expires.
+ */
+export function tokenDays(days: number | null | undefined): Result<number | null> {
+  const d = days === undefined ? DEFAULT_EXPIRES_IN_DAYS : days;
+  if (d !== null && (!Number.isSafeInteger(d) || d < 1 || d > MAX_EXPIRES_IN_DAYS))
+    return fail("invalid_body");
+  return ok(d);
+}
+
+/** The expiry of a token of `days` made at `now`, or null for none. */
+export function expiryOf(days: number | null, now: Date): Date | null {
+  return days === null ? null : new Date(now.getTime() + days * DAY_MS);
+}
+
+/** One try of the token create limit of a user: 20 per hour for both token kinds. One limiter call. */
+export function spendTokenCreate(config: ResolvedConfig, userId: string): Promise<boolean> {
+  return config.limiter.allow(`token-create:user:${userId}`, CREATE_PER_USER);
+}
+
+/** True when `lastUsedAt` is due a write: at most once per hour (plan 8b). */
+export function lastUsedDue(lastUsedAt: Date | null, now: Date): boolean {
+  return lastUsedAt === null || now.getTime() - lastUsedAt.getTime() >= LAST_USED_EVERY_MS;
 }
 
 /**
@@ -202,9 +237,8 @@ export async function createApiToken(
   const { user } = input;
   if (!user.emailVerified) return fail("email_unverified");
   if (!validTokenName(input.name)) return fail("invalid_body");
-  const days = input.expiresInDays === undefined ? DEFAULT_EXPIRES_IN_DAYS : input.expiresInDays;
-  if (days !== null && (!Number.isSafeInteger(days) || days < 1 || days > MAX_EXPIRES_IN_DAYS))
-    return fail("invalid_body");
+  const days = tokenDays(input.expiresInDays);
+  if (!days.ok) return days;
   const permissions = input.permissions ?? null;
   if (permissions !== null && !knownSet(config, permissions)) return fail("invalid_body");
   const metadata = input.metadata ?? null;
@@ -215,8 +249,7 @@ export async function createApiToken(
   if (quota !== null && !validQuota(quota)) return fail("invalid_body");
   // The limiter runs before every storage read, in every flow. So a flood with
   // a wrong organization costs one read per request at most, not one per try.
-  if (!(await config.limiter.allow(`token-create:user:${user.id}`, CREATE_PER_USER)))
-    return fail("rate_limited");
+  if (!(await spendTokenCreate(config, user.id))) return fail("rate_limited");
   const organizationId = input.organizationId ?? null;
   if (organizationId !== null) {
     // `membership` answers null with organizations off, for a missing
@@ -250,7 +283,7 @@ export async function createApiToken(
     name: input.name,
     tokenHash: await sha256Hex(token),
     hint: token.slice(API_TOKEN_PREFIX.length, API_TOKEN_PREFIX.length + HINT_LENGTH),
-    expiresAt: days === null ? null : new Date(now.getTime() + days * DAY_MS),
+    expiresAt: expiryOf(days.value, now),
     lastUsedAt: null,
     organizationId,
     permissions: permissions === null ? null : copySet(permissions),
@@ -268,12 +301,17 @@ export async function createApiToken(
   return ok({ token, apiToken: publicApiToken(row) });
 }
 
-/** True when the bearer is a token form: `tk_`, or a prefix of `tokens.movedPrefixes`. */
-export function isTokenBearer(config: ResolvedConfig, bearer: string): boolean {
+/** True when the bearer is a user token form: `tk_`, or a prefix of `tokens.movedPrefixes`. */
+export function isApiTokenBearer(config: ResolvedConfig, bearer: string): boolean {
   return (
     bearer.startsWith(API_TOKEN_PREFIX) ||
     config.tokens.movedPrefixes.some((p) => bearer.startsWith(p))
   );
+}
+
+/** True when the bearer is a token form of either kind: a user token, or `to_` (plan 12k). */
+export function isTokenBearer(config: ResolvedConfig, bearer: string): boolean {
+  return bearer.startsWith(ORGANIZATION_TOKEN_PREFIX) || isApiTokenBearer(config, bearer);
 }
 
 /**
@@ -323,7 +361,7 @@ export async function authenticateApiToken(
   const spent = await spendUse(config, "apiToken", row);
   if (!spent.ok) return spent;
   let lastUsedAt = row.lastUsedAt;
-  if (lastUsedAt === null || now.getTime() - lastUsedAt.getTime() >= LAST_USED_EVERY_MS) {
+  if (lastUsedDue(lastUsedAt, now)) {
     await config.storage.update("apiToken", [{ field: "id", op: "eq", value: row.id }], {
       lastUsedAt: now,
       updatedAt: now,
@@ -386,35 +424,53 @@ export async function revokeApiToken(
   return n === 0 ? fail("not_found") : ok({ ok: true });
 }
 
+/** The fields of a narrow-only change, as both token models store them. */
+export interface TokenNarrow {
+  name?: string | undefined;
+  permissions?: Statements | null | undefined;
+  expiresAt?: Date | null | undefined;
+  rateLimit?: LimitWindow | null | undefined;
+  quota?: TokenQuota | null | undefined;
+}
+
+/** The fields of a token row that a narrow-only change reads. */
+type NarrowRow = Pick<
+  ApiTokenRow,
+  "expiresAt" | "remaining" | "refillAmount" | "refillSeconds" | "lastRefillAt"
+> & { permissions: Record<string, string[]> | null };
+
+/** The write of a narrow-only change. Each key fits both token models. */
+export interface TokenPatch {
+  name?: string;
+  permissions?: Record<string, string[]>;
+  expiresAt?: Date;
+  rateLimitSeconds?: number | null;
+  rateLimitMax?: number | null;
+  remaining?: number;
+  refillAmount?: number | null;
+  refillSeconds?: number | null;
+  lastRefillAt?: null;
+}
+
+/** True when a change is well-formed before any read: a name, known names, a real date, a window, a quota. */
+export function narrowFormed(config: ResolvedConfig, input: TokenNarrow): boolean {
+  if (input.name !== undefined && !validTokenName(input.name)) return false;
+  if (input.permissions != null && !knownSet(config, input.permissions)) return false;
+  if (input.expiresAt != null && Number.isNaN(input.expiresAt.getTime())) return false;
+  if (input.rateLimit != null && !validWindow(input.rateLimit)) return false;
+  return input.quota == null || validQuota(input.quota);
+}
+
 /**
- * Narrows the caller's token by id and user id (spec 29 item 11). Another
- * user's id answers `not_found`. Each refused change answers
- * `invalid_body` and writes nothing. The route checks the fresh rule; an
- * in-process call is the app's own act (ruling 8 of plan 12k). The write is
- * one update on `updatedAt` as read, and on the quota as read when the quota
- * changes; zero rows answers `conflict`. Storage calls: one findOne and at
- * most one update.
+ * The write of a narrow-only change of `row` (spec 29 item 11), or
+ * `invalid_body` for a change that widens: a set over a smaller one, null
+ * over a set, a later expiry or null over one, a dropped or raised quota, or a
+ * changed refill. The one copy of the rule: both token models call it.
  */
-export async function updateApiToken(
-  config: ResolvedConfig,
-  input: ApiTokenUpdate,
-): Promise<Result<ApiTokenSummary>> {
-  if (!input.user.emailVerified) return fail("email_unverified");
-  if (input.name !== undefined && !validTokenName(input.name)) return fail("invalid_body");
-  const set = input.permissions;
-  if (set != null && !knownSet(config, set)) return fail("invalid_body");
-  const until = input.expiresAt;
-  if (until != null && Number.isNaN(until.getTime())) return fail("invalid_body");
-  if (input.rateLimit != null && !validWindow(input.rateLimit)) return fail("invalid_body");
-  const quota = input.quota;
-  if (quota != null && !validQuota(quota)) return fail("invalid_body");
-  const row = await config.storage.findOne("apiToken", [
-    { field: "id", op: "eq", value: input.id },
-    { field: "userId", op: "eq", value: input.user.id },
-  ]);
-  if (!row) return fail("not_found");
-  const data: Partial<Omit<ApiTokenRow, "id">> = {};
+export function narrowPatch(row: NarrowRow, input: TokenNarrow): Result<TokenPatch> {
+  const data: TokenPatch = {};
   if (input.name !== undefined) data.name = input.name;
+  const set = input.permissions;
   if (set === null) {
     // A set to null widens the token.
     if (row.permissions !== null) return fail("invalid_body");
@@ -422,6 +478,7 @@ export async function updateApiToken(
     if (row.permissions !== null && !isSubset(set, row.permissions)) return fail("invalid_body");
     data.permissions = copySet(set);
   }
+  const until = input.expiresAt;
   if (until === null) {
     if (row.expiresAt !== null) return fail("invalid_body");
   } else if (until !== undefined) {
@@ -433,6 +490,7 @@ export async function updateApiToken(
     data.rateLimitSeconds = input.rateLimit === null ? null : input.rateLimit.seconds;
     data.rateLimitMax = input.rateLimit === null ? null : input.rateLimit.max;
   }
+  const quota = input.quota;
   if (quota === null) {
     // Dropping the quota widens the token.
     if (row.remaining !== null) return fail("invalid_body");
@@ -451,6 +509,32 @@ export async function updateApiToken(
     data.refillSeconds = quota.refillSeconds ?? null;
     if (quota.refillAmount === undefined) data.lastRefillAt = null;
   }
+  return ok(data);
+}
+
+/**
+ * Narrows the caller's token by id and user id (spec 29 item 11). Another
+ * user's id answers `not_found`. Each refused change answers
+ * `invalid_body` and writes nothing. The route checks the fresh rule; an
+ * in-process call is the app's own act (ruling 8 of plan 12k). The write is
+ * one update on `updatedAt` as read, and on the quota as read when the quota
+ * changes; zero rows answers `conflict`. Storage calls: one findOne and at
+ * most one update.
+ */
+export async function updateApiToken(
+  config: ResolvedConfig,
+  input: ApiTokenUpdate,
+): Promise<Result<ApiTokenSummary>> {
+  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!narrowFormed(config, input)) return fail("invalid_body");
+  const row = await config.storage.findOne("apiToken", [
+    { field: "id", op: "eq", value: input.id },
+    { field: "userId", op: "eq", value: input.user.id },
+  ]);
+  if (!row) return fail("not_found");
+  const patch = narrowPatch(row, input);
+  if (!patch.ok) return patch;
+  const data: Partial<Omit<ApiTokenRow, "id">> = patch.value;
   if (Object.keys(data).length === 0) return ok(publicApiToken(row));
   const now = config.clock.now();
   data.updatedAt = now;
@@ -460,7 +544,7 @@ export async function updateApiToken(
       { field: "id", op: "eq", value: row.id },
       { field: "updatedAt", op: "eq", value: row.updatedAt },
       // A spend between the read and the write changes the count; the change then answers conflict.
-      ...(quota != null
+      ...(input.quota != null
         ? [
             { field: "remaining", op: "eq", value: row.remaining } as const,
             { field: "lastRefillAt", op: "eq", value: row.lastRefillAt } as const,
@@ -507,24 +591,44 @@ function once(
   return answer;
 }
 
-/** The token caller of a bearer, once per request. */
+/** The token caller of a bearer, once per request: `to_` is an organization token, else a user token. */
 function tokenCaller(config: ResolvedConfig, request: Request, bearer: string) {
   return once(config, request, async () => {
+    if (bearer.startsWith(ORGANIZATION_TOKEN_PREFIX)) {
+      const o = await authenticateOrganizationToken(config, bearer);
+      return o.ok ? ok<Caller>({ kind: "organizationToken", ...o.value }) : o;
+    }
     const t = await authenticateApiToken(config, bearer);
     return t.ok ? ok<Caller>({ kind: "token", ...t.value }) : t;
   });
 }
 
 /**
- * The caller of `GET /tokens/current`: a token bearer only. A cookie or a
- * `ts_` bearer is a person, and answers `unauthorized`.
+ * The caller of `GET /tokens/current`: a user token bearer only. A cookie or
+ * a `ts_` bearer is a person, and a `to_` bearer is an organization. Each
+ * answers `unauthorized` with no storage read, so it spends no quota.
  */
 export function apiTokenFromRequest(
   config: ResolvedConfig,
   request: Request,
 ): Promise<Result<Caller>> {
   const bearer = readBearer(request);
-  if (bearer === null || !isTokenBearer(config, bearer))
+  if (bearer === null || !isApiTokenBearer(config, bearer))
+    return Promise.resolve(fail("unauthorized"));
+  return tokenCaller(config, request, bearer);
+}
+
+/**
+ * The caller of `GET /organizations/tokens/current`: a `to_` bearer only
+ * (plan 12k). Any other credential answers `unauthorized` with no storage
+ * read.
+ */
+export function organizationTokenFromRequest(
+  config: ResolvedConfig,
+  request: Request,
+): Promise<Result<Caller>> {
+  const bearer = readBearer(request);
+  if (bearer === null || !bearer.startsWith(ORGANIZATION_TOKEN_PREFIX))
     return Promise.resolve(fail("unauthorized"));
   return tokenCaller(config, request, bearer);
 }
@@ -557,7 +661,8 @@ async function dpopCaller(
  * as a session only. A `tk_` value counts only in the bearer header: a
  * browser sends a cookie on a cross-site request, and a script never has
  * one. A JWT bearer is an OAuth access token (plan 9g). `Authorization:
- * DPoP` carries a DPoP-bound access token with its proof (plan 12e).
+ * DPoP` carries a DPoP-bound access token with its proof (plan 12e). A `to_`
+ * bearer is an organization token (plan 12k).
  *
  * A failure of a token answers its code (spec 29 item 16); any other failure
  * answers `unauthorized`. A token resolve spends one call of its quota in

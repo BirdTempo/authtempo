@@ -628,6 +628,24 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     {
+      key: "POST /organizations/tokens",
+      body: { organizationId: org, name: "ci", permissions: {} },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /organizations/tokens/update",
+      body: { organizationId: org, id },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /organizations/tokens/revoke",
+      body: { organizationId: org, id },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
       key: "POST /organizations/delete",
       body: { organizationId: org },
       session: true,
@@ -690,7 +708,8 @@ describe("the route contract (plan 11g)", () => {
   it("gives every route of ROUTES one contract, and no contract without a route", () => {
     const keys = Object.keys(ROUTE_CONTRACT).sort();
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(139);
+    // Plan 12k Task 8 adds the five organization token routes.
+    expect(keys.length).toBe(144);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -906,6 +925,15 @@ describe("the route contract (plan 11g)", () => {
         missing: { organizationId: INVALID_BODY, name: INVALID_BODY },
       },
       {
+        key: "GET /organizations/tokens",
+        path: "/organizations/tokens",
+        query: { organizationId: org },
+        headers: cookie,
+        required: ["organizationId"],
+        valid: { status: 200, code: null },
+        missing: { organizationId: INVALID_BODY },
+      },
+      {
         key: "GET /organizations/invitations",
         path: "/organizations/invitations",
         query: { organizationId: org },
@@ -991,7 +1019,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_QUERIES.map((row) => row.key).sort());
-    expect(hand.length).toBe(21);
+    expect(hand.length).toBe(22);
     let wrongForms = 0;
     for (const row of VALID_QUERIES) {
       const contract = CONTRACT[row.key];
@@ -1199,7 +1227,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
-    expect(withBody.length).toBe(77);
+    expect(withBody.length).toBe(80);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1225,7 +1253,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(75);
+    expect(refusals).toBe(78);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1243,7 +1271,7 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 69, both: 9, form: 7 });
+    expect(counts).toEqual({ json: 72, both: 9, form: 7 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);
@@ -1407,6 +1435,36 @@ describe("the route contract (plan 11g)", () => {
     await check(
       "POST /organizations/active",
       post("/auth/organizations/active", { organizationId: org }, cookie),
+    );
+    // The organization tokens (plan 12k Task 8).
+    const orgToken = (await check(
+      "POST /organizations/tokens",
+      post(
+        "/auth/organizations/tokens",
+        { organizationId: org, name: "ci", permissions: { member: ["read"] } },
+        cookie,
+      ),
+    )) as { token: string; apiToken: { id: string } };
+    await check("GET /organizations/tokens", byOrg("/organizations/tokens"));
+    await check(
+      "GET /organizations/tokens/current",
+      get("/auth/organizations/tokens/current", { authorization: `Bearer ${orgToken.token}` }),
+    );
+    await check(
+      "POST /organizations/tokens/update",
+      post(
+        "/auth/organizations/tokens/update",
+        { organizationId: org, id: orgToken.apiToken.id, name: "cd" },
+        cookie,
+      ),
+    );
+    await check(
+      "POST /organizations/tokens/revoke",
+      post(
+        "/auth/organizations/tokens/revoke",
+        { organizationId: org, id: orgToken.apiToken.id },
+        cookie,
+      ),
     );
     await check(
       "POST /organizations/delete",

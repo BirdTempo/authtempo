@@ -1,5 +1,9 @@
 import type { AuthForm } from "../http/route-list.js";
-import { API_TOKEN_PREFIX, SESSION_TOKEN_PREFIX } from "../primitives/credentials.js";
+import {
+  API_TOKEN_PREFIX,
+  ORGANIZATION_TOKEN_PREFIX,
+  SESSION_TOKEN_PREFIX,
+} from "../primitives/credentials.js";
 import type { OpenApiOptions } from "./deployment.js";
 
 /** The name of each security scheme, in the order of the document (spec 25 item 8). */
@@ -7,6 +11,7 @@ export const SCHEME_NAMES = [
   "sessionCookie",
   "sessionBearer",
   "apiToken",
+  "organizationToken",
   "sessionJwt",
   "oauth",
   "operatorSecret",
@@ -21,6 +26,7 @@ const SCHEMES_OF: Record<AuthForm, readonly SchemeName[]> = {
   none: [],
   session: ["sessionCookie", "sessionBearer"],
   apiToken: ["apiToken"],
+  organizationToken: ["organizationToken"],
   sessionJwt: ["sessionJwt"],
   accessToken: ["oauth"],
   dpopAccessToken: ["oauthDpop"],
@@ -31,7 +37,8 @@ const SCHEMES_OF: Record<AuthForm, readonly SchemeName[]> = {
 
 /**
  * The six security schemes of spec 25 item 8, and the initial access token
- * of the register route, the client Basic auth, and the DPoP scheme (plan 12e). The OAuth flow URLs are
+ * of the register route, the client Basic auth, and the DPoP scheme (plan 12e),
+ * and the organization token (plan 12k). The OAuth flow URLs are
  * absolute with a `serverUrl`; with none, they are absolute paths, which
  * resolve against the server of the document. A token prefix is in a
  * description only, never a value.
@@ -54,6 +61,11 @@ export function securitySchemes(options: OpenApiOptions): Record<SchemeName, obj
       type: "http",
       scheme: "bearer",
       description: `An API token as the bearer. It starts with \`${API_TOKEN_PREFIX}\`.`,
+    },
+    organizationToken: {
+      type: "http",
+      scheme: "bearer",
+      description: `A token of an organization as the bearer (plan 12k). It starts with \`${ORGANIZATION_TOKEN_PREFIX}\`.`,
     },
     sessionJwt: {
       type: "http",

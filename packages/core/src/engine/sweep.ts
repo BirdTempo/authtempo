@@ -21,6 +21,8 @@ export interface SweepResult {
   pendingSessions: number;
   /** API token rows past `expiresAt`. A token with no expiry is never swept. */
   apiTokens: number;
+  /** Organization token rows past `expiresAt` (plan 12k). A token with no expiry is never swept. */
+  organizationTokens: number;
   /** Trusted device rows past `expiresAt` (plan 9f). */
   trustedDevices: number;
   /** Retired signing keys past their 24 hours of verification (plan 9g). */
@@ -317,6 +319,11 @@ export async function sweepExpired(
     { field: "expiresAt", op: "lt", value: now },
   ]);
   meter.step(1);
+  // The same rule for the tokens of an organization (plan 12k).
+  const organizationTokens = await storage.delete("organizationToken", [
+    { field: "expiresAt", op: "lt", value: now },
+  ]);
+  meter.step(1);
   // No flow deletes an expired trusted device: each trust read refuses it
   // (`liveTrust`), and only this sweep deletes it.
   const trustedDevices = await storage.delete("trustedDevice", [
@@ -398,6 +405,7 @@ export async function sweepExpired(
     sessions,
     pendingSessions,
     apiTokens,
+    organizationTokens,
     trustedDevices,
     jwks,
     oauthTokens,

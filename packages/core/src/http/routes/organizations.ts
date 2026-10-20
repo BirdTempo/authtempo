@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
+import { requireFresh } from "../../engine/fresh.js";
 import {
   acceptInvitation,
   declineInvitation,
@@ -8,6 +9,12 @@ import {
   revokeInvitation,
   setActiveOrganization,
 } from "../../engine/invitations.js";
+import {
+  createOrganizationToken,
+  listOrganizationTokens,
+  revokeOrganizationToken,
+  updateOrganizationToken,
+} from "../../engine/organization-tokens.js";
 import {
   addMember,
   createOrganization,
@@ -21,6 +28,7 @@ import {
 import { hasPermission, permissionsOf } from "../../engine/permissions.js";
 import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { checkSlug } from "../../engine/slug-check.js";
+import { organizationTokenFromRequest } from "../../engine/tokens.js";
 import { fail, ok, type Result } from "../../result.js";
 import {
   activeBody,
@@ -31,6 +39,9 @@ import {
   inviteBody,
   memberBody,
   orgBody,
+  orgTokenCreateBody,
+  orgTokenRevokeBody,
+  orgTokenUpdateBody,
   removeBody,
   revokeBody,
   tokenBody,
@@ -159,9 +170,19 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
     post("/organizations/members/role", memberBody, "member", (s, b) =>
       updateMemberRole(config, { user: s.user, ...b }),
     ),
-    post("/organizations/members/remove", removeBody, null, (s, b) =>
-      removeMember(config, { user: s.user, ...b }),
-    ),
+    post("/organizations/members/remove", removeBody, null, async (s, b) => {
+      // The revoke of tokens changes credentials, so it needs a fresh session (plan 12k), before any write.
+      if (b.revokeTokens === true) {
+        const fresh = requireFresh(config, s.resolved.session);
+        if (!fresh.ok) return fresh;
+      }
+      return removeMember(config, {
+        user: s.user,
+        organizationId: b.organizationId,
+        userId: b.userId,
+        ...(b.revokeTokens !== undefined && { revokeTokens: b.revokeTokens }),
+      });
+    }),
     post("/organizations/invite", inviteBody, "invitation", (s, b) =>
       // exactOptionalPropertyTypes: pass teamIds only when the caller sent it.
       inviteMember(config, {
@@ -222,6 +243,54 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
     post("/organizations/check-slug", checkSlugBody, null, (s, b) =>
       checkSlug(config, { user: s.user, slug: b.slug }),
     ),
+    // Plan 12k: tokens that the organization owns. A session only: a token never makes or changes a token.
+    // A token is a credential for its life (spec 8.8), so the create and the update need a fresh session.
+    post("/organizations/tokens", orgTokenCreateBody, null, async (s, b) => {
+      const fresh = requireFresh(config, s.resolved.session);
+      if (!fresh.ok) return fresh;
+      return createOrganizationToken(config, {
+        user: s.user,
+        organizationId: b.organizationId,
+        name: b.name,
+        permissions: b.permissions,
+        ...(b.expiresInDays !== undefined && { expiresInDays: b.expiresInDays }),
+        ...(b.metadata != null && { metadata: b.metadata }),
+      });
+    }),
+    getByOrg("/organizations/tokens", "tokens", (user, organizationId) =>
+      listOrganizationTokens(config, { user, organizationId }),
+    ),
+    post("/organizations/tokens/update", orgTokenUpdateBody, null, async (s, b) => {
+      const fresh = requireFresh(config, s.resolved.session);
+      if (!fresh.ok) return fresh;
+      const { organizationId, id: tokenId, name, permissions, expiresAt } = b;
+      return updateOrganizationToken(config, {
+        user: s.user,
+        organizationId,
+        id: tokenId,
+        ...(name !== undefined && { name }),
+        ...(permissions !== undefined && { permissions }),
+        ...(expiresAt !== undefined && {
+          expiresAt: expiresAt === null ? null : new Date(expiresAt),
+        }),
+      });
+    }),
+    post("/organizations/tokens/revoke", orgTokenRevokeBody, null, (s, b) =>
+      revokeOrganizationToken(config, { user: s.user, ...b }),
+    ),
+    {
+      // A script learns which organization it acts for. A `to_` bearer only: any
+      // other credential answers 401. A token failure answers its own code.
+      method: "GET",
+      path: "/organizations/tokens/current",
+      key: "GET /organizations/tokens/current",
+      async handler(ctx) {
+        const r = await organizationTokenFromRequest(config, ctx.request);
+        if (!r.ok) return respond(r);
+        if (r.value.kind !== "organizationToken") return unauthorized();
+        return json({ organization: r.value.organization, apiToken: r.value.apiToken });
+      },
+    },
     // Active answers { user, session } as the engine returns it.
     post("/organizations/active", activeBody, null, (s, b) =>
       setActiveOrganization(config, { session: s.resolved, organizationId: b.organizationId }),

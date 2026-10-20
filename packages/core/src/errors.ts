@@ -72,6 +72,8 @@ export const ERRORS = {
   // plan 12k: the token quota and the retired keys of the shim cutover
   token_exhausted: 429,
   token_retired: 401,
+  // plan 12k: an organization holds ORGANIZATION_TOKEN_CAP live tokens
+  organization_token_limit: 409,
   // plan 11g: an unhandled error of a route. The router answers it; no route names it.
   internal: 500,
   // plan 12f: operator tools

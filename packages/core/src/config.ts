@@ -852,7 +852,8 @@ export interface TokensConfig {
   /**
    * The window of a new token that names none: `seconds` 1 to 86400 and
    * `max` 1 to 100000. Default null: no window. A token made through
-   * `POST /tokens` always gets it, because that route takes no window.
+   * `POST /tokens` or `POST /organizations/tokens` always gets it, because
+   * those routes take no window.
    */
   defaultRateLimit?: LimitWindow | null;
   /**
