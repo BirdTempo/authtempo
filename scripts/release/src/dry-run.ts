@@ -140,7 +140,10 @@ export function dryRunLine(r: DryRunReport): string {
   return `release-dry-run: ${verdict} packages=${c.packages ?? 0} of ${c.released ?? 0} version=${r.version ?? "none"} tarballs=${c.tarballs ?? 0} files=${c.files ?? 0} smoke=${c.smoke ?? 0} failures=${r.failures.length}`;
 }
 
-/** The fixed keys of each child. The four wrangler keys hold a build that spawns wrangler (ruling 40 of plan 11e). */
+/**
+ * The fixed keys of each child. The two wrangler keys, with CI and NO_COLOR,
+ * hold a build that spawns wrangler (ruling 40 of plan 11e).
+ */
 const CHILD_ENV = {
   CI: "1",
   NO_COLOR: "1",
