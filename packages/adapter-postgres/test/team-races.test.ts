@@ -192,4 +192,50 @@ describe("team races on Postgres (plan 12k Task 5, ruling 26)", () => {
     expect(await second).toMatchObject({ ok: false, code: "team_member_limit" });
     expect((await teamRows()).map((r) => r.userId)).toEqual(["a"]);
   });
+
+  it("of two team creates at teamsPerOrganization 1, one answers team_limit", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let second: Promise<unknown> | null = null;
+    const config = { teams: {}, limits: { teamsPerOrganization: 1 } };
+    const two = instance(watch("organization", g.reach), config, sent);
+    const one = instance(createPostgresAdapter(db.sql), config, sent, {
+      beforeCreateTeam: async () => {
+        second = two.api.createTeam({ user: a, organizationId, name: "Web" });
+        await Promise.race([g.at, second]);
+      },
+    });
+    const a = await user("a");
+    const organizationId = await organization(one, a);
+
+    const first = await one.api.createTeam({ user: a, organizationId, name: "Core" });
+
+    expect(first).toMatchObject({ ok: true, value: { name: "Core" } });
+    expect(await second).toMatchObject({ ok: false, code: "team_limit" });
+    expect((await teams()).map((t) => t.name)).toEqual(["Core"]);
+  });
+
+  it("of two deletes of the last two teams with keepLastTeam, one answers last_team", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let second: Promise<unknown> | null = null;
+    const config = { teams: { keepLastTeam: true } };
+    const two = instance(watch("organization", g.reach), config, sent);
+    const one = instance(createPostgresAdapter(db.sql), config, sent, {
+      beforeDeleteTeam: async () => {
+        second = two.api.deleteTeam({ user: a, teamId: web });
+        await Promise.race([g.at, second]);
+      },
+    });
+    const a = await user("a");
+    const organizationId = await organization(one, a);
+    const core = must(await one.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+    const web = must(await one.api.createTeam({ user: a, organizationId, name: "Web" })).id;
+
+    const first = await one.api.deleteTeam({ user: a, teamId: core });
+
+    expect(first).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: false, code: "last_team" });
+    expect((await teams()).map((t) => t.id)).toEqual([web]);
+  });
 });

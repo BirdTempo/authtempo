@@ -98,6 +98,24 @@ export async function lockTeam(
 }
 
 /**
+ * Locks the organization row in the caller's transaction, before a count of
+ * its teams, and answers false when the organization is gone. The update
+ * writes `createdAt` with its own value, so no field changes, and an owner
+ * write that compares `updatedAt` gets no false conflict. On Postgres a
+ * second team create or delete waits at this lock and then counts the
+ * committed teams (ruling 26).
+ */
+async function lockOrganization(
+  tx: StorageAdapter,
+  organization: { id: string; createdAt: Date },
+): Promise<boolean> {
+  const n = await tx.update("organization", [{ field: "id", op: "eq", value: organization.id }], {
+    createdAt: organization.createdAt,
+  });
+  return n > 0;
+}
+
+/**
  * The team and the caller's standing in its organization for `wanted`. A
  * missing team answers `not_found`; the standing answers as
  * `standing` does. A null set needs membership only.
@@ -118,8 +136,9 @@ async function teamStanding(
 /**
  * Creates a team. Needs `team:create`. The name rule is the organization
  * name rule; names are not unique. `teamsPerOrganization` counts inside the
- * transaction, before the write. D1 transactions are not isolated (spec
- * 8.6), so two creates at one moment can both pass the count.
+ * transaction, after the lock of the organization row and before the write.
+ * The lock holds the count on Postgres. D1 transactions are not isolated
+ * (spec 8.6), so on D1 two creates at one moment can both pass the count.
  */
 export async function createTeam(
   config: ResolvedConfig,
@@ -144,6 +163,8 @@ export async function createTeam(
   const limit = sc.o.limits.teamsPerOrganization;
   const written = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
+      // Also with no limit: a team of an organization that a delete removes must not stay.
+      if (!(await lockOrganization(tx, s.value.organization))) return fail("not_found");
       if (limit !== null) {
         const held = await tx.findMany(
           "team",
@@ -235,6 +256,7 @@ export async function deleteTeam(
   const deleted = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
       if (sc.keepLastTeam) {
+        if (!(await lockOrganization(tx, organization))) return fail("not_found");
         const held = await tx.findMany(
           "team",
           [{ field: "organizationId", op: "eq", value: team.organizationId }],
