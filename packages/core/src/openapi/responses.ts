@@ -77,12 +77,14 @@ function answerOf(kind: AnswerKind, schemaOf: SchemaOf): [string, OpenApiRespons
       ];
     case "redirect":
       return [
-        "302",
+        String(kind.status ?? 302),
         {
           description:
             kind.param === undefined
               ? "A redirect."
-              : `A redirect. A failure carries its code in the \`${kind.param}\` query parameter of the location.`,
+              : kind.status === 303
+                ? `A redirect. A failure is a 302 that carries its code in the \`${kind.param}\` query parameter of the location.`
+                : `A redirect. A failure carries its code in the \`${kind.param}\` query parameter of the location.`,
           headers: { Location: { required: true, schema: { type: "string" } } },
         },
       ];

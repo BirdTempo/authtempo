@@ -339,7 +339,8 @@ export const OAUTH_CONTRACT = {
   "POST /oauth/end-session": {
     body: { schema: endSessionForm, media: ["form"], parsedBy: "hand" },
     answer: { kind: "html" },
-    alt: { kind: "redirect" },
+    // A 303: to the client's redirect, or to the same GET when no session shows.
+    alt: { kind: "redirect", status: 303 },
   },
   "GET /.well-known/oauth-authorization-server": metadata("rfc8414"),
   "GET /.well-known/openid-configuration": metadata("oidc-discovery"),

@@ -32,9 +32,9 @@ export const SOCIAL_CONTRACT = {
   },
   "POST /social/:provider/link": {
     body: { schema: linkBody, media: ["json", "form"], parsedBy: "zod" },
-    // JSON: the client navigates to `url`. A form: a 303 to the provider.
+    // JSON: the client navigates to `url`. A form: a 303 to the provider, or a 302 with the error.
     answer: { kind: "json", schema: z.strictObject({ url: z.string() }) },
-    alt: { kind: "redirect", param: "auth_error" },
+    alt: { kind: "redirect", param: "auth_error", status: 303 },
   },
   "GET /social/:provider/callback": {
     query: { schema: callbackQuery, parsedBy: "hand" },

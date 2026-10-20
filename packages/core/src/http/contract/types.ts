@@ -3,13 +3,19 @@ import type { z } from "zod";
 /**
  * How a route answers (plan 11g). `json` is a body that `schema` describes,
  * with the status 200 unless `status` says 201. `html` is a page of core: no
- * script, its own CSP. `redirect` is a 302, and `param` is the query
- * parameter of the error that it carries. `metadata` is a standard document.
+ * script, its own CSP. `redirect` is a 302, or the 303 that `status` names:
+ * the answer to a form post that the browser follows with a GET. `param` is
+ * the query parameter of the error that a redirect carries, and a redirect
+ * with an error is a 302. `metadata` is a standard document.
  */
 export type AnswerKind =
   | { readonly kind: "json"; readonly schema: z.ZodType; readonly status?: 200 | 201 }
   | { readonly kind: "html" }
-  | { readonly kind: "redirect"; readonly param?: "auth_error" | "error" }
+  | {
+      readonly kind: "redirect";
+      readonly param?: "auth_error" | "error";
+      readonly status?: 303;
+    }
   | {
       readonly kind: "metadata";
       readonly standard: "rfc8414" | "oidc-discovery" | "jwks" | "openapi";

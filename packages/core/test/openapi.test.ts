@@ -197,6 +197,23 @@ describe("openApiDocument (plan 11g)", () => {
     expect(codes["403"]).toEqual(["origin_not_trusted"]);
   });
 
+  it("documents the 303 of a form post that the browser follows with a GET", () => {
+    const doc = reference();
+    const end = doc.paths["/oauth/end-session"];
+    expect(Object.keys(end?.post?.responses ?? {})).toContain("303");
+    expect(Object.keys(end?.post?.responses ?? {})).not.toContain("302");
+    expect(Object.keys(end?.get?.responses ?? {})).toContain("302");
+    const link = doc.paths["/social/{provider}/link"]?.post?.responses ?? {};
+    expect(Object.keys(link)).toContain("303");
+    expect(Object.keys(link)).not.toContain("302");
+    expect(link["303"]?.description).toBe(
+      "A redirect. A failure is a 302 that carries its code in the `auth_error` query parameter of the location.",
+    );
+    expect(Object.keys(doc.paths["/social/{provider}/start"]?.get?.responses ?? {})).toContain(
+      "302",
+    );
+  });
+
   it("lists one security requirement per credential form", () => {
     // The schemes of each form, typed here.
     const schemes: Record<string, string[]> = {

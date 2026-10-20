@@ -22,7 +22,9 @@ const FS_MODULE = "node:fs";
  *    with the status of its table. A redirect carries its code in `Location`.
  * 2. A 2xx JSON body parses under the strict answer schema of the contract.
  * 3. The content type fits a kind of the contract: JSON for `json` and
- *    `metadata`, HTML for `html`, a 302 with `Location` for `redirect`.
+ *    `metadata`, HTML for `html`, a redirect with `Location` for `redirect`.
+ *    A redirect has the status of its kind: a 302, or the 303 that the kind
+ *    names. A redirect that carries a code is a 302.
  * 4. A route that takes `clientSecretBasic` answers `invalid_client` as a
  *    401 with a Basic challenge, or as a 400 with none (plan 12e, ruling 19).
  * 5. A route that takes `dpopAccessToken` answers `invalid_dpop_proof` as a
@@ -163,8 +165,16 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     if (!contract) return { ...base, verdict: `no contract for ${key}` };
     const allowed = kinds(contract);
     if (redirected) {
-      if (!allowed.some((k) => k.kind === "redirect"))
+      const redirects = allowed.filter((k) => k.kind === "redirect");
+      if (redirects.length === 0)
         return { ...base, verdict: "a redirect fits no kind of the contract" };
+      // Rule 3: the status of the kind, and 302 for a redirect with a code.
+      const statuses = code === null ? redirects.map((k) => k.status ?? 302) : [302];
+      if (!statuses.includes(status))
+        return {
+          ...base,
+          verdict: `a ${status} redirect, the contract says ${statuses.join(" or ")}`,
+        };
       if (code === null) return { ...base, verdict: "ok" };
       return { ...base, verdict: codeVerdict(key as RouteKey, code, status, true) };
     }
