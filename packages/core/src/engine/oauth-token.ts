@@ -664,7 +664,8 @@ export async function resolveAccessToken(
   const dpopJkt = cnfJkt(p.cnf);
   if (dpopJkt === undefined) return null;
   const scopes = p.scope.split(" ").filter((s) => s.length > 0);
-  // A user id is a ULID; a client id is a `cl_` token or an https URL. The two never collide (plan 12e).
+  // Core makes a user id as a ULID and a client id as a `cl_` token or an https URL, so core's ids never collide.
+  // A compat app can bring its own user ids, and one can equal a client id: the compat docs name that case (ruling 27).
   if (p.sub === p.client_id) {
     const access = await clientAccessOf(config, {
       clientId: p.client_id,
