@@ -937,6 +937,31 @@ describe("dynamic roles (plan 12k Task 4)", () => {
     expect(await add(eve.id, "member")).toMatchObject({ ok: true, value: { role: "member" } });
     expect(await add(fay.id, "viewer")).toMatchObject({ ok: true, value: { role: "viewer" } });
   });
+
+  it("deletes the role rows with the organization (plan 12k Task 8)", async () => {
+    const w = world();
+    const { ada, organizationId } = await acme(w);
+    const other = mustOk(
+      await w.auth.api.createOrganization({ user: ada, slug: "other", name: "Other" }),
+    ).organization.id;
+    const h = bearer(await w.session("ada@example.com"));
+    const create = async (id: string) =>
+      json(
+        await w.auth.handle(
+          post(`${P}/create`, { organizationId: id, name: "editor", permissions: {} }, h),
+        ),
+      );
+    expect((await create(organizationId)).status).toBe(200);
+    expect((await create(other)).status).toBe(200);
+    expect(await w.storage.findMany("organizationRole", [])).toHaveLength(2);
+    const deleted = await json(
+      await w.auth.handle(post("/auth/organizations/delete", { organizationId }, h)),
+    );
+    expect(deleted).toEqual({ status: 200, body: { ok: true } });
+    // The role row of the deleted organization goes; the other organization keeps its row.
+    const left = await w.storage.findMany("organizationRole", []);
+    expect(left.map((r) => r.organizationId)).toEqual([other]);
+  });
 });
 
 describe("the dynamicRoles config (plan 12k Task 4)", () => {
