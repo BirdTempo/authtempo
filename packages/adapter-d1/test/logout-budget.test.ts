@@ -249,7 +249,8 @@ describe("the logouts of the operator acts and the sweep on D1 with a cap of 50 
       if (!done.value.more) break;
     }
     // Measured 2026-10-21: 50 queries in call 1 (the session, the links, the families) and 24 in
-    // call 2. The same input cost 55 when each row signed and resealed in the call (review M2).
+    // call 2. When each row signed and resealed in the call (review M2), call 1 met query 51 in
+    // endFamilies after its commit.
     expect(calls.map((c) => [c.ended, c.more])).toEqual([
       [1, true],
       [0, false],
