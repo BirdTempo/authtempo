@@ -178,9 +178,22 @@ Better Auth's `admin` plugin runs on core's operator tools (spec section 26). A 
 | `/admin/impersonate-user`, `/admin/stop-impersonating` | Core's `POST /operator/impersonate` and `/operator/impersonate/stop`. Each answers `{ session, user }`. The stop answers `{ session: null, user: null }` when no operator session comes back. |
 | `auth.api` admin calls | `listUsers`, `getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`, `impersonateUser`, and `stopImpersonating` run the steps of their paths with the caller's `headers`. A refusal throws `APIError` with the code of the path. |
 | `/get-session` | With `admin`, the user also has `role`, `banned`, `banReason`, and `banExpires`, and the session has `impersonatedBy`. |
-| `adminClient()` | The client reads `/get-session`, so `getSession` and `useSession` give the same four fields. The client's `admin` calls send the mapped paths. Each call that core does not serve answers `NOT_SUPPORTED`, and `checkRolePermission` throws. |
+| `adminClient()` | The client reads `/get-session`, so `getSession` and `useSession` give the same four fields. |
+| `authClient.admin` calls | `listUsers`, `getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`, `impersonateUser`, and `stopImpersonating` send the mapped paths and answer `{ data, error }`. Dates are `Date` values. |
+| `authClient.admin` calls core does not serve | `createUser`, `updateUser`, `listUserSessions`, `revokeUserSession`, `removeUser`, `setUserPassword`, and `hasPermission` answer `NOT_SUPPORTED` with no request. `checkRolePermission` throws, because core has no permission statements. |
 
-Core's guard decides each mapped call: the platform role, a verified address, a second factor, and a fresh session. Its refusal answers 403 with the code of the path, such as `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`. An operator cannot act on another platform operator through these calls. An unknown user answers 404 `USER_NOT_FOUND`, and a ban of the caller answers 409 `YOU_CANNOT_BAN_YOURSELF`. An impersonation of the operator, a platform operator, a banned user, or an absent user answers 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. An `offset` above 0 is refused. The README of the package lists each deviation from Better Auth.
+Core's guard decides each mapped call: the platform role, a verified address, a second factor, and a fresh session. Its refusal answers 403 with the code of the path, such as `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`. An operator cannot act on another platform operator through these calls. An unknown user answers 404 `USER_NOT_FOUND`, and a ban of the caller answers 409 `YOU_CANNOT_BAN_YOURSELF`. An impersonation of the operator, a platform operator, a banned user, or an absent user answers 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. The deviations from Better Auth:
+
+- `/admin/list-users` answers `total` only when the page ends the list. An `offset` above 0 is refused, because core pages by a cursor.
+- `/admin/revoke-user-sessions` ends one page per call. While sessions stay, it answers `{ success: false, more: true, ended }`.
+- A `set-role` of `user` on a platform operator answers 403 `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`. That revoke needs an operator secret or the app.
+- A ban of the caller answers `YOU_CANNOT_BAN_YOURSELF` with 409. Better Auth answers 400.
+- `/admin/revoke-user-sessions`, `/admin/unban-user`, and `/admin/set-role` on the caller's own user answer 409 `FORBIDDEN`. Better Auth has no such check there.
+- An unknown user answers 404 `USER_NOT_FOUND` on every path. Better Auth answers `{ success: true }` on `/admin/revoke-user-sessions`.
+- `/admin/impersonate-user` answers one code, `YOU_CANNOT_IMPERSONATE_ADMINS`, also for an absent user. Better Auth answers `USER_NOT_FOUND` there.
+- An impersonation session that starts another one answers 403 `FORBIDDEN`.
+- A stop by a session that impersonates nobody answers 400 with the message `You are not impersonating anyone`.
+- `/admin/stop-impersonating` answers `{ session: null, user: null }` when no operator session comes back. Better Auth answers 500 there.
 
 Each `NOT_SUPPORTED` message names spec section 26. A call with no reason writes the audit reason `better-auth admin plugin <path>`. The README of the package gives the SQL that copies the bans of Better Auth into core's columns at the cutover.
 
