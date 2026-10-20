@@ -398,6 +398,45 @@ describe("the teams shim (spec 29 item 19)", () => {
     expect((await c.organization.listUserTeams()).data?.map((t) => t.name)).toEqual(["Acme"]);
   });
 
+  it("answers activeTeamId in the session on the server and the client after setActiveTeam", async () => {
+    const { auth, api, person, client } = app({ teams: { enabled: true } });
+    const owner = await person("owner@example.com");
+    const created = await api.createOrganization({ user: owner.user, slug: "acme", name: "Acme" });
+    if (!created.ok) throw new Error(created.code);
+    const c = client(owner.token);
+    await c.organization.setActive({ organizationId: created.value.organization.id });
+    const teamId = (await c.organization.listUserTeams()).data?.[0]?.id ?? "";
+    expect((await c.organization.setActiveTeam({ teamId })).error).toBeNull();
+    const server = await auth.api.getSession({
+      headers: new Headers({ authorization: `Bearer ${owner.token}` }),
+    });
+    // consumerd reads session.activeTeamId (apps/api/src/middleware/require-session.ts at c43c307).
+    expect(Object.keys(server?.session ?? {}).sort()).toEqual([
+      "activeOrganizationId",
+      "activeTeamId",
+      "createdAt",
+      "expiresAt",
+      "id",
+      "ipAddress",
+      "token",
+      "updatedAt",
+      "userAgent",
+      "userId",
+    ]);
+    expect(server?.session.activeTeamId).toBe(teamId);
+    const browser = (await c.getSession()).data?.session;
+    expect(Object.keys(browser ?? {}).sort()).toEqual([
+      "activeOrganizationId",
+      "activeTeamId",
+      "expiresAt",
+      "id",
+      "userId",
+    ]);
+    expect(browser?.activeTeamId).toBe(teamId);
+    expect((await c.organization.setActiveTeam({ teamId: null })).error).toBeNull();
+    expect((await c.getSession()).data?.session.activeTeamId).toBeNull();
+  });
+
   it("maps allowRemovingAllTeams false onto keepLastTeam", async () => {
     const teamsOf = (teams: NonNullable<OrganizationOptions["teams"]>) => {
       const o = options({ teams });

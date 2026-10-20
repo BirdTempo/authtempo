@@ -46,6 +46,8 @@ export interface Session {
   ipAddress: string | null;
   userAgent: string | null;
   activeOrganizationId: string | null;
+  /** Better Auth's teams option (plan 12k ruling 41): the active team, or null. */
+  activeTeamId: string | null;
 }
 
 /** Better Auth's session with the admin plugin (plan 12f): the operator of an impersonation session, else null. */
@@ -951,6 +953,8 @@ export interface ClientSession {
   userId: string;
   expiresAt: Date;
   activeOrganizationId: string | null;
+  /** Better Auth's teams option (plan 12k ruling 41): the active team, or null. */
+  activeTeamId: string | null;
 }
 
 /**

@@ -100,6 +100,7 @@ function toClientSession(p: PublicSession): { session: ClientSession; user: Clie
       userId: p.user.id,
       expiresAt: new Date(p.session.expiresAt),
       activeOrganizationId: p.session.activeOrganizationId,
+      activeTeamId: p.session.activeTeamId,
     },
     user: toClientUser(p.user),
   };
@@ -227,6 +228,7 @@ export const CLIENT_SESSION_KEYS = keys<ClientSession>()([
   "userId",
   "expiresAt",
   "activeOrganizationId",
+  "activeTeamId",
 ]);
 
 /** The date keys of the admin answers: the user's and the session's (ruling 60 m1). */

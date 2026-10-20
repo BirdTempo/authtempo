@@ -874,7 +874,9 @@ Do not run Better Auth's team routes after the cutover.
   the key and a core write agree.
 - `invitation.teamId` holds the team ids joined by `,`, as Better Auth writes
   it. Core reads it as `teamIds`.
-- `session.activeTeamId` is Better Auth's own column.
+- `session.activeTeamId` is Better Auth's own column. The session of
+  `auth.api.getSession` and of the client's `getSession` answers it as
+  `activeTeamId`, null with no active team.
 
 Core fires the ten team hooks of `organizationHooks` (see "Hooks"). It fires
 no team hook for the default team of a create, where Better Auth fires

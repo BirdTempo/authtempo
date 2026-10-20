@@ -51,6 +51,7 @@ export function toSession(s: SessionRow, token: string): Session {
     ipAddress: s.ip,
     userAgent: s.userAgent,
     activeOrganizationId: s.activeOrganizationId,
+    activeTeamId: s.activeTeamId,
   };
 }
 
@@ -70,6 +71,7 @@ export function listedSession(s: SessionSummary, userId: string): Session {
     ipAddress: s.ip,
     userAgent: s.userAgent,
     activeOrganizationId: s.activeOrganizationId,
+    activeTeamId: s.activeTeamId,
   };
 }
 
@@ -172,6 +174,7 @@ export const SESSION_KEYS = keys<Session>()([
   "ipAddress",
   "userAgent",
   "activeOrganizationId",
+  "activeTeamId",
 ]);
 
 /**
