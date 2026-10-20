@@ -24,8 +24,11 @@ const FIRST_RELEASE = "0.1.0";
 /** The page that lists each entry (spec 33 item 8). Each entry links its own anchor. */
 const DOCS_PAGE = "/docs/reference/deprecations/";
 
-/** The words that mark a deprecated item in the shipped text (spec 33 item 8). */
-const ONE_RELEASE = /for one release/i;
+/**
+ * The words that mark a deprecated item in the shipped text (spec 33 item 8).
+ * The scan reads the whole text, so the words also count over a line break.
+ */
+const ONE_RELEASE = /for\s+one\s+release/gi;
 
 type Version = readonly [number, number, number];
 
@@ -37,6 +40,13 @@ const parse = (v: string): Version | null => {
 const compare = (a: Version, b: Version): number => a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
 
 const FORM = "<major>.<minor>.<patch>";
+
+/** True when an occurrence of `marker` in `text` holds all of `text` from `start` to `end`. */
+function holds(text: string, marker: string, start: number, end: number): boolean {
+  for (let at = text.indexOf(marker); at !== -1 && at <= start; at = text.indexOf(marker, at + 1))
+    if (at + marker.length >= end) return true;
+  return false;
+}
 
 /**
  * Holds each item of the register to its markers (spec 33 item 8). Below
@@ -94,22 +104,24 @@ export function checkDeprecations(input: DeprecationsInput): Report {
     }
   }
 
-  // The register is the one list of the items. A line of the shipped text that
-  // says "for one release" is a fourth item until a marker holds it.
+  // The register is the one list of the items. Words "for one release" in the
+  // shipped text are a fourth item until a marker text of their file holds all
+  // of them, so the removal of the marker text removes the words too.
   let marked = 0;
   for (const file of input.sources) {
-    const lines = (input.read(file) ?? "").split("\n");
-    if (lines.some((l) => ONE_RELEASE.test(l))) marked++;
-    lines.forEach((line, i) => {
-      if (!ONE_RELEASE.test(line)) return;
-      const held = input.entries.some((e) =>
-        e.markers.some((m) => m.file === file && m.text.trim() !== "" && line.includes(m.text)),
+    const text = input.read(file) ?? "";
+    const markers = input.entries.flatMap((e) => e.markers.filter((m) => m.file === file));
+    const matches = [...text.matchAll(ONE_RELEASE)];
+    if (matches.length > 0) marked++;
+    for (const match of matches) {
+      const start = match.index;
+      const end = start + match[0].length;
+      if (markers.some((m) => holds(text, m.text, start, end))) continue;
+      const line = text.slice(0, start).split("\n").length;
+      failures.push(
+        `${file}:${line} says for one release, and no marker of the register holds the line`,
       );
-      if (!held)
-        failures.push(
-          `${file}:${i + 1} says for one release, and no marker of the register holds the line`,
-        );
-    });
+    }
   }
 
   return requireCounts(

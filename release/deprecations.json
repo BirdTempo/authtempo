@@ -68,6 +68,10 @@
       },
       { "file": "packages/core/README.md", "text": "(`tempo_session`, read for one release)" },
       {
+        "file": "packages/core/README.md",
+        "text": "For one\n  release core reads the old `tempo_session` and moves it."
+      },
+      {
         "file": "packages/compat-better-auth/src/server/shapes.ts",
         "text": "legacyCookieName: LEGACY_SESSION_COOKIE"
       },

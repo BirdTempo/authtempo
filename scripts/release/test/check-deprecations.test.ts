@@ -252,6 +252,30 @@ describe("check-deprecations", () => {
     ]);
   });
 
+  it("reads the words over a line break, and a marker text must hold all of them", () => {
+    const vue = "packages/vue/README.md";
+    const broken = {
+      ...LIVE_TREE,
+      [vue]: "# vue\n\nThe old hook stays for one\nrelease, then it goes.\n",
+    };
+    const sources = [vue, ...Object.keys(LIVE_TREE)];
+    // The failure names the line where the words start.
+    expect(run("0.1.0", { tree: broken, sources }).failures).toEqual([
+      "packages/vue/README.md:3 says for one release, and no marker of the register holds the line",
+    ]);
+    const held = withEntry(1, (e) => {
+      e.markers.push({ file: vue, text: "stays for one\nrelease, then it goes." });
+    });
+    expect(run("0.1.0", { entries: held, tree: broken, sources }).failures).toEqual([]);
+    // A marker text beside the words does not hold them: its removal leaves them in the file.
+    const beside = withEntry(1, (e) => {
+      e.markers.push({ file: vue, text: "The old hook" });
+    });
+    expect(run("0.1.0", { entries: beside, tree: broken, sources }).failures).toEqual([
+      "packages/vue/README.md:3 says for one release, and no marker of the register holds the line",
+    ]);
+  });
+
   it("reads the real register", () => {
     const entries = readDeprecations(repo);
     expect(entries.map((e) => e.id)).toEqual([
