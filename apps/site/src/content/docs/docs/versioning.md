@@ -1,6 +1,6 @@
 ---
 title: Versioning policy
-description: How the packages of authtempo take their versions, what a change of each kind costs, and how the docs follow them.
+description: How the packages of authtempo take their versions, what a change of each kind costs, and which docs the site shows.
 type: reference
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 6

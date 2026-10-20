@@ -11,7 +11,7 @@ sources:
 
 **For:** a person who finds a fault in authtempo, or a developer who reads the security promises before an update.
 
-**What it does:** this page states the channels and the times of the security policy. Each sentence below is a copy of `SECURITY.md`, and a site check holds each copy equal to the file.
+**What it does:** this page states the channels and the times of the security policy. Each sentence of the sections How to report and The times is a copy of `SECURITY.md`. A site check holds each copy equal to the file.
 
 ## Before you start
 
