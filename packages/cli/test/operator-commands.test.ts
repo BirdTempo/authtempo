@@ -504,4 +504,46 @@ describe("the operator commands (plan 12f Task 12)", () => {
     expect(two.code).toBe(2);
     expect(two.io.stderr[0]).toBe("give exactly one of --email, --email-prefix, and --id");
   });
+
+  it("names no query in a stop of the host: no answer, a redirect, and a time-out", async () => {
+    const search = `${OPERATOR}/users/search`;
+    // A host with no answer, a host that answers 302, and a host that waits until the time limit.
+    const hosts: [string, (url: string, init: RequestInit) => Promise<Response>, string][] = [
+      [
+        "no answer",
+        async () => {
+          throw new TypeError("fetch failed");
+        },
+        `GET ${search}: no answer`,
+      ],
+      [
+        "a redirect",
+        async () => new Response(null, { status: 302, headers: { location: `${BASE}/elsewhere` } }),
+        `GET ${search} answered 302, a redirect: the CLI follows no redirect`,
+      ],
+      [
+        "a time-out",
+        (_url, init) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          }),
+        `GET ${search}: no answer in 1 s`,
+      ],
+    ];
+    for (const [label, fetch, stopped] of hosts) {
+      for (const json of [false, true]) {
+        const io = fakeIo({ env: { AUTHTEMPO_OPERATOR_SECRET: SUPPORT }, fetch });
+        const args = ["users", "search", BASE, "--email", "alice@example.com", "--timeout", "1"];
+        const code = await main(json ? [...args, "--json"] : args, io);
+        expect(code, label).toBe(2);
+        expect(io.stderr.at(-1), label).toBe(`stopped: ${stopped}`);
+        for (const line of io.stderr) expect(line, label).not.toMatch(/@|%40|alice/);
+        if (json) {
+          const doc = docOf(io.stdout);
+          expect(doc.stopped, label).toBe(stopped);
+          expect(JSON.stringify(doc), label).not.toMatch(/@|%40|alice/);
+        } else expect(io.stdout, label).toEqual([]);
+      }
+    }
+  });
 });

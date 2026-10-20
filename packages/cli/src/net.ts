@@ -13,8 +13,9 @@ export class HostError extends Stop {
 
 /**
  * A request with a time limit. A network failure or a timeout throws a
- * HostError that names the method and the URL. The cause's message is not
- * printed: a driver or a proxy can echo a header in it.
+ * HostError that names the method and the URL with no query. A search query
+ * can hold an address (review of plan 12f Task 12), so no text names it. The
+ * cause's message is not printed: a driver or a proxy can echo a header in it.
  *
  * The request follows no redirect (review of plan 11c Task 3): a 307 to
  * another origin would let the other origin answer for the deployment. A
@@ -28,19 +29,25 @@ export async function fetchWithin(
   init: RequestInit,
   ms: number,
 ): Promise<Response> {
+  const request = `${init.method ?? "GET"} ${withoutQuery(url)}`;
   let res: Response;
   try {
     res = await fetcher(url, { ...init, redirect: "manual", signal: AbortSignal.timeout(ms) });
   } catch (e) {
     const why =
       e instanceof Error && e.name === "TimeoutError" ? `no answer in ${ms / 1000} s` : "no answer";
-    throw new HostError(`${init.method ?? "GET"} ${url}: ${why}`);
+    throw new HostError(`${request}: ${why}`);
   }
   if (res.type === "opaqueredirect" || (res.status >= 300 && res.status < 400))
     throw new HostError(
-      `${init.method ?? "GET"} ${url} answered ${res.status}, a redirect: the CLI follows no redirect`,
+      `${request} answered ${res.status}, a redirect: the CLI follows no redirect`,
     );
   return res;
+}
+
+/** A URL with no query and no fragment: the part that a stop text can name. */
+export function withoutQuery(url: string): string {
+  return url.replace(/[?#].*$/s, "");
 }
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
