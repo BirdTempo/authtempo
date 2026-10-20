@@ -57,7 +57,7 @@ export type AuthForm =
   | "clientSecretBasic"; // the client id and secret as HTTP Basic, RFC 6749 section 2.3.1 (plan 12e)
 
 export interface RouteEntry {
-  readonly method: "GET" | "POST";
+  readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   readonly path: string;
   /**
    * The config that turns the route on. `session`, `magicLink`, and `tokens`

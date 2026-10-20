@@ -290,7 +290,14 @@ export async function completeSocial(
   const provider = await resolveProvider(config, entry);
   if (!provider) return fail("oauth_failed");
 
-  const token = await exchangeCode(config, provider, input.code, data.verifier, now);
+  const token = await exchangeProviderCode(
+    config,
+    provider,
+    input.code,
+    data.verifier,
+    now,
+    callbackUrl(config, provider),
+  );
   if (token === null) return fail("oauth_failed");
   const profile =
     provider.kind === "oidc"
@@ -494,13 +501,16 @@ async function completeLink(
  * The token that the provider's kind needs, or null on any failure: the ID
  * token of an `oidc` provider, the access token of an `oauth2` provider.
  * Logs the status or the error name only, never a token or the code.
+ * `redirectUri` is the callback of the start: a social provider's, or an
+ * SSO connection's (plan 12d deviation 6). One exchange serves both.
  */
-async function exchangeCode(
+export async function exchangeProviderCode(
   config: ResolvedConfig,
   provider: Provider,
   code: string,
   verifier: string,
   now: Date,
+  redirectUri: string,
 ): Promise<string | null> {
   let clientSecret: string;
   try {
@@ -522,7 +532,7 @@ async function exchangeCode(
       body: buildQuery({
         grant_type: "authorization_code",
         code,
-        redirect_uri: callbackUrl(config, provider),
+        redirect_uri: redirectUri,
         client_id: provider.clientId,
         client_secret: clientSecret,
         code_verifier: verifier,

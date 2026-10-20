@@ -29,6 +29,12 @@ export interface JwtSeam {
   signES256(input: SignES256Input): Promise<string>;
 }
 
+/**
+ * The most remote key sets that one seam keeps. SSO connections add one JWKS
+ * URL each, and a tenant can add many (plan 12d). At the limit the oldest set goes.
+ */
+export const JWKS_SETS_MAX = 500;
+
 /** ID tokens from Google and Apple are RS256. ES256 is allowed for a provider that moves. */
 const ID_TOKEN_ALGS = ["RS256", "ES256"];
 
@@ -45,6 +51,9 @@ export function createJoseJwtSeam(fetchFn: typeof fetch): JwtSeam {
         [customFetch]: fetchFn,
         timeoutDuration: PROVIDER_TIMEOUT_MS,
       });
+      // A Map keeps insert order, so its first key is the oldest set.
+      const oldest = sets.size >= JWKS_SETS_MAX ? sets.keys().next().value : undefined;
+      if (oldest !== undefined) sets.delete(oldest);
       sets.set(url, set);
     }
     return set;
