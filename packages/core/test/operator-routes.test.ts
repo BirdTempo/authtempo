@@ -248,11 +248,17 @@ describe("the operator routes (plan 12f Task 10)", () => {
       const both = { ...SUPPORT, ...sessionHeaders(key, cookie) };
       // The scheme with no secret still names the operator credential, so with a cookie it is two.
       const schemeOnly = { authorization: "Operator", ...sessionHeaders(key, cookie) };
+      // The scheme takes any case, as the secret check does (`OPERATOR_AUTH`).
+      const lower = {
+        authorization: `operator ${OPERATOR_SECRETS.support}`,
+        ...sessionHeaders(key, cookie),
+      };
       for (const [name, headers] of [
         ["a wrong secret", WRONG],
         ["no credential", {}],
         ["a secret and a session", both],
         ["the scheme and a session", schemeOnly],
+        ["a lowercase scheme and a session", lower],
       ] as const) {
         const res = await w.handle(request(key, { ...input, headers }));
         expect(await answerOf(res), `${key}: ${name}`).toEqual({
@@ -263,6 +269,12 @@ describe("the operator routes (plan 12f Task 10)", () => {
     }
     // No act ran.
     expect(await w.auth.storage.findMany("operatorAudit", [])).toEqual([]);
+    // A lowercase or an uppercase scheme alone is a secret call.
+    for (const scheme of ["operator", "OPERATOR"]) {
+      const headers = { authorization: `${scheme} ${OPERATOR_SECRETS.support}` };
+      const res = await w.handle(request("GET /operator/users", { headers }));
+      expect(res.status, scheme).toBe(200);
+    }
   });
 
   it("answers 403 to a secret without the route's scope", async () => {
@@ -377,10 +389,13 @@ describe("the operator routes (plan 12f Task 10)", () => {
   it("counts every secret call on its own key, and answers 429 at the 601st call of an hour", async () => {
     const w = await world();
     const users = "GET /operator/users";
-    for (let i = 1; i <= 600; i++) {
+    for (let i = 1; i <= 599; i++) {
       const res = await w.handle(request(users, { headers: WRONG }));
       if (res.status !== 401) throw new Error(`call ${i} answered ${res.status}`);
     }
+    // Call 600: a secret beside a session counts on the IP key before its 401 (deviation 5).
+    const both = await w.handle(request(users, { headers: { ...SUPPORT, ...w.operator.cookie } }));
+    expect(await answerOf(both)).toEqual({ status: 401, code: "unauthorized" });
     // The 601st call: a wrong secret and a right one both meet the limit, on every route.
     expect(await answerOf(await w.handle(request(users, { headers: WRONG })))).toEqual({
       status: 429,
