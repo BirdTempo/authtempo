@@ -6,7 +6,7 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 174 keys, the nested ones by their path", () => {
+  it("lists 175 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
@@ -14,7 +14,9 @@ describe("checkConfig", () => {
     // oauth.device.interval, oauth.devicePage, and oauth.defaultResource (ruling 52).
     // Plan 12f adds operator.secrets, operator.users, operator.impersonation, the three
     // keys of operator.secrets[], and the two keys of operator.impersonation.
-    expect(keys.length).toBe(174);
+    // Plan 12f Task 4 adds hooks.operator.
+    expect(keys.length).toBe(175);
+    expect(keys).toContain("hooks.operator");
     expect(keys).toContain("operator.secrets[].scopes");
     expect(keys).toContain("operator.impersonation.ttlMinutes");
     expect(keys).toContain("oauth.defaultResource");

@@ -106,5 +106,8 @@ export async function seedPlatform(auth: ReturnType<typeof makeAuth>) {
  * test that calls a resolver directly. The resolver runs `before` itself.
  */
 export function noVerifyHooks(via: UserVerifyVia): VerifySteps {
-  return verifySteps({ hooks: { organization: {}, session: {}, user: {}, identity: {} } }, via);
+  return verifySteps(
+    { hooks: { organization: {}, session: {}, user: {}, identity: {}, operator: {} } },
+    via,
+  );
 }

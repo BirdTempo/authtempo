@@ -246,6 +246,7 @@ export const CONFIG_KEYS = {
     session: true,
     user: true,
     identity: true,
+    operator: true,
   } satisfies Keys<HooksConfig>,
   account: {
     mail: true,

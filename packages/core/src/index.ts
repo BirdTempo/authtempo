@@ -79,6 +79,7 @@ export {
   type IdentityLinkVia,
   type IdentitySummary,
   type MemberVia,
+  type OperatorHooks,
   type OrganizationHookEvent,
   type OrganizationHooks,
   type OrganizationPatch,
@@ -119,6 +120,9 @@ export {
 export type { OAuthGrantSummary } from "./engine/oauth-grants.js";
 export type { OAuthResult } from "./engine/oauth-result.js";
 export type { OAuthAccess, TokenAnswer } from "./engine/oauth-token.js";
+export type { OperatorAuditDraft } from "./engine/operator/audit.js";
+export type { OperatorActor } from "./engine/operator/guards.js";
+export type { OperatorApi } from "./engine/operator/index.js";
 export type { MemberSummary, OrganizationSummary } from "./engine/organizations.js";
 export { validOrganizationName } from "./engine/organizations.js";
 export type { PasskeySummary } from "./engine/passkeys.js";

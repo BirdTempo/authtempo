@@ -19,6 +19,8 @@ import {
   type HooksConfig,
   IDENTITY_HOOK_POINTS,
   type IdentityHooks,
+  OPERATOR_HOOK_POINTS,
+  type OperatorHooks,
   ORGANIZATION_HOOK_POINTS,
   type OrganizationHooks,
   type ResolvedHooks,
@@ -1180,7 +1182,12 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     }),
     operator: resolveOperator(input.operator, organizations?.platformRole ?? null),
     openapi,
-    hooks: resolveHooks(input.hooks, organizations !== null),
+    // The operator key resolved above, so `users` is true or absent here.
+    hooks: resolveHooks(
+      input.hooks,
+      organizations !== null,
+      typeof input.operator === "object" && input.operator.users === true,
+    ),
     account: resolveAccount(input.account),
     captcha: resolveCaptcha(
       input.captcha,
@@ -2115,15 +2122,20 @@ function hookGroup(
 }
 
 /** The hook groups of core. The refusal message names them in this order. */
-const HOOK_GROUPS: readonly string[] = ["organization", "session", "user", "identity"];
+const HOOK_GROUPS: readonly string[] = ["organization", "session", "user", "identity", "operator"];
 
-function resolveHooks(input: HooksConfig | undefined, organizationsOn: boolean): ResolvedHooks {
-  if (input === undefined) return { organization: {}, session: {}, user: {}, identity: {} };
+function resolveHooks(
+  input: HooksConfig | undefined,
+  organizationsOn: boolean,
+  operatorUsersOn: boolean,
+): ResolvedHooks {
+  if (input === undefined)
+    return { organization: {}, session: {}, user: {}, identity: {}, operator: {} };
   if (!isHookObject(input)) throw new ConfigError("hooks must be a plain object");
   for (const key of Object.keys(input))
     if (!HOOK_GROUPS.includes(key))
       throw new ConfigError(
-        `hooks.${key} is not a hook group; core has organization, session, user, and identity`,
+        `hooks.${key} is not a hook group; core has organization, session, user, identity, and operator`,
       );
   // Each value passed the function check in hookGroup; the interfaces type the events.
   const organization = hookGroup(
@@ -2144,7 +2156,15 @@ function resolveHooks(input: HooksConfig | undefined, organizationsOn: boolean):
     input.identity,
     IDENTITY_HOOK_POINTS,
   ) as unknown as IdentityHooks;
-  return { organization, session, user, identity };
+  const operator = hookGroup(
+    "hooks.operator",
+    input.operator,
+    OPERATOR_HOOK_POINTS,
+  ) as unknown as OperatorHooks;
+  // Only an operator act runs these points, and the acts need operator.users.
+  if (Object.keys(operator).length > 0 && !operatorUsersOn)
+    throw new ConfigError("hooks.operator needs operator.users: the hooks would never run");
+  return { organization, session, user, identity, operator };
 }
 
 const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {

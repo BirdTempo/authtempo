@@ -273,6 +273,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `hooks.session` | `SessionHooks` | none | `beforeCreate`, `afterCreate`, and `afterEnd`. |
 | `hooks.user` | `UserHooks` | none | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeVerify`, and `afterVerify`. [Run your code at a flow point](/docs/guides/hooks/) gives the order. |
 | `hooks.identity` | `IdentityHooks` | none | `beforeLink`, `afterLink`, `beforeUnlink`, and `afterUnlink`. The `email` identity fires none. |
+| `hooks.operator` | `OperatorHooks` | none | Needs `operator.users`. `beforeAction` runs before an operator act and can refuse it. `afterAction` gets each audit row after the commit; send the row to a separate system there. |
 
 ## Captcha
 

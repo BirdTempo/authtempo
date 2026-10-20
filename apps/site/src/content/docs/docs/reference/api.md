@@ -13,6 +13,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
   - docs/superpowers/plans/2026-10-14-11g-openapi.md
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
+  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 4"
 ---
 
 **For:** a developer who calls core from server code, or looks for an export of `@authtempo/core`.
@@ -60,6 +61,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `api.jwt` | `mint`, `verify`, `rotate`, `jwks`, `sessionLive`; present unless `jwtMint` is `false` |
 | `api.oauth` | `grants`, `revoke`, and `clients` (`create`, `get`, `list`, `update`, `delete`, `rotateSecret`); present when `oauth` is set |
 | `api.secrets` | `status`, `rewrap`; present in every deployment, in process only. `status()` answers, for each version of the app secret, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, and `emailCodes` (live codes only). A version that a row names and the config lacks has `configured: false`. `status` reads every row of the TOTP, second factor, signing key, and code tables: one query per 1000 rows of each table. `rewrap({ limit, after })` reseals up to `limit` (1 to 1000, default 100) TOTP secrets and signing keys under the current version, and answers `{ resealed, failed, skipped, more, next }`. Pass `next` as `after` until `next` is `null` |
+| `api.operator` | `audit.list`; present in every deployment. Each call answers `not_found` while `operator.users` is off. Each call takes `actor`, for example the app as `{ kind: "app", name }`. The name has 1 to 64 characters of `[a-z0-9_.-]`. `audit.list({ actor, targetUserId?, after?, limit? })` answers the audit rows by `id` ascending. `limit` is 1 to 100, default 50. `next` is set when the page is full. A secret actor needs the scope `audit` |
 
 ## Functions
 
@@ -139,10 +141,11 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | API tokens | `TokensApi`, `ApiTokenCreate`, `ApiTokenSummary` |
 | Account | `ReauthInput`, `ReauthProof`, `SessionSummary`, `ProfileUpdate`, `EmailChangeRequest`, `IdentityEntry`, `IdentityList`, `IdentityUnlink`, `SocialLinked`, `SocialLinkStart`, `AccountDelete` |
 | App secrets | `SecretsApi`, `SecretsStatus`, `SecretsRewrap`, `SecretVersionCount` |
+| Operator tools | `OperatorApi`, `OperatorActor`, `OperatorAuditDraft` |
 | JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthClientsApi`, `OAuthAccess`, `OAuthClientAccess`, `CREDENTIALS_PER_CLIENT`, `DEVICE_GRANT`, `DEVICE_START_PER_IP`, `DEVICE_VERIFY_PER_SESSION`, `DEVICE_VERIFY_PER_IP`, `DEVICE_VERIFY_PER_CODE`, `DeviceAuthorizationAnswer`, `OAuthGrantSummary`, `OAuthResult`, `ClientInput`, `ClientSummary`, `ClientFields`, `RegisteredClient`, `CLIENT_SECRET_PREFIX` |
 | Organizations | `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |
 | Captcha | `CaptchaPort`, `CaptchaPage`, `CaptchaFlow` |
-| Hooks | `OrganizationHooks`, `OrganizationHookEvent`, `SessionHooks`, `SessionDraft`, `SessionPatch`, `SessionVia`, `SessionEndReason`, `MemberVia`, `RemoveVia`, `UserHooks`, `UserCreatePatch`, `UserPatch`, `UserCreateVia`, `UserUpdateVia`, `UserVerifyVia`, `IdentityHooks`, `IdentitySummary`, `IdentityLinkVia` |
+| Hooks | `OrganizationHooks`, `OrganizationHookEvent`, `SessionHooks`, `SessionDraft`, `SessionPatch`, `SessionVia`, `SessionEndReason`, `MemberVia`, `RemoveVia`, `UserHooks`, `UserCreatePatch`, `UserPatch`, `UserCreateVia`, `UserUpdateVia`, `UserVerifyVia`, `IdentityHooks`, `IdentitySummary`, `IdentityLinkVia`, `OperatorHooks` |
 
 ## The other entries
 

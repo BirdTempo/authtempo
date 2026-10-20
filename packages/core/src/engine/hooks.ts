@@ -2,8 +2,9 @@ import { ERRORS, type ErrorCode } from "../errors.js";
 import { appErrorName } from "../primitives/app-error.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { Result } from "../result.js";
-import type { SessionRow, UserRow } from "../schema.js";
+import type { OperatorAuditRow, SessionRow, UserRow } from "../schema.js";
 import type { InvitationSummary } from "./invitations.js";
+import type { OperatorAuditDraft } from "./operator/audit.js";
 import type { MemberSummary, OrganizationSummary } from "./organizations.js";
 
 /**
@@ -291,11 +292,31 @@ export interface IdentityHooks {
   afterUnlink?(e: { user: UserRow; identity: IdentitySummary }): Awaitable<void>;
 }
 
+/**
+ * The operator points (plan 12f, spec 26 item 10). Each operator act runs
+ * them through `operatorAct`. They need `operator.users`.
+ */
+export interface OperatorHooks {
+  /**
+   * Before the act's transaction, so before its first write. `audit` is
+   * the row that the act writes, with no id yet. A refusal answers
+   * `hook_refused`, and the act writes nothing.
+   */
+  beforeAction?(e: { audit: OperatorAuditDraft }): Awaitable<void>;
+  /**
+   * Once per audit row, after the commit. A throw writes one log line and
+   * cannot undo the act. Send the row to a separate system here: a person
+   * with write access to the database can change the table (ASVS 16.4.3).
+   */
+  afterAction?(e: { audit: OperatorAuditRow }): Awaitable<void>;
+}
+
 export interface HooksConfig {
   organization?: OrganizationHooks;
   session?: SessionHooks;
   user?: UserHooks;
   identity?: IdentityHooks;
+  operator?: OperatorHooks;
 }
 
 /** After `resolveConfig`: every group present, each hook bound to the object it came on. */
@@ -304,6 +325,7 @@ export interface ResolvedHooks {
   session: SessionHooks;
   user: UserHooks;
   identity: IdentityHooks;
+  operator: OperatorHooks;
 }
 
 /** The name in a log line. */
@@ -311,7 +333,8 @@ export type HookName =
   | `organization.${keyof OrganizationHooks & string}`
   | `session.${keyof SessionHooks & string}`
   | `user.${keyof UserHooks & string}`
-  | `identity.${keyof IdentityHooks & string}`;
+  | `identity.${keyof IdentityHooks & string}`
+  | `operator.${keyof OperatorHooks & string}`;
 
 /** Every hook point. A Record, so a point added to the interface and not listed here fails the compile. */
 export const ORGANIZATION_HOOK_POINTS: Readonly<Record<keyof OrganizationHooks, true>> = {
@@ -356,6 +379,11 @@ export const IDENTITY_HOOK_POINTS: Readonly<Record<keyof IdentityHooks, true>> =
   afterLink: true,
   beforeUnlink: true,
   afterUnlink: true,
+};
+
+export const OPERATOR_HOOK_POINTS: Readonly<Record<keyof OperatorHooks, true>> = {
+  beforeAction: true,
+  afterAction: true,
 };
 
 /** The longest refusal text, in UTF-16 code units. The text goes into a JSON body that a client shows. */

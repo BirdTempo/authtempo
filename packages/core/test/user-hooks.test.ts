@@ -733,7 +733,7 @@ describe("the hook groups in the config (plan 12a)", () => {
   it("refuses an unknown group and an unknown point of user and identity", () => {
     expect(() => makeAuth({ hooks: { users: {} } as never })).toThrow(
       new ConfigError(
-        "hooks.users is not a hook group; core has organization, session, user, and identity",
+        "hooks.users is not a hook group; core has organization, session, user, identity, and operator",
       ),
     );
     expect(() => makeAuth({ hooks: { user: { beforeSave: () => {} } as never } })).toThrow(

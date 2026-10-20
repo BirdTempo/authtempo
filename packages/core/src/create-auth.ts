@@ -70,6 +70,7 @@ import {
 import { listGrants, type OAuthGrantSummary, revokeGrant } from "./engine/oauth-grants.js";
 import { deliverLogouts } from "./engine/oauth-logout.js";
 import type { OAuthResult } from "./engine/oauth-result.js";
+import { type OperatorApi, operatorApi } from "./engine/operator/index.js";
 import {
   addMember,
   createOrganization,
@@ -541,6 +542,8 @@ export interface AuthApi {
   user: UserApi;
   identities: IdentitiesApi;
   secrets: SecretsApi;
+  /** The operator tools (plan 12f). Present in every deployment; a call answers `not_found` while its tool is off. */
+  operator: OperatorApi;
   password?: PasswordApi;
   emailOtp?: EmailOtpApi;
   totp?: TotpApi;
@@ -699,6 +702,7 @@ export function createAuth(input: AuthConfig): Auth {
         status: () => secretsStatus(config),
         rewrap: (i) => rewrapSecrets(config, i),
       },
+      operator: operatorApi(config),
       ...(config.password
         ? {
             password: {
