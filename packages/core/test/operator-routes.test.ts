@@ -269,6 +269,101 @@ describe("the operator routes (plan 12f Task 10)", () => {
     expect(await w.auth.storage.findMany("operatorAudit", [])).toEqual([]);
   });
 
+  it("answers 403 to a session that fails a step of the operator user guard (spec 26 item 2)", async () => {
+    const keys: string[] = [];
+    const w = await world({
+      config: {
+        limiter: {
+          allow: async (key: string) => {
+            keys.push(key);
+            return true;
+          },
+        },
+      },
+    });
+    const name = w.auth.config.cookieName;
+    const cookieOf = (token: string) => ({ cookie: `${name}=${token}` });
+    const ada = await verifiedSession(w.auth, "ada@example.com");
+    // A plain verified user: no platform role.
+    const plain = await verifiedSession(w.auth, "plain@example.com");
+    // A platform operator with no second factor: the secret grants the role to a verified user.
+    const noFactor = await verifiedSession(w.auth, "nofactor@example.com");
+    const granted = await w.handle(
+      request("POST /operator/users/platform-role", {
+        body: { userId: noFactor.user.id, grant: true, reason: REASON },
+        headers: SUPPORT,
+      }),
+    );
+    expect(granted.status).toBe(200);
+    // A platform operator with an unverified address: a sign-up with no verify, then create-admin.
+    const up = await passwordSignUp(w.auth.config, {
+      email: "unverified@example.com",
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok || !("token" in up.value)) throw new Error("the sign-up opened no session");
+    const admin = await w.handle(
+      request("POST /operator/users/create-admin", {
+        body: { email: "unverified@example.com", reason: REASON },
+        headers: SUPPORT,
+      }),
+    );
+    expect(await admin.json()).toMatchObject({ created: false });
+    const cases: [string, Record<string, string>][] = [
+      ["a plain verified user", cookieOf(plain.token)],
+      ["a platform operator with no second factor", cookieOf(noFactor.token)],
+      ["a platform operator with an unverified address", cookieOf(up.value.token)],
+    ];
+    const audit = async () => (await w.auth.storage.findMany("operatorAudit", [])).length;
+    const state = async () => ({
+      user: await w.auth.storage.findOne("user", [{ field: "id", op: "eq", value: ada.user.id }]),
+      sessions: (
+        await w.auth.storage.findMany("session", [
+          { field: "userId", op: "eq", value: ada.user.id },
+        ])
+      ).length,
+      factor: await w.auth.storage.findOne("secondFactor", [
+        { field: "userId", op: "eq", value: w.operator.userId },
+      ]),
+      members: await w.auth.storage.findMany("member", []),
+      users: (await w.auth.storage.findMany("user", [])).length,
+      all: (await w.auth.storage.findMany("session", [])).length,
+    });
+    const refusedAll = async (label: string, cookie: Record<string, string>) => {
+      const rows = await audit();
+      const before = await state();
+      keys.length = 0;
+      for (const { key } of TOOL_ROUTES) {
+        const res = await w.handle(
+          request(key, { ...inputOf(key, ada.user.id), headers: sessionHeaders(key, cookie) }),
+        );
+        expect(await answerOf(res), `${key}: ${label}`).toEqual({
+          status: 403,
+          code: "operator_required",
+        });
+      }
+      // No act ran, nothing changed, and no operator key counted.
+      expect(await audit(), label).toBe(rows);
+      expect(await state(), label).toEqual(before);
+      expect(
+        keys.filter((k) => k.startsWith("operator")),
+        label,
+      ).toEqual([]);
+    };
+    for (const [label, cookie] of cases) await refusedAll(label, cookie);
+    // A platform operator passes, and the call counts once on the user key.
+    keys.length = 0;
+    const passed = await w.handle(request("GET /operator/users", { headers: w.operator.cookie }));
+    expect(passed.status).toBe(200);
+    expect(keys.filter((k) => k.startsWith("operator"))).toEqual([
+      `operator:user:${w.operator.userId}`,
+    ]);
+    // A session that is not fresh: the default window of session.freshMinutes is 1440 minutes.
+    w.auth.clock.advance(1441 * 60_000);
+    await refusedAll("a session that is not fresh", w.operator.cookie);
+  });
+
   it("counts every secret call on its own key, and answers 429 at the 601st call of an hour", async () => {
     const w = await world();
     const users = "GET /operator/users";
