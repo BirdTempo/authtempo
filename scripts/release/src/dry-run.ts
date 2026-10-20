@@ -301,6 +301,10 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
         "latest",
         "--registry",
         DEAD_REGISTRY,
+        // npm 11.19.1 reads the package document before a dry run of a version
+        // above 0.0.0. Each retry on the dead address waits, 70 s for each
+        // tarball with the default retries (read 2026-10-20). One try fails at once.
+        "--fetch-retries=0",
       ];
       const r = run("npm", args, out);
       if (r.status !== 0)

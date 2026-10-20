@@ -290,6 +290,9 @@ describe("dry run", () => {
       // A dead address: no publish call can reach a registry, also with no --dry-run.
       expect(c.args[c.args.indexOf("--registry") + 1]).toBe("http://127.0.0.1:9");
     }
+    // npm reads the package document of the registry, and each retry on the dead address waits.
+    for (const c of publishes.filter((p) => p.cmd === "npm"))
+      expect(c.args).toContain("--fetch-retries=0");
     const git = calls.filter((c) => c.cmd === "git").map((c) => c.args[0]);
     expect(git).toEqual(["status", "archive"]);
     for (const c of calls)
