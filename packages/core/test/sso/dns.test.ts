@@ -111,6 +111,16 @@ describe("the DoH adapters", () => {
     );
   });
 
+  it("answers null on a content-length past the cap, before it reads the body", async () => {
+    // The body is a small valid answer: only the declared length can refuse it.
+    const big = (async () =>
+      new Response(txtAnswer(NAME, '"v"'), {
+        status: 200,
+        headers: { "content-length": "999999" },
+      })) as typeof fetch;
+    expect(await dohCloudflare(big).txt(NAME)).toBeNull();
+  });
+
   it("skips an entry of another owner name or another type", async () => {
     // A CNAME at the asked name: the TXT strings belong to the target, not to the asked name.
     const body = JSON.stringify({
