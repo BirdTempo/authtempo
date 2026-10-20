@@ -262,6 +262,25 @@ export function readInput(root: string, ref: string): ChangesetsInput {
   };
 }
 
+/**
+ * The notes of one run of `changeset status`: the exit code, then each line of
+ * its output, so a reader sees why it exited. The mark at a line start is dropped.
+ */
+export function statusNotes(run: {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+}): string[] {
+  const lines = `${run.stdout}\n${run.stderr}`
+    .split("\n")
+    .map((line) => line.replace(/^[^\x20-\x7e]+\s*/u, "").trim())
+    .filter((line) => line !== "");
+  return [
+    `changeset status exited ${run.status ?? "with no code"}`,
+    ...lines.map((line) => `changeset status: ${line}`),
+  ];
+}
+
 /** Runs the check on the checkout at `root`, and returns the lines to print and the exit code. */
 export function entry(root: string, ref: string): { lines: string[]; code: number } {
   let report: Report;
@@ -276,9 +295,9 @@ export function entry(root: string, ref: string): { lines: string[]; code: numbe
   // Changesets runs beside the check as a note. Its exit code never decides.
   const status = spawnSync("pnpm", ["changeset", "status", `--since=${mergeBase(root, ref)}`], {
     cwd: root,
-    stdio: "ignore",
+    encoding: "utf8",
   });
-  report.notes.push(`changeset status exited ${status.status ?? "with no code"}`);
+  report.notes.push(...statusNotes(status));
   return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
 }
 

@@ -9,6 +9,7 @@ import {
   parseChangeset,
   RUNTIME_KEYS,
   readInput,
+  statusNotes,
 } from "../src/check-changesets.ts";
 import { changedFiles, mergeBase } from "../src/lib/git.ts";
 import { summaryLine } from "../src/lib/report.ts";
@@ -406,6 +407,29 @@ describe("check-changesets", () => {
     ]);
     expect(r.notes).toEqual([
       ".changeset/old.md is on main at the merge base, so it covers no change of this branch",
+    ]);
+  });
+
+  it("prints the output of changeset status beside its exit code", () => {
+    // The output of changeset status 3.0.3 on the tree of 2026-10-20.
+    const notes = statusNotes({
+      status: 1,
+      stdout:
+        "\u{1F98B}  changeset v3.0.3\n\nSome packages have been changed but no changesets were found. Run changeset add to resolve this error.\nIf this change doesn't need a release, run changeset add --empty.\n\u{1F98B}  Exited with code 1\n",
+      stderr:
+        "$ changeset status --since=f44660d96876e06953e3aab7c8d1a3baae2c2c1e\n[ELIFECYCLE] Command failed with exit code 1.\n",
+    });
+    expect(notes).toEqual([
+      "changeset status exited 1",
+      "changeset status: changeset v3.0.3",
+      "changeset status: Some packages have been changed but no changesets were found. Run changeset add to resolve this error.",
+      "changeset status: If this change doesn't need a release, run changeset add --empty.",
+      "changeset status: Exited with code 1",
+      "changeset status: $ changeset status --since=f44660d96876e06953e3aab7c8d1a3baae2c2c1e",
+      "changeset status: [ELIFECYCLE] Command failed with exit code 1.",
+    ]);
+    expect(statusNotes({ status: null, stdout: "", stderr: "" })).toEqual([
+      "changeset status exited with no code",
     ]);
   });
 
