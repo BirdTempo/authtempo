@@ -125,6 +125,15 @@ export async function deleteOAuthTokens(
   ends: FamilyEnds,
 ): Promise<void> {
   await deleteFamilies(tx, [{ field: "userId", op: "eq", value: userId }], ends);
+  await deleteOAuthCodes(tx, userId);
+}
+
+/**
+ * The OAuth codes of the user and the device grants that name the user, in
+ * the caller's transaction: 2 statements. `deleteOAuthTokens` and the end
+ * of one user's sessions in pages (plan 12f Task 7) call it.
+ */
+export async function deleteOAuthCodes(tx: StorageAdapter, userId: string): Promise<void> {
   await tx.delete("verification", [
     { field: "purpose", op: "eq", value: "oauth-code" },
     { field: "identifier", op: "eq", value: userId },

@@ -82,8 +82,13 @@ export interface OperatorApi {
     input: CreateAdminInput,
   ): Promise<Result<{ userId: string; created: boolean; auditId: string }>>;
   sessions: {
-    /** Ends all access of one user but the API tokens (plan 12f Task 7). Needs the scope `sessions`. */
-    endUser(input: EndUserSessionsInput): Promise<Result<{ ended: number; auditId: string }>>;
+    /**
+     * Ends all access of one user but the API tokens (plan 12f Task 7), one
+     * page per call; call again while `more` is true. Needs the scope `sessions`.
+     */
+    endUser(
+      input: EndUserSessionsInput,
+    ): Promise<Result<{ ended: number; more: boolean; auditId: string }>>;
     /**
      * Ends up to `limit` sessions of all users, never the session of a user
      * actor; call again while `more` is true. Needs the scope `sessions`.

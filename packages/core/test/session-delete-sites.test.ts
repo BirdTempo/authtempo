@@ -37,7 +37,9 @@ type Kind =
   /** Expired sessions: a later step makes each link with no session a logout (ruling 49). */
   | "expired"
   /** A call of `destroySession`, which is a "by id" site; the caller delivers after it. */
-  | "sign-out";
+  | "sign-out"
+  /** Sessions that a sign-in wrote after the read of the flow: a later step makes each link with no session a logout (ruling 49). */
+  | "late";
 
 interface Site {
   file: string;
@@ -139,7 +141,7 @@ const SITES: Site[] = [
     count: 2,
     kind: "expired",
     reason:
-      "the revoke of the other sessions, the ban, and the end of one user's sessions by an operator; endSessions after it makes the dead links logouts",
+      "the revoke of the other sessions, the ban, and the end of one user's sessions by an operator; endSessions after it, or the sweep, makes the dead links logouts",
   },
   {
     file: "engine/operator/sessions.ts",
@@ -148,7 +150,16 @@ const SITES: Site[] = [
     count: 2,
     kind: "by id list",
     reason:
-      "the end of all sessions by an operator: one delete per row with a hook, one per chunk of ids without; the outbox rows of the links come first and are due now",
+      "the end of all sessions, and of one user's sessions, by an operator: one delete per row with a hook, one per chunk of ids without; the outbox rows of the links that fit come first and are due now, and the sweep makes the rest",
+  },
+  {
+    file: "engine/operator/sessions.ts",
+    fn: "endUserSessions",
+    call: 'delete("session"',
+    count: 1,
+    kind: "late",
+    reason:
+      "the last page of the end of one user's sessions: a session that a sign-in wrote after the read; the sweep makes its links logouts",
   },
   {
     file: "engine/sweep.ts",

@@ -163,6 +163,13 @@ export const LOGOUT_SWEEP_MAX = 50;
 export const LOGOUT_REQUEST_MAX = 10;
 
 /**
+ * The most storage calls of one row of a delivery (`deliverRow`): the
+ * client, the claim, the pairwise subject, the signing key, and the delete
+ * or the count of the attempt.
+ */
+export const LOGOUT_ROW_CALLS = 5;
+
+/**
  * The due rows of one client in one sweep (final review of plan 12e, L4).
  * A client whose URI fails or hangs cannot fill the sweep with its rows.
  * With dynamic registration, a stranger's client could otherwise delay the
@@ -388,12 +395,20 @@ async function deliverRows(config: ResolvedConfig, rows: OAuthLogoutRow[]): Prom
 }
 
 /**
- * Delivers the due outbox rows of `userId`, at most `LOGOUT_REQUEST_MAX`.
+ * Delivers the due outbox rows of `userId`, at most `max` and at most
+ * `LOGOUT_REQUEST_MAX`. A caller with a call budget passes `max`: the read
+ * costs 1 call, and each row costs at most `LOGOUT_ROW_CALLS`.
  * Each flow that ends a session calls it after its commit, beside its
  * `sessionsEnded` call. It never throws: the session end that the person
  * asked for is already done, and the sweep delivers what is left.
  */
-export async function deliverLogouts(config: ResolvedConfig, userId: string): Promise<void> {
+export async function deliverLogouts(
+  config: ResolvedConfig,
+  userId: string,
+  max: number = LOGOUT_REQUEST_MAX,
+): Promise<void> {
+  const limit = Math.min(max, LOGOUT_REQUEST_MAX);
+  if (limit < 1) return;
   try {
     const due = await config.storage.findMany(
       "oauthLogout",
@@ -401,7 +416,7 @@ export async function deliverLogouts(config: ResolvedConfig, userId: string): Pr
         { field: "userId", op: "eq", value: userId },
         { field: "nextAttemptAt", op: "lte", value: config.clock.now() },
       ],
-      { sort: { field: "nextAttemptAt", dir: "asc" }, limit: LOGOUT_REQUEST_MAX },
+      { sort: { field: "nextAttemptAt", dir: "asc" }, limit },
     );
     if (due.length > 0) await deliverRows(config, due);
   } catch (e) {

@@ -2,10 +2,13 @@ import type { ResolvedConfig } from "../../config.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SessionRow } from "../../schema.js";
 import { findManyIn, IN_CHUNK } from "../../storage/batch.js";
+import { countedStorage } from "../../storage/call-count.js";
 import type { StorageAdapter, Where } from "../../storage/port.js";
-import { deliverLogouts } from "../oauth-logout.js";
+import { deleteOAuthCodes } from "../oauth-grants.js";
+import { deliverLogouts, LOGOUT_ROW_CALLS } from "../oauth-logout.js";
 import { writeLogouts } from "../oauth-outbox.js";
-import { endAllAccess } from "../session-list.js";
+import { deleteTwoFactorChallenges } from "../second-factor.js";
+import { deleteHandoffCodes } from "../session-list.js";
 import { deleteEndedSessions, sessionIsLive, sessionsEnded } from "../sessions.js";
 import { holdUser } from "../user-hold.js";
 import { auditDraft, operatorAct, operatorReason } from "./audit.js";
@@ -20,11 +23,16 @@ import { type OperatorActor, requireScope } from "./guards.js";
  */
 export const END_ALL_LIMIT = { default: 500, max: 1000 };
 
-/** The input of the end of one user's sessions. */
+/**
+ * The input of the end of one user's sessions. `callsUsed` is the count of
+ * storage calls of the invocation before this call, default
+ * `OPERATOR_CALLS_BEFORE` of the actor.
+ */
 export interface EndUserSessionsInput {
   actor: OperatorActor;
   userId: string;
   reason: string;
+  callsUsed?: number;
   ip: string | null;
   userAgent: string | null;
 }
@@ -54,28 +62,63 @@ function reasonOf(
   return operatorReason(input.reason);
 }
 
+/** The calls of `targetOf`: the user, and for a user actor the platform organization and the member row. */
+const TARGET_CALLS: Readonly<Record<OperatorActor["kind"], number>> = {
+  user: 3,
+  secret: 1,
+  app: 1,
+};
+
 /**
- * Ends every session of one user (spec 26 item 5; ASVS 5.0.0 7.4.5:
- * "Verify that application administrators are able to terminate active
- * sessions for an individual user or for all users."). One transaction
- * holds the user row first (`holdUser`), then runs `endAllAccess`. It
- * ends every session, challenge, and handoff code of the user, and the
- * OAuth refresh tokens and codes. Then it writes the audit row with
- * `data: { ended }`. The API tokens stay: each has its own revoke. A user
- * actor ends their own sessions through the session list of plan 12a, so
- * their own user answers `operator_self`. A user actor gets
- * `operator_required` for a platform operator target.
+ * The calls that the last page of `endUserSessions` keeps for its own
+ * steps: the delete of a session that a sign-in wrote after the read, the
+ * read of the refresh tokens, their delete, the 2 statements of
+ * `deleteOAuthCodes`, and the read of `endFamilies` after the commit. Then
+ * one family at the least: 2 calls of `revokeFamily`.
+ */
+const LAST_PAGE_CALLS = 6;
+const FAMILY_CALLS = 2;
+
+/**
+ * Ends the access of one user, one page per call (spec 26 item 5; ASVS
+ * 5.0.0 7.4.5: "Verify that application administrators are able to
+ * terminate active sessions for an individual user or for all users.").
+ * A user actor ends their own sessions through the session list of plan
+ * 12a, so their own user answers `operator_self`. A user actor gets
+ * `operator_required` for a platform operator target. The API tokens
+ * stay: each has its own revoke.
+ *
+ * Each call fits `OPERATOR_CALL_BUDGET` with the calls before it, as
+ * `endAllSessions` does (ruling 34 of plan 12f). One transaction holds the
+ * user row first (`holdUser`, the lock order of every account write). Then
+ * it deletes the challenges, the expired sessions with no hook, a page of
+ * the live sessions by id (`endSessionPage`), and the handoff codes. That
+ * is the order of `endAllAccess`. When no session stays, the same call
+ * deletes the refresh tokens of as many OAuth families as the calls left
+ * allow, and the OAuth codes. The audit row holds `data: { ended }`.
+ * `more` is true while sessions or families stay, and the caller calls
+ * again.
  *
  * After the commit, in the order of ruling 2: `session.afterEnd` with
- * `operator` per session, the back-channel logouts, then `afterAction` and
- * `endFamilies` in `operatorAct`.
+ * `operator` per session, the back-channel logouts that the calls left
+ * allow (the sweep sends the rest), then `afterAction` and `endFamilies` in
+ * `operatorAct`. The work counts its calls through `countedStorage`.
  */
 export async function endUserSessions(
   config: ResolvedConfig,
   input: EndUserSessionsInput,
-): Promise<Result<{ ended: number; auditId: string }>> {
+): Promise<Result<{ ended: number; more: boolean; auditId: string }>> {
   const reason = reasonOf(config, input);
   if (!reason.ok) return reason;
+  const fixed = TARGET_CALLS[input.actor.kind];
+  // The least call: the target, the hold (3), the challenges, the expired rows (2 at most), the
+  // read, and the handoff codes (5), a page of one session (2 more), and the last page.
+  const budget = workBudget(
+    input.actor,
+    input.callsUsed,
+    fixed + 3 + 5 + 2 + LAST_PAGE_CALLS + FAMILY_CALLS,
+  );
+  if (!budget.ok) return budget;
   const target = await targetOf(config, input);
   if (!target.ok) return target;
   const drafted = auditDraft(input.actor, {
@@ -88,28 +131,80 @@ export async function endUserSessions(
   });
   if (!drafted.ok) return drafted;
   const now = config.clock.now();
+  const userId = input.userId;
   const done = await operatorAct(
     config,
     drafted.value,
-    async (tx, draft, ends) => {
+    async (raw, draft, ends) => {
+      const count = { calls: fixed };
+      const tx = countedStorage(raw, count, true);
       // The user row first: the lock order of every account write (user-hold.ts).
-      await holdUser(tx, input.userId);
+      await holdUser(tx, userId);
+      // A challenge first, as in endAllAccess: a verify spends its challenge as its last statement.
+      await deleteTwoFactorChallenges(tx, userId);
       // An ended row goes with no hook, as in the ban: it gets no `operator` event.
-      await deleteEndedSessions(tx, config, input.userId, now);
-      const ended = await endAllAccess(tx, input.userId, ends.ended ?? null, ends.families, now);
+      await deleteEndedSessions(tx, config, userId, now);
+      const read = await tx.findMany("session", [{ field: "userId", op: "eq", value: userId }], {
+        sort: { field: "id", dir: "asc" },
+        limit: END_ALL_LIMIT.default + 1,
+      });
+      const rows = read.slice(0, END_ALL_LIMIT.default);
+      // The page counts its read again, so it gets 1 more; the handoff delete and the last page stay out.
+      const pageBudget = budget.value - count.calls + 1 - 1 - LAST_PAGE_CALLS - FAMILY_CALLS;
+      const page = await endSessionPage(raw, config, rows, ends.ended ?? null, now, pageBudget);
+      count.calls += page.used - 1;
+      await deleteHandoffCodes(tx, userId);
+      const sessionsLeft = page.stopped || read.length > rows.length;
+      let familiesLeft = false;
+      let late = 0;
+      let families = 0;
+      if (!sessionsLeft) {
+        // A sign-in that commits after the read loses its row here, with no hook (plan 9d).
+        late = await tx.delete("session", [{ field: "userId", op: "eq", value: userId }]);
+        const tokens = await tx.findMany(
+          "oauthToken",
+          [{ field: "userId", op: "eq", value: userId }],
+          {
+            sort: { field: "id", dir: "asc" },
+          },
+        );
+        const all = [...new Set(tokens.map((t) => t.familyId))];
+        // The calls left after the token delete, the codes, and the read of endFamilies.
+        const room = Math.floor((budget.value - count.calls - 4) / FAMILY_CALLS);
+        const take = all.slice(0, Math.min(room, IN_CHUNK));
+        if (take.length > 0) {
+          // The last families take the whole user, so the read of endFamilies
+          // after the commit also finds a family that a parallel exchange wrote.
+          const where: Where<"oauthToken">[] = [
+            { field: "userId", op: "eq", value: userId },
+            ...(take.length < all.length
+              ? [{ field: "familyId" as const, op: "in" as const, value: take }]
+              : []),
+          ];
+          for (const id of take) ends.families.ids.add(id);
+          ends.families.scopes.push(where);
+          await tx.delete("oauthToken", where);
+        }
+        await deleteOAuthCodes(tx, userId);
+        families = take.length;
+        familiesLeft = take.length < all.length;
+      }
+      // The calls after the commit: the read and the revokes of endFamilies, then the delivery.
+      const after = families > 0 ? 1 + FAMILY_CALLS * families : 0;
+      const deliver = Math.floor((budget.value - count.calls - after - 1) / LOGOUT_ROW_CALLS);
       // The row is the last write of the act, so it can hold the count.
-      draft.data = { ended };
-      return ok({ ended });
+      draft.data = { ended: page.deleted + late };
+      return ok({ ended: page.deleted + late, more: sessionsLeft || familiesLeft, deliver });
     },
     {
-      async committed(_value, ends) {
+      async committed(value, ends) {
         await sessionsEnded(config, ends.ended, "operator");
-        await deliverLogouts(config, input.userId);
+        await deliverLogouts(config, userId, value.deliver);
       },
     },
   );
   if (!done.ok) return done;
-  return ok({ ended: done.value.ended, auditId: done.value.auditId });
+  return ok({ ended: done.value.ended, more: done.value.more, auditId: done.value.auditId });
 }
 
 /**

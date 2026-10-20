@@ -123,11 +123,13 @@ const auditRows = (storage: StorageAdapter) =>
  * Counts each storage call on `storage`, also inside a transaction, and
  * the session rows that each read answers. `log` holds each call as
  * `<method>:<model>`. The memory adapter gives a
- * transaction its own adapter object, so no call counts twice.
+ * transaction its own adapter object, so no call counts twice. An update
+ * inside a transaction counts 2, as on D1: the D1 adapter sends the prior
+ * read and the write as one batch of two statements.
  */
 function countCalls(storage: StorageAdapter) {
   const counts = { calls: 0, sessionRowsRead: 0, log: [] as string[] };
-  const wrap = (target: StorageAdapter): StorageAdapter => ({
+  const wrap = (target: StorageAdapter, inTransaction = false): StorageAdapter => ({
     ...target,
     create: ((model, data) => {
       counts.calls++;
@@ -147,7 +149,7 @@ function countCalls(storage: StorageAdapter) {
       return rows;
     }) as StorageAdapter["findMany"],
     update: ((model, where, data) => {
-      counts.calls++;
+      counts.calls += inTransaction ? 2 : 1;
       counts.log.push(`update:${model}`);
       return target.update(model, where, data);
     }) as StorageAdapter["update"],
@@ -173,7 +175,7 @@ function countCalls(storage: StorageAdapter) {
   storage.update = plain.update;
   storage.delete = plain.delete;
   storage.transaction = ((fn) =>
-    transaction((tx) => fn(wrap(tx)))) as StorageAdapter["transaction"];
+    transaction((tx) => fn(wrap(tx, true)))) as StorageAdapter["transaction"];
   return counts;
 }
 
@@ -436,12 +438,25 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
         ok: false,
         code: "invalid_body",
       });
+    // endUser of the app: 30 calls before leave 19, the least call; 31 leave 18.
+    const user = await w.storage.findOne("user", [
+      { field: "email", op: "eq", value: "ada@example.com" },
+    ]);
+    if (!user) throw new Error("no user");
+    expect(
+      await w.api.sessions.endUser({ ...input, userId: user.id, callsUsed: 31 }),
+    ).toMatchObject({ ok: false, code: "invalid_body" });
+    expect(await sessionsOf(w.storage)).toHaveLength(1);
+    expect(await auditRows(w.storage)).toEqual([]);
+    expect(
+      await w.api.sessions.endUser({ ...input, userId: user.id, callsUsed: 30 }),
+    ).toMatchObject({ ok: true, value: { ended: 1, more: false } });
     expect(await w.api.sessions.endAll({ ...input, reason: "a\nb" })).toMatchObject({
       ok: false,
       code: "invalid_body",
     });
-    expect(await sessionsOf(w.storage)).toHaveLength(1);
-    expect(await auditRows(w.storage)).toEqual([]);
+    expect(await sessionsOf(w.storage)).toEqual([]);
+    expect((await auditRows(w.storage)).map((r) => r.action)).toEqual(["sessions_end_user"]);
   });
 
   it("writes the logouts of two users' linked sessions and sends none in the call (ruling 1)", async () => {
@@ -724,6 +739,155 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     expect(await whole("default")).toEqual({ before: 8, total: 49, ended: 38 });
     // With the count of 8 the work gets 41 calls, and the whole call makes 50.
     expect(await whole("count")).toEqual({ before: 8, total: 50, ended: 39 });
+  });
+
+  it("ends one user's 100 sessions and 5 links in pages of 49 calls or fewer (review m2)", async () => {
+    for (const hook of [false, true]) {
+      const label = `hook ${hook}`;
+      const w = await world({ hook });
+      const clientId = await backchannelClient(w);
+      const user = await userWith(w, "ada@example.com", 1);
+      for (let i = 1; i < 100; i++) {
+        // The id is time-ordered across milliseconds: the linked sessions come first.
+        w.clock.advance(1);
+        const open = await openSession(w.config, {
+          user,
+          ip: null,
+          userAgent: null,
+          via: "password",
+        });
+        if (i <= 5) await linked(w, open.token, clientId);
+      }
+      const all = await sessionsOf(w.storage, user.id);
+      expect(all, label).toHaveLength(100);
+      w.ended.length = 0;
+      const counts = countCalls(w.storage);
+      const pages: { ended: number; more: boolean; calls: number }[] = [];
+      let more = true;
+      for (let call = 0; more && call < 10; call++) {
+        counts.calls = 0;
+        const done = await w.api.sessions.endUser({
+          actor: APP,
+          userId: user.id,
+          reason: "Lost laptop",
+          ip: null,
+          userAgent: null,
+        });
+        if (!done.ok) throw new Error(done.code);
+        pages.push({ ended: done.value.ended, more: done.value.more, calls: counts.calls });
+        more = done.value.more;
+      }
+      // The steps after the commit count too: the delivery and endFamilies. With the
+      // schema check of D1 each call stays at 50 or fewer.
+      expect(pages, label).toEqual(
+        hook
+          ? [
+              { ended: 31, more: true, calls: 42 },
+              { ended: 31, more: true, calls: 42 },
+              { ended: 31, more: true, calls: 42 },
+              { ended: 7, more: false, calls: 34 },
+            ]
+          : [{ ended: 100, more: false, calls: 44 }],
+      );
+      expect(more, label).toBe(false);
+      expect(await sessionsOf(w.storage, user.id), label).toEqual([]);
+      expect(await w.storage.findMany("oauthToken", []), label).toEqual([]);
+      if (hook)
+        expect([...w.ended].sort(), label).toEqual(all.map((x) => `${x.id}:operator`).sort());
+      await sweepAll(w);
+      expect(w.sent, label).toHaveLength(5);
+    }
+  });
+
+  it("ends one user's 30 OAuth families over calls of 49 storage calls or fewer (review m2)", async () => {
+    const w = await world();
+    const clients: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      w.clock.advance(SIGN_UP_GAP_MS);
+      clients.push(await backchannelClient(w));
+    }
+    const user = await userWith(w, "ada@example.com", 1);
+    const opened = await openSession(w.config, {
+      user,
+      ip: null,
+      userAgent: null,
+      via: "password",
+    });
+    // Each code exchange starts one refresh family.
+    for (const clientId of clients) await linked(w, opened.token, clientId);
+    const families = new Set((await w.storage.findMany("oauthToken", [])).map((t) => t.familyId));
+    expect(families.size).toBe(30);
+    const counts = countCalls(w.storage);
+    const pages: { ended: number; more: boolean; calls: number }[] = [];
+    let more = true;
+    for (let call = 0; more && call < 10; call++) {
+      counts.calls = 0;
+      const done = await w.api.sessions.endUser({
+        actor: APP,
+        userId: user.id,
+        reason: "Lost laptop",
+        ip: null,
+        userAgent: null,
+      });
+      if (!done.ok) throw new Error(done.code);
+      pages.push({ ended: done.value.ended, more: done.value.more, calls: counts.calls });
+      more = done.value.more;
+    }
+    // Each call takes the families that its calls left allow, and answers more while some stay.
+    expect(pages).toEqual([
+      { ended: 2, more: true, calls: 49 },
+      { ended: 0, more: true, calls: 49 },
+      { ended: 0, more: false, calls: 44 },
+    ]);
+    expect(await w.storage.findMany("oauthToken", [])).toEqual([]);
+    expect(await resolveSession(w.config, opened.token)).toBeNull();
+    await sweepAll(w);
+    expect(w.sent).toHaveLength(30);
+  });
+
+  it("fits a whole user-actor call of endUser in 50 calls (review m2)", async () => {
+    const limited = { calls: 0 };
+    const f = await operatorFixture({
+      config: {
+        limiter: {
+          allow: async () => {
+            limited.calls++;
+            return true;
+          },
+        },
+        session: { slidingRefreshDays: 0.25 },
+        hooks: { session: { afterEnd: () => {} } },
+      },
+    });
+    f.auth.clock.advance(SIGN_UP_GAP_MS);
+    await signUpAndVerify(f.auth, "ada@example.com", PASSWORD);
+    const user = await f.auth.storage.findOne("user", [
+      { field: "email", op: "eq", value: "ada@example.com" },
+    ]);
+    if (!user) throw new Error("no user");
+    for (let i = 1; i < 60; i++)
+      await openSession(f.auth.config, { user, ip: null, userAgent: null, via: "password" });
+    const api = operatorApi(f.auth.config);
+    const SCHEMA_CHECK = 1;
+    f.auth.clock.advance(7 * HOUR_MS);
+    const counts = countCalls(f.auth.storage);
+    limited.calls = 0;
+    const resolved = await resolveSession(f.auth.config, f.operator.token);
+    if (!resolved) throw new Error("the session ended");
+    const actor = await requireOperatorUser(f.auth.config, resolved);
+    if (!actor.ok) throw new Error(actor.code);
+    const before = counts.calls + limited.calls + SCHEMA_CHECK;
+    const done = await api.sessions.endUser({
+      actor: actor.value,
+      userId: user.id,
+      reason: "Lost laptop",
+      ip: null,
+      userAgent: null,
+    });
+    if (!done.ok) throw new Error(done.code);
+    const total = counts.calls + limited.calls + SCHEMA_CHECK;
+    // The reserve of 9 leaves the work 40 calls; the whole call makes 42.
+    expect([before, total, done.value.ended, done.value.more]).toEqual([8, 42, 21, true]);
   });
 
   it("ends 60 sessions with a hook in two pages, with no session lost or ended twice", async () => {
