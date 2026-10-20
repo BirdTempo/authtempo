@@ -166,6 +166,7 @@ const P11G = "2026-10-14-11g-openapi.md";
 const P12A = "2026-10-14-12a-account-self-service.md";
 const P12B = "2026-10-14-12b-security-hardening.md";
 const P12C = "2026-10-14-12c-second-factor-reach.md";
+const P12E = "2026-10-14-12e-oauth-provider-v2.md";
 
 /** A row of the review as it stands, read on the day of the review. */
 function row(
@@ -281,13 +282,6 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
 
   // Where both do the same.
   row(
-    "a4",
-    "parity",
-    "PKCE (RFC 7636)",
-    "S256 on every code, on every social start, and on the native handoff.",
-    "S256 only, and required for a public client.",
-  ),
-  row(
     "a9",
     "parity",
     "Server metadata (RFC 8414)",
@@ -386,77 +380,103 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "With a setting, each sign-up gets the same answer, with a simulated hash.",
     [P12B],
   ),
+  moved(
+    "a4",
+    "parity",
+    "PKCE (RFC 7636)",
+    "S256 only. A public client sends it on every code. A confidential client may omit it only when it asks for openid with a nonce.",
+    "S256 only, and required for a public client.",
+    [P12E],
+  ),
+  moved(
+    "a1",
+    "parity",
+    "OAuth 2.1 clients",
+    "Public and confidential clients. A confidential client sends a secret by Basic or the form, or signs a client assertion.",
+    "Public and confidential clients.",
+    [P12E],
+  ),
+  moved(
+    "a2",
+    "parity",
+    "OAuth grants",
+    "authorization_code, refresh_token, client_credentials, and the device code. oauth.device turns on the device code.",
+    "authorization_code, refresh_token, client_credentials, and the device code.",
+    [P12E],
+  ),
+  moved(
+    "a8",
+    "parity",
+    "Introspection (RFC 7662)",
+    "An introspection route for a confidential client that api.oauth.clients marks with introspect.",
+    "Supported.",
+    [P12E],
+  ),
+  moved(
+    "a10",
+    "parity",
+    "OIDC subjects",
+    "ID tokens, UserInfo, consent, and pairwise subjects for a client of the pairwise subject type.",
+    "ID tokens, UserInfo, consent, and pairwise subjects.",
+    [P12E],
+  ),
+  moved(
+    "a12",
+    "parity",
+    "Sign-out at the provider (OIDC)",
+    "A sign-out that the client starts at the end-session route, and a back-channel sign-out to each linked client through oauth.fetch.",
+    'The OIDC "RP-Initiated Logout" and "Back-Channel Logout" specs.',
+    [P12E],
+  ),
+  moved(
+    "a13",
+    "parity",
+    "Device grant (RFC 8628)",
+    "The device grant, which oauth.device turns on.",
+    "A device authorization plugin.",
+    [P12E],
+  ),
+  moved(
+    "a19",
+    "parity",
+    "DPoP (RFC 9449)",
+    "DPoP-bound access tokens, with the checks of the key and the token hash.",
+    "DPoP, with the checks of the key and the token hash.",
+    [P12E],
+  ),
+  moved(
+    "a20",
+    "parity",
+    "Client keys (RFC 7523)",
+    "private_key_jwt: the client signs an assertion with a key of its jwks or jwks_uri.",
+    "Supported.",
+    [P12E],
+  ),
+  moved(
+    "a25",
+    "parity",
+    "MCP authorization, revision 2026-07-28",
+    "Targets the revision, with client metadata documents, public and confidential clients, and dynamic registration off by default.",
+    "The MCP plugin targets it, with client metadata documents and dynamic registration off.",
+    [P12E],
+  ),
+  moved(
+    "b13",
+    "parity",
+    "Device authorization plugin",
+    "The device grant ships in core, and oauth.device turns it on.",
+    "A device authorization plugin.",
+    [P12E],
+  ),
 
   // Where Better Auth does more today.
-  row(
-    "a1",
-    "better-auth",
-    "OAuth 2.1 clients",
-    "Every client is public.",
-    "Public and confidential clients.",
-  ),
-  row(
-    "a2",
-    "better-auth",
-    "OAuth grants",
-    "authorization_code and refresh_token.",
-    "authorization_code, refresh_token, client_credentials, and the device code.",
-  ),
-  row(
-    "a8",
-    "better-auth",
-    "Introspection (RFC 7662)",
-    "No introspection route. A resource server checks the JWT offline.",
-    "Supported.",
-  ),
-  row(
-    "a10",
-    "better-auth",
-    "OIDC subjects",
-    "Public subjects only.",
-    "ID tokens, UserInfo, consent, and pairwise subjects.",
-  ),
-  row(
+  moved(
     "a11",
     "better-auth",
     "RS256 for OIDC",
-    "Signs with EdDSA or ES256 only, so a client that needs RS256 refuses the discovery.",
+    "jwtMint.alg is EdDSA, ES256, or RS256, and the ID token signs with it. No PS256 and no ES512.",
     "RS256, PS256, ES256, ES512, and EdDSA.",
-  ),
-  row(
-    "a12",
-    "better-auth",
-    "Sign-out at the provider (OIDC)",
-    "No sign-out at the provider. A sign-out does not end an access token.",
-    'The OIDC "RP-Initiated Logout" and "Back-Channel Logout" specs.',
-  ),
-  row(
-    "a13",
-    "better-auth",
-    "Device grant (RFC 8628)",
-    "No device grant.",
-    "A device authorization plugin.",
-  ),
-  row(
-    "a19",
-    "better-auth",
-    "DPoP (RFC 9449)",
-    "Bearer access tokens only.",
-    "DPoP, with the checks of the key and the token hash.",
-  ),
-  row(
-    "a20",
-    "better-auth",
-    "Client keys (RFC 7523)",
-    "No client authentication by a key, because no client is confidential.",
-    "Supported.",
-  ),
-  row(
-    "a25",
-    "better-auth",
-    "MCP authorization, revision 2026-07-28",
-    "Targets the revision, but serves public clients only, and turns dynamic registration on by default.",
-    "The MCP plugin targets it, with client metadata documents and dynamic registration off.",
+    [P12E],
   ),
   {
     ...row(
@@ -523,26 +543,21 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "A code for sign-in, for a reset, for the address check, and for a change of address.",
     [P12A],
   ),
-  row(
+  moved(
     "b9",
     "better-auth",
     "JWT algorithms",
-    "EdDSA or ES256, with key retirement and rotateEvery.",
+    "EdDSA, ES256, or RS256, with key retirement and rotateEvery. No PS256 and no ES512.",
     "RS256, PS256, ES256, ES512, and EdDSA.",
+    [P12E],
   ),
-  row(
+  moved(
     "b10",
     "better-auth",
     "OAuth provider",
-    "Public clients, the code grant, refresh, revoke, userinfo, and the metadata.",
+    "Each item of the OAuth rows above, but core signs no token with PS256 or ES512.",
     "Each item of the OAuth rows above.",
-  ),
-  row(
-    "b13",
-    "better-auth",
-    "Device authorization plugin",
-    "Not supported.",
-    "A device authorization plugin.",
+    [P12E],
   ),
   row(
     "b14",

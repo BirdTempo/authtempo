@@ -356,10 +356,20 @@ describe("the sides of /compare/ (rulings 25 and 26 of the plan 11b lane)", () =
     );
     expect(of("parity")).toEqual(
       [
+        "a1",
+        "a10",
+        "a12",
+        "a13",
         "a18",
+        "a19",
+        "a2",
+        "a20",
+        "a25",
         "a4",
+        "a8",
         "a9",
         "b1",
+        "b13",
         "b29",
         "b41",
         "b8",
@@ -372,7 +382,7 @@ describe("the sides of /compare/ (rulings 25 and 26 of the plan 11b lane)", () =
         "f6",
       ].sort(),
     );
-    expect(of("better-auth")).toHaveLength(50);
+    expect(of("better-auth")).toHaveLength(40);
     // Ruling 27: an authtempo row with a lack by design names the lack and its reason.
     for (const id of ["f4", "f16", "g6"])
       expect({
@@ -382,10 +392,36 @@ describe("the sides of /compare/ (rulings 25 and 26 of the plan 11b lane)", () =
         id,
         named: true,
       });
-    for (const id of ["a31", "a32", "b28", "b3", "b31", "b6", "d5", "e1", "f11", "g8"])
+    // Plan 12e (ruling 55): a11, b9, and b10 keep the side, as core signs no PS256 and no ES512.
+    for (const id of [
+      "a11",
+      "a31",
+      "a32",
+      "b10",
+      "b28",
+      "b3",
+      "b31",
+      "b6",
+      "b9",
+      "d5",
+      "e1",
+      "f11",
+      "g8",
+    ])
       expect({ id, side: COMPARE_ROWS.find((r) => r.id === id)?.side }).toEqual({
         id,
         side: "better-auth",
+      });
+  });
+
+  // Ruling 55 of plan 12e: each row that the plan made false moves with a fresh read, and cites the plan.
+  it("cites plan 12e on each row that the plan moved", () => {
+    const plan = "docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md";
+    const ids = ["a1", "a10", "a11", "a12", "a13", "a19", "a2", "a20", "a25", "a4", "a8"];
+    for (const id of [...ids, "b10", "b13", "b9"])
+      expect({ id, cites: COMPARE_ROWS.find((r) => r.id === id)?.source.endsWith(plan) }).toEqual({
+        id,
+        cites: true,
       });
   });
 });
