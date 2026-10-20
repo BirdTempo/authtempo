@@ -1243,7 +1243,10 @@ recorded row, so a second run moves nothing, and a revoked key stays revoked
 at the next run, each row once. The report
 holds counts, owner ids, and the stored prefixes, never a key, a digest, or
 metadata. A set loses each resource and action that core's statements do not
-know, and `dropped` counts them. An organization key gets its creator from
+know, and `dropped` counts them. A moved row meets core's create rules: a
+key with no name gets the name `Moved key`, and a name over 80 characters or
+with a control character skips as `invalidName`. Metadata whose JSON is over
+4096 bytes skips as `invalidMetadata`. An organization key gets its creator from
 `metadata.createdByUserId`, else the organization's first owner
 (`ownerFallback`). That owner then counts as the creator. The list's
 `creatorIsMember` follows that owner, and a removal of that owner with
@@ -1256,7 +1259,7 @@ Each step is a runbook line, with what breaks without it:
 
 1. Before the cutover, make a copy of the database, and apply the compat migrations to the copy: `storage.migrate()` on Postgres, or the D1 files with `wrangler d1 migrations apply` on D1. Without them, `betterAuthSchemaStorage` refuses the copy with `schema_mismatch`, and the dry run cannot start. Then run `moveBetterAuthApiKeys` with `dryRun: true` against the copy. The report gives the count of keys per owner and the stored prefixes. Without it, you do not know whom to tell, or which prefixes to list.
 2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Re-issue each key with no prefix, and delete its row. Without it, the move throws and moves nothing.
-3. Tell each owner whose key the report skips: `skippedKeys` names each row id, its owner, and the reason (`disabled`, `expired`, `noDigest`, `noCreator`, or `noOwner` for a key whose user or organization is gone; `present` moved at an earlier run). After the cutover a skipped key answers 401 `token_retired` (`KEY_DISABLED` from `verifyApiKey`), and every script that uses one stops.
+3. Tell each owner whose key the report skips: `skippedKeys` names each row id, its owner, and the reason (`disabled`, `expired`, `noDigest`, `noCreator`, `noOwner` for a key whose user or organization is gone, `invalidName`, or `invalidMetadata`; `present` moved at an earlier run). After the cutover a skipped key answers 401 `token_retired` (`KEY_DISABLED` from `verifyApiKey`), and every script that uses one stops.
 4. Deploy the shim build with migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
 5. Run `moveBetterAuthApiKeys` with `dryRun: false`. A second run is safe: it skips each recorded row. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
 6. A resource server with `@authtempo/verify` passes `movedPrefixes` (the same list) and `movedKind` (`"api-token"` for `references: "user"`, `"organization-token"` for `"organization"`), with that kind in `accept`. Without them, the verifier answers null for every moved key. A new `to_` key needs `"organization-token"` in `accept`.

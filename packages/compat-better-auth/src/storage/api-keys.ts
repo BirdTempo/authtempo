@@ -3,6 +3,8 @@ import {
   newId,
   type OrganizationTokenRow,
   type StorageAdapter,
+  validMetadata,
+  validTokenName,
 } from "@authtempo/core";
 import { CORE_STATEMENTS } from "@authtempo/core/access";
 import { BetterAuthCompatError } from "../compat-error.js";
@@ -32,6 +34,10 @@ export interface ApiKeyMoveReport {
     noCreator: number;
     /** The user or the organization of `referenceId` is gone, so the key could never act. */
     noOwner: number;
+    /** The name breaks core's rule: over 80 characters, or a control character. */
+    invalidName: number;
+    /** The metadata breaks core's rule: its JSON is over 4096 bytes. */
+    invalidMetadata: number;
   };
   /**
    * Each skipped row: its apikey id (never the key), its owner, and the
@@ -49,7 +55,15 @@ export interface ApiKeyMoveReport {
 }
 
 /** Why the move skipped a row: a key of `ApiKeyMoveReport.skipped`. */
-export type SkipReason = "disabled" | "expired" | "noDigest" | "present" | "noCreator" | "noOwner";
+export type SkipReason =
+  | "disabled"
+  | "expired"
+  | "noDigest"
+  | "present"
+  | "noCreator"
+  | "noOwner"
+  | "invalidName"
+  | "invalidMetadata";
 
 export interface ApiKeyMoveInput {
   names: Names;
@@ -76,6 +90,8 @@ export interface ApiKeyMoveInput {
   statements?: Record<string, readonly string[]>;
 }
 
+/** The name of a moved key that Better Auth stored with none: core keeps a name on every token. */
+const NAMELESS = "Moved key";
 /** The `source` of each `movedToken` record that the move writes. */
 const SOURCE = "better-auth:apikey";
 /** Better Auth's digest: SHA-256 in base64url with no padding (`defaultKeyHasher`). */
@@ -272,7 +288,16 @@ export async function moveBetterAuthApiKeys(
   const known: Record<string, readonly string[]> = { ...input.statements, ...CORE_STATEMENTS };
   const report: ApiKeyMoveReport = {
     moved: 0,
-    skipped: { disabled: 0, expired: 0, noDigest: 0, present: 0, noCreator: 0, noOwner: 0 },
+    skipped: {
+      disabled: 0,
+      expired: 0,
+      noDigest: 0,
+      present: 0,
+      noCreator: 0,
+      noOwner: 0,
+      invalidName: 0,
+      invalidMetadata: 0,
+    },
     skippedKeys: [],
     byOwner: {},
     dropped: 0,
@@ -335,13 +360,23 @@ export async function moveBetterAuthApiKeys(
       skip("noOwner");
       continue;
     }
-    const { set, dropped } = narrowSet(row.permissions, known);
+    // A moved row meets core's create rules (review finding L6). A key with no name gets one.
+    const name = typeof row.name === "string" && row.name !== "" ? row.name : NAMELESS;
+    if (!validTokenName(name)) {
+      skip("invalidName");
+      continue;
+    }
     const metadata = jsonObjectOf(row.metadata);
+    if (metadata !== null && !validMetadata(metadata)) {
+      skip("invalidMetadata");
+      continue;
+    }
+    const { set, dropped } = narrowSet(row.permissions, known);
     const window = input.rateLimitEnabled ? windowOf(row) : null;
     const quota = quotaOf(row);
     const createdAt = dateOf(row.createdAt) ?? now;
     const fields = {
-      name: typeof row.name === "string" ? row.name : "",
+      name,
       tokenHash,
       hint: typeof row.start === "string" ? row.start : "",
       expiresAt,

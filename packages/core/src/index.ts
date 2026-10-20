@@ -200,6 +200,8 @@ export {
   type AuthCode,
   type Caller,
   type ResolvedApiToken,
+  validMetadata,
+  validTokenName,
 } from "./engine/tokens.js";
 export type {
   ChallengeMethod,

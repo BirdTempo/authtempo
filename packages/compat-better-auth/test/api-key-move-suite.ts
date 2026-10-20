@@ -202,7 +202,16 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
         const report = await move(m, "user");
         expect(report).toEqual({
           moved: 1,
-          skipped: { disabled: 1, expired: 1, noDigest: 1, present: 0, noCreator: 0, noOwner: 0 },
+          skipped: {
+            disabled: 1,
+            expired: 1,
+            noDigest: 1,
+            present: 0,
+            noCreator: 0,
+            noOwner: 0,
+            invalidName: 0,
+            invalidMetadata: 0,
+          },
           skippedKeys: [
             { id: "k_1", owner: ada.user.id, reason: "disabled" },
             { id: "k_2", owner: ada.user.id, reason: "expired" },
@@ -457,6 +466,43 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
           noOwner: 2,
         });
         expect(await m.database.storage.findMany("organizationToken", [])).toEqual([]);
+      }),
+    );
+
+    it(
+      "holds a moved row to core's name and metadata rules, and names a key with no name",
+      fresh(async (m) => {
+        const { person } = app(m, "user");
+        const ada = await person("ada@example.com");
+        // Better Auth's default requireName is false, so a key may have no name.
+        const nameless = generatedKey("laaa_");
+        await m.insertKey(await keyRow(nameless, { referenceId: ada.user.id, name: null }));
+        await m.insertKey(
+          await keyRow(generatedKey("laaa_"), {
+            id: "k_long",
+            referenceId: ada.user.id,
+            name: "n".repeat(81),
+          }),
+        );
+        await m.insertKey(
+          await keyRow(generatedKey("laaa_"), {
+            id: "k_meta",
+            referenceId: ada.user.id,
+            metadata: JSON.stringify({ note: "m".repeat(4096) }),
+          }),
+        );
+        const report = await move(m, "user");
+        expect({ moved: report.moved, keys: report.skippedKeys }).toEqual({
+          moved: 1,
+          keys: [
+            { id: "k_long", owner: ada.user.id, reason: "invalidName" },
+            { id: "k_meta", owner: ada.user.id, reason: "invalidMetadata" },
+          ],
+        });
+        const rows = await m.database.storage.findMany("apiToken", [
+          { field: "userId", op: "eq", value: ada.user.id },
+        ]);
+        expect(rows.map((r) => r.name)).toEqual(["Moved key"]);
       }),
     );
 

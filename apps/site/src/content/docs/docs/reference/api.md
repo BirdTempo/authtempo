@@ -105,6 +105,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `readSessionToken` | Reads the session token of a request, from the cookie and then the bearer header. |
 | `isAppScheme`, `isGithubSubject` | The app scheme rule, and the rule of a GitHub subject. |
 | `newId` | Makes a row id. |
+| `validTokenName`, `validMetadata` | The create rules of a token: a name of 1 to 80 characters with no control character, and metadata of a plain object whose JSON is at most 4096 bytes. The Better Auth key move reads them. |
 | `checkCaptcha` | The captcha check of one flow, after its per-IP limit and before its per-email limits. It answers null when the flow goes on. An `api` call with no `captchaToken` skips it, so an app that proxies a browser request through `api` must pass the browser's token. |
 
 ## Classes and constants
