@@ -509,9 +509,19 @@ describe("dynamic roles (plan 12k Task 4)", () => {
         rank: 3,
         permissions: { organization: ["delete"] },
       });
-    const inUse = { ok: false, code: "role_in_use" };
-    expect(await create("closer")).toMatchObject(inUse);
-    expect(await create("auditor")).toMatchObject(inUse);
+    const h = bearer(await on.session("ada@example.com"));
+    expect(
+      await json(
+        await on.auth.handle(
+          post(
+            `${P}/create`,
+            { organizationId, name: "closer", rank: 3, permissions: { organization: ["delete"] } },
+            h,
+          ),
+        ),
+      ),
+    ).toEqual({ status: 409, body: { error: "role_in_use" } });
+    expect(await create("auditor")).toMatchObject({ ok: false, code: "role_in_use" });
     expect(await base.findMany("organizationRole", [])).toEqual([]);
     const carolCaller = await on.caller(await on.session("carol@example.com"));
     expect(
