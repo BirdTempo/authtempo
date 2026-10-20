@@ -505,6 +505,36 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
     );
 
     it(
+      "answers 200 at GET /organizations/tokens/current for a moved organization key",
+      fresh(async (m) => {
+        const { auth, person } = app(m, "organization");
+        const ada = await person("ada@example.com");
+        const org = await auth.tempo.api.createOrganization({
+          user: ada.user,
+          slug: "acme",
+          name: "Acme",
+        });
+        if (!org.ok) throw new Error(org.code);
+        const key = generatedKey("laaa_");
+        await m.insertKey(
+          await keyRow(key, {
+            referenceId: org.value.organization.id,
+            metadata: JSON.stringify({ createdByUserId: ada.user.id }),
+          }),
+        );
+        expect((await move(m, "organization")).moved).toBe(1);
+        const res = await auth.handler(
+          new Request(`${BASE}/api/auth/organizations/tokens/current`, {
+            headers: { authorization: `Bearer ${key}` },
+          }),
+        );
+        expect(res.status).toBe(200);
+        const body = (await res.json()) as { organization: { id: string } };
+        expect(body.organization.id).toBe(org.value.organization.id);
+      }),
+    );
+
+    it(
       "answers token_retired for a key that did not move",
       fresh(async (m) => {
         const { auth, person } = app(m, "user");
