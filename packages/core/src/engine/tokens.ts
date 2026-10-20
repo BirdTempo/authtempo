@@ -277,19 +277,21 @@ export function isTokenBearer(config: ResolvedConfig, bearer: string): boolean {
 }
 
 /**
- * The token of a `tk_` bearer or of a moved key (ruling 4 of plan 12k), in
- * this order: the form, the hash lookup, the expiry, the retired mark, the
- * user, the ban, the membership, the window, the spend. So a refused call
- * spends nothing. `unauthorized` for a malformed, unknown, or expired token,
- * a token whose user is gone or banned, and a token whose membership is gone. A moved
+ * The token of a `tk_` bearer or of a moved key (ruling 4 of plan 12k). The
+ * checks run in this order: the form, the hash lookup, the expiry, the retired
+ * mark, the user, the ban, the membership, the window, and the spend. So a
+ * refused call spends nothing. `unauthorized` for a malformed, unknown, or
+ * expired token, a token whose user is gone or banned, and a token whose
+ * membership is gone. A moved
  * key with no row answers `token_retired`, and so does a retired row. An
  * expired row is deleted on the way out. A row whose membership is gone
  * stays, so the list still shows it and the person sees why it stopped.
  *
- * Storage calls: none for a malformed bearer; one findOne of the hash; one
- * findOne of the user; two findOne for a bound token (`membership`); the
- * spend of `spendUse` (none with no quota); one update of `lastUsedAt` at
- * most once per hour. One limiter call for a token with a window.
+ * Storage calls: none for a malformed bearer. Else one findOne of the hash, one
+ * findOne of the user, and two findOne for a bound token (`membership`). Then
+ * the spend of `spendUse` (none with no quota), and one update of
+ * `lastUsedAt` at most once per hour. One limiter call for a token with a
+ * window.
  */
 export async function authenticateApiToken(
   config: ResolvedConfig,
@@ -479,9 +481,9 @@ const accessCaller = (r: ResolvedAccess): Caller =>
 
 /**
  * The answer of each request with `Authorization: DPoP` or a token bearer,
- * by instance, so a second `auth.caller` or `auth.authenticate` of one
- * request answers the same. The proof's `jti` is spent at the first call, and
- * so is one call of a token quota (ruling 3 of plan 12k); a replay is another
+ * by instance. So a second `auth.caller` or `auth.authenticate` of one request
+ * answers the same. The first call spends the proof's `jti`. It also spends
+ * one call of a token quota (ruling 3 of plan 12k). A replay is another
  * request. The key is the config first, so two instances never share an
  * answer (ruling 31 of plan 12e).
  */

@@ -709,11 +709,11 @@ export interface Auth {
   caller(request: Request): Promise<Caller | null>;
   /**
    * The caller of `caller(request)`, or the code of the failure (plan 12k,
-   * spec 29 item 16): a token answers `rate_limited` over its window,
-   * `token_exhausted` at a quota of zero, `token_retired` for a retired or
-   * moved key with no row, and `conflict` when a lost spend sees no other
-   * spend, or after 20 lost spends. Every
-   * other failure is `unauthorized`. `caller` answers null for each code. A
+   * spec 29 item 16). A token answers `rate_limited` over its window, and
+   * `token_exhausted` at a quota of zero. It answers `token_retired` for a
+   * retired key, or for a moved key with no row. It answers `conflict` when a
+   * lost spend sees no other spend, or after 20 lost spends. Every other
+   * failure is `unauthorized`. `caller` answers null for each code. A
    * token spends one call of its quota per request, in every read mode, so
    * `caller` and `authenticate` on one request spend once.
    */
