@@ -1,4 +1,4 @@
-import type { OperatorScope, OperatorSecretEntry, ResolvedConfig } from "../../config.js";
+import type { OperatorScope, ResolvedConfig, ResolvedOperatorSecret } from "../../config.js";
 import { isOperatorSecret, OPERATOR_USERS_PER_IP } from "../../operator-secret.js";
 import { constantTimeEqual, sha256Hex } from "../../primitives/crypto.js";
 import { fail, ok, type Result } from "../../result.js";
@@ -53,13 +53,13 @@ const APP_NAME = /^[a-z0-9_.-]{1,64}$/;
 export async function matchOperatorSecret(
   config: ResolvedConfig,
   request: Request,
-): Promise<OperatorSecretEntry | null> {
+): Promise<ResolvedOperatorSecret | null> {
   const operator = config.operator;
   if (!operator) return null;
   const secret = OPERATOR_AUTH.exec(request.headers.get("authorization") ?? "")?.[1];
   if (secret === undefined || !isOperatorSecret(secret)) return null;
   const digest = await sha256Hex(secret);
-  let match: OperatorSecretEntry | null = null;
+  let match: ResolvedOperatorSecret | null = null;
   // The loop compares against every entry and does not stop at a match, so
   // the time of a call does not tell which entry matched.
   for (const entry of operator.secrets) {

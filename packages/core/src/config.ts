@@ -571,6 +571,14 @@ export interface OperatorSecretEntry {
 }
 
 /**
+ * One operator secret after construction. The entry and its scope list are
+ * frozen, so no code can widen a secret at run time.
+ */
+export type ResolvedOperatorSecret = Readonly<Omit<OperatorSecretEntry, "scopes">> & {
+  readonly scopes: readonly OperatorScope[];
+};
+
+/**
  * Set `secretHash` or `secrets`, not both. Each tool is off by default, so
  * an upgrade from plan 11c opens no new route and widens no secret.
  */
@@ -609,7 +617,7 @@ export interface OperatorConfig {
 
 /** The operator config after construction (plan 12f). The 11c `secretHash` is the entry "default". */
 export interface ResolvedOperator {
-  secrets: readonly Readonly<OperatorSecretEntry>[];
+  secrets: readonly ResolvedOperatorSecret[];
   users: boolean;
   impersonation: { ttlMinutes: number; notice: boolean } | null;
 }
@@ -1686,7 +1694,7 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
 const HASH_TEXT = "must be the SHA-256 of the secret as 64 lowercase hex characters";
 
 /** One entry of `operator.secrets`, checked. The caller checks that names and hashes are unique. */
-function resolveOperatorEntry(input: unknown): OperatorSecretEntry {
+function resolveOperatorEntry(input: unknown): ResolvedOperatorSecret {
   if (!isPlainObject(input)) throw new ConfigError("operator.secrets[] must hold objects");
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(OPERATOR_ENTRY_KEYS, key))
@@ -1705,7 +1713,11 @@ function resolveOperatorEntry(input: unknown): OperatorSecretEntry {
       throw new ConfigError(
         "operator.secrets[].scopes holds a scope that is not keys, secrets, users, sessions, or audit",
       );
-  return Object.freeze({ name, secretHash, scopes: [...(scopes as OperatorScope[])] });
+  return Object.freeze({
+    name,
+    secretHash,
+    scopes: Object.freeze([...(scopes as OperatorScope[])]),
+  });
 }
 
 /**
@@ -1727,7 +1739,7 @@ function resolveOperator(
       throw new ConfigError(
         `operator.${key} is not an option; core has secretHash, secrets, users, and impersonation`,
       );
-  let secrets: OperatorSecretEntry[];
+  let secrets: ResolvedOperatorSecret[];
   if (input.secretHash !== undefined && input.secrets !== undefined)
     throw new ConfigError("operator.secretHash and operator.secrets are both set; set one");
   if (input.secrets !== undefined) {
@@ -1744,7 +1756,7 @@ function resolveOperator(
     if (typeof input.secretHash !== "string" || !SHA256_HEX.test(input.secretHash))
       throw new ConfigError(`operator.secretHash ${HASH_TEXT}, or set operator.secrets`);
     // The 11c secret keeps the scopes of 11c and 11c2: an upgrade does not widen it.
-    const scopes: OperatorScope[] = ["keys", "secrets"];
+    const scopes: readonly OperatorScope[] = Object.freeze(["keys", "secrets"]);
     secrets = [Object.freeze({ name: "default", secretHash: input.secretHash, scopes })];
   }
   if (input.users !== undefined && input.users !== true)

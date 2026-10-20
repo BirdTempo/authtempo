@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   type AuthConfig,
   ConfigError,
   type OperatorConfig,
   type OperatorScope,
+  type ResolvedOperator,
   resolveConfig,
 } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
@@ -277,5 +278,23 @@ describe("the operator config of plan 12f", () => {
       operator: { secrets: [entry("a", HASH, ["users"])], users: true },
     });
     expect(secretOnly.operator?.users).toBe(true);
+  });
+
+  it("freezes the scope list of each resolved secret", () => {
+    expectTypeOf<ResolvedOperator["secrets"][number]["scopes"]>().toEqualTypeOf<
+      readonly OperatorScope[]
+    >();
+    const named = resolveConfig({ ...base, operator: { secrets: [entry("a", HASH, ["audit"])] } });
+    const legacy = resolveConfig({ ...base, operator: { secretHash: HASH_B } });
+    for (const resolved of [named, legacy]) {
+      const scopes = resolved.operator?.secrets[0]?.scopes;
+      if (!scopes) throw new Error("no entry");
+      const before = [...scopes];
+      // @ts-expect-error: the resolved scope list is readonly.
+      expect(() => scopes.push("users")).toThrow(TypeError);
+      expect(scopes).toEqual(before);
+    }
+    expect(named.operator?.secrets[0]?.scopes).toEqual(["audit"]);
+    expect(legacy.operator?.secrets[0]?.scopes).toEqual(["keys", "secrets"]);
   });
 });
