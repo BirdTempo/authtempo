@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, rmSync, symlinkSync } from "node:fs";
+import {
+  cpSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -68,9 +77,58 @@ describe("the scaffold after publication (plan 12j)", () => {
   it("reads the version only", () => {
     expect(isUnpublished("0.0.0")).toBe(true);
     expect(isUnpublished("0.1.0")).toBe(false);
-    // The owner's release branch after `changeset version`: main keeps private: true.
-    const manifest = { private: true, version: "0.1.0" };
-    expect(isUnpublished(manifest.version)).toBe(false);
+  });
+
+  it("runs init from a built CLI at 0.1.0 that keeps private: true", () => {
+    // The release tree after `changeset version`: the manifest is at 0.1.0 and still has private: true.
+    // A copy of dist with that manifest, never the real one; its node_modules is a link to the package's.
+    const tmp = realpathSync(mkdtempSync(join(tmpdir(), "authtempo-released-cli-")));
+    try {
+      const cli = join(tmp, "cli");
+      cpSync(join(PKG, "dist"), join(cli, "dist"), { recursive: true });
+      const real = JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as Manifest;
+      writeFileSync(
+        join(cli, "package.json"),
+        `${JSON.stringify({ ...real, version: "0.1.0", private: true }, null, 2)}\n`,
+      );
+      symlinkSync(join(PKG, "node_modules"), join(cli, "node_modules"), "dir");
+      // The template step of the build (scripts/copy-templates.mjs), from the copy at its version.
+      const render = spawnSync(
+        process.execPath,
+        [
+          "--input-type=module",
+          "-e",
+          [
+            'import { readFileSync, writeFileSync } from "node:fs";',
+            'import { renderAll } from "./dist/templates.js";',
+            'const { version } = JSON.parse(readFileSync("package.json", "utf8"));',
+            'writeFileSync("dist/templates.json", JSON.stringify(renderAll(process.argv[1], version)) + "\\n");',
+          ].join("\n"),
+          REPO,
+        ],
+        { cwd: cli, encoding: "utf8" },
+      );
+      expect(render.status, render.stderr).toBe(0);
+      const app = join(tmp, "app");
+      const r = runBin(["init", app, "--stack", "workers-d1", "--json"], {
+        bin: join(cli, "dist/bin/authtempo.js"),
+        cwd: tmp,
+      });
+      expect(r.status, r.stderr).toBe(0);
+      const doc = JSON.parse(r.stdout) as { next: string[] };
+      expect(doc.next).toEqual([
+        `cd ${app}`,
+        "pnpm install",
+        "cp .dev.vars.example .dev.vars",
+        "pnpm exec authtempo migrate --target d1",
+        "pnpm dev",
+      ]);
+      expect(r.stderr).not.toContain("not on a registry yet");
+      const pkg = JSON.parse(readFileSync(join(app, "package.json"), "utf8")) as Manifest;
+      expect(pkg.devDependencies?.["@authtempo/cli"]).toBe("0.1.0");
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 
   it("adds the CLI as a dev dependency when published", () => {
