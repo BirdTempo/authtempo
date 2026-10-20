@@ -93,7 +93,7 @@
   },
   {
     "id": "handoff-oauth-reexports",
-    "what": "The re-exports of makePkce, webCrypto, base64Url, parseReturnedUrl, and HandoffCrypto from @authtempo/handoff. Import them from @authtempo/client/oauth.",
+    "what": "The re-exports of makePkce, webCrypto, base64Url, parseReturnedUrl, and the types HandoffCrypto and Returned from @authtempo/handoff. Import them from @authtempo/client/oauth.",
     "since": "0.1.0",
     "removeIn": "0.2.0",
     "markers": [

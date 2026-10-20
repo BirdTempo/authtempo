@@ -448,6 +448,23 @@ describe("check-deprecations", () => {
     }
   });
 
+  it("names each handoff re-export of an index.ts marker in the what text", () => {
+    const item = readDeprecations(repo).find((e) => e.id === "handoff-oauth-reexports");
+    const names = (item?.markers ?? [])
+      .filter((m) => m.file === "packages/handoff/src/index.ts")
+      .flatMap((m) => /\{([^}]*)\}/.exec(m.text)?.[1]?.split(",") ?? [])
+      .map((n) => n.replace(/^\s*type\s+/, "").trim());
+    expect(names.sort()).toEqual([
+      "HandoffCrypto",
+      "Returned",
+      "base64Url",
+      "makePkce",
+      "parseReturnedUrl",
+      "webCrypto",
+    ]);
+    for (const name of names) expect(item?.what, name).toMatch(new RegExp(`\\b${name}\\b`));
+  });
+
   it("refuses a register that is not a list of entries", () => {
     const dir = mkdtempSync(join(tmpdir(), "authtempo-deprecations-"));
     try {
