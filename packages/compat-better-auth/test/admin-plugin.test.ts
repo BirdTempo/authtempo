@@ -492,9 +492,17 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
       status: 409,
       body: { code: "YOU_CANNOT_BAN_YOURSELF", message: "You cannot ban yourself" },
     });
-    expect(
-      await json(await a.call("/admin/revoke-user-sessions", { userId: a.opId }, a.op)),
-    ).toMatchObject({ status: 409, body: { code: "FORBIDDEN" } });
+    // The README names these three as deviations (ruling 60 L3).
+    for (const [path, body] of [
+      ["/admin/revoke-user-sessions", { userId: a.opId }],
+      ["/admin/unban-user", { userId: a.opId }],
+      ["/admin/set-role", { userId: a.opId, role: "user" }],
+    ] as const)
+      expect({ path, ...(await json(await a.call(path, body, a.op))) }).toMatchObject({
+        path,
+        status: 409,
+        body: { code: "FORBIDDEN" },
+      });
     // A body that Better Auth refuses too, and no session.
     expect((await a.call("/admin/ban-user", { userId: "" }, a.op)).status).toBe(400);
     expect(await json(await a.call("/admin/unban-user", { userId: ann.id }))).toMatchObject({

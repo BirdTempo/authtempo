@@ -693,6 +693,10 @@ The deviations from Better Auth (ruling 53 of plan 12f):
   revoke another admin.
 - A ban of the caller answers `YOU_CANNOT_BAN_YOURSELF` with status 409.
   Better Auth answers 400.
+- `/admin/revoke-user-sessions`, `/admin/unban-user`, and `/admin/set-role`
+  on the caller's own user answer 409 `FORBIDDEN` (core's `operator_self`).
+  Better Auth has no such check on these three paths. Core lets no operator
+  act on the operator's own user.
 - An unknown user answers `USER_NOT_FOUND` on every path. Better Auth answers
   `{ success: true }` on `/admin/revoke-user-sessions`. The shim is stricter,
   so a typo in a user id does not look like a revoke that worked.
