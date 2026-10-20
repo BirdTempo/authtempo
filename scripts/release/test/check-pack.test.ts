@@ -333,6 +333,63 @@ describe("check-pack", () => {
     }
   });
 
+  it("fails a committed .npmrc and a registry or proxy key in a config file", () => {
+    // publish.ts runs npm in the checkout, and npm and pnpm read these files
+    // at a publish (review of the Task 6 fix, I5 and m1).
+    const hostile = "http://127.0.0.1:1/";
+    const tree = copyRoot((dir) => {
+      for (const file of [".npmrc", "packages/fixture/.npmrc", "docs/.npmrc"]) {
+        mkdirSync(join(dir, file, ".."), { recursive: true });
+        writeFileSync(join(dir, file), `registry=${hostile}\n`);
+      }
+      // The .npmrc of an installed package is not a file of the checkout.
+      mkdirSync(join(dir, "node_modules/some-package"), { recursive: true });
+      writeFileSync(join(dir, "node_modules/some-package/.npmrc"), `registry=${hostile}\n`);
+      writeFileSync(
+        join(dir, "package.json"),
+        JSON.stringify({ name: "authtempo", private: true, publishConfig: { registry: hostile } }),
+      );
+      writeFileSync(
+        join(dir, "pnpm-workspace.yaml"),
+        [
+          "packages:",
+          "  - packages/*",
+          "# registry: a comment names no key",
+          `httpsProxy: ${hostile}`,
+          `"@authtempo:registry": ${hostile}`,
+          "registries:",
+          `  default: ${hostile}`,
+          "",
+        ].join("\n"),
+      );
+      const file = join(dir, "packages/fixture/package.json");
+      const m = JSON.parse(readFileSync(file, "utf8")) as Record<string, Record<string, unknown>>;
+      m.publishConfig = { ...m.publishConfig, "@authtempo:registry": hostile };
+      // A dependency name is not a key of a registry.
+      m.dependencies = { ...m.dependencies, "registry-url": "7.0.0" };
+      writeFileSync(file, JSON.stringify(m));
+    });
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    try {
+      const path = pack(fixture("root/packages/fixture"), out);
+      expect(checkTarballs(tree, [path]).failures).toEqual([
+        ".npmrc: an .npmrc, which can name a registry, a proxy, or a token",
+        "docs/.npmrc: an .npmrc, which can name a registry, a proxy, or a token",
+        "packages/fixture/.npmrc: an .npmrc, which can name a registry, a proxy, or a token",
+        "package.json: the key publishConfig.registry names a registry or a proxy",
+        "packages/fixture/package.json: the key publishConfig.@authtempo:registry names a registry or a proxy",
+        "pnpm-workspace.yaml: line 4: the key httpsProxy names a registry or a proxy",
+        "pnpm-workspace.yaml: line 5: the key @authtempo:registry names a registry or a proxy",
+        "pnpm-workspace.yaml: line 6: the key registries names a registry or a proxy",
+      ]);
+      // The same tarball passes against the tree with none of these files.
+      expect(checkTarballs(fixture("root"), [path]).failures).toEqual([]);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+      rmSync(tree, { recursive: true, force: true });
+    }
+  });
+
   it("fails a publishConfig without public access and provenance", () => {
     expect(
       withManifest((m) => {

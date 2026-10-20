@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import {
@@ -254,10 +254,72 @@ export function readDeprecations(root: string): unknown[] {
   return existsSync(register) ? (JSON.parse(readFileSync(register, "utf8")) as unknown[]) : [];
 }
 
+/** A key that names a registry or a proxy, such as registry, registries, @authtempo:registry, httpsProxy, or https-proxy. */
+const REGISTRY_KEY = /registr|proxy/i;
+
+/** The folders that the .npmrc walk skips: the files of the installed packages and of git. */
+const WALK_SKIPS = ["node_modules", ".git"];
+
+/** Each path of `value` whose last key names a registry or a proxy. The dependency maps hold package names, so they stay out. */
+function registryKeys(value: unknown, path: string[] = []): string[] {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value).flatMap(([key, v]) => {
+    if (path.length === 0 && (DEPENDENCY_KEYS as readonly string[]).includes(key)) return [];
+    const at = [...path, key];
+    return [...(REGISTRY_KEY.test(key) ? [at.join(".")] : []), ...registryKeys(v, at)];
+  });
+}
+
+/** The key of each line of a YAML file, with its line number. A comment and a list item mark stay out. */
+function yamlKeys(text: string): { line: number; key: string }[] {
+  return text.split("\n").flatMap((raw, i) => {
+    const m = /^\s*(?:-\s+)?(?:"([^"]*)"|'([^']*)'|([^\s"'#:][^:#]*?))\s*:(?:\s|$)/.exec(raw);
+    const key = m?.[1] ?? m?.[2] ?? m?.[3];
+    return key === undefined ? [] : [{ line: i + 1, key }];
+  });
+}
+
+/**
+ * The failures of the config files of the tree at `root` that npm or pnpm reads
+ * at a publish: each .npmrc, and each registry or proxy key of the root
+ * package.json, pnpm-workspace.yaml, and each released manifest. publish.ts runs
+ * npm in the checkout, so such a file can move the publish (ruling 32 of the plan 12j lane).
+ */
+export function configFailures(root: string, released: readonly { dir: string }[]): string[] {
+  const failures: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+      a.name.localeCompare(b.name),
+    )) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (!WALK_SKIPS.includes(entry.name)) walk(path);
+      } else if (entry.name === ".npmrc")
+        failures.push(
+          `${relative(root, path)}: an .npmrc, which can name a registry, a proxy, or a token`,
+        );
+    }
+  };
+  walk(root);
+  for (const file of ["package.json", ...released.map((p) => join(p.dir, "package.json"))]) {
+    if (!existsSync(join(root, file))) continue;
+    for (const key of registryKeys(JSON.parse(readFileSync(join(root, file), "utf8"))))
+      failures.push(`${file}: the key ${key} names a registry or a proxy`);
+  }
+  const workspace = join(root, "pnpm-workspace.yaml");
+  if (existsSync(workspace))
+    for (const { line, key } of yamlKeys(readFileSync(workspace, "utf8")))
+      if (REGISTRY_KEY.test(key))
+        failures.push(
+          `pnpm-workspace.yaml: line ${line}: the key ${key} names a registry or a proxy`,
+        );
+  return failures;
+}
+
 /**
  * Checks each tarball against the tree at `root`: the released list, the
  * package folder, release/pack-needs.json, release/repository.json, the root
- * LICENSE, and release/deprecations.json.
+ * LICENSE, release/deprecations.json, and the config files of configFailures.
  */
 export function checkTarballs(root: string, paths: string[]): Report {
   const released = new Set(releasedNames(root));
@@ -278,6 +340,7 @@ export function checkTarballs(root: string, paths: string[]): Report {
   const failures: string[] = [];
   if (versions.length !== 1)
     failures.push(`the released packages hold ${versions.length} versions: ${versions.join(", ")}`);
+  failures.push(...configFailures(root, packages));
   const seen = new Set<string>();
   let files = 0;
   for (const path of paths) {
