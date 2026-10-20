@@ -767,9 +767,10 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       };
     };
     // The session, the user, the refresh; the platform organization, the member, the factor, the limiter; the schema check.
-    // With the reserve of 9 the work gets 40 calls: the read, the lock, the link read, and 37
-    // deletes. The memory adapter sends no lock, so the whole call makes 48.
-    expect(await whole("default")).toEqual({ before: 8, total: 48, ended: 37 });
+    // With the reserve of 10 the work gets 39 calls: the read, the lock, the link read, and 36
+    // deletes. The memory adapter sends no lock, so the whole call makes 47. The reserve
+    // holds the session read of the router's impersonation step, which this call skips.
+    expect(await whole("default")).toEqual({ before: 8, total: 47, ended: 36 });
     // With the count of 8 the work gets 41 calls, and the whole call makes 49.
     expect(await whole("count")).toEqual({ before: 8, total: 49, ended: 38 });
   });
@@ -966,8 +967,9 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     });
     if (!done.ok) throw new Error(done.code);
     const total = counts.calls + limited.calls + SCHEMA_CHECK;
-    // The reserve of 9 leaves the work 40 calls; the whole call makes 41.
-    expect([before, total, done.value.ended, done.value.more]).toEqual([8, 41, 22, true]);
+    // The reserve of 10 leaves the work 39 calls; the whole call makes 40. The reserve
+    // holds the session read of the router's impersonation step, which this call skips.
+    expect([before, total, done.value.ended, done.value.more]).toEqual([8, 40, 21, true]);
   });
 
   it("ends 60 sessions with a hook in two pages, with no session lost or ended twice", async () => {
