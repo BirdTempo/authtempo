@@ -32,7 +32,7 @@ Add the schema version field to the package manifest.
 The rules (`check-changesets`, plan 12j Task 4):
 
 1. A change to a released package needs a changeset that names the package.
-2. A test, a proof, a typetest, a fixture, and the README need no changeset.
+2. A test, a proof, a typetest, a fixture, and the README need no changeset. The `CHANGELOG.md` at a package root needs none: `changeset version` writes it on the release branch, and `check-records` holds it.
 3. A change to `package.json` needs a changeset only when a runtime key changes: `dependencies`, `peerDependencies`, `peerDependenciesMeta`, `optionalDependencies`, `exports`, `main`, `types`, `bin`, `files`, or `engines`.
 4. A changeset never names an unreleased package.
 5. An empty changeset (no package lines) needs the body line `No release: <reason>`.

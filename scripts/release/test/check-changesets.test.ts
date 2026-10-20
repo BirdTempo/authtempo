@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type ChangedFile,
@@ -7,9 +8,14 @@ import {
   parseChangeset,
   readInput,
 } from "../src/check-changesets.ts";
+import { changedFiles, mergeBase } from "../src/lib/git.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import { makeRepo, type Repo } from "./support/git-repo.ts";
 
+// The changesets CLI of the repository root, the one that writes each release branch.
+const CHANGESET_BIN = fileURLToPath(
+  new URL("../../../node_modules/@changesets/cli/bin.js", import.meta.url),
+);
 const read = (name: string) =>
   readFileSync(new URL(`./fixtures/changesets/${name}`, import.meta.url), "utf8");
 const changeset = (name: string) => ({ file: `.changeset/${name}`, text: read(name) });
@@ -41,21 +47,37 @@ afterEach(() => repo?.remove());
 
 /**
  * A repository on main with the released package @fixture/a and the unreleased
- * package @fixture/u, then the branch "work".
+ * package @fixture/u, then the branch "work". The config has the keys of the
+ * real .changeset/config.json, so `changeset version` runs on it.
  */
-function fixtureRepo(): Repo {
+function fixtureRepo(onMain: Record<string, string> = {}): Repo {
   const r = makeRepo();
+  r.write("package.json", '{ "name": "fixture-root", "private": true }\n');
   r.write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
   r.write(
     ".changeset/config.json",
-    JSON.stringify({ fixed: [["@fixture/a"]], linked: [], ignore: ["@fixture/u"] }),
+    JSON.stringify({
+      changelog: "@changesets/cli/changelog",
+      commit: false,
+      fixed: [["@fixture/a"]],
+      linked: [],
+      access: "public",
+      baseBranch: "main",
+      updateInternalDependencies: "patch",
+      ignore: ["@fixture/u"],
+      privatePackages: { version: true, tag: false },
+    }),
   );
   r.write(
     "packages/a/package.json",
-    '{ "name": "@fixture/a", "version": "0.0.0", "files": ["dist"] }\n',
+    '{\n  "name": "@fixture/a",\n  "version": "0.0.0",\n  "private": true,\n  "files": ["dist"]\n}\n',
   );
   r.write("packages/a/src/foo.ts", "export const foo = 1;\n");
-  r.write("packages/u/package.json", '{ "name": "@fixture/u", "version": "0.0.0" }\n');
+  r.write(
+    "packages/u/package.json",
+    '{ "name": "@fixture/u", "version": "0.0.0", "private": true }\n',
+  );
+  for (const [path, text] of Object.entries(onMain)) r.write(path, text);
   r.commit("first");
   r.git(["checkout", "--quiet", "-b", "work"]);
   return r;
@@ -188,6 +210,35 @@ describe("check-changesets", () => {
       "check-changesets: PASS changed=0 covered=0 exempt=0 empty=0 failures=0",
     );
     expect(head.notes).toEqual(["no change since the merge base"]);
+  });
+
+  it("passes the release branch that changeset version writes", () => {
+    repo = fixtureRepo({
+      ".changeset/first.md": '---\n"@fixture/a": minor\n---\n\nAdd the first feature.\n',
+    });
+    // The real command removes the changeset, writes the changelog, and moves the version.
+    repo.run(process.execPath, [CHANGESET_BIN, "version"]);
+    repo.commit("version packages");
+    expect(changedFiles(repo.root, mergeBase(repo.root, "main"))).toEqual([
+      ".changeset/first.md",
+      "packages/a/CHANGELOG.md",
+      "packages/a/package.json",
+    ]);
+    expect(JSON.parse(readFileSync(join(repo.root, "packages/a/package.json"), "utf8"))).toEqual({
+      name: "@fixture/a",
+      version: "0.1.0",
+      private: true,
+      files: ["dist"],
+    });
+    expect(summaryLine(checkChangesets(readInput(repo.root, "main")))).toBe(
+      "check-changesets: PASS changed=0 covered=0 exempt=2 empty=0 failures=0",
+    );
+  });
+
+  it("needs a changeset for a CHANGELOG.md below the package root", () => {
+    expect(run(paths("packages/core/src/CHANGELOG.md"), []).failures).toEqual([
+      "@authtempo/core changes and no changeset names it: packages/core/src/CHANGELOG.md",
+    ]);
   });
 
   it("needs a changeset when a move takes a file out of a released package", () => {

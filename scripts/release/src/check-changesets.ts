@@ -42,6 +42,12 @@ export const EXEMPT_PATTERNS: readonly { pattern: RegExp; reason: string }[] = [
   { pattern: /(^|\/)proof\//, reason: "a proof checks the pack and changes no runtime code" },
   { pattern: /^typetest\//, reason: "a typetest is not in the pack" },
   { pattern: /(^|\/)README\.md$/, reason: "the README changes the docs, not the code" },
+  // The release branch removes each changeset, so without this row each
+  // released package fails there. Only the changelog at the package root.
+  {
+    pattern: /^CHANGELOG\.md$/,
+    reason: "changeset version writes it from the changesets; check-records holds it",
+  },
 ];
 
 /** The keys of package.json that change what an app installs or loads. */

@@ -7,6 +7,8 @@ import { dirname, join } from "node:path";
 export interface Repo {
   root: string;
   git(args: string[]): string;
+  /** Runs a command in the repository with the same git environment. */
+  run(command: string, args: string[]): string;
   write(path: string, text: string): void;
   /** Stages every file and makes one commit. */
   commit(message: string): void;
@@ -28,11 +30,14 @@ const env = {
 
 export function makeRepo(): Repo {
   const root = mkdtempSync(join(tmpdir(), "authtempo-release-git-"));
-  const git = (args: string[]) => execFileSync("git", args, { cwd: root, env, encoding: "utf8" });
+  const run = (command: string, args: string[]) =>
+    execFileSync(command, args, { cwd: root, env, encoding: "utf8" });
+  const git = (args: string[]) => run("git", args);
   git(["init", "--quiet", "--initial-branch=main"]);
   return {
     root,
     git,
+    run,
     write(path, text) {
       mkdirSync(dirname(join(root, path)), { recursive: true });
       writeFileSync(join(root, path), text);
