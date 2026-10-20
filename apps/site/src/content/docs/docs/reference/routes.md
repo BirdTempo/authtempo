@@ -660,7 +660,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified |
 | Input | JSON `{ slug, name, metadata? }` |
 | Answer | `{ organization, member }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`slug_taken`](/docs/reference/errors/#slug_taken), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`organization_limit`](/docs/reference/errors/#organization_limit), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`slug_taken`](/docs/reference/errors/#slug_taken), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`organization_limit`](/docs/reference/errors/#organization_limit), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="get-organizations"><code>GET /organizations</code></h3>
 
@@ -678,7 +678,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Needs | A session cookie, or a `ts_` bearer token. The user has the rank `admin`, or `owner` for a slug |
 | Input | JSON `{ organizationId, name?, slug?, metadata? }` |
 | Answer | `{ organization }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`slug_taken`](/docs/reference/errors/#slug_taken), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`slug_taken`](/docs/reference/errors/#slug_taken), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-organizations-delete"><code>POST /organizations/delete</code></h3>
 
@@ -804,6 +804,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified. An API token answers 401 |
 | Input | JSON `{ slug }`. The slug holds 1 to 64 characters. Another key answers `invalid_body` |
 | Answer | `{ slug, status }`: the slug after the NFKC fold to lower case, and `available`, `taken`, or `reserved`. A slug that does not fold to a valid slug answers `slug: null` and `invalid`. `available` is a hint, not a hold: the create can still answer `slug_taken` when another user takes the slug first |
+| Limit | `slug-check:user:<userId>`, 60 per minute. The create and a rename to a new slug spend the same key |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 ## API tokens
