@@ -73,7 +73,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `operator:ip:<ip>` | 1 hour | 5 | Operator key rotation, right or wrong secret |
 | `operator-secrets:ip:<ip>` | 1 hour | 120 | Operator secret status, secret rewrap, and info, one count for the three, right or wrong secret. A rewrap of 100 000 rows at 1000 rows per call needs 100 calls |
 | `operator-users:ip:<ip>` | 1 hour | 600 | Every secret call to the user, session, and audit routes, right or wrong secret. `OPERATOR_USERS_PER_IP` |
-| `operator-users:secret:<name>` | 1 hour | 600 | Every call of one operator secret to the user, session, and audit routes, after the secret matches, from any address. `OPERATOR_USERS_PER_SECRET` |
+| `operator-users:secret:<name>` | 1 hour | 600 | Every call of one operator secret to the user, session, and audit routes, after the secret matches, from any IP. `OPERATOR_USERS_PER_SECRET` |
 | `operator:user:<userId>` | 1 hour | 600 | Every call of a platform operator, after the operator user guard passes |
 | `operator-impersonate:user:<userId>` | 1 hour | 20 | Impersonation starts of one platform operator |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
