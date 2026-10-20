@@ -404,6 +404,11 @@ export interface OAuthSessionClientRow extends BaseRow {
   sessionId: string;
   clientId: string;
   userId: string;
+  /**
+   * The `sid` that the ID tokens of this link carry (ruling 57 of plan 12e).
+   * The logout token sends it back, so a new secret version never changes it.
+   */
+  sid: string;
 }
 
 /** One back-channel logout to deliver (plan 12e): the outbox. The sweep retries a failed delivery. */
@@ -411,6 +416,8 @@ export interface OAuthLogoutRow extends BaseRow {
   clientId: string;
   userId: string;
   sessionId: string;
+  /** The `sid` of the link that this row replaced: the logout token carries it. */
+  sid: string;
   attempts: number;
   nextAttemptAt: Date;
 }
@@ -740,6 +747,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       sessionId: { type: "string" },
       clientId: { type: "string" },
       userId: { type: "string" },
+      sid: { type: "string" },
     },
     unique: [["sessionId", "clientId"]],
     // userId: the end of a user's sessions reads the user's links.
@@ -752,6 +760,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       clientId: { type: "string" },
       userId: { type: "string" },
       sessionId: { type: "string" },
+      sid: { type: "string" },
       attempts: { type: "integer" },
       nextAttemptAt: { type: "date" },
     },

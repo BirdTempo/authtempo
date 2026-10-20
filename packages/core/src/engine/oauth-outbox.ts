@@ -7,16 +7,17 @@ import { type StorageAdapter, StorageError } from "../storage/port.js";
 // import cycle. `oauth-logout.ts` delivers the rows.
 
 /**
- * Links a session to a client that got an ID token in it. A second link of
- * the same pair is a `unique_violation`, and the call ignores it. Call it
- * outside a transaction: on Postgres a unique violation ends the
- * transaction that holds it.
+ * Links a session to a client that got an ID token in it, with the `sid` of
+ * that token. A second link of the same pair is a `unique_violation`. The
+ * call then answers the `sid` of the first link, so each ID token of one
+ * session and one client carries one `sid`. Call it outside a transaction:
+ * on Postgres a unique violation ends the transaction that holds it.
  */
 export async function linkSession(
   storage: StorageAdapter,
-  input: { sessionId: string; clientId: string; userId: string },
+  input: { sessionId: string; clientId: string; userId: string; sid: string },
   now: Date,
-): Promise<void> {
+): Promise<string> {
   try {
     await storage.create("oauthSessionClient", {
       id: newId(now),
@@ -24,8 +25,15 @@ export async function linkSession(
       createdAt: now,
       updatedAt: now,
     });
+    return input.sid;
   } catch (e) {
     if (!(e instanceof StorageError && e.code === "unique_violation")) throw e;
+    const first = await storage.findOne("oauthSessionClient", [
+      { field: "sessionId", op: "eq", value: input.sessionId },
+      { field: "clientId", op: "eq", value: input.clientId },
+    ]);
+    // A session end can delete the first link between the two calls. Then this sid stands.
+    return first?.sid ?? input.sid;
   }
 }
 
@@ -45,6 +53,7 @@ export async function writeLogouts(
       clientId: link.clientId,
       userId: link.userId,
       sessionId: link.sessionId,
+      sid: link.sid,
       attempts: 0,
       nextAttemptAt: now,
       createdAt: now,

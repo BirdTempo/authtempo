@@ -1,12 +1,12 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { SESSION_JWT_TYPE } from "../primitives/credentials.js";
-import { randomBase64Url } from "../primitives/crypto.js";
+import { constantTimeEqual, randomBase64Url } from "../primitives/crypto.js";
 import type { OAuthClientRow, OAuthLogoutRow, SessionRow } from "../schema.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { findClient } from "./oauth-clients.js";
 import { endSessionById, linkSession, queueLogouts } from "./oauth-outbox.js";
-import { sidFor, sidNames, storedSubject, userOfSubject } from "./oauth-subject.js";
+import { sidNames, storedSubject, userOfSubject } from "./oauth-subject.js";
 import { sessionsEnded } from "./sessions.js";
 
 /**
@@ -33,13 +33,25 @@ export interface IdTokenHint {
   sub: string;
 }
 
-/** True when the hint names the session `sessionId`. A pairwise client holds its own sid (review M2 of plan 12e). */
+/**
+ * True when the hint names the session `sessionId`. A pairwise client holds
+ * its own sid (review M2 of plan 12e). A link of the session and the client
+ * holds the sid of its ID tokens, so the hint matches after the secret
+ * version that made it is gone (ruling 57). With no link, the hash runs
+ * under each version that the keyring holds.
+ */
 export async function hintNamesSession(
   config: ResolvedConfig,
   hint: IdTokenHint,
   sessionId: string,
 ): Promise<boolean> {
-  return hint.sid !== null && sidNames(config, hint.sid, sessionId, hint.client);
+  if (hint.sid === null) return false;
+  const link = await config.storage.findOne("oauthSessionClient", [
+    { field: "sessionId", op: "eq", value: sessionId },
+    { field: "clientId", op: "eq", value: hint.clientId },
+  ]);
+  if (link !== null && constantTimeEqual(link.sid, hint.sid)) return true;
+  return sidNames(config, hint.sid, sessionId, hint.client);
 }
 
 /**
@@ -184,24 +196,29 @@ const LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout";
  * end deletes the session after this read, and the link stays with no
  * session. `endSessions` and the sweep make such a link a logout (ruling
  * 49). A second logout of one session is harmless (section 2.7).
+ *
+ * `sid` is the value for a new link. The call answers the `sid` of the link,
+ * which the ID token must carry: the first one of the pair (ruling 57).
  */
 export async function linkIdToken(
   config: ResolvedConfig,
-  input: { sessionId: string; clientId: string; userId: string },
-): Promise<void> {
+  input: { sessionId: string; clientId: string; userId: string; sid: string },
+): Promise<string> {
   const now = config.clock.now();
-  await linkSession(config.storage, input, now);
+  const sid = await linkSession(config.storage, input, now);
   const session = await config.storage.findOne("session", [
     { field: "id", op: "eq", value: input.sessionId },
   ]);
-  if (session) return;
+  if (session) return sid;
   await queueLogouts(config.storage, input.userId, [input.sessionId], now);
   await deliverLogouts(config, input.userId);
+  return sid;
 }
 
 /**
  * The logout token of one outbox row (section 2.4). `sub` and `sid` are
- * the values that the client knows. An account delete removes a pairwise subject first.
+ * the values that the client knows. The row holds the `sid` of the ID
+ * token, so a new secret version since then changes nothing (ruling 57). An account delete removes a pairwise subject first.
  * Then the token holds `sid` alone, which section 2.4 allows. It never holds
  * a nonce.
  */
@@ -220,7 +237,7 @@ export async function logoutToken(
     jti: randomBase64Url(16),
     events: { [LOGOUT_EVENT]: {} },
     ...(sub !== null ? { sub } : {}),
-    sid: await sidFor(config, row.sessionId, client),
+    sid: row.sid,
   });
 }
 

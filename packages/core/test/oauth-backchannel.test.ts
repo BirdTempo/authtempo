@@ -742,6 +742,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
           sessionId: target.session.id,
           clientId,
           userId: target.user.id,
+          sid: target.session.id,
         });
       }
       return rows;
@@ -775,7 +776,12 @@ describe("back-channel logout (plan 12e Task 16)", () => {
   async function liveLinks(w: World, userId: string, clientId: string, count: number) {
     for (let i = 0; i < count; i++) {
       const s = await createSession(w.auth.config, { userId, ip: null, userAgent: null });
-      await linkIdToken(w.auth.config, { sessionId: s.session.id, clientId, userId });
+      await linkIdToken(w.auth.config, {
+        sessionId: s.session.id,
+        clientId,
+        userId,
+        sid: s.session.id,
+      });
       w.auth.clock.advance(1_000);
     }
   }
@@ -1110,6 +1116,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
           sessionId: s.session.id,
           clientId: clients[i % 5] ?? "",
           userId: actor.user.id,
+          sid: s.session.id,
         });
         if (i >= 300) await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, s.token) }));
       }
@@ -1199,6 +1206,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
         sessionId: s.session.id,
         clientId: bc,
         userId: actor.user.id,
+        sid: s.session.id,
       });
       ids.push(s.session.id);
     }
@@ -1438,6 +1446,44 @@ describe("the sid of a pairwise client (review M2 of plan 12e)", () => {
     const config = resolveConfig(input);
     const rotated = createRouter(config, coreRoutes(config));
     const res = await rotated(
+      new Request(
+        `${BASE_URL}/auth/oauth/end-session?${new URLSearchParams({ id_token_hint: hint })}`,
+        { headers: { cookie: cookieOf(w, actor.token) } },
+      ),
+    );
+    expect(await res.text()).not.toContain('name="confirm"');
+    expect(await live(w, actor.session.id)).toBe(false);
+  });
+
+  /** The routes of `w` on its storage, with `secrets` in place of its one secret. */
+  function rotatedTo(w: World, secrets: { version: number; value: string }[]): World {
+    const { secret: _, ...rest } = w.input;
+    const config = resolveConfig({ ...rest, secrets });
+    return { ...w, handle: createRouter(config, coreRoutes(config)) };
+  }
+  const V2 = { version: 2, value: "Zq8vR2kL9mN4pX7wT1yB6cD3hF5jG0sQ" };
+
+  it("keeps the sid of the first ID token for the link, and sends it in the logout token after a rotation (ruling 57)", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const { a } = await threeClients(w);
+    const first = decodeJwt((await tokensOf(w, actor.token, a)).id_token ?? "").sid;
+    const rotated = rotatedTo(w, [V2, { version: 1, value: w.input.secret ?? "" }]);
+    // A second ID token of the same session and client, under the new version, carries the same sid.
+    const second = decodeJwt((await tokensOf(rotated, actor.token, a)).id_token ?? "").sid;
+    expect(second).toBe(first);
+    await rotated.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    expect(w.calls).toHaveLength(1);
+    expect(decodeJwt(tokenOfCall(w.calls[0])).sid).toBe(first);
+  });
+
+  it("maps a pairwise hint to its session by the stored sid after its secret version is gone (ruling 57)", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const { a } = await threeClients(w);
+    const hint = (await tokensOf(w, actor.token, a)).id_token ?? "";
+    const gone = rotatedTo(w, [V2]);
+    const res = await gone.handle(
       new Request(
         `${BASE_URL}/auth/oauth/end-session?${new URLSearchParams({ id_token_hint: hint })}`,
         { headers: { cookie: cookieOf(w, actor.token) } },

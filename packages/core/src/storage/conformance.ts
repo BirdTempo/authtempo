@@ -1110,6 +1110,7 @@ export function runAdapterConformance(
         sessionId: "s1",
         clientId: client.id,
         userId: "u1",
+        sid: "s1",
         createdAt: at,
         updatedAt: at,
       };
@@ -1122,6 +1123,7 @@ export function runAdapterConformance(
         clientId: client.id,
         userId: "u1",
         sessionId: "s1",
+        sid: "s1",
         attempts: 1,
         nextAttemptAt: later,
         createdAt: at,
@@ -1189,6 +1191,7 @@ export function runAdapterConformance(
         sessionId: "s1",
         clientId: "cl_1",
         userId: "u1",
+        sid: "s1",
         createdAt: at,
         updatedAt: at,
       };
@@ -1205,6 +1208,7 @@ export function runAdapterConformance(
         clientId: "cl_1",
         userId: "u1",
         sessionId: "s1",
+        sid: "s1",
         attempts: 0,
         nextAttemptAt: at,
         createdAt: at,

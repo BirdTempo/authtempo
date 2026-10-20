@@ -368,7 +368,8 @@ CREATE TABLE ta_oauth_session_client (
   updated_at timestamptz NOT NULL,
   session_id text NOT NULL,
   client_id text NOT NULL,
-  user_id text NOT NULL
+  user_id text NOT NULL,
+  sid text NOT NULL
 );
 CREATE UNIQUE INDEX ux_ta_oauth_session_client__session_id__client_id ON ta_oauth_session_client (session_id, client_id);
 CREATE INDEX ix_ta_oauth_session_client__user_id ON ta_oauth_session_client (user_id);
@@ -379,6 +380,7 @@ CREATE TABLE ta_oauth_logout (
   client_id text NOT NULL,
   user_id text NOT NULL,
   session_id text NOT NULL,
+  sid text NOT NULL,
   attempts integer NOT NULL,
   next_attempt_at timestamptz NOT NULL
 );
@@ -440,7 +442,8 @@ CREATE TABLE ta_oauth_session_client (
   updated_at INTEGER NOT NULL,
   session_id TEXT NOT NULL,
   client_id TEXT NOT NULL,
-  user_id TEXT NOT NULL
+  user_id TEXT NOT NULL,
+  sid TEXT NOT NULL
 );
 CREATE UNIQUE INDEX ux_ta_oauth_session_client__session_id__client_id ON ta_oauth_session_client (session_id, client_id);
 CREATE INDEX ix_ta_oauth_session_client__user_id ON ta_oauth_session_client (user_id);
@@ -451,6 +454,7 @@ CREATE TABLE ta_oauth_logout (
   client_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
   session_id TEXT NOT NULL,
+  sid TEXT NOT NULL,
   attempts INTEGER NOT NULL,
   next_attempt_at INTEGER NOT NULL
 );

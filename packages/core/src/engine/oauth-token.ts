@@ -307,11 +307,14 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
   // OIDC Core 1.0 section 3.1.3.3: an ID token at the code exchange and the device poll. A refresh answers none.
   if (g.spentId === null && g.scopes.includes("openid")) {
     // Before the ID token: once the client holds its sid, a logout of the session reaches it (Task 16).
-    if (g.sessionId !== null && g.client.backchannelLogoutUri !== null)
-      await linkIdToken(config, {
+    // The link stores the sid, and a second ID token of the pair carries the stored one (ruling 57).
+    let sid = g.sessionId === null ? null : await sidFor(config, g.sessionId, g.client);
+    if (g.sessionId !== null && sid !== null && g.client.backchannelLogoutUri !== null)
+      sid = await linkIdToken(config, {
         sessionId: g.sessionId,
         clientId: g.client.id,
         userId: g.user.id,
+        sid,
       });
     const claims: Record<string, unknown> = {
       iss: issuer,
@@ -320,7 +323,7 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
       iat,
       exp,
       at_hash: await tokenHashClaim(alg, access),
-      ...(g.sessionId !== null ? { sid: await sidFor(config, g.sessionId, g.client) } : {}),
+      ...(sid !== null ? { sid } : {}),
       ...(g.nonce !== null ? { nonce: g.nonce } : {}),
       // OIDC Core 1.0 section 2: the time of the sign-in, not of the request.
       ...(g.authTime !== null ? { auth_time: g.authTime } : {}),

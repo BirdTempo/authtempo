@@ -151,17 +151,16 @@ const sidUnder = (secret: string, sector: string, sessionId: string) =>
   hmacSha256Hex(secret, `${SID_TAG}\n${sector}\n${sessionId}`);
 
 /**
- * The `sid` of a session for `client` in an ID token and a logout token
+ * The `sid` of a session for `client` at the first ID token of the pair
  * (review M2 of plan 12e). A public client gets the session id. A pairwise
  * client gets a keyed hash of its sector and the session id under the
  * current secret, as the user code hash is. Two sectors see two values, so
  * two relying parties cannot join their users by `sid` (OIDC Core 1.0
  * section 8). One sector sees one value for the life of the session.
  *
- * A new secret version changes the value. A logout token after a rotation
- * then names a `sid` that the client did not get. The token still holds
- * the pairwise `sub`, which Back-Channel Logout 1.0 section 2.4 lets the
- * client read.
+ * A new secret version changes the value. So the link of a session and a
+ * client stores the value of its first ID token. A later ID token of the
+ * link and its logout token carry the stored value (ruling 57).
  */
 export async function sidFor(
   config: ResolvedConfig,
