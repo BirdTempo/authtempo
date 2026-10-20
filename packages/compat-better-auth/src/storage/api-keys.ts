@@ -16,7 +16,7 @@ import { rawReadOf } from "./raw.js";
 // were read in @better-auth/api-key 1.7.5 (dist/index.mjs and
 // dist/types-y22rgFHR.d.mts) on 2026-10-21.
 
-/** What the move did or would do. Counts, owner ids, and prefixes only: never a key, a digest, or metadata. */
+/** What the move did or would do. Counts, row and owner ids, and prefixes only: never a key, a digest, or metadata. */
 export interface ApiKeyMoveReport {
   moved: number;
   skipped: {
@@ -31,6 +31,11 @@ export interface ApiKeyMoveReport {
     /** An organization key with no creator in its metadata and no owner in its organization. */
     noCreator: number;
   };
+  /**
+   * Each skipped row: its apikey id (never the key), its owner, and the
+   * reason, sorted by id. Runbook step 3 tells each such owner.
+   */
+  skippedKeys: { id: string; owner: string; reason: SkipReason }[];
   /** The moved keys per owner: the user id, or the organization id. */
   byOwner: Record<string, number>;
   /** The resources and actions that the moved sets lost, because core's statements do not know them. */
@@ -40,6 +45,9 @@ export interface ApiKeyMoveReport {
   /** Each stored `prefix` value, sorted: each one goes in `authtempo.movedKeyPrefixes` or `defaultPrefix`. */
   prefixes: string[];
 }
+
+/** Why the move skipped a row: a key of `ApiKeyMoveReport.skipped`. */
+export type SkipReason = "disabled" | "expired" | "noDigest" | "present" | "noCreator";
 
 export interface ApiKeyMoveInput {
   names: Names;
@@ -262,6 +270,7 @@ export async function moveBetterAuthApiKeys(
   const report: ApiKeyMoveReport = {
     moved: 0,
     skipped: { disabled: 0, expired: 0, noDigest: 0, present: 0, noCreator: 0 },
+    skippedKeys: [],
     byOwner: {},
     dropped: 0,
     ownerFallback: 0,
@@ -284,18 +293,22 @@ export async function moveBetterAuthApiKeys(
   const now = new Date();
   const db = storage.storage;
   for (const row of rows) {
+    const skip = (reason: SkipReason) => {
+      report.skipped[reason]++;
+      report.skippedKeys.push({ id: String(row.id), owner: String(row.referenceId), reason });
+    };
     if (!boolOf(row.enabled, true)) {
-      report.skipped.disabled++;
+      skip("disabled");
       continue;
     }
     const expiresAt = dateOf(row.expiresAt);
     if (expiresAt !== null && expiresAt.getTime() <= now.getTime()) {
-      report.skipped.expired++;
+      skip("expired");
       continue;
     }
     const digest = typeof row.key === "string" ? row.key : "";
     if (!DIGEST_RE.test(digest)) {
-      report.skipped.noDigest++;
+      skip("noDigest");
       continue;
     }
     const sourceId = String(row.id);
@@ -304,7 +317,7 @@ export async function moveBetterAuthApiKeys(
       { field: "sourceId", op: "eq", value: sourceId },
     ]);
     if (recorded !== null) {
-      report.skipped.present++;
+      skip("present");
       continue;
     }
     const tokenHash = hexOf(digest);
@@ -338,7 +351,7 @@ export async function moveBetterAuthApiKeys(
       if (createdById === null) {
         createdById = await firstOwner(storage, ownerId);
         if (createdById === null) {
-          report.skipped.noCreator++;
+          skip("noCreator");
           continue;
         }
         report.ownerFallback++;
@@ -378,6 +391,7 @@ export async function moveBetterAuthApiKeys(
     report.dropped += dropped;
     byOwner.set(ownerId, (byOwner.get(ownerId) ?? 0) + 1);
   }
+  report.skippedKeys.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   report.byOwner = Object.fromEntries(byOwner);
   report.prefixes = [...prefixes].sort();
   return report;

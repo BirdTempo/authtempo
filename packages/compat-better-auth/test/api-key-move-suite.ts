@@ -180,18 +180,34 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
         const live = generatedKey("laaa_");
         await m.insertKey(await keyRow(live, { referenceId: ada.user.id }));
         await m.insertKey(
-          await keyRow(generatedKey("laaa_"), { referenceId: ada.user.id, enabled: false }),
+          await keyRow(generatedKey("laaa_"), {
+            id: "k_1",
+            referenceId: ada.user.id,
+            enabled: false,
+          }),
         );
         await m.insertKey(
-          await keyRow(generatedKey("laaa_"), { referenceId: ada.user.id, expiresAt: past }),
+          await keyRow(generatedKey("laaa_"), {
+            id: "k_2",
+            referenceId: ada.user.id,
+            expiresAt: past,
+          }),
         );
         // disableKeyHashing was on: the column holds the clear key.
         const clear = generatedKey("laaa_");
-        await m.insertKey({ ...(await keyRow(clear, { referenceId: ada.user.id })), key: clear });
+        await m.insertKey({
+          ...(await keyRow(clear, { id: "k_3", referenceId: ada.user.id })),
+          key: clear,
+        });
         const report = await move(m, "user");
         expect(report).toEqual({
           moved: 1,
           skipped: { disabled: 1, expired: 1, noDigest: 1, present: 0, noCreator: 0 },
+          skippedKeys: [
+            { id: "k_1", owner: ada.user.id, reason: "disabled" },
+            { id: "k_2", owner: ada.user.id, reason: "expired" },
+            { id: "k_3", owner: ada.user.id, reason: "noDigest" },
+          ],
           byOwner: { [ada.user.id]: 1 },
           dropped: 0,
           ownerFallback: 0,
