@@ -870,6 +870,98 @@ describe("the device grant (plan 12e Task 14, RFC 8628)", () => {
   });
 });
 
+describe("the poll count of a device code (review M1 of plan 12e, RFC 8628 3.5)", () => {
+  const IP = { clientIp: () => "203.0.113.7" };
+  const UNKNOWN = `od_${"A".repeat(43)}`;
+
+  it("lets a device poll at its interval for 9 minutes and gives the tokens of an approval then", async () => {
+    const h = instance(undefined, {}, IP);
+    const clientId = await deviceClient(h);
+    const s = await signedIn(h);
+    const started = await start(h, clientId, "mcp:read");
+    const seen = new Set<string>();
+    // 108 polls, one each 5 seconds: more than the 60 of oauth-token:ip.
+    for (let t = 0; t < 540; t += 5) {
+      const a = await answer(await h.auth.handle(poll(clientId, started.device_code)));
+      seen.add(`${a.status} ${String(a.body.error)}`);
+      h.clock.advance(5_000);
+    }
+    expect([...seen]).toEqual(["400 authorization_pending"]);
+    await decide(h, s.cookie, started.user_code, "allow");
+    const tokens = await answer(await h.auth.handle(poll(clientId, started.device_code)));
+    expect(tokens.status).toBe(200);
+    expect(tokens.body.access_token).toEqual(expect.any(String));
+  });
+
+  it("spends no token budget of another client on the IP over a whole code life", async () => {
+    const h = instance(undefined, {}, IP);
+    const clientId = await deviceClient(h);
+    const other = await deviceClient(h);
+    const started = await start(h, clientId, "mcp:read");
+    const seen: string[] = [];
+    for (let t = 0; t <= 600; t += 5) {
+      seen.push(
+        String((await answer(await h.auth.handle(poll(clientId, started.device_code)))).body.error),
+      );
+      h.clock.advance(5_000);
+    }
+    expect(seen.slice(0, 120).every((e) => e === "authorization_pending")).toBe(true);
+    expect(seen.slice(120)).toEqual(["expired_token"]);
+    // The other client still has all 60 requests of oauth-token:ip.
+    const refresh = () =>
+      h.auth.handle(
+        tokenPost({
+          grant_type: "refresh_token",
+          refresh_token: `or_${"B".repeat(43)}`,
+          client_id: other,
+        }),
+      );
+    for (let i = 0; i < 60; i++)
+      expect(await answer(await refresh())).toEqual({
+        status: 400,
+        body: { error: "invalid_grant" },
+      });
+    expect(await answer(await refresh())).toEqual({ status: 429, body: { error: "rate_limited" } });
+  });
+
+  it("counts a poll of an unknown device code on oauth-token:ip, and a known code on its own key", async () => {
+    const h = instance(undefined, {}, IP);
+    const clientId = await deviceClient(h);
+    const started = await start(h, clientId, "mcp:read");
+    for (let i = 0; i < 30; i++) {
+      expect((await answer(await h.auth.handle(poll(clientId, UNKNOWN)))).body).toEqual({
+        error: "invalid_grant",
+      });
+      expect((await answer(await h.auth.handle(poll(clientId, "od_short")))).body).toEqual({
+        error: "invalid_grant",
+      });
+    }
+    expect(await answer(await h.auth.handle(poll(clientId, UNKNOWN)))).toEqual({
+      status: 429,
+      body: { error: "rate_limited" },
+    });
+    // A guess costs, and the device of a known code still polls.
+    expect((await answer(await h.auth.handle(poll(clientId, started.device_code)))).body).toEqual({
+      error: "authorization_pending",
+    });
+  });
+
+  it("holds one code to 130 polls in its life: the polls past the cap answer slow_down and change nothing", async () => {
+    const h = instance(undefined, {}, IP);
+    const clientId = await deviceClient(h);
+    const started = await start(h, clientId, "mcp:read");
+    const seen: string[] = [];
+    for (let i = 0; i < 140; i++)
+      seen.push(
+        String((await answer(await h.auth.handle(poll(clientId, started.device_code)))).body.error),
+      );
+    expect(seen[0]).toBe("authorization_pending");
+    expect(seen.slice(1).every((e) => e === "slow_down")).toBe(true);
+    // Polls 2 to 130 each add 5 seconds; polls 131 to 140 reach no row.
+    expect((await deviceRows(h))[0]?.interval).toBe(650);
+  });
+});
+
 describe("the end of a decided device code (plan 12e Task 14, ruling 44 S4)", () => {
   const OAUTH = {
     resources: [RESOURCE],

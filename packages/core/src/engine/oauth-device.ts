@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import type { LimitWindow } from "../limiter/port.js";
 import { hmacSha256Hex, randomToken, sha256Hex } from "../primitives/crypto.js";
 import type { DpopBinding } from "../primitives/dpop.js";
 import { newId } from "../primitives/ids.js";
@@ -12,7 +13,7 @@ import { authTimeOf, consentCovers, grantConsent } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { DEVICE_GRANT } from "./oauth-clients.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
-import { issueDeviceTokens, liveUser, type TokenAnswer } from "./oauth-token.js";
+import { issueDeviceTokens, liveUser, type TokenAnswer, tokenLimited } from "./oauth-token.js";
 import type { ResolvedSession } from "./sessions.js";
 
 /**
@@ -83,6 +84,55 @@ export const DEVICE_VERIFY_PER_IP = { seconds: 900, max: 20 };
  * many people.
  */
 export const DEVICE_VERIFY_PER_CODE = { seconds: 900, max: 10 };
+
+/**
+ * The polls of one device code above one per interval: a retry after a lost
+ * answer, or a device clock that runs fast.
+ */
+const POLL_SLACK = 10;
+
+/**
+ * The poll window of one device code (review M1 of plan 12e, RFC 8628
+ * section 3.5, read 2026-10-20). A device polls once per `interval` for the
+ * whole life of its code. So its key allows `ceil(life / interval)` polls
+ * and the slack in one window of the code life. With the defaults that is
+ * 130 polls in 600 s. `slow_down` keeps the pace; a poll past the cap
+ * answers `slow_down` too, and writes nothing.
+ */
+function pollWindow(config: ResolvedConfig, row: OAuthDeviceRow): LimitWindow {
+  const interval = oauthOf(config).device?.interval ?? row.interval;
+  const life = Math.ceil((row.expiresAt.getTime() - row.createdAt.getTime()) / 1000);
+  return { seconds: life, max: Math.ceil(life / interval) + POLL_SLACK };
+}
+
+/** The row of a device code, or null for a code of another form or an unknown code. */
+export async function findDeviceCode(
+  config: ResolvedConfig,
+  deviceCode: string,
+): Promise<OAuthDeviceRow | null> {
+  if (!DEVICE_RE.test(deviceCode)) return null;
+  return config.storage.findOne("oauthDevice", [
+    { field: "deviceCodeHash", op: "eq", value: await sha256Hex(deviceCode) },
+  ]);
+}
+
+/**
+ * The count of one poll, before the client auth, so a failed auth counts
+ * too. A known code counts on its own key, never on `oauth-token:ip`. A
+ * device that waits for its person would spend that budget in 5 minutes,
+ * and with it the budget of each other client on the IP. An unknown code
+ * counts on `oauth-token:ip`, so a guess still costs. Answers the refusal,
+ * or null.
+ */
+export async function pollLimited(
+  config: ResolvedConfig,
+  row: OAuthDeviceRow | null,
+  ip: string | null,
+): Promise<"rate_limited" | "slow_down" | null> {
+  if (row === null) return (await tokenLimited(config, ip)) ? "rate_limited" : null;
+  const key = `oauth-device-poll:code:${row.deviceCodeHash}`;
+  return (await config.limiter.allow(key, pollWindow(config, row))) ? null : "slow_down";
+}
 
 /** The answer of RFC 8628 section 3.2. */
 export interface DeviceAuthorizationAnswer {
@@ -302,10 +352,9 @@ export async function pollDevice(
 ): Promise<OAuthResult<TokenAnswer>> {
   const { client } = input.client;
   if (!client.grantTypes.includes(DEVICE_GRANT)) return oauthFail("unauthorized_client");
-  if (!DEVICE_RE.test(input.deviceCode)) return oauthFail("invalid_grant");
-  const row = await config.storage.findOne("oauthDevice", [
-    { field: "deviceCodeHash", op: "eq", value: await sha256Hex(input.deviceCode) },
-  ]);
+  // A read after the client auth, not the row of the count: the auth of a
+  // metadata document can drop the client's device rows (ruling 48).
+  const row = await findDeviceCode(config, input.deviceCode);
   if (!row || row.clientId !== client.id) return oauthFail("invalid_grant");
   if (row.dpopJkt !== null && input.dpop?.jkt !== row.dpopJkt)
     return oauthFail("invalid_dpop_proof");
