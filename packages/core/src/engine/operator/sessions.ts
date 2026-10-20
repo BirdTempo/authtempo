@@ -266,7 +266,8 @@ export const OPERATOR_CALL_BUDGET = 50;
  * The worst case of D1 statements before a session call, for each actor
  * (rulings 34, 35, and 37 of plan 12f). It holds when the caller passes no
  * `callsUsed`, and it leaves out the ready check. A user actor through
- * the route costs 8. The route limiter is 1. `resolveSession` is 3: the
+ * the route costs 9. The impersonation step of the router reads the
+ * session once (plan 12f Task 11). The route limiter is 1. `resolveSession` is 3: the
  * session, the user, and the sliding refresh. `requireOperatorUser` is 4:
  * the platform organization, the member row, the second factor, and its
  * limiter. The app: none. A secret actor: the limiter per IP and the
@@ -283,7 +284,7 @@ export const OPERATOR_CALL_BUDGET = 50;
  * user-actor call on core D1 (`operator-sessions-budget.test.ts`).
  */
 export const OPERATOR_CALLS_BEFORE: Readonly<Record<OperatorActor["kind"], number>> = {
-  user: 8,
+  user: 9,
   secret: 2,
   app: 0,
 };
@@ -440,8 +441,8 @@ export async function endSessionPage(
  * by id and its stop row. D1 has no row lock and sends 1 less. The calls
  * left write the logouts of the client links, 2 calls per link, and the
  * sweep logs out the rest. The work gets 48 calls for the app, 46 for a
- * secret, and 40 for a user actor. So a page with a hook ends 45, 43, or
- * 37 sessions. A call fits D1 Free, and so it fits Workers Paid too.
+ * secret, and 39 for a user actor. So a page with a hook ends 45, 43, or
+ * 36 sessions. A call fits D1 Free, and so it fits Workers Paid too.
  */
 export async function endAllSessions(
   config: ResolvedConfig,

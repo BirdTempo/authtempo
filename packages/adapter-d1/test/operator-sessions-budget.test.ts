@@ -315,7 +315,9 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
       // The whole invocation on the binding, and the counter of the adapter, which
       // leaves out the 2 limiter queries: they go to the binding, not through the adapter.
       expect([done.value.ended, count.queries, invocation.storage.statementsSent?.()]).toEqual(
-        call === "endAll" ? [37, 49, 47] : [21, 42, 40],
+        // The work keeps 1 call for the session read of the router's
+        // impersonation step (plan 12f Task 11), which this direct call skips.
+        call === "endAll" ? [36, 48, 46] : [20, 41, 39],
       );
     });
 });

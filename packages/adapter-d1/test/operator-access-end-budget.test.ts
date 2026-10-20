@@ -248,18 +248,23 @@ async function auditOf(userId: string): Promise<string[]> {
  * act, the sessions it ended, and the queries of each sweep. Each query count
  * is 50 or below. The user actor reads the session, the user, the refresh,
  * and the guard before the act, so its act ends fewer sessions.
+ *
+ * The counts changed on 2026-10-21 with plan 12f Task 11. The revoke holds
+ * the user row first (ruling 42), 3 calls, so its act ends 3 sessions
+ * fewer. A user actor through the route pays one more session read, the
+ * impersonation step of the router, so its act ends 1 session fewer.
  */
 const BAN_COUNTS: Record<string, [number, number, number[]]> = {
   "secret 45": [50, 31, [35]],
-  "user 45": [49, 23, [43]],
+  "user 45": [49, 22, [44]],
   "secret 60": [50, 31, [48, 22]],
-  "user 60": [49, 23, [48, 30]],
+  "user 60": [49, 22, [48, 31]],
 };
 const REVOKE_COUNTS: Record<string, [number, number, number, number, number[]]> = {
-  "secret 45": [50, 37, 27, 18, [20]],
-  "user 45": [50, 44, 27, 18, [20]],
-  "secret 60": [50, 50, 27, 31, [25]],
-  "user 60": [50, 49, 27, 23, [33]],
+  "secret 45": [50, 43, 24, 21, [20]],
+  "user 45": [50, 49, 24, 19, [25]],
+  "secret 60": [50, 50, 24, 28, [31]],
+  "user 60": [50, 49, 24, 19, [40]],
 };
 
 const asSecret = { authorization: `Operator ${SECRET}` };
