@@ -110,7 +110,8 @@ export function readSupport(text: string): { rows: SupportRow[]; failures: strin
 
 /**
  * Holds the support table to owner decision 3 of 2026-10-14 (spec 33 item 7).
- * At most one minor is current. The previous minor gets security fixes for
+ * After the first release, exactly one minor is current, and it is the
+ * newest minor. The previous minor gets security fixes for
  * 3 months after the next minor ships. A minor past that date is unsupported.
  * From each schema version of a supported minor, each adapter has a chain of
  * migrations to SCHEMA_VERSION, so one `authtempo migrate` reaches it.
@@ -127,9 +128,18 @@ export function checkSupport(input: SupportInput): Report {
     current: currents.length,
     security: rows.filter((r) => r.status === "security").length,
   };
-  if (currents.length > 1)
+  // The current minor gets every fix (owner decision 3). So after the first
+  // release one minor is current, and it is the newest one: a status typo on
+  // a release day must not leave the table with no current minor.
+  if (rows.length > 0 && currents.length !== 1)
     failures.push(
-      `${currents.length} minors are current (${currents.map((r) => r.minor).join(", ")}); at most one minor is current`,
+      `${currents.length} minors are current${currents.length > 0 ? ` (${currents.map((r) => r.minor).join(", ")})` : ""}; a released table has exactly one current minor`,
+    );
+  const newest = rows[rows.length - 1];
+  const only = currents.length === 1 ? currents[0] : undefined;
+  if (only !== undefined && newest !== undefined && only !== newest)
+    failures.push(
+      `${only.minor} is current and ${newest.minor} is newer; the newest minor is the current minor`,
     );
 
   for (const [i, row] of rows.entries()) {

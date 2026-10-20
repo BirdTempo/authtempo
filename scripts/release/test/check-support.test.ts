@@ -52,8 +52,47 @@ describe("check-support", () => {
 
   it("fails two current minors", () => {
     const r = check([current("0.1", "2026-11-02"), current("0.2", "2027-01-01")]);
-    expect(r.failures).toEqual(["2 minors are current (0.1, 0.2); at most one minor is current"]);
+    expect(r.failures).toEqual([
+      "2 minors are current (0.1, 0.2); a released table has exactly one current minor",
+    ]);
     expect(summaryLine(r)).toBe("check-support: FAIL minors=2 current=2 security=0 failures=1");
+  });
+
+  it("fails a released table with no current minor (review m3)", () => {
+    const unsupported: SupportRow = {
+      minor: "0.1",
+      status: "unsupported",
+      released: "2026-11-02",
+      schemaFrom: [],
+    };
+    const r = check([unsupported]);
+    expect(r.failures).toEqual([
+      "0 minors are current; a released table has exactly one current minor",
+    ]);
+    expect(summaryLine(r)).toBe("check-support: FAIL minors=1 current=0 security=0 failures=1");
+  });
+
+  it("fails a current minor that is not the newest minor (review m3)", () => {
+    const rows: SupportRow[] = [
+      current("0.1", "2026-11-02"),
+      { minor: "0.2", status: "unsupported", released: "2027-01-01", schemaFrom: [] },
+    ];
+    expect(check(rows).failures).toEqual([
+      "0.1 is current and 0.2 is newer; the newest minor is the current minor",
+    ]);
+    // The order of the minors is by number: 0.10 is newer than 0.9.
+    expect(
+      check([
+        {
+          minor: "0.9",
+          status: "security",
+          released: "2026-11-02",
+          securityUntil: "2027-04-01",
+          schemaFrom: [11],
+        },
+        current("0.10", "2027-01-01"),
+      ]).failures,
+    ).toEqual([]);
   });
 
   it("fails a security date that is not 3 months after the next minor's release", () => {
@@ -73,7 +112,10 @@ describe("check-support", () => {
     expect(check([noDate, current("0.2", "2027-01-01")]).failures).toEqual([
       "0.1 has the status security and no securityUntil",
     ]);
-    expect(check([old]).failures).toEqual(["0.1 has the status security and no newer minor"]);
+    expect(check([old]).failures).toEqual([
+      "0 minors are current; a released table has exactly one current minor",
+      "0.1 has the status security and no newer minor",
+    ]);
     // 3 months after 30 November is the last day of February.
     const late: SupportRow[] = [
       { ...old, securityUntil: "2027-02-28" },
