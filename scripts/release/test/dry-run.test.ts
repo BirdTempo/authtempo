@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkTarballs, readTarball } from "../src/check-pack.ts";
+import { readYaml, type YamlNode } from "../src/check-workflows.ts";
 import { type DryRunReport, dryRun, dryRunLine, type Run, type RunResult } from "../src/dry-run.ts";
 import { reportLines } from "../src/lib/report.ts";
 import { prepare } from "../src/prepare.ts";
@@ -41,6 +42,7 @@ function kindOf(cmd: string, args: string[], cwd: string): string {
   if (cmd === "pnpm" && a === "install")
     return cwd.endsWith("/smoke") ? "smoke install" : "install";
   if (cmd === "pnpm" && a === "turbo") return `turbo ${b} ${args[2] ?? ""}`;
+  if (cmd === "pnpm" && args.includes("pack")) return "pnpm pack";
   if (cmd === "pnpm") return `pnpm ${a}`;
   return `${cmd} ${a}`;
 }
@@ -158,6 +160,30 @@ async function passingRun() {
 
 const failuresOf = (r: DryRunReport) => r.failures;
 
+const repoRoot = new URL("../../../", import.meta.url);
+
+/**
+ * Each command line of the steps of the job check of release.yml that run in
+ * the release copy, in order.
+ */
+function releaseCopyLines(): string[] {
+  const text = readFileSync(new URL(".github/workflows/release.yml", repoRoot), "utf8");
+  const map = (n: YamlNode | undefined) => (n?.kind === "map" ? n.entries : {});
+  const steps = map(map(map(readYaml(text)).jobs).check).steps;
+  if (steps?.kind !== "list") throw new Error("release.yml: jobs.check.steps is not a list");
+  return steps.items.flatMap((step) => {
+    const e = map(step);
+    const dir = e["working-directory"];
+    const run = e.run;
+    if (dir?.kind !== "scalar" || !dir.value?.endsWith("/release-copy")) return [];
+    if (run?.kind !== "scalar" || run.value === null) return [];
+    return run.value
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => /^(pnpm|node) /.test(l));
+  });
+}
+
 describe("dry run", () => {
   it("stops on a dirty checkout with exit 2", async () => {
     const { root, tmp } = setup();
@@ -205,6 +231,41 @@ describe("dry run", () => {
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^@authtempo\/client@0\.1\.0 [0-9a-f]{64} files=5$/);
     expect(lines[1]).toMatch(/^@authtempo\/core@0\.1\.0 [0-9a-f]{64} files=5$/);
+  });
+
+  it("runs the release copy steps of release.yml", async () => {
+    // ruling 21 of plan 12j: the dry run and the job check run one list of
+    // commands in the copy. The pack and check-pack lines differ only by the
+    // name and the paths that the shell fills in.
+    const { report, calls } = await passingRun();
+    expect(report.exit).toBe(0);
+    const dir = report.dir ?? "";
+    const out = `${dir}/out`;
+    const kinds = [
+      "install",
+      "node prepare.ts",
+      "turbo run build",
+      "pnpm pack",
+      "node check-pack.ts",
+    ];
+    // One pack line stands for the loop of release.yml, so the first pack call is enough.
+    const firstPack = calls.find((c) => c.kind === "pnpm pack");
+    const lines = calls
+      .filter((c) => kinds.includes(c.kind) && (c.kind !== "pnpm pack" || c === firstPack))
+      .map((c) => {
+        if (c.kind === "pnpm pack")
+          return `pnpm ${c.args.map((a, i) => (i === 1 ? '"$name"' : a === out ? '"$PWD/out"' : a)).join(" ")}`;
+        if (c.kind === "node check-pack.ts") return `node ${c.args[0]} out/*.tgz`;
+        return `${c.cmd} ${c.args.join(" ")}`;
+      });
+    expect(lines).toEqual(releaseCopyLines());
+    expect(releaseCopyLines()).toEqual([
+      "pnpm install --frozen-lockfile --offline",
+      "node scripts/release/src/prepare.ts",
+      "pnpm turbo run build --force",
+      'pnpm --filter "$name" pack --pack-destination "$PWD/out"',
+      "node scripts/release/src/check-pack.ts out/*.tgz",
+    ]);
   });
 
   it("fails when the pnpm publish list differs from the tarballs", async () => {

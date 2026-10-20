@@ -2,6 +2,15 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  COPY_BUILD,
+  COPY_CHECK_PACK,
+  COPY_INSTALL,
+  COPY_PREPARE,
+  packCommand,
+  RELEASE_COPY_MARKER,
+  shellLine,
+} from "./lib/release-copy.ts";
+import {
   CI_FILE,
   ENVIRONMENT,
   NODE_FLOOR,
@@ -257,23 +266,25 @@ const JOBS: Record<string, Record<string, Job>> = {
           run: [
             'mkdir "$RUNNER_TEMP/release-copy"',
             'git archive HEAD | tar -x -C "$RUNNER_TEMP/release-copy"',
-            'touch "$RUNNER_TEMP/release-copy/.release-copy"',
+            `touch "$RUNNER_TEMP/release-copy/${RELEASE_COPY_MARKER}"`,
           ].join("\n"),
         },
-        { run: "pnpm install --frozen-lockfile --offline", copy: true },
-        { name: "Prepare the manifests", run: "node scripts/release/src/prepare.ts", copy: true },
-        { run: "pnpm turbo run build --force", copy: true },
+        // The commands of the release copy come from src/lib/release-copy.ts,
+        // which the dry run also runs (ruling 21 of plan 12j).
+        { run: shellLine(COPY_INSTALL), copy: true },
+        { name: "Prepare the manifests", run: shellLine(COPY_PREPARE), copy: true },
+        { run: shellLine(COPY_BUILD), copy: true },
         {
           name: "Pack each released package",
           run: [
             "mkdir out",
             "for name in $(jq -r '.fixed[0][]' .changeset/config.json); do",
-            '  pnpm --filter "$name" pack --pack-destination "$PWD/out"',
+            `  ${shellLine(packCommand('"$name"', '"$PWD/out"'))}`,
             "done",
           ].join("\n"),
           copy: true,
         },
-        { run: "node scripts/release/src/check-pack.ts out/*.tgz", copy: true },
+        { run: `${shellLine(COPY_CHECK_PACK)} out/*.tgz`, copy: true },
         {
           name: "Write the SHA-256 list",
           run: "cd out && sha256sum -- *.tgz > SHA256SUMS",

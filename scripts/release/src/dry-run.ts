@@ -13,10 +13,17 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readTarball } from "./check-pack.ts";
+import {
+  COPY_BUILD,
+  COPY_CHECK_PACK,
+  COPY_INSTALL,
+  COPY_PREPARE,
+  packCommand,
+  RELEASE_COPY_MARKER,
+} from "./lib/release-copy.ts";
 import { releasedNames } from "./lib/released.ts";
 import type { Report } from "./lib/report.ts";
 import { readWorkspace } from "./lib/workspace.ts";
-import { RELEASE_COPY_MARKER } from "./prepare.ts";
 
 export interface RunResult {
   status: number;
@@ -208,8 +215,10 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     for (const name of names) if (!folders.has(name)) failures.push(`${name}: no workspace folder`);
     if (failures.length > 0) return 1;
 
-    if (!step("pnpm install", "pnpm", ["install", "--frozen-lockfile", "--offline"], repo))
-      return 1;
+    // The commands of src/lib/release-copy.ts, which the job check of release.yml also runs.
+    const copyStep = (label: string, command: readonly string[]) =>
+      step(label, command[0] ?? "", command.slice(1), repo);
+    if (!copyStep("pnpm install", COPY_INSTALL)) return 1;
     writeFileSync(
       join(repo, ".changeset/dry-run.md"),
       `---\n${names.map((n) => `"${n}": minor`).join("\n")}\n---\n\n${CHANGESET_BODY}\n`,
@@ -229,20 +238,12 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
       return 1;
     }
     version = versions[0] ?? null;
-    if (!step("prepare", "node", ["scripts/release/src/prepare.ts"], repo)) return 1;
-    // Only the released packages and what they need: the site and the examples ship in no tarball.
-    const filters = names.map((n) => `--filter=${n}`);
-    if (!step("turbo run build", "pnpm", ["turbo", "run", "build", "--force", ...filters], repo))
-      return 1;
+    if (!copyStep("prepare", COPY_PREPARE)) return 1;
+    if (!copyStep("turbo run build", COPY_BUILD)) return 1;
 
     const tarballs: { name: string; path: string }[] = [];
     for (const name of names) {
-      const r = step(
-        `pnpm pack ${name}`,
-        "pnpm",
-        ["pack", "--pack-destination", out],
-        join(repo, folders.get(name) ?? ""),
-      );
+      const r = copyStep(`pnpm pack ${name}`, packCommand(name, out));
       if (r === null) continue;
       const path = resolve(nonEmpty(r.stdout).at(-1)?.trim() ?? "");
       if (!path.endsWith(".tgz") || !path.startsWith(`${out}/`) || !existsSync(path))
@@ -271,11 +272,8 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
       return failures.length === 0 ? 0 : 1;
     };
     log("dry-run: check-pack");
-    const check = run(
-      "node",
-      ["scripts/release/src/check-pack.ts", ...tarballs.map((t) => t.path)],
-      repo,
-    );
+    const [node = "", ...checkArgs] = COPY_CHECK_PACK;
+    const check = run(node, [...checkArgs, ...tarballs.map((t) => t.path)], repo);
     const checked = reportOf(check.stdout);
     if (check.status !== 0 || !checked?.summary.startsWith("check-pack: PASS")) {
       failures.push(`check-pack exited ${check.status}: ${checked?.summary ?? firstLine(check)}`);

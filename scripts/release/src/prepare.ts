@@ -3,15 +3,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { breakingByMinor, CORE, readDeprecations } from "./check-pack.ts";
 import { CHANGELOG_FILE, repositoryFor } from "./lib/pack-rules.ts";
+import { RELEASE_COPY_MARKER } from "./lib/release-copy.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, requireCounts, unreadReport } from "./lib/report.ts";
 import { type Manifest, readWorkspace } from "./lib/workspace.ts";
-
-/**
- * The file that the dry run writes at the root of each release copy. prepare
- * refuses a folder without it, so it never removes the hold on main.
- */
-export const RELEASE_COPY_MARKER = ".release-copy";
 
 export interface PrepareOptions {
   /** The package folder, relative to the root, such as packages/client. */
