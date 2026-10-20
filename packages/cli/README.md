@@ -275,6 +275,9 @@ only, as for `keys rotate`.
   character, checked before any request). With no terminal, or with
   `--no-input`, they need `--yes`. Each `users` write and `create-admin`
   writes one audit row, and the command prints its id.
+- A ban or a revoke that answers `familyEndFailed: true` prints its line,
+  then a `warning:` line on stderr, and exits 1. The act ran, and the end of
+  the OAuth refresh families failed. `sessions end` for the user ends them.
 - `sessions end` and `sessions end-all` write one audit row for each call.
   In text mode they print no audit row id. `sessions end --json` lists the
   ids in `auditIds`; the document of `sessions end-all --json` has no ids.

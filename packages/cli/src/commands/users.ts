@@ -208,9 +208,20 @@ interface UserWrite {
 }
 
 /**
+ * The warning of a ban or a revoke that answers `familyEndFailed: true`
+ * (ruling 37 of plan 12f): the act committed, and the end of the OAuth
+ * refresh families after the commit failed. `sessions end` reads the
+ * refresh tokens of the user again, and ends each family.
+ */
+export function familyEndWarning(userId: string): string {
+  return `warning: the act ran, but the end of the OAuth refresh families failed (familyEndFailed); run authtempo sessions end <base url> ${userId} with a secret of the sessions scope`;
+}
+
+/**
  * The common steps of a write on one user. First the confirmation rule,
  * before the secret. Then the secret, the question, and one POST. Last the
- * audit row id, on stdout or in the JSON document.
+ * audit row id, on stdout or in the JSON document. An answer with
+ * `familyEndFailed: true` adds the warning and exit 1, so a script sees it.
  */
 async function writeUser(
   ctx: Ctx,
@@ -244,10 +255,12 @@ async function writeUser(
     },
   );
   const auditId = auditIdOf(body, `POST ${t.base}${t.basePath}${w.path}`);
+  const exit = (body as { familyEndFailed?: unknown }).familyEndFailed === true ? 1 : 0;
   if (values.json === true)
-    printJson(ctx, { auditId, exit: 0, stopped: null } satisfies OperatorWriteJson);
+    printJson(ctx, { auditId, exit, stopped: null } satisfies OperatorWriteJson);
   else ctx.out(`${w.done}; audit row ${auditId}`);
-  return 0;
+  if (exit === 1) ctx.err(familyEndWarning(userId));
+  return exit;
 }
 
 /** `authtempo users ban <base url> <user id>` (plan 12f Task 12, spec 26 items 5 and 6). */

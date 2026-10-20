@@ -17,6 +17,7 @@ sidebar:
 ## Before you start
 
 - An operator secret with the scopes `users` and `audit`. [The first operator](/docs/operations/first-operator/) makes the entry.
+- The scope `sessions` too, for the step after a failed end of the OAuth families.
 - A sweep that runs from a scheduler. [Delete expired rows (the sweep)](/docs/guides/sweep/) tells how.
 
 ## Steps
@@ -28,6 +29,7 @@ Do the steps in this order. Each step names what breaks when you skip it.
 2. Run `authtempo users ban <base url> <user id> --reason "<reason>" --yes`. Add `--until <date>` for a ban with an end.
    - The reason goes into the audit row. A later reader sees why you acted.
    - The deployment answers `banned <user id>; audit row <id>`.
+   - Exit 1 with a `warning:` line on stderr means that the end of the OAuth refresh families failed. Do the step of the warning below.
 3. Run `authtempo users get <base url> <user id>`. Read the `BAN` column: `no-end`, or the end of the ban.
    - A `-` means that no ban holds. Read the stop text of step 2.
 4. Make sure that the sweep runs at least once an hour.
@@ -72,7 +74,13 @@ Core refuses each of them at its own doors: the session read, the JWT mint, the 
 - A ban of a platform operator also ends the impersonation sessions that the operator opened. Until the sweep ends a left one, each door refuses it.
 
 :::caution
-Warning: the CLI prints no `familyEndFailed`. After a storage error of a ban, run `authtempo sessions end <base url> <user id>`. It needs a secret with the scope `sessions`. It reads the refresh tokens of the user again, and ends each family.
+Warning: OAuth refresh families of the user can stay when the ban exits 1 with this line on stderr. The ban itself holds.
+
+```text
+warning: the act ran, but the end of the OAuth refresh families failed (familyEndFailed); run authtempo sessions end <base url> <user id> with a secret of the sessions scope
+```
+
+Then run `authtempo sessions end <base url> <user id> --reason "<reason>" --yes` with a secret of the scope `sessions`. It reads the refresh tokens of the user again, and ends each family. Exit 0 means that no family stays.
 :::
 
 ## If it fails

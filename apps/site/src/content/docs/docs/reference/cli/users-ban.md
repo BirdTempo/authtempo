@@ -45,10 +45,19 @@ authtempo users ban https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3 --reason 
 | Exit code | What it means |
 | --- | --- |
 | 0 | The deployment banned the user. The command prints the audit row id. |
+| 1 | The act ran, but the end of the OAuth refresh families failed. The command prints the audit row id and a warning. Run authtempo sessions end for the user. |
 | 2 | A usage error, or a stop. A stop names its cause: no answer, the tools are off, a refused secret, no users scope, or the limit of 600 calls an hour. A refusal of the act stops too, with its cause. |
 
 The command asks one question that names the act and the user id: `Ban the user <user id>, and end every session of the user?` With `--yes` it asks nothing.
 On a success, stdout holds one line: `banned <user id>; audit row <id>`. The audit row id is the `id` of the row in `authtempo audit list`.
+
+An answer with `familyEndFailed: true` means that the ban committed, and the end of the OAuth refresh families after the commit failed. The command then prints the same line, and exits 1 with this line on stderr:
+
+```text
+warning: the act ran, but the end of the OAuth refresh families failed (familyEndFailed); run authtempo sessions end <base url> <user id> with a secret of the sessions scope
+```
+
+Run [`authtempo sessions end`](/docs/reference/cli/sessions-end/) for the user. It reads the refresh tokens of the user again, and ends each family.
 
 A refusal stops with exit 2 and names its cause. For example, the user is banned, a hook refused the act, or another change ran at the same time.
 
@@ -71,7 +80,7 @@ The document of a stop holds `auditId: ""`. [The output](/docs/reference/cli/#th
 | Route | [`POST /operator/users/ban`](/docs/reference/routes/#post-operator-users-ban) |
 | Header | `Authorization: Operator <secret>` |
 | Body | `{ userId, reason, until }`. |
-| Answer | `{ auditId }`. |
+| Answer | `{ auditId }`, and `familyEndFailed: true` when the end of the OAuth families failed after the commit. |
 | Limit | The key `operator-users:ip:<ip>`, a window of 1 hour, and 600 calls, right or wrong secret, shared with every command of the user tools. [Limits](/docs/reference/limits/) lists every limit. |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 

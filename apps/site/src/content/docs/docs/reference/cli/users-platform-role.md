@@ -46,12 +46,15 @@ authtempo users platform-role https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3
 | Exit code | What it means |
 | --- | --- |
 | 0 | The deployment changed the role. The command prints the audit row id. |
+| 1 | A revoke ran. The act ran, but the end of the OAuth refresh families failed. The command prints the audit row id and a warning. Run authtempo sessions end for the user. |
 | 2 | A usage error, or a stop. A stop names its cause: no answer, the tools are off, a refused secret, no users scope, or the limit of 600 calls an hour. A refusal of the act stops too, with its cause. |
 
 Give exactly one of `--grant` and `--revoke`.
 
 The command asks one question that names the act and the user id: `Grant the platform role to the user <user id>?`, or for a revoke, `Revoke the platform role of the user <user id>, and end every session of the user?` With `--yes` it asks nothing.
 On a success, stdout holds one line: `granted the platform role to <user id>; audit row <id>`. The audit row id is the `id` of the row in `authtempo audit list`.
+
+A revoke that answers `familyEndFailed: true` prints its line, and exits 1 with the warning of [`authtempo users ban`](/docs/reference/cli/users-ban/). Run [`authtempo sessions end`](/docs/reference/cli/sessions-end/) for the user then.
 
 A refusal stops with exit 2 and names its cause. For example, the user is banned, a hook refused the act, or another change ran at the same time.
 
@@ -74,7 +77,7 @@ The document of a stop holds `auditId: ""`. [The output](/docs/reference/cli/#th
 | Route | [`POST /operator/users/platform-role`](/docs/reference/routes/#post-operator-users-platform-role) |
 | Header | `Authorization: Operator <secret>` |
 | Body | `{ userId, grant, reason }`. |
-| Answer | `{ auditId }`. |
+| Answer | `{ auditId }`. A revoke adds `familyEndFailed: true` when the end of the OAuth families failed after the commit. |
 | Limit | The key `operator-users:ip:<ip>`, a window of 1 hour, and 600 calls, right or wrong secret, shared with every command of the user tools. [Limits](/docs/reference/limits/) lists every limit. |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`email_unverified`](/docs/reference/errors/#email_unverified), [`account_banned`](/docs/reference/errors/#account_banned), [`member_limit`](/docs/reference/errors/#member_limit), [`last_owner`](/docs/reference/errors/#last_owner), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 

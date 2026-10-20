@@ -99,6 +99,7 @@ describe("the operator pages", () => {
         "POST /operator/users/ban",
         "GET /operator/users/get",
         "GET /operator/audit",
+        "POST /operator/sessions/end-user",
       ),
     );
     const page = "operations/ban-a-user.mdx";

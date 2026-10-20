@@ -24,6 +24,10 @@ export function writeStop(scope: string): string {
   return `${toolStop(scope)} A refusal of the act stops too, with its cause.`;
 }
 
+/** The exit 1 text of a ban and a revoke that answer `familyEndFailed: true` (ruling 37 of plan 12f). */
+export const FAMILY_END_EXIT =
+  "The act ran, but the end of the OAuth refresh families failed. The command prints the audit row id and a warning. Run authtempo sessions end for the user.";
+
 /** The two lines of the parent help of a command with subcommands. */
 export const GROUP_EXITS: HelpText["exits"] = [
   { code: 0, says: "The command printed its help." },
@@ -208,6 +212,7 @@ export const USERS_BAN_HELP: HelpText = {
   ],
   exits: [
     { code: 0, says: "The deployment banned the user. The command prints the audit row id." },
+    { code: 1, says: FAMILY_END_EXIT },
     { code: 2, says: writeStop("users") },
   ],
 };
@@ -255,6 +260,7 @@ export const USERS_PLATFORM_ROLE_HELP: HelpText = {
   ],
   exits: [
     { code: 0, says: "The deployment changed the role. The command prints the audit row id." },
+    { code: 1, says: `A revoke ran. ${FAMILY_END_EXIT}` },
     { code: 2, says: writeStop("users") },
   ],
 };

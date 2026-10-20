@@ -770,6 +770,63 @@ describe("the operator commands (plan 12f Task 12)", () => {
     );
   });
 
+  it("warns and exits 1 when a ban or a revoke answers familyEndFailed (ruling 37)", async () => {
+    const f = fixture();
+    const ada = await signUp(f, "ada@example.com");
+    expect(
+      (
+        await run(
+          ["create-admin", BASE, "--email", "root@example.com", "--reason", "first", "--yes"],
+          f,
+        )
+      ).code,
+    ).toBe(0);
+    const second = await run(
+      ["create-admin", BASE, "--email", "bea@example.com", "--reason", "second", "--yes"],
+      f,
+    );
+    // create-admin prints the user id alone on stdout.
+    const beaId = second.io.stdout.at(-1) ?? "";
+    // The read of endFamilies after the commit is the one outer read of
+    // oauthToken. A storage limit there, such as query 51 on D1 Free, throws.
+    const findMany = f.storage.findMany.bind(f.storage);
+    let refused = 0;
+    f.storage.findMany = ((model, ...rest) => {
+      if (model === "oauthToken") {
+        refused++;
+        throw new Error("Too many API requests by single worker invocation.");
+      }
+      return findMany(model, ...rest);
+    }) as typeof f.storage.findMany;
+    const warning = (id: string) =>
+      `warning: the act ran, but the end of the OAuth refresh families failed (familyEndFailed); run authtempo sessions end <base url> ${id} with a secret of the sessions scope`;
+
+    const ban = await run(["users", "ban", BASE, ada, "--reason", "spam", "--yes"], f);
+    expect(refused).toBe(1);
+    expect(ban.code).toBe(1);
+    expect(ban.io.stdout.at(-1)).toMatch(new RegExp(`^banned ${ada}; audit row \\S+$`));
+    expect(ban.io.stderr.at(-1)).toBe(warning(ada));
+
+    const json = await run(["users", "ban", BASE, ada, "--reason", "again", "--yes", "--json"], f);
+    expect(json.code).toBe(1);
+    expect(docOf(json.io.stdout)).toMatchObject({ exit: 1, stopped: null });
+    expect(json.io.stderr.at(-1)).toBe(warning(ada));
+
+    const revoke = await run(
+      ["users", "platform-role", BASE, beaId, "--revoke", "--reason", "left", "--yes"],
+      f,
+    );
+    expect(revoke.code).toBe(1);
+    expect(revoke.io.stderr.at(-1)).toBe(warning(beaId));
+    expect(refused).toBe(3);
+
+    // With the storage well again, the same ban exits 0 with no warning.
+    f.storage.findMany = findMany;
+    const again = await run(["users", "ban", BASE, ada, "--reason", "third", "--yes"], f);
+    expect(again.code).toBe(0);
+    expect(again.io.stderr.some((l) => l.startsWith("warning:"))).toBe(false);
+  });
+
   it("holds the refusal texts to the codes that a secret can get from the routes", () => {
     // These codes have their own texts in operatorCall, or a text by status (401 and 429).
     const own = ["operator_required", "invalid_body", "unauthorized", "rate_limited"];
