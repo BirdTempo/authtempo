@@ -184,7 +184,7 @@ function checkWorkspaceYaml(
 
   // pnpm runs the build script of each package on this list. The reason says what
   // the script does, so a reader can see that the entry is still safe. pnpm reads
-  // the block form and the flow form; a flow form on one line has no place for a
+  // the block form and the flow form. A flow form on one line has no place for a
   // reason on each entry, so each of its entries fails.
   const builds = topKey(yaml, "allowBuilds");
   if (builds === undefined) return 0;
@@ -220,8 +220,8 @@ function checkWorkspaceYaml(
 }
 
 /**
- * Each direct dependency of each workspace package has one row, each row holds
- * its facts, and the runtime closure of the released packages holds only the
+ * Each direct dependency of each workspace package has one row, and each row
+ * holds its facts. The runtime closure of the released packages holds only the
  * licenses of LICENSE_ALLOW (spec 33 item 9).
  */
 export function checkDependencies(input: DependenciesInput): Report {
@@ -272,8 +272,8 @@ export function checkDependencies(input: DependenciesInput): Report {
     if (kind === "runtime" && !isText(row.seam))
       failures.push(`${name}: the runtime row has no seam`);
 
-    // A platform row is the owner of the license of a package that pnpm skips on
-    // some machines, so the check gives one result on each machine. No manifest
+    // A platform row owns the license of a package that pnpm skips on some
+    // machines. So the check gives one result on each machine. No manifest
     // names the package, so the row has no user.
     if (kind === "platform") {
       const listed = Array.isArray(row.versions) ? row.versions.filter(isText) : [];
@@ -399,7 +399,7 @@ const unquote = (v: string) => v.replace(/^'(.*)'$/, "$1").replace(/''/g, "'");
 
 /**
  * The `importers` and `snapshots` sections of the workspace document of a
- * lockfile in the version 9 form, and each key of `packages` with an `os`, a
+ * lockfile in the version 9 form. Also each key of `packages` with an `os`, a
  * `cpu`, or a `libc` field. pnpm 12 writes the document of its own version
  * first, then `---`, then the workspace document. Each document must say
  * version 9.0, so a new lockfile form stops the check.
@@ -476,8 +476,8 @@ const snapshotKey = (name: string, version: string) =>
 
 /**
  * The runtime closure of the released packages: each package that an app gets
- * from `dependencies` and `optionalDependencies`, by name and version, with the
- * license that `license` reads. A workspace link to another released package
+ * from `dependencies` and `optionalDependencies`, by name and version. Each one
+ * has the license that `license` reads. A workspace link to another released package
  * is that package's own closure. `license` gives undefined for a package that
  * is not installed. That is a skipped platform package, or else an error.
  */
