@@ -330,6 +330,28 @@ export interface TwoFactorOptions {
   accountLockout?: { enabled?: boolean; maxFailedAttempts?: number; durationSeconds?: number };
 }
 
+/**
+ * Better Auth 1.7.7's admin options (dist/plugins/admin/types.d.mts, read
+ * 2026-10-21). Plan 12f maps `adminRoles` onto core's platform role and
+ * `impersonationSessionDuration` onto `operator.impersonation.ttlMinutes`.
+ * The check refuses each other key with a line that names spec section 26.
+ */
+export interface AdminOptions {
+  /** One core rank, for example "admin": the platform role in `authtempo.platformOrganization`. */
+  adminRoles?: string | string[];
+  /** Seconds, a whole number of minutes from 5 to 240. Default 3600. */
+  impersonationSessionDuration?: number;
+  defaultRole?: string;
+  defaultBanReason?: string;
+  defaultBanExpiresIn?: number;
+  bannedUserMessage?: unknown;
+  adminUserIds?: string[];
+  allowImpersonatingAdmins?: boolean;
+  schema?: unknown;
+  ac?: unknown;
+  roles?: unknown;
+}
+
 export interface BearerOptions {
   requireSignature?: boolean;
 }
@@ -349,7 +371,9 @@ export type EmailOtpPlugin = Marker<"email-otp", EmailOtpOptions>;
 export type BearerPlugin = Marker<"bearer", BearerOptions>;
 export type ExpoPlugin = Marker<"expo", ExpoOptions>;
 export type TwoFactorPlugin = Marker<"two-factor", TwoFactorOptions>;
+export type AdminPlugin = Marker<"admin", AdminOptions>;
 export type CompatPlugin =
+  | AdminPlugin
   | OrganizationPlugin
   | PasskeyPlugin
   | MagicLinkPlugin
@@ -548,8 +572,12 @@ export interface BetterAuthOptions {
    * `appURL`); default the origin of `baseURL`; it must be in
    * `trustedOrigins`. An absolute `callbackURL` or `redirectTo` must have
    * this origin, because core lands every sign-in on it.
+   * `platformOrganization` is the slug of the platform organization, whose
+   * members with the rank of `adminRoles` are platform operators (plan 12f,
+   * spec section 26 item 1). The `admin` plugin needs it, and nothing else
+   * takes it. `authtempo create-admin` creates the organization.
    */
-  authtempo?: { passwordHash?: PasswordHashSeam; appURL?: string };
+  authtempo?: { passwordHash?: PasswordHashSeam; appURL?: string; platformOrganization?: string };
 }
 
 /** Better Auth 1.7.2's sign-in answer for a user with the factor on (dist/plugins/two-factor/index.mjs, the after hook, read 2026-10-13). */

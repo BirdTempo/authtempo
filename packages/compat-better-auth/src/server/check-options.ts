@@ -1,4 +1,4 @@
-import { DELETE_CONFIRM_TTL_MINUTES, isAppScheme } from "@authtempo/core";
+import { DELETE_CONFIRM_TTL_MINUTES, isAppScheme, normalizeSlug } from "@authtempo/core";
 import { PASSWORD_MAX_LENGTH } from "../errors.js";
 import {
   type BetterAuthOptions,
@@ -6,6 +6,7 @@ import {
   type CompatPlugin,
   type OrganizationHookOptions,
 } from "../types.js";
+import { adminRolesOf, COMPAT_RANKS } from "./admin.js";
 
 export interface OptionCheck {
   /** `<path>: <reason>`, sorted. Any entry stops the construction. */
@@ -192,6 +193,59 @@ const organizationHooks = object({
   beforeRejectInvitation: refused("core runs no hook before a decline; use afterRejectInvitation"),
 });
 
+/** Each refused admin option names spec section 26, where core's operator tools are (plan 12f). */
+const ADMIN_RULES: Record<string, Rule> = {
+  adminRoles: (v, p, out) => {
+    if (typeof v !== "string" && !(Array.isArray(v) && v.every((r) => typeof r === "string"))) {
+      refuse(out, p, "expected a string or a list of strings");
+      return;
+    }
+    const roles = adminRolesOf({ adminRoles: v as string | string[] });
+    if (roles.length !== 1 || !Object.hasOwn(COMPAT_RANKS, roles[0] ?? ""))
+      refuse(
+        out,
+        p,
+        `core has one platform role: name exactly one rank of ${Object.keys(COMPAT_RANKS).join(", ")} (spec section 26 item 1)`,
+      );
+  },
+  impersonationSessionDuration: seconds(
+    60,
+    300,
+    14_400,
+    "core takes a whole number of minutes from 5 to 240 (spec section 26 item 3)",
+  ),
+  // Better Auth's default "user" changes nothing: a user who is not an operator has no role.
+  defaultRole: only(
+    "user",
+    "core keeps no role on a user; the platform role is a rank in the platform organization (spec section 26 item 1)",
+  ),
+  defaultBanReason: refused(
+    "core takes the reason of each ban from the call: banReason, else the admin path (spec section 26 item 5)",
+  ),
+  defaultBanExpiresIn: refused(
+    "core takes the end of each ban from the call: banExpiresIn, else no end (spec section 26 item 5)",
+  ),
+  bannedUserMessage: refused(
+    "core answers a banned user with its own code and text, BANNED_USER here (spec section 26 item 6)",
+  ),
+  adminUserIds: refused(
+    "core gives operator power by the platform role only, never by a list of user ids (spec section 26 item 1)",
+  ),
+  allowImpersonatingAdmins: only(
+    false,
+    "core never lets an operator impersonate a platform operator (spec section 26 item 9)",
+  ),
+  schema: refused(
+    "core keeps the ban in its own columns taBannedAt, taBanReason, and taBanUntil (spec section 26 item 14)",
+  ),
+  ac: refused(
+    "custom permission statements and roles for operators are row 12k, not core's operator tools (spec section 26 item 15)",
+  ),
+  roles: refused(
+    "custom permission statements and roles for operators are row 12k, not core's operator tools (spec section 26 item 15)",
+  ),
+};
+
 const PLUGIN_RULES: Record<string, Rule> = {
   organization: object(
     {
@@ -333,10 +387,10 @@ const PLUGIN_RULES: Record<string, Rule> = {
     requireSignature: only(false, "core's bearer token is opaque and needs no signature"),
   }),
   expo: object({}, "core's handoff serves the Expo client; this option is refused"),
+  admin: object(ADMIN_RULES, "not mapped onto core's operator tools (spec section 26 item 14)"),
 };
 
 const FOREIGN_PLUGINS: Record<string, string> = {
-  admin: "authtempo has no admin plugin",
   jwt: JWT_NOT_MAPPED,
   mcp: PROVIDER_NOT_MAPPED,
   cimd: PROVIDER_NOT_MAPPED,
@@ -641,6 +695,10 @@ const TOP: Record<string, Rule> = {
     },
     // Core checks that appURL is an exact origin in trustedOrigins (core config.ts).
     appURL: string,
+    // Plan 12f: the slug of the platform organization; checkOptions ties it to plugins[admin].
+    platformOrganization: (v, p, out) => {
+      if (typeof v !== "string" || normalizeSlug(v) === null) refuse(out, p, "expected a slug");
+    },
   }),
   databaseHooks,
   hooks: refused(NO_REQUEST_HOOKS),
@@ -838,6 +896,24 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
       "plugins[two-factor].accountLockout",
       "not set: Better Auth locks an account for 900 s after 10 wrong codes; core has no account lockout and caps the code checks per user at 10 per 15 minutes and 30 per 24 hours, and 5 codes per challenge",
     );
+  // Plan 12f (ruling 39): Better Auth's admins are the members of one
+  // organization with the rank of adminRoles, core's platform operators.
+  const platformOrganization = options.authtempo?.platformOrganization;
+  if (pluginOf(options, "admin")) {
+    if (!org)
+      refuse(
+        out,
+        "plugins[admin]",
+        "needs plugins[organization]: the platform role is a rank in the platform organization (spec section 26 item 1)",
+      );
+    if (platformOrganization === undefined)
+      refuse(
+        out,
+        "plugins[admin]",
+        "needs authtempo.platformOrganization, the slug of the platform organization (spec section 26 item 1)",
+      );
+  } else if (platformOrganization !== undefined)
+    refuse(out, "authtempo.platformOrganization", "only with plugins[admin]");
   if (pluginOf(options, "expo") && appSchemes(options).length === 0) {
     refuse(out, "plugins[expo]", "needs the app scheme, for example myapp://, in trustedOrigins");
   }

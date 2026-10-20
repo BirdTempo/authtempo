@@ -2,6 +2,7 @@ import type { LimiterPort, StorageAdapter } from "@authtempo/core";
 import type { DrizzleAdapterConfig } from "../src/adapters/drizzle.js";
 import { expoClient } from "../src/client/expo.js";
 import {
+  admin,
   bearer,
   emailOTP,
   expo,
@@ -166,7 +167,8 @@ export const consumerd = {
       roles: {},
       organizationHooks: {},
     }),
-    { id: "admin", defaultRole: "user", adminRoles: ["admin"] },
+    // Since plan 12f the admin plugin maps; consumerd still needs authtempo.platformOrganization.
+    admin({ defaultRole: "user", adminRoles: ["admin"] }),
     // Since plan 9e consumerd's emailOTP options run unchanged (apps/api/src/auth/create-auth.ts:175-181).
     emailOTP({
       otpLength: 6,
@@ -208,7 +210,8 @@ export const consumerb = {
       roles: {},
       organizationHooks: {},
     }),
-    { id: "admin" },
+    // Since plan 12f the admin plugin maps; consumerb still needs authtempo.platformOrganization.
+    admin(),
     { id: "api-key", defaultPrefix: "laaa_" },
     // Refused at construction since plan 9g, with JWT_NOT_MAPPED and PROVIDER_NOT_MAPPED
     // (check-options.ts); the type admits the literal, the runtime check refuses it.

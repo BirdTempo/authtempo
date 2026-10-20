@@ -1,4 +1,6 @@
 import {
+  type AdminOptions,
+  type AdminPlugin,
   type BearerOptions,
   type BearerPlugin,
   COMPAT_PLUGIN,
@@ -40,4 +42,12 @@ export function expo(options: ExpoOptions = {}): ExpoPlugin {
 }
 export function twoFactor(options: TwoFactorOptions = {}): TwoFactorPlugin {
   return { kind: COMPAT_PLUGIN, id: "two-factor", options };
+}
+/**
+ * Better Auth's admin plugin on core's operator tools (plan 12f, spec
+ * section 26 item 14). It needs `organization()` and
+ * `authtempo.platformOrganization`.
+ */
+export function admin(options: AdminOptions = {}): AdminPlugin {
+  return { kind: COMPAT_PLUGIN, id: "admin", options };
 }

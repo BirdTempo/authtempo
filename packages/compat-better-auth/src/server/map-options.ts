@@ -13,6 +13,7 @@ import {
   type CompatPlugin,
   type User,
 } from "../types.js";
+import { COMPAT_RANKS, IMPERSONATION_SECONDS, platformRoleOf } from "./admin.js";
 import { appSchemes, pluginOf, signUpClosed } from "./check-options.js";
 import { compatHooks } from "./hooks.js";
 import { compatAccountMail, compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
@@ -69,6 +70,8 @@ export interface Mapped {
    * hooks.ts), or null.
    */
   changeVerifyBefore: ((user: User) => unknown) | null;
+  /** The platform role of the `admin` plugin (plan 12f), or null without it. */
+  platformRole: string | null;
 }
 
 /**
@@ -123,15 +126,24 @@ function clientIpOf(options: BetterAuthOptions): ((request: Request) => string |
   };
 }
 
-/** Spread last into the config, so the type keeps it to the three plugin sections. */
-type PluginConfig = Pick<AuthConfig, "organizations" | "passkey" | "handoff">;
+/** Spread last into the config, so the type keeps it to the plugin sections. */
+type PluginConfig = Pick<AuthConfig, "organizations" | "passkey" | "handoff" | "operator">;
 
 function pluginConfig(options: BetterAuthOptions): PluginConfig {
   const out: PluginConfig = {};
   const org = pluginOf(options, "organization");
+  const admin = pluginOf(options, "admin");
+  // checkOptions refuses the admin plugin without organization() and the slug.
+  const platformOrganization = options.authtempo?.platformOrganization;
   if (org) {
     const o = org.options;
     out.organizations = {
+      // The ranks this package promises (README), and the one list the admin check reads.
+      ranks: { ...COMPAT_RANKS },
+      // Plan 12f: Better Auth's admins are the platform operators (spec section 26 item 1).
+      ...(admin && platformOrganization !== undefined
+        ? { platformOrganization, platformRole: platformRoleOf(admin.options) }
+        : {}),
       invitationTtlDays: (o.invitationExpiresIn ?? BETTER_AUTH_DEFAULTS.invitationExpiresIn) / DAY,
       // Never mailed by core: the mail port hands the token to sendInvitationEmail (mail.ts).
       invitationLinkBuilder: (token) => `${INVITATION_LINK_PREFIX}${token}`,
@@ -143,6 +155,12 @@ function pluginConfig(options: BetterAuthOptions): PluginConfig {
           o.invitationLimit ?? BETTER_AUTH_DEFAULTS.invitationLimit,
       },
     };
+  }
+  if (admin) {
+    // Better Auth's admin plugin always serves the impersonation; core's
+    // notice mail at each start stays on (owner decision 3 of plan 12f).
+    const seconds = admin.options.impersonationSessionDuration ?? IMPERSONATION_SECONDS;
+    out.operator = { users: true, impersonation: { ttlMinutes: seconds / 60 } };
   }
   const pk = pluginOf(options, "passkey");
   if (pk) {
@@ -185,6 +203,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   const org = pluginOf(options, "organization");
   const otp = pluginOf(options, "email-otp");
   const tf = pluginOf(options, "two-factor");
+  const admin = pluginOf(options, "admin");
   const ttlSeconds = magic
     ? (magic.options.expiresIn ?? BETTER_AUTH_DEFAULTS.magicLinkExpiresIn)
     : (options.emailVerification?.expiresIn ?? BETTER_AUTH_DEFAULTS.emailVerificationExpiresIn);
@@ -371,5 +390,6 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
       emailOtpChange: otp?.options.changeEmail?.enabled === true,
     },
     changeVerifyBefore: options.emailVerification?.beforeEmailVerification ?? null,
+    platformRole: admin ? platformRoleOf(admin.options) : null,
   };
 }
