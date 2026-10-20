@@ -156,11 +156,13 @@ const sidUnder = (secret: string, sector: string, sessionId: string) =>
  * client gets a keyed hash of its sector and the session id under the
  * current secret, as the user code hash is. Two sectors see two values, so
  * two relying parties cannot join their users by `sid` (OIDC Core 1.0
- * section 8). One sector sees one value for the life of the session.
+ * section 8).
  *
- * A new secret version changes the value. So the link of a session and a
- * client stores the value of its first ID token. A later ID token of the
- * link and its logout token carry the stored value (ruling 57).
+ * A new secret version changes the value. A stable `sid` matters only for a
+ * logout, so only a client with a back-channel URI keeps one. Its link to
+ * the session stores the value of its first ID token. A later ID token of
+ * the link and its logout token carry the stored value (ruling 57). A
+ * client with no link may see a new value after a new secret version.
  */
 export async function sidFor(
   config: ResolvedConfig,

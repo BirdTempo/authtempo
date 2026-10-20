@@ -227,7 +227,7 @@ A client that registers an https `backchannel_logout_uri` gets a sign-out token 
 - A 200 or 204 deletes the row. A throw, a timeout, 408, 429, or 5xx keeps it, and the sweep sends it again.
 - The waits are 1 minute, 5 minutes, 30 minutes, then 2 hours. A row goes after its sixth attempt. Any other answer deletes the row with one log line.
 - The token has `typ` `logout+jwt`, `sid`, the client's `sub`, the `events` claim, no nonce, and 2 minutes of life.
-- The `sid` is the value of the client's ID token. A public client gets the `id` of the session. A pairwise client gets a keyed hash of its sector and that `id`, so two sectors cannot join their users. Core stores the value with the link of the session and the client, so a new secret version does not change it.
+- The `sid` is the value of the client's ID token. A public client gets the `id` of the session. A pairwise client gets a keyed hash of its sector and that `id`, so two sectors cannot join their users. Core stores the value with the back-channel link of the session and the client, so a new secret version does not change it.
 - A refresh token stays (section 2.7). The client decides what to do with it.
 - Each sign-out with a linked client can take up to 2 seconds more while that client does not answer.
 - On D1, the sweep steps of these posts need Workers Paid. [Delete expired rows](/docs/guides/sweep/) gives the counts.
