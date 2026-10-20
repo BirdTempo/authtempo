@@ -594,8 +594,10 @@ export const MIGRATION_0010_NAME = "0010_compat_schema_v13";
  * It adds core's unique key on (teamId, userId) and its index on
  * (organizationId, userId). Better Auth's own index serves userId. A
  * row that Better Auth writes after the migration has no `ta` value, as for
- * 0001. The unique index fails on a table with two rows of one pair; Better
- * Auth's unique membershipKey stops such rows.
+ * 0001. The unique index fails on a table with two rows of one pair. Better
+ * Auth 1.7 writes the key of the pair in the unique membershipKey, so its own
+ * rows hold no such pair. A row from before 1.7 has no key, so such rows can
+ * exist: the README gives the query that finds them.
  *
  * Better Auth 1.7 added `team.memberCount` and `teamMember.membershipKey`.
  * The team tables of 1.4.21 (dist/plugins/organization/organization.mjs,
