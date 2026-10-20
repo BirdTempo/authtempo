@@ -429,6 +429,51 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
 
+<h3 id="account_banned"><code>account_banned</code> 403</h3>
+
+- **Meaning:** An operator banned the account. Only a person who proved the credential gets this code.
+- **Do:** Tell the person to contact support. Do not try again.
+
+| Routes |
+| --- |
+| No route answers this code yet. The ban of the operator tools adds it. |
+
+<h3 id="operator_required"><code>operator_required</code> 403</h3>
+
+- **Meaning:** The caller is not an operator for this action. The operator secret has no scope for the route, or the session fails the operator user guard. The code does not tell which step failed.
+- **Do:** Use a secret with the scope of the route. A platform operator verifies the address, turns a second factor on, and re-authenticates.
+
+| Routes |
+| --- |
+| [`POST /operator/keys/rotate`](/docs/reference/routes/#post-operator-keys-rotate) needs the scope `keys`. [`GET /operator/secrets/status`](/docs/reference/routes/#get-operator-secrets-status) and [`POST /operator/secrets/rewrap`](/docs/reference/routes/#post-operator-secrets-rewrap) need the scope `secrets`. |
+
+<h3 id="operator_self"><code>operator_self</code> 409</h3>
+
+- **Meaning:** A platform operator tried to act on their own account or on another platform operator.
+- **Do:** Ask another operator, or use an operator secret.
+
+| Routes |
+| --- |
+| No route answers this code yet. The operator user tools add it. |
+
+<h3 id="impersonation_refused"><code>impersonation_refused</code> 403</h3>
+
+- **Meaning:** The target of an impersonation is the operator, a platform operator, banned, or absent. One code answers each case.
+- **Do:** Check the user id. An operator cannot impersonate a platform operator.
+
+| Routes |
+| --- |
+| No route answers this code yet. The impersonation start adds it. |
+
+<h3 id="impersonation_session"><code>impersonation_session</code> 403</h3>
+
+- **Meaning:** An impersonation session cannot reach this route.
+- **Do:** Stop the impersonation, and do the action from the operator's own session.
+
+| Routes |
+| --- |
+| No route answers this code yet. The impersonation rules add it. |
+
 ## OAuth codes
 
 `OAUTH_ERRORS` of `@authtempo/core` holds these codes. The provider routes answer them, because an OAuth client reads these strings. `invalid_token` and `rate_limited` are in both tables, so an OAuth anchor has the prefix `oauth-`.

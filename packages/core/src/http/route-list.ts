@@ -57,7 +57,7 @@ export interface RouteEntry {
    * `emailOtpReset` needs `emailOtp` and `password`; `totp` needs `password`;
    * `oauthRegistration` needs `oauth` with `registration.dynamic`;
    * `oauthDevice` needs `oauth` with `device` (plan 12e); `operator`
-   * needs `operator.secretHash` (plan 11c), and `/operator/keys/rotate` also
+   * needs `operator.secretHash` (plan 11c) or `operator.secrets` (plan 12f), and `/operator/keys/rotate` also
    * needs `jwtMint` (plan 11c2). `account` (plan 12a) is in every
    * deployment. `accountDelete` (plan 12a) is on by default; `account.delete:
    * false` turns it off. `openapi` (plan 11g) needs `openapi: true`.
@@ -1158,7 +1158,7 @@ export const ROUTES = Object.freeze([
     path: "/operator/keys/rotate",
     feature: "operator",
     auth: ["operator"],
-    codes: ["rate_limited", "unauthorized"],
+    codes: ["rate_limited", "unauthorized", "operator_required"],
     oauthCodes: [],
   },
   {
@@ -1166,7 +1166,7 @@ export const ROUTES = Object.freeze([
     path: "/operator/secrets/status",
     feature: "operator",
     auth: ["operator"],
-    codes: ["rate_limited", "unauthorized"],
+    codes: ["rate_limited", "unauthorized", "operator_required"],
     oauthCodes: [],
   },
   {
@@ -1174,7 +1174,7 @@ export const ROUTES = Object.freeze([
     path: "/operator/secrets/rewrap",
     feature: "operator",
     auth: ["operator"],
-    codes: ["rate_limited", "unauthorized", "invalid_body"],
+    codes: ["rate_limited", "unauthorized", "operator_required", "invalid_body"],
     oauthCodes: [],
   },
   {

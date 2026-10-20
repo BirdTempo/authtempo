@@ -21,6 +21,8 @@ export type {
   MailPort,
   OAuthConfig,
   OperatorConfig,
+  OperatorScope,
+  OperatorSecretEntry,
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,

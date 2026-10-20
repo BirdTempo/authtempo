@@ -194,7 +194,8 @@ describe("openApiDocument (plan 11g)", () => {
     );
     expect(codes["401"]).toEqual(["unauthorized"]);
     expect(codes["429"]).toEqual(["rate_limited"]);
-    expect(codes["403"]).toEqual(["origin_not_trusted"]);
+    // Plan 12f: a secret with no scope keys answers 403 operator_required.
+    expect(codes["403"]).toEqual(["operator_required", "origin_not_trusted"]);
   });
 
   it("documents the 303 of a form post that the browser follows with a GET", () => {

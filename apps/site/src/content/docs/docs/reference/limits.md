@@ -72,6 +72,9 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `token-live:session:<sessionId>` | 1 minute | 120 | The live check of a session JWT |
 | `operator:ip:<ip>` | 1 hour | 5 | Operator key rotation, right or wrong secret |
 | `operator-secrets:ip:<ip>` | 1 hour | 120 | Operator secret status, secret rewrap, and info, one count for the three, right or wrong secret. A rewrap of 100 000 rows at 1000 rows per call needs 100 calls |
+| `operator-users:ip:<ip>` | 1 hour | 600 | Every secret call to the user, session, and audit routes, right or wrong secret. `OPERATOR_USERS_PER_IP` |
+| `operator:user:<userId>` | 1 hour | 600 | Every call of a platform operator, after the operator user guard passes |
+| `operator-impersonate:user:<userId>` | 1 hour | 20 | Impersonation starts of one platform operator |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize, and each `GET /oauth/device` with no session. The count runs before a request is held for the sign-in |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke. A device poll counts here unless it names a known code and the client of that code. A failed client auth of any poll counts here too |

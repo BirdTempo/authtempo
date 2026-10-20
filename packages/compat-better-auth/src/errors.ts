@@ -104,6 +104,22 @@ export const BETTER_AUTH_CODES = {
   // sessions, the accounts, and the user, and keeps the organizations
   // (better-auth dist/db/internal-adapter.mjs:233, read 2026-10-17). Core's own name.
   sole_owner: "SOLE_OWNER",
+  // Plan 12f (ruling 18; Task 13 reviews these names). The names come from
+  // Better Auth 1.7.7's admin plugin (better-auth dist/plugins/admin/error-codes.mjs
+  // in consumera's pnpm store, read 2026-10-20). The statuses stay core's.
+  account_banned: "BANNED_USER",
+  // Better Auth names one refusal per admin action, such as
+  // YOU_ARE_NOT_ALLOWED_TO_BAN_USERS. Core has one code for every action, so no name fits.
+  operator_required: "FORBIDDEN",
+  // YOU_CANNOT_BAN_YOURSELF names the ban only. Core refuses every act on the
+  // operator's own account and on another platform operator, so no name fits.
+  operator_self: "FORBIDDEN",
+  // Core refuses the operator, a platform operator, a banned user, and an absent
+  // user with one code. The admin target is the nearest case of Better Auth.
+  impersonation_refused: "YOU_CANNOT_IMPERSONATE_ADMINS",
+  // Better Auth lets an impersonation session reach every route, so it has no
+  // name for this refusal.
+  impersonation_session: "FORBIDDEN",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

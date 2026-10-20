@@ -3,8 +3,8 @@
  * characters. The operator route and `authtempo keys rotate` read this one
  * rule, so the CLI refuses a value before it costs one of the five calls per
  * hour. The entry `@authtempo/core/operator-secret` exports it, outside the
- * main entry: it is for the CLI, not for an app. The entry exports the two
- * limits of the operator routes too.
+ * main entry: it is for the CLI, not for an app. The entry exports the
+ * limits of the operator routes that the CLI prints too.
  */
 export const OPERATOR_SECRET = /^[\x21-\x7e]{32,512}$/;
 
@@ -29,3 +29,12 @@ export const OPERATOR_PER_IP = { seconds: 3600, max: 5 };
  * stop text and help of the CLI read this one value.
  */
 export const OPERATOR_SECRETS_PER_IP = { seconds: 3600, max: 120 };
+
+/**
+ * The limit of every secret call to the user, session, and audit routes
+ * (plan 12f, spec 26 item 12). 600 per IP per hour, with a right or a
+ * wrong secret. A support script that pages through 50 000 users at 100
+ * per page needs 500 calls. A guess costs one count of 600. The CLI prints
+ * this value (ruling 10 of plan 12f).
+ */
+export const OPERATOR_USERS_PER_IP = { seconds: 3600, max: 600 };

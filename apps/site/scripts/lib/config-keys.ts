@@ -17,6 +17,7 @@ import type {
   OidcEndpoints,
   OidcEntry,
   OperatorConfig,
+  OperatorSecretEntry,
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,
@@ -225,7 +226,21 @@ export const CONFIG_KEYS = {
     cimd: true,
     initialAccessTokenHash: true,
   } satisfies Keys<NonNullable<OAuthConfig["registration"]>>,
-  operator: { secretHash: true } satisfies Keys<OperatorConfig>,
+  operator: {
+    secretHash: true,
+    secrets: true,
+    users: true,
+    impersonation: true,
+  } satisfies Keys<OperatorConfig>,
+  "operator.secrets[]": {
+    name: true,
+    secretHash: true,
+    scopes: true,
+  } satisfies Keys<OperatorSecretEntry>,
+  "operator.impersonation": {
+    ttlMinutes: true,
+    notice: true,
+  } satisfies Keys<NonNullable<OperatorConfig["impersonation"]>>,
   hooks: {
     organization: true,
     session: true,

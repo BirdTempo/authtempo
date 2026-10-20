@@ -159,8 +159,11 @@ describe("operator config (plan 11c)", () => {
   it("resolves to null when absent or false, and keeps the hash", () => {
     expect(resolveConfig(base).operator).toBeNull();
     expect(resolveConfig({ ...base, operator: false }).operator).toBeNull();
+    // Plan 12f (ruling 17): the hash is one secret named "default" with the scopes keys and secrets.
     expect(resolveConfig({ ...base, operator: { secretHash: HASH } }).operator).toEqual({
-      secretHash: HASH,
+      secrets: [{ name: "default", secretHash: HASH, scopes: ["keys", "secrets"] }],
+      users: false,
+      impersonation: null,
     });
   });
 

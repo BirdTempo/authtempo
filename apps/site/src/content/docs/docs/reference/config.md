@@ -54,7 +54,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. An object without `password` is refused. |
 | `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, `/token/live`, and `api.jwt`. The OAuth provider needs it. |
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
-| `operator` | object or `false` | off | Turns on `GET /operator/secrets/status`, `POST /operator/secrets/rewrap`, `GET /operator/info`, and `POST /operator/keys/rotate`. `keys/rotate` needs `jwtMint`. |
+| `operator` | object or `false` | off | Turns on `GET /operator/secrets/status`, `POST /operator/secrets/rewrap`, `GET /operator/info`, and `POST /operator/keys/rotate`. `keys/rotate` needs `jwtMint`. Set `operator.secretHash` or `operator.secrets`, not both. |
 | `openapi` | `boolean` | `false` | Serves `GET <basePath>/openapi.json`, the OpenAPI document of the routes that the config turns on. |
 | `hooks` | object | no hook | The groups `organization`, `session`, `user`, and `identity`. Any other group is refused. |
 | `account` | object | the defaults below | The settings page: the proof mails, the notices, the confirm page, and the delete. See the keys under Account. |
@@ -251,11 +251,19 @@ Another key of `oauth` is refused.
 
 ## Operator
 
-Another key of `operator` is refused.
+Another key of `operator` is refused. Set `operator.secretHash` or `operator.secrets`, not both. Each tool is off by default, so an upgrade opens no new route and widens no secret. A presented secret is compared against every entry, also after a match.
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `operator.secretHash` | string | required | The SHA-256 of the operator secret as 64 lowercase hex characters. Core stores no secret. The secret must be 32 to 512 visible ASCII characters, and any other secret answers 401 with no reason. |
+| `operator.secretHash` | string | none | The SHA-256 of the operator secret as 64 lowercase hex characters. Core stores no secret. The secret must be 32 to 512 visible ASCII characters, and any other secret answers 401 with no reason. Since plan 12f it is one secret named `default` with the scopes `keys` and `secrets` only. |
+| `operator.secrets` | list | none | One entry or more, each a named secret with its scopes. Two entries with one name or one hash are refused. |
+| `operator.secrets[].name` | string | required | `^[a-z0-9][a-z0-9_-]{0,31}$`. The audit row names the secret by it. |
+| `operator.secrets[].secretHash` | string | required | The SHA-256 of the secret as 64 lowercase hex characters, as `operator.secretHash`. |
+| `operator.secrets[].scopes` | string list | required | One scope or more of `keys`, `secrets`, `users`, `sessions`, and `audit`. `keys` opens `POST /operator/keys/rotate`, and `secrets` opens the secret status and rewrap routes. A secret with no scope for a route gets 403 `operator_required`. |
+| `operator.users` | `true` | off | Turns on the user, session, and audit tools of plan 12f. It needs a secret with the scope `users` or `organizations.platformRole`, so that an actor can use the tools. |
+| `operator.impersonation` | object | off | Turns on impersonation. It needs `operator.users` and `organizations.platformRole`: only a platform operator starts one. |
+| `operator.impersonation.ttlMinutes` | number | 60 | A whole number from 5 to 240. The life of an impersonation session. The sliding refresh never moves it. |
+| `operator.impersonation.notice` | boolean | true | Sends the user a notice mail at each start. |
 
 ## Hooks
 

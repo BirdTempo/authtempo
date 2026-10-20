@@ -125,7 +125,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Area | Types |
 | --- | --- |
 | The auth object | `Auth`, `AuthApi`, `SessionApi`, `UserApi`, `IdentitiesApi`, `PublicUser`, `Caller`, `Result`, `Awaitable`, `PublicSession`, `ResolvedSession`, `ResolvedApiToken`, `SweepResult`, `Clock` |
-| Config | `AuthConfig`, `SecretVersion`, `Keyring`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `OrganizationsConfig`, `OrganizationLimits`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `TotpConfig`, `TotpGateConfig`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `HooksConfig`, `CaptchaConfig`, `AccountConfig`, `AccountNoticesConfig`, `AccountDeleteConfirmConfig` |
+| Config | `AuthConfig`, `SecretVersion`, `Keyring`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `OrganizationsConfig`, `OrganizationLimits`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `TotpConfig`, `TotpGateConfig`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `OperatorSecretEntry`, `OperatorScope`, `HooksConfig`, `CaptchaConfig`, `AccountConfig`, `AccountNoticesConfig`, `AccountDeleteConfirmConfig` |
 | Ports and seams | `StorageAdapter`, `LimiterPort`, `LimitWindow`, `MailPort`, `MailMessage`, `PasswordHashSeam`, `JwtSeam`, `WebAuthnSeam`, `DeriveGate`, `SignES256Input`, `VerifyIdTokenInput`, `JwsAlg`, `PublicJwk` |
 | Storage | `ModelName`, `Models`, `Where`, `Op`, `Sort`, `FindManyOptions`, `UserRow`, `IdentityRow`, `SessionRow`, `VerificationRow`, `PasskeyRow`, `PasswordRow`, `ApiTokenRow`, `OrganizationRow`, `MemberRow`, `InvitationRow`, `TotpRow`, `TrustedDeviceRow`, `SecondFactorRow`, `SecondFactorMethod`, `JwkRow`, `OAuthClientRow`, `OAuthConsentRow`, `OAuthTokenRow`, `OAuthDeviceRow`, `OAuthSubjectRow`, `OAuthSessionClientRow`, `OAuthLogoutRow`, `ClientAuthMethod`, `DeviceStatus`, `OperatorAuditRow`, `OperatorAction` |
 | Errors | `ErrorCode`, `OAuthErrorCode` |
@@ -214,6 +214,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `isOperatorSecret` | True when a value has the form of an operator secret. |
 | `OPERATOR_PER_IP` | The limit of `POST /operator/keys/rotate`: 5 calls per IP per hour. |
 | `OPERATOR_SECRETS_PER_IP` | The shared limit of the secret routes and the info route: 120 calls per IP per hour. |
+| `OPERATOR_USERS_PER_IP` | The limit of every secret call to the user, session, and audit routes of plan 12f: 600 calls per IP per hour. |
 
 ## The secrets entry
 

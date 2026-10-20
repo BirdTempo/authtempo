@@ -557,13 +557,61 @@ export interface ResolvedJwtMint {
   rotateEvery: number | null;
 }
 
+/** The scopes of a named operator secret (plan 12f). Each scope opens one group of operator routes. */
+export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit";
+
+/** One named operator secret with its scopes (plan 12f, owner decision 1). */
+export interface OperatorSecretEntry {
+  /** 1 to 32 characters of `[a-z0-9_-]`, first a letter or a digit. The audit row names the secret by it. */
+  name: string;
+  /** The SHA-256 of the secret, as 64 lowercase hex characters. Core stores the hash and never the secret. */
+  secretHash: string;
+  /** At least one scope. A secret with no scope could do nothing, so the config refuses it. */
+  scopes: OperatorScope[];
+}
+
+/**
+ * Set `secretHash` or `secrets`, not both. Each tool is off by default, so
+ * an upgrade from plan 11c opens no new route and widens no secret.
+ */
 export interface OperatorConfig {
   /**
    * The SHA-256 of the operator secret, as 64 lowercase hex characters
    * (plan 11c). Core stores this hash and never the secret, as it stores
-   * every token. Make the secret from 32 random bytes or more.
+   * every token. Make the secret from 32 random bytes or more. Plan 12f:
+   * it is one secret, named "default", with the scopes keys and secrets
+   * only, so an upgrade does not widen an 11c secret.
    */
-  secretHash: string;
+  secretHash?: string;
+  /**
+   * Plan 12f: named secrets, each with its scopes (owner decision 1). No
+   * default: an entry names its scopes, so no secret gets a scope by
+   * accident. Core compares a presented secret against every entry.
+   */
+  secrets?: OperatorSecretEntry[];
+  /**
+   * Plan 12f: the user, session, and audit tools. Off by default, because
+   * each tool reads or changes the accounts of every user. It needs a
+   * secret with the scope users or `organizations.platformRole`, so that
+   * an actor can use the tools.
+   */
+  users?: true;
+  /**
+   * Plan 12f: impersonation. Off by default, because an operator then acts
+   * as the user. It needs `users` and `organizations.platformRole`: only a
+   * platform operator starts one (owner decision 2). `ttlMinutes` is a
+   * whole number from 5 to 240, default 60: an hour serves a support call,
+   * and the session cannot outlive it. `notice` is true by default: the
+   * user gets a mail at each start (owner decision 3).
+   */
+  impersonation?: { ttlMinutes?: number; notice?: boolean };
+}
+
+/** The operator config after construction (plan 12f). The 11c `secretHash` is the entry "default". */
+export interface ResolvedOperator {
+  secrets: readonly Readonly<OperatorSecretEntry>[];
+  users: boolean;
+  impersonation: { ttlMinutes: number; notice: boolean } | null;
 }
 
 export interface OAuthConfig {
@@ -806,7 +854,7 @@ export interface ResolvedConfig {
   totp: ResolvedTotp | null;
   jwtMint: ResolvedJwtMint | null;
   oauth: ResolvedOAuth | null;
-  operator: { secretHash: string } | null;
+  operator: ResolvedOperator | null;
   openapi: boolean;
   hooks: ResolvedHooks;
   account: ResolvedAccount;
@@ -1120,7 +1168,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       appURL,
       trustedOrigins: input.trustedOrigins,
     }),
-    operator: resolveOperator(input.operator),
+    operator: resolveOperator(input.operator, organizations?.platformRole ?? null),
     openapi,
     hooks: resolveHooks(input.hooks, organizations !== null),
     account: resolveAccount(input.account),
@@ -1612,26 +1660,132 @@ function resolveJwtMint(
   };
 }
 
-const OPERATOR_KEYS: Readonly<Record<keyof OperatorConfig, true>> = { secretHash: true };
+const OPERATOR_KEYS: Readonly<Record<keyof OperatorConfig, true>> = {
+  secretHash: true,
+  secrets: true,
+  users: true,
+  impersonation: true,
+};
+const OPERATOR_ENTRY_KEYS: Readonly<Record<keyof OperatorSecretEntry, true>> = {
+  name: true,
+  secretHash: true,
+  scopes: true,
+};
+const OPERATOR_IMPERSONATION_KEYS: Readonly<
+  Record<keyof NonNullable<OperatorConfig["impersonation"]>, true>
+> = { ttlMinutes: true, notice: true };
+const OPERATOR_SCOPES: ReadonlySet<string> = new Set<OperatorScope>([
+  "keys",
+  "secrets",
+  "users",
+  "sessions",
+  "audit",
+]);
+const OPERATOR_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
+const HASH_TEXT = "must be the SHA-256 of the secret as 64 lowercase hex characters";
+
+/** One entry of `operator.secrets`, checked. The caller checks that names and hashes are unique. */
+function resolveOperatorEntry(input: unknown): OperatorSecretEntry {
+  if (!isPlainObject(input)) throw new ConfigError("operator.secrets[] must hold objects");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(OPERATOR_ENTRY_KEYS, key))
+      throw new ConfigError(
+        `operator.secrets[].${key} is not an option; core has name, secretHash, and scopes`,
+      );
+  const { name, secretHash, scopes } = input;
+  if (typeof name !== "string" || !OPERATOR_NAME.test(name))
+    throw new ConfigError("operator.secrets[].name must match ^[a-z0-9][a-z0-9_-]{0,31}$");
+  if (typeof secretHash !== "string" || !SHA256_HEX.test(secretHash))
+    throw new ConfigError(`operator.secrets[].secretHash ${HASH_TEXT}`);
+  if (!Array.isArray(scopes) || scopes.length === 0)
+    throw new ConfigError("operator.secrets[].scopes must list one scope or more");
+  for (const scope of scopes as unknown[])
+    if (typeof scope !== "string" || !OPERATOR_SCOPES.has(scope))
+      throw new ConfigError(
+        "operator.secrets[].scopes holds a scope that is not keys, secrets, users, sessions, or audit",
+      );
+  return Object.freeze({ name, secretHash, scopes: [...(scopes as OperatorScope[])] });
+}
 
 /**
- * `operator` (plans 11c and 11c2). Off when absent or `false`. It needs no
- * `jwtMint`: the secret routes and the info route serve without minting,
- * and `operatorRoutes` adds `keys/rotate` only with `jwtMint`.
+ * `operator` (plans 11c, 11c2, and 12f). Off when absent or `false`. It
+ * needs no `jwtMint`: the secret routes and the info route serve without
+ * minting, and `operatorRoutes` adds `keys/rotate` only with `jwtMint`.
+ * `platformRole` is the resolved `organizations.platformRole`: the user
+ * tools and the impersonation need an actor that can use them.
  */
-function resolveOperator(input: OperatorConfig | false | undefined): { secretHash: string } | null {
+function resolveOperator(
+  input: OperatorConfig | false | undefined,
+  platformRole: string | null,
+): ResolvedOperator | null {
   if (input === undefined || input === false) return null;
   if (!isPlainObject(input as unknown))
     throw new ConfigError("operator must be an object or false");
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(OPERATOR_KEYS, key))
-      throw new ConfigError(`operator.${key} is not an option; core has secretHash`);
-  if (typeof input.secretHash !== "string" || !SHA256_HEX.test(input.secretHash))
+      throw new ConfigError(
+        `operator.${key} is not an option; core has secretHash, secrets, users, and impersonation`,
+      );
+  let secrets: OperatorSecretEntry[];
+  if (input.secretHash !== undefined && input.secrets !== undefined)
+    throw new ConfigError("operator.secretHash and operator.secrets are both set; set one");
+  if (input.secrets !== undefined) {
+    if (!Array.isArray(input.secrets) || input.secrets.length === 0)
+      throw new ConfigError("operator.secrets must list one entry or more");
+    secrets = input.secrets.map((entry) => resolveOperatorEntry(entry));
+    const names = new Set(secrets.map((e) => e.name));
+    if (names.size !== secrets.length)
+      throw new ConfigError("operator.secrets[].name must be unique");
+    const hashes = new Set(secrets.map((e) => e.secretHash));
+    if (hashes.size !== secrets.length)
+      throw new ConfigError("operator.secrets[].secretHash must be unique");
+  } else {
+    if (typeof input.secretHash !== "string" || !SHA256_HEX.test(input.secretHash))
+      throw new ConfigError(`operator.secretHash ${HASH_TEXT}, or set operator.secrets`);
+    // The 11c secret keeps the scopes of 11c and 11c2: an upgrade does not widen it.
+    const scopes: OperatorScope[] = ["keys", "secrets"];
+    secrets = [Object.freeze({ name: "default", secretHash: input.secretHash, scopes })];
+  }
+  if (input.users !== undefined && input.users !== true)
+    throw new ConfigError("operator.users must be true or absent");
+  const users = input.users === true;
+  if (users && platformRole === null && !secrets.some((e) => e.scopes.includes("users")))
     throw new ConfigError(
-      "operator.secretHash must be the SHA-256 of the secret as 64 lowercase hex characters",
+      "operator.users needs a secret with the scope users or organizations.platformRole: else no actor can use the tools",
     );
-  return { secretHash: input.secretHash };
+  return {
+    secrets: Object.freeze(secrets),
+    users,
+    impersonation: resolveImpersonation(input.impersonation, users, platformRole),
+  };
+}
+
+/** `operator.impersonation` (plan 12f). Null when absent. */
+function resolveImpersonation(
+  input: OperatorConfig["impersonation"],
+  users: boolean,
+  platformRole: string | null,
+): ResolvedOperator["impersonation"] {
+  if (input === undefined) return null;
+  if (!isPlainObject(input as unknown))
+    throw new ConfigError("operator.impersonation must be an object");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(OPERATOR_IMPERSONATION_KEYS, key))
+      throw new ConfigError(
+        `operator.impersonation.${key} is not an option; core has ttlMinutes and notice`,
+      );
+  if (!users) throw new ConfigError("operator.impersonation needs operator.users");
+  // Only a platform operator starts an impersonation (owner decision 2).
+  if (platformRole === null)
+    throw new ConfigError("operator.impersonation needs organizations.platformRole");
+  const ttlMinutes = input.ttlMinutes ?? 60;
+  if (!Number.isSafeInteger(ttlMinutes) || ttlMinutes < 5 || ttlMinutes > 240)
+    throw new ConfigError("operator.impersonation.ttlMinutes must be a whole number from 5 to 240");
+  const notice = input.notice ?? true;
+  if (typeof notice !== "boolean")
+    throw new ConfigError("operator.impersonation.notice must be true or false");
+  return { ttlMinutes, notice };
 }
 
 const OAUTH_KEYS: Readonly<Record<keyof OAuthConfig, true>> = {

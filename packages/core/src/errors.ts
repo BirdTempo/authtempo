@@ -63,6 +63,12 @@ export const ERRORS = {
   sole_owner: 409,
   // plan 11g: an unhandled error of a route. The router answers it; no route names it.
   internal: 500,
+  // plan 12f: operator tools
+  account_banned: 403,
+  operator_required: 403,
+  operator_self: 409,
+  impersonation_refused: 403,
+  impersonation_session: 403,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;
