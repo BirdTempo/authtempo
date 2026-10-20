@@ -165,7 +165,11 @@ const roleCode =
         ? "ROLE_NOT_FOUND"
         : undefined;
 
-/** The name of a role that Better Auth names by its id: core's role calls take the name. */
+/**
+ * The name of a role that Better Auth names by its id: core's role calls take
+ * the name. A call by `roleId` lists the roles first, so it needs `ac:read`
+ * as well (README, "Access control and roles"). A call by `roleName` does not.
+ */
 async function roleName(
   c: Client,
   organizationId: string,
