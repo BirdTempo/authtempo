@@ -61,6 +61,12 @@ describe("organizations config", () => {
       /reservedSlugs/,
     );
     expect(() => makeAuth({ organizations: { platformRole: "operator" } })).toThrow(/platformRole/);
+    // With platformOrganization set, only the name check can refuse an unknown role.
+    expect(() =>
+      makeAuth({
+        organizations: { platformRole: "operator", platformOrganization: "platform-co" },
+      }),
+    ).toThrow("organizations.platformRole must be a name of roles or ranks");
     expect(() =>
       makeAuth({ organizations: { platformRole: "operator", ranks: { ...RANKS, operator: 5 } } }),
     ).toThrow(/platformOrganization/);
