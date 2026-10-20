@@ -378,8 +378,8 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
             throw invalid(model, w.field, "startsWith refuses a lone surrogate");
           // substr, not LIKE, as in core's builder (plan 12f deviation 2): exact, with case,
           // and no wildcard. The count is code points, as substr counts on both dialects.
+          // A nullAsEmpty field needs no "<> ''" clause: the prefix is never empty.
           parts.push(`substr(${c}, 1, ${p.add([...w.value].length)}) = ${enc(w.value)}`);
-          if (empty) parts.push(`${c} <> ''`);
           break;
         default: {
           // The four range ops only: lt, lte, gt, and gte.
