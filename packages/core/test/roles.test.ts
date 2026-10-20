@@ -351,25 +351,24 @@ describe("dynamic roles (plan 12k Task 4)", () => {
         permissions: { member: ["read"] },
       }),
     );
-    const h = bearer(await w.session("ada@example.com"));
     const del = async () =>
-      json(await w.auth.handle(post(`${P}/delete`, { organizationId, name: "editor" }, h)));
+      json(
+        await w.auth.handle(
+          post(
+            `${P}/delete`,
+            { organizationId, name: "editor" },
+            bearer(await w.session("ada@example.com")),
+          ),
+        ),
+      );
     const inUse = { status: 409, body: { error: "role_in_use" } };
-    // A part of the role string holds it: "member,editor".
+    // Only a member holds it, as a part of the role string: "member,editor".
     mustOk(
       await w.auth.api.updateMemberRole({
         user: ada,
         organizationId,
         userId: carol.id,
         role: "member,editor",
-      }),
-    );
-    const invitation = mustOk(
-      await w.auth.api.inviteMember({
-        user: ada,
-        organizationId,
-        email: "dave@example.com",
-        role: "editor",
       }),
     );
     expect(await del()).toEqual(inUse);
@@ -381,11 +380,18 @@ describe("dynamic roles (plan 12k Task 4)", () => {
         role: "member",
       }),
     );
-    // The member no longer holds it; the pending invitation does.
-    expect(await del()).toEqual(inUse);
+    // Only a pending invitation holds it.
     mustOk(
-      await w.auth.api.revokeInvitation({ user: ada, organizationId, invitationId: invitation.id }),
+      await w.auth.api.inviteMember({
+        user: ada,
+        organizationId,
+        email: "dave@example.com",
+        role: "editor",
+      }),
     );
+    expect(await del()).toEqual(inUse);
+    // An expired invitation holds no role: the default life is 7 days.
+    w.clock.advance(7 * DAY + 1);
     expect(await del()).toEqual({ status: 200, body: { ok: true } });
     expect(await w.storage.findMany("organizationRole", [])).toEqual([]);
   });
