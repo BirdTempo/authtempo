@@ -62,7 +62,7 @@ async function adminStanding(
   if (!organization) return fail("not_found");
   const m = await membership(config, input.organizationId, input.user.id);
   if (!m) return fail("forbidden_rank");
-  const standing = await effectiveIn(config, input.organizationId, m.member.role);
+  const standing = await effectiveIn(config, config.storage, input.organizationId, m.member.role);
   if (!can(standing.granted, RULE_STATEMENTS[rule])) return fail("forbidden_rank");
   return ok({ organization, standing });
 }
@@ -281,9 +281,9 @@ export async function acceptInvitation(
         { field: "userId", op: "eq", value: inv.inviterId },
       ]);
       const by: Standing = inviter
-        ? await effectiveIn(config, inv.organizationId, inviter.role)
+        ? await effectiveIn(config, tx, inv.organizationId, inviter.role)
         : { rank: 0, granted: {} };
-      const grant = await effectiveIn(config, inv.organizationId, inv.role);
+      const grant = await effectiveIn(config, tx, inv.organizationId, inv.role);
       const grantRank = grant.rank;
       // Only a pending row: an accepted row is a record of a grant that already happened.
       const lost = async (): Promise<"inviter_lost"> => {
@@ -312,7 +312,7 @@ export async function acceptInvitation(
       if (
         existing &&
         raise &&
-        !touchCheck(by, await effectiveIn(config, inv.organizationId, existing.role))
+        !touchCheck(by, await effectiveIn(config, tx, inv.organizationId, existing.role))
       )
         return lost();
       // The limit counts a new member row only: a raise of an existing member adds none.

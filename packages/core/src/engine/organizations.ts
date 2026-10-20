@@ -122,7 +122,12 @@ export async function standing(
   const m = await membership(config, organizationId, user.id);
   if (!m) return fail("forbidden_rank");
   // The rank of a dynamic role counts too (plan 12k Task 4), so a grant compares like with like.
-  const { rank, granted } = await effectiveIn(config, organizationId, m.member.role);
+  const { rank, granted } = await effectiveIn(
+    config,
+    config.storage,
+    organizationId,
+    m.member.role,
+  );
   // A null set needs membership only: a member may leave at any rank, rank 0 included.
   if (wanted !== null && !can(granted, wanted)) return fail("forbidden_rank");
   return ok({ ...m, rank, granted });
@@ -722,7 +727,7 @@ export async function grantable(
 ): Promise<Result<Standing>> {
   if (!ROLE_RE.test(role) || !roleAllowedIn(o, role, organization.slug))
     return fail("invalid_body");
-  const target = await effectiveIn(config, organization.id, role);
+  const target = await effectiveIn(config, config.storage, organization.id, role);
   // An unknown role ranks 0 and would be a silent no-rights member; refuse it with the same code as an escalation, so the caller learns nothing about the table.
   if (target.rank === 0 || !grantCheck(caller, target)) return fail("forbidden_rank");
   return ok(target);
@@ -836,7 +841,12 @@ export async function updateMemberRole(
   const target = await membership(config, input.organizationId, input.userId);
   if (!target) return fail("not_found");
   // A caller never touches a member above their own rank or with a right the caller lacks.
-  if (!touchCheck(s.value, await effectiveIn(config, input.organizationId, target.member.role)))
+  if (
+    !touchCheck(
+      s.value,
+      await effectiveIn(config, config.storage, input.organizationId, target.member.role),
+    )
+  )
     return fail("forbidden_rank");
   // Read the user before any write, so a missing user never answers not_found after a change.
   const user = await config.storage.findOne("user", [
@@ -924,7 +934,10 @@ export async function removeMember(
   if (!target) return fail("not_found");
   if (
     !self &&
-    !touchCheck(s.value, await effectiveIn(config, input.organizationId, target.member.role))
+    !touchCheck(
+      s.value,
+      await effectiveIn(config, config.storage, input.organizationId, target.member.role),
+    )
   )
     return fail("forbidden_rank");
   // The member's user, for the hook event. Read before any write.

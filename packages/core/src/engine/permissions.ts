@@ -11,6 +11,7 @@ import {
 import type { ResolvedConfig } from "../config.js";
 import { fail, ok, type Result } from "../result.js";
 import type { MemberRow, OrganizationRoleRow } from "../schema.js";
+import type { StorageAdapter } from "../storage/port.js";
 import { type ResolvedOrganizations, rankOf } from "./ranks.js";
 import type { Caller } from "./tokens.js";
 
@@ -35,9 +36,14 @@ export interface Standing {
  * A row with a bad shape grants nothing (rule 7). The shim's in-place table
  * holds rows that Better Auth wrote, so any text can be there. Core writes
  * one warn line with the row id per read, and never the permissions.
+ *
+ * `storage` is the handle to read through. Inside a transaction it is the
+ * transaction handle `tx`. A read through `config.storage` there waits for a
+ * second connection, and a Postgres pool of one then never ends the flow.
  */
 export async function effectiveIn(
   config: ResolvedConfig,
+  storage: StorageAdapter,
   organizationId: string,
   role: string,
 ): Promise<Standing> {
@@ -48,7 +54,7 @@ export async function effectiveIn(
   if (o.dynamicRoles === null) return { rank, granted };
   const unknown = [...new Set(role.split(","))].filter((part) => !Object.hasOwn(o.roles, part));
   if (unknown.length === 0) return { rank, granted };
-  const rows = await config.storage.findMany(
+  const rows = await storage.findMany(
     "organizationRole",
     [
       { field: "organizationId", op: "eq", value: organizationId },
@@ -130,7 +136,8 @@ async function effectiveFor(
       if (!member) return none;
       return {
         role: member.role,
-        permissions: (await effectiveIn(config, organizationId, member.role)).granted,
+        permissions: (await effectiveIn(config, config.storage, organizationId, member.role))
+          .granted,
       };
     }
     case "token": {
@@ -144,7 +151,7 @@ async function effectiveFor(
         { field: "id", op: "eq", value: caller.apiToken.id },
       ]);
       if (!row) return none;
-      const role = (await effectiveIn(config, organizationId, member.role)).granted;
+      const role = (await effectiveIn(config, config.storage, organizationId, member.role)).granted;
       return {
         role: member.role,
         permissions: row.permissions === null ? role : intersect(role, row.permissions),
