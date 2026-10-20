@@ -91,6 +91,17 @@ function freePort(): Promise<number> {
   });
 }
 
+/**
+ * What the status of the operator info probe proves (plan 12e Task 1, R-L1).
+ * A 200 to this run's secret: the Worker is this run's own. Another status:
+ * another server holds the port. No answer in time: a slow Worker under
+ * load, so the start asks again until its deadline.
+ */
+export function ownerOf(status: number | null): "own" | "other" | "wait" {
+  if (status === null) return "wait";
+  return status === 200 ? "own" : "other";
+}
+
 /** One started Worker: its base URL and port, the operator secret it holds, and its stop. */
 export interface ExampleWorker {
   base: string;
@@ -195,6 +206,7 @@ export async function startExampleWorker(): Promise<ExampleWorker> {
     rmSync(persist, { recursive: true, force: true, maxRetries: 3 });
   };
   // The loop ends 5 s before the deadline, so the stop below ends inside START_LIMIT_MS.
+  let infoSilent = false;
   while (child.exitCode === null && Date.now() < deadline - 5000) {
     const r = await fetch(`${base}/auth/session`, { signal: AbortSignal.timeout(2000) }).catch(
       () => null,
@@ -205,15 +217,23 @@ export async function startExampleWorker(): Promise<ExampleWorker> {
         headers: { authorization: `Operator ${operatorSecret}` },
         signal: AbortSignal.timeout(2000),
       }).catch(() => null);
-      if (own?.status === 200 && child.exitCode === null)
+      const owner = ownerOf(own?.status ?? null);
+      if (owner === "own" && child.exitCode === null)
         return { base, port, operatorSecret, operatorHash, stop };
-      await stop();
-      throw new Error(
-        `another server answers on ${base}: the operator info route answered ${own?.status ?? "nothing"} to this run's secret. ${log.slice(-2000)}`,
-      );
+      if (owner === "other") {
+        await stop();
+        throw new Error(
+          `another server answers on ${base}: the operator info route answered ${own?.status} to this run's secret. ${log.slice(-2000)}`,
+        );
+      }
+      infoSilent = true;
     }
     await sleep(300);
   }
   await stop();
-  throw new Error(`wrangler dev did not answer on ${base}: ${log.slice(-2000)}`);
+  throw new Error(
+    infoSilent
+      ? `wrangler dev answered on ${base}, but the operator info route never answered in time: ${log.slice(-2000)}`
+      : `wrangler dev did not answer on ${base}: ${log.slice(-2000)}`,
+  );
 }

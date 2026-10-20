@@ -2,6 +2,7 @@ import { afterAll, expect, it } from "vitest";
 import { assertFreshBuild } from "./support/bin.js";
 import {
   type ExampleWorker,
+  ownerOf,
   START_LIMIT_MS,
   startExampleWorker,
 } from "./support/example-worker.js";
@@ -17,6 +18,16 @@ afterAll(async () => {
 
 const info = (w: ExampleWorker, secret: string) =>
   fetch(`${w.base}/auth/operator/info`, { headers: { authorization: `Operator ${secret}` } });
+
+it("asks the operator info route again after no answer, and refuses only another status", () => {
+  expect([200, 401, 404, 500, null].map(ownerOf)).toEqual([
+    "own",
+    "other",
+    "other",
+    "other",
+    "wait",
+  ]);
+});
 
 it(
   "starts two Workers at once on two ports, and each accepts only its own operator secret",
