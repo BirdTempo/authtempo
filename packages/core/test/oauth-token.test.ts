@@ -8,6 +8,8 @@ import {
   authorized,
   basicHeader,
   codeFor,
+  consentPage,
+  consentPost,
   exchange,
   ISSUER,
   OTHER_RESOURCE,
@@ -672,5 +674,159 @@ describe("userinfo and the endpoint's edges (plan 9g)", () => {
       status: 400,
       body: { error: "invalid_request" },
     });
+  });
+});
+
+describe("the grant types of a client (review m1 of plan 12e, RFC 6749 5.2)", () => {
+  const DEVICE = "urn:ietf:params:oauth:grant-type:device_code";
+  const withDevice = () =>
+    oauthHandle({
+      oauth: {
+        resources: [RESOURCE, OTHER_RESOURCE],
+        scopes: { "mcp:read": "Read your documents" },
+        registration: { cimd: false, dynamic: true },
+        device: {},
+      },
+    });
+  /** A client of the register route with `grants`, or with no grant_types member. */
+  async function clientOf(h: ReturnType<typeof oauthHandle>, grants?: string[]) {
+    const res = await h.auth.handle(
+      new Request(`${BASE_URL}/auth/oauth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: BASE_URL },
+        body: JSON.stringify({
+          redirect_uris: [REDIRECT],
+          client_name: "Grant client",
+          ...(grants ? { grant_types: grants } : {}),
+        }),
+      }),
+    );
+    if (res.status !== 201) throw new Error(`register answered ${res.status}`);
+    return (await res.json()) as { client_id: string; grant_types: string[] };
+  }
+  const setGrants = async (
+    h: ReturnType<typeof oauthHandle>,
+    clientId: string,
+    grants: string[],
+  ) => {
+    const r = await h.auth.api.oauth?.clients.update({ clientId, grantTypes: grants });
+    if (!r?.ok) throw new Error("update failed");
+  };
+  const refreshRows = (h: ReturnType<typeof oauthHandle>) => h.storage.findMany("oauthToken", []);
+
+  it("keeps both grants of a client that names no grant_types, and gives it a refresh token", async () => {
+    const h = oauthHandle();
+    const client = await clientOf(h);
+    expect(client.grant_types).toEqual(["authorization_code", "refresh_token"]);
+    const s = await signedIn(h);
+    const p = await pkce();
+    const { code } = await authorized(h, s.cookie, {
+      clientId: client.client_id,
+      challenge: p.challenge,
+    });
+    const t = await tokens(await h.auth.handle(exchange(code, client.client_id, p.verifier)));
+    expect(t.refresh_token).toMatch(/^or_/);
+  });
+
+  it("redirects unauthorized_client at the authorize step for a client without authorization_code", async () => {
+    const h = withDevice();
+    const client = await clientOf(h, [DEVICE]);
+    const s = await signedIn(h);
+    const p = await pkce();
+    const page = await h.auth.handle(
+      get(
+        `/auth/oauth/authorize?${new URLSearchParams({
+          response_type: "code",
+          client_id: client.client_id,
+          redirect_uri: REDIRECT,
+          code_challenge: p.challenge,
+          code_challenge_method: "S256",
+          scope: "mcp:read",
+          resource: RESOURCE,
+          state: "st-9",
+        })}`,
+        { cookie: s.cookie },
+      ),
+    );
+    expect(page.status).toBe(302);
+    const to = new URL(page.headers.get("location") ?? "");
+    expect(`${to.origin}${to.pathname}`).toBe(REDIRECT);
+    expect(to.searchParams.get("error")).toBe("unauthorized_client");
+    expect(to.searchParams.get("state")).toBe("st-9");
+  });
+
+  it("redirects unauthorized_client at the consent post when the client lost authorization_code", async () => {
+    const h = withDevice();
+    const client = await clientOf(h, ["authorization_code", DEVICE]);
+    const s = await signedIn(h);
+    const p = await pkce();
+    const { requestId } = await consentPage(h, s.cookie, {
+      clientId: client.client_id,
+      challenge: p.challenge,
+      scope: "mcp:read",
+    });
+    await setGrants(h, client.client_id, [DEVICE]);
+    const done = await h.auth.handle(
+      consentPost({ request_id: requestId, decision: "allow" }, { cookie: s.cookie }),
+    );
+    expect(done.status).toBe(302);
+    const to = new URL(done.headers.get("location") ?? "");
+    expect(to.searchParams.get("error")).toBe("unauthorized_client");
+    expect(to.searchParams.get("code")).toBeNull();
+  });
+
+  it("answers unauthorized_client at the exchange when the client lost authorization_code", async () => {
+    const h = withDevice();
+    const client = await clientOf(h, ["authorization_code", "refresh_token", DEVICE]);
+    const s = await signedIn(h);
+    const p = await pkce();
+    const { code } = await authorized(h, s.cookie, {
+      clientId: client.client_id,
+      challenge: p.challenge,
+      scope: "mcp:read",
+    });
+    await setGrants(h, client.client_id, [DEVICE]);
+    const res = await h.auth.handle(exchange(code, client.client_id, p.verifier));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "unauthorized_client" });
+  });
+
+  it("writes no refresh row for a client without refresh_token, even with offline_access", async () => {
+    const h = oauthHandle();
+    const client = await clientOf(h, ["authorization_code"]);
+    const s = await signedIn(h);
+    const p = await pkce();
+    const { code } = await authorized(h, s.cookie, {
+      clientId: client.client_id,
+      challenge: p.challenge,
+      scope: "mcp:read offline_access",
+    });
+    const t = await tokens(await h.auth.handle(exchange(code, client.client_id, p.verifier)));
+    expect(t.refresh_token).toBeUndefined();
+    expect(t.access_token).toEqual(expect.any(String));
+    expect(await refreshRows(h)).toEqual([]);
+  });
+
+  it("answers unauthorized_client at the refresh when the client lost refresh_token, and keeps the row", async () => {
+    const h = oauthHandle();
+    const client = await clientOf(h);
+    const s = await signedIn(h);
+    const p = await pkce();
+    const { code } = await authorized(h, s.cookie, {
+      clientId: client.client_id,
+      challenge: p.challenge,
+    });
+    const t = await tokens(await h.auth.handle(exchange(code, client.client_id, p.verifier)));
+    await setGrants(h, client.client_id, ["authorization_code"]);
+    const res = await h.auth.handle(refreshWith(t.refresh_token ?? "", client.client_id));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "unauthorized_client" });
+    const rows = await refreshRows(h);
+    expect(rows.map((r) => r.usedAt)).toEqual([null]);
+    // The grant back: the same token refreshes.
+    await setGrants(h, client.client_id, ["authorization_code", "refresh_token"]);
+    expect((await h.auth.handle(refreshWith(t.refresh_token ?? "", client.client_id))).status).toBe(
+      200,
+    );
   });
 });

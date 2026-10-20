@@ -281,7 +281,8 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
     expires_in: exp - iat,
     scope,
   };
-  if (g.grantScopes.includes("offline_access")) {
+  // A refresh row only for a client of the refresh grant (review m1 of plan 12e).
+  if (g.grantScopes.includes("offline_access") && g.client.grantTypes.includes("refresh_token")) {
     const fresh = await writeRefresh(config, g, now);
     // The race of refreshGrant: a reuse, a reset, or a grant revoke deleted
     // the family before this write, so the spent row is gone. At the code
@@ -355,8 +356,10 @@ export async function exchangeCode(
     dpop: DpopBinding | null;
   },
 ): Promise<OAuthResult<TokenAnswer>> {
-  if (!CODE_RE.test(input.code)) return oauthFail("invalid_grant");
   const { client } = input.client;
+  // RFC 6749 section 5.2: a client without the grant spends no code (review m1 of plan 12e).
+  if (!client.grantTypes.includes("authorization_code")) return oauthFail("unauthorized_client");
+  if (!CODE_RE.test(input.code)) return oauthFail("invalid_grant");
   const valueHash = await sha256Hex(input.code);
   const consumed = await consumeVerification(config.storage, {
     purpose: "oauth-code",
@@ -537,6 +540,8 @@ export async function refreshGrant(
   },
 ): Promise<OAuthResult<TokenAnswer>> {
   const client = input.client.client;
+  // RFC 6749 section 5.2: a client without the grant spends no token (review m1 of plan 12e).
+  if (!client.grantTypes.includes("refresh_token")) return oauthFail("unauthorized_client");
   const row = await refreshRowOf(config, input.refreshToken);
   if (!row || row.clientId !== client.id) return oauthFail("invalid_grant");
   // RFC 9449 section 5: a bound token needs a proof of its key. This runs

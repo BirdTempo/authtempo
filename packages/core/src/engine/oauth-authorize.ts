@@ -212,6 +212,8 @@ export async function checkAuthorize(
   const responseType = single(params, "response_type");
   if (responseType === undefined) return back("invalid_request", state);
   if (responseType !== "code") return back("unsupported_response_type", state);
+  // RFC 6749 section 4.1.2.1: the client must hold the code grant (review m1 of plan 12e).
+  if (!client.grantTypes.includes("authorization_code")) return back("unauthorized_client", state);
   // Absent, or S256 with a good challenge. Whether this client may omit it waits for the scopes and the nonce.
   const challenge = single(params, "code_challenge");
   const method = single(params, "code_challenge_method");
