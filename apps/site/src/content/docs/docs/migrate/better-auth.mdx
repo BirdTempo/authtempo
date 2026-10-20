@@ -160,7 +160,7 @@ The table prefix `ta_` keeps the old product name tempo-auth for compatibility. 
 The `apiKey` plugin maps onto core's API tokens. Better Auth stores the SHA-256 of the whole key. So `moveBetterAuthApiKeys` moves each key into core's token table, and the key keeps working under the same secret. A new key has core's prefix, `tk_` for a user or `to_` for an organization. Each step states what breaks without it.
 
 1. Before the cutover, run `moveBetterAuthApiKeys` with `dryRun: true` against a copy of the database. The report gives the count of keys per owner and the stored prefixes. Without it, you do not know whom to tell, or which prefixes to list.
-2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Without it, a moved key with that prefix answers `INVALID_API_KEY`.
+2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Re-issue each key with no prefix, and delete its row. Without it, the move throws before its first write and moves nothing. Pass `movedPrefixes: movedKeyPrefixesOf(options)` to the move, so it reads the list that core reads.
 3. Tell each owner whose key the report skips: a disabled key, an expired key, or a key with no digest. After the cutover such a key answers 401 `token_retired`, and every script that uses one stops.
 4. Deploy the shim build with the compat migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
 5. Run `moveBetterAuthApiKeys` with `dryRun: false` once. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.

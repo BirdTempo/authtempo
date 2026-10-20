@@ -157,11 +157,21 @@ function apiKeyTokens(options: BetterAuthOptions): Pick<AuthConfig, "tokens"> {
           seconds: (rate?.timeWindow ?? API_KEY_DEFAULT_WINDOW.seconds * 1000) / 1000,
           max: rate?.maxRequests ?? API_KEY_DEFAULT_WINDOW.max,
         };
+  return { tokens: { defaultRateLimit, movedPrefixes: movedKeyPrefixesOf(options) } };
+}
+
+/**
+ * The moved prefixes of an app: `defaultPrefix` and each entry of
+ * `authtempo.movedKeyPrefixes`, each once. It is core's `tokens.movedPrefixes`
+ * and the input of `moveBetterAuthApiKeys`, so both read one list.
+ */
+export function movedKeyPrefixesOf(options: BetterAuthOptions): string[] {
+  const keys = pluginOf(options, "api-key")?.options;
   const prefixes = [
-    ...(keys.defaultPrefix !== undefined ? [keys.defaultPrefix] : []),
+    ...(keys?.defaultPrefix !== undefined ? [keys.defaultPrefix] : []),
     ...(options.authtempo?.movedKeyPrefixes ?? []),
   ];
-  return { tokens: { defaultRateLimit, movedPrefixes: [...new Set(prefixes)] } };
+  return [...new Set(prefixes)];
 }
 
 type OrganizationsConfig = Extract<AuthConfig["organizations"], object>;

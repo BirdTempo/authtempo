@@ -13,7 +13,7 @@ import { betterAuthPasswordHash } from "../src/hash.js";
 import { bearer, organization } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
-import { mapOptions } from "../src/server/map-options.js";
+import { mapOptions, movedKeyPrefixesOf } from "../src/server/map-options.js";
 import type { ApiKeyOptions, BetterAuthOptions, CompatDatabase } from "../src/types.js";
 
 const BASE = "https://api.example.com";
@@ -114,6 +114,13 @@ describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
       defaultRateLimit: { seconds: 60, max: 600 },
       movedPrefixes: ["laaa_"],
     });
+    // The move input reads the same list: defaultPrefix first, each prefix once.
+    expect(
+      movedKeyPrefixesOf({
+        ...o,
+        authtempo: { ...o.authtempo, movedKeyPrefixes: ["ci_", "laaa_"] },
+      }),
+    ).toEqual(["laaa_", "ci_"]);
     // Better Auth's apiKey:delete is core's apiToken:revoke (role-map.ts).
     const org = config.organizations;
     if (!org) throw new Error("no organizations config");

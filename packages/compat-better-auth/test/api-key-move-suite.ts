@@ -2,6 +2,7 @@ import { createPbkdf2PasswordHash } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { createAccessControl, defaultStatements } from "../src/access.js";
 import { apiKey } from "../src/api-key.js";
+import { BetterAuthCompatError } from "../src/compat-error.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { organization } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
@@ -153,11 +154,17 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
         await m.close();
       }
     };
-    const move = (m: MoveDatabase, references: "user" | "organization", dryRun = false) =>
+    const move = (
+      m: MoveDatabase,
+      references: "user" | "organization",
+      dryRun = false,
+      movedPrefixes: readonly string[] = ["laaa_"],
+    ) =>
       moveBetterAuthApiKeys(m.database, {
         names: m.database.names,
         references,
         dryRun,
+        movedPrefixes,
         statements: { project: ["read", "write"] },
       });
 
@@ -197,6 +204,42 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
         expect(rows[0]?.rateLimitMax).toBe(600);
         // The hint is Better Auth's start: the first 6 characters, the prefix included.
         expect(rows[0]?.hint).toBe(live.slice(0, 6));
+      }),
+    );
+
+    it(
+      "refuses a stored prefix outside movedPrefixes and a row with no prefix before any write",
+      fresh(async (m) => {
+        const { auth, person } = app(m, "user");
+        const ada = await person("ada@example.com");
+        // Probe P3 of the Task 12 review: Better Auth accepts both keys.
+        const ci = generatedKey("ci_");
+        const bare = generatedKey("");
+        await m.insertKey(await keyRow(ci, { referenceId: ada.user.id, prefix: "ci_" }));
+        await m.insertKey(await keyRow(bare, { referenceId: ada.user.id, prefix: null }));
+        await m.insertKey(await keyRow(generatedKey("laaa_"), { referenceId: ada.user.id }));
+        for (const dryRun of [true, false]) {
+          const error = await move(m, "user", dryRun).then(
+            () => null,
+            (e: unknown) => e,
+          );
+          expect(error).toBeInstanceOf(BetterAuthCompatError);
+          expect((error as BetterAuthCompatError).refusals).toEqual([
+            "moveBetterAuthApiKeys: apikey rows with no prefix: 1; such a key never reaches the lookup of the moved keys, so re-issue it and delete its row",
+            "moveBetterAuthApiKeys: no moved prefix starts the stored prefixes ci_; put each one in authtempo.movedKeyPrefixes",
+          ]);
+        }
+        // No write: not even the key whose prefix is listed moved.
+        expect(
+          await m.database.storage.findMany("apiToken", [
+            { field: "userId", op: "eq", value: ada.user.id },
+          ]),
+        ).toEqual([]);
+        // With ci_ listed, only the row with no prefix stops the move.
+        await expect(move(m, "user", true, ["laaa_", "ci_"])).rejects.toThrow(
+          "apikey rows with no prefix: 1",
+        );
+        expect((await auth.api.verifyApiKey({ body: { key: ci } })).valid).toBe(false);
       }),
     );
 

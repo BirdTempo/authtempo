@@ -14,6 +14,7 @@ export {
 export { betterAuthPasswordHash, SCRYPT, type ScryptFn } from "./hash.js";
 export { expo, passkey } from "./plugins.js";
 export { betterAuth } from "./server/better-auth.js";
+export { movedKeyPrefixesOf } from "./server/map-options.js";
 export {
   type ApiKeyMoveInput,
   type ApiKeyMoveReport,

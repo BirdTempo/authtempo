@@ -43,6 +43,12 @@ export interface ApiKeyMoveInput {
   /** True: read and count, and write nothing. */
   dryRun: boolean;
   /**
+   * Core's `tokens.movedPrefixes` of the app: `movedKeyPrefixesOf(options)`.
+   * Only a bearer with one of them reaches the lookup of the moved keys, so
+   * the move refuses a stored prefix outside the list (ruling 40 of plan 12k).
+   */
+  movedPrefixes: readonly string[];
+  /**
    * The app's own statements in Better Auth's names, as its `ac` holds them.
    * Core's six resources are always known. Absent: only those.
    */
@@ -187,12 +193,39 @@ async function firstOwner(
 }
 
 /**
+ * Ruling 40 of plan 12k: the check before the first write, and on a dry run
+ * too. A moved key acts only when its bearer starts with a moved prefix. So
+ * a stored prefix outside the list, or a row with no prefix, would move a
+ * key that never acts. The move then throws and writes nothing.
+ */
+function unroutable(
+  rows: readonly Record<string, unknown>[],
+  stored: ReadonlySet<string>,
+  movedPrefixes: readonly string[],
+): void {
+  const missing = [...stored].sort().filter((p) => !movedPrefixes.some((m) => p.startsWith(m)));
+  const bare = rows.filter((r) => typeof r.prefix !== "string" || r.prefix === "").length;
+  const out: string[] = [];
+  if (missing.length > 0)
+    out.push(
+      `moveBetterAuthApiKeys: no moved prefix starts the stored prefixes ${missing.join(", ")}; put each one in authtempo.movedKeyPrefixes`,
+    );
+  if (bare > 0)
+    out.push(
+      `moveBetterAuthApiKeys: apikey rows with no prefix: ${bare}; such a key never reaches the lookup of the moved keys, so re-issue it and delete its row`,
+    );
+  if (out.length > 0) throw new BetterAuthCompatError(out);
+}
+
+/**
  * Moves each apikey row into core's token table (owner decision 4 of plan
  * 12k). By ruling 2 a moved row acts as the old key, under the same secret:
  * the move writes no retired mark. Idempotent: a row whose digest exists in
  * core's tables is skipped. A disabled, expired, or undigested row is
  * skipped, and its key answers `token_retired` by its prefix after the
  * cutover. `dryRun: true` writes nothing and answers the same report.
+ * Before any write, a stored prefix outside `movedPrefixes`, or a row with
+ * no prefix, throws (`unroutable`).
  *
  * Storage calls: one raw read of apikey. Then per row: one findOne in each
  * token table, and one create unless `dryRun`. An organization key with no
@@ -228,10 +261,12 @@ export async function moveBetterAuthApiKeys(
     }
     return row;
   });
+  for (const row of rows)
+    if (typeof row.prefix === "string" && row.prefix !== "") prefixes.add(row.prefix);
+  unroutable(rows, prefixes, input.movedPrefixes);
   const now = new Date();
   const db = storage.storage;
   for (const row of rows) {
-    if (typeof row.prefix === "string" && row.prefix !== "") prefixes.add(row.prefix);
     if (!boolOf(row.enabled, true)) {
       report.skipped.disabled++;
       continue;

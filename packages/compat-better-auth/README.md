@@ -1207,8 +1207,15 @@ in the answer of the create.
 
 ### Cutover of API keys
 
-`moveBetterAuthApiKeys(storage, { names, references, dryRun, statements })`
-moves each `apikey` row into core's token table. Better Auth stores the
+`moveBetterAuthApiKeys(storage, { names, references, dryRun, movedPrefixes, statements })`
+moves each `apikey` row into core's token table. `movedPrefixes` is
+`movedKeyPrefixesOf(options)`, the list that core's `tokens.movedPrefixes`
+holds. Before any write, and on a dry run too, the move throws a
+`BetterAuthCompatError` when no entry starts a stored prefix, or when a row
+has no prefix. The error names each such prefix and counts the rows with no
+prefix (ruling 40 of plan 12k). Such a key could never act after the move,
+because only a bearer with a moved prefix reaches the lookup of the moved
+keys. Better Auth stores the
 SHA-256 of the whole key in base64url, so the digest moves. A moved key acts
 under the same secret, with no re-issue (ruling 2 of plan 12k). A row
 with `enabled` false, a row past `expiresAt`, and a row whose digest is not
@@ -1224,7 +1231,7 @@ until they revoke some.
 Each step is a runbook line, with what breaks without it:
 
 1. Before the cutover, run `moveBetterAuthApiKeys` with `dryRun: true` against a copy of the database. The report gives the count of keys per owner and the stored prefixes. Without it, you do not know whom to tell, or which prefixes to list.
-2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Without it, a moved key with that prefix answers `INVALID_API_KEY`, because core does not send it to the hash lookup.
+2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Re-issue each key with no prefix, and delete its row. Without it, the move throws and moves nothing.
 3. Tell each owner whose key the report skips. After the cutover a skipped key answers 401 `token_retired` (`KEY_DISABLED` from `verifyApiKey`), and every script that uses one stops.
 4. Deploy the shim build with migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
 5. Run `moveBetterAuthApiKeys` with `dryRun: false` once. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
