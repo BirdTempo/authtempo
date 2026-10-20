@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { gzipSync } from "node:zlib";
 import { describe, expect, it } from "vitest";
 import {
   breakingByMinor,
@@ -93,6 +94,48 @@ function addReleased(dir: string, name: string, version: string): void {
   });
 }
 
+/** One entry of a tarball that writeTar makes. The type is the ustar type flag. */
+interface TarEntry {
+  name: string;
+  type?: "0" | "1" | "2" | "5";
+  body?: string;
+  link?: string;
+}
+
+/**
+ * Writes a gzip ustar file with `entries`, in order. A test makes each entry
+ * that pnpm pack never writes, such as a link or a path outside package/.
+ */
+function writeTar(path: string, entries: TarEntry[]): void {
+  const blocks: Buffer[] = [];
+  for (const entry of entries) {
+    const body = Buffer.from(entry.body ?? "");
+    const header = Buffer.alloc(512);
+    header.write(entry.name, 0, 100);
+    header.write("0000644\0", 100);
+    header.write("0000000\0", 108);
+    header.write("0000000\0", 116);
+    header.write(`${body.length.toString(8).padStart(11, "0")}\0`, 124);
+    header.write("00000000000\0", 136);
+    header.write(" ".repeat(8), 148);
+    header.write(entry.type ?? "0", 156);
+    header.write(entry.link ?? "", 157, 100);
+    header.write("ustar\0", 257);
+    header.write("00", 263);
+    const sum = header.reduce((a, b) => a + b, 0);
+    header.write(`${sum.toString(8).padStart(6, "0")}\0 `, 148);
+    blocks.push(header, body, Buffer.alloc((512 - (body.length % 512)) % 512));
+  }
+  blocks.push(Buffer.alloc(1024));
+  writeFileSync(path, gzipSync(Buffer.concat(blocks)));
+}
+
+/** A package.json entry of a tarball. */
+const manifestEntry = (name: string): TarEntry => ({
+  name: "package/package.json",
+  body: JSON.stringify({ name, version: "0.1.0" }),
+});
+
 /** Runs pnpm pack in `dir` and gives the path of the one new tarball in `out`. */
 function pack(dir: string, out: string): string {
   const before = new Set(readdirSync(out));
@@ -117,6 +160,14 @@ describe("check-pack", () => {
     expect(failuresOf({ files: [...PACKED, "scripts/x.mjs"] })).toEqual([
       "the tarball holds scripts/x.mjs, which is outside files and the always-shipped files",
     ]);
+  });
+
+  it("fails a files entry that is a pattern", () => {
+    const manifest = structuredClone(MANIFEST);
+    manifest.files = ["dist/*.js", "CHANGELOG.md"];
+    expect(failuresOf({ manifest })).toContain(
+      "the files entry dist/*.js is a pattern, and check-pack reads only paths",
+    );
   });
 
   it("fails each forbidden name", () => {
@@ -173,6 +224,14 @@ describe("check-pack", () => {
     expect(failuresOf({ files: lacks("dist/bin/fixture.js"), needs: [] })).toEqual([
       'bin["fixture"] names dist/bin/fixture.js, which the tarball lacks',
     ]);
+  });
+
+  it("fails a target that is a pattern", () => {
+    expect(
+      withManifest((m) => {
+        m.exports = { ...(m.exports as object), "./*": "./dist/*.js" };
+      }),
+    ).toEqual(['exports["./*"] names the pattern dist/*.js, which check-pack cannot read']);
   });
 
   it("fails a workspace: text", () => {
@@ -334,6 +393,54 @@ describe("check-pack", () => {
         (list as unknown[]).every((p) => typeof p === "string" && p !== ""),
         name,
       ).toBe(true);
+    }
+  });
+
+  it("fails a tarball of a package that the tree does not release", () => {
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    try {
+      const path = join(out, "other.tgz");
+      writeTar(path, [manifestEntry("@authtempo/other")]);
+      expect(checkTarballs(fixture("root"), [path]).failures).toEqual([
+        `${path}: @authtempo/other is not a released package`,
+        "@authtempo/fixture: no tarball",
+        "read 0 tarballs",
+        "read 0 files",
+      ]);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
+  });
+
+  it("fails a released package with no needs entry, and a group of two versions", () => {
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    const roots: string[] = [];
+    try {
+      const path = pack(fixture("root/packages/fixture"), out);
+      const noNeeds = copyRoot((dir) => writeFileSync(join(dir, "release/pack-needs.json"), "{}"));
+      roots.push(noNeeds);
+      expect(checkTarballs(noNeeds, [path]).failures).toEqual([
+        "@authtempo/fixture: no entry in release/pack-needs.json",
+      ]);
+      const twoVersions = copyRoot((dir) => addReleased(dir, "@authtempo/second", "0.2.0"));
+      roots.push(twoVersions);
+      expect(checkTarballs(twoVersions, [path]).failures).toEqual([
+        "the released packages hold 2 versions: 0.1.0, 0.2.0",
+        "@authtempo/second: no tarball",
+      ]);
+    } finally {
+      for (const dir of [out, ...roots]) rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a tarball entry outside package/", () => {
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    try {
+      const path = join(out, "outside.tgz");
+      writeTar(path, [manifestEntry("@authtempo/fixture"), { name: "other/x.js", body: "x" }]);
+      expect(() => readTarball(path)).toThrow(`${path}: other/x.js is not under package/`);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
     }
   });
 
