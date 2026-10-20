@@ -284,6 +284,11 @@ export const consumerb = {
   ],
 };
 
+// Better Auth 1.7.5's second argument of apiKey: the type refuses it, and checkOptions refuses
+// it at run time (plan 12k Task 12 review, L7).
+// @ts-expect-error apiKey takes one options object
+apiKey({ defaultPrefix: "laaa_" }, {});
+
 // One guard per option type that lost its index signature in plan 9b. Each
 // line below the directive holds a key the type does not name. If an index
 // signature comes back on that type, the key compiles, the directive is

@@ -1214,7 +1214,14 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
         refuse(out, `plugins[passkey].${key}`, "required");
     }
   }
-  const keys = pluginOf(options, "api-key")?.options;
+  const keyPlugin = pluginOf(options, "api-key");
+  if (keyPlugin?.secondArgument)
+    refuse(
+      out,
+      "plugins[api-key]",
+      `apiKey takes one options object; a second argument is refused ${ITEM_20}`,
+    );
+  const keys = keyPlugin?.options;
   // Better Auth 1.7.5 answers ORGANIZATION_PLUGIN_REQUIRED at the first call (dist/index.mjs:526).
   if (keys?.references === "organization" && !org)
     refuse(

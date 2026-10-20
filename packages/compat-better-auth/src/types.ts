@@ -564,7 +564,10 @@ export type BearerPlugin = Marker<"bearer", BearerOptions>;
 export type ExpoPlugin = Marker<"expo", ExpoOptions>;
 export type TwoFactorPlugin = Marker<"two-factor", TwoFactorOptions>;
 export type AdminPlugin = Marker<"admin", AdminOptions>;
-export type ApiKeyPlugin = Marker<"api-key", ApiKeyOptions>;
+export type ApiKeyPlugin = Marker<"api-key", ApiKeyOptions> & {
+  /** True when the call had a second argument, which checkOptions refuses (plan 12k Task 12 review, L7). */
+  readonly secondArgument?: true;
+};
 export type CompatPlugin =
   | AdminPlugin
   | OrganizationPlugin

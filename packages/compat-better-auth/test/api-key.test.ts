@@ -157,6 +157,19 @@ describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
     );
   });
 
+  it("refuses a second argument of apiKey, which JavaScript would drop", () => {
+    // Better Auth 1.7.5 takes apiKey(configurations, options); the shim's type has one argument.
+    const loose = apiKey as (...args: unknown[]) => ReturnType<typeof apiKey>;
+    const o = {
+      ...options(CONSUMER_B_KEYS),
+      plugins: [consumerbOrganization(), loose(CONSUMER_B_KEYS, {})],
+    };
+    expect(checkOptions(o).refusals).toEqual([
+      "plugins[api-key]: apiKey takes one options object; a second argument is refused (spec 29 item 20)",
+    ]);
+    expect(() => betterAuth(o)).toThrowError(/a second argument is refused/);
+  });
+
   it("creates an organization key with no permissions and verifies it with valid true", async () => {
     const { auth, person } = app(CONSUMER_B_KEYS);
     const ada = await person("ada@example.com");
