@@ -69,6 +69,7 @@ import test from "../../../../../samples/guides/organizations.test.ts?raw";
 - [`email_unverified`](/docs/reference/errors/#email_unverified): the caller must prove the address first.
 - [`invalid_token`](/docs/reference/errors/#invalid_token) and [`token_expired`](/docs/reference/errors/#token_expired): the invitation is spent, revoked, old, or its inviter lost the rank.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): too many invitations, accepts, or slug reads.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the slug check got an empty slug, a slug over 64 characters, or another key.
 
 ## Next
 
