@@ -316,6 +316,50 @@ const WITH_REASONS: Record<string, string> = {
   version: "the packageManager field of package.json is the one source",
 };
 
+/** The files of the checkout and the root scripts of package.json. The test replaces both. */
+export interface Tree {
+  exists(path: string): boolean;
+  scripts: Record<string, string>;
+}
+
+/**
+ * The files that a workflow calls and a later task of plan 12j adds. The
+ * exists rule skips each one. An entry whose file exists fails as stale, so
+ * the task that adds the file removes its entry.
+ */
+const LATER: { path: string; task: string }[] = [
+  { path: "scripts/release/src/prepare.ts", task: "Task 6 (plan line 464)" },
+  { path: "scripts/release/src/release-check.ts", task: "Task 14 (plan line 941)" },
+];
+
+/** The pnpm commands of the workflows that are not root scripts. */
+const PNPM_COMMANDS = ["install", "turbo"];
+
+const nodePaths = (text: string) =>
+  [...text.matchAll(/\bnode\s+([\w./-]+)/g)].map((m) => m[1] ?? "");
+
+/**
+ * The failures of one run line whose script file does not exist. A missing
+ * file fails on the release day, so it fails here first.
+ */
+function pathFailures(run: string, tree: Tree): string[] {
+  const out: string[] = [];
+  const later = (path: string) => LATER.some((l) => l.path === path);
+  for (const path of nodePaths(run))
+    if (!later(path) && !tree.exists(path)) out.push(`${path} does not exist`);
+  for (const m of run.matchAll(/\bpnpm\s+([^\s-]\S*)/g)) {
+    const name = m[1] ?? "";
+    if (PNPM_COMMANDS.includes(name)) continue;
+    const script = tree.scripts[name];
+    if (script === undefined) out.push(`pnpm ${name} is not a root script of package.json`);
+    else
+      for (const path of nodePaths(script))
+        if (!later(path) && !tree.exists(path))
+          out.push(`pnpm ${name} runs ${path}, which does not exist`);
+  }
+  return out;
+}
+
 /** The jobs of each file, and the one job that may mint an OIDC token. */
 const PUBLISH_JOB = "publish";
 
@@ -375,6 +419,7 @@ function checkJob(
   file: string,
   name: string,
   job: YamlNode,
+  tree: Tree,
   counts: { uses: number; pinned: number },
   fail: (message: string) => void,
 ): void {
@@ -431,6 +476,7 @@ function checkJob(
         fail(`${where}: an expression in a run line; pass the value through env`);
       if (PUBLISH_COMMAND.test(run))
         fail(`${where}: a publish command outside node scripts/release/src/publish.ts`);
+      for (const message of pathFailures(run, tree)) fail(`${where}: ${message}`);
     }
   });
 
@@ -470,6 +516,7 @@ function checkJob(
 function checkFile(
   file: string,
   text: string,
+  tree: Tree,
   counts: { uses: number; pinned: number },
   fail: (message: string) => void,
 ): void {
@@ -510,7 +557,7 @@ function checkFile(
   const jobs = entriesOf(top.jobs);
   const want = Object.keys(JOBS[file] ?? {});
   if (Object.keys(jobs).join(",") !== want.join(",")) fail(`the jobs are not ${want.join(", ")}`);
-  for (const [name, job] of Object.entries(jobs)) checkJob(file, name, job, counts, fail);
+  for (const [name, job] of Object.entries(jobs)) checkJob(file, name, job, tree, counts, fail);
 }
 
 /**
@@ -519,7 +566,10 @@ function checkFile(
  * id-token: write only in the job publish, the environment, GitHub-hosted
  * runners, no expression in a run line, no token, and each step in its order.
  */
-export function checkWorkflows(input: { files: { name: string; text: string }[] }): Report {
+export function checkWorkflows(input: {
+  files: { name: string; text: string }[];
+  tree: Tree;
+}): Report {
   const failures: string[] = [];
   const counts = { files: 0, uses: 0, pinned: 0 };
   const names = input.files.map((f) => f.name);
@@ -532,19 +582,33 @@ export function checkWorkflows(input: { files: { name: string; text: string }[] 
       fail(`another workflow; a workflow needs its rules in check-workflows`);
       continue;
     }
-    checkFile(name, text, counts, fail);
+    checkFile(name, text, input.tree, counts, fail);
   }
+  for (const { path, task } of LATER)
+    if (input.tree.exists(path))
+      failures.push(`the file ${path} exists; ${task} removes its entry from LATER`);
   return requireCounts({ name: "check-workflows", counts, failures, notes: [] }, ["files"]);
 }
 
-/** Each file of .github/workflows/ under `root`. */
-export function readInput(root: string): { files: { name: string; text: string }[] } {
+/** Each file of .github/workflows/ under `root`, the files of `root`, and its root scripts. */
+export function readInput(root: string): {
+  files: { name: string; text: string }[];
+  tree: Tree;
+} {
   const dir = join(root, ".github/workflows");
-  if (!existsSync(dir)) return { files: [] };
+  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+    scripts?: Record<string, string>;
+  };
+  const tree: Tree = {
+    exists: (path) => existsSync(join(root, path)),
+    scripts: manifest.scripts ?? {},
+  };
+  if (!existsSync(dir)) return { files: [], tree };
   return {
     files: readdirSync(dir)
       .sort()
       .map((name) => ({ name, text: readFileSync(join(dir, name), "utf8") })),
+    tree,
   };
 }
 

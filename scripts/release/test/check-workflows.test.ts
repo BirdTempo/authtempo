@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { checkWorkflows, entry, readYaml } from "../src/check-workflows.ts";
@@ -20,12 +20,22 @@ function swap(text: string, from: string, to: string): string {
   return text.slice(0, at) + to + text.slice(at + from.length);
 }
 
-const check = (ci: string, release: string) =>
+/** The files and the root scripts of the tree, as the entry reads them. */
+const TREE = {
+  exists: (path: string) => existsSync(`${root}${path}`),
+  scripts: JSON.parse(readFileSync(`${root}package.json`, "utf8")).scripts as Record<
+    string,
+    string
+  >,
+};
+
+const check = (ci: string, release: string, tree = TREE) =>
   checkWorkflows({
     files: [
       { name: "ci.yml", text: ci },
       { name: "release.yml", text: release },
     ],
+    tree,
   });
 const ciFailures = (ci: string) => check(ci, RELEASE).failures;
 const releaseFailures = (release: string) => check(CI, release).failures;
@@ -251,6 +261,7 @@ describe("check-workflows", () => {
       ),
     ).toEqual([
       "ci.yml: jobs.check step 5: a publish command outside node scripts/release/src/publish.ts",
+      "ci.yml: jobs.check step 5: pnpm publish is not a root script of package.json",
       "ci.yml: jobs.check: step 5 is not pnpm install --frozen-lockfile",
     ]);
     expect(
@@ -554,8 +565,50 @@ describe("check-workflows", () => {
     expect(failures()).toEqual(expected);
   });
 
+  it("fails a script path that does not exist", () => {
+    const without = (gone: string) => ({
+      ...TREE,
+      exists: (p: string) => p !== gone && TREE.exists(p),
+    });
+    expect(check(CI, RELEASE, without("scripts/release/src/check-tag.ts")).failures).toEqual([
+      "release.yml: jobs.check step 4: scripts/release/src/check-tag.ts does not exist",
+    ]);
+    expect(check(CI, RELEASE, without("scripts/release/src/publish.ts")).failures).toEqual([
+      "release.yml: jobs.publish step 4: scripts/release/src/publish.ts does not exist",
+    ]);
+    // pnpm <script> runs a root script, and each node path of the script must exist.
+    const scripts = (s: Record<string, string>) => ({ ...TREE, scripts: s });
+    expect(check(CI, RELEASE, scripts({})).failures).toEqual([
+      "ci.yml: jobs.check step 6: pnpm release:check is not a root script of package.json",
+      "release.yml: jobs.check step 7: pnpm release:check is not a root script of package.json",
+    ]);
+    expect(
+      check(CI, RELEASE, scripts({ "release:check": "node scripts/release/src/gone.ts" })).failures,
+    ).toEqual([
+      "ci.yml: jobs.check step 6: pnpm release:check runs scripts/release/src/gone.ts, which does not exist",
+      "release.yml: jobs.check step 7: pnpm release:check runs scripts/release/src/gone.ts, which does not exist",
+    ]);
+  });
+
+  it("skips each file that a later task adds, and fails an entry whose file exists", () => {
+    // prepare.ts (Task 6) and release-check.ts (Task 14) are not in the tree yet.
+    expect(TREE.exists("scripts/release/src/prepare.ts")).toBe(false);
+    expect(TREE.exists("scripts/release/src/release-check.ts")).toBe(false);
+    expect(check(CI, RELEASE).failures).toEqual([]);
+    const plus = (made: string) => ({
+      ...TREE,
+      exists: (p: string) => p === made || TREE.exists(p),
+    });
+    expect(check(CI, RELEASE, plus("scripts/release/src/prepare.ts")).failures).toEqual([
+      "the file scripts/release/src/prepare.ts exists; Task 6 (plan line 464) removes its entry from LATER",
+    ]);
+    expect(check(CI, RELEASE, plus("scripts/release/src/release-check.ts")).failures).toEqual([
+      "the file scripts/release/src/release-check.ts exists; Task 14 (plan line 941) removes its entry from LATER",
+    ]);
+  });
+
   it("fails when it reads zero files", () => {
-    const r = checkWorkflows({ files: [] });
+    const r = checkWorkflows({ files: [], tree: TREE });
     expect(r.failures).toEqual([
       "ci.yml: the file is missing",
       "release.yml: the file is missing",
@@ -570,6 +623,7 @@ describe("check-workflows", () => {
           { name: "deploy.yml", text: CI },
           { name: "release.yml", text: RELEASE },
         ],
+        tree: TREE,
       }).failures,
     ).toEqual(["deploy.yml: another workflow; a workflow needs its rules in check-workflows"]);
   });
