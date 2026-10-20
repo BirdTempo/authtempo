@@ -264,6 +264,10 @@ export async function createRole(
  * Changes the rank or the permissions of a stored role. Needs `ac:update`.
  * The caller must pass the grant check on the role as it is and as it
  * becomes. A narrow applies at the next request, because no role is cached.
+ *
+ * The write compares `updatedAt` with the read and sets a new stamp. So an
+ * update that read the row before a parallel update answers `conflict`, and
+ * never writes back a set that the other update narrowed.
  */
 export async function updateRole(
   config: ResolvedConfig,
@@ -290,18 +294,25 @@ export async function updateRole(
     input.permissions ?? row.permissions,
   );
   if (!def.ok) return def;
-  const now = config.clock.now();
+  // One millisecond past the read, so the stamp changes even when the clock has not moved.
+  const now = new Date(Math.max(config.clock.now().getTime(), row.updatedAt.getTime() + 1));
   const n = await config.storage.update(
     "organizationRole",
-    [{ field: "id", op: "eq", value: row.id }],
+    [
+      { field: "id", op: "eq", value: row.id },
+      { field: "updatedAt", op: "eq", value: row.updatedAt },
+    ],
     {
       rank: def.value.rank,
       permissions: def.value.permissions,
       updatedAt: now,
     },
   );
-  // Zero rows: a delete ran after the read.
-  if (n === 0) return fail("not_found");
+  // Zero rows: another update or a delete ran after the read.
+  if (n === 0)
+    return (await findRole(config, input.organizationId, input.name))
+      ? fail("conflict")
+      : fail("not_found");
   return ok({
     id: row.id,
     name: row.name,

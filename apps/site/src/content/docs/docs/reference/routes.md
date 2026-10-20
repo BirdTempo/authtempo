@@ -844,8 +844,8 @@ These routes exist when the config sets `organizations.dynamicRoles`. An organiz
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh. An API token answers 401. The user holds `ac:update` in the organization, and the role's rank and actions |
 | Input | JSON `{ organizationId, name, rank?, permissions? }`. The rules of the create hold for `rank` and `permissions`. Another key answers `invalid_body` |
-| Answer | `{ role }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+| Answer | `{ role }`. An update that a parallel update of the role overtakes answers `conflict` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`conflict`](/docs/reference/errors/#conflict), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 <h3 id="post-organizations-roles-delete"><code>POST /organizations/roles/delete</code></h3>
 

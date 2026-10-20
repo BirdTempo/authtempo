@@ -1201,7 +1201,7 @@ export const ROUTES = Object.freeze([
     path: "/organizations/roles/update",
     feature: "dynamicRoles",
     auth: ["session"],
-    codes: ["unauthorized", "session_not_fresh", "invalid_body", "forbidden_rank"],
+    codes: ["unauthorized", "session_not_fresh", "invalid_body", "forbidden_rank", "conflict"],
     oauthCodes: [],
   },
   {

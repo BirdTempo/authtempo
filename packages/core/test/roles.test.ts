@@ -700,6 +700,58 @@ describe("dynamic roles (plan 12k Task 4)", () => {
     ).toBe(true);
   });
 
+  it("answers conflict when a parallel update changes the role after the read", async () => {
+    // The hook runs a second flow between the read and the write of the first update, as on Postgres with two connections.
+    let between: (() => Promise<unknown>) | null = null;
+    const w = world({ dynamicRoles: {} }, (s) => ({
+      ...s,
+      async findOne(model, where) {
+        const row = await s.findOne(model, where);
+        const run = between;
+        if (model === "organizationRole" && run) {
+          between = null;
+          await run();
+        }
+        return row;
+      },
+    }));
+    const { ada, organizationId } = await acme(w);
+    mustOk(
+      await w.auth.api.createRole({
+        user: ada,
+        organizationId,
+        name: "editor",
+        rank: 1,
+        permissions: { member: ["read"], invitation: ["read", "create"] },
+      }),
+    );
+    const editor = { user: ada, organizationId, name: "editor" };
+    // The first update sends the rank only, so it would write back the set of its read.
+    const h = bearer(await w.session("ada@example.com"));
+    between = () => w.auth.api.updateRole({ ...editor, permissions: { member: ["read"] } });
+    expect(
+      await json(
+        await w.auth.handle(post(`${P}/update`, { organizationId, name: "editor", rank: 2 }, h)),
+      ),
+    ).toEqual({ status: 409, body: { error: "conflict" } });
+    expect(await w.auth.api.getRole(editor)).toMatchObject({
+      ok: true,
+      value: { rank: 1, permissions: { member: ["read"] } },
+    });
+    // A read of the new row then passes, with no clock move.
+    expect(await w.auth.api.updateRole({ ...editor, rank: 2 })).toMatchObject({
+      ok: true,
+      value: { rank: 2, permissions: { member: ["read"] } },
+    });
+    // A delete between the read and the write answers not_found.
+    between = () => w.auth.api.deleteRole(editor);
+    expect(await w.auth.api.updateRole({ ...editor, rank: 1 })).toMatchObject({
+      ok: false,
+      code: "not_found",
+    });
+    expect(await w.storage.findMany("organizationRole", [])).toEqual([]);
+  });
+
   it("needs a fresh session for the three writes", async () => {
     const w = world();
     const { ada, organizationId } = await acme(w);
