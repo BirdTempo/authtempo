@@ -77,10 +77,9 @@ Update 2026-10-21 by plan 12f: the operator tools do step 5 with a record. The t
 - The command turns every method of the user off, and keeps the sessions. The user gets the notice `factor_disabled` unless `account.notices` is false.
 - The deployment refuses a check time after its own clock with `invalid_body`.
 - A user with the factor off stops the command with [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled). Tell the person to sign in.
-- A secret with no scope `users` gets [`operator_required`](/docs/reference/errors/#operator_required). A platform operator gets [`operator_self`](/docs/reference/errors/#operator_self) for their own user.
+- A secret with no scope `users` gets [`operator_required`](/docs/reference/errors/#operator_required).
 - A bad reason, method, reference, or time gets [`invalid_body`](/docs/reference/errors/#invalid_body). A user id that names no user gets [`not_found`](/docs/reference/errors/#not_found).
 - A wrong secret gets [`unauthorized`](/docs/reference/errors/#unauthorized). The 600 calls of an hour give [`rate_limited`](/docs/reference/errors/#rate_limited).
 - Another change of the user at the same time gets [`conflict`](/docs/reference/errors/#conflict). Run the command again.
 - A before hook of your app gets [`hook_refused`](/docs/reference/errors/#hook_refused) or [`hook_failed`](/docs/reference/errors/#hook_failed).
-- A session caller in an impersonation session gets [`impersonation_session`](/docs/reference/errors/#impersonation_session).
 - [`authtempo users second-factor-off`](/docs/reference/cli/users-second-factor-off/) lists each flag and each error.

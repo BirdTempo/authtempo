@@ -7,6 +7,7 @@ import {
   ROUTES,
   type RouteEntry,
   type RouteFeature,
+  USER_ACTOR_CODES,
 } from "../src/http/route-list.js";
 import { coreRouteModules, coreRoutes, type RouteModule } from "../src/http/routes/index.js";
 import { BASE, base, everyFeature, SOCIAL } from "./every-feature.js";
@@ -300,6 +301,16 @@ describe("the entry fields and the module tie (plan 11g)", () => {
       if (r.auth.length === 1 && r.auth[0] === "none")
         expect(r.codes.includes("unauthorized"), key).toBe(false);
     }
+  });
+
+  it("names the codes that only a request with a session gets (plan 12f)", () => {
+    expect(USER_ACTOR_CODES).toEqual(["operator_self", "impersonation_session"]);
+    // The entry type, not the literal tuple, as in the test above.
+    const listed: readonly RouteEntry[] = ROUTES;
+    const self = listed.filter((r) => r.codes.includes("operator_self"));
+    expect(self.length).toBeGreaterThan(0);
+    // A platform operator is the actor of operator_self: each route that answers it takes a session.
+    for (const r of self) expect(r.auth, `${r.method} ${r.path}`).toContain("session");
   });
 
   it("lists every feature once in ROUTE_FEATURES", () => {

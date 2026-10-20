@@ -19,5 +19,6 @@ export {
   type RouteMethod,
   type RoutePath,
   type RouterCode,
+  USER_ACTOR_CODES,
 } from "./http/route-list.js";
 export { PROVIDER_NAME_RE } from "./social/provider.js";

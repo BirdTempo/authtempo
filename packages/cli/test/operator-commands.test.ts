@@ -13,8 +13,10 @@ import {
   type MailMessage,
 } from "@authtempo/core";
 import { ROUTE_CONTRACT } from "@authtempo/core/openapi";
+import { ROUTES, type RouteEntry, USER_ACTOR_CODES } from "@authtempo/core/routes";
 import { describe, expect, it } from "vitest";
 import { main } from "../src/main.js";
+import { REFUSALS } from "../src/operator-client.js";
 import { PROOF_METHODS, reasonProblem } from "../src/operator-tools.js";
 import { fakeIo } from "./support/fake-io.js";
 
@@ -766,6 +768,21 @@ describe("the operator commands (plan 12f Task 12)", () => {
     expect(stopped(await run(ban, hooked))).toBe(
       "stopped: a hook of the deployment failed; read the log of the deployment",
     );
+  });
+
+  it("holds the refusal texts to the codes that a secret can get from the routes", () => {
+    // These codes have their own texts in operatorCall, or a text by status (401 and 429).
+    const own = ["operator_required", "invalid_body", "unauthorized", "rate_limited"];
+    const session: readonly string[] = USER_ACTOR_CODES;
+    const listed: readonly RouteEntry[] = ROUTES;
+    const codes = new Set<string>();
+    for (const r of listed)
+      if (
+        (r.feature === "operator" || r.feature === "operatorUsers") &&
+        r.auth.includes("operator")
+      )
+        for (const c of r.codes) if (!own.includes(c) && !session.includes(c)) codes.add(c);
+    expect([...codes].sort()).toEqual(Object.keys(REFUSALS).sort());
   });
 
   it("prints no address on stderr", async () => {

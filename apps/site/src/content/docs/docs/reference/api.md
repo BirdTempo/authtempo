@@ -180,6 +180,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `RoutePath` | A path that `ROUTES` holds for a method. An SDK types its paths with it, so a path that core does not serve fails the compile. |
 | `RouteKey` | `"<METHOD> <path>"` of one row of `ROUTES`. A key that `ROUTES` does not hold fails the compile. |
 | `ROUTER_CODES`, `RouterCode` | The codes that the router answers for every route: `not_found`, `origin_not_trusted`, and `internal`. An entry's `codes` never repeats them. |
+| `USER_ACTOR_CODES` | The codes of the operator routes that only a request with a session gets: `operator_self` and `impersonation_session`. A call with an operator secret never gets them. |
 | `PROVIDER_NAME_RE` | The name rule of `:provider`. |
 | `AUTH_ERROR_PARAM` | The query parameter of a browser flow failure, `auth_error`. |
 | `routeAnchor` | The anchor of a route on [Routes](/docs/reference/routes/): the method, then the path with each run of other characters as one hyphen. |

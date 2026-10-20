@@ -52,10 +52,11 @@ export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit";
  * The text of each refusal code that a write of plan 12f can answer to a
  * secret caller, by its cause. `operator_required` and `invalid_body` have
  * their own texts in `operatorCall`; 401, 404, and 429 have theirs by
- * status. `operator_self` is not here: core answers it to a user actor
- * only, and the CLI always calls with a secret.
+ * status. The codes of `USER_ACTOR_CODES` are not here: core answers them
+ * to a request with a session only, and the CLI always calls with a
+ * secret. A test holds the keys equal to the codes of `ROUTES` by that rule.
  */
-const REFUSALS: Readonly<Record<string, string>> = {
+export const REFUSALS: Readonly<Record<string, string>> = {
   account_banned: "the user is banned; unban the user first",
   email_unverified:
     "the user has not verified the address; the platform role needs a verified address",

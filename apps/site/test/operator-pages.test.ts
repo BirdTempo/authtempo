@@ -5,13 +5,16 @@ import {
   ROUTES,
   type RouteEntry,
   type RouteKey,
+  USER_ACTOR_CODES,
 } from "@authtempo/core/routes";
 import { describe, expect, it } from "vitest";
 import { DOCS } from "../scripts/lib/paths.ts";
 
 // The operator pages of plan 12f Task 14 against the codes of the routes
-// that their flows call. A code that a route declares and a page does not
-// link fails here, so a new code of a route reaches its page.
+// that their flows call. Each check holds the linked codes of a section
+// equal to the codes of its flow, both ways. A code that a route declares
+// and a page does not link fails, and so does a link to a code that the
+// flow cannot answer.
 
 /** The text of a `## ` section of a page, from its heading to the next one. */
 function section(page: string, heading: string): string {
@@ -35,12 +38,36 @@ const keyed =
   (r: RouteEntry) =>
     (keys as string[]).includes(`${r.method} ${r.path}`);
 
-/** Each code has a link to its anchor in the section, and the check names a code that lacks one. */
-function expectLinks(text: string, codes: Iterable<string>) {
-  for (const code of codes) {
-    const href = `/docs/reference/errors/#${errorAnchor(code, "core")}`;
-    expect({ code, linked: text.includes(`](${href})`) }).toEqual({ code, linked: true });
-  }
+/** The codes that a section links on the errors page, from each `](/docs/reference/errors/#<code>)`. */
+function linkedCodes(text: string): string[] {
+  const codes = new Set<string>();
+  for (const m of text.matchAll(/\]\(\/docs\/reference\/errors\/#([a-z0-9_-]+)\)/g))
+    if (m[1] !== undefined) codes.add(m[1]);
+  return [...codes].sort();
+}
+
+/**
+ * The section links each code of `codes` and no other code. The check names
+ * the codes that lack a link and the links of codes outside the flow.
+ */
+function expectLinks(page: string, text: string, codes: Iterable<string>) {
+  const want = [...new Set([...codes].map((c) => errorAnchor(c, "core")))].sort();
+  const got = linkedCodes(text);
+  expect({
+    page,
+    missing: want.filter((c) => !got.includes(c)),
+    extra: got.filter((c) => !want.includes(c)),
+  }).toEqual({ page, missing: [], extra: [] });
+}
+
+/**
+ * The codes of the routes that `pick` takes, as a call with an operator
+ * secret meets them: the codes that only a request with a session gets
+ * are out. Each runbook is a run of the CLI, which sends a secret only.
+ */
+function secretCodesOf(pick: (route: RouteEntry) => boolean): Set<string> {
+  const session: readonly string[] = USER_ACTOR_CODES;
+  return new Set([...codesOf(pick)].filter((c) => !session.includes(c)));
 }
 
 /** A router code that a page names when its flow can meet it. `internal` is no answer of a flow. */
@@ -53,16 +80,20 @@ describe("the operator pages", () => {
     );
     // The routes of the two features exist, so the set is never empty.
     expect(codes.size).toBeGreaterThan(10);
-    expectLinks(section("guides/operator-tools.mdx", "If it fails"), [...codes, ...ROUTER]);
+    const page = "guides/operator-tools.mdx";
+    expectLinks(page, section(page, "If it fails"), [...codes, ...ROUTER]);
   });
 
   it("links each code of create-admin and users get in the first operator runbook", () => {
-    const codes = codesOf(keyed("POST /operator/users/create-admin", "GET /operator/users/get"));
-    expectLinks(section("operations/first-operator.mdx", "If it fails"), [...codes, "not_found"]);
+    const codes = secretCodesOf(
+      keyed("POST /operator/users/create-admin", "GET /operator/users/get"),
+    );
+    const page = "operations/first-operator.mdx";
+    expectLinks(page, section(page, "If it fails"), [...codes, "not_found"]);
   });
 
   it("links each code of the ban flow in the ban runbook", () => {
-    const codes = codesOf(
+    const codes = secretCodesOf(
       keyed(
         "GET /operator/users/search",
         "POST /operator/users/ban",
@@ -70,14 +101,13 @@ describe("the operator pages", () => {
         "GET /operator/audit",
       ),
     );
-    expectLinks(section("operations/ban-a-user.mdx", "If it fails"), [...codes, "not_found"]);
+    const page = "operations/ban-a-user.mdx";
+    expectLinks(page, section(page, "If it fails"), [...codes, "not_found"]);
   });
 
   it("links each code of the factor disable in the dated note of the recovery runbook", () => {
-    const codes = codesOf(keyed("POST /operator/users/second-factor/disable"));
-    expectLinks(section("operations/second-factor-recovery.mdx", "Update 2026-10-21 by plan 12f"), [
-      ...codes,
-      "not_found",
-    ]);
+    const codes = secretCodesOf(keyed("POST /operator/users/second-factor/disable"));
+    const page = "operations/second-factor-recovery.mdx";
+    expectLinks(page, section(page, "Update 2026-10-21 by plan 12f"), [...codes, "not_found"]);
   });
 });

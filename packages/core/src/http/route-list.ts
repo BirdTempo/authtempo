@@ -1698,3 +1698,16 @@ export const ROUTER_CODES = [
   "internal",
 ] as const satisfies readonly ErrorCode[];
 export type RouterCode = (typeof ROUTER_CODES)[number];
+
+/**
+ * The codes of the operator routes that only a request with a session gets
+ * (plan 12f): `operator_self` for the act of a platform operator on their
+ * own user, and `impersonation_session` for a request of an impersonation
+ * session. A request with an operator secret and no session, such as each
+ * call of the CLI, never gets them. The CLI runbooks and the refusal texts
+ * of the CLI leave them out.
+ */
+export const USER_ACTOR_CODES = [
+  "operator_self",
+  "impersonation_session",
+] as const satisfies readonly ErrorCode[];
