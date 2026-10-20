@@ -4,6 +4,8 @@ import { parseXml, type XmlElement } from "../../src/saml/xml.js";
 import { referenceExcC14n } from "./c14n-reference.js";
 import c32in from "./fixtures/c14n/c14n-3.2.in.xml?raw";
 import c32out from "./fixtures/c14n/c14n-3.2.out.xml?raw";
+import c33in from "./fixtures/c14n/c14n-3.3-body.in.xml?raw";
+import c33out from "./fixtures/c14n/c14n-3.3-body.out.xml?raw";
 import c34in from "./fixtures/c14n/c14n-3.4-body.in.xml?raw";
 import c34out from "./fixtures/c14n/c14n-3.4-body.out.xml?raw";
 import e21ain from "./fixtures/c14n/exc-2.1-alone.in.xml?raw";
@@ -81,6 +83,7 @@ function elementsOf(el: XmlElement): XmlElement[] {
 describe("excC14n", () => {
   it.each([
     ["Canonical XML 1.0 section 3.2", c32in, c32out, "doc"],
+    ["Canonical XML 1.0 section 3.3, the body", c33in, c33out, "doc"],
     ["Canonical XML 1.0 section 3.4, the body", c34in, c34out, "doc"],
     ["Exclusive C14N section 2.1, alone", e21ain, e21aout, "elem1"],
     ["Exclusive C14N section 2.1, enveloped", e21ein, e21eout, "elem1"],
