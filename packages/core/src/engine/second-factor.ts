@@ -324,13 +324,20 @@ export async function removeMethod(
  * count of factor rows it deleted.
  */
 export function disableSecondFactor(config: ResolvedConfig, userId: string): Promise<number> {
-  return config.storage.transaction(async (tx) => {
-    await tx.delete("totp", [{ field: "userId", op: "eq", value: userId }]);
-    const n = await tx.delete("secondFactor", [{ field: "userId", op: "eq", value: userId }]);
-    await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: userId }]);
-    await deleteTwoFactorChallenges(tx, userId);
-    return n;
-  });
+  return config.storage.transaction((tx) => disableSecondFactorIn(tx, userId));
+}
+
+/**
+ * The deletes of `disableSecondFactor` in the caller's transaction (plan
+ * 12f deviation 7). The operator's disable runs them beside its audit row.
+ * Four delete statements; the answer is the count of factor rows deleted.
+ */
+export async function disableSecondFactorIn(tx: StorageAdapter, userId: string): Promise<number> {
+  await tx.delete("totp", [{ field: "userId", op: "eq", value: userId }]);
+  const n = await tx.delete("secondFactor", [{ field: "userId", op: "eq", value: userId }]);
+  await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: userId }]);
+  await deleteTwoFactorChallenges(tx, userId);
+  return n;
 }
 
 export const TWO_FACTOR_PREFIX = "tf_";
