@@ -258,6 +258,16 @@ describe("the access control shim (spec 29 item 18)", () => {
     expect(checkOptions(options({ ac, roles }, { roleRanks })).refusals).toEqual([]);
   });
 
+  it("refuses authtempo.roleRanks with no roles option", () => {
+    // The default roles keep member 1, admin 2, owner 3, so these ranks would change nothing.
+    const given = options({}, { roleRanks: { member: 1, admin: 7, owner: 9 } });
+    expect(checkOptions(given).refusals).toEqual([
+      "authtempo.roleRanks: needs plugins[organization].roles; the default roles rank member 1, admin 2, owner 3 (spec 29 item 18)",
+    ]);
+    expect(() => betterAuth(given)).toThrow(BetterAuthCompatError);
+    expect(checkOptions(options({})).refusals).toEqual([]);
+  });
+
   it("refuses dynamicAccessControl as a function", () => {
     // Better Auth's type admits a function; this package's type does not, so the literal is cast.
     const dynamicAccessControl = {

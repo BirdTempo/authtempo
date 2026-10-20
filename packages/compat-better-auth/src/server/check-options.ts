@@ -865,16 +865,24 @@ function roleChecks(options: BetterAuthOptions, out: OptionCheck): void {
     return;
   }
   const given = plainObject(org.roles) ? org.roles : undefined;
-  const names = given ? Object.keys(given) : Object.keys(DEFAULT_ROLE_RANKS);
+  if (!given) {
+    // The default roles have fixed ranks, so a rank table here would change nothing in silence.
+    if (ranks !== undefined)
+      refuse(
+        out,
+        "authtempo.roleRanks",
+        `needs plugins[organization].roles; the default roles rank member 1, admin 2, owner 3 ${ITEM_18}`,
+      );
+    return;
+  }
   if (plainObject(ranks))
     for (const name of Object.keys(ranks))
-      if (!names.includes(name))
+      if (!Object.hasOwn(given, name))
         refuse(
           out,
           `authtempo.roleRanks.${name}`,
           `ranks no role of plugins[organization].roles ${ITEM_18}`,
         );
-  if (!given) return;
   if (!Object.hasOwn(given, "owner"))
     refuse(
       out,
