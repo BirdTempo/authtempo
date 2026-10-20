@@ -160,6 +160,10 @@ export function checkSecurityPolicy(input: {
   const channels = linksOf(body("How to report"));
   const advisory = `${repository.url}/security/advisories/new`;
   const mailbox = `mailto:security@${new URL(origin).host}`;
+  // A reporter reads the text of the link, so the text is the address of its target.
+  for (const m of body("How to report").matchAll(/\[([^\]]*)\]\(mailto:([^)\s]+)\)/g))
+    if (m[1] !== m[2])
+      failures.push(`the mailbox link shows ${m[1]}; its target is mailto:${m[2]}`);
   if (channels.length !== 2)
     failures.push(`the section "How to report" names ${channels.length} channels; it must name 2`);
   if (channels[0] !== undefined && channels[0] !== advisory)

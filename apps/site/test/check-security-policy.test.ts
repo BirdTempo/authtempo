@@ -174,6 +174,7 @@ describe("check-security-policy", () => {
     const mail = "mailto:security@authtempo.com";
     expect(check(textWith(mail, "mailto:security@example.com")).failures).toEqual([
       'SECURITY.md holds the placeholder "example.com"',
+      "the mailbox link shows security@authtempo.com; its target is mailto:security@example.com",
       "the second channel is mailto:security@example.com; it must be mailto:security@authtempo.com, at the host of https://authtempo.com",
     ]);
     expect(
@@ -205,6 +206,30 @@ describe("check-security-policy", () => {
     expect(
       check(textWith(`(${mail})`, `(${mail}) or [the chat](https://chat.authtempo.com/)`)).failures,
     ).toEqual(['the section "How to report" names 3 channels; it must name 2']);
+  });
+
+  it("fails a mailbox link whose text is not its target", () => {
+    // A reporter reads the text of the link, so the text is the address of the target.
+    expect(
+      check(
+        textWith(
+          "[security@authtempo.com](mailto:security@authtempo.com)",
+          "[security@authtempo.net](mailto:security@authtempo.com)",
+        ),
+      ).failures,
+    ).toEqual([
+      "the mailbox link shows security@authtempo.net; its target is mailto:security@authtempo.com",
+    ]);
+    expect(
+      check(
+        textWith(
+          "[security@authtempo.com](mailto:security@authtempo.com)",
+          "[the security mailbox](mailto:security@authtempo.com)",
+        ),
+      ).failures,
+    ).toEqual([
+      "the mailbox link shows the security mailbox; its target is mailto:security@authtempo.com",
+    ]);
   });
 
   it("takes the host of the mailbox from the origin of the site", () => {
