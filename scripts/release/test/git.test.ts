@@ -1,4 +1,4 @@
-import { rmSync } from "node:fs";
+import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -57,6 +57,19 @@ describe("git", () => {
     repo.write("new.txt", "n\n");
     repo.write("ignored.txt", "i\n");
     expect(changedFiles(repo.root, b.base)).toEqual(["a.txt", "b.txt", "new.txt"]);
+  });
+
+  it("lists the old path and the new path of a move", () => {
+    const b = branched();
+    repo = b.repo;
+    repo.write("src/foo.ts", "export const foo = 1;\n");
+    repo.commit("add foo");
+    const before = repo.git(["rev-parse", "HEAD"]).trim();
+    mkdirSync(join(repo.root, "test"));
+    repo.git(["mv", "src/foo.ts", "test/foo.ts"]);
+    repo.commit("move foo");
+    // With rename detection, git lists only test/foo.ts.
+    expect(changedFiles(repo.root, before)).toEqual(["src/foo.ts", "test/foo.ts"]);
   });
 
   it("lists the working tree files without a removed file or an ignored file", () => {

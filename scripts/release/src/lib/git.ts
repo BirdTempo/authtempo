@@ -21,10 +21,11 @@ export function showAt(root: string, ref: string, path: string): string | null {
 /**
  * Each path that differs between `base` and the working tree, with each
  * untracked file that git does not ignore. A change that is not committed yet
- * counts too.
+ * counts too. A move lists the old path and the new path: with the rename
+ * detection of git, a move out of a released package lists only the new path.
  */
 export function changedFiles(root: string, base: string): string[] {
-  const changed = git(root, ["diff", "--name-only", "-z", base]).split("\0");
+  const changed = git(root, ["diff", "--name-only", "--no-renames", "-z", base]).split("\0");
   const untracked = git(root, ["ls-files", "--others", "--exclude-standard", "-z"]).split("\0");
   return [...new Set([...changed, ...untracked].filter((p) => p !== ""))].sort();
 }

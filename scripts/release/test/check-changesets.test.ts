@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type ChangedFile,
@@ -37,6 +38,28 @@ const paths = (...list: string[]) => list.map((path) => ({ path }));
 
 let repo: Repo | undefined;
 afterEach(() => repo?.remove());
+
+/**
+ * A repository on main with the released package @fixture/a and the unreleased
+ * package @fixture/u, then the branch "work".
+ */
+function fixtureRepo(): Repo {
+  const r = makeRepo();
+  r.write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");
+  r.write(
+    ".changeset/config.json",
+    JSON.stringify({ fixed: [["@fixture/a"]], linked: [], ignore: ["@fixture/u"] }),
+  );
+  r.write(
+    "packages/a/package.json",
+    '{ "name": "@fixture/a", "version": "0.0.0", "files": ["dist"] }\n',
+  );
+  r.write("packages/a/src/foo.ts", "export const foo = 1;\n");
+  r.write("packages/u/package.json", '{ "name": "@fixture/u", "version": "0.0.0" }\n');
+  r.commit("first");
+  r.git(["checkout", "--quiet", "-b", "work"]);
+  return r;
+}
 
 describe("check-changesets", () => {
   it("passes a source change with a changeset that names the package", () => {
@@ -165,6 +188,16 @@ describe("check-changesets", () => {
       "check-changesets: PASS changed=0 covered=0 exempt=0 empty=0 failures=0",
     );
     expect(head.notes).toEqual(["no change since the merge base"]);
+  });
+
+  it("needs a changeset when a move takes a file out of a released package", () => {
+    repo = fixtureRepo();
+    mkdirSync(join(repo.root, "packages/u/src"));
+    repo.git(["mv", "packages/a/src/foo.ts", "packages/u/src/foo.ts"]);
+    repo.commit("move foo out");
+    expect(checkChangesets(readInput(repo.root, "main")).failures).toEqual([
+      "@fixture/a changes and no changeset names it: packages/a/src/foo.ts",
+    ]);
   });
 
   it("reads only the changesets that are new since the merge base", () => {
