@@ -1521,9 +1521,17 @@ writes each value under version 1.
 ## The storage port
 
 Six methods: `create`, `findOne`, `findMany`, `update`, `delete`,
-`transaction`. Clauses join with AND. Operators: `eq ne in lt lte gt gte`.
-One sort field. No joins. Run `runAdapterConformance` from
+`transaction`. Clauses join with AND. Operators: `eq ne in lt lte gt gte
+startsWith`. One sort field. No joins. Run `runAdapterConformance` from
 `@authtempo/core/conformance` against a new adapter; it is the contract.
+
+`startsWith` matches the exact text of a non-empty prefix on a string
+field. Case counts, as for `eq`, and it has no wildcard. It never matches
+null. The prefix is a parameter. An SQL adapter compares
+`substr(column, 1, n)`, where n is the count of code points, so no index
+serves it and each call reads the whole table. An empty prefix, a value or
+a field that is not a string, a lone surrogate, or NUL throws
+`invalid_argument`.
 
 `@authtempo/core/testing` also exports `ROUTES`, every route that core can
 serve, each with the config that turns it on. A core test proves that the

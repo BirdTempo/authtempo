@@ -66,7 +66,8 @@ export class StorageError extends Error {
  * string field whose value begins with exactly that text, with case, and with
  * no wildcard. It never matches null. A value that is not a non-empty string
  * throws `invalid_argument`. It applies to `string` fields only; another field
- * type throws `invalid_argument`. The SQL adapters compare a `substr` of the
+ * type throws `invalid_argument`. A prefix with a lone surrogate or with NUL
+ * throws `invalid_argument`. The SQL adapters compare a `substr` of the
  * column, so no index serves it: each call scans the table.
  *
  * Sort rules. Nulls come last in ascending order and first in descending order.

@@ -33,7 +33,10 @@ The port is generic. Core names a model and its fields. The adapter maps them to
 ## The rules
 
 - Clauses join with AND only. There is no OR and no join. When core needs two tables, it does two reads.
-- The operators are `eq`, `ne`, `in`, `lt`, `lte`, `gt`, and `gte`.
+- The operators are `eq`, `ne`, `in`, `lt`, `lte`, `gt`, `gte`, and `startsWith`.
+- `startsWith` matches a string field whose value begins with the exact text of the prefix. Case counts, as it does for `eq`. A `%` or a `_` is plain text. It never matches null.
+- The prefix goes to the database as a parameter, never as SQL text. An SQL adapter compares `substr(column, 1, n)`, where n is the count of code points. No index serves that clause, so each call reads the whole table.
+- `startsWith` throws `invalid_argument` for an empty prefix, a value that is not a string, or a field that is not a string. It also refuses a prefix with a lone surrogate or with NUL.
 - `update` and `delete` take a `where`, never a bare id. So core can say "spend this token only if it is not spent" in one statement.
 - An empty `in` list matches nothing. An empty `where` on `update` or `delete` is an error.
 - Two null values never conflict on a unique key.
