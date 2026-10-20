@@ -200,6 +200,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `JWKS_RETIRED_MAX` | The retired keys that the key set lists at most. |
 | `checkDpopProof`, `DpopCheckInput`, `DpopCheck`, `DpopBinding` | The checks of a DPoP proof of RFC 9449 section 4.3, with no store. The caller spends the `jti` in its own replay store. |
 | `DPOP_TYP` | `dpop+jwt`, the header `typ` of a DPoP proof. |
+| `DPOP_WINDOW_SECONDS` | The window of a proof's `iat`: 60 seconds by default, from 10 to 300. Core's `oauth.dpop.windowSeconds` and `@authtempo/verify` read it. |
 | `FOREIGN_ALGS`, `ForeignAlg` | The algs of a key that a client sends: `EdDSA`, `Ed25519`, `ES256`, `RS256`, and `PS256`. |
 | `isResourceUrl`, `resourceOf` | The rule of an `oauth.resources` entry, and the entry that a request URL falls under. |
 
