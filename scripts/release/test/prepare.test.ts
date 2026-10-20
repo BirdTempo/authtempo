@@ -112,7 +112,7 @@ describe("prepare", () => {
   });
 
   it("writes breaking and deprecations into core only", () => {
-    const register = readFileSync(fixturePath("pack/deprecations.json"), "utf8");
+    const register = readFileSync(fixturePath("pack/root/release/deprecations.json"), "utf8");
     const dir = releaseCopy((d) => writeFileSync(join(d, "release/deprecations.json"), register));
     expect(summaryLine(prepare(dir))).toBe("prepare: PASS packages=2 failures=0");
     const core = readJson(join(dir, "packages/core/package.json"));
@@ -123,15 +123,12 @@ describe("prepare", () => {
     });
     const client = readJson(join(dir, "packages/client/package.json"));
     expect("authtempo" in client).toBe(false);
+  });
 
-    // Until Task 9 writes the register, the tree has no file and no item is deprecated.
-    const bare = releaseCopy();
-    expect(summaryLine(prepare(bare))).toBe("prepare: PASS packages=2 failures=0");
-    expect(readJson(join(bare, "packages/core/package.json")).authtempo).toEqual({
-      schemaVersion: 11,
-      breaking: {},
-      deprecations: [],
-    });
+  it("requires release/deprecations.json in the release copy", () => {
+    // The register is the one source of core's authtempo.deprecations, so a copy without it stops.
+    const dir = releaseCopy((d) => rmSync(join(d, "release/deprecations.json")));
+    expect(() => prepare(dir)).toThrow("release/deprecations.json");
   });
 
   it("reads the Breaking lines per minor", () => {

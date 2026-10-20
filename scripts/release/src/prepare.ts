@@ -1,7 +1,8 @@
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { breakingByMinor, CORE, readDeprecations } from "./check-pack.ts";
+import { breakingByMinor, CORE } from "./check-pack.ts";
+import { readDeprecations } from "./lib/deprecations.ts";
 import { CHANGELOG_FILE, repositoryFor } from "./lib/pack-rules.ts";
 import { RELEASE_COPY_MARKER } from "./lib/release-copy.ts";
 import { releasedNames } from "./lib/released.ts";

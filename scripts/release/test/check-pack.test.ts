@@ -20,6 +20,7 @@ import {
   type PackInput,
   readTarball,
 } from "../src/check-pack.ts";
+import { readDeprecations } from "../src/lib/deprecations.ts";
 import { FORBIDDEN_PACK_NAMES } from "../src/lib/pack-rules.ts";
 import { releasedNames } from "../src/lib/released.ts";
 import { summaryLine } from "../src/lib/report.ts";
@@ -498,7 +499,8 @@ describe("check-pack", () => {
         "Breaking: remove the read of the old session cookie tempo_session.",
       ],
     });
-    const deprecations = JSON.parse(readText("deprecations.json")) as unknown[];
+    const deprecations = readDeprecations(fixture("root"));
+    expect(deprecations.map((e) => e.id)).toEqual(["authtempo-import"]);
     const core = (authtempo: Record<string, unknown>) => {
       const manifest = structuredClone(MANIFEST);
       manifest.name = "@authtempo/core";
@@ -574,6 +576,20 @@ describe("check-pack", () => {
       ]);
     } finally {
       for (const dir of [out, ...roots]) rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("requires release/deprecations.json in the tree", () => {
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    const noRegister = copyRoot((dir) => rmSync(join(dir, "release/deprecations.json")));
+    try {
+      const path = pack(fixture("root/packages/fixture"), out);
+      // Before plan 12j Task 9 an absent register read as no item. Now it is the
+      // one source of core's authtempo.deprecations, so a tree without it stops.
+      expect(() => checkTarballs(noRegister, [path])).toThrow("release/deprecations.json");
+      expect(checkTarballs(fixture("root"), [path]).failures).toEqual([]);
+    } finally {
+      for (const dir of [out, noRegister]) rmSync(dir, { recursive: true, force: true });
     }
   });
 

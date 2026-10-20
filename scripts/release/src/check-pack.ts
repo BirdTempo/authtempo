@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { type Deprecation, readDeprecations } from "./lib/deprecations.ts";
 import {
   ALWAYS_SHIPPED,
   BINARY_EXTENSIONS,
@@ -36,7 +37,7 @@ export interface PackInput {
   /** The Breaking: lines of each minor of core's packed CHANGELOG.md. Read for core only. */
   breaking: Record<string, string[]>;
   /** release/deprecations.json. Read for core only. */
-  deprecations: unknown[];
+  deprecations: Deprecation[];
   /** The scripts of the workspace manifest. pnpm 12.8.1 pack strips the publish scripts from the packed one. */
   scripts: Record<string, unknown>;
 }
@@ -244,16 +245,6 @@ export function readTarball(path: string): Tarball {
   };
 }
 
-/**
- * release/deprecations.json of the tree at `root`. prepare writes it into core,
- * and check-pack holds core to it. Task 9 of plan 12j writes the register.
- * Until then no item is deprecated.
- */
-export function readDeprecations(root: string): unknown[] {
-  const register = join(root, "release/deprecations.json");
-  return existsSync(register) ? (JSON.parse(readFileSync(register, "utf8")) as unknown[]) : [];
-}
-
 /** A key that names a registry or a proxy, such as registry, registries, @authtempo:registry, httpsProxy, or https-proxy. */
 const REGISTRY_KEY = /registr|proxy/i;
 
@@ -335,6 +326,7 @@ export function checkTarballs(root: string, paths: string[]): Report {
     url: string;
   };
   const rootLicense = readFileSync(join(root, "LICENSE"), "utf8");
+  // The register is required: it is the one source of core's authtempo.deprecations.
   const deprecations = readDeprecations(root);
 
   const failures: string[] = [];
