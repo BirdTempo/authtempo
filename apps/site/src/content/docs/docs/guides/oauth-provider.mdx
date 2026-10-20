@@ -58,6 +58,14 @@ import test from "../../../../../samples/guides/oauth-provider.test.ts?raw";
 - The resource answers its 401 with `resource_metadata` and `scope`, and its 403 with `error="insufficient_scope"`. The functions `unauthorizedResponse` and `insufficientScopeResponse` of [the verify package](/docs/reference/verify/) write both.
 - The 401 names `error="invalid_token"` only for a request with a bearer and no session cookie. Core reads a session cookie first and does not read the bearer then.
 
+## The device flow
+
+A device with no browser, such as a command line tool, can get tokens with the device grant of RFC 8628. `oauth.device: {}` turns it on.
+
+1. The client asks at `POST /auth/oauth/device_authorization` and shows the person a short user code.
+2. The person opens `GET /auth/oauth/device` in a browser with a session, and types the code.
+3. The device polls `/auth/oauth/token` until the person approves or denies.
+
 ## If it fails
 
 The provider routes answer the codes of the OAuth table:

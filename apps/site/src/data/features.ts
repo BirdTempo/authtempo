@@ -30,8 +30,9 @@ export interface Feature {
  * a repeat. The three oauth rows also repeat.
  * The guide of `session` is the architecture page (plan 11b Task 4). The guide
  * of `operator` is the Operator section of the routes page, which shows its
- * four routes (ruling 18 of the plan 11b lane). `accountDelete` and
- * `oauthRegistration` point to the section of their guide that holds them.
+ * four routes (ruling 18 of the plan 11b lane). `accountDelete`,
+ * `oauthRegistration`, and `oauthDevice` point to the section of their guide
+ * that holds them.
  * `openapi` has no guide: its
  * reference page documents the route and the document.
  */
@@ -142,6 +143,7 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     title: "Device sign-in",
     line: "A device with no browser gets tokens after the person types a short code on your site.",
     icon: "oauth",
+    guide: "/docs/guides/oauth-provider/#the-device-flow",
   },
   openapi: {
     title: "OpenAPI document",
