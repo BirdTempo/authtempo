@@ -85,7 +85,7 @@ export function entry(
   const [groupVersion] = versions;
   if (versions.length !== 1 || groupVersion === undefined)
     return unread(`the released packages hold ${versions.length} versions: ${versions.join(", ")}`);
-  const minor = /^v?(\d+\.\d+)\./.exec(tag)?.[1];
+  const minor = new RegExp(`^${TAG_PREFIX}(\\d+\\.\\d+)\\.`).exec(tag)?.[1];
   const branch = `refs/remotes/${remote}/release/${minor}`;
   const report = checkTag({
     tag,
