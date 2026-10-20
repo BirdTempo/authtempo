@@ -362,6 +362,22 @@ describe("check-changesets", () => {
     ]);
   });
 
+  it("counts no changeset that is on main at the merge base, also when it changes", () => {
+    repo = fixtureRepo({
+      ".changeset/old.md": '---\n"@fixture/a": patch\n---\n\nFix the old bug.\n',
+    });
+    repo.write("packages/a/src/foo.ts", "export const foo = 2;\n");
+    repo.write(".changeset/old.md", '---\n"@fixture/a": patch\n---\n\nFix the old bug. \n');
+    repo.commit("change foo and edit the old changeset");
+    const r = checkChangesets(readInput(repo.root, "main"));
+    expect(r.failures).toEqual([
+      "@fixture/a changes and no changeset names it: packages/a/src/foo.ts",
+    ]);
+    expect(r.notes).toEqual([
+      ".changeset/old.md is on main at the merge base, so it covers no change of this branch",
+    ]);
+  });
+
   it("reads only the changesets that are new since the merge base", () => {
     repo = makeRepo();
     repo.write("pnpm-workspace.yaml", "packages:\n  - packages/*\n");

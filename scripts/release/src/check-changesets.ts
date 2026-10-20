@@ -22,8 +22,11 @@ export interface ChangedFile {
 export interface ChangesetsInput {
   /** Each path that differs between the merge base and the working tree. */
   changed: ChangedFile[];
-  /** Each changeset that is new or changed since the merge base. */
-  changesets: { file: string; text: string }[];
+  /**
+   * Each changeset that is new or changed since the merge base. `onMain` is
+   * true when the file is at the merge base too.
+   */
+  changesets: { file: string; text: string; onMain?: boolean }[];
   /** The released package names: the fixed group. */
   released: string[];
   /** The folder of each workspace package, by name. */
@@ -117,7 +120,13 @@ export function checkChangesets(input: ChangesetsInput): Report {
 
   const named = new Set<string>();
   let empty = 0;
-  for (const { file, text } of input.changesets) {
+  for (const { file, text, onMain } of input.changesets) {
+    // A changeset on main covers an earlier change. An edit on the branch does
+    // not make it cover a new one.
+    if (onMain === true) {
+      notes.push(`${file} is on main at the merge base, so it covers no change of this branch`);
+      continue;
+    }
     let parsed: ReturnType<typeof parseChangeset>;
     try {
       parsed = parseChangeset(text);
@@ -208,8 +217,8 @@ const CHANGESET_FILE = /^\.changeset\/[^/]+\.md$/;
 
 /**
  * Reads the input of `checkChangesets` from the checkout at `root`, against the
- * merge base with `ref`. Only a changeset that is new or changed since the merge
- * base counts: a changeset that is already on `main` covers an earlier change.
+ * merge base with `ref`. Each changeset that is new or changed since the merge
+ * base is read, and `onMain` marks each one that is at the merge base too.
  */
 export function readInput(root: string, ref: string): ChangesetsInput {
   const base = mergeBase(root, ref);
@@ -222,11 +231,12 @@ export function readInput(root: string, ref: string): ChangesetsInput {
         ? { path, base: showAt(root, base, path), head: readHead(path) }
         : { path },
   );
-  const changesets: { file: string; text: string }[] = [];
+  const changesets: ChangesetsInput["changesets"] = [];
   for (const path of paths) {
     if (!CHANGESET_FILE.test(path) || path === ".changeset/README.md") continue;
     const text = readHead(path);
-    if (text !== null) changesets.push({ file: path, text });
+    if (text !== null)
+      changesets.push({ file: path, text, onMain: showAt(root, base, path) !== null });
   }
   const workspace = readWorkspace(root);
   return {
