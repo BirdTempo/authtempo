@@ -257,6 +257,29 @@ describe("dry run", () => {
     );
   });
 
+  it("prints each failure line of a failed step", async () => {
+    // Before Task 3b of plan 12j, 22 released packages have no engines, and the
+    // person needs each name, not the last line only.
+    const { root, tmp } = setup((d) => {
+      for (const p of ["client", "core"]) {
+        const file = join(d, `packages/${p}/package.json`);
+        const m = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+        delete m.engines;
+        writeFileSync(file, `${JSON.stringify(m, null, 2)}\n`);
+      }
+    });
+    const f = fake();
+    const report = await dryRun({ root, run: f.run, tmp });
+    expect(failuresOf(report)).toEqual([
+      "prepare exited 1: prepare: FAIL packages=2 failures=2",
+      "prepare: @authtempo/client: the manifest has no engines",
+      "prepare: @authtempo/core: the manifest has no engines",
+    ]);
+    expect(dryRunLine(report)).toBe(
+      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=0 files=0 smoke=0 failures=3",
+    );
+  });
+
   it("never calls publish without --dry-run, push, or tag", async () => {
     const { report, calls } = await passingRun();
     expect(report.exit).toBe(0);

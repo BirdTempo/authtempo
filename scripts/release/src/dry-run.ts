@@ -99,6 +99,22 @@ const firstLine = (r: RunResult) =>
   (nonEmpty(r.stderr)[0] ?? nonEmpty(r.stdout).at(-1) ?? "no output").trim();
 
 /**
+ * The summary line and the failure lines of a release check that printed its
+ * report: "<name>: PASS|FAIL ..." and each line after it that starts with two
+ * spaces, except a note. A step with no summary line gives null.
+ */
+function reportOf(stdout: string): { summary: string; failures: string[] } | null {
+  const all = nonEmpty(stdout);
+  const at = all.findIndex((l) => /^\S+: (PASS|FAIL) /.test(l));
+  if (at < 0) return null;
+  const failures = all
+    .slice(at + 1)
+    .filter((l) => l.startsWith("  ") && !l.trim().startsWith("note:"))
+    .map((l) => l.trim());
+  return { summary: all[at] ?? "", failures };
+}
+
+/**
  * The dry run of spec 33 item 4.1, in a copy of `git archive HEAD` under a new
  * temp folder. It stops at the first step that fails. It never commits, tags,
  * pushes, or publishes, and it leaves the checkout unchanged.
@@ -126,7 +142,9 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     log(`dry-run: ${label}`);
     const r = run(cmd, args, cwd);
     if (r.status === 0) return r;
-    failures.push(`${label} exited ${r.status}: ${firstLine(r)}`);
+    const report = reportOf(r.stdout);
+    failures.push(`${label} exited ${r.status}: ${report?.summary ?? firstLine(r)}`);
+    for (const line of report?.failures ?? []) failures.push(`${label}: ${line}`);
     return null;
   };
 
@@ -258,12 +276,12 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
       ["scripts/release/src/check-pack.ts", ...tarballs.map((t) => t.path)],
       repo,
     );
-    const summary = nonEmpty(check.stdout).find((l) => l.startsWith("check-pack: "));
-    if (check.status !== 0 || summary === undefined || !summary.startsWith("check-pack: PASS")) {
-      failures.push(`check-pack exited ${check.status}: ${summary ?? firstLine(check)}`);
-      for (const l of nonEmpty(check.stdout).filter((x) => x.startsWith("  "))) {
-        failures.push(`check-pack: ${l.trim()}`);
-        for (const t of tarballs) if (l.trim().startsWith(`${tag.get(t.name)}:`)) bad.add(t.name);
+    const checked = reportOf(check.stdout);
+    if (check.status !== 0 || !checked?.summary.startsWith("check-pack: PASS")) {
+      failures.push(`check-pack exited ${check.status}: ${checked?.summary ?? firstLine(check)}`);
+      for (const l of checked?.failures ?? []) {
+        failures.push(`check-pack: ${l}`);
+        for (const t of tarballs) if (l.startsWith(`${tag.get(t.name)}:`)) bad.add(t.name);
       }
       // A failure that names no package, such as a group of two versions, holds back each package.
       if (bad.size === 0) for (const t of tarballs) bad.add(t.name);
@@ -356,15 +374,14 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     }
     log("dry-run: node smoke.mjs");
     const s = run("node", ["smoke.mjs", join(repo, ".changeset/config.json")], smoke);
-    const smokeLine = nonEmpty(s.stdout).find((l) => l.startsWith("smoke: "));
-    if (s.status !== 0 || smokeLine === undefined || !smokeLine.startsWith("smoke: PASS")) {
-      failures.push(`node smoke.mjs exited ${s.status}: ${smokeLine ?? firstLine(s)}`);
-      for (const l of nonEmpty(s.stdout).filter((x) => x.startsWith("  ")))
-        failures.push(`smoke: ${l.trim()}`);
+    const smoked = reportOf(s.stdout);
+    if (s.status !== 0 || smoked === null || !smoked.summary.startsWith("smoke: PASS")) {
+      failures.push(`node smoke.mjs exited ${s.status}: ${smoked?.summary ?? firstLine(s)}`);
+      for (const l of smoked?.failures ?? []) failures.push(`smoke: ${l}`);
       for (const t of tarballs) bad.add(t.name);
       return settle();
     }
-    lines.push(smokeLine);
+    lines.push(smoked.summary);
     counts.smoke = 1;
     return settle();
   }
