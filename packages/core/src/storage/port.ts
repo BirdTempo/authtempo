@@ -1,6 +1,6 @@
 import type { ModelName, Models } from "../schema.js";
 
-export type Op = "eq" | "ne" | "in" | "lt" | "lte" | "gt" | "gte";
+export type Op = "eq" | "ne" | "in" | "lt" | "lte" | "gt" | "gte" | "startsWith";
 
 export interface Where<M extends ModelName> {
   field: keyof Models[M] & string;
@@ -61,6 +61,13 @@ export class StorageError extends Error {
  *   must answer it without sending that SQL.
  * - A unique key with null in any of its fields never conflicts, so two rows
  *   may both hold null there.
+ *
+ * Prefix rule (plan 12f). `startsWith` takes a non-empty string. It matches a
+ * string field whose value begins with exactly that text, with case, and with
+ * no wildcard. It never matches null. A value that is not a non-empty string
+ * throws `invalid_argument`. It applies to `string` fields only; another field
+ * type throws `invalid_argument`. The SQL adapters compare a `substr` of the
+ * column, so no index serves it: each call scans the table.
  *
  * Sort rules. Nulls come last in ascending order and first in descending order.
  *

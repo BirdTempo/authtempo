@@ -370,7 +370,16 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
           parts.push(`${c} IN (${vals.map(enc).join(", ")})`);
           break;
         }
+        case "startsWith":
+          if (type !== "string" || typeof w.value !== "string" || w.value === "")
+            throw invalid(model, w.field, "startsWith takes a non-empty string on a string field");
+          // substr, not LIKE, as in core's builder (plan 12f deviation 2): exact, with case,
+          // and no wildcard. The count is code points, as substr counts on both dialects.
+          parts.push(`substr(${c}, 1, ${p.add([...w.value].length)}) = ${enc(w.value)}`);
+          if (empty) parts.push(`${c} <> ''`);
+          break;
         default: {
+          // The four range ops only: lt, lte, gt, and gte.
           if (isNull(w.value)) {
             impossible = true;
             break;

@@ -300,6 +300,15 @@ function compileWhere<M extends ModelName>(
         parts.push(`${col} ${op} ${p.add(enc(w.value))}`);
         break;
       }
+      case "startsWith": {
+        if (type !== "string" || typeof w.value !== "string" || w.value === "")
+          throw invalid(model, w.field, "startsWith takes a non-empty string on a string field");
+        // substr, not LIKE: SQLite's LIKE ignores the case of ASCII letters, and a
+        // wildcard needs an escape. substr counts characters on both dialects, so
+        // the match is exact (plan 12f deviation 2). No index serves it: a scan.
+        parts.push(`substr(${col}, 1, ${p.add([...w.value].length)}) = ${p.add(enc(w.value))}`);
+        break;
+      }
     }
   }
   if (impossible) return { clause: "", impossible: true };

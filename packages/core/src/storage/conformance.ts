@@ -1431,6 +1431,98 @@ export function runAdapterConformance(
         ).toEqual(["a3"]);
       });
     });
+
+    describe("startsWith (plan 12f)", () => {
+      const rows: [string, string][] = [
+        ["p1", "a%b@example.com"],
+        ["p2", "abc@example.com"],
+        ["p3", "a_c@example.com"],
+        ["p4", "a\\d@example.com"],
+        ["p5", "éa@example.com"],
+        ["p6", "ébc@example.com"],
+        ["p7", "Abe@example.com"],
+        ["p8", "𝔞b@example.com"],
+      ];
+      const prefixed = async (prefix: string) =>
+        (await db.findMany("user", [{ field: "email", op: "startsWith", value: prefix }]))
+          .map((r) => r.id)
+          .sort();
+
+      beforeEach(async () => {
+        for (const [id, email] of rows) await db.create("user", user(id, email, t0));
+      });
+
+      it("matches a prefix as text, with no wildcard and with case", async () => {
+        expect(await prefixed("a%")).toEqual(["p1"]);
+        expect(await prefixed("a_")).toEqual(["p3"]);
+        expect(await prefixed("a\\")).toEqual(["p4"]);
+        expect(await prefixed("ab")).toEqual(["p2"]);
+        expect(await prefixed("A")).toEqual(["p7"]);
+        expect(await prefixed("a")).toEqual(["p1", "p2", "p3", "p4"]);
+        expect(await prefixed("é")).toEqual(["p5", "p6"]);
+        expect(await prefixed("éa")).toEqual(["p5"]);
+        // One code point outside the BMP: two UTF-16 units, one character in SQL.
+        expect(await prefixed("𝔞")).toEqual(["p8"]);
+        expect(await prefixed("abc@example.com")).toEqual(["p2"]);
+        expect(await prefixed("abc@example.comx")).toEqual([]);
+      });
+
+      it("joins with the other clauses and the sort", async () => {
+        // ASCII rows only: the test server's collation sorts them in byte order, as SQLite does.
+        const found = await db.findMany(
+          "user",
+          [
+            { field: "email", op: "startsWith", value: "a" },
+            { field: "email", op: "ne", value: "abc@example.com" },
+          ],
+          {
+            sort: [
+              { field: "email", dir: "asc" },
+              { field: "id", dir: "asc" },
+            ],
+            limit: 2,
+          },
+        );
+        expect(found.map((r) => r.email)).toEqual(["a%b@example.com", "a\\d@example.com"]);
+      });
+
+      it("never matches null", async () => {
+        await db.create("user", { ...user("n1", "n1@example.com", t0), name: "xena" });
+        await db.create("user", user("n2", "n2@example.com", t0));
+        const found = await db.findMany("user", [{ field: "name", op: "startsWith", value: "x" }]);
+        expect(found.map((r) => r.id)).toEqual(["n1"]);
+      });
+
+      it("refuses an empty prefix, a value that is not a string, and a field that is not a string", async () => {
+        const refused = { name: "StorageError", code: "invalid_argument" };
+        await expect(
+          db.findMany("user", [{ field: "email", op: "startsWith", value: "" }]),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.findMany("user", [{ field: "email", op: "startsWith", value: 5 }]),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.findMany("user", [{ field: "email", op: "startsWith", value: null }]),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.findMany("user", [{ field: "emailVerified", op: "startsWith", value: "t" }]),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.findMany("user", [{ field: "createdAt", op: "startsWith", value: "2026" }]),
+        ).rejects.toMatchObject(refused);
+        // The refusal holds on an empty table too, and on update and delete.
+        await expect(
+          db.findMany("session", [{ field: "id", op: "startsWith", value: "" }]),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.update("user", [{ field: "email", op: "startsWith", value: "" }], { name: "x" }),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.delete("user", [{ field: "email", op: "startsWith", value: 5 }]),
+        ).rejects.toMatchObject(refused);
+        expect((await db.findMany("user", [])).length).toBe(8);
+      });
+    });
   });
 }
 

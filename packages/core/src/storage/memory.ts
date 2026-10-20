@@ -31,6 +31,9 @@ function matches<M extends ModelName>(row: Record<string, unknown>, where: Where
       case "in":
         // SQL: IN never matches a NULL row, even if the list holds null.
         return v !== null && (w.value as unknown[]).some((x) => norm(x) === v);
+      case "startsWith":
+        // A prefix of UTF-16 units is a prefix of code points, so this agrees with SQL substr.
+        return typeof v === "string" && v.startsWith(w.value as string);
       case "lt":
       case "lte":
       case "gt":
@@ -96,6 +99,17 @@ interface Lock {
   tail: Promise<void>;
 }
 
+/** The prefix rule of the port: a non-empty string on a string field. */
+function assertPrefixes<M extends ModelName>(model: M, where: Where<M>[]): void {
+  const fields = schema[model].fields as Record<string, { type: string }>;
+  for (const w of where) {
+    if (w.op !== "startsWith") continue;
+    if (fields[w.field]?.type !== "string" || typeof w.value !== "string" || w.value === "") {
+      throw new StorageError("invalid_argument", model, [w.field]);
+    }
+  }
+}
+
 /**
  * `log` is null outside a transaction. Inside one, every write pushes the
  * step that reverses it, so a rollback touches only this transaction's rows
@@ -119,6 +133,8 @@ function adapterOn(store: Store, lock: Lock, log: Undo[] | null): StorageAdapter
       model,
       where.map((w) => w.field),
     );
+    // Before the filter, so an empty table refuses a bad prefix as SQL does.
+    assertPrefixes(model, where);
     return [...t.values()].filter((r) => matches(r, where));
   };
 
