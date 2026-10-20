@@ -87,13 +87,19 @@ async function dump(): Promise<Record<string, unknown[]>> {
   return out;
 }
 
-/** A request to the route of `key` with the impersonation cookie. A POST is a trusted JSON post. */
-function requestOf(key: RouteKey): Request {
+/**
+ * A request to the route of `key` with the impersonation session: the
+ * cookie, or the `ts_` token as a bearer. A POST is a trusted JSON post.
+ */
+function requestOf(key: RouteKey, via: "cookie" | "bearer" = "cookie"): Request {
   const [method, path = ""] = key.split(" ");
   const url = `/auth${path.replace(":provider", "google")}`;
-  const cookie = `__Host-tempo_session=${w.token}`;
-  if (method === "POST") return post(url, {}, { cookie });
-  return new Request(`${BASE_URL}${url}`, { headers: { cookie, origin: APP_ORIGIN } });
+  const credential =
+    via === "cookie"
+      ? { cookie: `__Host-tempo_session=${w.token}` }
+      : { authorization: `Bearer ${w.token}` };
+  if (method === "POST") return post(url, {}, credential);
+  return new Request(`${BASE_URL}${url}`, { headers: { ...credential, origin: APP_ORIGIN } });
 }
 
 describe("the impersonation lists (plan 12f Task 11)", () => {
@@ -118,6 +124,17 @@ describe("the impersonation lists (plan 12f Task 11)", () => {
     async (key) => {
       const before = await dump();
       const res = await w.handle(requestOf(key));
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: "impersonation_session" });
+      expect(await dump()).toEqual(before);
+    },
+  );
+
+  it.each([...DECLARING].sort())(
+    "refuses every route of IMPERSONATION_REFUSED to a bearer impersonation session: %s",
+    async (key) => {
+      const before = await dump();
+      const res = await w.handle(requestOf(key, "bearer"));
       expect(res.status).toBe(403);
       expect(await res.json()).toEqual({ error: "impersonation_session" });
       expect(await dump()).toEqual(before);
