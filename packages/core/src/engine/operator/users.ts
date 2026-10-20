@@ -205,8 +205,13 @@ export async function listUsers(
  *   and `next` is set only when more users follow.
  *
  * Two keys, no key, or a bad value answers `invalid_body`. An `after`
- * that names no user answers `invalid_body`: start the search again. No
- * match answers `{ users: [], next: null }`, the shape of a match.
+ * that names no user, or a user whose address no longer starts with the
+ * prefix, answers `invalid_body`: start the search again. No match answers
+ * `{ users: [], next: null }`, the shape of a match.
+ *
+ * One race stays. When the cursor user moves to another address inside the
+ * prefix between two pages, the next page starts after the new address. It
+ * skips or repeats the users between the two addresses.
  *
  * Cost: a prefix search reads the whole user table on D1 and Postgres
  * (`startsWith` compiles to `substr`, which no index serves). On a table
@@ -260,7 +265,9 @@ export async function searchUsers(
     const last = await config.storage.findOne("user", [
       { field: "id", op: "eq", value: input.after },
     ]);
-    if (!last) return fail("invalid_body");
+    // A cursor user who moved out of the prefix would skip the rest of the
+    // prefix and answer `next: null` (review 12f Task 5 L2).
+    if (!last?.email.startsWith(prefix)) return fail("invalid_body");
     where.push({ field: "email", op: "gt", value: last.email });
   }
   const rows = await config.storage.findMany("user", where, {

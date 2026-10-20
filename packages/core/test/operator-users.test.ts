@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
 import { matchOperatorSecret, type OperatorActor } from "../src/engine/operator/guards.js";
 import { operatorApi } from "../src/engine/operator/index.js";
 import { createSession } from "../src/engine/sessions.js";
 import { normalizeEmailPrefix } from "../src/engine/users.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import { BASE_URL, makeAuth, seedPlatform } from "./helpers.js";
+import { BASE_URL, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
   type OperatorAuth,
@@ -20,7 +21,7 @@ import {
   googleSignIn,
   tokenEndpoint,
 } from "./social-helpers.js";
-import { EMAIL, enrolled } from "./totp-helpers.js";
+import { EMAIL, enrolled, verifiedSession } from "./totp-helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -195,6 +196,42 @@ describe("operator user reads (plan 12f Task 5)", () => {
     expect(
       await api.users.search({ actor: APP, emailPrefix: "sam.", after: "01NOSUCHUSER" }),
     ).toMatchObject({ code: "invalid_body" });
+  });
+
+  it("refuses a prefix cursor whose address left the prefix (review probe P3)", async () => {
+    const auth = await operatorAuth();
+    const api = operatorApi(auth.config);
+    await signUpAll(auth, ["sam.a@example.com"]);
+    const b = await verifiedSession(auth, "sam.b@example.com");
+    await signUpAll(auth, ["sam.c@example.com", "sam.d@example.com"]);
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const first = await api.users.search({ actor: APP, emailPrefix: "sam.", limit: 2 });
+    if (!first.ok) throw new Error(first.code);
+    expect(first.value.users.map((u) => u.email)).toEqual([
+      "sam.a@example.com",
+      "sam.b@example.com",
+    ]);
+    expect(first.value.next).toBe(b.user.id);
+
+    // sam.b moves to an address outside the prefix through the change flow.
+    const asked = await requestEmailChange(auth.config, {
+      session: b,
+      newEmail: "zed@example.com",
+    });
+    expect(asked.ok).toBe(true);
+    const token = tokenFromMail(auth.mail.findLast((m) => m.to === "zed@example.com")?.text ?? "");
+    const moved = await confirmEmailChange(auth.config, { token, ip: null, userAgent: null });
+    expect(moved.ok).toBe(true);
+
+    // The next page would skip sam.c and sam.d, so the cursor answers invalid_body.
+    expect(
+      await api.users.search({
+        actor: APP,
+        emailPrefix: "sam.",
+        limit: 2,
+        after: first.value.next ?? "",
+      }),
+    ).toEqual({ ok: false, code: "invalid_body", status: 400 });
   });
 
   it("answers the same shape for no match", async () => {
