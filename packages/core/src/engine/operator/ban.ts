@@ -73,17 +73,35 @@ export interface UnbanInput {
  */
 function banEnd(until: unknown, now: Date): Result<Date | null> {
   if (until === undefined) return ok(null);
-  const fields = typeof until === "string" ? ISO_DATE_TIME.exec(until) : null;
-  if (typeof until !== "string" || !fields) return fail("invalid_body");
-  const end = new Date(until);
+  const end = isoDateTime(until);
+  if (!end) return fail("invalid_body");
   const ms = end.getTime() - now.getTime();
-  if (Number.isNaN(ms) || !sameFields(fields, end)) return fail("invalid_body");
   if (ms < UNTIL_MIN_MS || ms > UNTIL_MAX_MS) return fail("invalid_body");
   return ok(end);
 }
 
-/** The first checks, in order: the tool is on, the actor holds the scope `users`, and the reason is valid. */
-function reasonOf(config: ResolvedConfig, input: { actor: OperatorActor; reason: unknown }) {
+/**
+ * The time of an ISO 8601 date and time with a zone. Null for another
+ * value, and for a date or a time that does not exist. The end of a ban
+ * and the time of a factor proof (plan 12f Task 9) share this one rule.
+ */
+export function isoDateTime(value: unknown): Date | null {
+  const fields = typeof value === "string" ? ISO_DATE_TIME.exec(value) : null;
+  if (typeof value !== "string" || !fields) return null;
+  const at = new Date(value);
+  if (Number.isNaN(at.getTime()) || !sameFields(fields, at)) return null;
+  return at;
+}
+
+/**
+ * The first checks, in order: the tool is on, the actor holds the scope
+ * `users`, and the reason is valid. The disable of the second factor (plan
+ * 12f Task 9) runs the same checks.
+ */
+export function reasonOf(
+  config: ResolvedConfig,
+  input: { actor: OperatorActor; reason: unknown },
+): Result<string> {
   if (!config.operator?.users) return fail("not_found");
   const scoped = requireScope(input.actor, "users");
   if (!scoped.ok) return scoped;
