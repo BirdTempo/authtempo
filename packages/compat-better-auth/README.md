@@ -898,7 +898,10 @@ The client has Better Auth's team calls, on core's routes under
 `addTeamMember`, and `removeTeamMember`, in Better Auth's shapes. A team's
 `additionalFields` answer `NOT_SUPPORTED` (501). `listUserTeams` lists the
 teams of the session's user only: a `userId` of another person answers
-`YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER` (403).
+`YOU_ARE_NOT_ALLOWED_TO_UPDATE_THIS_MEMBER` (403). `addTeamMember` of a user
+who is no member of the organization answers
+`USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION` with core's status 404, where Better
+Auth answers 400.
 
 `organization.checkSlug({ slug })` runs core's slug check. A free slug answers
 `{ status: true }`, as in Better Auth. A taken or reserved slug answers

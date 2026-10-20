@@ -1182,10 +1182,22 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
         );
       },
       addTeamMember({ teamId, userId }) {
+        let notMember = false;
         return run(
-          (c) => c.organizations.teams.members.add({ teamId, userId }),
+          async (c): Promise<ClientResult<TeamMemberJSON>> => {
+            const r = await c.organizations.teams.members.add({ teamId, userId });
+            // Core answers not_found for a missing team and for a user who is no member.
+            // The team is there when the caller can list its members.
+            if (!r.ok && r.code === "not_found")
+              notMember = (await c.organizations.teams.members.list({ teamId })).ok;
+            return r;
+          },
           teamMemberOf,
-          teamCode("YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_TEAM_MEMBER"),
+          // Better Auth's code for a user who is no member (routes/crud-team.mjs:640, read 2026-10-21).
+          (f) =>
+            notMember
+              ? "USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION"
+              : teamCode("YOU_ARE_NOT_ALLOWED_TO_CREATE_A_NEW_TEAM_MEMBER")(f),
         );
       },
       async removeTeamMember({ teamId, userId }) {

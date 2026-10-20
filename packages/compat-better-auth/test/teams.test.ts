@@ -817,6 +817,14 @@ describe("the teams shim (spec 29 item 19)", () => {
       "Acme",
       "Green",
     ]);
+    // A user who is no member of the organization: Better Auth's code, with core's status.
+    const carol = await person("carol@example.com");
+    expect(
+      (await c.organization.addTeamMember({ teamId, userId: carol.user.id })).error,
+    ).toMatchObject({ code: "USER_IS_NOT_A_MEMBER_OF_THE_ORGANIZATION", status: 404 });
+    expect(
+      (await c.organization.addTeamMember({ teamId: "no-such-team", userId: bob.user.id })).error,
+    ).toMatchObject({ code: "TEAM_NOT_FOUND", status: 404 });
     const added = await c.organization.addTeamMember({ teamId, userId: bob.user.id });
     expect(added.data).toEqual({
       id: expect.any(String),
