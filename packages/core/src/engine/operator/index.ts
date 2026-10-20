@@ -3,6 +3,7 @@ import type { Result } from "../../result.js";
 import type { OperatorAuditRow } from "../../schema.js";
 import { listAudit } from "./audit.js";
 import { checkActor, type OperatorActor } from "./guards.js";
+import { getUser, listUsers, type OperatorUser, searchUsers } from "./users.js";
 
 /**
  * `auth.api.operator` (plan 12f): the operator tools in process. Present in
@@ -20,6 +21,25 @@ export interface OperatorApi {
       after?: string;
       limit?: number;
     }): Promise<Result<{ rows: OperatorAuditRow[]; next: string | null }>>;
+  };
+  users: {
+    /** The users by `id` ascending, 1 to 100 per page. Needs the scope `users`. */
+    list(input: {
+      actor: OperatorActor;
+      after?: string;
+      limit?: number;
+    }): Promise<Result<{ users: OperatorUser[]; next: string | null }>>;
+    /** A search by one of `email`, `emailPrefix`, and `id`. Needs the scope `users`. */
+    search(input: {
+      actor: OperatorActor;
+      email?: string;
+      emailPrefix?: string;
+      id?: string;
+      after?: string;
+      limit?: number;
+    }): Promise<Result<{ users: OperatorUser[]; next: string | null }>>;
+    /** One user by id. Needs the scope `users`. */
+    get(input: { actor: OperatorActor; userId: string }): Promise<Result<OperatorUser>>;
   };
 }
 
@@ -41,6 +61,11 @@ export function operatorApi(config: ResolvedConfig): OperatorApi {
   return {
     audit: {
       list: entry((i) => listAudit(config, i)),
+    },
+    users: {
+      list: entry((i) => listUsers(config, i)),
+      search: entry((i) => searchUsers(config, i)),
+      get: entry((i) => getUser(config, i)),
     },
   };
 }

@@ -94,19 +94,45 @@ export function validImageUrl(value: string): boolean {
   return true;
 }
 
+/** The longest address, in UTF-16 code units. */
+const EMAIL_MAX = 254;
+
+/**
+ * The steps that an address and an address prefix share: trimmed,
+ * lowercase, at most `EMAIL_MAX` long, and with no control character. Or
+ * null. One function, so the address rule and the prefix rule cannot drift.
+ */
+function normalizeAddressText(raw: string): string | null {
+  const text = raw.trim().toLowerCase();
+  if (text.length > EMAIL_MAX) return null;
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code <= 0x1f || code === 0x7f) return null;
+  }
+  return text;
+}
+
 /**
  * Lowercase, trimmed, and shaped like an address, or null. The shape check
  * is loose on purpose: the magic link proves the address. A control
  * character is never part of an address, and storage rejects U+0000.
  */
 export function normalizeEmail(raw: string): string | null {
-  const email = raw.trim().toLowerCase();
-  if (email.length > 254 || !EMAIL_RE.test(email)) return null;
-  for (const ch of email) {
-    const code = ch.codePointAt(0) ?? 0;
-    if (code <= 0x1f || code === 0x7f) return null;
-  }
+  const email = normalizeAddressText(raw);
+  if (email === null || !EMAIL_RE.test(email)) return null;
   return email;
+}
+
+/**
+ * The start of an address for a prefix search (plan 12f): the steps of
+ * `normalizeEmail` with no shape check, or null. An empty prefix is null.
+ * A lone surrogate is null too, because the `startsWith` rule of the
+ * storage port refuses it. NUL is a control character, so it is null.
+ */
+export function normalizeEmailPrefix(raw: string): string | null {
+  const prefix = normalizeAddressText(raw);
+  if (prefix === null || prefix === "" || /\p{Cs}/u.test(prefix)) return null;
+  return prefix;
 }
 
 export interface ClaimKeep {
