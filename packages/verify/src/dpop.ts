@@ -1,4 +1,9 @@
-import { checkDpopProof, FOREIGN_ALGS, type ForeignAlg } from "@authtempo/core/credentials";
+import {
+  checkDpopProof,
+  DPOP_WINDOW_SECONDS,
+  FOREIGN_ALGS,
+  type ForeignAlg,
+} from "@authtempo/core/credentials";
 
 /**
  * DPoP at a resource server (plan 12e, RFC 9449 read 2026-10-20). This is
@@ -71,9 +76,8 @@ export interface ResolvedDpop {
 }
 
 /**
- * The rule of core's `oauth.dpop`: the same algs and the same window. RFC
- * 9449 section 11.1 asks for a short window; 60 s covers a client clock
- * that drifts.
+ * The rule of core's `oauth.dpop`: the same algs and the same window, read
+ * from core's one copy of each (`FOREIGN_ALGS`, `DPOP_WINDOW_SECONDS`).
  */
 export function resolveDpop(input: DpopOptions, clock: { now(): Date }): ResolvedDpop {
   const algs = input.algs ?? FOREIGN_ALGS;
@@ -85,9 +89,12 @@ export function resolveDpop(input: DpopOptions, clock: { now(): Date }): Resolve
     throw new Error(
       "authtempo verify: dpop.algs must be a list of distinct values of EdDSA, Ed25519, ES256, RS256, and PS256",
     );
-  const windowSeconds = input.windowSeconds ?? 60;
-  if (!Number.isSafeInteger(windowSeconds) || windowSeconds < 10 || windowSeconds > 300)
-    throw new Error("authtempo verify: dpop.windowSeconds must be an integer from 10 to 300");
+  const { min, max } = DPOP_WINDOW_SECONDS;
+  const windowSeconds = input.windowSeconds ?? DPOP_WINDOW_SECONDS.default;
+  if (!Number.isSafeInteger(windowSeconds) || windowSeconds < min || windowSeconds > max)
+    throw new Error(
+      `authtempo verify: dpop.windowSeconds must be an integer from ${min} to ${max}`,
+    );
   return {
     algs: [...algs],
     windowSeconds,

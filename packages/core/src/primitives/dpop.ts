@@ -15,6 +15,13 @@ import {
 
 /** The `typ` of a DPoP proof (RFC 9449 section 4.2). */
 export const DPOP_TYP = "dpop+jwt";
+/**
+ * The window of a proof's `iat` in seconds: the default, the least, and the
+ * most. RFC 9449 section 11.1 asks for a short window; 60 s covers a client
+ * clock that drifts. Core's `oauth.dpop.windowSeconds` and the verify
+ * package read this one copy (review L5 of plan 12e).
+ */
+export const DPOP_WINDOW_SECONDS = { default: 60, min: 10, max: 300 } as const;
 /** The longest `jti`: section 11.1 asks a server to refuse a large one. Core stores its hash only. */
 const JTI_MAX = 256;
 

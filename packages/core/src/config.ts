@@ -49,6 +49,7 @@ import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort } from "./limiter/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
 import { sessionCookieNames } from "./primitives/credentials.js";
+import { DPOP_WINDOW_SECONDS } from "./primitives/dpop.js";
 import { FOREIGN_ALGS, type ForeignAlg } from "./primitives/foreign-jwk.js";
 import { JWS_ALGS, type JwsAlg } from "./primitives/jwk.js";
 import {
@@ -1687,12 +1688,14 @@ function resolveIntrospection(
 }
 
 /**
- * `oauth.dpop` (plan 12e). RFC 9449 section 11.1 asks for a short window;
- * 60 s covers a client clock that drifts. A replay row lives twice the
- * window, so a longer window keeps more rows.
+ * `oauth.dpop` (plan 12e). The window rule is `DPOP_WINDOW_SECONDS`. A
+ * replay row lives twice the window, so a longer window keeps more rows.
  */
 function resolveDpop(input: unknown): ResolvedOAuth["dpop"] {
-  if (input === undefined) return { algs: FOREIGN_ALGS, windowSeconds: 60 };
+  const { min, max } = DPOP_WINDOW_SECONDS;
+  const range = `oauth.dpop.windowSeconds must be an integer from ${min} to ${max}`;
+  if (input === undefined)
+    return { algs: FOREIGN_ALGS, windowSeconds: DPOP_WINDOW_SECONDS.default };
   if (!isPlainObject(input)) throw new ConfigError("oauth.dpop must be an object");
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && key !== "algs" && key !== "windowSeconds")
@@ -1707,12 +1710,11 @@ function resolveDpop(input: unknown): ResolvedOAuth["dpop"] {
     throw new ConfigError(
       "oauth.dpop.algs must be a list of distinct values of EdDSA, Ed25519, ES256, RS256, and PS256",
     );
-  const seconds: unknown = input.windowSeconds ?? 60;
-  if (typeof seconds !== "number")
-    throw new ConfigError("oauth.dpop.windowSeconds must be an integer from 10 to 300");
+  const seconds: unknown = input.windowSeconds ?? DPOP_WINDOW_SECONDS.default;
+  if (typeof seconds !== "number") throw new ConfigError(range);
   return {
     algs: [...(algs as ForeignAlg[])],
-    windowSeconds: integerIn("oauth.dpop.windowSeconds", seconds, 10, 300),
+    windowSeconds: integerIn("oauth.dpop.windowSeconds", seconds, min, max),
   };
 }
 

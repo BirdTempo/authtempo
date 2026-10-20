@@ -21,6 +21,7 @@ export {
 export {
   checkDpopProof,
   DPOP_TYP,
+  DPOP_WINDOW_SECONDS,
   type DpopBinding,
   type DpopCheck,
   type DpopCheckInput,
