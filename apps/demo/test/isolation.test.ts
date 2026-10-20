@@ -5,6 +5,7 @@ import {
   codeFor,
   exchange,
   type Jar,
+  LONG_TEST_MS,
   lastCode,
   lastLink,
   mailbox,
@@ -260,24 +261,28 @@ async function passkeyIds(jar: Jar): Promise<string[]> {
 }
 
 describe("two sandboxes", () => {
-  it("keeps each sandbox's credentials and mail to itself", async () => {
-    // Both sandboxes come through the gate, each from its own first visit.
-    const a = await newSandbox();
-    const b = await newSandbox();
-    expect(a.cookies.get(SANDBOX_COOKIE)).not.toBe(b.cookies.get(SANDBOX_COOKIE));
-    const heldA = await hold(a);
-    await fill(a);
-    // B tries each item of A before B makes any data of its own.
-    await refusedIn(b, heldA, true);
-    const heldB = await hold(b);
-    await refusedIn(a, heldB, false);
-    // No row crosses: each store holds its own passkey only.
-    const keysA = await passkeyIds(a);
-    const keysB = await passkeyIds(b);
-    expect(keysA).toHaveLength(1);
-    expect(keysB).toHaveLength(1);
-    expect(keysA.filter((k) => keysB.includes(k))).toEqual([]);
-  });
+  it(
+    "keeps each sandbox's credentials and mail to itself",
+    async () => {
+      // Both sandboxes come through the gate, each from its own first visit.
+      const a = await newSandbox();
+      const b = await newSandbox();
+      expect(a.cookies.get(SANDBOX_COOKIE)).not.toBe(b.cookies.get(SANDBOX_COOKIE));
+      const heldA = await hold(a);
+      await fill(a);
+      // B tries each item of A before B makes any data of its own.
+      await refusedIn(b, heldA, true);
+      const heldB = await hold(b);
+      await refusedIn(a, heldB, false);
+      // No row crosses: each store holds its own passkey only.
+      const keysA = await passkeyIds(a);
+      const keysB = await passkeyIds(b);
+      expect(keysA).toHaveLength(1);
+      expect(keysB).toHaveLength(1);
+      expect(keysA.filter((k) => keysB.includes(k))).toEqual([]);
+    },
+    LONG_TEST_MS,
+  );
 
   it("names each store by its own id", async () => {
     const a = await newSandbox();

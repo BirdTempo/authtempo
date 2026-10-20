@@ -44,12 +44,17 @@ beforeAll(async () => {
   await sql.end({ timeout: 5 });
 });
 
+// The drop is slow while other suites create, write, and drop databases on
+// the same Postgres. Measured on 2026-10-20, it took 0.03 to 0.8 s alone.
+// While core, compat, and the adapters ran their tests, it took 8.3, 15.4,
+// and 28.6 s (one-minute load 13 to 28). The default hook limit of 10 s
+// failed the unfiltered runs, so the drop gets 60 s, about twice the worst.
 afterAll(async () => {
   await Promise.all(pending);
   const admin = postgres(ADMIN_URL, { max: 1, onnotice: () => {} });
   await admin.unsafe(`DROP DATABASE IF EXISTS ${DB} WITH (FORCE)`);
   await admin.end({ timeout: 5 });
-});
+}, 60_000);
 
 const json = (path: string, body: unknown) =>
   new Request(`${BASE}${path}`, {

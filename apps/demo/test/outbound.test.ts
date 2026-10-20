@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { everyFlow } from "./flows.js";
+import { LONG_TEST_MS } from "./helpers.js";
 import { escapes, PROBE_ENTRY } from "./outbound-log.js";
 
 /**
@@ -22,17 +23,21 @@ describe("outbound requests", () => {
     expect(await recorded()).toContain(PROBE_ENTRY);
   });
 
-  it("sends no request out of the Worker", async () => {
-    // The flows run first. The test reads the recorder list before any flow
-    // error, so a flow that fails on a blocked request still shows the request.
-    let failure: unknown = null;
-    try {
-      await everyFlow();
-    } catch (e) {
-      failure = e;
-    }
-    // The teardown of test/outbound-teardown.ts also reads the list after every file.
-    expect(escapes(await recorded())).toEqual([]);
-    expect(failure).toBeNull();
-  });
+  it(
+    "sends no request out of the Worker",
+    async () => {
+      // The flows run first. The test reads the recorder list before any flow
+      // error, so a flow that fails on a blocked request still shows the request.
+      let failure: unknown = null;
+      try {
+        await everyFlow();
+      } catch (e) {
+        failure = e;
+      }
+      // The teardown of test/outbound-teardown.ts also reads the list after every file.
+      expect(escapes(await recorded())).toEqual([]);
+      expect(failure).toBeNull();
+    },
+    LONG_TEST_MS,
+  );
 });

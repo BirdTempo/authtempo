@@ -7,6 +7,16 @@ export const SESSION_COOKIE = "__Host-tempo_session";
 export const PASSWORD = "correct horse battery";
 
 /**
+ * The time limit of a pool test that walks many routes or every flow (final
+ * review of plan 12e, L9). The default of 5 s failed an unfiltered run: the
+ * outbound test passed 5008 ms there (one-minute load 3.5 to 8.1). Measured on
+ * 2026-10-20 alone, the four tests of this limit took 0.38 to 1.3 s. While
+ * core, compat, and the adapters ran their tests (load 15 to 31), they took
+ * up to 2.3 s. Each test grows with the flows, so the limit is 20 s.
+ */
+export const LONG_TEST_MS = 20_000;
+
+/**
  * The cookies of one visitor, as a browser keeps them. Each test starts with
  * a fresh sandbox, so no test reads the rows of another.
  */
