@@ -620,6 +620,16 @@ describe("the operator commands (plan 12f Task 12)", () => {
     expect(ahead.io.stderr.at(-1)).toBe(
       "stopped: the deployment refused a value (invalid_body): --proof-checked-at must be a date and time with a zone, at most 7 days old, and not later than the clock of the deployment",
     );
+    // A cursor that core refuses: each read names only its own flags.
+    const long = "x".repeat(65);
+    const list = await run(["users", "list", BASE, "--after", long], f);
+    expect(list.io.stderr.at(-1)).toBe(
+      "stopped: the deployment refused a value (invalid_body): --after is an id of at most 64 characters, from the page before",
+    );
+    const search = await run(["users", "search", BASE, "--id", "x", "--after", long], f);
+    expect(search.io.stderr.at(-1)).toBe(
+      "stopped: the deployment refused a value (invalid_body): --email-prefix is 3 to 254 characters after the address rule, and --after is an id of the page before",
+    );
     // A ban that ends in the past.
     const past = await run(
       ["users", "ban", BASE, id, "--reason", "spam", "--until", "2020-01-01T00:00:00Z", "--yes"],

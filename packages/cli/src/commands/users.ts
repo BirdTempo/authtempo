@@ -47,8 +47,9 @@ const PAGE_OPTIONS = {
   "max-calls": { type: "string" },
 } as const;
 
-/** The text after `invalid_body` of a user read. */
-const READ_INVALID =
+/** The text after `invalid_body` of each user read. Each text names the flags of its own command only. */
+const LIST_INVALID = "--after is an id of at most 64 characters, from the page before";
+const SEARCH_INVALID =
   "--email-prefix is 3 to 254 characters after the address rule, and --after is an id of the page before";
 
 const LIST_OPTIONS = { ...TOOL_OPTIONS, ...PAGE_OPTIONS } as const;
@@ -145,7 +146,7 @@ async function runList(argv: string[], ctx: Ctx): Promise<number> {
   const secret = readOperatorSecret(ctx, values);
   const path = "/operator/users";
   reading(ctx, t, path);
-  return listUsers(ctx, { ...t, secret }, path, {}, values, rule, READ_INVALID);
+  return listUsers(ctx, { ...t, secret }, path, {}, values, rule, LIST_INVALID);
 }
 
 /**
@@ -168,7 +169,7 @@ async function runSearch(argv: string[], ctx: Ctx): Promise<number> {
   const path = "/operator/users/search";
   reading(ctx, t, path);
   const query = Object.fromEntries(keys);
-  return listUsers(ctx, { ...t, secret }, path, query, values, rule, READ_INVALID);
+  return listUsers(ctx, { ...t, secret }, path, query, values, rule, SEARCH_INVALID);
 }
 
 /** `authtempo users get <base url> <user id>` (plan 12f Task 12): one user. */
