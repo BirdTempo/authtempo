@@ -10,7 +10,14 @@ import { deleteTwoFactorChallenges } from "../second-factor.js";
 import { deleteHandoffCodes } from "../session-list.js";
 import { deleteEndedSessions, sessionIsLive, sessionsEnded } from "../sessions.js";
 import { holdUser } from "../user-hold.js";
-import { auditDraft, operatorAct, operatorReason } from "./audit.js";
+import {
+  auditDraft,
+  type ImpersonationStops,
+  impersonationStops,
+  operatorAct,
+  operatorReason,
+  writeStopRow,
+} from "./audit.js";
 import { targetOf } from "./ban.js";
 import { type OperatorActor, requireScope } from "./guards.js";
 
@@ -156,6 +163,7 @@ export async function endUserSessions(
   if (!drafted.ok) return drafted;
   const now = config.clock.now();
   const userId = input.userId;
+  const stops = impersonationStops(config, "operator_end");
   const done = await operatorAct(
     config,
     drafted.value,
@@ -187,6 +195,7 @@ export async function endUserSessions(
         now,
         pageBudget,
         null,
+        stops,
       );
       meter.step(page.used - 1);
       await deleteHandoffCodes(tx, userId);
@@ -232,8 +241,7 @@ export async function endUserSessions(
       return ok({ ended: page.deleted + late, more: sessionsLeft || familiesLeft });
     },
     {
-      // The stop rows of these pages come with the rebase onto plan 12f Task 7 (ruling 43).
-      committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator", null),
+      committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator", stops),
       answerFamilyEnd: true,
     },
   );
@@ -334,6 +342,11 @@ export async function workBudget(
  * (final fix wave M-1). An expired row gets no event (plan 12a review L3).
  * The answer is the count of deleted rows, `stopped` when the budget left
  * rows of the list, and `used`, the calls of the page.
+ *
+ * With `stops`, each live impersonation session of the page goes by id,
+ * with its stop row (ruling 43 of plan 12f). It costs 2 calls with no
+ * hook and 1 more with a hook, and the budget counts them. The rows are
+ * in hand, so the page reads nothing more.
  */
 export async function endSessionPage(
   tx: StorageAdapter,
@@ -343,10 +356,16 @@ export async function endSessionPage(
   now: Date,
   budget: number,
   lock: Where<"session">[] | null,
+  stops: ImpersonationStops | null,
 ): Promise<{ deleted: number; stopped: boolean; used: number }> {
   const chunks = (k: number) => Math.ceil(k / IN_CHUNK);
-  // The read, the lock, the link reads, and the deletes of the first k rows.
-  const cost = (k: number) => 1 + (lock ? 1 : 0) + chunks(k) + (ended ? k : chunks(k));
+  // A live impersonation session ends by id with its stop row; an expired one writes none.
+  const endsWithStop = (row: SessionRow) =>
+    stops !== null && row.actorId !== null && sessionIsLive(config, row, now);
+  const impersonations = (k: number) => rows.slice(0, k).filter(endsWithStop).length;
+  // The read, the lock, the link reads, the deletes of the first k rows, and the stop rows.
+  const cost = (k: number) =>
+    1 + (lock ? 1 : 0) + chunks(k) + (ended ? k : chunks(k)) + (ended ? 1 : 2) * impersonations(k);
   let k = rows.length;
   while (k > 1 && cost(k) > budget) k--;
   const take = rows.slice(0, k);
@@ -374,15 +393,17 @@ export async function endSessionPage(
   await writeLogouts(tx, written, now);
   used += 2 * written.length;
   let deleted = 0;
-  if (ended) {
-    for (const row of take)
-      if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
-        deleted++;
-        if (sessionIsLive(config, row, now)) ended.push(row);
-      }
-  } else {
-    for (let i = 0; i < take.length; i += IN_CHUNK) {
-      const ids = take.slice(i, i + IN_CHUNK).map((r) => r.id);
+  const byId = take.filter((row) => ended !== null || endsWithStop(row));
+  for (const row of byId)
+    if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
+      deleted++;
+      if (sessionIsLive(config, row, now)) ended?.push(row);
+      if (stops && endsWithStop(row)) await writeStopRow(tx, stops, row, now);
+    }
+  if (!ended) {
+    const rest = take.filter((row) => !endsWithStop(row));
+    for (let i = 0; i < rest.length; i += IN_CHUNK) {
+      const ids = rest.slice(i, i + IN_CHUNK).map((r) => r.id);
       deleted += await tx.delete("session", [{ field: "id", op: "in", value: ids }]);
     }
   }
@@ -414,7 +435,9 @@ export async function endSessionPage(
  * row. With no hook the deletes are ceil(n / 50) statements, so the sum is
  * 3 + 2 ceil(n / 50): 23 for 500 sessions, and 43 for 1000. With a
  * `session.afterEnd` hook there is one delete per session, and the sum is
- * 3 + ceil(n / 50) + n. D1 has no row lock and sends 1 less. The calls
+ * 3 + ceil(n / 50) + n. Each live impersonation session costs 2 more with
+ * no hook, and 1 more with a hook (ruling 43). The two calls are its delete
+ * by id and its stop row. D1 has no row lock and sends 1 less. The calls
  * left write the logouts of the client links, 2 calls per link, and the
  * sweep logs out the rest. The work gets 48 calls for the app, 46 for a
  * secret, and 40 for a user actor. So a page with a hook ends 45, 43, or
@@ -445,6 +468,7 @@ export async function endAllSessions(
   const keep: Where<"session">[] =
     actor.kind === "user" ? [{ field: "id", op: "ne", value: actor.session.id }] : [];
   const now = config.clock.now();
+  const stops = impersonationStops(config, "operator_end");
   const done = await operatorAct(
     config,
     drafted.value,
@@ -464,12 +488,13 @@ export async function endAllSessions(
         now,
         budget.value - meter.used + 1,
         keep,
+        stops,
       );
       // The row is the last write of the act, so it can hold the count.
       draft.data = { ended: page.deleted };
       return ok({ ended: page.deleted, more: page.stopped || read.length > limit });
     },
-    { committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator", null) },
+    { committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator", stops) },
   );
   if (!done.ok) return done;
   return ok({ ended: done.value.ended, more: done.value.more, auditId: done.value.auditId });

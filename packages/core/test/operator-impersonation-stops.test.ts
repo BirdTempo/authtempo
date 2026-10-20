@@ -1,19 +1,28 @@
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { deleteAccount } from "../src/engine/account-delete.js";
+import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
 import { impersonationStops } from "../src/engine/operator/audit.js";
 import { startImpersonation } from "../src/engine/operator/impersonation.js";
 import { operatorApi } from "../src/engine/operator/index.js";
 import { removeMember } from "../src/engine/organizations.js";
-import { changePassword, passwordSignUp, verifyPasswordEmail } from "../src/engine/password.js";
+import {
+  changePassword,
+  passwordSignUp,
+  requestPasswordReset,
+  resetPassword,
+  verifyPasswordEmail,
+} from "../src/engine/password.js";
 import { revokeOtherSessions, revokeSession } from "../src/engine/session-list.js";
 import { destroySession, resolveSession } from "../src/engine/sessions.js";
+import { enableTotp, setupTotp } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
+import { base32Decode } from "../src/primitives/totp.js";
 import { post, tokenFromMail } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
-import { PASSWORD, verifiedSession } from "./totp-helpers.js";
+import { codeNow, PASSWORD, verifiedSession } from "./totp-helpers.js";
 
 // The stop rows of ruling 43 of plan 12f: every end of an impersonation
 // session but the expiry writes one `impersonation_stop` row with its
@@ -134,6 +143,73 @@ describe("the stop rows of the impersonation (ruling 43 of plan 12f)", () => {
     expect(await stops(w)).toEqual([
       stopOf(w, sessionId, "user_end", "The user ended the impersonation session."),
     ]);
+  });
+
+  it("writes user_end at a change of address, a reset, and a second-factor enable", async () => {
+    for (const how of ["email", "reset", "factor"] as const) {
+      const w = await world();
+      const { sessionId } = await impersonate(w);
+      if (how === "email") {
+        await requestEmailChange(w.auth.config, {
+          session: w.target,
+          newEmail: "ada.new@example.com",
+        });
+        const token = /token=([A-Za-z0-9_%-]+)/.exec(w.auth.mail.at(-1)?.text ?? "")?.[1] ?? "";
+        const r = await confirmEmailChange(w.auth.config, { token, ip: null, userAgent: null });
+        expect(r.ok, how).toBe(true);
+      } else if (how === "reset") {
+        expect((await requestPasswordReset(w.auth.config, { email: TARGET, ip: null })).ok).toBe(
+          true,
+        );
+        const r = await resetPassword(w.auth.config, {
+          token: tokenFromMail(w.auth.mail.at(-1)?.text ?? ""),
+          password: "a reset long password",
+          ip: null,
+          userAgent: null,
+        });
+        expect(r.ok, how).toBe(true);
+      } else {
+        const setup = await setupTotp(w.auth.config, {
+          userId: w.target.user.id,
+          password: PASSWORD,
+        });
+        if (!setup.ok) throw new Error(setup.code);
+        const r = await enableTotp(w.auth.config, {
+          session: w.target,
+          code: await codeNow(w.auth, base32Decode(setup.value.secret)),
+        });
+        expect(r.ok, how).toBe(true);
+      }
+      expect(await stops(w), how).toEqual([
+        stopOf(w, sessionId, "user_end", "The user ended the impersonation session."),
+      ]);
+    }
+  });
+
+  it("writes operator_end at an end of one user's sessions and of all sessions", async () => {
+    for (const hook of [false, true])
+      for (const call of ["endUser", "endAll"] as const) {
+        const w = await world(hook ? { hooks: { session: { afterEnd: () => {} } } } : {});
+        const { sessionId } = await impersonate(w);
+        const api = operatorApi(w.auth.config).sessions;
+        const base = { actor: APP, reason: "Key leak", ip: null, userAgent: null };
+        const r =
+          call === "endUser"
+            ? await api.endUser({ ...base, userId: w.target.user.id })
+            : await api.endAll(base);
+        expect(r.ok, call).toBe(true);
+        expect(await stops(w), `${call} ${hook}`).toEqual([
+          stopOf(
+            w,
+            sessionId,
+            "operator_end",
+            "An operator ended the sessions, and the impersonation session with them.",
+          ),
+        ]);
+        expect(
+          await w.auth.storage.findMany("session", [{ field: "actorId", op: "ne", value: null }]),
+        ).toEqual([]);
+      }
   });
 
   it("writes sign_out when the app signs the session out in process", async () => {

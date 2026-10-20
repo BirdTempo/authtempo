@@ -71,7 +71,12 @@ const clock = { now: () => current };
  * slide of 6 hours, so a read of the session after 7 hours writes its
  * refresh. Each call makes a new adapter: one invocation.
  */
-function engine(db: D1Database, sent: MailMessage[], limiter: AuthConfig["limiter"] = OPEN) {
+function engine(
+  db: D1Database,
+  sent: MailMessage[],
+  limiter: AuthConfig["limiter"] = OPEN,
+  impersonation = false,
+) {
   const storage = createD1Adapter(db);
   const input: AuthConfig = {
     baseURL: BASE,
@@ -93,7 +98,7 @@ function engine(db: D1Database, sent: MailMessage[], limiter: AuthConfig["limite
       platformOrganization: "platform-co",
       ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
     },
-    operator: { users: true },
+    operator: impersonation ? { users: true, impersonation: {} } : { users: true },
     hooks: { session: { afterEnd: () => {} } },
   };
   return { auth: createAuth(input), storage, input };
@@ -203,6 +208,78 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
     // queries. The call sends no logout, so it reads no outbox row (ruling 37).
     expect([done.value.ended, done.value.more, count.queries]).toEqual([31, true, 42]);
     expect(invocation.storage.statementsSent?.()).toBe(42);
+  });
+
+  /**
+   * With the impersonation on: a platform operator, one session of the
+   * target, 3 impersonation sessions of the target, then 59 more sessions.
+   * So the first page holds the 3 impersonation sessions (ruling 43).
+   */
+  async function withImpersonations(sent: MailMessage[]) {
+    const setup = engine(env.DB, sent, OPEN, true).auth;
+    const token = await platformOperator(setup, sent);
+    const { userId } = await signIns(setup, sent, "ada@example.com", 1);
+    const operator = await setup.api.getSession(token);
+    if (!operator) throw new Error("the session ended");
+    for (let i = 0; i < 3; i++) {
+      const r = await setup.api.operator.impersonate({
+        operator,
+        userId,
+        reason: `Ticket ${i}`,
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+    }
+    // A core id is a ULID: rows of one millisecond sort at random. A second
+    // later, the next rows sort after the impersonation sessions.
+    current = new Date(current.getTime() + 1000);
+    await signIns(setup, sent, "ada@example.com", 59);
+    return userId;
+  }
+
+  const stopRows = async () =>
+    (
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM ta_operator_audit WHERE action = 'impersonation_stop'",
+      ).first<{ n: number }>()
+    )?.n;
+
+  it("an endAll of the app with a hook and 3 impersonation sessions sends 49 queries, the stop rows too", async () => {
+    const sent: MailMessage[] = [];
+    await withImpersonations(sent);
+    const { db, count } = counting(env.DB);
+    const invocation = engine(db, sent, OPEN, true);
+    const done = await invocation.auth.api.operator.sessions.endAll({
+      actor: APP,
+      reason: "Key leak",
+      ip: null,
+      userAgent: null,
+    });
+    if (!done.ok) throw new Error(done.code);
+    // The schema check, the read, the link read, 42 deletes, 3 stop rows, and the audit
+    // row. Each impersonation session costs its delete and its stop row (ruling 43).
+    expect([done.value.ended, done.value.more, count.queries]).toEqual([42, true, 49]);
+    expect(invocation.storage.statementsSent?.()).toBe(49);
+    expect(await stopRows()).toBe(3);
+  });
+
+  it("an endUser of the app with a hook and 3 impersonation sessions sends 42 queries, the stop rows too", async () => {
+    const sent: MailMessage[] = [];
+    const userId = await withImpersonations(sent);
+    const { db, count } = counting(env.DB);
+    const invocation = engine(db, sent, OPEN, true);
+    const done = await invocation.auth.api.operator.sessions.endUser({
+      actor: APP,
+      userId,
+      reason: "Lost laptop",
+      ip: null,
+      userAgent: null,
+    });
+    if (!done.ok) throw new Error(done.code);
+    expect([done.value.ended, done.value.more, count.queries]).toEqual([28, true, 42]);
+    expect(invocation.storage.statementsSent?.()).toBe(42);
+    expect(await stopRows()).toBe(3);
   });
 
   for (const call of ["endAll", "endUser"] as const)
