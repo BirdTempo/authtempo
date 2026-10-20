@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false,
+    // The checks run as .ts files under Node's type stripping, which needs the
+    // .ts extension in each relative import.
+    "allowImportingTsExtensions": true,
+    // TypeScript 7 loads no @types package unless "types" names it. The checks read node:fs.
+    "types": ["node"]
+  },
+  "include": ["src", "test"]
+}

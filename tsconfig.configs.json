@@ -16,6 +16,8 @@
     "examples/**/vitest*.config.ts",
     "examples/**/vitest*.config.mts",
     "apps/**/vitest*.config.ts",
-    "apps/**/vitest*.config.mts"
+    "apps/**/vitest*.config.mts",
+    // Plan 12j: the release checks package. It is the one workspace package under scripts/.
+    "scripts/release/vitest*.config.ts"
   ]
 }
