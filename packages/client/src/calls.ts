@@ -136,6 +136,7 @@ export const CLIENT_CALLS = [
     select: "success",
   },
   { operation: "organizations.permissions", method: "GET", path: "/organizations/permissions" },
+  { operation: "organizations.checkSlug", method: "POST", path: "/organizations/check-slug" },
   { operation: "tokens.create", method: "POST", path: "/tokens" },
   { operation: "tokens.list", method: "GET", path: "/tokens", select: "tokens" },
   { operation: "tokens.revoke", method: "POST", path: "/tokens/revoke" },

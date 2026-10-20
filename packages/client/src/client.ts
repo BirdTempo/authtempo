@@ -408,6 +408,17 @@ export interface Client {
     permissions(input: {
       organizationId: string;
     }): Promise<ClientResult<{ role: string | null; permissions: Record<string, string[]> }>>;
+    /**
+     * The normalized slug and its status, or a null slug for `invalid`. It
+     * needs a verified address. `available` is a hint, not a hold: the create
+     * can still answer `slug_taken`.
+     */
+    checkSlug(input: { slug: string }): Promise<
+      ClientResult<{
+        slug: string | null;
+        status: "available" | "taken" | "reserved" | "invalid";
+      }>
+    >;
   };
   /**
    * API tokens for scripts and CLIs. `create`, `list`, and `revoke` need a
@@ -1293,6 +1304,11 @@ export function createClient(options: ClientOptions): Client {
           "organizations.permissions",
           undefined,
           { organizationId: input.organizationId },
+        ),
+      checkSlug: (input) =>
+        send<{ slug: string | null; status: "available" | "taken" | "reserved" | "invalid" }>(
+          "organizations.checkSlug",
+          input,
         ),
     },
     tokens: {
