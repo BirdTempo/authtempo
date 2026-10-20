@@ -88,10 +88,29 @@ describe("the shape walk of the answer check (plan 11g)", () => {
     // A statement set (plan 12k): free resource keys, each a list of action names.
     const statements = z.strictObject({ permissions: z.record(z.string(), z.array(z.string())) });
     expect(shapePaths(statements)).toEqual({ paths: [], blocked: [] });
+    // A free value (`metadata`) and a scalar value hold no key either.
+    expect(shapePaths(z.record(z.string(), z.unknown()))).toEqual({ paths: [], blocked: [] });
+    expect(shapePaths(z.record(z.string(), z.number()))).toEqual({ paths: [], blocked: [] });
     const lists = z.record(z.string(), z.array(z.strictObject({ at: z.string().optional() })));
     expect(shapePaths(lists).blocked).toEqual([
       "the walk cannot enter a record of shaped values at the answer",
     ]);
+  });
+
+  it("blocks a record of lists of a oneOf or a tuple, and a record of a oneOf or a tuple", () => {
+    // The walk does not read the keywords of a record's value, so the record rule blocks them (review 12k Task 3, M3).
+    const tagged = z.discriminatedUnion("k", [
+      z.strictObject({ k: z.literal("x"), a: z.string().optional() }),
+      z.strictObject({ k: z.literal("y") }),
+    ]);
+    const tuple = z.tuple([z.strictObject({ a: z.string().optional() })]);
+    // A tuple with a rest of strings has scalar `items` beside `prefixItems`.
+    const rest = z.tuple([z.strictObject({ a: z.string().optional() })], z.string());
+    for (const value of [z.array(tagged), z.array(tuple), tagged, rest])
+      expect(shapePaths(z.record(z.string(), value))).toEqual({
+        paths: [],
+        blocked: ["the walk cannot enter a record of shaped values at the answer"],
+      });
   });
 
   it("enters six keywords and reads twenty-one as keywords that hold no key", () => {

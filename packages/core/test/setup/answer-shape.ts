@@ -100,6 +100,34 @@ function branchesOf(node: Node): { branches: Node[]; nullable: boolean } {
   return { branches, nullable: typeNull || branches.length < node.anyOf.length };
 }
 
+const SCALARS: ReadonlySet<unknown> = new Set(["string", "number", "integer", "boolean", "null"]);
+
+/** True when `node` holds a scalar type, or a list of them, and only keywords of `NO_KEYS` beside it. */
+function scalar(node: Node): boolean {
+  const types = Array.isArray(node.type) ? node.type : [node.type];
+  return (
+    node.type !== undefined &&
+    types.every((t) => SCALARS.has(t)) &&
+    Object.keys(node).every((k) => k === "type" || NO_KEYS.has(k))
+  );
+}
+
+/**
+ * True when the value node of a record holds no key: a free value (`{}`), a
+ * scalar, or a list of scalars (a statement set, plan 12k). The walk does not
+ * enter this node, so it never reads its keywords. Any other value can hide an
+ * optional key: `oneOf`, `prefixItems`, or a list of objects (review 12k Task 3, M3).
+ */
+function flatValue(node: Node): boolean {
+  if (Object.keys(node).every((k) => NO_KEYS.has(k)) || scalar(node)) return true;
+  return (
+    node.type === "array" &&
+    typeof node.items === "object" &&
+    scalar(node.items) &&
+    Object.keys(node).every((k) => k === "type" || k === "items" || NO_KEYS.has(k))
+  );
+}
+
 function walkPaths(node: Node, prefix: string, out: Paths): void {
   const where = prefix || "the answer";
   for (const keyword of Object.keys(node))
@@ -112,12 +140,7 @@ function walkPaths(node: Node, prefix: string, out: Paths): void {
   }
   const record = node.additionalProperties;
   // A record (`extensions`, `metadata`) has free keys: no key of it is optional or nullable.
-  // A record of lists of scalars (a statement set, plan 12k) has no such key in its values either.
-  const shaped = (n: Node) => Boolean(n.properties || n.anyOf || n.items);
-  if (
-    typeof record === "object" &&
-    (record.properties || record.anyOf || (record.items && shaped(record.items)))
-  )
+  if (typeof record === "object" && !flatValue(record))
     out.blocked.push(`the walk cannot enter a record of shaped values at ${where}`);
   if (node.properties) {
     const required = new Set(node.required ?? []);
