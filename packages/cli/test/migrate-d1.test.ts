@@ -14,7 +14,7 @@ const ADAPTER_FILES = readdirSync(ADAPTER)
 const ADAPTER_ENTRIES = readdirSync(ADAPTER).sort();
 const CORE = ADAPTER_FILES.map((f) => f.slice(0, -".sql".length));
 const COMPAT_DIR = join(PKG, "../compat-better-auth/migrations/d1");
-/** The seven compat files of the package, in order. */
+/** The eight compat files of the package, in order. */
 const COMPAT_FILES = readdirSync(COMPAT_DIR)
   .filter((f) => f.endsWith(".sql"))
   .sort();
@@ -146,7 +146,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
 
   // Plan 11f Task 5 (spec 23 item 11): the database's compat version decides the copies, and an edited copy stops the run.
   it("stops on an edited copy before any write, also with --dry-run", () => {
-    // The app's folder holds the seven copies under a dry run's names, written from the package's files, and none is applied.
+    // The app's folder holds the eight copies under a dry run's names, written from the package's files, and none is applied.
     const files: Record<string, string> = { "migrations/0001_better_auth.sql": BA_SQLITE };
     for (const [i, f] of COMPAT_FILES.entries())
       files[`migrations/${String(i + 2).padStart(4, "0")}_${f.replace(/^\d+_/, "")}`] =
@@ -161,7 +161,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
           .map((f) => [f, readFileSync(join(dir, f), "utf8")]),
       );
     const before = snapshot();
-    expect(Object.keys(before)).toHaveLength(8);
+    expect(Object.keys(before)).toHaveLength(9);
     for (const extra of [["--dry-run"], []]) {
       const r = migrate(p.dir, ["--tables", "compat", ...extra]);
       expect(r.status).toBe(2);
@@ -180,7 +180,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     ).toEqual([]);
   });
 
-  it("copies nothing on a database at compat version 7, also with the files renamed", () => {
+  it("copies nothing on a database at compat version 8, also with the files renamed", () => {
     const p = d1Project({
       migrationsDir: "migrations",
       files: { "migrations/0001_better_auth.sql": BA_SQLITE },
@@ -188,14 +188,14 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     const first = migrate(p.dir, ["--tables", "compat"]);
     expect(first.status, first.stderr).toBe(0);
     expect(readLocal(p.dir, "SELECT value FROM ta_meta WHERE key = 'compat_better_auth'")).toEqual([
-      { value: "7" },
+      { value: "8" },
     ]);
     // The app renumbers its copies from 0090. wrangler keys its table by file name, so the app renames the rows too.
     const dir = join(p.dir, "migrations");
     const copies = readdirSync(dir)
       .filter((f) => f.includes("_compat_"))
       .sort();
-    expect(copies).toHaveLength(7);
+    expect(copies).toHaveLength(8);
     const renamed: string[] = [];
     for (const [i, f] of copies.entries()) {
       const name = `${String(90 + i).padStart(4, "0")}_${f.replace(/^\d+_/, "")}`;
@@ -207,7 +207,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     appendFileSync(join(dir, "0090_compat_better_auth.sql"), "-- renumbered by the app\n");
     const again = migrate(p.dir, ["--tables", "compat"]);
     expect(again.status, again.stderr).toBe(0);
-    expect(linesOf(again.stdout)).toEqual(["version before: 10; version after: 10"]);
+    expect(linesOf(again.stdout)).toEqual(["version before: 11; version after: 11"]);
     expect(readdirSync(dir).sort()).toEqual(["0001_better_auth.sql", ...renamed]);
     expect(
       readLocal(p.dir, "SELECT name FROM d1_migrations ORDER BY id").map((row) => row.name),
@@ -246,7 +246,7 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     expect(first.status, first.stderr).toBe(0);
     readLocal(p.dir, "UPDATE ta_meta SET value = 'x' WHERE key = 'compat_better_auth'");
     const before = readdirSync(join(p.dir, "migrations")).sort();
-    expect(before).toHaveLength(8);
+    expect(before).toHaveLength(9);
     for (const extra of [["--dry-run"], []]) {
       const r = migrate(p.dir, ["--tables", "compat", ...extra]);
       expect(r.status).toBe(2);
