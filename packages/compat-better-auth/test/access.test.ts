@@ -268,6 +268,38 @@ describe("the access control shim (spec 29 item 18)", () => {
     expect(checkOptions(options({})).refusals).toEqual([]);
   });
 
+  it("refuses an ac resource named apiToken and an action that a core resource lacks", () => {
+    const own = createAccessControl({ ...defaultStatements, apiToken: ["read"] });
+    expect(
+      checkOptions(
+        options({ ac: own, roles: { owner: own.newRole({}) } }, { roleRanks: { owner: 1 } }),
+      ).refusals,
+    ).toEqual([
+      "plugins[organization].ac.statements.apiToken: apiToken is core's name of Better Auth's apiKey; name the resource apiKey (spec 29 item 18)",
+    ]);
+    // A role that names apiToken would get core's token read in silence.
+    const tokenRole = { owner: ac.newRole({ apiToken: ["read"] }) };
+    expect(
+      checkOptions(options({ ac, roles: tokenRole }, { roleRanks: { owner: 1 } })).refusals,
+    ).toEqual([
+      "plugins[organization].roles.owner.statements.apiToken: apiToken is core's name of Better Auth's apiKey; name the resource apiKey (spec 29 item 18)",
+    ]);
+    // An action that core's resource lacks is refused, not dropped.
+    const extra = createAccessControl({
+      ...defaultStatements,
+      member: ["create", "ban"],
+      apiKey: ["read", "delete"],
+    });
+    expect(
+      checkOptions(
+        options({ ac: extra, roles: { owner: extra.newRole({}) } }, { roleRanks: { owner: 1 } }),
+      ).refusals,
+    ).toEqual([
+      "plugins[organization].ac.statements.apiKey: core's apiToken takes only the actions read, create, update, revoke (spec 29 item 18)",
+      "plugins[organization].ac.statements.member: core's member takes only the actions read, create, update, delete (spec 29 item 18)",
+    ]);
+  });
+
   it("refuses dynamicAccessControl as a function", () => {
     // Better Auth's type admits a function; this package's type does not, so the literal is cast.
     const dynamicAccessControl = {

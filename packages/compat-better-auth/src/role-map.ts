@@ -7,7 +7,12 @@
 
 /** Better Auth's api-key resource. Core names it `apiToken`. */
 const BETTER_AUTH_KEY = "apiKey";
-const CORE_KEY = "apiToken";
+export const CORE_KEY = "apiToken";
+
+/** Core's name of one Better Auth resource name. */
+export function toCoreName(resource: string): string {
+  return resource === BETTER_AUTH_KEY ? CORE_KEY : resource;
+}
 
 /** The six resources of core (`CORE_STATEMENTS`). An app's own statements never hold them. */
 export const CORE_RESOURCES: readonly string[] = [

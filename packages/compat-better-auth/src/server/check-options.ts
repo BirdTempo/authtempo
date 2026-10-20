@@ -7,7 +7,13 @@ import {
   union,
 } from "@authtempo/core/access";
 import { PASSWORD_MAX_LENGTH } from "../errors.js";
-import { CORE_RESOURCES, corePermissionsOf, toCoreNames } from "../role-map.js";
+import {
+  CORE_KEY,
+  CORE_RESOURCES,
+  corePermissionsOf,
+  toCoreName,
+  toCoreNames,
+} from "../role-map.js";
 import {
   type BetterAuthOptions,
   COMPAT_PLUGIN,
@@ -262,10 +268,15 @@ const plainObject = (v: unknown): v is Record<string, unknown> => {
   return proto === Object.prototype || proto === null;
 };
 
+/** An app that names core's `apiToken` itself would get core's token rights. */
+const CORE_TOKEN_NAME = `${CORE_KEY} is core's name of Better Auth's apiKey; name the resource apiKey ${ITEM_18}`;
+
 /**
  * `ac`: the object of `createAccessControl` from `better-auth/plugins/access`
  * (this package's `./plugins/access`). Its own resources become core's
- * `organizations.statements`, so each name follows core's name rule.
+ * `organizations.statements`, so each name follows core's name rule. A core
+ * resource keeps core's actions: an action that core lacks is refused, not
+ * dropped. `apiKey` is core's `apiToken`, so `apiToken` itself is refused.
  */
 const accessControl: Rule = (v, p, out) => {
   const a = v as { statements?: unknown; newRole?: unknown } | null;
@@ -277,9 +288,19 @@ const accessControl: Rule = (v, p, out) => {
     );
     return;
   }
-  for (const [resource, actions] of Object.entries(toCoreNames(a.statements) as object)) {
-    if (CORE_RESOURCES.includes(resource)) continue;
-    const at = `${p}.statements.${resource}`;
+  for (const [given, actions] of Object.entries(a.statements)) {
+    const at = `${p}.statements.${given}`;
+    if (given === CORE_KEY) {
+      refuse(out, at, CORE_TOKEN_NAME);
+      continue;
+    }
+    const resource = toCoreName(given);
+    if (CORE_RESOURCES.includes(resource)) {
+      const core: readonly string[] = CORE_STATEMENTS[resource as keyof typeof CORE_STATEMENTS];
+      if (!Array.isArray(actions) || actions.some((x) => !core.includes(x)))
+        refuse(out, at, `core's ${resource} takes only the actions ${core.join(", ")} ${ITEM_18}`);
+      continue;
+    }
     if (!NAME_RE.test(resource))
       refuse(out, at, `core takes a resource name of ^[a-z][a-zA-Z0-9-]{0,31}$ ${ITEM_18}`);
     else if (
@@ -301,6 +322,8 @@ const roleTable: Rule = (v, p, out) =>
     const x = r as { statements?: unknown; authorize?: unknown } | null;
     if (typeof x?.authorize !== "function" || !plainObject(x.statements))
       refuse(out, path, `expected a role of ac.newRole(statements) ${ITEM_18}`);
+    else if (Object.hasOwn(x.statements, CORE_KEY))
+      refuse(out, `${path}.statements.${CORE_KEY}`, CORE_TOKEN_NAME);
   });
 
 const PLUGIN_RULES: Record<string, Rule> = {
