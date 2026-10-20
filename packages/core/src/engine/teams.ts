@@ -118,8 +118,11 @@ export async function lockTeam(
  * racer then answers its true code (`team_limit`, `last_team`), not
  * `conflict`. Also, a parallel owner write compares `updatedAt` with its own
  * read, so a stamp of a team write would give it a false `conflict`.
+ *
+ * The organization token create and a member removal with `revokeTokens`
+ * take the same lock (ruling 32 of plan 12k).
  */
-async function lockOrganization(
+export async function lockOrganization(
   tx: StorageAdapter,
   organization: { id: string; createdAt: Date },
 ): Promise<boolean> {

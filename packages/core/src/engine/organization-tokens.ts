@@ -1,4 +1,4 @@
-import { isSubset, type Statements } from "../access.js";
+import { can, isSubset, type Statements } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
 import type { LimitWindow } from "../limiter/port.js";
 import { ORGANIZATION_TOKEN_PREFIX } from "../primitives/credentials.js";
@@ -8,6 +8,8 @@ import { fail, ok, type Result } from "../result.js";
 import type { OrganizationTokenRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
 import { type OrganizationSummary, publicOrganization, standing } from "./organizations.js";
+import { effectiveIn } from "./permissions.js";
+import { lockOrganization } from "./teams.js";
 import {
   spendUse,
   type TokenQuota,
@@ -159,9 +161,16 @@ async function creatorIn(config: ResolvedConfig, row: OrganizationTokenRow): Pro
  * isolated transaction, so there two creates at once can pass at 49; the
  * per-user limit bounds that overshoot.
  *
+ * The standing read runs before the transaction. A removal with
+ * `revokeTokens` takes the same lock, so after the lock the create reads the
+ * creator's member row again through `tx`. A gone row, or a role without the
+ * right or the set, answers `forbidden_rank` as `standing` does (ruling 32).
+ *
  * Storage calls: three findOne of `standing`; in the transaction one update
- * (the lock), one delete of the expired rows, one findMany (the count), and one
- * create. One limiter call, before every storage call.
+ * (the lock), one findOne of the member row, the role read of `effectiveIn`
+ * (none for a role of the config), one delete of the expired rows, one
+ * findMany (the count), and one create. One limiter call, before every
+ * storage call.
  */
 export async function createOrganizationToken(
   config: ResolvedConfig,
@@ -213,15 +222,17 @@ export async function createOrganizationToken(
     updatedAt: now,
   };
   const made = await config.storage.transaction(async (tx): Promise<Result<true>> => {
-    // Zero rows: the organization went after the standing read.
-    const locked = await tx.update(
-      "organization",
-      [{ field: "id", op: "eq", value: organizationId }],
-      {
-        createdAt: s.value.organization.createdAt,
-      },
-    );
-    if (locked === 0) return fail("not_found");
+    // False: the organization went after the standing read.
+    if (!(await lockOrganization(tx, s.value.organization))) return fail("not_found");
+    // A removal that committed before the lock is seen here; a later one waits for this commit.
+    const member = await tx.findOne("member", [
+      { field: "organizationId", op: "eq", value: organizationId },
+      { field: "userId", op: "eq", value: user.id },
+    ]);
+    if (!member) return fail("forbidden_rank");
+    const { granted } = await effectiveIn(config, tx, organizationId, member.role);
+    if (!can(granted, CREATE) || !isSubset(input.permissions, granted))
+      return fail("forbidden_rank");
     // The organization's expired tokens go first, so they do not count against the cap.
     await tx.delete("organizationToken", [
       { field: "organizationId", op: "eq", value: organizationId },

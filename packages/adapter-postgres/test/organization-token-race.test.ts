@@ -121,3 +121,156 @@ describe("the organization token cap on Postgres (plan 12k Task 8)", () => {
     expect(await storage.findMany("organizationToken", [])).toHaveLength(CAP);
   });
 });
+
+/** A promise and the call that resolves it. */
+function signal() {
+  let fire = () => {};
+  const promise = new Promise<void>((r) => {
+    fire = r;
+  });
+  return { promise, fire };
+}
+
+/**
+ * A storage, and the storage of each of its transactions, that runs `before`
+ * ahead of each write of `model` (an update or a create). The setup and the
+ * other flow use other instances, so the hook sees one flow only.
+ */
+function held(
+  base: StorageAdapter,
+  model: "organization" | "organizationToken",
+  before: () => Promise<void>,
+): StorageAdapter {
+  return {
+    ...base,
+    async update(m, where, data) {
+      if (m === model) await before();
+      return base.update(m, where, data);
+    },
+    async create(m, row) {
+      if (m === model) await before();
+      return base.create(m, row);
+    },
+    transaction: (fn) => base.transaction((tx) => fn(held(tx, model, before))),
+  };
+}
+
+let next = 0;
+/** A verified user row, as a sign-up with a verified address leaves it. */
+async function user(storage: StorageAdapter) {
+  next += 1;
+  return storage.create("user", {
+    id: `u${next}`,
+    email: `u${next}@example.com`,
+    emailVerified: true,
+    name: null,
+    image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
+    createdAt: t0,
+    updatedAt: t0,
+  });
+}
+
+/** An organization of a new owner with a new admin, made by the real flows. */
+async function adminOf(storage: StorageAdapter) {
+  const plain = instance(storage);
+  const owner = await user(storage);
+  const admin = await user(storage);
+  const org = await plain.api.createOrganization({
+    user: owner,
+    slug: `acme-${next}`,
+    name: "Acme",
+  });
+  if (!org.ok) throw new Error(org.code);
+  const organizationId = org.value.organization.id;
+  const added = await plain.api.addMember({
+    user: owner,
+    organizationId,
+    userId: admin.id,
+    role: "admin",
+  });
+  if (!added.ok) throw new Error(added.code);
+  return { owner, admin, organizationId };
+}
+
+/** The live tokens of the organization whose creator has no member row there. */
+async function orphans(storage: StorageAdapter, organizationId: string) {
+  const tokens = await storage.findMany("organizationToken", [
+    { field: "organizationId", op: "eq", value: organizationId },
+  ]);
+  const members = await storage.findMany("member", [
+    { field: "organizationId", op: "eq", value: organizationId },
+  ]);
+  const present = new Set(members.map((m) => m.userId));
+  return tokens.filter((t) => !present.has(t.createdById));
+}
+
+// Ruling 32 of plan 12k: a create of the admin and the removal of the admin
+// with revokeTokens, on two connections. Each order runs five times.
+describe("an organization token create against a removal with revokeTokens on Postgres (ruling 32)", () => {
+  it("refuses the create when the removal commits between its standing read and its lock", async () => {
+    const storage = createPostgresAdapter(db.sql);
+    const first = createPostgresAdapter(await connection());
+    const b = instance(createPostgresAdapter(await connection()));
+    for (let i = 0; i < 5; i++) {
+      const { owner, admin, organizationId } = await adminOf(storage);
+      const removed = signal();
+      // The create waits at its lock until the removal has committed.
+      const a = instance(held(first, "organization", () => removed.promise));
+      const create = a.api.organizationTokens.create({
+        user: admin,
+        organizationId,
+        name: "ci",
+        permissions: {},
+      });
+      const removal = await b.api.removeMember({
+        user: owner,
+        organizationId,
+        userId: admin.id,
+        revokeTokens: true,
+      });
+      removed.fire();
+      const made = await create;
+      expect(removal.ok).toBe(true);
+      expect(made.ok ? "ok" : made.code).toBe("forbidden_rank");
+      expect(await orphans(storage, organizationId)).toEqual([]);
+    }
+  });
+
+  it("revokes the token when the create holds the lock as the removal starts", async () => {
+    const storage = createPostgresAdapter(db.sql);
+    const first = createPostgresAdapter(await connection());
+    const second = createPostgresAdapter(await connection());
+    for (let i = 0; i < 5; i++) {
+      const { owner, admin, organizationId } = await adminOf(storage);
+      const atInsert = signal();
+      const atLock = signal();
+      const removed = signal();
+      // The create holds the lock and waits before its insert, until the removal reaches
+      // its own lock or ends. Without that lock the removal ends first, and the insert comes later.
+      const a = instance(
+        held(first, "organizationToken", async () => {
+          atInsert.fire();
+          await Promise.race([atLock.promise, removed.promise]);
+        }),
+      );
+      const b = instance(held(second, "organization", async () => atLock.fire()));
+      const create = a.api.organizationTokens.create({
+        user: admin,
+        organizationId,
+        name: "ci",
+        permissions: {},
+      });
+      await atInsert.promise;
+      const removal = b.api
+        .removeMember({ user: owner, organizationId, userId: admin.id, revokeTokens: true })
+        .finally(() => removed.fire());
+      const [made, gone] = await Promise.all([create, removal]);
+      expect(made.ok ? "ok" : made.code).toBe("ok");
+      expect(gone.ok).toBe(true);
+      expect(await orphans(storage, organizationId)).toEqual([]);
+    }
+  });
+});
