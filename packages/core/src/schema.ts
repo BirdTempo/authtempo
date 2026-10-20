@@ -541,6 +541,20 @@ export interface OrganizationTokenRow extends BaseRow {
   retiredAt: Date | null;
 }
 
+/**
+ * One key of another system that a move wrote into a core token (plan 12k).
+ * The move writes it in the transaction of the token, and a later run skips
+ * each recorded key. So a revoke of a moved token stays a revoke.
+ */
+export interface MovedTokenRow extends BaseRow {
+  /** The system and table of the key, such as `better-auth:apikey`. */
+  source: string;
+  /** The key's id in that table. */
+  sourceId: string;
+  /** The id of the core token that the key became. The row stays after a revoke of that token. */
+  tokenId: string;
+}
+
 export interface Models {
   user: UserRow;
   identity: IdentityRow;
@@ -568,6 +582,7 @@ export interface Models {
   team: TeamRow;
   teamMember: TeamMemberRow;
   organizationToken: OrganizationTokenRow;
+  movedToken: MovedTokenRow;
 }
 
 export type ModelName = keyof Models;
@@ -997,5 +1012,17 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     },
     unique: [["tokenHash"]],
     indexes: [["organizationId"]],
+  },
+  // A key of another system that a move made a core token (plan 12k Task 12 review, M2). No
+  // userId field and no tie to the token row, so neither the account delete nor a revoke removes it.
+  movedToken: {
+    fields: {
+      ...base,
+      source: { type: "string" },
+      sourceId: { type: "string" },
+      tokenId: { type: "string" },
+    },
+    unique: [["source", "sourceId"]],
+    indexes: [],
   },
 };

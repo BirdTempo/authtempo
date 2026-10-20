@@ -33,7 +33,7 @@ sources:
 | 10 | `0010_schema_v10` | No table. It adds `fresh_at` to `ta_session`, the field `freshAt` (date, nullable). The field holds the time of the last sign-in or re-authentication. Null is never fresh (plan 12a). |
 | 11 | `0011_schema_v11` | `ta_oauth_device`, `ta_oauth_subject`, `ta_oauth_session_client`, `ta_oauth_logout`. It also adds the columns of a confidential client to `ta_oauth_client`, and `parent_id` and `dpop_jkt` to `ta_oauth_token` (plan 12e). |
 | 12 | `0012_schema_v12` | `ta_operator_audit`. It also adds the three ban fields to `ta_user` and `actor_id` to `ta_session` (plan 12f). |
-| 13 | `0013_schema_v13` | `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`. It also adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token` (plan 12k). |
+| 13 | `0013_schema_v13` | `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`, `ta_moved_token`. It also adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token` (plan 12k). |
 
 `SCHEMA_VERSION` of `@authtempo/core` is 13.
 
@@ -87,6 +87,7 @@ Version 13 comes from the `0013_schema_v13` migration in both adapters, and from
 | `team` | `ta_team` | table | A named group of members of one organization, with an index on `organization_id`. A team has no role (plan 12k). |
 | `teamMember` | `ta_team_member` | table | One member of one team, unique on (`team_id`, `user_id`). It holds a copy of `organization_id`, so a member removal deletes the person's team rows in one statement (plan 12k). |
 | `organizationToken` | `ta_organization_token` | table | A token that an organization owns, unique on `token_hash`. It has no `user_id`, so the account delete keeps it (plan 12k). |
+| `movedToken` | `ta_moved_token` | table | One key of another system that a move made a core token: `source`, `sourceId`, and `tokenId`, unique on (`source`, `source_id`). A later move skips a recorded key, so a revoke of its token stays a revoke. The record stays after the revoke (plan 12k). |
 
 The counts are `integer` on Postgres, as every count of core is, except the passkey `counter` and the TOTP `lastStep`.
 

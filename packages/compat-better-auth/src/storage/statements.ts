@@ -169,6 +169,8 @@ export const CORE_TABLE_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
   // Better Auth apikey table is read only by moveBetterAuthApiKeys.
   "apiToken",
   "organizationToken",
+  // The record of each moved apikey row (review finding M2): migration 0010 creates it.
+  "movedToken",
 ]);
 
 function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): CompatStatements {

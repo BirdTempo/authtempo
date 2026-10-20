@@ -261,6 +261,7 @@ export {
   type MemberRow,
   type ModelName,
   type Models,
+  type MovedTokenRow,
   type OAuthClientRow,
   type OAuthConsentRow,
   type OAuthDeviceRow,

@@ -759,7 +759,7 @@ describe("migration 0010 (plan 12k)", () => {
     ]);
   });
 
-  it("creates core's two token tables with core's columns and indexes on D1 (Task 12)", () => {
+  it("creates core's two token tables and the record of moved keys on D1 (Task 12)", () => {
     const db = sqlite(BETTER_AUTH_SQLITE);
     for (const text of [
       shipped,
@@ -781,6 +781,7 @@ describe("migration 0010 (plan 12k)", () => {
         "ta_organization_token",
         ["ix_ta_organization_token__organization_id", "ux_ta_organization_token__token_hash"],
       ],
+      ["movedToken", "ta_moved_token", ["ux_ta_moved_token__source__source_id"]],
     ] as const) {
       const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(
         (c) => c.name,

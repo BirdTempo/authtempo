@@ -5,9 +5,10 @@
  * ta_api_token gets the scope, the window, the quota, and the retired mark.
  * Each new column is nullable with no default and no fill. A row of version
  * 12 holds NULL: no team, no scope, no window, no quota, and a live token.
- * The four new tables hold the stored roles, the teams, the team members,
- * and the organization tokens. The table ta_organization_token has no
- * user_id column, so the account delete keeps its rows. The counts are
+ * The five new tables hold the stored roles, the teams, the team members,
+ * the organization tokens, and the record of each moved key. The tables
+ * ta_organization_token and ta_moved_token have no user_id column, so the
+ * account delete keeps their rows. The counts are
  * integer, not bigint: `postgresColumnType` gives bigint to `counter` and
  * `lastStep` only (ruling 9 of plan 12k). The runner applies the text in one
  * transaction. The columns keep the field order of the schema.
@@ -77,6 +78,15 @@ CREATE TABLE ta_organization_token (
 );
 CREATE UNIQUE INDEX ux_ta_organization_token__token_hash ON ta_organization_token (token_hash);
 CREATE INDEX ix_ta_organization_token__organization_id ON ta_organization_token (organization_id);
+CREATE TABLE ta_moved_token (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  source text NOT NULL,
+  source_id text NOT NULL,
+  token_id text NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_moved_token__source__source_id ON ta_moved_token (source, source_id);
 
 UPDATE ta_meta SET value = '13' WHERE key = 'schema_version';
 `;

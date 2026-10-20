@@ -113,7 +113,8 @@ function notCredential(provider: string): string {
  * (owner decision 4 of 2026-10-14, plan 12k): Better Auth keys are
  * re-issued at the cutover, and `moveBetterAuthApiKeys` moves the rows as
  * retired rows. By ruling 2 of plan 12k a moved row acts: the move writes
- * no retired mark.
+ * no retired mark. Core's `movedToken`, the record of each moved row, keeps
+ * core's own table too.
  */
 export type MappedModel = Exclude<
   ModelName,
@@ -131,6 +132,7 @@ export type MappedModel = Exclude<
   | "secondFactor"
   | "operatorAudit"
   | "organizationToken"
+  | "movedToken"
 >;
 
 export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {

@@ -45,6 +45,7 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">) {
         "ta_operator_audit",
         "ta_api_token",
         "ta_organization_token",
+        "ta_moved_token",
       ].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
     );
   };

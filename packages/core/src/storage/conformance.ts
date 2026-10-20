@@ -1838,6 +1838,29 @@ export function runAdapterConformance(
         });
       });
 
+      it("round-trips a moved token record and keeps one per source key", async () => {
+        const record = {
+          id: "mt1",
+          source: "better-auth:apikey",
+          sourceId: "k1",
+          tokenId: "t1",
+          createdAt: at,
+          updatedAt: at,
+        };
+        await db.create("movedToken", record);
+        // The same key id of another source is another record.
+        await db.create("movedToken", { ...record, id: "mt2", source: "other:key" });
+        expect(
+          await db.findOne("movedToken", [
+            { field: "source", op: "eq", value: "better-auth:apikey" },
+            { field: "sourceId", op: "eq", value: "k1" },
+          ]),
+        ).toEqual(record);
+        await expect(
+          db.create("movedToken", { ...record, id: "mt3", tokenId: "t2" }),
+        ).rejects.toMatchObject({ code: "unique_violation", fields: ["source", "sourceId"] });
+      });
+
       it("round-trips the new api token fields as null", async () => {
         if (unmapped("apiToken").length > 0) return holdsNone("apiToken", token("t1", "h1"));
         // A row with the version 13 fields null reads them back as null. The

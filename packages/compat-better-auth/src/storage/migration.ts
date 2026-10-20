@@ -570,8 +570,9 @@ export const MIGRATION_0010_NAME = "0010_compat_schema_v13";
 /**
  * The core statements of migration 0010, by dialect (plan 12k Task 12). They
  * create core's `ta_api_token` with every field to version 13, as core 0005
- * and 0013 leave it. They also create core 0013's `ta_organization_token`,
- * with the indexes of both.
+ * and 0013 leave it. They also create core 0013's `ta_organization_token`
+ * and `ta_moved_token`, the record of each moved apikey row, with their
+ * indexes.
  * This package never had a `ta_api_token` (plan 8b left `apiToken`
  * unmapped), so the migration creates it whole.
  */
@@ -621,7 +622,16 @@ CREATE TABLE ta_organization_token (
   retired_at timestamptz
 );
 CREATE UNIQUE INDEX ux_ta_organization_token__token_hash ON ta_organization_token (token_hash);
-CREATE INDEX ix_ta_organization_token__organization_id ON ta_organization_token (organization_id);`,
+CREATE INDEX ix_ta_organization_token__organization_id ON ta_organization_token (organization_id);
+CREATE TABLE ta_moved_token (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  source text NOT NULL,
+  source_id text NOT NULL,
+  token_id text NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_moved_token__source__source_id ON ta_moved_token (source, source_id);`,
   sqlite: `CREATE TABLE ta_api_token (
   id TEXT PRIMARY KEY NOT NULL,
   created_at INTEGER NOT NULL,
@@ -667,7 +677,16 @@ CREATE TABLE ta_organization_token (
   retired_at INTEGER
 );
 CREATE UNIQUE INDEX ux_ta_organization_token__token_hash ON ta_organization_token (token_hash);
-CREATE INDEX ix_ta_organization_token__organization_id ON ta_organization_token (organization_id);`,
+CREATE INDEX ix_ta_organization_token__organization_id ON ta_organization_token (organization_id);
+CREATE TABLE ta_moved_token (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  token_id TEXT NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_moved_token__source__source_id ON ta_moved_token (source, source_id);`,
 };
 
 /**
@@ -711,9 +730,10 @@ CREATE INDEX ix_ta_organization_token__organization_id ON ta_organization_token 
  * absent tables in the 1.4.21 form and then adds the two columns. On 1.7
  * team tables that variant stops with `duplicate column name: memberCount`.
  *
- * `apiToken` and `organizationToken` keep core's own tables (Task 12, owner
- * decision 4): the migration creates `ta_api_token` and
- * `ta_organization_token` with core's names (`COMPAT_0010_CORE`). Better
+ * `apiToken`, `organizationToken`, and `movedToken` keep core's own tables
+ * (Task 12, owner decision 4): the migration creates `ta_api_token`,
+ * `ta_organization_token`, and `ta_moved_token` with core's names
+ * (`COMPAT_0010_CORE`). Better
  * Auth's `apikey` table stays as it is: no migration writes or drops it.
  * The Better Auth columns take the app's naming, so the text depends on
  * `names`, as for 0009. Append-only once it ships.

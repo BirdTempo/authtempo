@@ -558,6 +558,7 @@ describe("the compat migration on postgres", () => {
         "ta_jwk",
         "ta_limit",
         "ta_meta",
+        "ta_moved_token",
         "ta_oauth_client",
         "ta_oauth_consent",
         "ta_oauth_device",
@@ -594,6 +595,7 @@ describe("the compat migration on postgres", () => {
         "operatorAudit",
         "apiToken",
         "organizationToken",
+        "movedToken",
       ] as const) {
         const cols = await pg.sql.unsafe<{ c: string }[]>(
           "SELECT column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
@@ -625,6 +627,7 @@ describe("the compat migration on postgres", () => {
         "operatorAudit",
         "apiToken",
         "organizationToken",
+        "movedToken",
       ] as const) {
         const cols = await pg.sql.unsafe<
           { column_name: string; is_nullable: string; data_type: string }[]
@@ -671,6 +674,7 @@ describe("the compat migration on postgres", () => {
         "operatorAudit",
         "apiToken",
         "organizationToken",
+        "movedToken",
       ] as const) {
         const rows = await pg.sql.unsafe<{ indexname: string; indexdef: string }[]>(
           "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1 AND indexname <> $2",

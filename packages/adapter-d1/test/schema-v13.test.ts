@@ -100,7 +100,7 @@ describe("schema version 13 on D1 (plan 12k)", () => {
 
   it("names every model of the schema", async () => {
     const models = Object.keys(schema) as (keyof typeof schema)[];
-    expect(models).toHaveLength(26);
+    expect(models).toHaveLength(27);
     const tables = (
       await env.DB.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'ta_%'",
@@ -156,9 +156,17 @@ describe("schema version 13 on D1 (plan 12k)", () => {
       "last_refill_at",
       "retired_at",
     ]);
+    expect((await columns(env.DB, "ta_moved_token")).map((c) => c.name)).toEqual([
+      "id",
+      "created_at",
+      "updated_at",
+      "source",
+      "source_id",
+      "token_id",
+    ]);
     const indexes = (
       await env.DB.prepare(
-        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('ta_organization_role', 'ta_team', 'ta_team_member', 'ta_organization_token') AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY name",
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('ta_organization_role', 'ta_team', 'ta_team_member', 'ta_organization_token', 'ta_moved_token') AND name NOT LIKE 'sqlite_autoindex_%' ORDER BY name",
       ).all<{ name: string }>()
     ).results.map((r) => r.name);
     expect(indexes).toEqual([
@@ -166,6 +174,7 @@ describe("schema version 13 on D1 (plan 12k)", () => {
       "ix_ta_team__organization_id",
       "ix_ta_team_member__organization_id__user_id",
       "ix_ta_team_member__user_id",
+      "ux_ta_moved_token__source__source_id",
       "ux_ta_organization_role__organization_id__name",
       "ux_ta_organization_token__token_hash",
       "ux_ta_team_member__team_id__user_id",

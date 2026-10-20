@@ -109,7 +109,7 @@ describe("schema version 13 on Postgres (plan 12k)", () => {
 
   it("names every model of the schema", async () => {
     const models = Object.keys(schema) as (keyof typeof schema)[];
-    expect(models).toHaveLength(26);
+    expect(models).toHaveLength(27);
     const db = await freshDatabase();
     try {
       const tables = (
@@ -172,9 +172,17 @@ describe("schema version 13 on Postgres (plan 12k)", () => {
         `last_refill_at ${at}`,
         `retired_at ${at}`,
       ]);
+      expect(await columnsOf("ta_moved_token")).toEqual([
+        "id text",
+        `created_at ${at}`,
+        `updated_at ${at}`,
+        "source text",
+        "source_id text",
+        "token_id text",
+      ]);
       const indexes = (
         await db.sql.unsafe<{ indexname: string }[]>(
-          "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND tablename IN ('ta_organization_role', 'ta_team', 'ta_team_member', 'ta_organization_token') AND indexname NOT LIKE '%_pkey' ORDER BY indexname",
+          "SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND tablename IN ('ta_organization_role', 'ta_team', 'ta_team_member', 'ta_organization_token', 'ta_moved_token') AND indexname NOT LIKE '%_pkey' ORDER BY indexname",
         )
       ).map((r) => r.indexname);
       expect(indexes).toEqual([
@@ -182,6 +190,7 @@ describe("schema version 13 on Postgres (plan 12k)", () => {
         "ix_ta_team__organization_id",
         "ix_ta_team_member__organization_id__user_id",
         "ix_ta_team_member__user_id",
+        "ux_ta_moved_token__source__source_id",
         "ux_ta_organization_role__organization_id__name",
         "ux_ta_organization_token__token_hash",
         "ux_ta_team_member__team_id__user_id",

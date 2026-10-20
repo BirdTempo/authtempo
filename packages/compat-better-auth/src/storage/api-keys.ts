@@ -1,4 +1,9 @@
-import { type ApiTokenRow, newId, type OrganizationTokenRow } from "@authtempo/core";
+import {
+  type ApiTokenRow,
+  newId,
+  type OrganizationTokenRow,
+  type StorageAdapter,
+} from "@authtempo/core";
 import { CORE_STATEMENTS } from "@authtempo/core/access";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { toCoreNames } from "../role-map.js";
@@ -21,7 +26,7 @@ export interface ApiKeyMoveReport {
     expired: number;
     /** The digest is not 43 base64url characters: `disableKeyHashing` or another hasher. */
     noDigest: number;
-    /** A core token has the digest already: an earlier move wrote it. */
+    /** An earlier run moved the row and recorded it (`movedToken`). A revoke since then stays a revoke. */
     present: number;
     /** An organization key with no creator in its metadata and no owner in its organization. */
     noCreator: number;
@@ -55,6 +60,8 @@ export interface ApiKeyMoveInput {
   statements?: Record<string, readonly string[]>;
 }
 
+/** The `source` of each `movedToken` record that the move writes. */
+const SOURCE = "better-auth:apikey";
 /** Better Auth's digest: SHA-256 in base64url with no padding (`defaultKeyHasher`). */
 const DIGEST_RE = /^[A-Za-z0-9_-]{43}$/;
 /** Core's window bounds (core config.ts `validWindow`): a longer window is cut to one day. */
@@ -220,16 +227,20 @@ function unroutable(
 /**
  * Moves each apikey row into core's token table (owner decision 4 of plan
  * 12k). By ruling 2 a moved row acts as the old key, under the same secret:
- * the move writes no retired mark. Idempotent: a row whose digest exists in
- * core's tables is skipped. A disabled, expired, or undigested row is
+ * the move writes no retired mark. One-shot for each row: the move records
+ * each moved row (`movedToken`) in the transaction of its token, and a later
+ * run skips a recorded row. So a revoked key stays revoked after a second
+ * run (review finding M2). A disabled, expired, or undigested row is
  * skipped, and its key answers `token_retired` by its prefix after the
  * cutover. `dryRun: true` writes nothing and answers the same report.
  * Before any write, a stored prefix outside `movedPrefixes`, or a row with
  * no prefix, throws (`unroutable`).
  *
- * Storage calls: one raw read of apikey. Then per row: one findOne in each
- * token table, and one create unless `dryRun`. An organization key with no
- * creator in its metadata adds one findMany of members.
+ * Storage calls: one raw read of apikey. Then per row: one findOne of the
+ * record, and one transaction of two creates unless `dryRun`. An
+ * organization key with no creator in its metadata adds one findMany of
+ * members. A digest that a core token holds already fails the unique index,
+ * and the run stops with that row and its record undone.
  */
 export async function moveBetterAuthApiKeys(
   storage: PostgresSchemaStorage | D1SchemaStorage,
@@ -281,15 +292,16 @@ export async function moveBetterAuthApiKeys(
       report.skipped.noDigest++;
       continue;
     }
-    const tokenHash = hexOf(digest);
-    const byHash = [{ field: "tokenHash" as const, op: "eq" as const, value: tokenHash }];
-    if (
-      (await db.findOne("apiToken", byHash)) !== null ||
-      (await db.findOne("organizationToken", byHash)) !== null
-    ) {
+    const sourceId = String(row.id);
+    const recorded = await db.findOne("movedToken", [
+      { field: "source", op: "eq", value: SOURCE },
+      { field: "sourceId", op: "eq", value: sourceId },
+    ]);
+    if (recorded !== null) {
       report.skipped.present++;
       continue;
     }
+    const tokenHash = hexOf(digest);
     const ownerId = String(row.referenceId);
     const { set, dropped } = narrowSet(row.permissions, known);
     const metadata = jsonObjectOf(row.metadata);
@@ -312,7 +324,8 @@ export async function moveBetterAuthApiKeys(
       createdAt,
       updatedAt: dateOf(row.updatedAt) ?? createdAt,
     };
-    let write: () => Promise<unknown>;
+    let write: (tx: StorageAdapter) => Promise<unknown>;
+    let tokenId: string;
     if (input.references === "organization") {
       let createdById =
         typeof metadata?.createdByUserId === "string" ? metadata.createdByUserId : null;
@@ -330,7 +343,8 @@ export async function moveBetterAuthApiKeys(
         createdById,
         ...fields,
       };
-      write = () => db.create("organizationToken", data);
+      tokenId = data.id;
+      write = (tx) => tx.create("organizationToken", data);
     } else {
       const data: ApiTokenRow = {
         id: newId(createdAt),
@@ -338,9 +352,22 @@ export async function moveBetterAuthApiKeys(
         organizationId: null,
         ...fields,
       };
-      write = () => db.create("apiToken", data);
+      tokenId = data.id;
+      write = (tx) => tx.create("apiToken", data);
     }
-    if (!input.dryRun) await write();
+    // The token and its record commit together, so a run that stops between rows moves each row once.
+    if (!input.dryRun)
+      await db.transaction(async (tx) => {
+        await write(tx);
+        await tx.create("movedToken", {
+          id: newId(now),
+          source: SOURCE,
+          sourceId,
+          tokenId,
+          createdAt: now,
+          updatedAt: now,
+        });
+      });
     report.moved++;
     report.dropped += dropped;
     byOwner.set(ownerId, (byOwner.get(ownerId) ?? 0) + 1);

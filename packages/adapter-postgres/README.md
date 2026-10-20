@@ -84,7 +84,7 @@ Version 11 (plan 12e, 2026-10-19) is the OAuth provider's second version. It add
 
 Version 12 (plan 12f, 2026-10-20) is the operator tools. It adds `banned_at`, `ban_reason`, and `ban_until` to `ta_user`, `actor_id` to `ta_session`, and the table `ta_operator_audit`. Each new column is nullable, with no default and no fill: a row of version 11 holds null, which means no ban and no impersonation. Apply `0012_schema_v12` before you deploy a core at version 12; the adapter refuses a database at version 11.
 
-Version 13 (plan 12k, 2026-10-20) is organizations and tokens, second version. It adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token`: the scope, the window, the quota, and the retired mark. It adds the tables `ta_organization_role`, `ta_team`, `ta_team_member`, and `ta_organization_token`. Each new column is nullable, with no default and no fill: a row of version 12 reads as before. Apply `0013_schema_v13` before you deploy a core at version 13; the adapter refuses a database at version 12.
+Version 13 (plan 12k, 2026-10-20) is organizations and tokens, second version. It adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token`: the scope, the window, the quota, and the retired mark. It adds the tables `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`, and `ta_moved_token`, the record of each moved key. Each new column is nullable, with no default and no fill: a row of version 12 reads as before. Apply `0013_schema_v13` before you deploy a core at version 13; the adapter refuses a database at version 12.
 
 ## Limiter
 

@@ -32,13 +32,20 @@ describe("schema version 13 (plan 12k)", () => {
     ]);
   });
 
-  it("defines the four models with their keys", () => {
-    expect(Object.keys(schema).slice(-4)).toEqual([
+  it("defines the five models with their keys", () => {
+    expect(Object.keys(schema).slice(-5)).toEqual([
       "organizationRole",
       "team",
       "teamMember",
       "organizationToken",
+      "movedToken",
     ]);
+    // One record per key of a source (plan 12k Task 12 review, M2).
+    expect([schema.movedToken.unique, schema.movedToken.indexes]).toEqual([
+      [["source", "sourceId"]],
+      [],
+    ]);
+    expect(Object.keys(schema.movedToken.fields)).not.toContain("userId");
     expect([schema.organizationRole.unique, schema.organizationRole.indexes]).toEqual([
       [["organizationId", "name"]],
       [],

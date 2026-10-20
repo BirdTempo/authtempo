@@ -20,7 +20,8 @@
 -- compatMigration0010Sql("sqlite", resolveNames(options), "before-1.7")
 -- for its text.
 -- ta_api_token and ta_organization_token are core's own token tables
--- (plan 12k Task 12). The file creates them with core's names. Better Auth's
+-- (plan 12k Task 12), and ta_moved_token records each moved apikey row.
+-- The file creates them with core's names. Better Auth's
 -- apikey table stays as it is: no migration writes it or drops it.
 ALTER TABLE "session" ADD COLUMN "activeTeamId" TEXT;
 ALTER TABLE "invitation" ADD COLUMN "teamId" TEXT;
@@ -89,5 +90,14 @@ CREATE TABLE ta_organization_token (
 );
 CREATE UNIQUE INDEX ux_ta_organization_token__token_hash ON ta_organization_token (token_hash);
 CREATE INDEX ix_ta_organization_token__organization_id ON ta_organization_token (organization_id);
+CREATE TABLE ta_moved_token (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  source TEXT NOT NULL,
+  source_id TEXT NOT NULL,
+  token_id TEXT NOT NULL
+);
+CREATE UNIQUE INDEX ux_ta_moved_token__source__source_id ON ta_moved_token (source, source_id);
 UPDATE ta_meta SET value = '13' WHERE key = 'schema_version';
 UPDATE ta_meta SET value = '10' WHERE key = 'compat_better_auth';

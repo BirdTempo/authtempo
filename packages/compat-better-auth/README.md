@@ -111,7 +111,7 @@ What the migration does (`0001_compat_better_auth`, append-only):
 
 Migration `0002_compat_schema_v5` (plan 8b) moves `schema_version` to 5 and `compat_better_auth` to 2. It changes no table: core 5 adds API tokens, and this package does not hold them until its api-key plan. Core's routes under `/tokens` answer 404 here. `tempo.api.tokens.*` is not usable on this storage: `create` throws `unknown_model`, and the reads answer empty. `migrate()` runs both migrations. On D1, copy `0002_compat_schema_v5.sql` after the 0001 file, for both variants and every naming: it touches `ta_meta` only. Without it the storage refuses to start with `schema_mismatch`.
 
-Plan 12k: core's token routes work in the shim. Migration 0010 creates core's own `ta_api_token` and `ta_organization_token`, so `/tokens`, `/organizations/tokens`, and `tempo.api.tokens.*` act on this storage (see "API keys").
+Plan 12k: core's token routes work in the shim. Migration 0010 creates core's own `ta_api_token`, `ta_organization_token`, and `ta_moved_token` (the record of each moved key), so `/tokens`, `/organizations/tokens`, and `tempo.api.tokens.*` act on this storage (see "API keys").
 
 What changes at cutover:
 
@@ -1219,7 +1219,11 @@ keys. Better Auth stores the
 SHA-256 of the whole key in base64url, so the digest moves. A moved key acts
 under the same secret, with no re-issue (ruling 2 of plan 12k). A row
 with `enabled` false, a row past `expiresAt`, and a row whose digest is not
-43 base64url characters are skipped. A second run moves nothing. The report
+43 base64url characters are skipped. Each moved row gets a record in core's
+`ta_moved_token`, in the transaction of its token. A later run skips each
+recorded row, so a second run moves nothing, and a revoked key stays revoked
+(review finding M2 of Task 12). A run that stops between rows moves the rest
+at the next run, each row once. The report
 holds counts, owner ids, and the stored prefixes, never a key, a digest, or
 metadata. A set loses each resource and action that core's statements do not
 know, and `dropped` counts them. An organization key gets its creator from
@@ -1234,7 +1238,7 @@ Each step is a runbook line, with what breaks without it:
 2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Re-issue each key with no prefix, and delete its row. Without it, the move throws and moves nothing.
 3. Tell each owner whose key the report skips. After the cutover a skipped key answers 401 `token_retired` (`KEY_DISABLED` from `verifyApiKey`), and every script that uses one stops.
 4. Deploy the shim build with migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
-5. Run `moveBetterAuthApiKeys` with `dryRun: false` once. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
+5. Run `moveBetterAuthApiKeys` with `dryRun: false`. A second run is safe: it skips each recorded row. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
 6. Change the app code that reads the `apikey` table itself. consumerb lists, reads, and deletes keys through Drizzle (`routes/api-keys.ts`). It sends a bearer to `verifyApiKey` only when it starts with `laaa_` (`middleware/identity.ts`). A new key starts with `to_`, so that check must also take `to_`. Without these edits, a new key never authenticates, and the key list shows only the old table.
 7. When every owner moved, drop the `apikey` table yourself. No migration of authtempo drops it, because it is your record. Without the drop, nothing breaks; the table only holds stale rows.
 

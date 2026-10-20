@@ -1,4 +1,4 @@
-import { createPbkdf2PasswordHash } from "@authtempo/core";
+import { createPbkdf2PasswordHash, type StorageAdapter } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { createAccessControl, defaultStatements } from "../src/access.js";
 import { apiKey } from "../src/api-key.js";
@@ -8,6 +8,7 @@ import { organization } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { moveBetterAuthApiKeys } from "../src/storage/api-keys.js";
 import type { D1SchemaStorage, PostgresSchemaStorage } from "../src/storage/index.js";
+import { rawReadOf, registerRawRead } from "../src/storage/raw.js";
 
 /** One database of the suite: the shim storage after the compat migrations, and a raw insert into apikey. */
 export interface MoveDatabase {
@@ -260,6 +261,76 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
             { field: "userId", op: "eq", value: ada.user.id },
           ]),
         ).toHaveLength(1);
+      }),
+    );
+
+    it(
+      "keeps a revoked key refused when the move runs again",
+      fresh(async (m) => {
+        // Probe P1 of the Task 12 review: the second run brought the key back.
+        const { auth, person } = app(m, "user");
+        const ada = await person("ada@example.com");
+        const key = generatedKey("laaa_");
+        await m.insertKey(await keyRow(key, { referenceId: ada.user.id }));
+        expect((await move(m, "user")).moved).toBe(1);
+        const id = (await auth.api.listApiKeys({ headers: ada.headers }))[0]?.id ?? "";
+        await auth.api.deleteApiKey({ body: { keyId: id }, headers: ada.headers });
+        expect((await auth.api.verifyApiKey({ body: { key } })).valid).toBe(false);
+        const again = await move(m, "user");
+        expect({ moved: again.moved, present: again.skipped.present }).toEqual({
+          moved: 0,
+          present: 1,
+        });
+        expect((await auth.api.verifyApiKey({ body: { key } })).valid).toBe(false);
+        expect(await auth.api.listApiKeys({ headers: ada.headers })).toEqual([]);
+      }),
+    );
+
+    it(
+      "moves each row once when a run stops halfway and runs again",
+      fresh(async (m) => {
+        const { auth, person } = app(m, "user");
+        const ada = await person("ada@example.com");
+        const keys = [generatedKey("laaa_"), generatedKey("laaa_"), generatedKey("laaa_")];
+        for (const key of keys) await m.insertKey(await keyRow(key, { referenceId: ada.user.id }));
+        // The second record write fails, as a process that stops inside the second row.
+        const real = m.database.storage;
+        let records = 0;
+        const stopping: StorageAdapter = {
+          ...real,
+          transaction: (fn) =>
+            real.transaction((tx) =>
+              fn({
+                ...tx,
+                create: async (model, data) => {
+                  if (model === "movedToken" && ++records === 2) throw new Error("stopped");
+                  return tx.create(model, data);
+                },
+              } as StorageAdapter),
+            ),
+        };
+        const halfway = { ...m.database, storage: stopping };
+        registerRawRead(halfway, rawReadOf(m.database) ?? (async () => []));
+        await expect(
+          moveBetterAuthApiKeys(halfway, {
+            names: m.database.names,
+            references: "user",
+            dryRun: false,
+            movedPrefixes: ["laaa_"],
+          }),
+        ).rejects.toThrow("stopped");
+        const byUser = [{ field: "userId" as const, op: "eq" as const, value: ada.user.id }];
+        // The first row and its record committed; the second row's token went with its record.
+        expect(await real.findMany("apiToken", byUser)).toHaveLength(1);
+        const again = await move(m, "user");
+        expect({ moved: again.moved, present: again.skipped.present }).toEqual({
+          moved: 2,
+          present: 1,
+        });
+        expect(await real.findMany("apiToken", byUser)).toHaveLength(3);
+        expect(await real.findMany("movedToken", [])).toHaveLength(3);
+        for (const key of keys)
+          expect((await auth.api.verifyApiKey({ body: { key } })).valid).toBe(true);
       }),
     );
 
