@@ -1,7 +1,11 @@
 import type { ModelName, Models } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "./port.js";
 
-/** D1 binds at most 100 parameters per statement (read 2026-10-09); fifty leaves room for the other clauses. */
+/**
+ * D1 binds at most 100 parameters per query (D1 limits page updated 21
+ * April 2026, read 2026-10-09 and again 2026-10-20). Fifty leaves room for
+ * the other clauses. A statement with more fails on D1 alone.
+ */
 export const IN_CHUNK = 50;
 
 /**

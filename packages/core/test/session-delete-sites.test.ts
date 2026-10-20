@@ -30,6 +30,8 @@ type Kind =
   | "endSessions"
   /** One session by id: `endSessionById` writes the outbox rows, then deletes. */
   | "by id"
+  /** A list of sessions of any users: the outbox rows of their links, then the deletes by id, in one transaction. */
+  | "by id list"
   /** The flow created this session in this transaction: no link can exist yet. */
   | "undo"
   /** Expired sessions: a later step makes each link with no session a logout (ruling 49). */
@@ -103,7 +105,7 @@ const SITES: Site[] = [
     count: 1,
     kind: "endSessions",
     reason:
-      "endOtherSessions (the revoke of the other sessions, the password change, the email change) and endAllAccess (the ban)",
+      "endOtherSessions (the revoke of the other sessions, the password change, the email change) and endAllAccess (the ban, the end of one user's sessions by an operator)",
   },
   {
     file: "engine/users.ts",
@@ -137,7 +139,16 @@ const SITES: Site[] = [
     count: 2,
     kind: "expired",
     reason:
-      "the revoke of the other sessions and the ban; endSessions after it makes the dead links logouts",
+      "the revoke of the other sessions, the ban, and the end of one user's sessions by an operator; endSessions after it makes the dead links logouts",
+  },
+  {
+    file: "engine/operator/sessions.ts",
+    fn: "endSessionPage",
+    call: 'delete("session"',
+    count: 2,
+    kind: "by id list",
+    reason:
+      "the end of all sessions by an operator: one delete per row with a hook, one per chunk of ids without; the outbox rows of the links come first and are due now",
   },
   {
     file: "engine/sweep.ts",

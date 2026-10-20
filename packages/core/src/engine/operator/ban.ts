@@ -114,6 +114,7 @@ export function reasonOf(
  * act on a platform operator (`operator_required`). A secret and the app
  * can act on a platform operator. The answer is the user row. The grant and
  * the revoke of the platform role (plan 12f Task 8) use the same checks.
+ * So does the end of one user's sessions (plan 12f Task 7).
  */
 export async function targetOf(
   config: ResolvedConfig,

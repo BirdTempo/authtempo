@@ -12,6 +12,12 @@ import {
   revokePlatformRole,
 } from "./platform-role.js";
 import { disableFactorWithProof, type FactorDisableInput } from "./second-factor.js";
+import {
+  type EndAllSessionsInput,
+  type EndUserSessionsInput,
+  endAllSessions,
+  endUserSessions,
+} from "./sessions.js";
 import { getUser, listUsers, type OperatorUser, searchUsers } from "./users.js";
 
 /**
@@ -75,6 +81,17 @@ export interface OperatorApi {
   createAdmin(
     input: CreateAdminInput,
   ): Promise<Result<{ userId: string; created: boolean; auditId: string }>>;
+  sessions: {
+    /** Ends all access of one user but the API tokens (plan 12f Task 7). Needs the scope `sessions`. */
+    endUser(input: EndUserSessionsInput): Promise<Result<{ ended: number; auditId: string }>>;
+    /**
+     * Ends up to `limit` sessions of all users, never the session of a user
+     * actor; call again while `more` is true. Needs the scope `sessions`.
+     */
+    endAll(
+      input: EndAllSessionsInput,
+    ): Promise<Result<{ ended: number; more: boolean; auditId: string }>>;
+  };
 }
 
 /**
@@ -111,5 +128,9 @@ export function operatorApi(config: ResolvedConfig): OperatorApi {
       disable: entry((i) => disableFactorWithProof(config, i)),
     },
     createAdmin: entry((i) => createAdmin(config, i)),
+    sessions: {
+      endUser: entry((i) => endUserSessions(config, i)),
+      endAll: entry((i) => endAllSessions(config, i)),
+    },
   };
 }
