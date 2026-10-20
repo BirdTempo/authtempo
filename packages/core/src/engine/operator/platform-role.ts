@@ -23,7 +23,7 @@ import { targetOf } from "./ban.js";
 import { activeBan } from "./ban-rule.js";
 import { type OperatorActor, requireScope } from "./guards.js";
 import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
-import { endImpersonations } from "./impersonation.js";
+import { endImpersonations, holdImpersonations } from "./impersonation.js";
 
 /** The input of a grant or a revoke of the platform role (spec 26 item 5). */
 export interface PlatformRoleInput {
@@ -431,9 +431,14 @@ export async function revokePlatformRole(
         if (!locked.ok) return locked;
       } else if ((await write(tx)) === 0) return fail("conflict");
       meter.step(losesOwner ? REVOKE_WRITE_WORST : 2);
+      // The locks of the user's sessions and of the impersonation sessions
+      // that the user opened, in one read, before any delete (ruling 42 L3):
+      // the audit read and the lock read.
+      const hold = await holdImpersonations(tx, user.id, now, true);
+      meter.step(2);
       await endAllAccessPage(tx, config, user.id, ends, now, meter, budget.value, "operator");
       // The role started them, so they end with it (ruling 31).
-      await endImpersonations(tx, user.id, ends.ended ?? null, now);
+      await endImpersonations(tx, hold, ends.ended ?? null, now);
       const change: MemberChange =
         rest === ""
           ? { kind: "remove", member }

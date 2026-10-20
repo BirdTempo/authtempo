@@ -211,30 +211,72 @@ export async function stopImpersonation(
 }
 
 /**
- * Ends every impersonation session that the platform operator `operatorId`
+ * The targets of the impersonations that `operatorId` may still hold, and
+ * the proof that their session rows are locked (ruling 42 L3 of plan 12f).
+ * `holdImpersonations` makes it, and `endImpersonations` reads it.
+ */
+export interface ImpersonationHold {
+  readonly operatorId: string;
+  readonly targets: readonly string[];
+}
+
+/**
+ * Reads the targets of `operatorId` and takes the row locks of their
+ * sessions in one `lockInOrder` read, in the caller's transaction. The
+ * start rows of the last `IMPERSONATION_TTL_MAX_MINUTES` name each target
+ * through the audit index on `actorId`. No impersonation session lives
+ * longer.
+ *
+ * With `own`, the same read also locks the operator's own sessions, which
+ * the caller deletes next. A page of `endAll` locks by id across users.
+ * With two lock reads, it could hold a row of one set and wait on the
+ * other (ruling 36). The port has no OR, so the read locks every session
+ * of the operator and of each target. Call it before any session delete of
+ * the transaction. With no target, it locks nothing, and the deletes of
+ * the caller take their own locks.
+ */
+export async function holdImpersonations(
+  tx: StorageAdapter,
+  operatorId: string,
+  now: Date,
+  own: boolean,
+): Promise<ImpersonationHold> {
+  const since = new Date(now.getTime() - IMPERSONATION_TTL_MAX_MINUTES * MINUTE_MS);
+  const targets = await impersonationTargets(tx, operatorId, since);
+  if (targets.length > 0)
+    await tx.lockInOrder?.(
+      "session",
+      own
+        ? [{ field: "userId", op: "in", value: [operatorId, ...targets] }]
+        : [
+            { field: "userId", op: "in", value: targets },
+            { field: "actorId", op: "eq", value: operatorId },
+          ],
+    );
+  return { operatorId, targets };
+}
+
+/**
+ * Ends every impersonation session that the platform operator of `hold`
  * opened, in the caller's transaction (ruling 31 of plan 12f). The ban and
  * the revoke of the platform role call it, so nothing of the operator's
- * acts stays (spec 26). The start rows of the last
- * `IMPERSONATION_TTL_MAX_MINUTES` name each target through the audit
- * index on `actorId`: no impersonation session lives longer. One
- * `endSessions` per target then deletes the target's sessions whose
- * `actorId` is the operator, with the outbox rows of their links. The
- * answer is the count of sessions.
+ * acts stays (spec 26). One `endSessions` per target deletes the target's
+ * sessions whose `actorId` is the operator, with the outbox rows of their
+ * links. The answer is the count of sessions.
  */
 export async function endImpersonations(
   tx: StorageAdapter,
-  operatorId: string,
+  hold: ImpersonationHold,
   ended: SessionRow[] | null,
   now: Date,
 ): Promise<number> {
-  const since = new Date(now.getTime() - IMPERSONATION_TTL_MAX_MINUTES * MINUTE_MS);
   let n = 0;
-  for (const userId of await impersonationTargets(tx, operatorId, since)) {
+  for (const userId of hold.targets) {
     n += await endSessions(
       tx,
       [
         { field: "userId", op: "eq", value: userId },
-        { field: "actorId", op: "eq", value: operatorId },
+        { field: "actorId", op: "eq", value: hold.operatorId },
       ],
       ended,
       now,
