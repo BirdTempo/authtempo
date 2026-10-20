@@ -625,6 +625,36 @@ refused.
 `/admin/set-role` takes the platform role, which grants it, or `user`, which
 revokes it. Any other role is refused.
 
+Each mapped call posts core's operator route with the caller's cookie, so
+core's guard decides (plan 12f Task 10):
+
+| Call | Core's route | Answer |
+| --- | --- | --- |
+| `GET /admin/list-users` | `GET /operator/users` or `/operator/users/search` | `{ users, total, limit, offset }` when the page ends the list. Else `{ users, limit, offset, next }`: pass `after=<next>` for the next page. |
+| `GET /admin/get-user?id=` | `GET /operator/users/get` | The user. |
+| `POST /admin/ban-user` | `POST /operator/users/ban` | `{ user }`. `banExpiresIn` is in seconds, from 60 seconds to 3650 days. |
+| `POST /admin/unban-user` | `POST /operator/users/unban` | `{ user }`. |
+| `POST /admin/set-role` | `POST /operator/users/platform-role` | `{ user }`. |
+| `POST /admin/revoke-user-sessions` | `POST /operator/sessions/end-user` | `{ success: true }`. While sessions stay, `{ success: false, more: true, ended }`: call again. |
+
+Each user in an answer has Better Auth's admin fields: `role` is the
+platform role or `user`, and `banned`, `banReason`, and `banExpires` show a
+ban that holds now. An operator cannot act on another platform operator
+through these calls. So a ban, an unban, or a `set-role` of `user` on a
+platform operator is refused. The revoke of an operator needs an operator
+secret or the app (`auth.tempo.api.operator.platformRole.revoke`).
+
+| Core's refusal | Answer |
+| --- | --- |
+| `operator_required` (the guard, or a target that is a platform operator) | 403 with the code of the path: `YOU_ARE_NOT_ALLOWED_TO_LIST_USERS`, `YOU_ARE_NOT_ALLOWED_TO_GET_USER`, `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS` (ban and unban), `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`, or `YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS`. |
+| `operator_self` | 409 `YOU_CANNOT_BAN_YOURSELF` on a ban, else 409 `FORBIDDEN`. |
+| `not_found` | 404 `USER_NOT_FOUND`. |
+| `unauthorized` (no session) | 401 `UNAUTHORIZED`. |
+
+On D1, an act reads the user row once after core's route, for `{ user }`.
+A ban of a user with 60 sessions sends 32 queries in its invocation.
+The impersonation calls come with plan 12f Task 11.
+
 Better Auth requires a reason nowhere, and core writes an audit row with a
 reason for each act. A ban takes `banReason` as its reason. Every other call,
 and a ban with no `banReason`, writes `better-auth admin plugin <path>`. Then

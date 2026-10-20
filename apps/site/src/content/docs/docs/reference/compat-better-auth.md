@@ -172,6 +172,11 @@ Better Auth's `admin` plugin runs on core's operator tools (spec section 26). A 
 | `/admin/create-user`, `/admin/update-user`, `/admin/list-user-sessions`, `/admin/revoke-user-session`, `/admin/has-permission` | `NOT_SUPPORTED` (501). |
 | `/admin/list-users` | One search: `searchValue` with `searchOperator: "starts_with"` on the address, or `filterField` `email` or `id`. A search of the name, `contains`, `ends_with`, `sortBy`, and an `offset` other than 0 answer `NOT_SUPPORTED` (501). |
 | `/admin/set-role` | The platform role grants it, and `user` revokes it. Any other role answers `NOT_SUPPORTED` (501). |
+| `/admin/list-users`, `/admin/get-user` | Core's `GET /operator/users`, `/operator/users/search`, and `/operator/users/get`. The list answers `total` only when the page ends the list, else `next`; pass `after` for the next page. |
+| `/admin/ban-user`, `/admin/unban-user`, `/admin/set-role` | Core's `POST /operator/users/ban`, `/operator/users/unban`, and `/operator/users/platform-role`. Each answers `{ user }` with `role`, `banned`, `banReason`, and `banExpires`. |
+| `/admin/revoke-user-sessions` | Core's `POST /operator/sessions/end-user`. While sessions stay, it answers `{ success: false, more: true, ended }`: call again. |
+
+Core's guard decides each mapped call: the platform role, a verified address, a second factor, and a fresh session. Its refusal answers 403 with the code of the path, such as `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS`. An operator cannot act on another platform operator through these calls. An unknown user answers 404 `USER_NOT_FOUND`, and a ban of the caller answers 409 `YOU_CANNOT_BAN_YOURSELF`.
 
 Each `NOT_SUPPORTED` message names spec section 26. A call with no reason writes the audit reason `better-auth admin plugin <path>`. The README of the package gives the SQL that copies the bans of Better Auth into core's columns at the cutover.
 
