@@ -25,7 +25,7 @@ export const PROOF_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
  * id in the app's own system, never the evidence: the audit table must hold
  * no personal document.
  */
-const REFERENCE_MAX = 200;
+export const REFERENCE_MAX = 200;
 
 /** The proof of an identity check, as the operator gives it. */
 export interface FactorProof {

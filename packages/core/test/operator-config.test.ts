@@ -285,9 +285,16 @@ describe("the operator config of plan 12f", () => {
     // Spec 26 item 3 and the plan ask for an actor, not a secret (ruling 21).
     const resolved = resolveConfig({ ...base, ...PLATFORM, operator: { users: true } });
     expect(resolved.operator).toEqual({ secrets: [], users: true, impersonation: null });
+    // With no secret entry the secret routes are a tool that is off: 404, as a path that does
+    // not exist (ruling 22 of plan 12f, spec 26 item 7).
     const app = operatorApp({ users: true }, PLATFORM);
-    for (const [method, path] of ROUTES)
-      expect((await app.handle(call(method, path, SECRET))).status, path).toBe(401);
+    for (const [method, path] of ROUTES) {
+      const res = await app.handle(call(method, path, SECRET));
+      expect({ status: res.status, body: await res.json() }, path).toEqual({
+        status: 404,
+        body: { error: "not_found" },
+      });
+    }
   });
 
   it("freezes the scope list of each resolved secret", () => {

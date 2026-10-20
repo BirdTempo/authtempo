@@ -1,13 +1,40 @@
+import type { z } from "zod";
 import type { OperatorScope, ResolvedConfig } from "../../config.js";
 import { rotateKey } from "../../engine/jwt.js";
-import { matchOperatorSecret, requireScope } from "../../engine/operator/guards.js";
+import {
+  matchOperatorSecret,
+  type OperatorActor,
+  requireOperatorUser,
+  requireScope,
+} from "../../engine/operator/guards.js";
+import { operatorApi } from "../../engine/operator/index.js";
 import { rewrapSecrets, secretsStatus } from "../../engine/secrets.js";
+import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import { ipKey } from "../../limiter/ip-key.js";
-import { OPERATOR_PER_IP, OPERATOR_SECRETS_PER_IP } from "../../operator-secret.js";
+import {
+  OPERATOR_PER_IP,
+  OPERATOR_SECRETS_PER_IP,
+  OPERATOR_USERS_PER_IP,
+} from "../../operator-secret.js";
+import { readSessionToken } from "../../primitives/credentials.js";
+import { fail, ok, type Result } from "../../result.js";
 import { SCHEMA_VERSION } from "../../schema.js";
 import { VERSION } from "../../version.js";
-import { rewrapBody } from "../contract/operator.js";
-import { json, respond } from "../json.js";
+import {
+  auditQuery,
+  banBody,
+  createAdminBody,
+  endAllBody,
+  factorDisableBody,
+  platformRoleBody,
+  rewrapBody,
+  searchQuery,
+  userQuery,
+  userReasonBody,
+  usersQuery,
+} from "../contract/operator.js";
+import { json, readJson, respond } from "../json.js";
+import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
 
 /**
@@ -52,9 +79,12 @@ async function readRewrapBody(
 }
 
 /**
- * The operator routes (plans 11c and 11c2). Off unless the config sets
- * `operator`. The secret is not an API token: no user owns it, and no
- * session reaches it. `keys/rotate` exists only with `jwtMint`: its one
+ * The operator routes. The four secret routes of plans 11c and 11c2 exist
+ * only with an operator secret entry. With `operator.users` and no secret,
+ * they are a tool that is off, so they answer 404 (ruling 22 of plan 12f,
+ * spec 26 item 7). The routes of the user, session, and audit tools exist only
+ * with `operator.users` (`toolRoutes`). The secret is not an API token: no
+ * user owns it, and no session reaches it. `keys/rotate` exists only with `jwtMint`: its one
  * action rotates the signing key. The three routes of 11c2 answer counts
  * and key names, never a sealed value, a hash, or a config value. Each
  * route runs its limiter first, so every call counts, also one with no
@@ -64,6 +94,12 @@ async function readRewrapBody(
  */
 export function operatorRoutes(config: ResolvedConfig): Route[] {
   if (!config.operator) return [];
+  return [...secretRoutes(config), ...toolRoutes(config)];
+}
+
+/** The four secret routes of plans 11c and 11c2, or none when the config holds no secret entry. */
+function secretRoutes(config: ResolvedConfig): Route[] {
+  if (!config.operator || config.operator.secrets.length === 0) return [];
   const rotate: Route[] = config.jwtMint
     ? [
         {
@@ -140,5 +176,206 @@ export function operatorRoutes(config: ResolvedConfig): Route[] {
         });
       },
     },
+  ];
+}
+
+/** `Authorization: Operator …`, any case: the request names the operator secret as its credential. */
+const OPERATOR_SCHEME = /^Operator(\s|$)/i;
+
+/** The actor of one request, and the Set-Cookie of a session caller's sliding refresh. */
+export interface OperatorCaller {
+  actor: OperatorActor;
+  renewed: string | null;
+}
+
+/**
+ * The actor of a request to a route of the user, session, and audit tools
+ * (plan 12f, spec 26 items 7 and 12). A request with the operator scheme
+ * counts on `operator-users:ip:<ip>` first, so every secret call counts,
+ * right or wrong. Then a session cookie or a `ts_` bearer beside it answers
+ * 401 `unauthorized` (deviation 5): the request has no single actor. Then
+ * the secret must match an entry, else 401. A request with no operator
+ * scheme needs a session, else 401, and then `requireOperatorUser`, which
+ * counts on `operator:user:<userId>`. A user actor exists only through that
+ * guard. The scope check of a secret is the engine's, at each entry.
+ */
+export async function readOperatorActor(
+  config: ResolvedConfig,
+  ctx: RouteContext,
+  route: string,
+): Promise<Result<OperatorCaller>> {
+  const request = ctx.request;
+  if (OPERATOR_SCHEME.test(request.headers.get("authorization") ?? "")) {
+    if (!(await config.limiter.allow(`operator-users:ip:${ipKey(ctx.ip)}`, OPERATOR_USERS_PER_IP)))
+      return fail("rate_limited");
+    if (readSessionToken(config, request) !== null) return fail("unauthorized");
+    const entry = await matchOperatorSecret(config, request);
+    if (entry === null) return fail("unauthorized");
+    return ok({ actor: { kind: "secret", name: entry.name, scopes: entry.scopes }, renewed: null });
+  }
+  const resolved = await sessionFromRequest(config, request);
+  if (!resolved) return fail("unauthorized");
+  const user = await requireOperatorUser(config, resolved, route);
+  if (!user.ok) return user;
+  return ok({ actor: user.value, renewed: renewedSessionCookie(config, request, resolved) });
+}
+
+/**
+ * The query of a read, parsed by its contract schema. A repeated key fails
+ * `invalid_body`, as a repeated form field does in `readBody`: the schema
+ * never sees a silent first or last value.
+ */
+function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
+  const raw: Record<string, string> = Object.create(null);
+  for (const [key, value] of url.searchParams) {
+    if (key in raw) return fail("invalid_body");
+    raw[key] = value;
+  }
+  const parsed = schema.safeParse(raw);
+  return parsed.success ? ok(parsed.data) : fail("invalid_body");
+}
+
+/** A page size of a query, as the number the engine takes. */
+function limitOf(limit: string | undefined): { limit?: number } {
+  return limit === undefined ? {} : { limit: Number(limit) };
+}
+
+/** The value under one key: the CLI reads `{ user }` (plan 12f Task 12). */
+function under<K extends string, V>(key: K, r: Result<V>): Result<Record<K, V>> {
+  return r.ok ? ok({ [key]: r.value } as Record<K, V>) : r;
+}
+
+/**
+ * The routes of the user, session, and audit tools (plan 12f, spec 26 item
+ * 7), only with `operator.users`. Each route reads the actor first. Then it
+ * reads its query or its JSON body with the contract schema. Then it calls
+ * one entry of `auth.api.operator` with the caller's IP and user agent. A session
+ * caller's POST keeps the Origin rule and the Fetch Metadata rule of the
+ * router. A secret caller sends no cookie, and a POST with no Origin passes.
+ * The impersonation routes are plan 12f Task 11.
+ */
+function toolRoutes(config: ResolvedConfig): Route[] {
+  if (!config.operator?.users) return [];
+  const api = operatorApi(config);
+  const send = (res: Response, renewed: string | null) => {
+    if (renewed) res.headers.append("set-cookie", renewed);
+    return res;
+  };
+  const read = <T, V, P extends RoutePath<"GET">>(
+    path: P,
+    schema: z.ZodType<T>,
+    run: (actor: OperatorActor, query: T) => Promise<Result<V>>,
+  ): Route => ({
+    method: "GET",
+    path,
+    key: `GET ${path}`,
+    async handler(ctx) {
+      const caller = await readOperatorActor(config, ctx, `GET ${path}`);
+      if (!caller.ok) return respond(caller);
+      const query = readQuery(ctx.url, schema);
+      if (!query.ok) return send(respond(query), caller.value.renewed);
+      return send(respond(await run(caller.value.actor, query.value)), caller.value.renewed);
+    },
+  });
+  const write = <T, V, P extends RoutePath<"POST">>(
+    path: P,
+    schema: z.ZodType<T>,
+    run: (
+      actor: OperatorActor,
+      body: T,
+      meta: { ip: string | null; userAgent: string | null },
+    ) => Promise<Result<V>>,
+  ): Route => ({
+    method: "POST",
+    path,
+    key: `POST ${path}`,
+    async handler(ctx) {
+      const caller = await readOperatorActor(config, ctx, `POST ${path}`);
+      if (!caller.ok) return respond(caller);
+      const body = await readJson(ctx.request, schema);
+      if (!body.ok) return send(respond(body), caller.value.renewed);
+      const meta = { ip: ctx.ip, userAgent: ctx.request.headers.get("user-agent") };
+      return send(respond(await run(caller.value.actor, body.value, meta)), caller.value.renewed);
+    },
+  });
+  return [
+    read("/operator/users", usersQuery, (actor, q) =>
+      api.users.list({
+        actor,
+        ...(q.after === undefined ? {} : { after: q.after }),
+        ...limitOf(q.limit),
+      }),
+    ),
+    read("/operator/users/search", searchQuery, (actor, q) =>
+      api.users.search({
+        actor,
+        ...(q.email === undefined ? {} : { email: q.email }),
+        ...(q.emailPrefix === undefined ? {} : { emailPrefix: q.emailPrefix }),
+        ...(q.id === undefined ? {} : { id: q.id }),
+        ...(q.after === undefined ? {} : { after: q.after }),
+        ...limitOf(q.limit),
+      }),
+    ),
+    read("/operator/users/get", userQuery, async (actor, q) =>
+      under("user", await api.users.get({ actor, userId: q.userId })),
+    ),
+    write("/operator/users/ban", banBody, (actor, b, meta) =>
+      api.users.ban({
+        actor,
+        userId: b.userId,
+        reason: b.reason,
+        ...(b.until === undefined ? {} : { until: b.until }),
+        ...meta,
+      }),
+    ),
+    write("/operator/users/unban", userReasonBody, (actor, b, meta) =>
+      api.users.unban({ actor, userId: b.userId, reason: b.reason, ...meta }),
+    ),
+    write("/operator/users/platform-role", platformRoleBody, (actor, b, meta) =>
+      (b.grant ? api.platformRole.grant : api.platformRole.revoke)({
+        actor,
+        userId: b.userId,
+        reason: b.reason,
+        ...meta,
+      }),
+    ),
+    write("/operator/users/second-factor/disable", factorDisableBody, (actor, b, meta) =>
+      api.secondFactor.disable({
+        actor,
+        userId: b.userId,
+        reason: b.reason,
+        proof: b.proof,
+        ...meta,
+      }),
+    ),
+    // A secret actor only: the engine answers operator_required to a user actor.
+    write("/operator/users/create-admin", createAdminBody, (actor, b, meta) =>
+      api.createAdmin({
+        actor,
+        email: b.email,
+        ...(b.name === undefined ? {} : { name: b.name }),
+        reason: b.reason,
+        ...meta,
+      }),
+    ),
+    write("/operator/sessions/end-user", userReasonBody, (actor, b, meta) =>
+      api.sessions.endUser({ actor, userId: b.userId, reason: b.reason, ...meta }),
+    ),
+    write("/operator/sessions/end-all", endAllBody, (actor, b, meta) =>
+      api.sessions.endAll({
+        actor,
+        reason: b.reason,
+        ...(b.limit === undefined ? {} : { limit: b.limit }),
+        ...meta,
+      }),
+    ),
+    read("/operator/audit", auditQuery, (actor, q) =>
+      api.audit.list({
+        actor,
+        ...(q.targetUserId === undefined ? {} : { targetUserId: q.targetUserId }),
+        ...(q.after === undefined ? {} : { after: q.after }),
+        ...limitOf(q.limit),
+      }),
+    ),
   ];
 }

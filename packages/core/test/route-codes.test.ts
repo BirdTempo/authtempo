@@ -277,7 +277,17 @@ function world(extra: Partial<AuthConfig> = {}) {
       registration: { cimd: false, dynamic: true },
       device: {},
     },
-    operator: { secretHash: "0".repeat(64) },
+    // A secret with every scope, and the user tools of plan 12f. The hash admits no secret.
+    operator: {
+      secrets: [
+        {
+          name: "default",
+          secretHash: "0".repeat(64),
+          scopes: ["keys", "secrets", "users", "sessions", "audit"],
+        },
+      ],
+      users: true,
+    },
     account: { deleteConfirm: { ttlMinutes: 60 } },
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.
     trustedOrigins: [BASE_URL],
@@ -411,7 +421,10 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
           : // The device page counts a request with no session only.
             key === "GET /oauth/device"
             ? {}
-            : w.cookie(me.token),
+            : // The operator user tools count a secret call before the compare (plan 12f).
+              entryOf(key).feature === "operatorUsers"
+              ? { authorization: `Operator ${"x".repeat(32)}` }
+              : w.cookie(me.token),
       fills,
     );
     // The two routes that carry the code in a redirect to the app.
@@ -446,7 +459,10 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
       }),
     );
     const fills: Fills = { $org: org.organization.id, $inviteToken: w.lastInvitation() };
-    const routes = declaring("email_unverified").filter((key) => takes(key, "session"));
+    // The operator user tools answer it for the target, not for the caller: operator-routes.test.ts drives it.
+    const routes = declaring("email_unverified").filter(
+      (key) => takes(key, "session") && entryOf(key).feature !== "operatorUsers",
+    );
     expect(routes.length).toBeGreaterThan(0);
     const results = await probe(w, routes, () => w.cookie(pat.token), fills);
     expect(unlike(results, "email_unverified", 403)).toEqual({});
@@ -920,6 +936,14 @@ const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "POST /identities/unlink",
   // The claims hook of the JWT: its own test above.
   "GET /token",
+  // The operator writes of plan 12f: operator-routes.test.ts arms hooks.operator.beforeAction on each.
+  "POST /operator/users/ban",
+  "POST /operator/users/unban",
+  "POST /operator/users/platform-role",
+  "POST /operator/users/second-factor/disable",
+  "POST /operator/users/create-admin",
+  "POST /operator/sessions/end-user",
+  "POST /operator/sessions/end-all",
 ];
 
 /** A world whose before hooks all refuse, or all throw, once `armed`. The setup runs before. */

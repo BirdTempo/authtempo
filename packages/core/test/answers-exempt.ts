@@ -50,8 +50,12 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "GET /oauth/device",
   "GET /oauth/grants",
   "GET /openapi.json",
+  "GET /operator/audit",
   "GET /operator/info",
   "GET /operator/secrets/status",
+  "GET /operator/users",
+  "GET /operator/users/get",
+  "GET /operator/users/search",
   "GET /password/reset",
   "GET /password/verify",
   "GET /social/:provider/callback",
@@ -67,6 +71,13 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /oauth/register",
   "POST /operator/keys/rotate",
   "POST /operator/secrets/rewrap",
+  "POST /operator/sessions/end-all",
+  "POST /operator/sessions/end-user",
+  "POST /operator/users/ban",
+  "POST /operator/users/create-admin",
+  "POST /operator/users/platform-role",
+  "POST /operator/users/second-factor/disable",
+  "POST /operator/users/unban",
   "POST /organizations/create",
   "POST /organizations/delete",
   "POST /organizations/invitations/revoke",
@@ -125,6 +136,13 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /oauth/userinfo",
   "POST /operator/keys/rotate",
   "POST /operator/secrets/rewrap",
+  "POST /operator/sessions/end-all",
+  "POST /operator/sessions/end-user",
+  "POST /operator/users/ban",
+  "POST /operator/users/create-admin",
+  "POST /operator/users/platform-role",
+  "POST /operator/users/second-factor/disable",
+  "POST /operator/users/unban",
   "POST /organizations/active",
   "POST /organizations/create",
   "POST /organizations/delete",
@@ -269,6 +287,26 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows("conflict", "five lost rounds of the user hold; profile.test.ts proves the engine path", [
     "POST /user/update",
   ]),
+  ...rows(
+    "conflict",
+    "five lost rounds of the user hold; account-delete.test.ts proves the engine path",
+    ["POST /operator/users/second-factor/disable", "POST /operator/sessions/end-user"],
+  ),
+  ...rows(
+    "conflict",
+    "five lost rounds of the compare-and-set of the ban fields (writeBanFields of ban.ts); no request can lose them, and no engine test loses them yet: an open point of plan 12f Task 10",
+    ["POST /operator/users/ban", "POST /operator/users/unban"],
+  ),
+  ...rows(
+    "conflict",
+    "a grant that an account delete or a parallel grant races, or a role change that races the revoke; operator-platform-role.test.ts proves the engine path",
+    ["POST /operator/users/platform-role"],
+  ),
+  ...rows(
+    "conflict",
+    "an organization or a user that a parallel act writes between the read and the transaction; operator-create-admin.test.ts proves the engine path",
+    ["POST /operator/users/create-admin"],
+  ),
 
   // A code that only a race, or a state that no flow reaches, answers.
   ...rows(
@@ -361,6 +399,23 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
   },
   ...optionsRows("POST /reauth/passkey/options", REQUEST_OPTION_KEYS),
   ...optionsRows("POST /second-factor/passkey/options", REQUEST_OPTION_KEYS),
+  // A ban of the product always holds its reason: the ban takes one, and the unban keeps it.
+  ...(["GET /operator/users", "GET /operator/users/search"] as const).map(
+    (key): AnswerShapeExempt => ({
+      key,
+      field: "users[].ban.reason",
+      form: "null",
+      reason:
+        "every ban writes its reason, so no flow leaves a ban with none; the field is nullable because the user row allows it; operator-ban.test.ts proves the ban fields",
+    }),
+  ),
+  {
+    key: "GET /operator/users/get",
+    field: "user.ban.reason",
+    form: "null",
+    reason:
+      "every ban writes its reason, so no flow leaves a ban with none; the field is nullable because the user row allows it; operator-ban.test.ts proves the ban fields",
+  },
   {
     key: "POST /passkeys/rename",
     field: "passkey.name",

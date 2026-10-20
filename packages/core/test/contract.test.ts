@@ -39,6 +39,8 @@ const REDIRECT = "https://client.example.com/callback";
 const RESOURCE = `${BASE_URL}/mcp`;
 /** The operator secret whose hash the world's config holds. */
 const OPERATOR_SECRET = "operator-secret-0123456789abcdef-0123456789";
+/** The header of that secret. */
+const OPERATOR = { authorization: `Operator ${OPERATOR_SECRET}` };
 
 /** What a route answered: the status, and the code of a JSON error or of a redirect's error parameter. */
 interface Answer {
@@ -111,7 +113,13 @@ function world(secretHash = "0".repeat(64)) {
     social: SOCIAL,
     organizations: {},
     oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true }, device: {} },
-    operator: { secretHash },
+    // One secret with every scope, and the user tools of plan 12f.
+    operator: {
+      secrets: [
+        { name: "default", secretHash, scopes: ["keys", "secrets", "users", "sessions", "audit"] },
+      ],
+      users: true,
+    },
     account: { deleteConfirm: { ttlMinutes: 60 } },
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
@@ -296,6 +304,28 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       headers: { authorization: `Operator ${OPERATOR_SECRET}` },
       refused: INVALID_BODY,
     },
+    // The operator tools of plan 12f: the actor first, then the body. A user id that names no
+    // user answers not_found, so these rows change no row that a later row reads.
+    ...(
+      [
+        [
+          "POST /operator/users/ban",
+          { userId: id, reason: "case 1", until: "2026-02-01T00:00:00Z" },
+        ],
+        ["POST /operator/users/unban", { userId: id, reason: "case 1" }],
+        ["POST /operator/users/platform-role", { userId: id, grant: true, reason: "case 1" }],
+        [
+          "POST /operator/users/second-factor/disable",
+          {
+            userId: id,
+            reason: "case 1",
+            proof: { method: "document", reference: "c-1", checkedAt: "2025-12-31T23:00:00Z" },
+          },
+        ],
+        ["POST /operator/users/create-admin", { email: "admin@example.com", reason: "case 1" }],
+        ["POST /operator/sessions/end-user", { userId: id, reason: "case 1" }],
+      ] as const
+    ).map(([key, body]) => ({ key, body, headers: OPERATOR, refused: INVALID_BODY })),
     { key: "POST /reauth", body: { password: PASSWORD }, session: true, refused: INVALID_BODY },
     {
       key: "POST /user/update",
@@ -541,6 +571,13 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
       refused: INVALID_TOKEN,
     },
+    // The end of all sessions goes last: it ends the session of every row above.
+    {
+      key: "POST /operator/sessions/end-all",
+      body: { reason: "case 1", limit: 10 },
+      headers: OPERATOR,
+      refused: INVALID_BODY,
+    },
   ];
   return { rows, cookie };
 }
@@ -563,7 +600,7 @@ describe("the route contract (plan 11g)", () => {
   it("gives every route of ROUTES one contract, and no contract without a route", () => {
     const keys = Object.keys(ROUTE_CONTRACT).sort();
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(108);
+    expect(keys.length).toBe(119);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -1009,7 +1046,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
-    expect(withBody.length).toBe(56);
+    expect(withBody.length).toBe(63);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1035,7 +1072,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(54);
+    expect(refusals).toBe(61);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1053,7 +1090,7 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 48, both: 9, form: 7 });
+    expect(counts).toEqual({ json: 55, both: 9, form: 7 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

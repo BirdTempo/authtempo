@@ -16,6 +16,13 @@ function templated(r: { method: string; path: string }): string {
   return routeKeyOf(r.method, r.path);
 }
 
+/** The platform organization of plan 12f, so the user tools have a user actor and no secret. */
+const PLATFORM = {
+  platformRole: "operator",
+  platformOrganization: "platform-co",
+  ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+};
+
 /** The features that each route module serves (plan 11g). A route's entry must have one of them. */
 const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   sessions: ["session", "account"],
@@ -33,7 +40,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   organizations: ["organizations"],
   tokens: ["tokens"],
   jwt: ["jwtMint"],
-  operator: ["operator"],
+  operator: ["operator", "operatorUsers"],
   oauth: ["oauth", "oauthRegistration", "oauthDevice"],
   openapi: ["openapi"],
 };
@@ -49,7 +56,7 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(108);
+    expect(listed.length).toBe(119);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -168,6 +175,24 @@ describe("ROUTES (plan 11a)", () => {
       name: "operator",
       delta: { operator: { secretHash: "0".repeat(64) } },
       features: ["operator"],
+    },
+    {
+      name: "operator users with a secret",
+      start: { operator: { secretHash: "0".repeat(64) } },
+      delta: {
+        operator: {
+          secrets: [{ name: "support", secretHash: "0".repeat(64), scopes: ["users"] }],
+          users: true,
+        },
+      },
+      features: ["operatorUsers"],
+    },
+    // Ruling 22 of plan 12f: with no secret entry, the four secret routes are off.
+    {
+      name: "operator users with a platform role and no secret",
+      start: { organizations: PLATFORM },
+      delta: { organizations: PLATFORM, operator: { users: true } },
+      features: ["operatorUsers"],
     },
     { name: "openapi", delta: { openapi: true }, features: ["openapi"] },
   ];

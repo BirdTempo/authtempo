@@ -64,7 +64,17 @@ export function everyFeature(): ResolvedConfig {
       registration: { cimd: false, dynamic: true },
       device: {},
     },
-    operator: { secretHash: "0".repeat(64) },
+    // A secret with every scope, and the user tools of plan 12f.
+    operator: {
+      secrets: [
+        {
+          name: "default",
+          secretHash: "0".repeat(64),
+          scopes: ["keys", "secrets", "users", "sessions", "audit"],
+        },
+      ],
+      users: true,
+    },
     openapi: true,
   });
 }
