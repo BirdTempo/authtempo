@@ -22,8 +22,8 @@ export function createTokensAuth(deps: {
  */
 export async function whoami(auth: Auth, request: Request): Promise<Response> {
   const c = await auth.caller(request);
-  // A client_credentials token acts for no user, so this route has no one to name.
-  if (!c || c.kind === "oauth-client")
+  // A client_credentials token and an organization token act for no user, so this route has no one to name.
+  if (!c || c.kind === "oauth-client" || c.kind === "organizationToken")
     return Response.json({ error: "unauthorized" }, { status: 401 });
   const res = Response.json({ kind: c.kind, email: c.user.email });
   // After a sliding refresh, renew the cookie, or the browser drops it early.

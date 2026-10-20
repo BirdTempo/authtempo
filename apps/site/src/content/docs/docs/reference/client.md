@@ -119,13 +119,18 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.organizations.members.list({ organizationId })` | `GET /organizations/members` | `MemberJSON[]` |
 | `client.organizations.members.add({ organizationId, userId, role })` | `POST /organizations/members/add` | `MemberJSON` |
 | `client.organizations.members.role({ organizationId, userId, role })` | `POST /organizations/members/role` | `MemberJSON` |
-| `client.organizations.members.remove({ organizationId, userId })` | `POST /organizations/members/remove` | `{ ok: true }` |
+| `client.organizations.members.remove({ organizationId, userId, revokeTokens? })` | `POST /organizations/members/remove` | `{ ok: true }`. `revokeTokens: true` deletes the person's organization tokens too |
 | `client.organizations.invitations.invite({ organizationId, email, role })` | `POST /organizations/invite` | `InvitationJSON` |
 | `client.organizations.invitations.list({ organizationId })` | `GET /organizations/invitations` | `InvitationJSON[]` |
 | `client.organizations.invitations.revoke({ organizationId, invitationId })` | `POST /organizations/invitations/revoke` | `{ ok: true }` |
 | `client.organizations.invitations.accept({ token })` | `POST /organizations/invitations/accept` | `{ organization, member }` |
 | `client.organizations.invitations.decline({ token })` | `POST /organizations/invitations/decline` | `{ ok: true }` |
 | `client.organizations.setActive({ organizationId })` | `POST /organizations/active` | `PublicSession` |
+| `client.organizations.tokens.create({ organizationId, name, permissions, expiresInDays?, metadata? })` | `POST /organizations/tokens` | `{ token, apiToken: OrganizationTokenSummaryJSON }` |
+| `client.organizations.tokens.list({ organizationId })` | `GET /organizations/tokens` | `OrganizationTokenSummaryJSON[]` |
+| `client.organizations.tokens.update({ organizationId, id, name?, permissions?, expiresAt? })` | `POST /organizations/tokens/update` | `OrganizationTokenSummaryJSON`, after a narrow-only change |
+| `client.organizations.tokens.revoke({ organizationId, id })` | `POST /organizations/tokens/revoke` | `{ ok: true }` |
+| `client.organizations.tokens.current()` | `GET /organizations/tokens/current` | `{ organization, apiToken }`, with a `to_` token |
 | `client.tokens.create({ name, expiresInDays?, organizationId?, permissions?, metadata? })` | `POST /tokens` | `{ token, apiToken: ApiTokenSummaryJSON }` |
 | `client.tokens.list()` | `GET /tokens` | `ApiTokenSummaryJSON[]` |
 | `client.tokens.revoke({ id })` | `POST /tokens/revoke` | `{ ok: true }` |
@@ -224,7 +229,7 @@ The types of the package:
 | --- | --- |
 | The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `ClientSessionState`, `SessionState`, `SessionStore`, `Locale`, `ErrorTexts` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions` |
-| Answers | `ApiTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `TeamJSON`, `TeamMemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
+| Answers | `ApiTokenSummaryJSON`, `OrganizationTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `TeamJSON`, `TeamMemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 | Account settings | `SessionSummaryJSON`, `FreshJSON`, `PublicUserJSON`, `IdentityEntryJSON`, `IdentityListJSON` |
 
 ## Next

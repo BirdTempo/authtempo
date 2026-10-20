@@ -58,8 +58,9 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `invite:email:<email>` | 1 hour | 5 | Invite, per invited address |
 | `invitation-accept:ip:<ip>` | 15 minutes | 20 | Invitation accept |
 | `slug-check:user:<userId>` | 1 minute | 60 | Organization slug check, create, and rename to a new slug, on one budget, before the slug read |
-| `token-create:user:<userId>` | 1 hour | 20 | API token create |
+| `token-create:user:<userId>` | 1 hour | 20 | API token create, and organization token create: one key for both |
 | `token-use:tk:<tokenId>` | The token's `rateLimitSeconds` | The token's `rateLimitMax` | Each call of one API token with a window, after the hash lookup and before the quota spend. The app sets the window in process, or `tokens.defaultRateLimit` fills it. A change of the window starts a new count |
+| `token-use:to:<tokenId>` | The token's `rateLimitSeconds` | The token's `rateLimitMax` | Each call of one organization token with a window, by the rule of `token-use:tk:<tokenId>` |
 | `reauth:user:<userId>` | 15 minutes | 10 | Re-authentication, right or wrong |
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | Re-authentication code mail, before the address keys of every mailed code |
 | `session-revoke:user:<userId>` | 15 minutes | 30 | Session revoke and revoke-others together |

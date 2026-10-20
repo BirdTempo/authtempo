@@ -37,9 +37,9 @@ sources:
 | --- | --- |
 | `handle(request)` | Serves the routes under `basePath`. Mount it for each path that starts with `basePath`. |
 | `session(request, options?)` | Answers the `ResolvedSession` of the cookie or the `ts_` bearer token, or null. A `tk_` token answers null. With `{ refresh: false }`, the read writes nothing: no sliding refresh and no delete of an ended row. |
-| `caller(request)` | Answers a `Caller`: a session, an API token, or an OAuth access token under its resource, or null. A `client_credentials` token answers `kind: "oauth-client"`, with no user. An `oauth` caller has `user` and `subject`, the token's `sub`: the user id, or the pairwise subject of a pairwise client. |
+| `caller(request)` | Answers a `Caller`: a session, an API token, an organization token, or an OAuth access token under its resource, or null. A `client_credentials` token answers `kind: "oauth-client"`, with no user. A `to_` token answers `kind: "organizationToken"`, with `organization` and no user. An `oauth` caller has `user` and `subject`, the token's `sub`: the user id, or the pairwise subject of a pairwise client. |
 | `authenticate(request)` | Answers the `Caller` of `caller(request)` as a `Result`, or the code of the failure: `rate_limited` over a token's window, `token_exhausted` at a quota of zero, `token_retired` for a retired key, `conflict` when a lost spend sees no other spend or after 20 lost spends, and `unauthorized` for any other failure. `caller` answers null for each code. A token spends one call of its quota per request, so `caller` and `authenticate` on one request spend once. |
-| `hasPermission(caller, { organizationId, permissions })` | True when the caller holds every action in the organization. A session reads its role now. A user token reads its user's role, and grants nothing outside its bound organization. An OAuth caller grants nothing. Any failure answers false. |
+| `hasPermission(caller, { organizationId, permissions })` | True when the caller holds every action in the organization. A session reads its role now. A user token reads its user's role, and grants nothing outside its bound organization. An organization token reads its own set, in its own organization only. An OAuth caller grants nothing. Any failure answers false. |
 | `permissionsOf(caller, organizationId)` | Answers `{ role, permissions }` in the organization. A non-member gets `role: null` and `{}`. `not_found` with `organizations` off or for an unknown organization. |
 | `sessionCookie(request, resolved)` | Answers the `Set-Cookie` value after a sliding refresh, or null. Send it, or the browser drops the cookie early. |
 | `wellKnown(request)` | Serves the documents under `/.well-known/` at the origin root. 404 while `oauth` is off. |
@@ -59,6 +59,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | Passkeys | `passkeyRegistrationOptions`, `verifyPasskeyRegistration`, `passkeyAuthenticationOptions`, `verifyPasskeyAuthentication`, `listPasskeys`, `deletePasskey`, `renamePasskey`. `renamePasskey` needs no fresh session |
 | Handoff | `startHandoff`, `continueHandoff`, `redeemHandoff` |
 | Organizations | `createOrganization`, `listOrganizations`, `checkSlug`, `updateOrganization`, `deleteOrganization`, `listMembers`, `addMember`, `updateMemberRole`, `removeMember`, `inviteMember`, `listInvitations`, `revokeInvitation`, `acceptInvitation`, `declineInvitation`, `listRoles`, `getRole`, `createRole`, `updateRole`, `deleteRole`. The five role calls answer `not_found` while `organizations.dynamicRoles` is off. The three role writes apply no fresh rule; their routes do. Call `api.session.requireFresh` first |
+| `api.organizationTokens` | `create`, `list`, `update`, `revoke`, `current`. They answer `not_found` while `organizations` is off. `create` and `update` take the window and the quota, as `api.tokens` does, and apply no fresh rule. `removeMember` takes `revokeTokens: true` to delete the person's tokens of the organization |
 | `api.tokens` | `create`, `list`, `revoke`, `update`, `current`. `create` and `update` also take the window `rateLimit` and the `quota`, which no route takes. `update` narrows only, and a quota only goes down or loses its refill |
 | `api.session` | `requireFresh(resolved)`, `reauthenticate`, `requestReauthCode`, `reauthPasskeyOptions`, `list`, `revoke`, `revokeOthers`, `refresh(token)`; present in every deployment. `refresh` slides the expiry as `POST /session/refresh` does. `api.passkeyRegistrationOptions`, `api.deletePasskey`, `api.tokens.create`, `api.tokens.update`, `api.totp.disableWithCode`, and `api.totp.regenerateBackupCodesWithCode` take a user and apply no fresh rule: call `requireFresh` first. [Fresh sessions](/docs/concepts/fresh-sessions/) |
 | `api.user` | `update`, `changeEmail`, `confirmEmailChange`, `verifyEmailChange`, `delete`, `confirmDelete`; present in every deployment. `verifyEmailChange` answers `not_found` with `emailOtp: false`. `delete` and `confirmDelete` answer `not_found` with `account.delete: false`. With `account.deleteConfirm` on, `delete` mails a link and answers `{ sent: true }` |
@@ -117,6 +118,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `VERSION` | The version of core. |
 | `SCHEMA_VERSION` | The schema version that this core needs. |
 | `API_TOKEN_PREFIX` | `tk_`. |
+| `ORGANIZATION_TOKEN_PREFIX`, `ORGANIZATION_TOKEN_CAP` | `to_`, and 50, the live tokens of one organization. |
 | `DEFAULT_RESERVED_SLUGS` | The default reserved slugs. |
 | `CORE_STATEMENTS` | The resources and actions of core: `organization`, `member`, `invitation`, `team`, `ac`, and `apiToken`. |
 | `DELETE_CONFIRM_TTL_MINUTES` | The bounds and the default of `account.deleteConfirm.ttlMinutes`: 5, 1440, and 60. |
@@ -151,7 +153,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Passwords | `PasswordApi`, `PasswordSignUp`, `PasswordSignUpResult`, `PasswordSignUpPending`, `PasswordSignIn`, `PasswordSignInResult`, `PasswordSession`, `PasswordVerify`, `PasswordVerified`, `PasswordResend`, `PasswordResetRequest`, `PasswordReset`, `ResetResult`, `ResetChallenge`, `PasswordChange`, `PasswordReauth` |
 | Email codes | `EmailOtpApi`, `EmailOtpRequest`, `EmailOtpVerify`, `EmailOtpReset`, `EmailOtpSession`, `ResolvedEmailOtp` |
 | Second factor | `TotpApi`, `TotpSetup`, `TotpSetupInput`, `TotpStatus`, `TwoFactorPending`, `TwoFactorSession`, `TwoFactorVerify`, `ChallengeMethod`, `SignInChallenge`, `MethodEnabled`, `ChallengeView` |
-| API tokens | `TokensApi`, `ApiTokenCreate`, `ApiTokenSummary`, `ApiTokenUpdate`, `TokenQuota`, `AuthCode` |
+| API tokens | `TokensApi`, `ApiTokenCreate`, `ApiTokenSummary`, `ApiTokenUpdate`, `TokenQuota`, `AuthCode`, `OrganizationTokensApi`, `OrganizationTokenCreate`, `OrganizationTokenSummary`, `OrganizationTokenUpdate`, `ResolvedOrganizationToken` |
 | Account | `ReauthInput`, `ReauthProof`, `SessionSummary`, `ProfileUpdate`, `EmailChangeRequest`, `IdentityEntry`, `IdentityList`, `IdentityUnlink`, `SocialLinked`, `SocialLinkStart`, `AccountDelete` |
 | App secrets | `SecretsApi`, `SecretsStatus`, `SecretsRewrap`, `SecretVersionCount` |
 | Operator tools | `OperatorApi`, `OperatorActor`, `OperatorAuditDraft`, `OperatorUser` |
@@ -204,7 +206,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 
 | Export | What it is |
 | --- | --- |
-| `SESSION_TOKEN_PREFIX`, `API_TOKEN_PREFIX` | `ts_` and `tk_`, the prefixes of a session token and of an API token. |
+| `SESSION_TOKEN_PREFIX`, `API_TOKEN_PREFIX`, `ORGANIZATION_TOKEN_PREFIX` | `ts_`, `tk_`, and `to_`, the prefixes of a session token, an API token, and an organization token. |
 | `SESSION_JWT_TYPE`, `ACCESS_TOKEN_TYPE` | `JWT` and `at+jwt`, the header `typ` of a session JWT and of an OAuth access token. |
 | `DEFAULT_COOKIE_NAME` | `__Host-tempo_session`, the session cookie name when the config sets no `cookieName`. |
 | `LEGACY_COOKIE_NAME` | The session cookie name before plan 12b. Core reads it for one release when `cookieName` is the default. |

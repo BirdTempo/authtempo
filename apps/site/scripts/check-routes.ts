@@ -21,6 +21,7 @@ export const AUTH_WORDS: Record<AuthForm, string> = {
   none: "Nothing",
   session: "A session cookie, or a ts_ bearer token",
   apiToken: "A tk_ bearer token",
+  organizationToken: "A to_ bearer token",
   sessionJwt: "A session JWT as the bearer",
   accessToken: "An access token of the OAuth provider as the bearer",
   dpopAccessToken: "A DPoP-bound access token with its proof",

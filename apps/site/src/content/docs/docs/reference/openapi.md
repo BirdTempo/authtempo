@@ -44,6 +44,7 @@ Each operation has one security requirement for each credential form that the ro
 | `sessionCookie` | `apiKey` | The session cookie, by the name of `cookieName` |
 | `sessionBearer` | `http` | A session token as the bearer. It starts with `ts_` |
 | `apiToken` | `http` | An API token as the bearer. It starts with `tk_` |
+| `organizationToken` | `http` | A token of an organization as the bearer. It starts with `to_` |
 | `sessionJwt` | `http` | A session JWT as the bearer |
 | `oauth` | `oauth2` | An access token of the OAuth provider, from the authorization code flow. A public client proves itself with PKCE (S256). A confidential client sends its secret, and may omit PKCE only when it asks `openid` with a `nonce` |
 | `operatorSecret` | `apiKey` | The operator secret in the `Authorization` header, as `Operator <secret>`. `Operator` is not a registered HTTP authentication scheme |

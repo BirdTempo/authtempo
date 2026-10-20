@@ -21,6 +21,7 @@ describe("delete expired rows", () => {
       "oauthLogouts",
       "oauthSessionLinks",
       "oauthTokens",
+      "organizationTokens",
       "pendingSessions",
       "sessions",
       "totpSetups",

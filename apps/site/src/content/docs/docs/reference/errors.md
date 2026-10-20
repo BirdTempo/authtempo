@@ -286,6 +286,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`GET /tokens/current`](/docs/reference/routes/#get-tokens-current), and each route that resolves the token through `auth.authenticate`. |
 
+<h3 id="organization_token_limit"><code>organization_token_limit</code> 409</h3>
+
+- **Meaning:** The organization holds 50 live organization tokens.
+- **Do:** Revoke a token of the organization first.
+
+| Routes |
+| --- |
+| [`POST /organizations/tokens`](/docs/reference/routes/#post-organizations-tokens). |
+
 <h3 id="hook_refused"><code>hook_refused</code> 403</h3>
 
 - **Meaning:** A before hook of the app threw `hookRefusal(message)`. The body carries `message`.

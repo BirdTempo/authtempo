@@ -720,10 +720,10 @@ These routes exist when the config sets `organizations`. A write that runs an or
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. The user has the rank `admin`, or is the member |
-| Input | JSON `{ organizationId, userId }` |
+| Needs | A session cookie, or a `ts_` bearer token. The user has the rank `admin`, or is the member. With `revokeTokens: true`, the user also holds `apiToken:revoke`, and the session is fresh |
+| Input | JSON `{ organizationId, userId, revokeTokens? }`. `revokeTokens: true` deletes the organization tokens that the person made in this organization, in the same write. Without it, those tokens stay |
 | Answer | `{ ok: true }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`last_owner`](/docs/reference/errors/#last_owner), [`conflict`](/docs/reference/errors/#conflict), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`last_owner`](/docs/reference/errors/#last_owner), [`conflict`](/docs/reference/errors/#conflict), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-organizations-invite"><code>POST /organizations/invite</code></h3>
 
@@ -806,6 +806,53 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Answer | `{ slug, status }`: the slug after the NFKC fold to lower case, and `available`, `taken`, or `reserved`. A slug that does not fold to a valid slug answers `slug: null` and `invalid`. `available` is a hint, not a hold: the create can still answer `slug_taken` when another user takes the slug first |
 | Limit | `slug-check:user:<userId>`, 60 per minute. The create and a rename to a new slug spend the same key |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="post-organizations-tokens"><code>POST /organizations/tokens</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The session is fresh, the address is verified, and the user holds `apiToken:create`. A token answers 401 |
+| Input | JSON `{ organizationId, name, expiresInDays?, permissions, metadata? }`. `permissions` is a subset of the user's set in the organization; `{}` grants nothing, and `null` answers `invalid_body`. Another key answers `invalid_body`, so a client sets no window and no quota |
+| Answer | `{ token, apiToken }`; the clear `to_` token appears once. `apiToken` has `createdById` and `creatorIsMember` |
+| Limit | `token-create:user:<userId>`, 20 per hour, the key of `POST /tokens`. An organization holds at most 50 live tokens |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`organization_token_limit`](/docs/reference/errors/#organization_token_limit) |
+
+<h3 id="get-organizations-tokens"><code>GET /organizations/tokens</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The address is verified, and the user holds `apiToken:read` |
+| Input | Query `{ organizationId }` |
+| Answer | `{ tokens }`, newest first. `creatorIsMember` is false after the creator left the organization or deleted the account; the token still acts |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank) |
+
+<h3 id="post-organizations-tokens-update"><code>POST /organizations/tokens/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The session is fresh, the address is verified, and the user holds `apiToken:update` |
+| Input | JSON `{ organizationId, id, name?, permissions?, expiresAt? }`. It narrows only, as `POST /tokens/update`. Another key answers `invalid_body` |
+| Answer | The `apiToken` after the change |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`conflict`](/docs/reference/errors/#conflict) |
+
+<h3 id="post-organizations-tokens-revoke"><code>POST /organizations/tokens/revoke</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The address is verified, and the user holds `apiToken:revoke`. The creator of a token has no right of their own |
+| Input | JSON `{ organizationId, id }` |
+| Answer | `{ ok: true }` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank) |
+
+<h3 id="get-organizations-tokens-current"><code>GET /organizations/tokens/current</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A to_ bearer token. No other credential |
+| Input | None |
+| Answer | `{ organization, apiToken }`, with no user: the token acts for the organization. Each answer spends one call of the token's quota |
+| Limit | `token-use:to:<id>`, the token's own window, when it has one |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`token_exhausted`](/docs/reference/errors/#token_exhausted), [`conflict`](/docs/reference/errors/#conflict) |
 
 ## Dynamic roles
 

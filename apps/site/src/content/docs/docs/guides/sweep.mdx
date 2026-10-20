@@ -41,6 +41,7 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `sessions` | Sessions past their expiry. |
 | `pendingSessions` | Sessions that an act left for the sweep, past the calls of the act. A ban and a revoke of the platform role leave the sessions of the user. A ban, a revoke, an account delete, a removal, a leave, and a role change leave the impersonation sessions that the operator opened. Each gets `session.afterEnd`, and an impersonation session gets the stop row of the cause. The sweep reads their rows before the idle clients, and the outbox leaves the calls of one page for them. Until the sweep ends it, every door refuses the session of a banned user, and every operator check refuses a former operator. Every door also refuses a left impersonation session. |
 | `apiTokens` | API tokens past their expiry. A token with no expiry stays. |
+| `organizationTokens` | Organization tokens past their expiry. A token with no expiry stays. |
 | `trustedDevices` | Trusted devices past their expiry. |
 | `totpSetups` | Second factor setups that no enable confirmed within 15 minutes. |
 | `jwks` | Signing keys retired more than 24 hours ago. |
