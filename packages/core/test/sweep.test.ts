@@ -53,6 +53,7 @@ describe("sweepExpired", () => {
         tokenHash: `h-${id}`,
         expiresAt,
         acceptedAt,
+        teamIds: null,
         createdAt: now,
         updatedAt: now,
       });
@@ -68,6 +69,7 @@ describe("sweepExpired", () => {
         activeOrganizationId: null,
         freshAt: now,
         actorId: null,
+        activeTeamId: null,
         createdAt: now,
         updatedAt: now,
       });
@@ -81,6 +83,15 @@ describe("sweepExpired", () => {
         expiresAt,
         lastUsedAt: null,
         organizationId: null,
+        permissions: null,
+        metadata: null,
+        rateLimitSeconds: null,
+        rateLimitMax: null,
+        remaining: null,
+        refillAmount: null,
+        refillSeconds: null,
+        lastRefillAt: null,
+        retiredAt: null,
         createdAt: now,
         updatedAt: now,
       });

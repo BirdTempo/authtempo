@@ -142,6 +142,7 @@ The bans of the admin plugin need no step. Compat migration 0009 copies each ban
 | `0007_compat_schema_v10.sql` | Adds `taFreshAt` to `session`, nullable, with no fill. Tables with other names take the text of `compatMigration0007Sql("sqlite", storage.names)`. |
 | `0008_compat_schema_v11.sql` | Adds the version 11 columns to `ta_oauth_client` and `ta_oauth_token`, and adds `ta_oauth_device`, `ta_oauth_subject`, `ta_oauth_session_client`, and `ta_oauth_logout`. The same text for every naming. |
 | `0009_compat_schema_v12.sql` | Adds `taBannedAt`, `taBanReason`, and `taBanUntil` to `user` and `taActorId` to `session`, nullable, and adds `ta_operator_audit`. It copies each ban of the admin plugin into the three ban columns. Tables with other names take the text of `compatMigration0009Sql("sqlite", storage.names)`. |
+| `0010_compat_schema_v13.sql` | Adds `activeTeamId` to `session` and `teamId` to `invitation`, nullable, with no fill. Tables with other names take the text of `compatMigration0010Sql("sqlite", storage.names)`. |
 
 A file number lower than the Better Auth table migration makes every new database fail at the compat file with `no such table`.
 

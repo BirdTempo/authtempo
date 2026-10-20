@@ -565,6 +565,34 @@ export function compatMigration0009Sql(dialect: "postgres" | "sqlite", n: Names)
   ].join("\n")}\n`;
 }
 
+export const MIGRATION_0010_NAME = "0010_compat_schema_v13";
+
+/**
+ * Migration 0010 (plan 12k): core's schema version 13. Core 13 adds
+ * `activeTeamId` to `session`, `teamIds` to `invitation`, the scope and quota
+ * fields to `apiToken`, and the models `organizationRole`, `team`,
+ * `teamMember`, and `organizationToken`. Better Auth's teams option keeps
+ * `session.activeTeamId` and `invitation.teamId`. This migration adds the
+ * two columns, nullable with no fill. On Postgres it adds each column only
+ * when it is absent, so a table of an app with teams keeps its own. A SQLite
+ * file is static and cannot test, so the D1 text adds both columns. The
+ * apiToken fields and the four models have no table here yet. They are in
+ * UNMAPPED_MODELS, and the later tasks of plan 12k add their tables to this
+ * unshipped migration. The columns take the app's naming, so the text
+ * depends on `names`, as for 0009. Append-only once it ships.
+ */
+export function compatMigration0010Sql(dialect: "postgres" | "sqlite", n: Names): string {
+  const pg = dialect === "postgres";
+  const add = (table: "session" | "invitation", field: string) =>
+    `ALTER TABLE ${n.table(table)} ADD COLUMN ${pg ? "IF NOT EXISTS " : ""}${n.column(table, field)} ${pg ? "text" : "TEXT"};`;
+  return `${[
+    add("session", "activeTeamId"),
+    add("invitation", "teamId"),
+    "UPDATE ta_meta SET value = '13' WHERE key = 'schema_version';",
+    "UPDATE ta_meta SET value = '10' WHERE key = 'compat_better_auth';",
+  ].join("\n")}\n`;
+}
+
 /** Postgres: now, cut to the millisecond precision that core reads back. */
 const MS_NOW = "date_trunc('milliseconds', now())";
 
@@ -819,6 +847,7 @@ export const COMPAT_MIGRATION_NAMES: readonly string[] = [
   MIGRATION_0007_NAME,
   MIGRATION_0008_NAME,
   MIGRATION_0009_NAME,
+  MIGRATION_0010_NAME,
 ];
 
 /**
@@ -837,6 +866,7 @@ const POSTGRES_TEXTS: readonly ((names: Names) => string)[] = [
   (names) => compatMigration0007Sql("postgres", names),
   () => compatMigration0008Sql("postgres"),
   (names) => compatMigration0009Sql("postgres", names),
+  (names) => compatMigration0010Sql("postgres", names),
 ];
 if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(

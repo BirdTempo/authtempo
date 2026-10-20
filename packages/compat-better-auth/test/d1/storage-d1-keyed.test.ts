@@ -62,6 +62,7 @@ const signUpRows =
       activeOrganizationId: null,
       freshAt: at,
       actorId: null,
+      activeTeamId: null,
       createdAt: at,
       updatedAt: at,
     });

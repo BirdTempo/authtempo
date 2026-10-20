@@ -8,6 +8,8 @@ import type {
   ApiTokenRow,
   IdentityRow,
   JwkRow,
+  ModelName,
+  Models,
   OAuthClientRow,
   OAuthConsentRow,
   OAuthDeviceRow,
@@ -16,9 +18,13 @@ import type {
   OAuthSubjectRow,
   OAuthTokenRow,
   OperatorAuditRow,
+  OrganizationRoleRow,
+  OrganizationTokenRow,
   PasskeyRow,
   SecondFactorRow,
   SessionRow,
+  TeamMemberRow,
+  TeamRow,
   TotpRow,
   TrustedDeviceRow,
   UserRow,
@@ -26,6 +32,7 @@ import type {
 } from "../schema.js";
 import { createPbkdf2PasswordHash } from "../seams/password-hash.js";
 import { type StorageAdapter, StorageError } from "./port.js";
+import { USER_CHILD_MODELS } from "./sql.js";
 
 export { runRefreshRaceConformance } from "./refresh-race-conformance.js";
 
@@ -34,15 +41,25 @@ export interface ConformanceTarget {
   close(): Promise<void>;
 }
 
+/**
+ * The models that a storage may leave out. The Better Auth compatibility
+ * package holds no API token until its api-key plan (plan 8b). It holds none
+ * of the four models of plan 12k until the 12k shim tasks map them.
+ */
+export type UnmappedModel =
+  | "apiToken"
+  | "organizationRole"
+  | "team"
+  | "teamMember"
+  | "organizationToken";
+
 export interface ConformanceOptions {
   /**
-   * Models this storage does not hold. Only `apiToken` is allowed: the
-   * Better Auth compatibility package holds no API token until its api-key
-   * plan (plan 8b). The suite then checks the contract of a model with no
-   * table: a read answers empty, as for a where that never matches, and a
-   * create throws `unknown_model`.
+   * Models this storage does not hold. The suite then checks the contract
+   * of a model with no table. A read answers empty, as for a where that
+   * never matches. A create throws `unknown_model`.
    */
-  unmapped?: readonly "apiToken"[];
+  unmapped?: readonly UnmappedModel[];
   /**
    * True for an adapter on a database with row locks, such as Postgres. It
    * must then have `lockInOrder` (ruling 37 of plan 12f): without it two
@@ -740,6 +757,7 @@ export function runAdapterConformance(
         tokenHash: "h1",
         expiresAt: new Date(at.getTime() + 1000),
         acceptedAt: null,
+        teamIds: null,
         createdAt: at,
         updatedAt: at,
       });
@@ -775,6 +793,15 @@ export function runAdapterConformance(
       expiresAt: null,
       lastUsedAt: null,
       organizationId: null,
+      permissions: null,
+      metadata: null,
+      rateLimitSeconds: null,
+      rateLimitMax: null,
+      remaining: null,
+      refillAmount: null,
+      refillSeconds: null,
+      lastRefillAt: null,
+      retiredAt: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -1315,6 +1342,7 @@ export function runAdapterConformance(
         activeOrganizationId: null,
         freshAt: null,
         actorId: null,
+        activeTeamId: null,
         createdAt: at,
         updatedAt: at,
       };
@@ -1379,6 +1407,7 @@ export function runAdapterConformance(
           activeOrganizationId: null,
           freshAt: null,
           actorId: "u-operator",
+          activeTeamId: null,
           createdAt: at,
           updatedAt: at,
         };
@@ -1656,6 +1685,192 @@ export function runAdapterConformance(
           ["u1", "Ann"],
           ["u2", "Bea"],
         ]);
+      });
+    });
+
+    describe("schema version 13 (plan 12k)", () => {
+      const at = new Date("2026-10-20T00:00:00.000Z");
+      const later = new Date(at.getTime() + 3_600_000);
+      const unmapped = (...models: UnmappedModel[]) =>
+        models.filter((m) => options.unmapped?.includes(m));
+      // The contract of a model with no table (plan 8b): a read answers empty, and a create throws unknown_model.
+      async function holdsNone<M extends ModelName>(model: M, row: Models[M]): Promise<void> {
+        const byId = [{ field: "id" as const, op: "eq" as const, value: row.id }];
+        await expect(db.create(model, row)).rejects.toMatchObject({ code: "unknown_model" });
+        expect(await db.findOne(model, byId)).toBeNull();
+        expect(await db.findMany(model, byId)).toEqual([]);
+        expect(await db.delete(model, byId)).toBe(0);
+      }
+      const role: OrganizationRoleRow = {
+        id: "r1",
+        organizationId: "o1",
+        name: "auditor",
+        rank: 1,
+        permissions: { project: ["read"], member: ["read", "list"] },
+        createdAt: at,
+        updatedAt: at,
+      };
+      const team: TeamRow = {
+        id: "t1",
+        organizationId: "o1",
+        name: "Ops",
+        createdAt: at,
+        updatedAt: at,
+      };
+      const teamMember: TeamMemberRow = {
+        id: "tm1",
+        teamId: "t1",
+        organizationId: "o1",
+        userId: "u1",
+        createdAt: at,
+        updatedAt: at,
+      };
+      const bare: OrganizationTokenRow = {
+        id: "ot1",
+        organizationId: "o1",
+        createdById: "u1",
+        name: "deploy",
+        tokenHash: "oh1",
+        hint: "abcdefgh",
+        permissions: {},
+        metadata: null,
+        expiresAt: null,
+        lastUsedAt: null,
+        rateLimitSeconds: null,
+        rateLimitMax: null,
+        remaining: null,
+        refillAmount: null,
+        refillSeconds: null,
+        lastRefillAt: null,
+        retiredAt: null,
+        createdAt: at,
+        updatedAt: at,
+      };
+      const full: OrganizationTokenRow = {
+        ...bare,
+        id: "ot2",
+        tokenHash: "oh2",
+        permissions: { project: ["read", "write"] },
+        metadata: { app: "ci", nested: { n: 1, ok: true } },
+        expiresAt: later,
+        lastUsedAt: at,
+        rateLimitSeconds: 60,
+        rateLimitMax: 100,
+        remaining: 5000,
+        refillAmount: 5000,
+        refillSeconds: 86_400,
+        lastRefillAt: at,
+        retiredAt: later,
+      };
+      const token = (id: string, tokenHash: string): ApiTokenRow => ({
+        ...apiToken(at),
+        id,
+        tokenHash,
+      });
+
+      it("round-trips an organization role with its json permissions", async () => {
+        if (unmapped("organizationRole").length > 0) return holdsNone("organizationRole", role);
+        await db.create("organizationRole", role);
+        const where = [
+          { field: "organizationId" as const, op: "eq" as const, value: "o1" },
+          { field: "name" as const, op: "eq" as const, value: "auditor" },
+        ];
+        expect(await db.findOne("organizationRole", where)).toEqual(role);
+        const second = { ...role, id: "r2", rank: 2 };
+        await expect(db.create("organizationRole", second)).rejects.toBeInstanceOf(StorageError);
+        await expect(db.create("organizationRole", second)).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["organizationId", "name"],
+        });
+      });
+
+      it("round-trips a team and a team member", async () => {
+        const none = unmapped("team", "teamMember");
+        if (none.includes("team")) await holdsNone("team", team);
+        if (none.includes("teamMember")) await holdsNone("teamMember", teamMember);
+        if (none.length > 0) return;
+        await db.create("user", user("u1", "a@example.com", at));
+        await db.create("team", team);
+        await db.create("teamMember", teamMember);
+        expect(await db.findOne("team", [{ field: "id", op: "eq", value: "t1" }])).toEqual(team);
+        await expect(db.create("teamMember", { ...teamMember, id: "tm2" })).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["teamId", "userId"],
+        });
+        expect(
+          await db.findMany("teamMember", [
+            { field: "organizationId", op: "eq", value: "o1" },
+            { field: "userId", op: "eq", value: "u1" },
+          ]),
+        ).toEqual([teamMember]);
+      });
+
+      it("round-trips an organization token with every nullable field null and set", async () => {
+        if (unmapped("organizationToken").length > 0) return holdsNone("organizationToken", bare);
+        await db.create("organizationToken", bare);
+        await db.create("organizationToken", full);
+        const byHash = (h: string) => [
+          { field: "tokenHash" as const, op: "eq" as const, value: h },
+        ];
+        expect(await db.findOne("organizationToken", byHash("oh1"))).toEqual(bare);
+        expect(await db.findOne("organizationToken", byHash("oh2"))).toEqual(full);
+        await expect(db.create("organizationToken", { ...bare, id: "ot3" })).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["tokenHash"],
+        });
+      });
+
+      it("reads the new api token fields as null on an old row", async () => {
+        if (unmapped("apiToken").length > 0) return holdsNone("apiToken", token("t1", "h1"));
+        // The create path of plan 8b writes the version 13 fields as null.
+        await db.create("user", user("u1", "a@example.com", at));
+        await db.create("apiToken", token("t1", "h1"));
+        const read = await db.findOne("apiToken", [{ field: "id", op: "eq", value: "t1" }]);
+        expect(read).toEqual(token("t1", "h1"));
+        expect(read).toMatchObject({
+          permissions: null,
+          metadata: null,
+          remaining: null,
+          retiredAt: null,
+        });
+      });
+
+      it("matches a null retiredAt with eq null", async () => {
+        if (unmapped("apiToken").length > 0) return holdsNone("apiToken", token("t1", "h1"));
+        await db.create("user", user("u1", "a@example.com", at));
+        const retired: ApiTokenRow = {
+          ...token("t2", "h2"),
+          permissions: { project: ["read"] },
+          metadata: { moved: true },
+          rateLimitSeconds: 60,
+          rateLimitMax: 10,
+          remaining: 0,
+          refillAmount: 10,
+          refillSeconds: 3600,
+          lastRefillAt: at,
+          retiredAt: later,
+        };
+        await db.create("apiToken", token("t1", "h1"));
+        await db.create("apiToken", retired);
+        await db.create("apiToken", token("t3", "h3"));
+        expect(
+          (
+            await db.findMany("apiToken", [{ field: "retiredAt", op: "eq", value: null }], {
+              sort: { field: "id", dir: "asc" },
+            })
+          ).map((r) => r.id),
+        ).toEqual(["t1", "t3"]);
+        expect(await db.findOne("apiToken", [{ field: "id", op: "eq", value: "t2" }])).toEqual(
+          retired,
+        );
+      });
+
+      it("lists teamMember and not organizationToken as a user child", () => {
+        expect(USER_CHILD_MODELS).toContain("teamMember");
+        expect(USER_CHILD_MODELS).toContain("apiToken");
+        expect(USER_CHILD_MODELS).not.toContain("organizationToken");
+        expect(USER_CHILD_MODELS).not.toContain("organizationRole");
+        expect(USER_CHILD_MODELS).not.toContain("team");
       });
     });
   });

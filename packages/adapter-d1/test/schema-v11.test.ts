@@ -4,7 +4,7 @@ import { createD1Adapter } from "../src/index.js";
 
 describe("schema version 11 on D1 (plan 12e)", () => {
   it("moves the version to 11", async () => {
-    // env.DB holds every migration (0012 since plan 12f), so read the version that 0011 itself writes.
+    // env.DB holds every migration (0012 since plan 12f, 0013 since plan 12k), so read the version that 0011 itself writes.
     const m0011 = env.TEST_MIGRATIONS.find((m) => m.name.startsWith("0011_"));
     expect(
       m0011?.queries.some((q) =>

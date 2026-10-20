@@ -94,7 +94,10 @@ function notCredential(provider: string): string {
  * `trustedDevice`. Plan 9g added `jwk`, `oauthClient`, `oauthConsent`, and
  * `oauthToken`. Plan 12c added `secondFactor`. Plan 12e added
  * `oauthDevice`, `oauthSubject`, `oauthSessionClient`, and `oauthLogout`.
- * Plan 12f added `operatorAudit`.
+ * Plan 12f added `operatorAudit`. Plan 12k Task 1 adds its four models
+ * (`organizationRole`, `team`, `teamMember`, `organizationToken`) with no
+ * table yet: `UNMAPPED_MODELS` holds them, and the later 12k tasks map
+ * each one.
  */
 export type MappedModel = Exclude<
   ModelName,
@@ -111,6 +114,10 @@ export type MappedModel = Exclude<
   | "oauthLogout"
   | "secondFactor"
   | "operatorAudit"
+  | "organizationRole"
+  | "team"
+  | "teamMember"
+  | "organizationToken"
 >;
 
 export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
@@ -166,6 +173,8 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       ip: as("ipAddress"),
       freshAt: as("taFreshAt"),
       actorId: as("taActorId"),
+      // Better Auth's own column of its teams option (plan 12k).
+      activeTeamId: as("activeTeamId"),
     },
   },
   verification: {
@@ -214,6 +223,9 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       tokenHash: as("taTokenHash"),
       acceptedAt: as("taAcceptedAt"),
       updatedAt: as("taUpdatedAt"),
+      // Better Auth's own column of its teams option (plan 12k). Core writes
+      // null until the teams task; that task adds the comma-joined form.
+      teamIds: as("teamId"),
     },
     insertExtras: (row) => ({ status: row.acceptedAt ? "accepted" : "pending" }),
     updateExtras: (data) =>

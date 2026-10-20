@@ -13,6 +13,7 @@ import shipped0006 from "../migrations/d1/0006_compat_schema_v9.sql?raw";
 import shipped0007 from "../migrations/d1/0007_compat_schema_v10.sql?raw";
 import shipped0008 from "../migrations/d1/0008_compat_schema_v11.sql?raw";
 import shipped0009 from "../migrations/d1/0009_compat_schema_v12.sql?raw";
+import shipped0010 from "../migrations/d1/0010_compat_schema_v13.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
@@ -22,6 +23,7 @@ import shipped0006Before17 from "../migrations/d1-before-1.7/0006_compat_schema_
 import shipped0007Before17 from "../migrations/d1-before-1.7/0007_compat_schema_v10.sql?raw";
 import shipped0008Before17 from "../migrations/d1-before-1.7/0008_compat_schema_v11.sql?raw";
 import shipped0009Before17 from "../migrations/d1-before-1.7/0009_compat_schema_v12.sql?raw";
+import shipped0010Before17 from "../migrations/d1-before-1.7/0010_compat_schema_v13.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
@@ -32,10 +34,12 @@ import {
   compatMigration0007Sql,
   compatMigration0008Sql,
   compatMigration0009Sql,
+  compatMigration0010Sql,
   compatMigrationSql,
   MIGRATION_0007_NAME,
   MIGRATION_0008_NAME,
   MIGRATION_0009_NAME,
+  MIGRATION_0010_NAME,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
 import { before17 } from "./d1/sql.js";
@@ -625,5 +629,79 @@ describe("migration 0009 (plan 12f)", () => {
     );
     expect(auditOf(compatMigration0009Sql("sqlite", resolveNames()))).toEqual(auditOf(core0012D1));
     expect(auditOf(core0012D1)).toHaveLength(3);
+  });
+});
+
+describe("migration 0010 (plan 12k)", () => {
+  it("ships both D1 files as the default naming's SQLite text", () => {
+    const text = compatMigration0010Sql("sqlite", resolveNames());
+    expect(normalize(shipped0010)).toBe(normalize(text));
+    expect(normalize(shipped0010Before17)).toBe(normalize(text));
+  });
+
+  it("is the runner's step after 0009, and the step writes '10'", () => {
+    const names = [...COMPAT_MIGRATION_NAMES];
+    expect(names.indexOf(MIGRATION_0010_NAME)).toBe(names.indexOf(MIGRATION_0009_NAME) + 1);
+    expect(MIGRATION_0010_NAME).toBe("0010_compat_schema_v13");
+    for (const dialect of ["postgres", "sqlite"] as const)
+      expect(compatMigration0010Sql(dialect, resolveNames())).toContain(
+        "UPDATE ta_meta SET value = '10' WHERE key = 'compat_better_auth';",
+      );
+  });
+
+  it("adds activeTeamId and teamId with no fill, and moves the versions to 13 and 10", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    // A session and an invitation of Better Auth from before the files: a fill of 0010 would reach them.
+    db.exec(
+      `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('u1', 'Ada', 'ada@example.com', 1, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')`,
+    );
+    db.exec(
+      `INSERT INTO "session" (id, expiresAt, token, createdAt, updatedAt, userId) VALUES ('s1', '2026-11-01T00:00:00.000Z', 't1', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'u1')`,
+    );
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+      shipped0008,
+      shipped0009,
+      shipped0010,
+    ])
+      db.exec(text);
+    const columns = (table: string) =>
+      (
+        db.prepare(`PRAGMA table_info("${table}")`).all() as {
+          name: string;
+          type: string;
+          notnull: number;
+          dflt_value: unknown;
+        }[]
+      ).map(({ name, type, notnull, dflt_value }) => ({ name, type, notnull, dflt_value }));
+    expect(columns("session").at(-1)).toEqual({
+      name: "activeTeamId",
+      type: "TEXT",
+      notnull: 0,
+      dflt_value: null,
+    });
+    expect(columns("invitation").at(-1)).toEqual({
+      name: "teamId",
+      type: "TEXT",
+      notnull: 0,
+      dflt_value: null,
+    });
+    expect(db.prepare(`SELECT "activeTeamId" AS t FROM "session"`).all()).toEqual([{ t: null }]);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "10" },
+      { key: "schema_version", value: "13" },
+    ]);
+  });
+
+  it("adds each column on Postgres only when it is absent", () => {
+    const text = compatMigration0010Sql("postgres", resolveNames());
+    expect(text).toContain(`ALTER TABLE "session" ADD COLUMN IF NOT EXISTS "activeTeamId" text;`);
+    expect(text).toContain(`ALTER TABLE "invitation" ADD COLUMN IF NOT EXISTS "teamId" text;`);
   });
 });

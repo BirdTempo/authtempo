@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 12;
+export const SCHEMA_VERSION = 13;
 
 export interface BaseRow {
   id: string;
@@ -45,6 +45,8 @@ export interface SessionRow extends BaseRow {
    * Null on every other session.
    */
   actorId: string | null;
+  /** The team the session acts in, of its active organization (plan 12k). Null: none. */
+  activeTeamId: string | null;
 }
 
 export type VerificationPurpose =
@@ -192,6 +194,8 @@ export interface InvitationRow extends BaseRow {
   tokenHash: string;
   expiresAt: Date;
   acceptedAt: Date | null;
+  /** Team ids that an accept adds the person to. Null: none. */
+  teamIds: string[] | null;
 }
 
 export interface PasswordRow extends BaseRow {
@@ -214,6 +218,24 @@ export interface ApiTokenRow extends BaseRow {
   lastUsedAt: Date | null;
   /** The one organization the token acts in, or null. */
   organizationId: string | null;
+  /** The statements the token may use (plan 12k). Null: the rights of its user. */
+  permissions: Record<string, string[]> | null;
+  /** The app's own data on the token. Core never reads it. */
+  metadata: Record<string, unknown> | null;
+  /** The length of the per-token window in seconds. Null: no window. */
+  rateLimitSeconds: number | null;
+  /** The calls that one window allows. Null: no window. */
+  rateLimitMax: number | null;
+  /** The calls that the quota still allows. Null: no quota. */
+  remaining: number | null;
+  /** The value that a refill sets `remaining` to. Null: no refill. */
+  refillAmount: number | null;
+  /** The seconds between two refills. Null: no refill. */
+  refillSeconds: number | null;
+  /** The time of the last refill. Null: no refill yet. */
+  lastRefillAt: Date | null;
+  /** The time of the retirement of the token. A retired token never acts. Null: live. */
+  retiredAt: Date | null;
 }
 
 /** One row per user with a second factor (plan 9f). */
@@ -473,6 +495,52 @@ export interface OperatorAuditRow extends BaseRow {
   userAgent: string | null;
 }
 
+/** A role that one organization stored (plan 12k). */
+export interface OrganizationRoleRow extends BaseRow {
+  organizationId: string;
+  name: string;
+  rank: number;
+  /** Any JSON: a stored row can hold any value, so each read parses it. */
+  permissions: unknown;
+}
+
+/** A named group of members of one organization (plan 12k). */
+export interface TeamRow extends BaseRow {
+  organizationId: string;
+  name: string;
+}
+
+/** One member of one team (plan 12k). */
+export interface TeamMemberRow extends BaseRow {
+  teamId: string;
+  organizationId: string;
+  userId: string;
+}
+
+/** A token that an organization owns (plan 12k). */
+export interface OrganizationTokenRow extends BaseRow {
+  organizationId: string;
+  /** The member who created the token. Not `userId`: the token outlives the person. */
+  createdById: string;
+  /** 1 to 80 UTF-16 code units, no control character. */
+  name: string;
+  /** SHA-256 hex of the clear token. The clear token is never stored. */
+  tokenHash: string;
+  /** The characters after the prefix, so a list tells the tokens apart. */
+  hint: string;
+  permissions: Record<string, string[]>;
+  metadata: Record<string, unknown> | null;
+  expiresAt: Date | null;
+  lastUsedAt: Date | null;
+  rateLimitSeconds: number | null;
+  rateLimitMax: number | null;
+  remaining: number | null;
+  refillAmount: number | null;
+  refillSeconds: number | null;
+  lastRefillAt: Date | null;
+  retiredAt: Date | null;
+}
+
 export interface Models {
   user: UserRow;
   identity: IdentityRow;
@@ -496,6 +564,10 @@ export interface Models {
   oauthLogout: OAuthLogoutRow;
   secondFactor: SecondFactorRow;
   operatorAudit: OperatorAuditRow;
+  organizationRole: OrganizationRoleRow;
+  team: TeamRow;
+  teamMember: TeamMemberRow;
+  organizationToken: OrganizationTokenRow;
 }
 
 export type ModelName = keyof Models;
@@ -562,6 +634,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       activeOrganizationId: { type: "string", nullable: true },
       freshAt: { type: "date", nullable: true },
       actorId: { type: "string", nullable: true },
+      activeTeamId: { type: "string", nullable: true },
     },
     unique: [["tokenHash"]],
     indexes: [["userId"], ["activeOrganizationId"]],
@@ -625,6 +698,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       tokenHash: { type: "string" },
       expiresAt: { type: "date" },
       acceptedAt: { type: "date", nullable: true },
+      teamIds: { type: "json", nullable: true },
     },
     unique: [["tokenHash"]],
     indexes: [["organizationId", "email"]],
@@ -650,6 +724,15 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       expiresAt: { type: "date", nullable: true },
       lastUsedAt: { type: "date", nullable: true },
       organizationId: { type: "string", nullable: true },
+      permissions: { type: "json", nullable: true },
+      metadata: { type: "json", nullable: true },
+      rateLimitSeconds: { type: "integer", nullable: true },
+      rateLimitMax: { type: "integer", nullable: true },
+      remaining: { type: "integer", nullable: true },
+      refillAmount: { type: "integer", nullable: true },
+      refillSeconds: { type: "integer", nullable: true },
+      lastRefillAt: { type: "date", nullable: true },
+      retiredAt: { type: "date", nullable: true },
     },
     unique: [["tokenHash"]],
     indexes: [["userId"]],
@@ -856,5 +939,63 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     unique: [],
     // targetUserId: the audit of one user. actorId: the acts of one operator.
     indexes: [["targetUserId"], ["actorId"]],
+  },
+  // A role that one organization stored (plan 12k). Never the owner rank; never a name of the config.
+  organizationRole: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      name: { type: "string" },
+      rank: { type: "integer" },
+      permissions: { type: "json" },
+    },
+    unique: [["organizationId", "name"]],
+    indexes: [],
+  },
+  // A named group of members of one organization. A team has no role (owner decision 1 of 2026-10-14).
+  team: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      name: { type: "string" },
+    },
+    unique: [],
+    indexes: [["organizationId"]],
+  },
+  // organizationId is a copy, so a member removal deletes the person's team rows in one statement.
+  teamMember: {
+    fields: {
+      ...base,
+      teamId: { type: "string" },
+      organizationId: { type: "string" },
+      userId: { type: "string" },
+    },
+    unique: [["teamId", "userId"]],
+    indexes: [["userId"], ["organizationId", "userId"]],
+  },
+  // A token that an organization owns. No userId field: the account delete of plan 12a leaves it,
+  // so a script outlives the person (owner decision 2 of 2026-10-14).
+  organizationToken: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      createdById: { type: "string" },
+      name: { type: "string" },
+      tokenHash: { type: "string" },
+      hint: { type: "string" },
+      permissions: { type: "json" },
+      metadata: { type: "json", nullable: true },
+      expiresAt: { type: "date", nullable: true },
+      lastUsedAt: { type: "date", nullable: true },
+      rateLimitSeconds: { type: "integer", nullable: true },
+      rateLimitMax: { type: "integer", nullable: true },
+      remaining: { type: "integer", nullable: true },
+      refillAmount: { type: "integer", nullable: true },
+      refillSeconds: { type: "integer", nullable: true },
+      lastRefillAt: { type: "date", nullable: true },
+      retiredAt: { type: "date", nullable: true },
+    },
+    unique: [["tokenHash"]],
+    indexes: [["organizationId"]],
   },
 };

@@ -100,7 +100,7 @@ describe("authtempo info (plan 11c2)", () => {
     const doc = docOf(io.stdout);
     expect(doc).toEqual({
       cli: "0.0.0",
-      schemaVersion: 12,
+      schemaVersion: 13,
       runtime: { node: "v26.10.0", platform: "linux", arch: "x64" },
       packageManager: { name: "pnpm", version: "12.8.1", source: "user-agent" },
       packages: { "@authtempo/core": "0.0.0", "@authtempo/adapter-d1": null },
@@ -118,7 +118,7 @@ describe("authtempo info (plan 11c2)", () => {
     const human = fakeIo({ files: PROJECT, env: { npm_config_user_agent: AGENT } });
     expect(await main(["info"], human)).toBe(0);
     expect(human.stdout).toEqual([
-      "authtempo 0.0.0 (schema version 12)",
+      "authtempo 0.0.0 (schema version 13)",
       "runtime: node v26.10.0, linux, x64",
       "package manager: pnpm 12.8.1 (from npm_config_user_agent)",
       "packages: @authtempo/adapter-d1 not installed, @authtempo/core 0.0.0",
@@ -312,7 +312,7 @@ describe("authtempo info (plan 11c2)", () => {
     const doc = docOf(io.stdout);
     expect(doc.deployment).toEqual({
       core: "0.0.0",
-      schemaVersion: 12,
+      schemaVersion: 13,
       configKeys: CONFIG_KEYS,
       dropped: 0,
     });
@@ -331,7 +331,7 @@ describe("authtempo info (plan 11c2)", () => {
     });
     expect(await main(["info", BASE], human)).toBe(0);
     const at = human.stdout.indexOf(
-      "deployment: core 0.0.0, schema version 12, 9 config keys, 0 dropped",
+      "deployment: core 0.0.0, schema version 13, 9 config keys, 0 dropped",
     );
     expect(at).toBeGreaterThan(0);
     expect(human.stdout.slice(at + 1)).toEqual(CONFIG_KEYS.map((k) => `config key: ${k}`));

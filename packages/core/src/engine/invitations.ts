@@ -95,6 +95,7 @@ export async function inviteMember(
     tokenHash: await sha256Hex(token),
     expiresAt: new Date(now.getTime() + o.invitationTtlDays * 86_400_000),
     acceptedAt: null,
+    teamIds: null,
     createdAt: now,
     updatedAt: now,
   };

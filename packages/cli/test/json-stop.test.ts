@@ -160,7 +160,7 @@ describe("migrate --json", () => {
     try {
       await applyPostgresMigrations(db.sql);
       await db.sql.unsafe(
-        readFileSync(join(PKG, "test/fixtures/postgres/0013_future.sql"), "utf8"),
+        readFileSync(join(PKG, "test/fixtures/postgres/0014_future.sql"), "utf8"),
       );
       const stop = runBin(
         ["migrate", "--target", "postgres", "--url-env", "TEST_DB_URL", "--json"],
@@ -168,7 +168,7 @@ describe("migrate --json", () => {
       );
       const doc = stopDoc(stop, MIGRATE_JSON_KEYS, false);
       expect(doc.stopped).toBe(
-        "the database is at version 13; this CLI knows version 12; use a newer CLI",
+        "the database is at version 14; this CLI knows version 13; use a newer CLI",
       );
       expect(doc).toMatchObject({ target: "", tables: "", applied: [], pending: [] });
       // The stop document holds no part of the connection string.

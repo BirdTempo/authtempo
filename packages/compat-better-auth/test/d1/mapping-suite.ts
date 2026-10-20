@@ -99,7 +99,10 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
       return { adapter: db(), close: truncate };
     },
     // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
-    { unmapped: ["apiToken"], updateInTransaction: 2 },
+    {
+      unmapped: ["apiToken", "organizationRole", "team", "teamMember", "organizationToken"],
+      updateInTransaction: 2,
+    },
   );
 
   describe(`the Better Auth mapping on D1, ${label}`, () => {
@@ -219,6 +222,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
             activeOrganizationId: null,
             freshAt: at,
             actorId: null,
+            activeTeamId: null,
             createdAt: at,
             updatedAt: at,
           });

@@ -17,8 +17,8 @@ await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 // The tests share one database (the pool gives each file its own storage), so
 // each one compares the rows after a run with the rows before it.
 
-/** Core's tables after the migrations in packages/adapter-d1/migrations (24 since 0012 of plan 12f). */
-const TABLES = 24;
+/** Core's tables after the migrations in packages/adapter-d1/migrations (28 since 0013 of plan 12k). */
+const TABLES = 28;
 
 /**
  * Every row of every core table, read with raw SQL and not through the

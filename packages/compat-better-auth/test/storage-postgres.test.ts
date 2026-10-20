@@ -53,7 +53,10 @@ runAdapterConformance(
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
   },
-  { unmapped: ["apiToken"], rowLocks: true },
+  {
+    unmapped: ["apiToken", "organizationRole", "team", "teamMember", "organizationToken"],
+    rowLocks: true,
+  },
 );
 
 runAdapterConformance(
@@ -64,7 +67,10 @@ runAdapterConformance(
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
   },
-  { unmapped: ["apiToken"], rowLocks: true },
+  {
+    unmapped: ["apiToken", "organizationRole", "team", "teamMember", "organizationToken"],
+    rowLocks: true,
+  },
 );
 
 /** Rows as Better Auth 1.7 writes them, inserted before the migration, on the fixture with its foreign keys. */
@@ -130,6 +136,7 @@ describe("the Better Auth mapping on postgres", () => {
       "0007_compat_schema_v10",
       "0008_compat_schema_v11",
       "0009_compat_schema_v12",
+      "0010_compat_schema_v13",
     ]);
     expect(await s.migrate()).toEqual([]);
     db = s.storage;
@@ -138,8 +145,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 12; a new core version needs migration 0010 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(12);
+  it("serves core schema version 13; a new core version needs migration 0011 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(13);
   });
 
   it("names only columns the table field list knows", () => {
@@ -191,6 +198,7 @@ describe("the Better Auth mapping on postgres", () => {
       activeOrganizationId: null,
       freshAt: at,
       actorId: null,
+      activeTeamId: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -369,6 +377,7 @@ describe("the Better Auth mapping on postgres", () => {
       tokenHash: "ef".repeat(32),
       expiresAt: later,
       acceptedAt: null,
+      teamIds: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -500,6 +509,38 @@ describe("the compat migration on postgres", () => {
     }
   });
 
+  it("keeps the teams columns of an app that has them, and adds them to an app that has none (plan 12k)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      // Better Auth's teams option adds these two columns. Its rows keep their values.
+      await pg.sql.unsafe(`ALTER TABLE "session" ADD COLUMN "activeTeamId" text`);
+      await pg.sql.unsafe(`ALTER TABLE "invitation" ADD COLUMN "teamId" text`);
+      await betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql }).migrate();
+      const cols = await pg.sql.unsafe<{ t: string; c: string }[]>(
+        `SELECT table_name AS t, column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND column_name IN ('activeTeamId', 'teamId') ORDER BY table_name`,
+      );
+      expect([...cols]).toEqual([
+        { t: "invitation", c: "teamId" },
+        { t: "session", c: "activeTeamId" },
+      ]);
+    } finally {
+      await pg.close();
+    }
+    const none = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      await betterAuthSchemaStorage({ dialect: "postgres", sql: none.sql }).migrate();
+      const cols = await none.sql.unsafe<{ t: string; c: string; n: string }[]>(
+        `SELECT table_name AS t, column_name AS c, is_nullable AS n FROM information_schema.columns WHERE table_schema = current_schema() AND column_name IN ('activeTeamId', 'teamId') ORDER BY table_name`,
+      );
+      expect([...cols]).toEqual([
+        { t: "invitation", c: "teamId", n: "YES" },
+        { t: "session", c: "activeTeamId", n: "YES" },
+      ]);
+    } finally {
+      await none.close();
+    }
+  });
+
   it("creates exactly core's ta_ tables (plans 9f, 9g, 12c, 12e, and 12f)", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
@@ -531,8 +572,8 @@ describe("the compat migration on postgres", () => {
         "ta_trusted_device",
       ]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "9" },
-        { key: "schema_version", value: "12" },
+        { key: "compat_better_auth", value: "10" },
+        { key: "schema_version", value: "13" },
       ]);
       // Core's columns in core's order (plans 9f and 9g), so core's statements read these tables.
       for (const model of [
@@ -745,6 +786,7 @@ describe("the compat undo of a created user", () => {
       activeOrganizationId: null,
       freshAt: at,
       actorId: null,
+      activeTeamId: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -793,6 +835,7 @@ describe("the Better Auth foreign keys on postgres", () => {
       activeOrganizationId: null,
       freshAt: at,
       actorId: null,
+      activeTeamId: null,
       createdAt: at,
       updatedAt: at,
     });

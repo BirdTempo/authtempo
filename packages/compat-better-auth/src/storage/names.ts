@@ -53,6 +53,7 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "taLastSeenAt",
     "taFreshAt",
     "taActorId",
+    "activeTeamId",
   ],
   account: [
     "id",
@@ -92,6 +93,7 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "taTokenHash",
     "taAcceptedAt",
     "taUpdatedAt",
+    "teamId",
   ],
   passkey: [
     "id",

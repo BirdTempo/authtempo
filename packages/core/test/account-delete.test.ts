@@ -379,6 +379,25 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
       role: "member",
     });
     if (!toMe.ok) throw new Error(toMe.code);
+    // A team of Bob's organization with the user in it (schema version 13,
+    // plan 12k). No engine writes teams yet, so the rows go in as the team
+    // engine writes them: one team and one member row of a member.
+    const at = w.auth.clock.now();
+    await w.auth.storage.create("team", {
+      id: "team-ops",
+      organizationId: team.id,
+      name: "Ops",
+      createdAt: at,
+      updatedAt: at,
+    });
+    await w.auth.storage.create("teamMember", {
+      id: "team-ops-ada",
+      teamId: "team-ops",
+      organizationId: team.id,
+      userId: me.user.id,
+      createdAt: at,
+      updatedAt: at,
+    });
     // Proofs in flight for the address and for the user id.
     await requestMagicLink(w.auth.config, { email: EMAIL, ip: null });
     expect(

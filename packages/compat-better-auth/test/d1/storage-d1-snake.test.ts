@@ -10,6 +10,7 @@ import {
   compatMigration0007Sql,
   compatMigration0008Sql,
   compatMigration0009Sql,
+  compatMigration0010Sql,
 } from "../../src/storage/migration.js";
 import { type NamingOptions, resolveNames } from "../../src/storage/names.js";
 import { BETTER_AUTH_SQLITE } from "../fixtures.js";
@@ -27,6 +28,7 @@ import { before17, renamed } from "./sql.js";
 // Then 0007 runs, which names the session table and its column (plan 12a).
 // Then 0008 runs, which names ta_ tables only (plan 12e).
 // Then 0009 runs, which names the user and session tables and their columns (plan 12f).
+// Then 0010 runs, which names the session and invitation tables and their columns (plan 12k).
 const naming = {
   casing: "snake",
   tables: {
@@ -54,6 +56,7 @@ await execD1(compatMigration0006Sql("sqlite", resolveNames(naming)));
 await execD1(compatMigration0007Sql("sqlite", resolveNames(naming)));
 await execD1(compatMigration0008Sql("sqlite"));
 await execD1(compatMigration0009Sql("sqlite", resolveNames(naming)));
+await execD1(compatMigration0010Sql("sqlite", resolveNames(naming)));
 
 it("builds the tables with snake_case columns and plural names", async () => {
   const cols = await env.DB.prepare(

@@ -64,6 +64,7 @@ async function seedInvitation(storage: StorageAdapter, email: string) {
     tokenHash: `h-${email}`,
     expiresAt: new Date(at.getTime() + 86_400_000),
     acceptedAt: null,
+    teamIds: null,
     createdAt: at,
     updatedAt: at,
   });

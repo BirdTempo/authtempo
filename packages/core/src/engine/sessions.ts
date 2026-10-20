@@ -193,6 +193,7 @@ export async function createSession(
     // An impersonation session is never fresh (plan 12f, spec 26 item 9).
     freshAt: input.impersonation ? null : (input.freshAt ?? now),
     actorId: input.impersonation?.actorId ?? null,
+    activeTeamId: null,
     createdAt: now,
     updatedAt: now,
   });

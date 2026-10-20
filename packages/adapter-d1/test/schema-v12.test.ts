@@ -18,7 +18,8 @@ describe("schema version 12 on D1 (plan 12f)", () => {
       { name: "ban_reason", type: "TEXT", notnull: 0, dflt_value: null },
       { name: "ban_until", type: "INTEGER", notnull: 0, dflt_value: null },
     ]);
-    expect((await columns("ta_session")).at(-1)).toEqual({
+    // Plan 12k adds active_team_id after actor_id.
+    expect((await columns("ta_session")).at(-2)).toEqual({
       name: "actor_id",
       type: "TEXT",
       notnull: 0,
@@ -37,9 +38,13 @@ describe("schema version 12 on D1 (plan 12f)", () => {
       "ip",
       "user_agent",
     ]);
+    // env.DB holds every migration (0013 since plan 12k), so read the version that 0012 itself writes.
+    const m0012 = env.TEST_MIGRATIONS.find((m) => m.name.startsWith("0012_"));
     expect(
-      await env.DB.prepare("SELECT value FROM ta_meta WHERE key = 'schema_version'").first("value"),
-    ).toBe("12");
+      m0012?.queries.some((q) =>
+        q.includes("UPDATE ta_meta SET value = '12' WHERE key = 'schema_version'"),
+      ),
+    ).toBe(true);
   });
 
   it("refuses a database at version 11, then reads its user and session with no ban and no actor after 0012", async () => {

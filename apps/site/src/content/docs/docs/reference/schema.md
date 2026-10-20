@@ -11,7 +11,7 @@ sources:
 
 **For:** an operator who deploys a new core, or a developer who reads the tables.
 
-**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 12 needs the migrations up to `0012_schema_v12`.
+**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 13 needs the migrations up to `0013_schema_v13`.
 
 ## Before you start
 
@@ -33,8 +33,9 @@ sources:
 | 10 | `0010_schema_v10` | No table. It adds `fresh_at` to `ta_session`, the field `freshAt` (date, nullable). The field holds the time of the last sign-in or re-authentication. Null is never fresh (plan 12a). |
 | 11 | `0011_schema_v11` | `ta_oauth_device`, `ta_oauth_subject`, `ta_oauth_session_client`, `ta_oauth_logout`. It also adds the columns of a confidential client to `ta_oauth_client`, and `parent_id` and `dpop_jkt` to `ta_oauth_token` (plan 12e). |
 | 12 | `0012_schema_v12` | `ta_operator_audit`. It also adds the three ban fields to `ta_user` and `actor_id` to `ta_session` (plan 12f). |
+| 13 | `0013_schema_v13` | `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`. It also adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token` (plan 12k). |
 
-`SCHEMA_VERSION` of `@authtempo/core` is 12.
+`SCHEMA_VERSION` of `@authtempo/core` is 13.
 
 Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Its migration is `0009_schema_v9` in both adapters and `0006_compat_schema_v9` in the compatibility package. Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 
@@ -71,6 +72,23 @@ Version 12 comes from the `0012_schema_v12` migration in both adapters, and from
 | `user.banUntil` | `ta_user.ban_until` | date, nullable | The end of the ban. Null with `bannedAt` set: the ban has no end (plan 12f, spec 26 item 6). |
 | `session.actorId` | `ta_session.actor_id` | string, nullable | The platform operator who impersonates the user. Null on every other session (plan 12f, spec 26 item 9). |
 | `operatorAudit` | `ta_operator_audit` | table | One row per operator act: `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, and `userAgent`, with an index on `target_user_id` and on `actor_id`. Core never updates or deletes a row. The account delete keeps the rows (plan 12f, spec 26 item 8). |
+
+Version 13 comes from the `0013_schema_v13` migration in both adapters, and from `0010_compat_schema_v13` in the compatibility package (plan 12k). Each new column is nullable, with no default and no fill. A row of version 12 holds null: no team, no scope, no window, no quota, and a live token.
+
+| Field | Column | Type | What it holds |
+| --- | --- | --- | --- |
+| `session.activeTeamId` | `ta_session.active_team_id` | string, nullable | The team the session acts in, of its active organization (plan 12k). |
+| `invitation.teamIds` | `ta_invitation.team_ids` | json, nullable | The teams that an accept adds the person to (plan 12k). |
+| `apiToken.permissions`, `apiToken.metadata` | `ta_api_token.permissions`, `ta_api_token.metadata` | json, nullable | The statements the token may use, and the app's own data. Null: the rights of the user, and no data (plan 12k). |
+| `apiToken.rateLimitSeconds`, `apiToken.rateLimitMax` | `ta_api_token.rate_limit_seconds`, `ta_api_token.rate_limit_max` | integer, nullable | The per-token window. Null: no window (plan 12k). |
+| `apiToken.remaining`, `apiToken.refillAmount`, `apiToken.refillSeconds`, `apiToken.lastRefillAt` | `ta_api_token.remaining`, `ta_api_token.refill_amount`, `ta_api_token.refill_seconds`, `ta_api_token.last_refill_at` | integer or date, nullable | The quota and its refill. Null: no quota (plan 12k). |
+| `apiToken.retiredAt` | `ta_api_token.retired_at` | date, nullable | The time of the retirement of the token. A retired token never acts. Null: live (plan 12k). |
+| `organizationRole` | `ta_organization_role` | table | A role that one organization stored: `organizationId`, `name`, `rank`, and `permissions`, unique on (`organization_id`, `name`) (plan 12k). |
+| `team` | `ta_team` | table | A named group of members of one organization, with an index on `organization_id`. A team has no role (plan 12k). |
+| `teamMember` | `ta_team_member` | table | One member of one team, unique on (`team_id`, `user_id`). It holds a copy of `organization_id`, so a member removal deletes the person's team rows in one statement (plan 12k). |
+| `organizationToken` | `ta_organization_token` | table | A token that an organization owns, unique on `token_hash`. It has no `user_id`, so the account delete keeps it (plan 12k). |
+
+The counts are `integer` on Postgres, as every count of core is, except the passkey `counter` and the TOTP `lastStep`.
 
 The table prefix `ta_` and the advisory lock names keep the old product name tempo-auth for compatibility. A change needs a migration.
 
@@ -151,6 +169,7 @@ The compatibility package keeps the tables of Better Auth 1.7. It adds columns t
 | `0007_compat_schema_v10` | `taFreshAt` on `session`, which holds `freshAt`. No default and no fill. The text names the session table, so tables with other names take the text of `compatMigration0007Sql`. |
 | `0008_compat_schema_v11` | The columns and the four tables of version 11, with the same defaults. The text names `ta_` tables only, so it is the same for every naming. |
 | `0009_compat_schema_v12` | `taBannedAt`, `taBanReason`, and `taBanUntil` on `user`, `taActorId` on `session`, and `ta_operator_audit`. No default. It copies each ban of the admin plugin (`banned`, `banReason`, `banExpires`) into the ban columns, and skips a row that has `taBannedAt`. The text names the user and session tables, so tables with other names take the text of `compatMigration0009Sql`. |
+| `0010_compat_schema_v13` | `activeTeamId` on `session` and `teamId` on `invitation`, the columns of Better Auth's teams option. No default and no fill. On Postgres it adds each column only when it is absent. The text names the session and invitation tables, so tables with other names take the text of `compatMigration0010Sql`. |
 
 On D1, a database made by a Better Auth older than 1.7 uses the folder `d1-before-1.7`. [Better Auth compatibility](/docs/reference/compat-better-auth/) tells the rest.
 

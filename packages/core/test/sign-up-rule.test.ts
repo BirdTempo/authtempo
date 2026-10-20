@@ -47,6 +47,7 @@ async function invite(
     tokenHash: `h-${email}-${expiresIn}`,
     expiresAt: new Date(now.getTime() + expiresIn),
     acceptedAt: accepted ? now : null,
+    teamIds: null,
     createdAt: now,
     updatedAt: now,
   });

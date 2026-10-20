@@ -22,7 +22,7 @@ describe("schema version 11 on Postgres (plan 12e)", () => {
         "SELECT value FROM ta_meta WHERE key = 'schema_version'",
       );
       expect(version[0]?.value).toBe("11");
-      // The adapter reads only a database of the current version: apply the later migrations first (0012 since plan 12f).
+      // The adapter reads only a database of the current version: apply the later migrations first (0012 since plan 12f, 0013 since plan 12k).
       for (const m of MIGRATIONS.slice(i0011 + 1)) await a.unsafe(m.sql);
       const db = createPostgresAdapter(a);
       const client = await db.findOne("oauthClient", [{ field: "id", op: "eq", value: "cl_10" }]);

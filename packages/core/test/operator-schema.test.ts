@@ -7,8 +7,9 @@ import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 // adapter runs them.
 
 describe("schema version 12 (plan 12f)", () => {
-  it("has schema version 12", () => {
-    expect(SCHEMA_VERSION).toBe(12);
+  it("has schema version 12 or a later version", () => {
+    // Plan 12k moves the version to 13: test/schema-v13.test.ts pins it.
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(12);
   });
 
   it("adds the ban fields and the actor field as the last nullable fields", () => {
@@ -17,7 +18,8 @@ describe("schema version 12 (plan 12f)", () => {
       ["banReason", { type: "string", nullable: true }],
       ["banUntil", { type: "date", nullable: true }],
     ]);
-    expect(Object.entries(schema.session.fields).at(-1)).toEqual([
+    // Plan 12k adds activeTeamId after actorId.
+    expect(Object.entries(schema.session.fields).at(-2)).toEqual([
       "actorId",
       { type: "string", nullable: true },
     ]);

@@ -500,6 +500,7 @@ describe("resolveSocialUser", () => {
       activeOrganizationId: null,
       freshAt: now,
       actorId: null,
+      activeTeamId: null,
       createdAt: now,
       updatedAt: now,
     });

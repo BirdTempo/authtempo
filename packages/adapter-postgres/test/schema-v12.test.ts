@@ -22,7 +22,7 @@ describe("schema version 12 on Postgres (plan 12f)", () => {
       await a.unsafe(
         "INSERT INTO ta_session (id, created_at, updated_at, user_id, token_hash, expires_at, last_seen_at, fresh_at) VALUES ('s11', now(), now(), 'u11', 'h11', now() + interval '1 day', now(), now())",
       );
-      for (const m of MIGRATIONS.slice(i0012)) await a.unsafe(m.sql);
+      await a.unsafe(MIGRATIONS[i0012]?.sql ?? "");
       const version = await a.unsafe<{ value: string }[]>(
         "SELECT value FROM ta_meta WHERE key = 'schema_version'",
       );
@@ -68,6 +68,8 @@ describe("schema version 12 on Postgres (plan 12f)", () => {
           column_default: null,
         },
       ]);
+      // The adapter reads only a database of the current version: apply the later migrations first (0013 since plan 12k).
+      for (const m of MIGRATIONS.slice(i0012 + 1)) await a.unsafe(m.sql);
       const db = createPostgresAdapter(a);
       expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u11" }])).toMatchObject({
         bannedAt: null,

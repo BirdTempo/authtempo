@@ -547,7 +547,8 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     " AND NOT EXISTS (SELECT 1 FROM ta_oauth_subject WHERE user_id = ?)" +
     " AND NOT EXISTS (SELECT 1 FROM ta_oauth_session_client WHERE user_id = ?)" +
     " AND NOT EXISTS (SELECT 1 FROM ta_oauth_logout WHERE user_id = ?)" +
-    " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = ?)";
+    " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM ta_team_member WHERE user_id = ?)";
 
   it("lists every model with a userId field as a child, from the schema", () => {
     expect(USER_CHILD_MODELS).toEqual([
@@ -566,6 +567,7 @@ describe("the D1 undo of a user create (plan 8b)", () => {
       "oauthSessionClient",
       "oauthLogout",
       "secondFactor",
+      "teamMember",
     ]);
   });
 
@@ -573,18 +575,18 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     const st = coreStatements(SQLITE);
     expect(st.undoCreate("user", user(true))).toEqual({
       sql: `DELETE FROM ta_user WHERE id = ?${children}`,
-      params: Array(16).fill("u1"),
+      params: Array(17).fill("u1"),
     });
     expect(st.undoCreate("user", user(false))).toEqual({
       sql: `DELETE FROM ta_user WHERE id = ? AND email_verified = ?${children}`,
-      params: ["u1", 0, ...Array(15).fill("u1")],
+      params: ["u1", 0, ...Array(16).fill("u1")],
     });
   });
 
   it("numbers the Postgres placeholders after the where", () => {
     const s = coreStatements(POSTGRES).undoCreate("user", user(true));
-    expect(s.sql.endsWith("FROM ta_second_factor WHERE user_id = $16)")).toBe(true);
-    expect(s.params).toHaveLength(16);
+    expect(s.sql.endsWith("FROM ta_team_member WHERE user_id = $17)")).toBe(true);
+    expect(s.params).toHaveLength(17);
   });
 
   it("keeps the undo of any other model a delete by id", () => {
@@ -599,6 +601,7 @@ describe("the D1 undo of a user create (plan 8b)", () => {
       activeOrganizationId: null,
       freshAt: null,
       actorId: null,
+      activeTeamId: null,
       createdAt: t0,
       updatedAt: t0,
     });

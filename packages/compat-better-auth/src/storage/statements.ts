@@ -89,9 +89,16 @@ export interface CompatStatements extends SqlStatements {
  * leaves them out. This storage holds no row of them. A read answers empty,
  * as for a where that never matches, so `sweepExpired` counts 0 and
  * `caller` answers null for a `tk_` bearer. A create throws `unknown_model`,
- * so a write never vanishes in silence. Plan 8b, 2026-10-11.
+ * so a write never vanishes in silence. Plan 8b, 2026-10-11. Plan 12k Task 1
+ * adds its four models until the later 12k tasks map them.
  */
-export const UNMAPPED_MODELS: ReadonlySet<ModelName> = new Set<ModelName>(["apiToken"]);
+export const UNMAPPED_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
+  "apiToken",
+  "organizationRole",
+  "team",
+  "teamMember",
+  "organizationToken",
+]);
 
 function withoutUnmapped(st: CompatStatements): CompatStatements {
   const none = (model: ModelName) => UNMAPPED_MODELS.has(model);
