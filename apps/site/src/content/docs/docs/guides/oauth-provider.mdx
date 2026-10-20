@@ -204,8 +204,9 @@ A relying party ends the person's session at `end_session_endpoint`, `GET` or `P
 
 - A valid `id_token_hint` of the session that the request carries ends that session at once. An expired hint still counts.
 - Any other request with a session answers a confirmation page. Only its yes, posted from `baseURL`, ends the session.
-- The answer redirects to `post_logout_redirect_uri` with `state` only for a valid hint and an exact entry of the client's `post_logout_redirect_uris`. Else core shows the signed-out page.
 - A cross-site form post carries no `SameSite=Lax` cookie. So a post with no session answers 303 to the GET of the same fields, which carries the cookie.
+- A frame carries no `SameSite=Lax` cookie either. So a GET with `Sec-Fetch-Dest` other than `document` and no session gets a page with a top-level link to the same GET, and no redirect.
+- Any other answer redirects to `post_logout_redirect_uri` with `state` only for a valid hint and an exact entry of the client's `post_logout_redirect_uris`. Else core shows the signed-out page.
 - `session.afterEnd` fires with the reason `oidc_logout`.
 - The route counts on `oauth-end-session:ip`, 60 per 15 minutes.
 
