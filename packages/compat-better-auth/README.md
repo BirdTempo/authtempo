@@ -111,7 +111,7 @@ What the migration does (`0001_compat_better_auth`, append-only):
 
 Migration `0002_compat_schema_v5` (plan 8b) moves `schema_version` to 5 and `compat_better_auth` to 2. It changes no table: core 5 adds API tokens, and this package does not hold them until its api-key plan. Core's routes under `/tokens` answer 404 here. `tempo.api.tokens.*` is not usable on this storage: `create` throws `unknown_model`, and the reads answer empty. `migrate()` runs both migrations. On D1, copy `0002_compat_schema_v5.sql` after the 0001 file, for both variants and every naming: it touches `ta_meta` only. Without it the storage refuses to start with `schema_mismatch`.
 
-Plan 12k: core's token routes work in the shim. Migration 0010 creates core's own `ta_api_token`, `ta_organization_token`, and `ta_moved_token` (the record of each moved key), so `/tokens`, `/organizations/tokens`, and `tempo.api.tokens.*` act on this storage (see "API keys").
+Plan 12k: core's token routes work in the shim. Migration 0010 creates core's own `ta_api_token`, `ta_organization_token`, and `ta_moved_token`, the record of each moved key. So `/tokens`, `/organizations/tokens`, and `tempo.api.tokens.*` act on this storage (see "API keys").
 
 What changes at cutover:
 
@@ -1196,7 +1196,7 @@ in Better Auth. An organization key with no `permissions` gets `{}`, which
 grants nothing. `verifyApiKey` runs `tempo.authenticate`, so it spends one
 call of the quota and one of the window. Its codes are Better Auth's:
 `INVALID_API_KEY`, `RATE_LIMITED`, `USAGE_EXCEEDED`, and `KEY_DISABLED` for a
-moved prefix with no row. The shim cannot tell why such a key has no row, so
+moved prefix with no row. The shim cannot tell why such a key has no row. So
 the text of that `KEY_DISABLED` names each cause: a revoke, a skip at the
 move, or an expiry. Better Auth answered `KEY_EXPIRED` for an expired key.
 With `permissions`, it checks the key's own set
@@ -1227,9 +1227,9 @@ moves each `apikey` row into core's token table. `rateLimitEnabled` is the
 plugin's `rateLimit.enabled` (Better Auth's default is true). With false,
 Better Auth skips the window of every key, so the move writes no window. `movedPrefixes` is
 `movedKeyPrefixesOf(options)`, the list that core's `tokens.movedPrefixes`
-holds. Before any write, and on a dry run too, the move throws a
-`BetterAuthCompatError` when no entry starts a stored prefix, or when a row
-has no prefix. The error names each such prefix and counts the rows with no
+holds. Before any write, and on a dry run too, the move can throw a
+`BetterAuthCompatError`. It throws when no entry starts a stored prefix, or
+when a row has no prefix. The error names each such prefix and counts the rows with no
 prefix (ruling 40 of plan 12k). Such a key could never act after the move,
 because only a bearer with a moved prefix reaches the lookup of the moved
 keys. Better Auth stores the
@@ -1243,9 +1243,9 @@ recorded row, so a second run moves nothing, and a revoked key stays revoked
 at the next run, each row once. The report
 holds counts, owner ids, and the stored prefixes, never a key, a digest, or
 metadata. A set loses each resource and action that core's statements do not
-know, and `dropped` counts them. A moved row meets core's create rules: a
-key with no name gets the name `Moved key`, and a name over 80 characters or
-with a control character skips as `invalidName`. Metadata whose JSON is over
+know, and `dropped` counts them. A moved row meets core's create rules. A
+key with no name gets the name `Moved key`. A name over 80 characters or with
+a control character skips as `invalidName`. Metadata whose JSON is over
 4096 bytes skips as `invalidMetadata`. An organization key gets its creator from
 `metadata.createdByUserId`, else the organization's first owner
 (`ownerFallback`). That owner then counts as the creator. The list's
@@ -1259,7 +1259,7 @@ Each step is a runbook line, with what breaks without it:
 
 1. Before the cutover, make a copy of the database, and apply the compat migrations to the copy: `storage.migrate()` on Postgres, or the D1 files with `wrangler d1 migrations apply` on D1. Without them, `betterAuthSchemaStorage` refuses the copy with `schema_mismatch`, and the dry run cannot start. Then run `moveBetterAuthApiKeys` with `dryRun: true` against the copy. The report gives the count of keys per owner and the stored prefixes. Without it, you do not know whom to tell, or which prefixes to list.
 2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Re-issue each key with no prefix, and delete its row. Without it, the move throws and moves nothing.
-3. Tell each owner whose key the report skips: `skippedKeys` names each row id, its owner, and the reason (`disabled`, `expired`, `noDigest`, `noCreator`, `noOwner` for a key whose user or organization is gone, `invalidName`, or `invalidMetadata`; `present` moved at an earlier run). After the cutover a skipped key answers 401 `token_retired` (`KEY_DISABLED` from `verifyApiKey`), and every script that uses one stops.
+3. Tell each owner whose key the report skips: `skippedKeys` names each row id, its owner, and the reason. The reasons are `disabled`, `expired`, `noDigest`, `noCreator`, `noOwner` (the user or the organization is gone), `invalidName`, and `invalidMetadata`. A `present` row moved at an earlier run. After the cutover a skipped key answers 401 `token_retired` (`KEY_DISABLED` from `verifyApiKey`), and every script that uses one stops.
 4. Deploy the shim build with migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
 5. Run `moveBetterAuthApiKeys` with `dryRun: false`. A second run is safe: it skips each recorded row. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
 6. A resource server with `@authtempo/verify` passes `movedPrefixes` (the same list) and `movedKind` (`"api-token"` for `references: "user"`, `"organization-token"` for `"organization"`), with that kind in `accept`. Without them, the verifier answers null for every moved key. A new `to_` key needs `"organization-token"` in `accept`.

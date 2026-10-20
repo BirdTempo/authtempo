@@ -73,7 +73,7 @@ export interface ApiKeyMoveInput {
   dryRun: boolean;
   /**
    * Core's `tokens.movedPrefixes` of the app: `movedKeyPrefixesOf(options)`.
-   * Only a bearer with one of them reaches the lookup of the moved keys, so
+   * Only a bearer with one of them reaches the lookup of the moved keys. So
    * the move refuses a stored prefix outside the list (ruling 40 of plan 12k).
    */
   movedPrefixes: readonly string[];
