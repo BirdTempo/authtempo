@@ -17,8 +17,8 @@ import {
 } from "./audit.js";
 import { activeBan } from "./ban-rule.js";
 import { isPlatformOperator, type OperatorActor, requireScope } from "./guards.js";
-import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
 import { endImpersonations, holdImpersonations } from "./impersonation.js";
+import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
 
 const MINUTE_MS = 60_000;
 
@@ -270,7 +270,17 @@ export async function banUser(
       // the audit read and the lock read.
       const hold = await holdImpersonations(tx, input.userId, now, true);
       meter.step(2);
-      await endAllAccessPage(tx, config, input.userId, ends, now, meter, budget.value, "banned");
+      await endAllAccessPage(
+        tx,
+        config,
+        input.userId,
+        ends,
+        now,
+        meter,
+        budget.value,
+        "banned",
+        stops,
+      );
       // A banned platform operator keeps no impersonation session (ruling 31).
       await endImpersonations(tx, hold, ends.ended ?? null, now, stops);
       return written;

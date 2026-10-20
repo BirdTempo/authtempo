@@ -11,7 +11,6 @@ import { startImpersonation, stopImpersonation } from "../../engine/operator/imp
 import { operatorApi } from "../../engine/operator/index.js";
 import { rewrapSecrets, secretsStatus } from "../../engine/secrets.js";
 import {
-  readSessionToken,
   renewedSessionCookie,
   resolveSession,
   sessionCookieToken,

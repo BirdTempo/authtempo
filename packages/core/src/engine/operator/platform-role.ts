@@ -28,8 +28,8 @@ import {
 import { targetOf } from "./ban.js";
 import { activeBan } from "./ban-rule.js";
 import { type OperatorActor, requireScope } from "./guards.js";
-import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
 import { endImpersonations, holdImpersonations } from "./impersonation.js";
+import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
 
 /** The input of a grant or a revoke of the platform role (spec 26 item 5). */
 export interface PlatformRoleInput {
@@ -398,7 +398,17 @@ export async function revokePlatformRole(
         const pending = await hasPendingEnd(tx, user.id);
         meter.step(1);
         if (pending)
-          await endAllAccessPage(tx, config, user.id, ends, now, meter, budget.value, "operator");
+          await endAllAccessPage(
+            tx,
+            config,
+            user.id,
+            ends,
+            now,
+            meter,
+            budget.value,
+            "operator",
+            stops,
+          );
         return ok({ change: null });
       }
       const rest = member.role
@@ -443,7 +453,17 @@ export async function revokePlatformRole(
       // the audit read and the lock read.
       const hold = await holdImpersonations(tx, user.id, now, true);
       meter.step(2);
-      await endAllAccessPage(tx, config, user.id, ends, now, meter, budget.value, "operator");
+      await endAllAccessPage(
+        tx,
+        config,
+        user.id,
+        ends,
+        now,
+        meter,
+        budget.value,
+        "operator",
+        stops,
+      );
       // The role started them, so they end with it (ruling 31).
       await endImpersonations(tx, hold, ends.ended ?? null, now, stops);
       const change: MemberChange =

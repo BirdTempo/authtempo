@@ -9,7 +9,7 @@ import { deleteOAuthCodes } from "../oauth-grants.js";
 import { deleteTwoFactorChallenges } from "../second-factor.js";
 import { deleteHandoffCodes } from "../session-list.js";
 import { deleteEndedSessions, endedList, sessionsEnded } from "../sessions.js";
-import type { OperatorActEnds } from "./audit.js";
+import { type ImpersonationStops, impersonationStops, type OperatorActEnds } from "./audit.js";
 import { END_ALL_LIMIT, endSessionPage, FAMILY_CALLS, STEP_WORST } from "./sessions.js";
 
 /**
@@ -76,6 +76,7 @@ export async function endAllAccessPage(
   meter: Meter,
   budget: number,
   reason: PendingEndReason,
+  stops: ImpersonationStops | null,
 ): Promise<{ ended: number; left: boolean }> {
   const byUser: Where<"session">[] = [{ field: "userId", op: "eq", value: userId }];
   // The locks of every session of the user first, then the ended rows with no hook (plan 12a review L3).
@@ -100,7 +101,7 @@ export async function endAllAccessPage(
   // No lock of its own: deleteEndedSessions took the locks of every session of the user.
   const page =
     rows.length > 0 && pageBudget >= PAGE_LEAST
-      ? await endSessionPage(tx, config, rows, ends.ended ?? null, now, pageBudget, null)
+      ? await endSessionPage(tx, config, rows, ends.ended ?? null, now, pageBudget, null, stops)
       : { deleted: 0, stopped: rows.length > 0, used: 1 };
   meter.step(page.used - 1);
   await deleteHandoffCodes(tx, userId);
@@ -212,6 +213,8 @@ export async function endPendingRows(
       { field: "createdAt", op: "lte", value: before },
     ];
     const ended = endedList(config);
+    // The impersonation sessions of the row end with their stop rows (ruling 43 of plan 12f).
+    const stops = impersonationStops(config, reason === "operator" ? "revoke" : "ban");
     const now = config.clock.now();
     // The delete of the row stays out of the page.
     const pageBudget = limit - meter.used - 1;
@@ -223,7 +226,7 @@ export async function endPendingRows(
       const rows = read.slice(0, END_ALL_LIMIT.default);
       const page =
         rows.length > 0
-          ? await endSessionPage(tx, config, rows, ended ?? null, now, pageBudget, where)
+          ? await endSessionPage(tx, config, rows, ended ?? null, now, pageBudget, where, stops)
           : { deleted: 0, stopped: false, used: 1 };
       const finished = !page.stopped && read.length <= rows.length;
       if (finished) await tx.delete("verification", [{ field: "id", op: "eq", value: row.id }]);
@@ -231,7 +234,7 @@ export async function endPendingRows(
     });
     meter.step(done.page.used + (done.finished ? 1 : 0));
     n += done.page.deleted;
-    await sessionsEnded(config, ended, reason, null);
+    await sessionsEnded(config, ended, reason, stops);
     if (!done.finished) break;
   }
   return n;
