@@ -1147,6 +1147,7 @@ The follow-ups of consumerd:
 - `authtempo.platformOrganization` for the admin plugin (see "The admin plugin").
 - Anonymous sign-in, `$context`, `getOrgAdapter`, and the rate limit storage.
 - `authtempo.roleRanks` from its ROLE_RANK (`ac` and `roles` map since plan 12k).
+- Its `packages/db/test/better-auth-schema.test.ts` calls `auth.api.createOrganization`, `createTeam`, and `addTeamMember`. The shim's `auth.api` has none of the three, so call `auth.tempo.api` with core's arguments. The same test expects `memberCount` 1 after a team member add. The shim writes 0 at the create and never updates it (deviation 11), so that expectation changes to 0.
 - `hooks`: wrap the handler (see "Request hooks").
 
 `freshAge: 600` and `deferSessionRefresh: true` run unchanged since plan 12a: core's window is 10 minutes, and the shim's client posts the deferred refresh. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. `teams: { enabled: true }` runs unchanged since plan 12k: Better Auth's default team and its last-team rule hold. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e. The tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` instead. With snake-case names, the column is `ta_purpose`. The row holds a keyed hash, never the code.
