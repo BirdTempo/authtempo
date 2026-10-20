@@ -1,6 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import {
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
@@ -13,7 +14,20 @@ import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkTarballs, readTarball } from "../src/check-pack.ts";
 import { readYaml, type YamlNode } from "../src/check-workflows.ts";
-import { type DryRunReport, dryRun, dryRunLine, type Run, type RunResult } from "../src/dry-run.ts";
+import {
+  type ChildEnv,
+  childEnv,
+  type DryRunReport,
+  dryRun,
+  dryRunLine,
+  NPM_SCOPE_REGISTRY,
+  npmPublishArgs,
+  PNPM_PUBLISH_ARGS,
+  PNPM_SCOPE_REGISTRY,
+  type Run,
+  type RunResult,
+  spawnRun,
+} from "../src/dry-run.ts";
 import { reportLines } from "../src/lib/report.ts";
 import { prepare } from "../src/prepare.ts";
 import { changesetVersion, copyFixture } from "./support/release-copy.ts";
@@ -23,6 +37,7 @@ interface Call {
   cmd: string;
   args: string[];
   cwd: string;
+  env: ChildEnv;
 }
 
 const ok = (stdout = ""): RunResult => ({ status: 0, stdout, stderr: "" });
@@ -33,7 +48,7 @@ const fromReport = (lines: string[], failed: boolean): RunResult => ({
 });
 
 /** The step of one child process call, by its command and its first arguments. */
-function kindOf(cmd: string, args: string[], cwd: string): string {
+function kindOf(cmd: string, args: readonly string[], cwd: string): string {
   const [a = "", b = ""] = args;
   if (cmd === "git") return `git ${a}`;
   if (cmd === "tar") return "extract";
@@ -56,8 +71,8 @@ function kindOf(cmd: string, args: string[], cwd: string): string {
 function fake(change: Record<string, (call: Call) => RunResult | undefined> = {}) {
   const calls: Call[] = [];
   const changesets: string[] = [];
-  const run: Run = (cmd, args, cwd) => {
-    const call = { kind: kindOf(cmd, args, cwd), cmd, args: [...args], cwd };
+  const run: Run = (cmd, args, cwd, env) => {
+    const call = { kind: kindOf(cmd, args, cwd), cmd, args: [...args], cwd, env: { ...env } };
     calls.push(call);
     const changed = change[call.kind]?.(call);
     if (changed !== undefined) return changed;
@@ -97,7 +112,12 @@ function fake(change: Record<string, (call: Call) => RunResult | undefined> = {}
       }
       case "npm publish": {
         const t = readTarball(args[1] ?? "");
-        return ok(`+ ${t.manifest.name}@${t.manifest.version}\n`);
+        return {
+          status: 0,
+          stdout: `+ ${t.manifest.name}@${t.manifest.version}\n`,
+          stderr:
+            "npm notice Publishing to http://127.0.0.1:9 with tag latest and public access (dry-run)\n",
+        };
       }
       case "pnpm publish":
         return ok(pnpmPublishLines(cwd).join("\n"));
@@ -150,11 +170,11 @@ function snapshot(dir: string): Record<string, string> {
   return out;
 }
 
-async function passingRun() {
+async function passingRun(env?: NodeJS.ProcessEnv) {
   const { root, tmp } = setup();
   const before = snapshot(root);
   const f = fake();
-  const report = await dryRun({ root, run: f.run, tmp });
+  const report = await dryRun({ root, run: f.run, tmp, ...(env === undefined ? {} : { env }) });
   return { root, tmp, before, report, ...f };
 }
 
@@ -376,9 +396,18 @@ describe("dry run", () => {
         c.kind,
         "http://127.0.0.1:9",
       ]);
+    // A scoped name goes to the scope registry of an npmrc, not to --registry.
+    expect(publishes.map((c) => c.args.filter((a) => a.includes(":registry=")))).toEqual([
+      ["--@authtempo:registry=http://127.0.0.1:9"],
+      ["--@authtempo:registry=http://127.0.0.1:9"],
+      ["--config.@authtempo:registry=http://127.0.0.1:9"],
+    ]);
     // npm reads the package document of the registry, and each retry on the dead address waits.
-    for (const c of publishes.filter((p) => p.cmd === "npm"))
-      expect(c.args).toContain("--fetch-retries=0");
+    expect(publishes.map((c) => c.args.filter((a) => a.includes("fetch-retries")))).toEqual([
+      ["--fetch-retries=0"],
+      ["--fetch-retries=0"],
+      ["--config.fetch-retries=0"],
+    ]);
     // Each install reads the store only.
     const installs = calls.filter((c) => c.kind === "install" || c.kind === "smoke install");
     expect(installs).toHaveLength(2);
@@ -387,7 +416,136 @@ describe("dry run", () => {
     // No other call names a host.
     for (const c of calls)
       for (const a of c.args)
-        if (/^[a-z+]+:\/\//.test(a)) expect([c.kind, a]).toEqual([c.kind, "http://127.0.0.1:9"]);
+        if (/[a-z+]+:\/\//.test(a))
+          expect([c.kind, a.replace(/^.*?([a-z+]+:\/\/)/, "$1")]).toEqual([
+            c.kind,
+            "http://127.0.0.1:9",
+          ]);
+  });
+
+  it("gives each child the keys of the allowlist only", async () => {
+    // The env of a person on the day before a release: a token, a scope
+    // registry, and a user npmrc (review of Task 6, M1).
+    const parent = {
+      PATH: "/bin",
+      HOME: "/home/person",
+      TMPDIR: "/tmp/person",
+      LANG: "en_US.UTF-8",
+      NPM_TOKEN: "FAKE-TEST-TOKEN",
+      NODE_AUTH_TOKEN: "FAKE-TEST-TOKEN",
+      NODE_OPTIONS: "--require /home/person/hook.cjs",
+      NPM_CONFIG_USERCONFIG: "/home/person/.npmrc",
+      npm_config_registry: "http://127.0.0.1:1/",
+      "npm_config_@authtempo:registry": "http://127.0.0.1:1/",
+      TURBO_TOKEN: "FAKE-TEST-TOKEN",
+      TURBO_TEAM: "person",
+      TURBO_API: "http://127.0.0.1:1",
+    };
+    const { report, calls } = await passingRun(parent);
+    expect(report.exit).toBe(0);
+    const dir = report.dir ?? "";
+    expect(calls).toHaveLength(15);
+    for (const c of calls)
+      expect([c.kind, c.env]).toEqual([
+        c.kind,
+        {
+          PATH: "/bin",
+          HOME: "/home/person",
+          TMPDIR: "/tmp/person",
+          LANG: "en_US.UTF-8",
+          CI: "1",
+          NO_COLOR: "1",
+          WRANGLER_SEND_METRICS: "false",
+          WRANGLER_HIDE_BANNER: "true",
+          TURBO_TELEMETRY_DISABLED: "1",
+          NPM_CONFIG_USERCONFIG: `${dir}/npmrc-user`,
+          NPM_CONFIG_GLOBALCONFIG: `${dir}/npmrc-global`,
+        },
+      ]);
+    // A key that the parent lacks stays out of the child.
+    const bare = await passingRun({ PATH: "/bin", NPM_TOKEN: "FAKE-TEST-TOKEN" });
+    for (const c of bare.calls)
+      expect([c.kind, Object.keys(c.env).sort()]).toEqual([
+        c.kind,
+        [
+          "CI",
+          "NO_COLOR",
+          "NPM_CONFIG_GLOBALCONFIG",
+          "NPM_CONFIG_USERCONFIG",
+          "PATH",
+          "TURBO_TELEMETRY_DISABLED",
+          "WRANGLER_HIDE_BANNER",
+          "WRANGLER_SEND_METRICS",
+        ],
+      ]);
+  });
+
+  it("writes the two npmrc files empty before the first call", async () => {
+    const { root, tmp } = setup();
+    const seen: string[] = [];
+    const f = fake();
+    const run: Run = (cmd, args, cwd, env) => {
+      for (const key of ["NPM_CONFIG_USERCONFIG", "NPM_CONFIG_GLOBALCONFIG"])
+        seen.push(`${key}=${JSON.stringify(readFileSync(env[key] ?? "", "utf8"))}`);
+      return f.run(cmd, args, cwd, env);
+    };
+    const report = await dryRun({ root, run, tmp });
+    expect(report.exit).toBe(0);
+    expect(new Set(seen)).toEqual(
+      new Set(['NPM_CONFIG_USERCONFIG=""', 'NPM_CONFIG_GLOBALCONFIG=""']),
+    );
+  });
+
+  it("fails when a publish line names another registry than the dead one", async () => {
+    const { root, tmp } = setup();
+    const f = fake({
+      "npm publish": (c) =>
+        c.args[1]?.includes("authtempo-core-")
+          ? {
+              status: 0,
+              stdout: "+ @authtempo/core@0.1.0\n",
+              stderr:
+                "npm notice Publishing to https://registry.npmjs.org/ with tag latest and public access (dry-run)\n",
+            }
+          : undefined,
+    });
+    const report = await dryRun({ root, run: f.run, tmp });
+    expect(failuresOf(report)).toEqual([
+      "@authtempo/core@0.1.0: npm publish --dry-run names the registry https://registry.npmjs.org/, not http://127.0.0.1:9",
+    ]);
+    expect(dryRunLine(report)).toBe(
+      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
+    );
+
+    // An npm answer that names no registry is not proof of the dead one.
+    const silent = setup();
+    const quiet = fake({
+      "npm publish": (c) =>
+        c.args[1]?.includes("authtempo-client-") ? ok("+ @authtempo/client@0.1.0\n") : undefined,
+    });
+    const r2 = await dryRun({ root: silent.root, run: quiet.run, tmp: silent.tmp });
+    expect(failuresOf(r2)).toEqual([
+      "@authtempo/client@0.1.0: npm publish --dry-run names no registry",
+    ]);
+
+    const other = setup();
+    const g = fake({
+      "pnpm publish": (c) =>
+        ok(
+          pnpmPublishLines(c.cwd)
+            .map((l) => l.replace("http://127.0.0.1:9/", "https://registry.npmjs.org/"))
+            .join("\n"),
+        ),
+    });
+    const r3 = await dryRun({ root: other.root, run: g.run, tmp: other.tmp });
+    expect(failuresOf(r3)).toEqual([
+      "pnpm publish -r --dry-run names the registry https://registry.npmjs.org/ for @authtempo/client@0.1.0, not http://127.0.0.1:9",
+      "pnpm publish -r --dry-run names the registry https://registry.npmjs.org/ for @authtempo/core@0.1.0, not http://127.0.0.1:9",
+    ]);
+    expect(dryRunLine(r3)).toBe(
+      "release-dry-run: FAIL packages=0 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=2",
+    );
+    expect(g.calls.map((c) => c.kind)).not.toContain("smoke");
   });
 
   it("writes only under the temp folder", async () => {
@@ -406,5 +564,113 @@ describe("dry run", () => {
     // The checkout is unchanged, and the temp folder is gone without --keep.
     expect(snapshot(root)).toEqual(before);
     expect(existsSync(dir)).toBe(false);
+  });
+});
+
+/**
+ * A loopback listener on a free port in its own process, because each publish
+ * call blocks this process. It writes one line for each request to `log`.
+ */
+async function listen(log: string): Promise<{ url: string; stop: () => void }> {
+  const code = `
+    const { createServer } = require("node:http");
+    const { appendFileSync } = require("node:fs");
+    const server = createServer((req, res) => {
+      appendFileSync(${JSON.stringify(log)}, req.method + " " + req.url + " " + (req.headers.authorization ?? "none") + "\\n");
+      res.statusCode = 404;
+      res.setHeader("content-type", "application/json");
+      res.end("{}");
+    });
+    server.listen(0, "127.0.0.1", () => console.log(server.address().port));
+  `;
+  writeFileSync(log, "");
+  const child = spawn(process.execPath, ["-e", code], { stdio: ["ignore", "pipe", "inherit"] });
+  const port = await new Promise<string>((ok, fail) => {
+    child.stdout.once("data", (d: Buffer) => ok(d.toString().trim()));
+    child.once("exit", (status) => fail(new Error(`the listener exited ${status}`)));
+  });
+  return { url: `http://127.0.0.1:${port}/`, stop: () => child.kill() };
+}
+
+describe("dry run against a scope registry", () => {
+  it("sends no request to the scope registry of the env or of an npmrc", async () => {
+    // Each released name is @authtempo/*. npm and pnpm send a scoped name to
+    // the scope registry of an npmrc, not to --registry (review of Task 6, M1).
+    const temp = mkdtempSync(join(tmpdir(), "authtempo-scope-test-"));
+    made.push(temp);
+    const log = join(temp, "requests.log");
+    const listener = await listen(log);
+    try {
+      const host = listener.url.slice("http:".length, -1);
+      const npmrc = `@authtempo:registry=${listener.url}\n${host}/:_authToken=FAKE-TEST-TOKEN\n`;
+      const home = join(temp, "home");
+      mkdirSync(home);
+      writeFileSync(join(home, ".npmrc"), npmrc);
+      writeFileSync(join(temp, "user.npmrc"), npmrc);
+      const parent: NodeJS.ProcessEnv = {
+        ...process.env,
+        HOME: home,
+        NPM_CONFIG_USERCONFIG: join(temp, "user.npmrc"),
+        "npm_config_@authtempo:registry": listener.url,
+        NPM_TOKEN: "FAKE-TEST-TOKEN",
+        NODE_AUTH_TOKEN: "FAKE-TEST-TOKEN",
+      };
+
+      // A release copy after prepare, and its tarballs.
+      const repo = copyFixture((d) => {
+        changesetVersion(d, "Add the first release.");
+        writeFileSync(join(d, ".release-copy"), "");
+      });
+      made.push(repo);
+      expect(prepare(repo).failures).toEqual([]);
+      const out = join(temp, "out");
+      mkdirSync(out);
+      execFileSync("pnpm", ["--filter", "@authtempo/core", "pack", "--pack-destination", out], {
+        cwd: repo,
+        env: { ...process.env, NO_COLOR: "1" },
+        stdio: "pipe",
+      });
+      const [tarball = ""] = readdirSync(out);
+      const configs = { user: join(temp, "npmrc-user"), global: join(temp, "npmrc-global") };
+      writeFileSync(configs.user, "");
+      writeFileSync(configs.global, "");
+
+      // Each guard holds alone: the env without the scope arguments, and the
+      // scope arguments with the env of the parent.
+      const cases: [label: string, env: ChildEnv, scope: boolean][] = [
+        ["both", childEnv(parent, configs), true],
+        ["env alone", childEnv(parent, configs), false],
+        ["arguments alone", parent as ChildEnv, true],
+      ];
+      const drop = (args: readonly string[], scope: boolean) =>
+        args.filter((a) => scope || (a !== NPM_SCOPE_REGISTRY && a !== PNPM_SCOPE_REGISTRY));
+      for (const [label, env, scope] of cases) {
+        const npm = spawnRun("npm", drop(npmPublishArgs(join(out, tarball)), scope), out, env);
+        const pnpm = spawnRun("pnpm", drop(PNPM_PUBLISH_ARGS, scope), repo, env);
+        const lines = (r: RunResult) => `${r.stdout}\n${r.stderr}`.split("\n").map((l) => l.trim());
+        // npm names the --registry value with a slash and the scope value without one.
+        const said = [
+          ...lines(npm)
+            .filter((l) => l.includes("Publishing to"))
+            .map((l) => l.replace("127.0.0.1:9/ ", "127.0.0.1:9 ")),
+          ...lines(pnpm)
+            .filter((l) => l.includes(" → "))
+            .sort(),
+        ];
+        expect([label, npm.status, pnpm.status, said, readFileSync(log, "utf8")]).toEqual([
+          label,
+          0,
+          0,
+          [
+            "npm notice Publishing to http://127.0.0.1:9 with tag latest and public access (dry-run)",
+            "📦 @authtempo/client@0.1.0 → http://127.0.0.1:9/",
+            "📦 @authtempo/core@0.1.0 → http://127.0.0.1:9/",
+          ],
+          "",
+        ]);
+      }
+    } finally {
+      listener.stop();
+    }
   });
 });
