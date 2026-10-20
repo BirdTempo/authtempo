@@ -22,6 +22,7 @@ export const DEMO_EXEMPT = {
   handoff: "It needs a native or desktop app on the visitor's device.",
   oauth: "The provider needs a client app, and the demo has none.",
   oauthRegistration: "The provider needs a client app.",
+  oauthDevice: "The device grant needs a client app on a device, and the demo has none.",
   jwtMint: "Its key set and tokens serve a client app, which the demo does not have.",
   operator: "An operator tool, not a sign-in method.",
   // Ruling 33 of the lane: the owner may move it later.

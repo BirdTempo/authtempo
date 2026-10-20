@@ -26,17 +26,17 @@ Each limit is our own code. `src/gate.ts` checks the gate limits, and `src/limit
 
 | Limit | Value | Source line |
 | --- | --- | --- |
-| New sandboxes per IP per hour (an IPv6 address counts by its /64) | 5 | `src/facts.ts:110` `sandboxesPerIp` |
-| New sandboxes in total per hour | 600 | `src/facts.ts:112` `sandboxesTotal` |
-| The window of both gate counts | 1 hour | `src/facts.ts:114` `windowMs` |
-| The life of a sandbox from its creation, with no extension on use | 60 minutes | `src/facts.ts:116` `sandboxLifeMs` |
-| Users per sandbox | 10 | `src/facts.ts:118` `usersPerSandbox` |
-| Passkeys per sandbox | 10 | `src/facts.ts:119` `passkeysPerSandbox` |
-| API tokens per sandbox | 10 | `src/facts.ts:120` `tokensPerSandbox` |
-| Organizations per sandbox | 10 | `src/facts.ts:121` `organizationsPerSandbox` |
-| Mails kept per sandbox, the newest first | 50 | `src/facts.ts:123` `mailsKept` |
-| Request body, above which the Worker answers 413 | 16 KiB | `src/facts.ts:125` `bodyBytes` |
-| Requests per IP per minute in one isolate, before any Durable Object call (weak: each isolate counts alone) | 600 | `src/facts.ts:131` `requestsPerIpPerMinute` |
+| New sandboxes per IP per hour (an IPv6 address counts by its /64) | 5 | `src/facts.ts:111` `sandboxesPerIp` |
+| New sandboxes in total per hour | 600 | `src/facts.ts:113` `sandboxesTotal` |
+| The window of both gate counts | 1 hour | `src/facts.ts:115` `windowMs` |
+| The life of a sandbox from its creation, with no extension on use | 60 minutes | `src/facts.ts:117` `sandboxLifeMs` |
+| Users per sandbox | 10 | `src/facts.ts:119` `usersPerSandbox` |
+| Passkeys per sandbox | 10 | `src/facts.ts:120` `passkeysPerSandbox` |
+| API tokens per sandbox | 10 | `src/facts.ts:121` `tokensPerSandbox` |
+| Organizations per sandbox | 10 | `src/facts.ts:122` `organizationsPerSandbox` |
+| Mails kept per sandbox, the newest first | 50 | `src/facts.ts:124` `mailsKept` |
+| Request body, above which the Worker answers 413 | 16 KiB | `src/facts.ts:126` `bodyBytes` |
+| Requests per IP per minute in one isolate, before any Durable Object call (weak: each isolate counts alone) | 600 | `src/facts.ts:132` `requestsPerIpPerMinute` |
 
 This table is a copy for a reader. `src/facts.ts` is the source. `test/limits.test.ts` and `test/timer.test.ts` hold each number. When a number changes, change this row in the same commit.
 
