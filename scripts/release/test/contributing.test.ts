@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 // CONTRIBUTING.md at the repository root (owner decision 5 of 2026-10-14,
@@ -42,6 +42,35 @@ function commandFault(line: string, scripts: Record<string, string>): string | n
       : `${line.trim()}: a turbo line is pnpm turbo run ... --force`;
   if (name !== undefined && (PNPM_COMMANDS.has(name) || Object.hasOwn(scripts, name))) return null;
   return `${line.trim()}: ${name ?? "(none)"} is not a root script`;
+}
+
+/**
+ * Each path of the repository that the guide names: a code span with a slash,
+ * and each link target. A bare name such as `CHANGELOG.md` is the file of each
+ * package, not one path.
+ */
+function namedPaths(text: string): string[] {
+  const spans = [...text.matchAll(/`([^`\s]+)`/g)].map((m) => m[1] ?? "");
+  const links = [...text.matchAll(/\]\(([^)\s]+)\)/g)].map((m) => m[1] ?? "");
+  return [...new Set([...spans.filter((s) => s.includes("/")), ...links])];
+}
+
+/**
+ * The paths that a later task of plan 12j adds. The exists rule skips each
+ * one. An entry whose file exists fails as stale, so the task that adds the
+ * file removes its entry (the LATER form of check-workflows).
+ */
+const LATER: { path: string; task: string }[] = [
+  { path: "docs/release/RUNBOOK.md", task: "Task 13b" },
+];
+
+/** The fault of each named path: a missing file, or a stale LATER entry. */
+function pathFaults(paths: readonly string[], exists: (path: string) => boolean): string[] {
+  const later = new Set(LATER.map((l) => l.path));
+  const faults = paths.filter((p) => !later.has(p) && !exists(p)).map((p) => `${p} does not exist`);
+  for (const { path, task } of LATER)
+    if (exists(path)) faults.push(`the file ${path} exists; ${task} removes its entry from LATER`);
+  return faults;
 }
 
 describe("CONTRIBUTING.md", () => {
@@ -110,6 +139,21 @@ describe("CONTRIBUTING.md", () => {
       "`docs/release/RUNBOOK.md`",
     ])
       expect(rule).toContain(text);
+  });
+
+  it("names only paths that exist, or that a later task adds", () => {
+    const paths = namedPaths(TEXT);
+    expect(paths).toContain("docs/security/advisories.md");
+    expect(paths).toContain("docs/release/RUNBOOK.md");
+    expect(paths).toContain("SECURITY.md");
+    expect(pathFaults(paths, (p) => existsSync(new URL(p, ROOT)))).toEqual([]);
+    // The fault form of each rule, so the test can fail on each.
+    expect(pathFaults(["docs/no-such-file.md"], () => false)).toEqual([
+      "docs/no-such-file.md does not exist",
+    ]);
+    expect(pathFaults([], () => true)).toEqual([
+      "the file docs/release/RUNBOOK.md exists; Task 13b removes its entry from LATER",
+    ]);
   });
 
   it("links SECURITY.md for a fault", () => {
