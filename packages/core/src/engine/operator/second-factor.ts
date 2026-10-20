@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { PROOF_MAX_AGE_MS, PROOF_METHODS, REFERENCE_MAX } from "../../operator-secret.js";
 import { hasControlChar, hasLoneSurrogate } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import { sendNotice } from "../notices.js";
@@ -7,25 +8,10 @@ import { auditDraft, operatorAct } from "./audit.js";
 import { isoDateTime, reasonOf, targetOf } from "./ban.js";
 import type { OperatorActor } from "./guards.js";
 
-/** How the operator proved the identity of the person (spec 26 item 5). */
-export const PROOF_METHODS = ["document", "in_person", "video", "knowledge", "other"] as const;
+// The proof rules live in the entry @authtempo/core/operator-secret, so the CLI reads the same rules (ruling 40).
+export { PROOF_MAX_AGE_MS, PROOF_METHODS, REFERENCE_MAX } from "../../operator-secret.js";
 
 export type ProofMethod = (typeof PROOF_METHODS)[number];
-
-/**
- * The oldest proof that a disable accepts: 7 days. ASVS 5.0.0 6.4.4: "Verify
- * that if a multi-factor authentication factor is lost, evidence of identity
- * proofing is performed at the same level as during enrollment." An old
- * check is not evidence of the person who asks now.
- */
-export const PROOF_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
-
-/**
- * The longest reference, in UTF-16 code units. The reference is the case
- * id in the app's own system, never the evidence: the audit table must hold
- * no personal document.
- */
-export const REFERENCE_MAX = 200;
 
 /** The proof of an identity check, as the operator gives it. */
 export interface FactorProof {

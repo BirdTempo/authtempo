@@ -1,7 +1,8 @@
 import type { ResolvedConfig } from "../../config.js";
+import { isOperatorReason } from "../../operator-secret.js";
 import { appErrorName } from "../../primitives/app-error.js";
 import { newId } from "../../primitives/ids.js";
-import { hasControlChar, hasLoneSurrogate, removeControlChars } from "../../primitives/text.js";
+import { hasControlChar, removeControlChars } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { OperatorAction, OperatorAuditRow, SessionRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
@@ -31,11 +32,8 @@ export const OPERATOR_ACTIONS: readonly OperatorAction[] = Object.freeze(
   Object.keys(ACTIONS) as OperatorAction[],
 );
 
-/**
- * The longest reason, in UTF-16 code units. A reason is a short note for a
- * later reader of the row, not a document.
- */
-export const REASON_MAX = 500;
+// The reason rule lives in the entry @authtempo/core/operator-secret, so the CLI reads the same rule (ruling 40).
+export { REASON_MAX } from "../../operator-secret.js";
 
 /** The longest user agent of a row, in code points (spec 26 item 8). */
 export const USER_AGENT_MAX = 512;
@@ -71,10 +69,7 @@ export interface OperatorAuditDraft {
  * the operator wrote it.
  */
 export function operatorReason(raw: unknown): Result<string> {
-  if (typeof raw !== "string" || raw.length === 0 || raw.length > REASON_MAX)
-    return fail("invalid_body");
-  if (hasControlChar(raw) || hasLoneSurrogate(raw)) return fail("invalid_body");
-  return ok(raw);
+  return typeof raw === "string" && isOperatorReason(raw) ? ok(raw) : fail("invalid_body");
 }
 
 /**

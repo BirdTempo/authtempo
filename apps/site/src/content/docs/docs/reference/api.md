@@ -212,7 +212,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 
 ## The operator secret entry
 
-`@authtempo/core/operator-secret` holds the one rule of the operator secret and the limits of the operator routes. Core and the CLI read each of them.
+`@authtempo/core/operator-secret` holds the one rule of the operator secret, the limits of the operator routes, and the text rules of the operator tools. Core and the CLI read each of them.
 
 | Export | What it is |
 | --- | --- |
@@ -222,6 +222,11 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `OPERATOR_SECRETS_PER_IP` | The shared limit of the secret routes and the info route: 120 calls per IP per hour. |
 | `OPERATOR_USERS_PER_IP` | The limit of every secret call to the user, session, and audit routes of plan 12f: 600 calls per IP per hour. |
 | `OPERATOR_USERS_PER_SECRET` | The limit of each operator secret on the same routes after the secret matches: 600 calls per hour from any address. |
+| `REASON_MAX` | The longest reason of an operator act: 500 UTF-16 code units. |
+| `isOperatorReason` | True when a reason has 1 to 500 code units, no control character, and no lone surrogate. The engine and the CLI check with it. |
+| `PROOF_METHODS` | The methods of an identity check before an operator turns a second factor off: `document`, `in_person`, `video`, `knowledge`, and `other`. |
+| `PROOF_MAX_AGE_MS` | The oldest identity check that the disable accepts: 7 days, in milliseconds (ASVS 5.0.0 6.4.4). |
+| `REFERENCE_MAX` | The longest reference of an identity check: 200 UTF-16 code units. |
 
 ## The secrets entry
 
