@@ -3,6 +3,7 @@ import {
   defaultSignInPage,
   isIpLiteral,
   type LimiterPort,
+  normalizeSlug,
   type SignInPageInput,
 } from "@authtempo/core";
 import { betterAuthPasswordHash } from "../hash.js";
@@ -134,7 +135,10 @@ function pluginConfig(options: BetterAuthOptions): PluginConfig {
   const org = pluginOf(options, "organization");
   const admin = pluginOf(options, "admin");
   // checkOptions refuses the admin plugin without organization() and the slug.
-  const platformOrganization = options.authtempo?.platformOrganization;
+  // The config holds the slug that core resolves (normalizeSlug), so the
+  // shim's role read and core's read find one organization (ruling 60 M1).
+  const raw = options.authtempo?.platformOrganization;
+  const platformOrganization = raw === undefined ? undefined : (normalizeSlug(raw) ?? raw);
   if (org) {
     const o = org.options;
     out.organizations = {

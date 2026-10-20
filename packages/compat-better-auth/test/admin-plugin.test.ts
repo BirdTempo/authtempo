@@ -553,6 +553,29 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
     expect(await session(cookieOf(again))).toEqual({ role: "user", ...none });
   });
 
+  it("reads the platform role by the slug that core resolves (ruling 60 M1)", async () => {
+    // The app writes the slug in upper case. Core folds it to lower case.
+    const m = mapOptions(
+      options({}, { authtempo: { passwordHash: fast, platformOrganization: "Platform-Co" } }),
+    );
+    expect(orgOf(m)?.platformOrganization).toBe("platform-co");
+    const a = await adminApp(memoryDatabase(), { slug: "Platform-Co" });
+    const ann = await a.user("ann@example.com");
+    const roleIn = async (cookie: string) =>
+      ((await (await a.read("/get-session", cookie)).json()) as { user: { role: string } }).user
+        .role;
+    const listed = await json(await a.read("/admin/list-users", a.op));
+    const roles = Object.fromEntries(
+      listed.body.users.map((u: { email: string; role: string }) => [u.email, u.role]),
+    );
+    // get-session and list-users give each user one role.
+    expect({ op: await roleIn(a.op), ann: await roleIn(ann.cookie) }).toEqual({
+      op: "admin",
+      ann: "user",
+    });
+    expect(roles).toEqual({ [OPERATOR]: "admin", "ann@example.com": "user" });
+  });
+
   it("gives the client session the role and the ban fields with adminClient() (ruling 54)", async () => {
     const a = await adminApp(memoryDatabase());
     const ann = await a.user("ann@example.com");

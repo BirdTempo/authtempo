@@ -294,6 +294,7 @@ export function toAdminUser(row: UserRow, role: string, now: Date): AdminUser {
  * it in the platform organization, else `user`. The rule is core's
  * `holdsPlatformRole`, so the shim keeps no copy (ruling 54 of plan 12f).
  * Two reads: the platform organization by its slug, and the member row.
+ * `mapOptions` puts the slug that core resolves into the config (ruling 60).
  */
 export async function roleOf(mapped: Mapped, userId: string): Promise<string> {
   const o = mapped.config.organizations;

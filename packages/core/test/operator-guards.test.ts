@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { type AuthConfig, resolveConfig } from "../src/config.js";
 import {
   appActor,
+  holdsPlatformRole,
   isPlatformOperator,
   matchOperatorSecret,
   requireOperatorUser,
@@ -9,6 +11,7 @@ import {
 import { addMember } from "../src/engine/organizations.js";
 import { passwordSignUp } from "../src/engine/password.js";
 import { constantTimeEqual } from "../src/primitives/crypto.js";
+import { createMemoryAdapter } from "../src/storage/memory.js";
 import { BASE_URL } from "./helpers.js";
 import {
   OPERATOR_SECRETS,
@@ -176,5 +179,48 @@ describe("the scope and the app actor (plan 12f)", () => {
     expect(appActor("x".repeat(64)).ok).toBe(true);
     for (const name of ["", "x".repeat(65), "Billing", "a b", "a/b", "ä"])
       expect(appActor(name), name).toEqual({ ok: false, code: "invalid_body", status: 400 });
+  });
+});
+
+describe("the platform role rule on a config input (ruling 56 of plan 12f)", () => {
+  it("gives a config input and its resolved config one answer", () => {
+    const base = {
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+    } satisfies AuthConfig;
+    const inputs: AuthConfig[] = [
+      base,
+      { ...base, organizations: false },
+      { ...base, organizations: {} },
+      { ...base, organizations: { platformOrganization: "platform-co" } },
+      { ...base, organizations: { platformOrganization: "Platform-Co", platformRole: "admin" } },
+    ];
+    const members = [
+      null,
+      { organizationId: "p1", role: "admin" },
+      { organizationId: "p1", role: "member,admin" },
+      { organizationId: "p1", role: "member" },
+      { organizationId: "p2", role: "admin" },
+    ];
+    const holds: string[] = [];
+    inputs.forEach((input, i) => {
+      const resolved = resolveConfig(input);
+      for (const platformId of ["p1", null])
+        for (const [j, member] of members.entries()) {
+          const answer = holdsPlatformRole(input, platformId, member);
+          expect({ i, platformId, j, answer }).toEqual({
+            i,
+            platformId,
+            j,
+            answer: holdsPlatformRole(resolved, platformId, member),
+          });
+          if (answer) holds.push(`${i} ${platformId} ${j}`);
+        }
+    });
+    // Only the input with a platform role holds it, in the platform organization.
+    expect(holds).toEqual(["4 p1 1", "4 p1 2"]);
   });
 });

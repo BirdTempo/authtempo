@@ -24,14 +24,15 @@ export const cookieOf = (res: Response) =>
  * the product. The operator signs up and verifies the address. The app
  * makes the first operator in process (createAdmin, spec 26 item 11). The
  * operator then signs in, after the grant (ruling 50), and turns TOTP on
- * through Better Auth's two paths unless `factor` is false.
+ * through Better Auth's two paths unless `factor` is false. `slug` is
+ * the platform organization as the app writes it.
  */
-export function adminShim(database: CompatDatabase, links: string[] = []) {
+export function adminShim(database: CompatDatabase, links: string[] = [], slug = "platform-co") {
   return betterAuth({
     baseURL: BASE,
     secret: "0123456789abcdef0123456789abcdef",
     database,
-    authtempo: { passwordHash: fast, platformOrganization: "platform-co" },
+    authtempo: { passwordHash: fast, platformOrganization: slug },
     emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
     emailVerification: {
       sendVerificationEmail: async ({ token }) => {
@@ -46,9 +47,12 @@ export function adminShim(database: CompatDatabase, links: string[] = []) {
   });
 }
 
-export async function adminApp(database: CompatDatabase, opts: { factor?: boolean } = {}) {
+export async function adminApp(
+  database: CompatDatabase,
+  opts: { factor?: boolean; slug?: string } = {},
+) {
   const links: string[] = [];
-  const auth = adminShim(database, links);
+  const auth = adminShim(database, links, opts.slug);
   const send = (method: string, path: string, body: unknown, cookie: string) =>
     auth.handler(
       new Request(`${BASE}/api/auth${path}`, {
