@@ -244,6 +244,54 @@ describe("the operator audit row (plan 12f Task 4)", () => {
     expect(order).toEqual(["committed", "afterAction", "endFamilies"]);
   });
 
+  it("runs afterAction and endFamilies when the act's step throws, with one log line", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const order: string[] = [];
+    const auth = await operatorAuth({
+      hooks: {
+        operator: {
+          afterAction() {
+            order.push("afterAction");
+          },
+        },
+      },
+    });
+    const { user } = await verifiedSession(auth, TARGET);
+    const inner = auth.storage;
+    const recording: StorageAdapter = {
+      create: (model, data) => inner.create(model, data),
+      findOne: (model, where) => inner.findOne(model, where),
+      findMany: (model, where, opts) => {
+        if (model === "oauthToken") order.push("endFamilies");
+        return inner.findMany(model, where, opts);
+      },
+      update: (model, where, data) => inner.update(model, where, data),
+      delete: (model, where) => inner.delete(model, where),
+      transaction: (fn) => inner.transaction(fn),
+    };
+    const done = await operatorAct(
+      { ...auth.config, storage: recording },
+      draftFor(user.id),
+      async (tx, _draft, ends) => {
+        await deleteFamilies(tx, [{ field: "userId", op: "eq", value: user.id }], ends.families);
+        return ok({ userId: user.id });
+      },
+      {
+        async committed() {
+          order.push("committed");
+          throw new Error("step broke");
+        },
+      },
+    );
+    // The act is committed, so the answer is ok and the row stays.
+    if (!done.ok) throw new Error(done.code);
+    expect((await auditRows(auth.storage)).map((r) => r.id)).toEqual([done.value.auditId]);
+    expect(order).toEqual(["committed", "afterAction", "endFamilies"]);
+    expect(errors.mock.calls).toEqual([
+      ["authtempo: operator step failed", done.value.auditId, "Error"],
+    ]);
+  });
+
   it("refuses a reason with a control character", () => {
     for (const raw of ["a\nb", "a\u0000", "", "x".repeat(REASON_MAX + 1), 7, null, undefined])
       expect(operatorReason(raw)).toEqual({ ok: false, code: "invalid_body", status: 400 });

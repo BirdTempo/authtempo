@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { appErrorName } from "../../primitives/app-error.js";
 import { newId } from "../../primitives/ids.js";
 import { hasControlChar, removeControlChars } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
@@ -126,8 +127,8 @@ export interface OperatorActEnds {
 export interface OperatorActSteps<T> {
   /**
    * Runs after the commit and before `afterAction`: `sessionsEnded`,
-   * `deliverLogouts`, the notice, and the user hooks, in that order. It
-   * must not throw: the act is committed.
+   * `deliverLogouts`, the notice, and the user hooks, in that order. The
+   * act is committed, so a throw writes one log line and the act stays.
    */
   committed?(value: T, ends: OperatorActEnds): Promise<void>;
 }
@@ -146,8 +147,8 @@ export interface OperatorActSteps<T> {
  * After the commit, in the order of ruling 2 of plan 12f: the act's
  * `committed` step, then `afterAction` with the stored row, then
  * `endFamilies` last (ruling 45 of plan 12e). A throw of `afterAction`
- * writes one log line and the act stays. The answer is the work's value
- * with `auditId`.
+ * writes one log line and the act stays; so does a throw of the step. The
+ * answer is the work's value with `auditId`.
  */
 export async function operatorAct<T extends object>(
   config: ResolvedConfig,
@@ -182,9 +183,21 @@ export async function operatorAct<T extends object>(
   });
   if (!done.ok) return done;
   const { value, row } = done.value;
-  await steps.committed?.(value, ends);
-  await runAfter("operator.afterAction", config.hooks.operator.afterAction, { audit: row }, row.id);
-  await endFamilies(config, ends.families);
+  try {
+    await steps.committed?.(value, ends);
+  } catch (e) {
+    console.error("authtempo: operator step failed", row.id, appErrorName(e));
+  } finally {
+    // endFamilies is a security step: it ends a refresh family that a race
+    // wrote during the act. So it runs after any end of the step.
+    await runAfter(
+      "operator.afterAction",
+      config.hooks.operator.afterAction,
+      { audit: row },
+      row.id,
+    );
+    await endFamilies(config, ends.families);
+  }
   return ok({ ...value, auditId: row.id });
 }
 
