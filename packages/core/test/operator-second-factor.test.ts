@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { defaultNoticeMail, type NoticeMailInput } from "../src/engine/notices.js";
 import type { OperatorActor } from "../src/engine/operator/guards.js";
 import { operatorApi } from "../src/engine/operator/index.js";
 import {
@@ -238,6 +239,52 @@ describe("the disable of the second factor with a proof (plan 12f Task 9)", () =
     expect(mails[0]?.text).not.toContain(OPERATOR_IP);
     expect(mails[0]?.text).not.toContain("IP address");
     expect(mails[0]?.text).not.toContain(OPERATOR_UA);
+  });
+
+  it("hands the notice builder no IP and no user agent, and sends no notice with notices: false", async () => {
+    const mail = vi.fn((input: NoticeMailInput) => defaultNoticeMail(input));
+    const auth = await operatorAuth({ account: { notices: { mail } } });
+    const { user } = await enrolled(auth, EMAIL);
+    mail.mockClear();
+    const done = await disable(auth, user.id);
+    if (!done.ok) throw new Error(done.code);
+    expect(mail).toHaveBeenCalledTimes(1);
+    expect(mail.mock.calls[0]?.[0]).toMatchObject({
+      event: "factor_disabled",
+      email: EMAIL,
+      ip: null,
+      userAgent: null,
+    });
+    // With the notices off the act still runs, and no notice goes.
+    const off = await operatorAuth({ account: { notices: false } });
+    const ada = await enrolled(off, EMAIL);
+    const quiet = await disable(off, ada.user.id);
+    if (!quiet.ok) throw new Error(quiet.code);
+    expect(offMails(off)).toEqual([]);
+    expect((await auditRows(off)).map((r) => r.action)).toEqual(["second_factor_disable"]);
+  });
+
+  it("writes only the three proof keys, and the time in the toISOString form", async () => {
+    const auth = await operatorAuth();
+    const { user } = await enrolled(auth, EMAIL);
+    const at = new Date(auth.clock.now().getTime() - DAY_MS);
+    // The same instant, written with the zone +02:00.
+    const local = new Date(at.getTime() + 2 * 3600 * 1000).toISOString().slice(0, 23);
+    const proof = {
+      method: "document",
+      reference: "CASE-4821",
+      checkedAt: `${local}+02:00`,
+      document: "P1234567",
+    };
+    const done = await disable(auth, user.id, { proof });
+    if (!done.ok) throw new Error(done.code);
+    const [row] = await auditRows(auth);
+    expect(row?.data).toEqual({
+      method: "document",
+      reference: "CASE-4821",
+      checkedAt: at.toISOString(),
+    });
+    expect(JSON.stringify(row)).not.toContain("P1234567");
   });
 
   it("answers not_found while the user tools are off, after the actor check", async () => {
