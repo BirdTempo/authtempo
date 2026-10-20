@@ -512,7 +512,8 @@ describe("the compat migration on postgres", () => {
   it("keeps the teams columns of an app that has them, and adds them to an app that has none (plan 12k)", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
-      // Better Auth's teams option adds these two columns. Its rows keep their values.
+      // Better Auth's teams option adds these two columns. The migration keeps
+      // each one and adds no second column.
       await pg.sql.unsafe(`ALTER TABLE "session" ADD COLUMN "activeTeamId" text`);
       await pg.sql.unsafe(`ALTER TABLE "invitation" ADD COLUMN "teamId" text`);
       await betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql }).migrate();
