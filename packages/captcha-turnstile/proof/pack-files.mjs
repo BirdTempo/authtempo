@@ -5,12 +5,15 @@
 // as packages/import/worker/proof/pack-files.mjs, checked 2026-10-12).
 // The package's test script runs `tsc` first, so `dist` is newer than the
 // source that this check reads it for.
+// LICENSE ships because an MIT package must carry its notice, and pnpm
+// 12.8.1 copies the root LICENSE into the pack (its CHANGELOG, 12.0.0-rc.8,
+// read 2026-10-20).
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const pkg = fileURLToPath(new URL("..", import.meta.url));
 /** The files a pack must hold. npm adds package.json and README.md. */
-const NEEDED = ["package.json", "README.md", "dist/index.js", "dist/index.d.ts"];
+const NEEDED = ["package.json", "README.md", "LICENSE", "dist/index.js", "dist/index.d.ts"];
 const run = spawnSync("pnpm", ["pack", "--dry-run", "--json"], {
   cwd: pkg,
   encoding: "utf8",
@@ -24,7 +27,7 @@ if (run.status !== 0) {
 } else {
   paths = JSON.parse(run.stdout).files.map((f) => f.path);
   for (const p of paths)
-    if (!(p === "package.json" || p === "README.md" || p.startsWith("dist/")))
+    if (!(p === "package.json" || p === "README.md" || p === "LICENSE" || p.startsWith("dist/")))
       failures.push(`the pack holds ${p}, outside the allowlist`);
   for (const p of NEEDED) if (!paths.includes(p)) failures.push(`${p} is not in the pack`);
 }

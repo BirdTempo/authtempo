@@ -19,6 +19,10 @@
 // worker/.wrangler/cache/cf.json and a fake worker/input/import.local.json
 // when they do not exist, so a tree with no rehearsal shows the leak too,
 // and it removes only what it made.
+//
+// LICENSE ships because an MIT package must carry its notice, and pnpm
+// 12.8.1 copies the root LICENSE into the pack (its CHANGELOG, 12.0.0-rc.8,
+// read 2026-10-20).
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
@@ -30,13 +34,14 @@ const FAKES = [
   fileURLToPath(new URL("../input/import.local.json", import.meta.url)),
 ];
 /** The files a pack always holds (npm adds package.json and README.md). */
-const FILES = ["package.json", "README.md", "worker/README.md", "worker/wrangler.jsonc"];
+const FILES = ["package.json", "README.md", "LICENSE", "worker/README.md", "worker/wrangler.jsonc"];
 /** The folders whose every file ships. None of them holds local state. */
 const PREFIXES = ["dist/", "worker/src/", "worker/proof/"];
 /** Folders that must never ship. The allowlist already refuses them; the names make the failure clear. */
 const FORBIDDEN = ["worker/.wrangler/", "worker/input/", "src/", "test/"];
 const NEEDED = [
   "package.json",
+  "LICENSE",
   "dist/index.js",
   "worker/README.md",
   "worker/wrangler.jsonc",

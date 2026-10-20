@@ -3,16 +3,20 @@
 // package's proof does. pnpm 12.8.1 prints the list with
 // `pnpm pack --dry-run --json` (checked 2026-10-12 for packages/import).
 //
-// The pack holds package.json, README.md, and dist/ only. It must never hold
-// a test, a source file, a scaffold of the tests, or local state: a .env, a
-// .dev.vars, a .wrangler folder, or a node_modules folder.
+// The pack holds package.json, README.md, LICENSE, and dist/ only. It must
+// never hold a test, a source file, a scaffold of the tests, or local state: a
+// .env, a .dev.vars, a .wrangler folder, or a node_modules folder.
+//
+// LICENSE ships because an MIT package must carry its notice, and pnpm
+// 12.8.1 copies the root LICENSE into the pack (its CHANGELOG, 12.0.0-rc.8,
+// read 2026-10-20).
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const pkg = fileURLToPath(new URL("..", import.meta.url));
 /** The files a pack always holds. */
-const FILES = ["package.json", "README.md"];
+const FILES = ["package.json", "README.md", "LICENSE"];
 /** The folders whose every file ships. */
 const PREFIXES = ["dist/"];
 /** Names that never ship, at the start of a path or after any slash. */
@@ -28,6 +32,7 @@ const FORBIDDEN = [
 const NEEDED = [
   "package.json",
   "README.md",
+  "LICENSE",
   "dist/index.js",
   "dist/main.js",
   "dist/bin/authtempo.js",
