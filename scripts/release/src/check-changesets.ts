@@ -67,15 +67,21 @@ function packedBy(inner: string, files: readonly string[] | undefined): boolean 
   return files.some((entry) => inner === entry || inner.startsWith(`${entry}/`));
 }
 
-/** The keys of package.json that change what an app installs or loads. */
+/**
+ * The keys of package.json that change what an app installs or loads. `type`
+ * and `imports` change how Node loads dist. Rule 4 of .changeset/README.md
+ * names the same keys, and a test holds the two lists equal.
+ */
 export const RUNTIME_KEYS = [
   "dependencies",
   "peerDependencies",
   "peerDependenciesMeta",
   "optionalDependencies",
   "exports",
+  "imports",
   "main",
   "types",
+  "type",
   "bin",
   "files",
   "engines",

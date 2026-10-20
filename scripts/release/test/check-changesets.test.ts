@@ -6,6 +6,7 @@ import {
   type ChangedFile,
   checkChangesets,
   parseChangeset,
+  RUNTIME_KEYS,
   readInput,
 } from "../src/check-changesets.ts";
 import { changedFiles, mergeBase } from "../src/lib/git.ts";
@@ -197,6 +198,56 @@ describe("check-changesets", () => {
       expect(summaryLine(run([manifest("base", head)], []))).toBe(
         "check-changesets: PASS changed=0 covered=0 exempt=1 empty=0 failures=0",
       );
+  });
+
+  it("needs a changeset for a change of type or imports", () => {
+    expect(run([manifest("base", "type"), manifest("base", "imports")], []).failures).toEqual([
+      "@authtempo/core changes and no changeset names it: packages/core/package.json (type), packages/core/package.json (imports)",
+    ]);
+  });
+
+  it("needs a changeset for a new or a removed manifest", () => {
+    const text = read("manifests/base.json");
+    const all =
+      "dependencies, peerDependencies, peerDependenciesMeta, optionalDependencies, exports, imports, main, types, type, bin, files, engines";
+    expect(
+      run([{ path: "packages/core/package.json", base: null, head: text }], []).failures,
+    ).toEqual([
+      `@authtempo/core changes and no changeset names it: packages/core/package.json (${all})`,
+    ]);
+    expect(
+      run([{ path: "packages/core/package.json", base: text, head: null }], []).failures,
+    ).toEqual([
+      `@authtempo/core changes and no changeset names it: packages/core/package.json (${all})`,
+    ]);
+  });
+
+  it("names the same runtime keys in the code and in .changeset/README.md", () => {
+    const keys = [
+      "dependencies",
+      "peerDependencies",
+      "peerDependenciesMeta",
+      "optionalDependencies",
+      "exports",
+      "imports",
+      "main",
+      "types",
+      "type",
+      "bin",
+      "files",
+      "engines",
+    ];
+    expect([...RUNTIME_KEYS]).toEqual(keys);
+    // The rule line of the README is the list that a contributor reads.
+    const readme = readFileSync(
+      fileURLToPath(new URL("../../../.changeset/README.md", import.meta.url)),
+      "utf8",
+    );
+    const rule = readme
+      .split("\n")
+      .find((line) => line.includes("only when a runtime key changes"));
+    // The pattern skips `package.json`, because a key name has no dot.
+    expect([...(rule ?? "").matchAll(/`([A-Za-z]+)`/g)].map((m) => m[1])).toEqual(keys);
   });
 
   it("allows an empty changeset with a reason", () => {
