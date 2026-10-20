@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readTarball } from "./check-pack.ts";
 import {
@@ -146,39 +146,115 @@ const CHILD_ENV = {
 
 /**
  * The keys of the parent env that a child keeps. Each other key stays out,
- * such as NPM_TOKEN, NODE_AUTH_TOKEN, NODE_OPTIONS, npm_config_*, and TURBO_*.
+ * such as HOME, NPM_TOKEN, NODE_AUTH_TOKEN, NODE_OPTIONS, npm_config_*, and TURBO_*.
  */
 const KEPT_ENV = [
   // The search path of node, pnpm, npm, git, and tar.
   "PATH",
-  // The pnpm store of the offline install, the npm cache, and the git config.
-  // npm and pnpm do not read the npmrc in it, because NPM_CONFIG_USERCONFIG names another file.
-  "HOME",
   // The temp folder of each tool.
   "TMPDIR",
   // The text encoding of the output, such as the package mark of the pnpm lines.
   "LANG",
 ] as const;
 
-/**
- * The env of each child of the dry run: the kept keys of `parent`, the fixed
- * keys, and two empty npmrc files. npm 11.19.1 refuses one file as both the
- * user and the global config (read 2026-10-21), so there are two.
- */
-export function childEnv(
-  parent: NodeJS.ProcessEnv,
-  npmrc: { user: string; global: string },
-): ChildEnv {
+/** The keys of KEPT_ENV that `parent` holds. */
+function keptOf(parent: NodeJS.ProcessEnv): ChildEnv {
   const env: ChildEnv = {};
   for (const key of KEPT_ENV) {
     const value = parent[key];
     if (value !== undefined) env[key] = value;
   }
-  return {
-    ...env,
+  return env;
+}
+
+/** The files of the temp folder that each child gets in place of the files of the person. */
+export interface ChildFiles {
+  /** The empty user npmrc. */
+  user: string;
+  /** The empty global npmrc. */
+  global: string;
+  /** The empty HOME folder. */
+  home: string;
+}
+
+/** The store and the caches of the person, which the offline installs read. */
+export interface ToolPaths {
+  store: string;
+  pnpmCache: string;
+  npmCache: string;
+}
+
+/**
+ * The read of each tool path, under the HOME of the person. pnpm 12.8.1 and
+ * npm 11.19.1 print one absolute path for each (read 2026-10-21).
+ */
+const PATH_READS: [key: keyof ToolPaths, cmd: string, args: readonly string[]][] = [
+  ["store", "pnpm", ["store", "path"]],
+  ["pnpmCache", "pnpm", ["cache", "path"]],
+  ["npmCache", "npm", ["config", "get", "cache"]],
+];
+
+/**
+ * The env of the path reads: the kept keys, the HOME of `parent`, the fixed
+ * keys, and the two empty npmrc files. No read sends a request.
+ */
+export function readEnv(parent: NodeJS.ProcessEnv, files: ChildFiles): ChildEnv {
+  const env: ChildEnv = {
+    ...keptOf(parent),
     ...CHILD_ENV,
-    NPM_CONFIG_USERCONFIG: npmrc.user,
-    NPM_CONFIG_GLOBALCONFIG: npmrc.global,
+    NPM_CONFIG_USERCONFIG: files.user,
+    NPM_CONFIG_GLOBALCONFIG: files.global,
+  };
+  if (parent.HOME !== undefined) env.HOME = parent.HOME;
+  return env;
+}
+
+/** Reads each tool path once with `run`, in the empty folder `cwd`. */
+export function readToolPaths(
+  run: Run,
+  env: ChildEnv,
+  cwd: string,
+): { paths: ToolPaths; failures: string[] } {
+  const paths: ToolPaths = { store: "", pnpmCache: "", npmCache: "" };
+  const failures: string[] = [];
+  for (const [key, cmd, args] of PATH_READS) {
+    const label = `${cmd} ${args.join(" ")}`;
+    const r = run(cmd, args, cwd, env);
+    const lines = nonEmpty(r.stdout).map((l) => l.trim());
+    if (r.status !== 0) failures.push(`${label} exited ${r.status}: ${firstLine(r)}`);
+    else if (lines.length !== 1 || !isAbsolute(lines[0] ?? ""))
+      failures.push(`${label} printed no one absolute path: ${lines.join(", ") || "no output"}`);
+    else paths[key] = lines[0] ?? "";
+  }
+  return { paths, failures };
+}
+
+/**
+ * The env of each child of the dry run: the kept keys of `parent`, the fixed
+ * keys, the files of the temp folder, and the tool paths. npm 11.19.1 refuses
+ * one file as both the user and the global config (read 2026-10-21), so there are two.
+ */
+export function childEnv(parent: NodeJS.ProcessEnv, files: ChildFiles, paths: ToolPaths): ChildEnv {
+  return {
+    ...keptOf(parent),
+    ...CHILD_ENV,
+    // An empty folder, never the HOME of the person (review of the Task 6 fix, M1, m1, L1).
+    // In the HOME of the person, pnpm 12.8.1 reads Library/Preferences/pnpm/config.yaml,
+    // which can hold a proxy, a registry, and a token.
+    // turbo 2.11.7 reads the token of turbo login and of the Vercel CLI under
+    // Library/Application Support, and sends it to a remote cache.
+    // git reads .gitconfig at git status and git archive.
+    // npm reads no file in HOME, because the two npm config keys name the empty files.
+    // The three keys below name the store and the caches, so no child needs the real HOME.
+    HOME: files.home,
+    NPM_CONFIG_USERCONFIG: files.user,
+    NPM_CONFIG_GLOBALCONFIG: files.global,
+    // The store and the metadata cache of the offline installs. pnpm 12.8.1 reads
+    // pnpm_config_*, not npm_config_*, from the env (read 2026-10-21).
+    pnpm_config_store_dir: paths.store,
+    pnpm_config_cache_dir: paths.pnpmCache,
+    // The cache of npm publish --dry-run.
+    npm_config_cache: paths.npmCache,
   };
 }
 
@@ -243,12 +319,18 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
     dir,
     lines,
   });
-  // The temp folder comes first: the two empty npmrc files of childEnv are in it.
+  // The temp folder comes first: the empty files of childEnv are in it.
   const temp = mkdtempSync(join(options.tmp ?? tmpdir(), "authtempo-release-"));
-  const npmrc = { user: join(temp, "npmrc-user"), global: join(temp, "npmrc-global") };
-  writeFileSync(npmrc.user, "");
-  writeFileSync(npmrc.global, "");
-  const env = childEnv(options.env ?? process.env, npmrc);
+  const files: ChildFiles = {
+    user: join(temp, "npmrc-user"),
+    global: join(temp, "npmrc-global"),
+    home: join(temp, "home"),
+  };
+  writeFileSync(files.user, "");
+  writeFileSync(files.global, "");
+  mkdirSync(files.home);
+  const parent = options.env ?? process.env;
+  let env: ChildEnv = {};
   /** Runs one step. A step that exits other than 0 adds a failure and gives null. */
   const step = (
     label: string,
@@ -266,6 +348,14 @@ export async function dryRun(options: DryRunOptions): Promise<DryRunReport> {
   };
 
   try {
+    // The tool paths come from the real tools once, in the empty HOME folder as the working folder.
+    log("dry-run: read the store and the caches");
+    const read = readToolPaths(run, readEnv(parent, files), files.home);
+    if (read.failures.length > 0) {
+      failures.push(...read.failures);
+      return done(1);
+    }
+    env = childEnv(parent, files, read.paths);
     // git archive HEAD holds no change of the working tree, so a dirty checkout
     // would pack another tree than the one that the person sees.
     log("dry-run: git status --porcelain");

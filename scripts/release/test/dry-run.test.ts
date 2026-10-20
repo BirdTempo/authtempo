@@ -16,6 +16,7 @@ import { checkTarballs, readTarball } from "../src/check-pack.ts";
 import { readYaml, type YamlNode } from "../src/check-workflows.ts";
 import {
   type ChildEnv,
+  type ChildFiles,
   childEnv,
   type DryRunReport,
   dryRun,
@@ -27,11 +28,41 @@ import {
   type Run,
   type RunResult,
   spawnRun,
+  type ToolPaths,
 } from "../src/dry-run.ts";
 import { reportLines } from "../src/lib/report.ts";
 import { readWorkspace } from "../src/lib/workspace.ts";
 import { prepare } from "../src/prepare.ts";
 import { changesetVersion, copyFixture } from "./support/release-copy.ts";
+
+/** What the three path reads print for a person, in the form of pnpm 12.8.1 and npm 11.19.1. */
+const PERSON: ToolPaths = {
+  store: "/home/person/Library/pnpm/store/v11",
+  pnpmCache: "/home/person/Library/Caches/pnpm",
+  npmCache: "/home/person/.npm",
+};
+
+/** The kinds of the three path reads, which come before each other call. */
+const READS = ["pnpm store", "pnpm cache", "npm config"];
+
+/** The files of childEnv and some tool paths in a new temp folder, for a call of a real tool. */
+function childFiles(temp: string): { files: ChildFiles; paths: ToolPaths } {
+  mkdirSync(temp, { recursive: true });
+  const files = {
+    user: join(temp, "npmrc-user"),
+    global: join(temp, "npmrc-global"),
+    home: join(temp, "home"),
+  };
+  writeFileSync(files.user, "");
+  writeFileSync(files.global, "");
+  mkdirSync(files.home);
+  const paths = {
+    store: join(temp, "store"),
+    pnpmCache: join(temp, "pnpm-cache"),
+    npmCache: join(temp, "npm-cache"),
+  };
+  return { files, paths };
+}
 
 interface Call {
   kind: string;
@@ -78,6 +109,12 @@ function fake(change: Record<string, (call: Call) => RunResult | undefined> = {}
     const changed = change[call.kind]?.(call);
     if (changed !== undefined) return changed;
     switch (call.kind) {
+      case "pnpm store":
+        return ok(`${PERSON.store}\n`);
+      case "pnpm cache":
+        return ok(`${PERSON.pnpmCache}\n`);
+      case "npm config":
+        return ok(`${PERSON.npmCache}\n`);
       case "git status":
         return ok();
       case "git archive": {
@@ -240,13 +277,14 @@ describe("dry run", () => {
     expect(dryRunLine(report)).toBe(
       "release-dry-run: FAIL packages=0 of 0 version=none tarballs=0 files=0 smoke=0 failures=1",
     );
-    expect(f.calls.map((c) => c.kind)).toEqual(["git status"]);
+    expect(f.calls.map((c) => c.kind)).toEqual([...READS, "git status"]);
     expect(readdirSync(tmp)).toEqual([]);
   });
 
   it("runs the steps in order", async () => {
     const { report, calls, changesets } = await passingRun();
     expect(calls.map((c) => c.kind)).toEqual([
+      ...READS,
       "git status",
       "git archive",
       "extract",
@@ -581,10 +619,10 @@ describe("dry run", () => {
       scripts.map((s) => [s, `node -e "require('fs').writeFileSync('ran-${s}.txt', '')"`]),
     );
     writeFileSync(file, `${JSON.stringify(m, null, 2)}\n`);
-    const npmrc = { user: join(repo, "npmrc-user"), global: join(repo, "npmrc-global") };
-    writeFileSync(npmrc.user, "");
-    writeFileSync(npmrc.global, "");
-    const r = spawnRun("pnpm", PNPM_PUBLISH_ARGS, repo, childEnv(process.env, npmrc));
+    const temp = mkdtempSync(join(tmpdir(), "authtempo-scripts-test-"));
+    made.push(temp);
+    const { files, paths } = childFiles(temp);
+    const r = spawnRun("pnpm", PNPM_PUBLISH_ARGS, repo, childEnv(process.env, files, paths));
     expect([r.status, r.stdout.includes("📦 @authtempo/core@0.1.0 → http://127.0.0.1:9/")]).toEqual(
       [0, true],
     );
@@ -614,39 +652,57 @@ describe("dry run", () => {
     const { report, calls } = await passingRun(parent);
     expect(report.exit).toBe(0);
     const dir = report.dir ?? "";
-    expect(calls).toHaveLength(15);
-    for (const c of calls)
+    expect(calls).toHaveLength(18);
+    const fixed = {
+      PATH: "/bin",
+      TMPDIR: "/tmp/person",
+      LANG: "en_US.UTF-8",
+      CI: "1",
+      NO_COLOR: "1",
+      WRANGLER_SEND_METRICS: "false",
+      WRANGLER_HIDE_BANNER: "true",
+      TURBO_TELEMETRY_DISABLED: "1",
+      NPM_CONFIG_USERCONFIG: `${dir}/npmrc-user`,
+      NPM_CONFIG_GLOBALCONFIG: `${dir}/npmrc-global`,
+    };
+    // Only the three path reads get the HOME of the person.
+    for (const c of calls.slice(0, 3))
+      expect([c.kind, c.env]).toEqual([c.kind, { ...fixed, HOME: "/home/person" }]);
+    for (const c of calls.slice(3))
       expect([c.kind, c.env]).toEqual([
         c.kind,
         {
-          PATH: "/bin",
-          HOME: "/home/person",
-          TMPDIR: "/tmp/person",
-          LANG: "en_US.UTF-8",
-          CI: "1",
-          NO_COLOR: "1",
-          WRANGLER_SEND_METRICS: "false",
-          WRANGLER_HIDE_BANNER: "true",
-          TURBO_TELEMETRY_DISABLED: "1",
-          NPM_CONFIG_USERCONFIG: `${dir}/npmrc-user`,
-          NPM_CONFIG_GLOBALCONFIG: `${dir}/npmrc-global`,
+          ...fixed,
+          HOME: `${dir}/home`,
+          pnpm_config_store_dir: "/home/person/Library/pnpm/store/v11",
+          pnpm_config_cache_dir: "/home/person/Library/Caches/pnpm",
+          npm_config_cache: "/home/person/.npm",
         },
       ]);
     // A key that the parent lacks stays out of the child.
     const bare = await passingRun({ PATH: "/bin", NPM_TOKEN: "FAKE-TEST-TOKEN" });
-    for (const c of bare.calls)
+    const keys = [
+      "CI",
+      "NO_COLOR",
+      "NPM_CONFIG_GLOBALCONFIG",
+      "NPM_CONFIG_USERCONFIG",
+      "PATH",
+      "TURBO_TELEMETRY_DISABLED",
+      "WRANGLER_HIDE_BANNER",
+      "WRANGLER_SEND_METRICS",
+    ];
+    for (const c of bare.calls.slice(0, 3))
+      expect([c.kind, Object.keys(c.env).sort()]).toEqual([c.kind, keys]);
+    for (const c of bare.calls.slice(3))
       expect([c.kind, Object.keys(c.env).sort()]).toEqual([
         c.kind,
         [
-          "CI",
-          "NO_COLOR",
-          "NPM_CONFIG_GLOBALCONFIG",
-          "NPM_CONFIG_USERCONFIG",
-          "PATH",
-          "TURBO_TELEMETRY_DISABLED",
-          "WRANGLER_HIDE_BANNER",
-          "WRANGLER_SEND_METRICS",
-        ],
+          ...keys,
+          "HOME",
+          "npm_config_cache",
+          "pnpm_config_cache_dir",
+          "pnpm_config_store_dir",
+        ].sort(),
       ]);
   });
 
@@ -664,6 +720,51 @@ describe("dry run", () => {
     expect(new Set(seen)).toEqual(
       new Set(['NPM_CONFIG_USERCONFIG=""', 'NPM_CONFIG_GLOBALCONFIG=""']),
     );
+  });
+
+  it("gives each child an empty HOME in the temp folder", async () => {
+    // The HOME of the person holds the pnpm config.yaml and the turbo and
+    // Vercel tokens (review of the Task 6 fix, M1).
+    const { root, tmp } = setup();
+    const f = fake();
+    const homes: string[] = [];
+    const run: Run = (cmd, args, cwd, env) => {
+      const home = env.HOME ?? "";
+      homes.push(
+        `${kindOf(cmd, args, cwd)} ${existsSync(home) ? readdirSync(home).length : "none"}`,
+      );
+      return f.run(cmd, args, cwd, env);
+    };
+    const report = await dryRun({ root, run, tmp, env: { PATH: "/bin", HOME: root } });
+    expect(report.exit).toBe(0);
+    const dir = report.dir ?? "";
+    const kinds = f.calls.map((c) => c.kind);
+    expect(f.calls.map((c) => c.env.HOME)).toEqual(
+      kinds.map((k) => (READS.includes(k) ? root : `${dir}/home`)),
+    );
+    // Each path read runs in the empty folder, so no project config of the checkout applies.
+    expect(f.calls.slice(0, 3).map((c) => c.cwd)).toEqual([
+      `${dir}/home`,
+      `${dir}/home`,
+      `${dir}/home`,
+    ]);
+    expect(homes.slice(3).filter((h) => !h.endsWith(" 0"))).toEqual([]);
+  });
+
+  it("fails when a tool path read fails", async () => {
+    const { root, tmp } = setup();
+    const f = fake({
+      "pnpm store": () => ({ status: 1, stdout: "", stderr: "ERR_PNPM_SOMETHING\n" }),
+      "npm config": () => ok("undefined\n"),
+    });
+    const report = await dryRun({ root, run: f.run, tmp });
+    expect(report.exit).toBe(1);
+    expect(failuresOf(report)).toEqual([
+      "pnpm store path exited 1: ERR_PNPM_SOMETHING",
+      "npm config get cache printed no one absolute path: undefined",
+    ]);
+    expect(f.calls.map((c) => c.kind)).toEqual(READS);
+    expect(readdirSync(tmp)).toEqual([]);
   });
 
   it("fails when a publish line names another registry than the dead one", async () => {
@@ -801,15 +902,13 @@ describe("dry run against a scope registry", () => {
         stdio: "pipe",
       });
       const [tarball = ""] = readdirSync(out);
-      const configs = { user: join(temp, "npmrc-user"), global: join(temp, "npmrc-global") };
-      writeFileSync(configs.user, "");
-      writeFileSync(configs.global, "");
+      const { files, paths } = childFiles(join(temp, "child"));
 
       // Each guard holds alone: the env without the scope arguments, and the
       // scope arguments with the env of the parent.
       const cases: [label: string, env: ChildEnv, scope: boolean][] = [
-        ["both", childEnv(parent, configs), true],
-        ["env alone", childEnv(parent, configs), false],
+        ["both", childEnv(parent, files, paths), true],
+        ["env alone", childEnv(parent, files, paths), false],
         ["arguments alone", parent as ChildEnv, true],
       ];
       const drop = (args: readonly string[], scope: boolean) =>
