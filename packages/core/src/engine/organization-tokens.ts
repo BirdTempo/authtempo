@@ -361,9 +361,10 @@ export async function revokeOrganizationToken(
 }
 
 /**
- * The organization and the summary of a `to_` token, in the order of a user
- * token: the form, the hash lookup, the expiry, the retired mark, the
- * organization, the window, the spend. So a refused call spends nothing.
+ * The organization and the summary of a `to_` token. The checks run in the
+ * order of a user token. The order is the form, the hash lookup, the expiry,
+ * the retired mark, the organization, the window, and the spend. So a refused
+ * call spends nothing.
  * `unauthorized` for a malformed, unknown, or expired token, a token whose
  * organization is gone, and any token while organizations are off. An
  * expired row is deleted on the way out. The creator does not count: the
@@ -373,6 +374,11 @@ export async function revokeOrganizationToken(
  * findOne of the organization; the spend of `spendUse` (none with no quota);
  * one update of `lastUsedAt` at most once per hour; one findOne of the
  * creator's member row. One limiter call for a token with a window.
+ *
+ * On D1 a resolve runs at most 44 statements. It runs 4 of its own and the
+ * 39 of the worst spend (20 updates and 19 reads). A cold isolate adds 1, the
+ * schema version check. A D1 test holds the count at 50 or fewer, the queries
+ * of one Workers Free invocation.
  */
 export async function authenticateOrganizationToken(
   config: ResolvedConfig,

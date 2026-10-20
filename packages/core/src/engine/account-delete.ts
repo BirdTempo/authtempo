@@ -311,6 +311,10 @@ async function runDelete(
  * user row after its session insert. The sessions go before the
  * identities: a link in flight updates its session as its last statement,
  * so it undoes or commits first.
+ *
+ * The cost per organization that goes: the 9 storage calls of
+ * `deleteOrganizationRows` with `alone`. Plan 12k Task 8 added 2 of them,
+ * the deletes of the organization tokens and of the role rows.
  */
 export async function deleteAccountRows(
   tx: StorageAdapter,
