@@ -205,8 +205,9 @@ const firstLine = (r: RunResult) =>
 
 /**
  * The summary line and the failure lines of a release check that printed its
- * report: "<name>: PASS|FAIL ..." and each line after it that starts with two
- * spaces, except a note. A step with no summary line gives null.
+ * report. The summary line is "<name>: PASS|FAIL ...". Each failure line comes
+ * after it and starts with two spaces, and a note is not one. A step with no
+ * summary line gives null.
  */
 function reportOf(stdout: string): { summary: string; failures: string[] } | null {
   const all = nonEmpty(stdout);

@@ -1,6 +1,6 @@
 // The commands of a release copy (plan 12j, ruling 21). The job check of
-// release.yml and the dry run both run them, so one list holds both:
-// check-workflows reads it for each run line, and the dry run spawns it.
+// release.yml and the dry run both run them, so one list holds both.
+// check-workflows reads it for each run line. The dry run spawns it.
 
 /** The file at the root of each release copy. prepare refuses a folder without it. */
 export const RELEASE_COPY_MARKER = ".release-copy";
@@ -13,9 +13,9 @@ export const COPY_PREPARE = ["node", "scripts/release/src/prepare.ts"] as const;
 
 /**
  * The build with the cache off, of the released packages and what they need.
- * The site builds its feed from each changelog, and its build fails on a
- * version with no release date (read 2026-10-21 in a copy after changeset
- * version). The site ships in no tarball, so the build skips it.
+ * The site builds its feed from each changelog. Its build fails on a version
+ * with no release date (read 2026-10-21 in a copy after changeset version).
+ * The site ships in no tarball, so the build skips it.
  */
 export const COPY_BUILD = ["pnpm", "turbo", "run", "build", "--force"] as const;
 
