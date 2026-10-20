@@ -65,15 +65,16 @@ The test below turns the factor off and signs in with the password alone.
 
 Update 2026-10-21 by plan 12f: the operator tools do step 5 with a record. The text above stays as it was published.
 
-1. Run `authtempo users second-factor-off <base url> <user id> --reason "<reason>" --yes` for step 5.
-2. Add `--proof-method <method>`: `document`, `in_person`, `video`, `knowledge`, or `other`.
-3. Add `--proof-reference <case id>`: the record of step 4 in your own system, never the evidence.
-4. Add `--proof-checked-at <time>`: the time of the check of step 3, at most 7 days old.
+1. Run `authtempo users search <base url> --email <address>`. Copy the user id from the `ID` column.
+2. Run `authtempo users second-factor-off <base url> <user id> --reason "<reason>" --yes` for step 5 above.
+3. Add `--proof-method <method>`: `document`, `in_person`, `video`, `knowledge`, or `other`.
+4. Add `--proof-reference <case id>`: the record of step 4 above in your own system, never the evidence.
+5. Add `--proof-checked-at <time>`: the time of the check of step 3 above, at most 7 days old.
 
 - The secret needs the scope `users`. [Run the operator tools](/docs/guides/operator-tools/#the-second-factor) gives the rules of section 26 of the design.
 - The method `knowledge` alone is below the level of an enrollment. Use `document`, `in_person`, or `video`.
 - Core checks no proof. The audit row `second_factor_disable` keeps the three values, and `hooks.operator.beforeAction` can check them.
-- Before step 5, look for a recent change of the address. A person who took the account can change the address, and then ask for a recovery.
+- Before step 5 above, look for a recent change of the address. A person who took the account can change the address, and then ask for a recovery.
 - The command turns every method of the user off, and keeps the sessions. The user gets the notice `factor_disabled` unless `account.notices` is false.
 - The deployment refuses a check time after its own clock with `invalid_body`.
 - A user with the factor off stops the command with [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled). Tell the person to sign in.

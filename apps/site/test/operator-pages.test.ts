@@ -107,7 +107,9 @@ describe("the operator pages", () => {
   });
 
   it("links each code of the factor disable in the dated note of the recovery runbook", () => {
-    const codes = secretCodesOf(keyed("POST /operator/users/second-factor/disable"));
+    const codes = secretCodesOf(
+      keyed("GET /operator/users/search", "POST /operator/users/second-factor/disable"),
+    );
     const page = "operations/second-factor-recovery.mdx";
     expectLinks(page, section(page, "Update 2026-10-21 by plan 12f"), [...codes, "not_found"]);
   });
