@@ -7,6 +7,7 @@ import {
 } from "../scripts/check-security-policy.ts";
 import { readRepoFile } from "../scripts/lib/load.ts";
 import { summaryLine } from "../scripts/lib/report.ts";
+import { SITE } from "../src/data/site.ts";
 
 // The real files of the tree: SECURITY.md, release/support.json, and
 // release/repository.json (plan 12j Task 12, spec 33 item 7).
@@ -17,9 +18,11 @@ const REPOSITORY = {
   owner: "authtempo",
   name: "authtempo",
 };
+/** The origin of the site. check.ts passes SITE.origin; the test types the value. */
+const ORIGIN = "https://authtempo.com";
 
 const check = (text: string, rows: readonly SupportRow[] = []) =>
-  checkSecurityPolicy({ text, rows, repository: REPOSITORY });
+  checkSecurityPolicy({ text, rows, repository: REPOSITORY, origin: ORIGIN });
 
 /** The real text with one part replaced. Each break replaces one whole part, as a person would. */
 const textWith = (from: string, to: string) => {
@@ -49,7 +52,12 @@ describe("check-security-policy", () => {
     expect(real.failures).toEqual([]);
     expect(real.repository).toEqual(REPOSITORY);
     expect(real.rows).toEqual([]);
-    const r = checkSecurityPolicy({ text: TEXT, rows: real.rows, repository: real.repository });
+    const r = checkSecurityPolicy({
+      text: TEXT,
+      rows: real.rows,
+      repository: real.repository,
+      origin: SITE.origin,
+    });
     expect(r.failures).toEqual([]);
     expect(summaryLine(r)).toBe(
       "check-security-policy: PASS sections=7 rows=0 channels=2 failures=0",
@@ -166,7 +174,7 @@ describe("check-security-policy", () => {
     const mail = "mailto:security@authtempo.com";
     expect(check(textWith(mail, "mailto:security@example.com")).failures).toEqual([
       'SECURITY.md holds the placeholder "example.com"',
-      "the second channel is mailto:security@example.com; it must be mailto:security@authtempo.com, at the host of SITE.origin",
+      "the second channel is mailto:security@example.com; it must be mailto:security@authtempo.com, at the host of https://authtempo.com",
     ]);
     expect(
       check(textWith("Do not open a public issue", "TODO: Do not open a public issue")).failures,
@@ -197,6 +205,25 @@ describe("check-security-policy", () => {
     expect(
       check(textWith(`(${mail})`, `(${mail}) or [the chat](https://chat.authtempo.com/)`)).failures,
     ).toEqual(['the section "How to report" names 3 channels; it must name 2']);
+  });
+
+  it("takes the host of the mailbox from the origin of the site", () => {
+    const other = (text: string) =>
+      checkSecurityPolicy({
+        text,
+        rows: [],
+        repository: REPOSITORY,
+        origin: "https://auth.example.org",
+      });
+    // The real file names the mailbox of authtempo.com, so another origin fails it.
+    expect(other(TEXT).failures).toEqual([
+      "the second channel is mailto:security@authtempo.com; it must be mailto:security@auth.example.org, at the host of https://auth.example.org",
+    ]);
+    const moved = textWith(
+      "[security@authtempo.com](mailto:security@authtempo.com)",
+      "[security@auth.example.org](mailto:security@auth.example.org)",
+    );
+    expect(other(moved).failures).toEqual([]);
   });
 
   it("states the times of decision 4", () => {

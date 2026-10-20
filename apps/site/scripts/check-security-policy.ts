@@ -3,7 +3,6 @@
 // support table against release/support.json, the times of owner decision 4,
 // and the two channels. The prose rules are not here: check-terms and
 // check-sentences read the file through policyProsePages (plan 11b).
-import { SITE } from "../src/data/site.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** The `## ` sections of SECURITY.md, in this order (spec 33 item 7). */
@@ -91,8 +90,10 @@ export function checkSecurityPolicy(input: {
   text: string;
   rows: readonly SupportRow[];
   repository: Repository;
+  /** The origin of the site. check.ts passes SITE.origin, so the mailbox follows a change of host. */
+  origin: string;
 }): CheckReport {
-  const { text, rows, repository } = input;
+  const { text, rows, repository, origin } = input;
   const failures: string[] = [];
   const sections = sectionsOf(text);
   const headings = sections.map((s) => s.heading);
@@ -155,10 +156,10 @@ export function checkSecurityPolicy(input: {
   }
 
   // The channels of owner decision 4: GitHub private vulnerability reporting
-  // first, then the mailbox. The mailbox has the host of the site.
+  // first, then the mailbox. The mailbox has the host of the origin input.
   const channels = linksOf(body("How to report"));
   const advisory = `${repository.url}/security/advisories/new`;
-  const mailbox = `mailto:security@${new URL(SITE.origin).host}`;
+  const mailbox = `mailto:security@${new URL(origin).host}`;
   if (channels.length !== 2)
     failures.push(`the section "How to report" names ${channels.length} channels; it must name 2`);
   if (channels[0] !== undefined && channels[0] !== advisory)
@@ -167,7 +168,7 @@ export function checkSecurityPolicy(input: {
     );
   if (channels[1] !== undefined && channels[1] !== mailbox)
     failures.push(
-      `the second channel is ${channels[1]}; it must be ${mailbox}, at the host of SITE.origin`,
+      `the second channel is ${channels[1]}; it must be ${mailbox}, at the host of ${origin}`,
     );
 
   for (const t of TIMES)

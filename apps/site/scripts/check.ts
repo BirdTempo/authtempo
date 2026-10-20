@@ -19,6 +19,7 @@ import { FEATURES, PACKAGE_EXEMPT, PACKAGE_FEATURES } from "../src/data/features
 import { ICON_NAMES } from "../src/data/icons.ts";
 import { FEED_START, RELEASE_DATES } from "../src/data/releases.ts";
 import { REPO_ROOT } from "../src/data/repo.ts";
+import { SITE } from "../src/data/site.ts";
 import { checkAgentIndex, sampleIncludes } from "./check-agent-index.ts";
 import { checkClaims } from "./check-claims.ts";
 import { checkCli } from "./check-cli.ts";
@@ -438,6 +439,7 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         text: input.text ?? "",
         rows: input.rows,
         repository: input.repository,
+        origin: SITE.origin,
       });
       r.failures.unshift(...input.failures);
       return r;
