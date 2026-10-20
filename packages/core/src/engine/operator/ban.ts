@@ -20,8 +20,32 @@ const UNTIL_MIN_MS = MINUTE_MS;
 /** The latest end of a timed ban: 3650 days after now. A longer ban is a ban with no end. */
 const UNTIL_MAX_MS = 3650 * 86_400_000;
 
-/** An ISO 8601 date and time with a zone, as `Date.prototype.toISOString` writes it or with an offset. */
-const ISO_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+/**
+ * An ISO 8601 date and time with a zone, as `Date.prototype.toISOString`
+ * writes it or with an offset. The groups: year, month, day, hour, minute,
+ * second, then the offset sign, hours, and minutes.
+ */
+const ISO_DATE_TIME =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,3})?)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
+
+/**
+ * True when the calendar fields of the input name the time that `end`
+ * holds. `Date` moves a day that does not exist to a later day: it reads
+ * 02-30 as 03-02 (review L2). So a wrong date gives a ban to another day.
+ */
+function sameFields(fields: RegExpExecArray, end: Date): boolean {
+  const [, year, month, day, hour, minute, second, sign, offsetHours, offsetMinutes] = fields;
+  const offset = sign ? Number(offsetHours) * 60 + Number(offsetMinutes) : 0;
+  const local = new Date(end.getTime() + (sign === "-" ? -offset : offset) * MINUTE_MS);
+  return (
+    local.getUTCFullYear() === Number(year) &&
+    local.getUTCMonth() + 1 === Number(month) &&
+    local.getUTCDate() === Number(day) &&
+    local.getUTCHours() === Number(hour) &&
+    local.getUTCMinutes() === Number(minute) &&
+    local.getUTCSeconds() === Number(second ?? "0")
+  );
+}
 
 /** The input of a ban (spec 26 items 5 and 6). `until` absent: the ban has no end. */
 export interface BanInput {
@@ -43,13 +67,18 @@ export interface UnbanInput {
   userAgent: string | null;
 }
 
-/** The end of a timed ban, or null for no end. `invalid_body` outside 1 minute to 3650 days after now. */
+/**
+ * The end of a timed ban, or null for no end. `invalid_body` for a date
+ * that does not exist, and outside 1 minute to 3650 days after now.
+ */
 function banEnd(until: unknown, now: Date): Result<Date | null> {
   if (until === undefined) return ok(null);
-  if (typeof until !== "string" || !ISO_DATE_TIME.test(until)) return fail("invalid_body");
+  const fields = typeof until === "string" ? ISO_DATE_TIME.exec(until) : null;
+  if (typeof until !== "string" || !fields) return fail("invalid_body");
   const end = new Date(until);
   const ms = end.getTime() - now.getTime();
-  if (Number.isNaN(ms) || ms < UNTIL_MIN_MS || ms > UNTIL_MAX_MS) return fail("invalid_body");
+  if (Number.isNaN(ms) || !sameFields(fields, end)) return fail("invalid_body");
+  if (ms < UNTIL_MIN_MS || ms > UNTIL_MAX_MS) return fail("invalid_body");
   return ok(end);
 }
 

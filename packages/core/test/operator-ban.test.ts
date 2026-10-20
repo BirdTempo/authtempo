@@ -565,6 +565,28 @@ describe("the ban (plan 12f Task 6)", () => {
       code: "not_found",
       status: 404,
     });
+    // A day or an hour that does not exist: Date rolls 02-30 to 03-02.
+    const year = w.clock.now().getUTCFullYear() + 1;
+    for (const until of [
+      `${year}-02-30T00:00:00Z`,
+      `${year}-04-31T12:00:00+02:00`,
+      `${year}-06-15T23:59:60Z`,
+    ])
+      expect(await ban(w, s.user.id, until)).toEqual({
+        ok: false,
+        code: "invalid_body",
+        status: 400,
+      });
+    expect(await userRow(w, s.user.id)).toMatchObject({ bannedAt: null });
+    // A real day passes in each zone form.
+    expect((await ban(w, s.user.id, `${year}-03-01T00:30:00+02:00`)).ok).toBe(true);
+    expect((await userRow(w, s.user.id))?.banUntil?.toISOString()).toBe(
+      `${year}-02-28T22:30:00.000Z`,
+    );
+    expect((await ban(w, s.user.id, `${year}-02-28T23:30:00-02:00`)).ok).toBe(true);
+    expect((await userRow(w, s.user.id))?.banUntil?.toISOString()).toBe(
+      `${year}-03-01T01:30:00.000Z`,
+    );
     expect((await ban(w, s.user.id, at(MINUTE_MS))).ok).toBe(true);
     expect((await ban(w, s.user.id, at(3650 * 1440 * MINUTE_MS))).ok).toBe(true);
     const user = await w.storage.findOne("user", [{ field: "id", op: "eq", value: s.user.id }]);
