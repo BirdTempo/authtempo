@@ -1,3 +1,12 @@
+import {
+  CORE_STATEMENTS,
+  NAME_RE,
+  type RoleDef,
+  type RoleTable,
+  type Statements,
+  statementFault,
+  union,
+} from "./access.js";
 import { DEFAULT_BASE_PATH } from "./bindings.js";
 import {
   CAPTCHA_FLOWS,
@@ -34,7 +43,7 @@ import type { CimdEntry, JwksEntry } from "./engine/oauth-clients.js";
 import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
 import { defaultExistingAccountMail, type ExistingAccountMailInput } from "./engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
-import { normalizeSlug, ROLE_RE } from "./engine/ranks.js";
+import { deriveRoles, normalizeSlug, ROLE_RE } from "./engine/ranks.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 import { LEGACY_SESSION_COOKIE } from "./http/cookies.js";
@@ -780,7 +789,12 @@ export interface LegacyVerifyConfig {
 }
 
 export interface OrganizationsConfig {
+  /** The rank form: a rank per role; core derives each role's permissions. Not with `roles`. */
   ranks?: Record<string, number>;
+  /** The role form (plan 12k): a rank and the permissions per role. Not with `ranks`. */
+  roles?: Record<string, { rank: number; permissions: Record<string, string[]> }>;
+  /** The app's own resources and their actions, beside `CORE_STATEMENTS`. */
+  statements?: Record<string, string[]>;
   reservedSlugs?: string[];
   platformOrganization?: string;
   platformRole?: string;
@@ -842,7 +856,12 @@ export interface ResolvedConfig {
     confirmPage: (input: HandoffConfirmPageInput) => string;
   } | null;
   organizations: {
+    /** From `ranks`, or the rank of each role of `roles`. */
     ranks: Readonly<Record<string, number>>;
+    /** From `roles`, or `deriveRoles(ranks)`. */
+    roles: RoleTable;
+    /** `CORE_STATEMENTS` and the app's own: the known set. */
+    statements: Statements;
     reservedSlugs: ReadonlySet<string>;
     platformOrganization: string | null;
     platformRole: string | null;
@@ -889,6 +908,75 @@ export function workersClientIp(request: Request): string | null {
 }
 
 const DEFAULT_RANKS = { viewer: 1, member: 2, admin: 3, owner: 4 };
+
+/** The known statement set: `CORE_STATEMENTS` and the app's own resources (plan 12k). */
+function resolveStatements(input: Record<string, string[]> | undefined): Statements {
+  if (input === undefined) return union(CORE_STATEMENTS);
+  if (!isPlainObject(input)) throw new ConfigError("organizations.statements must be an object");
+  for (const [name, actions] of Object.entries(input)) {
+    // A core resource keeps core's actions, so an app cannot widen or rename them.
+    if (Object.hasOwn(CORE_STATEMENTS, name))
+      throw new ConfigError(`organizations.statements.${name} is a core resource`);
+    if (!NAME_RE.test(name))
+      throw new ConfigError(`organizations.statements has a bad resource name: ${name}`);
+    if (!Array.isArray(actions) || actions.length === 0)
+      throw new ConfigError(`organizations.statements.${name} must list at least one action`);
+    for (const [i, action] of actions.entries()) {
+      if (typeof action !== "string" || !NAME_RE.test(action))
+        throw new ConfigError(
+          `organizations.statements.${name} has a bad action name: ${String(action)}`,
+        );
+      if (actions.indexOf(action) !== i)
+        throw new ConfigError(`organizations.statements.${name} repeats ${action}`);
+    }
+  }
+  return union(CORE_STATEMENTS, input);
+}
+
+/**
+ * The two role forms (plan 12k). `ranks` derives the permissions of each role;
+ * `roles` names them. One form only, so no rank and no right has two sources.
+ */
+function resolveRoleForms(
+  o: OrganizationsConfig,
+  known: Statements,
+): { ranks: Record<string, number>; roles: RoleTable } {
+  if (o.ranks !== undefined && o.roles !== undefined)
+    throw new ConfigError("organizations takes ranks or roles, not both");
+  if (o.roles === undefined) {
+    const ranks = o.ranks ?? DEFAULT_RANKS;
+    checkRanks(ranks, "ranks");
+    return { ranks, roles: deriveRoles(ranks) };
+  }
+  if (!isPlainObject(o.roles)) throw new ConfigError("organizations.roles must be an object");
+  const entries = Object.entries(o.roles);
+  for (const [name, def] of entries)
+    if (!isPlainObject(def)) throw new ConfigError(`organizations.roles.${name} must be an object`);
+  // fromEntries defines each key as an own property, so a role name such as `__proto__` stays data.
+  const ranks = Object.fromEntries(entries.map(([name, def]) => [name, def.rank]));
+  checkRanks(ranks, "roles");
+  const roles = new Map<string, RoleDef>();
+  for (const [name, def] of entries) {
+    const fault = statementFault(def.permissions, known);
+    if (fault !== null) throw new ConfigError(`organizations.roles.${name}.permissions: ${fault}`);
+    roles.set(name, { rank: def.rank, permissions: union(def.permissions) });
+  }
+  return { ranks, roles: Object.fromEntries(roles) };
+}
+
+/** The name rule, the rank rule, and the owner rule of either form. */
+function checkRanks(ranks: Record<string, number>, form: "ranks" | "roles"): void {
+  for (const [role, rank] of Object.entries(ranks)) {
+    if (!ROLE_RE.test(role) || role.includes(","))
+      throw new ConfigError(`organizations.${form} has a bad role name: ${role}`);
+    const where = form === "ranks" ? `ranks.${role}` : `roles.${role}.rank`;
+    if (!Number.isSafeInteger(rank) || rank < 1)
+      throw new ConfigError(`organizations.${where} must be a positive integer`);
+  }
+  // The create path makes the creator owner, and the last-owner rule reads that rank.
+  if (!Object.hasOwn(ranks, "owner"))
+    throw new ConfigError(`organizations.${form} must name owner`);
+}
 /**
  * Exported for the importer (plan 9b), which refuses the same slugs. One list
  * for both. Frozen: `resolveConfig` reads it on every call, so a caller that
@@ -992,16 +1080,9 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   let organizations: ResolvedConfig["organizations"] = null;
   if (input.organizations) {
     const o = input.organizations;
-    const ranks = o.ranks ?? DEFAULT_RANKS;
-    for (const [role, rank] of Object.entries(ranks)) {
-      if (!ROLE_RE.test(role) || role.includes(","))
-        throw new ConfigError(`organizations.ranks has a bad role name: ${role}`);
-      if (!Number.isSafeInteger(rank) || rank < 1)
-        throw new ConfigError(`organizations.ranks.${role} must be a positive integer`);
-    }
-    // The create path makes the creator owner, and the last-owner rule reads that rank.
-    if (!Object.hasOwn(ranks, "owner"))
-      throw new ConfigError("organizations.ranks must name owner");
+    const statements = resolveStatements(o.statements);
+    const forms = resolveRoleForms(o, statements);
+    const ranks = forms.ranks;
     const reserved = new Set<string>();
     for (const s of o.reservedSlugs ?? DEFAULT_RESERVED_SLUGS) {
       const n = normalizeSlug(s);
@@ -1021,7 +1102,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     let platformRole: string | null = null;
     if (o.platformRole !== undefined) {
       if (!Object.hasOwn(ranks, o.platformRole))
-        throw new ConfigError("organizations.platformRole must be in ranks");
+        throw new ConfigError("organizations.platformRole must be a name of roles or ranks");
       if (platformOrganization === null)
         throw new ConfigError(
           "organizations.platformRole needs organizations.platformOrganization",
@@ -1033,6 +1114,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       throw new ConfigError("organizations.invitationTtlDays must be a positive integer");
     organizations = {
       ranks: { ...ranks },
+      roles: forms.roles,
+      statements,
       reservedSlugs: reserved,
       platformOrganization,
       platformRole,

@@ -147,10 +147,12 @@ Each provider adds a start route and a callback route. A field of a preset must 
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `organizations.ranks` | map of role to number | `{ viewer: 1, member: 2, admin: 3, owner: 4 }` | Positive integers. Must name `owner`. A role name holds no comma. |
+| `organizations.ranks` | map of role to number | `{ viewer: 1, member: 2, admin: 3, owner: 4 }` | Positive integers. Must name `owner`. A role name holds no comma. Core derives the permissions of each role. Not with `roles`. |
+| `organizations.roles` | map of role to `{ rank, permissions }` | none | Each rank a positive integer. Must name `owner`. Each permission is a known resource and action. Not with `ranks`. |
+| `organizations.statements` | map of resource to action list | none | The app's own resources beside the core ones. A core resource name, a bad name, an empty list, and a repeated action are refused. |
 | `organizations.reservedSlugs` | string list | `admin`, `api`, `auth`, `internal`, `operator`, `ops`, `platform`, `system`, `www` | Each entry must be a slug. |
 | `organizations.platformOrganization` | string | none | A slug. Core reserves it. |
-| `organizations.platformRole` | string | none | A role of `ranks`. It needs `platformOrganization`. |
+| `organizations.platformRole` | string | none | A role of `ranks` or `roles`. It needs `platformOrganization`. |
 | `organizations.invitationTtlDays` | number | 7 | A positive integer. |
 | `organizations.invitationLinkBuilder` | function of the token and the organization | `<appURL>/?invitation=<token>` | The link in the invitation mail. |
 | `organizations.limits` | object | no limit | See the three limits. |

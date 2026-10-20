@@ -1,3 +1,4 @@
+import type { CORE_STATEMENTS, RoleDef, RoleTable, Statements } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
 
 export type ResolvedOrganizations = NonNullable<ResolvedConfig["organizations"]>;
@@ -59,7 +60,62 @@ export const RULES = {
 
 /** The rank a rule needs. A rule that names a role the table lacks needs the highest rank, so it fails closed. */
 export function needs(config: ResolvedOrganizations, rule: keyof typeof RULES): number {
-  const role = RULES[rule];
-  if (Object.hasOwn(config.ranks, role)) return config.ranks[role] ?? Number.POSITIVE_INFINITY;
-  return Math.max(...Object.values(config.ranks));
+  return rankNeeded(config.ranks, RULES[rule]);
+}
+
+/** The rank of a role, or the highest rank when the table lacks the role. */
+function rankNeeded(ranks: Readonly<Record<string, number>>, role: string): number {
+  if (Object.hasOwn(ranks, role)) return ranks[role] ?? Number.POSITIVE_INFINITY;
+  return Math.max(...Object.values(ranks));
+}
+
+/**
+ * The statements of each plan 6 rule. `slugChange` holds `organization:update`;
+ * `updateOrganization` also keeps its owner rank check by `needs(o, "slugChange")`.
+ */
+export const RULE_STATEMENTS: { readonly [K in keyof typeof RULES]: Statements } = {
+  update: { organization: ["update"] },
+  slugChange: { organization: ["update"] },
+  delete: { organization: ["delete"] },
+  members: { member: ["read"] },
+  addMember: { member: ["create"] },
+  updateRole: { member: ["update"] },
+  removeOther: { member: ["delete"] },
+  invite: { invitation: ["create"] },
+  invitations: { invitation: ["read"] },
+  revoke: { invitation: ["cancel"] },
+};
+
+/** The plan 6 role whose rank each core action needs in the `ranks` form. */
+export const ACTION_ROLE: {
+  readonly [R in keyof typeof CORE_STATEMENTS]: Readonly<Record<string, string>>;
+} = {
+  organization: { update: "admin", delete: "owner" },
+  member: { read: "viewer", create: "admin", update: "admin", delete: "admin" },
+  invitation: { read: "admin", create: "admin", cancel: "admin" },
+  team: { create: "admin", update: "admin", delete: "admin" },
+  ac: { read: "viewer", create: "admin", update: "admin", delete: "admin" },
+  apiToken: { read: "admin", create: "admin", update: "admin", revoke: "admin" },
+};
+
+/**
+ * The role table of the `ranks` form. Each role holds each core action whose
+ * `ACTION_ROLE` role it meets by the rule of `needs`. The default derivation
+ * equals plan 6: test/default-table.test.ts proves it on two rank tables.
+ */
+export function deriveRoles(ranks: Readonly<Record<string, number>>): RoleTable {
+  const table: typeof ACTION_ROLE = ACTION_ROLE;
+  const roles = new Map<string, RoleDef>();
+  for (const [name, rank] of Object.entries(ranks)) {
+    const permissions = new Map<string, string[]>();
+    for (const [resource, actions] of Object.entries(table)) {
+      const held = Object.entries(actions)
+        .filter(([, role]) => rank >= rankNeeded(ranks, role))
+        .map(([action]) => action);
+      if (held.length > 0) permissions.set(resource, held);
+    }
+    roles.set(name, { rank, permissions: Object.fromEntries(permissions) });
+  }
+  // fromEntries defines each key as an own property, so a role name such as `__proto__` stays data.
+  return Object.fromEntries(roles);
 }

@@ -1,3 +1,4 @@
+export { CORE_STATEMENTS, can, type RoleTable, type Statements } from "./access.js";
 export {
   CAPTCHA_FLOWS,
   CAPTCHA_HEADER,

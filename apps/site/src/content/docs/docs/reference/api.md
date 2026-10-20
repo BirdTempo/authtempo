@@ -8,6 +8,7 @@ sources:
   - packages/core/src/index.ts
   - packages/core/src/routes.ts
   - packages/core/src/credentials.ts
+  - packages/core/src/access.ts
   - packages/core/src/operator-secret.ts
   - packages/core/src/secrets-entry.ts
   - docs/superpowers/plans/2026-10-14-11d-sdks.md
@@ -17,11 +18,12 @@ sources:
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 5"
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 7"
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 8"
+  - docs/superpowers/plans/2026-10-14-12k-organizations-tokens-v2.md "Task 2"
 ---
 
 **For:** a developer who calls core from server code, or looks for an export of `@authtempo/core`.
 
-**What it does:** this page lists the members of the auth object and every export of the core entry. The export check holds this page to `packages/core/src/index.ts`. Four more export checks hold it to the route, credential, operator secret, and secrets entries.
+**What it does:** this page lists the members of the auth object and every export of the core entry. The export check holds this page to `packages/core/src/index.ts`. Five more export checks hold it to the route, credential, access, operator secret, and secrets entries.
 
 ## Before you start
 
@@ -95,6 +97,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `holdsPlatformRole` | Takes a config, the id of the platform organization, and a member row. True when the row is of that organization and its role parts hold `organizations.platformRole`. The Better Auth shim reads this rule. |
 | `activeBan` | Takes a user row and a time. True while a ban holds at that time: the ban has no end, or it ends after that time. A ban that ended reads as no ban. The Better Auth shim reads this rule. |
 | `isJsonRequest` | Takes a request. True when its content type is `application/json`, with or without parameters. A form post and a missing type are false. The Better Auth shim reads this rule. |
+| `can` | True when a granted statement set holds every action of a wanted set. An empty or unknown request answers false. The access entry has the other checks. |
 | `readSessionToken` | Reads the session token of a request, from the cookie and then the bearer header. |
 | `isAppScheme`, `isGithubSubject` | The app scheme rule, and the rule of a GitHub subject. |
 | `newId` | Makes a row id. |
@@ -112,6 +115,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `SCHEMA_VERSION` | The schema version that this core needs. |
 | `API_TOKEN_PREFIX` | `tk_`. |
 | `DEFAULT_RESERVED_SLUGS` | The default reserved slugs. |
+| `CORE_STATEMENTS` | The resources and actions of core: `organization`, `member`, `invitation`, `team`, `ac`, and `apiToken`. |
 | `DELETE_CONFIRM_TTL_MINUTES` | The bounds and the default of `account.deleteConfirm.ttlMinutes`: 5, 1440, and 60. |
 | `DEFAULT_SESSION_COOKIE` | `__Host-tempo_session`, the default name of the session cookie. |
 | `DERIVE_GATE_MAX` | 2, the derives that the gate lets run at once. |
@@ -149,7 +153,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | App secrets | `SecretsApi`, `SecretsStatus`, `SecretsRewrap`, `SecretVersionCount` |
 | Operator tools | `OperatorApi`, `OperatorActor`, `OperatorAuditDraft`, `OperatorUser` |
 | JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthClientsApi`, `OAuthAccess`, `OAuthClientAccess`, `CREDENTIALS_PER_CLIENT`, `DEVICE_GRANT`, `DEVICE_START_PER_IP`, `DEVICE_VERIFY_PER_SESSION`, `DEVICE_VERIFY_PER_IP`, `DEVICE_VERIFY_PER_CODE`, `DeviceAuthorizationAnswer`, `OAuthGrantSummary`, `OAuthResult`, `ClientInput`, `ClientSummary`, `ClientFields`, `RegisteredClient`, `CLIENT_SECRET_PREFIX` |
-| Organizations | `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |
+| Organizations | `Statements`, `RoleTable`, `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |
 | Captcha | `CaptchaPort`, `CaptchaPage`, `CaptchaFlow` |
 | Hooks | `OrganizationHooks`, `OrganizationHookEvent`, `SessionHooks`, `SessionDraft`, `SessionPatch`, `SessionVia`, `SessionEndReason`, `MemberVia`, `RemoveVia`, `UserHooks`, `UserCreatePatch`, `UserPatch`, `UserCreateVia`, `UserUpdateVia`, `UserVerifyVia`, `IdentityHooks`, `IdentitySummary`, `IdentityLinkVia`, `OperatorHooks` |
 
@@ -164,6 +168,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | `@authtempo/core/testing` | `SoftAuthenticator`, `totpCode`, `base32Decode`, `ROUTES`, the route list, and `TEST_SECRET`, the app secret of the tests. |
 | `@authtempo/core/routes` | The route facts of an SDK. The next part lists them. |
 | `@authtempo/core/credentials` | The credential facts of an SDK. The part after it lists them. |
+| `@authtempo/core/access` | The pure permission checks, for a browser bundle. The access part lists them. |
 | `@authtempo/core/operator-secret` | The form of the operator secret, for the CLI, not for an app. The part before the last lists it. |
 | `@authtempo/core/secrets` | The rules of the app secret, for the CLI, not for an app. The last part of this page lists it. |
 
@@ -213,6 +218,23 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `DPOP_WINDOW_SECONDS` | The window of a proof's `iat`: 60 seconds by default, from 10 to 300. Core's `oauth.dpop.windowSeconds` and `@authtempo/verify` read it. |
 | `FOREIGN_ALGS`, `ForeignAlg` | The algs of a key that a client sends: `EdDSA`, `Ed25519`, `ES256`, `RS256`, and `PS256`. |
 | `isResourceUrl`, `resourceOf` | The rule of an `oauth.resources` entry, and the entry that a request URL falls under. |
+
+## The access entry
+
+`@authtempo/core/access` holds the pure checks of permission statements. It imports nothing, so a browser bundle can use it. The server check decides; a client check only hides a control.
+
+| Export | What it is |
+| --- | --- |
+| `Statements` | A statement set: each resource with its actions, such as `{ member: ["read"] }`. |
+| `RoleDef`, `RoleTable` | One role, with its rank and its permissions, and the roles by name. |
+| `NAME_RE` | The rule of a resource or an action name: a lower case letter, then at most 31 letters, digits, or hyphens. |
+| `CORE_STATEMENTS` | The resources and actions of core. |
+| `can` | True when the granted set holds every wanted action. An empty request, an empty action list, an unknown resource, an unknown action, and a value that is not a set answer false. It never throws. |
+| `union`, `intersect` | The union and the intersection of sets. Each keeps an action once, in the order of first sight. `intersect` drops a resource with no action left. |
+| `isSubset` | True when the second set holds every action of the first. The empty set is a subset of every set. |
+| `effectiveOf` | The union of the permissions of each comma part of a role string. A part that the table lacks adds nothing. |
+| `roleHasPermission` | True when a role string holds every wanted action in a role table. |
+| `statementFault` | Null for a valid set of known names, else the text of the first fault. |
 
 ## The operator secret entry
 

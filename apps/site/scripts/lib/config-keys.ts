@@ -143,6 +143,8 @@ export const CONFIG_KEYS = {
   } satisfies Keys<Part<"handoff">>,
   organizations: {
     ranks: true,
+    roles: true,
+    statements: true,
     reservedSlugs: true,
     platformOrganization: true,
     platformRole: true,

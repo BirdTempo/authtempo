@@ -47,6 +47,15 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     page: "/docs/reference/api/",
     headings: ["The credential entry"],
   },
+  // The pure permission checks of plan 12k, for a browser bundle.
+  {
+    label: "core-access",
+    pkg: "@authtempo/core",
+    entry: "./access",
+    source: "packages/core/src/access.ts",
+    page: "/docs/reference/api/",
+    headings: ["The access entry"],
+  },
   {
     label: "core-operator-secret",
     pkg: "@authtempo/core",
