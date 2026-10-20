@@ -29,11 +29,16 @@ export interface EndUserSessionsInput {
   userAgent: string | null;
 }
 
-/** The input of the end of all sessions. `limit` is 1 to 1000, default 500. */
+/**
+ * The input of the end of all sessions. `limit` is 1 to 1000, default 500.
+ * `callsUsed` is the count of storage calls of the invocation before this
+ * call, default `OPERATOR_CALLS_BEFORE` of the actor.
+ */
 export interface EndAllSessionsInput {
   actor: OperatorActor;
   reason: string;
   limit?: number;
+  callsUsed?: number;
   ip: string | null;
   userAgent: string | null;
 }
@@ -108,14 +113,50 @@ export async function endUserSessions(
 }
 
 /**
- * The storage calls of the work of one `endAllSessions` call: the read, the
- * link reads, the outbox writes, and the deletes (ruling 27 of plan 12f).
- * D1 allows 50 queries per invocation on Workers Free and 1000 on Workers
- * Paid (D1 limits page updated 21 April 2026, read 2026-10-20). The product
- * runs on Workers Free, so a call fits 50. The 5 calls that stay serve the
- * guard, the limiter, and the audit row.
+ * The storage calls of one whole invocation that holds a session call:
+ * the calls before it and the call itself (ruling 34 of plan 12f). D1
+ * allows 50 queries per invocation on Workers Free and 1000 on Workers
+ * Paid (D1 limits page updated 21 April 2026, read 2026-10-21). The
+ * product runs on Workers Free, so the whole invocation fits 50. Each
+ * statement of a D1 batch counts as one call here.
  */
-export const OPERATOR_CALL_BUDGET = 45;
+export const OPERATOR_CALL_BUDGET = 50;
+
+/**
+ * The storage calls before a session call when the caller passes no
+ * `callsUsed`: the worst case of each actor (ruling 34 of plan 12f). A
+ * user actor through the route: the route limiter 1, `resolveSession` 3
+ * (the session, the user, and the sliding refresh), `requireOperatorUser`
+ * 4 (the platform organization, the member row, the second factor, and
+ * its limiter), and the D1 schema check 1. A secret actor: the route
+ * limiter and the schema check. The app: the schema check. A caller that
+ * made more calls passes its count as `callsUsed`.
+ */
+export const OPERATOR_CALLS_BEFORE: Readonly<Record<OperatorActor["kind"], number>> = {
+  user: 9,
+  secret: 2,
+  app: 1,
+};
+
+/**
+ * The calls that the work of a session call may make: the budget less the
+ * calls before the act and the audit row. `callsUsed` is the count of the
+ * caller, an integer from 0 to 49, else `invalid_body`. The answer is
+ * `invalid_body` too when the work would get fewer than `least` calls.
+ */
+function workBudget(actor: OperatorActor, callsUsed: unknown, least: number): Result<number> {
+  const before = callsUsed === undefined ? OPERATOR_CALLS_BEFORE[actor.kind] : callsUsed;
+  if (
+    typeof before !== "number" ||
+    !Number.isInteger(before) ||
+    before < 0 ||
+    before >= OPERATOR_CALL_BUDGET
+  )
+    return fail("invalid_body");
+  // The audit row is the last call of the act.
+  const work = OPERATOR_CALL_BUDGET - before - 1;
+  return work < least ? fail("invalid_body") : ok(work);
+}
 
 /**
  * Ends a page of the listed session rows of any users in the caller's
@@ -190,8 +231,9 @@ async function endSessionPage(
  * Ends the sessions of all users, one page per call (spec 26 item 5;
  * ASVS 5.0.0 7.4.5). One transaction reads `limit + 1` session rows by
  * `id` ascending, never the session of a user actor. It ends the first
- * `limit` rows, or fewer when `OPERATOR_CALL_BUDGET` stops the page
- * (`endSessionPage`). Then it writes one audit row with
+ * `limit` rows, or fewer when the budget stops the page (`endSessionPage`).
+ * The budget is `OPERATOR_CALL_BUDGET` less the calls before the act and
+ * the audit row. Then it writes one audit row with
  * `targetUserId: null` and `data: { ended }`. The answer has `more: true`
  * when rows stay, and the caller calls again. An ended row is gone, so the
  * next read starts at the first row that stays, and no row ends twice.
@@ -209,11 +251,11 @@ async function endSessionPage(
  * link reads, the deletes, and the audit row. With no hook the deletes are
  * ceil(n / 50) statements, so the sum is 2 + 2 ceil(n / 50): 22 for 500
  * sessions, and 42 for 1000. With a `session.afterEnd` hook there is one
- * delete per session, and the sum is 2 + ceil(n / 50) + n, so a page ends
- * about 43 sessions. The calls left in the budget write the logouts of the
- * client links, 2 calls per link, and the sweep logs out the rest. D1
- * allows 50 queries per invocation on Workers Free and 1000 on Workers Paid
- * (D1 limits page updated 21 April 2026, read 2026-10-21). A call fits both.
+ * delete per session, and the sum is 2 + ceil(n / 50) + n. The calls left
+ * write the logouts of the client links, 2 calls per link, and the sweep
+ * logs out the rest. The work gets 48 calls for the app, 47 for a secret,
+ * and 40 for a user actor, so a page with a hook ends 46, 45, or 38
+ * sessions. A call fits D1 Free, and so it fits Workers Paid too.
  */
 export async function endAllSessions(
   config: ResolvedConfig,
@@ -224,6 +266,9 @@ export async function endAllSessions(
   const limit = input.limit ?? END_ALL_LIMIT.default;
   if (!Number.isInteger(limit) || limit < 1 || limit > END_ALL_LIMIT.max)
     return fail("invalid_body");
+  // The least page: the read, one link read, and one delete.
+  const budget = workBudget(input.actor, input.callsUsed, 3);
+  if (!budget.ok) return budget;
   const drafted = auditDraft(input.actor, {
     action: "sessions_end_all",
     targetUserId: null,
@@ -251,7 +296,7 @@ export async function endAllSessions(
         read.slice(0, limit),
         ends.ended ?? null,
         now,
-        OPERATOR_CALL_BUDGET,
+        budget.value,
       );
       // The row is the last write of the act, so it can hold the count.
       draft.data = { ended: page.deleted };

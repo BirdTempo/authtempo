@@ -430,6 +430,12 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
         ok: false,
         code: "invalid_body",
       });
+    // 47 calls before the act leave 2 for the work: less than the read, a link read, and a delete.
+    for (const callsUsed of [-1, 1.5, 47, 50])
+      expect(await w.api.sessions.endAll({ ...input, callsUsed })).toMatchObject({
+        ok: false,
+        code: "invalid_body",
+      });
     expect(await w.api.sessions.endAll({ ...input, reason: "a\nb" })).toMatchObject({
       ok: false,
       code: "invalid_body",
@@ -527,7 +533,7 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     expect([counts.calls, counts.sessionRowsRead]).toEqual([22, 501]);
   });
 
-  it("keeps each call at 46 storage calls or fewer, and ends each session once", async () => {
+  it("keeps each call of the app at 49 storage calls or fewer, and ends each session once", async () => {
     const cases = [
       { size: 1, linked: 0 },
       { size: 50, linked: 0 },
@@ -572,8 +578,8 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
             userAgent: null,
           });
           if (!done.ok) throw new Error(done.code);
-          // The budget of 45 and the audit row.
-          expect(counts.calls, label).toBeLessThanOrEqual(46);
+          // The work of 48 and the audit row; the schema check of D1 makes 50.
+          expect(counts.calls, label).toBeLessThanOrEqual(49);
           expect(done.value.ended, label).toBeGreaterThan(0);
           ended += done.value.ended;
           more = done.value.more;
@@ -593,8 +599,8 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     const clientId = await backchannelClient(w);
     const user = await userWith(w, "ada@example.com", 1);
     const open = () => openSession(w.config, { user, ip: null, userAgent: null, via: "password" });
-    for (let i = 0; i < 21; i++) await linked(w, (await open()).token, clientId);
-    for (let i = 0; i < 38; i++) await open();
+    for (let i = 0; i < 25; i++) await linked(w, (await open()).token, clientId);
+    for (let i = 0; i < 34; i++) await open();
     expect(await sessionsOf(w.storage)).toHaveLength(60);
     const counts = countCalls(w.storage);
     const done = await w.api.sessions.endAll({
@@ -603,13 +609,13 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       ip: null,
       userAgent: null,
     });
-    // The read, 2 link reads, and 2 deletes cost 5; 20 links take 40 of the 45; then the audit row.
-    expect(done.ok && [done.value.ended, done.value.more, counts.calls]).toEqual([60, false, 46]);
+    // The read, 2 link reads, and 2 deletes cost 5; 21 links take 42 of the 48; then the audit row.
+    expect(done.ok && [done.value.ended, done.value.more, counts.calls]).toEqual([60, false, 48]);
     expect(await sessionsOf(w.storage)).toEqual([]);
-    expect(await w.storage.findMany("oauthLogout", [])).toHaveLength(20);
-    expect(await w.storage.findMany("oauthSessionClient", [])).toHaveLength(1);
+    expect(await w.storage.findMany("oauthLogout", [])).toHaveLength(21);
+    expect(await w.storage.findMany("oauthSessionClient", [])).toHaveLength(4);
     await sweepAll(w);
-    expect(w.sent).toHaveLength(21);
+    expect(w.sent).toHaveLength(25);
   });
 
   it("ends a session with 30 client links in one call inside the budget (review M1)", async () => {
@@ -647,15 +653,77 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       // The linked session goes in the first call, with its event.
       if (call === 0) expect(await resolveSession(w.config, opened.token)).toBeNull();
     }
-    expect(calls.every((n) => n <= 46)).toBe(true);
+    expect(calls).toEqual([49]);
     expect(w.ended).toContain(`${opened.session.id}:operator`);
     expect(await sessionsOf(w.storage)).toEqual([]);
-    // Two sessions: the read, the link read, and 2 deletes cost 4. So 20 logouts fit the
-    // first call, and the sweep makes the other 10 and sends all 30.
-    expect(await w.storage.findMany("oauthLogout", [])).toHaveLength(20);
-    expect(await w.storage.findMany("oauthSessionClient", [])).toHaveLength(10);
+    // Two sessions: the read, the link read, and 2 deletes cost 4. So 22 logouts fit the
+    // work of 48, and the sweep makes the other 8 and sends all 30.
+    expect(await w.storage.findMany("oauthLogout", [])).toHaveLength(22);
+    expect(await w.storage.findMany("oauthSessionClient", [])).toHaveLength(8);
     await sweepAll(w);
     expect(w.sent).toHaveLength(30);
+  });
+
+  it("fits a whole user-actor call of endAll with a hook and a full page in 50 calls (review M2)", async () => {
+    const limited = { calls: 0 };
+    const f = await operatorFixture({
+      config: {
+        // The D1 limiter sends one statement per check.
+        limiter: {
+          allow: async () => {
+            limited.calls++;
+            return true;
+          },
+        },
+        // A slide of 6 hours, so the read of the session makes its refresh write too.
+        session: { slidingRefreshDays: 0.25 },
+        hooks: { session: { afterEnd: () => {} } },
+      },
+    });
+    // 90 sessions: two full pages.
+    for (let u = 0; u < 3; u++) {
+      const email = `user${u}@example.com`;
+      f.auth.clock.advance(SIGN_UP_GAP_MS);
+      await signUpAndVerify(f.auth, email, PASSWORD);
+      const user = await f.auth.storage.findOne("user", [
+        { field: "email", op: "eq", value: email },
+      ]);
+      if (!user) throw new Error("no user");
+      for (let i = 1; i < 30; i++)
+        await openSession(f.auth.config, { user, ip: null, userAgent: null, via: "password" });
+    }
+    const api = operatorApi(f.auth.config);
+    // The D1 adapter checks the schema version with one query before the first call of an invocation.
+    const SCHEMA_CHECK = 1;
+    const whole = async (callsUsed: "count" | "default") => {
+      // 7 hours: past the slide, and inside the 1440 fresh minutes of the sign-in.
+      f.auth.clock.advance(7 * HOUR_MS);
+      const counts = countCalls(f.auth.storage);
+      limited.calls = 0;
+      const resolved = await resolveSession(f.auth.config, f.operator.token);
+      if (!resolved) throw new Error("the session ended");
+      const actor = await requireOperatorUser(f.auth.config, resolved);
+      if (!actor.ok) throw new Error(actor.code);
+      const before = counts.calls + limited.calls + SCHEMA_CHECK;
+      const done = await api.sessions.endAll({
+        actor: actor.value,
+        reason: "Key leak",
+        ip: null,
+        userAgent: null,
+        ...(callsUsed === "count" ? { callsUsed: before } : {}),
+      });
+      if (!done.ok) throw new Error(done.code);
+      return {
+        before,
+        total: counts.calls + limited.calls + SCHEMA_CHECK,
+        ended: done.value.ended,
+      };
+    };
+    // The session, the user, the refresh; the platform organization, the member, the factor, the limiter; the schema check.
+    // With the reserve of 9 the work gets 40 calls: the read, the link read, and 38 deletes.
+    expect(await whole("default")).toEqual({ before: 8, total: 49, ended: 38 });
+    // With the count of 8 the work gets 41 calls, and the whole call makes 50.
+    expect(await whole("count")).toEqual({ before: 8, total: 50, ended: 39 });
   });
 
   it("ends 60 sessions with a hook in two pages, with no session lost or ended twice", async () => {
@@ -676,14 +744,14 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       if (!done.ok) throw new Error(done.code);
       pages.push({ ended: done.value.ended, more: done.value.more });
     }
-    // Page 1: the read, the link read, and 43 deletes fill the budget of 45.
+    // Page 1: the read, the link read, and 46 deletes fill the work of 48.
     expect(pages).toEqual([
-      { ended: 43, more: true },
-      { ended: 17, more: false },
+      { ended: 46, more: true },
+      { ended: 14, more: false },
     ]);
     expect(w.ended).toHaveLength(60);
     expect([...w.ended].sort()).toEqual(all.map((x) => `${x.id}:operator`).sort());
     expect(await sessionsOf(w.storage)).toEqual([]);
-    expect((await auditRows(w.storage)).map((r) => r.data)).toEqual([{ ended: 43 }, { ended: 17 }]);
+    expect((await auditRows(w.storage)).map((r) => r.data)).toEqual([{ ended: 46 }, { ended: 14 }]);
   });
 });
