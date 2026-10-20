@@ -1,4 +1,15 @@
-import { PAGE_MAX, REASON_MAX, TOOL_CALLS_PER_HOUR } from "../operator-tools.js";
+import {
+  PAGE_MAX,
+  PROOF_MAX_AGE_MS,
+  PROOF_METHODS,
+  REASON_MAX,
+  REFERENCE_MAX,
+  TOOL_CALLS_PER_HOUR,
+} from "../operator-tools.js";
+
+/** The age limit of a proof in whole days, for the help: 7. */
+export const PROOF_DAYS = PROOF_MAX_AGE_MS / 86_400_000;
+
 import { OPERATOR_FLAGS, operatorFlagsWithYes } from "./keys.js";
 import { COMMON_FLAGS, type HelpFlag, type HelpText } from "./types.js";
 
@@ -248,15 +259,15 @@ export const USERS_SECOND_FACTOR_OFF_HELP: HelpText = {
     REASON_FLAG,
     {
       flag: "--proof-method <method>",
-      says: "How the identity was checked: document, in_person, video, knowledge, or other.",
+      says: `How the identity was checked: ${PROOF_METHODS.slice(0, -1).join(", ")}, or ${PROOF_METHODS.at(-1)}.`,
     },
     {
       flag: "--proof-reference <text>",
-      says: "The case id of the check in your own system, from 1 to 200 characters. Never the evidence itself.",
+      says: `The case id of the check in your own system, from 1 to ${REFERENCE_MAX} characters. Never the evidence itself.`,
     },
     {
       flag: "--proof-checked-at <date>",
-      says: "The time of the check: a date and time with a zone, at most 7 days old. The deployment refuses a time after its own clock.",
+      says: `The time of the check: a date and time with a zone, at most ${PROOF_DAYS} days old. The deployment refuses a time after its own clock.`,
     },
     ...WRITE_FLAGS,
   ],

@@ -1,4 +1,8 @@
-import { OPERATOR_USERS_PER_IP } from "@authtempo/core/operator-secret";
+import {
+  isOperatorReason,
+  OPERATOR_USERS_PER_IP,
+  REASON_MAX,
+} from "@authtempo/core/operator-secret";
 import { COMMON_OPTIONS } from "./args.js";
 import { Stop, UsageError } from "./errors.js";
 import type { AuditRowJson, OperatorUserJson } from "./json.js";
@@ -41,20 +45,13 @@ export const WRITE_OPTIONS = {
  */
 export const TOOL_CALLS_PER_HOUR = OPERATOR_USERS_PER_IP.max;
 
-/**
- * The longest reason of an act, in UTF-16 code units (spec 26 item 5). A
- * copy of `REASON_MAX` of core, which no public entry exports. The test
- * "refuses a reason that core refuses" holds this rule to the answer of a
- * real core handle and to the route contract.
- */
-export const REASON_MAX = 500;
-
-/**
- * The methods of an identity proof (spec 26 item 5, ASVS 5.0.0 6.4.4). A
- * copy of `PROOF_METHODS` of core; the same test holds it to the enum of
- * the route contract.
- */
-export const PROOF_METHODS = ["document", "in_person", "video", "knowledge", "other"] as const;
+// The reason rule and the proof rules come from core (ruling 40 of plan 12f): one source.
+export {
+  PROOF_MAX_AGE_MS,
+  PROOF_METHODS,
+  REASON_MAX,
+  REFERENCE_MAX,
+} from "@authtempo/core/operator-secret";
 
 /** The largest page of a read (the route contract: 1 to 100). */
 export const PAGE_MAX = 100;
@@ -62,24 +59,14 @@ export const PAGE_MAX = 100;
 /** The largest page of `sessions end-all` (the route contract: 1 to 1000, default 500). */
 export const END_ALL_MAX = 1000;
 
-// biome-ignore lint/suspicious/noControlCharactersInRegex: the class names the control characters that core refuses.
-const CONTROL = /[\u0000-\u001f\u007f]/;
-
 /**
- * Why core refuses a reason, or null. Core refuses an empty reason, one
- * over `REASON_MAX`, and one with a C0 control character, DEL, or a lone
- * surrogate (`operatorReason` of core). The CLI checks before any request,
- * so a bad reason costs none of the 600 calls.
+ * Why core refuses a reason, or null. The rule is core's own
+ * `isOperatorReason`, so the CLI and the engine cannot drift. The CLI
+ * checks before any request, so a bad reason costs none of the 600 calls.
  */
 export function reasonProblem(reason: string): string | null {
-  if (
-    reason.length === 0 ||
-    reason.length > REASON_MAX ||
-    CONTROL.test(reason) ||
-    /\p{Cs}/u.test(reason)
-  )
-    return `--reason is 1 to ${REASON_MAX} characters with no control character and no lone surrogate`;
-  return null;
+  if (isOperatorReason(reason)) return null;
+  return `--reason is 1 to ${REASON_MAX} characters with no control character and no lone surrogate`;
 }
 
 /** The reason of a write, or a usage error. Each write needs one: core writes it in the audit row. */

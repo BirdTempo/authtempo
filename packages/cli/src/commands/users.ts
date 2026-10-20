@@ -3,6 +3,7 @@ import { COMMON_OPTIONS, nearest, oneOf, parseOrUsage } from "../args.js";
 import type { Command } from "../command.js";
 import { Stop, UsageError } from "../errors.js";
 import {
+  PROOF_DAYS,
   USERS_BAN_HELP,
   USERS_GET_HELP,
   USERS_HELP,
@@ -338,8 +339,7 @@ async function runFactorOff(argv: string[], ctx: Ctx): Promise<number> {
     question: `Turn every second factor of the user ${userId} off?`,
     act: "change",
     done: `turned the second factor of ${userId} off`,
-    invalid:
-      "--proof-checked-at must be a date and time with a zone, at most 7 days old, and not later than the clock of the deployment",
+    invalid: `--proof-checked-at must be a date and time with a zone, at most ${PROOF_DAYS} days old, and not later than the clock of the deployment`,
   });
 }
 
