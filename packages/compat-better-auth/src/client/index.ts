@@ -5,6 +5,7 @@ export type * from "../types.js";
 export { CLIENT_SESSION_KEYS, CLIENT_USER_KEYS, createAuthClient } from "./create-auth-client.js";
 export { expoClient } from "./expo.js";
 export {
+  adminClient,
   emailOTPClient,
   magicLinkClient,
   organizationClient,

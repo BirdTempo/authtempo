@@ -2,7 +2,7 @@ import { type ClientPlugin, COMPAT_CLIENT_PLUGIN, type TwoFactorClientOptions } 
 
 type Simple = Extract<
   ClientPlugin,
-  { id: "organization" | "passkey" | "magic-link" | "email-otp" }
+  { id: "organization" | "passkey" | "magic-link" | "email-otp" | "admin" }
 >;
 
 export function organizationClient(): Simple {
@@ -13,6 +13,13 @@ export function passkeyClient(): Simple {
 }
 export function magicLinkClient(): Simple {
   return { kind: COMPAT_CLIENT_PLUGIN, id: "magic-link" };
+}
+/**
+ * Better Auth's `adminClient()` (plan 12f): the session read goes to the
+ * shim's `/get-session`, so the user holds the role and the ban fields.
+ */
+export function adminClient(): Simple {
+  return { kind: COMPAT_CLIENT_PLUGIN, id: "admin" };
 }
 export function emailOTPClient(): Simple {
   return { kind: COMPAT_CLIENT_PLUGIN, id: "email-otp" };

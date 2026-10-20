@@ -19,6 +19,7 @@ import type {
   ClientOptions,
   ClientPasskey,
   ClientSession,
+  ClientSessionUser,
   ClientUser,
   CompatClientError,
   CompatClientResult,
@@ -43,6 +44,41 @@ function toClientUser(u: PublicSession["user"]): ClientUser {
     image: u.image,
   };
 }
+/** The JSON of the shim's `/get-session` answer: Better Auth's session with the admin fields. */
+interface AdminSessionJSON {
+  session: { id: string; userId: string; expiresAt: string; activeOrganizationId: string | null };
+  user: ClientUser & {
+    role: string;
+    banned: boolean;
+    banReason: string | null;
+    banExpires: string | null;
+  };
+  needsRefresh?: boolean;
+}
+
+/** The answer of the shim's `/get-session`, cut to the session keys and the user keys with the admin fields. */
+function toAdminClientSession(p: AdminSessionJSON): {
+  session: ClientSession;
+  user: ClientSessionUser;
+} {
+  const u = p.user;
+  return {
+    session: {
+      id: p.session.id,
+      userId: p.session.userId,
+      expiresAt: new Date(p.session.expiresAt),
+      activeOrganizationId: p.session.activeOrganizationId,
+    },
+    user: {
+      ...toClientUser(u),
+      role: u.role,
+      banned: u.banned,
+      banReason: u.banReason,
+      banExpires: u.banExpires === null ? null : new Date(u.banExpires),
+    },
+  };
+}
+
 function toClientSession(p: PublicSession): { session: ClientSession; user: ClientUser } {
   return {
     session: {
@@ -190,6 +226,8 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     (p): p is Extract<typeof p, { id: "expo" }> => p.id === "expo",
   );
   const expo: ExpoClientOptions | null = expoPlugin ? expoPlugin.options : null;
+  // With adminClient(), the session read goes to the shim's /get-session for the admin fields (plan 12f).
+  const adminPlugin = options.plugins?.some((p) => p.id === "admin") ?? false;
   const twoFactorPlugin = options.plugins?.find(
     (p): p is Extract<typeof p, { id: "two-factor" }> => p.id === "two-factor",
   );
@@ -308,6 +346,78 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     return { data: null, error };
   }
 
+  /** A request to the shim with the app's headers, the credentials of `run`, and the Expo bearer. */
+  const shimFetch = (url: string, method: "GET" | "POST", body?: unknown) => {
+    const headers = new Headers(method === "POST" ? { "content-type": "application/json" } : {});
+    for (const [k, v] of Object.entries(fo.headers ?? {})) headers.set(k, v);
+    const stored = readStored();
+    if (stored) headers.set("authorization", `Bearer ${stored}`);
+    return baseFetch(url, {
+      method,
+      headers,
+      ...(method === "POST" ? { body: JSON.stringify(body) } : {}),
+      credentials: expo ? "omit" : (fo.credentials ?? "include"),
+    });
+  };
+
+  /**
+   * The session read with `adminClient()` (ruling 54 of plan 12f). It reads
+   * the shim's `/get-session`, which gives the user the role and the ban
+   * fields. A due session under deferSessionRefresh gets a POST there, and a
+   * failed refresh keeps the GET answer, as `readSession` does with core.
+   */
+  async function adminSession(
+    quiet: boolean,
+  ): Promise<CompatClientResult<{ session: ClientSession; user: ClientSessionUser } | null>> {
+    const resolved = resolveBase();
+    if (!resolved) return noBase();
+    const url = `${resolved.origin}${resolved.basePath}/get-session`;
+    type Read = { res: Response; json: unknown; request: { url: string; method: string } };
+    const read = async (method: "GET" | "POST"): Promise<Read | null> => {
+      try {
+        const res = await shimFetch(url, method, {});
+        const json = await res
+          .clone()
+          .json()
+          .catch(() => undefined);
+        return { res, json, request: { url, method } };
+      } catch {
+        return null;
+      }
+    };
+    // The shim answers 200 with null for no session, and 200 with the session.
+    const answered = (x: Read | null) => x?.res.status === 200 && x.json !== undefined;
+    let r = await read("GET");
+    if (r && answered(r) && (r.json as AdminSessionJSON | null)?.needsRefresh === true) {
+      const refreshed = await read("POST");
+      if (answered(refreshed)) r = refreshed;
+    }
+    if (r && answered(r)) {
+      const json = r.json as AdminSessionJSON | null;
+      const data = json ? toAdminClientSession(json) : null;
+      if (fo.onSuccess && !quiet) await fo.onSuccess({ data, response: r.res, request: r.request });
+      return { data, error: null };
+    }
+    const body = r?.json as { code?: unknown; message?: unknown } | null | undefined;
+    const code =
+      r === null
+        ? BETTER_AUTH_CODES.network
+        : typeof body?.code === "string"
+          ? body.code
+          : BETTER_AUTH_CODES.unexpected;
+    const error =
+      typeof body?.message === "string"
+        ? clientError(code, r?.res.status ?? 0, body.message)
+        : clientError(code, r?.res.status ?? 0);
+    if (fo.onError)
+      await fo.onError({
+        error,
+        response: r?.res ?? null,
+        request: r?.request ?? { url, method: "GET" },
+      });
+    return { data: null, error };
+  }
+
   /**
    * A POST to one of the shim's Better Auth paths (plan 9f), with the same
    * fetch, headers, credentials, and Expo bearer as `run`. The shim answers
@@ -318,18 +428,9 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     if (!resolved) return noBase();
     const url = `${resolved.origin}${resolved.basePath}${path}`;
     const request = { url, method: "POST" };
-    const headers = new Headers({ "content-type": "application/json" });
-    for (const [k, v] of Object.entries(fo.headers ?? {})) headers.set(k, v);
-    const stored = readStored();
-    if (stored) headers.set("authorization", `Bearer ${stored}`);
     let res: Response;
     try {
-      res = await baseFetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-        credentials: expo ? "omit" : (fo.credentials ?? "include"),
-      });
+      res = await shimFetch(url, "POST", body);
     } catch {
       const error = clientError(BETTER_AUTH_CODES.network, 0);
       if (fo.onError) await fo.onError({ error, response: null, request });
@@ -405,7 +506,7 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     };
   };
 
-  const readSession = (quiet: boolean) =>
+  const coreSession = (quiet: boolean) =>
     run(
       // Under deferSessionRefresh, a due session is refreshed by a POST, as
       // Better Auth 1.7.2's session atom does (dist/client/session-atom.mjs:66
@@ -421,6 +522,7 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
       undefined,
       quiet,
     );
+  const readSession = (quiet: boolean) => (adminPlugin ? adminSession(quiet) : coreSession(quiet));
   const getSession = () => readSession(false);
   const store = createSessionStore(getSession);
 

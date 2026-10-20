@@ -5,6 +5,7 @@ import {
   systemClock,
 } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
+import { adminClient, CLIENT_USER_KEYS, createAuthClient } from "../src/client/index.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { admin, organization } from "../src/plugins.js";
 import {
@@ -549,6 +550,121 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
       password: PASSWORD,
     });
     expect(await session(cookieOf(again))).toEqual({ role: "user", ...none });
+  });
+
+  it("gives the client session the role and the ban fields with adminClient() (ruling 54)", async () => {
+    const a = await adminApp(memoryDatabase());
+    const ann = await a.user("ann@example.com");
+    const seen: string[] = [];
+    const client = (cookie: string, admin = true) =>
+      createAuthClient({
+        baseURL: `${BASE}/api/auth`,
+        fetchOptions: {
+          headers: cookie ? { cookie } : {},
+          customFetchImpl: async (input, init) => {
+            const req = new Request(input, init);
+            seen.push(`${req.method} ${new URL(req.url).pathname}`);
+            return a.auth.handler(req);
+          },
+        },
+        ...(admin ? { plugins: [adminClient()] } : {}),
+      });
+    const none = { banned: false, banReason: null, banExpires: null };
+    const op = await client(a.op).getSession();
+    expect(op.error).toBeNull();
+    expect(op.data?.user).toMatchObject({ email: OPERATOR, role: "admin", ...none });
+    expect(Object.keys(op.data?.user ?? {}).sort()).toEqual(
+      [...CLIENT_USER_KEYS, "role", "banned", "banReason", "banExpires"].sort(),
+    );
+    expect(op.data?.session.expiresAt).toBeInstanceOf(Date);
+    expect(seen).toEqual(["GET /api/auth/get-session"]);
+    const annSession = await client(ann.cookie).getSession();
+    expect(annSession.data?.user).toMatchObject({
+      email: "ann@example.com",
+      role: "user",
+      ...none,
+    });
+    // No session: null and no error, as Better Auth's client answers.
+    expect(await client("").getSession()).toEqual({ data: null, error: null });
+    // Without adminClient(), the client reads core's session and keeps the five user keys.
+    seen.length = 0;
+    const plain = await client(a.op, false).getSession();
+    expect(Object.keys(plain.data?.user ?? {}).sort()).toEqual([...CLIENT_USER_KEYS].sort());
+    expect(seen).toEqual(["GET /api/auth/session"]);
+  });
+
+  it("refreshes a due session through POST /get-session with adminClient(), and keeps the GET answer when it fails", async () => {
+    const answer = (id: string) => ({
+      session: {
+        id,
+        userId: "u1",
+        expiresAt: "2026-01-08T00:00:00.000Z",
+        activeOrganizationId: null,
+      },
+      user: {
+        id: "u1",
+        name: "",
+        email: "pat@example.com",
+        emailVerified: true,
+        image: null,
+        role: "admin",
+        banned: false,
+        banReason: null,
+        banExpires: null,
+      },
+      needsRefresh: id === "s-get",
+    });
+    const run = async (post: () => Response, get = () => Response.json(answer("s-get"))) => {
+      const seen: string[] = [];
+      const c = createAuthClient({
+        baseURL: `${BASE}/api/auth`,
+        plugins: [adminClient()],
+        fetchOptions: {
+          customFetchImpl: async (input, init) => {
+            const req = new Request(input, init);
+            seen.push(`${req.method} ${new URL(req.url).pathname}`);
+            return req.method === "POST" ? post() : get();
+          },
+        },
+      });
+      const r = await c.getSession();
+      return {
+        error: r.error && { code: r.error.code, status: r.error.status },
+        session: r.data?.session.id,
+        role: r.data?.user.role,
+        seen,
+      };
+    };
+    const calls = ["GET /api/auth/get-session", "POST /api/auth/get-session"];
+    expect(await run(() => Response.json(answer("s-post")))).toEqual({
+      error: null,
+      session: "s-post",
+      role: "admin",
+      seen: calls,
+    });
+    expect(await run(() => new Response("<html>bad gateway</html>", { status: 502 }))).toEqual({
+      error: null,
+      session: "s-get",
+      role: "admin",
+      seen: calls,
+    });
+    // A failed GET answers an error and no session: core's body has no Better Auth code.
+    const failed = () => Response.json({ error: "unexpected" }, { status: 500 });
+    expect(await run(failed, failed)).toEqual({
+      error: { code: "UNEXPECTED_RESPONSE", status: 500 },
+      session: undefined,
+      role: undefined,
+      seen: ["GET /api/auth/get-session"],
+    });
+    const down = () => {
+      throw new TypeError("fetch failed");
+    };
+    expect(await run(down, down)).toEqual({
+      error: { code: "NETWORK_ERROR", status: 0 },
+      session: undefined,
+      role: undefined,
+      seen: ["GET /api/auth/get-session"],
+    });
   });
 
   it("refuses an admin with no second factor", async () => {

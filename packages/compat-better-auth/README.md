@@ -654,8 +654,12 @@ secret or the app (`auth.tempo.api.operator.platformRole.revoke`).
 With `admin()`, `/get-session` and `auth.api.getSession` give the user
 `role`, `banned`, `banReason`, and `banExpires`, as Better Auth does. The
 role is the platform role or `user`. A banned user has no session, so
-`banned` is `false` there. The client of this package reads core's own
-session, so its user has no such field.
+`banned` is `false` there. With `adminClient()` from `better-auth/client/plugins`,
+the client's `getSession` and `useSession` read `/get-session`. So the user
+has the same four fields, and `banExpires` is a `Date` or null. Without
+`adminClient()`, the client reads core's own session, and its user has no
+such field. The client has no `admin.*` calls: send the admin paths with
+`fetch` and the session cookie.
 
 The deviations from Better Auth (ruling 53 of plan 12f):
 

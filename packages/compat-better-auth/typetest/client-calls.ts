@@ -1,5 +1,6 @@
 import { expoClient } from "../src/client/expo.js";
 import {
+  adminClient,
   emailOTPClient,
   magicLinkClient,
   organizationClient,
@@ -146,4 +147,16 @@ export async function plainSignIn(email: string, password: string) {
   const r = await dashboard.signIn.email({ email, password });
   // @ts-expect-error without twoFactorClient the answer has no twoFactorRedirect
   return r.data?.twoFactorRedirect;
+}
+
+// Plan 12f: with adminClient() the session user holds the role and the ban fields.
+export const operatorConsole = createAuthClient({
+  baseURL: "https://api.example.com",
+  plugins: [adminClient()],
+});
+export async function isAdmin() {
+  const r = await operatorConsole.getSession();
+  const role: string | undefined = r.data?.user.role;
+  const until: Date | null | undefined = r.data?.user.banExpires;
+  return role === "admin" && !r.data?.user.banned && until !== undefined;
 }

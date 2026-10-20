@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import manifest from "../package.json?raw";
 import {
+  adminClient,
   emailOTPClient,
   magicLinkClient,
   organizationClient,
@@ -47,8 +48,14 @@ describe("plugin markers", () => {
 
   it("client markers carry the id", () => {
     expect(
-      [organizationClient(), passkeyClient(), magicLinkClient(), emailOTPClient()].map((p) => p.id),
-    ).toEqual(["organization", "passkey", "magic-link", "email-otp"]);
+      [
+        organizationClient(),
+        passkeyClient(),
+        magicLinkClient(),
+        emailOTPClient(),
+        adminClient(),
+      ].map((p) => p.id),
+    ).toEqual(["organization", "passkey", "magic-link", "email-otp", "admin"]);
   });
 
   it("the two-factor client marker carries its options (plan 9f)", () => {

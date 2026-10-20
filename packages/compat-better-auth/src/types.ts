@@ -749,6 +749,21 @@ export interface ClientUser {
   image: string | null;
 }
 
+/**
+ * The fields of the admin plugin on the session user (ruling 54 of plan
+ * 12f). The client gives them with `adminClient()` only, read from the
+ * shim's `/get-session`.
+ */
+export interface ClientAdminFields {
+  role: string;
+  banned: boolean;
+  banReason: string | null;
+  banExpires: Date | null;
+}
+
+/** The user of a session read: `ClientUser`, and the admin fields with `adminClient()`. */
+export type ClientSessionUser = ClientUser & Partial<ClientAdminFields>;
+
 export interface ClientSession {
   id: string;
   userId: string;
@@ -840,7 +855,7 @@ export const COMPAT_CLIENT_PLUGIN = "authtempo-compat-client-plugin";
 export type ClientPlugin =
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
-      readonly id: "organization" | "passkey" | "magic-link" | "email-otp";
+      readonly id: "organization" | "passkey" | "magic-link" | "email-otp" | "admin";
     }
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
@@ -874,7 +889,7 @@ export interface ClientOptions {
 }
 
 export interface SessionState {
-  data: { session: ClientSession; user: ClientUser } | null;
+  data: { session: ClientSession; user: ClientSessionUser } | null;
   error: CompatClientError | null;
   isPending: boolean;
   isRefetching: boolean;
@@ -931,7 +946,10 @@ export interface AuthClient<TF extends boolean = false> {
     }): Promise<CompatClientResult<{ token: string | null; user: ClientUser }>>;
   };
   signOut(): Promise<CompatClientResult<{ success: true }>>;
-  getSession(): Promise<CompatClientResult<{ session: ClientSession; user: ClientUser } | null>>;
+  /** With `adminClient()`, the user holds `role`, `banned`, `banReason`, and `banExpires` (plan 12f). */
+  getSession(): Promise<
+    CompatClientResult<{ session: ClientSession; user: ClientSessionUser } | null>
+  >;
   /** Core's resend route (plan 8b). A `callbackURL` answers NOT_SUPPORTED: core lands the link on the app origin. */
   sendVerificationEmail(input: {
     email: string;
@@ -1038,7 +1056,7 @@ export interface AuthClient<TF extends boolean = false> {
   useSession: SessionStore;
   /** Expo only: the stored session as one cookie header value, `__Host-tempo_session=<token>`, or "" when none. */
   getCookie(): string;
-  $Infer: { Session: { session: ClientSession; user: ClientUser } };
+  $Infer: { Session: { session: ClientSession; user: ClientSessionUser } };
 }
 
 export interface ReactAuthClient<TF extends boolean = false>
