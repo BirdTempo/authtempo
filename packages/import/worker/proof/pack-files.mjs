@@ -14,31 +14,43 @@
 // - worker/input/: import.local.json holds every password hash of an import.
 //
 // The check fails when any packed path is outside the allowlist below, when
-// a path is under worker/.wrangler/, worker/input/, src/, or test/, or when
-// a file that the Worker or the CLI needs is absent. It makes a fake
+// a path is under worker/input/ or matches a forbidden name of plan 12j (such
+// as .wrangler/, src/ outside worker/src, or test/), or when a file that the
+// Worker or the CLI needs is absent. It makes a fake
 // worker/.wrangler/cache/cf.json and a fake worker/input/import.local.json
 // when they do not exist, so a tree with no rehearsal shows the leak too,
 // and it removes only what it made.
 //
 // LICENSE ships because an MIT package must carry its notice, and pnpm
 // 12.8.1 copies the root LICENSE into the pack (its CHANGELOG, 12.0.0-rc.8,
-// read 2026-10-20).
+// read 2026-10-20). CHANGELOG.md ships from the first release on (plan 12j).
+// The shared forbidden names are the one list of plan 12j, which check-pack
+// also reads. Node runs the .ts import by type stripping (Node 22.18 or later).
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  ALWAYS_SHIPPED,
+  CHANGELOG_FILE,
+  forbiddenMatch,
+} from "../../../../scripts/release/src/lib/pack-rules.ts";
 
 const pkg = fileURLToPath(new URL("../..", import.meta.url));
 const FAKES = [
   fileURLToPath(new URL("../.wrangler/cache/cf.json", import.meta.url)),
   fileURLToPath(new URL("../input/import.local.json", import.meta.url)),
 ];
+const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
 /** The files a pack always holds (npm adds package.json and README.md). */
-const FILES = ["package.json", "README.md", "LICENSE", "worker/README.md", "worker/wrangler.jsonc"];
+const FILES = [...ALWAYS_SHIPPED, CHANGELOG_FILE, "worker/README.md", "worker/wrangler.jsonc"];
 /** The folders whose every file ships. None of them holds local state. */
 const PREFIXES = ["dist/", "worker/src/", "worker/proof/"];
-/** Folders that must never ship. The allowlist already refuses them; the names make the failure clear. */
-const FORBIDDEN = ["worker/.wrangler/", "worker/input/", "src/", "test/"];
+/**
+ * The folder of this package that must never ship, beside the shared names.
+ * The allowlist already refuses it; the name makes the failure clear.
+ */
+const INPUT = "worker/input/";
 const NEEDED = [
   "package.json",
   "LICENSE",
@@ -77,8 +89,8 @@ try {
     for (const need of NEEDED)
       if (!paths.includes(need)) failures.push(`${need} is not in the pack`);
     for (const p of paths) {
-      const forbidden = FORBIDDEN.find((f) => p.startsWith(f));
-      if (forbidden) failures.push(`the pack holds ${p}, under ${forbidden}`);
+      const forbidden = p.startsWith(INPUT) ? INPUT : forbiddenMatch(p, manifest.files);
+      if (forbidden) failures.push(`the pack holds ${p}, which matches ${forbidden}`);
       else if (!FILES.includes(p) && !PREFIXES.some((f) => p.startsWith(f)))
         failures.push(`the pack holds ${p}, outside the allowlist`);
     }
