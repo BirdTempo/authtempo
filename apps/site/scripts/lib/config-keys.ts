@@ -5,6 +5,7 @@ import type {
   AppleConfig,
   AuthConfig,
   CaptchaConfig,
+  DynamicRolesConfig,
   EmailOtpConfig,
   GitHubConfig,
   GoogleConfig,
@@ -151,7 +152,11 @@ export const CONFIG_KEYS = {
     invitationTtlDays: true,
     invitationLinkBuilder: true,
     limits: true,
+    dynamicRoles: true,
   } satisfies Keys<OrganizationsConfig>,
+  "organizations.dynamicRoles": {
+    maxPerOrganization: true,
+  } satisfies Keys<DynamicRolesConfig>,
   "organizations.limits": {
     perUser: true,
     membersPerOrganization: true,

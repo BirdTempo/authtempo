@@ -31,7 +31,7 @@ describe("the calls that can answer session_not_fresh", () => {
     const named = calls(
       between(guide, "## The fresh rule", "## ").filter((l) => l.includes("can answer")),
     );
-    expect(listed).toHaveLength(16);
+    expect(listed).toHaveLength(19);
     expect(named).toEqual(listed);
   });
 });

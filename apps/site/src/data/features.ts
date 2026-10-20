@@ -17,7 +17,7 @@ export interface Feature {
 /**
  * One row per member of RouteFeature. It had 17 at 0ef9665. Plan 11g adds
  * `openapi`, the 18th, and plan 12e adds `oauthDevice`, the 19th. Plan 12f
- * adds `operatorUsers`, the 20th, and `operatorImpersonation`, the 21st. A Record over the union fails the site's typecheck when core
+ * adds `operatorUsers`, the 20th, and `operatorImpersonation`, the 21st. Plan 12k adds `dynamicRoles`, the 22nd. A Record over the union fails the site's typecheck when core
  * adds a member, so a new feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
@@ -34,7 +34,9 @@ export interface Feature {
  * four routes (ruling 18 of the plan 11b lane). Until the guide of plan
  * 12f Task 14, the guide of `operatorUsers` is the section of the routes
  * page that shows its routes. The guide of `operatorImpersonation` is the
- * Impersonation section of that page. `accountDelete`,
+ * Impersonation section of that page. Until plan 12k Task 9
+ * writes its guide, `dynamicRoles` points to its section of the routes page.
+ * `dynamicRoles` repeats the `organization` symbol. `accountDelete`,
  * `oauthRegistration`, and `oauthDevice` point to the section of their guide
  * that holds them.
  * `openapi` has no guide: its
@@ -112,6 +114,12 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "Organizations, ranked roles, mailed invitations, and the active organization.",
     icon: "organization",
     guide: "/docs/guides/organizations/",
+  },
+  dynamicRoles: {
+    title: "Dynamic roles",
+    line: "Each organization stores its own roles, with a rank and a set of actions.",
+    icon: "organization",
+    guide: "/docs/reference/routes/#dynamic-roles",
   },
   tokens: {
     title: "API tokens",

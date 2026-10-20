@@ -156,6 +156,8 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `organizations.invitationTtlDays` | number | 7 | A positive integer. |
 | `organizations.invitationLinkBuilder` | function of the token and the organization | `<appURL>/?invitation=<token>` | The link in the invitation mail. |
 | `organizations.limits` | object | no limit | See the three limits. |
+| `organizations.dynamicRoles` | object | off | Turns on the roles that each organization stores. See [Dynamic roles](/docs/reference/routes/#dynamic-roles). |
+| `organizations.dynamicRoles.maxPerOrganization` | number | 50 | An integer from 1 to 1000. A create at the limit answers `role_limit`. |
 | `organizations.limits.perUser` | number | none | A positive integer. Create answers `organization_limit` at it. |
 | `organizations.limits.membersPerOrganization` | number | none | A positive integer. Add and accept answer `member_limit` at it. |
 | `organizations.limits.pendingInvitationsPerOrganization` | number | none | A positive integer. Invite answers `invitation_limit` at it. |

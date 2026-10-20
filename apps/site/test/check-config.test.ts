@@ -6,7 +6,7 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 177 keys, the nested ones by their path", () => {
+  it("lists 179 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
@@ -16,10 +16,12 @@ describe("checkConfig", () => {
     // keys of operator.secrets[], and the two keys of operator.impersonation.
     // Plan 12f Task 4 adds hooks.operator.
     // Plan 12k Task 2 adds organizations.roles and organizations.statements.
-    expect(keys.length).toBe(177);
+    // Plan 12k Task 4 adds organizations.dynamicRoles and its maxPerOrganization.
+    expect(keys.length).toBe(179);
     expect(keys).toContain("hooks.operator");
     expect(keys).toContain("operator.secrets[].scopes");
     expect(keys).toContain("operator.impersonation.ttlMinutes");
+    expect(keys).toContain("organizations.dynamicRoles.maxPerOrganization");
     expect(keys).toContain("organizations.roles");
     expect(keys).toContain("organizations.statements");
     expect(keys).toContain("oauth.defaultResource");

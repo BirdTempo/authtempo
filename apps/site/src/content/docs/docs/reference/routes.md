@@ -807,6 +807,55 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Limit | `slug-check:user:<userId>`, 60 per minute. The create and a rename to a new slug spend the same key |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
+## Dynamic roles
+
+These routes exist when the config sets `organizations.dynamicRoles`. An organization stores its own roles beside the roles of the config. A role check reads them at each request, so a change applies at the next request.
+
+<h3 id="get-organizations-roles"><code>GET /organizations/roles</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `ac:read` in the organization |
+| Input | Query `{ organizationId }` |
+| Answer | `{ roles }`: each stored role with `id`, `name`, `rank`, `permissions`, `createdAt`, and `updatedAt`, by name. A row with a bad shape is left out |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="get-organizations-roles-get"><code>GET /organizations/roles/get</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `ac:read` in the organization |
+| Input | Query `{ organizationId, name }` |
+| Answer | `{ role }` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="post-organizations-roles-create"><code>POST /organizations/roles/create</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The session is fresh. An API token answers 401. The user holds `ac:create` in the organization |
+| Input | JSON `{ organizationId, name, rank?, permissions }`. `name` is one role name that the config does not hold. `rank` is from 1 to the user's rank and below the owner rank, default 1. `permissions` are known actions that the user holds. Another key answers `invalid_body` |
+| Answer | `{ role }` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`role_taken`](/docs/reference/errors/#role_taken), [`role_limit`](/docs/reference/errors/#role_limit), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="post-organizations-roles-update"><code>POST /organizations/roles/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The session is fresh. An API token answers 401. The user holds `ac:update` in the organization, and the role's rank and actions |
+| Input | JSON `{ organizationId, name, rank?, permissions? }`. The rules of the create hold for `rank` and `permissions`. Another key answers `invalid_body` |
+| Answer | `{ role }` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
+<h3 id="post-organizations-roles-delete"><code>POST /organizations/roles/delete</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The session is fresh. An API token answers 401. The user holds `ac:delete` in the organization, and the role's rank and actions |
+| Input | JSON `{ organizationId, name }` |
+| Answer | `{ ok: true }`. A member or a pending invitation that holds the role answers `role_in_use` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`role_in_use`](/docs/reference/errors/#role_in_use), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+
 ## API tokens
 
 These routes exist in every deployment.

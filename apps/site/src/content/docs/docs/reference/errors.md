@@ -474,6 +474,32 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | The Errors cell of each route on the [routes page](/docs/reference/routes/) names it. It covers the sign-out, the re-authentication, and every operator route but the stop. It covers each change of a way in, the second-factor routes, and the handoff. It covers the organization writes that give or take a role, and the OAuth authorize, consent, and end-session routes. The in-process calls of the same acts answer it too. |
+<h3 id="role_in_use"><code>role_in_use</code> 409</h3>
+
+- **Meaning:** A member of the organization or a pending invitation holds the stored role, alone or as a part of its role string.
+- **Do:** Give each member another role with [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), revoke the invitations, then delete the role again.
+
+| Routes |
+| --- |
+| [`POST /organizations/roles/delete`](/docs/reference/routes/#post-organizations-roles-delete). |
+
+<h3 id="role_limit"><code>role_limit</code> 409</h3>
+
+- **Meaning:** The organization holds `organizations.dynamicRoles.maxPerOrganization` stored roles, 50 by default.
+- **Do:** Delete a role that no member holds, or raise the limit in the config.
+
+| Routes |
+| --- |
+| [`POST /organizations/roles/create`](/docs/reference/routes/#post-organizations-roles-create). |
+
+<h3 id="role_taken"><code>role_taken</code> 409</h3>
+
+- **Meaning:** The organization holds a stored role with this name.
+- **Do:** Choose another name, or change the role with [`POST /organizations/roles/update`](/docs/reference/routes/#post-organizations-roles-update).
+
+| Routes |
+| --- |
+| [`POST /organizations/roles/create`](/docs/reference/routes/#post-organizations-roles-create). |
 
 ## OAuth codes
 

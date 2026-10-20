@@ -45,6 +45,7 @@ import test from "../../../../../samples/guides/account-settings.test.ts?raw";
 - A sign-in makes a session fresh for `session.freshMinutes`, 1440 by default. A re-authentication makes it fresh again. The session token and the expiry stay the same.
 - These client calls can answer `session_not_fresh`: `sessions.revoke`, `sessions.revokeOthers`, `user.changeEmail`, `user.delete`, `identities.unlink`, and `identities.link`.
 - The calls of the other guides can answer it too: `passkey.register`, `passkeys.delete`, and `tokens.create`.
+- The three role writes can answer it: `organizations.roles.create`, `organizations.roles.update`, and `organizations.roles.delete`.
 - `password.change` can answer it while the second factor is on, and for a first password.
 - The second factor calls can answer it: `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`, `secondFactor.passkey.enable`, `secondFactor.email.enable`, and `secondFactor.disable`.
 - `withFresh` runs the change. On `session_not_fresh` it runs your re-authentication, then the change once more.

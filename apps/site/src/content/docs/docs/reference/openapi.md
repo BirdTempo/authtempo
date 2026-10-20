@@ -69,6 +69,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `emailOtpReset` | `emailOtp` and `password` | off |
 | `handoff` | `handoff` | off |
 | `organizations` | `organizations` | off |
+| `dynamicRoles` | `organizations.dynamicRoles` | off |
 | `tokens` | always on | on |
 | `jwtMint` | `jwtMint` | on |
 | `operator` | `operator` | off |

@@ -70,8 +70,9 @@ describe("the demo lists and the routes of core", () => {
       // three oauth routes (GET and POST /oauth/end-session, POST /oauth/introspect)
       // and the three routes of oauthDevice, so 24 became 30. Plan 12f adds the
       // eleven routes of operatorUsers and the two routes of
-      // operatorImpersonation, so 30 became 43.
-      expect(checked).toBe(43);
+      // operatorImpersonation, so 30 became 43. Plan 12k Task 4 adds the five
+      // routes of dynamicRoles, so 43 became 48.
+      expect(checked).toBe(48);
     },
     LONG_TEST_MS,
   );
