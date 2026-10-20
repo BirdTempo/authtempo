@@ -520,6 +520,30 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(await outbox(w)).toEqual([]);
   });
 
+  it("delivers at most 10 rows after a session end, and the sweep delivers the rest (spec 8.16 item 14)", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const clients: string[] = [];
+    // api.oauth.clients makes them: the register route allows 10 per hour.
+    for (let i = 0; i < 12; i++) {
+      const made = await createClient(w.auth.config, {
+        name: `Client ${i}`,
+        redirectUris: [REDIRECT],
+        backchannelLogoutUri: BC,
+      });
+      if (!made.ok) throw new Error(made.error);
+      clients.push(made.value.client.id);
+    }
+    for (const c of clients) await tokensOf(w, actor.token, c);
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    expect(w.calls).toHaveLength(10);
+    expect(await outbox(w)).toHaveLength(2);
+    await sweepExpired(w.auth.config);
+    expect(w.calls).toHaveLength(12);
+    expect(new Set(w.calls.map((c) => decodeJwt(tokenOfCall(c)).aud))).toEqual(new Set(clients));
+    expect(await outbox(w)).toEqual([]);
+  });
+
   it("keeps the row on a 500 with attempts 1 and nextAttemptAt one minute out, and the sweep delivers it", async () => {
     const w = world();
     const { actor } = await twoSessions(w);

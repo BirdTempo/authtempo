@@ -940,6 +940,42 @@ describe("oauth (plan 9g)", () => {
       ).toThrowError(message);
   });
 
+  it("reads oauth.device and refuses a value outside its bounds (spec 8.16 item 13)", () => {
+    const device = (value: unknown) =>
+      resolveConfig({ ...base, oauth: { resources: [R], fetch, device: value as never } }).oauth
+        ?.device;
+    expect(device(undefined)).toBeNull();
+    expect(device(false)).toBeNull();
+    expect(device({})).toEqual({ codeTtlMinutes: 10, interval: 5 });
+    expect(device({ codeTtlMinutes: 1, interval: 60 })).toEqual({
+      codeTtlMinutes: 1,
+      interval: 60,
+    });
+    expect(device({ codeTtlMinutes: 30, interval: 5 })).toEqual({
+      codeTtlMinutes: 30,
+      interval: 5,
+    });
+    const TTL = "oauth.device.codeTtlMinutes must be an integer from 1 to 30";
+    const INTERVAL = "oauth.device.interval must be an integer from 5 to 60";
+    const bad: [unknown, string][] = [
+      [true, "oauth.device must be an object or false"],
+      [null, "oauth.device must be an object or false"],
+      [
+        { codeTtl: 5 },
+        "oauth.device.codeTtl is not an option; core has codeTtlMinutes and interval",
+      ],
+      [{ codeTtlMinutes: 0 }, TTL],
+      [{ codeTtlMinutes: 31 }, TTL],
+      [{ codeTtlMinutes: 1.5 }, TTL],
+      [{ codeTtlMinutes: "10" }, TTL],
+      [{ interval: 4 }, INTERVAL],
+      [{ interval: 61 }, INTERVAL],
+      [{ interval: 5.5 }, INTERVAL],
+      [{ interval: "5" }, INTERVAL],
+    ];
+    for (const [value, message] of bad) expect(() => device(value)).toThrowError(message);
+  });
+
   it("accepts dynamic and cimd both off: api.oauth.clients.create is the way in (plan 12e)", () => {
     expect(
       resolveConfig({

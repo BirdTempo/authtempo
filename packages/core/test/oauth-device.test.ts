@@ -857,6 +857,32 @@ describe("the device grant (plan 12e Task 14, RFC 8628)", () => {
     });
   });
 
+  it("limits the device authorization request to 30 per IP per 15 minutes, a failed auth too (spec 8.16 item 13)", async () => {
+    const h = instance(undefined, {}, { clientIp: () => "203.0.113.8" });
+    const clientId = await deviceClient(h);
+    const startOf = (id: string) =>
+      h.auth.handle(form(START_URL, { client_id: id, scope: "mcp:read", resource: RESOURCE }));
+    const statuses: number[] = [];
+    for (let i = 0; i < 30; i++)
+      statuses.push((await startOf(i % 2 === 0 ? clientId : "cl_unknown")).status);
+    expect(statuses).toEqual(Array.from({ length: 30 }, (_, i) => (i % 2 === 0 ? 200 : 400)));
+    expect(await answer(await startOf(clientId))).toEqual({
+      status: 429,
+      body: { error: "rate_limited" },
+    });
+    // Another IP has its own count.
+    const other = instance(h, {}, { clientIp: () => "203.0.113.9" });
+    expect(
+      (
+        await other.auth.handle(
+          form(START_URL, { client_id: clientId, scope: "mcp:read", resource: RESOURCE }),
+        )
+      ).status,
+    ).toBe(200);
+    h.clock.advance(900_000);
+    expect((await startOf(clientId)).status).toBe(200);
+  });
+
   it("draws each user code from the alphabet", async () => {
     const h = instance();
     const clientId = await deviceClient(h);
