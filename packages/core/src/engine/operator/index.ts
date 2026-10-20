@@ -11,6 +11,7 @@ import {
   type PlatformRoleInput,
   revokePlatformRole,
 } from "./platform-role.js";
+import { disableFactorWithProof, type FactorDisableInput } from "./second-factor.js";
 import { getUser, listUsers, type OperatorUser, searchUsers } from "./users.js";
 
 /**
@@ -59,6 +60,13 @@ export interface OperatorApi {
     /** Revokes the platform role and ends all access of the user but the API tokens. Needs the scope `users`. */
     revoke(input: PlatformRoleInput): Promise<Result<{ auditId: string }>>;
   };
+  secondFactor: {
+    /**
+     * Turns the second factor off after identity proofing, with the proof in
+     * the audit row (plan 12f Task 9, ASVS 5.0.0 6.4.4). Needs the scope `users`.
+     */
+    disable(input: FactorDisableInput): Promise<Result<{ auditId: string }>>;
+  };
   /**
    * Creates the first operator: the platform organization when absent, the
    * user when absent (not verified, no password), and the member row. A
@@ -98,6 +106,9 @@ export function operatorApi(config: ResolvedConfig): OperatorApi {
     platformRole: {
       grant: entry((i) => grantPlatformRole(config, i)),
       revoke: entry((i) => revokePlatformRole(config, i)),
+    },
+    secondFactor: {
+      disable: entry((i) => disableFactorWithProof(config, i)),
     },
     createAdmin: entry((i) => createAdmin(config, i)),
   };
