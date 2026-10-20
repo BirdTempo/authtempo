@@ -4,8 +4,8 @@ import { addMember } from "../src/engine/organizations.js";
 import { type ResolvedSession, resolveSession } from "../src/engine/sessions.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { BASE_URL, makeAuth, seedPlatform } from "./helpers.js";
-import { FAST } from "./password-helpers.js";
-import { enrolled, verifiedSession } from "./totp-helpers.js";
+import { FAST, signUpAndVerify } from "./password-helpers.js";
+import { enrolled, PASSWORD, verifiedSession } from "./totp-helpers.js";
 
 /** The three named operator secrets of the fixture, each 32 visible characters or more. */
 export const OPERATOR_SECRETS = {
@@ -59,30 +59,37 @@ export type OperatorAuth = Awaited<ReturnType<typeof operatorAuth>>;
  * A platform operator, built through the flows of the product. The app
  * seeds the platform organization and root through storage, as a
  * migration would (`seedPlatform`; the slug is reserved). The operator
- * signs up and verifies the address, turns TOTP on through the enable
- * flow, and root adds the member row through `addMember`. The session is
- * fresh: the sign-in just set `freshAt`. `role: null` leaves the member
- * row out; `factor: false` leaves the factor off.
+ * signs up and verifies the address, and root adds the member row through
+ * `addMember`. Then the operator signs in and turns TOTP on through the
+ * enable flow. The sign-in comes after the grant: the guard gives no power
+ * to a session from before it (ruling 50). The session is fresh: the
+ * sign-in just set `freshAt`. `role: null` leaves the member row out;
+ * `factor: false` leaves the factor off.
  */
 export async function operatorFixture(
   options: { role?: string | null; factor?: boolean; config?: Partial<AuthConfig> } = {},
 ) {
   const auth = await operatorAuth(options.config);
   const { root, platformOrg } = await seedPlatform(auth);
-  const signedIn =
-    options.factor === false
-      ? await verifiedSession(auth, OPERATOR_EMAIL)
-      : (await enrolled(auth, OPERATOR_EMAIL)).session;
+  await signUpAndVerify(auth, OPERATOR_EMAIL, PASSWORD);
+  const user = await auth.storage.findOne("user", [
+    { field: "email", op: "eq", value: OPERATOR_EMAIL },
+  ]);
+  if (!user) throw new Error("no operator user");
   const role = options.role === undefined ? "operator" : options.role;
   if (role !== null) {
     const added = await addMember(auth.config, {
       user: root,
       organizationId: platformOrg.id,
-      userId: signedIn.user.id,
+      userId: user.id,
       role,
     });
     if (!added.ok) throw new Error(added.code);
   }
+  const signedIn =
+    options.factor === false
+      ? await verifiedSession(auth, OPERATOR_EMAIL)
+      : (await enrolled(auth, OPERATOR_EMAIL)).session;
   const operator = await sessionOf(auth, signedIn.token);
   return { auth, root, platformOrg, operator };
 }

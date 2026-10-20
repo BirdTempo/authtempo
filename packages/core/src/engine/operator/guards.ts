@@ -81,13 +81,25 @@ export async function isPlatformOperator(
   userId: string,
   storage: StorageAdapter = config.storage,
 ): Promise<boolean> {
+  return (await platformMember(config, userId, storage)) !== null;
+}
+
+/**
+ * The member row of the platform organization that gives the user the
+ * platform role, or null. `isPlatformOperator` and the guard read it.
+ */
+async function platformMember(
+  config: ResolvedConfig,
+  userId: string,
+  storage: StorageAdapter = config.storage,
+): Promise<MemberRow | null> {
   const organizationId = await platformOrganizationId(config, storage);
-  if (organizationId === null) return false;
+  if (organizationId === null) return null;
   const member = await storage.findOne("member", [
     { field: "organizationId", op: "eq", value: organizationId },
     { field: "userId", op: "eq", value: userId },
   ]);
-  return holdsPlatformRole(config, organizationId, member);
+  return member && holdsPlatformRole(config, organizationId, member) ? member : null;
 }
 
 /**
@@ -140,7 +152,11 @@ function refused(route: string): Result<never> {
  * order:
  *
  * 1. The session is not an impersonation session.
- * 2. The user holds the platform role in the platform organization.
+ * 2. The user holds the platform role in the platform organization, and
+ *    the session is not older than the last write of that member row
+ *    (ruling 50 of plan 12f). Each write of a role, a grant too, sets
+ *    `updatedAt`, so a re-grant gives no power to a session from before
+ *    it, such as a session that a revoke left for the sweep.
  * 3. The address is verified.
  * 4. A second factor has a method.
  * 5. The session is fresh.
@@ -157,7 +173,10 @@ export async function requireOperatorUser(
 ): Promise<Result<OperatorActor & { kind: "user" }>> {
   const { user, session } = resolved;
   if (session.actorId !== null) return refused(route);
-  if (!(await isPlatformOperator(config, user.id))) return refused(route);
+  const member = await platformMember(config, user.id);
+  if (!member) return refused(route);
+  // The grant time of the role: a session from before it holds no operator power.
+  if (session.createdAt.getTime() < member.updatedAt.getTime()) return refused(route);
   if (!user.emailVerified) return refused(route);
   if (!(await hasSecondFactor(config, user.id))) return refused(route);
   if (!requireFresh(config, session).ok) return refused(route);

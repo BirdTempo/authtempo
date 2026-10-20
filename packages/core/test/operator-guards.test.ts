@@ -17,6 +17,7 @@ import {
   operatorHeader,
   sessionOf,
 } from "./operator-helpers.js";
+import { signUpAndVerify } from "./password-helpers.js";
 import { enrolled, PASSWORD } from "./totp-helpers.js";
 
 // A pass-through spy: the real compare runs, and the test counts the calls.
@@ -102,14 +103,19 @@ describe("the operator user guard (plan 12f)", () => {
       status: 429,
     });
     // The key holds the user id: a second platform operator keeps a full window.
-    const second = await enrolled(f.auth, "op2@example.com");
+    // The grant comes before the sign-in, as the guard asks (ruling 50).
+    await signUpAndVerify(f.auth, "op2@example.com", PASSWORD);
+    const op2 = await f.auth.storage.findOne("user", [
+      { field: "email", op: "eq", value: "op2@example.com" },
+    ]);
     const added = await addMember(f.auth.config, {
       user: f.root,
       organizationId: f.platformOrg.id,
-      userId: second.user.id,
+      userId: op2?.id ?? "",
       role: "operator",
     });
     if (!added.ok) throw new Error(added.code);
+    const second = await enrolled(f.auth, "op2@example.com");
     const r = await requireOperatorUser(
       f.auth.config,
       await sessionOf(f.auth, second.session.token),

@@ -889,7 +889,7 @@ These routes exist when the config sets `operator.secretHash` or `operator.secre
 
 ## Operator user tools
 
-These routes exist when the config sets `operator.users` (plan 12f). A secret call counts on `operator-users:ip:<ip>`, 600 per hour, right or wrong secret. A secret that matches also counts on `operator-users:secret:<name>`, 600 per hour from any address. A platform operator counts on `operator:user:<userId>`, 600 per hour ([Limits](/docs/reference/limits/)). A request with an operator secret and a session answers 401. A user actor never acts on their own user or on another platform operator. Each write writes one audit row in its transaction, and its answer names the row. Each write reads a body of the type `application/json` only. A body of another type, or with no type, answers `invalid_body`.
+These routes exist when the config sets `operator.users` (plan 12f). A secret call counts on `operator-users:ip:<ip>`, 600 per hour, right or wrong secret. A secret that matches also counts on `operator-users:secret:<name>`, 600 per hour from any address. A platform operator counts on `operator:user:<userId>`, 600 per hour ([Limits](/docs/reference/limits/)). A request with an operator secret and a session answers 401. A user actor never acts on their own user or on another platform operator. Each write writes one audit row in its transaction, and its answer names the row. The operator user guard also refuses a session from before the last write of the user's platform role. So after a grant or a re-grant, the operator signs in again. Each write reads a body of the type `application/json` only. A body of another type, or with no type, answers `invalid_body`.
 
 <h3 id="get-operator-users"><code>GET /operator/users</code></h3>
 

@@ -74,7 +74,12 @@ const endings: { id: string; reason: string }[] = [];
  * operator secret, and a slide of 6 hours. Each call makes a new adapter:
  * one invocation.
  */
-async function engine(db: D1Database, sent: MailMessage[], limiter?: AuthConfig["limiter"]) {
+async function engine(
+  db: D1Database,
+  sent: MailMessage[],
+  limiter?: AuthConfig["limiter"],
+  extra: Partial<AuthConfig> = {},
+) {
   const storage = createD1Adapter(db);
   const input: AuthConfig = {
     baseURL: BASE,
@@ -108,16 +113,18 @@ async function engine(db: D1Database, sent: MailMessage[], limiter?: AuthConfig[
         },
       },
     },
+    ...extra,
   };
   return { auth: createAuth(input), storage };
 }
 
 type Auth = Awaited<ReturnType<typeof engine>>["auth"];
 
-/** `count` sign-ins of one address by a magic link: the user id and the token of the last session. */
+/** `count` sign-ins of one address by a magic link: the user id, the token of the last session, and each token. */
 async function signIns(auth: Auth, sent: MailMessage[], email: string, count: number) {
   let userId = "";
   let last = "";
+  const tokens: string[] = [];
   for (let i = 0; i < count; i++) {
     await auth.api.requestMagicLink({ email, ip: null });
     const text = sent.filter((m) => m.to === email).at(-1)?.text ?? "";
@@ -128,8 +135,9 @@ async function signIns(auth: Auth, sent: MailMessage[], email: string, count: nu
     if (!s) throw new Error("no session");
     userId = s.user.id;
     last = r.value.token;
+    tokens.push(last);
   }
-  return { userId, token: last };
+  return { userId, token: last, tokens };
 }
 
 /**
@@ -137,8 +145,7 @@ async function signIns(auth: Auth, sent: MailMessage[], email: string, count: nu
  * sign-in, the first password, and the email method of the second factor.
  * Answers the token of a fresh session.
  */
-async function platformOperator(auth: Auth, sent: MailMessage[]) {
-  const email = "op@example.com";
+async function platformOperator(auth: Auth, sent: MailMessage[], email = "op@example.com") {
   const made = await auth.api.operator.createAdmin({
     actor: APP,
     email,
@@ -164,6 +171,17 @@ async function platformOperator(auth: Auth, sent: MailMessage[]) {
   );
   if (res.status !== 200) throw new Error(`enable answered ${res.status}`);
   return token;
+}
+
+/** The token of the first of `tokens` whose session row still exists. */
+async function leftToken(tokens: string[]): Promise<string> {
+  for (const token of tokens) {
+    const row = await env.DB.prepare("SELECT id FROM ta_session WHERE token_hash = ?")
+      .bind(await sha256Hex(token))
+      .first();
+    if (row) return token;
+  }
+  throw new Error("no left session");
 }
 
 /** One route call as one invocation on a counting view: the status, the body, and the queries. */
@@ -248,6 +266,50 @@ const asSecret = { authorization: `Operator ${SECRET}` };
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });
 
 describe("the ban and the revoke on D1 (rulings 44 and 45 of plan 12f)", () => {
+  it("gives a session from before a re-grant no operator power, and a new session acts (ruling 50)", async () => {
+    const sent: MailMessage[] = [];
+    // The magic link opens a session with no second factor here, so the target signs in 60 times after its factor.
+    const { auth: setup } = await engine(env.DB, sent, undefined, {
+      totp: { gate: { magicLink: false } },
+    });
+    await platformOperator(setup, sent);
+    await platformOperator(setup, sent, "bob@example.com");
+    const bob = await signIns(setup, sent, "bob@example.com", 60);
+    const list = (token: string) =>
+      setup.handle(
+        new Request(`${BASE}/auth/operator/users`, {
+          headers: { cookie: `__Host-tempo_session=${token}` },
+        }),
+      );
+    expect((await list(bob.token)).status).toBe(200);
+    const revoked = await invoke(sent, "/operator/users/platform-role", asSecret, {
+      userId: bob.userId,
+      grant: false,
+      reason: REASON,
+    });
+    expect(revoked.status).toBe(200);
+    const left = await leftToken(bob.tokens);
+    // The re-grant before the sweep: the left session keeps no power from it.
+    current = new Date(current.getTime() + 1);
+    const granted = await setup.api.operator.platformRole.grant({
+      actor: APP,
+      userId: bob.userId,
+      reason: REASON,
+      ip: null,
+      userAgent: null,
+    });
+    if (!granted.ok) throw new Error(granted.code);
+    const old = await list(left);
+    expect([old.status, await old.json()]).toEqual([403, { error: "operator_required" }]);
+    // A sign-in after the re-grant acts.
+    current = new Date(current.getTime() + 1);
+    const fresh = await signIns(setup, sent, "bob@example.com", 1);
+    expect((await list(fresh.token)).status).toBe(200);
+    // The sweep still ends the left sessions, and keeps the new one.
+    await sweepAll(sent);
+    expect(await sessionsOf(bob.userId)).toBe(1);
+  });
+
   beforeEach(async () => {
     await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
     endings.length = 0;
