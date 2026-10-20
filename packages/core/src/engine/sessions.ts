@@ -363,9 +363,15 @@ export async function endSessions(
   // The outbox reads the user's links; every flow ends the sessions of one user.
   const user = where.find((w) => w.field === "userId" && w.op === "eq")?.value;
   if (typeof user !== "string") throw new Error("authtempo: endSessions needs a userId term");
-  const links = await tx.findMany("oauthSessionClient", [
-    { field: "userId", op: "eq", value: user },
-  ]);
+  // Each read that drives a delete sorts by id, so every flow takes the
+  // rows of a table in one order. An unsorted read answers in the order of
+  // the index or the heap: on Postgres an update can move a row, and two
+  // flows then wait on each other (plan 12f Task 7 review m1).
+  const links = await tx.findMany(
+    "oauthSessionClient",
+    [{ field: "userId", op: "eq", value: user }],
+    { sort: { field: "id", dir: "asc" } },
+  );
   const ending = new Set<string>();
   for (const id of new Set(links.map((l) => l.sessionId))) {
     const byId: Where<"session"> = { field: "id", op: "eq", value: id };
@@ -379,7 +385,7 @@ export async function endSessions(
   );
   let n = 0;
   if (ended)
-    for (const row of await tx.findMany("session", where)) {
+    for (const row of await tx.findMany("session", where, { sort: { field: "id", dir: "asc" } })) {
       if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
         ended.push(row);
         n++;

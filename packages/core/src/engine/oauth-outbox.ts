@@ -75,9 +75,12 @@ export async function queueLogouts(
   now: Date,
 ): Promise<void> {
   const ids = new Set(sessionIds);
-  const links = await tx.findMany("oauthSessionClient", [
-    { field: "userId", op: "eq", value: userId },
-  ]);
+  // By id, as in endSessions: every flow deletes the links in one order.
+  const links = await tx.findMany(
+    "oauthSessionClient",
+    [{ field: "userId", op: "eq", value: userId }],
+    { sort: { field: "id", dir: "asc" } },
+  );
   await writeLogouts(
     tx,
     links.filter((l) => ids.has(l.sessionId)),
