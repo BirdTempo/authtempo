@@ -207,6 +207,14 @@ function toComponents<T>(node: T): T {
 }
 
 /**
+ * The keys of the authorize query that the schema leaves optional, though a
+ * default config requires them: each names the config key that lifts the
+ * need. The engine takes an absent `resource` only while
+ * `oauth.defaultResource` is set (ruling 52 of plan 12e).
+ */
+const CONFIG_OPTIONAL: Readonly<Record<string, string>> = { resource: "oauth.defaultResource" };
+
+/**
  * One `in: query` parameter per top-level property of a query schema, with
  * `required` from the schema. With an `alone` key, no key is required: the
  * description of each key says which form requires it.
@@ -225,7 +233,9 @@ function queryParameters(schema: object, alone?: string): object[] {
         ? `The second form of the query: \`${alone}\` comes alone, with no other key.`
         : needed
           ? `Required unless \`${alone}\` comes alone.`
-          : undefined;
+          : Object.hasOwn(CONFIG_OPTIONAL, name)
+            ? `Required unless \`${alone}\` comes alone, or \`${CONFIG_OPTIONAL[name]}\` is set.`
+            : undefined;
     return {
       name,
       in: "query",

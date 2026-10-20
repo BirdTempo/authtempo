@@ -256,6 +256,8 @@ export async function approvedDevice(
   clientId: string,
   cookie: string,
   scope = "mcp:read",
+  /** Null sends no `resource` (ruling 53 of plan 12e). */
+  resource: string | null = RESOURCE,
 ): Promise<string> {
   const formPost = (path: string, body: Record<string, string>, headers = {}) =>
     new Request(`${BASE_URL}/auth${path}`, {
@@ -264,7 +266,11 @@ export async function approvedDevice(
       body: new URLSearchParams(body).toString(),
     });
   const started = await h.auth.handle(
-    formPost("/oauth/device_authorization", { client_id: clientId, scope, resource: RESOURCE }),
+    formPost("/oauth/device_authorization", {
+      client_id: clientId,
+      scope,
+      ...(resource !== null ? { resource } : {}),
+    }),
   );
   if (started.status !== 200) throw new Error(`device_authorization answered ${started.status}`);
   const { device_code, user_code } = (await started.json()) as {

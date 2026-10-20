@@ -11,7 +11,7 @@ import {
 import type { DpopBinding } from "../primitives/dpop.js";
 import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
-import { resourceOf } from "../primitives/resource.js";
+import { namedResource, resourceOf } from "../primitives/resource.js";
 import type {
   OAuthClientRow,
   OAuthDeviceRow,
@@ -379,8 +379,8 @@ export async function exchangeCode(
   // RFC 9449 section 10: a code of `dpop_jkt` needs a proof of that key.
   if (data.dpopJkt !== null && input.dpop?.jkt !== data.dpopJkt)
     return oauthFail("invalid_dpop_proof");
-  if (input.resource !== null && input.resource !== data.resource)
-    return oauthFail("invalid_target");
+  const askedResource = namedResource(input.resource);
+  if (askedResource !== null && askedResource !== data.resource) return oauthFail("invalid_target");
   const user = await liveUser(config, data.userId);
   if (!user) return oauthFail("invalid_grant");
   // Every code comes from a consent that covers its scopes. A grant revoke
@@ -557,8 +557,8 @@ export async function refreshGrant(
       return oauthFail("invalid_scope");
     scopes = asked;
   }
-  if (input.resource !== null && input.resource !== row.resource)
-    return oauthFail("invalid_target");
+  const askedResource = namedResource(input.resource);
+  if (askedResource !== null && askedResource !== row.resource) return oauthFail("invalid_target");
   // The auth read the client: a CIMD document that did not answer refused this refresh there, and the family stays.
   const user = await liveUser(config, row.userId);
   if (!user) return reuse(config, row);

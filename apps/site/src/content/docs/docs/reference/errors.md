@@ -480,7 +480,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-invalid_target"><code>invalid_target</code> 400</h3>
 
-- **Meaning:** The `resource` is not one of `oauth.resources`, or not the grant's resource. A `client_credentials` request has no `resource`.
+- **Meaning:** The `resource` is not one of `oauth.resources`, or not the grant's resource. An authorize request, a `client_credentials` request, or a device start has no `resource` while `oauth.defaultResource` is not set. An empty `resource` counts as none.
 - **Do:** Send the resource of the grant.
 
 | Routes |

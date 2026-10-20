@@ -4,6 +4,7 @@ import { hmacSha256Hex, randomToken, sha256Hex } from "../primitives/crypto.js";
 import type { DpopBinding } from "../primitives/dpop.js";
 import { newId } from "../primitives/ids.js";
 import { currentSecret } from "../primitives/keyring.js";
+import { namedResource } from "../primitives/resource.js";
 import type { OAuthClientRow, OAuthDeviceRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { issuerOf } from "./jwt.js";
@@ -143,7 +144,7 @@ export async function startDevice(
   if (!device || !client.grantTypes.includes(DEVICE_GRANT) || client.subjectType === "pairwise")
     return oauthFail("unauthorized_client");
   // oauth.defaultResource takes the place of an absent resource; else the 9g rule (ruling 52 of plan 12e).
-  const resource = input.resource ?? oauth.defaultResource;
+  const resource = namedResource(input.resource) ?? oauth.defaultResource;
   if (resource === null || !oauth.resources.includes(resource)) return oauthFail("invalid_target");
   const scopes = [...new Set((input.scope ?? "").split(" ").filter((s) => s.length > 0))];
   if (scopes.length === 0 || scopes.some((s) => !oauth.scopes.has(s)))

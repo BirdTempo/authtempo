@@ -51,3 +51,12 @@ export function resourceOf(resources: readonly string[], url: string): string | 
   }
   return best;
 }
+
+/**
+ * A `resource` value of a request: an empty one counts as absent (RFC 6749
+ * section 3.1, read 2026-10-20; ruling 53 of plan 12e). The token, the
+ * device, and the authorize paths read it the same way.
+ */
+export function namedResource(value: string | null): string | null {
+  return value === "" ? null : value;
+}

@@ -379,6 +379,10 @@ describe("openApiDocument (plan 11g)", () => {
     expect(params.find((p) => p.name === "client_id")?.description).toBe(
       "Required unless `request_id` comes alone.",
     );
+    // Ruling 53 m2: the schema leaves resource optional for oauth.defaultResource; the text keeps the rule.
+    expect(params.find((p) => p.name === "resource")?.description).toBe(
+      "Required unless `request_id` comes alone, or `oauth.defaultResource` is set.",
+    );
   });
 
   it("writes the bearer challenge where the route writes it", () => {

@@ -2,6 +2,7 @@ import type { ResolvedConfig } from "../config.js";
 import { ACCESS_TOKEN_TYPE } from "../primitives/credentials.js";
 import { randomBase64Url } from "../primitives/crypto.js";
 import type { DpopBinding } from "../primitives/dpop.js";
+import { namedResource } from "../primitives/resource.js";
 import type { OAuthClientRow } from "../schema.js";
 import { issuerOf, signToken } from "./jwt.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
@@ -66,8 +67,8 @@ function holdsGrant(
 
 /**
  * `grant_type=client_credentials` for a client that `authenticateClient`
- * checked. `resource` is required: the token is for one resource (RFC
- * 8707). An absent `scope` gives every served scope. An asked scope that
+ * checked. The token is for one resource (RFC 8707): `resource`, else
+ * `oauth.defaultResource`; with neither, `invalid_target`. An absent `scope` gives every served scope. An asked scope that
  * is not served, or an empty set, is `invalid_scope` (RFC 6749 section 3.3).
  * With `dpop`, the token is bound to that key (RFC 9449 section 5).
  */
@@ -88,7 +89,7 @@ export async function credentialsGrant(
   )
     return oauthFail("rate_limited");
   // oauth.defaultResource takes the place of an absent resource; else the 9g rule (ruling 52 of plan 12e).
-  const resource = input.resource ?? oauth.defaultResource;
+  const resource = namedResource(input.resource) ?? oauth.defaultResource;
   if (resource === null || !oauth.resources.includes(resource)) return oauthFail("invalid_target");
   const scopes =
     input.scope === null
