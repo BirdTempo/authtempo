@@ -1248,7 +1248,7 @@ until they revoke some.
 
 Each step is a runbook line, with what breaks without it:
 
-1. Before the cutover, run `moveBetterAuthApiKeys` with `dryRun: true` against a copy of the database. The report gives the count of keys per owner and the stored prefixes. Without it, you do not know whom to tell, or which prefixes to list.
+1. Before the cutover, make a copy of the database, and apply the compat migrations to the copy: `storage.migrate()` on Postgres, or the D1 files with `wrangler d1 migrations apply` on D1. Without them, `betterAuthSchemaStorage` refuses the copy with `schema_mismatch`, and the dry run cannot start. Then run `moveBetterAuthApiKeys` with `dryRun: true` against the copy. The report gives the count of keys per owner and the stored prefixes. Without it, you do not know whom to tell, or which prefixes to list.
 2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Re-issue each key with no prefix, and delete its row. Without it, the move throws and moves nothing.
 3. Tell each owner whose key the report skips. After the cutover a skipped key answers 401 `token_retired` (`KEY_DISABLED` from `verifyApiKey`), and every script that uses one stops.
 4. Deploy the shim build with migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
