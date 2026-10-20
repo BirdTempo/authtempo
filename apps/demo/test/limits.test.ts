@@ -9,6 +9,7 @@ import {
   call,
   fetchSelf,
   type Jar,
+  LONG_TEST_MS,
   lastCode,
   lastLink,
   mailbox,
@@ -256,48 +257,58 @@ describe("the limits of the demo", () => {
     expect((await firstVisit(ip)).status).toBe(303);
   });
 
-  it("refuses the 11th user through each user route", async () => {
-    expect(USER_ROUTES.filter((r) => !(r in USER_ROUTE_CALLS))).toEqual([]);
-    for (const [route, make] of Object.entries(USER_ROUTE_CALLS)) {
-      const jar = await newSandbox();
-      await tenUsers(jar);
-      const res = await make(sameSandbox(jar), "eleventh@example.com");
-      await holdsResetWait(jar, res);
-      const body = await res.text();
-      expect({ route, status: res.status, body }).toEqual({
-        route,
-        status: 429,
-        body: JSON.stringify({ ...REFUSED, limit: "usersPerSandbox" }),
-      });
-      expect(await count(jar, "ta_user")).toBe(10);
-    }
-  });
+  // This test and the next took 5009 and 5002 ms in an unfiltered run (review n3 of plan 12e).
+  // The measures are beside LONG_TEST_MS.
+  it(
+    "refuses the 11th user through each user route",
+    async () => {
+      expect(USER_ROUTES.filter((r) => !(r in USER_ROUTE_CALLS))).toEqual([]);
+      for (const [route, make] of Object.entries(USER_ROUTE_CALLS)) {
+        const jar = await newSandbox();
+        await tenUsers(jar);
+        const res = await make(sameSandbox(jar), "eleventh@example.com");
+        await holdsResetWait(jar, res);
+        const body = await res.text();
+        expect({ route, status: res.status, body }).toEqual({
+          route,
+          status: 429,
+          body: JSON.stringify({ ...REFUSED, limit: "usersPerSandbox" }),
+        });
+        expect(await count(jar, "ta_user")).toBe(10);
+      }
+    },
+    LONG_TEST_MS,
+  );
 
-  it("lets a user that exists sign in at 10 users through each user route", async () => {
-    // The answer of core to a user that exists, by route. A sign-up of a
-    // known address answers 200 and makes no user.
-    const expected: Record<string, number> = {
-      "POST /password/sign-up": 200,
-      "POST /magic-link/verify": 302,
-      "POST /otp/verify": 200,
-      "GET /social/:provider/callback": 302,
-      "POST /password/reset": 302,
-      "POST /otp/reset": 200,
-    };
-    expect(Object.keys(expected).sort()).toEqual([...USER_ROUTES].sort());
-    for (const [route, make] of Object.entries(USER_ROUTE_CALLS)) {
-      const jar = await newSandbox();
-      await tenUsers(jar);
-      const res = await make(sameSandbox(jar), " User3@Example.com ");
-      const location = res.headers.get("location") ?? "";
-      expect({ route, status: res.status, error: location.includes("auth_error") }).toEqual({
-        route,
-        status: expected[route],
-        error: false,
-      });
-      expect(await count(jar, "ta_user")).toBe(10);
-    }
-  });
+  it(
+    "lets a user that exists sign in at 10 users through each user route",
+    async () => {
+      // The answer of core to a user that exists, by route. A sign-up of a
+      // known address answers 200 and makes no user.
+      const expected: Record<string, number> = {
+        "POST /password/sign-up": 200,
+        "POST /magic-link/verify": 302,
+        "POST /otp/verify": 200,
+        "GET /social/:provider/callback": 302,
+        "POST /password/reset": 302,
+        "POST /otp/reset": 200,
+      };
+      expect(Object.keys(expected).sort()).toEqual([...USER_ROUTES].sort());
+      for (const [route, make] of Object.entries(USER_ROUTE_CALLS)) {
+        const jar = await newSandbox();
+        await tenUsers(jar);
+        const res = await make(sameSandbox(jar), " User3@Example.com ");
+        const location = res.headers.get("location") ?? "";
+        expect({ route, status: res.status, error: location.includes("auth_error") }).toEqual({
+          route,
+          status: expected[route],
+          error: false,
+        });
+        expect(await count(jar, "ta_user")).toBe(10);
+      }
+    },
+    LONG_TEST_MS,
+  );
 
   it("lets a linked identity sign in at 10 users after its user changed address", async () => {
     // The sign-in of a fixed identity of the demo provider.
