@@ -730,7 +730,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Field | Value |
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The user has the rank `admin` |
-| Input | JSON `{ organizationId, email, role, teamIds? }`. `teamIds` needs `organizations.teams`: at most 20 distinct teams of the organization, else `invalid_body` |
+| Input | JSON `{ organizationId, email, role, teamIds? }`. `teamIds` needs `organizations.teams`: at most 20 distinct teams of the organization, else `invalid_body`. An invite with `teamIds` also needs `member:update`, the right of a team member add, else `forbidden_rank` |
 | Answer | `{ invitation }`, with no token |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`invitation_limit`](/docs/reference/errors/#invitation_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 

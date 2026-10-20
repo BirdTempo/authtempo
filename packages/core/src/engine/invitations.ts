@@ -19,7 +19,7 @@ import {
 import { effectiveIn, grantCheck, type Standing, touchCheck } from "./permissions.js";
 import { RULE_STATEMENTS, rankOf, roleAllowedIn } from "./ranks.js";
 import { publicSession, type ResolvedSession } from "./sessions.js";
-import { lockTeam } from "./teams.js";
+import { lockTeam, TEAM_MEMBER_ADD } from "./teams.js";
 import { holdUser, userStays } from "./user-hold.js";
 import { normalizeEmail } from "./users.js";
 
@@ -112,6 +112,9 @@ export async function inviteMember(
   if (!g.ok) return g;
   const teams = await inviteTeams(config, input.organizationId, input.teamIds);
   if (!teams.ok) return teams;
+  // The accept adds the person to each team, so the inviter needs the right of a team member add.
+  if (teams.value !== null && !can(s.value.standing.granted, TEAM_MEMBER_ADD))
+    return fail("forbidden_rank");
   // After the rank checks, so a stranger cannot spend an admin's budget.
   if (!(await config.limiter.allow(`invite:user:${input.user.id}`, INVITE_USER_LIMIT)))
     return fail("rate_limited");

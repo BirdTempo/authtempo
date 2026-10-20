@@ -70,6 +70,9 @@ function teamMemberSummary(row: TeamMemberRow, user: UserRow): TeamMemberSummary
   };
 }
 
+/** The statement of a team member add (spec 29 item 7). An invite that names teams asks it too. */
+export const TEAM_MEMBER_ADD: Statements = { member: ["update"] };
+
 const byName = (a: TeamSummary, b: TeamSummary) =>
   a.name < b.name ? -1 : a.name > b.name ? 1 : a.id < b.id ? -1 : 1;
 
@@ -384,7 +387,7 @@ export async function addTeamMember(
 ): Promise<Result<TeamMemberSummary>> {
   const sc = scope(config);
   if (!sc) return fail("not_found");
-  const t = await teamStanding(config, input.user, input.teamId, { member: ["update"] });
+  const t = await teamStanding(config, input.user, input.teamId, TEAM_MEMBER_ADD);
   if (!t.ok) return t;
   const { team, organization } = t.value;
   const member = await config.storage.findOne("member", [

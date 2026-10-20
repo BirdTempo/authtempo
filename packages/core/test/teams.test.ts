@@ -326,6 +326,44 @@ describe("teams (plan 12k Task 5)", () => {
     expect(sessions.map((s) => [s.activeOrganizationId, s.activeTeamId])).toEqual([[null, null]]);
   });
 
+  it("asks member:update for an invite that names teams", async () => {
+    const all = {
+      organization: ["update", "delete"],
+      member: ["read", "create", "update", "delete"],
+      invitation: ["read", "create", "cancel"],
+      team: ["create", "update", "delete"],
+    };
+    const w = world({
+      teams: {},
+      roles: {
+        owner: { rank: 4, permissions: all },
+        recruiter: { rank: 2, permissions: { invitation: ["create"], member: ["read"] } },
+        guest: { rank: 1, permissions: {} },
+      },
+    });
+    const ada = await w.user("ada@example.com");
+    const rita = await w.user("rita@example.com");
+    const organizationId = mustOk(
+      await w.auth.api.createOrganization({ user: ada, slug: "acme", name: "Acme" }),
+    ).organization.id;
+    mustOk(
+      await w.auth.api.addMember({ user: ada, organizationId, userId: rita.id, role: "recruiter" }),
+    );
+    const team = mustOk(await w.auth.api.createTeam({ user: ada, organizationId, name: "Core" }));
+    const h = bearer(await w.session("rita@example.com"));
+    const invite = (body: Record<string, unknown>) =>
+      w.auth
+        .handle(post("/auth/organizations/invite", { organizationId, role: "guest", ...body }, h))
+        .then(json);
+    // An invite with teams places a person in a team: the team member add asks member:update.
+    expect(await invite({ email: "dan@example.com", teamIds: [team.id] })).toEqual({
+      status: 403,
+      body: { error: "forbidden_rank" },
+    });
+    expect(await w.storage.findMany("invitation", [])).toEqual([]);
+    expect(await invite({ email: "dan@example.com" })).toMatchObject({ status: 200 });
+  });
+
   it("refuses an invite that names a team of another organization", async () => {
     const w = world();
     const { ada, organizationId } = await acme(w);
