@@ -89,12 +89,14 @@ function memberSummary(member: MemberRow, user: UserRow): MemberSummary {
   };
 }
 
-/** What an act did to the member row, for the hooks after the commit. Null: no change. */
-type MemberChange =
+/** The change of an added role part: a new row, or new parts of a row. Null: no change. */
+type PartChange =
   | { kind: "add"; member: MemberRow }
   | { kind: "role"; member: MemberRow; previousRole: string }
-  | { kind: "remove"; member: MemberRow }
   | null;
+
+/** What an act did to the member row, for the hooks after the commit. Null: no change. */
+type MemberChange = PartChange | { kind: "remove"; member: MemberRow };
 
 /** The member hooks after the commit (plan 9d), with `via: "operator"`. */
 async function memberChanged(
@@ -131,12 +133,12 @@ async function memberChanged(
 }
 
 /**
- * The add of the role part in the act's transaction: a new member row with
- * `role` alone, or `role` added to the parts of the row that exists. A row
- * that holds the part already changes nothing. The before hook runs before
- * the first write. A new row counts against `membersPerOrganization` (plan
- * 9d) and holds the user row against the account delete (plan 12a Task 11).
- * A parallel change of the row answers `conflict`.
+ * The checks and the before hook of an added role part, with no write. The
+ * change is a new member row with `role` alone, or `role` added to the
+ * parts of the row that exists. A row that holds the part already changes
+ * nothing. A new row counts against `membersPerOrganization` (plan 9d).
+ * The caller runs every before hook first (the D1 undo), then holds the
+ * user row, then calls `writePart`.
  */
 async function addRolePart(
   config: ResolvedConfig,
@@ -150,7 +152,7 @@ async function addRolePart(
     by: UserRow | null;
   },
   now: Date,
-): Promise<Result<MemberChange>> {
+): Promise<Result<PartChange>> {
   const hooks = config.hooks.organization;
   const organization = publicOrganization(input.organization);
   const { user, member, by } = input;
@@ -164,16 +166,6 @@ async function addRolePart(
       memberUser: user,
       by,
     });
-    // The role from the read is in the where: a parallel change matches zero rows.
-    const n = await tx.update(
-      "member",
-      [
-        { field: "id", op: "eq", value: member.id },
-        { field: "role", op: "eq", value: member.role },
-      ],
-      { role, updatedAt: now },
-    );
-    if (n === 0) return fail("conflict");
     return ok({
       kind: "role",
       member: { ...member, role, updatedAt: now },
@@ -206,6 +198,26 @@ async function addRolePart(
     invitation: null,
   });
   return ok({ kind: "add", member: row });
+}
+
+/**
+ * The member write of an added role part. The role from the read is in the
+ * where, so a parallel change matches zero rows and answers `conflict`.
+ */
+async function writePart(tx: StorageAdapter, change: PartChange): Promise<Result<true>> {
+  if (change?.kind === "add") await tx.create("member", change.member);
+  else if (change?.kind === "role") {
+    const n = await tx.update(
+      "member",
+      [
+        { field: "id", op: "eq", value: change.member.id },
+        { field: "role", op: "eq", value: change.previousRole },
+      ],
+      { role: change.member.role, updatedAt: change.member.updatedAt },
+    );
+    if (n === 0) return fail("conflict");
+  }
+  return ok(true);
 }
 
 /** The member row of `userId` in the organization, read through `storage`. */
@@ -276,11 +288,14 @@ export async function grantPlatformRole(
           now,
         );
         if (!change.ok) return change;
-        if (change.value?.kind === "add") {
-          await holdUser(tx, user.id);
-          await tx.create("member", change.value.member);
-          await userStays(tx, user.id);
-        }
+        // A new row holds the user row against the account delete (plan 12a
+        // Task 11). A change of the parts of a row needs no hold: a deleted
+        // row matches zero rows.
+        const added = change.value?.kind === "add";
+        if (added) await holdUser(tx, user.id);
+        const written = await writePart(tx, change.value);
+        if (!written.ok) return written;
+        if (added) await userStays(tx, user.id);
         return ok({ change: change.value });
       },
       {
@@ -505,7 +520,7 @@ export async function createAdmin(
             createdAt: now,
             updatedAt: now,
           }));
-        let change: MemberChange;
+        let change: PartChange;
         if (found) {
           const member = await memberOf(tx, organization.id, user.id);
           const added = await addRolePart(
@@ -536,10 +551,14 @@ export async function createAdmin(
           });
           change = { kind: "add", member };
         }
+        // The hold of the user row comes before the member write, the lock
+        // order of `user-hold.ts`. The account delete takes the user row and
+        // then the member rows, so the other order can deadlock on Postgres.
         if (existing) await holdUser(tx, user.id);
         if (!found) await tx.create("organization", organization);
         if (!existing) await tx.create("user", user);
-        if (change?.kind === "add") await tx.create("member", change.member);
+        const written = await writePart(tx, change);
+        if (!written.ok) return written;
         if (existing) await userStays(tx, user.id);
         return ok({ user, created: !existing, organization, change });
       },
