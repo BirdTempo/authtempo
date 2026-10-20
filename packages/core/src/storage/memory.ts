@@ -32,7 +32,8 @@ function matches<M extends ModelName>(row: Record<string, unknown>, where: Where
         // SQL: IN never matches a NULL row, even if the list holds null.
         return v !== null && (w.value as unknown[]).some((x) => norm(x) === v);
       case "startsWith":
-        // A prefix of UTF-16 units is a prefix of code points, so this agrees with SQL substr.
+        // assertPrefixes refuses a lone surrogate, so the prefix is whole code points.
+        // For well-formed text, this agrees with SQL substr.
         return typeof v === "string" && v.startsWith(w.value as string);
       case "lt":
       case "lte":
@@ -99,12 +100,21 @@ interface Lock {
   tail: Promise<void>;
 }
 
-/** The prefix rule of the port: a non-empty string on a string field. */
+/**
+ * The prefix rule of the port: a non-empty string on a string field, with no
+ * lone surrogate. A lone surrogate is no code point, and each engine reads it
+ * another way.
+ */
 function assertPrefixes<M extends ModelName>(model: M, where: Where<M>[]): void {
   const fields = schema[model].fields as Record<string, { type: string }>;
   for (const w of where) {
     if (w.op !== "startsWith") continue;
-    if (fields[w.field]?.type !== "string" || typeof w.value !== "string" || w.value === "") {
+    if (
+      fields[w.field]?.type !== "string" ||
+      typeof w.value !== "string" ||
+      w.value === "" ||
+      /\p{Cs}/u.test(w.value)
+    ) {
       throw new StorageError("invalid_argument", model, [w.field]);
     }
   }

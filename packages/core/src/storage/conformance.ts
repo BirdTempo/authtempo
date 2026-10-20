@@ -1505,6 +1505,13 @@ export function runAdapterConformance(
         await expect(
           db.findMany("user", [{ field: "createdAt", op: "startsWith", value: "2026" }]),
         ).rejects.toMatchObject(refused);
+        // A lone surrogate is no code point: memory, Postgres, and SQLite gave three answers.
+        await expect(
+          db.findMany("user", [{ field: "email", op: "startsWith", value: "\uD835" }]),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.findMany("user", [{ field: "email", op: "startsWith", value: "a\uDD1E" }]),
+        ).rejects.toMatchObject(refused);
         // The refusal holds on an empty table too, and on update and delete.
         await expect(
           db.findMany("session", [{ field: "id", op: "startsWith", value: "" }]),
