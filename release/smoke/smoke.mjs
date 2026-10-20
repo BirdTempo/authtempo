@@ -1,7 +1,11 @@
 // The consumer smoke of plan 12j (spec 33 item 6). The dry run copies this
 // folder out of the repository, installs each release tarball into it offline,
-// and runs `node smoke.mjs`. So each import resolves from node_modules, as in
-// an app, and never from the workspace.
+// and runs `node smoke.mjs <repository>/.changeset/config.json`. So each import
+// resolves from node_modules, as in an app, and never from the workspace.
+//
+// The argument gives the released list, fixed[0] of the file. The installed
+// @authtempo packages must be that list, so a dry run that installs 23 of 24
+// packages fails.
 //
 // For each @authtempo dependency of package.json, it imports each entry of the
 // exports map. An entry of exempt.json needs a runtime that plain Node does
@@ -29,6 +33,24 @@ const failures = [];
 const names = Object.keys({ ...own.dependencies, ...own.devDependencies })
   .filter((n) => n.startsWith("@authtempo/"))
   .sort();
+
+const config = process.argv[2];
+/** @type {string[]} */
+const released = config === undefined ? [] : (readJson(config).fixed?.[0] ?? []);
+if (config === undefined)
+  failures.push("give the path of .changeset/config.json, whose fixed[0] is the released list");
+else {
+  if (released.length === 0) failures.push(`${config}: fixed[0] names no package`);
+  if (names.length !== released.length)
+    failures.push(
+      `the smoke installs ${names.length} packages, and the group releases ${released.length}`,
+    );
+  for (const name of released)
+    if (!names.includes(name)) failures.push(`${name}: released, and not installed`);
+  for (const name of names)
+    if (!released.includes(name)) failures.push(`${name}: installed, and not released`);
+}
+
 let entries = 0;
 let exempted = 0;
 
@@ -136,7 +158,7 @@ try {
 
 const verdict = failures.length === 0 ? "PASS" : "FAIL";
 console.log(
-  `smoke: ${verdict} packages=${names.length} entries=${entries} exempt=${exempted} cli=${cliRuns} failures=${failures.length}`,
+  `smoke: ${verdict} packages=${names.length} released=${released.length} entries=${entries} exempt=${exempted} cli=${cliRuns} failures=${failures.length}`,
 );
 for (const failure of failures) console.log(`  ${failure}`);
 if (failures.length > 0) process.exit(1);
