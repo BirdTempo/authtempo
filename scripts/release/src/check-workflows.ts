@@ -25,10 +25,11 @@ const indentOf = (line: string) => line.length - line.trimStart().length;
 const isBlank = (line: string) => line.trim() === "" || line.trimStart().startsWith("#");
 
 /**
- * Reads the YAML subset that the two workflows use: block mappings with plain
- * keys, block lists, "|" blocks, plain and quoted scalars with a comment, and
- * the flow forms {} and ["a", "b"]. Every other form throws, so a form that
- * this reader does not know never passes unread.
+ * Reads the YAML subset that the two workflows use. The subset has block
+ * mappings with plain keys, block lists, and "|" blocks. It has plain and
+ * quoted scalars with a comment, and the flow forms {} and ["a", "b"]. Every
+ * other form throws, so a form that this reader does not know never passes
+ * unread.
  */
 export function readYaml(text: string): YamlNode {
   const lines = text.split("\n");
@@ -561,10 +562,12 @@ function checkFile(
 }
 
 /**
- * The rules of spec 33 item 5 over the two workflows: each action pinned to a
- * commit SHA with its version, the triggers, the least permissions with
- * id-token: write only in the job publish, the environment, GitHub-hosted
- * runners, no expression in a run line, no token, and each step in its order.
+ * The rules of spec 33 item 5 over the two workflows. Each action is pinned to
+ * a commit SHA with its version. The triggers and the permissions are the
+ * least, and only the job publish has id-token: write and the environment.
+ * Each runner is GitHub-hosted. No run line holds an expression, and no line
+ * names a token. Each level holds only the keys of its rule, each step is in
+ * its order, and each script file exists.
  */
 export function checkWorkflows(input: {
   files: { name: string; text: string }[];

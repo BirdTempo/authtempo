@@ -4,7 +4,7 @@
 // The publish job runs no install, so this file imports only Node modules and
 // ./lib/release-facts.ts, which imports nothing. A test holds the import list.
 // It checks the npm floor, each SHA-256 against SHA256SUMS of the check job,
-// and the registry, then runs one npm publish for each version that the
+// and the registry. Then it runs one npm publish for each version that the
 // registry lacks, in the order of the dependency graph.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";

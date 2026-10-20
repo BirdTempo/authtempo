@@ -24,9 +24,9 @@ afterEach(() => {
 });
 
 /**
- * The folder that the job publish downloads: one pnpm pack tarball of core and
- * one of client at `version`, and SHA256SUMS in the form of sha256sum (the
- * hash, two spaces, the file name). client depends on core.
+ * The folder that the job publish downloads. It holds one pnpm pack tarball of
+ * core and one of client at `version`. SHA256SUMS has the form of sha256sum:
+ * the hash, two spaces, the file name. client depends on core.
  */
 function downloaded(version: string, react = false): string {
   const root = mkdtempSync(join(tmpdir(), "authtempo-release-publish-"));
