@@ -8,7 +8,7 @@
 // registry lacks, in the order of the dependency graph.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { gunzipSync } from "node:zlib";
 import { NPM_FLOOR } from "./lib/release-facts.ts";
@@ -209,6 +209,12 @@ export function publish(dir: string, seams: Seams): Outcome {
   const failures: string[] = [];
   const npm = seams.run("npm", ["--version"]);
   const npmVersion = npm.code === 0 ? npm.stdout.trim() : `(npm --version exited ${npm.code})`;
+  if (!existsSync(join(dir, "SHA256SUMS")))
+    return {
+      published: [],
+      skipped: [],
+      failures: ["the folder has no SHA256SUMS; the job check writes it"],
+    };
   const sums = readSums(readFileSync(join(dir, "SHA256SUMS"), "utf8"), failures);
   const hashed = readdirSync(dir)
     .filter((f) => f.endsWith(".tgz"))
@@ -272,6 +278,25 @@ export function publishLines(o: Outcome): string[] {
   ];
 }
 
+/** The answer of one `npm view <spec> <field> --json` from its exit code and output. */
+export function readView(status: number | null, stdout: string, stderr: string): ViewAnswer {
+  const out = stdout.trim();
+  if (status === 0) {
+    // npm view prints nothing for a version that the package lacks.
+    if (out === "") return { missing: true };
+    let value: unknown;
+    try {
+      value = JSON.parse(out);
+    } catch {
+      return { error: `the answer ${out} is not JSON` };
+    }
+    return typeof value === "string" ? { found: value } : { error: `the answer ${out}` };
+  }
+  if (/\bE404\b/.test(`${stdout}${stderr}`)) return { missing: true };
+  const first = stderr.split("\n").find((l) => l.trim() !== "");
+  return { error: first ?? `npm view exited ${status}` };
+}
+
 /** The real seams: npm on the PATH of the publish job. */
 export const npmSeams: Seams = {
   run(command, args) {
@@ -285,16 +310,7 @@ export const npmSeams: Seams = {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const out = (r.stdout ?? "").trim();
-    if (r.status === 0) {
-      // npm view prints nothing for a version that the package lacks.
-      if (out === "") return { missing: true };
-      const value: unknown = JSON.parse(out);
-      return typeof value === "string" ? { found: value } : { error: `the answer ${out}` };
-    }
-    if (/\bE404\b/.test(`${r.stdout ?? ""}${r.stderr ?? ""}`)) return { missing: true };
-    const first = (r.stderr ?? "").split("\n").find((l) => l.trim() !== "");
-    return { error: first ?? `npm view exited ${r.status}` };
+    return readView(r.status, r.stdout ?? "", r.stderr ?? "");
   },
 };
 

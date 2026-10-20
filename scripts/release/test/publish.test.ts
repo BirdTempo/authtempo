@@ -12,6 +12,7 @@ import {
   publish,
   publishLines,
   publishPlan,
+  readView,
   type Seams,
   type Tarball,
   type ViewAnswer,
@@ -299,6 +300,26 @@ describe("publish", () => {
       `${CLIENT("0.1.0")} has no line in SHA256SUMS`,
     ]);
     expect(f.published()).toEqual([]);
+  });
+
+  it("prints a FAIL line, not a stack, when SHA256SUMS is missing", () => {
+    const out = downloaded("0.1.0");
+    rmSync(join(out, "SHA256SUMS"));
+    const f = fake({});
+    expect(publishLines(publish(out, f.seams))).toEqual([
+      "publish: FAIL published=0 skipped=0 failures=1",
+      "  the folder has no SHA256SUMS; the job check writes it",
+    ]);
+    expect(f.published()).toEqual([]);
+  });
+
+  it("reads each answer of npm view, and an answer that is not JSON is an error", () => {
+    expect(readView(0, '"0.1.0"\n', "")).toEqual({ found: "0.1.0" });
+    expect(readView(0, "\n", "")).toEqual({ missing: true });
+    expect(readView(1, "", "npm error code E404\n")).toEqual({ missing: true });
+    expect(readView(1, "", "\nnpm error ETIMEDOUT\n")).toEqual({ error: "npm error ETIMEDOUT" });
+    expect(readView(0, '["0.1.0"]', "")).toEqual({ error: 'the answer ["0.1.0"]' });
+    expect(readView(0, "<html>", "")).toEqual({ error: "the answer <html> is not JSON" });
   });
 
   it("fails when it reads zero tarballs", () => {

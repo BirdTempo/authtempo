@@ -1,3 +1,5 @@
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { checkTag, entry } from "../src/check-tag.ts";
 import { summaryLine } from "../src/lib/report.ts";
@@ -114,6 +116,30 @@ describe("check-tag", () => {
     expect(entry(repo.root, "v0.1.1")).toEqual({
       lines: ["check-tag: PASS tags=1 failures=0"],
       code: 0,
+    });
+  });
+
+  it("prints a FAIL line, not a stack, when git exits with an error", () => {
+    // origin/main has a parent commit that the object store lacks, so the walk
+    // of git merge-base exits 128.
+    repo = released("0.1.0");
+    const first = repo.git(["rev-parse", "HEAD"]).trim();
+    repo.write("packages/core/x.txt", "x\n");
+    repo.commit("x");
+    const lost = repo.git(["rev-parse", "HEAD"]).trim();
+    repo.write("packages/core/y.txt", "y\n");
+    repo.commit("y");
+    repo.git(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    repo.git(["checkout", "--quiet", "-b", "side", first]);
+    repo.write("packages/core/z.txt", "z\n");
+    repo.commit("side");
+    rmSync(join(repo.root, ".git/objects", lost.slice(0, 2), lost.slice(2)));
+    expect(entry(repo.root, "v0.1.0")).toEqual({
+      lines: [
+        "check-tag: FAIL tags=0 failures=1",
+        "  git merge-base --is-ancestor HEAD refs/remotes/origin/main exited 128",
+      ],
+      code: 1,
     });
   });
 

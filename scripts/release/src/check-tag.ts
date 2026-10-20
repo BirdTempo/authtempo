@@ -49,12 +49,15 @@ function git(root: string, args: string[]): { code: number } {
 const hasRef = (root: string, ref: string) =>
   git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).code === 0;
 
+/** A git exit other than 0 or 1. The entry prints it as the one failure. */
+class GitError extends Error {}
+
 /** True when HEAD is `ref` or a commit before it. */
 function onRef(root: string, ref: string): boolean {
   const { code } = git(root, ["merge-base", "--is-ancestor", "HEAD", ref]);
   if (code === 0) return true;
   if (code === 1) return false;
-  throw new Error(`git merge-base --is-ancestor HEAD ${ref} exited ${code}`);
+  throw new GitError(`git merge-base --is-ancestor HEAD ${ref} exited ${code}`);
 }
 
 /**
@@ -87,12 +90,16 @@ export function entry(
     return unread(`the released packages hold ${versions.length} versions: ${versions.join(", ")}`);
   const minor = new RegExp(`^${TAG_PREFIX}(\\d+\\.\\d+)\\.`).exec(tag)?.[1];
   const branch = `refs/remotes/${remote}/release/${minor}`;
-  const report = checkTag({
-    tag,
-    groupVersion,
-    onMain: onRef(root, main),
-    onReleaseBranch: minor !== undefined && hasRef(root, branch) && onRef(root, branch),
-  });
+  let onMain: boolean;
+  let onReleaseBranch: boolean;
+  try {
+    onMain = onRef(root, main);
+    onReleaseBranch = minor !== undefined && hasRef(root, branch) && onRef(root, branch);
+  } catch (error) {
+    if (!(error instanceof GitError)) throw error;
+    return unread(error.message);
+  }
+  const report = checkTag({ tag, groupVersion, onMain, onReleaseBranch });
   return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
 }
 
