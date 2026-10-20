@@ -132,10 +132,12 @@ A `to_` token belongs to an organization, not to a person. It acts with its own 
 - [`rate_limited`](/docs/reference/errors/#rate_limited): more than 20 creates in one hour, or a call over the token's window.
 - [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): the session is older than the fresh window. Re-authenticate, then send it again.
 - [`invalid_body`](/docs/reference/errors/#invalid_body): an unknown action, a set with `organizations` off, or an update that widens.
-- [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the set is wider than yours, or you lack the `apiToken` action.
+- [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the set is wider than yours, or you lack the `apiToken` action. A create also answers it when its creator is no longer a member.
 - [`token_exhausted`](/docs/reference/errors/#token_exhausted): the quota is spent. Wait for the refill, or give a new quota.
 - [`token_retired`](/docs/reference/errors/#token_retired): a moved key has no row. Issue a new token.
 - [`conflict`](/docs/reference/errors/#conflict): another write or spend changed the token at the same moment. Retry.
+- [`last_owner`](/docs/reference/errors/#last_owner): `members.remove` with `revokeTokens: true` cannot remove the last owner.
+- [`hook_refused`](/docs/reference/errors/#hook_refused) and [`hook_failed`](/docs/reference/errors/#hook_failed): the `beforeRemoveMember` hook of `members.remove` refused the removal or threw.
 
 ## Next
 
