@@ -84,10 +84,7 @@ describe("verifyEnveloped", () => {
     ["as a second child of the target", (copy) => ["<saml:Subject>", `${copy}<saml:Subject>`]],
     [
       "inside the target's Signature, under an element with an ID",
-      (copy) => [
-        "</ds:KeyInfo>",
-        `</ds:KeyInfo><ds:Object><saml:Advice ID="_inner">${copy}</saml:Advice></ds:Object>`,
-      ],
+      (copy) => ["</ds:KeyInfo>", `<saml:Advice ID="_inner">${copy}</saml:Advice></ds:KeyInfo>`],
     ],
   ])("refuses a Signature at any other place: %s", async (_name, place) => {
     const start = signed.indexOf("<ds:Signature ");
@@ -98,6 +95,40 @@ describe("verifyEnveloped", () => {
       ok: false,
       step: "signature_shape",
     });
+  });
+
+  // Review m1 of Task 7: the enveloped transform leaves the Signature out of the digest, so an
+  // Object holds unsigned content inside the signed element. KeyInfo is never read.
+  it.each([
+    [
+      "with an unsigned AttributeStatement",
+      '<ds:Object><saml:AttributeStatement><saml:Attribute Name="role"><saml:AttributeValue>admin</saml:AttributeValue></saml:Attribute></saml:AttributeStatement></ds:Object>',
+    ],
+    ["with no content", "<ds:Object/>"],
+  ])("refuses an Object in the Signature: %s", async (_name, object) => {
+    const xml = edit(signed, "</ds:KeyInfo>", `</ds:KeyInfo>${object}`);
+    expect(await verifyEnveloped(assertionOf(xml), [rsaKey])).toEqual({
+      ok: false,
+      step: "signature_shape",
+    });
+  });
+
+  it("refuses an Object in the place of KeyInfo", async () => {
+    const xml = signed.replace(/<ds:KeyInfo>[\s\S]*?<\/ds:KeyInfo>/, "<ds:Object/>");
+    expect(xml).not.toBe(signed);
+    expect(await verifyEnveloped(assertionOf(xml), [rsaKey])).toEqual({
+      ok: false,
+      step: "signature_shape",
+    });
+  });
+
+  it("accepts a KeyInfo with any child, because the check never reads it", async () => {
+    const xml = signed.replace(
+      /<ds:KeyInfo>[\s\S]*?<\/ds:KeyInfo>/,
+      "<ds:KeyInfo><saml:NameID>evil</saml:NameID></ds:KeyInfo>",
+    );
+    expect(xml).not.toBe(signed);
+    expect(await verifyEnveloped(assertionOf(xml), [rsaKey])).toEqual({ ok: true });
   });
 
   it.each([

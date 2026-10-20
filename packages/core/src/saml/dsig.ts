@@ -140,17 +140,17 @@ function parseSignature(target: XmlElement): Parsed {
     if (owner === null || owner === target || attr(owner, "ID") === null)
       throw new Fail("signature_shape");
   }
-  // XML Signature 1.1 section 4.2: SignedInfo, SignatureValue, KeyInfo?, Object*.
+  // XML Signature 1.1 section 4.2: SignedInfo, SignatureValue, KeyInfo?, Object*. The profile
+  // refuses each Object: the enveloped transform leaves it out of the digest, so it holds
+  // unsigned content inside the signed element. KeyInfo stays, because IdPs send it.
   const parts = elementsOf(signature);
-  const [signedInfo, signatureValueEl, ...rest] = parts;
+  const [signedInfo, signatureValueEl, keyInfo, ...rest] = parts;
   if (signedInfo === undefined || !isDsig(signedInfo, "SignedInfo"))
     throw new Fail("signature_shape");
   if (signatureValueEl === undefined || !isDsig(signatureValueEl, "SignatureValue"))
     throw new Fail("signature_shape");
-  let objects = rest;
-  if (objects[0] !== undefined && isDsig(objects[0], "KeyInfo")) objects = objects.slice(1);
-  if (!objects.every((o) => isDsig(o, "Object")) || !onlySpaceText(signature))
-    throw new Fail("signature_shape");
+  if (keyInfo !== undefined && !isDsig(keyInfo, "KeyInfo")) throw new Fail("signature_shape");
+  if (rest.length > 0 || !onlySpaceText(signature)) throw new Fail("signature_shape");
 
   // Step 2: SignedInfo holds CanonicalizationMethod, SignatureMethod, and one Reference.
   if (!attrsWithin(signedInfo, ["Id"]) || !onlySpaceText(signedInfo)) throw new Fail("algorithm");

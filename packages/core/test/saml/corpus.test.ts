@@ -121,7 +121,7 @@ describe("the attack corpus", () => {
     ["XSW5", xsw5, "wrapping", "algorithm"],
     ["XSW6", xsw6, "wrapping", "signature_shape"],
     ["XSW7", xsw7, "wrapping", "signature_shape"],
-    ["XSW8", xsw8, "wrapping", "algorithm"],
+    ["XSW8", xsw8, "wrapping", "signature_shape"],
   ])("refuses the wrapping shape %s", async (_name, attack, chain, alone) => {
     const xml = await attack(valid, idp);
     expect(await verifyAssertionOf(xml, [key])).toEqual({ ok: false, step: chain });
