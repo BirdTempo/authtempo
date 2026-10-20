@@ -99,18 +99,18 @@ function logRead(actor: OperatorActor, fn: string): void {
 
 /**
  * The `OperatorUser` of each row, in the order of the rows. A call costs
- * a fixed count of storage calls, whatever the count of rows: one read
- * finds the platform organization, and one `in` read each takes the
- * member, second-factor, session, and identity rows of every user of the
- * page. That is 5 calls, or 4 with no platform role. A list or a search
+ * a fixed count of storage calls, whatever the count of rows. One read
+ * finds the platform organization. One `in` read each takes the member,
+ * second-factor, session, and identity rows of every user of the page.
+ * That is 5 calls, or 4 with no platform role. A list or a search
  * adds its user reads, so a page costs at most 7.
  *
  * Each `in` read binds only the user ids: at most 100, the page bound.
- * The D1 limit is 100 bound parameters per query and 1000 queries per
- * invocation on Workers Paid, 50 on Workers Free (D1 limits page updated
- * 21 April 2026, read 2026-10-20). The Workers limits page (updated 12
- * October 2026, read 2026-10-20) gives Free 50 subrequests and 1,000 to
- * internal services. A page fits both Free figures.
+ * D1 allows 100 bound parameters per query (D1 limits page updated 21
+ * April 2026, read 2026-10-20). The same page gives 1000 queries per
+ * invocation on Workers Paid and 50 on Workers Free. The Workers limits
+ * page (updated 12 October 2026, read 2026-10-20) gives Free 50
+ * subrequests and 1,000 to internal services. A page fits both Free figures.
  *
  * So the reads filter the platform organization and the live sessions
  * here, not in storage. The session read takes every session row of the
@@ -160,7 +160,7 @@ async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<O
 
 /**
  * The users by `id` ascending. For a core id (a ULID) this is about the
- * order of creation: two ids of one millisecond sort by their random part,
+ * order of creation. Two ids of one millisecond sort by their random part,
  * and a compat id has no time part. `after` is the `next` of the page before. `limit` is 1 to 100, default 50. The
  * read takes `limit + 1` rows, so `next` is set only when more users
  * follow. No total count: a count of every row scans the table on D1.
@@ -213,7 +213,7 @@ export async function listUsers(
  * come back, not the rows read. The per-IP limit of the route
  * (`OPERATOR_USERS_PER_IP`) and the per-user limit of a platform operator
  * bound the scans per hour. An app call in process counts on no limiter,
- * so a loop of the app has no bound: the app already holds the storage and
+ * so a loop of the app has no bound. The app already holds the storage and
  * the config. A page costs at most 7 storage calls (`operatorUsers`).
  *
  * Needs `operator.users` (else `not_found`) and the scope `users`.
