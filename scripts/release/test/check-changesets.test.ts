@@ -60,7 +60,8 @@ const run = (
   names: string[],
   commits = 1,
   packs = files,
-  version = "0.0.0",
+  // The group after the first release. A row of the first release passes "0.0.0".
+  version = "0.1.0",
 ) =>
   checkChangesets({
     changed,
@@ -312,6 +313,48 @@ describe("check-changesets", () => {
     ).toBe("check-changesets: PASS changed=1 covered=1 exempt=0 empty=0 failures=0");
   });
 
+  it("refuses a first release with only patch changesets", () => {
+    // At 0.0.0 a patch gives 0.0.1. The first release is 0.1.0 (ruling 28 of the plan 12j lane).
+    const r = run(paths("packages/core/src/x.ts"), ["core-patch.md"], 1, files, "0.0.0");
+    expect(r.failures).toEqual([
+      "the group is at 0.0.0 and the highest bump of the changesets is patch; the first release is 0.1.0, so one changeset names a minor",
+    ]);
+    expect(summaryLine(r)).toBe(
+      "check-changesets: FAIL changed=1 covered=1 exempt=0 empty=0 failures=1",
+    );
+    // One minor beside the patch gives 0.1.0.
+    expect(
+      run(
+        paths("packages/core/src/x.ts"),
+        ["core-patch.md", "core-minor-single-quote.md"],
+        1,
+        files,
+        "0.0.0",
+      ).failures,
+    ).toEqual([]);
+    // changeset version reads each changeset of the folder, so a minor on main counts too.
+    expect(
+      checkChangesets({
+        changed: paths("packages/core/src/x.ts"),
+        changesets: [
+          { ...changeset("core-minor-single-quote.md"), onMain: true },
+          changeset("core-patch.md"),
+        ],
+        released,
+        dirs,
+        files,
+        commits: 1,
+        version: "0.0.0",
+      }).failures,
+    ).toEqual([]);
+    // After the first release, a patch alone is a patch release.
+    expect(
+      run(paths("packages/core/src/x.ts"), ["core-patch.md"], 1, files, "0.1.0").failures,
+    ).toEqual([]);
+    // No changeset gives no release, so the rule has nothing to check.
+    expect(run(paths("packages/core/test/x.test.ts"), [], 1, files, "0.0.0").failures).toEqual([]);
+  });
+
   it("refuses a changeset whose body starts with a plan number", () => {
     expect(run(paths("packages/core/src/x.ts"), ["plan-number.md"]).failures).toEqual([
       ".changeset/plan-number.md: the body starts with a plan number; a changelog entry names the change, not the plan",
@@ -395,11 +438,12 @@ describe("check-changesets", () => {
   });
 
   it("counts no changeset that is on main at the merge base, also when it changes", () => {
+    // A minor, so the folder gives the first release 0.1.0 (ruling 28 of the plan 12j lane).
     repo = fixtureRepo({
-      ".changeset/old.md": '---\n"@fixture/a": patch\n---\n\nFix the old bug.\n',
+      ".changeset/old.md": '---\n"@fixture/a": minor\n---\n\nAdd the old feature.\n',
     });
     repo.write("packages/a/src/foo.ts", "export const foo = 2;\n");
-    repo.write(".changeset/old.md", '---\n"@fixture/a": patch\n---\n\nFix the old bug. \n');
+    repo.write(".changeset/old.md", '---\n"@fixture/a": minor\n---\n\nAdd the old feature. \n');
     repo.commit("change foo and edit the old changeset");
     const r = checkChangesets(readInput(repo.root, "main"));
     expect(r.failures).toEqual([
@@ -453,7 +497,8 @@ describe("check-changesets", () => {
     );
     repo.write(".changeset/README.md", "# Changesets\n");
     repo.write(".changeset/old.md", '---\n"@fixture/a": patch\n---\n\nFix the old bug.\n');
-    repo.write("packages/a/package.json", '{ "name": "@fixture/a", "version": "0.0.0" }\n');
+    // The group after the first release, so a patch alone is a patch release.
+    repo.write("packages/a/package.json", '{ "name": "@fixture/a", "version": "0.1.0" }\n');
     repo.write("packages/a/src/x.ts", "export const x = 1;\n");
     repo.commit("first");
     repo.git(["checkout", "--quiet", "-b", "work"]);
@@ -461,7 +506,7 @@ describe("check-changesets", () => {
     repo.write("packages/a/src/x.ts", "export const x = 2;\n");
     repo.write(
       "packages/a/package.json",
-      '{ "name": "@fixture/a", "version": "0.0.0", "engines": { "node": ">=22" } }\n',
+      '{ "name": "@fixture/a", "version": "0.1.0", "engines": { "node": ">=22" } }\n',
     );
     repo.write(".changeset/README.md", '---\n"@fixture/a": patch\n---\n\nNot a changeset.\n');
     expect(checkChangesets(readInput(repo.root, "main")).failures).toEqual([

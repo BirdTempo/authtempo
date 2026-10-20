@@ -305,6 +305,22 @@ describe("check-pack", () => {
     ]);
   });
 
+  it("fails a release at 0.0.x above 0.0.0", () => {
+    // The first release is 0.1.0 (ruling 28 of the plan 12j lane).
+    for (const version of ["0.0.1", "0.0.12"]) {
+      const manifest = structuredClone(MANIFEST);
+      manifest.version = version;
+      expect(failuresOf({ manifest, groupVersion: version })).toEqual([
+        `the version is ${version}; the first release is 0.1.0, so no release is at 0.0.x`,
+      ]);
+    }
+    for (const version of ["0.1.0", "0.10.3", "1.0.1"]) {
+      const manifest = structuredClone(MANIFEST);
+      manifest.version = version;
+      expect(failuresOf({ manifest, groupVersion: version })).toEqual([]);
+    }
+  });
+
   it("fails a missing license, repository.url, repository.directory, or CHANGELOG.md", () => {
     expect(
       withManifest((m) => {

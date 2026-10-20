@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseChangeset } from "./lib/changeset-file.ts";
 import { changedFiles, commitCount, mergeBase, NoMergeBase, showAt } from "./lib/git.ts";
+import { FIRST_RELEASE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
 import { readWorkspace } from "./lib/workspace.ts";
@@ -121,12 +122,19 @@ export function checkChangesets(input: ChangesetsInput): Report {
   const released = new Set(input.released);
 
   const named = new Set<string>();
+  const bumps = new Set<string>();
   let empty = 0;
   for (const { file, text, onMain } of input.changesets) {
     // A changeset on main covers an earlier change. An edit on the branch does
     // not make it cover a new one.
     if (onMain === true) {
       notes.push(`${file} is on main at the merge base, so it covers no change of this branch`);
+      // changeset version reads each changeset of the folder, so its bump counts for the first release.
+      try {
+        for (const { bump } of parseChangeset(text).releases) bumps.add(bump);
+      } catch {
+        // A file that does not parse failed on main, where it was new.
+      }
       continue;
     }
     let parsed: ReturnType<typeof parseChangeset>;
@@ -142,6 +150,7 @@ export function checkChangesets(input: ChangesetsInput): Report {
         failures.push(`${file} names no package and has no line "No release: <reason>"`);
     }
     for (const { name, bump } of parsed.releases) {
+      bumps.add(bump);
       if (released.has(name)) named.add(name);
       else failures.push(`${file} names ${name}, which is not a released package`);
       // From 0.x, changeset version writes 1.0.0 for a major, and only the
@@ -158,6 +167,14 @@ export function checkChangesets(input: ChangesetsInput): Report {
         `${file}: the body starts with a plan number; a changelog entry names the change, not the plan`,
       );
   }
+
+  // At 0.0.0 a patch gives 0.0.1, and the first release is FIRST_RELEASE
+  // (ruling 28 of the plan 12j lane). A major already fails above. The bumps
+  // come from each changeset of the folder, new or on main.
+  if (input.version === "0.0.0" && bumps.has("patch") && !bumps.has("minor") && !bumps.has("major"))
+    failures.push(
+      `the group is at 0.0.0 and the highest bump of the changesets is patch; the first release is ${FIRST_RELEASE}, so one changeset names a minor`,
+    );
 
   // A glob or a "./" entry would need the full pack rules. The check does not
   // guess, so each file of the package then counts as packed.

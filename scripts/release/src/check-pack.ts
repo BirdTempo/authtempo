@@ -12,6 +12,7 @@ import {
   RELEASE_LICENSE,
   repositoryFor,
 } from "./lib/pack-rules.ts";
+import { FIRST_RELEASE } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, requireCounts, summaryLine } from "./lib/report.ts";
 import { type Manifest, readWorkspace } from "./lib/workspace.ts";
@@ -109,6 +110,11 @@ export function checkPack(input: PackInput): Report {
   // each app to run a clone. This is ruling 13 of the plan 12j lane.
   if (manifest.version === UNPUBLISHED_VERSION)
     failures.push(`the version is ${UNPUBLISHED_VERSION}, which the scaffold reads as unpublished`);
+  // A patch at 0.0.0 gives 0.0.1, and the first release is FIRST_RELEASE (ruling 28 of the plan 12j lane).
+  if (/^0\.0\.\d+$/.test(manifest.version) && manifest.version !== UNPUBLISHED_VERSION)
+    failures.push(
+      `the version is ${manifest.version}; the first release is ${FIRST_RELEASE}, so no release is at 0.0.x`,
+    );
   if (manifest.version !== input.groupVersion)
     failures.push(
       `the version is ${manifest.version}, not the group version ${input.groupVersion}`,

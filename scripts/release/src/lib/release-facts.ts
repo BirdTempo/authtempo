@@ -10,6 +10,14 @@ export const CI_FILE = "ci.yml";
 /** The GitHub environment of the publish job, with the owner as the required reviewer. Read by check-workflows and the runbook test. */
 export const ENVIRONMENT = "release";
 
+/**
+ * The version of the first release (spec 33 item 1.2). Read by check-changesets
+ * (a first release needs a minor changeset), check-pack (no release is at 0.0.x),
+ * and the site check check-policy-pages, which holds the versioning page to it.
+ * A patch at 0.0.0 would give 0.0.1, so both checks refuse it (ruling 28 of plan 12j).
+ */
+export const FIRST_RELEASE = "0.1.0";
+
 /** The prefix of the release tag `v<version>`. Read by check-tag, check-workflows, and the runbook test. */
 export const TAG_PREFIX = "v";
 
