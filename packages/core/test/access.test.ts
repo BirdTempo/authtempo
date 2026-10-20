@@ -5,6 +5,7 @@ import {
   effectiveOf,
   intersect,
   type RoleTable,
+  roleHasPermission,
   type Statements,
   statementFault,
   union,
@@ -44,6 +45,16 @@ describe("access", () => {
     expect(can(null as never, { member: ["read"] })).toBe(false);
     expect(can(g, { member: "read" } as never)).toBe(false);
     expect(can({ member: "read" } as never, { member: ["read"] })).toBe(false);
+  });
+
+  it("reads an action list that is not an array as no action", () => {
+    // A client table that the app writes by hand can hold a string; its letters grant nothing.
+    const bad = { doc: "rw" } as unknown as Statements;
+    const table = { ed: { rank: 1, permissions: bad } } as RoleTable;
+    expect(roleHasPermission(table, "ed", { doc: ["r"] })).toBe(false);
+    expect(union(bad)).toEqual({ doc: [] });
+    expect(intersect(bad, { doc: ["r", "w"] })).toEqual({});
+    expect(intersect({ doc: ["r", "w"] }, bad)).toEqual({});
   });
 
   it("unions the parts of a role string and ignores an unknown part", () => {

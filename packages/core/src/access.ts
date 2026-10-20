@@ -42,9 +42,14 @@ function isStatements(value: unknown): value is Statements {
   return true;
 }
 
-/** The actions of one resource, or none when the set lacks it. */
+/**
+ * The actions of one resource, or none when the set lacks it or its value is
+ * not a list. A string would spread into its letters, so it grants nothing.
+ */
 function actionsOf(set: Statements, resource: string): readonly string[] {
-  return Object.hasOwn(set, resource) ? (set[resource] ?? []) : [];
+  if (!Object.hasOwn(set, resource)) return [];
+  const actions: unknown = set[resource];
+  return Array.isArray(actions) ? actions : [];
 }
 
 /**
