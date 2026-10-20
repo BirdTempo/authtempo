@@ -218,7 +218,7 @@ Another key of `jwtMint` is refused.
 
 `jwtMint.alg: "RS256"` costs more CPU than EdDSA or ES256. One RSA key generation took 20 to 129 ms of wall time in local workerd. One RS256 signature took less than 1 ms. These are wall times on a loaded machine, measured on 2026-10-19.
 
-On Workers, every RS256 key generation runs inside a Worker invocation, a request or a scheduled event. The first signature with no key makes a key. A `rotateEvery` rotation, a change of `jwtMint.alg`, and `api.jwt.rotate()` make a key too. `authtempo keys rotate` calls `POST <basePath>/operator/keys/rotate`, which is a Worker request. A new app `secret` opens no old key: the key retires, and the next signature makes a key. Workers Free allows 10 ms of CPU per invocation, so it can refuse each of these.
+On Workers, every RS256 key generation runs inside a Worker invocation, a request or a scheduled event. The first signature or the first key set read with no key makes a key. A `rotateEvery` rotation, a change of `jwtMint.alg`, and `api.jwt.rotate()` make a key too. `authtempo keys rotate` calls `POST <basePath>/operator/keys/rotate`, which is a Worker request. A new app `secret` opens no old key: the key retires, and the next signature makes a key. Workers Free allows 10 ms of CPU per invocation, so it can refuse each of these.
 
 ## OAuth provider
 
