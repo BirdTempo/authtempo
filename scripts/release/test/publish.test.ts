@@ -249,6 +249,54 @@ describe("publish", () => {
     ).toEqual(["the tarballs hold 2 versions: 0.1.0, 0.1.1"]);
   });
 
+  it("fails a cycle in the dependency graph and a version that is not x.y.z", () => {
+    const tarball = (name: string, version: string, dependencies: string[]): Tarball => ({
+      file: `${name.replace("@authtempo/", "authtempo-")}-${version}.tgz`,
+      name,
+      version,
+      sha256: "a".repeat(64),
+      dependencies,
+    });
+    const plan = (tarballs: Tarball[]) =>
+      publishPlan({
+        tarballs,
+        sums: new Map(tarballs.map((t) => [t.file, t.sha256])),
+        registry: Object.fromEntries(tarballs.map((t) => [t.name, { held: false, latest: null }])),
+        npmVersion: "11.19.1",
+      });
+    expect(
+      plan([
+        tarball("@authtempo/core", "0.1.0", ["@authtempo/client"]),
+        tarball("@authtempo/client", "0.1.0", ["@authtempo/core"]),
+      ]),
+    ).toEqual({
+      publish: [],
+      skip: [],
+      failures: [
+        "the dependency graph has a cycle: @authtempo/client -> @authtempo/core -> @authtempo/client",
+      ],
+    });
+    expect(plan([tarball("@authtempo/core", "0.1", [])])).toEqual({
+      publish: [],
+      skip: [],
+      failures: ["authtempo-core-0.1.tgz: the version 0.1 is not x.y.z"],
+    });
+  });
+
+  it("refuses a SHA256SUMS line that is not <sha256>  <file>", () => {
+    const out = downloaded("0.1.0");
+    const lines = readFileSync(join(out, "SHA256SUMS"), "utf8").split("\n");
+    // One space in place of two: sha256sum never writes this form.
+    const bad = (lines[0] ?? "").replace("  ", " ");
+    writeFileSync(join(out, "SHA256SUMS"), `${bad}\n${lines[1]}\n`);
+    const f = fake({});
+    expect(publish(out, f.seams).failures).toEqual([
+      `SHA256SUMS: the line ${bad} is not <sha256>  <file>`,
+      `${CLIENT("0.1.0")} has no line in SHA256SUMS`,
+    ]);
+    expect(f.published()).toEqual([]);
+  });
+
   it("fails when it reads zero tarballs", () => {
     const out = mkdtempSync(join(tmpdir(), "authtempo-release-publish-"));
     folders.push(out);

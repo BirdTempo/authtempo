@@ -91,6 +91,32 @@ describe("check-tag", () => {
     ]);
   });
 
+  it("fails a tag on a commit that release/<minor> does not hold", () => {
+    // origin/main and origin/release/0.1 hold the first commit. HEAD is a later
+    // commit at 0.1.1, so it is on neither branch, though release/0.1 exists.
+    repo = released("0.1.0");
+    repo.git(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    repo.git(["update-ref", "refs/remotes/origin/release/0.1", "HEAD"]);
+    for (const name of ["core", "client"])
+      repo.write(
+        `packages/${name}/package.json`,
+        JSON.stringify({ name: `@authtempo/${name}`, version: "0.1.1" }),
+      );
+    repo.commit("0.1.1");
+    expect(entry(repo.root, "v0.1.1")).toEqual({
+      lines: [
+        "check-tag: FAIL tags=1 failures=1",
+        "  the tagged commit is on neither main nor release/0.1",
+      ],
+      code: 1,
+    });
+    repo.git(["update-ref", "refs/remotes/origin/release/0.1", "HEAD"]);
+    expect(entry(repo.root, "v0.1.1")).toEqual({
+      lines: ["check-tag: PASS tags=1 failures=0"],
+      code: 0,
+    });
+  });
+
   it("fails a checkout with no origin/main or with two versions in the group", () => {
     repo = released("0.1.0");
     expect(entry(repo.root, "v0.1.0")).toEqual({

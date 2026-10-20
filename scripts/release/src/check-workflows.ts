@@ -158,9 +158,9 @@ export function readYaml(text: string): YamlNode {
   skip();
   if (i >= lines.length) throw new YamlForm("line 1: an empty file");
   if (indentOf(current()) !== 0) throw new YamlForm(`line ${i + 1}: an indent at the top`);
+  // block(0) reads to the end of the file, because no line has an indent below 0.
   const root = block(0);
-  skip();
-  if (i < lines.length) throw new YamlForm(`line ${i + 1}: a line outside the top mapping`);
+  if (root.kind !== "map") throw new YamlForm("line 1: a top that is not a mapping");
   return root;
 }
 

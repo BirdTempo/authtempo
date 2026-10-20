@@ -370,6 +370,34 @@ describe("check-workflows", () => {
     ]);
   });
 
+  it("fails registry-url on setup-node and a pnpm store cache", () => {
+    // registry-url writes an .npmrc for NODE_AUTH_TOKEN, the token path that
+    // trusted publishing must not have.
+    expect(
+      ciFailures(
+        swap(
+          CI,
+          "          package-manager-cache: false\n",
+          "          package-manager-cache: false\n          registry-url: https://registry.npmjs.org\n",
+        ),
+      ),
+    ).toEqual([
+      "ci.yml: jobs.check step 3: actions/setup-node has the with key registry-url; it writes an .npmrc for a token",
+    ]);
+    const pnpm = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0\n";
+    expect(ciFailures(swap(CI, pnpm, `${pnpm}        with:\n          cache: true\n`))).toEqual([
+      "ci.yml: jobs.check step 2: pnpm/action-setup has the with key cache; a cache is never evidence",
+    ]);
+  });
+
+  it("refuses the key __proto__, an escape, a mapping on one line, a nested flow form, and a top that is not a mapping", () => {
+    expect(() => readYaml("__proto__: 1\n")).toThrow("line 1: the key __proto__");
+    expect(() => readYaml('a: "x\\ny"\n')).toThrow("line 1: an escape in a quoted value");
+    expect(() => readYaml("a: b: c\n")).toThrow("line 1: a mapping on one line");
+    expect(() => readYaml('a: ["b", ["c"]]\n')).toThrow("line 1: a flow form inside a flow list");
+    expect(() => readYaml("- a\n- b\n")).toThrow("line 1: a top that is not a mapping");
+  });
+
   it("refuses a YAML form outside the subset", () => {
     expect(() => readYaml("a: &x 1\nb: *x\n")).toThrow("line 1: an anchor, an alias, or a tag");
     expect(() => readYaml("a: >\n  text\n")).toThrow("line 1: a block scalar other than |");
