@@ -92,6 +92,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `validOrganizationName`, `validUserName` | The name rules of core. A user name has 1 to 200 code units and no control, format, line separator, paragraph separator, or lone surrogate character. The zero-width non-joiner and joiner pass. |
 | `validImageUrl` | The image rule of core: an `https://` URL with a host, of at most 2048 characters, with no `@` and no `%` in its authority. It holds no whitespace, no control or format character, no backslash, and none of `"<>{}\|^` or a backtick. |
 | `rankOf` | The rank of a role string in a rank table. |
+| `holdsPlatformRole` | Takes a config, the id of the platform organization, and a member row. True when the row is of that organization and its role parts hold `organizations.platformRole`. The Better Auth shim reads this rule. |
 | `readSessionToken` | Reads the session token of a request, from the cookie and then the bearer header. |
 | `isAppScheme`, `isGithubSubject` | The app scheme rule, and the rule of a GitHub subject. |
 | `newId` | Makes a row id. |

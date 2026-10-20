@@ -1,4 +1,4 @@
-import type { Auth, OperatorUser, UserRow } from "@authtempo/core";
+import { type Auth, holdsPlatformRole, type OperatorUser, type UserRow } from "@authtempo/core";
 import { BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
 import type { AdminOptions, AdminUser } from "../types.js";
 import type { Mapped } from "./map-options.js";
@@ -271,10 +271,8 @@ export function toAdminUser(row: UserRow, role: string, now: Date): AdminUser {
 /**
  * The Better Auth role of one user: the platform role when the user holds
  * it in the platform organization, else `user`. The rule is core's
- * `holdsPlatformRole` (engine/operator/guards.ts): a member row there whose
- * role parts, split at each comma, hold the platform role. Core does not
- * export it, so this copy keeps the same split. Two reads: the platform
- * organization by its slug, and the member row.
+ * `holdsPlatformRole`, so the shim keeps no copy (ruling 54 of plan 12f).
+ * Two reads: the platform organization by its slug, and the member row.
  */
 export async function roleOf(mapped: Mapped, userId: string): Promise<string> {
   const o = mapped.config.organizations;
@@ -289,7 +287,9 @@ export async function roleOf(mapped: Mapped, userId: string): Promise<string> {
     { field: "organizationId", op: "eq", value: organization.id },
     { field: "userId", op: "eq", value: userId },
   ]);
-  return member?.role.split(",").includes(mapped.platformRole) ? mapped.platformRole : USER_ROLE;
+  return holdsPlatformRole(mapped.config, organization.id, member)
+    ? mapped.platformRole
+    : USER_ROLE;
 }
 
 type Body = Record<string, unknown>;

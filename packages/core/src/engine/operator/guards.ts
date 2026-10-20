@@ -148,14 +148,16 @@ export async function platformOrganizationId(
 /**
  * The role rule of `isPlatformOperator` for a member row in hand: a row of
  * the platform organization whose role parts hold `organizations.platformRole`.
- * A read of many users passes each row of one `in` read.
+ * A read of many users passes each row of one `in` read. The main entry
+ * exports it, so the Better Auth shim reads this rule and keeps no copy
+ * (ruling 54 of plan 12f). The config is a resolved config or a config input.
  */
 export function holdsPlatformRole(
-  config: ResolvedConfig,
+  config: { readonly organizations?: { readonly platformRole?: string | null } | false | null },
   platformId: string | null,
   member: Pick<MemberRow, "organizationId" | "role"> | null | undefined,
 ): boolean {
-  const role = config.organizations?.platformRole ?? null;
+  const role = (config.organizations ? config.organizations.platformRole : null) ?? null;
   if (role === null || platformId === null || !member) return false;
   return member.organizationId === platformId && holdsRolePart(member.role, role);
 }
