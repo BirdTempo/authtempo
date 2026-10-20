@@ -230,6 +230,7 @@ describe("the operator config of plan 12f", () => {
       {},
       "operator.users needs",
     ],
+    ["users with no secret and no platform role", { users: true }, {}, "operator.users needs"],
     [
       "users with the 11c secret and no platform role",
       { secretHash: HASH, users: true },
@@ -278,6 +279,15 @@ describe("the operator config of plan 12f", () => {
       operator: { secrets: [entry("a", HASH, ["users"])], users: true },
     });
     expect(secretOnly.operator?.users).toBe(true);
+  });
+
+  it("accepts the user tools with a platform role and no secret", async () => {
+    // Spec 26 item 3 and the plan ask for an actor, not a secret (ruling 21).
+    const resolved = resolveConfig({ ...base, ...PLATFORM, operator: { users: true } });
+    expect(resolved.operator).toEqual({ secrets: [], users: true, impersonation: null });
+    const app = operatorApp({ users: true }, PLATFORM);
+    for (const [method, path] of ROUTES)
+      expect((await app.handle(call(method, path, SECRET))).status, path).toBe(401);
   });
 
   it("freezes the scope list of each resolved secret", () => {

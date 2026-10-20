@@ -579,8 +579,10 @@ export type ResolvedOperatorSecret = Readonly<Omit<OperatorSecretEntry, "scopes"
 };
 
 /**
- * Set `secretHash` or `secrets`, not both. Each tool is off by default, so
- * an upgrade from plan 11c opens no new route and widens no secret.
+ * Set `secretHash` or `secrets`, not both. With `users` and
+ * `organizations.platformRole`, you can set neither: only platform
+ * operators then use the tools. Each tool is off by default, so an upgrade
+ * from plan 11c opens no new route and widens no secret.
  */
 export interface OperatorConfig {
   /**
@@ -1752,6 +1754,10 @@ function resolveOperator(
     const hashes = new Set(secrets.map((e) => e.secretHash));
     if (hashes.size !== secrets.length)
       throw new ConfigError("operator.secrets[].secretHash must be unique");
+  } else if (input.secretHash === undefined && input.users === true) {
+    // Spec 26 item 3 asks for an actor, not a secret. With no secret, only a
+    // platform operator uses the tools; the no-actor rule below checks the role.
+    secrets = [];
   } else {
     if (typeof input.secretHash !== "string" || !SHA256_HEX.test(input.secretHash))
       throw new ConfigError(`operator.secretHash ${HASH_TEXT}, or set operator.secrets`);

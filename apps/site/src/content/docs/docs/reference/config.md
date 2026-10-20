@@ -251,7 +251,7 @@ Another key of `oauth` is refused.
 
 ## Operator
 
-Another key of `operator` is refused. Set `operator.secretHash` or `operator.secrets`, not both. Each tool is off by default, so an upgrade opens no new route and widens no secret. A presented secret is compared against every entry, also after a match.
+Another key of `operator` is refused. Set `operator.secretHash` or `operator.secrets`, not both. With `operator.users` and `organizations.platformRole`, you can set neither: only platform operators then use the tools, and each secret route answers 401. Each tool is off by default, so an upgrade opens no new route and widens no secret. A presented secret is compared against every entry, also after a match.
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
