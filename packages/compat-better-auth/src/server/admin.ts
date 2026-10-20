@@ -7,7 +7,7 @@ import {
   type SessionRow,
   type UserRow,
 } from "@authtempo/core";
-import { BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
+import { APIError, apiError, BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
 import type { AdminOptions, AdminSession, AdminUser } from "../types.js";
 import type { Mapped } from "./map-options.js";
 import { sessionTokenOf, toSession, toUser } from "./shapes.js";
@@ -200,8 +200,24 @@ export function setRoleChange(role: unknown, platformRole: string): "grant" | "r
   return null;
 }
 
-function failure(code: string, status: number, message: string) {
-  return Response.json({ code, message }, { status });
+/**
+ * One admin answer before it is a Response: Better Auth's body, the
+ * status, and core's headers. The handler sends it as JSON, and `auth.api`
+ * answers the body itself, with its dates (ruling 60 m2).
+ */
+export interface AdminAnswer {
+  body: unknown;
+  status: number;
+  headers: Headers;
+}
+
+/** The JSON Response of an answer. */
+function responseOf(a: AdminAnswer): Response {
+  return Response.json(a.body, { status: a.status, headers: a.headers });
+}
+
+function failure(code: string, status: number, message: string): AdminAnswer {
+  return { body: { code, message }, status, headers: new Headers() };
 }
 
 /**
@@ -211,6 +227,11 @@ function failure(code: string, status: number, message: string) {
  * These refusals name a config fact only, so they come before the session read.
  */
 export async function adminRefusal(mapped: Mapped, request: Request): Promise<Response | null> {
+  const a = await refusalAnswer(mapped, request);
+  return a === null ? null : responseOf(a);
+}
+
+async function refusalAnswer(mapped: Mapped, request: Request): Promise<AdminAnswer | null> {
   const url = new URL(request.url);
   const prefix = `${mapped.basePath}/admin/`;
   if (!url.pathname.startsWith(prefix)) return null;
@@ -344,11 +365,11 @@ export async function roleOf(mapped: Mapped, userId: string): Promise<string> {
 
 type Body = Record<string, unknown>;
 
-/** A JSON body of Better Auth's form with core's headers: the renewed cookie and CORS. */
-function withHeaders(body: unknown, status: number, from: Response): Response {
+/** A body of Better Auth's form with core's headers: the renewed cookie and CORS. */
+function withHeaders(body: unknown, status: number, from: Response): AdminAnswer {
   const headers = new Headers(from.headers);
   headers.delete("content-length");
-  return Response.json(body, { status, headers });
+  return { body, status, headers };
 }
 
 /**
@@ -359,7 +380,7 @@ function withHeaders(body: unknown, status: number, from: Response): Response {
  * `operator_self` names the caller's own user. Each other code answers its
  * name in `BETTER_AUTH_CODES`.
  */
-async function refusalOf(path: string, res: Response): Promise<Response> {
+async function refusalOf(path: string, res: Response): Promise<AdminAnswer> {
   const body = (await res
     .clone()
     .json()
@@ -381,9 +402,9 @@ async function refusalOf(path: string, res: Response): Promise<Response> {
 }
 
 /** A VALIDATION_ERROR of the shim's own, before any core route runs. */
-function invalid(): Response {
+function invalid(): AdminAnswer {
   const code = BETTER_AUTH_CODES.invalid_body;
-  return Response.json({ code, message: messageOf(code) }, { status: 400 });
+  return failure(code, 400, messageOf(code));
 }
 
 /** The JSON object of a POST, or null for no object. */
@@ -422,6 +443,15 @@ export async function adminRoute(
   mapped: Mapped,
   request: Request,
 ): Promise<Response | null> {
+  const a = await adminAnswer(auth, mapped, request);
+  return a === null ? null : responseOf(a);
+}
+
+async function adminAnswer(
+  auth: Auth,
+  mapped: Mapped,
+  request: Request,
+): Promise<AdminAnswer | null> {
   const url = new URL(request.url);
   if (!url.pathname.startsWith(`${mapped.basePath}/admin/`)) return null;
   const path = url.pathname.slice(mapped.basePath.length);
@@ -591,6 +621,48 @@ export async function adminRoute(
     }
   }
   return null;
+}
+
+/** The input of one `auth.api` admin call, in Better Auth's shape. */
+export interface AdminCallInput {
+  headers?: Headers;
+  query?: Record<string, string | number | boolean | undefined>;
+  body?: unknown;
+}
+
+/**
+ * One admin call of `auth.api` (ruling 60 m2). It sends the handler's own
+ * steps with the caller's headers: the refusals, then the mapped route.
+ * So the server call and the HTTP path answer alike. It answers Better
+ * Auth's body, or throws Better Auth's `APIError` with the status and code
+ * of the path. Without the `admin` plugin, each call throws 404.
+ */
+export async function adminCall(
+  auth: Auth,
+  mapped: Mapped,
+  method: "GET" | "POST",
+  path: string,
+  input: AdminCallInput,
+): Promise<unknown> {
+  if (mapped.platformRole === null) throw apiError("not_found", 404);
+  const url = new URL(`${mapped.origin}${mapped.basePath}${path}`);
+  for (const [k, v] of Object.entries(input.query ?? {}))
+    if (v !== undefined) url.searchParams.set(k, String(v));
+  const headers = new Headers(input.headers);
+  if (method === "POST") headers.set("content-type", "application/json");
+  const request = new Request(url, {
+    method,
+    headers,
+    ...(method === "POST" ? { body: JSON.stringify(input.body ?? {}) } : {}),
+  });
+  const a = (await refusalAnswer(mapped, request)) ?? (await adminAnswer(auth, mapped, request));
+  if (a === null) throw apiError("not_found", 404);
+  if (a.status < 400) return a.body;
+  const b = (a.body ?? {}) as { code?: unknown; message?: unknown };
+  throw new APIError(a.status, {
+    ...(typeof b.code === "string" ? { code: b.code } : {}),
+    ...(typeof b.message === "string" ? { message: b.message } : {}),
+  });
 }
 
 /**

@@ -639,6 +639,14 @@ core's guard decides (plan 12f Task 10):
 | `POST /admin/impersonate-user` | `POST /operator/impersonate` | `{ session, user }` of the new session. The session cookie holds its token, and core's actor cookie keeps the operator's token. A bearer caller gets the token in `session.token` and no cookie. |
 | `POST /admin/stop-impersonating` | `POST /operator/impersonate/stop` | `{ session, user }` of the operator's own session, which the session cookie holds again. With no actor cookie, or when the operator's session ended, `{ session: null, user: null }`. |
 
+`auth.api` has Better Auth's server calls of these paths: `listUsers`,
+`getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`,
+`impersonateUser`, and `stopImpersonating`. Each takes Better Auth's
+`query` or `body` and the caller's `headers`, and runs the steps of its
+path. So it answers what the path answers, with dates as `Date` values. A
+refusal throws `APIError` with the status and the code of the path. Without
+`admin()`, each call throws 404.
+
 Each user in an answer has Better Auth's admin fields: `role` is the
 platform role or `user`, and `banned`, `banReason`, and `banExpires` show a
 ban that holds now. With `twoFactor()`, each user also has

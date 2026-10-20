@@ -176,6 +176,7 @@ Better Auth's `admin` plugin runs on core's operator tools (spec section 26). A 
 | `/admin/ban-user`, `/admin/unban-user`, `/admin/set-role` | Core's `POST /operator/users/ban`, `/operator/users/unban`, and `/operator/users/platform-role`. Each answers `{ user }` with `role`, `banned`, `banReason`, and `banExpires`. With `twoFactor()`, the user also has `twoFactorEnabled`. |
 | `/admin/revoke-user-sessions` | Core's `POST /operator/sessions/end-user`. While sessions stay, it answers `{ success: false, more: true, ended }`: call again. |
 | `/admin/impersonate-user`, `/admin/stop-impersonating` | Core's `POST /operator/impersonate` and `/operator/impersonate/stop`. Each answers `{ session, user }`. The stop answers `{ session: null, user: null }` when no operator session comes back. |
+| `auth.api` admin calls | `listUsers`, `getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`, `impersonateUser`, and `stopImpersonating` run the steps of their paths with the caller's `headers`. A refusal throws `APIError` with the code of the path. |
 | `/get-session` | With `admin`, the user also has `role`, `banned`, `banReason`, and `banExpires`, and the session has `impersonatedBy`. |
 | `adminClient()` | The client reads `/get-session`, so `getSession` and `useSession` give the same four fields. The client has no `admin.*` calls. |
 

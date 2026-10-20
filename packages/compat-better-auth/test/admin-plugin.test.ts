@@ -906,3 +906,116 @@ describe("the impersonation calls on core's routes (plan 12f Task 11)", () => {
     ]);
   });
 });
+
+/** The status, code, and message of the APIError that a server call throws, or null. */
+const thrown = async (call: Promise<unknown>) => {
+  try {
+    await call;
+    return null;
+  } catch (e) {
+    const x = e as { statusCode: number; body: { code: string; message: string } };
+    return { status: x.statusCode, code: x.body.code, message: x.body.message };
+  }
+};
+
+describe("the admin calls of auth.api (ruling 60 m2)", () => {
+  it("serves Better Auth's server admin calls with the steps of the paths", async () => {
+    const a = await adminApp(memoryDatabase());
+    const ann = await a.user("ann@example.com");
+    const bob = await a.user("bob@example.com");
+    const cy = await a.user("cy@example.com");
+    const headers = new Headers({ cookie: a.op });
+    const api = a.auth.api;
+
+    const listed = await api.listUsers({
+      query: { searchValue: "ann", searchOperator: "starts_with", limit: 10 },
+      headers,
+    });
+    expect(listed.users.map((u) => u.email)).toEqual(["ann@example.com"]);
+    expect(listed).toMatchObject({ total: 1, limit: 10, offset: 0 });
+    // A server call answers dates, as Better Auth's does.
+    expect(listed.users[0]?.createdAt).toBeInstanceOf(Date);
+    const got = await api.getUser({ query: { id: ann.id }, headers });
+    expect(got).toMatchObject({ id: ann.id, role: "user", twoFactorEnabled: false });
+
+    const banned = await api.banUser({
+      body: { userId: ann.id, banReason: "Spam", banExpiresIn: 3600 },
+      headers,
+    });
+    expect(banned.user).toMatchObject({ id: ann.id, banned: true, banReason: "Spam" });
+    expect(banned.user.banExpires).toBeInstanceOf(Date);
+    const unbanned = await api.unbanUser({ body: { userId: ann.id }, headers });
+    expect(unbanned.user).toMatchObject({ banned: false, banExpires: null });
+    const granted = await api.setRole({ body: { userId: bob.id, role: "admin" }, headers });
+    expect(granted.user).toMatchObject({ id: bob.id, role: "admin" });
+    expect(await api.revokeUserSessions({ body: { userId: cy.id }, headers })).toEqual({
+      success: true,
+    });
+    expect(await (await a.read("/get-session", cy.cookie)).json()).toBeNull();
+
+    const start = await api.impersonateUser({ body: { userId: ann.id }, headers });
+    expect(start.session).toMatchObject({ userId: ann.id, impersonatedBy: a.opId });
+    expect(start.user).toMatchObject({ id: ann.id, role: "user" });
+    const opToken = a.op.slice(COOKIE_NAME.length + 1);
+    const stop = await api.stopImpersonating({
+      headers: new Headers({
+        cookie: `${COOKIE_NAME}=${start.session.token}; ${ACTOR}=${opToken}`,
+      }),
+    });
+    expect(stop.session).toMatchObject({ userId: a.opId, token: opToken, impersonatedBy: null });
+    expect(stop.user).toMatchObject({ id: a.opId, role: "admin", twoFactorEnabled: true });
+
+    // Core's audit rows name the operator, as through the paths.
+    const by = { actorKind: "user", actorId: a.opId };
+    expect((await a.audit(ann.id)).filter((r) => r.action === "ban")).toEqual([
+      { action: "ban", ...by, reason: "Spam" },
+    ]);
+  });
+
+  it("throws Better Auth's APIError of each path, and 404 without the plugin", async () => {
+    const a = await adminApp(memoryDatabase());
+    const ann = await a.user("ann@example.com");
+    const headers = new Headers({ cookie: a.op });
+    const api = a.auth.api;
+    expect(await thrown(api.listUsers({ query: { offset: 10 }, headers }))).toEqual({
+      status: 501,
+      code: "NOT_SUPPORTED",
+      message:
+        "core pages by a cursor, not by an offset, and gives no total (spec section 26 item 4)",
+    });
+    expect(await thrown(api.getUser({ query: { id: "nobody" }, headers }))).toEqual({
+      status: 404,
+      code: "USER_NOT_FOUND",
+      message: "User not found",
+    });
+    expect(
+      await thrown(api.setRole({ body: { userId: ann.id, role: "owner" }, headers })),
+    ).toMatchObject({
+      status: 501,
+      code: "NOT_SUPPORTED",
+    });
+    expect(await thrown(api.banUser({ body: { userId: a.opId }, headers }))).toEqual({
+      status: 409,
+      code: "YOU_CANNOT_BAN_YOURSELF",
+      message: "You cannot ban yourself",
+    });
+    expect(
+      await thrown(api.unbanUser({ body: { userId: ann.id }, headers: new Headers() })),
+    ).toMatchObject({ status: 401, code: "UNAUTHORIZED" });
+    expect(await thrown(api.stopImpersonating({ headers }))).toEqual({
+      status: 400,
+      code: "BAD_REQUEST",
+      message: "You are not impersonating anyone",
+    });
+    // A member with no platform role gets the code of the path.
+    const asAnn = new Headers({ cookie: ann.cookie });
+    expect(
+      await thrown(api.revokeUserSessions({ body: { userId: a.opId }, headers: asAnn })),
+    ).toMatchObject({ status: 403, code: "YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS" });
+    expect(await a.audit(ann.id)).toEqual([]);
+
+    const off = betterAuth(options(null, { authtempo: { passwordHash: fast } }));
+    expect(await thrown(off.api.listUsers({ headers }))).toMatchObject({ status: 404 });
+    expect(await thrown(off.api.stopImpersonating({ headers }))).toMatchObject({ status: 404 });
+  });
+});

@@ -16,7 +16,7 @@ import {
   passwordPolicyCode,
 } from "../errors.js";
 import type { Account, CompatServerApi } from "../types.js";
-import { roleOf, toAdminSession, toAdminUser } from "./admin.js";
+import { type AdminCallInput, adminCall, roleOf, toAdminSession, toAdminUser } from "./admin.js";
 import { sha256Hex } from "./mail.js";
 import type { Mapped } from "./map-options.js";
 import {
@@ -209,6 +209,10 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true, tru
     if (!pw) throw apiError("not_found", 404);
     return pw;
   };
+  // The admin calls run the handler's steps of their paths (ruling 60 m2): core
+  // serves them to a user actor only through its routes.
+  const admin = <T>(method: "GET" | "POST", path: string, input: AdminCallInput) =>
+    adminCall(auth, mapped, method, path, input) as Promise<T>;
   return {
     async getSession({ headers }) {
       // A GET request: with session.deferSessionRefresh on, core reads with no write (plan 12a).
@@ -494,5 +498,16 @@ export function createApi(auth: Auth, mapped: Mapped): CompatServerApi<true, tru
       );
       return { status: true };
     },
+    listUsers: ({ query, headers }) =>
+      admin("GET", "/admin/list-users", { headers, ...(query ? { query: { ...query } } : {}) }),
+    getUser: ({ query, headers }) => admin("GET", "/admin/get-user", { headers, query }),
+    banUser: ({ body, headers }) => admin("POST", "/admin/ban-user", { headers, body }),
+    unbanUser: ({ body, headers }) => admin("POST", "/admin/unban-user", { headers, body }),
+    setRole: ({ body, headers }) => admin("POST", "/admin/set-role", { headers, body }),
+    revokeUserSessions: ({ body, headers }) =>
+      admin("POST", "/admin/revoke-user-sessions", { headers, body }),
+    impersonateUser: ({ body, headers }) =>
+      admin("POST", "/admin/impersonate-user", { headers, body }),
+    stopImpersonating: ({ headers }) => admin("POST", "/admin/stop-impersonating", { headers }),
   };
 }

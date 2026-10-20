@@ -734,6 +734,64 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
     body: { accountId: string };
     headers: Headers;
   }): Promise<{ status: true }>;
+  /**
+   * The admin calls of plan 12f (ruling 60 m2). Each one runs the steps of
+   * its `/admin/*` path with the caller's headers, so core's operator guard
+   * decides. Each refusal throws `APIError` with the code of the path.
+   * Without the `admin` plugin, each call throws 404.
+   */
+  listUsers(input: { query?: AdminListUsersQuery; headers: Headers }): Promise<AdminUserList>;
+  getUser(input: { query: { id: string }; headers: Headers }): Promise<AdminUser>;
+  /** `banExpiresIn` is in seconds. */
+  banUser(input: {
+    body: { userId: string; banReason?: string; banExpiresIn?: number };
+    headers: Headers;
+  }): Promise<{ user: AdminUser }>;
+  unbanUser(input: { body: { userId: string }; headers: Headers }): Promise<{ user: AdminUser }>;
+  /** The platform role grants it, and `user` revokes it. */
+  setRole(input: {
+    body: { userId: string; role: string | string[] };
+    headers: Headers;
+  }): Promise<{ user: AdminUser }>;
+  /** One page per call: while sessions stay, `{ success: false, more: true, ended }`. */
+  revokeUserSessions(input: {
+    body: { userId: string };
+    headers: Headers;
+  }): Promise<{ success: true } | { success: false; more: true; ended: number }>;
+  impersonateUser(input: {
+    body: { userId: string };
+    headers: Headers;
+  }): Promise<{ session: AdminSession; user: AdminUser }>;
+  /** Null fields when no operator session comes back. */
+  stopImpersonating(input: {
+    headers: Headers;
+  }): Promise<{ session: AdminSession | null; user: AdminUser | null }>;
+}
+
+/** Better Auth's list-users query (dist/plugins/admin/routes.mjs, read 2026-10-21), and the shim's `after`. */
+export interface AdminListUsersQuery {
+  searchValue?: string;
+  searchField?: "email" | "name";
+  searchOperator?: "contains" | "starts_with" | "ends_with";
+  limit?: string | number;
+  offset?: string | number;
+  sortBy?: string;
+  sortDirection?: "asc" | "desc";
+  filterField?: string;
+  filterValue?: string | number | boolean;
+  /** Only `eq` maps onto core; each other operator throws NOT_SUPPORTED. */
+  filterOperator?: string;
+  /** The shim's own key: the `next` of the page before. */
+  after?: string;
+}
+
+/** The list-users answer: `total` only when the page ends the list, else `next` (ruling 53 of plan 12f). */
+export interface AdminUserList {
+  users: AdminUser[];
+  total?: number;
+  limit?: number;
+  offset: number;
+  next?: string;
 }
 
 export interface BetterAuthInstance<O extends BetterAuthOptions = BetterAuthOptions> {
