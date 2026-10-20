@@ -89,7 +89,9 @@ export class Sandbox extends DurableObject<Cloudflare.Env> {
     if (url.pathname === "/whoami") {
       // As examples/worker: the session cookie, a ts_ bearer, or a tk_ bearer.
       const c = await auth.caller(request);
-      if (!c) return json(401, { error: "unauthorized" });
+      // A client_credentials token acts for no user, so this route has no one to name (plan 12e).
+      // The demo turns oauth off, so no caller of that kind reaches it.
+      if (!c || c.kind === "oauth-client") return json(401, { error: "unauthorized" });
       const res = json(200, { kind: c.kind, id: c.user.id, email: c.user.email });
       // After a sliding refresh, renew the cookie or the browser drops it early.
       const renewed = c.kind === "session" ? auth.sessionCookie(request, c) : null;
