@@ -319,6 +319,39 @@ describe("the quota (plan 12k Task 7)", () => {
     expect(await remaining(h)).toEqual([10]);
   });
 
+  it("answers unauthorized when a revoke deletes the row during the spend", async () => {
+    const h = useHandle();
+    const ada = await h.seedUser("ada@example.com");
+    const made = mustOk(
+      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 10 } }),
+    );
+    // The person revokes the token after the resolve read the row and before its spend writes.
+    const storage: StorageAdapter = {
+      ...h.storage,
+      async update(model, where, data) {
+        if (model === "apiToken" && "remaining" in data)
+          expect(await h.auth.api.tokens.revoke({ user: ada, id: made.apiToken.id })).toEqual({
+            ok: true,
+            value: { ok: true },
+          });
+        return h.storage.update(model, where, data);
+      },
+    };
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage,
+      mail: { send: async () => {} },
+      clock: h.clock,
+    });
+    expect(await auth.authenticate(request(made.token))).toMatchObject({
+      ok: false,
+      code: "unauthorized",
+    });
+    expect(await h.storage.findMany("apiToken", [])).toEqual([]);
+  });
+
   it("answers conflict to a quota update when spends ran between its read and its write", async () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
