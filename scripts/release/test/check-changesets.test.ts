@@ -53,7 +53,13 @@ const files: Record<string, readonly string[] | undefined> = {
   ],
   "authtempo-example-node": undefined,
 };
-const run = (changed: ChangedFile[], names: string[], commits = 1, packs = files) =>
+const run = (
+  changed: ChangedFile[],
+  names: string[],
+  commits = 1,
+  packs = files,
+  version = "0.0.0",
+) =>
   checkChangesets({
     changed,
     changesets: names.map(changeset),
@@ -61,6 +67,7 @@ const run = (changed: ChangedFile[], names: string[], commits = 1, packs = files
     dirs,
     files: packs,
     commits,
+    version,
   });
 const paths = (...list: string[]) => list.map((path) => ({ path }));
 
@@ -278,6 +285,26 @@ describe("check-changesets", () => {
     expect(run(paths("examples/node/src/app.ts"), ["unreleased.md"]).failures).toEqual([
       ".changeset/unreleased.md names authtempo-example-node, which is not a released package",
     ]);
+  });
+
+  it("refuses a major bump while the group version is 0.x", () => {
+    for (const version of ["0.0.0", "0.4.2"])
+      expect(
+        run(paths("packages/core/src/x.ts"), ["core-major.md"], 1, files, version).failures,
+      ).toEqual([
+        '.changeset/core-major.md names @authtempo/core as major; the group is at 0.x, so a break is a minor with a "Breaking:" line until the owner names 1.0.0',
+      ]);
+    // The entry reads the group version from the workspace.
+    repo = fixtureRepo();
+    repo.write("packages/a/src/foo.ts", "export const foo = 2;\n");
+    repo.write(".changeset/break.md", '---\n"@fixture/a": major\n---\n\nRemove foo.\n');
+    expect(checkChangesets(readInput(repo.root, "main")).failures).toEqual([
+      '.changeset/break.md names @fixture/a as major; the group is at 0.x, so a break is a minor with a "Breaking:" line until the owner names 1.0.0',
+    ]);
+    // After the owner names 1.0.0, a break is a major.
+    expect(
+      summaryLine(run(paths("packages/core/src/x.ts"), ["core-major.md"], 1, files, "1.0.0")),
+    ).toBe("check-changesets: PASS changed=1 covered=1 exempt=0 empty=0 failures=0");
   });
 
   it("refuses a changeset whose body starts with a plan number", () => {

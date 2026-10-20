@@ -35,6 +35,8 @@ export interface ChangesetsInput {
   files: Record<string, readonly string[] | undefined>;
   /** The count of commits since the merge base. */
   commits: number;
+  /** The version of the group in the working tree. */
+  version: string;
 }
 
 /**
@@ -139,9 +141,15 @@ export function checkChangesets(input: ChangesetsInput): Report {
       if (!/^No release: \S/.test(parsed.body))
         failures.push(`${file} names no package and has no line "No release: <reason>"`);
     }
-    for (const { name } of parsed.releases) {
+    for (const { name, bump } of parsed.releases) {
       if (released.has(name)) named.add(name);
       else failures.push(`${file} names ${name}, which is not a released package`);
+      // From 0.x, changeset version writes 1.0.0 for a major, and only the
+      // owner names 1.0.0 (spec 33 item 1.2).
+      if (bump === "major" && input.version.startsWith("0."))
+        failures.push(
+          `${file} names ${name} as major; the group is at 0.x, so a break is a minor with a "Breaking:" line until the owner names 1.0.0`,
+        );
     }
     // The body becomes the changelog entry, and a reader of the changelog
     // does not know the plan numbers.
@@ -239,13 +247,18 @@ export function readInput(root: string, ref: string): ChangesetsInput {
       changesets.push({ file: path, text, onMain: showAt(root, base, path) !== null });
   }
   const workspace = readWorkspace(root);
+  const released = releasedNames(root);
+  // check-packages holds one version for the group, so the first one is the group version.
+  const version = workspace.find((p) => released.includes(p.name))?.manifest.version;
+  if (version === undefined) throw new Error("no released package is in the workspace");
   return {
     changed,
     changesets,
-    released: releasedNames(root),
+    released,
     dirs: Object.fromEntries(workspace.map((p) => [p.name, p.dir])),
     files: Object.fromEntries(workspace.map((p) => [p.name, p.manifest.files])),
     commits: commitCount(root, base),
+    version,
   };
 }
 

@@ -41,7 +41,7 @@ The rules (`check-changesets`, plan 12j Task 4):
 
 ## The bump
 
-The group stays at 0.x until the owner names `1.0.0`.
+The group stays at 0.x until the owner names `1.0.0`. While the group is at 0.x, `check-changesets` fails on a `major`: from 0.x, `changeset version` writes `1.0.0` for a major.
 
 - A break is a `minor` with a line that starts with `Breaking:`.
 - A feature is a `minor`.
