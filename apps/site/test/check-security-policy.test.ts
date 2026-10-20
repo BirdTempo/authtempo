@@ -185,6 +185,14 @@ describe("check-security-policy", () => {
       "SECURITY.md links the repository someone/fork; release/repository.json names authtempo/authtempo",
       "the first channel is https://github.com/someone/fork/security/advisories/new; it must be https://github.com/authtempo/authtempo/security/advisories/new, from release/repository.json",
     ]);
+    // The same owner with another name is another repository.
+    expect(
+      check(textWith(advisory, "https://github.com/authtempo/other/security/advisories/new"))
+        .failures,
+    ).toEqual([
+      "SECURITY.md links the repository authtempo/other; release/repository.json names authtempo/authtempo",
+      "the first channel is https://github.com/authtempo/other/security/advisories/new; it must be https://github.com/authtempo/authtempo/security/advisories/new, from release/repository.json",
+    ]);
     // A third channel, or one channel only.
     expect(
       check(textWith(`(${mail})`, `(${mail}) or [the chat](https://chat.authtempo.com/)`)).failures,
