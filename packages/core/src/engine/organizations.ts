@@ -130,21 +130,17 @@ async function ownerCount(
   return members.filter((m) => rankOf(o.ranks, m.role) >= ownerRank).length;
 }
 
-function isOwner(o: ResolvedOrganizations, rank: number): boolean {
+/** True when `rank` is at the owner rank or above: the member counts as an owner. */
+export function isOwner(o: ResolvedOrganizations, rank: number): boolean {
   return rank >= (o.ranks.owner ?? Number.POSITIVE_INFINITY);
 }
 
 /**
- * Thrown inside a transaction to roll back writes that already ran, then
- * caught outside it and answered as conflict. A thrown error is the only
- * signal that makes every adapter undo its writes.
- */
-class OwnerConflict extends Error {}
-
-/**
- * A write that can remove an owner: the owner count, the lock, the write, and
- * the recount run in one transaction. `organization` is the row from the
+ * The owner lock in the caller's transaction (plan 6): the owner count, the
+ * lock, the write, and the recount. `organization` is the row from the
  * standing read. `write` returns the number of member rows it changed.
+ * `ownerWrite` runs it in its own transaction. An operator act (plan 12f)
+ * runs it in the act's transaction, so the lock and the act commit together.
  *
  * The port has no row lock. The conditional update of updatedAt is an
  * optimistic lock: on Postgres the second of two concurrent owner writes
@@ -154,12 +150,40 @@ class OwnerConflict extends Error {}
  * D1 transactions are not isolated: a second request can read the stamp this
  * transaction wrote and pass the lock before this transaction deletes its
  * owner. The recount after the write catches that case. If no owner remains,
- * the sentinel rolls this transaction back, and the later of the two racers
- * answers conflict.
+ * the throw of `conflict` rolls this transaction back, and the later of the
+ * two racers answers conflict. The caller runs the lock in `hookGuard`, which
+ * answers the throw outside the transaction.
  *
  * A refusal before the first write returns a value and does not throw: no
  * write has run at that point, so the commit changes nothing.
  */
+export async function ownerLock(
+  tx: StorageAdapter,
+  o: ResolvedOrganizations,
+  organization: OrganizationRow,
+  write: (tx: StorageAdapter) => Promise<number>,
+  now: Date,
+): Promise<Result<true>> {
+  const seen = organization.updatedAt;
+  if ((await ownerCount(tx, o, organization.id)) <= 1) return fail("last_owner");
+  // One millisecond past the read, so the stamp changes even when the clock has not moved.
+  const stamp = new Date(Math.max(now.getTime(), seen.getTime() + 1));
+  const n = await tx.update(
+    "organization",
+    [
+      { field: "id", op: "eq", value: organization.id },
+      { field: "updatedAt", op: "eq", value: seen },
+    ],
+    { updatedAt: stamp },
+  );
+  if (n === 0) return fail("conflict");
+  // Zero rows: the member's role changed after the standing read. The lock update must roll back.
+  if ((await write(tx)) === 0) stopWith("conflict");
+  if ((await ownerCount(tx, o, organization.id)) < 1) stopWith("conflict");
+  return ok(true);
+}
+
+/** A write that can remove an owner: `ownerLock` in its own transaction. The caller runs it in `hookGuard`. */
 async function ownerWrite(
   config: ResolvedConfig,
   o: ResolvedOrganizations,
@@ -167,30 +191,7 @@ async function ownerWrite(
   write: (tx: StorageAdapter) => Promise<number>,
 ): Promise<Result<true>> {
   const now = config.clock.now();
-  const seen = organization.updatedAt;
-  try {
-    return await config.storage.transaction(async (tx): Promise<Result<true>> => {
-      if ((await ownerCount(tx, o, organization.id)) <= 1) return fail("last_owner");
-      // One millisecond past the read, so the stamp changes even when the clock has not moved.
-      const stamp = new Date(Math.max(now.getTime(), seen.getTime() + 1));
-      const n = await tx.update(
-        "organization",
-        [
-          { field: "id", op: "eq", value: organization.id },
-          { field: "updatedAt", op: "eq", value: seen },
-        ],
-        { updatedAt: stamp },
-      );
-      if (n === 0) return fail("conflict");
-      // Zero rows: the member's role changed after the standing read. The lock update must roll back.
-      if ((await write(tx)) === 0) throw new OwnerConflict();
-      if ((await ownerCount(tx, o, organization.id)) < 1) throw new OwnerConflict();
-      return ok(true);
-    });
-  } catch (err) {
-    if (err instanceof OwnerConflict) return fail("conflict");
-    throw err;
-  }
+  return config.storage.transaction((tx) => ownerLock(tx, o, organization, write, now));
 }
 
 export async function createOrganization(
