@@ -11,10 +11,17 @@ import {
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
-import { passwordSignIn, requestPasswordReset, resetPassword } from "../src/engine/password.js";
+import {
+  passwordSignIn,
+  passwordSignUp,
+  requestPasswordReset,
+  resetPassword,
+  verifyPasswordEmail,
+} from "../src/engine/password.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
+import { verifyTwoFactor } from "../src/engine/totp.js";
 import { randomBase64Url, sha256Base64Url } from "../src/primitives/crypto.js";
 import type { Result } from "../src/result.js";
 import type { UserRow } from "../src/schema.js";
@@ -23,7 +30,7 @@ import { tokenFromMail } from "./helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
 import { recordNextTransaction, signUpAndVerify } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
-import { enrolled, PASSWORD } from "./totp-helpers.js";
+import { codeNow, enrolled, PASSWORD } from "./totp-helpers.js";
 
 const EMAIL = "ada@example.com";
 const RP = { rpID: "example.com", rpName: "Example", origins: ["https://app.example.com"] };
@@ -314,6 +321,75 @@ describe("the ban at the session doors (plan 12f Task 6)", () => {
     // The consume of the link is the one write before the stop, and the stop undoes it.
     expect(writes).toEqual(["update:verification"]);
     expect(await userOf(w)).toEqual(user);
+  });
+
+  // Three more flows open a session through prepareSession, as each door
+  // above does (review L5 of Task 6).
+  it("refuses the reset of a banned user with no factor, which opens a session", async () => {
+    const w = await world();
+    await signUpAndVerify(w.auth, EMAIL, PASSWORD);
+    await ban(w);
+    const user = await userOf(w);
+    expect(await requestPasswordReset(w.auth.config, { email: EMAIL, ip: null })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    const token = tokenFromMail(w.auth.mail.at(-1)?.text ?? "");
+    w.before.length = 0;
+    expect(
+      await resetPassword(w.auth.config, {
+        token,
+        password: "another long password",
+        ip: null,
+        userAgent: null,
+      }),
+    ).toEqual(BANNED);
+    expect(w.before).toEqual([]);
+    expect(await w.auth.storage.findMany("session", [])).toEqual([]);
+    // The stop undoes the reset: the old password stays, and the sign-in answers the ban.
+    expect(await userOf(w)).toEqual(user);
+    expect(await password(w)).toEqual(BANNED);
+  });
+
+  it("refuses the verify link of a sign-up when the ban came after the mail", async () => {
+    const w = await world();
+    const up = await passwordSignUp(w.auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    const mail = w.auth.mail.findLast((m) => m.to === EMAIL && m.subject.startsWith("Confirm"));
+    await ban(w);
+    w.before.length = 0;
+    expect(
+      await verifyPasswordEmail(w.auth.config, {
+        token: tokenFromMail(mail?.text ?? ""),
+        ip: null,
+        userAgent: null,
+      }),
+    ).toEqual(BANNED);
+    expect(w.before).toEqual([]);
+    expect(await w.auth.storage.findMany("session", [])).toEqual([]);
+    expect((await userOf(w)).emailVerified).toBe(false);
+  });
+
+  it("ends a challenge that was open at the ban, so a right code opens nothing", async () => {
+    const w = await world();
+    const { secret } = await enrolled(w.auth, EMAIL);
+    const r = await password(w);
+    if (!r.ok || !("twoFactor" in r.value)) throw new Error("the sign-in answered no challenge");
+    const { challenge } = r.value.twoFactor;
+    await ban(w);
+    expect(
+      await verifyTwoFactor(w.auth.config, {
+        challenge,
+        code: await codeNow(w.auth, secret),
+        ip: null,
+      }),
+    ).toEqual({ ok: false, code: "invalid_token", status: 400 });
+    expect(await w.auth.storage.findMany("session", [])).toEqual([]);
   });
 
   it("answers a banned user's mail request as any user's", async () => {
