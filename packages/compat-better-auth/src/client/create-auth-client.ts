@@ -921,7 +921,8 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
             const members = await c.organizations.members.list({ organizationId: id });
             if (!members.ok) return members;
             const invitations = await c.organizations.invitations.list({ organizationId: id });
-            // A member below admin cannot list invitations in core; Better Auth shows them an empty list too.
+            // A role with no invitation:read cannot list the invitations in core. Better Auth shows
+            // them to every member; the shim answers an empty list here.
             if (!invitations.ok && invitations.code !== "forbidden_rank") return invitations;
             return {
               ok: true,
