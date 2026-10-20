@@ -56,16 +56,24 @@ export function prepareManifest(manifest: Manifest, options: PrepareOptions): Ma
 }
 
 /**
+ * Why prepare refuses the folder at `root`, or null for a release copy. It only
+ * reads, so a test can call it on the checkout: a folder with .git or with no
+ * marker is not a release copy.
+ */
+export function refusal(root: string): string | null {
+  if (existsSync(join(root, RELEASE_COPY_MARKER)) && !existsSync(join(root, ".git"))) return null;
+  return `prepare runs only in a release copy: ${root} has .git or no ${RELEASE_COPY_MARKER} file`;
+}
+
+/**
  * Prepares each released package of the release copy at `root`. It writes
  * prepareManifest back with the indent of the file. It copies the root LICENSE
- * into the package folder. It throws in a folder with .git or with no marker,
- * such as the checkout.
+ * into the package folder. It throws in a folder that refusal refuses, such as
+ * the checkout.
  */
 export function prepare(root: string): Report {
-  if (!existsSync(join(root, RELEASE_COPY_MARKER)) || existsSync(join(root, ".git")))
-    throw new Error(
-      `prepare runs only in a release copy: ${root} has .git or no ${RELEASE_COPY_MARKER} file`,
-    );
+  const refused = refusal(root);
+  if (refused !== null) throw new Error(refused);
   const failures: string[] = [];
   const rootManifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Manifest;
   const license = rootManifest.license;

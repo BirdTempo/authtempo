@@ -6,7 +6,7 @@ import { breakingByMinor } from "../src/check-pack.ts";
 import { releasedNames } from "../src/lib/released.ts";
 import { summaryLine } from "../src/lib/report.ts";
 import { type Manifest, readWorkspace } from "../src/lib/workspace.ts";
-import { prepare, prepareManifest } from "../src/prepare.ts";
+import { prepare, prepareManifest, refusal } from "../src/prepare.ts";
 import { changesetVersion, copyFixture, RELEASE_COPY_FIXTURE } from "./support/release-copy.ts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -160,19 +160,31 @@ describe("prepare", () => {
   });
 
   it("refuses to run in the repo checkout", () => {
-    // The checkout has .git and no .release-copy marker.
-    expect(() => prepare(repoRoot)).toThrow("prepare runs only in a release copy");
+    // The checkout has .git and no .release-copy marker. The test reads the
+    // refusal only: prepare on the checkout would write each manifest when
+    // the guard regresses (review of Task 6, m3).
+    expect(refusal(repoRoot)).toBe(
+      `prepare runs only in a release copy: ${repoRoot} has .git or no .release-copy file`,
+    );
     // private: true is the hold on main (spec 33): every released package keeps it.
     const released = new Set(releasedNames(repoRoot));
     const packages = readWorkspace(repoRoot).filter((p) => released.has(p.name));
     expect(packages.length).toBe(released.size);
     for (const p of packages) expect([p.name, p.manifest.private]).toEqual([p.name, true]);
 
-    // A copy with no marker is refused too, and so is a copy that holds .git.
+    // prepare runs on fixture copies only. A copy with no marker is refused,
+    // and so is a copy that holds .git. Each one keeps its manifests.
     const unmarked = copyFixture();
     made.push(unmarked);
-    expect(() => prepare(unmarked)).toThrow("prepare runs only in a release copy");
     const withGit = releaseCopy((d) => writeFileSync(join(d, ".git"), "gitdir: /elsewhere\n"));
-    expect(() => prepare(withGit)).toThrow("prepare runs only in a release copy");
+    for (const dir of [unmarked, withGit]) {
+      const before = readFileSync(join(dir, "packages/client/package.json"), "utf8");
+      expect(() => prepare(dir)).toThrow(
+        `prepare runs only in a release copy: ${dir} has .git or no .release-copy file`,
+      );
+      expect(readFileSync(join(dir, "packages/client/package.json"), "utf8")).toBe(before);
+    }
+    // A release copy has the marker and no .git.
+    expect(refusal(releaseCopy())).toBe(null);
   });
 });
