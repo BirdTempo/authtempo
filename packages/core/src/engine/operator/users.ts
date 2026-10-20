@@ -80,7 +80,7 @@ function pageLimit(value: number | undefined): number | null {
  * `not_found`), and the actor holds the scope `users` (else
  * `operator_required`). A user actor passed `requireOperatorUser`, which
  * counts on `operator:user:<userId>`; a route counts a secret before it
- * calls a read (spec 26 item 12).
+ * calls a read (spec 26 item 12). An app call in process counts on no limiter.
  */
 function readGuard(config: ResolvedConfig, actor: OperatorActor): Result<true> {
   if (!config.operator?.users) return fail("not_found");
@@ -212,8 +212,9 @@ export async function listUsers(
  * of 10 000 users a miss reads 10 000 rows. `limit` bounds the rows that
  * come back, not the rows read. The per-IP limit of the route
  * (`OPERATOR_USERS_PER_IP`) and the per-user limit of a platform operator
- * bound the scans per hour. A page costs at most 7 storage calls
- * (`operatorUsers`).
+ * bound the scans per hour. An app call in process counts on no limiter,
+ * so a loop of the app has no bound: the app already holds the storage and
+ * the config. A page costs at most 7 storage calls (`operatorUsers`).
  *
  * Needs `operator.users` (else `not_found`) and the scope `users`.
  */
