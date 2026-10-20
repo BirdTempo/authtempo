@@ -1,9 +1,19 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   type ChangedFile,
+  changesetStatus,
   checkChangesets,
   entry,
   parseChangeset,
@@ -408,6 +418,34 @@ describe("check-changesets", () => {
     expect(r.notes).toEqual([
       ".changeset/old.md is on main at the merge base, so it covers no change of this branch",
     ]);
+  });
+
+  it("runs changeset status from node_modules only, so it installs nothing", () => {
+    // pnpm changeset status installed node_modules in a clone with none
+    // (review of Task 6, n1). The check runs the binary itself, or skips the note.
+    const bare = mkdtempSync(join(tmpdir(), "authtempo-changeset-status-"));
+    try {
+      expect(changesetStatus(bare, "f44660d9")).toEqual([
+        "changeset status: skipped, node_modules/.bin/changeset is absent, and the check installs nothing",
+      ]);
+      expect(readdirSync(bare)).toEqual([]);
+
+      // A stand-in binary writes its arguments, so the test reads the call.
+      const bin = join(bare, "node_modules/.bin");
+      mkdirSync(bin, { recursive: true });
+      writeFileSync(
+        join(bin, "changeset"),
+        '#!/bin/sh\nprintf \'%s\\n\' "$@" > "$(dirname "$0")/args.txt"\necho "No changesets present"\nexit 0\n',
+      );
+      chmodSync(join(bin, "changeset"), 0o755);
+      expect(changesetStatus(bare, "f44660d9")).toEqual([
+        "changeset status exited 0",
+        "changeset status: No changesets present",
+      ]);
+      expect(readFileSync(join(bin, "args.txt"), "utf8")).toBe("status\n--since=f44660d9\n");
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
   });
 
   it("prints the output of changeset status beside its exit code", () => {

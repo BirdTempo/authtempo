@@ -281,6 +281,26 @@ export function statusNotes(run: {
   ];
 }
 
+/** The binary of Changesets that the root install links. */
+const CHANGESET_BIN = "node_modules/.bin/changeset";
+
+/**
+ * The notes of `changeset status --since=<since>` in the checkout at `root`.
+ * It runs the linked binary itself, not through pnpm. pnpm 12.8.1 installs
+ * node_modules first in a checkout with none (review of Task 6, n1), and a
+ * check never installs a package. With no binary, the note says so.
+ */
+export function changesetStatus(root: string, since: string): string[] {
+  const bin = join(root, CHANGESET_BIN);
+  if (!existsSync(bin))
+    return [
+      `changeset status: skipped, ${CHANGESET_BIN} is absent, and the check installs nothing`,
+    ];
+  return statusNotes(
+    spawnSync(bin, ["status", `--since=${since}`], { cwd: root, encoding: "utf8" }),
+  );
+}
+
 /** Runs the check on the checkout at `root`, and returns the lines to print and the exit code. */
 export function entry(root: string, ref: string): { lines: string[]; code: number } {
   let report: Report;
@@ -293,11 +313,7 @@ export function entry(root: string, ref: string): { lines: string[]; code: numbe
     return { lines: reportLines(unreadReport("check-changesets", keys, error.message)), code: 1 };
   }
   // Changesets runs beside the check as a note. Its exit code never decides.
-  const status = spawnSync("pnpm", ["changeset", "status", `--since=${mergeBase(root, ref)}`], {
-    cwd: root,
-    encoding: "utf8",
-  });
-  report.notes.push(...statusNotes(status));
+  report.notes.push(...changesetStatus(root, mergeBase(root, ref)));
   return { lines: reportLines(report), code: report.failures.length > 0 ? 1 : 0 };
 }
 
