@@ -6,10 +6,11 @@ import type { BetterAuthTable } from "./names.js";
  * `base64Std`: base64url in core, standard base64 with padding in the table (Better Auth's passkey key).
  * `emptyAsNull`: "" in the table reads as null (Better Auth writes "" for no transports).
  * `permission`: a statement set in core, JSON text with Better Auth's names in
- * the table (`organizationRole.permission`, plan 12k). The read parses it and
- * maps `apiKey` onto `apiToken`; a text that does not parse reads as the text,
- * so core's shape rule refuses the row (spec 29 item 6, rule 7). The write
- * maps `apiToken` back onto `apiKey`.
+ * the table (`organizationRole.permission`, plan 12k). The read parses it,
+ * maps `apiKey` onto `apiToken`, and adds the list reads in memory. A text
+ * that does not parse reads as the text, so core's shape rule refuses the row
+ * (spec 29 item 6, rule 7). The write maps `apiToken` back onto `apiKey` and
+ * removes the list reads (`toStoredPermissions`).
  */
 export type Codec = "nullAsEmpty" | "base64Std" | "emptyAsNull" | "permission";
 

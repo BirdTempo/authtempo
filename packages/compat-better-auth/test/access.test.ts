@@ -186,8 +186,8 @@ describe("the access control shim (spec 29 item 18)", () => {
         rank: 4,
         permissions: {
           organization: ["update", "delete"],
-          member: ["create", "update", "delete", "read"],
-          invitation: ["create", "cancel", "read"],
+          member: ["read", "create", "update", "delete"],
+          invitation: ["read", "create", "cancel"],
           team: ["create", "update", "delete"],
           ac: ["create", "read", "update", "delete"],
           project: ["read", "write", "delete"],
@@ -198,8 +198,8 @@ describe("the access control shim (spec 29 item 18)", () => {
         rank: 3,
         permissions: {
           organization: ["update"],
-          invitation: ["create", "cancel", "read"],
-          member: ["create", "update", "delete", "read"],
+          invitation: ["read", "create", "cancel"],
+          member: ["read", "create", "update", "delete"],
           team: ["create", "update", "delete"],
           ac: ["create", "read", "update", "delete"],
           project: ["read", "write"],
@@ -209,7 +209,7 @@ describe("the access control shim (spec 29 item 18)", () => {
       member: { rank: 1, permissions: { ac: ["read"], project: ["read"], member: ["read"] } },
       lead: {
         rank: 2,
-        permissions: { invitation: ["create", "read"], project: ["read"], member: ["read"] },
+        permissions: { invitation: ["read", "create"], project: ["read"], member: ["read"] },
       },
     });
     expect(mapped?.dynamicRoles).toEqual({});
@@ -222,8 +222,8 @@ describe("the access control shim (spec 29 item 18)", () => {
         rank: 2,
         permissions: {
           organization: ["update"],
-          invitation: ["create", "cancel", "read"],
-          member: ["create", "update", "delete", "read"],
+          invitation: ["read", "create", "cancel"],
+          member: ["read", "create", "update", "delete"],
           team: ["create", "update", "delete"],
           ac: ["create", "read", "update", "delete"],
         },
@@ -232,8 +232,8 @@ describe("the access control shim (spec 29 item 18)", () => {
         rank: 3,
         permissions: {
           organization: ["update", "delete"],
-          member: ["create", "update", "delete", "read"],
-          invitation: ["create", "cancel", "read"],
+          member: ["read", "create", "update", "delete"],
+          invitation: ["read", "create", "cancel"],
           team: ["create", "update", "delete"],
           ac: ["create", "read", "update", "delete"],
         },
@@ -372,6 +372,105 @@ describe("the access control shim (spec 29 item 18)", () => {
     }
   });
 
+  describe("reads a Better Auth era role row with the list reads (ruling 29 Q5)", () => {
+    /** A Postgres shim app with one organization of an owner, and a client of each person. */
+    async function era() {
+      const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+      const database = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      await database.migrate();
+      const { auth, person } = app(database, {
+        ac,
+        roles,
+        dynamicAccessControl: { enabled: true },
+      });
+      const clientOf = (token: string) =>
+        createAuthClient({
+          baseURL: BASE,
+          basePath: "/api/auth",
+          plugins: [organizationClient({ ac, roles })],
+          fetchOptions: {
+            customFetchImpl: async (input, init) => auth.handler(new Request(input, init)),
+            headers: { authorization: `Bearer ${token}` },
+          },
+        });
+      const owner = await person("owner@example.com");
+      const created = await auth.tempo.api.createOrganization({
+        user: (owner.caller as SessionCaller).user,
+        slug: "acme",
+        name: "Acme",
+      });
+      if (!created.ok) throw new Error(created.code);
+      return { pg, auth, person, clientOf, owner, organizationId: created.value.organization.id };
+    }
+
+    /** The row as Better Auth's create-role writes it: JSON.stringify of the permission, no updatedAt. */
+    const insertRow = (
+      pg: Awaited<ReturnType<typeof freshBetterAuthSchema>>,
+      organizationId: string,
+      role: string,
+      permission: string,
+    ) =>
+      pg.sql.unsafe(
+        `INSERT INTO "organizationRole" ("id", "organizationId", "role", "permission", "createdAt") VALUES ($1, $2, $3, $4, $5)`,
+        [`r-${role}`, organizationId, role, permission, at.toISOString()],
+      );
+    const textOf = async (pg: Awaited<ReturnType<typeof freshBetterAuthSchema>>, role: string) =>
+      (
+        await pg.sql.unsafe<{ permission: string }[]>(
+          `SELECT "permission" FROM "organizationRole" WHERE "role" = $1`,
+          [role],
+        )
+      )[0]?.permission;
+
+    it("lets the holder of a Better Auth era row list the members", async () => {
+      const { pg, auth, person, clientOf, owner, organizationId } = await era();
+      try {
+        // Better Auth lets every member list the members, so its row holds no member:read.
+        await insertRow(pg, organizationId, "closer", '{"project":["delete"]}');
+        const pat = await person("pat@example.com");
+        const added = await auth.tempo.api.addMember({
+          user: (owner.caller as SessionCaller).user,
+          organizationId,
+          userId: (pat.caller as SessionCaller).user.id,
+          role: "closer",
+        });
+        expect(added.ok).toBe(true);
+        const full = await clientOf(pat.token).organization.getFullOrganization({ organizationId });
+        expect(full.error).toBeNull();
+        expect(full.data?.members.map((m) => m.role).sort()).toEqual(["closer", "owner"]);
+        // The read added member:read in memory only: the text stays Better Auth's.
+        expect(await textOf(pg, "closer")).toBe('{"project":["delete"]}');
+      } finally {
+        await pg.close();
+      }
+    });
+
+    it("writes the stored text back byte-equal after an unchanged update, and adds the edit only", async () => {
+      const { pg, clientOf, owner, organizationId } = await era();
+      try {
+        const text = '{"project":["read","delete"],"apiKey":["read"],"invitation":["create"]}';
+        await insertRow(pg, organizationId, "closer", text);
+        const client = clientOf(owner.token);
+        const same = await client.organization.updateRole({
+          roleName: "closer",
+          organizationId,
+          data: {},
+        });
+        expect(same.error).toBeNull();
+        expect(await textOf(pg, "closer")).toBe(text);
+        const edited = await client.organization.updateRole({
+          roleName: "closer",
+          organizationId,
+          data: { permission: { project: ["read"], invitation: ["create"] } },
+        });
+        expect(edited.error).toBeNull();
+        expect(await textOf(pg, "closer")).toBe('{"project":["read"],"invitation":["create"]}');
+      } finally {
+        await pg.close();
+      }
+    });
+  });
+
   it("maps apiKey in a stored permission onto apiToken and back", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG + BETTER_AUTH_ROLE_PG);
     try {
@@ -394,7 +493,8 @@ describe("the access control shim (spec 29 item 18)", () => {
         organizationId: "o1",
         name: "keys",
         rank: 1,
-        permissions: { apiToken: ["read"], project: ["read"] },
+        // The read adds member:read in memory (ruling 29 Q5); the text holds none.
+        permissions: { apiToken: ["read"], project: ["read"], member: ["read"] },
         createdAt: at,
         updatedAt: at,
       });
@@ -424,6 +524,7 @@ describe("the access control shim (spec 29 item 18)", () => {
       expect((await storage.findOne("organizationRole", byId("r1")))?.permissions).toEqual({
         apiToken: ["read", "create"],
         project: ["read"],
+        member: ["read"],
       });
     } finally {
       await pg.close();
@@ -481,7 +582,7 @@ describe("the access control shim (spec 29 item 18)", () => {
             organizationId: "o1",
             name: "auditor",
             rank: 1,
-            permissions: { project: ["read"] },
+            permissions: { project: ["read"], member: ["read"] },
             createdAt: at,
             updatedAt: at,
           });

@@ -787,8 +787,11 @@ The roles of an organization stay in place in Better Auth's `organizationRole`
 table. Migration 0010 creates the table with Better Auth's own SQL when it is
 absent, adds `taRank` (integer, NOT NULL, default 1), and adds the unique key
 on (`organizationId`, `role`). `permission` stays Better Auth's JSON text:
-the storage parses it, maps `apiKey` onto `apiToken`, and writes Better Auth's
-names back. A row whose text does not parse, or whose permissions name an
+the storage parses it and maps `apiKey` onto `apiToken`. It adds the list
+reads of a static role in memory: `member: ["read"]`, and `invitation: ["read"]`
+when the row holds `invitation: ["create"]`. A write removes these reads and
+writes Better Auth's names back. So the text keeps Better Auth's form, and an
+update that changes nothing writes the same text, byte for byte. A row whose text does not parse, or whose permissions name an
 unknown resource or action, grants nothing, and core logs `authtempo: role
 row invalid <id>`. A row of Better Auth reads with rank 1 until an owner
 changes it, and its null `updatedAt` reads as its `createdAt`.
@@ -802,9 +805,8 @@ SELECT id, "organizationId", role FROM "organizationRole" WHERE role IN ('owner'
 ```
 
 Put the names of `roles` in the list in place of Better Auth's three. A row
-that Better Auth wrote holds no `member: ["read"]`, so a person whose only
-role is such a row cannot list the members until an owner updates the role
-through `updateRole`, which adds the read.
+that Better Auth wrote holds no `member: ["read"]`. The read adds it, so a
+person whose only role is such a row lists the members, as in Better Auth.
 
 The client has Better Auth's role calls, on core's routes under
 `/organizations/roles`: `organization.createRole`, `deleteRole`, `listRoles`,

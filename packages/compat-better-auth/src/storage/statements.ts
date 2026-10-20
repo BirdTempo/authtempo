@@ -22,7 +22,7 @@ import {
   undoCreateWhere,
   whileNoChildRow,
 } from "@authtempo/core/sql";
-import { toBetterAuthNames, toCoreNames } from "../role-map.js";
+import { fromStoredPermissions, toStoredPermissions } from "../role-map.js";
 import { type AnyModelMap, MAPPING } from "./mapping.js";
 import { FILLED_DATES, sqliteIsoText } from "./migration.js";
 import { type BetterAuthTable, type Names, TABLE_FIELDS } from "./names.js";
@@ -281,7 +281,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       codec === "nullAsEmpty" && (value === null || value === undefined)
         ? ""
         : codec === "permission"
-          ? toBetterAuthNames(value)
+          ? toStoredPermissions(value)
           : value;
     // core's encodeValue checks the type and refuses NUL; it answers JSON text and SQLite 0 or 1.
     const v = encodeValue(d, type, given, model, field);
@@ -320,7 +320,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
           } catch {
             parsed = v;
           }
-        v = toCoreNames(parsed);
+        v = fromStoredPermissions(parsed);
       } else if (type === "json") {
         // App SQL can write any text here. Name the model and the field, as
         // for any other value core cannot read (final review L-10).

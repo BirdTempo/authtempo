@@ -244,7 +244,7 @@ describe("the apps' access control (plan 12k Task 10)", () => {
     ]);
     expect(org?.roles?.guardian?.permissions).toEqual({
       ac: ["read"],
-      invitation: ["create", "cancel", "read"],
+      invitation: ["read", "create", "cancel"],
       learner: ["read", "create", "update", "delete"],
       consent: ["read", "create", "revoke"],
       transcript: ["read"],

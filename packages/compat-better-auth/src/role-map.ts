@@ -69,22 +69,59 @@ export function toBetterAuthNames(value: unknown): unknown {
 }
 
 /**
- * Better Auth's list rule on core's check: every member lists the members,
- * and a role that invites lists the invitations. So each mapped role holds
- * `member:read`, and `invitation:read` when it holds `invitation:create`.
+ * The list reads on core's check (spec 29 item 18). Better Auth 1.7.2 lets
+ * every member list the members and the invitations: both routes check only
+ * the member row (routes/crud-members.mjs:437, routes/crud-invites.mjs:525).
+ * So each mapped role holds `member:read`. A role holds `invitation:read`
+ * only when it holds `invitation:create`, so the shim is stricter there.
  */
 export function withListReads(set: Record<string, string[]>): Record<string, string[]> {
   const out = { ...set };
   // A value that is not a list stays as it is, so core's shape rule refuses it.
+  // The read goes first, as in core's statements. So a list that the write of
+  // toStoredPermissions stripped reads back in its first order.
   const member = Object.hasOwn(out, "member") ? out.member : [];
-  if (Array.isArray(member) && !member.includes("read")) out.member = [...member, "read"];
+  if (Array.isArray(member) && !member.includes("read")) out.member = ["read", ...member];
   const invitation = out.invitation;
   if (Array.isArray(invitation) && invitation.includes("create") && !invitation.includes("read"))
-    out.invitation = [...invitation, "read"];
+    out.invitation = ["read", ...invitation];
   return out;
 }
 
 /** A Better Auth role's statements as core's permissions: the names, then the list reads. */
 export function corePermissionsOf(statements: unknown): Record<string, string[]> {
   return withListReads(toCoreNames(statements) as Record<string, string[]>);
+}
+
+/** Removes `read` from one list, and the list when nothing stays. */
+function withoutRead(out: Map<string, unknown>, resource: string): void {
+  const list = out.get(resource);
+  if (!Array.isArray(list)) return;
+  const rest = list.filter((a) => a !== "read");
+  if (rest.length > 0) out.set(resource, rest);
+  else out.delete(resource);
+}
+
+/**
+ * A stored role's text, parsed, as core reads it (ruling 29 Q5). The names
+ * become core's, and the list reads of `withListReads` come in memory only.
+ * So a row that Better Auth wrote keeps its member list in core.
+ */
+export function fromStoredPermissions(value: unknown): unknown {
+  const named = toCoreNames(value);
+  return plain(named) ? withListReads(named as Record<string, string[]>) : named;
+}
+
+/**
+ * Core's permissions as the stored text holds them: the inverse of
+ * `fromStoredPermissions`. The write removes the list reads that the read
+ * adds, so an unchanged write keeps the stored text, byte for byte.
+ */
+export function toStoredPermissions(value: unknown): unknown {
+  if (!plain(value)) return value;
+  const out = new Map(Object.entries(value));
+  withoutRead(out, "member");
+  const invitation = out.get("invitation");
+  if (Array.isArray(invitation) && invitation.includes("create")) withoutRead(out, "invitation");
+  return toBetterAuthNames(Object.fromEntries(out));
 }
