@@ -38,6 +38,13 @@ export function checkPackages(input: PackagesInput): Report {
   const unreleased = new Set(Object.keys(input.unreleased));
   const names = new Set(input.packages.map((p) => p.name));
 
+  // A set of names hides a second folder with one name, so count the folders.
+  const dirs = new Map<string, string[]>();
+  for (const p of input.packages) dirs.set(p.name, [...(dirs.get(p.name) ?? []), p.dir]);
+  for (const [name, list] of [...dirs].sort(([a], [b]) => a.localeCompare(b)))
+    if (list.length > 1)
+      failures.push(`${name} is the name of ${list.length} folders: ${list.join(", ")}`);
+
   for (const name of [...names].sort()) {
     const inFixed = fixed.has(name);
     const inUnreleased = unreleased.has(name);

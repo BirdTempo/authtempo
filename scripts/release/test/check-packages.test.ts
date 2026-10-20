@@ -89,6 +89,12 @@ describe("check-packages", () => {
     ]);
   });
 
+  it("fails on two folders with one package name", () => {
+    expect(run("duplicate").failures).toEqual([
+      "@authtempo/client is the name of 2 folders: packages/client, packages/zz-dup",
+    ]);
+  });
+
   it("fails on a listed name that is not a workspace package", () => {
     expect(run("stale").failures).toContain(
       "@authtempo/gone is in the fixed group and is not a workspace package",
