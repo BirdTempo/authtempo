@@ -49,9 +49,11 @@ export interface OperatorCall {
 export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit";
 
 /**
- * The text of each refusal code that a write of plan 12f can answer, by its
- * cause. `operator_required` and `invalid_body` have their own texts in
- * `operatorCall`; 401, 404, and 429 have theirs by status.
+ * The text of each refusal code that a write of plan 12f can answer to a
+ * secret caller, by its cause. `operator_required` and `invalid_body` have
+ * their own texts in `operatorCall`; 401, 404, and 429 have theirs by
+ * status. `operator_self` is not here: core answers it to a user actor
+ * only, and the CLI always calls with a secret.
  */
 const REFUSALS: Readonly<Record<string, string>> = {
   account_banned: "the user is banned; unban the user first",
@@ -60,7 +62,6 @@ const REFUSALS: Readonly<Record<string, string>> = {
   member_limit: "the platform organization has its largest count of members",
   last_owner: "the user is the last owner of the platform organization; add another owner first",
   conflict: "another change of this user ran at the same time; read the user, then run it again",
-  operator_self: "an operator cannot act on their own user",
   totp_not_enabled: "the user has no second factor on",
   hook_refused: "a hook of the deployment refused the act (hooks.operator.beforeAction)",
   hook_failed: "a hook of the deployment failed; read the log of the deployment",

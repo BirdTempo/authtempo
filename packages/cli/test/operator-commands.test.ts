@@ -9,6 +9,7 @@ import {
   createMemoryAdapter,
   createMemoryLimiter,
   createPbkdf2PasswordHash,
+  hookRefusal,
   type MailMessage,
 } from "@authtempo/core";
 import { ROUTE_CONTRACT } from "@authtempo/core/openapi";
@@ -33,7 +34,8 @@ const hash = (s: string) => createHash("sha256").update(s, "utf8").digest("hex")
  * One core handle with the user tools on: a platform organization, a
  * platform role, and two named secrets. `operator` replaces the operator
  * block, so a test can turn the tools off. `fetch` sends each request to the
- * handle from one IP and counts the requests of each path.
+ * handle from one IP and counts the requests of each path. `storage` is
+ * for a read, or for a test that runs a parallel request inside a transaction.
  */
 function fixture(operator?: AuthConfig["operator"], extra: Partial<AuthConfig> = {}) {
   let current = new Date("2026-03-01T00:00:00.000Z");
@@ -42,10 +44,11 @@ function fixture(operator?: AuthConfig["operator"], extra: Partial<AuthConfig> =
     current = new Date(current.getTime() + ms);
   };
   const mails: MailMessage[] = [];
+  const storage = createMemoryAdapter();
   const auth: Auth = createAuth({
     baseURL: BASE,
     trustedOrigins: ["https://app.example.com"],
-    storage: createMemoryAdapter(),
+    storage,
     limiter: createMemoryLimiter(clock),
     clock,
     mail: {
@@ -76,7 +79,7 @@ function fixture(operator?: AuthConfig["operator"], extra: Partial<AuthConfig> =
     paths.push(`${init.method ?? "GET"} ${new URL(url).pathname}`);
     return auth.handle(new Request(url, { ...init, headers }));
   };
-  return { auth, fetch, paths, mails, advance };
+  return { auth, fetch, paths, mails, advance, storage };
 }
 type Fixture = ReturnType<typeof fixture>;
 
@@ -571,6 +574,134 @@ describe("the operator commands (plan 12f Task 12)", () => {
     );
     expect(past.io.stderr.at(-1)).toBe(
       "stopped: the deployment refused a value (invalid_body): --until must be a date and time with a zone, from 1 minute to 3650 days after now",
+    );
+  });
+
+  it("tells the tools off from a missing user on a 404 of a command with a user id", async () => {
+    const off = fixture({ secretHash: hash(SUPPORT) });
+    for (const [args, scope] of [
+      [["users", "ban", BASE, "01NOSUCHUSER", "--reason", "spam", "--yes"], "users"],
+      [["sessions", "end", BASE, "01NOSUCHUSER", "--reason", "reset", "--yes"], "sessions"],
+    ] as const) {
+      off.paths.length = 0;
+      const r = await run([...args], off);
+      expect(r.code, args[1]).toBe(2);
+      expect(r.io.stderr.at(-1), args[1]).toBe(
+        `stopped: the operator user tools are off: set operator.users and a secret with the ${scope} scope in the config of the deployment`,
+      );
+      // The act, then one read of the user list that tells the two causes apart.
+      expect(off.paths, args[1]).toHaveLength(2);
+      expect(off.paths[1], args[1]).toBe("GET /auth/operator/users");
+    }
+  });
+
+  it("names the cause of each refusal code that a secret caller can get", async () => {
+    const APP = { kind: "app", name: "test" } as const;
+    const stopped = (r: { io: { stderr: string[] } }) => r.io.stderr.at(-1);
+    const admin = (email: string) => [
+      ...["create-admin", BASE, "--email", email, "--reason", "first operator", "--yes"],
+    ];
+
+    // account_banned: the address of a banned user.
+    const f = fixture();
+    const ada = await signUp(f, "ada@example.com");
+    expect((await run(["users", "ban", BASE, ada, "--reason", "spam", "--yes"], f)).code).toBe(0);
+    expect(stopped(await run(admin("ada@example.com"), f))).toBe(
+      "stopped: the user is banned; unban the user first",
+    );
+
+    // totp_not_enabled: a user with no second factor.
+    const bea = await signUp(f, "bea@example.com");
+    const off = await run(
+      [
+        ...["users", "second-factor-off", BASE, bea, "--reason", "lost phone"],
+        ...["--proof-method", "document", "--proof-reference", "case-1"],
+        ...["--proof-checked-at", CHECKED, "--yes"],
+      ],
+      f,
+    );
+    expect(stopped(off)).toBe("stopped: the user has no second factor on");
+
+    // last_owner: the one owner holds the platform role alone, and a revoke takes the owner rank.
+    expect((await run(admin("bea@example.com"), f)).code).toBe(0);
+    const org = await f.storage.findOne("organization", [
+      { field: "slug", op: "eq", value: "platform" },
+    ]);
+    // A change of a member role needs a verified address: the link of the sign-up mail proves it.
+    const mail = f.mails.find((m) => m.to === "bea@example.com")?.text ?? "";
+    const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(mail)?.[1] ?? "");
+    const verified = await f.auth.api.password?.verifyEmail({ token, ip: null, userAgent: null });
+    if (!org || !verified?.ok) throw new Error("no platform organization or no verified address");
+    const moved = await f.auth.api.updateMemberRole({
+      user: verified.value.user,
+      organizationId: org.id,
+      userId: bea,
+      role: "operator",
+    });
+    if (!moved.ok) throw new Error(moved.code);
+    const revoke = await run(
+      ["users", "platform-role", BASE, bea, "--revoke", "--reason", "left", "--yes"],
+      f,
+    );
+    expect(stopped(revoke)).toBe(
+      "stopped: the user is the last owner of the platform organization; add another owner first",
+    );
+
+    // member_limit: a platform organization with room for one member.
+    const full = fixture(undefined, {
+      organizations: {
+        platformOrganization: "platform",
+        platformRole: "operator",
+        ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+        limits: { membersPerOrganization: 1 },
+      },
+    });
+    expect((await run(admin("root@example.com"), full)).code).toBe(0);
+    expect(stopped(await run(admin("cy@example.com"), full))).toBe(
+      "stopped: the platform organization has its largest count of members",
+    );
+
+    // conflict: a parallel create-admin makes the platform organization between the read and the act.
+    const race = fixture();
+    const transaction = race.storage.transaction.bind(race.storage);
+    let between: (() => Promise<unknown>) | null = () =>
+      race.auth.api.operator.createAdmin({
+        actor: APP,
+        email: "root@example.com",
+        reason: "parallel",
+        ip: null,
+        userAgent: null,
+      });
+    race.storage.transaction = async (fn) => {
+      const step = between;
+      between = null;
+      if (step) await step();
+      return transaction(fn);
+    };
+    expect(stopped(await run(admin("dee@example.com"), race))).toBe(
+      "stopped: another change of this user ran at the same time; read the user, then run it again",
+    );
+
+    // hook_refused and hook_failed: hooks.operator.beforeAction refuses, or throws.
+    let mode: "refuse" | "fail" = "refuse";
+    const hooked = fixture(undefined, {
+      hooks: {
+        operator: {
+          beforeAction: () => {
+            if (mode === "refuse") throw hookRefusal("not now");
+            throw new Error("the hook broke");
+          },
+        },
+      },
+    });
+    const eve = await signUp(hooked, "eve@example.com");
+    const ban = ["users", "ban", BASE, eve, "--reason", "spam", "--yes"];
+    expect(stopped(await run(ban, hooked))).toBe(
+      "stopped: a hook of the deployment refused the act (hooks.operator.beforeAction)",
+    );
+    mode = "fail";
+    expect(stopped(await run(ban, hooked))).toBe(
+      "stopped: a hook of the deployment failed; read the log of the deployment",
     );
   });
 
