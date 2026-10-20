@@ -41,8 +41,8 @@ export interface PackInput {
 /** The version of every package on main. No release carries it (spec 33 item 11). */
 const UNPUBLISHED_VERSION = "0.0.0";
 
-/** The package whose manifest carries the upgrade facts (spec 33 item 10.5). */
-const CORE = "@authtempo/core";
+/** The package whose manifest carries the upgrade facts (spec 33 item 10.5). prepare writes them. */
+export const CORE = "@authtempo/core";
 
 const DEPENDENCY_KEYS = [
   "dependencies",
@@ -238,6 +238,16 @@ export function readTarball(path: string): Tarball {
 }
 
 /**
+ * release/deprecations.json of the tree at `root`. prepare writes it into core,
+ * and check-pack holds core to it. Task 9 of plan 12j writes the register.
+ * Until then no item is deprecated.
+ */
+export function readDeprecations(root: string): unknown[] {
+  const register = join(root, "release/deprecations.json");
+  return existsSync(register) ? (JSON.parse(readFileSync(register, "utf8")) as unknown[]) : [];
+}
+
+/**
  * Checks each tarball against the tree at `root`: the released list, the
  * package folder, release/pack-needs.json, release/repository.json, the root
  * LICENSE, and release/deprecations.json.
@@ -255,11 +265,7 @@ export function checkTarballs(root: string, paths: string[]): Report {
     url: string;
   };
   const rootLicense = readFileSync(join(root, "LICENSE"), "utf8");
-  // Task 9 of plan 12j writes the register. Until then no item is deprecated.
-  const register = join(root, "release/deprecations.json");
-  const deprecations = existsSync(register)
-    ? (JSON.parse(readFileSync(register, "utf8")) as unknown[])
-    : [];
+  const deprecations = readDeprecations(root);
 
   const failures: string[] = [];
   if (versions.length !== 1)

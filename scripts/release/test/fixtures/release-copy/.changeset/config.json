@@ -1,0 +1,5 @@
+{
+  "fixed": [["@authtempo/client", "@authtempo/core"]],
+  "linked": [],
+  "ignore": ["@authtempo/sdk-conformance"]
+}

@@ -1,0 +1,4 @@
+{
+  "@authtempo/client": ["package.json", "README.md", "LICENSE", "CHANGELOG.md", "dist/index.js"],
+  "@authtempo/core": ["package.json", "README.md", "LICENSE", "CHANGELOG.md", "dist/index.js"]
+}

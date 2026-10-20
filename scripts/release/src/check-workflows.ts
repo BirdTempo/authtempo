@@ -329,7 +329,6 @@ export interface Tree {
  * the task that adds the file removes its entry.
  */
 const LATER: { path: string; task: string }[] = [
-  { path: "scripts/release/src/prepare.ts", task: "Task 6 (plan line 464)" },
   { path: "scripts/release/src/release-check.ts", task: "Task 14 (plan line 941)" },
 ];
 

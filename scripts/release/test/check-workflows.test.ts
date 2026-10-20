@@ -636,17 +636,15 @@ describe("check-workflows", () => {
   });
 
   it("skips each file that a later task adds, and fails an entry whose file exists", () => {
-    // prepare.ts (Task 6) and release-check.ts (Task 14) are not in the tree yet.
-    expect(TREE.exists("scripts/release/src/prepare.ts")).toBe(false);
+    // release-check.ts (Task 14) is not in the tree yet. Task 6 added prepare.ts
+    // and removed its entry, so the exists rule holds it now.
+    expect(TREE.exists("scripts/release/src/prepare.ts")).toBe(true);
     expect(TREE.exists("scripts/release/src/release-check.ts")).toBe(false);
     expect(check(CI, RELEASE).failures).toEqual([]);
     const plus = (made: string) => ({
       ...TREE,
       exists: (p: string) => p === made || TREE.exists(p),
     });
-    expect(check(CI, RELEASE, plus("scripts/release/src/prepare.ts")).failures).toEqual([
-      "the file scripts/release/src/prepare.ts exists; Task 6 (plan line 464) removes its entry from LATER",
-    ]);
     expect(check(CI, RELEASE, plus("scripts/release/src/release-check.ts")).failures).toEqual([
       "the file scripts/release/src/release-check.ts exists; Task 14 (plan line 941) removes its entry from LATER",
     ]);
