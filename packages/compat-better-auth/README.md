@@ -789,9 +789,11 @@ absent. It adds `taRank` (integer, NOT NULL, default 1) and the unique key on
 (`organizationId`, `role`). `permission` stays Better Auth's JSON text: the
 storage parses it and maps `apiKey` onto `apiToken`. It adds the list reads of
 a static role in memory: `member: ["read"]`, and `invitation: ["read"]` when
-the row holds `invitation: ["create"]`. A write removes these reads and writes
-Better Auth's names back. So the text keeps Better Auth's form, and an update
-that changes nothing writes the same text, byte for byte. A row whose text
+the row holds `invitation: ["create"]`. A write writes Better Auth's names back
+and removes no action, so a write never takes away a stored right. The text
+can gain the two reads at its next write. Better Auth 1.7.2 lists the members
+and the invitations with no permission check, so they change no answer of
+Better Auth. A row whose text
 does not parse grants nothing, and so does a row whose permissions name an
 unknown resource or action. Core logs `authtempo: role row invalid <id>` for
 each. A row of Better Auth reads with rank 1 until an owner

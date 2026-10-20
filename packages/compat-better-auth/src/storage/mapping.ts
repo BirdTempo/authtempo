@@ -10,7 +10,7 @@ import type { BetterAuthTable } from "./names.js";
  * maps `apiKey` onto `apiToken`, and adds the list reads in memory. A text
  * that does not parse reads as the text, so core's shape rule refuses the row
  * (spec 29 item 6, rule 7). The write maps `apiToken` back onto `apiKey` and
- * removes the list reads (`toStoredPermissions`).
+ * removes no action (`toStoredPermissions`, ruling 37).
  */
 export type Codec = "nullAsEmpty" | "base64Std" | "emptyAsNull" | "permission";
 

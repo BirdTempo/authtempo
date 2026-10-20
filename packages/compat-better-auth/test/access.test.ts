@@ -6,6 +6,7 @@ import {
   createPbkdf2PasswordHash,
   systemClock,
 } from "@authtempo/core";
+import type { Statements } from "@authtempo/core/access";
 import { describe, expect, it } from "vitest";
 import {
   adminAc,
@@ -554,11 +555,16 @@ describe("the access control shim (spec 29 item 18)", () => {
       }
     });
 
-    it("writes the stored text back byte-equal after an unchanged update, and adds the edit only", async () => {
+    it("keeps a stored member read after an update (ruling 37)", async () => {
       const { pg, clientOf, owner, organizationId } = await era();
       try {
-        const text = '{"project":["read","delete"],"apiKey":["read"],"invitation":["create"]}';
-        await insertRow(pg, organizationId, "closer", text);
+        // A Better Auth app may name member:read in its own statements.
+        await insertRow(
+          pg,
+          organizationId,
+          "closer",
+          '{"member":["read","update"],"project":["read"]}',
+        );
         const client = clientOf(owner.token);
         const same = await client.organization.updateRole({
           roleName: "closer",
@@ -566,14 +572,56 @@ describe("the access control shim (spec 29 item 18)", () => {
           data: {},
         });
         expect(same.error).toBeNull();
-        expect(await textOf(pg, "closer")).toBe(text);
+        expect(await textOf(pg, "closer")).toBe('{"member":["read","update"],"project":["read"]}');
         const edited = await client.organization.updateRole({
           roleName: "closer",
           organizationId,
-          data: { permission: { project: ["read"], invitation: ["create"] } },
+          data: { permission: { member: ["read", "update"], project: ["read", "write"] } },
         });
         expect(edited.error).toBeNull();
-        expect(await textOf(pg, "closer")).toBe('{"project":["read"],"invitation":["create"]}');
+        expect(await textOf(pg, "closer")).toBe(
+          '{"member":["read","update"],"project":["read","write"]}',
+        );
+      } finally {
+        await pg.close();
+      }
+    });
+
+    it("gives Better Auth's role check the same answers on the row after a write", async () => {
+      const { pg, clientOf, owner, organizationId } = await era();
+      try {
+        const texts = [
+          '{"member":["read","update"],"project":["read"]}',
+          '{"project":["delete"],"apiKey":["read"],"invitation":["create"]}',
+        ];
+        for (const [i, text] of texts.entries())
+          await insertRow(pg, organizationId, `role${i}`, text);
+        const client = clientOf(owner.token);
+        for (const i of texts.keys()) {
+          const done = await client.organization.updateRole({
+            roleName: `role${i}`,
+            organizationId,
+            data: {},
+          });
+          expect(done.error).toBeNull();
+        }
+        // Each request that Better Auth checks, one action at a time: every action of
+        // ac.statements (with Better Auth's defaults) and of the stored text itself.
+        const requestsOf = (text: string) =>
+          [
+            ...Object.entries(ac.statements),
+            ...Object.entries(JSON.parse(text) as Statements),
+          ].flatMap(([resource, actions]) => actions.map((action) => ({ [resource]: [action] })));
+        for (const [i, text] of texts.entries()) {
+          const after = (await textOf(pg, `role${i}`)) ?? "";
+          const before = role(JSON.parse(text));
+          const written = role(JSON.parse(after));
+          for (const request of requestsOf(text))
+            expect({ request, success: written.authorize(request).success }).toEqual({
+              request,
+              success: before.authorize(request).success,
+            });
+        }
       } finally {
         await pg.close();
       }

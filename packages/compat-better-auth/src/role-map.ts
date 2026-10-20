@@ -78,8 +78,7 @@ export function toBetterAuthNames(value: unknown): unknown {
 export function withListReads(set: Record<string, string[]>): Record<string, string[]> {
   const out = { ...set };
   // A value that is not a list stays as it is, so core's shape rule refuses it.
-  // The read goes first, as in core's statements. So a list that the write of
-  // toStoredPermissions stripped reads back in its first order.
+  // The read goes first, as in core's statements.
   const member = Object.hasOwn(out, "member") ? out.member : [];
   if (Array.isArray(member) && !member.includes("read")) out.member = ["read", ...member];
   const invitation = out.invitation;
@@ -93,19 +92,10 @@ export function corePermissionsOf(statements: unknown): Record<string, string[]>
   return withListReads(toCoreNames(statements) as Record<string, string[]>);
 }
 
-/** Removes `read` from one list, and the list when nothing stays. */
-function withoutRead(out: Map<string, unknown>, resource: string): void {
-  const list = out.get(resource);
-  if (!Array.isArray(list)) return;
-  const rest = list.filter((a) => a !== "read");
-  if (rest.length > 0) out.set(resource, rest);
-  else out.delete(resource);
-}
-
 /**
  * A stored role's text, parsed, as core reads it (ruling 29 Q5). The names
- * become core's, and the list reads of `withListReads` come in memory only.
- * So a row that Better Auth wrote keeps its member list in core.
+ * become core's, and the read adds the list reads of `withListReads`. So a
+ * row that Better Auth wrote keeps its member list in core.
  */
 export function fromStoredPermissions(value: unknown): unknown {
   const named = toCoreNames(value);
@@ -113,15 +103,12 @@ export function fromStoredPermissions(value: unknown): unknown {
 }
 
 /**
- * Core's permissions as the stored text holds them: the inverse of
- * `fromStoredPermissions`. The write removes the list reads that the read
- * adds, so an unchanged write keeps the stored text, byte for byte.
+ * Core's permissions as the stored text holds them: Better Auth's names, and
+ * no action removed (ruling 37). A write never removes a stored right, so the
+ * text may gain the list reads that the read added. Better Auth 1.7.2 lists
+ * the members and the invitations with no permission check, so these reads
+ * change no answer of Better Auth.
  */
 export function toStoredPermissions(value: unknown): unknown {
-  if (!plain(value)) return value;
-  const out = new Map(Object.entries(value));
-  withoutRead(out, "member");
-  const invitation = out.get("invitation");
-  if (Array.isArray(invitation) && invitation.includes("create")) withoutRead(out, "invitation");
-  return toBetterAuthNames(Object.fromEntries(out));
+  return toBetterAuthNames(value);
 }
