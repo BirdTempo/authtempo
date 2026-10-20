@@ -205,19 +205,22 @@ describe("verifyEnveloped", () => {
     expect(await verifyEnveloped(assertionOf(xml), [rsaKey])).toEqual({ ok: false, step });
   });
 
-  it("refuses a target ID that a second element also holds", async () => {
-    const id = /<saml:Assertion ID="([^"]+)"/.exec(signed)?.[1];
-    if (id === undefined) throw new Error("no Assertion ID");
-    const xml = edit(
-      signed,
-      "<samlp:Status>",
-      `<samlp:Extensions><x ID="${id}"/></samlp:Extensions><samlp:Status>`,
-    );
-    expect(await verifyEnveloped(assertionOf(xml), [rsaKey])).toEqual({
-      ok: false,
-      step: "reference",
-    });
-  });
+  it.each(["ID", "Id", "id"])(
+    "refuses a target ID that a second element also holds, in the attribute %s",
+    async (name) => {
+      const id = /<saml:Assertion ID="([^"]+)"/.exec(signed)?.[1];
+      if (id === undefined) throw new Error("no Assertion ID");
+      const xml = edit(
+        signed,
+        "<samlp:Status>",
+        `<samlp:Extensions><x ${name}="${id}"/></samlp:Extensions><samlp:Status>`,
+      );
+      expect(await verifyEnveloped(assertionOf(xml), [rsaKey])).toEqual({
+        ok: false,
+        step: "reference",
+      });
+    },
+  );
 
   it.each<[string, (xml: string) => string, string]>([
     [
@@ -299,6 +302,10 @@ describe("verifyEnveloped", () => {
     [
       "an empty URI",
       async (xml) => xml.replace(/<ds:Reference URI="#[^"]+"/, '<ds:Reference URI=""'),
+    ],
+    [
+      "an attribute on DigestValue",
+      async (xml) => edit(xml, "<ds:DigestValue>", '<ds:DigestValue Id="d">'),
     ],
   ])("refuses each algorithm outside the list: %s", async (_name, change) => {
     const xml = await change(signed);
