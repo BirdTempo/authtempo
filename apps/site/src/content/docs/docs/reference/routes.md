@@ -835,8 +835,8 @@ These routes exist when the config sets `organizations.dynamicRoles`. An organiz
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh. An API token answers 401. The user holds `ac:create` in the organization |
 | Input | JSON `{ organizationId, name, rank?, permissions }`. `name` is one role name that the config does not hold. `rank` is from 1 to the user's rank and below the owner rank, default 1. `permissions` are known actions that the user holds. Another key answers `invalid_body` |
-| Answer | `{ role }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`role_taken`](/docs/reference/errors/#role_taken), [`role_limit`](/docs/reference/errors/#role_limit), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+| Answer | `{ role }`. A member or a pending invitation that holds the name as a role part answers `role_in_use` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`role_taken`](/docs/reference/errors/#role_taken), [`role_in_use`](/docs/reference/errors/#role_in_use), [`role_limit`](/docs/reference/errors/#role_limit), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 <h3 id="post-organizations-roles-update"><code>POST /organizations/roles/update</code></h3>
 

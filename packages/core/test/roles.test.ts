@@ -473,6 +473,67 @@ describe("dynamic roles (plan 12k Task 4)", () => {
     expect(await base.findMany("invitation", [])).toEqual([]);
   });
 
+  it("answers role_in_use at a create while a member or a pending invitation holds the name", async () => {
+    // Reachable: with dynamicRoles off, a grant may name any part. The app then turns dynamicRoles on.
+    const base = createMemoryAdapter();
+    const off = world({}, (s) => s, base);
+    const { ada, carol, organizationId } = await acme(off);
+    mustOk(
+      await off.auth.api.updateMemberRole({
+        user: ada,
+        organizationId,
+        userId: carol.id,
+        role: "member,closer",
+      }),
+    );
+    const invitation = mustOk(
+      await off.auth.api.inviteMember({
+        user: ada,
+        organizationId,
+        email: "dave@example.com",
+        role: "viewer,auditor",
+      }),
+    );
+    const on = world({ dynamicRoles: {} }, (s) => s, base);
+    const create = (name: string) =>
+      on.auth.api.createRole({
+        user: ada,
+        organizationId,
+        name,
+        rank: 3,
+        permissions: { organization: ["delete"] },
+      });
+    const inUse = { ok: false, code: "role_in_use" };
+    expect(await create("closer")).toMatchObject(inUse);
+    expect(await create("auditor")).toMatchObject(inUse);
+    expect(await base.findMany("organizationRole", [])).toEqual([]);
+    const carolCaller = await on.caller(await on.session("carol@example.com"));
+    expect(
+      await on.auth.hasPermission(carolCaller, {
+        organizationId,
+        permissions: { organization: ["delete"] },
+      }),
+    ).toBe(false);
+    // Once no one holds the name, the create answers ok.
+    mustOk(
+      await on.auth.api.updateMemberRole({
+        user: ada,
+        organizationId,
+        userId: carol.id,
+        role: "member",
+      }),
+    );
+    expect(await create("closer")).toMatchObject({ ok: true, value: { name: "closer" } });
+    mustOk(
+      await on.auth.api.revokeInvitation({
+        user: ada,
+        organizationId,
+        invitationId: invitation.id,
+      }),
+    );
+    expect(await create("auditor")).toMatchObject({ ok: true, value: { name: "auditor" } });
+  });
+
   it("answers role_limit at the cap", async () => {
     const w = world({ dynamicRoles: { maxPerOrganization: 2 } });
     const { organizationId } = await acme(w);

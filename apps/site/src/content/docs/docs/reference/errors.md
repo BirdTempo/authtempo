@@ -476,12 +476,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | The Errors cell of each route on the [routes page](/docs/reference/routes/) names it. It covers the sign-out, the re-authentication, and every operator route but the stop. It covers each change of a way in, the second-factor routes, and the handoff. It covers the organization writes that give or take a role, and the OAuth authorize, consent, and end-session routes. The in-process calls of the same acts answer it too. |
 <h3 id="role_in_use"><code>role_in_use</code> 409</h3>
 
-- **Meaning:** A member of the organization or a pending invitation holds the stored role, alone or as a part of its role string.
-- **Do:** Give each member another role with [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), revoke the invitations, then delete the role again.
+- **Meaning:** A member of the organization or a pending invitation holds the role name, alone or as a part of its role string. A delete of the role, or a create of a role with that name, answers this code.
+- **Do:** Give each member another role with [`POST /organizations/members/role`](/docs/reference/routes/#post-organizations-members-role), revoke the invitations, then send the request again.
 
 | Routes |
 | --- |
-| [`POST /organizations/roles/delete`](/docs/reference/routes/#post-organizations-roles-delete). |
+| [`POST /organizations/roles/create`](/docs/reference/routes/#post-organizations-roles-create), [`POST /organizations/roles/delete`](/docs/reference/routes/#post-organizations-roles-delete). |
 
 <h3 id="role_limit"><code>role_limit</code> 409</h3>
 

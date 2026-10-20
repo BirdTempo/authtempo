@@ -1191,6 +1191,7 @@ export const ROUTES = Object.freeze([
       "invalid_body",
       "forbidden_rank",
       "role_taken",
+      "role_in_use",
       "role_limit",
     ],
     oauthCodes: [],

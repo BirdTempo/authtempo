@@ -3,7 +3,7 @@ import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { OrganizationRoleRow, UserRow } from "../schema.js";
-import { StorageError } from "../storage/port.js";
+import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { standing } from "./organizations.js";
 import { grantCheck, roleRowDef, type Standing } from "./permissions.js";
 import { type ResolvedOrganizations, ROLE_RE } from "./ranks.js";
@@ -154,11 +154,48 @@ export async function getRole(
   return summary ? ok(summary) : fail("not_found");
 }
 
+/** True when a part of the comma-joined role string is the name. */
+function holds(role: string, name: string): boolean {
+  return role.split(",").includes(name);
+}
+
+/**
+ * True while a member row of the organization or a pending invitation holds
+ * the name as a part of its role string. `tx` is the open transaction.
+ *
+ * Cost: two storage calls. The port has no part match. So the check reads
+ * every member row and every pending invitation of the organization, and N
+ * members cost one read of N rows. The limits `membersPerOrganization` and
+ * `pendingInvitationsPerOrganization` bound them when they are set.
+ */
+async function heldInside(
+  tx: StorageAdapter,
+  organizationId: string,
+  name: string,
+  now: Date,
+): Promise<boolean> {
+  const members = await tx.findMany("member", [
+    { field: "organizationId", op: "eq", value: organizationId },
+  ]);
+  if (members.some((m) => holds(m.role, name))) return true;
+  const pending = await tx.findMany("invitation", [
+    { field: "organizationId", op: "eq", value: organizationId },
+    { field: "acceptedAt", op: "eq", value: null },
+    { field: "expiresAt", op: "gt", value: now },
+  ]);
+  return pending.some((i) => holds(i.role, name));
+}
+
 /**
  * Stores a role. Needs `ac:create`. Rules 1 to 3 check the name, the rank,
  * and the permissions. Rule 8: the cap counts the rows inside the
  * transaction, before the write. D1 transactions are not isolated (spec
  * 8.6), so two creates at one moment can both pass the count.
+ *
+ * A part that a member or a pending invitation holds answers `role_in_use`.
+ * Such a part comes from a grant made while dynamic roles were off, or from
+ * a role that the config no longer names. A create would else give its
+ * holder rights that no caller granted (ruling 24 M1).
  */
 export async function createRole(
   config: ResolvedConfig,
@@ -197,6 +234,7 @@ export async function createRole(
         ])
       )
         return fail("role_taken");
+      if (await heldInside(tx, input.organizationId, input.name, now)) return fail("role_in_use");
       const held = await tx.findMany(
         "organizationRole",
         [{ field: "organizationId", op: "eq", value: input.organizationId }],
@@ -274,22 +312,15 @@ export async function updateRole(
   });
 }
 
-/** True when a part of the comma-joined role string is the name. */
-function holds(role: string, name: string): boolean {
-  return role.split(",").includes(name);
-}
-
 /**
  * Deletes a stored role. Needs `ac:delete` and the grant check on the role.
  * Rule 5: `role_in_use` while a member row of the organization or a pending
  * invitation holds the name as a part of its role string.
  *
- * Cost: three storage calls in one transaction. The port has no part match.
- * So the check reads every member row and every pending invitation of the
- * organization, and N members cost one read of N rows. The limits
- * `membersPerOrganization` and `pendingInvitationsPerOrganization` bound them
- * when they are set. A role that a parallel request grants after the check
- * grants nothing, because an unknown part ranks 0 and holds no statement.
+ * Cost: three storage calls in one transaction (see `heldInside`). A grant
+ * of the name that a parallel request makes after the check holds a part
+ * that no table names. A later create of the name answers `role_in_use` for
+ * it, so the part never gets rights.
  */
 export async function deleteRole(
   config: ResolvedConfig,
@@ -305,16 +336,7 @@ export async function deleteRole(
   if (!grantCheck(s.value, rowStanding(sc.o, row))) return fail("forbidden_rank");
   const now = config.clock.now();
   return config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
-    const members = await tx.findMany("member", [
-      { field: "organizationId", op: "eq", value: input.organizationId },
-    ]);
-    if (members.some((m) => holds(m.role, input.name))) return fail("role_in_use");
-    const pending = await tx.findMany("invitation", [
-      { field: "organizationId", op: "eq", value: input.organizationId },
-      { field: "acceptedAt", op: "eq", value: null },
-      { field: "expiresAt", op: "gt", value: now },
-    ]);
-    if (pending.some((i) => holds(i.role, input.name))) return fail("role_in_use");
+    if (await heldInside(tx, input.organizationId, input.name, now)) return fail("role_in_use");
     const n = await tx.delete("organizationRole", [{ field: "id", op: "eq", value: row.id }]);
     return n === 0 ? fail("not_found") : ok({ ok: true as const });
   });
