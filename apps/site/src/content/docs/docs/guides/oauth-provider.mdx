@@ -65,7 +65,7 @@ import clientsTest from "../../../../../samples/guides/oauth-clients.test.ts?raw
 
 ## Confidential clients
 
-A confidential client holds a credential. The token, revoke, introspection, and device routes take four client auth methods:
+A confidential client holds a credential. The token, revoke, and device routes take four client auth methods. The introspection route takes each method but `none`.
 
 | Method | What the client sends |
 | --- | --- |
@@ -77,7 +77,7 @@ A confidential client holds a credential. The token, revoke, introspection, and 
 - A client with a secret may send it by either secret method, one method per request (RFC 6749 section 2.3.1). Two methods answer `invalid_request`.
 - A public client and a `private_key_jwt` client take their own method only. An empty `client_secret` counts as omitted.
 - After an `Authorization` header, a failed client auth answers 401 `invalid_client` with `WWW-Authenticate: Basic`. With no header it answers 400 with no challenge, so a browser shows no sign-in dialog.
-- A failed client auth spends nothing. It counts on `oauth-token:ip`, and no limit counts per client, so a stranger cannot lock a real client out.
+- A failed client auth spends nothing. It counts on the per-IP key of its route. The token and revoke routes count `oauth-token:ip`, introspection `oauth-introspect:ip`, and the device start `oauth-device:ip`. No limit counts per client, so a stranger cannot lock a real client out.
 - A public client sends PKCE S256 on every code. A confidential client may omit PKCE only when it asks `openid` with a `nonce` (RFC 9700 section 2.1.1).
 - The assertion of `private_key_jwt` has the client id as `iss` and `sub`, and the issuer alone as `aud`. The token endpoint URL as `aud` is refused (draft-ietf-oauth-rfc7523bis-11).
 - An assertion lives at most 300 seconds, with 30 seconds of skew. Its `jti` works once. The algs are EdDSA, Ed25519, ES256, RS256, and PS256.
@@ -107,16 +107,18 @@ A service that acts for no person uses the `client_credentials` grant:
 
 ## Client metadata documents
 
-With `registration.cimd` on, a client id may be the https URL of its metadata document. Core implements draft-ietf-oauth-client-id-metadata-document-02 (`CIMD_REVISION`). It accepts the documents of -00, which MCP 2026-07-28 pins.
+With `registration.cimd` on, a client id may be the https URL of its metadata document. Core implements draft-ietf-oauth-client-id-metadata-document-02. It accepts the documents of -00, which MCP 2026-07-28 pins.
 
 - Core fetches the document through `oauth.fetch`, with `redirect: "manual"`, 10 seconds, and 8 KB at most. It keeps the document one hour per isolate.
 - The document's `client_id` must equal its URL.
 - A document with `client_secret` or `client_secret_expires_at` is refused (-02 section 4.1). So is a method other than `none` or `private_key_jwt`.
 - A `private_key_jwt` document with `jwks` or `jwks_uri` is a confidential client. It signs a client assertion at the token route.
 - A document cannot change at the request of this server. So core drops each member that it does not serve, and writes a warning with the member name.
-- The dropped members are another grant, another response type, and an `id_token_signed_response_alg` other than `jwtMint.alg`. A `backchannel_logout_uri` off the host of the document goes too.
+- Core drops each entry of `grant_types` or `response_types` that it does not serve, and an `id_token_signed_response_alg` other than `jwtMint.alg`.
+- A pairwise document loses `sector_identifier_uri` and the device grant of its `grant_types`.
+- Core drops a `backchannel_logout_uri` that is not valid, is off the host of the document, or has no `oauth.fetch` to post to it. It also drops a `backchannel_logout_session_required` that is not a boolean.
 - A document with no `authorization_code` grant or no `code` response type is refused.
-- When a document changes from `private_key_jwt` to `none`, core revokes every refresh token of the client in the same write.
+- When a document changes from `private_key_jwt` to `none`, core revokes every refresh token and deletes every device code of the client in the same write.
 
 ## The device flow
 
