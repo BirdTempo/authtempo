@@ -108,13 +108,19 @@ function refused(route: string): Result<never> {
 }
 
 /**
- * The operator user guard (spec 26 item 2). It checks, in this order: not
- * an impersonation session; the platform role in the platform
- * organization; a verified address; a second factor with a method; a fresh
- * session. Each failure answers `operator_required`, one code for every
- * step, so a caller learns nothing about the step that failed. Then it
- * counts on `operator:user:<userId>`. `route` names the caller in the log
- * line; an engine call is `api`.
+ * The operator user guard (spec 26 item 2). It checks five steps in this
+ * order:
+ *
+ * 1. The session is not an impersonation session.
+ * 2. The user holds the platform role in the platform organization.
+ * 3. The address is verified.
+ * 4. A second factor has a method.
+ * 5. The session is fresh.
+ *
+ * Each failure answers `operator_required`, one code for every step, so a
+ * caller learns nothing about the step that failed. Then it counts on
+ * `operator:user:<userId>`. `route` names the caller in the log line; an
+ * engine call is `api`.
  */
 export async function requireOperatorUser(
   config: ResolvedConfig,
