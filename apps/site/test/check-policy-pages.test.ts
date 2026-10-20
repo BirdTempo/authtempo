@@ -83,6 +83,26 @@ describe("check-policy-pages", () => {
     ]);
   });
 
+  it("takes a pointer sentence in a held section only in the link-only form", () => {
+    const input = withText(
+      "versioning",
+      "Read [Security policy](/docs/reference/security-policy/).\n",
+      "Read [Security policy](/docs/reference/security-policy/).\n\nRead this: each fault gets a fix in 1 day.\n",
+    );
+    expect(failures(input)).toEqual([
+      'docs/versioning.md, section "The support window", states "Read this: each fault gets a fix in 1 day.", which no source holds',
+    ]);
+    // A link with more text after it is not a pointer.
+    const tail = withText(
+      "versioning",
+      "Read [Security policy](/docs/reference/security-policy/).",
+      "Read [Security policy](/docs/reference/security-policy/) for a fix in 1 day.",
+    );
+    expect(failures(tail)).toEqual([
+      'docs/versioning.md, section "The support window", states "Read [Security policy](/docs/reference/security-policy/) for a fix in 1 day.", which no source holds',
+    ]);
+  });
+
   it("holds the closed channels to SECURITY.md both ways", () => {
     const closed =
       "Until the first release, the two channels are not open, and the times of this policy do not apply.";
