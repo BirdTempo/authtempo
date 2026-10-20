@@ -27,7 +27,8 @@ export function checkTag(input: {
     if (tag.slice(TAG_PREFIX.length) !== groupVersion)
       failures.push(`the tag ${tag} differs from the group version ${groupVersion}`);
     // A patch at 0.0.0 gives 0.0.1, and the first release is FIRST_RELEASE
-    // (rulings 28 and 30 of the plan 12j lane). check-pack holds the release copy.
+    // (rulings 28 and 30 of the plan 12j lane). The check check-pack holds the
+    // release copy.
     if (m[1] === "0" && m[2] === "0")
       failures.push(
         `the tag ${tag} is at 0.0.x; the first release is ${FIRST_RELEASE}, so no tag is v0.0.x`,

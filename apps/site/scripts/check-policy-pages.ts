@@ -2,12 +2,13 @@
 // pages state facts that other files hold: the versioning page and the
 // security policy page. Each fact sentence of a page is a copy of one
 // sentence of its source, so this check holds each copy equal to the source.
-// A section that the check holds may hold only those copies, so a fact with
-// no source cannot join it. The sources: SECURITY.md (the support window, the
-// channels, the times), spec 33 item 1.2 (the 0.x rules), .changeset/config.json
-// (one version), the version of core (the state today),
-// release/repository.json (the link to the file), and FIRST_RELEASE with the
-// two release checks that refuse another first release.
+// A held section holds only its allowed sentences, so a fact with no source
+// cannot join it. SECURITY.md gives the support window, the channels, and
+// the times. Spec 33 item 1.2 gives the 0.x rules and the bump of each class
+// of change. .changeset/config.json gives one version. The version of core
+// gives the state today. release/repository.json gives the link to the file.
+// FIRST_RELEASE gives the first release. Two release checks refuse a release
+// at 0.0.x, and each names FIRST_RELEASE.
 import { existsSync, readdirSync } from "node:fs";
 import { type Repository, readPolicyInput } from "./check-security-policy.ts";
 import { REPO } from "./lib/paths.ts";
@@ -137,14 +138,14 @@ const TIES: readonly Tie[] = [
   },
 ];
 
-/** A section that holds only its allowed sentences. Some sections also take a pointer sentence. */
+/** A section that holds only its allowed sentences. With `pointer`, it also takes a pointer sentence. */
 interface Held {
   page: string;
   section: string;
   pointer: boolean;
 }
 
-/** The sections that hold only copies of a source, and a pointer sentence at most. */
+/** The sections that the check always holds. Other sections join while their state holds. */
 const HELD: readonly Held[] = [
   { page: VERSIONING, section: "One version", pointer: true },
   { page: VERSIONING, section: "The support window", pointer: true },
@@ -167,7 +168,7 @@ const TODAY =
   "Every package is private and at version `0.0.0`. No release exists, and the owner decides when the packages publish.";
 /**
  * The docs of today (ruling 29 of plan 12j). Spec 33 item 13 puts the
- * versioned docs trees outside plan 12j, so the page says that only the docs
+ * versioned docs trees outside plan 12j. So the page says that only the docs
  * of main exist, until a versioned tree exists.
  */
 const DOCS_SECTION = "The docs";
@@ -360,10 +361,10 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
       );
   }
 
-  // The first release: FIRST_RELEASE gives the version, and check-pack and
-  // check-tag refuse another one where the release reads the version. Each
-  // names FIRST_RELEASE in its failure message, so a rule that goes takes that
-  // line with it.
+  // The first release: FIRST_RELEASE gives the version. check-pack and
+  // check-tag refuse a release at 0.0.x where the release reads the version.
+  // Each names FIRST_RELEASE in its failure message, so a rule that goes
+  // takes that line with it.
   const first = /^export const FIRST_RELEASE = "([^"]+)";$/m.exec(input.releaseFacts)?.[1];
   if (first === undefined) failures.push(`${PATHS.releaseFacts} has no export const FIRST_RELEASE`);
   else {
@@ -433,7 +434,7 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
         failures.push(`${h.page}, section "${h.section}", states "${s}", which no source holds`);
   }
 
-  // The rule table: each row has a class of spec 33 item 1.2, and its In 0.x
+  // The rule table: each row has a class of spec 33 item 1.2. Its In 0.x
   // cell is the bump that the spec gives that class.
   let rows = 0;
   const classLine = specSentences.find((x) => x.startsWith("In 0.x a break"));
