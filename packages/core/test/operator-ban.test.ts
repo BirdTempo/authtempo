@@ -3,7 +3,7 @@ import { type AuthConfig, resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
 import { hookGuard } from "../src/engine/hooks.js";
-import { mintSessionJwt, sessionLive } from "../src/engine/jwt.js";
+import { mintSessionJwt, sessionLive, signToken } from "../src/engine/jwt.js";
 import { liveUser } from "../src/engine/oauth-token.js";
 import { activeBan } from "../src/engine/operator/ban-rule.js";
 import { requireOperatorUser } from "../src/engine/operator/guards.js";
@@ -17,11 +17,14 @@ import {
   writeSession,
 } from "../src/engine/sessions.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
+import { ACCESS_TOKEN_TYPE } from "../src/primitives/credentials.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
+import { decodeJws } from "../src/primitives/jwk.js";
 import type { StorageAdapter } from "../src/storage/port.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth } from "./helpers.js";
 import {
   authorized,
+  basicHeader,
   exchange,
   type Handle,
   pkce,
@@ -182,6 +185,38 @@ const status = async (w: World, request: Request) => (await w.auth.handle(reques
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 const GRANT = { status: 400, body: { error: "invalid_grant" } };
 const UNAUTHORIZED = { ok: false, code: "unauthorized", status: 401 };
+
+/** A resource server's client that may introspect (`introspect: true` of `api.oauth.clients`). */
+async function introspector(w: World) {
+  const clients = w.auth.api.oauth?.clients;
+  if (!clients) throw new Error("oauth is off");
+  const made = await clients.create({
+    name: "Resource server",
+    authMethod: "client_secret_basic",
+    grantTypes: ["client_credentials"],
+    credentialsScopes: ["mcp:read"],
+    introspect: true,
+  });
+  if (!made.ok) throw new Error(made.error);
+  const secret = made.value.clientSecret;
+  if (!secret) throw new Error("create answered no secret");
+  return { clientId: made.value.client.id, secret };
+}
+
+/** The introspection answer of `token` for the client `rs`. */
+async function introspect(w: World, rs: { clientId: string; secret: string }, token: string) {
+  const res = await w.auth.handle(
+    new Request(`${BASE_URL}/auth/oauth/introspect`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        authorization: basicHeader(rs.clientId, rs.secret),
+      },
+      body: new URLSearchParams({ token }).toString(),
+    }),
+  );
+  return (await res.json()) as { active: boolean };
+}
 
 /** The user row of `userId`, read from storage. */
 const userRow = (w: World, userId: string) =>
@@ -545,6 +580,68 @@ describe("the ban (plan 12f Task 6)", () => {
     const user = await w.storage.findOne("user", [{ field: "id", op: "eq", value: s.user.id }]);
     expect(user).toMatchObject({ banReason: "Abuse report 7", banUntil: new Date(until) });
     expect(user?.bannedAt).toEqual(w.clock.now());
+  });
+
+  it("keeps an access token from before the ban refused after the unban", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    const clientId = await registered(w, [REDIRECT]);
+    const rs = await introspector(w);
+    const before = await grant(w, s.cookie, clientId);
+    const caller = (token: string) =>
+      w.auth.caller(new Request(RESOURCE, { headers: bearer(token) }));
+    expect(await introspect(w, rs, before.access_token)).toMatchObject({ active: true });
+    expect((await ban(w, s.user.id)).ok).toBe(true);
+    expect(await caller(before.access_token)).toBeNull();
+    w.clock.advance(MINUTE_MS);
+    expect((await unban(w, s.user.id)).ok).toBe(true);
+    // Ruling 25: the unban restores nothing, also before the token's exp.
+    expect(await caller(before.access_token)).toBeNull();
+    expect(await introspect(w, rs, before.access_token)).toEqual({ active: false });
+    // iat is in seconds: a token of the same second as the unban stays refused.
+    w.clock.advance(1000);
+    const again = await signedIn(w);
+    const after = await grant(w, again.cookie, clientId);
+    expect(await caller(after.access_token)).toMatchObject({ kind: "oauth" });
+    expect(await introspect(w, rs, after.access_token)).toMatchObject({ active: true });
+  });
+
+  it("keeps an access token from before a timed ban refused after its end", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    const clientId = await registered(w, [REDIRECT]);
+    const rs = await introspector(w);
+    const before = await grant(w, s.cookie, clientId);
+    const caller = (token: string) =>
+      w.auth.caller(new Request(RESOURCE, { headers: bearer(token) }));
+    const until = new Date(w.clock.now().getTime() + 2 * MINUTE_MS).toISOString();
+    expect((await ban(w, s.user.id, until)).ok).toBe(true);
+    w.clock.advance(2 * MINUTE_MS);
+    expect(await caller(before.access_token)).toBeNull();
+    expect(await introspect(w, rs, before.access_token)).toEqual({ active: false });
+    w.clock.advance(1000);
+    const again = await signedIn(w);
+    const after = await grant(w, again.cookie, clientId);
+    expect(await caller(after.access_token)).toMatchObject({ kind: "oauth" });
+  });
+
+  it("refuses an access token with no number iat", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    const clientId = await registered(w, [REDIRECT]);
+    const g = await grant(w, s.cookie, clientId);
+    const claims = decodeJws(g.access_token)?.payload;
+    if (!claims) throw new Error("the access token does not decode");
+    const caller = (token: string) =>
+      w.auth.caller(new Request(RESOURCE, { headers: bearer(token) }));
+    // The same claims under the same key pass, so only the iat changes the answer.
+    const same = await signToken(w.config, ACCESS_TOKEN_TYPE, claims);
+    expect(await caller(same)).toMatchObject({ kind: "oauth" });
+    const { iat: _iat, ...noIat } = claims;
+    for (const iat of [undefined, String(claims.iat)]) {
+      const token = await signToken(w.config, ACCESS_TOKEN_TYPE, { ...noIat, iat });
+      expect(await caller(token)).toBeNull();
+    }
   });
 
   it("answers not_found while the user tools are off", async () => {

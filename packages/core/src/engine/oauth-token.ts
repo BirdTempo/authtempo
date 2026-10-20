@@ -27,7 +27,7 @@ import { familyEnded, revokeFamily } from "./oauth-family.js";
 import { linkIdToken } from "./oauth-logout.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { sidFor, subjectFor, userOfSubject } from "./oauth-subject.js";
-import { activeBan } from "./operator/ban-rule.js";
+import { activeBan, bannedFor } from "./operator/ban-rule.js";
 import { consumeVerification } from "./verification.js";
 
 /**
@@ -647,8 +647,8 @@ export type ResolvedAccess =
 /**
  * The caller of an access token, or null: a JWT that verifies under a key
  * of this instance, with `typ: "at+jwt"`, this issuer, an `aud` in
- * `oauth.resources`, and a live `exp`. Then a user that exists, with each
- * scope still in `oauth.scopes`. For a `client_credentials` token, a client
+ * `oauth.resources`, a live `exp`, and a number `iat`. Then a user that
+ * exists, with no ban window over `iat`, and each scope still in `oauth.scopes`. For a `client_credentials` token, a client
  * that still holds the grant and each scope. A session JWT of `GET /token`
  * and an ID token have `typ: "JWT"` and never pass.
  */
@@ -665,6 +665,8 @@ export async function resolveAccessToken(
   if (p.iss !== issuerOf(config) || typeof p.aud !== "string" || !oauth.resources.includes(p.aud))
     return null;
   if (typeof p.exp !== "number" || p.exp <= now) return null;
+  // The ban window reads the issue time (ruling 28). Core writes iat in each access token.
+  if (typeof p.iat !== "number") return null;
   if (
     typeof p.sub !== "string" ||
     typeof p.client_id !== "string" ||
@@ -699,9 +701,10 @@ export async function resolveAccessToken(
   const userId = await userOfSubject(config, p.sub, client);
   if (userId === null) return null;
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-  // A banned user's access token answers as no token here (ruling 5 of plan
-  // 12f). A resource server that verifies the JWT alone accepts it to its exp.
-  if (!user || activeBan(user, config.clock.now())) return null;
+  // A token from before the end of the user's last ban answers as no token
+  // here (rulings 5, 25, and 28 of plan 12f), also after the unban or the
+  // end. A resource server that verifies the JWT alone accepts it to its exp.
+  if (!user || bannedFor(user, new Date(p.iat * 1000))) return null;
   return {
     kind: "oauth",
     subject: p.sub,
