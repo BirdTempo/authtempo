@@ -208,9 +208,9 @@ interface UserWrite {
 }
 
 /**
- * The common steps of a write on one user: the confirmation rule before
- * the secret, the secret, the question, one POST, and the audit row id on
- * stdout or in the JSON document.
+ * The common steps of a write on one user. First the confirmation rule,
+ * before the secret. Then the secret, the question, and one POST. Last the
+ * audit row id, on stdout or in the JSON document.
  */
 async function writeUser(
   ctx: Ctx,

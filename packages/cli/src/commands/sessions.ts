@@ -54,11 +54,11 @@ interface Sums {
 }
 
 /**
- * The loop of an end command, as `secret rewrap` runs it: one call after
- * another while the answer has `more: true` and the calls stay under
- * `--max-calls`. One stderr line per call. A call that stops at the
- * statement budget of the deployment answers `more: true`; that is normal,
- * and the loop calls again (lead input of plan 12f Task 7). A stop after a
+ * The loop of an end command, as `secret rewrap` runs it. It calls again
+ * while the answer has `more: true` and the calls stay under `--max-calls`.
+ * One stderr line per call. A call that stops at the
+ * statement budget of the deployment answers `more: true`. That is normal:
+ * the loop calls again (lead input of plan 12f Task 7). A stop after a
  * call that ran keeps the sums of the calls before it.
  */
 async function endLoop(

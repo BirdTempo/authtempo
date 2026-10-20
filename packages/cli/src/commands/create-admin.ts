@@ -29,10 +29,11 @@ function createAnswer(body: unknown): { userId: string; created: boolean; auditI
 
 /**
  * `authtempo create-admin <base url> --email <address>` (plan 12f Task 12,
- * spec 26 item 11). The route makes the platform organization when it is
- * absent, the user when no user holds the address (not verified, no
- * password), and the member row, in one transaction. The user id goes to
- * stdout. No stderr line, and so no question, names the address.
+ * spec 26 item 11). One transaction of the route makes the member row. It
+ * also makes the platform organization when it is absent. It makes the user
+ * when no user holds the address, with no verified address and no password.
+ * The user id goes to stdout. No stderr line, and so no question, names the
+ * address.
  */
 async function run(argv: string[], ctx: Ctx): Promise<number> {
   const { values, positionals } = parseOrUsage(
