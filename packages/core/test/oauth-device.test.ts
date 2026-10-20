@@ -15,6 +15,7 @@ import type { StorageAdapter } from "../src/storage/port.js";
 import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
 import {
   approvedDevice,
+  basicHeader,
   type Handle,
   REDIRECT,
   RESOURCE,
@@ -970,6 +971,83 @@ describe("the poll count of a device code (review M1 of plan 12e, RFC 8628 3.5)"
     expect((await answer(await h.auth.handle(poll(clientId, started.device_code)))).body).toEqual({
       error: "authorization_pending",
     });
+  });
+
+  it("counts a poll of a known code under another client id on oauth-token:ip (review n1)", async () => {
+    const h = instance(undefined, {}, IP);
+    const owner = await deviceClient(h);
+    const other = await deviceClient(h, { token_endpoint_auth_method: "client_secret_post" });
+    const started = await start(h, owner, "mcp:read");
+    const wrongSecret = () =>
+      h.auth.handle(
+        tokenPost({
+          grant_type: DEVICE_GRANT,
+          device_code: started.device_code,
+          client_id: other,
+          client_secret: `cs_${"C".repeat(43)}`,
+        }),
+      );
+    for (let i = 0; i < 60; i++)
+      expect(await answer(await wrongSecret())).toEqual({
+        status: 400,
+        body: { error: "invalid_client" },
+      });
+    expect(await answer(await wrongSecret())).toEqual({
+      status: 429,
+      body: { error: "rate_limited" },
+    });
+    // The owner of the code still polls on the key of its code.
+    expect((await answer(await h.auth.handle(poll(owner, started.device_code)))).body).toEqual({
+      error: "authorization_pending",
+    });
+  });
+
+  it("counts a Basic poll of the code's own client on the code key, and its failed auth on oauth-token:ip too", async () => {
+    const h = instance(undefined, {}, IP);
+    const reg = await h.auth.handle(
+      post("/auth/oauth/register", {
+        redirect_uris: [REDIRECT],
+        client_name: "Secret TV",
+        grant_types: [DEVICE_GRANT],
+        token_endpoint_auth_method: "client_secret_basic",
+      }),
+    );
+    const { client_id: owner, client_secret: secret } = (await reg.json()) as {
+      client_id: string;
+      client_secret: string;
+    };
+    const other = await deviceClient(h);
+    const started = await start(h, owner, "mcp:read", {
+      authorization: basicHeader(owner, secret),
+    });
+    const pollAs = (key: string) =>
+      h.auth.handle(
+        tokenPost(
+          { grant_type: DEVICE_GRANT, device_code: started.device_code },
+          { authorization: basicHeader(owner, key) },
+        ),
+      );
+    // 70 polls at the interval: more than the 60 of oauth-token:ip, so they count on the code key.
+    for (let i = 0; i < 70; i++) {
+      expect((await answer(await pollAs(secret))).body).toEqual({ error: "authorization_pending" });
+      h.clock.advance(5_000);
+    }
+    for (let i = 0; i < 60; i++)
+      expect((await answer(await pollAs(`cs_${"D".repeat(43)}`))).body).toEqual({
+        error: "invalid_client",
+      });
+    // The 60 failed auths spent oauth-token:ip, so a request of another client meets the limit.
+    expect(
+      await answer(
+        await h.auth.handle(
+          tokenPost({
+            grant_type: "refresh_token",
+            refresh_token: `or_${"B".repeat(43)}`,
+            client_id: other,
+          }),
+        ),
+      ),
+    ).toEqual({ status: 429, body: { error: "rate_limited" } });
   });
 
   it("holds one code to 130 polls in its life: the polls past the cap answer slow_down and change nothing", async () => {

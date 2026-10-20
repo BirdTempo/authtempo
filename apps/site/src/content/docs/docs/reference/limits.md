@@ -74,10 +74,10 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `operator-secrets:ip:<ip>` | 1 hour | 120 | Operator secret status, secret rewrap, and info, one count for the three, right or wrong secret. A rewrap of 100 000 rows at 1000 rows per call needs 100 calls |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize, and each `GET /oauth/device` with no session. The count runs before a request is held for the sign-in |
-| `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke. A device poll counts here only for an unknown device code |
+| `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke. A device poll counts here unless it names a known code and the client of that code. A failed client auth of any poll counts here too |
 | `oauth-token-origin:ip:<ip>` | 15 minutes | 60 | The origin check of a foreign origin at the token endpoint and its preflight |
 | `oauth-device:ip:<ip>` | 15 minutes | 30 | The device authorization request, before the client auth, so a failed auth counts too |
-| `oauth-device-poll:code:<hash>` | The code life | One per `interval`, plus 10: 130 for the defaults | Each poll of one known device code, before the client auth. A poll past the limit answers `slow_down` |
+| `oauth-device-poll:code:<hash>` | The code life | One per `interval`, plus 10: 130 for the defaults | Each poll of one known device code by the client of the code, before the client auth. The client is the Basic id, the assertion `sub`, or the form `client_id`. A poll under another client id counts on `oauth-token:ip`. A poll past the limit answers `slow_down` |
 | `oauth-device-verify:ip:<ip>` | 15 minutes | 20 | Each post of the device page from one IP |
 | `oauth-device-verify:session:<sessionId>` | 15 minutes | 5 | Each post of the device page from one session: a guessed user code costs one |
 | `oauth-device-verify:code:<hash>` | 15 minutes | 10 | Each post of the device page that finds one live user code, by its keyed hash. It bounds how many sessions see the consent of one code |

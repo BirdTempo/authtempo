@@ -77,7 +77,7 @@ A confidential client holds a credential. The token, revoke, and device routes t
 - A client with a secret may send it by either secret method, one method per request (RFC 6749 section 2.3.1). Two methods answer `invalid_request`.
 - A public client and a `private_key_jwt` client take their own method only. An empty `client_secret` counts as omitted.
 - After an `Authorization` header, a failed client auth answers 401 `invalid_client` with `WWW-Authenticate: Basic`. With no header it answers 400 with no challenge, so a browser shows no sign-in dialog.
-- A failed client auth spends nothing. It counts on the per-IP key of its route. The token and revoke routes count `oauth-token:ip`, introspection `oauth-introspect:ip`, and the device start `oauth-device:ip`. No limit counts per client, so a stranger cannot lock a real client out.
+- A failed client auth spends nothing. It counts on the per-IP key of its route. The token and revoke routes count `oauth-token:ip`, introspection `oauth-introspect:ip`, and the device start `oauth-device:ip`. A failed auth of a device poll also counts on `oauth-token:ip`, as on every other grant. No limit counts per client, so a stranger cannot lock a real client out.
 - A public client sends PKCE S256 on every code. A confidential client may omit PKCE only when it asks `openid` with a non-empty `nonce` (RFC 9700 section 2.1.1).
 - The assertion of `private_key_jwt` has the client id as `iss` and `sub`, and the issuer alone as `aud`. The token endpoint URL as `aud` is refused (draft-ietf-oauth-rfc7523bis-11).
 - An assertion lives at most 300 seconds, with 30 seconds of skew. Its `jti` works once. The algs are EdDSA, Ed25519, ES256, RS256, and PS256.
@@ -134,7 +134,7 @@ The device grant of RFC 8628 serves a device with no browser, such as a TV or a 
 - The user code is `XXXX-XXXX` of the letters `BCDFGHJKLMNPQRSTVWXZ`. It lives `oauth.device.codeTtlMinutes`, 10 minutes by default.
 - `verification_uri_complete` fills the field. The person still submits it.
 - A poll before the decision answers `authorization_pending`. A poll within `interval` seconds answers `slow_down`, and the interval grows by 5 seconds.
-- A poll of a known code counts on its own key, not on `oauth-token:ip`. So a device can poll at its interval for the whole code life ([limits](/docs/reference/limits/)).
+- A poll of a known code by the client of the code counts on its own key, not on `oauth-token:ip`. So a device can poll at its interval for the whole code life ([limits](/docs/reference/limits/)). A poll under another client id counts on `oauth-token:ip`.
 - A deny answers `access_denied`, and an expired code `expired_token`. An approved code gives its tokens once, then `invalid_grant`.
 - Only the client that asked may poll. A DPoP proof at the device request binds the code to its key.
 - Core stores a SHA-256 of the device code and an HMAC of the user code under the app secret, never a code.

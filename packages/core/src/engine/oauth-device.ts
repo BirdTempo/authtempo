@@ -117,19 +117,32 @@ export async function findDeviceCode(
 }
 
 /**
+ * True when a poll counts on the key of its code (review n1 of plan 12e).
+ * The code is known, and the request names the client of the code. A failed
+ * auth of such a poll also counts on `oauth-token:ip` (the token route).
+ */
+export const pollOnCode = (
+  row: OAuthDeviceRow | null,
+  clientId: string | null,
+): row is OAuthDeviceRow => row !== null && clientId === row.clientId;
+
+/**
  * The count of one poll, before the client auth, so a failed auth counts
- * too. A known code counts on its own key, never on `oauth-token:ip`. A
- * device that waits for its person would spend that budget in 5 minutes,
- * and with it the budget of each other client on the IP. An unknown code
- * counts on `oauth-token:ip`, so a guess still costs. Answers the refusal,
- * or null.
+ * too. A poll of a known code under its own client counts on the key of the
+ * code, never on `oauth-token:ip`. A device that waits for its person would
+ * spend that budget in 5 minutes. It would spend the budget of each other
+ * client on the IP with it. Each other poll counts on `oauth-token:ip`: an
+ * unknown code, so a guess still costs, and a code under another client id.
+ * So a known code lifts no per-IP count of a failed auth. Answers the
+ * refusal, or null.
  */
 export async function pollLimited(
   config: ResolvedConfig,
   row: OAuthDeviceRow | null,
+  clientId: string | null,
   ip: string | null,
 ): Promise<"rate_limited" | "slow_down" | null> {
-  if (row === null) return (await tokenLimited(config, ip)) ? "rate_limited" : null;
+  if (!pollOnCode(row, clientId)) return (await tokenLimited(config, ip)) ? "rate_limited" : null;
   const key = `oauth-device-poll:code:${row.deviceCodeHash}`;
   return (await config.limiter.allow(key, pollWindow(config, row))) ? null : "slow_down";
 }

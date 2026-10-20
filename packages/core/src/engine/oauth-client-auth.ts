@@ -98,6 +98,23 @@ export function namesClient(request: Request, form: URLSearchParams): boolean {
 }
 
 /**
+ * The client id that the request names, before any check: the Basic id, the
+ * `sub` of a client assertion, or `client_id` of the form. Null when it names
+ * none. Only a limit key reads it, never a grant.
+ */
+export function claimedClientId(request: Request, form: URLSearchParams): string | null {
+  const header = request.headers.get("authorization") ?? "";
+  if (BASIC_RE.test(header))
+    return basicCredentials(header.slice("basic ".length).trim())?.id ?? null;
+  const assertion = form.get("client_assertion");
+  if (assertion !== null) {
+    const sub = decodeForeignJws(assertion)?.payload.sub;
+    return typeof sub === "string" ? sub : null;
+  }
+  return form.get("client_id");
+}
+
+/**
  * The client of the request, authenticated. The methods present are an
  * `Authorization: Basic` header, `client_secret` in the form, and
  * `client_assertion_type` in the form. More than one is `invalid_request`.

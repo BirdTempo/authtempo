@@ -11,6 +11,7 @@ import {
 import {
   type AuthedClient,
   authenticateClient,
+  claimedClientId,
   namesClient,
 } from "../../engine/oauth-client-auth.js";
 import {
@@ -31,6 +32,7 @@ import {
   normalizeUserCode,
   pollDevice,
   pollLimited,
+  pollOnCode,
   startDevice,
   USER_CODE_RE,
 } from "../../engine/oauth-device.js";
@@ -286,18 +288,23 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     if (!form) return tokenAnswer(oauthFail("invalid_request"));
     const grant = form.get("grant_type") ?? "";
     if (!GRANTS.has(grant)) return tokenAnswer(oauthFail("unsupported_grant_type"));
-    // A device poll counts on its own key per code (review M1 of plan 12e, RFC 8628 section 3.5).
+    // A poll of a code by its own client counts on the code key (RFC 8628 section 3.5).
+    // Reviews M1 and n1 of plan 12e.
     const device =
       grant === DEVICE_GRANT ? await findDeviceCode(config, form.get("device_code") ?? "") : null;
+    const claimed = claimedClientId(request, form);
     const limited =
       grant === DEVICE_GRANT
-        ? await pollLimited(config, device, ip)
+        ? await pollLimited(config, device, claimed, ip)
         : (await tokenLimited(config, ip))
           ? "rate_limited"
           : null;
     if (limited !== null) return tokenAnswer(oauthFail(limited));
     const authed = await authenticateClient(config, request, form, client);
     if (!authed.ok) {
+      // A failed auth costs on oauth-token:ip on every grant.
+      // A poll that counted on its code key spends it here.
+      if (grant === DEVICE_GRANT && pollOnCode(device, claimed)) await tokenLimited(config, ip);
       // The token route's pragma of RFC 6749 section 5.1, as tokenAnswer sets it.
       const refused = clientRefused(request, authed);
       refused.headers.set("pragma", "no-cache");

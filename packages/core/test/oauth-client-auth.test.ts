@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { basicCredentials } from "../src/engine/oauth-client-auth.js";
+import { basicCredentials, claimedClientId } from "../src/engine/oauth-client-auth.js";
 import { secretMatches } from "../src/engine/oauth-client-secret.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import { BASE_URL } from "./helpers.js";
@@ -123,6 +123,25 @@ describe("client auth at the token endpoint (plan 12e)", () => {
       }),
     );
     expect(lower.status).toBe(200);
+  });
+
+  it("reads the client id that a request names, before any check (review n1)", () => {
+    const req = (headers: Record<string, string> = {}) =>
+      new Request(`${ISSUER}/oauth/token`, { method: "POST", headers });
+    const part = (o: object) => btoa(JSON.stringify(o)).replace(/=+$/, "");
+    const assertion = `${part({ alg: "ES256" })}.${part({ sub: "cl_jwt" })}.AA`;
+    expect(
+      claimedClientId(req({ authorization: basicHeader("cl_b", "s") }), new URLSearchParams()),
+    ).toBe("cl_b");
+    expect(claimedClientId(req(), new URLSearchParams({ client_assertion: assertion }))).toBe(
+      "cl_jwt",
+    );
+    expect(claimedClientId(req(), new URLSearchParams({ client_id: "cl_form" }))).toBe("cl_form");
+    // A bad Basic header and an assertion with no string sub name no client.
+    expect(claimedClientId(req({ authorization: "Basic !!!" }), new URLSearchParams())).toBeNull();
+    const noSub = `${part({ alg: "ES256" })}.${part({ sub: 7 })}.AA`;
+    expect(claimedClientId(req(), new URLSearchParams({ client_assertion: noSub }))).toBeNull();
+    expect(claimedClientId(req(), new URLSearchParams())).toBeNull();
   });
 
   it("reads Basic as form-encoded id and secret (RFC 6749 2.3.1)", async () => {
