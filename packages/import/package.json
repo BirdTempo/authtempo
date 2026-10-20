@@ -17,8 +17,7 @@
     "dist",
     "worker/README.md",
     "worker/wrangler.jsonc",
-    "worker/src",
-    "worker/proof"
+    "worker/src"
   ],
   "scripts": {
     "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",

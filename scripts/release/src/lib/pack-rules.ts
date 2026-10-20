@@ -36,6 +36,7 @@ export const FORBIDDEN_PACK_NAMES = [
   ".omc/", // the state of an agent tool
   ".superpowers/", // the plans and the review notes of the lane
   "AGENTS.md", // a notes file that turbo writes
+  "proof/", // a repository proof: it runs only in the repository, and git holds its record
 ] as const;
 
 /**

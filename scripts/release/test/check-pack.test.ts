@@ -198,6 +198,7 @@ describe("check-pack", () => {
       [".omc/", "dist/.omc/state.json"],
       [".superpowers/", "skills/.superpowers/x.md"],
       ["AGENTS.md", "skills/AGENTS.md"],
+      ["proof/", "worker/proof/pack-files.mjs"],
     ];
     expect([...FORBIDDEN_PACK_NAMES]).toEqual(cases.map(([name]) => name));
     for (const [name, path] of cases)

@@ -124,12 +124,13 @@ package. It runs with Node.js compatibility off: `proof/bundle-no-node.mjs`
 bundles it with both flags, fails on any `node:` module, and fails unless the
 bundle reads the package's `dist`. `proof/pack-files.mjs` checks the file
 list of a pack against the allowlist in `files` (`dist`, this README,
-`wrangler.jsonc`, `src`, `proof`). It fails on any other path, and on any
+`wrangler.jsonc`, `src`). It fails on any other path, and on any
 path under `.wrangler/` (the local D1 copy and the dev bundle, both with the
 hashes) or `input/`. The package's `test` script runs both. The proofs run
 in this repo only: `bundle-no-node.mjs` compares `dist` with `src/`, and
-`pack-files.mjs` packs the package folder, and no pack holds `src/`. They
-ship as the record of what was checked.
+`pack-files.mjs` packs the package folder, and no pack holds `src/`. No
+pack holds the proofs either. The git history is the record of what they
+checked.
 
 Unverified (the owner runbook): a run against the real database with
 `"remote": true`, and a run with an input file of tens of megabytes.

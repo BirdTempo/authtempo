@@ -3,9 +3,10 @@
 // no publish. pnpm 12.8.1 prints the list with `pnpm pack --dry-run --json`
 // (checked 2026-10-12).
 //
-// `files` in package.json is an allowlist of the shipped paths: `dist`, the
-// Worker's README, config, and sources, and these proofs. It names no
-// folder that can hold local state. pnpm does not apply `.gitignore` inside
+// `files` in package.json is an allowlist of the shipped paths: `dist`, and
+// the Worker's README, config, and sources. No proof ships, because a proof
+// runs only in the repository (plan 12j). The list names no folder that can
+// hold local state. pnpm does not apply `.gitignore` inside
 // a folder that `files` names, so a `worker` entry shipped two git-ignored
 // folders (I-1 of the plan 9b2 final review):
 // - worker/.wrangler/: after a rehearsal, wrangler dev keeps the local D1
@@ -45,7 +46,7 @@ const manifest = JSON.parse(readFileSync(new URL("../../package.json", import.me
 /** The files a pack always holds (npm adds package.json and README.md). */
 const FILES = [...ALWAYS_SHIPPED, CHANGELOG_FILE, "worker/README.md", "worker/wrangler.jsonc"];
 /** The folders whose every file ships. None of them holds local state. */
-const PREFIXES = ["dist/", "worker/src/", "worker/proof/"];
+const PREFIXES = ["dist/", "worker/src/"];
 /**
  * The folder of this package that must never ship, beside the shared names.
  * The allowlist already refuses it; the name makes the failure clear.
