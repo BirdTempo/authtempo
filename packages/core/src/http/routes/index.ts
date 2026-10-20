@@ -12,6 +12,7 @@ import { organizationRoutes } from "./organizations.js";
 import { passkeyRoutes } from "./passkeys.js";
 import { passwordRoutes } from "./password.js";
 import { reauthRoutes } from "./reauth.js";
+import { roleRoutes } from "./roles.js";
 import { secondFactorRoutes } from "./second-factor.js";
 import { sessionRoutes } from "./sessions.js";
 import { socialRoutes } from "./social.js";
@@ -34,6 +35,7 @@ export type RouteModule =
   | "email-otp"
   | "handoff"
   | "organizations"
+  | "roles"
   | "tokens"
   | "jwt"
   | "operator"
@@ -61,6 +63,7 @@ export function coreRouteModules(
     { module: "email-otp", routes: emailOtpRoutes(config) },
     { module: "handoff", routes: handoffRoutes(config) },
     { module: "organizations", routes: organizationRoutes(config) },
+    { module: "roles", routes: roleRoutes(config) },
     { module: "tokens", routes: tokenRoutes(config) },
     { module: "jwt", routes: jwtRoutes(config) },
     { module: "operator", routes: operatorRoutes(config) },

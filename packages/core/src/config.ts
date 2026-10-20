@@ -802,6 +802,17 @@ export interface OrganizationsConfig {
   /** The link in the invitation mail. Default `${appURL}/?invitation=<token>`. */
   invitationLinkBuilder?: (token: string, organization: { slug: string; name: string }) => string;
   limits?: OrganizationLimits;
+  /**
+   * Roles that each organization stores (plan 12k, spec 29 item 6). Absent:
+   * off. `maxPerOrganization` is 1 to 1000, default 50.
+   */
+  dynamicRoles?: DynamicRolesConfig;
+}
+
+/** The options of `organizations.dynamicRoles` (plan 12k). */
+export interface DynamicRolesConfig {
+  /** The role rows of one organization. A create at the cap answers `role_limit`. */
+  maxPerOrganization?: number;
 }
 
 /** Each a positive integer. Absent: no limit (plan 9d). */
@@ -868,6 +879,8 @@ export interface ResolvedConfig {
     invitationTtlDays: number;
     invitationLinkBuilder: (token: string, organization: { slug: string; name: string }) => string;
     limits: ResolvedLimits;
+    /** Null: dynamic roles are off, and no read of a role row runs (plan 12k). */
+    dynamicRoles: { maxPerOrganization: number } | null;
   } | null;
   signUp: "open" | "invited" | false;
   password: {
@@ -1124,6 +1137,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         o.invitationLinkBuilder ??
         ((token) => `${appURL}/?invitation=${encodeURIComponent(token)}`),
       limits: resolveLimits(o.limits),
+      dynamicRoles: resolveDynamicRoles(o.dynamicRoles),
     };
   }
   const basePath = input.basePath ?? DEFAULT_BASE_PATH;
@@ -1432,6 +1446,25 @@ function resolveSessionConfig(input: AuthConfig["session"]): ResolvedConfig["ses
     freshMinutes: integerIn("session.freshMinutes", o.freshMinutes ?? 1440, 1, 1440),
     deferRefresh: o.deferRefresh ?? false,
   };
+}
+
+/** `organizations.dynamicRoles` (plan 12k). Absent: off. */
+function resolveDynamicRoles(
+  input: DynamicRolesConfig | undefined,
+): { maxPerOrganization: number } | null {
+  if (input === undefined) return null;
+  if (!isPlainObject(input)) throw new ConfigError("organizations.dynamicRoles must be an object");
+  for (const key of Object.keys(input))
+    if (key !== "maxPerOrganization")
+      throw new ConfigError(
+        `organizations.dynamicRoles.${key} is not an option; core has maxPerOrganization`,
+      );
+  // Only `undefined` means the default: a `null` from a JS caller is refused.
+  const given: unknown = (input as DynamicRolesConfig).maxPerOrganization;
+  const max = given === undefined ? 50 : given;
+  const path = "organizations.dynamicRoles.maxPerOrganization";
+  if (typeof max !== "number") throw new ConfigError(`${path} must be an integer from 1 to 1000`);
+  return { maxPerOrganization: integerIn(path, max, 1, 1000) };
 }
 
 function resolveLimits(input: OrganizationLimits | undefined): ResolvedLimits {

@@ -139,6 +139,13 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /organizations/invitations/accept": { token: "$inviteToken" },
   "POST /organizations/invitations/decline": { token: "$inviteToken" },
   "POST /organizations/active": { organizationId: "$org" },
+  "POST /organizations/roles/create": {
+    organizationId: "$org",
+    name: "editor",
+    permissions: { member: ["read"] },
+  },
+  "POST /organizations/roles/update": { organizationId: "$org", name: "editor", rank: 1 },
+  "POST /organizations/roles/delete": { organizationId: "$org", name: "editor" },
   "POST /tokens": { name: "ci" },
   "POST /tokens/revoke": { id: "t1" },
   "POST /oauth/register": { redirect_uris: ["https://client.example.com/callback"] },
@@ -159,6 +166,8 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /handoff/start": { challenge: BODY43, redirect: "example://auth" },
   "GET /organizations/members": { organizationId: "$org" },
   "GET /organizations/invitations": { organizationId: "$org" },
+  "GET /organizations/roles": { organizationId: "$org" },
+  "GET /organizations/roles/get": { organizationId: "$org", name: "editor" },
 };
 
 /** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
@@ -273,7 +282,7 @@ function world(extra: Partial<AuthConfig> = {}) {
     passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL] },
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
-    organizations: {},
+    organizations: { dynamicRoles: {} },
     oauth: {
       resources: [`${BASE_URL}/mcp`],
       registration: { cimd: false, dynamic: true },

@@ -43,6 +43,15 @@ type PublicSessionJSON = Omit<PublicSession, "needsRefresh">;
 
 export type OrganizationJSON = Omit<OrganizationSummary, "createdAt"> & { createdAt: string };
 export type MemberJSON = Omit<MemberSummary, "createdAt"> & { createdAt: string };
+/** One stored role of an organization (plan 12k), as `RoleSummary` answers it on the wire. */
+export interface RoleJSON {
+  id: string;
+  name: string;
+  rank: number;
+  permissions: Record<string, string[]>;
+  createdAt: string;
+  updatedAt: string;
+}
 export type InvitationJSON = Omit<InvitationSummary, "expiresAt" | "createdAt"> & {
   expiresAt: string;
   createdAt: string;
@@ -419,6 +428,29 @@ export interface Client {
         status: "available" | "taken" | "reserved" | "invalid";
       }>
     >;
+    /**
+     * The stored roles of an organization (plan 12k). They exist when the
+     * server sets `organizations.dynamicRoles`. The list and the get need
+     * `ac:read`. The three writes need a fresh session and `ac:create`,
+     * `ac:update`, or `ac:delete`.
+     */
+    roles: {
+      list(input: { organizationId: string }): Promise<ClientResult<RoleJSON[]>>;
+      get(input: { organizationId: string; name: string }): Promise<ClientResult<RoleJSON>>;
+      create(input: {
+        organizationId: string;
+        name: string;
+        rank?: number | undefined;
+        permissions: Record<string, string[]>;
+      }): Promise<ClientResult<RoleJSON>>;
+      update(input: {
+        organizationId: string;
+        name: string;
+        rank?: number | undefined;
+        permissions?: Record<string, string[]> | undefined;
+      }): Promise<ClientResult<RoleJSON>>;
+      delete(input: { organizationId: string; name: string }): Promise<ClientResult<{ ok: true }>>;
+    };
   };
   /**
    * API tokens for scripts and CLIs. `create`, `list`, and `revoke` need a
@@ -1310,6 +1342,34 @@ export function createClient(options: ClientOptions): Client {
           "organizations.checkSlug",
           input,
         ),
+      roles: {
+        list: (input) =>
+          part<{ roles: RoleJSON[] }, "organizations.roles.list">(
+            "organizations.roles.list",
+            undefined,
+            { organizationId: input.organizationId },
+          ),
+        get: (input) =>
+          part<{ role: RoleJSON }, "organizations.roles.get">(
+            "organizations.roles.get",
+            undefined,
+            {
+              organizationId: input.organizationId,
+              name: input.name,
+            },
+          ),
+        create: (input) =>
+          part<{ role: RoleJSON }, "organizations.roles.create">(
+            "organizations.roles.create",
+            input,
+          ),
+        update: (input) =>
+          part<{ role: RoleJSON }, "organizations.roles.update">(
+            "organizations.roles.update",
+            input,
+          ),
+        delete: (input) => send<{ ok: true }>("organizations.roles.delete", input),
+      },
     },
     tokens: {
       create: ({ expiresInDays, organizationId, ...rest }) =>

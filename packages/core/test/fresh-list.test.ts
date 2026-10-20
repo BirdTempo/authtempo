@@ -38,6 +38,9 @@ const BODIES: Readonly<Record<string, unknown>> = {
   "/organizations/members/add": { organizationId: "x", userId: "y", role: "member" },
   "/organizations/members/remove": { organizationId: "x", userId: "y" },
   "/organizations/members/role": { organizationId: "x", userId: "y", role: "member" },
+  "/organizations/roles/create": { organizationId: "x", name: "editor", permissions: {} },
+  "/organizations/roles/delete": { organizationId: "x", name: "editor" },
+  "/organizations/roles/update": { organizationId: "x", name: "editor" },
   "/organizations/update": { organizationId: "x" },
   "/otp/request": { email: EMAIL },
   "/otp/reset": { email: EMAIL, code: "000000", password: "another long password" },
@@ -77,7 +80,7 @@ async function probe(): Promise<Map<string, { status: number; error: string | un
     social: SOCIAL,
     passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] },
     handoff: { schemes: ["example://"] },
-    organizations: {},
+    organizations: { dynamicRoles: {} },
     password: {},
     oauth: { resources: [`${BASE}/mcp`], registration: { cimd: false, dynamic: true } },
     operator: { secretHash: "0".repeat(64) },
@@ -139,7 +142,7 @@ describe("the routes that answer session_not_fresh and the client README list", 
       .sort();
     const calls = clientCalls();
     const listed = readmeList();
-    expect(listed).toHaveLength(16);
+    expect(listed).toHaveLength(19);
     const ops = (name: string) =>
       calls.filter((c) => c.operation === name || c.operation.startsWith(`${name}.`));
     // A listed call with no fresh route: the README promises a rule that the code lacks.

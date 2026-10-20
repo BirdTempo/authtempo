@@ -39,6 +39,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   "email-otp": ["emailOtp", "emailOtpReset"],
   handoff: ["handoff"],
   organizations: ["organizations"],
+  roles: ["dynamicRoles"],
   tokens: ["tokens"],
   jwt: ["jwtMint"],
   operator: ["operator", "operatorUsers", "operatorImpersonation"],
@@ -57,7 +58,7 @@ describe("ROUTES (plan 11a)", () => {
     const listed = ROUTES.map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
-    expect(listed.length).toBe(124);
+    expect(listed.length).toBe(129);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -127,6 +128,12 @@ describe("ROUTES (plan 11a)", () => {
     },
     { name: "handoff", delta: { handoff: { schemes: ["example://"] } }, features: ["handoff"] },
     { name: "organizations", delta: { organizations: {} }, features: ["organizations"] },
+    {
+      name: "dynamicRoles",
+      start: { organizations: {} },
+      delta: { organizations: { dynamicRoles: {} } },
+      features: ["dynamicRoles"],
+    },
     {
       name: "oauth with dynamic registration",
       delta: {

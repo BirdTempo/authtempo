@@ -364,6 +364,8 @@ can answer it:
 - `identities.unlink`, `identities.link`
 - `passkey.register`, `passkeys.delete`
 - `tokens.create`
+- `organizations.roles.create`, `organizations.roles.update`,
+  `organizations.roles.delete`
 - `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`
 - `secondFactor.passkey.enable`, `secondFactor.email.enable`,
   `secondFactor.disable`

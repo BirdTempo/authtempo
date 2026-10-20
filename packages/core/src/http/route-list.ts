@@ -23,6 +23,7 @@ export const ROUTE_FEATURES = [
   "emailOtpReset",
   "handoff",
   "organizations",
+  "dynamicRoles",
   "tokens",
   "jwtMint",
   "operator",
@@ -65,6 +66,7 @@ export interface RouteEntry {
    * (plan 12f). `account` (plan 12a) is in every
    * deployment. `accountDelete` (plan 12a) is on by default; `account.delete:
    * false` turns it off. `openapi` (plan 11g) needs `openapi: true`.
+   * `dynamicRoles` (plan 12k) needs `organizations` with `dynamicRoles`.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -1160,6 +1162,53 @@ export const ROUTES = Object.freeze([
     feature: "organizations",
     auth: ["session"],
     codes: ["unauthorized", "invalid_body", "forbidden_rank"],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/organizations/roles",
+    feature: "dynamicRoles",
+    auth: ["session"],
+    codes: ["unauthorized", "invalid_body", "forbidden_rank"],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/organizations/roles/get",
+    feature: "dynamicRoles",
+    auth: ["session"],
+    codes: ["unauthorized", "invalid_body", "forbidden_rank"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/organizations/roles/create",
+    feature: "dynamicRoles",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "session_not_fresh",
+      "invalid_body",
+      "forbidden_rank",
+      "role_taken",
+      "role_limit",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/organizations/roles/update",
+    feature: "dynamicRoles",
+    auth: ["session"],
+    codes: ["unauthorized", "session_not_fresh", "invalid_body", "forbidden_rank"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/organizations/roles/delete",
+    feature: "dynamicRoles",
+    auth: ["session"],
+    codes: ["unauthorized", "session_not_fresh", "invalid_body", "forbidden_rank", "role_in_use"],
     oauthCodes: [],
   },
   {

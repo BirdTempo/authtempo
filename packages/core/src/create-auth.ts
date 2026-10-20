@@ -125,6 +125,14 @@ import {
   reauthPasskeyOptions,
   requestReauthCode,
 } from "./engine/reauth.js";
+import {
+  createRole,
+  deleteRole,
+  getRole,
+  listRoles,
+  type RoleSummary,
+  updateRole,
+} from "./engine/roles.js";
 import type { SignInChallenge } from "./engine/second-factor.js";
 import {
   rewrapSecrets,
@@ -555,6 +563,37 @@ export interface AuthApi {
     session: ResolvedSession;
     organizationId: string | null;
   }): Promise<Result<PublicSession>>;
+  /**
+   * The stored roles of an organization (plan 12k, spec 29 item 6). Each of
+   * the five answers `not_found` while `organizations.dynamicRoles` is off.
+   * The list and the get need `ac:read`; the writes need `ac:create`,
+   * `ac:update`, and `ac:delete`. The fresh rule is the route's.
+   */
+  listRoles(input: { user: UserRow; organizationId: string }): Promise<Result<RoleSummary[]>>;
+  getRole(input: {
+    user: UserRow;
+    organizationId: string;
+    name: string;
+  }): Promise<Result<RoleSummary>>;
+  createRole(input: {
+    user: UserRow;
+    organizationId: string;
+    name: string;
+    rank?: number;
+    permissions: Statements;
+  }): Promise<Result<RoleSummary>>;
+  updateRole(input: {
+    user: UserRow;
+    organizationId: string;
+    name: string;
+    rank?: number;
+    permissions?: Statements;
+  }): Promise<Result<RoleSummary>>;
+  deleteRole(input: {
+    user: UserRow;
+    organizationId: string;
+    name: string;
+  }): Promise<Result<{ ok: true }>>;
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
   tokens: TokensApi;
@@ -719,6 +758,11 @@ export function createAuth(input: AuthConfig): Auth {
       acceptInvitation: (i) => acceptInvitation(config, i),
       declineInvitation: (i) => declineInvitation(config, i),
       setActiveOrganization: (i) => setActiveOrganization(config, i),
+      listRoles: (i) => listRoles(config, i),
+      getRole: (i) => getRole(config, i),
+      createRole: (i) => createRole(config, i),
+      updateRole: (i) => updateRole(config, i),
+      deleteRole: (i) => deleteRole(config, i),
       getSession: (token) => resolveSession(config, token),
       async signOut(token) {
         const ended = await destroySession(config, token);

@@ -107,7 +107,7 @@ export async function membership(
  * secret; the distinct codes let a client tell a dead link from a missing
  * right. `granted` is the caller's effective set in the organization.
  */
-async function standing(
+export async function standing(
   config: ResolvedConfig,
   user: UserRow,
   organizationId: string,
@@ -121,10 +121,11 @@ async function standing(
   if (!organization) return fail("not_found");
   const m = await membership(config, organizationId, user.id);
   if (!m) return fail("forbidden_rank");
-  const { granted } = await effectiveIn(config, organizationId, m.member.role);
+  // The rank of a dynamic role counts too (plan 12k Task 4), so a grant compares like with like.
+  const { rank, granted } = await effectiveIn(config, organizationId, m.member.role);
   // A null set needs membership only: a member may leave at any rank, rank 0 included.
   if (wanted !== null && !can(granted, wanted)) return fail("forbidden_rank");
-  return ok({ ...m, granted });
+  return ok({ ...m, rank, granted });
 }
 
 function verified(user: UserRow): Result<true> {

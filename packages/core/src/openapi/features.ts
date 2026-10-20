@@ -19,6 +19,7 @@ export const FEATURE_INFO: Record<RouteFeature, { configKey: string; default: "o
   emailOtpReset: { configKey: "emailOtp and password", default: "off" },
   handoff: { configKey: "handoff", default: "off" },
   organizations: { configKey: "organizations", default: "off" },
+  dynamicRoles: { configKey: "organizations.dynamicRoles", default: "off" },
   tokens: { configKey: "always on", default: "on" },
   jwtMint: { configKey: "jwtMint", default: "on" },
   operator: { configKey: "operator", default: "off" },

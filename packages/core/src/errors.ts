@@ -61,6 +61,10 @@ export const ERRORS = {
   identity_taken: 409,
   // plan 12a: the account is the last owner of an organization with other members
   sole_owner: 409,
+  // plan 12k: dynamic roles
+  role_in_use: 409,
+  role_limit: 409,
+  role_taken: 409,
   // plan 11g: an unhandled error of a route. The router answers it; no route names it.
   internal: 500,
   // plan 12f: operator tools

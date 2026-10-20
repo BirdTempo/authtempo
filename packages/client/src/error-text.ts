@@ -67,6 +67,9 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   identity_taken:
     "This provider account belongs to another account. Sign in to that account to use it.",
   sole_owner: "You are the only owner of a team. Make another member an owner first.",
+  role_in_use: "A member or an invitation holds this role. Give them another role first.",
+  role_limit: "This organization has the most roles that it can hold. Delete a role first.",
+  role_taken: "This organization has a role with this name. Choose another name.",
   internal: "The server had an error. Try again later.",
   account_banned: "Your account is banned, so you cannot sign in.",
   operator_required: "You do not have the operator rights for this action.",

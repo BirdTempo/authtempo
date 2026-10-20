@@ -120,6 +120,12 @@ export const BETTER_AUTH_CODES = {
   // Better Auth lets an impersonation session reach every route, so it has no
   // name for this refusal.
   impersonation_session: "FORBIDDEN",
+  // Plan 12k Task 4. Core's own names for now: no Better Auth install was on the
+  // machine to read. Task 10 of plan 12k maps dynamicAccessControl and reads
+  // Better Auth's names for these three refusals.
+  role_in_use: "ROLE_IN_USE",
+  role_limit: "ROLE_LIMIT",
+  role_taken: "ROLE_TAKEN",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

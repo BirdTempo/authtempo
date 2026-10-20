@@ -15,6 +15,7 @@ export type {
   AccountDeleteConfirmConfig,
   AccountNoticesConfig,
   AuthConfig,
+  DynamicRolesConfig,
   EmailOtpConfig,
   JwtMintConfig,
   LegacyVerifyConfig,
@@ -156,6 +157,7 @@ export type { PermissionInput } from "./engine/permissions.js";
 export type { ProfileUpdate } from "./engine/profile.js";
 export { normalizeSlug, ROLE_RE, rankOf } from "./engine/ranks.js";
 export type { ReauthInput, ReauthProof } from "./engine/reauth.js";
+export type { RoleSummary } from "./engine/roles.js";
 export type { SignInChallenge } from "./engine/second-factor.js";
 export type { MethodEnabled } from "./engine/second-factor-methods.js";
 export type { SecretsRewrap, SecretsStatus, SecretVersionCount } from "./engine/secrets.js";

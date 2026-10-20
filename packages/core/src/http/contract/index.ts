@@ -12,6 +12,7 @@ import { ORGANIZATIONS_CONTRACT } from "./organizations.js";
 import { PASSKEYS_CONTRACT } from "./passkeys.js";
 import { PASSWORD_CONTRACT } from "./password.js";
 import { REAUTH_CONTRACT } from "./reauth.js";
+import { ROLES_CONTRACT } from "./roles.js";
 import { SECOND_FACTOR_CONTRACT } from "./second-factor.js";
 import { SESSIONS_CONTRACT } from "./sessions.js";
 import { SOCIAL_CONTRACT } from "./social.js";
@@ -41,6 +42,7 @@ export const ROUTE_CONTRACT = {
   ...EMAIL_OTP_CONTRACT,
   ...HANDOFF_CONTRACT,
   ...ORGANIZATIONS_CONTRACT,
+  ...ROLES_CONTRACT,
   ...TOKENS_CONTRACT,
   ...JWT_CONTRACT,
   ...OPERATOR_CONTRACT,

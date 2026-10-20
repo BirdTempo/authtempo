@@ -112,7 +112,7 @@ function world(secretHash = "0".repeat(64)) {
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     // The platform role turns on the impersonation routes (plan 12f).
-    organizations: { platformRole: "owner", platformOrganization: "platform-co" },
+    organizations: { platformRole: "owner", platformOrganization: "platform-co", dynamicRoles: {} },
     oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true }, device: {} },
     // One secret with every scope, the user tools, and the impersonation of plan 12f.
     operator: {
@@ -560,6 +560,25 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
       refused: INVALID_BODY,
     },
+    // The three role writes in order: the update and the delete find the created role.
+    {
+      key: "POST /organizations/roles/create",
+      body: { organizationId: org, name: "editor", permissions: { member: ["read"] } },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /organizations/roles/update",
+      body: { organizationId: org, name: "editor", rank: 1 },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /organizations/roles/delete",
+      body: { organizationId: org, name: "editor" },
+      session: true,
+      refused: INVALID_BODY,
+    },
     {
       key: "POST /organizations/check-slug",
       body: { slug: "beta" },
@@ -628,7 +647,7 @@ describe("the route contract (plan 11g)", () => {
   it("gives every route of ROUTES one contract, and no contract without a route", () => {
     const keys = Object.keys(ROUTE_CONTRACT).sort();
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(124);
+    expect(keys.length).toBe(129);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -639,7 +658,7 @@ describe("the route contract (plan 11g)", () => {
         expect(CONTRACT[route.key], `${route.key} has no contract`).toBeDefined();
         mounted.add(route.key);
       }
-    expect(modules.length).toBe(18);
+    expect(modules.length).toBe(19);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -657,6 +676,17 @@ describe("the route contract (plan 11g)", () => {
     });
     if (!started.ok) throw new Error(started.code);
     const org = await organizationOf(w, cookie, "acme");
+    // A stored role, so the valid query of the role get finds a row.
+    await jsonOf(
+      await w.handle(
+        post(
+          "/auth/organizations/roles/create",
+          { organizationId: org, name: "editor", permissions: { member: ["read"] } },
+          cookie,
+        ),
+      ),
+      "the role create",
+    );
     const clientId = await registeredClient(w);
     const INVALID_REQUEST: Answer = { status: 400, code: "invalid_request" };
     const BACK_INVALID: Answer = { status: 302, code: "invalid_request" };
@@ -808,6 +838,24 @@ describe("the route contract (plan 11g)", () => {
         missing: { organizationId: INVALID_BODY },
       },
       {
+        key: "GET /organizations/roles",
+        path: "/organizations/roles",
+        query: { organizationId: org },
+        headers: cookie,
+        required: ["organizationId"],
+        valid: { status: 200, code: null },
+        missing: { organizationId: INVALID_BODY },
+      },
+      {
+        key: "GET /organizations/roles/get",
+        path: "/organizations/roles/get",
+        query: { organizationId: org, name: "editor" },
+        headers: cookie,
+        required: ["organizationId", "name"],
+        valid: { status: 200, code: null },
+        missing: { organizationId: INVALID_BODY, name: INVALID_BODY },
+      },
+      {
         key: "GET /organizations/invitations",
         path: "/organizations/invitations",
         query: { organizationId: org },
@@ -875,7 +923,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_QUERIES.map((row) => row.key).sort());
-    expect(hand.length).toBe(17);
+    expect(hand.length).toBe(19);
     let wrongForms = 0;
     for (const row of VALID_QUERIES) {
       const contract = CONTRACT[row.key];
@@ -1083,7 +1131,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
-    expect(withBody.length).toBe(67);
+    expect(withBody.length).toBe(70);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1109,7 +1157,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(65);
+    expect(refusals).toBe(68);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1127,7 +1175,7 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 59, both: 9, form: 7 });
+    expect(counts).toEqual({ json: 62, both: 9, form: 7 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

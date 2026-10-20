@@ -17,6 +17,7 @@ export {
   type PasskeySummaryJSON,
   type PasswordSignIn,
   type PublicUserJSON,
+  type RoleJSON,
   type SecondFactorEnableJSON,
   type SessionSummaryJSON,
   type TotpStatusJSON,
