@@ -115,8 +115,9 @@ export function auditDraft(
 
 /**
  * What the work of an act collects for the steps after the commit (ruling
- * 2): the ended sessions for `session.afterEnd` (undefined when no hook
- * listens), and the OAuth families that its deletes noted.
+ * 2). `ended` holds the ended sessions for `session.afterEnd`; it is
+ * undefined when no hook listens. `families` holds the OAuth families that
+ * the deletes of the work noted.
  */
 export interface OperatorActEnds {
   ended: SessionRow[] | undefined;
@@ -144,9 +145,9 @@ export interface OperatorActSteps<T> {
  * no row is written. Any other throw passes to the caller, also after the
  * undo. So the act commits with its row, or neither commits.
  *
- * After the commit, in the order of ruling 2 of plan 12f: the act's
- * `committed` step, then `afterAction` with the stored row, then
- * `endFamilies` last (ruling 45 of plan 12e). A throw of `afterAction`
+ * After the commit, three steps run in the order of ruling 2 of plan 12f.
+ * The act's `committed` step runs first, then `afterAction` with the
+ * stored row. `endFamilies` runs last (ruling 45 of plan 12e). A throw of `afterAction`
  * writes one log line and the act stays; so does a throw of the step. The
  * answer is the work's value with `auditId`.
  */
@@ -216,8 +217,8 @@ function idInput(value: unknown): boolean {
  * The audit rows, oldest first, by `id` ascending (a ULID, so the order of
  * the writes). `targetUserId` reads one user's rows through its index.
  * `after` is the `next` of the page before. `limit` is 1 to 100, default
- * 50. `next` is the last id when the page is full, else null; so a full
- * last page is followed by one empty page. Needs `operator.users` (else
+ * 50. `next` is the last id when the page is full, else null; so one
+ * empty page comes after a full last page. Needs `operator.users` (else
  * `not_found`, as the user reads), an actor that passes `checkActor`, and
  * the scope `audit`.
  */
