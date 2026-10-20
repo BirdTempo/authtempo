@@ -33,6 +33,10 @@ const releaseFailures = (release: string) => check(CI, release).failures;
 const CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1";
 /** The checkout of the job check, with its first with key. It is in each file once. */
 const HISTORY = "\n        with:\n          fetch-depth: 0";
+/** The failure of an upload that is not the tarballs of the release copy. */
+const UPLOAD =
+  // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+  "release.yml: jobs.check step 15: the upload is not the artifact tarballs of ${{ runner.temp }}/release-copy/out/ with if-no-files-found: error";
 const PUBLISH_PERMISSIONS = "    permissions:\n      id-token: write\n      contents: read\n";
 
 describe("check-workflows", () => {
@@ -127,7 +131,10 @@ describe("check-workflows", () => {
     ).toEqual(["release.yml: jobs.check: id-token: write; only jobs.publish may mint a token"]);
     expect(
       ciFailures(swap(CI, "    runs-on:", "    permissions:\n      id-token: write\n    runs-on:")),
-    ).toEqual(["ci.yml: jobs.check: id-token: write; only jobs.publish may mint a token"]);
+    ).toEqual([
+      "ci.yml: jobs.check: the key permissions is not in the rule of the job",
+      "ci.yml: jobs.check: id-token: write; only jobs.publish may mint a token",
+    ]);
   });
 
   it("fails a job permission that writes", () => {
@@ -140,6 +147,15 @@ describe("check-workflows", () => {
         ),
       ),
     ).toEqual(["release.yml: jobs.check: the permission contents: write; a job here only reads"]);
+    expect(
+      releaseFailures(
+        swap(
+          RELEASE,
+          "    permissions:\n      contents: read\n",
+          "    permissions:\n      contents: read\n      actions: read\n",
+        ),
+      ),
+    ).toEqual(["release.yml: jobs.check: the permission actions; a job here reads only contents"]);
   });
 
   it("fails a publish job with no environment release, or with another permission than id-token: write and contents: read", () => {
@@ -246,7 +262,10 @@ describe("check-workflows", () => {
           "    environment: release\n    env:\n      NODE_AUTH_TOKEN: ${{ secrets.NPM }}\n",
         ),
       ),
-    ).toEqual(["release.yml: line 108: a token or a secret; trusted publishing uses no token"]);
+    ).toEqual([
+      "release.yml: line 108: a token or a secret; trusted publishing uses no token",
+      "release.yml: jobs.publish: the key env is not in the rule of the job",
+    ]);
   });
 
   it("fails a removed, an added, or a moved step", () => {
@@ -281,7 +300,22 @@ describe("check-workflows", () => {
       releaseFailures(
         swap(RELEASE, tag, `${tag}        working-directory: \${{ runner.temp }}/release-copy\n`),
       ),
-    ).toEqual(["release.yml: jobs.check: step 4 has a working-directory, and it must have none"]);
+    ).toEqual([
+      "release.yml: jobs.check step 4: the key working-directory is not in the rule of the step",
+    ]);
+    // A named step keeps its name, and a step with no name in the rule has none.
+    expect(
+      releaseFailures(swap(RELEASE, "      - name: Check the tag\n", "      - name: Tag\n")),
+    ).toEqual(["release.yml: jobs.check: step 4 is not named Check the tag"]);
+    expect(
+      releaseFailures(
+        swap(
+          RELEASE,
+          "      - run: docker compose up -d --wait\n",
+          "      - name: Postgres\n        run: docker compose up -d --wait\n",
+        ),
+      ),
+    ).toEqual(["release.yml: jobs.check step 5: the key name is not in the rule of the step"]);
   });
 
   it("fails a setup that changes", () => {
@@ -303,7 +337,7 @@ describe("check-workflows", () => {
     const pnpm = "pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0\n";
     expect(ciFailures(swap(CI, pnpm, `${pnpm}        with:\n          version: 12.8.1\n`))).toEqual(
       [
-        "ci.yml: jobs.check step 2: pnpm/action-setup names a version; the packageManager field of package.json is the one source",
+        "ci.yml: jobs.check step 2: pnpm/action-setup has the with key version; the packageManager field of package.json is the one source",
       ],
     );
     expect(
@@ -319,8 +353,9 @@ describe("check-workflows", () => {
     ]);
     expect(
       releaseFailures(swap(RELEASE, "if-no-files-found: error", "if-no-files-found: warn")),
-    ).toEqual([
-      "release.yml: jobs.check step 15: the upload is not the artifact tarballs with if-no-files-found: error",
+    ).toEqual([UPLOAD]);
+    expect(releaseFailures(swap(RELEASE, "release-copy/out/\n", "release-copy/\n"))).toEqual([
+      UPLOAD,
     ]);
   });
 
@@ -354,6 +389,169 @@ describe("check-workflows", () => {
     expect(check(swap(CI, "on:\n", "on: &trigger\n"), RELEASE).failures).toEqual([
       "ci.yml: line 8: an anchor, an alias, or a tag",
     ]);
+  });
+
+  // The probes of the review of Task 8 (W1 to W21). Each adds one key that
+  // the check does not name. Before the closed key lists, each one passed.
+  const TAG_STEP = '        run: node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"\n';
+  const PUBLISH_STEP = "      - run: node scripts/release/src/publish.ts out\n";
+  const DOWNLOAD = "          name: tarballs\n          path: out\n";
+  const PUBLISH_CHECKOUT = `      - uses: ${CHECKOUT}\n        with:\n          persist-credentials: false\n      # Node with`;
+  const probes: [string, () => string[], string[]][] = [
+    [
+      "W1 continue-on-error on the step check-tag",
+      () =>
+        releaseFailures(swap(RELEASE, TAG_STEP, `${TAG_STEP}        continue-on-error: true\n`)),
+      ["release.yml: jobs.check step 4: the key continue-on-error is not in the rule of the step"],
+    ],
+    [
+      "W2 if: false on the step check-tag",
+      () => releaseFailures(swap(RELEASE, TAG_STEP, `${TAG_STEP}        if: false\n`)),
+      ["release.yml: jobs.check step 4: the key if is not in the rule of the step"],
+    ],
+    [
+      "W3 continue-on-error on jobs.check",
+      () => releaseFailures(swap(RELEASE, "  check:\n", "  check:\n    continue-on-error: true\n")),
+      ["release.yml: jobs.check: the key continue-on-error is not in the rule of the job"],
+    ],
+    [
+      "W4 if: always() on jobs.publish",
+      () =>
+        releaseFailures(
+          swap(RELEASE, "    needs: check\n", "    needs: check\n    if: always()\n"),
+        ),
+      ["release.yml: jobs.publish: the key if is not in the rule of the job"],
+    ],
+    [
+      "W5 repository on the checkout of jobs.publish",
+      () =>
+        releaseFailures(
+          swap(
+            RELEASE,
+            PUBLISH_CHECKOUT,
+            PUBLISH_CHECKOUT.replace("false\n", "false\n          repository: evil/fork\n"),
+          ),
+        ),
+      [
+        "release.yml: jobs.publish step 1: actions/checkout has the with key repository; the rule names no such key",
+      ],
+    ],
+    [
+      "W6 run-id and repository on download-artifact",
+      () =>
+        releaseFailures(
+          swap(
+            RELEASE,
+            DOWNLOAD,
+            `${DOWNLOAD}          run-id: "123"\n          repository: evil/fork\n`,
+          ),
+        ),
+      [
+        "release.yml: jobs.publish step 3: actions/download-artifact has the with key run-id; the rule names no such key",
+        "release.yml: jobs.publish step 3: actions/download-artifact has the with key repository; the rule names no such key",
+      ],
+    ],
+    [
+      "W7 env with toJSON(secrets) on jobs.publish",
+      () =>
+        releaseFailures(
+          swap(
+            RELEASE,
+            "    environment: release\n",
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: a GitHub Actions expression, not a template.
+            "    environment: release\n    env:\n      ALL: ${{ toJSON(secrets) }}\n",
+          ),
+        ),
+      [
+        "release.yml: line 108: a token or a secret; trusted publishing uses no token",
+        "release.yml: jobs.publish: the key env is not in the rule of the job",
+      ],
+    ],
+    [
+      "W8 env NODE_OPTIONS on the publish step",
+      () =>
+        releaseFailures(
+          swap(
+            RELEASE,
+            PUBLISH_STEP,
+            `${PUBLISH_STEP}        env:\n          NODE_OPTIONS: --import=./evil.mjs\n`,
+          ),
+        ),
+      ["release.yml: jobs.publish step 4: the key env is not in the rule of the step"],
+    ],
+    [
+      "W9 container on jobs.publish",
+      () =>
+        releaseFailures(
+          swap(
+            RELEASE,
+            "    environment: release\n",
+            "    environment: release\n    container:\n      image: evil/image\n",
+          ),
+        ),
+      ["release.yml: jobs.publish: the key container is not in the rule of the job"],
+    ],
+    [
+      "W10 shell on the step check-tag",
+      () =>
+        releaseFailures(
+          swap(RELEASE, TAG_STEP, `${TAG_STEP}        shell: bash -c "exit 0" {0}\n`),
+        ),
+      ["release.yml: jobs.check step 4: the key shell is not in the rule of the step"],
+    ],
+    [
+      "W11 defaults at the top level",
+      () =>
+        releaseFailures(
+          swap(
+            RELEASE,
+            "permissions: {}\n",
+            "permissions: {}\n\ndefaults:\n  run:\n    shell: bash\n",
+          ),
+        ),
+      ["release.yml: the top-level key defaults is not in the rule"],
+    ],
+    [
+      "W12 ref on the checkout of jobs.check",
+      () =>
+        releaseFailures(
+          swap(
+            RELEASE,
+            "          persist-credentials: false\n      # pnpm at",
+            "          persist-credentials: false\n          ref: main\n      # pnpm at",
+          ),
+        ),
+      [
+        "release.yml: jobs.check step 1: actions/checkout has the with key ref; the rule names no such key",
+      ],
+    ],
+    [
+      "W13 github.token on download-artifact",
+      () =>
+        releaseFailures(
+          swap(RELEASE, DOWNLOAD, `${DOWNLOAD}          github-token: \${{ github.token }}\n`),
+        ),
+      [
+        "release.yml: line 129: a token or a secret; trusted publishing uses no token",
+        "release.yml: jobs.publish step 3: actions/download-artifact has the with key github-token; the rule names no such key",
+      ],
+    ],
+    [
+      "W20 timeout-minutes on the step check-tag",
+      () => releaseFailures(swap(RELEASE, TAG_STEP, `${TAG_STEP}        timeout-minutes: 0\n`)),
+      ["release.yml: jobs.check step 4: the key timeout-minutes is not in the rule of the step"],
+    ],
+    [
+      "W21 if: false on the job of ci.yml",
+      () =>
+        ciFailures(
+          swap(CI, "    runs-on: ubuntu-24.04\n", "    if: false\n    runs-on: ubuntu-24.04\n"),
+        ),
+      ["ci.yml: jobs.check: the key if is not in the rule of the job"],
+    ],
+  ];
+  it.each(probes)("fails %s", (_id, failures, expected) => {
+    expect(failures()).toEqual(expected);
   });
 
   it("fails when it reads zero files", () => {

@@ -200,8 +200,8 @@ interface Step {
   uses?: string;
   /** The text of a run step, without its last line end. */
   run?: string;
-  /** The name of a run step in a failure, when the text has more than one line. */
-  label?: string;
+  /** The name of the step. A step with no name here has no name key. */
+  name?: string;
   /** A run step in the release copy. */
   copy?: true;
   /** A checkout with the full history (fetch-depth: 0). */
@@ -213,64 +213,107 @@ const checkout = (history: boolean): Step =>
 const PNPM: Step = { uses: "pnpm/action-setup" };
 const NODE: Step = { uses: "actions/setup-node" };
 
+/** The keys of each job, and its steps in order. */
+interface Job {
+  keys: string[];
+  steps: Step[];
+}
+
 /**
- * The steps of each job, in order. A step that is gone, new, or moved fails,
- * so a change of a workflow step changes this table in the same commit. The
- * comment above each step in the workflow says what breaks without it.
+ * The jobs of each file. A key that this table does not name fails. A step
+ * that is gone, new, or moved fails too. So a change of a workflow changes
+ * this table in the same commit. The comment above each step in the workflow
+ * says what breaks without it.
  */
-const STEPS: Record<string, Record<string, Step[]>> = {
+const JOBS: Record<string, Record<string, Job>> = {
   [CI_FILE]: {
-    check: [
-      checkout(true),
-      PNPM,
-      NODE,
-      { run: "docker compose up -d --wait" },
-      { run: "pnpm install --frozen-lockfile" },
-      { run: "pnpm release:check --no-osv --no-dry-run --base origin/main" },
-    ],
+    check: {
+      keys: ["runs-on", "steps"],
+      steps: [
+        checkout(true),
+        PNPM,
+        NODE,
+        { run: "docker compose up -d --wait" },
+        { run: "pnpm install --frozen-lockfile" },
+        { run: "pnpm release:check --no-osv --no-dry-run --base origin/main" },
+      ],
+    },
   },
   [WORKFLOW_FILE]: {
-    check: [
-      checkout(true),
-      PNPM,
-      NODE,
-      { run: 'node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"' },
-      { run: "docker compose up -d --wait" },
-      { run: "pnpm install --frozen-lockfile" },
-      // A tag checkout has no local main (ruling 16 of plan 12j).
-      { run: "pnpm release:check --base origin/main" },
-      {
-        label: "the release copy",
-        run: [
-          'mkdir "$RUNNER_TEMP/release-copy"',
-          'git archive HEAD | tar -x -C "$RUNNER_TEMP/release-copy"',
-          'touch "$RUNNER_TEMP/release-copy/.release-copy"',
-        ].join("\n"),
-      },
-      { run: "pnpm install --frozen-lockfile --offline", copy: true },
-      { run: "node scripts/release/src/prepare.ts", copy: true },
-      { run: "pnpm turbo run build --force", copy: true },
-      {
-        label: "the pack of each released package",
-        run: [
-          "mkdir out",
-          "for name in $(jq -r '.fixed[0][]' .changeset/config.json); do",
-          '  pnpm --filter "$name" pack --pack-destination "$PWD/out"',
-          "done",
-        ].join("\n"),
-        copy: true,
-      },
-      { run: "node scripts/release/src/check-pack.ts out/*.tgz", copy: true },
-      { run: "cd out && sha256sum -- *.tgz > SHA256SUMS", copy: true },
-      { uses: "actions/upload-artifact" },
-    ],
-    publish: [
-      checkout(false),
-      NODE,
-      { uses: "actions/download-artifact" },
-      { run: "node scripts/release/src/publish.ts out" },
-    ],
+    check: {
+      keys: ["runs-on", "permissions", "steps"],
+      steps: [
+        checkout(true),
+        PNPM,
+        NODE,
+        { name: "Check the tag", run: 'node scripts/release/src/check-tag.ts "$GITHUB_REF_NAME"' },
+        { run: "docker compose up -d --wait" },
+        { run: "pnpm install --frozen-lockfile" },
+        // A tag checkout has no local main (ruling 16 of plan 12j).
+        { run: "pnpm release:check --base origin/main" },
+        {
+          name: "Make the release copy",
+          run: [
+            'mkdir "$RUNNER_TEMP/release-copy"',
+            'git archive HEAD | tar -x -C "$RUNNER_TEMP/release-copy"',
+            'touch "$RUNNER_TEMP/release-copy/.release-copy"',
+          ].join("\n"),
+        },
+        { run: "pnpm install --frozen-lockfile --offline", copy: true },
+        { name: "Prepare the manifests", run: "node scripts/release/src/prepare.ts", copy: true },
+        { run: "pnpm turbo run build --force", copy: true },
+        {
+          name: "Pack each released package",
+          run: [
+            "mkdir out",
+            "for name in $(jq -r '.fixed[0][]' .changeset/config.json); do",
+            '  pnpm --filter "$name" pack --pack-destination "$PWD/out"',
+            "done",
+          ].join("\n"),
+          copy: true,
+        },
+        { run: "node scripts/release/src/check-pack.ts out/*.tgz", copy: true },
+        {
+          name: "Write the SHA-256 list",
+          run: "cd out && sha256sum -- *.tgz > SHA256SUMS",
+          copy: true,
+        },
+        { uses: "actions/upload-artifact" },
+      ],
+    },
+    publish: {
+      keys: ["needs", "runs-on", "environment", "permissions", "steps"],
+      steps: [
+        checkout(false),
+        NODE,
+        { uses: "actions/download-artifact" },
+        { run: "node scripts/release/src/publish.ts out" },
+      ],
+    },
   },
+};
+
+/** The top-level keys of each file. Any other key, such as defaults or env, fails. */
+const TOP_KEYS = ["name", "on", "permissions", "jobs"];
+
+/**
+ * The with keys of each action. Any other key fails, because a key such as
+ * repository, ref, or run-id makes the step read another source.
+ */
+const WITH_KEYS: Record<string, (step: Step | undefined) => string[]> = {
+  "actions/checkout": (step) =>
+    step?.history === true ? ["fetch-depth", "persist-credentials"] : ["persist-credentials"],
+  "actions/setup-node": () => ["node-version", "package-manager-cache"],
+  "pnpm/action-setup": () => [],
+  "actions/upload-artifact": () => ["name", "path", "if-no-files-found"],
+  "actions/download-artifact": () => ["name", "path"],
+};
+
+/** The reason of a with key that the rule refuses, where the key has a known effect. */
+const WITH_REASONS: Record<string, string> = {
+  "registry-url": "it writes an .npmrc for a token",
+  cache: "a cache is never evidence",
+  version: "the packageManager field of package.json is the one source",
 };
 
 /** The jobs of each file, and the one job that may mint an OIDC token. */
@@ -279,7 +322,7 @@ const PUBLISH_JOB = "publish";
 const PIN = /^([\w.-]+\/[\w.-]+)@([0-9a-f]{40})$/;
 const VERSION = /^\d+\.\d+\.\d+$/;
 const PUBLISH_COMMAND = /\b(?:npm|pnpm|yarn|changeset)\s+publish\b/;
-const TOKEN = /\bsecrets\.|NODE_AUTH_TOKEN|NPM_TOKEN|_authToken/;
+const TOKEN = /\bsecrets\b|\bgithub\.token\b|\bGITHUB_TOKEN\b|NODE_AUTH_TOKEN|NPM_TOKEN|_authToken/;
 
 /** -1, 0, or 1 for two versions of the form x.y.z. */
 function compare(a: string, b: string): number {
@@ -295,6 +338,12 @@ function compare(a: string, b: string): number {
 /** The rules of the `with` keys of one uses step. */
 function checkWith(action: string, step: Step | undefined, w: Record<string, YamlNode>): string[] {
   const out: string[] = [];
+  const allowed = WITH_KEYS[action]?.(step) ?? [];
+  for (const key of Object.keys(w))
+    if (!allowed.includes(key))
+      out.push(
+        `${action} has the with key ${key}; ${WITH_REASONS[key] ?? "the rule names no such key"}`,
+      );
   if (action === "actions/checkout") {
     if (scalarOf(w["persist-credentials"]) !== "false")
       out.push("the checkout keeps its token in the git config");
@@ -304,20 +353,17 @@ function checkWith(action: string, step: Step | undefined, w: Record<string, Yam
     const v = scalarOf(w["node-version"]) ?? "";
     if (!VERSION.test(v) || compare(v, NODE_FLOOR) < 0)
       out.push(`node-version ${v} is not a full version at or above ${NODE_FLOOR}`);
-    if (scalarOf(w["package-manager-cache"]) !== "false" || w.cache !== undefined)
+    if (scalarOf(w["package-manager-cache"]) !== "false")
       out.push("the setup-node cache is on; a cache is never evidence");
-    if (w["registry-url"] !== undefined)
-      out.push("setup-node names registry-url, which writes an .npmrc for a token");
-  } else if (action === "pnpm/action-setup") {
-    if (w.version !== undefined)
-      out.push(
-        "pnpm/action-setup names a version; the packageManager field of package.json is the one source",
-      );
-    if (w.cache !== undefined && scalarOf(w.cache) !== "false")
-      out.push("the pnpm store cache is on; a cache is never evidence");
   } else if (action === "actions/upload-artifact") {
-    if (scalarOf(w.name) !== "tarballs" || scalarOf(w["if-no-files-found"]) !== "error")
-      out.push("the upload is not the artifact tarballs with if-no-files-found: error");
+    if (
+      scalarOf(w.name) !== "tarballs" ||
+      scalarOf(w.path) !== `${COPY}/out/` ||
+      scalarOf(w["if-no-files-found"]) !== "error"
+    )
+      out.push(
+        `the upload is not the artifact tarballs of ${COPY}/out/ with if-no-files-found: error`,
+      );
   } else if (action === "actions/download-artifact") {
     if (scalarOf(w.name) !== "tarballs" || scalarOf(w.path) !== "out")
       out.push("the download is not the artifact tarballs in out");
@@ -334,6 +380,9 @@ function checkJob(
 ): void {
   const at = `jobs.${name}`;
   const e = entriesOf(job);
+  const rule = JOBS[file]?.[name] ?? { keys: [], steps: [] };
+  for (const key of Object.keys(e))
+    if (!rule.keys.includes(key)) fail(`${at}: the key ${key} is not in the rule of the job`);
   const runsOn = e["runs-on"];
   if (runsOn?.kind !== "scalar") fail(`${at}: runs-on is not one label`);
   else if (!/^ubuntu-\d+\.\d+$/.test(runsOn.value ?? ""))
@@ -350,13 +399,14 @@ function checkJob(
     for (const [key, value] of Object.entries(entriesOf(e.permissions))) {
       if (key === "id-token")
         fail(`${at}: id-token: write; only jobs.${PUBLISH_JOB} may mint a token`);
+      else if (key !== "contents")
+        fail(`${at}: the permission ${key}; a job here reads only contents`);
       else if (scalarOf(value) !== "read")
         fail(`${at}: the permission ${key}: ${scalarOf(value)}; a job here only reads`);
     }
   }
 
   const steps = e.steps?.kind === "list" ? e.steps.items : [];
-  const rule = STEPS[file]?.[name] ?? [];
   steps.forEach((node, k) => {
     const s = entriesOf(node);
     const where = `${at} step ${k + 1}`;
@@ -372,7 +422,7 @@ function checkJob(
           fail(`${where}: ${uses} has no version comment # v<major>.<minor>.<patch>`);
       }
       const action = uses.split("@")[0] ?? "";
-      for (const message of checkWith(action, rule[k], entriesOf(s.with)))
+      for (const message of checkWith(action, rule.steps[k], entriesOf(s.with)))
         fail(`${where}: ${message}`);
     }
     const run = scalarOf(s.run);
@@ -384,15 +434,15 @@ function checkJob(
     }
   });
 
-  if (steps.length !== rule.length) {
-    fail(`${at}: ${steps.length} steps, not the ${rule.length} steps of the rule`);
+  if (steps.length !== rule.steps.length) {
+    fail(`${at}: ${steps.length} steps, not the ${rule.steps.length} steps of the rule`);
     return;
   }
   steps.forEach((node, k) => {
-    const want = rule[k];
+    const want = rule.steps[k];
     if (want === undefined) return;
     const s = entriesOf(node);
-    const label = want.uses ?? want.label ?? want.run ?? "";
+    const label = want.uses ?? want.name ?? want.run ?? "";
     const uses = scalarOf(s.uses);
     const run = scalarOf(s.run);
     const ok =
@@ -403,10 +453,17 @@ function checkJob(
       fail(`${at}: step ${k + 1} is not ${label}`);
       return;
     }
-    const dir = scalarOf(s["working-directory"]);
-    if (want.copy === true && dir !== COPY) fail(`${at}: step ${k + 1} is not in the release copy`);
-    if (want.copy !== true && s["working-directory"] !== undefined)
-      fail(`${at}: step ${k + 1} has a working-directory, and it must have none`);
+    // A key such as if, continue-on-error, env, or shell changes what the step does.
+    const keys = want.uses !== undefined ? ["uses", "with"] : ["run"];
+    if (want.name !== undefined) keys.push("name");
+    if (want.copy === true) keys.push("working-directory");
+    for (const key of Object.keys(s))
+      if (!keys.includes(key))
+        fail(`${at} step ${k + 1}: the key ${key} is not in the rule of the step`);
+    if (want.name !== undefined && scalarOf(s.name) !== want.name)
+      fail(`${at}: step ${k + 1} is not named ${want.name}`);
+    if (want.copy === true && scalarOf(s["working-directory"]) !== COPY)
+      fail(`${at}: step ${k + 1} is not in the release copy`);
   });
 }
 
@@ -429,6 +486,8 @@ function checkFile(
     return;
   }
   const top = entriesOf(root);
+  for (const key of Object.keys(top))
+    if (!TOP_KEYS.includes(key)) fail(`the top-level key ${key} is not in the rule`);
 
   const on = top.on;
   for (const trigger of ["pull_request_target", "workflow_run"])
@@ -449,7 +508,7 @@ function checkFile(
     fail(`id-token: write at the top level; only jobs.${PUBLISH_JOB} may mint a token`);
 
   const jobs = entriesOf(top.jobs);
-  const want = Object.keys(STEPS[file] ?? {});
+  const want = Object.keys(JOBS[file] ?? {});
   if (Object.keys(jobs).join(",") !== want.join(",")) fail(`the jobs are not ${want.join(", ")}`);
   for (const [name, job] of Object.entries(jobs)) checkJob(file, name, job, counts, fail);
 }
