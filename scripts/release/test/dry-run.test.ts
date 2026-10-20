@@ -122,8 +122,24 @@ function fake(change: Record<string, (call: Call) => RunResult | undefined> = {}
       }
       case "pnpm publish":
         return ok(pnpmPublishLines(cwd).join("\n"));
-      case "smoke":
+      case "smoke": {
+        // The real smoke.mjs reads the released list from the config of the copy.
+        const config = join(cwd, "../repo/.changeset/config.json");
+        if (
+          args.length !== 2 ||
+          args[0] !== "smoke.mjs" ||
+          args[1] !== config ||
+          !existsSync(config)
+        )
+          return fromReport(
+            [
+              "smoke: FAIL packages=2 released=0 entries=0 exempt=0 cli=0 failures=1",
+              "  give the path of .changeset/config.json, whose fixed[0] is the released list",
+            ],
+            true,
+          );
         return ok("smoke: PASS packages=2 released=2 entries=2 exempt=0 cli=0 failures=0\n");
+      }
       default:
         return ok();
     }
@@ -244,6 +260,12 @@ describe("dry run", () => {
     ]);
     expect(changesets).toEqual([
       '---\n"@authtempo/client": minor\n"@authtempo/core": minor\n---\n\nDry run of the next release.\n',
+    ]);
+    // smoke.mjs reads the released list from the config path (review of Task 6, L1).
+    const smoke = calls.find((c) => c.kind === "smoke");
+    expect([smoke?.cwd, smoke?.args]).toEqual([
+      `${report.dir}/smoke`,
+      ["smoke.mjs", `${report.dir}/repo/.changeset/config.json`],
     ]);
     expect(failuresOf(report)).toEqual([]);
     expect(report.exit).toBe(0);
