@@ -12,6 +12,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 21
   - docs/superpowers/plans/2026-10-14-11e-mcp.md
+  - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -35,8 +36,9 @@ import mcp from "../../../../../../../examples/mcp-server/src/mcp.ts?raw";
 1. Turn on `oauth` in the config of the auth app.
    - Set `oauth.resources` to the URL of the MCP route, such as `https://app.example.com/mcp`.
    - Set `oauth.scopes` to `{ "mcp:tools": "Use the tools of this app" }`, or to your own text.
-   - Set `oauth.registration` to `{ dynamic: false }`. The MCP authorization revision calls dynamic registration deprecated. Row 12e makes `dynamic: false` the default.
+   - Set `oauth.registration` to `{ dynamic: false }`. Dynamic registration is off by default since plan 12e. The MCP authorization revision calls it deprecated.
    - Set `oauth.fetch` to `guardedFetch({ resolve: dohResolve(fetch), fetch })`. A client then registers by the URL of its metadata document.
+   - Core implements the metadata document draft -02, and accepts the documents of -00 that MCP 2026-07-28 pins.
 2. Mount `auth.wellKnown(request)` for every path that starts with `/.well-known/` at the origin root.
 3. Wrap the handler of the `/mcp` route in `requireMcpAuth` of `@authtempo/verify/mcp`.
    - Pass the `auth` of core as the source when the MCP route is in the same Worker as the auth app.
@@ -93,17 +95,21 @@ The route `https://app.example.com/mcp` with `scopes: ["mcp:tools"]` answers the
 | A bearer that is not a valid token for this resource | 401 | `Bearer error="invalid_token", resource_metadata="https://app.example.com/.well-known/oauth-protected-resource/mcp", scope="mcp:tools"` |
 | A valid token without `mcp:tools` | 403 | `Bearer error="insufficient_scope", scope="mcp:tools", resource_metadata="https://app.example.com/.well-known/oauth-protected-resource/mcp"` |
 
-A source that fails gives 503 with no body, never 401.
+A source that fails gives 503 with no body, never 401. A request under the `DPoP` scheme gets a `DPoP` challenge too. [The verify MCP entry](/docs/reference/verify-mcp/) lists those answers.
 
-## What this does not do yet
+## More of the provider
 
-- Confidential clients. Every client is public. Row 12e adds them.
-- DPoP. Row 12e adds it.
-- Token introspection. Row 12e adds it.
-- The app's own sign-in route. A browser with no session goes to core's sign-in page. Row 12e adds `oauth.signInURL`.
-- A refresh retry window. A refresh token sent twice ends its family. Row 12e adds a reuse window, off by default.
+Plan 12e adds these to the provider. Each one has a section in [the provider guide](/docs/guides/oauth-provider/).
 
-The consent page and the connected apps page are in [the provider guide](/docs/guides/oauth-provider/).
+- Confidential clients. A client may hold a secret or sign a client assertion with its key. A public client still sends PKCE on every code.
+- A metadata document with `private_key_jwt` and its keys is a confidential client.
+- DPoP. A bound access token reaches the route as `Authorization: DPoP` with a proof of its key.
+- Token introspection, for a resource server that must know whether a token is live now.
+- The app's own sign-in route, `oauth.signInURL`, in place of core's sign-in page.
+- A refresh reuse window, `oauth.refreshReuseSeconds`. It is off by default: a refresh token sent twice ends its family.
+- Pairwise subjects. `whoami` answers the token subject, which is the pairwise subject for a pairwise client.
+
+The consent page and the connected apps page are in the provider guide too.
 
 ## If it fails
 
