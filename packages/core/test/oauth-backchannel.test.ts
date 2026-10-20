@@ -124,7 +124,7 @@ function world(opts: { noFetch?: boolean; cimd?: boolean } = {}) {
     oauth,
   };
   const { api } = createAuth(input);
-  return { auth, handle, api, second: resolveConfig(input), calls, status, answer };
+  return { auth, handle, api, input, second: resolveConfig(input), calls, status, answer };
 }
 type World = ReturnType<typeof world>;
 
@@ -145,11 +145,17 @@ async function bcClient(w: World, uri: string | null, extra: Record<string, unkn
 }
 
 /** The token answer of the authorize step and the code exchange for the session of `token`. */
-async function tokensOf(w: World, token: string, clientId: string, scope = "openid mcp:read") {
+async function tokensOf(
+  w: World,
+  token: string,
+  clientId: string,
+  scope = "openid mcp:read",
+  redirectUri = REDIRECT,
+) {
   const p = await pkce();
   const cookie = cookieOf(w, token);
   const page = await w.handle(
-    authorizeGet({ clientId, challenge: p.challenge, scope, nonce: "n-1" }, cookie),
+    authorizeGet({ clientId, challenge: p.challenge, scope, nonce: "n-1", redirectUri }, cookie),
   );
   // A consent that covers the scopes already answers the redirect at once.
   const done =
@@ -163,7 +169,7 @@ async function tokensOf(w: World, token: string, clientId: string, scope = "open
       : page;
   const code = new URL(done.headers.get("location") ?? "").searchParams.get("code");
   if (!code) throw new Error(`authorize answered ${page.status} with no code`);
-  const res = await w.handle(exchange(code, clientId, p.verifier));
+  const res = await w.handle(exchange(code, clientId, p.verifier, { redirect_uri: redirectUri }));
   if (res.status !== 200) throw new Error(`the exchange answered ${res.status}`);
   return (await res.json()) as { id_token?: string; refresh_token?: string };
 }
@@ -631,12 +637,17 @@ describe("back-channel logout (plan 12e Task 16)", () => {
         jti: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
         events: { [EVENT]: {} },
         sub: idClaims.sub,
-        sid: actor.session.id,
+        sid: idClaims.sid,
       });
       expect(payload).not.toHaveProperty("nonce");
-      expect(idClaims.sid).toBe(actor.session.id);
-      if (subjectType === "pairwise") expect(payload.sub).not.toBe(actor.user.id);
-      else expect(payload.sub).toBe(actor.user.id);
+      // A pairwise client gets its own sid, not the session id (review M2 of plan 12e).
+      if (subjectType === "pairwise") {
+        expect(payload.sub).not.toBe(actor.user.id);
+        expect(idClaims.sid).toMatch(/^[0-9a-f]{64}$/);
+      } else {
+        expect(payload.sub).toBe(actor.user.id);
+        expect(idClaims.sid).toBe(actor.session.id);
+      }
     }
   });
 
@@ -1293,5 +1304,122 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(
       await createClient(blind.auth.config, { redirectUris: [REDIRECT], backchannelLogoutUri: BC }),
     ).toMatchObject(refused);
+  });
+});
+
+describe("the sid of a pairwise client (review M2 of plan 12e)", () => {
+  const OTHER_REDIRECT = "https://app.example.org/callback";
+  const OTHER_BC = "https://app.example.org/backchannel";
+
+  /** One pairwise client on client.example.com, one on app.example.org, and one public client. */
+  async function threeClients(w: World) {
+    const a = await bcClient(w, BC, { subject_type: "pairwise" });
+    const b = await bcClient(w, OTHER_BC, {
+      subject_type: "pairwise",
+      redirect_uris: [OTHER_REDIRECT],
+      post_logout_redirect_uris: ["https://app.example.org/bye"],
+    });
+    const pub = await bcClient(w, BC2, { redirect_uris: [REDIRECT] });
+    return { a, b, pub };
+  }
+
+  it("gives two pairwise clients of one session two sid values, and a public client the session id", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const { a, b, pub } = await threeClients(w);
+    const sidOf = async (clientId: string, redirectUri = REDIRECT) =>
+      decodeJwt(
+        (await tokensOf(w, actor.token, clientId, "openid mcp:read", redirectUri)).id_token ?? "",
+      ).sid;
+    const sidA = await sidOf(a);
+    const sidB = await sidOf(b, OTHER_REDIRECT);
+    expect(typeof sidA).toBe("string");
+    expect(sidA).not.toBe(sidB);
+    expect(sidA).not.toBe(actor.session.id);
+    expect(sidB).not.toBe(actor.session.id);
+    // One client keeps one sid in one session.
+    expect(await sidOf(a)).toBe(sidA);
+    expect(await sidOf(pub)).toBe(actor.session.id);
+  });
+
+  it("writes the sid of each client in its logout token", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const { a, b, pub } = await threeClients(w);
+    const sids = new Map<string, unknown>();
+    for (const [clientId, uri] of [
+      [a, REDIRECT],
+      [b, OTHER_REDIRECT],
+      [pub, REDIRECT],
+    ] as const)
+      sids.set(
+        clientId,
+        decodeJwt((await tokensOf(w, actor.token, clientId, "openid mcp:read", uri)).id_token ?? "")
+          .sid,
+      );
+    await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, actor.token) }));
+    expect(w.calls).toHaveLength(3);
+    const got = new Map<unknown, unknown>();
+    for (const c of w.calls) {
+      const claims = decodeJwt(tokenOfCall(c));
+      got.set(claims.aud, claims.sid);
+    }
+    expect(got).toEqual(sids);
+    expect(new Set(got.values()).size).toBe(3);
+  });
+
+  it("ends the session of a pairwise hint at once, and asks first for a hint of another session", async () => {
+    const w = world();
+    const { actor, other } = await twoSessions(w);
+    const { a, b } = await threeClients(w);
+    const hintOf = async (token: string, clientId: string, uri: string) =>
+      (await tokensOf(w, token, clientId, "openid mcp:read", uri)).id_token ?? "";
+    const endWith = (cookieToken: string, hint: string) =>
+      w.handle(
+        new Request(
+          `${BASE_URL}/auth/oauth/end-session?${new URLSearchParams({ id_token_hint: hint })}`,
+          { headers: { cookie: cookieOf(w, cookieToken) } },
+        ),
+      );
+    // A hint of the other session asks first, and both sessions live.
+    const otherHint = await hintOf(other.token, b, OTHER_REDIRECT);
+    const asked = await endWith(actor.token, otherHint);
+    expect(await asked.text()).toContain('name="confirm" value="yes"');
+    expect(await live(w, actor.session.id)).toBe(true);
+    expect(await live(w, other.session.id)).toBe(true);
+    // A hint of each client of this session ends it at once.
+    const ended = await endWith(actor.token, await hintOf(actor.token, a, REDIRECT));
+    expect(await ended.text()).not.toContain('name="confirm"');
+    expect(await live(w, actor.session.id)).toBe(false);
+    expect(await live(w, other.session.id)).toBe(true);
+    const done = await endWith(other.token, otherHint);
+    expect(await done.text()).not.toContain('name="confirm"');
+    expect(await live(w, other.session.id)).toBe(false);
+  });
+
+  it("maps a pairwise hint from before a new secret version to its session", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    const { a } = await threeClients(w);
+    const hint = (await tokensOf(w, actor.token, a)).id_token ?? "";
+    // A second version becomes current on another instance over the same storage.
+    const { secret, ...rest } = w.input;
+    const input: AuthConfig = {
+      ...rest,
+      secrets: [
+        { version: 2, value: "Zq8vR2kL9mN4pX7wT1yB6cD3hF5jG0sQ" },
+        { version: 1, value: secret ?? "" },
+      ],
+    };
+    const config = resolveConfig(input);
+    const rotated = createRouter(config, coreRoutes(config));
+    const res = await rotated(
+      new Request(
+        `${BASE_URL}/auth/oauth/end-session?${new URLSearchParams({ id_token_hint: hint })}`,
+        { headers: { cookie: cookieOf(w, actor.token) } },
+      ),
+    );
+    expect(await res.text()).not.toContain('name="confirm"');
+    expect(await live(w, actor.session.id)).toBe(false);
   });
 });

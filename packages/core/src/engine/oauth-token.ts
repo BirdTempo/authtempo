@@ -26,7 +26,7 @@ import { clientAccessOf, type OAuthClientAccess } from "./oauth-credentials.js";
 import { familyEnded, revokeFamily } from "./oauth-family.js";
 import { linkIdToken } from "./oauth-logout.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
-import { subjectFor, userOfSubject } from "./oauth-subject.js";
+import { sidFor, subjectFor, userOfSubject } from "./oauth-subject.js";
 import { consumeVerification } from "./verification.js";
 
 /**
@@ -319,7 +319,7 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
       iat,
       exp,
       at_hash: await tokenHashClaim(alg, access),
-      ...(g.sessionId !== null ? { sid: g.sessionId } : {}),
+      ...(g.sessionId !== null ? { sid: await sidFor(config, g.sessionId, g.client) } : {}),
       ...(g.nonce !== null ? { nonce: g.nonce } : {}),
       // OIDC Core 1.0 section 2: the time of the sign-in, not of the request.
       ...(g.authTime !== null ? { auth_time: g.authTime } : {}),

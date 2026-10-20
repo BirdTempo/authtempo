@@ -48,6 +48,7 @@ import {
   checkIdTokenHint,
   endSession,
   endSessionLimited,
+  hintNamesSession,
   logoutRedirect,
 } from "../../engine/oauth-logout.js";
 import { type OAuthResult, oauthFail } from "../../engine/oauth-result.js";
@@ -573,7 +574,8 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         ctx.request.method === "POST" &&
         params.get("confirm") === "yes" &&
         ctx.request.headers.get("origin") === config.baseURL;
-      if (!confirmed && (hint === null || hint.sid !== resolved.session.id)) {
+      const named = hint !== null && (await hintNamesSession(config, hint, resolved.session.id));
+      if (!confirmed && !named) {
         // Section 2: with no valid hint of this session, ask the person first.
         const fields: Record<string, string> = {};
         for (const name of ["id_token_hint", "client_id", "post_logout_redirect_uri", "state"]) {

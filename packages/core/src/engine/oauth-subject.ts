@@ -1,7 +1,8 @@
 import type { ResolvedConfig } from "../config.js";
-import { randomBase64Url } from "../primitives/crypto.js";
+import { constantTimeEqual, hmacSha256Hex, randomBase64Url } from "../primitives/crypto.js";
 import { isIpLiteral, isLocalHost } from "../primitives/host.js";
 import { newId } from "../primitives/ids.js";
+import { currentSecret } from "../primitives/keyring.js";
 import type { OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 
@@ -134,4 +135,62 @@ export async function userOfSubject(
     { field: "subject", op: "eq", value: sub },
   ]);
   return row !== null && row.sector === sectorOf(client) ? row.userId : null;
+}
+
+/** The domain of the keyed hash of a sid, so no other keyed hash of the app secret can equal one. */
+const SID_TAG = "authtempo-oauth-sid";
+
+/** The sector of a pairwise client. The metadata rule refuses a pairwise client with no sector. */
+function pairwiseSector(client: OAuthClientRow): string {
+  const sector = sectorOf(client);
+  if (sector === null) throw new Error("authtempo: a pairwise client has no sector");
+  return sector;
+}
+
+const sidUnder = (secret: string, sector: string, sessionId: string) =>
+  hmacSha256Hex(secret, `${SID_TAG}\n${sector}\n${sessionId}`);
+
+/**
+ * The `sid` of a session for `client` in an ID token and a logout token
+ * (review M2 of plan 12e). A public client gets the session id. A pairwise
+ * client gets a keyed hash of its sector and the session id under the
+ * current secret, as the user code hash is. Two sectors see two values, so
+ * two relying parties cannot join their users by `sid` (OIDC Core 1.0
+ * section 8). One sector sees one value for the life of the session.
+ *
+ * A new secret version changes the value. A logout token after a rotation
+ * then names a `sid` that the client did not get. The token still holds
+ * the pairwise `sub`, which Back-Channel Logout 1.0 section 2.4 lets the
+ * client read.
+ */
+export async function sidFor(
+  config: ResolvedConfig,
+  sessionId: string,
+  client: OAuthClientRow,
+): Promise<string> {
+  if (client.subjectType === "public") return sessionId;
+  return sidUnder(currentSecret(config.keyring), pairwiseSector(client), sessionId);
+}
+
+/**
+ * True when `sid` from an ID token of `client` names the session
+ * `sessionId`. For a pairwise client the hash runs under each version that
+ * the keyring holds, so a hint from before a new secret version still
+ * matches. The values of the keyring are distinct, so no second version
+ * can match by chance.
+ */
+export async function sidNames(
+  config: ResolvedConfig,
+  sid: string,
+  sessionId: string,
+  client: OAuthClientRow,
+): Promise<boolean> {
+  if (client.subjectType === "public") return sid === sessionId;
+  const sector = pairwiseSector(client);
+  for (const version of config.keyring.versions) {
+    const secret = config.keyring.valueOf(version);
+    if (secret !== null && constantTimeEqual(await sidUnder(secret, sector, sessionId), sid))
+      return true;
+  }
+  return false;
 }

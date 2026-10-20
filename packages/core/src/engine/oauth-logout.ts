@@ -6,7 +6,7 @@ import type { OAuthClientRow, OAuthLogoutRow, SessionRow } from "../schema.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { findClient } from "./oauth-clients.js";
 import { endSessionById, linkSession, queueLogouts } from "./oauth-outbox.js";
-import { storedSubject, userOfSubject } from "./oauth-subject.js";
+import { sidFor, sidNames, storedSubject, userOfSubject } from "./oauth-subject.js";
 import { sessionsEnded } from "./sessions.js";
 
 /**
@@ -21,14 +21,25 @@ export const endSessionLimited = async (config: ResolvedConfig, ip: string | nul
   !(await config.limiter.allow(`oauth-end-session:ip:${ipKey(ip)}`, END_SESSION_PER_IP));
 
 /**
- * What a valid `id_token_hint` names. `clientId` is its `aud`. `sid` is the
- * session of the sign-in, or null when the code had no session. `sub` is the
- * user id: a pairwise subject is mapped back to its user.
+ * What a valid `id_token_hint` names. `clientId` is its `aud`, and `client`
+ * its row. `sid` is the `sid` of the token as the client got it, or null
+ * when the code had no session: `hintNamesSession` maps it to a session.
+ * `sub` is the user id: a pairwise subject is mapped back to its user.
  */
 export interface IdTokenHint {
   clientId: string;
+  client: OAuthClientRow;
   sid: string | null;
   sub: string;
+}
+
+/** True when the hint names the session `sessionId`. A pairwise client holds its own sid (review M2 of plan 12e). */
+export async function hintNamesSession(
+  config: ResolvedConfig,
+  hint: IdTokenHint,
+  sessionId: string,
+): Promise<boolean> {
+  return hint.sid !== null && sidNames(config, hint.sid, sessionId, hint.client);
 }
 
 /**
@@ -54,7 +65,7 @@ export async function checkIdTokenHint(
   if (!client) return null;
   const userId = await userOfSubject(config, p.sub, client);
   if (userId === null) return null;
-  return { clientId: client.id, sid: p.sid ?? null, sub: userId };
+  return { clientId: client.id, client, sid: p.sid ?? null, sub: userId };
 }
 
 /**
@@ -189,8 +200,8 @@ export async function linkIdToken(
 }
 
 /**
- * The logout token of one outbox row (section 2.4). `sub` is the subject
- * that the client knows. An account delete removes a pairwise subject first.
+ * The logout token of one outbox row (section 2.4). `sub` and `sid` are
+ * the values that the client knows. An account delete removes a pairwise subject first.
  * Then the token holds `sid` alone, which section 2.4 allows. It never holds
  * a nonce.
  */
@@ -209,7 +220,7 @@ export async function logoutToken(
     jti: randomBase64Url(16),
     events: { [LOGOUT_EVENT]: {} },
     ...(sub !== null ? { sub } : {}),
-    sid: row.sessionId,
+    sid: await sidFor(config, row.sessionId, client),
   });
 }
 
