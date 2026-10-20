@@ -280,9 +280,14 @@ describe("the logouts of the operator acts and the sweep on D1 with a cap of 50 
     for (let i = 0; i < 45; i++) sessions.push(await signIn(setup, mail, "ada@example.com"));
     const publicClient = await client(setup, "public", false);
     const pairwiseClient = await client(setup, "pairwise", true);
+    // Each link gets its own millisecond, so the link step reads the links in the order of this
+    // loop. With one time for all, the random part of each id set the order, and the sweep count
+    // changed by run: 21 or 22 in the runs of 2026-10-21 (ruling 55 of plan 12f).
     for (const s of sessions) {
       await link(setup, s.token, publicClient);
+      current = new Date(current.getTime() + 1);
       await link(setup, s.token, pairwiseClient);
+      current = new Date(current.getTime() + 1);
     }
     expect(await rows("ta_oauth_session_client")).toBe(90);
     // The app ends all sessions: a page with a hook has no room for links, so each link stays.
@@ -318,9 +323,18 @@ describe("the logouts of the operator acts and the sweep on D1 with a cap of 50 
     // read of the pending-end rows (ruling 50 of plan 12f) takes 1 call: it was 17 before.
     for (const s of sweeps) expect(s.queries + s.posts).toBeLessThanOrEqual(50);
     expect(sweeps.slice(0, 5).map((s) => s.links)).toEqual([16, 16, 16, 16, 16]);
-    // All 90 rows are sent and deleted within 21 sweeps: 21 hours with an hourly cron. The
-    // order of links with one time can differ by run, so a run can take fewer. The bound was
-    // 20 before the read of the pending-end rows (ruling 50 of plan 12f): a run of 2026-10-21 took 21.
+    // The posts of each sweep, the same in each run. The outbox rows of one link page have one
+    // due time, and the read gives them in the order of the page. A pairwise row costs 1 call more
+    // than a public row: the read of its subject. The outbox step reserves 9 calls for the next
+    // row, so a page that starts with a pairwise row sends 1 row, not 2. The link sweeps 1 to 6
+    // make 16, 16, 16, 16, 16, and 10 rows and send 2, 2, 2, 2, 2, and 3. Then 5 or 6 rows a
+    // sweep fit beside the 12 fixed steps and the pending-end read.
+    expect(sweeps.map((s) => s.posts)).toEqual([
+      2, 2, 2, 2, 2, 3, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6,
+    ]);
+    // All 90 rows are sent and deleted within 21 sweeps: 21 hours with an hourly cron. This loop
+    // takes 20. When each page starts with a pairwise row, it takes 21 (measured 2026-10-21). The
+    // bound was 20 before the read of the pending-end rows (ruling 50 of plan 12f).
     expect(sweeps.length).toBeLessThanOrEqual(21);
     // Each link gave one post: no row went out twice.
     const sent = posts.map((p) => `${p.aud}:${p.sid}`);
@@ -346,9 +360,13 @@ describe("the logouts of the operator acts and the sweep on D1 with a cap of 50 
     for (let i = 0; i < 45; i++) sessions.push(await signIn(setup, mail, "ada@example.com"));
     const publicClient = await client(setup, "public", false);
     const pairwiseClient = await client(setup, "pairwise", true);
+    // Each link gets its own millisecond, so the order of the links, and the count of each sweep,
+    // is the same in each run (ruling 55 of plan 12f).
     for (const s of sessions) {
       await link(setup, s.token, publicClient);
+      current = new Date(current.getTime() + 1);
       await link(setup, s.token, pairwiseClient);
+      current = new Date(current.getTime() + 1);
     }
     const ended = await engine(env.DB, mail).auth.api.operator.sessions.endAll({
       actor: APP,
@@ -403,7 +421,9 @@ describe("the logouts of the operator acts and the sweep on D1 with a cap of 50 
     expect(sweeps.length).toBeLessThanOrEqual(90);
     // Measured 2026-10-21: 7 link rows and 3 idle clients a sweep, at most 46 calls, and the last row
     // at sweep 24. Before the change, sweeps 1 to 6 made no link row, and the last row went out at
-    // sweep 27 (review m1, probe N2).
+    // sweep 27 (review m1, probe N2). On d791dbe0 (2026-10-21), sweeps 1 to 10 make 6 link rows
+    // each, and the last row goes out at sweep 26 in each run.
+    expect(sweeps.length).toBe(26);
     expect(sweeps.length).toBeLessThanOrEqual(30);
     const sent = posts.map((p) => `${p.aud}:${p.sid}`);
     expect(sent).toHaveLength(90);
