@@ -403,6 +403,56 @@ describe("the differential test against xml-crypto 6.3.3", () => {
     expect(xmlCryptoAccepts(byIdp, idp)).toBe(true);
   });
 
+  // Review m2 of Task 7: the shape that Shibboleth writes. The prefix xs is declared on the
+  // Response only, and only an xsi:type value uses it. So only a PrefixList puts it in the
+  // canonical bytes, and a changed binding of xs changes those bytes.
+  it.each<[string, string, { reference: string[]; signedInfo: string[] }]>([
+    ["the Reference", "reference", { reference: ["xs"], signedInfo: [] }],
+    ["SignedInfo", "signature", { reference: [], signedInfo: ["xs"] }],
+  ])(
+    "accepts a PrefixList of xml-crypto on %s, and a changed binding answers %s",
+    async (_place, step, lists) => {
+      const unsigned = await idp.response(validInput(now, { signAssertion: false }));
+      const declared = unsigned.replace(
+        "<samlp:Response ",
+        `<samlp:Response xmlns:xs="${NS_XS}" xmlns:xsi="${NS_XSI}" `,
+      );
+      const typed = declared.replace(
+        "<saml:AttributeValue>",
+        '<saml:AttributeValue xsi:type="xs:string">',
+      );
+      expect(typed).toContain('xsi:type="xs:string"');
+      const id = attrId(assertionOf(typed));
+      const signer = new SignedXml({
+        privateKey: idp.privateKeyPem,
+        canonicalizationAlgorithm: DSIG_ALGORITHMS.c14n,
+        signatureAlgorithm: DSIG_ALGORITHMS.rsaSha256,
+        inclusiveNamespacesPrefixList: lists.signedInfo,
+      });
+      signer.addReference({
+        xpath: `//*[@ID='${id}']`,
+        transforms: [DSIG_ALGORITHMS.enveloped, DSIG_ALGORITHMS.c14n],
+        digestAlgorithm: DSIG_ALGORITHMS.sha256,
+        inclusiveNamespacesPrefixList: lists.reference,
+      });
+      signer.computeSignature(typed, {
+        location: { reference: `//*[@ID='${id}']/*[local-name(.)='Issuer']`, action: "after" },
+      });
+      const out = signer.getSignedXml();
+      // xml-crypto writes the list once, in the place of this row.
+      expect(out.split('PrefixList="xs"').length).toBe(2);
+      // The CanonicalizationMethod of SignedInfo comes before the Reference.
+      const referenceAt = out.indexOf("Reference URI=");
+      expect(referenceAt).toBeGreaterThan(0);
+      expect(out.indexOf('PrefixList="xs"') < referenceAt).toBe(lists.signedInfo.length > 0);
+      expect(xmlCryptoAccepts(out, idp)).toBe(true);
+      expect(await verifyEnveloped(assertionOf(out), [key])).toEqual({ ok: true });
+      const moved = out.replace(`xmlns:xs="${NS_XS}"`, 'xmlns:xs="urn:example:other"');
+      expect(moved).not.toBe(out);
+      expect(await verifyEnveloped(assertionOf(moved), [key])).toEqual({ ok: false, step });
+    },
+  );
+
   // Two findings of 2026-10-20 (test/saml/fixtures/real/FINDINGS.md): xml-crypto 6.3.3
   // sorts namespace declarations by `String.prototype.localeCompare` (case-insensitive
   // first), and attributes by the joined text of namespace URI and local name. Canonical XML
