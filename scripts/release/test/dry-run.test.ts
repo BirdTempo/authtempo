@@ -391,6 +391,30 @@ describe("dry run", () => {
     );
   });
 
+  it("fails when npm publish exits 0 and prints no + line", async () => {
+    // An exit code alone is a claim: the + line names what npm would publish.
+    const { root, tmp } = setup();
+    const f = fake({
+      "npm publish": (c) =>
+        c.args[1]?.includes("authtempo-core-")
+          ? {
+              status: 0,
+              stdout: "",
+              stderr:
+                "npm notice Publishing to http://127.0.0.1:9 with tag latest and public access (dry-run)\n",
+            }
+          : undefined,
+    });
+    const report = await dryRun({ root, run: f.run, tmp });
+    expect(failuresOf(report)).toEqual([
+      "@authtempo/core@0.1.0: npm publish --dry-run does not print + @authtempo/core@0.1.0",
+    ]);
+    expect(dryRunLine(report)).toBe(
+      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=1",
+    );
+    expect(f.calls.map((c) => c.kind)).not.toContain("pnpm publish");
+  });
+
   it("prints each failure line of a failed step", async () => {
     // Before Task 3b of plan 12j, 22 released packages have no engines, and the
     // person needs each name, not the last line only.
