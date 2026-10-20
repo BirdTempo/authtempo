@@ -87,7 +87,7 @@ Then run `authtempo sessions end <base url> <user id> --reason "<reason>" --yes`
 
 - [`not_found`](/docs/reference/errors/#not_found): no user has the id, or the user tools are off.
 - [`unauthorized`](/docs/reference/errors/#unauthorized): the secret is wrong, or its hash is not in `operator.secrets`.
-- [`operator_required`](/docs/reference/errors/#operator_required): the entry lacks the scope `users`.
+- [`operator_required`](/docs/reference/errors/#operator_required): the entry lacks the scope of the command: `users` for `users`, `audit` for `audit list`, or `sessions` for `sessions end`.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): the 600 calls of this hour from this IP, or of this secret, are spent.
 - [`invalid_body`](/docs/reference/errors/#invalid_body): the reason or the date breaks its rule.
 - [`conflict`](/docs/reference/errors/#conflict): another change of the user ran at the same time. Run the command again.
