@@ -45,7 +45,11 @@ const DAY_MS = 86_400_000;
  */
 const ROTATE_DUE: { readonly rotateDue: true } = Object.freeze({ rotateDue: true });
 
-/** The claims a session JWT carries from core. `jwtMint.claims` adds names, never these. */
+/**
+ * The claims a session JWT carries from core. `jwtMint.claims` adds names,
+ * never these. `act` names the operator of an impersonation session (plan
+ * 12f), so no app claim can forge or hide it.
+ */
 export const RESERVED_CLAIMS: ReadonlySet<string> = new Set([
   "iss",
   "sub",
@@ -59,6 +63,7 @@ export const RESERVED_CLAIMS: ReadonlySet<string> = new Set([
   "email_verified",
   "name",
   "org",
+  "act",
 ]);
 
 export interface SessionJwtClaims {
@@ -72,6 +77,8 @@ export interface SessionJwtClaims {
   email_verified: boolean;
   name: string | null;
   org: string | null;
+  /** The operator of an impersonation session (RFC 8693 section 4.1, plan 12f). Absent otherwise. */
+  act?: { sub: string };
   [claim: string]: unknown;
 }
 
@@ -346,7 +353,12 @@ export async function mintSessionJwt(
   if (extra === null) return fail("hook_failed");
   const own = Object.fromEntries(Object.entries(extra).filter(([k]) => !RESERVED_CLAIMS.has(k)));
   const iat = Math.floor(now.getTime() / 1000);
-  const exp = iat + mint.ttlMinutes * 60;
+  // An impersonation session ends at its fixed expiry, so its JWT ends no
+  // later (plan 12f deviation 10). Other session JWTs keep the ttl of spec 8.12.
+  const exp =
+    session.actorId === null
+      ? iat + mint.ttlMinutes * 60
+      : Math.min(iat + mint.ttlMinutes * 60, Math.floor(session.expiresAt.getTime() / 1000));
   const claims: SessionJwtClaims = {
     ...own,
     iss: issuerOf(config),
@@ -359,6 +371,8 @@ export async function mintSessionJwt(
     email_verified: user.emailVerified,
     name: user.name,
     org: session.activeOrganizationId,
+    // RFC 8693 section 4.1: the actor who acts for the subject.
+    ...(session.actorId === null ? {} : { act: { sub: session.actorId } }),
   };
   return ok({
     token: await signToken(config, SESSION_JWT_TYPE, claims),

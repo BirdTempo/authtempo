@@ -50,6 +50,12 @@ export interface SessionSummary {
   activeOrganizationId: string | null;
   /** True for the session of the caller. */
   current: boolean;
+  /**
+   * True for a session that a platform operator opened for support (plan
+   * 12f, spec 26 item 9). The list names no operator: the user sees the
+   * mark, and the audit row holds the operator.
+   */
+  impersonation: boolean;
 }
 
 /**
@@ -78,6 +84,7 @@ export async function listSessions(
       userAgent: s.userAgent,
       activeOrganizationId: s.activeOrganizationId,
       current: s.id === input.session.session.id,
+      impersonation: s.actorId !== null,
     })),
   );
 }

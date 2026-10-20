@@ -84,7 +84,7 @@ describe("openApiDocument (plan 11g)", () => {
     const keys = operations(doc).map((o) => o.key);
     expect(new Set(keys).size).toBe(keys.length);
     expect([...keys].sort()).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(119);
+    expect(keys.length).toBe(121);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(":provider", "{provider}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -165,14 +165,19 @@ describe("openApiDocument (plan 11g)", () => {
   });
 
   it("marks the rewrap body as not required, and every other body as required", () => {
-    // The rewrap reads an empty body as `{}` (plan 11c2), so its body is the one that is not required.
+    // The rewrap reads an empty body as `{}` (plan 11c2), and so does the stop of an
+    // impersonation (plan 12f): their bodies are the ones that are not required.
     const optional = operations(reference())
       .filter(({ op }) => op.requestBody?.required === false)
       .map(({ key }) => key);
-    expect(optional).toEqual(["POST /operator/secrets/rewrap"]);
+    expect(optional.sort()).toEqual([
+      "POST /operator/impersonate/stop",
+      "POST /operator/secrets/rewrap",
+    ]);
     const bodies = operations(reference()).filter(({ op }) => op.requestBody !== undefined);
-    // Plan 12f adds the seven bodies of the operator writes: 64 became 71.
-    expect(bodies.length).toBe(71);
+    // Plan 12f adds the seven bodies of the operator writes, then the two of
+    // the impersonation: 64 became 73.
+    expect(bodies.length).toBe(73);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -195,8 +200,13 @@ describe("openApiDocument (plan 11g)", () => {
     );
     expect(codes["401"]).toEqual(["unauthorized"]);
     expect(codes["429"]).toEqual(["rate_limited"]);
-    // Plan 12f: a secret with no scope keys answers 403 operator_required.
-    expect(codes["403"]).toEqual(["operator_required", "origin_not_trusted"]);
+    // Plan 12f: a secret with no scope keys answers 403 operator_required, and
+    // an impersonation session answers 403 impersonation_session.
+    expect(codes["403"]).toEqual([
+      "operator_required",
+      "impersonation_session",
+      "origin_not_trusted",
+    ]);
   });
 
   it("documents the 303 of a form post that the browser follows with a GET", () => {
@@ -385,8 +395,9 @@ describe("openApiDocument (plan 11g)", () => {
         queries++;
       } else expect(params, key).toEqual([]);
     }
-    // Plan 12f adds 11 JSON answers, 7 bodies, and 4 queries of the operator routes.
-    expect([answers, bodies, queries]).toEqual([95, 71, 20]);
+    // Plan 12f adds 11 JSON answers, 7 bodies, and 4 queries of the operator
+    // routes, then 2 answers and 2 bodies of the impersonation.
+    expect([answers, bodies, queries]).toEqual([97, 73, 20]);
   });
 
   it("takes the request_id form of the authorize query", () => {

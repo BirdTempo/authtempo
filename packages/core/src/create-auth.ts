@@ -70,6 +70,7 @@ import {
 import { listGrants, type OAuthGrantSummary, revokeGrant } from "./engine/oauth-grants.js";
 import { deliverLogouts } from "./engine/oauth-logout.js";
 import type { OAuthResult } from "./engine/oauth-result.js";
+import { refuseImpersonation } from "./engine/operator/impersonation.js";
 import { type OperatorApi, operatorApi } from "./engine/operator/index.js";
 import {
   addMember,
@@ -190,7 +191,7 @@ import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
 import { createWellKnownHandler } from "./http/well-known.js";
 import type { PublicJwk } from "./primitives/jwk.js";
-import type { Result } from "./result.js";
+import { fail, type Result } from "./result.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
@@ -603,6 +604,21 @@ export interface Auth {
   errors: typeof ERRORS;
 }
 
+/**
+ * The in-process door of an act that the router refuses to an impersonation
+ * session (plan 12f, spec 26 item 9): `impersonation_session` for an input
+ * whose session has `actorId`, as the route answers. A call that takes a
+ * user, not a session, cannot tell; its route refuses.
+ */
+function refusesImpersonation<I extends { session: Pick<ResolvedSession, "session"> }, R>(
+  run: (input: I) => Promise<Result<R>>,
+): (input: I) => Promise<Result<R>> {
+  return async (input) => {
+    const refused = refuseImpersonation(input.session);
+    return refused.ok ? run(input) : fail(refused.code);
+  };
+}
+
 /** The POST gate of each Auth, for `crossSiteRefusal`. A WeakMap keeps it off the Auth type. */
 const gates = new WeakMap<Auth, (request: Request) => Response | null>();
 
@@ -639,7 +655,7 @@ export function createAuth(input: AuthConfig): Auth {
       requestMagicLink: (i) => requestMagicLink(config, i),
       verifyMagicLink: (i) => verifyMagicLink(config, i),
       startSocial: (i) => startSocial(config, i),
-      startLink: (i) => startLink(config, i),
+      startLink: refusesImpersonation((i) => startLink(config, i)),
       completeSocial: (i) => completeSocial(config, i),
       passkeyRegistrationOptions: (i) => passkeyRegistrationOptions(config, i),
       verifyPasskeyRegistration: (i) => verifyPasskeyRegistration(config, i),
@@ -678,9 +694,9 @@ export function createAuth(input: AuthConfig): Auth {
       },
       session: {
         requireFresh: (resolved) => requireFresh(config, resolved.session),
-        reauthenticate: (i) => reauthenticate(config, i),
-        requestReauthCode: (i) => requestReauthCode(config, i),
-        reauthPasskeyOptions: (i) => reauthPasskeyOptions(config, i),
+        reauthenticate: refusesImpersonation((i) => reauthenticate(config, i)),
+        requestReauthCode: refusesImpersonation((i) => requestReauthCode(config, i)),
+        reauthPasskeyOptions: refusesImpersonation((i) => reauthPasskeyOptions(config, i)),
         list: (i) => listSessions(config, i),
         revoke: (i) => revokeSession(config, i),
         revokeOthers: (i) => revokeOtherSessions(config, i),
@@ -688,15 +704,15 @@ export function createAuth(input: AuthConfig): Auth {
       },
       user: {
         update: (i) => updateProfile(config, i),
-        changeEmail: (i) => requestEmailChange(config, i),
+        changeEmail: refusesImpersonation((i) => requestEmailChange(config, i)),
         confirmEmailChange: (i) => confirmEmailChange(config, i),
-        verifyEmailChange: (i) => verifyEmailChange(config, i),
-        delete: (i) => startAccountDelete(config, i),
-        confirmDelete: (i) => confirmAccountDelete(config, i),
+        verifyEmailChange: refusesImpersonation((i) => verifyEmailChange(config, i)),
+        delete: refusesImpersonation((i) => startAccountDelete(config, i)),
+        confirmDelete: refusesImpersonation((i) => confirmAccountDelete(config, i)),
       },
       identities: {
         list: (i) => listIdentities(config, i),
-        unlink: (i) => unlinkIdentity(config, i),
+        unlink: refusesImpersonation((i) => unlinkIdentity(config, i)),
       },
       secrets: {
         status: () => secretsStatus(config),
@@ -712,7 +728,7 @@ export function createAuth(input: AuthConfig): Auth {
               resendVerification: (i) => resendPasswordVerification(config, i),
               requestReset: (i) => requestPasswordReset(config, i),
               reset: (i) => resetPassword(config, i),
-              change: (i) => changePassword(config, i),
+              change: refusesImpersonation((i) => changePassword(config, i)),
               verify: (i) => verifyPassword(config, i),
             },
           }
@@ -731,7 +747,7 @@ export function createAuth(input: AuthConfig): Auth {
         ? {
             totp: {
               setup: (i) => setupTotp(config, i),
-              enable: (i) => enableTotp(config, i),
+              enable: refusesImpersonation((i) => enableTotp(config, i)),
               verify: (i) => verifyTwoFactor(config, i),
               disable: (i) => disableTotp(config, i),
               disableWithCode: (i) => disableTotpWithCode(config, i),

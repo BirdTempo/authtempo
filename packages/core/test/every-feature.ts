@@ -57,14 +57,14 @@ export function everyFeature(): ResolvedConfig {
     social: SOCIAL,
     passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] },
     handoff: { schemes: ["example://"] },
-    organizations: {},
+    organizations: { platformRole: "owner", platformOrganization: "platform-co" },
     password: {},
     oauth: {
       resources: [`${BASE}/mcp`],
       registration: { cimd: false, dynamic: true },
       device: {},
     },
-    // A secret with every scope, and the user tools of plan 12f.
+    // A secret with every scope, the user tools, and the impersonation of plan 12f.
     operator: {
       secrets: [
         {
@@ -74,6 +74,7 @@ export function everyFeature(): ResolvedConfig {
         },
       ],
       users: true,
+      impersonation: {},
     },
     openapi: true,
   });

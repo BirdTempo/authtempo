@@ -82,7 +82,7 @@ more request headers go in the fifth.
 
 | Operation | Route | Answer type |
 | --- | --- | --- |
-| `client.session()` | `GET /session` | `ClientResult<PublicSession \| null>`. A 401 gives `null`, not a failure. With core's `session.deferRefresh` on, the session holds `needsRefresh`. |
+| `client.session()` | `GET /session` | `ClientResult<PublicSession \| null>`. A 401 gives `null`, not a failure. With core's `session.deferRefresh` on, the session holds `needsRefresh`. `session.actorId` is the operator's user id in an impersonation session, else null. |
 | `client.session.refresh()` | `POST /session/refresh` | As `session()`. It slides the expiry and renews the cookie when the refresh is due. The store reads again. The store's own read calls it when `needsRefresh` is true, and keeps the GET answer if it fails. Call it yourself after a direct `session()`. |
 | `client.signOut()` | `POST /sign-out` | `ClientResult<{ ok: true }>` |
 | `client.readRedirectError(url)` | none | The code of `?auth_error=<code>`: an `ErrorCode` or an `OAuthErrorCode`, because core's OAuth sign-in route sends a code of `OAUTH_ERRORS`. `unexpected` for a code that neither table has, or `null` |
@@ -329,7 +329,7 @@ Each one needs a session, except `user.confirmEmailChange`.
 
 | Operation | Route | Answer type |
 | --- | --- | --- |
-| `client.sessions.list()` | `GET /sessions` | `ClientResult<SessionSummaryJSON[]>`, newest first. `current` marks the caller's session |
+| `client.sessions.list()` | `GET /sessions` | `ClientResult<SessionSummaryJSON[]>`, newest first. `current` marks the caller's session. `impersonation` marks a session that a platform operator opened, and names no operator |
 | `client.sessions.revoke({ id })` | `POST /sessions/revoke` | `ClientResult<{ ok: true, current }>`. See the rule below the table |
 | `client.sessions.revokeOthers()` | `POST /sessions/revoke-others` | `ClientResult<{ ended }>`, the count of ended sessions |
 | `client.reauth.password({ password, code? })` | `POST /reauth` | `ClientResult<FreshJSON>`. `code` is the second factor, while it is on |

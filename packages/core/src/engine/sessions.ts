@@ -124,6 +124,18 @@ export interface SessionInput {
   activeOrganizationId?: string | null;
   /** The last sign-in, when it is older than the session: a handoff (plan 12e ruling 41). Default now. */
   freshAt?: Date;
+  /** Set only through `openSession` for an impersonation (plan 12f). */
+  impersonation?: SessionImpersonation;
+}
+
+/**
+ * The marks of an impersonation session (plan 12f, spec 26 item 9): the
+ * operator's user id and the fixed expiry. The row gets no fresh time, so
+ * every change behind the fresh rule refuses it.
+ */
+export interface SessionImpersonation {
+  actorId: string;
+  expiresAt: Date;
 }
 
 /** What an engine flow passes to `openSession` (plan 9d). */
@@ -138,6 +150,8 @@ export interface SessionOpen {
    * sign-in (plan 12e ruling 41). Default now.
    */
   signedInAt?: Date;
+  /** The marks of an impersonation session, with `via: "impersonation"` (plan 12f). */
+  impersonation?: SessionImpersonation;
 }
 
 export interface ResolvedSession {
@@ -169,13 +183,14 @@ export async function createSession(
     id: newId(now),
     userId: input.userId,
     tokenHash: await sha256Hex(token),
-    expiresAt: sessionExpiry(config, now, now),
+    expiresAt: input.impersonation?.expiresAt ?? sessionExpiry(config, now, now),
     lastSeenAt: now,
     ip: input.ip,
     userAgent: input.userAgent,
     activeOrganizationId: input.activeOrganizationId ?? null,
-    freshAt: input.freshAt ?? now,
-    actorId: null,
+    // An impersonation session is never fresh (plan 12f, spec 26 item 9).
+    freshAt: input.impersonation ? null : (input.freshAt ?? now),
+    actorId: input.impersonation?.actorId ?? null,
     createdAt: now,
     updatedAt: now,
   });
@@ -272,8 +287,9 @@ export async function prepareSession(
     via: input.via,
   });
   const patched = await patchedInput(config, storage, draft, patch);
+  const signedIn = input.signedInAt ? { ...patched, freshAt: input.signedInAt } : patched;
   const prepared = {
-    input: input.signedInAt ? { ...patched, freshAt: input.signedInAt } : patched,
+    input: input.impersonation ? { ...signedIn, impersonation: input.impersonation } : signedIn,
   };
   // After the hook: the hold is a write, and a before hook runs before the
   // first write (the D1 undo). Before the flow's other writes: the lock order.
@@ -462,7 +478,8 @@ export function readModeOf(
  * deleted on the way out. After `slidingRefreshDays` the expiry moves
  * forward by a full ttl. In `"read-only"` mode the call writes nothing: an
  * ended row answers null and stays for the sweep, and a due refresh sets
- * `needsRefresh`. No mode changes `freshAt`.
+ * `needsRefresh`. No mode changes `freshAt`. An impersonation session (with
+ * `actorId`) is never due: its expiry is fixed at the start (plan 12f).
  *
  * A session from before the end of the user's last ban answers null (plan
  * 12f, `bannedFor`). The ban ended every session in its transaction, so
@@ -506,7 +523,7 @@ export async function resolveSession(
     return null;
   }
   const sinceSeen = now.getTime() - session.lastSeenAt.getTime();
-  const due = sinceSeen >= config.session.slidingRefreshDays * DAY_MS;
+  const due = session.actorId === null && sinceSeen >= config.session.slidingRefreshDays * DAY_MS;
   if (!write) return { user, session, refreshed: false, needsRefresh: due };
   if (due) {
     const expiresAt = sessionExpiry(config, session.createdAt, now);
@@ -614,10 +631,19 @@ export function publicUser(user: UserRow): {
 /** The public shape of a user (plan 12a: the profile and the change of address answer it). */
 export type PublicUser = ReturnType<typeof publicUser>;
 
-/** The public shape of a session. Never the hash, never internal ids a client does not need. */
+/**
+ * The public shape of a session. Never the hash, never internal ids a client
+ * does not need. `actorId` is the operator's user id for an impersonation
+ * session, else null (plan 12f): the page of the app shows the mark.
+ */
 export function publicSession(resolved: ResolvedSession): {
   user: ReturnType<typeof publicUser>;
-  session: { id: string; expiresAt: string; activeOrganizationId: string | null };
+  session: {
+    id: string;
+    expiresAt: string;
+    activeOrganizationId: string | null;
+    actorId: string | null;
+  };
 } {
   const { user, session } = resolved;
   return {
@@ -626,6 +652,7 @@ export function publicSession(resolved: ResolvedSession): {
       id: session.id,
       expiresAt: session.expiresAt.toISOString(),
       activeOrganizationId: session.activeOrganizationId,
+      actorId: session.actorId,
     },
   };
 }

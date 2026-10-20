@@ -15,6 +15,19 @@ export const rewrapBody = z.strictObject({
   after: z.string().optional(),
 });
 
+/**
+ * The body of an impersonation start (plan 12f Task 11): the target and the
+ * operator's reason. The engine checks the reason (1 to 500 characters, no
+ * control character); the id bound keeps a read short.
+ */
+export const impersonateBody = z.strictObject({
+  userId: z.string().min(1).max(64),
+  reason: z.string(),
+});
+
+/** The body of a stop: an optional reason. An empty body is `{}`. */
+export const impersonateStopBody = z.strictObject({ reason: z.string().optional() });
+
 /** The row count of one secret version, as `secretsStatus` answers it. */
 const SecretVersionCountJson = z.strictObject({
   version: z.number().int(),
@@ -237,6 +250,26 @@ export const OPERATOR_CONTRACT = {
     answer: {
       kind: "json",
       schema: z.strictObject({ rows: z.array(OperatorAuditJson), next: z.string().nullable() }),
+    },
+  },
+  // A bearer caller gets the token in the body; a cookie caller gets it in the cookie only.
+  "POST /operator/impersonate": {
+    body: { schema: impersonateBody, media: ["json"], parsedBy: "zod" },
+    answer: {
+      kind: "json",
+      schema: z.strictObject({
+        token: z.string().optional(),
+        expiresAt: z.iso.datetime(),
+        auditId: z.string(),
+      }),
+    },
+  },
+  // restored: the answer set the session cookie back to the operator's token.
+  "POST /operator/impersonate/stop": {
+    body: { schema: impersonateStopBody, media: ["json"], parsedBy: "zod", optional: true },
+    answer: {
+      kind: "json",
+      schema: z.strictObject({ auditId: z.string(), restored: z.boolean() }),
     },
   },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;

@@ -67,8 +67,9 @@ describe("the demo lists and the routes of core", () => {
       // Count what ran: the routes of the eight exempt features. Plan 12e added
       // three oauth routes (GET and POST /oauth/end-session, POST /oauth/introspect)
       // and the three routes of oauthDevice, so 24 became 30. Plan 12f adds the
-      // eleven routes of operatorUsers, so 30 became 41.
-      expect(checked).toBe(41);
+      // eleven routes of operatorUsers and the two routes of
+      // operatorImpersonation, so 30 became 43.
+      expect(checked).toBe(43);
     },
     LONG_TEST_MS,
   );

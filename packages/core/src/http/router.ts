@@ -4,6 +4,7 @@ import { peekSession, sessionCapMs } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { appErrorName } from "../primitives/app-error.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
+import { impersonationRefusal } from "./impersonation-rules.js";
 import { json } from "./json.js";
 import type { RouteKey, RouterCode } from "./route-list.js";
 
@@ -189,7 +190,9 @@ export function createPostGate(
  * non-browser client and passes. A POST that `fetchMetadataRefuses` names
  * gets the same 403 (plan 12b). A route with `clientOrigin` checks a
  * foreign Origin itself, and a route with `preflight` answers a foreign
- * preflight itself (plan 11d).
+ * preflight itself (plan 11d). An impersonation session gets 403
+ * `impersonation_session` at each route of `IMPERSONATION_REFUSED`, after
+ * the Origin rules and before the handler (plan 12f).
  */
 export function createRouter(
   config: ResolvedConfig,
@@ -268,6 +271,9 @@ export function createRouter(
     if (!route) return routerError("not_found");
     const refusal = gate(request);
     if (refusal) return refusal;
+    // The impersonation step (plan 12f): after the match, before the handler.
+    const impersonated = route.key && (await impersonationRefusal(config, request, route.key));
+    if (impersonated) return impersonated;
     return route.handler({
       request,
       url,

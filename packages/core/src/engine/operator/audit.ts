@@ -4,7 +4,7 @@ import { appErrorName } from "../../primitives/app-error.js";
 import { newId } from "../../primitives/ids.js";
 import { hasControlChar, removeControlChars } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
-import type { OperatorAction, OperatorAuditRow, SessionRow } from "../../schema.js";
+import type { OperatorAction, OperatorAuditRow, SessionRow, UserRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
 import { HookStop, hookGuard, runAfter, runBefore } from "../hooks.js";
 import { endFamilies, type FamilyEnds, familyEnds } from "../oauth-family.js";
@@ -73,6 +73,13 @@ export function operatorReason(raw: unknown): Result<string> {
 }
 
 /**
+ * The actor of an audit row. A user actor needs the user id only: the stop
+ * of an impersonation (plan 12f Task 11) names the operator of the session
+ * row, whose user row it does not read.
+ */
+export type AuditActor = OperatorActor | { kind: "user"; user: Pick<UserRow, "id"> };
+
+/**
  * The draft of one act. The actor is named by the secret's name, the user
  * id, or the app's name, never by a secret. An app name outside the rule of
  * `checkActor` answers `invalid_body`. The user agent loses each control
@@ -80,7 +87,7 @@ export function operatorReason(raw: unknown): Result<string> {
  * no character.
  */
 export function auditDraft(
-  actor: OperatorActor,
+  actor: AuditActor,
   input: {
     action: OperatorAction;
     targetUserId: string | null;
@@ -90,7 +97,7 @@ export function auditDraft(
     userAgent: string | null;
   },
 ): Result<OperatorAuditDraft> {
-  const named = checkActor(actor);
+  const named = actor.kind === "app" ? checkActor(actor) : ok(true);
   if (!named.ok) return named;
   const actorId = actor.kind === "user" ? actor.user.id : actor.name;
   const userAgent =

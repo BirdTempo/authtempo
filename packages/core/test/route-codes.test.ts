@@ -409,7 +409,9 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
       $deleteToken: deleteToken,
       $challenge: challenge,
     };
-    const routes = declaring("rate_limited");
+    // The impersonation start counts after the operator guard, so it needs a
+    // platform operator: operator-impersonation.test.ts answers its 429.
+    const routes = declaring("rate_limited").filter((key) => key !== "POST /operator/impersonate");
     expect(routes.length).toBeGreaterThan(0);
     w.limiter.refuse = true;
     const results = await probe(
@@ -944,6 +946,10 @@ const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "POST /operator/users/create-admin",
   "POST /operator/sessions/end-user",
   "POST /operator/sessions/end-all",
+  // The impersonation needs a platform operator and an impersonation session:
+  // operator-impersonation.test.ts drives both hook codes of each route.
+  "POST /operator/impersonate",
+  "POST /operator/impersonate/stop",
 ];
 
 /** A world whose before hooks all refuse, or all throw, once `armed`. The setup runs before. */

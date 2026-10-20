@@ -111,14 +111,16 @@ function world(secretHash = "0".repeat(64)) {
     passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL] },
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
-    organizations: {},
+    // The platform role turns on the impersonation routes (plan 12f).
+    organizations: { platformRole: "owner", platformOrganization: "platform-co" },
     oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true }, device: {} },
-    // One secret with every scope, and the user tools of plan 12f.
+    // One secret with every scope, the user tools, and the impersonation of plan 12f.
     operator: {
       secrets: [
         { name: "default", secretHash, scopes: ["keys", "secrets", "users", "sessions", "audit"] },
       ],
       users: true,
+      impersonation: {},
     },
     account: { deleteConfirm: { ttlMinutes: 60 } },
   });
@@ -326,6 +328,20 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
         ["POST /operator/sessions/end-user", { userId: id, reason: "case 1" }],
       ] as const
     ).map(([key, body]) => ({ key, body, headers: OPERATOR, refused: INVALID_BODY })),
+    // The session is no platform operator: the start answers operator_required after the body.
+    {
+      key: "POST /operator/impersonate",
+      body: { userId: id, reason: "Ticket 1" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    // The session is no impersonation: the stop answers not_found after the body.
+    {
+      key: "POST /operator/impersonate/stop",
+      body: { reason: "Done" },
+      session: true,
+      refused: INVALID_BODY,
+    },
     { key: "POST /reauth", body: { password: PASSWORD }, session: true, refused: INVALID_BODY },
     {
       key: "POST /user/update",
@@ -600,7 +616,7 @@ describe("the route contract (plan 11g)", () => {
   it("gives every route of ROUTES one contract, and no contract without a route", () => {
     const keys = Object.keys(ROUTE_CONTRACT).sort();
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(119);
+    expect(keys.length).toBe(121);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -1046,7 +1062,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
-    expect(withBody.length).toBe(63);
+    expect(withBody.length).toBe(65);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1072,7 +1088,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(61);
+    expect(refusals).toBe(63);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1090,7 +1106,7 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 55, both: 9, form: 7 });
+    expect(counts).toEqual({ json: 57, both: 9, form: 7 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

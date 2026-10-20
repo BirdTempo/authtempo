@@ -173,7 +173,11 @@ describe("checkRoutes", () => {
     const r = checkRoutes(
       edit("<td>Nothing</td>", "<td>No credential</td>")
         .replace('JSON <code dir="auto">{ email, next? }</code>', "Some JSON")
-        .replace("<td>None</td>\n</tr>\n</tbody>", "<td>No code</td>\n</tr>\n</tbody>"),
+        // The sign-out cell: plan 12f declares impersonation_session there.
+        .replace(
+          '<td><a href="/docs/reference/errors/#impersonation_session"><code dir="auto">impersonation_session</code></a></td>\n</tr>\n</tbody>',
+          "<td>No code</td>\n</tr>\n</tbody>",
+        ),
       routes,
       doc,
     );

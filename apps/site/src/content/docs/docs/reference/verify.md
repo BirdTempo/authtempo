@@ -58,6 +58,8 @@ sources:
 | `api-token` | A `tk_` bearer token | One call to `GET /tokens/current` | `user`, `apiToken` |
 | `session-token` | A `ts_` bearer token | One call to `GET /session`. Each check can extend the session, as a visit does. | `user`, `session` |
 
+An impersonation session (plan 12f) shows in two callers. A `session-jwt` caller has `claims.act`, `{ sub }` with the operator's user id (RFC 8693 section 4.1). A `session-token` caller has `session.actorId`, which is null for every other session.
+
 The `userId` of an `oauth` caller is the token's `sub`. That is the user id for a public client, and the pairwise subject (`ps_…`) for a pairwise client. Core's `auth.caller` names the same value `subject`, beside the user.
 
 A kind that `accept` does not list answers `null` with no call.

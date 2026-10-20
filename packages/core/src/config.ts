@@ -529,8 +529,8 @@ export interface JwtMintConfig {
   ttlMinutes?: number;
   /**
    * The app's own claims. A reserved name (`iss`, `sub`, `aud`, `iat`,
-   * `exp`, `nbf`, `jti`, `sid`, `email`, `email_verified`, `name`, `org`)
-   * never comes from here. A throw answers `hook_failed`.
+   * `exp`, `nbf`, `jti`, `sid`, `email`, `email_verified`, `name`, `org`,
+   * `act`) never comes from here. A throw answers `hook_failed`.
    */
   claims?: (
     user: UserRow,
@@ -1786,6 +1786,13 @@ function resolveOperator(
   };
 }
 
+/**
+ * The longest life of an impersonation session (spec 26 item 3). No
+ * impersonation session lives longer, so the start rows of this window name
+ * every live one (plan 12f Task 11).
+ */
+export const IMPERSONATION_TTL_MAX_MINUTES = 240;
+
 /** `operator.impersonation` (plan 12f). Null when absent. */
 function resolveImpersonation(
   input: OperatorConfig["impersonation"],
@@ -1805,7 +1812,11 @@ function resolveImpersonation(
   if (platformRole === null)
     throw new ConfigError("operator.impersonation needs organizations.platformRole");
   const ttlMinutes = input.ttlMinutes ?? 60;
-  if (!Number.isSafeInteger(ttlMinutes) || ttlMinutes < 5 || ttlMinutes > 240)
+  if (
+    !Number.isSafeInteger(ttlMinutes) ||
+    ttlMinutes < 5 ||
+    ttlMinutes > IMPERSONATION_TTL_MAX_MINUTES
+  )
     throw new ConfigError("operator.impersonation.ttlMinutes must be a whole number from 5 to 240");
   const notice = input.notice ?? true;
   if (typeof notice !== "boolean")

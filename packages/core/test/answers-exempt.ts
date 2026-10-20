@@ -69,6 +69,8 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /oauth/device_authorization",
   "POST /oauth/grants/revoke",
   "POST /oauth/register",
+  "POST /operator/impersonate",
+  "POST /operator/impersonate/stop",
   "POST /operator/keys/rotate",
   "POST /operator/secrets/rewrap",
   "POST /operator/sessions/end-all",
@@ -134,6 +136,8 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /oauth/revoke",
   "POST /oauth/token",
   "POST /oauth/userinfo",
+  "POST /operator/impersonate",
+  "POST /operator/impersonate/stop",
   "POST /operator/keys/rotate",
   "POST /operator/secrets/rewrap",
   "POST /operator/sessions/end-all",
@@ -439,13 +443,6 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     form: "null",
     reason:
       "the bearer check stamps lastUsedAt before the route answers; GET /tokens answers the null form; tokens.test.ts proves the stamp",
-  },
-  {
-    key: "GET /sessions",
-    field: "sessions[].freshAt",
-    form: "null",
-    reason:
-      "every sign-in writes freshAt, so only a session row from before schema version 10 has none; fresh.test.ts proves the null form on the engine",
   },
   // The enable answers the status after the write, where both keys are set.
   {

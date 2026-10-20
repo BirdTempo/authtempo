@@ -87,6 +87,18 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     reason: "the info command of the CLI calls it with the operator secret (plan 11c2)",
   },
   {
+    method: "POST",
+    path: "/operator/impersonate",
+    reason:
+      "an app's own admin page calls it; spec 26 item 15 adds no client SDK call for it (plan 12f)",
+  },
+  {
+    method: "POST",
+    path: "/operator/impersonate/stop",
+    reason:
+      "an app's own admin page calls it; spec 26 item 15 adds no client SDK call for it (plan 12f)",
+  },
+  {
     method: "GET",
     path: "/operator/users",
     reason:

@@ -1,9 +1,15 @@
 import type { ResolvedConfig } from "../../config.js";
 import type { Result } from "../../result.js";
-import type { OperatorAuditRow } from "../../schema.js";
+import type { OperatorAuditRow, SessionRow } from "../../schema.js";
 import { listAudit } from "./audit.js";
 import { type BanInput, banUser, type UnbanInput, unbanUser } from "./ban.js";
 import { checkActor, type OperatorActor } from "./guards.js";
+import {
+  type ImpersonationStart,
+  type ImpersonationStop,
+  startImpersonation,
+  stopImpersonation,
+} from "./impersonation.js";
 import {
   type CreateAdminInput,
   createAdmin,
@@ -26,7 +32,7 @@ import { getUser, listUsers, type OperatorUser, searchUsers } from "./users.js";
  * every deployment; each call answers `not_found` while its tool is off.
  * The caller passes the actor: the app as `{ kind: "app", name }`, a secret
  * entry, or a platform operator from `requireOperatorUser`. Tasks 5 to 11
- * add their entries here only, each through `entry`.
+ * add their entries here only, each through `entry` when it takes an actor.
  */
 export interface OperatorApi {
   audit: {
@@ -104,6 +110,18 @@ export interface OperatorApi {
       input: EndAllSessionsInput,
     ): Promise<Result<{ ended: number; more: boolean; auditId: string }>>;
   };
+  /**
+   * Starts an impersonation of a user by a platform operator (plan 12f
+   * Task 11). It takes the operator's own session, not an actor: a secret
+   * and the app never start one (spec 26 item 1). Needs
+   * `operator.impersonation`. The answer holds the new session's token; the
+   * route moves the operator's token into the actor cookie.
+   */
+  impersonate(
+    input: ImpersonationStart,
+  ): Promise<Result<{ token: string; session: SessionRow; auditId: string }>>;
+  /** Ends an impersonation session. A session with no `actorId` answers `not_found`. */
+  stopImpersonating(input: ImpersonationStop): Promise<Result<{ auditId: string }>>;
 }
 
 /**
@@ -144,5 +162,9 @@ export function operatorApi(config: ResolvedConfig): OperatorApi {
       endUser: entry((i) => endUserSessions(config, i)),
       endAll: entry((i) => endAllSessions(config, i)),
     },
+    // No entry(): these take a session, not an actor, and the guard of the
+    // start reads the session (requireOperatorUser).
+    impersonate: (i) => startImpersonation(config, i),
+    stopImpersonating: (i) => stopImpersonation(config, i),
   };
 }

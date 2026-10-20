@@ -23,6 +23,7 @@ export const FEATURE_INFO: Record<RouteFeature, { configKey: string; default: "o
   jwtMint: { configKey: "jwtMint", default: "on" },
   operator: { configKey: "operator", default: "off" },
   operatorUsers: { configKey: "operator.users", default: "off" },
+  operatorImpersonation: { configKey: "operator.impersonation", default: "off" },
   oauth: { configKey: "oauth", default: "off" },
   oauthRegistration: { configKey: "oauth.registration.dynamic", default: "off" },
   oauthDevice: { configKey: "oauth.device", default: "off" },

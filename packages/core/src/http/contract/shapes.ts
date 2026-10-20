@@ -16,11 +16,15 @@ export const UserJson = z.strictObject({
   image: z.string().nullable(),
 });
 
-/** The public session row of `publicSession`. Never the hash. */
+/**
+ * The public session row of `publicSession`. Never the hash. `actorId` is
+ * the operator's user id of an impersonation session, else null (plan 12f).
+ */
 export const SessionJson = z.strictObject({
   id: z.string(),
   expiresAt: z.iso.datetime(),
   activeOrganizationId: z.string().nullable(),
+  actorId: z.string().nullable(),
 });
 
 /**

@@ -28,7 +28,15 @@ export type Awaitable<T> = T | Promise<T>;
 export type MemberVia = "create" | "add" | "invitation" | "operator";
 /** A remove by another member, a leave by the member, or the revoke of the platform role (plan 12f). */
 export type RemoveVia = "remove" | "leave" | "operator";
-export type SessionVia = "password" | "magic_link" | "social" | "passkey" | "handoff" | "email_otp";
+/** How a session came. `impersonation`: a platform operator opened it for the user (plan 12f). */
+export type SessionVia =
+  | "password"
+  | "magic_link"
+  | "social"
+  | "passkey"
+  | "handoff"
+  | "email_otp"
+  | "impersonation";
 /**
  * Each value of `SessionVia` (plan 12f). The ban doors test reads it, so a
  * new value fails that test until the test gets a row for it.
@@ -40,6 +48,7 @@ export const SESSION_VIA = {
   passkey: true,
   handoff: true,
   email_otp: true,
+  impersonation: true,
 } as const satisfies Record<SessionVia, true>;
 export type SessionEndReason =
   | "sign_out"
@@ -60,7 +69,9 @@ export type SessionEndReason =
   // plan 12f: an operator bans the user, or a session of a banned user is presented.
   | "banned"
   // plan 12f: an operator ends the sessions of one user or of all users.
-  | "operator";
+  | "operator"
+  // plan 12f: the operator stops an impersonation.
+  | "impersonation_end";
 
 /** The member a before hook sees: no row exists yet. */
 export interface ProposedMember {
@@ -221,9 +232,10 @@ export interface SessionHooks {
 /**
  * How a user row came: the flow's sign-in, or a reset that created the user
  * (plan 12a). `operator`: `createAdmin` of plan 12f creates the user, with no
- * proof of the address.
+ * proof of the address. An impersonation opens a session of a user that
+ * exists, so it creates no user.
  */
-export type UserCreateVia = SessionVia | "password_reset" | "operator";
+export type UserCreateVia = Exclude<SessionVia, "impersonation"> | "password_reset" | "operator";
 /** The profile update, the change of address (plan 12a), or an operator's ban and unban (plan 12f). */
 export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban";
 /**

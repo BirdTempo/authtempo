@@ -17,7 +17,7 @@ export interface Feature {
 /**
  * One row per member of RouteFeature (17 at 0ef9665; plan 11g adds `openapi`,
  * the 18th; plan 12e adds `oauthDevice`, the 19th; plan 12f adds
- * `operatorUsers`, the 20th). A Record over the union fails the site's typecheck when core
+ * `operatorUsers`, the 20th, and `operatorImpersonation`, the 21st). A Record over the union fails the site's typecheck when core
  * adds a member, so a new feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
@@ -33,7 +33,8 @@ export interface Feature {
  * of `operator` is the Operator section of the routes page, which shows its
  * four routes (ruling 18 of the plan 11b lane). Until the guide of plan
  * 12f Task 14, the guide of `operatorUsers` is the section of the routes
- * page that shows its routes. `accountDelete`,
+ * page that shows its routes, and the guide of `operatorImpersonation` is
+ * the Impersonation section of that page. `accountDelete`,
  * `oauthRegistration`, and `oauthDevice` point to the section of their guide
  * that holds them.
  * `openapi` has no guide: its
@@ -135,6 +136,12 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "List, ban, and sign out users, with an audit row for each act.",
     icon: "cli",
     guide: "/docs/reference/routes/#operator-user-tools",
+  },
+  operatorImpersonation: {
+    title: "Impersonation",
+    line: "A platform operator acts as a user for support, with a time limit, a mark, and a notice.",
+    icon: "session",
+    guide: "/docs/reference/routes/#impersonation",
   },
   oauth: {
     title: "OAuth provider",

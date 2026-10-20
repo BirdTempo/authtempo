@@ -20,7 +20,9 @@ export type NoticeEvent =
   | "passkey_removed"
   | "identity_linked"
   | "identity_unlinked"
-  | "account_deleted";
+  | "account_deleted"
+  // plan 12f: a platform operator opened a session on the account, for support.
+  | "impersonation_started";
 
 /** What a notice mail builder gets. Core sends the mail to `email`, whatever `to` the builder answers. */
 export interface NoticeMailInput {
@@ -37,7 +39,8 @@ export interface NoticeMailInput {
   newEmail?: string;
 }
 
-const WHAT: Readonly<Record<NoticeEvent, string>> = {
+/** The first line of each notice but the impersonation notice, which has its own text. */
+const WHAT: Readonly<Record<Exclude<NoticeEvent, "impersonation_started">, string>> = {
   password_changed: "Your password was changed.",
   password_reset: "Your password was reset.",
   email_changed: "The email address of your account was changed.",
@@ -52,6 +55,19 @@ const WHAT: Readonly<Record<NoticeEvent, string>> = {
 
 /** The default notices. `account.notices.mail` replaces them. */
 export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
+  const subject = `Security notice for your ${input.appName} account`;
+  // The text of plan 12f Task 11. The operator acts for the app, so the
+  // user asks the app, not a reset. It holds no IP: the operator's address
+  // stays with the operator (plan 12f deviation 13).
+  if (input.event === "impersonation_started")
+    return {
+      to: input.email,
+      subject,
+      text: [
+        `An operator of ${input.appName} opened a session on your account at ${input.at.toISOString()}, for support.`,
+        `If you did not ask for support, contact ${input.appName}.`,
+      ].join("\n"),
+    };
   const lines = [WHAT[input.event]];
   if (input.newEmail !== undefined) lines.push(`The new address is ${input.newEmail}.`);
   if (input.provider !== undefined) lines.push(`The provider is ${input.provider}.`);
@@ -64,11 +80,7 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
   if (input.event === "email_changed" || input.event === "account_deleted")
     lines.push(`If you did not make this change, contact the support of ${input.appName} at once.`);
   else lines.push("If this was not you, reset your password and end your other sessions.");
-  return {
-    to: input.email,
-    subject: `Security notice for your ${input.appName} account`,
-    text: lines.join("\n"),
-  };
+  return { to: input.email, subject, text: lines.join("\n") };
 }
 
 /**

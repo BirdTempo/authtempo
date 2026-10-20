@@ -6,6 +6,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 10
   - packages/core/src/errors.ts
   - packages/core/README.md "Organizations"
+  - packages/core/src/http/impersonation-rules.ts
 ---
 
 **For:** a developer who reads an error answer of authtempo and must act on it.
@@ -463,16 +464,16 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| No route answers this code yet. The impersonation start adds it. |
+| [`POST /operator/impersonate`](/docs/reference/routes/#post-operator-impersonate). |
 
 <h3 id="impersonation_session"><code>impersonation_session</code> 403</h3>
 
-- **Meaning:** An impersonation session cannot reach this route.
-- **Do:** Stop the impersonation, and do the action from the operator's own session.
+- **Meaning:** An impersonation session cannot reach this route. The router answers it before the handler, so the route changes nothing.
+- **Do:** Stop the impersonation with [`POST /operator/impersonate/stop`](/docs/reference/routes/#post-operator-impersonate-stop), and do the action from the operator's own session, or ask the user to do it.
 
 | Routes |
 | --- |
-| No route answers this code yet. The impersonation rules add it. |
+| The Errors cell of each route on the [routes page](/docs/reference/routes/) names it. It covers every operator route but the stop, the sign-out, and the re-authentication. It covers each change of a way in, the second-factor routes, and the handoff. It covers the organization writes that give or take a role, and the OAuth authorize, consent, and end-session routes. The in-process calls of the same acts answer it too. |
 
 ## OAuth codes
 

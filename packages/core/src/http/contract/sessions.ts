@@ -17,6 +17,8 @@ export const SessionSummary = z.strictObject({
   userAgent: z.string().nullable(),
   activeOrganizationId: z.string().nullable(),
   current: z.boolean(),
+  /** True for a session that a platform operator opened (plan 12f). It names no operator. */
+  impersonation: z.boolean(),
 });
 
 /** The contract of `routes/sessions.ts` (plan 11g). */

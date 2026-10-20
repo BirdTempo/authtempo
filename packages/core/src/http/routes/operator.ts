@@ -7,9 +7,16 @@ import {
   requireOperatorUser,
   requireScope,
 } from "../../engine/operator/guards.js";
+import { startImpersonation, stopImpersonation } from "../../engine/operator/impersonation.js";
 import { operatorApi } from "../../engine/operator/index.js";
 import { rewrapSecrets, secretsStatus } from "../../engine/secrets.js";
-import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
+import {
+  readSessionToken,
+  renewedSessionCookie,
+  resolveSession,
+  sessionCookieToken,
+  sessionFromRequest,
+} from "../../engine/sessions.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import {
   OPERATOR_PER_IP,
@@ -28,6 +35,8 @@ import {
   createAdminBody,
   endAllBody,
   factorDisableBody,
+  impersonateBody,
+  impersonateStopBody,
   platformRoleBody,
   rewrapBody,
   searchQuery,
@@ -35,9 +44,12 @@ import {
   userReasonBody,
   usersQuery,
 } from "../contract/operator.js";
+import { clearSessionCookie, readCookie, sessionCookie } from "../cookies.js";
+import { actorCookieName } from "../impersonation-rules.js";
 import { json, readJson, respond } from "../json.js";
 import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
+import { unauthorized } from "../session-route.js";
 
 /**
  * The one check of the operator secret, for every operator route of 11c
@@ -78,6 +90,122 @@ async function readRewrapBody(
     ...(limit === undefined ? {} : { limit }),
     ...(after === undefined ? {} : { after }),
   };
+}
+
+/** The body of a stop: `{}` for an empty body, else the parsed JSON, or null for a bad body. */
+async function readStopBody(request: Request): Promise<{ reason?: string } | null> {
+  const text = await request.text();
+  let raw: unknown = {};
+  if (text !== "") {
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return null;
+    }
+  }
+  const parsed = impersonateStopBody.safeParse(raw);
+  if (!parsed.success) return null;
+  return parsed.data.reason === undefined ? {} : { reason: parsed.data.reason };
+}
+
+/** Whole seconds from now to `at`, at least 0: the Max-Age of a cookie that ends at `at`. */
+function secondsUntil(config: ResolvedConfig, at: Date): number {
+  return Math.max(0, Math.floor((at.getTime() - config.clock.now().getTime()) / 1000));
+}
+
+/**
+ * The impersonation routes (plan 12f Task 11, spec 26 item 9). Each needs
+ * the session of the caller: a request with an operator secret and no
+ * session answers 401, and so does a request with both (plan 12f deviation
+ * 5). The start moves the operator's token into the actor cookie and sets
+ * the session cookie to the new token, each with the Max-Age of the new
+ * session. A bearer caller gets the token in the body and no cookie. The
+ * stop ends the session, clears the actor cookie, and sets the session
+ * cookie back to the operator's token while that session lives, else
+ * clears it.
+ */
+function impersonationRoutes(config: ResolvedConfig): Route[] {
+  if (!config.operator?.impersonation) return [];
+  const { sameSite } = config.cookie;
+  const actorCookie = actorCookieName(config);
+  const userAgent = (ctx: RouteContext) => ctx.request.headers.get("user-agent");
+  const withSecret = (ctx: RouteContext) =>
+    /^Operator\s/i.test(ctx.request.headers.get("authorization") ?? "");
+  return [
+    {
+      method: "POST",
+      path: "/operator/impersonate",
+      key: "POST /operator/impersonate",
+      async handler(ctx) {
+        const operator = await sessionFromRequest(config, ctx.request);
+        const token = readSessionToken(config, ctx.request);
+        if (!operator || token === null || withSecret(ctx)) return unauthorized();
+        const body = await readJson(ctx.request, impersonateBody);
+        if (!body.ok) return respond(body);
+        const r = await startImpersonation(
+          config,
+          {
+            operator,
+            userId: body.value.userId,
+            reason: body.value.reason,
+            ip: ctx.ip,
+            userAgent: userAgent(ctx),
+          },
+          "POST /operator/impersonate",
+        );
+        if (!r.ok) return respond(r);
+        const { session, auditId } = r.value;
+        const expiresAt = session.expiresAt.toISOString();
+        if (sessionCookieToken(config, ctx.request) === null)
+          return json({ token: r.value.token, expiresAt, auditId });
+        const res = json({ expiresAt, auditId });
+        const maxAge = secondsUntil(config, session.expiresAt);
+        res.headers.append(
+          "set-cookie",
+          sessionCookie(config.cookieName, r.value.token, maxAge, sameSite),
+        );
+        res.headers.append("set-cookie", sessionCookie(actorCookie, token, maxAge, sameSite));
+        return res;
+      },
+    },
+    {
+      method: "POST",
+      path: "/operator/impersonate/stop",
+      key: "POST /operator/impersonate/stop",
+      async handler(ctx) {
+        const resolved = await sessionFromRequest(config, ctx.request);
+        if (!resolved || withSecret(ctx)) return unauthorized();
+        const body = await readStopBody(ctx.request);
+        if (body === null) return json({ error: "invalid_body" }, 400);
+        const r = await stopImpersonation(config, {
+          session: resolved,
+          ...body,
+          ip: ctx.ip,
+          userAgent: userAgent(ctx),
+        });
+        if (!r.ok) return respond(r);
+        if (sessionCookieToken(config, ctx.request) === null)
+          return json({ auditId: r.value.auditId, restored: false });
+        // The operator's own session, when it still lives: the actor cookie holds its token.
+        const own = readCookie(ctx.request, actorCookie);
+        const back = own === null ? null : await resolveSession(config, own);
+        const res = json({ auditId: r.value.auditId, restored: back !== null });
+        res.headers.append(
+          "set-cookie",
+          back !== null && own !== null
+            ? sessionCookie(
+                config.cookieName,
+                own,
+                secondsUntil(config, back.session.expiresAt),
+                sameSite,
+              )
+            : clearSessionCookie(config.cookieName, sameSite),
+        );
+        res.headers.append("set-cookie", clearSessionCookie(actorCookie, sameSite));
+        return res;
+      },
+    },
+  ];
 }
 
 /**
@@ -178,6 +306,7 @@ function secretRoutes(config: ResolvedConfig): Route[] {
         });
       },
     },
+    ...impersonationRoutes(config),
   ];
 }
 
