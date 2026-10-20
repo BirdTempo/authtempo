@@ -49,6 +49,17 @@ export interface EndAllSessionsInput {
   userAgent: string | null;
 }
 
+/**
+ * The answer of the end of one user's sessions. `familyEndFailed` is set
+ * when `endFamilies` threw after the commit; `more` is then true.
+ */
+export interface EndUserSessionsAnswer {
+  ended: number;
+  more: boolean;
+  auditId: string;
+  familyEndFailed?: true;
+}
+
 /** The first checks, in order: the tool is on, the actor holds the scope `sessions`, and the reason is valid. */
 function reasonOf(
   config: ResolvedConfig,
@@ -123,7 +134,10 @@ const FAMILY_CALLS = 2;
  * deletes the refresh tokens of as many OAuth families as the calls left
  * allow, and the OAuth codes. The audit row holds `data: { ended }`.
  * `more` is true while sessions or families stay, and the caller calls
- * again.
+ * again. The calls of `endFamilies` after the commit are in the budget. A
+ * throw there still answers ok, with `familyEndFailed: true` and `more`
+ * true: the next call reads the user's refresh tokens again and ends the
+ * family of each row that a parallel exchange wrote (ruling 37).
  *
  * After the commit, in the order of ruling 2: `session.afterEnd` with
  * `operator` per session, then `afterAction` and `endFamilies` in
@@ -135,7 +149,7 @@ const FAMILY_CALLS = 2;
 export async function endUserSessions(
   config: ResolvedConfig,
   input: EndUserSessionsInput,
-): Promise<Result<{ ended: number; more: boolean; auditId: string }>> {
+): Promise<Result<EndUserSessionsAnswer>> {
   const reason = reasonOf(config, input);
   if (!reason.ok) return reason;
   const fixed = TARGET_CALLS[input.actor.kind];
@@ -235,10 +249,16 @@ export async function endUserSessions(
       draft.data = { ended: page.deleted + late };
       return ok({ ended: page.deleted + late, more: sessionsLeft || familiesLeft });
     },
-    { committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator") },
+    {
+      committed: (_value, ends) => sessionsEnded(config, ends.ended, "operator"),
+      answerFamilyEnd: true,
+    },
   );
   if (!done.ok) return done;
-  return ok({ ended: done.value.ended, more: done.value.more, auditId: done.value.auditId });
+  const { ended, more, auditId, familyEndFailed } = done.value;
+  return ok(
+    familyEndFailed ? { ended, more: true, auditId, familyEndFailed } : { ended, more, auditId },
+  );
 }
 
 /**

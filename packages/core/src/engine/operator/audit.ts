@@ -134,6 +134,14 @@ export interface OperatorActSteps<T> {
    * The act is committed, so a throw writes one log line and the act stays.
    */
   committed?(value: T, ends: OperatorActEnds): Promise<void>;
+  /**
+   * True: a throw of `endFamilies` writes one log line, and the answer holds
+   * `familyEndFailed: true` in place of the throw (ruling 37 of plan 12f).
+   * The act committed, so a throw would answer an error for a done act.
+   * A storage limit after the commit, such as query 51 on D1 Free, is such
+   * a throw. Default false: the throw passes on.
+   */
+  answerFamilyEnd?: boolean;
 }
 
 /**
@@ -162,7 +170,7 @@ export async function operatorAct<T extends object>(
     ends: OperatorActEnds,
   ) => Promise<Result<T>>,
   steps: OperatorActSteps<T> = {},
-): Promise<Result<T & { auditId: string }>> {
+): Promise<Result<T & { auditId: string; familyEndFailed?: true }>> {
   const reason = operatorReason(draft.reason);
   if (!reason.ok) return reason;
   const ends: OperatorActEnds = { ended: endedList(config), families: familyEnds() };
@@ -186,6 +194,7 @@ export async function operatorAct<T extends object>(
   });
   if (!done.ok) return done;
   const { value, row } = done.value;
+  let familyEndFailed = false;
   try {
     await steps.committed?.(value, ends);
   } catch (e) {
@@ -199,9 +208,16 @@ export async function operatorAct<T extends object>(
       { audit: row },
       row.id,
     );
-    await endFamilies(config, ends.families);
+    if (steps.answerFamilyEnd)
+      try {
+        await endFamilies(config, ends.families);
+      } catch (e) {
+        console.error("authtempo: operator family end failed", row.id, appErrorName(e));
+        familyEndFailed = true;
+      }
+    else await endFamilies(config, ends.families);
   }
-  return ok({ ...value, auditId: row.id });
+  return ok({ ...value, auditId: row.id, ...(familyEndFailed ? { familyEndFailed: true } : {}) });
 }
 
 /** An optional id input: absent, or a string of 1 to `ID_MAX` characters with no control character. */

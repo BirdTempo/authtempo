@@ -878,6 +878,53 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     expect(w.sent).toHaveLength(30);
   });
 
+  it("names a failed family end in the answer of endUser and asks for one more call (ruling 37)", async () => {
+    const w = await world();
+    const clientId = await backchannelClient(w);
+    const user = await userWith(w, "ada@example.com", 1);
+    const opened = await openSession(w.config, {
+      user,
+      ip: null,
+      userAgent: null,
+      via: "password",
+    });
+    await linked(w, opened.token, clientId);
+    // The end mark of a family is the first write after the commit. A storage
+    // limit there, such as query 51 on D1 Free, throws.
+    const create = w.storage.create.bind(w.storage);
+    let refused = 0;
+    w.storage.create = ((model, data) => {
+      if (
+        model === "verification" &&
+        (data as { purpose: string }).purpose === "oauth-family-end"
+      ) {
+        refused++;
+        throw new Error("Too many API requests by single worker invocation.");
+      }
+      return create(model, data);
+    }) as StorageAdapter["create"];
+    const input = { actor: APP, userId: user.id, reason: "Lost laptop", ip: null, userAgent: null };
+    const first = await w.api.sessions.endUser(input);
+    if (!first.ok) throw new Error(first.code);
+    expect(refused).toBe(1);
+    // The act committed: the answer names the failure, and more asks for the call that ends the families.
+    expect([first.value.ended, first.value.more, first.value.familyEndFailed]).toEqual([
+      2,
+      true,
+      true,
+    ]);
+    expect(await sessionsOf(w.storage, user.id)).toEqual([]);
+    expect(await w.storage.findMany("oauthToken", [])).toEqual([]);
+    w.storage.create = create;
+    const second = await w.api.sessions.endUser(input);
+    if (!second.ok) throw new Error(second.code);
+    expect([second.value.ended, second.value.more, second.value.familyEndFailed]).toEqual([
+      0,
+      false,
+      undefined,
+    ]);
+  });
+
   it("fits a whole user-actor call of endUser in 50 calls (review m2)", async () => {
     const limited = { calls: 0 };
     const f = await operatorFixture({
