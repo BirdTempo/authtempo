@@ -33,7 +33,7 @@ describe("check-policy-pages", () => {
     const r = checkPolicyPages(REAL);
     expect(r.failures).toEqual([]);
     expect(summaryLine(r)).toBe(
-      "check-policy-pages: PASS pages=2 ties=18 states=2 rows=5 links=3 failures=0",
+      "check-policy-pages: PASS pages=2 ties=18 states=3 rows=5 links=3 failures=0",
     );
   });
 
@@ -44,7 +44,7 @@ describe("check-policy-pages", () => {
       'docs/versioning.md, section "The support window", states "The previous minor gets security fixes for 6 months after the next minor ships.", which no source holds',
     ]);
     expect(summaryLine(checkPolicyPages(input))).toBe(
-      "check-policy-pages: FAIL pages=2 ties=18 states=2 rows=5 links=3 failures=2",
+      "check-policy-pages: FAIL pages=2 ties=18 states=3 rows=5 links=3 failures=2",
     );
   });
 
@@ -112,6 +112,7 @@ describe("check-policy-pages", () => {
     );
     expect(failures(input)).toEqual([
       'docs/versioning.md, section "One version", does not state: The first release is `0.1.0`. (from spec 33 item 1.2)',
+      'docs/versioning.md, section "One version", does not state: The first release is `0.1.0`. (from scripts/release/src/lib/release-facts.ts, FIRST_RELEASE)',
       'docs/versioning.md, section "One version", states "The first release is `1.0.0`.", which no source holds',
     ]);
   });
@@ -145,6 +146,33 @@ describe("check-policy-pages", () => {
     expect(failures(input)).toEqual([
       'docs/versioning.md, section "One version", does not state: Every released package has the same version. (from .changeset/config.json, which has 1 fixed group)',
     ]);
+  });
+
+  it("holds the first release sentence to FIRST_RELEASE and its two rules", () => {
+    const facts = REAL.releaseFacts;
+    expect(facts).toContain('export const FIRST_RELEASE = "0.1.0";');
+    expect(failures({ ...REAL, releaseFacts: facts.replace('= "0.1.0";', '= "0.2.0";') })).toEqual([
+      'docs/versioning.md, section "One version", does not state: The first release is `0.2.0`. (from scripts/release/src/lib/release-facts.ts, FIRST_RELEASE)',
+    ]);
+    expect(
+      failures({
+        ...REAL,
+        releaseFacts: facts.replace("export const FIRST_RELEASE", "const FIRST"),
+      }),
+    ).toEqual(["scripts/release/src/lib/release-facts.ts has no export const FIRST_RELEASE"]);
+    // A rule that no longer names FIRST_RELEASE no longer keeps the sentence.
+    for (const [key, file] of [
+      ["checkChangesets", "scripts/release/src/check-changesets.ts"],
+      ["checkPack", "scripts/release/src/check-pack.ts"],
+    ] as const) {
+      const text = REAL[key]
+        .split("\n")
+        .filter((l) => !l.includes("{FIRST_RELEASE}"))
+        .join("\n");
+      expect(failures({ ...REAL, [key]: text })).toEqual([
+        `${file} has no message with \${FIRST_RELEASE}, so no rule keeps the sentence: The first release is \`0.1.0\`.`,
+      ]);
+    }
   });
 
   it("holds the In 0.x column to the From 1.0.0 column", () => {

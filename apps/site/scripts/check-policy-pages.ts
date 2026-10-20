@@ -5,8 +5,9 @@
 // A section that the check holds may hold only those copies, so a fact with
 // no source cannot join it. The sources: SECURITY.md (the support window, the
 // channels, the times), spec 33 item 1.2 (the 0.x rules), .changeset/config.json
-// (one version), the version of core (the state today), and
-// release/repository.json (the link to the file).
+// (one version), the version of core (the state today),
+// release/repository.json (the link to the file), and FIRST_RELEASE with the
+// two release checks that refuse another first release.
 import { type Repository, readPolicyInput } from "./check-security-policy.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
@@ -21,6 +22,9 @@ const PATHS = {
   spec: "docs/superpowers/specs/2026-10-09-tempo-auth-design.md",
   changesetConfig: ".changeset/config.json",
   core: "packages/core/package.json",
+  releaseFacts: "scripts/release/src/lib/release-facts.ts",
+  checkChangesets: "scripts/release/src/check-changesets.ts",
+  checkPack: "scripts/release/src/check-pack.ts",
 } as const;
 
 export interface PolicyPagesInput {
@@ -31,6 +35,10 @@ export interface PolicyPagesInput {
   changesetConfig: string;
   coreVersion: string;
   repository: Repository;
+  /** The texts of the release package that keep the first release (ruling 28 of plan 12j). */
+  releaseFacts: string;
+  checkChangesets: string;
+  checkPack: string;
 }
 
 /**
@@ -260,6 +268,28 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
       );
   }
 
+  // The first release: FIRST_RELEASE gives the version, and check-changesets
+  // and check-pack refuse another one. Each names FIRST_RELEASE in its failure
+  // message, so a rule that goes takes that line with it.
+  const first = /^export const FIRST_RELEASE = "([^"]+)";$/m.exec(input.releaseFacts)?.[1];
+  if (first === undefined) failures.push(`${PATHS.releaseFacts} has no export const FIRST_RELEASE`);
+  else {
+    const sentence = `The first release is \`${first}\`.`;
+    allow(VERSIONING, "One version", sentence);
+    if (oneVersion !== null && !sentencesOf(oneVersion).includes(sentence))
+      failures.push(
+        `${VERSIONING}, section "One version", does not state: ${sentence} (from ${PATHS.releaseFacts}, FIRST_RELEASE)`,
+      );
+    for (const [file, text] of [
+      [PATHS.checkChangesets, input.checkChangesets],
+      [PATHS.checkPack, input.checkPack],
+    ] as const)
+      if (!/\$\{FIRST_RELEASE\}/.test(text))
+        failures.push(
+          `${file} has no message with \${FIRST_RELEASE}, so no rule keeps the sentence: ${sentence}`,
+        );
+  }
+
   // The versions today: the section exists only while core is at 0.0.0.
   if (pages.has(VERSIONING)) {
     const today = section(VERSIONING, TODAY_SECTION);
@@ -328,7 +358,7 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
   return requireCounts(
     {
       name: "check-policy-pages",
-      counts: { pages: pages.size, ties: TIES.length, states: 2, rows, links },
+      counts: { pages: pages.size, ties: TIES.length, states: 3, rows, links },
       failures,
     },
     ["pages", "rows", "links"],
@@ -375,6 +405,9 @@ export function readPolicyPagesInput(read: (path: string) => string | null): {
       changesetConfig,
       coreVersion,
       repository: policy.repository,
+      releaseFacts: text(PATHS.releaseFacts),
+      checkChangesets: text(PATHS.checkChangesets),
+      checkPack: text(PATHS.checkPack),
     },
     failures,
   };
