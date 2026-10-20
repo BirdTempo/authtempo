@@ -3,8 +3,9 @@
  * 3.5.2). The body comes from a directory, so the parser bounds the count of
  * operations, the length of a path, and the depth of a value, and it knows
  * each attribute by name. A form that the plan does not name is refused, never
- * ignored. The parser reads only; the caller applies the operations to a copy
- * and writes once.
+ * ignored. The read-only keys of the no-path form are the one exception (Task
+ * 10 Behavior 1). The parser reads only; the caller applies the operations to
+ * a copy and writes once.
  */
 
 import { SCIM_ERRORS, type ScimType } from "../../errors.js";
@@ -43,6 +44,8 @@ interface AttrRule {
   readonly filter: "type" | "value" | null;
   // A known attribute that a PATCH must not change.
   readonly refuse: { scimType: ScimType; detail: string } | null;
+  // The read of the key in the no-path form: as a path, ignored, or the id.
+  readonly noPath: "path" | "ignore" | "id";
 }
 
 function rules(list: AttrRule[]): ReadonlyMap<string, AttrRule> {
@@ -50,20 +53,24 @@ function rules(list: AttrRule[]): ReadonlyMap<string, AttrRule> {
 }
 
 function text(name: string): AttrRule {
-  return { name, boolean: false, subs: null, filter: null, refuse: null };
+  return { name, boolean: false, subs: null, filter: null, refuse: null, noPath: "path" };
 }
 
 function flag(name: string): AttrRule {
-  return { name, boolean: true, subs: null, filter: null, refuse: null };
+  return { name, boolean: true, subs: null, filter: null, refuse: null, noPath: "path" };
 }
 
 function complex(name: string, subs: string[], filter: "type" | "value" | null): AttrRule {
   const map = new Map(subs.map((s) => [asciiLower(s), { name: s, boolean: s === "primary" }]));
-  return { name, boolean: false, subs: map, filter, refuse: null };
+  return { name, boolean: false, subs: map, filter, refuse: null, noPath: "path" };
 }
 
-function readOnly(name: string): AttrRule {
-  return { ...text(name), refuse: { scimType: "mutability", detail: `${name} is read-only` } };
+function readOnly(name: string, noPath: AttrRule["noPath"]): AttrRule {
+  return {
+    ...text(name),
+    refuse: { scimType: "mutability", detail: `${name} is read-only` },
+    noPath,
+  };
 }
 
 const MULTI_SUBS = ["value", "display", "type", "primary"];
@@ -113,10 +120,12 @@ const USER_RULES = rules([
     ...text("password"),
     refuse: { scimType: "invalidValue", detail: "password is not supported" },
   },
-  readOnly("id"),
-  readOnly("meta"),
-  readOnly("schemas"),
-  readOnly("groups"),
+  // Task 10 Behavior 1 (RFC 7643 section 2.2): id, meta, and groups in a
+  // request are ignored. A path that names one still answers mutability.
+  readOnly("id", "id"),
+  readOnly("meta", "ignore"),
+  readOnly("schemas", "path"),
+  readOnly("groups", "ignore"),
 ]);
 
 // The enterprise User extension (RFC 7643 section 4.3), read only as `<URN>:attr`.
@@ -134,10 +143,14 @@ const GROUP_RULES = rules([
   text("displayName"),
   text("externalId"),
   complex("members", ["value", "display", "type", "$ref"], "value"),
-  readOnly("id"),
-  readOnly("meta"),
-  readOnly("schemas"),
+  readOnly("id", "id"),
+  readOnly("meta", "ignore"),
+  readOnly("schemas", "path"),
 ]);
+
+function rulesOf(resource: "User" | "Group"): ReadonlyMap<string, AttrRule> {
+  return resource === "User" ? USER_RULES : GROUP_RULES;
+}
 
 const ENTERPRISE_PREFIX = `${asciiLower(NS_SCIM_ENTERPRISE)}:`;
 const BODY_KEYS = new Set(["schemas", "Operations"]);
@@ -176,9 +189,7 @@ function readPath(path: string, resource: "User" | "Group"): Target | Refusal {
   const dot = path.indexOf(".");
   const open = path.indexOf("[");
   const cut = open >= 0 && (dot < 0 || open < dot) ? open : dot;
-  const rule = (resource === "User" ? USER_RULES : GROUP_RULES).get(
-    asciiLower(cut < 0 ? path : path.slice(0, cut)),
-  );
+  const rule = rulesOf(resource).get(asciiLower(cut < 0 ? path : path.slice(0, cut)));
   if (rule === undefined) return bad;
   if (rule.refuse !== null) return refuse(rule.refuse.scimType, rule.refuse.detail);
   if (cut < 0)
@@ -230,12 +241,18 @@ function target(
   return { op, path: t.path, value: flagValue };
 }
 
-/** Reads a PatchOp message into its operations, or answers the SCIM refusal. */
+/**
+ * Reads a PatchOp message into its operations, or answers the SCIM refusal.
+ * `id` is the `id` key of the no-path form, or null when no operation sends
+ * one. The caller answers 400 `mutability` only when `id` differs from the id
+ * of the target resource. An id that is not a text, or a second id that
+ * differs from the first, answers `mutability` here.
+ */
 export function parsePatch(
   body: unknown,
   resource: "User" | "Group",
 ):
-  | { ok: true; ops: PatchOp[] }
+  | { ok: true; ops: PatchOp[]; id: string | null }
   | { ok: false; status: number; scimType: ScimType; detail: string } {
   if (!isObject(body)) return refuse("invalidSyntax", "the body is not a PatchOp message");
   if (!Object.keys(body).every((k) => BODY_KEYS.has(k))) {
@@ -250,6 +267,7 @@ export function parsePatch(
     return refuse("invalidValue", `Operations must hold 1 to ${PATCH_OPS_MAX} operations`);
   }
   const ops: PatchOp[] = [];
+  let id: string | null = null;
   for (const [i, entry] of list.entries()) {
     if (!isObject(entry) || !Object.keys(entry).every((k) => OP_KEYS.has(k))) {
       return refuse("invalidSyntax", `operation ${i} is not an object of op, path, and value`);
@@ -288,6 +306,18 @@ export function parsePatch(
         );
       }
       for (const [key, part] of Object.entries(value)) {
+        // Okta sends the group id in the no-path form of a group rename (its
+        // SCIM 2.0 protocol reference). RFC 7643 section 2.2 lets a server
+        // ignore a read-only attribute in a request, so core takes the id out
+        // and hands it to the caller.
+        const noPath = rulesOf(resource).get(asciiLower(key))?.noPath;
+        if (noPath === "ignore") continue;
+        if (noPath === "id") {
+          if (typeof part !== "string" || (id !== null && part !== id))
+            return refuse("mutability", `operation ${i}: id is read-only`);
+          id = part;
+          continue;
+        }
         const op = target(name, key, part, resource);
         if ("ok" in op) return { ...op, detail: `operation ${i}: ${op.detail}` };
         ops.push(op);
@@ -296,5 +326,5 @@ export function parsePatch(
     if (ops.length > PATCH_OPS_MAX)
       return refuse("invalidValue", `the operations hold more than ${PATCH_OPS_MAX} changes`);
   }
-  return { ok: true, ops };
+  return { ok: true, ops, id };
 }

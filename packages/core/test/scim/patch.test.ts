@@ -169,7 +169,67 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
       ],
     ];
     for (const [name, input, resource, ops] of rows) {
-      expect(parsePatch(input, resource), name).toEqual({ ok: true, ops });
+      expect(parsePatch(input, resource), name).toEqual({ ok: true, ops, id: null });
+    }
+  });
+
+  it("takes the id out of the no-path form and ignores meta and groups (Okta)", () => {
+    const rows: [string, unknown, "User" | "Group", unknown[], string | null][] = [
+      [
+        "the Okta group rename",
+        body({
+          op: "replace",
+          value: { id: "abf4dd94-a4c0-4f67-89c9-76b03340cb9b", displayName: "Test SCIMv2" },
+        }),
+        "Group",
+        [{ op: "replace", path: at("displayName"), value: "Test SCIMv2" }],
+        "abf4dd94-a4c0-4f67-89c9-76b03340cb9b",
+      ],
+      [
+        "a no-path value with meta and groups",
+        body({
+          op: "replace",
+          value: {
+            id: "u1",
+            meta: { resourceType: "User" },
+            groups: [{ value: "g1" }],
+            displayName: "A",
+          },
+        }),
+        "User",
+        [{ op: "replace", path: at("displayName"), value: "A" }],
+        "u1",
+      ],
+      [
+        "an id that differs from the target goes to the caller",
+        body({ op: "replace", value: { ID: "other", displayName: "Eng" } }),
+        "Group",
+        [{ op: "replace", path: at("displayName"), value: "Eng" }],
+        "other",
+      ],
+      [
+        "the same id in two operations",
+        body(
+          { op: "replace", value: { id: "g1", displayName: "Eng" } },
+          { op: "add", value: { id: "g1", externalId: "e1" } },
+        ),
+        "Group",
+        [
+          { op: "replace", path: at("displayName"), value: "Eng" },
+          { op: "add", path: at("externalId"), value: "e1" },
+        ],
+        "g1",
+      ],
+      [
+        "the meta of a Group alone",
+        body({ op: "replace", value: { meta: {} } }),
+        "Group",
+        [],
+        null,
+      ],
+    ];
+    for (const [name, input, resource, ops, id] of rows) {
+      expect(parsePatch(input, resource), name).toEqual({ ok: true, ops, id });
     }
   });
 
@@ -508,10 +568,49 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
       ],
       ["the id", body({ op: "replace", path: "id", value: "x" }), "User", "mutability", 400],
       [
-        "the meta of a Group",
-        body({ op: "replace", value: { meta: {} } }),
+        "a meta path of a Group",
+        body({ op: "replace", path: "meta", value: {} }),
         "Group",
         "mutability",
+        400,
+      ],
+      [
+        "a schemas path",
+        body({ op: "replace", path: "schemas", value: [] }),
+        "User",
+        "mutability",
+        400,
+      ],
+      ["a meta path", body({ op: "remove", path: "meta" }), "User", "mutability", 400],
+      [
+        "schemas in the no-path form",
+        body({ op: "replace", value: { schemas: [], title: "t" } }),
+        "User",
+        "mutability",
+        400,
+      ],
+      [
+        "an id that is not a text in the no-path form",
+        body({ op: "replace", value: { id: 5, displayName: "Eng" } }),
+        "Group",
+        "mutability",
+        400,
+      ],
+      [
+        "two ids in the no-path form",
+        body(
+          { op: "replace", value: { id: "g1", displayName: "Eng" } },
+          { op: "replace", value: { id: "g2" } },
+        ),
+        "Group",
+        "mutability",
+        400,
+      ],
+      [
+        "groups in the no-path form of a Group",
+        body({ op: "replace", value: { groups: [] } }),
+        "Group",
+        "invalidPath",
         400,
       ],
       [
