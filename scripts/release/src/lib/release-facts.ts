@@ -11,10 +11,11 @@ export const CI_FILE = "ci.yml";
 export const ENVIRONMENT = "release";
 
 /**
- * The version of the first release (spec 33 item 1.2). Read by check-changesets
- * (a first release needs a minor changeset), check-pack (no release is at 0.0.x),
- * and the site check check-policy-pages, which holds the versioning page to it.
- * A patch at 0.0.0 would give 0.0.1, so both checks refuse it (ruling 28 of plan 12j).
+ * The version of the first release (spec 33 item 1.2). Read by check-pack (no
+ * released package is at 0.0.x), check-tag (no tag is v0.0.x), and the site
+ * check check-policy-pages, which holds the versioning page to it. A patch at
+ * 0.0.0 would give 0.0.1, so both checks refuse it where the release reads the
+ * version (rulings 28 and 30 of plan 12j).
  */
 export const FIRST_RELEASE = "0.1.0";
 

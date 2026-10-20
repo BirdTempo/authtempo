@@ -56,6 +56,16 @@ describe("check-tag", () => {
     ]);
   });
 
+  it("fails a tag v0.0.x", () => {
+    // The first release is 0.1.0 (rulings 28 and 30 of the plan 12j lane).
+    for (const version of ["0.0.1", "0.0.0"])
+      expect(tagAt(`v${version}`, version, "main").failures).toEqual([
+        `the tag v${version} is at 0.0.x; the first release is 0.1.0, so no tag is v0.0.x`,
+      ]);
+    expect(tagAt("v0.1.0", "0.1.0", "main").failures).toEqual([]);
+    expect(tagAt("v1.0.0", "1.0.0", "main").failures).toEqual([]);
+  });
+
   it("fails a tag with a prerelease part", () => {
     expect(tagAt("v0.2.0-rc.1", "0.2.0-rc.1", "main").failures).toEqual([
       "the tag v0.2.0-rc.1 has a prerelease part, and the release has no pre mode",

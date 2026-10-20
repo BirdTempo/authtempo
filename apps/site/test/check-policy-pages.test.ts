@@ -162,7 +162,7 @@ describe("check-policy-pages", () => {
     ).toEqual(["scripts/release/src/lib/release-facts.ts has no export const FIRST_RELEASE"]);
     // A rule that no longer names FIRST_RELEASE no longer keeps the sentence.
     for (const [key, file] of [
-      ["checkChangesets", "scripts/release/src/check-changesets.ts"],
+      ["checkTag", "scripts/release/src/check-tag.ts"],
       ["checkPack", "scripts/release/src/check-pack.ts"],
     ] as const) {
       const text = REAL[key]

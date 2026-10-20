@@ -23,7 +23,7 @@ const PATHS = {
   changesetConfig: ".changeset/config.json",
   core: "packages/core/package.json",
   releaseFacts: "scripts/release/src/lib/release-facts.ts",
-  checkChangesets: "scripts/release/src/check-changesets.ts",
+  checkTag: "scripts/release/src/check-tag.ts",
   checkPack: "scripts/release/src/check-pack.ts",
 } as const;
 
@@ -37,7 +37,7 @@ export interface PolicyPagesInput {
   repository: Repository;
   /** The texts of the release package that keep the first release (ruling 28 of plan 12j). */
   releaseFacts: string;
-  checkChangesets: string;
+  checkTag: string;
   checkPack: string;
 }
 
@@ -268,9 +268,10 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
       );
   }
 
-  // The first release: FIRST_RELEASE gives the version, and check-changesets
-  // and check-pack refuse another one. Each names FIRST_RELEASE in its failure
-  // message, so a rule that goes takes that line with it.
+  // The first release: FIRST_RELEASE gives the version, and check-pack and
+  // check-tag refuse another one where the release reads the version. Each
+  // names FIRST_RELEASE in its failure message, so a rule that goes takes that
+  // line with it.
   const first = /^export const FIRST_RELEASE = "([^"]+)";$/m.exec(input.releaseFacts)?.[1];
   if (first === undefined) failures.push(`${PATHS.releaseFacts} has no export const FIRST_RELEASE`);
   else {
@@ -281,7 +282,7 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
         `${VERSIONING}, section "One version", does not state: ${sentence} (from ${PATHS.releaseFacts}, FIRST_RELEASE)`,
       );
     for (const [file, text] of [
-      [PATHS.checkChangesets, input.checkChangesets],
+      [PATHS.checkTag, input.checkTag],
       [PATHS.checkPack, input.checkPack],
     ] as const)
       if (!/\$\{FIRST_RELEASE\}/.test(text))
@@ -406,7 +407,7 @@ export function readPolicyPagesInput(read: (path: string) => string | null): {
       coreVersion,
       repository: policy.repository,
       releaseFacts: text(PATHS.releaseFacts),
-      checkChangesets: text(PATHS.checkChangesets),
+      checkTag: text(PATHS.checkTag),
       checkPack: text(PATHS.checkPack),
     },
     failures,

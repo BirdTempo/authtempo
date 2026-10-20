@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { TAG_PREFIX } from "./lib/release-facts.ts";
+import { FIRST_RELEASE, TAG_PREFIX } from "./lib/release-facts.ts";
 import { releasedNames } from "./lib/released.ts";
 import { type Report, reportLines, unreadReport } from "./lib/report.ts";
 import { readWorkspace } from "./lib/workspace.ts";
@@ -26,6 +26,12 @@ export function checkTag(input: {
   else {
     if (tag.slice(TAG_PREFIX.length) !== groupVersion)
       failures.push(`the tag ${tag} differs from the group version ${groupVersion}`);
+    // A patch at 0.0.0 gives 0.0.1, and the first release is FIRST_RELEASE
+    // (rulings 28 and 30 of the plan 12j lane). check-pack holds the release copy.
+    if (m[1] === "0" && m[2] === "0")
+      failures.push(
+        `the tag ${tag} is at 0.0.x; the first release is ${FIRST_RELEASE}, so no tag is v0.0.x`,
+      );
     const branch = `release/${m[1]}.${m[2]}`;
     if (!input.onMain) {
       if (!input.onReleaseBranch)
