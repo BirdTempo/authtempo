@@ -53,3 +53,23 @@ export function isLocalHost(hostname: string): boolean {
   if (!host.includes(".")) return true;
   return PRIVATE_SUFFIXES.some((s) => host === s.slice(1) || host.endsWith(s));
 }
+
+/**
+ * The host rule of each URL that core fetches or posts to from the server.
+ * No IP literal, no local name, and not the host of this instance.
+ * `hostname` is the parsed `URL.hostname`. Plan 12d moved the rule here from
+ * `oauth-clients.ts`, so the client documents and the DNS proofs share it.
+ */
+export function isPublicHost(hostname: string, baseURL: string): boolean {
+  // A trailing dot names the same host: `localhost.` is `localhost`.
+  const host = hostname.replace(/\.$/, "");
+  // An IP literal (IPv4 or IPv6, 127.0.0.1 and [::1] too): a public client has a DNS name, and an address may be internal.
+  if (isIpLiteral(host)) return false;
+  // `localhost`, `*.localhost`, a single label, and the private names: the one local host rule.
+  if (isLocalHost(host)) return false;
+  // This instance's own host: a document there would make core fetch itself.
+  // The compare is by `hostname`, with no port: a document on another port
+  // of this host is refused too, which is stricter than the host and port.
+  if (host === new URL(baseURL).hostname) return false;
+  return true;
+}

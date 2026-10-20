@@ -5,7 +5,8 @@ import { limit } from "../limiter/limit.js";
 import type { Observer } from "../observe/observer.js";
 import { constantTimeEqual, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { FOREIGN_ALGS, keyFitsAlg } from "../primitives/foreign-jwk.js";
-import { HTTP_LOOPBACK, isIpLiteral, isLocalHost } from "../primitives/host.js";
+import { HTTP_LOOPBACK, isPublicHost } from "../primitives/host.js";
+import { readCapped } from "../primitives/read-capped.js";
 import { hasControlChar } from "../primitives/text.js";
 import { clientRef } from "../redact.js";
 import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
@@ -648,31 +649,13 @@ export function validCimdUrl(value: string, baseURL: string): boolean {
   if (u.href !== value) return false;
   if (u.protocol !== "https:" || u.username !== "" || u.password !== "") return false;
   if (u.search !== "" || u.pathname === "/") return false;
-  return publicHost(u, baseURL);
-}
-
-/**
- * The host rule of each URL that core fetches or posts to from the server.
- * No IP literal, no local name, and not the host of this instance.
- */
-function publicHost(u: URL, baseURL: string): boolean {
-  // A trailing dot names the same host: `localhost.` is `localhost`.
-  const host = u.hostname.replace(/\.$/, "");
-  // An IP literal (IPv4 or IPv6, 127.0.0.1 and [::1] too): a public client has a DNS name, and an address may be internal.
-  if (isIpLiteral(host)) return false;
-  // `localhost`, `*.localhost`, a single label, and the private names: the one local host rule.
-  if (isLocalHost(host)) return false;
-  // This instance's own host: a document there would make core fetch itself.
-  // The compare is by `hostname`, with no port: a document on another port
-  // of this host is refused too, which is stricter than the host and port.
-  if (host === new URL(baseURL).hostname) return false;
-  return true;
+  return isPublicHost(u.hostname, baseURL);
 }
 
 /**
  * A back-channel logout URI (Back-Channel Logout 1.0 section 2.2, read
  * 2026-10-20): absolute, https, no fragment, no user, in canonical form, on
- * a host of `publicHost`. A query is allowed, and core keeps it. Section 2.2
+ * a host of `isPublicHost`. A query is allowed, and core keeps it. Section 2.2
  * allows http for a confidential client; core refuses it, because the token
  * ends a person's session.
  */
@@ -687,7 +670,7 @@ export function validLogoutUri(value: unknown, baseURL: string): value is string
   }
   if (u.href !== value) return false;
   if (u.protocol !== "https:" || u.username !== "" || u.password !== "") return false;
-  return publicHost(u, baseURL);
+  return isPublicHost(u.hostname, baseURL);
 }
 
 /** True when `a` and `b` are URLs of one host name. */
@@ -697,51 +680,6 @@ function sameHost(a: string, b: unknown): boolean {
     return new URL(a).hostname === new URL(b).hostname;
   } catch {
     return false;
-  }
-}
-
-/** The body as text, or null past `max` bytes, on a read error, or when `signal` aborts. */
-async function readCapped(res: Response, max: number, signal: AbortSignal): Promise<string | null> {
-  const declared = Number(res.headers.get("content-length") ?? "0");
-  if (declared > max) {
-    await res.body?.cancel();
-    return null;
-  }
-  if (!res.body) return "";
-  const reader = res.body.getReader();
-  const aborted = new Promise<never>((_resolve, reject) => {
-    if (signal.aborted) reject(new Error("aborted"));
-    signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
-  });
-  // A rejection after the read ended has no reader: it must not count as unhandled.
-  aborted.catch(() => {});
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await Promise.race([reader.read(), aborted]);
-      if (done) break;
-      total += value.byteLength;
-      if (total > max) {
-        await reader.cancel();
-        return null;
-      }
-      chunks.push(value);
-    }
-  } catch {
-    await reader.cancel().catch(() => {});
-    return null;
-  }
-  const out = new Uint8Array(total);
-  let at = 0;
-  for (const c of chunks) {
-    out.set(c, at);
-    at += c.byteLength;
-  }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(out);
-  } catch {
-    return null;
   }
 }
 

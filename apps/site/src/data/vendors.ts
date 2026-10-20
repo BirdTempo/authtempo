@@ -149,6 +149,7 @@ function fileUrlHosts(path: string, text: string): string[] {
   if (!path.includes("packages/core/src/") || !path.endsWith(".ts")) return [];
   if (
     path.includes("/src/social/") ||
+    path.includes("/src/engine/sso/") ||
     path.includes("/src/testing/") ||
     path.endsWith("/src/storage/conformance.ts") ||
     path.endsWith(".test.ts")
@@ -171,6 +172,9 @@ function fileUrlHosts(path: string, text: string): string[] {
  * - a URL in a comment.
  * - src/social/: the provider presets. An app turns each one on in its own
  *   config, and the sign-in goes to the provider that the app chose.
+ * - src/engine/sso/: the DNS resolver presets of the domain proof (plan 12d,
+ *   ruling 15). Core has no default resolver. An app turns each one on in
+ *   its own `sso.dns`, and the proof asks the resolvers that the app chose.
  * - src/testing/, src/storage/conformance.ts, and .test.ts files: test
  *   helpers that no deployment runs.
  * - the reserved names of RESERVED, and an IP literal.
