@@ -222,6 +222,32 @@ export async function operatorAct<T extends object>(
   return ok({ ...value, auditId: row.id, ...(familyEndFailed ? { familyEndFailed: true } : {}) });
 }
 
+/**
+ * The users whose impersonation `operatorId` started at or after `since`:
+ * the `targetUserId` of each `impersonation_start` row of that user actor,
+ * by the index on `actorId` (plan 12f Task 11, ruling 31). This file stays
+ * the one reader of the audit table.
+ */
+export async function impersonationTargets(
+  storage: StorageAdapter,
+  operatorId: string,
+  since: Date,
+): Promise<string[]> {
+  const starts = await storage.findMany(
+    "operatorAudit",
+    [
+      { field: "actorId", op: "eq", value: operatorId },
+      { field: "actorKind", op: "eq", value: "user" },
+      { field: "action", op: "eq", value: "impersonation_start" },
+      { field: "createdAt", op: "gte", value: since },
+    ],
+    { sort: { field: "id", dir: "asc" } },
+  );
+  const targets = new Set<string>();
+  for (const row of starts) if (row.targetUserId !== null) targets.add(row.targetUserId);
+  return [...targets].sort();
+}
+
 /** An optional id input: absent, or a string of 1 to `ID_MAX` characters with no control character. */
 function idInput(value: unknown): boolean {
   return (

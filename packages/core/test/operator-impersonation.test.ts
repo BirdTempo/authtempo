@@ -386,6 +386,40 @@ describe("the impersonation (plan 12f Task 11)", () => {
     ).toEqual({ ok: false, code: "impersonation_session", status: 403 });
   });
 
+  it("ends the impersonation sessions of an operator at a ban and at a revoke of the role", async () => {
+    for (const act of ["ban", "revoke"] as const) {
+      const w = await world();
+      const token = await started(w);
+      const api = operatorApi(w.auth.config);
+      const done =
+        act === "ban"
+          ? await api.users.ban({
+              actor: APP,
+              userId: w.operator.user.id,
+              reason: "The operator left",
+              ip: null,
+              userAgent: null,
+            })
+          : await api.platformRole.revoke({
+              actor: APP,
+              userId: w.operator.user.id,
+              reason: "The operator left",
+              ip: null,
+              userAgent: null,
+            });
+      if (!done.ok) throw new Error(done.code);
+      expect(await resolveSession(w.auth.config, token), act).toBeNull();
+      expect(
+        await w.auth.storage.findMany("session", [{ field: "actorId", op: "ne", value: null }]),
+        act,
+      ).toEqual([]);
+      // The target's own session stays.
+      expect((await resolveSession(w.auth.config, w.target.token))?.user.id, act).toBe(
+        w.target.user.id,
+      );
+    }
+  });
+
   it("answers each code of the start and the stop", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const refusing = await world(

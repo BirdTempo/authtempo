@@ -12,6 +12,7 @@ import { auditDraft, type OperatorActEnds, operatorAct, operatorReason } from ".
 import { activeBan } from "./ban-rule.js";
 import { isPlatformOperator, type OperatorActor, requireScope } from "./guards.js";
 import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
+import { endImpersonations } from "./impersonation.js";
 
 const MINUTE_MS = 60_000;
 
@@ -204,6 +205,8 @@ async function userUpdated(
  * stay with a pending-end row, and the sweep ends them with `banned`.
  * Until then `bannedFor` refuses each of them at every door. A throw of
  * `endFamilies` after the commit answers ok with `familyEndFailed: true`.
+ * The act also ends the impersonation sessions that the user opened as an
+ * operator (`endImpersonations`, ruling 31).
  *
  * After the commit, in the order of ruling 2: `session.afterEnd` with
  * `banned` per session, `user.afterUpdate`, then `afterAction` and
@@ -256,6 +259,8 @@ export async function banUser(
       // The read and the update: a batch of 2 on D1.
       meter.step(STEP_WORST.hold);
       await endAllAccessPage(tx, config, input.userId, ends, now, meter, budget.value, "banned");
+      // A banned platform operator keeps no impersonation session (ruling 31).
+      await endImpersonations(tx, input.userId, ends.ended ?? null, now);
       return written;
     },
     {

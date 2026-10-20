@@ -23,6 +23,7 @@ import { targetOf } from "./ban.js";
 import { activeBan } from "./ban-rule.js";
 import { type OperatorActor, requireScope } from "./guards.js";
 import { TARGET_CALLS, workBudget } from "./sessions.js";
+import { endImpersonations } from "./impersonation.js";
 
 /** The input of a grant or a revoke of the platform role (spec 26 item 5). */
 export interface PlatformRoleInput {
@@ -327,6 +328,8 @@ export async function grantPlatformRole(
  * target with no role part gets no change and the audit row. When a
  * pending-end row of the target exists, such a revoke ends a page of the
  * sessions again (ruling 45), so a retry does what the first call left.
+ * The act also ends the impersonation sessions that the target opened
+ * (`endImpersonations`, ruling 31).
  *
  * After the commit, the steps run in the order of ruling 2. First,
  * `session.afterEnd` fires with `operator` for each session. Then the
@@ -424,6 +427,8 @@ export async function revokePlatformRole(
       } else if ((await write(tx)) === 0) return fail("conflict");
       meter.step(losesOwner ? REVOKE_WRITE_WORST : 2);
       await endAllAccessPage(tx, config, user.id, ends, now, meter, budget.value, "operator");
+      // The role started them, so they end with it (ruling 31).
+      await endImpersonations(tx, user.id, ends.ended ?? null, now);
       const change: MemberChange =
         rest === ""
           ? { kind: "remove", member }

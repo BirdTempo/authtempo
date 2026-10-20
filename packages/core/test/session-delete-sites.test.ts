@@ -110,6 +110,15 @@ const SITES: Site[] = [
       "endOtherSessions (the revoke of the other sessions, the password change, the email change) and endAllAccess (the ban, the end of one user's sessions by an operator)",
   },
   {
+    file: "engine/operator/impersonation.ts",
+    fn: "endImpersonations",
+    call: "endSessions",
+    count: 1,
+    kind: "endSessions",
+    reason:
+      "the ban and the revoke of the platform role end the impersonation sessions of the operator (ruling 31); an impersonation session reaches no authorize step, so it has no link",
+  },
+  {
     file: "engine/users.ts",
     fn: "claimEmail",
     call: "endSessions",

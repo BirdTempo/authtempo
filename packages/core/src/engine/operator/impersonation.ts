@@ -1,10 +1,17 @@
-import type { ResolvedConfig } from "../../config.js";
+import { IMPERSONATION_TTL_MAX_MINUTES, type ResolvedConfig } from "../../config.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SessionRow } from "../../schema.js";
+import type { StorageAdapter } from "../../storage/port.js";
 import { sendNotice } from "../notices.js";
 import { endSessionById } from "../oauth-outbox.js";
-import { openSession, type ResolvedSession, sessionOpened, sessionsEnded } from "../sessions.js";
-import { auditDraft, operatorAct, operatorReason } from "./audit.js";
+import {
+  endSessions,
+  openSession,
+  type ResolvedSession,
+  sessionOpened,
+  sessionsEnded,
+} from "../sessions.js";
+import { auditDraft, impersonationTargets, operatorAct, operatorReason } from "./audit.js";
 import { activeBan } from "./ban-rule.js";
 import { IMPERSONATE_PER_USER, isPlatformOperator, requireOperatorUser } from "./guards.js";
 
@@ -188,4 +195,37 @@ export async function stopImpersonation(
   );
   if (!done.ok) return done;
   return ok({ auditId: done.value.auditId });
+}
+
+/**
+ * Ends every impersonation session that the platform operator `operatorId`
+ * opened, in the caller's transaction (ruling 31 of plan 12f). The ban and
+ * the revoke of the platform role call it, so nothing of the operator's
+ * acts stays (spec 26). The start rows of the last
+ * `IMPERSONATION_TTL_MAX_MINUTES` name each target through the audit
+ * index on `actorId`: no impersonation session lives longer. One
+ * `endSessions` per target then deletes the target's sessions whose
+ * `actorId` is the operator, with the outbox rows of their links. The
+ * answer is the count of sessions.
+ */
+export async function endImpersonations(
+  tx: StorageAdapter,
+  operatorId: string,
+  ended: SessionRow[] | null,
+  now: Date,
+): Promise<number> {
+  const since = new Date(now.getTime() - IMPERSONATION_TTL_MAX_MINUTES * MINUTE_MS);
+  let n = 0;
+  for (const userId of await impersonationTargets(tx, operatorId, since)) {
+    n += await endSessions(
+      tx,
+      [
+        { field: "userId", op: "eq", value: userId },
+        { field: "actorId", op: "eq", value: operatorId },
+      ],
+      ended,
+      now,
+    );
+  }
+  return n;
 }

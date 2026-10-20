@@ -36,7 +36,8 @@ describe("the audit model is append-only (plan 12f Task 4, spec 26 item 8)", () 
     const writer = text("engine/operator/audit.ts");
     const uses = writer.match(/operatorAudit/g)?.length ?? 0;
     const allowed = writer.match(/\.(create|findMany)\(\s*"operatorAudit",/g)?.length ?? 0;
-    expect(allowed).toBe(2);
+    // The insert, the list, and the read of the impersonation targets (plan 12f Task 11).
+    expect(allowed).toBe(3);
     expect(uses).toBe(allowed);
   });
 });
