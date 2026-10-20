@@ -169,6 +169,28 @@ export const OAUTH_ERRORS = {
 export type OAuthErrorCode = keyof typeof OAUTH_ERRORS;
 
 /**
+ * The `scimType` values of the SCIM error message, with their status
+ * (RFC 7644 section 3.12, plan 12d Task 9; not re-read on 2026-10-20, as no
+ * network read was allowed for this task). A SCIM route answers the SCIM error
+ * message and never a code of `ERRORS`, so the client codes and the
+ * compatibility table do not change (spec section 30 item 21).
+ */
+export const SCIM_ERRORS = {
+  invalidFilter: 400,
+  tooMany: 400,
+  uniqueness: 409,
+  mutability: 400,
+  invalidSyntax: 400,
+  invalidPath: 400,
+  noTarget: 400,
+  invalidValue: 400,
+  invalidVers: 400,
+  sensitive: 403,
+} as const;
+
+export type ScimType = keyof typeof SCIM_ERRORS;
+
+/**
  * The status of `invalid_client` at a route that takes client auth, for a
  * request with no `Authorization` header (plan 12e, ruling 19). RFC 6749
  * section 5.2 allows 400 there. A 400 needs no challenge (RFC 7235), so no
