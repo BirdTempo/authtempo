@@ -535,6 +535,16 @@ describe("the platform role (plan 12f Task 8)", () => {
     expect(await isPlatformOperator(auth.config, other.user.id)).toBe(false);
   });
 
+  it("answers not_found for a grant and a revoke with no platform organization", async () => {
+    const auth = await operatorAuth();
+    const ada = await verifiedSession(auth, EMAIL);
+    const none = { ok: false, code: "not_found", status: 404 };
+    expect(await grant(auth, ada.user.id)).toEqual(none);
+    expect(await revoke(auth, ada.user.id)).toEqual(none);
+    expect(await auth.storage.findMany("member", [])).toEqual([]);
+    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
+  });
+
   it("needs the scope users of a secret actor", async () => {
     const auth = await operatorAuth();
     await seedPlatform(auth);
