@@ -138,6 +138,23 @@ export const LOGOUT_SWEEP_MAX = 50;
 /** The due rows of one delivery: one request per row, all in parallel. */
 export const LOGOUT_REQUEST_MAX = 10;
 
+/**
+ * The due rows of one client in one sweep (final review of plan 12e, L4).
+ * A client whose URI fails or hangs cannot fill the sweep with its rows.
+ * With dynamic registration, a stranger's client could otherwise delay the
+ * logouts of every other client.
+ */
+export const LOGOUT_SWEEP_PER_CLIENT = 10;
+
+/**
+ * The reads of one sweep step. Each read after the first leaves out each
+ * client that an earlier read gave, so it finds the rows of other clients.
+ * A read costs one storage call, so the reads add at most 4 calls to the
+ * counts of `LOGOUT_SWEEP_MAX`. Its terms are the due time and at most 50
+ * clients, under the 100 bound parameters of a D1 statement.
+ */
+export const LOGOUT_SWEEP_READS = 5;
+
 /** One request: 2 seconds. A client that does not answer in time fails the attempt. */
 const LOGOUT_FETCH_MS = 2_000;
 
@@ -367,15 +384,34 @@ export async function deliverLogouts(config: ResolvedConfig, userId: string): Pr
 }
 
 /**
- * The sweep step: at most `LOGOUT_SWEEP_MAX` due rows, `LOGOUT_REQUEST_MAX`
- * at a time. Answers the rows sent or dropped.
+ * The sweep step: at most `LOGOUT_SWEEP_MAX` due rows, at most
+ * `LOGOUT_SWEEP_PER_CLIENT` of one client, `LOGOUT_REQUEST_MAX` at a time.
+ * Answers the rows sent or dropped.
  */
 export async function deliverDueLogouts(config: ResolvedConfig): Promise<number> {
-  const due = await config.storage.findMany(
-    "oauthLogout",
-    [{ field: "nextAttemptAt", op: "lte", value: config.clock.now() }],
-    { sort: { field: "nextAttemptAt", dir: "asc" }, limit: LOGOUT_SWEEP_MAX },
-  );
+  const now = config.clock.now();
+  const due: OAuthLogoutRow[] = [];
+  const seen = new Set<string>();
+  for (let read = 0; read < LOGOUT_SWEEP_READS && due.length < LOGOUT_SWEEP_MAX; read++) {
+    const rows = await config.storage.findMany(
+      "oauthLogout",
+      [
+        { field: "nextAttemptAt", op: "lte", value: now },
+        ...[...seen].map((id) => ({ field: "clientId" as const, op: "ne" as const, value: id })),
+      ],
+      { sort: { field: "nextAttemptAt", dir: "asc" }, limit: LOGOUT_SWEEP_MAX },
+    );
+    const taken = new Map<string, number>();
+    for (const row of rows) {
+      const count = taken.get(row.clientId) ?? 0;
+      if (count >= LOGOUT_SWEEP_PER_CLIENT || due.length >= LOGOUT_SWEEP_MAX) continue;
+      taken.set(row.clientId, count + 1);
+      due.push(row);
+    }
+    for (const row of rows) seen.add(row.clientId);
+    // A short read found every due row of the clients that it did not leave out.
+    if (rows.length < LOGOUT_SWEEP_MAX) break;
+  }
   let n = 0;
   for (let i = 0; i < due.length; i += LOGOUT_REQUEST_MAX)
     n += await deliverRows(config, due.slice(i, i + LOGOUT_REQUEST_MAX));

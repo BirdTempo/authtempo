@@ -538,6 +538,39 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     expect(await outbox(w)).toEqual([]);
   });
 
+  it("sends at most 10 rows of one client in a sweep, so a failing client cannot hold back the rows of another client", async () => {
+    const w = world();
+    const { actor } = await twoSessions(w);
+    // A second person: a sign-out delivers the due rows of its own user, so
+    // the rows of the good client are this person's.
+    const second = await verifiedSession(w.auth, "second@example.com", "3.3.3.3");
+    const failing = await bcClient(w, BC);
+    const good = await bcClient(w, BC2);
+    w.status.set(BC, 500);
+    w.status.set(BC2, 500);
+    /** One linked session of `clientId` that a sign-out ends while the client fails: one due row. */
+    const endLinked = async (clientId: string, userId: string) => {
+      const s = await createSession(w.auth.config, { userId, ip: null, userAgent: null });
+      await linkIdToken(w.auth.config, { sessionId: s.session.id, clientId, userId });
+      await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, s.token) }));
+    };
+    // 60 rows of the failing client fall due first, more than one read of 50.
+    for (let i = 0; i < 60; i++) await endLinked(failing, actor.user.id);
+    w.auth.clock.advance(MINUTE);
+    for (let i = 0; i < 3; i++) await endLinked(good, second.user.id);
+    w.auth.clock.advance(MINUTE);
+    w.status.set(BC2, 200);
+    const before = w.calls.length;
+    expect((await sweepExpired(w.auth.config)).oauthLogouts).toBe(3);
+    const posts = w.calls.slice(before).map((c) => c.url);
+    expect(posts.filter((u) => u === BC)).toHaveLength(10);
+    expect(posts.filter((u) => u === BC2)).toHaveLength(3);
+    const rows = await outbox(w);
+    expect(rows.filter((r) => r.clientId === good)).toEqual([]);
+    expect(rows.filter((r) => r.clientId === failing && r.attempts === 2)).toHaveLength(10);
+    expect(rows.filter((r) => r.clientId === failing && r.attempts === 1)).toHaveLength(50);
+  });
+
   it("deletes a row after 6 attempts with one log line", async () => {
     const w = world();
     const { actor } = await twoSessions(w);
@@ -1023,8 +1056,13 @@ describe("back-channel logout (plan 12e Task 16)", () => {
     for (const subjectType of ["public", "pairwise"] as const) {
       const w = world();
       const { actor } = await twoSessions(w);
-      const bc = await bcClient(w, BC, { subject_type: subjectType });
-      w.status.set(BC, 500);
+      // Five clients, so the cap of 10 rows per client leaves the sweep cap full.
+      const uris = [1, 2, 3, 4, 5].map((k) => `${BC}/${k}`);
+      const clients: string[] = [];
+      for (const uri of uris) {
+        clients.push(await bcClient(w, uri, { subject_type: subjectType }));
+        w.status.set(uri, 500);
+      }
       // 300 links whose session expires, and 200 outbox rows that fail and
       // are due again: more than each cap, so the caps bound the calls.
       for (let i = 0; i < 500; i++) {
@@ -1035,7 +1073,7 @@ describe("back-channel logout (plan 12e Task 16)", () => {
         });
         await linkIdToken(w.auth.config, {
           sessionId: s.session.id,
-          clientId: bc,
+          clientId: clients[i % 5] ?? "",
           userId: actor.user.id,
         });
         if (i >= 300) await w.handle(post("/auth/sign-out", {}, { cookie: cookieOf(w, s.token) }));
