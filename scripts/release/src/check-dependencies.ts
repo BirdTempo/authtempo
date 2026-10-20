@@ -8,19 +8,23 @@ import { readWorkspace, type WorkspacePackage } from "./lib/workspace.ts";
 /**
  * One row of release/dependencies.json: one direct dependency of the workspace
  * packages, by name and kind (spec 33 item 9). Spec 13 stays the prose record.
+ * A platform row instead gives the license of a platform package of the
+ * runtime closure, for each machine where pnpm skips that package.
  */
 export interface DependencyRow {
   name: string;
-  kind: "runtime" | "peer" | "dev";
+  kind: "runtime" | "peer" | "dev" | "platform";
   /** Each version range that a manifest writes for this name and kind. A new version needs a new read. */
   versions: string[];
-  /** Each workspace package that takes it in this kind, by name. */
+  /** Each workspace package that takes it in this kind, by name. A platform row has none. */
   users: string[];
   reason: string;
   /** The date of the last check of its version, license, and install script (YYYY-MM-DD). */
   read: string;
   /** The file that holds each import of a runtime dependency. */
   seam?: string;
+  /** The license of a platform package, with its source in the reason. */
+  license?: string;
 }
 
 /** One package of the runtime closure of the released packages, with its license. */
@@ -30,6 +34,10 @@ export interface ClosurePackage {
   license: string;
   /** The first released package whose closure holds it. */
   from: string;
+  /** True when the lockfile limits the package to an os, a cpu, or a libc. */
+  platform?: true;
+  /** True when pnpm skipped the package on this machine: its license comes from its platform row. */
+  skipped?: true;
 }
 
 export interface DependenciesInput {
@@ -50,7 +58,7 @@ export const LICENSE_ALLOW = ["MIT", "ISC", "BSD-2-Clause", "BSD-3-Clause", "Apa
 /** The lowest minimumReleaseAge, in minutes: a version younger than one day is the common window for a malicious publish. */
 const MINIMUM_RELEASE_AGE = 1440;
 
-const KINDS = ["runtime", "peer", "dev"] as const;
+const KINDS = ["runtime", "peer", "dev", "platform"] as const;
 
 /** The kind of the row for each dependency key of a manifest. */
 const KIND_OF_KEY = {
@@ -239,12 +247,16 @@ export function checkDependencies(input: DependenciesInput): Report {
 
   const rowUsers = new Map<string, Set<string>>();
   const rowCount = new Map<string, number>();
-  const kindCount: Record<string, number> = { runtime: 0, peer: 0, dev: 0 };
+  const kindCount: Record<string, number> = { runtime: 0, peer: 0, dev: 0, platform: 0 };
+  // The license of each platform package by name@version, from a platform row.
+  const platformLicense = new Map<string, string>();
   for (const row of input.rows) {
     const name = isText(row.name) ? row.name : "(no name)";
     const kind = row.kind;
     if (typeof kind !== "string" || !(KINDS as readonly string[]).includes(kind)) {
-      failures.push(`${name}: the row has the kind ${String(kind)}, not runtime, peer, or dev`);
+      failures.push(
+        `${name}: the row has the kind ${String(kind)}, not runtime, peer, dev, or platform`,
+      );
       continue;
     }
     kindCount[kind] = (kindCount[kind] ?? 0) + 1;
@@ -252,12 +264,31 @@ export function checkDependencies(input: DependenciesInput): Report {
     rowCount.set(id, (rowCount.get(id) ?? 0) + 1);
 
     const users = Array.isArray(row.users) ? row.users.filter(isText) : [];
-    if (users.length === 0) failures.push(`${name}: the ${kind} row has no user`);
+    if (kind !== "platform" && users.length === 0)
+      failures.push(`${name}: the ${kind} row has no user`);
     if (!isText(row.reason)) failures.push(`${name}: the ${kind} row has no reason`);
     if (!isDate(row.read))
       failures.push(`${name}: the ${kind} row has no read date in the form YYYY-MM-DD`);
     if (kind === "runtime" && !isText(row.seam))
       failures.push(`${name}: the runtime row has no seam`);
+
+    // A platform row is the owner of the license of a package that pnpm skips on
+    // some machines, so the check gives one result on each machine. No manifest
+    // names the package, so the row has no user.
+    if (kind === "platform") {
+      const listed = Array.isArray(row.versions) ? row.versions.filter(isText) : [];
+      if (listed.length === 0) failures.push(`${name}: the platform row lists no version`);
+      if (!isText(row.license)) failures.push(`${name}: the platform row has no license`);
+      for (const version of listed) {
+        if (isText(row.license) && isText(row.reason) && isDate(row.read))
+          platformLicense.set(`${name}@${version}`, row.license);
+        if (!input.closure.some((c) => c.platform && c.name === name && c.version === version))
+          failures.push(
+            `${name}@${version}: the platform row matches no platform package of the runtime closure`,
+          );
+      }
+      continue;
+    }
 
     const expected = taken.get(id);
     const versions = Array.isArray(row.versions) ? row.versions.filter(isText).sort() : [];
@@ -282,6 +313,29 @@ export function checkDependencies(input: DependenciesInput): Report {
           `${entry.name}: ${user} takes it and no row names that user (kind ${entry.kind})`,
         );
 
+  // A skipped package takes the license of its platform row. An installed package
+  // keeps the license of its package.json, and a platform row must agree with it.
+  let skipped = 0;
+  const unread = new Set<string>();
+  const closure = input.closure.map((c) => {
+    const row = platformLicense.get(`${c.name}@${c.version}`);
+    if (c.skipped) {
+      skipped += 1;
+      if (row === undefined) {
+        failures.push(
+          `${c.name}@${c.version}: pnpm skipped this platform package on this machine, and no platform row in release/dependencies.json gives its license`,
+        );
+        unread.add(`${c.name}@${c.version}`);
+      }
+      return { ...c, license: row ?? "" };
+    }
+    if (row !== undefined && row !== c.license)
+      failures.push(
+        `${c.name}@${c.version}: the platform row gives the license ${row}, and the installed package.json gives ${c.license}`,
+      );
+    return c;
+  });
+
   // An exemption names one package at one version with one license (ruling 15
   // of plan 12j), so another version, another license, or another package fails.
   const exemptions = new Set<string>();
@@ -296,7 +350,7 @@ export function checkDependencies(input: DependenciesInput): Report {
       failures.push(`${at}: the license exemption has no read date in the form YYYY-MM-DD`);
       ok = false;
     }
-    const match = input.closure.some(
+    const match = closure.some(
       (c) => c.name === e.name && c.version === e.version && c.license === e.license,
     );
     if (!match)
@@ -307,8 +361,10 @@ export function checkDependencies(input: DependenciesInput): Report {
   }
 
   let exempt = 0;
-  for (const c of input.closure)
-    if (exemptions.has(`${c.name}\0${c.version}\0${c.license}`)) exempt += 1;
+  // A skipped package with no platform row has its own failure above.
+  for (const c of closure)
+    if (unread.has(`${c.name}@${c.version}`)) continue;
+    else if (exemptions.has(`${c.name}\0${c.version}\0${c.license}`)) exempt += 1;
     else if (!LICENSE_ALLOW.includes(c.license))
       failures.push(
         `${c.name}@${c.version} has the license ${c.license || "(none)"} in the runtime closure of ${c.from}, outside the allow list`,
@@ -322,8 +378,10 @@ export function checkDependencies(input: DependenciesInput): Report {
         runtime: kindCount.runtime ?? 0,
         peer: kindCount.peer ?? 0,
         dev: kindCount.dev ?? 0,
+        platform: kindCount.platform ?? 0,
         packages: input.packages.length,
         closure: input.closure.length,
+        skipped,
         exempt,
         builds,
       },
@@ -341,13 +399,15 @@ const unquote = (v: string) => v.replace(/^'(.*)'$/, "$1").replace(/''/g, "'");
 
 /**
  * The `importers` and `snapshots` sections of the workspace document of a
- * lockfile in the version 9 form. pnpm 12 writes the document of its own
- * version first, then `---`, then the workspace document. Each document must
- * say version 9.0, so a new lockfile form stops the check.
+ * lockfile in the version 9 form, and each key of `packages` with an `os`, a
+ * `cpu`, or a `libc` field. pnpm 12 writes the document of its own version
+ * first, then `---`, then the workspace document. Each document must say
+ * version 9.0, so a new lockfile form stops the check.
  */
 function readLockfile(text: string): {
   importers: Map<string, LockEntry>;
   snapshots: Map<string, LockEntry>;
+  platforms: Set<string>;
 } {
   const docs = text.split(/^---$/m).filter((d) => d.trim() !== "");
   for (const doc of docs) {
@@ -357,6 +417,8 @@ function readLockfile(text: string): {
   const doc = docs.at(-1) ?? "";
   const importers = new Map<string, LockEntry>();
   const snapshots = new Map<string, LockEntry>();
+  const platforms = new Set<string>();
+  let pkg: string | undefined;
   let section = "";
   let entry: LockEntry | undefined;
   let key: string | undefined;
@@ -366,6 +428,12 @@ function readLockfile(text: string): {
     if (/^\S/.test(line)) {
       section = line.replace(/:.*$/, "");
       entry = undefined;
+      continue;
+    }
+    if (section === "packages") {
+      const top = /^ {2}(\S.*?):$/.exec(line);
+      if (top !== null) pkg = unquote(top[1] ?? "");
+      else if (pkg !== undefined && /^ {4}(os|cpu|libc):/.test(line)) platforms.add(pkg);
       continue;
     }
     if (section !== "importers" && section !== "snapshots") continue;
@@ -399,7 +467,7 @@ function readLockfile(text: string): {
     const version = /^ {8}version: (.+)$/.exec(line);
     if (version !== null && dep !== undefined) target[dep] = unquote(version[1] ?? "");
   }
-  return { importers, snapshots };
+  return { importers, snapshots, platforms };
 }
 
 /** The snapshot key of a dependency: `<name>@<version>`, or the target of an alias. */
@@ -410,14 +478,15 @@ const snapshotKey = (name: string, version: string) =>
  * The runtime closure of the released packages: each package that an app gets
  * from `dependencies` and `optionalDependencies`, by name and version, with the
  * license that `license` reads. A workspace link to another released package
- * is that package's own closure.
+ * is that package's own closure. `license` gives undefined for a package that
+ * is not installed. That is a skipped platform package, or else an error.
  */
 export function runtimeClosure(
   lockfileText: string,
   released: readonly { name: string; dir: string }[],
-  license: (name: string, version: string) => string,
+  license: (name: string, version: string) => string | undefined,
 ): ClosurePackage[] {
-  const { importers, snapshots } = readLockfile(lockfileText);
+  const { importers, snapshots, platforms } = readLockfile(lockfileText);
   const releasedDirs = new Set(released.map((r) => r.dir));
   const found = new Map<string, { name: string; version: string; from: string }>();
   const seen = new Set<string>();
@@ -456,20 +525,31 @@ export function runtimeClosure(
   for (const r of released) visitImporter(r.dir, r.name);
   return [...found.values()]
     .sort((a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version))
-    .map((p) => ({
-      name: p.name,
-      version: p.version,
-      license: license(p.name, p.version),
-      from: p.from,
-    }));
+    .map((p) => {
+      const platform = platforms.has(`${p.name}@${p.version}`);
+      const read = license(p.name, p.version);
+      if (read === undefined && !platform)
+        throw new Error(
+          `no package.json for ${p.name}@${p.version} under node_modules/.pnpm: run pnpm install --offline --frozen-lockfile`,
+        );
+      return {
+        name: p.name,
+        version: p.version,
+        license: read ?? "",
+        from: p.from,
+        ...(platform ? { platform: true as const } : {}),
+        ...(read === undefined ? { skipped: true as const } : {}),
+      };
+    });
 }
 
 /**
  * The license of an installed package, from its package.json in the virtual
  * store of `root`. The folder is `<name with "/" as "+">@<version>`, with a
- * peer suffix after "_" when pnpm resolved a peer.
+ * peer suffix after "_" when pnpm resolved a peer. Undefined when the package
+ * is not installed.
  */
-export function storeLicense(root: string): (name: string, version: string) => string {
+export function storeLicense(root: string): (name: string, version: string) => string | undefined {
   const store = join(root, "node_modules/.pnpm");
   const folders = existsSync(store) ? readdirSync(store) : [];
   return (name, version) => {
@@ -478,10 +558,7 @@ export function storeLicense(root: string): (name: string, version: string) => s
       folders.find((f) => f === folder) ?? folders.find((f) => f.startsWith(`${folder}_`));
     const path =
       match === undefined ? undefined : join(store, match, "node_modules", name, "package.json");
-    if (path === undefined || !existsSync(path))
-      throw new Error(
-        `no package.json for ${name}@${version} under node_modules/.pnpm: run pnpm install --offline --frozen-lockfile`,
-      );
+    if (path === undefined || !existsSync(path)) return undefined;
     const value = (JSON.parse(readFileSync(path, "utf8")) as { license?: unknown }).license;
     if (typeof value === "string") return value;
     // An old manifest writes { "type": "<id>" }.

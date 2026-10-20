@@ -6,6 +6,7 @@ import {
   type DependenciesInput,
   readInput,
   runtimeClosure,
+  storeLicense,
 } from "../src/check-dependencies.ts";
 import { summaryLine } from "../src/lib/report.ts";
 
@@ -52,7 +53,7 @@ describe("check-dependencies", () => {
     const r = checkDependencies(real());
     expect(r.failures).toEqual([]);
     expect(summaryLine(r)).toBe(
-      "check-dependencies: PASS rows=89 runtime=34 peer=13 dev=42 packages=50 closure=33 exempt=1 builds=3 failures=0",
+      "check-dependencies: PASS rows=89 runtime=34 peer=13 dev=42 platform=0 packages=50 closure=33 skipped=0 exempt=1 builds=3 failures=0",
     );
   });
 
@@ -139,7 +140,9 @@ describe("check-dependencies", () => {
     input.rows.push({ ...rowOf(input, "turbo", "dev"), kind: "optional" });
     const failures = checkDependencies(input).failures;
     expect(failures).toContain("zod: 2 runtime rows, not 1");
-    expect(failures).toContain("turbo: the row has the kind optional, not runtime, peer, or dev");
+    expect(failures).toContain(
+      "turbo: the row has the kind optional, not runtime, peer, dev, or platform",
+    );
   });
 
   it("fails a license outside the allow list in the runtime closure", () => {
@@ -151,7 +154,13 @@ describe("check-dependencies", () => {
       { name: "@scope/tiny", version: "1.2.3", license: "MIT", from: "@fixture/util" },
       { name: "copyleft", version: "1.0.0", license: "GPL-3.0", from: "@fixture/core" },
       { name: "inner", version: "4.5.6", license: "ISC", from: "@fixture/core" },
-      { name: "native-bit", version: "0.1.0", license: "BSD-2-Clause", from: "@fixture/util" },
+      {
+        name: "native-bit",
+        version: "0.1.0",
+        license: "BSD-2-Clause",
+        from: "@fixture/util",
+        platform: true,
+      },
       { name: "peer-lib", version: "2.0.0", license: "MIT", from: "@fixture/core" },
       { name: "string-width", version: "4.2.3", license: "MIT", from: "@fixture/util" },
     ]);
@@ -160,6 +169,87 @@ describe("check-dependencies", () => {
     input.licenseExempt = [];
     expect(checkDependencies(input).failures).toEqual([
       "copyleft@1.0.0 has the license GPL-3.0 in the runtime closure of @fixture/core, outside the allow list",
+    ]);
+  });
+
+  it("reads a skipped platform package from its platform row, with the real license reader", () => {
+    // The lockfile limits @esbuild/aix-ppc64 to aix on ppc64, so pnpm skips it on
+    // each machine of this repository. jose 6.2.12 is installed in the store.
+    const closure = runtimeClosure(
+      lockfile("platform.yaml"),
+      [{ name: "@fixture/core", dir: "packages/core" }],
+      storeLicense(repoRoot),
+    );
+    expect(closure).toEqual([
+      {
+        name: "@esbuild/aix-ppc64",
+        version: "0.28.1",
+        license: "",
+        from: "@fixture/core",
+        platform: true,
+        skipped: true,
+      },
+      { name: "jose", version: "6.2.12", license: "MIT", from: "@fixture/core" },
+    ]);
+    const input = real();
+    input.closure = closure;
+    input.licenseExempt = [];
+    const none = checkDependencies(input);
+    expect(none.failures).toEqual([
+      "@esbuild/aix-ppc64@0.28.1: pnpm skipped this platform package on this machine, and no platform row in release/dependencies.json gives its license",
+    ]);
+    expect(summaryLine(none)).toMatch(/^check-dependencies: FAIL .* closure=2 skipped=1 /);
+    const row = {
+      name: "@esbuild/aix-ppc64",
+      kind: "platform",
+      versions: ["0.28.1"],
+      license: "MIT",
+      reason: "esbuild takes it as an optional dependency for aix on ppc64.",
+      read: "2026-10-21",
+    };
+    input.rows.push(row);
+    const held = checkDependencies(input);
+    expect(held.failures).toEqual([]);
+    expect(summaryLine(held)).toMatch(/ platform=1 packages=50 closure=2 skipped=1 /);
+    row.license = "GPL-3.0";
+    expect(checkDependencies(input).failures).toEqual([
+      "@esbuild/aix-ppc64@0.28.1 has the license GPL-3.0 in the runtime closure of @fixture/core, outside the allow list",
+    ]);
+  });
+
+  it("throws for a package that is not installed and has no platform limit", () => {
+    expect(() =>
+      runtimeClosure(lockfile("gpl.yaml"), FIXTURE_RELEASED, storeLicense(repoRoot)),
+    ).toThrow(
+      "no package.json for @scope/tiny@1.2.3 under node_modules/.pnpm: run pnpm install --offline --frozen-lockfile",
+    );
+  });
+
+  it("fails a platform row with a gap, a stale platform row, and a row that the installed license contradicts", () => {
+    const input = real();
+    input.closure = runtimeClosure(lockfile("gpl.yaml"), FIXTURE_RELEASED, fixtureLicense).filter(
+      (c) => c.name !== "copyleft",
+    );
+    input.licenseExempt = [];
+    const row = (name: string, fields: Record<string, unknown>) => ({
+      name,
+      kind: "platform",
+      versions: ["0.1.0"],
+      license: "BSD-2-Clause",
+      reason: "A platform package.",
+      read: "2026-10-21",
+      ...fields,
+    });
+    input.rows.push(row("native-bit", { license: "MIT" }));
+    input.rows.push(row("@esbuild/linux-x64", { versions: ["0.28.1"] }));
+    input.rows.push(row("gap", { versions: [], license: "", reason: "", read: "2026-10" }));
+    expect(checkDependencies(input).failures).toEqual([
+      "@esbuild/linux-x64@0.28.1: the platform row matches no platform package of the runtime closure",
+      "gap: the platform row has no reason",
+      "gap: the platform row has no read date in the form YYYY-MM-DD",
+      "gap: the platform row lists no version",
+      "gap: the platform row has no license",
+      "native-bit@0.1.0: the platform row gives the license MIT, and the installed package.json gives BSD-2-Clause",
     ]);
   });
 
