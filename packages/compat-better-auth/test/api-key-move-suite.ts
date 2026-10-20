@@ -582,7 +582,11 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
         expect(await auth.tempo.caller(request())).toBeNull();
         expect(await auth.api.verifyApiKey({ body: { key } })).toEqual({
           valid: false,
-          error: { code: "KEY_DISABLED", message: "This key was replaced. Create a new key." },
+          error: {
+            code: "KEY_DISABLED",
+            message:
+              "This key does not act: it was revoked, disabled, or expired, or it did not move. Create a new key.",
+          },
           key: null,
         });
       }),

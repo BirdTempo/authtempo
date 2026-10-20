@@ -16,7 +16,7 @@ import {
   apiKeyError,
   BETTER_AUTH_CODES,
   compatApiError,
-  REPLACED_KEY_MESSAGE,
+  RETIRED_KEY_MESSAGE,
 } from "../errors.js";
 import { toBetterAuthNames, toCoreNames } from "../role-map.js";
 import type { ApiKey, ApiKeyOptions, ApiKeyServerApi, ApiKeyVerifyResult } from "../types.js";
@@ -157,11 +157,12 @@ const coreSet = (set: Record<string, string[]>): Statements => toCoreNames(set) 
 
 /**
  * Better Auth's verify code of core's resolve code. A moved prefix with no
- * row answers `token_retired`, because the key was replaced at the cutover.
- * So it answers KEY_DISABLED with the text of a replaced key (plan 12k Task 12).
+ * row answers `token_retired`: the key was revoked, skipped at the move, or
+ * expired. So it answers KEY_DISABLED with a text that names each cause
+ * (plan 12k Task 12).
  */
 function verifyCode(code: string): { code: ApiKeyCode; message?: string } {
-  if (code === "token_retired") return { code: "KEY_DISABLED", message: REPLACED_KEY_MESSAGE };
+  if (code === "token_retired") return { code: "KEY_DISABLED", message: RETIRED_KEY_MESSAGE };
   if (code === "token_exhausted") return { code: "USAGE_EXCEEDED" };
   if (code === "rate_limited") return { code: "RATE_LIMITED" };
   return { code: "INVALID_API_KEY" };

@@ -240,8 +240,14 @@ export const API_KEY_CODES = {
 
 export type ApiKeyCode = keyof typeof API_KEY_CODES;
 
-/** The text of a moved prefix with no row: the key was replaced at the cutover (plan 12k Task 12). */
-export const REPLACED_KEY_MESSAGE = "This key was replaced. Create a new key.";
+/**
+ * The text of a moved prefix with no row (plan 12k Task 12). The shim cannot
+ * tell the cause: a revoke, a skip at the move (disabled, expired, or no
+ * digest), or an expiry after it. So the text names each cause (review
+ * finding L3). Better Auth answered `KEY_EXPIRED` for an expired key.
+ */
+export const RETIRED_KEY_MESSAGE =
+  "This key does not act: it was revoked, disabled, or expired, or it did not move. Create a new key.";
 
 /** The server `APIError` of an api-key code, with Better Auth's status and text. */
 export function apiKeyError(code: ApiKeyCode, message?: string): APIError {
