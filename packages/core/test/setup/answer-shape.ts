@@ -113,8 +113,8 @@ function scalar(node: Node): boolean {
 }
 
 /**
- * True when the value node of a record holds no key: a free value (`{}`), a
- * scalar, or a list of scalars (a statement set, plan 12k). The walk does not
+ * True when the value node of a record holds no key. Such a value is free
+ * (`{}`), a scalar, or a list of scalars (a statement set, plan 12k). The walk does not
  * enter this node, so it never reads its keywords. Any other value can hide an
  * optional key: `oneOf`, `prefixItems`, or a list of objects (review 12k Task 3, M3).
  */

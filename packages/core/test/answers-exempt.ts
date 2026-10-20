@@ -42,7 +42,7 @@ const INTERNAL_ANSWERED: readonly RouteKey[] = [
   "POST /sign-out",
 ];
 
-/** The routes on which a test calls the path with its feature off. */
+/** The routes on which a test causes not_found: a feature that is off, or an id that names no row. */
 const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "GET /.well-known/openid-configuration",
   "GET /handoff/start",

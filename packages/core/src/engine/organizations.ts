@@ -701,7 +701,7 @@ export async function listMembers(
 
 /**
  * The role is well-formed, allowed in this organization, and passes
- * `grantCheck`: its rank is at most the caller's and its statements are a
+ * `grantCheck`. So its rank is at most the caller's, and its statements are a
  * subset of the caller's. The answer is the role's standing. Exported for
  * the invite and the accept, so one rule holds for every grant.
  */

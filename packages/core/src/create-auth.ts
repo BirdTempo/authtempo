@@ -593,9 +593,9 @@ export interface Auth {
   caller(request: Request): Promise<Caller | null>;
   /**
    * True when the caller holds every permission in the organization (plan
-   * 12k, spec 29 item 9). A session reads its member role now; a user token
-   * reads its user's role, narrowed by the token's set, and grants nothing
-   * outside its bound organization; an OAuth caller grants nothing. False,
+   * 12k, spec 29 item 9). A session reads its member role now. A user token
+   * reads its user's role, narrowed by the token's set. It grants nothing
+   * outside its bound organization. An OAuth caller grants nothing. False,
    * never a throw, on any failure.
    */
   hasPermission(caller: Caller, input: PermissionInput): Promise<boolean>;
