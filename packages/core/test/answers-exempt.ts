@@ -310,6 +310,16 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
 
   // A code that only a race, or a state that no flow reaches, answers.
   ...rows(
+    "account_banned",
+    "the sign-in needs a passkey ceremony or a provider exchange; operator-ban-doors.test.ts proves the ban at the engine door of each",
+    [...CALLBACKS, "POST /passkey/authenticate/verify"],
+  ),
+  ...rows(
+    "account_banned",
+    "only a race with the ban reaches it: the ban deletes the challenges and the handoff codes in its transaction; operator-ban-doors.test.ts proves both, and writeSession stops the race row",
+    ["POST /handoff/redeem", "POST /totp/verify", "POST /totp/challenge"],
+  ),
+  ...rows(
     "already_member",
     "a concurrent addMember wins the unique key while the token stays live; no test races it (invitations.ts)",
     ["POST /organizations/invitations/accept"],

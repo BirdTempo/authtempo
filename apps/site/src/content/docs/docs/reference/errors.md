@@ -436,7 +436,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| No route answers this code yet. The ban of the operator tools adds it. |
+| The sign-in routes answer it after the credential check: [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/verify`](/docs/reference/routes/#post-password-verify), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback). A race with the ban can reach it at [`POST /handoff/redeem`](/docs/reference/routes/#post-handoff-redeem), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge). The operator tools [`POST /operator/users/platform-role`](/docs/reference/routes/#post-operator-users-platform-role) and [`POST /operator/users/create-admin`](/docs/reference/routes/#post-operator-users-create-admin) refuse a banned target. |
 
 <h3 id="operator_required"><code>operator_required</code> 403</h3>
 
