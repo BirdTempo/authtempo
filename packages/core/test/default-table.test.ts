@@ -64,7 +64,7 @@ describe("the default role table", () => {
     expect(compare(Object.keys(ranks), { ranks })).toEqual([]);
   });
 
-  it("refuses ranks and roles together, an owner-less roles table, and an unknown permission", () => {
+  it("refuses ranks and roles together, an owner-less roles table, a comma in a role name, and an unknown permission", () => {
     const owner = { rank: 4, permissions: { organization: ["update", "delete"] } };
     expect(() => makeAuth({ organizations: { ranks: { owner: 4 }, roles: { owner } } })).toThrow(
       "organizations takes ranks or roles, not both",
@@ -72,6 +72,9 @@ describe("the default role table", () => {
     expect(() =>
       makeAuth({ organizations: { roles: { admin: { rank: 3, permissions: {} } } } }),
     ).toThrow("organizations.roles must name owner");
+    expect(() =>
+      makeAuth({ organizations: { roles: { owner, "a,b": { rank: 2, permissions: {} } } } }),
+    ).toThrow("organizations.roles has a bad role name: a,b");
     expect(() =>
       makeAuth({
         organizations: {
