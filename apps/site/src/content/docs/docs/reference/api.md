@@ -207,6 +207,7 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | Export | What it is |
 | --- | --- |
 | `SESSION_TOKEN_PREFIX`, `API_TOKEN_PREFIX`, `ORGANIZATION_TOKEN_PREFIX` | `ts_`, `tk_`, and `to_`, the prefixes of a session token, an API token, and an organization token. |
+| `movedPrefixFault` | The rule of a `tokens.movedPrefixes` entry: `"form"`, `"shadow"` (it overlaps a core prefix), or null. Core's config and `@authtempo/verify` read it. |
 | `SESSION_JWT_TYPE`, `ACCESS_TOKEN_TYPE` | `JWT` and `at+jwt`, the header `typ` of a session JWT and of an OAuth access token. |
 | `DEFAULT_COOKIE_NAME` | `__Host-tempo_session`, the session cookie name when the config sets no `cookieName`. |
 | `LEGACY_COOKIE_NAME` | The session cookie name before plan 12b. Core reads it for one release when `cookieName` is the default. |
