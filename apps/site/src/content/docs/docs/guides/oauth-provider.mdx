@@ -134,6 +134,7 @@ The device grant of RFC 8628 serves a device with no browser, such as a TV or a 
 - The user code is `XXXX-XXXX` of the letters `BCDFGHJKLMNPQRSTVWXZ`. It lives `oauth.device.codeTtlMinutes`, 10 minutes by default.
 - `verification_uri_complete` fills the field. The person still submits it.
 - A poll before the decision answers `authorization_pending`. A poll within `interval` seconds answers `slow_down`, and the interval grows by 5 seconds.
+- A poll of a known code counts on its own key, not on `oauth-token:ip`. So a device can poll at its interval for the whole code life ([limits](/docs/reference/limits/)).
 - A deny answers `access_denied`, and an expired code `expired_token`. An approved code gives its tokens once, then `invalid_grant`.
 - Only the client that asked may poll. A DPoP proof at the device request binds the code to its key.
 - Core stores a SHA-256 of the device code and an HMAC of the user code under the app secret, never a code.
