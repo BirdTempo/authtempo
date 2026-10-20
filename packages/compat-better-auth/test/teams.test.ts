@@ -253,6 +253,17 @@ describe("the teams shim (spec 29 item 19)", () => {
       });
       expect(await raw()).toBeNull();
       expect(await read()).toBeNull();
+      // An id with a comma would read back as two ids, so the write refuses it and keeps the row.
+      await expect(
+        s.storage.update("invitation", [{ field: "id", op: "eq", value: "i1" }], {
+          teamIds: ["a,b"],
+        }),
+      ).rejects.toMatchObject({
+        code: "invalid_argument",
+        model: "invitation",
+        message: expect.stringMatching(/expected a list of ids with no comma/),
+      });
+      expect(await raw()).toBeNull();
     } finally {
       await pg.close();
     }
