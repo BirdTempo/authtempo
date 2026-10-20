@@ -98,11 +98,12 @@ const SITES: Site[] = [
   },
   {
     file: "engine/session-list.ts",
-    fn: "endOtherSessions",
+    fn: "endAccess",
     call: "endSessions",
     count: 1,
     kind: "endSessions",
-    reason: "the revoke of the other sessions, the password change, the email change",
+    reason:
+      "endOtherSessions (the revoke of the other sessions, the password change, the email change) and endAllAccess (the ban)",
   },
   {
     file: "engine/users.ts",
@@ -127,7 +128,7 @@ const SITES: Site[] = [
     count: 1,
     kind: "by id",
     reason:
-      "the sign-out, the revoke of one session, an expired row that a request presents, and RP-initiated logout",
+      "the sign-out, the revoke of one session, an expired row or a row of a banned user that a request presents, and RP-initiated logout",
   },
   {
     file: "engine/sessions.ts",
@@ -135,7 +136,8 @@ const SITES: Site[] = [
     call: 'delete("session"',
     count: 2,
     kind: "expired",
-    reason: "the revoke of the other sessions; endSessions after it makes the dead links logouts",
+    reason:
+      "the revoke of the other sessions and the ban; endSessions after it makes the dead links logouts",
   },
   {
     file: "engine/sweep.ts",

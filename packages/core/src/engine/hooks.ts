@@ -25,6 +25,18 @@ export type MemberVia = "create" | "add" | "invitation";
 /** A remove by another member, or a leave by the member. */
 export type RemoveVia = "remove" | "leave";
 export type SessionVia = "password" | "magic_link" | "social" | "passkey" | "handoff" | "email_otp";
+/**
+ * Each value of `SessionVia` (plan 12f). The ban doors test reads it, so a
+ * new value fails that test until the test gets a row for it.
+ */
+export const SESSION_VIA = {
+  password: true,
+  magic_link: true,
+  social: true,
+  passkey: true,
+  handoff: true,
+  email_otp: true,
+} as const satisfies Record<SessionVia, true>;
 export type SessionEndReason =
   | "sign_out"
   | "password_reset"
@@ -40,7 +52,9 @@ export type SessionEndReason =
   // plan 12a: the account delete ends every session of the user.
   | "account_deleted"
   // plan 12e: a relying party asks for the end (OIDC RP-Initiated Logout 1.0).
-  | "oidc_logout";
+  | "oidc_logout"
+  // plan 12f: an operator bans the user, or a session of a banned user is presented.
+  | "banned";
 
 /** The member a before hook sees: no row exists yet. */
 export interface ProposedMember {
@@ -193,8 +207,8 @@ export interface SessionHooks {
 
 /** How a user row came: the flow's sign-in, or a reset that created the user (plan 12a). */
 export type UserCreateVia = SessionVia | "password_reset";
-/** The profile update, or the change of address (plan 12a). */
-export type UserUpdateVia = "profile" | "email_change";
+/** The profile update, the change of address (plan 12a), or an operator's ban and unban (plan 12f). */
+export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban";
 /**
  * The flow that proves the address of an existing unverified user (plan
  * 12a). `social` is a sign-in with a verified provider address.
@@ -224,6 +238,10 @@ export interface UserPatch {
   name?: string | null;
   image?: string | null;
   email?: string;
+  /** The ban and the unban write the three ban fields (plan 12f). */
+  bannedAt?: Date | null;
+  banReason?: string | null;
+  banUntil?: Date | null;
 }
 
 /**
@@ -257,7 +275,7 @@ export interface UserHooks {
    */
   beforeCreate?(e: { user: UserRow; via: UserCreateVia }): Awaitable<UserCreatePatchAnswer>;
   afterCreate?(e: { user: UserRow; via: UserCreateVia }): Awaitable<void>;
-  /** The profile update and the change of address. `patch` holds the fields the flow writes. */
+  /** The profile update, the change of address, the ban, and the unban. `patch` holds the fields the flow writes. */
   beforeUpdate?(e: { user: UserRow; patch: UserPatch; via: UserUpdateVia }): Awaitable<void>;
   /** `user` is the stored row after the update. */
   afterUpdate?(e: { user: UserRow; previous: UserRow; via: UserUpdateVia }): Awaitable<void>;

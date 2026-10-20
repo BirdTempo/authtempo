@@ -234,6 +234,7 @@ describe("the methods of a challenge (plan 12c)", () => {
       factor,
       {
         userId: user.id,
+        user,
         via: "magic_link",
         from: "sign-in",
         ip: "3.3.3.3",

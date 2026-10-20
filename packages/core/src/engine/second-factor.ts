@@ -7,6 +7,8 @@ import { groupBackupCode, normalizeBackupCode, randomBackupCode } from "../primi
 import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
+import { stopWith } from "./hooks.js";
+import { activeBan } from "./operator/ban-rule.js";
 import { ROUNDS } from "./rounds.js";
 import { endSessions, type PreparedSession, prepareSession, writeSession } from "./sessions.js";
 
@@ -404,6 +406,8 @@ export function challengeMethods(
 
 export interface ChallengeInput extends ChallengeOrigin {
   userId: string;
+  /** The ban fields of the row the flow read (ruling 14 of plan 12f): no new read. */
+  user: Pick<UserRow, "bannedAt" | "banUntil">;
   ip: string | null;
   userAgent: string | null;
   next: string | undefined;
@@ -415,6 +419,9 @@ export interface ChallengeInput extends ChallengeOrigin {
  * verification row (spec 8.11 item 4). Its `data` holds the origin, so the
  * verify opens the session with the same `via`, and the IP, the user agent,
  * and `next` of the first factor.
+ *
+ * An active ban stops it with `account_banned` before the insert (plan 12f
+ * deviation 12). So a banned user gets no challenge and no mailed code.
  */
 export async function writeChallenge(
   config: ResolvedConfig,
@@ -423,6 +430,7 @@ export async function writeChallenge(
   input: ChallengeInput,
   now: Date,
 ): Promise<{ id: string; pending: TwoFactorPending }> {
+  if (activeBan(input.user, now)) stopWith("account_banned");
   const challenge = randomToken(TWO_FACTOR_PREFIX);
   const expiresAt = new Date(now.getTime() + CHALLENGE_TTL_MS);
   const id = newId(now);
@@ -547,7 +555,7 @@ export function gatedSteps(
   trustId(): string | null;
 } {
   let prepared: PreparedSession | null = null;
-  let gated: { row: SecondFactorRow; userId: string } | null = null;
+  let gated: { row: SecondFactorRow; user: UserRow } | null = null;
   let trustId: string | null = null;
   return {
     async before(tx, user) {
@@ -558,7 +566,7 @@ export function gatedSteps(
         ? await gateRead(config, tx, user.id, open.trustDevice, now)
         : { gated: false, trustId: null };
       if (read.gated) {
-        gated = { row: read.row, userId: user.id };
+        gated = { row: read.row, user };
         return;
       }
       trustId = read.trustId;
@@ -576,7 +584,8 @@ export function gatedSteps(
           tx,
           g.row,
           {
-            userId: g.userId,
+            userId: g.user.id,
+            user: g.user,
             via: open.via,
             from: "sign-in",
             ip: open.ip,

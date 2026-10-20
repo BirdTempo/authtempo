@@ -21,6 +21,7 @@ import { currentSecret, secretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { JwkRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
+import { activeBan } from "./operator/ban-rule.js";
 import { sessionIsLive } from "./sessions.js";
 
 /**
@@ -387,7 +388,8 @@ export async function verifySessionJwt(
  * absolute cap of `session.absoluteDays` (plan 12b) (plan 9g final
  * fix wave, review M-1). A resource server that must end access at a
  * sign-out asks this with the `sid` of a verified session JWT. It reads the
- * row by id only: it renews nothing and resolves no user.
+ * row by id and renews nothing. It reads the user for the ban (plan 12f):
+ * a user with an active ban has no live session.
  */
 export async function sessionLive(
   config: ResolvedConfig,
@@ -398,7 +400,10 @@ export async function sessionLive(
   const row = await config.storage.findOne("session", [
     { field: "id", op: "eq", value: input.sid },
   ]);
-  return row !== null && sessionIsLive(config, row, config.clock.now());
+  const now = config.clock.now();
+  if (row === null || !sessionIsLive(config, row, now)) return false;
+  const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: row.userId }]);
+  return user !== null && !activeBan(user, now);
 }
 
 /**

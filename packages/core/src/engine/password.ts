@@ -10,11 +10,12 @@ import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
-import { HookStop, hookGuard } from "./hooks.js";
+import { HookStop, hookGuard, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { endFamilies, type FamilyEnds, familyEnds } from "./oauth-family.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
 import { deliverLogouts } from "./oauth-logout.js";
+import { activeBan } from "./operator/ban-rule.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
 import { gateRead, touchTrust, writeChallenge } from "./second-factor.js";
 import { deleteHandoffCodes, endOtherAccess } from "./session-list.js";
@@ -1306,6 +1307,9 @@ function applyReset(
       : null;
     const gatedRow = gate?.gated ? gate.row : null;
     if (gate && !gate.gated) trust.id = gate.trustId;
+    // A banned user gets no challenge (plan 12f). The stop comes before the
+    // writes below, as the session hook's does; `writeChallenge` checks again.
+    if (gatedRow && activeBan(user, now)) stopWith("account_banned");
     // The reset consumes its link first, and the hook runs before every
     // other write (plan 9d, fix round 2). The link row belongs to this
     // request alone, so the D1 undo of the consume is exact; an undo of the
@@ -1376,6 +1380,7 @@ function applyReset(
         gatedRow,
         {
           userId: user.id,
+          user,
           via: "password",
           from: "reset",
           ip: input.ip,

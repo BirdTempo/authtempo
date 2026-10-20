@@ -14,6 +14,7 @@ import {
   requestResource,
   resolveAccessToken,
 } from "./oauth-token.js";
+import { activeBan } from "./operator/ban-rule.js";
 import { membership } from "./organizations.js";
 import {
   type ResolvedSession,
@@ -178,6 +179,9 @@ export async function resolveApiToken(
   }
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: row.userId }]);
   if (!user) return null;
+  // A banned user's token answers as no token, and its row stays: it works
+  // again after an unban (plan 12f, spec 26 item 6).
+  if (activeBan(user, now)) return null;
   if (row.organizationId !== null && !(await membership(config, row.organizationId, user.id)))
     return null;
   let lastUsedAt = row.lastUsedAt;

@@ -27,6 +27,7 @@ import { familyEnded, revokeFamily } from "./oauth-family.js";
 import { linkIdToken } from "./oauth-logout.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { sidFor, subjectFor, userOfSubject } from "./oauth-subject.js";
+import { activeBan } from "./operator/ban-rule.js";
 import { consumeVerification } from "./verification.js";
 
 /**
@@ -147,10 +148,15 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
 export const tokenLimited = async (config: ResolvedConfig, ip: string | null) =>
   !(await config.limiter.allow(`oauth-token:ip:${ipKey(ip)}`, TOKEN_PER_IP));
 
-/** The user, while it exists and its address is verified. */
+/**
+ * The user, while it exists, its address is verified, and no ban is active
+ * (plan 12f). The refresh grant, the code exchange, the device poll, and
+ * introspection read it.
+ */
 export async function liveUser(config: ResolvedConfig, userId: string): Promise<UserRow | null> {
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-  return user?.emailVerified ? user : null;
+  if (!user?.emailVerified || activeBan(user, config.clock.now())) return null;
+  return user;
 }
 
 /**
@@ -693,7 +699,9 @@ export async function resolveAccessToken(
   const userId = await userOfSubject(config, p.sub, client);
   if (userId === null) return null;
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-  if (!user) return null;
+  // A banned user's access token answers as no token here (ruling 5 of plan
+  // 12f). A resource server that verifies the JWT alone accepts it to its exp.
+  if (!user || activeBan(user, config.clock.now())) return null;
   return {
     kind: "oauth",
     subject: p.sub,

@@ -2,6 +2,7 @@ import type { ResolvedConfig } from "../../config.js";
 import type { Result } from "../../result.js";
 import type { OperatorAuditRow } from "../../schema.js";
 import { listAudit } from "./audit.js";
+import { type BanInput, banUser, type UnbanInput, unbanUser } from "./ban.js";
 import { checkActor, type OperatorActor } from "./guards.js";
 import { getUser, listUsers, type OperatorUser, searchUsers } from "./users.js";
 
@@ -40,6 +41,10 @@ export interface OperatorApi {
     }): Promise<Result<{ users: OperatorUser[]; next: string | null }>>;
     /** One user by id. Needs the scope `users`. */
     get(input: { actor: OperatorActor; userId: string }): Promise<Result<OperatorUser>>;
+    /** Bans a user and ends all access but the API tokens (plan 12f Task 6). Needs the scope `users`. */
+    ban(input: BanInput): Promise<Result<{ auditId: string }>>;
+    /** Lifts a ban. It restores no session. Needs the scope `users`. */
+    unban(input: UnbanInput): Promise<Result<{ auditId: string }>>;
   };
 }
 
@@ -66,6 +71,8 @@ export function operatorApi(config: ResolvedConfig): OperatorApi {
       list: entry((i) => listUsers(config, i)),
       search: entry((i) => searchUsers(config, i)),
       get: entry((i) => getUser(config, i)),
+      ban: entry((i) => banUser(config, i)),
+      unban: entry((i) => unbanUser(config, i)),
     },
   };
 }

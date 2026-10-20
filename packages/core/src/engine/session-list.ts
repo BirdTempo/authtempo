@@ -1,7 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow } from "../schema.js";
-import type { StorageAdapter } from "../storage/port.js";
+import type { StorageAdapter, Where } from "../storage/port.js";
 import { requireFresh } from "./fresh.js";
 import type { FamilyEnds } from "./oauth-family.js";
 import { deleteOAuthTokens } from "./oauth-grants.js";
@@ -125,13 +125,32 @@ export async function deleteHandoffCodes(tx: StorageAdapter, userId: string): Pr
 }
 
 /**
+ * The one list of deletes of a session end (plan 12f deviation 6): the
+ * challenges, the sessions that `sessionWhere` matches, then the handoff
+ * codes. The challenges go first because a verify spends its challenge as
+ * its last statement (plan 9f). `endOtherSessions` and `endAllAccess` both
+ * call it, so the two lists cannot drift. `sessionWhere` holds the
+ * `userId` term. The answer is the count of sessions that the call deleted.
+ */
+async function endAccess(
+  tx: StorageAdapter,
+  userId: string,
+  sessionWhere: Where<"session">[],
+  ended: SessionRow[] | null,
+  now: Date,
+): Promise<number> {
+  await deleteTwoFactorChallenges(tx, userId);
+  const n = await endSessions(tx, sessionWhere, ended, now);
+  await deleteHandoffCodes(tx, userId);
+  return n;
+}
+
+/**
  * Ends every session of the user but one, and the sessions in waiting, in the
- * caller's transaction (plan 12a). The order is the challenges, the sessions,
- * then the handoff codes. The challenges go first because a verify spends its
- * challenge as its last statement (plan 9f). A code of the caller's own
- * browser goes too, and costs one more handoff. The trusted devices, the API
- * tokens, and the OAuth grants stay. Each has its own list and revoke. The
- * answer is the count of sessions that the call deleted.
+ * caller's transaction (plan 12a), through `endAccess`. A code of the
+ * caller's own browser goes too, and costs one more handoff. The trusted
+ * devices, the API tokens, and the OAuth grants stay. Each has its own list
+ * and revoke. The answer is the count of sessions that the call deleted.
  */
 export async function endOtherSessions(
   tx: StorageAdapter,
@@ -140,9 +159,9 @@ export async function endOtherSessions(
   ended: SessionRow[] | null,
   now: Date,
 ): Promise<number> {
-  await deleteTwoFactorChallenges(tx, userId);
-  const n = await endSessions(
+  return endAccess(
     tx,
+    userId,
     [
       { field: "userId", op: "eq", value: userId },
       { field: "id", op: "ne", value: keepSessionId },
@@ -150,8 +169,6 @@ export async function endOtherSessions(
     ended,
     now,
   );
-  await deleteHandoffCodes(tx, userId);
-  return n;
 }
 
 /**
@@ -170,6 +187,26 @@ export async function endOtherAccess(
   now: Date,
 ): Promise<number> {
   const n = await endOtherSessions(tx, userId, keepSessionId, ended, now);
+  await deleteOAuthTokens(tx, userId, families);
+  return n;
+}
+
+/**
+ * Ends all access of the user in the caller's transaction (plan 12f, ASVS
+ * 5.0.0 7.4.2): every session, challenge, and handoff code through
+ * `endAccess`, then the OAuth refresh tokens and codes. The API tokens stay:
+ * each has its own revoke, and they work again after an unban (spec 26 item
+ * 6). The caller runs, after its commit, `sessionsEnded`, `deliverLogouts`,
+ * and `endFamilies` last (ruling 2). The answer is the count of sessions.
+ */
+export async function endAllAccess(
+  tx: StorageAdapter,
+  userId: string,
+  ended: SessionRow[] | null,
+  families: FamilyEnds,
+  now: Date,
+): Promise<number> {
+  const n = await endAccess(tx, userId, [{ field: "userId", op: "eq", value: userId }], ended, now);
   await deleteOAuthTokens(tx, userId, families);
   return n;
 }

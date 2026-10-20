@@ -20,7 +20,8 @@ import {
   stopWith,
 } from "./hooks.js";
 import { endSessionById, writeLogouts } from "./oauth-outbox.js";
-import { holdUser, userStays } from "./user-hold.js";
+import { activeBan } from "./operator/ban-rule.js";
+import { holdUser } from "./user-hold.js";
 
 // The credential facts moved to primitives/credentials.ts (plan 11d). They stay exported here, so no importer changes.
 export { readBearer, readSessionToken, SESSION_TOKEN_PREFIX, sessionCookieToken };
@@ -246,12 +247,17 @@ export interface PreparedSession {
  * flow's transaction; the flow's `hookGuard` answers it. A flow calls it
  * apart from `writeSession` only when the hook must run before its first
  * write: the password sign-up.
+ *
+ * An active ban stops it with `account_banned` before the hook (plan 12f,
+ * spec 26 item 6). Every flow calls it after its credential check, so only
+ * a person who proved the credential learns of the ban.
  */
 export async function prepareSession(
   config: ResolvedConfig,
   input: SessionOpen,
   storage: StorageAdapter = config.storage,
 ): Promise<PreparedSession> {
+  if (activeBan(input.user, config.clock.now())) stopWith("account_banned");
   const draft: SessionDraft = {
     userId: input.user.id,
     ip: input.ip,
@@ -283,6 +289,10 @@ export async function prepareSession(
  * session and every other write of the flow. D1 has no lock. The delete
  * removes the user row before the sessions, and this read follows the
  * insert. So one of the two always sees the other.
+ *
+ * The same read stops an active ban with `account_banned` (ruling 3 of plan
+ * 12f). The ban writes the user row before it deletes the sessions. So a
+ * ban that commits after the flow read the user still stops this session.
  */
 export async function writeSession(
   config: ResolvedConfig,
@@ -290,7 +300,11 @@ export async function writeSession(
   storage: StorageAdapter = config.storage,
 ): Promise<{ token: string; session: SessionRow }> {
   const written = await createSession(config, prepared.input, storage);
-  await userStays(storage, prepared.input.userId);
+  const user = await storage.findOne("user", [
+    { field: "id", op: "eq", value: prepared.input.userId },
+  ]);
+  if (!user) stopWith("conflict");
+  if (activeBan(user, config.clock.now())) stopWith("account_banned");
   return written;
 }
 
@@ -438,6 +452,11 @@ export function readModeOf(
  * forward by a full ttl. In `"read-only"` mode the call writes nothing: an
  * ended row answers null and stays for the sweep, and a due refresh sets
  * `needsRefresh`. No mode changes `freshAt`.
+ *
+ * A session of a user with an active ban answers null (plan 12f). The ban
+ * ended every session in its transaction, so such a row is one that a
+ * sign-in wrote in a race with the ban. In `"write"` mode the call deletes
+ * it by id; in `"read-only"` mode it writes nothing (ruling 4).
  */
 export async function resolveSession(
   config: ResolvedConfig,
@@ -466,6 +485,13 @@ export async function resolveSession(
     { field: "id", op: "eq", value: session.userId },
   ]);
   if (!user) return null;
+  if (activeBan(user, now)) {
+    if (!write) return null;
+    // As for an expired row: the links go to the outbox, and the sweep delivers them.
+    const n = await endSessionById(config.storage, session, now);
+    if (n === 1) await sessionsEnded(config, [session], "banned");
+    return null;
+  }
   const sinceSeen = now.getTime() - session.lastSeenAt.getTime();
   const due = sinceSeen >= config.session.slidingRefreshDays * DAY_MS;
   if (!write) return { user, session, refreshed: false, needsRefresh: due };

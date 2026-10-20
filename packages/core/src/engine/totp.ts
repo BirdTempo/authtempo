@@ -738,14 +738,16 @@ export async function twoFactorGate(
   if (!row) return { trustId: null };
   const trustId = await liveTrust(config.storage, user.id, input.trustDevice, now);
   if (trustId) return { trustId };
-  const challenge = await config.storage.transaction(
-    async (tx): Promise<Result<TwoFactorPending>> => {
+  // `hookGuard`: `writeChallenge` stops an active ban with `account_banned` (plan 12f).
+  const challenge = await hookGuard(() =>
+    config.storage.transaction(async (tx): Promise<Result<TwoFactorPending>> => {
       const { id, pending } = await writeChallenge(
         config,
         tx,
         row,
         {
           userId: user.id,
+          user,
           via: "password",
           from: "sign-in",
           ip: input.ip,
@@ -767,7 +769,7 @@ export async function twoFactorGate(
         return fail("invalid_credentials");
       }
       return ok(pending);
-    },
+    }),
   );
   return { challenge };
 }
