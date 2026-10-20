@@ -30,6 +30,17 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /operator/secrets/rewrap",
   "GET /operator/info",
   "POST /operator/impersonate",
+  "GET /operator/users",
+  "GET /operator/users/search",
+  "GET /operator/users/get",
+  "POST /operator/users/ban",
+  "POST /operator/users/unban",
+  "POST /operator/users/platform-role",
+  "POST /operator/users/second-factor/disable",
+  "POST /operator/users/create-admin",
+  "POST /operator/sessions/end-user",
+  "POST /operator/sessions/end-all",
+  "GET /operator/audit",
   // The stop is the one way out. A sign-out would end the session with no
   // stop row and keep the actor cookie (ruling 6 for the end-session route).
   "POST /sign-out",

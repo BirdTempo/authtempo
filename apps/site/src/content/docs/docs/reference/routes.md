@@ -923,7 +923,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | Query { after?, limit? }. `limit` is 1 to 100, default 50. `after` is the `next` of the last answer |
 | Answer | `{ users, next }`: the users by `id` ascending. Each user has `id`, `email`, `emailVerified`, `name`, `createdAt`, `ban`, `platformOperator`, `secondFactor`, `sessions` (live, at most 100), and `identities` (provider names). No hash, token, or provider subject. `next` is null on the last page |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-operator-users-search"><code>GET /operator/users/search</code></h3>
 
@@ -932,7 +932,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | Query { email?, emailPrefix?, id?, after?, limit? }. Exactly one of `email`, `emailPrefix`, and `id`. A prefix has 3 to 254 characters after the address rule, and matches with case and with no wildcard. A prefix search reads the whole user table |
 | Answer | `{ users, next }`, as `GET /operator/users`. No match answers `{ users: [], next: null }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-operator-users-get"><code>GET /operator/users/get</code></h3>
 
@@ -941,7 +941,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | Query { userId } |
 | Answer | `{ user }`, one user as `GET /operator/users` gives it. A user id that names no user answers 404 `not_found` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-users-ban"><code>POST /operator/users/ban</code></h3>
 
@@ -950,7 +950,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | JSON { userId, reason, until? }. `reason` is 1 to 500 characters with no control character. `until` is a date and time with a zone, 1 minute to 3650 days from now; with no `until` the ban has no end |
 | Answer | `{ auditId }`, and `familyEndFailed: true` when the end of the OAuth families failed after the commit. The ban ends every challenge, handoff code, and OAuth refresh token and code of the user, and the sessions that fit the call. The sweep ends the other sessions, and until then every door refuses them. API tokens stay, and work again after an unban |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-users-unban"><code>POST /operator/users/unban</code></h3>
 
@@ -959,7 +959,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | JSON { userId, reason }. `reason` is 1 to 500 characters with no control character |
 | Answer | `{ auditId }`. The unban restores no session. An unban of a user with no ban also writes its row |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-users-platform-role"><code>POST /operator/users/platform-role</code></h3>
 
@@ -968,7 +968,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | JSON { userId, grant, reason }. `grant` true grants the platform role, and false revokes it. `reason` is 1 to 500 characters with no control character |
 | Answer | `{ auditId }`, and `familyEndFailed: true` when the end of the OAuth families failed after the commit. A grant needs a verified address and no ban. A revoke ends the sessions of the user that fit the call, and keeps one owner of the platform organization. The sweep ends the other sessions, and a second revoke ends them too. Until then each operator check refuses them |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`email_unverified`](/docs/reference/errors/#email_unverified), [`account_banned`](/docs/reference/errors/#account_banned), [`member_limit`](/docs/reference/errors/#member_limit), [`last_owner`](/docs/reference/errors/#last_owner), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`email_unverified`](/docs/reference/errors/#email_unverified), [`account_banned`](/docs/reference/errors/#account_banned), [`member_limit`](/docs/reference/errors/#member_limit), [`last_owner`](/docs/reference/errors/#last_owner), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-users-second-factor-disable"><code>POST /operator/users/second-factor/disable</code></h3>
 
@@ -977,7 +977,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | JSON { userId, reason, proof }. `reason` is 1 to 500 characters with no control character. `proof` is `{ method, reference, checkedAt }`: `method` is `document`, `in_person`, `video`, `knowledge`, or `other`. `reference` is the case id in your own system, at most 200 characters, never the evidence. `checkedAt` is a date and time with a zone, at most 7 days old |
 | Answer | `{ auditId }`. The whole second factor goes, and the user gets the mail `factor_disabled` unless `account.notices` is false |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-users-create-admin"><code>POST /operator/users/create-admin</code></h3>
 
@@ -986,7 +986,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. Only a secret with the scope `users` passes; a session caller gets 403 `operator_required` |
 | Input | JSON { email, name?, reason }. `reason` is 1 to 500 characters with no control character |
 | Answer | `{ userId, created, auditId }`. It creates the platform organization when absent, the user when no user holds the address (not verified, no password), and the member row. The new operator has no power before a proof of the mailbox and a second factor |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`account_banned`](/docs/reference/errors/#account_banned), [`member_limit`](/docs/reference/errors/#member_limit), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`account_banned`](/docs/reference/errors/#account_banned), [`member_limit`](/docs/reference/errors/#member_limit), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-sessions-end-user"><code>POST /operator/sessions/end-user</code></h3>
 
@@ -995,7 +995,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `sessions`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | JSON { userId, reason }. `reason` is 1 to 500 characters with no control character |
 | Answer | `{ ended, more, auditId }`. It ends the sessions, challenges, handoff codes, and OAuth refresh tokens and codes of one user, one page per call. Call again while `more` is true |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-sessions-end-all"><code>POST /operator/sessions/end-all</code></h3>
 
@@ -1004,7 +1004,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `sessions`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | JSON { reason, limit? }. `reason` is 1 to 500 characters with no control character. `limit` is 1 to 1000 sessions, default 500 |
 | Answer | `{ ended, more, auditId }`. It ends up to `limit` sessions of all users, and keeps the session of a platform operator who calls it. A call stops early to stay inside 50 storage calls. Call again while `more` is true |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-operator-audit"><code>GET /operator/audit</code></h3>
 
@@ -1013,7 +1013,7 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `audit`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
 | Input | Query { targetUserId?, after?, limit? }. `targetUserId` reads one user's rows. `limit` is 1 to 100, default 50. `after` is the `next` of the last answer |
 | Answer | `{ rows, next }`: the audit rows by `id` ascending, oldest first. A row has `id`, `createdAt`, `updatedAt`, `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, and `userAgent`. `actorId` names a secret by its name, never by the secret. `next` is the last id of a full page, else null |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 ## OAuth provider
 
