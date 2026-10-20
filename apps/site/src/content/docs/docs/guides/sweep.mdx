@@ -48,7 +48,7 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `limits` | The limit windows that ended, when the limiter has a sweep. |
 | `oauthDevices` | Device grants past their expiry: pending, decided, and spent. A poll of such a code answers `expired_token` before the sweep, and `invalid_grant` after it. |
 | `oauthSessionLinks` | Links of OAuth clients to sessions that are gone, at most 250 in one sweep. Each link becomes a back-channel sign-out message: an expiry ends a session too. |
-| `oauthLogouts` | Back-channel sign-out messages, at most 50 in one sweep. Each due message gets one more attempt. The count holds the messages that a client took, and the messages that core deleted after their sixth attempt. |
+| `oauthLogouts` | Back-channel sign-out messages, at most 50 in one sweep and at most 10 of one client. So a client that fails cannot hold back the messages of other clients. Each due message gets one more attempt. The count holds the messages that a client took, and the messages that core deleted after their sixth attempt. |
 | `oauthClientSecrets` | Old OAuth client secrets past the overlap of a rotation. The sweep clears them from the client. |
 
 ## How it behaves
