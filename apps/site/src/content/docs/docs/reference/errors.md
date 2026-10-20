@@ -445,16 +445,16 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /operator/keys/rotate`](/docs/reference/routes/#post-operator-keys-rotate) needs the scope `keys`. [`GET /operator/secrets/status`](/docs/reference/routes/#get-operator-secrets-status) and [`POST /operator/secrets/rewrap`](/docs/reference/routes/#post-operator-secrets-rewrap) need the scope `secrets`. |
+| [`POST /operator/keys/rotate`](/docs/reference/routes/#post-operator-keys-rotate) needs the scope `keys`. [`GET /operator/secrets/status`](/docs/reference/routes/#get-operator-secrets-status) and [`POST /operator/secrets/rewrap`](/docs/reference/routes/#post-operator-secrets-rewrap) need the scope `secrets`. The operator user tools need the scope `users`, `sessions`, or `audit`, or a platform operator who passes the guard. These routes are [`GET /operator/users`](/docs/reference/routes/#get-operator-users), [`GET /operator/users/search`](/docs/reference/routes/#get-operator-users-search), [`GET /operator/users/get`](/docs/reference/routes/#get-operator-users-get), [`POST /operator/users/ban`](/docs/reference/routes/#post-operator-users-ban), [`POST /operator/users/unban`](/docs/reference/routes/#post-operator-users-unban), [`POST /operator/users/platform-role`](/docs/reference/routes/#post-operator-users-platform-role), [`POST /operator/users/second-factor/disable`](/docs/reference/routes/#post-operator-users-second-factor-disable), [`POST /operator/sessions/end-user`](/docs/reference/routes/#post-operator-sessions-end-user), [`POST /operator/sessions/end-all`](/docs/reference/routes/#post-operator-sessions-end-all), and [`GET /operator/audit`](/docs/reference/routes/#get-operator-audit). [`POST /operator/users/create-admin`](/docs/reference/routes/#post-operator-users-create-admin) takes a secret only. |
 
 <h3 id="operator_self"><code>operator_self</code> 409</h3>
 
-- **Meaning:** A platform operator tried to act on their own account or on another platform operator.
+- **Meaning:** A platform operator tried to act on their own account. An act on another platform operator answers `operator_required`.
 - **Do:** Ask another operator, or use an operator secret.
 
 | Routes |
 | --- |
-| No route answers this code yet. The operator user tools add it. |
+| [`POST /operator/users/ban`](/docs/reference/routes/#post-operator-users-ban), [`POST /operator/users/unban`](/docs/reference/routes/#post-operator-users-unban), [`POST /operator/users/platform-role`](/docs/reference/routes/#post-operator-users-platform-role), [`POST /operator/users/second-factor/disable`](/docs/reference/routes/#post-operator-users-second-factor-disable), and [`POST /operator/sessions/end-user`](/docs/reference/routes/#post-operator-sessions-end-user), for a platform operator who names their own user. |
 
 <h3 id="impersonation_refused"><code>impersonation_refused</code> 403</h3>
 

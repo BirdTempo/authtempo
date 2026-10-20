@@ -790,8 +790,8 @@ describe("the demo page (plan 11b Task 12)", () => {
     expect(exempt.map((m) => / id="off-([^"]+)"/.exec(m[1] ?? "")?.[1])).toEqual(
       Object.keys(DEMO_EXEMPT),
     );
-    // The seven exempt features, typed here (plan 12e adds oauthDevice), so a lost member fails this test too.
-    expect(exempt).toHaveLength(7);
+    // The eight exempt features, typed here (plan 12e adds oauthDevice, plan 12f operatorUsers), so a lost member fails this test too.
+    expect(exempt).toHaveLength(8);
     for (const m of exempt) {
       const f = (/ id="off-([^"]+)"/.exec(m[1] ?? "")?.[1] ?? "") as keyof typeof DEMO_EXEMPT;
       expect({ f, dt: textOf(m[2] ?? ""), dd: textOf(m[3] ?? "") }).toEqual({

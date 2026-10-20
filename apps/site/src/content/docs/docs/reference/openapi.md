@@ -72,6 +72,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `tokens` | always on | on |
 | `jwtMint` | `jwtMint` | on |
 | `operator` | `operator` | off |
+| `operatorUsers` | `operator.users` | off |
 | `oauth` | `oauth` | off |
 | `oauthRegistration` | `oauth.registration.dynamic` | off |
 | `oauthDevice` | `oauth.device` | off |

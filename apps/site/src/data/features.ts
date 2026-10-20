@@ -16,7 +16,8 @@ export interface Feature {
 
 /**
  * One row per member of RouteFeature (17 at 0ef9665; plan 11g adds `openapi`,
- * the 18th; plan 12e adds `oauthDevice`, the 19th). A Record over the union fails the site's typecheck when core
+ * the 18th; plan 12e adds `oauthDevice`, the 19th; plan 12f adds
+ * `operatorUsers`, the 20th). A Record over the union fails the site's typecheck when core
  * adds a member, so a new feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
@@ -30,7 +31,9 @@ export interface Feature {
  * a repeat. The three oauth rows also repeat.
  * The guide of `session` is the architecture page (plan 11b Task 4). The guide
  * of `operator` is the Operator section of the routes page, which shows its
- * four routes (ruling 18 of the plan 11b lane). `accountDelete`,
+ * four routes (ruling 18 of the plan 11b lane). Until the guide of plan
+ * 12f Task 14, the guide of `operatorUsers` is the section of the routes
+ * page that shows its routes. `accountDelete`,
  * `oauthRegistration`, and `oauthDevice` point to the section of their guide
  * that holds them.
  * `openapi` has no guide: its
@@ -126,6 +129,12 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "Rotate the signing key and reseal the app secrets with a hashed operator secret.",
     icon: "cli",
     guide: "/docs/reference/routes/#operator",
+  },
+  operatorUsers: {
+    title: "Operator user tools",
+    line: "List, ban, and sign out users, with an audit row for each act.",
+    icon: "cli",
+    guide: "/docs/reference/routes/#operator-user-tools",
   },
   oauth: {
     title: "OAuth provider",
