@@ -37,9 +37,9 @@ An adapter can leave these out. Core then takes a fixed worst case.
 
 | Method | What it does |
 | --- | --- |
-| `statementsSent` | Answers the count of statements that the adapter sent since its creation. D1 counts each statement of a batch. The operator session calls read it, so each call fits the 50 queries of D1 Free. |
+| `statementsSent` | Answers the count of statements that the adapter sent since its creation, its transactions included. D1 counts each statement of a batch and the queries of its ready check, also in the D1 storage of the Better Auth tables. Memory and Postgres count their port calls. The operator session calls and the sweep read it, so each call fits the 50 queries of D1 Free. |
 | `readyStatements` | Runs the ready check of the adapter when it has not run, such as the schema version check, and answers the count of statements that the check sent. The operator session calls reserve it in their budget. A core D1 adapter answers 1. The D1 storage of the Better Auth tables answers 4: it also reads the indexes of the account table. Without it core reserves 1. |
-| `lockInOrder` | Inside a transaction, takes the row locks of the rows that match, by id, in one statement. Postgres runs `SELECT ... ORDER BY id FOR UPDATE`. D1 and memory have no row lock and leave it out. Each flow that deletes many sessions calls it first, so two such flows wait in turn and never on each other. |
+| `lockInOrder` | Inside a transaction, takes the row locks of the rows that match, by id, in one statement. Postgres runs `SELECT ... ORDER BY id FOR UPDATE`. D1 and memory have no row lock and leave it out. Each flow that deletes many sessions calls it first, the sweep too, so two such flows wait in turn and never on each other. An adapter on a database with row locks must have it: without it two such flows can deadlock. |
 
 ## The rules
 
@@ -63,7 +63,7 @@ The guards of core live in the `where` clauses and the unique keys, not in the i
 
 ## The contract
 
-`runAdapterConformance` from `@authtempo/core/conformance` is the contract. It runs the same tests on every adapter: the operators, the sorts, the unique keys, the transactions, and the round trip of every model. An adapter that fails it does not ship.
+`runAdapterConformance` from `@authtempo/core/conformance` is the contract. It runs the same tests on every adapter: the operators, the sorts, the unique keys, the transactions, and the round trip of every model. It also checks the optional methods: the count of each port call in `statementsSent`, and the row locks of `lockInOrder`. Pass `rowLocks: true` for a database with row locks: the suite then fails when `lockInOrder` is missing. Pass `updateInTransaction` when an update in a transaction sends more than one statement, as on D1 (2). An adapter that fails it does not ship.
 
 ## The schema version
 

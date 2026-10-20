@@ -9,10 +9,15 @@ async function truncateAll(): Promise<void> {
   await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
 }
 
-runAdapterConformance("d1", async () => {
-  await truncateAll();
-  return { adapter: createD1Adapter(env.DB), close: truncateAll };
-});
+// D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
+runAdapterConformance(
+  "d1",
+  async () => {
+    await truncateAll();
+    return { adapter: createD1Adapter(env.DB), close: truncateAll };
+  },
+  { updateInTransaction: 2 },
+);
 
 /** The live shape of the test database, read with the two exported SQL texts. */
 async function liveShape(): Promise<LiveShape> {

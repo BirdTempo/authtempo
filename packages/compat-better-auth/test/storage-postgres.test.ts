@@ -53,7 +53,7 @@ runAdapterConformance(
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
   },
-  { unmapped: ["apiToken"] },
+  { unmapped: ["apiToken"], rowLocks: true },
 );
 
 runAdapterConformance(
@@ -64,7 +64,7 @@ runAdapterConformance(
     await s.migrate();
     return { adapter: s.storage, close: () => pg.close() };
   },
-  { unmapped: ["apiToken"] },
+  { unmapped: ["apiToken"], rowLocks: true },
 );
 
 /** Rows as Better Auth 1.7 writes them, inserted before the migration, on the fixture with its foreign keys. */

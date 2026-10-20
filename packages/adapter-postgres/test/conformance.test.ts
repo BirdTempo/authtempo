@@ -5,10 +5,15 @@ import { describe, expect, it } from "vitest";
 import { createPostgresAdapter, expectedPostgresShape, readPostgresShape } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
-runAdapterConformance("postgres", async () => {
-  const db = await freshDatabase();
-  return { adapter: createPostgresAdapter(db.sql), close: () => db.close() };
-});
+// Postgres has row locks, so the adapter must have lockInOrder (ruling 37 of plan 12f).
+runAdapterConformance(
+  "postgres",
+  async () => {
+    const db = await freshDatabase();
+    return { adapter: createPostgresAdapter(db.sql), close: () => db.close() };
+  },
+  { rowLocks: true },
+);
 
 describe("postgres migration matches the core schema", () => {
   it("the fresh database has the shape of expectedPostgresShape()", async () => {

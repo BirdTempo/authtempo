@@ -43,6 +43,17 @@ export interface ConformanceOptions {
    * create throws `unknown_model`.
    */
   unmapped?: readonly "apiToken"[];
+  /**
+   * True for an adapter on a database with row locks, such as Postgres. It
+   * must then have `lockInOrder` (ruling 37 of plan 12f): without it two
+   * flows that delete many sessions can wait on each other. Default false.
+   */
+  rowLocks?: boolean;
+  /**
+   * The statements of one update inside a transaction, for `statementsSent`.
+   * D1 sends 2: the read of the rows for the undo and the write. Default 1.
+   */
+  updateInTransaction?: number;
 }
 
 function user(id: string, email: string, at: Date): UserRow {
@@ -1527,6 +1538,87 @@ export function runAdapterConformance(
           db.delete("user", [{ field: "email", op: "startsWith", value: 5 }]),
         ).rejects.toMatchObject(refused);
         expect((await db.findMany("user", [])).length).toBe(8);
+      });
+    });
+
+    describe("the optional methods of the call budget (rulings 35 to 37 of plan 12f)", () => {
+      /** The growth of `statementsSent` across `step`. */
+      const growth = async (step: () => Promise<unknown>) => {
+        const before = db.statementsSent?.() ?? 0;
+        await step();
+        return (db.statementsSent?.() ?? 0) - before;
+      };
+
+      it("counts each statement of each port call in statementsSent, inside a transaction too", async () => {
+        if (!db.statementsSent) return;
+        // The ready check first, so the counts below hold the calls alone.
+        await db.findOne("user", [{ field: "id", op: "eq", value: "none" }]);
+        const byId = [{ field: "id" as const, op: "eq" as const, value: "u1" }];
+        const outside = [
+          await growth(() => db.create("user", user("u1", "a@example.com", t0))),
+          await growth(() => db.findOne("user", byId)),
+          await growth(() => db.findMany("user", byId)),
+          await growth(() => db.update("user", byId, { name: "Ada" })),
+          await growth(() => db.delete("user", byId)),
+        ];
+        expect(outside).toEqual([1, 1, 1, 1, 1]);
+        const inside: number[] = [];
+        await db.transaction(async (tx) => {
+          const step = async (f: () => Promise<unknown>) => {
+            inside.push(await growth(f));
+          };
+          await step(() => tx.create("user", user("u2", "b@example.com", t0)));
+          await step(() => tx.findOne("user", [{ field: "id", op: "eq", value: "u2" }]));
+          await step(() => tx.findMany("user", [{ field: "id", op: "eq", value: "u2" }]));
+          await step(() =>
+            tx.update("user", [{ field: "id", op: "eq", value: "u2" }], { name: "Bea" }),
+          );
+          await step(() => tx.delete("user", [{ field: "id", op: "eq", value: "u2" }]));
+        });
+        // The transaction shares the count of the adapter, so a call budget sees each statement.
+        expect(inside).toEqual([1, 1, 1, options.updateInTransaction ?? 1, 1]);
+      });
+
+      it("answers readyStatements once the check ran, and sends no statement for a second answer", async () => {
+        if (!db.readyStatements) return;
+        const first = await db.readyStatements();
+        expect(Number.isInteger(first) && first >= 0).toBe(true);
+        expect(await growth(async () => expect(await db.readyStatements?.()).toBe(first))).toBe(0);
+      });
+
+      it("has lockInOrder on a database with row locks", () => {
+        if (options.rowLocks) expect(typeof db.lockInOrder).toBe("function");
+      });
+
+      it("takes the row locks of lockInOrder in a transaction: a write of another caller waits for the commit", async () => {
+        if (!db.lockInOrder) return;
+        await db.create("user", user("u1", "a@example.com", t0));
+        await db.create("user", user("u2", "b@example.com", t0));
+        const all = [{ field: "email" as const, op: "ne" as const, value: "none" }];
+        // Outside a transaction it holds nothing and changes nothing.
+        await db.lockInOrder("user", all);
+        const order: string[] = [];
+        let locked: () => void = () => {};
+        const held = new Promise<void>((r) => {
+          locked = r;
+        });
+        const holder = db.transaction(async (tx) => {
+          expect(await growth(() => tx.lockInOrder?.("user", all) ?? Promise.resolve())).toBe(1);
+          locked();
+          await new Promise((r) => setTimeout(r, 300));
+          order.push("commit");
+        });
+        await held;
+        const writer = db
+          .update("user", [{ field: "id", op: "eq", value: "u2" }], { name: "Bea" })
+          .then(() => order.push("write"));
+        await Promise.all([holder, writer]);
+        expect(order).toEqual(["commit", "write"]);
+        const rows = await db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+        expect(rows.map((r) => [r.id, r.name])).toEqual([
+          ["u1", null],
+          ["u2", "Bea"],
+        ]);
       });
     });
   });

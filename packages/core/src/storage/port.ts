@@ -110,9 +110,12 @@ export interface StorageAdapter {
    * Optional. The count of statements that this adapter sent to its
    * database since its creation, its transactions included (ruling 35 of
    * plan 12f). D1 counts each statement, and each statement of a batch:
-   * D1 Free allows 50 queries per invocation. Memory and Postgres count
-   * their port calls. A caller reads it twice and takes the difference, so
-   * a count of a shared adapter can only be too high, never too low.
+   * D1 Free allows 50 queries per invocation. The queries of the D1 ready
+   * check count too, in core's adapter and in the D1 storage of the Better
+   * Auth tables (ruling 37). Memory and Postgres count their port calls.
+   * A caller reads it twice and takes the difference, so a count of a
+   * shared adapter can only be too high, never too low. The conformance kit
+   * checks the count of each port call, inside a transaction too.
    */
   statementsSent?(): number;
   /**
@@ -122,6 +125,9 @@ export interface StorageAdapter {
    * scan, so two flows that delete the same rows in one statement each can
    * wait on each other. Postgres runs SELECT ... ORDER BY id FOR UPDATE. D1
    * and memory have no row lock and leave it out. It costs one statement.
+   * An adapter on a database with row locks must have it (ruling 37):
+   * without it the session deletes of two flows can deadlock. The
+   * conformance kit checks it with the option `rowLocks: true`.
    */
   lockInOrder?<M extends ModelName>(model: M, where: Where<M>[]): Promise<void>;
   /**
