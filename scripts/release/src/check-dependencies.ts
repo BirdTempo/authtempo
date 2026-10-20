@@ -71,8 +71,69 @@ const isDate = (v: unknown): v is string =>
 const sameList = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((v, i) => v === b[i]);
 
-/** The rules of pnpm-workspace.yaml: the release age and a reason on each allowBuilds line. */
-function checkWorkspaceYaml(yaml: string, failures: string[]): number {
+/**
+ * The keys of pnpm-workspace.yaml that change what pnpm installs, and that no
+ * rule here reads yet. An override can put another package in place of a row,
+ * and no row changes. A later plan that needs one of them adds its rule first.
+ */
+const UNREAD_KEYS = [
+  "overrides",
+  "packageExtensions",
+  "patchedDependencies",
+  "catalog",
+  "catalogs",
+] as const;
+
+const unquoteName = (v: string) => v.trim().replace(/^'(.*)'$|^"(.*)"$/, "$1$2");
+
+/**
+ * One top-level key of pnpm-workspace.yaml: the value on its own line, with no
+ * comment, and each indented or empty line after it. Undefined when the key is absent.
+ */
+function topKey(yaml: string, key: string): { inline: string; lines: string[] } | undefined {
+  const all = yaml.split("\n");
+  const start = all.findIndex((l) => l.startsWith(`${key}:`));
+  if (start === -1) return undefined;
+  const inline = (all[start] ?? "")
+    .slice(key.length + 1)
+    .replace(/\s#.*$/, "")
+    .trim();
+  const lines: string[] = [];
+  // A line with no indent starts the next key.
+  for (const raw of all.slice(start + 1)) {
+    if (/^\S/.test(raw)) break;
+    lines.push(raw);
+  }
+  return { inline, lines };
+}
+
+/** The entries of a list key in block form (`- x` lines) or flow form (`[x, y]`). Undefined for another form. */
+function listEntries(value: { inline: string; lines: string[] }): string[] | undefined {
+  if (value.inline.startsWith("[")) {
+    if (!value.inline.endsWith("]")) return undefined;
+    const body = value.inline.slice(1, -1).trim();
+    return body === "" ? [] : body.split(",").map(unquoteName);
+  }
+  if (value.inline !== "") return undefined;
+  const entries: string[] = [];
+  for (const raw of value.lines) {
+    const line = raw.replace(/\s#.*$/, "").trim();
+    if (line === "" || line.startsWith("#")) continue;
+    if (!line.startsWith("- ")) return undefined;
+    entries.push(unquoteName(line.slice(2)));
+  }
+  return entries;
+}
+
+/**
+ * The rules of pnpm-workspace.yaml: the release age, its exclusions, a reason
+ * on each allowBuilds entry, and no key that changes the install unread.
+ */
+function checkWorkspaceYaml(
+  yaml: string,
+  rows: readonly Record<string, unknown>[],
+  failures: string[],
+): number {
   const age = /^minimumReleaseAge:\s*(\S+)\s*(?:#.*)?$/m.exec(yaml);
   if (age === null) failures.push("minimumReleaseAge is gone from pnpm-workspace.yaml");
   else {
@@ -81,30 +142,73 @@ function checkWorkspaceYaml(yaml: string, failures: string[]): number {
       failures.push(`minimumReleaseAge is ${age[1]}, below ${MINIMUM_RELEASE_AGE}`);
   }
 
-  // pnpm runs the build script of each package on this list. The reason says what
-  // the script does, so a reader can see that the entry is still safe.
-  let builds = 0;
-  let inBuilds = false;
-  for (const raw of yaml.split("\n")) {
-    if (/^allowBuilds:\s*$/.test(raw)) {
-      inBuilds = true;
-      continue;
+  // An exclusion turns the age rule off for its packages, and pnpm 12 can write
+  // one itself. Each entry names a row, by name or by name@version, so a reason
+  // and a read date stand behind it. A pattern such as "*" names no row.
+  const exclude = topKey(yaml, "minimumReleaseAgeExclude");
+  if (exclude !== undefined) {
+    const entries = listEntries(exclude);
+    if (entries === undefined)
+      failures.push("minimumReleaseAgeExclude: the value is not a list in block or flow form");
+    for (const entry of entries ?? []) {
+      const at = entry.lastIndexOf("@");
+      const name = at > 0 ? entry.slice(0, at) : entry;
+      const version = at > 0 ? entry.slice(at + 1) : undefined;
+      const held = rows.some(
+        (r) =>
+          r.name === name &&
+          isText(r.reason) &&
+          isDate(r.read) &&
+          (version === undefined || (Array.isArray(r.versions) && r.versions.includes(version))),
+      );
+      if (!held)
+        failures.push(`minimumReleaseAgeExclude: ${entry} has no row in release/dependencies.json`);
     }
-    if (!inBuilds) continue;
-    // A line with no indent starts the next key.
-    if (/^\S/.test(raw)) break;
+  }
+
+  if (topKey(yaml, "dangerouslyAllowAllBuilds") !== undefined)
+    failures.push(
+      "dangerouslyAllowAllBuilds is in pnpm-workspace.yaml: list each build in allowBuilds with a reason",
+    );
+  for (const key of UNREAD_KEYS)
+    if (topKey(yaml, key) !== undefined)
+      failures.push(`${key} is in pnpm-workspace.yaml: no rule of check-dependencies reads it yet`);
+
+  // pnpm runs the build script of each package on this list. The reason says what
+  // the script does, so a reader can see that the entry is still safe. pnpm reads
+  // the block form and the flow form; a flow form on one line has no place for a
+  // reason on each entry, so each of its entries fails.
+  const builds = topKey(yaml, "allowBuilds");
+  if (builds === undefined) return 0;
+  let count = 0;
+  const entry = (text: string, reason: string) => {
+    count += 1;
+    const name = unquoteName(text.replace(/:.*$/, ""));
+    if (reason.trim() === "") failures.push(`allowBuilds: ${name} has no reason comment`);
+  };
+  if (/^\{.*\}$/.test(builds.inline)) {
+    const body = builds.inline.slice(1, -1).trim();
+    for (const text of body === "" ? [] : body.split(",")) entry(text, "");
+    return count;
+  }
+  if (builds.inline !== "" && builds.inline !== "{") {
+    failures.push(
+      `allowBuilds: the value "${builds.inline}" is not a list of "<name>: <value> # <reason>"`,
+    );
+    return count;
+  }
+  for (const raw of builds.lines) {
     const line = raw.trim();
     if (line === "" || line.startsWith("#")) continue;
-    const entry = /^('[^']+'|"[^"]+"|[^\s:'"]+):\s*([^\s#]+)\s*(?:#(.*))?$/.exec(line);
-    if (entry === null) {
+    if (builds.inline === "{" && line === "}") break;
+    const m = /^('[^']+'|"[^"]+"|[^\s:'"]+):\s*([^\s#,]+)\s*(,?)\s*(?:#(.*))?$/.exec(line);
+    if (m === null || (builds.inline === "" && m[3] === ",")) {
       failures.push(`allowBuilds: the line "${line}" is not "<name>: <value> # <reason>"`);
       continue;
     }
-    builds += 1;
-    const name = (entry[1] ?? "").replace(/^['"]|['"]$/g, "");
-    if ((entry[3] ?? "").trim() === "") failures.push(`allowBuilds: ${name} has no reason comment`);
+    entry(m[1] ?? "", m[4] ?? "");
   }
-  return builds;
+  return count;
 }
 
 /**
@@ -114,7 +218,7 @@ function checkWorkspaceYaml(yaml: string, failures: string[]): number {
  */
 export function checkDependencies(input: DependenciesInput): Report {
   const failures: string[] = [];
-  const builds = checkWorkspaceYaml(input.workspaceYaml, failures);
+  const builds = checkWorkspaceYaml(input.workspaceYaml, input.rows, failures);
 
   // What the manifests take, by name and kind. A workspace reference is owned
   // code; check-packages holds its form.

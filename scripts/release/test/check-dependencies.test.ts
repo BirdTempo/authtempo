@@ -265,6 +265,105 @@ describe("check-dependencies", () => {
     ]);
   });
 
+  it("fails a minimumReleaseAgeExclude entry with no row, in block and flow form", () => {
+    const flow = real();
+    flow.workspaceYaml = flow.workspaceYaml.replace(
+      /^minimumReleaseAge: 1440$/m,
+      "minimumReleaseAge: 1440\nminimumReleaseAgeExclude: ['*']",
+    );
+    expect(checkDependencies(flow).failures).toEqual([
+      "minimumReleaseAgeExclude: * has no row in release/dependencies.json",
+    ]);
+    const block = real();
+    block.workspaceYaml = block.workspaceYaml.replace(
+      /^minimumReleaseAge: 1440$/m,
+      "minimumReleaseAge: 1440\nminimumReleaseAgeExclude:\n  - left-pad\n  - 'jose@6.2.13'",
+    );
+    expect(checkDependencies(block).failures).toEqual([
+      "minimumReleaseAgeExclude: left-pad has no row in release/dependencies.json",
+      "minimumReleaseAgeExclude: jose@6.2.13 has no row in release/dependencies.json",
+    ]);
+    const empty = real();
+    empty.workspaceYaml = empty.workspaceYaml.replace(
+      /^minimumReleaseAge: 1440$/m,
+      "minimumReleaseAge: 1440\nminimumReleaseAgeExclude: []",
+    );
+    expect(checkDependencies(empty).failures).toEqual([]);
+  });
+
+  it("passes a minimumReleaseAgeExclude entry only with a row that holds a reason and a read date", () => {
+    const input = real();
+    input.workspaceYaml = input.workspaceYaml.replace(
+      /^minimumReleaseAge: 1440$/m,
+      "minimumReleaseAge: 1440\nminimumReleaseAgeExclude:\n  - jose\n  - zod@4.6.5",
+    );
+    expect(checkDependencies(input).failures).toEqual([]);
+    // jose has a dev row and a runtime row: one of them with a reason holds the entry.
+    rowOf(input, "jose", "runtime").reason = "";
+    expect(checkDependencies(input).failures).toEqual(["jose: the runtime row has no reason"]);
+    rowOf(input, "jose", "dev").reason = "";
+    delete rowOf(input, "zod", "runtime").read;
+    expect(checkDependencies(input).failures).toEqual([
+      "minimumReleaseAgeExclude: jose has no row in release/dependencies.json",
+      "minimumReleaseAgeExclude: zod@4.6.5 has no row in release/dependencies.json",
+      "jose: the dev row has no reason",
+      "jose: the runtime row has no reason",
+      "zod: the runtime row has no read date in the form YYYY-MM-DD",
+    ]);
+  });
+
+  it("reads allowBuilds in flow form, and fails each entry with no reason comment", () => {
+    const input = real();
+    input.workspaceYaml = input.workspaceYaml.replace(
+      /^allowBuilds:\n(?: {2}.*\n)*/m,
+      "allowBuilds: { esbuild: true, workerd: true, bun: true, evil-pkg: true }\n",
+    );
+    const r = checkDependencies(input);
+    expect(r.failures).toEqual([
+      "allowBuilds: esbuild has no reason comment",
+      "allowBuilds: workerd has no reason comment",
+      "allowBuilds: bun has no reason comment",
+      "allowBuilds: evil-pkg has no reason comment",
+    ]);
+    expect(summaryLine(r)).toMatch(/ builds=4 failures=4$/);
+    const lines = real();
+    lines.workspaceYaml = lines.workspaceYaml.replace(
+      /^allowBuilds:\n(?: {2}.*\n)*/m,
+      "allowBuilds: {\n  esbuild: true, # it links the platform binary\n  evil-pkg: true,\n}\n",
+    );
+    expect(checkDependencies(lines).failures).toEqual([
+      "allowBuilds: evil-pkg has no reason comment",
+    ]);
+    const odd = real();
+    odd.workspaceYaml = odd.workspaceYaml.replace(
+      /^allowBuilds:\n(?: {2}.*\n)*/m,
+      "allowBuilds: true\n",
+    );
+    expect(checkDependencies(odd).failures).toEqual([
+      'allowBuilds: the value "true" is not a list of "<name>: <value> # <reason>"',
+    ]);
+  });
+
+  it("fails dangerouslyAllowAllBuilds", () => {
+    const input = real();
+    input.workspaceYaml = `${input.workspaceYaml}dangerouslyAllowAllBuilds: true\n`;
+    expect(checkDependencies(input).failures).toEqual([
+      "dangerouslyAllowAllBuilds is in pnpm-workspace.yaml: list each build in allowBuilds with a reason",
+    ]);
+  });
+
+  it("fails each key that changes what pnpm installs and that no rule reads", () => {
+    const input = real();
+    input.workspaceYaml = `${input.workspaceYaml}overrides:\n  jose: 6.2.13\npackageExtensions: {}\npatchedDependencies:\n  zod: patches/zod.patch\ncatalog:\n  zod: 4.6.5\ncatalogs: {}\n`;
+    expect(checkDependencies(input).failures).toEqual([
+      "overrides is in pnpm-workspace.yaml: no rule of check-dependencies reads it yet",
+      "packageExtensions is in pnpm-workspace.yaml: no rule of check-dependencies reads it yet",
+      "patchedDependencies is in pnpm-workspace.yaml: no rule of check-dependencies reads it yet",
+      "catalog is in pnpm-workspace.yaml: no rule of check-dependencies reads it yet",
+      "catalogs is in pnpm-workspace.yaml: no rule of check-dependencies reads it yet",
+    ]);
+  });
+
   it("fails when it reads zero rows", () => {
     const input = real();
     input.rows = [];
