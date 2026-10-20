@@ -55,6 +55,9 @@ export async function signedIn(h: Handle, email = "ada@example.com", verified = 
     emailVerified: verified,
     name: "Ada Lovelace",
     image: "https://img.example.com/ada.png",
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: now,
     updatedAt: now,
   });

@@ -849,6 +849,9 @@ async function linkInTransaction(
     emailVerified: profile.emailVerified,
     name: profile.name,
     image: profile.image,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: now,
     updatedAt: now,
   };

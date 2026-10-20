@@ -86,6 +86,9 @@ async function seedToday(storage: StorageAdapter, at: Date): Promise<void> {
     emailVerified: true,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     ...base,
   });
   await storage.create("password", {
@@ -301,6 +304,9 @@ describe("secret versions on read and write (plan 12b)", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: at,
       updatedAt: at,
     });

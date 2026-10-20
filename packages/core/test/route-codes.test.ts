@@ -735,6 +735,9 @@ describe("the codes of one route (plan 11g)", () => {
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -1585,6 +1588,9 @@ describe("the shapes of the OAuth answers (plan 11g)", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });

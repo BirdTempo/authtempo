@@ -11,13 +11,13 @@ import { before17 } from "./sql.js";
 // 0002 to 0005, and the migration-file test ties the file texts to that DDL.
 // Here: Better Auth's own SQLite SQL with its seven foreign keys, made into
 // tables from before 1.7 (no account.issuer and no index on it), then the
-// eight shipped files through applyD1Migrations, then core's conformance
+// nine shipped files through applyD1Migrations, then core's conformance
 // suite and the D1 mapping tests.
 await execD1(before17(BETTER_AUTH_SQLITE));
 await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS_BEFORE_17);
 
-it("applies the eight shipped d1-before-1.7 files: account gains issuer with its unique key, and ta_meta names schema version 11", async () => {
-  expect(env.COMPAT_MIGRATIONS_BEFORE_17).toHaveLength(8);
+it("applies the nine shipped d1-before-1.7 files: account gains issuer with its unique key, and ta_meta names schema version 12", async () => {
+  expect(env.COMPAT_MIGRATIONS_BEFORE_17).toHaveLength(9);
   const cols = await env.DB.prepare(`SELECT name FROM pragma_table_info('account')`).all<{
     name: string;
   }>();
@@ -31,8 +31,8 @@ it("applies the eight shipped d1-before-1.7 files: account gains issuer with its
     value: string;
   }>();
   expect(meta.results).toEqual([
-    { key: "compat_better_auth", value: "8" },
-    { key: "schema_version", value: "11" },
+    { key: "compat_better_auth", value: "9" },
+    { key: "schema_version", value: "12" },
   ]);
 });
 

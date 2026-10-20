@@ -67,6 +67,9 @@ export async function appUser(
     emailVerified: verified,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: AT,
     updatedAt: AT,
   });

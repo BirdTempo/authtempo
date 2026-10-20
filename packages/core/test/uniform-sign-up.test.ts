@@ -45,6 +45,9 @@ async function seedUser(storage: StorageAdapter, email: string, verified: boolea
     emailVerified: verified,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: at,
     updatedAt: at,
   });

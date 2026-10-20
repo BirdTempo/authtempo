@@ -4,9 +4,13 @@ import { createD1Adapter } from "../src/index.js";
 
 describe("schema version 11 on D1 (plan 12e)", () => {
   it("moves the version to 11", async () => {
+    // env.DB holds every migration (0012 since plan 12f), so read the version that 0011 itself writes.
+    const m0011 = env.TEST_MIGRATIONS.find((m) => m.name.startsWith("0011_"));
     expect(
-      await env.DB.prepare("SELECT value FROM ta_meta WHERE key = 'schema_version'").first("value"),
-    ).toBe("11");
+      m0011?.queries.some((q) =>
+        q.includes("UPDATE ta_meta SET value = '11' WHERE key = 'schema_version'"),
+      ),
+    ).toBe(true);
   });
 
   it("reads a version 10 client and token row with every default", async () => {

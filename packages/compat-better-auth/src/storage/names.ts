@@ -28,7 +28,18 @@ export const BETTER_AUTH_TABLES: readonly BetterAuthTable[] = [
  * an insert leaves them null and an update never names them.
  */
 export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
-  user: ["id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt"],
+  user: [
+    "id",
+    "name",
+    "email",
+    "emailVerified",
+    "image",
+    "createdAt",
+    "updatedAt",
+    "taBannedAt",
+    "taBanReason",
+    "taBanUntil",
+  ],
   session: [
     "id",
     "expiresAt",
@@ -41,6 +52,7 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
     "activeOrganizationId",
     "taLastSeenAt",
     "taFreshAt",
+    "taActorId",
   ],
   account: [
     "id",

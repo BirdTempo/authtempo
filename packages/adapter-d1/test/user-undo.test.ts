@@ -21,6 +21,9 @@ const user = (id: string, emailVerified: boolean) => ({
   emailVerified,
   name: null,
   image: null,
+  bannedAt: null,
+  banReason: null,
+  banUntil: null,
   createdAt: t0,
   updatedAt: t0,
 });
@@ -96,6 +99,7 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
         userAgent: null,
         activeOrganizationId: null,
         freshAt: t0,
+        actorId: null,
         createdAt: t0,
         updatedAt: t0,
       }),

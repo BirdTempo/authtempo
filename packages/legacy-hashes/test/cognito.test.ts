@@ -489,6 +489,9 @@ describe("a Cognito pool that does not accept the email as a user name (plan 9b2
         emailVerified: true,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: at,
         updatedAt: at,
       });

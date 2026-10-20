@@ -82,6 +82,8 @@ Version 10 (plan 12a, 2026-10-15) adds `fresh_at` to `ta_session`: the time a si
 
 Version 11 (plan 12e, 2026-10-19) is the OAuth provider's second version. It adds the columns of a confidential client to `ta_oauth_client`, `parent_id` and `dpop_jkt` to `ta_oauth_token`, and the tables `ta_oauth_device`, `ta_oauth_subject`, `ta_oauth_session_client`, and `ta_oauth_logout`. Each new NOT NULL client column has a default, so each client row of version 10 reads as the public client it was. Apply `0011_schema_v11` before you deploy a core at version 11; the adapter refuses a database at version 10.
 
+Version 12 (plan 12f, 2026-10-20) is the operator tools. It adds `banned_at`, `ban_reason`, and `ban_until` to `ta_user`, `actor_id` to `ta_session`, and the table `ta_operator_audit`. Each new column is nullable, with no default and no fill: a row of version 11 holds null, which means no ban and no impersonation. Apply `0012_schema_v12` before you deploy a core at version 12; the adapter refuses a database at version 11.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

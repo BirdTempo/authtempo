@@ -20,7 +20,7 @@ import { assertFreshIndex, siteIndex } from "./support/index.js";
 
 const CLI_BIN = join(REPO, "packages/cli/dist/bin/authtempo.js");
 /** The 11c fixture of a future schema version (0008_future.sql then; renumbered by later plans). */
-const FUTURE_SQL = join(REPO, "packages/cli/test/fixtures/postgres/0012_future.sql");
+const FUTURE_SQL = join(REPO, "packages/cli/test/fixtures/postgres/0013_future.sql");
 /**
  * The highest schema version of the Postgres adapter's migration files
  * (ruling 25). CORE_MIGRATIONS of the CLI comes from this folder. The test

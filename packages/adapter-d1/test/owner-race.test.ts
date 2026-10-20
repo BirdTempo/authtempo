@@ -70,6 +70,9 @@ describe("owner removal race on D1 (plan 6 review I-1)", () => {
         emailVerified: true,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: t0,
         updatedAt: t0,
       });

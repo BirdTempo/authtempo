@@ -94,6 +94,7 @@ function notCredential(provider: string): string {
  * `trustedDevice`. Plan 9g added `jwk`, `oauthClient`, `oauthConsent`, and
  * `oauthToken`. Plan 12c added `secondFactor`. Plan 12e added
  * `oauthDevice`, `oauthSubject`, `oauthSessionClient`, and `oauthLogout`.
+ * Plan 12f added `operatorAudit`.
  */
 export type MappedModel = Exclude<
   ModelName,
@@ -109,6 +110,7 @@ export type MappedModel = Exclude<
   | "oauthSessionClient"
   | "oauthLogout"
   | "secondFactor"
+  | "operatorAudit"
 >;
 
 export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
@@ -117,6 +119,9 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
     fields: {
       ...same("id", "email", "emailVerified", "image", "createdAt", "updatedAt"),
       name: as("name", "nullAsEmpty"),
+      bannedAt: as("taBannedAt"),
+      banReason: as("taBanReason"),
+      banUntil: as("taBanUntil"),
     },
   },
   identity: {
@@ -160,6 +165,7 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       lastSeenAt: as("taLastSeenAt"),
       ip: as("ipAddress"),
       freshAt: as("taFreshAt"),
+      actorId: as("taActorId"),
     },
   },
   verification: {

@@ -87,6 +87,9 @@ function world() {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });

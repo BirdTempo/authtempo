@@ -160,6 +160,9 @@ describe("authtempo-import", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -424,6 +427,9 @@ describe("authtempo-import", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -469,6 +475,9 @@ describe("authtempo-import", () => {
       emailVerified: true,
       name: "Ada Lovelace",
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: new Date("2024-01-15T10:29:00.500Z"),
       updatedAt: new Date("2024-01-15T10:29:00.500Z"),
     });

@@ -608,6 +608,9 @@ describe("the races of the change of address (plan 12a)", () => {
           emailVerified: false,
           name: null,
           image: null,
+          bannedAt: null,
+          banReason: null,
+          banUntil: null,
           createdAt: now,
           updatedAt: now,
         });

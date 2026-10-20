@@ -14,7 +14,18 @@ function freshId(): string {
 
 function user(id: string, email: string) {
   const at = new Date("2026-01-01T00:00:00.000Z");
-  return { id, createdAt: at, updatedAt: at, email, emailVerified: false, name: null, image: null };
+  return {
+    id,
+    createdAt: at,
+    updatedAt: at,
+    email,
+    emailVerified: false,
+    name: null,
+    image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
+  };
 }
 
 /** Runs `fn` inside a new sandbox, with the shim over its own store. */

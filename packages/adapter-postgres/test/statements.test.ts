@@ -47,6 +47,9 @@ describe("the Postgres statements seam", () => {
           emailVerified: false,
           name: null,
           image: null,
+          bannedAt: null,
+          banReason: null,
+          banUntil: null,
           createdAt: at,
           updatedAt: at,
         });
@@ -69,6 +72,9 @@ describe("the Postgres statements seam", () => {
     emailVerified: false,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: at,
     updatedAt: at,
   });

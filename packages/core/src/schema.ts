@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 11;
+export const SCHEMA_VERSION = 12;
 
 export interface BaseRow {
   id: string;
@@ -11,6 +11,12 @@ export interface UserRow extends BaseRow {
   emailVerified: boolean;
   name: string | null;
   image: string | null;
+  /** When an operator banned the user (plan 12f). Null: no ban. */
+  bannedAt: Date | null;
+  /** The operator's reason for the ban. Null when no ban holds. */
+  banReason: string | null;
+  /** The end of the ban. Null with `bannedAt` set: the ban has no end. */
+  banUntil: Date | null;
 }
 
 export interface IdentityRow extends BaseRow {
@@ -34,6 +40,11 @@ export interface SessionRow extends BaseRow {
    * Null is never fresh: a row of schema version 9 or older holds null.
    */
   freshAt: Date | null;
+  /**
+   * The id of the platform operator who impersonates the user (plan 12f).
+   * Null on every other session.
+   */
+  actorId: string | null;
 }
 
 export type VerificationPurpose =
@@ -422,6 +433,33 @@ export interface OAuthLogoutRow extends BaseRow {
   nextAttemptAt: Date;
 }
 
+/** The acts that write an operator audit row (plan 12f, spec 26 item 8). */
+export type OperatorAction =
+  | "ban"
+  | "unban"
+  | "platform_role_grant"
+  | "platform_role_revoke"
+  | "second_factor_disable"
+  | "sessions_end_user"
+  | "sessions_end_all"
+  | "impersonation_start"
+  | "impersonation_stop"
+  | "create_admin";
+
+/** One operator act (plan 12f). Append-only: core has no update and no delete of it. */
+export interface OperatorAuditRow extends BaseRow {
+  actorKind: "secret" | "user" | "app";
+  /** The secret's name, the user id, or the app's name. Never the secret. */
+  actorId: string;
+  action: OperatorAction;
+  /** Null for `sessions_end_all` only. Not `userId`, so the account delete keeps the row. */
+  targetUserId: string | null;
+  reason: string;
+  data: Record<string, unknown> | null;
+  ip: string | null;
+  userAgent: string | null;
+}
+
 export interface Models {
   user: UserRow;
   identity: IdentityRow;
@@ -444,6 +482,7 @@ export interface Models {
   oauthSessionClient: OAuthSessionClientRow;
   oauthLogout: OAuthLogoutRow;
   secondFactor: SecondFactorRow;
+  operatorAudit: OperatorAuditRow;
 }
 
 export type ModelName = keyof Models;
@@ -480,6 +519,9 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       emailVerified: { type: "boolean" },
       name: { type: "string", nullable: true },
       image: { type: "string", nullable: true },
+      bannedAt: { type: "date", nullable: true },
+      banReason: { type: "string", nullable: true },
+      banUntil: { type: "date", nullable: true },
     },
     unique: [["email"]],
     indexes: [],
@@ -506,6 +548,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       userAgent: { type: "string", nullable: true },
       activeOrganizationId: { type: "string", nullable: true },
       freshAt: { type: "date", nullable: true },
+      actorId: { type: "string", nullable: true },
     },
     unique: [["tokenHash"]],
     indexes: [["userId"], ["activeOrganizationId"]],
@@ -782,5 +825,23 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     },
     unique: [["userId"]],
     indexes: [],
+  },
+  // plan 12f: one row per operator act. Append-only. No userId field, so the
+  // account delete and the D1 undo of a user create do not read it.
+  operatorAudit: {
+    fields: {
+      ...base,
+      actorKind: { type: "string" },
+      actorId: { type: "string" },
+      action: { type: "string" },
+      targetUserId: { type: "string", nullable: true },
+      reason: { type: "string" },
+      data: { type: "json", nullable: true },
+      ip: { type: "string", nullable: true },
+      userAgent: { type: "string", nullable: true },
+    },
+    unique: [],
+    // targetUserId: the audit of one user. actorId: the acts of one operator.
+    indexes: [["targetUserId"], ["actorId"]],
   },
 };

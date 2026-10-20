@@ -24,6 +24,9 @@ describe("the Better Auth storage on D1, default names", () => {
     emailVerified: true,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: at,
     updatedAt: at,
   });

@@ -3,6 +3,7 @@ import { MIGRATIONS } from "@authtempo/adapter-postgres";
 import { columnsOf, TABLES } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
 import core0011D1 from "../../adapter-d1/migrations/0011_schema_v11.sql?raw";
+import core0012D1 from "../../adapter-d1/migrations/0012_schema_v12.sql?raw";
 import shipped from "../migrations/d1/0001_compat_better_auth.sql?raw";
 import shipped0002 from "../migrations/d1/0002_compat_schema_v5.sql?raw";
 import shipped0003 from "../migrations/d1/0003_compat_schema_v6.sql?raw";
@@ -11,6 +12,7 @@ import shipped0005 from "../migrations/d1/0005_compat_schema_v8.sql?raw";
 import shipped0006 from "../migrations/d1/0006_compat_schema_v9.sql?raw";
 import shipped0007 from "../migrations/d1/0007_compat_schema_v10.sql?raw";
 import shipped0008 from "../migrations/d1/0008_compat_schema_v11.sql?raw";
+import shipped0009 from "../migrations/d1/0009_compat_schema_v12.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
@@ -19,6 +21,7 @@ import shipped0005Before17 from "../migrations/d1-before-1.7/0005_compat_schema_
 import shipped0006Before17 from "../migrations/d1-before-1.7/0006_compat_schema_v9.sql?raw";
 import shipped0007Before17 from "../migrations/d1-before-1.7/0007_compat_schema_v10.sql?raw";
 import shipped0008Before17 from "../migrations/d1-before-1.7/0008_compat_schema_v11.sql?raw";
+import shipped0009Before17 from "../migrations/d1-before-1.7/0009_compat_schema_v12.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
@@ -28,9 +31,11 @@ import {
   compatMigration0006Sql,
   compatMigration0007Sql,
   compatMigration0008Sql,
+  compatMigration0009Sql,
   compatMigrationSql,
   MIGRATION_0007_NAME,
   MIGRATION_0008_NAME,
+  MIGRATION_0009_NAME,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
 import { before17 } from "./d1/sql.js";
@@ -522,5 +527,103 @@ describe("migration 0008 and core 0011 (plan 12e)", () => {
     expect(pg).toBeDefined();
     expect(statementsOf(compatMigration0008Sql("postgres"))).toEqual(statementsOf(pg?.sql ?? ""));
     expect(statementsOf(compatMigration0008Sql("sqlite"))).toEqual(statementsOf(core0011D1));
+  });
+});
+
+describe("migration 0009 (plan 12f)", () => {
+  it("ships both D1 files as the default naming's SQLite text", () => {
+    const text = compatMigration0009Sql("sqlite", resolveNames());
+    expect(normalize(shipped0009)).toBe(normalize(text));
+    expect(normalize(shipped0009Before17)).toBe(normalize(text));
+  });
+
+  it("is the runner's step after 0008, and the step writes '9'", () => {
+    const names = [...COMPAT_MIGRATION_NAMES];
+    expect(names.indexOf(MIGRATION_0009_NAME)).toBe(names.indexOf(MIGRATION_0008_NAME) + 1);
+    expect(MIGRATION_0009_NAME).toBe("0009_compat_schema_v12");
+    for (const dialect of ["postgres", "sqlite"] as const)
+      expect(compatMigration0009Sql(dialect, resolveNames())).toContain(
+        "UPDATE ta_meta SET value = '9' WHERE key = 'compat_better_auth';",
+      );
+  });
+
+  it("adds the ban and actor columns with no fill and the audit table, and moves the versions to 12 and 9", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    // A user and a session of Better Auth from before the files: a fill of 0009 would reach them.
+    db.exec(
+      `INSERT INTO "user" (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('u1', 'Ada', 'ada@example.com', 1, '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z')`,
+    );
+    db.exec(
+      `INSERT INTO "session" (id, expiresAt, token, createdAt, updatedAt, userId) VALUES ('s1', '2026-11-01T00:00:00.000Z', 't1', '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z', 'u1')`,
+    );
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+      shipped0008,
+      shipped0009,
+    ])
+      db.exec(text);
+    const nullable = (table: string, names: readonly string[]) =>
+      (
+        db.prepare(`PRAGMA table_info("${table}")`).all() as {
+          name: string;
+          type: string;
+          notnull: number;
+          dflt_value: unknown;
+        }[]
+      )
+        .filter((c) => names.includes(c.name))
+        .map(({ name, type, notnull, dflt_value }) => ({ name, type, notnull, dflt_value }));
+    expect(nullable("user", ["taBannedAt", "taBanReason", "taBanUntil"])).toEqual([
+      { name: "taBannedAt", type: "TEXT", notnull: 0, dflt_value: null },
+      { name: "taBanReason", type: "TEXT", notnull: 0, dflt_value: null },
+      { name: "taBanUntil", type: "TEXT", notnull: 0, dflt_value: null },
+    ]);
+    expect(nullable("session", ["taActorId"])).toEqual([
+      { name: "taActorId", type: "TEXT", notnull: 0, dflt_value: null },
+    ]);
+    expect(
+      db
+        .prepare(`SELECT "taBannedAt" AS a, "taBanReason" AS r, "taBanUntil" AS u FROM "user"`)
+        .all(),
+    ).toEqual([{ a: null, r: null, u: null }]);
+    expect(db.prepare(`SELECT "taActorId" AS a FROM "session"`).all()).toEqual([{ a: null }]);
+    const cols = (
+      db.prepare("PRAGMA table_info(ta_operator_audit)").all() as { name: string }[]
+    ).map((c) => c.name);
+    expect(cols).toEqual(columnsOf("operatorAudit"));
+    const indexes = (db.prepare("PRAGMA index_list(ta_operator_audit)").all() as { name: string }[])
+      .map((i) => i.name)
+      // The primary key's own index has a name of SQLite.
+      .filter((name) => !name.startsWith("sqlite_autoindex_"));
+    expect(indexes.sort()).toEqual([
+      "ix_ta_operator_audit__actor_id",
+      "ix_ta_operator_audit__target_user_id",
+    ]);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "9" },
+      { key: "schema_version", value: "12" },
+    ]);
+  });
+
+  it("holds core 0012's statements of ta_operator_audit on Postgres and on D1", () => {
+    /** The statements of a text that name ta_operator_audit, without comments and blank space. */
+    const auditOf = (text: string) =>
+      normalize(text)
+        .split(";")
+        .map((st) => st.trim())
+        .filter((st) => st.includes("ta_operator_audit"));
+    const pg = MIGRATIONS.find((m) => m.name === "0012_schema_v12");
+    expect(pg).toBeDefined();
+    expect(auditOf(compatMigration0009Sql("postgres", resolveNames()))).toEqual(
+      auditOf(pg?.sql ?? ""),
+    );
+    expect(auditOf(compatMigration0009Sql("sqlite", resolveNames()))).toEqual(auditOf(core0012D1));
+    expect(auditOf(core0012D1)).toHaveLength(3);
   });
 });

@@ -36,6 +36,9 @@ describe("the session cookie name (plan 12b)", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: new Date("2026-10-14T00:00:00.000Z"),
       updatedAt: new Date("2026-10-14T00:00:00.000Z"),
     });
@@ -57,6 +60,9 @@ describe("the session cookie name (plan 12b)", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: new Date("2026-10-14T00:00:00.000Z"),
       updatedAt: new Date("2026-10-14T00:00:00.000Z"),
     });
@@ -82,6 +88,9 @@ describe("the session cookie name (plan 12b)", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: new Date("2026-10-14T00:00:00.000Z"),
       updatedAt: new Date("2026-10-14T00:00:00.000Z"),
     });
@@ -159,6 +168,9 @@ describe("the session cookie name (plan 12b)", () => {
         emailVerified: true,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: new Date("2026-10-14T00:00:00.000Z"),
         updatedAt: new Date("2026-10-14T00:00:00.000Z"),
       });

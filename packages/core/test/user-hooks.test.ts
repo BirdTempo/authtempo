@@ -375,6 +375,9 @@ describe("hooks.user (plan 12a, spec 8.9)", () => {
             emailVerified: true,
             name: null,
             image: null,
+            bannedAt: null,
+            banReason: null,
+            banUntil: null,
             createdAt: now,
             updatedAt: now,
           });
@@ -476,6 +479,9 @@ describe("patchedNewUser (plan 12a)", () => {
     emailVerified: true,
     name: "Old",
     image: "https://img.example.com/old.png",
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: new Date(0),
     updatedAt: new Date(0),
   };

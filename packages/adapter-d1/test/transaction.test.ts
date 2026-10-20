@@ -19,6 +19,9 @@ describe("d1 undo log", () => {
       emailVerified: false,
       name: "Ada",
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: t0,
       updatedAt: t0,
     });
@@ -43,6 +46,9 @@ describe("d1 undo log", () => {
           emailVerified: false,
           name: null,
           image: null,
+          bannedAt: null,
+          banReason: null,
+          banUntil: null,
           createdAt: t0,
           updatedAt: t0,
         });
@@ -63,6 +69,9 @@ describe("d1 undo log", () => {
           emailVerified: false,
           name: null,
           image: null,
+          bannedAt: null,
+          banReason: null,
+          banUntil: null,
           createdAt: t0,
           updatedAt: t0,
         });
@@ -73,6 +82,9 @@ describe("d1 undo log", () => {
             emailVerified: false,
             name: null,
             image: null,
+            bannedAt: null,
+            banReason: null,
+            banUntil: null,
             createdAt: t0,
             updatedAt: t0,
           });
@@ -92,6 +104,9 @@ describe("d1 undo log", () => {
         emailVerified: false,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: t0,
         updatedAt: t0,
       });
@@ -103,6 +118,9 @@ describe("d1 undo log", () => {
             emailVerified: false,
             name: null,
             image: null,
+            bannedAt: null,
+            banReason: null,
+            banUntil: null,
             createdAt: t0,
             updatedAt: t0,
           });
@@ -122,6 +140,9 @@ describe("d1 undo log", () => {
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: t0,
       updatedAt: t0,
     });
@@ -135,6 +156,9 @@ describe("d1 undo log", () => {
           emailVerified: false,
           name: null,
           image: null,
+          bannedAt: null,
+          banReason: null,
+          banUntil: null,
           createdAt: t0,
           updatedAt: t0,
         });
@@ -146,6 +170,9 @@ describe("d1 undo log", () => {
           emailVerified: false,
           name: null,
           image: null,
+          bannedAt: null,
+          banReason: null,
+          banUntil: null,
           createdAt: t0,
           updatedAt: t0,
         });
@@ -175,6 +202,9 @@ describe("d1 undo log", () => {
           emailVerified: false,
           name: null,
           image: null,
+          bannedAt: null,
+          banReason: null,
+          banUntil: null,
           createdAt: t0,
           updatedAt: t0,
         });

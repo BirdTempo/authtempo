@@ -172,6 +172,7 @@ export async function createSession(
     userAgent: input.userAgent,
     activeOrganizationId: input.activeOrganizationId ?? null,
     freshAt: input.freshAt ?? now,
+    actorId: null,
     createdAt: now,
     updatedAt: now,
   });

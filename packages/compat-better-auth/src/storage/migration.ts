@@ -480,6 +480,70 @@ export function compatMigration0008Sql(dialect: "postgres" | "sqlite"): string {
   ].join("\n")}\n`;
 }
 
+export const MIGRATION_0009_NAME = "0009_compat_schema_v12";
+
+/** The core statements of migration 0009, by dialect: core 0012's text for `ta_operator_audit`. */
+const COMPAT_0009_CORE: Readonly<Record<"postgres" | "sqlite", string>> = {
+  postgres: `CREATE TABLE ta_operator_audit (
+  id text PRIMARY KEY,
+  created_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL,
+  actor_kind text NOT NULL,
+  actor_id text NOT NULL,
+  action text NOT NULL,
+  target_user_id text,
+  reason text NOT NULL,
+  data jsonb,
+  ip text,
+  user_agent text
+);
+CREATE INDEX ix_ta_operator_audit__target_user_id ON ta_operator_audit (target_user_id);
+CREATE INDEX ix_ta_operator_audit__actor_id ON ta_operator_audit (actor_id);`,
+  sqlite: `CREATE TABLE ta_operator_audit (
+  id TEXT PRIMARY KEY NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  actor_kind TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  action TEXT NOT NULL,
+  target_user_id TEXT,
+  reason TEXT NOT NULL,
+  data TEXT,
+  ip TEXT,
+  user_agent TEXT
+);
+CREATE INDEX ix_ta_operator_audit__target_user_id ON ta_operator_audit (target_user_id);
+CREATE INDEX ix_ta_operator_audit__actor_id ON ta_operator_audit (actor_id);`,
+};
+
+/**
+ * Migration 0009 (plan 12f): core's schema version 12. Core 12 adds the ban
+ * fields `bannedAt`, `banReason`, and `banUntil` to `user`, `actorId` to
+ * `session`, and the model `operatorAudit`. Better Auth's `user` gets
+ * `taBannedAt`, `taBanReason`, and `taBanUntil`, and its `session` gets
+ * `taActorId` (deviation 11 of plan 12f): the admin plugin's own columns
+ * exist only in some apps, and its `banned` is a boolean. Each column is
+ * nullable with no default and no fill. `operatorAudit` is core's own table
+ * (`CORE_TABLE_MODELS`), with the text of core 0012. The columns take the
+ * app's naming, so the text depends on `names`: the D1 files in this package
+ * are the text of the default naming, as for 0007. Append-only.
+ */
+export function compatMigration0009Sql(dialect: "postgres" | "sqlite", n: Names): string {
+  const date = dialect === "postgres" ? "timestamptz" : "TEXT";
+  const text = dialect === "postgres" ? "text" : "TEXT";
+  const add = (table: "user" | "session", field: string, type: string) =>
+    `ALTER TABLE ${n.table(table)} ADD COLUMN ${n.column(table, field)} ${type};`;
+  return `${[
+    add("user", "taBannedAt", date),
+    add("user", "taBanReason", text),
+    add("user", "taBanUntil", date),
+    add("session", "taActorId", text),
+    COMPAT_0009_CORE[dialect],
+    "UPDATE ta_meta SET value = '12' WHERE key = 'schema_version';",
+    "UPDATE ta_meta SET value = '9' WHERE key = 'compat_better_auth';",
+  ].join("\n")}\n`;
+}
+
 /** Postgres: now, cut to the millisecond precision that core reads back. */
 const MS_NOW = "date_trunc('milliseconds', now())";
 
@@ -733,6 +797,7 @@ export const COMPAT_MIGRATION_NAMES: readonly string[] = [
   MIGRATION_0006_NAME,
   MIGRATION_0007_NAME,
   MIGRATION_0008_NAME,
+  MIGRATION_0009_NAME,
 ];
 
 /**
@@ -750,6 +815,7 @@ const POSTGRES_TEXTS: readonly ((names: Names) => string)[] = [
   (names) => compatMigration0006Sql("postgres", names),
   (names) => compatMigration0007Sql("postgres", names),
   () => compatMigration0008Sql("postgres"),
+  (names) => compatMigration0009Sql("postgres", names),
 ];
 if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(

@@ -15,6 +15,7 @@ import type {
   OAuthSessionClientRow,
   OAuthSubjectRow,
   OAuthTokenRow,
+  OperatorAuditRow,
   PasskeyRow,
   SecondFactorRow,
   SessionRow,
@@ -45,7 +46,18 @@ export interface ConformanceOptions {
 }
 
 function user(id: string, email: string, at: Date): UserRow {
-  return { id, email, emailVerified: false, name: null, image: null, createdAt: at, updatedAt: at };
+  return {
+    id,
+    email,
+    emailVerified: false,
+    name: null,
+    image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
+    createdAt: at,
+    updatedAt: at,
+  };
 }
 
 function verification(id: string, at: Date, consumedAt: Date | null): VerificationRow {
@@ -1291,6 +1303,7 @@ export function runAdapterConformance(
         userAgent: null,
         activeOrganizationId: null,
         freshAt: null,
+        actorId: null,
         createdAt: at,
         updatedAt: at,
       };
@@ -1318,6 +1331,105 @@ export function runAdapterConformance(
       expect(
         (await db.findOne("session", [{ field: "id", op: "eq", value: "s2" }]))?.freshAt,
       ).toEqual(at);
+    });
+
+    describe("schema version 12 round-trips (plan 12f)", () => {
+      const at = new Date("2026-10-20T00:00:00.000Z");
+
+      it("round-trips the ban fields of a user, set and null", async () => {
+        const banned: UserRow = {
+          ...user("u-banned", "banned@example.com", at),
+          bannedAt: at,
+          banReason: "abuse of the support desk",
+          banUntil: new Date(at.getTime() + 86_400_000),
+        };
+        const free = user("u-free", "free@example.com", at);
+        await db.create("user", banned);
+        await db.create("user", free);
+        expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u-banned" }])).toEqual(
+          banned,
+        );
+        const read = await db.findOne("user", [{ field: "id", op: "eq", value: "u-free" }]);
+        expect(read).toEqual(free);
+        expect(read).toMatchObject({ bannedAt: null, banReason: null, banUntil: null });
+      });
+
+      it("round-trips the actor of a session", async () => {
+        // A session names a user; the compatibility storage has a foreign key on it.
+        await db.create("user", user("u-target", "target@example.com", at));
+        const row: SessionRow = {
+          id: "s-imp",
+          userId: "u-target",
+          tokenHash: "h-imp",
+          expiresAt: new Date(at.getTime() + 60_000),
+          lastSeenAt: at,
+          ip: null,
+          userAgent: null,
+          activeOrganizationId: null,
+          freshAt: null,
+          actorId: "u-operator",
+          createdAt: at,
+          updatedAt: at,
+        };
+        await db.create("session", row);
+        expect(await db.findOne("session", [{ field: "id", op: "eq", value: "s-imp" }])).toEqual(
+          row,
+        );
+      });
+
+      it("round-trips an operatorAudit row and reads the rows of one target in id order", async () => {
+        const first: OperatorAuditRow = {
+          id: "a1",
+          actorKind: "secret",
+          actorId: "support",
+          action: "ban",
+          targetUserId: "u-target",
+          reason: "abuse of the support desk",
+          data: { until: "2026-10-21T00:00:00.000Z", nested: { n: 1, ok: true } },
+          ip: null,
+          userAgent: null,
+          createdAt: at,
+          updatedAt: at,
+        };
+        const second: OperatorAuditRow = {
+          ...first,
+          id: "a2",
+          actorKind: "user",
+          actorId: "u-operator",
+          action: "unban",
+          data: null,
+          ip: "203.0.113.7",
+          userAgent: "curl/8.0",
+        };
+        const all: OperatorAuditRow = {
+          ...first,
+          id: "a3",
+          action: "sessions_end_all",
+          targetUserId: null,
+          data: { ended: 2, more: false },
+        };
+        // Out of id order, so the sort and not the insert order decides.
+        await db.create("operatorAudit", second);
+        await db.create("operatorAudit", all);
+        await db.create("operatorAudit", first);
+        expect(await db.findOne("operatorAudit", [{ field: "id", op: "eq", value: "a1" }])).toEqual(
+          first,
+        );
+        expect(
+          await db.findMany(
+            "operatorAudit",
+            [{ field: "targetUserId", op: "eq", value: "u-target" }],
+            {
+              sort: [{ field: "id", dir: "asc" }],
+            },
+          ),
+        ).toEqual([first, second]);
+        expect(
+          (
+            await db.findMany("operatorAudit", [{ field: "targetUserId", op: "eq", value: null }])
+          ).map((r) => r.id),
+        ).toEqual(["a3"]);
+      });
     });
   });
 }
@@ -1379,6 +1491,9 @@ async function rotationRun(storage: StorageAdapter): Promise<void> {
     emailVerified: true,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: at,
     updatedAt: at,
   });

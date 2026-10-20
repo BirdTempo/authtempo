@@ -442,6 +442,9 @@ describe("resolveSocialUser", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -496,6 +499,7 @@ describe("resolveSocialUser", () => {
       userAgent: null,
       activeOrganizationId: null,
       freshAt: now,
+      actorId: null,
       createdAt: now,
       updatedAt: now,
     });

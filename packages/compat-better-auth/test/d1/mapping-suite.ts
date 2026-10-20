@@ -42,6 +42,7 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">) {
         "ta_oauth_subject",
         "ta_oauth_session_client",
         "ta_oauth_logout",
+        "ta_operator_audit",
       ].map((t) => env.DB.prepare(`DELETE FROM ${t}`)),
     );
   };
@@ -84,6 +85,9 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -113,6 +117,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
         "oauthSubject",
         "oauthSessionClient",
         "oauthLogout",
+        "operatorAudit",
       ] as const) {
         const info = await env.DB.prepare(`PRAGMA table_info(${TABLES[model]})`).all<{
           name: string;
@@ -140,6 +145,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
         "oauthSubject",
         "oauthSessionClient",
         "oauthLogout",
+        "operatorAudit",
       ] as const) {
         const list = await env.DB.prepare(`PRAGMA index_list(${TABLES[model]})`).all<{
           name: string;
@@ -170,6 +176,9 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
             emailVerified: false,
             name: null,
             image: null,
+            bannedAt: null,
+            banReason: null,
+            banUntil: null,
             createdAt: at,
             updatedAt: at,
           });
@@ -191,6 +200,9 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
             emailVerified: true,
             name: null,
             image: null,
+            bannedAt: null,
+            banReason: null,
+            banUntil: null,
             createdAt: at,
             updatedAt: at,
           });
@@ -205,6 +217,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
             userAgent: null,
             activeOrganizationId: null,
             freshAt: at,
+            actorId: null,
             createdAt: at,
             updatedAt: at,
           });
@@ -225,6 +238,9 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
             emailVerified: true,
             name: null,
             image: null,
+            bannedAt: null,
+            banReason: null,
+            banUntil: null,
             createdAt: at,
             updatedAt: at,
           });
@@ -255,6 +271,9 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
         emailVerified: true,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: at,
         updatedAt: at,
       });

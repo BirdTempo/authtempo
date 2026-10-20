@@ -26,6 +26,9 @@ const signUpRows =
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: at,
       updatedAt: at,
     };
@@ -58,6 +61,7 @@ const signUpRows =
       userAgent: null,
       activeOrganizationId: null,
       freshAt: at,
+      actorId: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -157,6 +161,9 @@ describe("the Better Auth foreign keys on D1", () => {
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -182,6 +189,9 @@ describe("the plan 9b2 inputs on the recorded Better Auth tables", () => {
     emailVerified: true,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: at,
     updatedAt: at,
   });

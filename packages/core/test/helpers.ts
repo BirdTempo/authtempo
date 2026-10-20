@@ -39,6 +39,9 @@ export function makeAuth(overrides: Partial<AuthConfig> = {}) {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });

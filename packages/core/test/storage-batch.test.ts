@@ -16,6 +16,9 @@ describe("findManyIn", () => {
         emailVerified: i % 2 === 0,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: at,
         updatedAt: at,
       });

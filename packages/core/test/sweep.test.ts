@@ -67,6 +67,7 @@ describe("sweepExpired", () => {
         userAgent: "ua",
         activeOrganizationId: null,
         freshAt: now,
+        actorId: null,
         createdAt: now,
         updatedAt: now,
       });

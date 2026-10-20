@@ -29,6 +29,9 @@ const user = (id: string, email: string) => ({
   emailVerified: false,
   name: null,
   image: null,
+  bannedAt: null,
+  banReason: null,
+  banUntil: null,
   createdAt: at,
   updatedAt: at,
 });

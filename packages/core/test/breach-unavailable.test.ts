@@ -41,6 +41,9 @@ describe("a breach check that cannot answer (plan 12b)", () => {
         emailVerified: true,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: now,
         updatedAt: now,
       });

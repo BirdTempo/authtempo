@@ -26,6 +26,9 @@ async function unverifiedUser(auth: ReturnType<typeof makeAuth>) {
     emailVerified: false,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: now,
     updatedAt: now,
   });

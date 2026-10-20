@@ -668,6 +668,9 @@ async function writeUser(
     emailVerified: rows.verified,
     name: rows.name,
     image: rows.image,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: r.createdAt ?? now,
     updatedAt: now,
   });

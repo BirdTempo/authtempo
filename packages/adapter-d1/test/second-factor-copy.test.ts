@@ -104,6 +104,9 @@ it("lets a plan 9f backup code of 8 characters pass through the engine after the
     emailVerified: true,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: at,
     updatedAt: at,
   });

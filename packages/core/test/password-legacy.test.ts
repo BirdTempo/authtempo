@@ -29,6 +29,9 @@ async function importedUser(auth: ReturnType<typeof makeAuth>, emailVerified = t
     emailVerified,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: now,
     updatedAt: now,
   });

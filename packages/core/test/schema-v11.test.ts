@@ -9,8 +9,9 @@ import { makeAuth } from "./helpers.js";
 // defaults of a version 10 row are in the D1 and Postgres schema-v11 tests.
 
 describe("schema version 11 (plan 12e)", () => {
-  it("names version 11", () => {
-    expect(SCHEMA_VERSION).toBe(11);
+  it("names version 11 or a later version", () => {
+    // Plan 12f moves the version to 12: operator-schema.test.ts pins it.
+    expect(SCHEMA_VERSION).toBeGreaterThanOrEqual(11);
   });
 
   it("joins the four new models to USER_CHILD_MODELS by the schema rule", () => {

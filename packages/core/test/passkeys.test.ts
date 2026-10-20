@@ -90,6 +90,9 @@ describe("passkey registration", () => {
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -517,6 +520,9 @@ describe("passkey routes", () => {
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });

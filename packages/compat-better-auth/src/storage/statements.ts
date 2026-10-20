@@ -159,6 +159,9 @@ export const CORE_TABLE_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
   "oauthSubject",
   "oauthSessionClient",
   "oauthLogout",
+  // Plan 12f: migration 0009 creates it. The Better Auth admin plugin keeps
+  // no audit table, so no Better Auth table is read or written.
+  "operatorAudit",
 ]);
 
 function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): CompatStatements {

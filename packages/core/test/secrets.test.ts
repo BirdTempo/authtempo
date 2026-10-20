@@ -210,6 +210,9 @@ describe("api.secrets (plan 12b)", () => {
         emailVerified: true,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: AT,
         updatedAt: AT,
       });

@@ -42,6 +42,9 @@ describe("names", () => {
       "email_verified",
       "name",
       "image",
+      "banned_at",
+      "ban_reason",
+      "ban_until",
     ]);
   });
   it("names unique indexes with double underscores and parses them back", () => {
@@ -188,13 +191,27 @@ describe("statements", () => {
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: t0,
       updatedAt: t0,
     });
     expect(s.sql).toBe(
-      "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
-    expect(s.params).toEqual(["u1", t0.getTime(), t0.getTime(), "a@example.com", 0, null, null]);
+    expect(s.params).toEqual([
+      "u1",
+      t0.getTime(),
+      t0.getTime(),
+      "a@example.com",
+      0,
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
     const p = insertStatement(POSTGRES, "verification", {
       id: "v1",
       purpose: "magic-link",
@@ -223,7 +240,7 @@ describe("statements", () => {
       { sort: { field: "createdAt", dir: "asc" }, limit: 2 },
     );
     expect(s?.sql).toBe(
-      "SELECT id, created_at, updated_at, email, email_verified, name, image FROM ta_user WHERE name IS NULL AND email <> ? AND id IN (?, ?) AND created_at > ? ORDER BY created_at IS NULL, created_at ASC LIMIT ?",
+      "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until FROM ta_user WHERE name IS NULL AND email <> ? AND id IN (?, ?) AND created_at > ? ORDER BY created_at IS NULL, created_at ASC LIMIT ?",
     );
     expect(s?.params).toEqual(["x", "a", "b", t0.getTime(), 2]);
     const d = selectStatement(SQLITE, "user", [], { sort: { field: "name", dir: "desc" } });
@@ -232,7 +249,7 @@ describe("statements", () => {
       sort: { field: "name", dir: "asc" },
     });
     expect(p?.sql).toBe(
-      "SELECT id, created_at, updated_at, email, email_verified, name, image FROM ta_user WHERE name IS NOT NULL ORDER BY name ASC",
+      "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until FROM ta_user WHERE name IS NOT NULL ORDER BY name ASC",
     );
     expect(p?.params).toEqual([]);
   });
@@ -422,6 +439,9 @@ describe("final review fixes", () => {
           emailVerified: false,
           name: null,
           image: null,
+          bannedAt: null,
+          banReason: null,
+          banUntil: null,
           createdAt: t0,
           updatedAt: t0,
         }),
@@ -506,6 +526,9 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     emailVerified,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: t0,
     updatedAt: t0,
   });
@@ -575,6 +598,7 @@ describe("the D1 undo of a user create (plan 8b)", () => {
       userAgent: null,
       activeOrganizationId: null,
       freshAt: null,
+      actorId: null,
       createdAt: t0,
       updatedAt: t0,
     });

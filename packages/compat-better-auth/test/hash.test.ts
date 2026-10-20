@@ -193,6 +193,9 @@ describe("the rehash on sign-in (plan 8)", () => {
       emailVerified: true,
       name: "Pat",
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: at,
       updatedAt: at,
     });

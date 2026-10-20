@@ -17,8 +17,8 @@ await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
 // The tests share one database (the pool gives each file its own storage), so
 // each one compares the rows after a run with the rows before it.
 
-/** Core's tables after the migrations in packages/adapter-d1/migrations (23 since 0011 of plan 12e). */
-const TABLES = 23;
+/** Core's tables after the migrations in packages/adapter-d1/migrations (24 since 0012 of plan 12f). */
+const TABLES = 24;
 
 /**
  * Every row of every core table, read with raw SQL and not through the
@@ -308,6 +308,9 @@ describe("the repair on core's D1 adapter (plan 9b2 fix round 2)", () => {
         emailVerified: verified,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: AT,
         updatedAt: AT,
       });

@@ -209,6 +209,9 @@ describe("the demo Worker and its sandboxes", () => {
           emailVerified: false,
           name: null,
           image: null,
+          bannedAt: null,
+          banReason: null,
+          banUntil: null,
         },
       ),
     );

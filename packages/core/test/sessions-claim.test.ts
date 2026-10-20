@@ -275,6 +275,9 @@ async function unverifiedHandoffCode(auth: ReturnType<typeof makeAuth>) {
     emailVerified: false,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: now,
     updatedAt: now,
   });
@@ -558,6 +561,9 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -614,6 +620,9 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -770,6 +779,9 @@ describe("the session is created inside the claim transaction (plan 7 input, Rev
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -1590,6 +1602,9 @@ describe("the D1-like test view (plan 9 Task 4 review M-1)", () => {
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: at,
       updatedAt: at,
     };

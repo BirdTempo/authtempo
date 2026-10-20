@@ -237,6 +237,8 @@ export {
   type OAuthSessionClientRow,
   type OAuthSubjectRow,
   type OAuthTokenRow,
+  type OperatorAction,
+  type OperatorAuditRow,
   type OrganizationRow,
   type PasskeyRow,
   type PasswordRow,

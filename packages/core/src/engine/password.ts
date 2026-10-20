@@ -319,6 +319,9 @@ function insertSignUp(
       emailVerified: false,
       name: row.name,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -474,6 +477,9 @@ function insertUniform(
       emailVerified: false,
       name: row.name,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -1281,6 +1287,9 @@ function applyReset(
         emailVerified: true,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: now,
         updatedAt: now,
       });

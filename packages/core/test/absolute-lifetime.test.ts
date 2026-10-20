@@ -45,6 +45,9 @@ async function user(storage: ReturnType<typeof createMemoryAdapter>) {
     emailVerified: true,
     name: null,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: at,
     updatedAt: at,
   });

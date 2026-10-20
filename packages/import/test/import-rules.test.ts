@@ -225,6 +225,9 @@ describe("importUsers: a half record (I-3)", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: AT,
       updatedAt: AT,
     });
@@ -464,6 +467,9 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
       emailVerified: verified,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: AT,
       updatedAt: AT,
     });
@@ -789,6 +795,9 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: AT,
       updatedAt: AT,
     });

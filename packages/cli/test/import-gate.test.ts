@@ -107,25 +107,25 @@ it("stops before any write on a database with no schema", async () => {
 it("stops before any write on a database one version below", async () => {
   await applyOneVersionBelow(db.sql);
   const before = await rowCounts();
-  expect(before.ta_migrations).toBe("10");
+  expect(before.ta_migrations).toBe("11");
   const r = run();
   expect(r.status).toBe(2);
   expect(r.stdout).toBe("");
   expect(linesOf(r.stderr).at(-1)).toBe(
-    `stopped: the database is at version 10; this CLI writes version 11; ${MIGRATE_FIRST}`,
+    `stopped: the database is at version 11; this CLI writes version 12; ${MIGRATE_FIRST}`,
   );
   expect(await rowCounts()).toEqual(before);
 });
 
 it("stops before any write on a database one version above", async () => {
   await applyPostgresMigrations(db.sql);
-  await db.sql.unsafe(readFileSync(join(PKG, "test/fixtures/postgres/0012_future.sql"), "utf8"));
+  await db.sql.unsafe(readFileSync(join(PKG, "test/fixtures/postgres/0013_future.sql"), "utf8"));
   const before = await rowCounts();
   const r = run();
   expect(r.status).toBe(2);
   expect(r.stdout).toBe("");
   expect(linesOf(r.stderr).at(-1)).toBe(
-    "stopped: the database is at version 12; this CLI knows version 11; use a newer CLI; nothing was written",
+    "stopped: the database is at version 13; this CLI knows version 12; use a newer CLI; nothing was written",
   );
   expect(await rowCounts()).toEqual(before);
 });
@@ -137,7 +137,7 @@ it("names --tables compat in the stop of a compat import", async () => {
   expect(r.status).toBe(2);
   expect(r.stdout).toBe("");
   expect(linesOf(r.stderr).at(-1)).toBe(
-    "stopped: the database is at version 10; this CLI writes version 11; run authtempo migrate --target postgres --tables compat first; nothing was written",
+    "stopped: the database is at version 11; this CLI writes version 12; run authtempo migrate --target postgres --tables compat first; nothing was written",
   );
   expect(await rowCounts()).toEqual(before);
 });
@@ -183,7 +183,7 @@ it("stops a dry run too", async () => {
   expect(r.status).toBe(2);
   expect(r.stdout).toBe("");
   expect(linesOf(r.stderr).at(-1)).toBe(
-    `stopped: the database is at version 10; this CLI writes version 11; ${MIGRATE_FIRST}`,
+    `stopped: the database is at version 11; this CLI writes version 12; ${MIGRATE_FIRST}`,
   );
 });
 
@@ -207,18 +207,18 @@ describe("importGate and the two table sets", () => {
   const FIX = "run authtempo migrate --target postgres --tables compat first; nothing was written";
 
   it("stops a compat import on compat tables below or above the package's version", () => {
-    expect(stopOf(11, "compat", 0, 7)).toBe(
-      `the compat tables are at version 7; this CLI writes version 8; ${FIX}`,
+    expect(stopOf(12, "compat", 0, 8)).toBe(
+      `the compat tables are at version 8; this CLI writes version 9; ${FIX}`,
     );
-    expect(stopOf(11, "compat", 0, 9)).toBe(
-      "the compat tables are at version 9; this CLI knows version 8; use a newer CLI; nothing was written",
+    expect(stopOf(12, "compat", 0, 10)).toBe(
+      "the compat tables are at version 10; this CLI knows version 9; use a newer CLI; nothing was written",
     );
-    expect(stopOf(11, "compat", 0, 8)).toBeNull();
+    expect(stopOf(12, "compat", 0, 9)).toBeNull();
   });
 
   it("names the other table set when the database holds only one", () => {
-    expect(stopOf(11, "compat", 11, 0)).toBe(CORE_ONLY);
-    expect(stopOf(11, "core", 0, 8)).toBe(COMPAT_ONLY);
+    expect(stopOf(12, "compat", 12, 0)).toBe(CORE_ONLY);
+    expect(stopOf(12, "core", 0, 9)).toBe(COMPAT_ONLY);
   });
 
   it("names the compat set in the stop of a core import on a database with no schema", () => {
@@ -229,10 +229,10 @@ describe("importGate and the two table sets", () => {
   });
 
   it("reads the core version first, and passes a core import on core's tables", () => {
-    expect(stopOf(10, "compat", 10, 0)).toBe(
-      `the database is at version 10; this CLI writes version 11; ${FIX}`,
+    expect(stopOf(11, "compat", 11, 0)).toBe(
+      `the database is at version 11; this CLI writes version 12; ${FIX}`,
     );
-    expect(stopOf(11, "core", 11, 0)).toBeNull();
+    expect(stopOf(12, "core", 12, 0)).toBeNull();
   });
 });
 

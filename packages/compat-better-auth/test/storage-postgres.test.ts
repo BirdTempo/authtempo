@@ -89,6 +89,9 @@ const user = (id: string, email: string) => ({
   emailVerified: true,
   name: null,
   image: null,
+  bannedAt: null,
+  banReason: null,
+  banUntil: null,
   createdAt: at,
   updatedAt: at,
 });
@@ -126,6 +129,7 @@ describe("the Better Auth mapping on postgres", () => {
       "0006_compat_schema_v9",
       "0007_compat_schema_v10",
       "0008_compat_schema_v11",
+      "0009_compat_schema_v12",
     ]);
     expect(await s.migrate()).toEqual([]);
     db = s.storage;
@@ -134,8 +138,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 11; a new core version needs migration 0009 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(11);
+  it("serves core schema version 12; a new core version needs migration 0010 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(12);
   });
 
   it("names only columns the table field list knows", () => {
@@ -186,6 +190,7 @@ describe("the Better Auth mapping on postgres", () => {
       userAgent: "ua",
       activeOrganizationId: null,
       freshAt: at,
+      actorId: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -495,7 +500,7 @@ describe("the compat migration on postgres", () => {
     }
   });
 
-  it("creates exactly core's ta_ tables (plans 9f, 9g, 12c, and 12e)", async () => {
+  it("creates exactly core's ta_ tables (plans 9f, 9g, 12c, 12e, and 12f)", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const before = await pg.sql.unsafe<{ t: string }[]>(
@@ -520,13 +525,14 @@ describe("the compat migration on postgres", () => {
         "ta_oauth_session_client",
         "ta_oauth_subject",
         "ta_oauth_token",
+        "ta_operator_audit",
         "ta_second_factor",
         "ta_totp",
         "ta_trusted_device",
       ]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "8" },
-        { key: "schema_version", value: "11" },
+        { key: "compat_better_auth", value: "9" },
+        { key: "schema_version", value: "12" },
       ]);
       // Core's columns in core's order (plans 9f and 9g), so core's statements read these tables.
       for (const model of [
@@ -541,6 +547,7 @@ describe("the compat migration on postgres", () => {
         "oauthSubject",
         "oauthSessionClient",
         "oauthLogout",
+        "operatorAudit",
       ] as const) {
         const cols = await pg.sql.unsafe<{ c: string }[]>(
           "SELECT column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
@@ -569,6 +576,7 @@ describe("the compat migration on postgres", () => {
         "oauthSubject",
         "oauthSessionClient",
         "oauthLogout",
+        "operatorAudit",
       ] as const) {
         const cols = await pg.sql.unsafe<
           { column_name: string; is_nullable: string; data_type: string }[]
@@ -612,6 +620,7 @@ describe("the compat migration on postgres", () => {
         "oauthSubject",
         "oauthSessionClient",
         "oauthLogout",
+        "operatorAudit",
       ] as const) {
         const rows = await pg.sql.unsafe<{ indexname: string; indexdef: string }[]>(
           "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1 AND indexname <> $2",
@@ -735,6 +744,7 @@ describe("the compat undo of a created user", () => {
       userAgent: null,
       activeOrganizationId: null,
       freshAt: at,
+      actorId: null,
       createdAt: at,
       updatedAt: at,
     });
@@ -782,6 +792,7 @@ describe("the Better Auth foreign keys on postgres", () => {
       userAgent: null,
       activeOrganizationId: null,
       freshAt: at,
+      actorId: null,
       createdAt: at,
       updatedAt: at,
     });

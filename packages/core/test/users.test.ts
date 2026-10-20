@@ -94,6 +94,9 @@ describe("findOrCreateUserByEmail", () => {
       emailVerified: false,
       name: "Ada",
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -130,6 +133,9 @@ describe("findOrCreateUserByEmail", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     };
@@ -169,6 +175,9 @@ describe("findOrCreateUserByEmail repairs a missing email identity (plan 3 input
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -214,6 +223,9 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       ...row,
     });
     await storage.create("passkey", {
@@ -234,6 +246,9 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       emailVerified: true,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       ...row,
     });
     await storage.create("passkey", {
@@ -291,6 +306,9 @@ describe("claimEmail covers handoff codes (plan 5a input)", () => {
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -340,6 +358,9 @@ describe("claimEmail and the password row (plan 8)", () => {
       emailVerified: false,
       name: null,
       image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -511,6 +532,9 @@ describe("claimEmail needs user.beforeVerify first (plan 12a, Task 18)", () => {
         emailVerified: false,
         name: null,
         image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
         createdAt: now,
         updatedAt: now,
       });

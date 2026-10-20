@@ -85,6 +85,9 @@ async function seed(storage: StorageAdapter, email: string, name: string | null 
     emailVerified: true,
     name,
     image: null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
     createdAt: now,
     updatedAt: now,
   }) as Promise<UserRow>;

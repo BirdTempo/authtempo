@@ -10,6 +10,9 @@ const user = (id: string, email: string) => ({
   emailVerified: false,
   name: null,
   image: null,
+  bannedAt: null,
+  banReason: null,
+  banUntil: null,
   createdAt: t0,
   updatedAt: t0,
 });

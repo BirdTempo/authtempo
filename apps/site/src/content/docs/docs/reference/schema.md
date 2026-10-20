@@ -11,7 +11,7 @@ sources:
 
 **For:** an operator who deploys a new core, or a developer who reads the tables.
 
-**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 11 needs the migrations up to `0011_schema_v11`.
+**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 12 needs the migrations up to `0012_schema_v12`.
 
 ## Before you start
 
@@ -32,8 +32,9 @@ sources:
 | 9 | `0009_schema_v9` | No table. It adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk`: the version of the app secret that seals or keys the value. Default 1. |
 | 10 | `0010_schema_v10` | No table. It adds `fresh_at` to `ta_session`, the field `freshAt` (date, nullable). The field holds the time of the last sign-in or re-authentication. Null is never fresh (plan 12a). |
 | 11 | `0011_schema_v11` | `ta_oauth_device`, `ta_oauth_subject`, `ta_oauth_session_client`, `ta_oauth_logout`. It also adds the columns of a confidential client to `ta_oauth_client`, and `parent_id` and `dpop_jkt` to `ta_oauth_token` (plan 12e). |
+| 12 | `0012_schema_v12` | `ta_operator_audit`. It also adds the three ban fields to `ta_user` and `actor_id` to `ta_session` (plan 12f). |
 
-`SCHEMA_VERSION` of `@authtempo/core` is 11.
+`SCHEMA_VERSION` of `@authtempo/core` is 12.
 
 Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Its migration is `0009_schema_v9` in both adapters and `0006_compat_schema_v9` in the compatibility package. Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 
@@ -60,6 +61,16 @@ Version 11 comes from the `0011_schema_v11` migration in both adapters, and from
 | `subject_type` | `public` |
 
 Every other new column is nullable and reads null. Version 11 also adds the verification purposes `client-assertion` and `dpop-proof`, which need no DDL. Plan 12e also adds the purpose `oauth-family-end`, the end mark of a refresh family that a reuse or a revoke ended. It needs no DDL either.
+
+Version 12 comes from the `0012_schema_v12` migration in both adapters, and from `0009_compat_schema_v12` in the compatibility package (plan 12f). Each new column is nullable, with no default and no fill. A row of version 11 holds null: no ban and no impersonation.
+
+| Field | Column | Type | What it holds |
+| --- | --- | --- | --- |
+| `user.bannedAt` | `ta_user.banned_at` | date, nullable | When an operator banned the user. Null: no ban (plan 12f, spec 26 item 6). |
+| `user.banReason` | `ta_user.ban_reason` | string, nullable | The operator's reason for the ban (plan 12f, spec 26 item 6). |
+| `user.banUntil` | `ta_user.ban_until` | date, nullable | The end of the ban. Null with `bannedAt` set: the ban has no end (plan 12f, spec 26 item 6). |
+| `session.actorId` | `ta_session.actor_id` | string, nullable | The platform operator who impersonates the user. Null on every other session (plan 12f, spec 26 item 9). |
+| `operatorAudit` | `ta_operator_audit` | table | One row per operator act: `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, and `userAgent`, with an index on `target_user_id` and on `actor_id`. Core never updates or deletes a row. The account delete keeps the rows (plan 12f, spec 26 item 8). |
 
 The table prefix `ta_` and the advisory lock names keep the old product name tempo-auth for compatibility. A change needs a migration.
 
@@ -139,6 +150,7 @@ The compatibility package keeps the tables of Better Auth 1.7. It adds columns t
 | `0006_compat_schema_v9` | `secret_version` on `ta_totp`, `ta_second_factor`, and `ta_jwk`, and `taSecretVersion` on `verification`, which holds the same field. Default 1. The text names the verification table, so tables with other names take the text of `compatMigration0006Sql`. |
 | `0007_compat_schema_v10` | `taFreshAt` on `session`, which holds `freshAt`. No default and no fill. The text names the session table, so tables with other names take the text of `compatMigration0007Sql`. |
 | `0008_compat_schema_v11` | The columns and the four tables of version 11, with the same defaults. The text names `ta_` tables only, so it is the same for every naming. |
+| `0009_compat_schema_v12` | `taBannedAt`, `taBanReason`, and `taBanUntil` on `user`, `taActorId` on `session`, and `ta_operator_audit`. No default and no fill. The text names the user and session tables, so tables with other names take the text of `compatMigration0009Sql`. |
 
 On D1, a database made by a Better Auth older than 1.7 uses the folder `d1-before-1.7`. [Better Auth compatibility](/docs/reference/compat-better-auth/) tells the rest.
 
