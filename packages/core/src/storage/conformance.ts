@@ -1620,6 +1620,43 @@ export function runAdapterConformance(
           ["u2", "Bea"],
         ]);
       });
+
+      it("takes the row locks of lockInOrder by id, so a caller that locks in id order cannot deadlock with it", async () => {
+        if (!db.lockInOrder) return;
+        // The scan order differs from the id order: u2 goes in first, and the update writes a new
+        // u1 row after it. So a lock in scan order takes u2 first (review m2 of the 12f Task 7 fix 2).
+        await db.create("user", user("u2", "b@example.com", t0));
+        await db.create("user", user("u1", "a@example.com", t0));
+        await db.update("user", [{ field: "id", op: "eq", value: "u1" }], { name: "Ada" });
+        const all = [{ field: "email" as const, op: "ne" as const, value: "none" }];
+        const order: string[] = [];
+        let first: () => void = () => {};
+        const holdsFirst = new Promise<void>((r) => {
+          first = r;
+        });
+        // The writer locks u1 and then u2, in id order.
+        const writer = db.transaction(async (tx) => {
+          await tx.update("user", [{ field: "id", op: "eq", value: "u1" }], { name: "Ann" });
+          first();
+          await new Promise((r) => setTimeout(r, 300));
+          await tx.update("user", [{ field: "id", op: "eq", value: "u2" }], { name: "Bea" });
+          order.push("writer");
+        });
+        await holdsFirst;
+        // A lock by id waits on u1 and holds no row. A lock in scan order holds u2 and waits on u1,
+        // while the writer waits on u2: a deadlock, and the database ends one transaction.
+        const locker = db.transaction(async (tx) => {
+          await tx.lockInOrder?.("user", all);
+          order.push("locker");
+        });
+        await Promise.all([writer, locker]);
+        expect(order).toEqual(["writer", "locker"]);
+        const rows = await db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+        expect(rows.map((r) => [r.id, r.name])).toEqual([
+          ["u1", "Ann"],
+          ["u2", "Bea"],
+        ]);
+      });
     });
   });
 }

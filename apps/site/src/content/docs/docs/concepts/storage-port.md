@@ -63,7 +63,7 @@ The guards of core live in the `where` clauses and the unique keys, not in the i
 
 ## The contract
 
-`runAdapterConformance` from `@authtempo/core/conformance` is the contract. It runs the same tests on every adapter: the operators, the sorts, the unique keys, the transactions, and the round trip of every model. It also checks the optional methods: the count of each port call in `statementsSent`, and the row locks of `lockInOrder`. Pass `rowLocks: true` for a database with row locks: the suite then fails when `lockInOrder` is missing. Pass `updateInTransaction` when an update in a transaction sends more than one statement, as on D1 (2). An adapter that fails it does not ship.
+`runAdapterConformance` from `@authtempo/core/conformance` is the contract. It runs the same tests on every adapter: the operators, the sorts, the unique keys, the transactions, and the round trip of every model. It also checks the optional methods: the count of each port call in `statementsSent`, and the row locks of `lockInOrder` and their order by id. A lock in scan order fails the suite: it can deadlock with a flow that locks by id. Pass `rowLocks: true` for a database with row locks: the suite then fails when `lockInOrder` is missing. Pass `updateInTransaction` when an update in a transaction sends more than one statement, as on D1 (2). An adapter that fails it does not ship.
 
 ## The schema version
 
