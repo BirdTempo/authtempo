@@ -47,7 +47,11 @@ export function exampleFiles(dir: string): string[] {
   return out.sort();
 }
 
-/** True for the version of a package that no release published: 0.0.0, the version on main. */
+/**
+ * True for the version of a package that no release published: 0.0.0. Each
+ * package holds it until the first `changeset version`, which writes 0.1.0
+ * or higher.
+ */
 export function isUnpublished(version: string): boolean {
   return version === "0.0.0";
 }
