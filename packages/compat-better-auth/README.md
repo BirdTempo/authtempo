@@ -651,6 +651,26 @@ secret or the app (`auth.tempo.api.operator.platformRole.revoke`).
 | `not_found` | 404 `USER_NOT_FOUND`. |
 | `unauthorized` (no session) | 401 `UNAUTHORIZED`. |
 
+With `admin()`, `/get-session` and `auth.api.getSession` give the user
+`role`, `banned`, `banReason`, and `banExpires`, as Better Auth does. The
+role is the platform role or `user`. A banned user has no session, so
+`banned` is `false` there. The client of this package reads core's own
+session, so its user has no such field.
+
+The deviations from Better Auth (ruling 53 of plan 12f):
+
+- `/admin/list-users` answers `total` only when the page ends the list. An
+  `offset` above 0 is refused, because core pages by a cursor.
+- `/admin/revoke-user-sessions` ends one page per call. While sessions
+  stay, it answers `{ success: false, more: true, ended }`.
+- A `set-role` of `user` on a platform operator is refused with
+  `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`. Better Auth lets an admin
+  revoke another admin.
+- A ban of the caller answers `YOU_CANNOT_BAN_YOURSELF` with status 409.
+  Better Auth answers 400.
+- An unknown user answers `USER_NOT_FOUND` on every path. Better Auth answers
+  `{ success: true }` on `/admin/revoke-user-sessions`.
+
 On D1, an act reads the user row once after core's route, for `{ user }`.
 A ban of a user with 60 sessions sends 32 queries in its invocation.
 The impersonation calls come with plan 12f Task 11.
