@@ -1173,7 +1173,10 @@ The follow-ups of consumerb:
 
 Since plan 12k (Task 12, spec 29 item 20), `apiKey(options)` of
 `@better-auth/api-key` maps onto core's API tokens. Every option of
-@better-auth/api-key 1.7.5 maps, is a note, or is refused at start. Core's
+@better-auth/api-key 1.7.5 maps, is a note, or is refused at start. The shim
+reads api-key 1.7.5, consumerb's pin, beside the Better Auth 1.7.2 target of
+the rest of this package. `BETTER_AUTH_API_KEY_VERSION` of `./api-key` holds
+it, and a test pins it. Core's
 tokens keep core's own tables, `ta_api_token` and `ta_organization_token`
 (owner decision 4 of 2026-10-14). Migration 0010 creates them. Better Auth's
 `apikey` table stays as it is: no migration writes it or drops it.
@@ -1200,6 +1203,12 @@ body. `enabled: false` and a `metadata` change answer `NOT_SUPPORTED`: core
 has no disabled token and keeps the metadata of the create. The client has
 `authClient.apiKey.create`, `list`, `get`, `update`, and `delete`. A call with
 `organizationId` acts on the organization's tokens.
+
+The refill differs at one edge. Better Auth 1.7.5 refills when the time since
+the last refill is greater than the interval. Core refills when it is equal or
+greater (plan 12k decision 6), so a call at the exact interval acts. Both set
+the count to `refillAmount` less the one use. A moved interval rounds up to
+whole seconds. A move test pins both sides of the edge.
 
 An answer's `start` holds core's hint, and `prefix` is null. `requestCount` is
 0, because core's limiter holds the window. The refill fields are there only
@@ -1228,7 +1237,10 @@ holds counts, owner ids, and the stored prefixes, never a key, a digest, or
 metadata. A set loses each resource and action that core's statements do not
 know, and `dropped` counts them. An organization key gets its creator from
 `metadata.createdByUserId`, else the organization's first owner
-(`ownerFallback`). A moved key acts, so it counts against core's cap of 50
+(`ownerFallback`). That owner then counts as the creator. The list's
+`creatorIsMember` follows that owner, and a removal of that owner with
+`revokeTokens: true` revokes these keys too, though the owner never made
+them. A moved key acts, so it counts against core's cap of 50
 live tokens per owner. An owner with more moved keys can create no new key
 until they revoke some.
 

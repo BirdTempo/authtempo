@@ -1,5 +1,5 @@
 import { createPbkdf2PasswordHash, type StorageAdapter } from "@authtempo/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAccessControl, defaultStatements } from "../src/access.js";
 import { apiKey } from "../src/api-key.js";
 import { BetterAuthCompatError } from "../src/compat-error.js";
@@ -331,6 +331,52 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
         expect(await real.findMany("movedToken", [])).toHaveLength(3);
         for (const key of keys)
           expect((await auth.api.verifyApiKey({ body: { key } })).valid).toBe(true);
+      }),
+    );
+
+    it(
+      "refills a moved key when the interval has passed, at the edge too (deviation of the refill rule)",
+      fresh(async (m) => {
+        const { auth, person } = app(m, "user");
+        const ada = await person("ada@example.com");
+        const at = new Date(Date.now() - 600_000);
+        const row = (key: string) =>
+          keyRow(key, {
+            referenceId: ada.user.id,
+            rateLimitEnabled: false,
+            remaining: 0,
+            refillAmount: 5,
+            refillInterval: 60_000,
+            lastRefillAt: at,
+          });
+        const early = generatedKey("laaa_");
+        const edge = generatedKey("laaa_");
+        await m.insertKey(await row(early));
+        await m.insertKey(await row(edge));
+        expect((await move(m, "user")).moved).toBe(2);
+        vi.useFakeTimers({ toFake: ["Date"] });
+        try {
+          // One millisecond before the interval: no refill, so the count of 0 refuses.
+          vi.setSystemTime(at.getTime() + 59_999);
+          expect((await auth.api.verifyApiKey({ body: { key: early } })).error?.code).toBe(
+            "USAGE_EXCEEDED",
+          );
+          // At the interval: core refills (now >= last + interval, plan 12k decision 6).
+          // Better Auth 1.7.5 refills only after it (dist/index.mjs:1743), so it refuses here.
+          vi.setSystemTime(at.getTime() + 60_000);
+          const v = await auth.api.verifyApiKey({ body: { key: edge } });
+          expect({ valid: v.valid, remaining: v.key?.remaining }).toEqual({
+            valid: true,
+            remaining: 4,
+          });
+        } finally {
+          vi.useRealTimers();
+        }
+        const rows = await m.database.storage.findMany("apiToken", [
+          { field: "userId", op: "eq", value: ada.user.id },
+        ]);
+        // Both set the count to refillAmount less the one use.
+        expect(rows.map((r) => r.remaining).sort()).toEqual([0, 4]);
       }),
     );
 

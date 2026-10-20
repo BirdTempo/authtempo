@@ -6,7 +6,7 @@ import {
 } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { createAccessControl, defaultStatements } from "../src/access.js";
-import { apiKey } from "../src/api-key.js";
+import { apiKey, BETTER_AUTH_API_KEY_VERSION } from "../src/api-key.js";
 import { apiKeyClient } from "../src/client/api-key.js";
 import { createAuthClient } from "../src/client/index.js";
 import { betterAuthPasswordHash } from "../src/hash.js";
@@ -105,6 +105,15 @@ function app(keys: ApiKeyOptions) {
 }
 
 describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
+  it("reads @better-auth/api-key 1.7.5, and its fixtures are of that version", () => {
+    expect(BETTER_AUTH_API_KEY_VERSION).toBe("1.7.5");
+    const fixtures = Object.keys(import.meta.glob("./fixtures/better-auth-api-key-*.sql"));
+    expect(fixtures.sort()).toEqual([
+      "./fixtures/better-auth-api-key-1.7.5.postgres.sql",
+      "./fixtures/better-auth-api-key-1.7.5.sqlite.sql",
+    ]);
+  });
+
   it("constructs consumerb's apiKey options with no refusal", () => {
     const o = options(CONSUMER_B_KEYS);
     expect(checkOptions(o).refusals).toEqual([]);
