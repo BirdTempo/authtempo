@@ -1,8 +1,8 @@
 // check-security-policy (plan 12j Task 12, spec 33 item 7). It holds
-// SECURITY.md of the repository root: its seven sections in order, the
-// support table against release/support.json, the times of owner decision 4,
-// and the two channels. The prose rules are not here: check-terms and
-// check-sentences read the file through policyProsePages (plan 11b).
+// SECURITY.md of the repository root. It reads the seven sections in order
+// and the support table against release/support.json. It also reads the times
+// of owner decision 4 and the two channels. The prose rules are not here:
+// check-terms and check-sentences read the file through policyProsePages (plan 11b).
 import { type CheckReport, requireCounts } from "./lib/report.ts";
 
 /** The `## ` sections of SECURITY.md, in this order (spec 33 item 7). */

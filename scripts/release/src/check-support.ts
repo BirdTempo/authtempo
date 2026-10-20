@@ -129,7 +129,7 @@ export function checkSupport(input: SupportInput): Report {
     security: rows.filter((r) => r.status === "security").length,
   };
   // The current minor gets every fix (owner decision 3). So after the first
-  // release one minor is current, and it is the newest one: a status typo on
+  // release, one minor is current, and it is the newest one. A status typo on
   // a release day must not leave the table with no current minor.
   if (rows.length > 0 && currents.length !== 1)
     failures.push(
@@ -142,8 +142,8 @@ export function checkSupport(input: SupportInput): Report {
       `${only.minor} is current and ${newest.minor} is newer; the newest minor is the current minor`,
     );
 
-  // One row for each minor, and the minors ship in their number order, so
-  // the security date of each minor reads the release of the right next minor.
+  // Each minor has one row, and the minors ship in their number order. The
+  // security date of each minor reads the release of the next minor.
   const seen = new Map<string, number>();
   for (const row of rows) {
     const key = minorParts(row.minor).join(".");
