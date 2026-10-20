@@ -292,12 +292,13 @@ describe("the disable of the second factor with a proof (plan 12f Task 9)", () =
     count.take();
     const byApp = await api.secondFactor.disable({ actor: APP, userId: ada.user.id, ...input });
     if (!byApp.ok) throw new Error(byApp.code);
-    // The user read, four deletes, and the audit insert.
-    expect(count.take()).toBe(6);
+    // The user read, the hold of the user row (a read and an update), four
+    // deletes, and the audit insert.
+    expect(count.take()).toBe(8);
     const actor: OperatorActor = { kind: "user", user: operator.user, session: operator.session };
     const byUser = await api.secondFactor.disable({ actor, userId: bob.user.id, ...input });
     if (!byUser.ok) throw new Error(byUser.code);
     // Two more reads: the platform organization and the member row of the target.
-    expect(count.take()).toBe(8);
+    expect(count.take()).toBe(10);
   });
 });

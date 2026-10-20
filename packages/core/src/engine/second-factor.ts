@@ -11,6 +11,7 @@ import { stopWith } from "./hooks.js";
 import { activeBan } from "./operator/ban-rule.js";
 import { ROUNDS } from "./rounds.js";
 import { endSessions, type PreparedSession, prepareSession, writeSession } from "./sessions.js";
+import { holdUser } from "./user-hold.js";
 
 /**
  * The second factor apart from its methods (plan 12c, spec 8.11 and 8.14).
@@ -330,9 +331,14 @@ export function disableSecondFactor(config: ResolvedConfig, userId: string): Pro
 /**
  * The deletes of `disableSecondFactor` in the caller's transaction (plan
  * 12f deviation 7). The operator's disable runs them beside its audit row.
- * Four delete statements; the answer is the count of factor rows deleted.
+ * The hold of the user row comes first, so every caller keeps the lock
+ * order of user-hold.ts. The account delete deletes the trusted devices
+ * before the factor row, so without the hold Postgres finds a deadlock
+ * (plan 12f Task 9 review m1). The hold is one read and one update, then
+ * four delete statements; the answer is the count of factor rows deleted.
  */
 export async function disableSecondFactorIn(tx: StorageAdapter, userId: string): Promise<number> {
+  await holdUser(tx, userId);
   await tx.delete("totp", [{ field: "userId", op: "eq", value: userId }]);
   const n = await tx.delete("secondFactor", [{ field: "userId", op: "eq", value: userId }]);
   await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: userId }]);

@@ -76,7 +76,8 @@ function proofOf(raw: unknown, now: Date): Result<FactorProof> {
  * After the commit the user gets the notice `factor_disabled`, with no IP
  * and no user agent: those are the operator's (plan 12f deviation 13). The
  * act ends no session. Its storage calls are fixed: one read of the user
- * (three for a user actor), four deletes, and the audit insert.
+ * (three for a user actor), the hold of the user row (one read and one
+ * update), four deletes, and the audit insert: 8, and 10 for a user actor.
  */
 export async function disableFactorWithProof(
   config: ResolvedConfig,
