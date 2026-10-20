@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { UNPUBLISHED_NOTE } from "../src/templates.js";
+import { extraFiles, STACKS, UNPUBLISHED_NOTE } from "../src/templates.js";
 import { assertFreshBuild, linesOf, PKG, REPO } from "./support/bin.js";
 
 /**
@@ -94,6 +94,17 @@ describe("the documented run form", () => {
     }
     expect(readFileSync(join(PKG, "README.md"), "utf8")).toContain(form.line);
     expect(UNPUBLISHED_NOTE).toContain(`node ${pathOnly} in the folder of the app`);
+  });
+
+  // The docs give the node form while the packages are unpublished. A published
+  // scaffold runs pnpm exec authtempo, so its README holds no placeholder path.
+  it("holds the docs form to the unpublished branch of the scaffold", () => {
+    for (const stack of STACKS) {
+      const readme = (published: boolean) =>
+        extraFiles(stack, published).find((f) => f.path === "README.md")?.text ?? "";
+      expect(readme(false), stack).toContain(`node ${form.bin} in the folder of the app`);
+      expect(readme(true), stack).not.toContain(PLACEHOLDER);
+    }
   });
 
   it("prints the complete help, as the page shows it", () => {

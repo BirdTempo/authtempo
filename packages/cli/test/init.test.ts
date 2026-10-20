@@ -21,7 +21,6 @@ const VERSION = (JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as 
 const TEST_SECRET = "0123456789abcdef0123456789abcdef";
 let templates: Record<Stack, TemplateFile[]>;
 const PKG_JSON = JSON.parse(readFileSync(join(PKG, "package.json"), "utf8")) as {
-  private?: boolean;
   version: string;
 };
 
@@ -94,7 +93,7 @@ describe("the init templates (spec 19, the one-source rule)", () => {
   it("gives each stack the example's files, the base config, and the three files of the stack", () => {
     for (const stack of STACKS) {
       const example = exampleFiles(join(REPO, "examples", STACK_INFO[stack].example));
-      const extras = extraFiles(stack).map((f) => f.path);
+      const extras = extraFiles(stack, !UNPUBLISHED).map((f) => f.path);
       expect(templates[stack].map((f) => f.path)).toEqual(
         [...example, "tsconfig.base.json", ...extras].sort(),
       );
@@ -112,7 +111,7 @@ describe("the init templates (spec 19, the one-source rule)", () => {
       const dir = join(REPO, "examples", STACK_INFO[stack].example);
       for (const path of exampleFiles(dir)) {
         const original = readFileSync(join(dir, path), "utf8");
-        const out = rewrite(stack, path, original, VERSION);
+        const out = rewrite(stack, path, original, VERSION, !UNPUBLISHED);
         if (path === "package.json") {
           const pkg = JSON.parse(original) as {
             scripts: Record<string, string>;
@@ -249,7 +248,7 @@ describe("authtempo init (spec 19)", () => {
   });
 
   it("names the install note only while the CLI is unpublished", () => {
-    expect(UNPUBLISHED).toBe(PKG_JSON.private === true || PKG_JSON.version === "0.0.0");
+    expect(UNPUBLISHED).toBe(PKG_JSON.version === "0.0.0");
   });
 
   it("quotes a folder with a space or a character of the shell in the cd step", () => {
