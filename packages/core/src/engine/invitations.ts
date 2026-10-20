@@ -15,7 +15,7 @@ import {
   type OrganizationSummary,
   publicOrganization,
 } from "./organizations.js";
-import { effectiveIn, grantCheck, type Standing } from "./permissions.js";
+import { effectiveIn, grantCheck, type Standing, touchCheck } from "./permissions.js";
 import { RULE_STATEMENTS, rankOf, roleAllowedIn } from "./ranks.js";
 import { publicSession, type ResolvedSession } from "./sessions.js";
 import { holdUser, userStays } from "./user-hold.js";
@@ -285,6 +285,14 @@ export async function acceptInvitation(
         : { rank: 0, granted: {} };
       const grant = await effectiveIn(config, inv.organizationId, inv.role);
       const grantRank = grant.rank;
+      // Only a pending row: an accepted row is a record of a grant that already happened.
+      const lost = async (): Promise<"inviter_lost"> => {
+        await tx.delete("invitation", [
+          { field: "id", op: "eq", value: inv.id },
+          { field: "acceptedAt", op: "eq", value: null },
+        ]);
+        return "inviter_lost";
+      };
       // The role table or the organization slug can change after the invite. A role that now ranks 0, or a
       // platform role outside the platform organization, is a grant no live caller could make.
       if (
@@ -292,18 +300,21 @@ export async function acceptInvitation(
         !grantCheck(by, grant) ||
         grantRank === 0 ||
         !roleAllowedIn(o, inv.role, organizationRow.slug)
-      ) {
-        // Only a pending row: an accepted row is a record of a grant that already happened.
-        await tx.delete("invitation", [
-          { field: "id", op: "eq", value: inv.id },
-          { field: "acceptedAt", op: "eq", value: null },
-        ]);
-        return "inviter_lost";
-      }
+      )
+        return lost();
       const existing = await tx.findOne("member", [
         { field: "organizationId", op: "eq", value: inv.organizationId },
         { field: "userId", op: "eq", value: input.user.id },
       ]);
+      const raise = existing !== null && grantRank > rankOf(o.ranks, existing.role);
+      // A raise changes the role of a member, so the inviter must also pass the touch rule on
+      // the current role (spec 29 item 5). Else an inviter could drop a statement it does not hold.
+      if (
+        existing &&
+        raise &&
+        !touchCheck(by, await effectiveIn(config, inv.organizationId, existing.role))
+      )
+        return lost();
       // The limit counts a new member row only: a raise of an existing member adds none.
       if (!existing && limit !== null) {
         const held = await tx.findMany(
@@ -327,7 +338,6 @@ export async function acceptInvitation(
       // as they see updateMemberRole (final fix wave I-1). Before the consume, so a refusal throws
       // before any write and the invitation stays pending. `by` is the inviter, whose rank grants
       // the role; the accepting user when the inviter's user row is gone.
-      const raise = existing !== null && grantRank > rankOf(o.ranks, existing.role);
       let raisedBy: UserRow = input.user;
       if (existing && raise) {
         raisedBy =

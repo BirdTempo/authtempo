@@ -44,6 +44,34 @@ const CONSUMER_D_ROLES = {
   },
 };
 
+/**
+ * An app resource `grades`: grader holds `grades:write` at rank 1, and admin
+ * does not hold it at rank 3. So admin outranks grader and still may not touch it.
+ */
+const GRADES = {
+  statements: { grades: ["write"] },
+  roles: {
+    grader: { rank: 1, permissions: { member: ["read"], grades: ["write"] } },
+    member: { rank: 2, permissions: { member: ["read"] } },
+    admin: {
+      rank: 3,
+      permissions: {
+        member: ["read", "create", "update", "delete"],
+        invitation: ["read", "create", "cancel"],
+      },
+    },
+    owner: {
+      rank: 4,
+      permissions: {
+        organization: ["update", "delete"],
+        member: ["read", "create", "update", "delete"],
+        invitation: ["read", "create", "cancel"],
+        grades: ["write"],
+      },
+    },
+  },
+};
+
 function world(over: Partial<AuthConfig> = {}, storage: StorageAdapter = createMemoryAdapter()) {
   const clock = { now: () => t0 };
   const auth = createAuth({
@@ -144,6 +172,60 @@ describe("the grant and touch checks (plan 12k Task 3)", () => {
     ).toMatchObject({ ok: true, value: { role: "learner" } });
     const roles = (await w.storage.findMany("member", [])).map((m) => m.role).sort();
     expect(roles).toEqual(["guardian", "learner", "owner", "teacher"]);
+  });
+
+  /** An organization of the GRADES roles with an admin and a grader, and the mail texts it sent. */
+  async function graded() {
+    const sent: string[] = [];
+    const w = world({
+      organizations: GRADES,
+      mail: {
+        send: async (m) => {
+          sent.push(m.text);
+        },
+      },
+    });
+    const owner = await w.user("owner@example.com");
+    const admin = await w.user("admin@example.com");
+    const grader = await w.user("grader@example.com");
+    const org = mustOk(
+      await w.auth.api.createOrganization({ user: owner, slug: "school", name: "School" }),
+    );
+    const organizationId = org.organization.id;
+    mustOk(
+      await w.auth.api.addMember({ user: owner, organizationId, userId: admin.id, role: "admin" }),
+    );
+    mustOk(
+      await w.auth.api.addMember({
+        user: owner,
+        organizationId,
+        userId: grader.id,
+        role: "grader",
+      }),
+    );
+    return { w, sent, owner, admin, grader, organizationId };
+  }
+
+  it("refuses an accept that raises a member whom the inviter may not touch", async () => {
+    const { w, sent, admin, grader, organizationId } = await graded();
+    // member ranks above grader and is a subset of admin, so the invite is a valid grant.
+    mustOk(
+      await w.auth.api.inviteMember({
+        user: admin,
+        organizationId,
+        email: grader.email,
+        role: "member",
+      }),
+    );
+    const token = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(sent.at(-1) ?? "")?.[1] ?? "";
+    // The raise would drop grades:write, a statement that admin does not hold.
+    expect(await w.auth.api.acceptInvitation({ user: grader, token, ip: null })).toMatchObject({
+      ok: false,
+      code: "invalid_token",
+    });
+    const roles = (await w.storage.findMany("member", [])).map((m) => m.role).sort();
+    expect(roles).toEqual(["admin", "grader", "owner"]);
+    expect(await w.storage.findMany("invitation", [])).toEqual([]);
   });
 });
 
