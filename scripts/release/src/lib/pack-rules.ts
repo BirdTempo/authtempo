@@ -8,6 +8,7 @@
  * Names that never ship, each with what it holds. A name that ends in "/" is a
  * folder at the start of a path or after any "/". A name that starts with "*"
  * matches the file name. Any other name matches a path part that starts with it.
+ * Each name matches at any depth, so a folder that `files` names cannot ship it.
  */
 export const FORBIDDEN_PACK_NAMES = [
   ".env", // local secrets
@@ -21,6 +22,20 @@ export const FORBIDDEN_PACK_NAMES = [
   "coverage/",
   "*.test.*",
   "*.tsbuildinfo",
+  ".npmrc", // a registry token
+  "*.pem", // a private key or a certificate
+  "*.key", // a private key
+  "id_rsa", // an SSH private key, and its .pub file
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
+  "*.sqlite", // a local database, which can hold user rows
+  "*.sqlite3",
+  "*.db",
+  ".git/", // the repository history and its config
+  ".omc/", // the state of an agent tool
+  ".superpowers/", // the plans and the review notes of the lane
+  "AGENTS.md", // a notes file that turbo writes
 ] as const;
 
 /**

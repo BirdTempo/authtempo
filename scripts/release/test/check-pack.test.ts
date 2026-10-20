@@ -184,6 +184,20 @@ describe("check-pack", () => {
       ["coverage/", "dist/coverage/lcov.info"],
       ["*.test.*", "dist/index.test.js"],
       ["*.tsbuildinfo", "dist/tsconfig.tsbuildinfo"],
+      [".npmrc", "dist/.npmrc"],
+      ["*.pem", "dist/cert.pem"],
+      ["*.key", "dist/server.key"],
+      ["id_rsa", "dist/id_rsa"],
+      ["id_dsa", "dist/id_dsa"],
+      ["id_ecdsa", "dist/id_ecdsa"],
+      ["id_ed25519", "dist/id_ed25519"],
+      ["*.sqlite", "migrations/local.sqlite"],
+      ["*.sqlite3", "migrations/local.sqlite3"],
+      ["*.db", "migrations/dev.db"],
+      [".git/", "dist/.git/config"],
+      [".omc/", "dist/.omc/state.json"],
+      [".superpowers/", "skills/.superpowers/x.md"],
+      ["AGENTS.md", "skills/AGENTS.md"],
     ];
     expect([...FORBIDDEN_PACK_NAMES]).toEqual(cases.map(([name]) => name));
     for (const [name, path] of cases)
