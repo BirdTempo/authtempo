@@ -1820,9 +1820,10 @@ export function runAdapterConformance(
         });
       });
 
-      it("reads the new api token fields as null on an old row", async () => {
+      it("round-trips the new api token fields as null", async () => {
         if (unmapped("apiToken").length > 0) return holdsNone("apiToken", token("t1", "h1"));
-        // The create path of plan 8b writes the version 13 fields as null.
+        // A row with the version 13 fields null reads them back as null. The
+        // schema-v13 test of each adapter reads an old row.
         await db.create("user", user("u1", "a@example.com", at));
         await db.create("apiToken", token("t1", "h1"));
         const read = await db.findOne("apiToken", [{ field: "id", op: "eq", value: "t1" }]);

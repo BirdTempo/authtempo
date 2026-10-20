@@ -68,6 +68,25 @@ describe("createApiToken", () => {
     expect(JSON.stringify(row)).not.toContain(r.value.token);
   });
 
+  it("writes the nine fields of schema version 13 as null", async () => {
+    const auth = makeAuth();
+    const ada = await auth.seedUser("ada@example.com");
+    const r = await create(auth, ada);
+    if (!r.ok) throw new Error(r.code);
+    const [row] = await auth.storage.findMany("apiToken", []);
+    expect(row).toMatchObject({
+      permissions: null,
+      metadata: null,
+      rateLimitSeconds: null,
+      rateLimitMax: null,
+      remaining: null,
+      refillAmount: null,
+      refillSeconds: null,
+      lastRefillAt: null,
+      retiredAt: null,
+    });
+  });
+
   it("refuses an unverified user with email_unverified", async () => {
     const auth = makeAuth();
     const user = await unverifiedUser(auth);
