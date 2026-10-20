@@ -6,7 +6,7 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 184 keys, the nested ones by their path", () => {
+  it("lists 187 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
@@ -19,13 +19,15 @@ describe("checkConfig", () => {
     // Plan 12k Task 4 adds organizations.dynamicRoles and its maxPerOrganization.
     // Plan 12k Task 5 adds organizations.teams, its defaultTeam and keepLastTeam,
     // and the limits teamsPerOrganization and membersPerTeam.
-    expect(keys.length).toBe(184);
+    // Plan 12k Task 7 adds tokens, tokens.defaultRateLimit, and tokens.movedPrefixes.
+    expect(keys.length).toBe(187);
     expect(keys).toContain("hooks.operator");
     expect(keys).toContain("operator.secrets[].scopes");
     expect(keys).toContain("operator.impersonation.ttlMinutes");
     expect(keys).toContain("organizations.dynamicRoles.maxPerOrganization");
     expect(keys).toContain("organizations.teams.keepLastTeam");
     expect(keys).toContain("organizations.limits.membersPerTeam");
+    expect(keys).toContain("tokens.movedPrefixes");
     expect(keys).toContain("organizations.roles");
     expect(keys).toContain("organizations.statements");
     expect(keys).toContain("oauth.defaultResource");

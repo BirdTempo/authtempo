@@ -24,6 +24,7 @@ import type {
   PasswordConfig,
   SecretVersion,
   TeamsConfig,
+  TokensConfig,
   TotpConfig,
   TotpGateConfig,
 } from "@authtempo/core";
@@ -67,6 +68,7 @@ export const CONFIG_KEYS = {
     webauthn: true,
     handoff: true,
     organizations: true,
+    tokens: true,
     signUp: true,
     password: true,
     emailOtp: true,
@@ -163,6 +165,7 @@ export const CONFIG_KEYS = {
     defaultTeam: true,
     keepLastTeam: true,
   } satisfies Keys<TeamsConfig>,
+  tokens: { defaultRateLimit: true, movedPrefixes: true } satisfies Keys<TokensConfig>,
   "organizations.limits": {
     perUser: true,
     membersPerOrganization: true,

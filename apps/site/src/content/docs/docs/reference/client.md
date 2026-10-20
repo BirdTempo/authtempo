@@ -126,9 +126,10 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.organizations.invitations.accept({ token })` | `POST /organizations/invitations/accept` | `{ organization, member }` |
 | `client.organizations.invitations.decline({ token })` | `POST /organizations/invitations/decline` | `{ ok: true }` |
 | `client.organizations.setActive({ organizationId })` | `POST /organizations/active` | `PublicSession` |
-| `client.tokens.create({ name, expiresInDays?, organizationId? })` | `POST /tokens` | `{ token, apiToken: ApiTokenSummaryJSON }` |
+| `client.tokens.create({ name, expiresInDays?, organizationId?, permissions?, metadata? })` | `POST /tokens` | `{ token, apiToken: ApiTokenSummaryJSON }` |
 | `client.tokens.list()` | `GET /tokens` | `ApiTokenSummaryJSON[]` |
 | `client.tokens.revoke({ id })` | `POST /tokens/revoke` | `{ ok: true }` |
+| `client.tokens.update({ id, name?, permissions?, expiresAt? })` | `POST /tokens/update` | `ApiTokenSummaryJSON`, after a narrow-only change |
 | `client.tokens.current()` | `GET /tokens/current` | `{ user, apiToken }` |
 | `client.jwt.token()` | `GET /token` | `{ token }` |
 | `client.oauth.grants()` | `GET /oauth/grants` | `OAuthGrantJSON[]` |
@@ -171,7 +172,7 @@ These operations serve the settings page of the signed-in person. Each one needs
 - `user.changeEmail`, `user.delete`
 - `identities.unlink`, `identities.link`
 - `passkey.register`, `passkeys.delete`
-- `tokens.create`
+- `tokens.create`, `tokens.update`
 - `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`
 - `secondFactor.passkey.enable`, `secondFactor.email.enable`, `secondFactor.disable`
 - `password.change` while the second factor is on, and for a first password

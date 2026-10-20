@@ -950,9 +950,9 @@ These routes exist in every deployment.
 | Field | Value |
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified. A token of another form answers 401 |
-| Input | JSON `{ name, expiresInDays?, organizationId? }` |
+| Input | JSON `{ name, expiresInDays?, organizationId?, permissions?, metadata? }`. `permissions` narrows the token and needs `organizations`; a token bound to an organization holds a subset of the user's set there. `metadata` holds at most 4096 bytes as JSON. The route takes no window and no quota |
 | Answer | `{ token, apiToken }`; the clear token appears once |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`token_limit`](/docs/reference/errors/#token_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`token_limit`](/docs/reference/errors/#token_limit), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank) |
 
 <h3 id="get-tokens"><code>GET /tokens</code></h3>
 
@@ -960,7 +960,7 @@ These routes exist in every deployment.
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified |
 | Input | None |
-| Answer | `{ tokens: [{ id, name, hint, expiresAt, lastUsedAt, organizationId, createdAt }] }`, newest first |
+| Answer | `{ tokens: [{ id, name, hint, expiresAt, lastUsedAt, organizationId, permissions, metadata, rateLimit, remaining, retired, createdAt }] }`, newest first |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified) |
 
 <h3 id="post-tokens-revoke"><code>POST /tokens/revoke</code></h3>
@@ -972,14 +972,24 @@ These routes exist in every deployment.
 | Answer | `{ ok: true }` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified) |
 
+<h3 id="post-tokens-update"><code>POST /tokens/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified. A token of another form answers 401 |
+| Input | JSON `{ id, name?, permissions?, expiresAt? }`. It narrows only: a new set is a subset of the old one, a set over none narrows, and a new `expiresAt` is earlier than the old one. Another key answers `invalid_body`, so a client sets no window and no quota |
+| Answer | The `apiToken` after the change |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict) |
+
 <h3 id="get-tokens-current"><code>GET /tokens/current</code></h3>
 
 | Field | Value |
 | --- | --- |
 | Needs | A `tk_` bearer token. No other credential |
 | Input | None |
-| Answer | `{ user, apiToken }` |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
+| Answer | `{ user, apiToken }`. Each answer spends one call of the token's quota. A key with a prefix of `tokens.movedPrefixes` resolves here too |
+| Limit | `token-use:tk:<id>`, the token's own window, when it has one |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`token_exhausted`](/docs/reference/errors/#token_exhausted), [`token_retired`](/docs/reference/errors/#token_retired), [`conflict`](/docs/reference/errors/#conflict) |
 
 ## JWT minting
 

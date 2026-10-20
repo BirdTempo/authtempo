@@ -48,6 +48,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `webauthn` | `WebAuthnSeam` | @simplewebauthn/server 14.0.3 | The WebAuthn ceremonies. Tests inject a fake. |
 | `handoff` | object | off | The handoff is on when it is set. |
 | `organizations` | object or `false` | off | `{}` turns organizations on with the defaults. |
+| `tokens` | object | no window, no moved prefix | The limits of API tokens. Tokens are always on. |
 | `signUp` | `"open"` \| `"invited"` \| `false` | `"open"` | Who may become a user. `"invited"` needs `organizations` and a pending invitation of the address. `false` lets nobody new in. |
 | `password` | object | off | `{}` turns passwords on. With no key, the password routes answer 404. |
 | `emailOtp` | object or `false` | on | `false` removes the code routes and `api.emailOtp`. |
@@ -166,6 +167,13 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `organizations.limits.pendingInvitationsPerOrganization` | number | none | A positive integer. Invite answers `invitation_limit` at it. |
 | `organizations.limits.teamsPerOrganization` | number | none | A positive integer. A team create answers `team_limit` at it. |
 | `organizations.limits.membersPerTeam` | number | none | A positive integer. A team member add and an accept answer `team_member_limit` at it. |
+
+## API tokens
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `tokens.defaultRateLimit` | `{ seconds, max }` or `null` | `null` | The window of a new token that names none: `seconds` 1 to 86400, `max` 1 to 100000. A token from `POST /tokens` always gets it. Over the window, a token call answers `rate_limited`. |
+| `tokens.movedPrefixes` | string list | none | The prefixes of keys that moved into core's token table, such as `laaa_`. Each matches `^[a-z][a-z0-9]{0,15}_$` and is no prefix that core issues. A key with such a prefix and no row answers `token_retired`. |
 
 ## Passwords
 

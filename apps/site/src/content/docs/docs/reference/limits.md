@@ -59,6 +59,7 @@ A key ends in the address, the IP, or the user id. A request with no client IP u
 | `invitation-accept:ip:<ip>` | 15 minutes | 20 | Invitation accept |
 | `slug-check:user:<userId>` | 1 minute | 60 | Organization slug check, create, and rename to a new slug, on one budget, before the slug read |
 | `token-create:user:<userId>` | 1 hour | 20 | API token create |
+| `token-use:tk:<tokenId>` | The token's `rateLimitSeconds` | The token's `rateLimitMax` | Each call of one API token with a window, after the hash lookup and before the quota spend. The app sets the window in process, or `tokens.defaultRateLimit` fills it. A change of the window starts a new count |
 | `reauth:user:<userId>` | 15 minutes | 10 | Re-authentication, right or wrong |
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | Re-authentication code mail, before the address keys of every mailed code |
 | `session-revoke:user:<userId>` | 15 minutes | 30 | Session revoke and revoke-others together |
@@ -120,6 +121,8 @@ These counts live in their rows, so they hold under every limiter.
 | Wrong codes of one second factor challenge | 5 | `too_many_attempts` |
 | Email code sends of one second factor challenge | 3 | `rate_limited` |
 | API tokens of one user | 50 | `token_limit` |
+| Calls of one API token with a quota | Its `remaining`. A due refill sets it to `refillAmount` | `token_exhausted`. One compare-and-set per try, three tries, then `conflict` |
+| The `metadata` of one API token | 4096 bytes as JSON | `invalid_body` |
 | Memberships of one user | `organizations.limits.perUser` | `organization_limit` |
 | Members of one organization | `organizations.limits.membersPerOrganization` | `member_limit` |
 | Pending invitations of one organization | `organizations.limits.pendingInvitationsPerOrganization` | `invitation_limit` |

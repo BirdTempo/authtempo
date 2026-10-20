@@ -31,7 +31,8 @@ describe("the calls that can answer session_not_fresh", () => {
     const named = calls(
       between(guide, "## The fresh rule", "## ").filter((l) => l.includes("can answer")),
     );
-    expect(listed).toHaveLength(19);
+    // Plan 12k Task 7 adds tokens.update.
+    expect(listed).toHaveLength(20);
     expect(named).toEqual(listed);
   });
 });

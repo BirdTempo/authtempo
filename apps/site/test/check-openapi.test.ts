@@ -11,8 +11,8 @@ const json = openApiJson(
   }),
 );
 const page = readFileSync(new URL("./fixtures/openapi/openapi.html", import.meta.url), "utf8");
-// GET /session, POST /session/refresh, POST /sign-out, the four token routes, and the four operator routes.
-const ROUTE_COUNT = 11;
+// GET /session, POST /session/refresh, POST /sign-out, the five token routes, and the four operator routes.
+const ROUTE_COUNT = 12;
 const DIFFERS =
   "the built file differs from openApiDocument of openApiReferenceOptions(); build again";
 
@@ -33,7 +33,7 @@ describe("checkOpenApi", () => {
   it("passes when the built file equals the generator", () => {
     const r = checkOpenApi(json, json, page, ROUTE_COUNT);
     expect(r.failures).toEqual([]);
-    expect(r.counts).toEqual({ operations: 11, routes: 11, schemes: 4, tags: 3 });
+    expect(r.counts).toEqual({ operations: 12, routes: 12, schemes: 4, tags: 3 });
   });
 
   it("fails when the built file is absent", () => {
@@ -61,7 +61,7 @@ describe("checkOpenApi", () => {
     const doc = JSON.parse(json) as { paths: Record<string, unknown> };
     delete doc.paths["/tokens/current"];
     const r = checkOpenApi(JSON.stringify(doc), json, page, ROUTE_COUNT);
-    expect(r.failures).toEqual([DIFFERS, "operations=10 of 11"]);
+    expect(r.failures).toEqual([DIFFERS, "operations=11 of 12"]);
   });
 
   it("fails when the page's tag table differs from the document", () => {
