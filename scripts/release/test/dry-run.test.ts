@@ -346,14 +346,7 @@ describe("dry run", () => {
     expect(report.exit).toBe(0);
     const publishes = calls.filter((c) => c.args.includes("publish"));
     expect(publishes.map((c) => c.kind)).toEqual(["npm publish", "npm publish", "pnpm publish"]);
-    for (const c of publishes) {
-      expect(c.args).toContain("--dry-run");
-      // A dead address: no publish call can reach a registry, also with no --dry-run.
-      expect(c.args[c.args.indexOf("--registry") + 1]).toBe("http://127.0.0.1:9");
-    }
-    // npm reads the package document of the registry, and each retry on the dead address waits.
-    for (const c of publishes.filter((p) => p.cmd === "npm"))
-      expect(c.args).toContain("--fetch-retries=0");
+    for (const c of publishes) expect(c.args).toContain("--dry-run");
     const git = calls.filter((c) => c.cmd === "git").map((c) => c.args[0]);
     expect(git).toEqual(["status", "archive"]);
     for (const c of calls)
@@ -362,6 +355,32 @@ describe("dry run", () => {
     expect(calls.filter((c) => c.kind === "pnpm changeset").map((c) => c.args)).toEqual([
       ["changeset", "version"],
     ]);
+  });
+
+  it("never reaches a network host", async () => {
+    const { report, calls } = await passingRun();
+    expect(report.exit).toBe(0);
+    // Each publish call names the dead address, where nothing listens. pnpm 12.8.1
+    // does not read npm_config_registry (Task 6 Step 1, 2026-10-20), so the flag is the guard.
+    const publishes = calls.filter((c) => c.args.includes("publish"));
+    expect(publishes).toHaveLength(3);
+    for (const c of publishes)
+      expect([c.kind, c.args[c.args.indexOf("--registry") + 1]]).toEqual([
+        c.kind,
+        "http://127.0.0.1:9",
+      ]);
+    // npm reads the package document of the registry, and each retry on the dead address waits.
+    for (const c of publishes.filter((p) => p.cmd === "npm"))
+      expect(c.args).toContain("--fetch-retries=0");
+    // Each install reads the store only.
+    const installs = calls.filter((c) => c.kind === "install" || c.kind === "smoke install");
+    expect(installs).toHaveLength(2);
+    for (const c of installs)
+      expect([c.kind, c.args.includes("--offline")]).toEqual([c.kind, true]);
+    // No other call names a host.
+    for (const c of calls)
+      for (const a of c.args)
+        if (/^[a-z+]+:\/\//.test(a)) expect([c.kind, a]).toEqual([c.kind, "http://127.0.0.1:9"]);
   });
 
   it("writes only under the temp folder", async () => {
