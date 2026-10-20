@@ -1,7 +1,11 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   checkPolicyPages,
   type PolicyPagesInput,
+  readFolders,
   readPolicyPagesInput,
 } from "../scripts/check-policy-pages.ts";
 import { readRepoFile } from "../scripts/lib/load.ts";
@@ -180,6 +184,7 @@ describe("check-policy-pages", () => {
     const today =
       "The site shows the docs of the current main only, at `/docs/`. A later plan adds a docs tree for each earlier minor.";
     expect(REAL.docsFolders).not.toContain("v0.1");
+    expect(REAL.builtFolders).not.toContain("v0.1");
     // A versioned tree exists, and the page still says that none exists.
     expect(failures({ ...REAL, docsFolders: [...REAL.docsFolders, "v0.1"] })).toEqual([
       `apps/site/src/content/docs/docs/v0.1 exists, so docs/versioning.md, section "The docs", must not state: ${today}`,
@@ -191,9 +196,33 @@ describe("check-policy-pages", () => {
       "Each earlier minor has its own docs tree.",
     );
     expect(failures(promise)).toEqual([
-      `no folder v<major>.<minor> is in apps/site/src/content/docs/docs, so docs/versioning.md, section "The docs", must state: ${today}`,
+      `no folder v<major>.<minor> is in apps/site/src/content/docs/docs or apps/site/dist/docs, so docs/versioning.md, section "The docs", must state: ${today}`,
       'docs/versioning.md, section "The docs", states "Each earlier minor has its own docs tree.", which no source holds',
     ]);
+  });
+
+  it("reads a versioned tree from the source folders and from the build", () => {
+    const today =
+      "The site shows the docs of the current main only, at `/docs/`. A later plan adds a docs tree for each earlier minor.";
+    const root = mkdtempSync(join(tmpdir(), "plan-12j-policy-pages-"));
+    try {
+      mkdirSync(join(root, "apps/site/src/content/docs/docs/guides"), { recursive: true });
+      const folders = readFolders(`${root}/`);
+      // No build exists yet, so the build has no folder.
+      expect(folders("apps/site/dist/docs")).toEqual([]);
+      // Spec 18 item 13 builds an earlier tree from its git tag, so it can exist in the build only.
+      mkdirSync(join(root, "apps/site/dist/docs/v0.1"), { recursive: true });
+      mkdirSync(join(root, "apps/site/dist/docs/concepts"));
+      writeFileSync(join(root, "apps/site/dist/docs/v0.2"), "a file, not a tree\n");
+      const read = readPolicyPagesInput(readRepoFile, folders);
+      expect(read.input.docsFolders).toEqual(["guides"]);
+      expect(read.input.builtFolders).toEqual(["concepts", "v0.1"]);
+      expect(failures(read.input)).toEqual([
+        `apps/site/dist/docs/v0.1 exists, so docs/versioning.md, section "The docs", must not state: ${today}`,
+      ]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("holds each In 0.x cell to its class in spec 33 item 1.2", () => {

@@ -8,7 +8,7 @@
 // (one version), the version of core (the state today),
 // release/repository.json (the link to the file), and FIRST_RELEASE with the
 // two release checks that refuse another first release.
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { type Repository, readPolicyInput } from "./check-security-policy.ts";
 import { REPO } from "./lib/paths.ts";
 import { type CheckReport, requireCounts } from "./lib/report.ts";
@@ -28,6 +28,7 @@ const PATHS = {
   checkTag: "scripts/release/src/check-tag.ts",
   checkPack: "scripts/release/src/check-pack.ts",
   docs: "apps/site/src/content/docs/docs",
+  built: "apps/site/dist/docs",
 } as const;
 
 export interface PolicyPagesInput {
@@ -44,6 +45,8 @@ export interface PolicyPagesInput {
   checkPack: string;
   /** The folder names under the docs tree. A versioned tree is a folder v<major>.<minor>. */
   docsFolders: string[];
+  /** The folder names under the built docs, dist/docs/. */
+  builtFolders: string[];
 }
 
 /**
@@ -403,7 +406,10 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
 
   // The docs of today: the sentences hold while no versioned tree exists.
   // After that the section is not held, and it must not state them.
-  const versioned = input.docsFolders.filter((f) => /^v\d+\.\d+$/.test(f));
+  const versioned = [
+    ...input.docsFolders.map((f) => `${PATHS.docs}/${f}`),
+    ...input.builtFolders.map((f) => `${PATHS.built}/${f}`),
+  ].filter((f) => /\/v\d+\.\d+$/.test(f));
   const docs = section(VERSIONING, DOCS_SECTION);
   const statesToday = docs !== null && sentencesOf(docs).join(" ").includes(DOCS_TODAY);
   if (pages.has(VERSIONING) && versioned.length === 0) {
@@ -411,11 +417,11 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
     for (const s of sentencesOf([DOCS_TODAY])) allow(VERSIONING, DOCS_SECTION, s);
     if (!statesToday)
       failures.push(
-        `no folder v<major>.<minor> is in ${PATHS.docs}, so ${VERSIONING}, section "${DOCS_SECTION}", must state: ${DOCS_TODAY}`,
+        `no folder v<major>.<minor> is in ${PATHS.docs} or ${PATHS.built}, so ${VERSIONING}, section "${DOCS_SECTION}", must state: ${DOCS_TODAY}`,
       );
   } else if (statesToday)
     failures.push(
-      `${PATHS.docs}/${versioned[0]} exists, so ${VERSIONING}, section "${DOCS_SECTION}", must not state: ${DOCS_TODAY}`,
+      `${versioned[0]} exists, so ${VERSIONING}, section "${DOCS_SECTION}", must not state: ${DOCS_TODAY}`,
     );
 
   for (const h of held) {
@@ -507,6 +513,23 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
 }
 
 /**
+ * The folder names under a repository path of `root`, in name order. An
+ * absent folder has none: the build output exists only after a build. Spec
+ * 18 item 13 builds each earlier docs tree from the git tag of its minor. So
+ * a later plan can write a tree into the build output only, and the check
+ * reads both places.
+ */
+export function readFolders(root: string): (path: string) => string[] {
+  return (path) =>
+    existsSync(`${root}${path}`)
+      ? readdirSync(`${root}${path}`, { withFileTypes: true })
+          .filter((e) => e.isDirectory())
+          .map((e) => e.name)
+          .sort()
+      : [];
+}
+
+/**
  * Reads the two pages and their sources by their repository paths. A file
  * that is absent is a failure, so the check never passes on a file it did
  * not read. SECURITY.md and release/repository.json come through
@@ -514,10 +537,7 @@ export function checkPolicyPages(input: PolicyPagesInput): CheckReport {
  */
 export function readPolicyPagesInput(
   read: (path: string) => string | null,
-  folders: (path: string) => string[] = (path) =>
-    readdirSync(`${REPO}${path}`, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name),
+  folders: (path: string) => string[] = readFolders(REPO),
 ): {
   input: PolicyPagesInput;
   failures: string[];
@@ -556,6 +576,7 @@ export function readPolicyPagesInput(
       checkTag: text(PATHS.checkTag),
       checkPack: text(PATHS.checkPack),
       docsFolders: folders(PATHS.docs),
+      builtFolders: folders(PATHS.built),
     },
     failures,
   };
