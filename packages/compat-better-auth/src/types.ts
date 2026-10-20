@@ -30,6 +30,8 @@ export interface AdminUser extends User {
   banned: boolean;
   banReason: string | null;
   banExpires: Date | null;
+  /** With the twoFactor plugin only: true while the user's second factor is on (ruling 60 L2). */
+  twoFactorEnabled?: boolean;
 }
 
 export interface Session {

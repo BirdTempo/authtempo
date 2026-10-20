@@ -50,8 +50,9 @@ describe("the admin impersonation on D1 (plan 12f Task 13)", () => {
     expect(stop.res.status).toBe(200);
     // Core's route, then the shim's session read for Better Auth's { session, user }.
     // The stop also reads the operator's role: the platform organization and the member row.
+    // Each answer also reads the factor rows for twoFactorEnabled (ruling 60 L2).
     expect(start.queries).toBeLessThanOrEqual(50);
     expect(stop.queries).toBeLessThanOrEqual(50);
-    expect([start.queries, stop.queries]).toEqual([32, 18]);
+    expect([start.queries, stop.queries]).toEqual([33, 19]);
   });
 });

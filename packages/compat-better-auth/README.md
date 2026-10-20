@@ -641,8 +641,10 @@ core's guard decides (plan 12f Task 10):
 
 Each user in an answer has Better Auth's admin fields: `role` is the
 platform role or `user`, and `banned`, `banReason`, and `banExpires` show a
-ban that holds now. An operator cannot act on another platform operator
-through these calls. So a ban, an unban, or a `set-role` of `user` on a
+ban that holds now. With `twoFactor()`, each user also has
+`twoFactorEnabled`, read from core's `ta_second_factor` rows in one read per
+answer. An operator cannot act on another platform operator through these
+calls. So a ban, an unban, or a `set-role` of `user` on a
 platform operator is refused. The revoke of an operator needs an operator
 secret or the app (`auth.tempo.api.operator.platformRole.revoke`).
 
@@ -691,8 +693,9 @@ The deviations from Better Auth (ruling 53 of plan 12f):
   impersonation session stays. Core ends the impersonation session first.
 
 On D1, an act reads the user row once after core's route, for `{ user }`.
-A ban of a user with 60 sessions sends 34 queries in its invocation.
-An impersonation start sends 32 queries and a stop 18, each with the
+With `twoFactor()`, it also reads the factor row once.
+A ban of a user with 60 sessions sends 35 queries in its invocation.
+An impersonation start sends 33 queries and a stop 19, each with the
 shim's read of the session for `{ session, user }`.
 
 Better Auth requires a reason nowhere, and core writes an audit row with a

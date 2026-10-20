@@ -14,6 +14,7 @@ import {
   banBodyOf,
   listUsersTarget,
   setRoleChange,
+  toAdminUser,
 } from "../src/server/admin.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
@@ -363,6 +364,7 @@ const ADMIN_USER_KEYS = [
   "image",
   "name",
   "role",
+  "twoFactorEnabled",
   "updatedAt",
 ];
 
@@ -574,6 +576,36 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
       ann: "user",
     });
     expect(roles).toEqual({ [OPERATOR]: "admin", "ann@example.com": "user" });
+  });
+
+  it("gives each admin user twoFactorEnabled with the twoFactor plugin (ruling 60 L2)", async () => {
+    const a = await adminApp(memoryDatabase());
+    const ann = await a.user("ann@example.com");
+    const factorOf = (users: { email: string; twoFactorEnabled?: boolean }[]) =>
+      Object.fromEntries(users.map((u) => [u.email, u.twoFactorEnabled]));
+    const listed = await json(await a.read("/admin/list-users", a.op));
+    expect(factorOf(listed.body.users)).toEqual({ [OPERATOR]: true, "ann@example.com": false });
+    const got = await json(await a.read(`/admin/get-user?id=${a.opId}`, a.op));
+    expect(got.body.twoFactorEnabled).toBe(true);
+    const start = await json(await a.call("/admin/impersonate-user", { userId: ann.id }, a.op));
+    expect(start.body.user.twoFactorEnabled).toBe(false);
+    const banned = await json(await a.call("/admin/ban-user", { userId: ann.id }, a.op));
+    expect(banned.body.user.twoFactorEnabled).toBe(false);
+    // Without the plugin, the key is not there, as in Better Auth's user.
+    const now = new Date();
+    const row = {
+      id: "u1",
+      email: "pat@example.com",
+      emailVerified: true,
+      name: null,
+      image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    expect(Object.keys(toAdminUser(row, "user", now))).not.toContain("twoFactorEnabled");
   });
 
   it("gives the client session the role and the ban fields with adminClient() (ruling 54)", async () => {

@@ -278,8 +278,14 @@ const BAN_YOURSELF = "YOU_CANNOT_BAN_YOURSELF";
  * is the platform role or `user`. The ban fields hold a ban that holds
  * now, by core's rule `activeBan` (spec 26 item 6), so the shim keeps no
  * copy (ruling 60 L1). A ban that ended reads as no ban.
+ * `twoFactorEnabled` is there with the twoFactor plugin only (ruling 60 L2).
  */
-export function toAdminUser(row: UserRow, role: string, now: Date): AdminUser {
+export function toAdminUser(
+  row: UserRow,
+  role: string,
+  now: Date,
+  twoFactorEnabled?: boolean,
+): AdminUser {
   const holds = activeBan(row, now);
   return {
     ...toUser(row),
@@ -287,7 +293,28 @@ export function toAdminUser(row: UserRow, role: string, now: Date): AdminUser {
     banned: holds,
     banReason: holds ? row.banReason : null,
     banExpires: holds ? row.banUntil : null,
+    ...(twoFactorEnabled !== undefined ? { twoFactorEnabled } : {}),
   };
+}
+
+/**
+ * The users of `ids` whose second factor is on, or null without the
+ * twoFactor plugin. Core's factor is on while its `secondFactor` row
+ * exists (core `factorRow`), so one `in` read answers a whole page.
+ */
+async function factorsOf(mapped: Mapped, ids: readonly string[]): Promise<Set<string> | null> {
+  if (!mapped.plugins.has("two-factor")) return null;
+  if (ids.length === 0) return new Set();
+  const rows = await mapped.config.storage.findMany("secondFactor", [
+    { field: "userId", op: "in", value: [...ids] },
+  ]);
+  return new Set(rows.map((r) => r.userId));
+}
+
+/** Better Auth's admin user of one row, with `twoFactorEnabled` from one factor read. */
+async function adminUserOf(mapped: Mapped, row: UserRow, role: string): Promise<AdminUser> {
+  const factors = await factorsOf(mapped, [row.id]);
+  return toAdminUser(row, role, new Date(), factors ? factors.has(row.id) : undefined);
 }
 
 /**
@@ -384,10 +411,11 @@ function userIdOf(body: Body | null): string | null {
  * shim adds no power and no check of its own past Better Auth's shapes.
  *
  * The cost on D1: an act answers Better Auth's `{ user }` from one read of
- * the user row after core's route. That read is the one statement on top
- * of the route's call budget (ruling 37 of plan 12f). An impersonation
- * start or stop reads the session of the token that core set, for
- * `{ session, user }`, in 5 statements. The stop also reads the role in 2.
+ * the user row after core's route. That read is on top of the route's call
+ * budget (ruling 37 of plan 12f). An impersonation start or stop reads the
+ * session of the token that core set, for `{ session, user }`, in 5
+ * statements. The stop also reads the role in 2. With the twoFactor
+ * plugin, each answer reads the factor rows in 1 more (ruling 60 L2).
  */
 export async function adminRoute(
   auth: Auth,
@@ -427,7 +455,7 @@ export async function adminRoute(
   const userAfter = async (res: Response, userId: string, role: string) => {
     const row = await storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
     if (!row) throw new Error("authtempo compat: the user of an answered admin call is gone");
-    return withHeaders({ user: toAdminUser(row, role, new Date()) }, 200, res);
+    return withHeaders({ user: await adminUserOf(mapped, row, role) }, 200, res);
   };
 
   if (path === "/admin/list-users") {
@@ -437,7 +465,7 @@ export async function adminRoute(
     const res = await core(`${target.path}?${new URLSearchParams(target.query)}`);
     if (!res.ok) return refusalOf(path, res);
     const page = (await res.json()) as { users: OperatorUser[]; next: string | null };
-    const users = await usersOf(storage, page.users, platformRole);
+    const users = await usersOf(mapped, page.users, platformRole);
     const limit = target.query.limit === undefined ? undefined : Number(target.query.limit);
     // Core gives no total (a count scans the table on D1). The total is
     // exact when this page ends the list; else `next` names the next page.
@@ -455,7 +483,7 @@ export async function adminRoute(
     const res = await core(`/operator/users/get?${new URLSearchParams({ userId: id })}`);
     if (!res.ok) return refusalOf(path, res);
     const { user } = (await res.json()) as { user: OperatorUser };
-    const [one] = await usersOf(storage, [user], platformRole);
+    const [one] = await usersOf(mapped, [user], platformRole);
     // Better Auth answers the user itself, not `{ user }` (routes.mjs getUser).
     return withHeaders(one ?? null, 200, res);
   }
@@ -483,7 +511,7 @@ export async function adminRoute(
     return withHeaders(
       {
         session: toAdminSession(back.session, own),
-        user: toAdminUser(back.user, await roleOf(mapped, back.user.id), new Date()),
+        user: await adminUserOf(mapped, back.user, await roleOf(mapped, back.user.id)),
       },
       200,
       res,
@@ -540,7 +568,7 @@ export async function adminRoute(
       return withHeaders(
         {
           session: toAdminSession(s.session, token),
-          user: toAdminUser(s.user, USER_ROLE, new Date()),
+          user: await adminUserOf(mapped, s.user, USER_ROLE),
         },
         200,
         res,
@@ -568,24 +596,35 @@ export async function adminRoute(
 /**
  * Better Auth's users of core's operator users, in core's order. One read
  * of the user rows gives `image` and `updatedAt`, which core's operator
- * answer does not hold. `platformOperator` gives `role`.
+ * answer does not hold. `platformOperator` gives `role`. With the twoFactor
+ * plugin, one more read gives `twoFactorEnabled`.
  */
 async function usersOf(
-  storage: Mapped["config"]["storage"],
+  mapped: Mapped,
   users: readonly OperatorUser[],
   platformRole: string,
 ): Promise<AdminUser[]> {
   if (users.length === 0) return [];
-  const rows = await storage.findMany("user", [
-    { field: "id", op: "in", value: users.map((u) => u.id) },
+  const ids = users.map((u) => u.id);
+  const rows = await mapped.config.storage.findMany("user", [
+    { field: "id", op: "in", value: ids },
   ]);
+  const factors = await factorsOf(mapped, ids);
   const byId = new Map(rows.map((r) => [r.id, r]));
   const now = new Date();
   const out: AdminUser[] = [];
   for (const u of users) {
     const row = byId.get(u.id);
     // A user deleted between the two reads is left out of the answer.
-    if (row) out.push(toAdminUser(row, u.platformOperator ? platformRole : USER_ROLE, now));
+    if (row)
+      out.push(
+        toAdminUser(
+          row,
+          u.platformOperator ? platformRole : USER_ROLE,
+          now,
+          factors ? factors.has(row.id) : undefined,
+        ),
+      );
   }
   return out;
 }
