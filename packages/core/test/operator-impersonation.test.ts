@@ -363,11 +363,21 @@ describe("the impersonation (plan 12f Task 11)", () => {
     });
     if (!grant.ok) throw new Error(grant.code);
     const impersonation = await sessionOf(w.auth, token);
+    // Step 1 refuses first (spec 26 item 2): the guard sends no statement.
+    // Without it, the role read runs, and the fresh step refuses the session.
+    const storage = w.auth.config.storage;
+    const sent = () => {
+      const n = storage.statementsSent?.();
+      if (n === undefined) throw new Error("the memory storage counts its statements");
+      return n;
+    };
+    const before = sent();
     expect(await requireOperatorUser(w.auth.config, impersonation)).toEqual({
       ok: false,
       code: "operator_required",
       status: 403,
     });
+    expect(sent() - before).toBe(0);
     errors.mockRestore();
   });
 
