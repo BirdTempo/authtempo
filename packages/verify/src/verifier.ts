@@ -120,6 +120,10 @@ export interface VerifierOptions {
   /**
    * `apiTokenSeconds`: how long a `tk_` answer is kept, 0 to 60. Default 0: a
    * revoke takes effect at once. A token with a window or a quota is never kept.
+   * An answer kept before the app adds a window or a quota lives up to
+   * `apiTokenSeconds`, as after a revoke. Those calls skip core and spend
+   * nothing. A key on the limit fields would not help: the kept answer holds
+   * the old fields, and only a call to core reads the new ones.
    */
   cache?: { apiTokenSeconds?: number | undefined } | undefined;
   /** The deadline of each call to the auth app, 100 to 30000 ms. Default 5000. */

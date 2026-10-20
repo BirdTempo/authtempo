@@ -35,7 +35,7 @@ sources:
 | `resources` | none | The `oauth.resources` entries that this server serves. Required for `oauth` and `oauth-client`. |
 | `accept` | `["session-jwt"]` | The caller kinds to accept, of the type `CallerKind`. |
 | `checkSessionEnd` | `false` | Asks `POST /token/live` for each session JWT, so a sign-out ends access at once. |
-| `cache` | `{ apiTokenSeconds: 0 }` | How long the verifier keeps an API token answer: 0 to `API_TOKEN_CACHE_MAX_SECONDS` (60) seconds. |
+| `cache` | `{ apiTokenSeconds: 0 }` | How long the verifier keeps an API token answer: 0 to `API_TOKEN_CACHE_MAX_SECONDS` (60) seconds. A token with a window or a quota is never kept. An answer kept before the app adds a window or a quota lives up to `apiTokenSeconds`, as after a revoke. |
 | `timeoutMs` | `TIMEOUT_DEFAULT_MS` (5000) | The deadline of each call to the auth app, from `TIMEOUT_MIN_MS` (100) to `TIMEOUT_MAX_MS` (30000). |
 | `fetch` | `globalThis.fetch` | The fetch of every call to the auth app. Any function of a request and its init that answers a `Response`. |
 | `clock` | the system clock | Tests inject one. |
