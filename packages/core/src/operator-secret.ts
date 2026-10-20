@@ -41,8 +41,8 @@ export const OPERATOR_USERS_PER_IP = { seconds: 3600, max: 600 };
 
 /**
  * The limit of each operator secret on the user, session, and audit routes
- * (ruling 38 of plan 12f): 600 calls per hour after the secret matches,
- * from any address. The count per IP bounds the guesses. This count bounds
+ * (ruling 38 of plan 12f). It allows 600 calls per hour after the secret
+ * matches, from any address. The count per IP bounds the guesses. This count bounds
  * a stolen secret: at 100 users a page it reads at most 60 000 users an
  * hour, from any number of addresses.
  */

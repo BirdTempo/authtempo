@@ -33,8 +33,9 @@ const AGENT = "ops-test/1";
 const REASON = "Support case 4711";
 
 /**
- * The routes of plan 12f Task 10, typed here (spec 26 item 7, less the two
- * impersonation routes of Task 11), with the scope that a secret needs.
+ * The routes of plan 12f Task 10, typed here, with the scope that a secret
+ * needs. They are the routes of spec 26 item 7, less the two impersonation
+ * routes of Task 11.
  */
 const TOOL_ROUTES = [
   { key: "GET /operator/users", scope: "users" },
