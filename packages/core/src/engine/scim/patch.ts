@@ -1,8 +1,8 @@
 /**
  * The SCIM PATCH parser (plan 12d Task 10 Behavior 8, RFC 7644 section
- * 3.5.2). The body comes from a directory, so the parser bounds the count of
- * operations, the length of a path, and the depth of a value, and it knows
- * each attribute by name. A form that the plan does not name is refused, never
+ * 3.5.2). The body comes from a directory. So the parser bounds the count of
+ * operations, the length of a path, and the depth of a value. It knows each
+ * attribute by name. A form that the plan does not name is refused, never
  * ignored. The read-only keys of the no-path form are the one exception (Task
  * 10 Behavior 1). The parser reads only; the caller applies the operations to
  * a copy and writes once.
@@ -75,8 +75,9 @@ function readOnly(name: string, noPath: AttrRule["noPath"]): AttrRule {
 
 const MULTI_SUBS = ["value", "display", "type", "primary"];
 
-// The core User schema (RFC 7643 sections 3.1 and 4.1). Every attribute but
-// the read-only ones goes into `scimUser.data` (Task 10 Behavior 1).
+// The core User schema (RFC 7643 sections 3.1 and 4.1). `userName`,
+// `externalId`, and `active` are columns, and `password` is refused. Every
+// other attribute of this table goes into `scimUser.data` (Task 10 Behavior 1).
 const USER_RULES = rules([
   text("userName"),
   text("externalId"),

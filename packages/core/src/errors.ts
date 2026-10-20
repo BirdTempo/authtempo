@@ -170,10 +170,10 @@ export type OAuthErrorCode = keyof typeof OAUTH_ERRORS;
 
 /**
  * The `scimType` values of the SCIM error message, with their status
- * (RFC 7644 section 3.12, plan 12d Task 9; not re-read on 2026-10-20, as no
- * network read was allowed for this task). A SCIM route answers the SCIM error
- * message and never a code of `ERRORS`, so the client codes and the
- * compatibility table do not change (spec section 30 item 21).
+ * (RFC 7644 section 3.12, plan 12d Task 9). Section 3.12 was not re-read on
+ * 2026-10-20, because this task allowed no network read. A SCIM route answers
+ * the SCIM error message and never a code of `ERRORS`. So the client codes and
+ * the compatibility table do not change (spec section 30 item 21).
  */
 export const SCIM_ERRORS = {
   invalidFilter: 400,
