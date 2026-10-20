@@ -356,6 +356,18 @@ describe("check-deprecations", () => {
     expect(code).toBe(0);
     // The scan reads the shipped source and each README of packages/.
     const files = sourceFiles(repo);
+    // The entry scans that set. Each file with the words is the file of a
+    // marker that holds them, so the register gives the second count.
+    const held = new Set(
+      entries
+        .flatMap((e) => e.markers)
+        .filter((m) => /for\s+one\s+release/i.test(m.text))
+        .map((m) => m.file),
+    );
+    expect(held.size).toBeGreaterThan(10);
+    expect(lines.at(-1)).toBe(
+      `  note: ${files.length} shipped files, ${held.size} with for one release`,
+    );
     expect(files).toContain("packages/core/src/http/cookies.ts");
     expect(files).toContain("packages/handoff/README.md");
     expect(files.some((f) => f.includes("/test/") || f.includes("/dist/"))).toBe(false);
