@@ -8,6 +8,7 @@ sources:
   - packages/cli/README.md "Install"
   - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 9"
   - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 8"
+  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
   - packages/cli/src/stacks.ts
 sidebar:
   order: 1
@@ -53,6 +54,10 @@ node /path/to/authtempo/packages/cli/dist/bin/authtempo.js --help
 | `authtempo secret` | Makes an app secret or an operator secret from 32 random bytes. | [authtempo secret](/docs/reference/cli/secret/) |
 | `authtempo secret status`, `authtempo secret rewrap` | Counts and reseals the rows of each app secret version through the operator routes. | [authtempo secret status](/docs/reference/cli/secret-status/), [authtempo secret rewrap](/docs/reference/cli/secret-rewrap/) |
 | `authtempo info` | Prints a support report with no secret value. | [authtempo info](/docs/reference/cli/info/) |
+| `authtempo users` | Reads, bans, and unbans users, changes the platform role, and turns a second factor off, through the operator user tools. | [authtempo users](/docs/reference/cli/users/) |
+| `authtempo sessions` | Ends the sessions of one user or of all users through the operator user tools. | [authtempo sessions](/docs/reference/cli/sessions/) |
+| `authtempo audit list` | Lists the audit rows of the operator acts. | [authtempo audit list](/docs/reference/cli/audit-list/) |
+| `authtempo create-admin` | Makes the first platform operator of a deployment. | [authtempo create-admin](/docs/reference/cli/create-admin/) |
 
 ## The flags
 

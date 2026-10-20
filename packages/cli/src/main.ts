@@ -1,6 +1,8 @@
 import { nearest } from "./args.js";
 import type { Command } from "./command.js";
+import { auditCommand } from "./commands/audit.js";
 import { checkCommand } from "./commands/check.js";
+import { createAdminCommand } from "./commands/create-admin.js";
 import { importCommand } from "./commands/import.js";
 import { infoCommand } from "./commands/info.js";
 import { initCommand } from "./commands/init.js";
@@ -8,6 +10,8 @@ import { keysCommand } from "./commands/keys.js";
 import { mcpCommand } from "./commands/mcp.js";
 import { migrateCommand } from "./commands/migrate.js";
 import { secretCommand } from "./commands/secret.js";
+import { sessionsCommand } from "./commands/sessions.js";
+import { usersCommand } from "./commands/users.js";
 import { UsageError } from "./errors.js";
 import { ROOT_HELP } from "./help/authtempo.js";
 import { type HelpText, renderHelp, shortHelp } from "./help/types.js";
@@ -26,6 +30,10 @@ export const COMMANDS: Readonly<Record<string, Command>> = {
   mcp: mcpCommand,
   secret: secretCommand,
   info: infoCommand,
+  users: usersCommand,
+  sessions: sessionsCommand,
+  audit: auditCommand,
+  "create-admin": createAdminCommand,
 };
 
 /**

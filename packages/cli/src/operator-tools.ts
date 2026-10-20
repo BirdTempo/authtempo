@@ -1,0 +1,390 @@
+import { OPERATOR_USERS_PER_IP } from "@authtempo/core/operator-secret";
+import { COMMON_OPTIONS } from "./args.js";
+import { Stop, UsageError } from "./errors.js";
+import type { AuditRowJson, OperatorUserJson } from "./json.js";
+import { baseOf, basePathOf, timeoutOf } from "./net.js";
+import {
+  type OperatorScope,
+  OperatorStop,
+  type OperatorValues,
+  operatorCall,
+} from "./operator-client.js";
+import type { Ctx } from "./output.js";
+
+/**
+ * The shared parts of the commands of plan 12f Task 12: `users`, `sessions`,
+ * `audit`, and `create-admin`. Each one calls the user, session, and audit
+ * routes of core with a named operator secret (spec 26 items 7 and 11).
+ */
+
+/** The flags of each read: the four operator flags of `keys rotate`. */
+export const TOOL_OPTIONS = {
+  ...COMMON_OPTIONS,
+  "base-path": { type: "string" },
+  "token-env": { type: "string" },
+  "token-file": { type: "string" },
+  timeout: { type: "string" },
+} as const;
+
+/** The flags of each write: the reason of the audit row and the confirmation rule of `keys rotate`. */
+export const WRITE_OPTIONS = {
+  ...TOOL_OPTIONS,
+  reason: { type: "string" },
+  yes: { type: "boolean" },
+  "no-input": { type: "boolean" },
+} as const;
+
+/**
+ * The limit of every secret call to these routes: 600 per IP per hour
+ * (spec 26 item 12). Core's limiter reads the same value, so the 429 text
+ * and the help print the number that core counts.
+ */
+export const TOOL_CALLS_PER_HOUR = OPERATOR_USERS_PER_IP.max;
+
+/**
+ * The longest reason of an act, in UTF-16 code units (spec 26 item 5). A
+ * copy of `REASON_MAX` of core, which no public entry exports. The test
+ * "refuses a reason that core refuses" holds this rule to the answer of a
+ * real core handle and to the route contract.
+ */
+export const REASON_MAX = 500;
+
+/**
+ * The methods of an identity proof (spec 26 item 5, ASVS 5.0.0 6.4.4). A
+ * copy of `PROOF_METHODS` of core; the same test holds it to the enum of
+ * the route contract.
+ */
+export const PROOF_METHODS = ["document", "in_person", "video", "knowledge", "other"] as const;
+
+/** The largest page of a read (the route contract: 1 to 100). */
+export const PAGE_MAX = 100;
+
+/** The largest page of `sessions end-all` (the route contract: 1 to 1000, default 500). */
+export const END_ALL_MAX = 1000;
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: the class names the control characters that core refuses.
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/**
+ * Why core refuses a reason, or null. Core refuses an empty reason, one
+ * over `REASON_MAX`, and one with a C0 control character, DEL, or a lone
+ * surrogate (`operatorReason` of core). The CLI checks before any request,
+ * so a bad reason costs none of the 600 calls.
+ */
+export function reasonProblem(reason: string): string | null {
+  if (
+    reason.length === 0 ||
+    reason.length > REASON_MAX ||
+    CONTROL.test(reason) ||
+    /\p{Cs}/u.test(reason)
+  )
+    return `--reason is 1 to ${REASON_MAX} characters with no control character and no lone surrogate`;
+  return null;
+}
+
+/** The reason of a write, or a usage error. Each write needs one: core writes it in the audit row. */
+export function reasonOf(value: string | undefined): string {
+  if (value === undefined)
+    throw new UsageError("give --reason <text>: each write needs a reason for its audit row");
+  const problem = reasonProblem(value);
+  if (problem !== null) throw new UsageError(problem);
+  return value;
+}
+
+/** The base URL, the base path, and the time limit of a call. */
+export interface ToolTarget {
+  base: string;
+  basePath: string;
+  ms: number;
+}
+
+/**
+ * The target of a call, before any read of the secret. The base is https,
+ * or http on this machine only, because the request carries a secret.
+ */
+export function toolTarget(target: string | undefined, values: OperatorValues): ToolTarget {
+  return {
+    base: baseOf(target),
+    basePath: basePathOf(values["base-path"]),
+    ms: timeoutOf(values.timeout),
+  };
+}
+
+/** The user id of a command that acts on one user: the positional after the base URL. */
+export function userIdOf(id: string | undefined, extra: readonly string[]): string {
+  if (id === undefined) throw new UsageError("name the user id after the base URL");
+  if (extra.length > 0) throw new UsageError(`unexpected argument ${extra[0]}`);
+  return id;
+}
+
+/** A whole number flag from 1 to `max`, or undefined when absent, or a usage error. */
+export function countOf(flag: string, value: string | undefined, max: number): number | undefined {
+  if (value === undefined) return undefined;
+  const n = /^\d+$/.test(value) ? Number(value) : Number.NaN;
+  if (!(n >= 1 && n <= max)) throw new UsageError(`--${flag} is a whole number from 1 to ${max}`);
+  return n;
+}
+
+/** The flags of the confirmation rule. */
+export interface ConfirmValues {
+  yes?: boolean | undefined;
+  "no-input"?: boolean | undefined;
+  "token-file"?: string | undefined;
+}
+
+/**
+ * The confirmation rule of `keys rotate`, before any read of the secret and
+ * any request: a run that cannot ask must say yes. `--token-file -` reads
+ * stdin to its end, so the question would read an ended stream.
+ */
+export function needYes(ctx: Ctx, values: ConfirmValues, command: string): void {
+  if (values.yes === true) return;
+  if (!ctx.stdinIsTTY || values["no-input"] === true)
+    throw new UsageError(
+      `${command} asks for a confirmation: give --yes when no person can answer`,
+    );
+  if (values["token-file"] === "-")
+    throw new UsageError(
+      "--token-file - reads the secret from stdin, so the command cannot ask: give --yes",
+    );
+}
+
+/** The question of a write, unless `--yes`. `act` names what did not happen on a no. */
+export async function ask(
+  ctx: Ctx,
+  values: ConfirmValues,
+  question: string,
+  act: string,
+): Promise<void> {
+  if (values.yes === true) return;
+  if (!(await ctx.confirm(question))) throw new Stop(`no ${act}: the answer was not yes`);
+}
+
+/** One call of a route of the user tools. */
+export interface ToolCall {
+  path: string;
+  method: "GET" | "POST";
+  body?: unknown;
+  query?: Readonly<Record<string, string>>;
+  scope: OperatorScope;
+  /** The text after `invalid_body`: what the command checks. */
+  invalid?: string;
+  /** The user id of a command that acts on one user. A 404 then has two causes. */
+  userId?: string;
+}
+
+/**
+ * One call of a route of the user, session, and audit tools, with the 600
+ * calls of an hour in its 429 text. A 404 of a command with a user id has
+ * two causes: no user has the id, or the tools are off. One read of the
+ * user list tells which (it costs one more call): a 404 there means the
+ * tools are off, and any other answer means the route exists.
+ */
+export async function toolCall(
+  ctx: Ctx,
+  t: ToolTarget & { secret: string },
+  call: ToolCall,
+): Promise<unknown> {
+  const { userId, ...rest } = call;
+  try {
+    return await operatorCall(ctx, { ...t, ...rest, perHour: TOOL_CALLS_PER_HOUR, tool: true });
+  } catch (e) {
+    if (!(e instanceof OperatorStop) || e.status !== 404 || userId === undefined) throw e;
+    try {
+      await operatorCall(ctx, {
+        ...t,
+        path: "/operator/users",
+        method: "GET",
+        query: { limit: "1" },
+        perHour: TOOL_CALLS_PER_HOUR,
+        tool: true,
+        scope: "users",
+      });
+    } catch (probe) {
+      if (!(probe instanceof OperatorStop)) throw probe;
+      if (probe.status === 404) throw e;
+    }
+    throw new Stop(`no user has the id ${userId}`);
+  }
+}
+
+const isString = (v: unknown): v is string => typeof v === "string";
+const isCount = (v: unknown): v is number => typeof v === "number" && Number.isSafeInteger(v);
+const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every(isString);
+const isNullableString = (v: unknown): v is string | null => v === null || isString(v);
+
+/** One user of an answer, with the keys of `OperatorUserJson` only, or null when it is not one. */
+export function operatorUser(v: unknown): OperatorUserJson | null {
+  if (typeof v !== "object" || v === null) return null;
+  const u = v as Record<string, unknown>;
+  const ban = u.ban as Record<string, unknown> | null | undefined;
+  if (
+    !isString(u.id) ||
+    !isString(u.email) ||
+    typeof u.emailVerified !== "boolean" ||
+    !isNullableString(u.name) ||
+    !isString(u.createdAt) ||
+    typeof u.platformOperator !== "boolean" ||
+    !isStrings(u.secondFactor) ||
+    !isCount(u.sessions) ||
+    !isStrings(u.identities)
+  )
+    return null;
+  if (ban === undefined || (ban !== null && typeof ban !== "object")) return null;
+  if (
+    ban !== null &&
+    (!isString(ban.at) || !isNullableString(ban.reason) || !isNullableString(ban.until))
+  )
+    return null;
+  return {
+    id: u.id,
+    email: u.email,
+    emailVerified: u.emailVerified,
+    name: u.name,
+    createdAt: u.createdAt,
+    ban:
+      ban === null
+        ? null
+        : {
+            at: ban.at as string,
+            reason: ban.reason as string | null,
+            until: ban.until as string | null,
+          },
+    platformOperator: u.platformOperator,
+    secondFactor: u.secondFactor,
+    sessions: u.sessions,
+    identities: u.identities,
+  };
+}
+
+/** One page of users, or null when the body is not one. */
+export function usersPage(
+  body: unknown,
+): { users: OperatorUserJson[]; next: string | null } | null {
+  if (typeof body !== "object" || body === null) return null;
+  const b = body as Record<string, unknown>;
+  if (!Array.isArray(b.users) || !isNullableString(b.next)) return null;
+  const users: OperatorUserJson[] = [];
+  for (const raw of b.users) {
+    const user = operatorUser(raw);
+    if (user === null) return null;
+    users.push(user);
+  }
+  return { users, next: b.next };
+}
+
+/** One audit row of an answer, with the keys of `AuditRowJson` only, or null. */
+function auditRow(v: unknown): AuditRowJson | null {
+  if (typeof v !== "object" || v === null) return null;
+  const r = v as Record<string, unknown>;
+  if (
+    !isString(r.id) ||
+    !isString(r.createdAt) ||
+    !isString(r.updatedAt) ||
+    !isString(r.actorKind) ||
+    !isString(r.actorId) ||
+    !isString(r.action) ||
+    !isNullableString(r.targetUserId) ||
+    !isString(r.reason) ||
+    !isNullableString(r.ip) ||
+    !isNullableString(r.userAgent)
+  )
+    return null;
+  if (r.data !== null && (typeof r.data !== "object" || Array.isArray(r.data))) return null;
+  return {
+    id: r.id,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+    actorKind: r.actorKind,
+    actorId: r.actorId,
+    action: r.action,
+    targetUserId: r.targetUserId,
+    reason: r.reason,
+    data: r.data as Record<string, unknown> | null,
+    ip: r.ip,
+    userAgent: r.userAgent,
+  };
+}
+
+/** One page of audit rows, or null when the body is not one. */
+export function auditPage(body: unknown): { rows: AuditRowJson[]; next: string | null } | null {
+  if (typeof body !== "object" || body === null) return null;
+  const b = body as Record<string, unknown>;
+  if (!Array.isArray(b.rows) || !isNullableString(b.next)) return null;
+  const rows: AuditRowJson[] = [];
+  for (const raw of b.rows) {
+    const row = auditRow(raw);
+    if (row === null) return null;
+    rows.push(row);
+  }
+  return { rows, next: b.next };
+}
+
+/** The `auditId` of a write's answer, or a stop that names the request. */
+export function auditIdOf(body: unknown, request: string): string {
+  const id = (body as { auditId?: unknown } | null)?.auditId;
+  if (typeof body !== "object" || body === null || !isString(id))
+    throw new Stop(`${request} answered 200 with no audit row id`);
+  return id;
+}
+
+/**
+ * The lines of a table: one header line, then one line per row. Each
+ * column is as wide as its widest cell, with two spaces between columns,
+ * so a person reads the columns and a script splits on spaces. Only the
+ * last column can hold a space.
+ */
+export function tableLines(
+  header: readonly string[],
+  rows: readonly (readonly string[])[],
+): string[] {
+  const widths = header.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? "").length)));
+  const line = (cells: readonly string[]) =>
+    cells
+      .map((c, i) => (i === cells.length - 1 ? c : c.padEnd(widths[i] ?? 0)))
+      .join("  ")
+      .trimEnd();
+  return [line(header), ...rows.map(line)];
+}
+
+/** The header of a user table. */
+export const USER_HEADER = [
+  "ID",
+  "EMAIL",
+  "VERIFIED",
+  "BAN",
+  "OPERATOR",
+  "FACTORS",
+  "SESSIONS",
+  "CREATED",
+] as const;
+
+/** One user as a table row: no name, so no cell holds a space. */
+export function userRow(u: OperatorUserJson): string[] {
+  const ban = u.ban === null ? "-" : (u.ban.until ?? "no-end");
+  return [
+    u.id,
+    u.email,
+    u.emailVerified ? "yes" : "no",
+    ban,
+    u.platformOperator ? "yes" : "no",
+    u.secondFactor.length > 0 ? u.secondFactor.join(",") : "-",
+    String(u.sessions),
+    u.createdAt,
+  ];
+}
+
+/** The header of an audit table. The reason is last: it can hold spaces. */
+export const AUDIT_HEADER = ["ID", "CREATED", "ACTOR", "ACTION", "TARGET", "REASON"] as const;
+
+/** One audit row as a table row. */
+export function auditLine(r: AuditRowJson): string[] {
+  return [
+    r.id,
+    r.createdAt,
+    `${r.actorKind}:${r.actorId}`,
+    r.action,
+    r.targetUserId ?? "-",
+    r.reason,
+  ];
+}

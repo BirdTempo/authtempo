@@ -1,7 +1,7 @@
 # @authtempo/cli
 
 The `authtempo` command line: set up, migrate, import into, check, and
-maintain an authtempo deployment. Spec section 19 holds its rules.
+maintain an authtempo deployment, and support its users. Spec section 19 holds its rules.
 
 ```bash
 authtempo --help
@@ -247,6 +247,38 @@ a base URL, and reads `GET <basePath>/operator/info`. The report holds no
 secret value and no host name. The deployment answers config key paths,
 never a value, and the command drops each path that is not a plain name.
 Exit 1 names a part that gave no answer.
+
+## users, sessions, audit, and create-admin
+
+```bash
+authtempo users search https://api.example.com --email ada@example.com
+authtempo users ban https://api.example.com <user id> --reason "spam" --yes
+authtempo sessions end-all https://api.example.com --reason "breach" --yes
+authtempo audit list https://api.example.com --all
+authtempo create-admin https://api.example.com --email root@example.com --reason "first operator" --yes
+```
+
+These commands call the operator user tools of plan 12f (spec 26 item 11)
+under `<basePath>/operator/`. The deployment needs `operator.users` and a
+named secret in `operator.secrets` with the scope of each command: `users`
+for `users` and `create-admin`, `sessions` for `sessions`, and `audit` for
+`audit`. The operator secret comes from `--token-env` or `--token-file`
+only, as for `keys rotate`.
+
+- `users list|search|get` and `audit list` print a table on stdout, or one
+  JSON document with `--json`. `--all` follows `next` until it is null.
+- `users ban|unban|platform-role|second-factor-off`, `sessions end|end-all`,
+  and `create-admin` need `--reason` (1 to 500 characters with no control
+  character, checked before any request). With no terminal, or with
+  `--no-input`, they need `--yes`. Each act writes one audit row, and the
+  command prints its id.
+- `sessions end` and `sessions end-all` call again while the answer has
+  `more: true`, up to `--max-calls`, with one stderr line per call.
+- No stderr line holds an address. An address on stdout is the result that
+  the operator asked for. No line holds the secret.
+- A 404, a 401, a 403, and a 429 stop with exit 2 and a text that names the
+  cause. Every secret call counts on `operator-users:ip:<ip>`, 600 calls an
+  hour, right or wrong secret.
 
 ## Tests
 

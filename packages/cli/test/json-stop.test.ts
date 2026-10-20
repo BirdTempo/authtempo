@@ -7,17 +7,25 @@ import { join } from "node:path";
 import { applyPostgresMigrations } from "@authtempo/adapter-postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
+  AUDIT_LIST_JSON_KEYS,
   CHECK_JSON_KEYS,
+  CREATE_ADMIN_JSON_KEYS,
+  GROUP_JSON_KEYS,
   IMPORT_JSON_KEYS,
   INFO_JSON_KEYS,
   INIT_JSON_KEYS,
   KEYS_JSON_KEYS,
   MCP_JSON_KEYS,
   MIGRATE_JSON_KEYS,
+  OPERATOR_WRITE_JSON_KEYS,
   SECRET_JSON_KEYS,
   SECRET_REWRAP_JSON_KEYS,
   SECRET_STATUS_JSON_KEYS,
+  SESSIONS_END_ALL_JSON_KEYS,
+  SESSIONS_END_JSON_KEYS,
   STOP_JSON,
+  USER_JSON_KEYS,
+  USERS_LIST_JSON_KEYS,
   VERSION_JSON_KEYS,
 } from "../src/json.js";
 import { COMMANDS } from "../src/main.js";
@@ -447,6 +455,56 @@ describe("authtempo info", () => {
   });
 });
 
+describe("the operator commands of plan 12f", () => {
+  it("print the stop document when the host gives no answer and on a usage error", async () => {
+    const port = await closedPort();
+    const base = `http://127.0.0.1:${port}`;
+    const secret = "s".repeat(40);
+    const id = "01J8Z3Q4R5S6T7V8W9X0Y1Z2A3";
+    const write = ["--reason", "test", "--yes", "--json"];
+    const runs: [string[], object][] = [
+      [["users", "list", base, "--json"], USERS_LIST_JSON_KEYS],
+      [["users", "search", base, "--id", id, "--json"], USERS_LIST_JSON_KEYS],
+      [["users", "get", base, id, "--json"], USER_JSON_KEYS],
+      [["users", "ban", base, id, ...write], OPERATOR_WRITE_JSON_KEYS],
+      [["users", "unban", base, id, ...write], OPERATOR_WRITE_JSON_KEYS],
+      [["users", "platform-role", base, id, "--grant", ...write], OPERATOR_WRITE_JSON_KEYS],
+      [
+        [
+          ...["users", "second-factor-off", base, id, "--proof-method", "document"],
+          ...["--proof-reference", "case-1", "--proof-checked-at", "2026-10-20T00:00:00Z"],
+          ...write,
+        ],
+        OPERATOR_WRITE_JSON_KEYS,
+      ],
+      [["sessions", "end", base, id, ...write], SESSIONS_END_JSON_KEYS],
+      [["sessions", "end-all", base, ...write], SESSIONS_END_ALL_JSON_KEYS],
+      [["audit", "list", base, "--json"], AUDIT_LIST_JSON_KEYS],
+      [["create-admin", base, "--email", "root@example.com", ...write], CREATE_ADMIN_JSON_KEYS],
+    ];
+    for (const [args, keys] of runs) {
+      const stop = runBin(args, { env: { AUTHTEMPO_OPERATOR_SECRET: secret } });
+      const doc = stopDoc(stop, keys, false);
+      expect(doc.stopped, args.join(" ")).toContain("no answer");
+      expect(stop.stdout).not.toContain(secret);
+      // A usage error: a time limit that is no number.
+      const usage = runBin([...args, "--timeout", "x"]);
+      stopDoc(usage, keys, true);
+      expect(usage.stderr).toContain(
+        `Usage: authtempo ${args.slice(0, 2).join(" ").replace(` ${base}`, "")}`,
+      );
+    }
+    // A command with subcommands and none named: the two run keys only.
+    for (const name of ["users", "sessions", "audit"]) {
+      const bare = runBin([name, "--json"]);
+      expect(stopDoc(bare, GROUP_JSON_KEYS, true)).toEqual({
+        exit: 2,
+        stopped: expect.stringMatching(/^name a subcommand of /),
+      });
+    }
+  });
+});
+
 describe("STOP_JSON", () => {
   it("holds STOP_JSON to each key list", () => {
     const lists: Record<keyof typeof STOP_JSON, object> = {
@@ -460,6 +518,20 @@ describe("STOP_JSON", () => {
       "secret status": SECRET_STATUS_JSON_KEYS,
       "secret rewrap": SECRET_REWRAP_JSON_KEYS,
       info: INFO_JSON_KEYS,
+      users: GROUP_JSON_KEYS,
+      "users list": USERS_LIST_JSON_KEYS,
+      "users search": USERS_LIST_JSON_KEYS,
+      "users get": USER_JSON_KEYS,
+      "users ban": OPERATOR_WRITE_JSON_KEYS,
+      "users unban": OPERATOR_WRITE_JSON_KEYS,
+      "users platform-role": OPERATOR_WRITE_JSON_KEYS,
+      "users second-factor-off": OPERATOR_WRITE_JSON_KEYS,
+      sessions: GROUP_JSON_KEYS,
+      "sessions end": SESSIONS_END_JSON_KEYS,
+      "sessions end-all": SESSIONS_END_ALL_JSON_KEYS,
+      audit: GROUP_JSON_KEYS,
+      "audit list": AUDIT_LIST_JSON_KEYS,
+      "create-admin": CREATE_ADMIN_JSON_KEYS,
     };
     expect(Object.keys(STOP_JSON).sort()).toEqual(
       [
@@ -473,6 +545,20 @@ describe("STOP_JSON", () => {
         "secret status",
         "secret rewrap",
         "info",
+        "users",
+        "users list",
+        "users search",
+        "users get",
+        "users ban",
+        "users unban",
+        "users platform-role",
+        "users second-factor-off",
+        "sessions",
+        "sessions end",
+        "sessions end-all",
+        "audit",
+        "audit list",
+        "create-admin",
       ].sort(),
     );
     for (const [name, list] of Object.entries(lists)) {

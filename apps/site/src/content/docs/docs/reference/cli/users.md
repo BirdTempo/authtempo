@@ -1,0 +1,55 @@
+---
+title: authtempo users
+description: The subcommands of authtempo users. They read, ban, and unban users, change the platform role, and turn a second factor off.
+type: reference
+sources:
+  - packages/cli/src/commands/users.ts
+  - packages/cli/src/help/users.ts
+  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
+sidebar:
+  order: 12
+---
+
+**For:** an operator who supports the users of a deployment from a terminal or a script.
+
+**What it does:** this page lists the subcommands of `authtempo users`. Each subcommand has its own page.
+
+## Before you start
+
+- The user tools on: `operator.users: true`, and a named secret with the `users` scope in `operator.secrets`. [Configuration](/docs/reference/config/) lists the keys.
+- The operator secret in `AUTHTEMPO_OPERATOR_SECRET`, or in a file. [Secrets](/docs/reference/cli/#secrets) gives the rule.
+
+## The command
+
+The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+
+```sh
+authtempo users list https://api.example.com
+```
+
+| Subcommand | What it does | Page |
+| --- | --- | --- |
+| `authtempo users list` | Lists the users by id, one page or every page. | [authtempo users list](/docs/reference/cli/users-list/) |
+| `authtempo users search` | Finds users by an exact address, an exact id, or the start of an address. | [authtempo users search](/docs/reference/cli/users-search/) |
+| `authtempo users get` | Reads one user by id. | [authtempo users get](/docs/reference/cli/users-get/) |
+| `authtempo users ban` | Bans a user, and ends every session of the user. | [authtempo users ban](/docs/reference/cli/users-ban/) |
+| `authtempo users unban` | Lifts the ban of a user. | [authtempo users unban](/docs/reference/cli/users-unban/) |
+| `authtempo users platform-role` | Grants or revokes the platform role. | [authtempo users platform-role](/docs/reference/cli/users-platform-role/) |
+| `authtempo users second-factor-off` | Turns the second factor of a user off after a check of the identity. | [authtempo users second-factor-off](/docs/reference/cli/users-second-factor-off/) |
+
+`authtempo users` with no subcommand is a usage error. With `--json` it prints `{ exit, stopped }`.
+
+| Flag | What it does |
+| --- | --- |
+| `--json` | Prints `{ exit, stopped }` on a usage error. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
+| `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
+
+| Exit code | What it means |
+| --- | --- |
+| 0 | The command printed its help. |
+| 2 | A usage error: the command needs a subcommand. |
+
+## Next
+
+- [authtempo audit list](/docs/reference/cli/audit-list/)
+- [Routes](/docs/reference/routes/#operator-user-tools)

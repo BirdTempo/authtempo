@@ -37,6 +37,14 @@ const EXEMPT_COMMANDS: Readonly<Record<string, string>> = {
   secret:
     "it makes a secret, which must not enter the context of an agent; its subcommands need the operator secret, and rewrap changes a live deployment",
   info: "a support report for a person; a later row can add a tool",
+  users:
+    "an operator command needs the operator secret; no MCP tool takes a secret (spec 21 item 5)",
+  sessions:
+    "an operator command needs the operator secret; no MCP tool takes a secret (spec 21 item 5)",
+  audit:
+    "an operator command needs the operator secret; no MCP tool takes a secret (spec 21 item 5)",
+  "create-admin":
+    "an operator command needs the operator secret; no MCP tool takes a secret (spec 21 item 5)",
 };
 
 /** The --help flag of every command. An agent reads the tool's own schema, not the help text. */

@@ -20,7 +20,20 @@ const helpFlags = (flags: readonly { flag: string }[]) =>
   flags.flatMap((f) => [...f.flag.matchAll(/--([a-z0-9.-]+)/g)].map((m) => m[1] ?? ""));
 
 /** The command table in the order of the root help. Each task of plan 11c adds its command. */
-const NAMES = ["init", "migrate", "import", "check", "keys", "mcp", "secret", "info"];
+const NAMES = [
+  "init",
+  "migrate",
+  "import",
+  "check",
+  "keys",
+  "mcp",
+  "secret",
+  "info",
+  "users",
+  "sessions",
+  "audit",
+  "create-admin",
+];
 
 /**
  * The commands that need an argument, so the bare command is a usage error
@@ -28,13 +41,24 @@ const NAMES = ["init", "migrate", "import", "check", "keys", "mcp", "secret", "i
  * NAMES, because some commands run with no argument. A test below holds
  * the two lists to NAMES.
  */
-const NEEDS_ARGUMENT = ["init", "migrate", "import", "check", "keys", "mcp"] as const;
+const NEEDS_ARGUMENT = [
+  "init",
+  "migrate",
+  "import",
+  "check",
+  "keys",
+  "mcp",
+  "users",
+  "sessions",
+  "audit",
+  "create-admin",
+] as const;
 
 /** The commands that run with no argument (ruling 5): `secret` prints a value, and `info` prints a report. */
 const NO_ARGUMENT = ["secret", "info"] as const;
 
 describe("the common rules (spec 19)", () => {
-  it("has the eight commands in the order of the root help", () => {
+  it("has the twelve commands in the order of the root help", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
   });
 
@@ -126,11 +150,28 @@ describe("the common rules (spec 19)", () => {
     const tokenFile = (command: string) =>
       HELP.find((h) => h.command === command)?.flags.find((f) => f.flag === "--token-file <path>")
         ?.says;
-    for (const command of ["keys rotate", "secret rewrap"])
+    for (const command of [
+      "keys rotate",
+      "secret rewrap",
+      "users ban",
+      "users unban",
+      "users platform-role",
+      "users second-factor-off",
+      "sessions end",
+      "sessions end-all",
+      "create-admin",
+    ])
       expect(tokenFile(command)).toBe(
         "The file that holds the operator secret. A dash reads stdin, and then the command needs --yes.",
       );
-    for (const command of ["secret status", "info"])
+    for (const command of [
+      "secret status",
+      "info",
+      "users list",
+      "users search",
+      "users get",
+      "audit list",
+    ])
       expect(tokenFile(command)).toBe(
         "The file that holds the operator secret. A dash reads stdin.",
       );

@@ -228,6 +228,141 @@ export const INFO_JSON_KEYS = {
 } as const satisfies Record<keyof InfoJson, true>;
 
 /**
+ * The document of a command that has subcommands only (plan 12f): `users`,
+ * `sessions`, and `audit` with no subcommand. Such a run is a usage error,
+ * so its document holds the two run keys only.
+ */
+export type GroupJson = RunKeys;
+export const GROUP_JSON_KEYS = { exit: true, stopped: true } as const satisfies Record<
+  keyof GroupJson,
+  true
+>;
+
+/**
+ * One user as the operator routes answer it (spec 26 item 4): no hash, no
+ * sealed value, no token, and no provider subject. The CLI copies these
+ * keys only.
+ */
+export interface OperatorUserJson {
+  id: string;
+  email: string;
+  emailVerified: boolean;
+  name: string | null;
+  createdAt: string;
+  ban: { at: string; reason: string | null; until: string | null } | null;
+  platformOperator: boolean;
+  secondFactor: string[];
+  /** The live sessions, counted up to 100. */
+  sessions: number;
+  identities: string[];
+}
+
+/** `authtempo users list --json` and `users search --json` (plan 12f): the users, and the cursor of the next page. */
+export interface UsersListJson extends RunKeys {
+  users: OperatorUserJson[];
+  /** Null after the last page, and after a run with --all. */
+  next: string | null;
+}
+export const USERS_LIST_JSON_KEYS = {
+  users: true,
+  next: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof UsersListJson, true>;
+
+/** `authtempo users get --json` (plan 12f). The user is null only in the document of a stop. */
+export interface UserJson extends RunKeys {
+  user: OperatorUserJson | null;
+}
+export const USER_JSON_KEYS = { user: true, exit: true, stopped: true } as const satisfies Record<
+  keyof UserJson,
+  true
+>;
+
+/** `authtempo users ban|unban|platform-role|second-factor-off --json` (plan 12f): the id of the audit row of the act. */
+export interface OperatorWriteJson extends RunKeys {
+  auditId: string;
+}
+export const OPERATOR_WRITE_JSON_KEYS = {
+  auditId: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof OperatorWriteJson, true>;
+
+/** `authtempo sessions end --json` (plan 12f): the sums of the calls, and the audit row of each call. */
+export interface SessionsEndJson extends RunKeys {
+  ended: number;
+  calls: number;
+  /** The `more` of the last call: true while a session of the user is left. */
+  more: boolean;
+  auditIds: string[];
+}
+export const SESSIONS_END_JSON_KEYS = {
+  ended: true,
+  calls: true,
+  more: true,
+  auditIds: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof SessionsEndJson, true>;
+
+/** `authtempo sessions end-all --json` (plan 12f): the sums of the calls. */
+export interface SessionsEndAllJson extends RunKeys {
+  ended: number;
+  calls: number;
+  /** The `more` of the last call: true while a session is left. */
+  more: boolean;
+}
+export const SESSIONS_END_ALL_JSON_KEYS = {
+  ended: true,
+  calls: true,
+  more: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof SessionsEndAllJson, true>;
+
+/** One audit row as `GET /operator/audit` answers it (spec 26 item 8). `actorId` names a secret by its name. */
+export interface AuditRowJson {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  actorKind: string;
+  actorId: string;
+  action: string;
+  targetUserId: string | null;
+  reason: string;
+  data: Record<string, unknown> | null;
+  ip: string | null;
+  userAgent: string | null;
+}
+
+/** `authtempo audit list --json` (plan 12f): the rows, and the cursor of the next page. */
+export interface AuditListJson extends RunKeys {
+  rows: AuditRowJson[];
+  next: string | null;
+}
+export const AUDIT_LIST_JSON_KEYS = {
+  rows: true,
+  next: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof AuditListJson, true>;
+
+/** `authtempo create-admin --json` (plan 12f): the user, whether the run made it, and the audit row. */
+export interface CreateAdminJson extends RunKeys {
+  userId: string;
+  created: boolean;
+  auditId: string;
+}
+export const CREATE_ADMIN_JSON_KEYS = {
+  userId: true,
+  created: true,
+  auditId: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof CreateAdminJson, true>;
+
+/**
  * The document of a usage error or a thrown stop under `--json`, for each
  * command and each subcommand (plan 11e deviation 19). The key is the key
  * of `helpOf`. Each other key holds its empty value: "", [], null, false,
@@ -295,6 +430,20 @@ export const STOP_JSON = {
     exit: 2,
     stopped: null,
   },
+  users: { exit: 2, stopped: null },
+  "users list": { users: [], next: null, exit: 2, stopped: null },
+  "users search": { users: [], next: null, exit: 2, stopped: null },
+  "users get": { user: null, exit: 2, stopped: null },
+  "users ban": { auditId: "", exit: 2, stopped: null },
+  "users unban": { auditId: "", exit: 2, stopped: null },
+  "users platform-role": { auditId: "", exit: 2, stopped: null },
+  "users second-factor-off": { auditId: "", exit: 2, stopped: null },
+  sessions: { exit: 2, stopped: null },
+  "sessions end": { ended: 0, calls: 0, more: false, auditIds: [], exit: 2, stopped: null },
+  "sessions end-all": { ended: 0, calls: 0, more: false, exit: 2, stopped: null },
+  audit: { exit: 2, stopped: null },
+  "audit list": { rows: [], next: null, exit: 2, stopped: null },
+  "create-admin": { userId: "", created: false, auditId: "", exit: 2, stopped: null },
 } satisfies {
   init: InitJson;
   migrate: MigrateJson;
@@ -306,4 +455,18 @@ export const STOP_JSON = {
   "secret status": SecretStatusJson;
   "secret rewrap": SecretRewrapJson;
   info: InfoJson;
+  users: GroupJson;
+  "users list": UsersListJson;
+  "users search": UsersListJson;
+  "users get": UserJson;
+  "users ban": OperatorWriteJson;
+  "users unban": OperatorWriteJson;
+  "users platform-role": OperatorWriteJson;
+  "users second-factor-off": OperatorWriteJson;
+  sessions: GroupJson;
+  "sessions end": SessionsEndJson;
+  "sessions end-all": SessionsEndAllJson;
+  audit: GroupJson;
+  "audit list": AuditListJson;
+  "create-admin": CreateAdminJson;
 };
