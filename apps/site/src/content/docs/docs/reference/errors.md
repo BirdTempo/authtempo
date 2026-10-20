@@ -633,8 +633,8 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="oauth-unauthorized_client"><code>unauthorized_client</code> 400</h3>
 
-- **Meaning:** A revoke named a `client_id` that is not the client of the refresh token. Nothing is revoked. Or a `client_credentials` request came from a public client, or from a client whose `grantTypes` do not hold the grant. A device request or poll came from a client without the device grant, or from a pairwise client.
-- **Do:** Revoke with the client id of the token, or with no client id. For `client_credentials`, use a confidential client of `api.oauth.clients` with the grant.
+- **Meaning:** A revoke named a `client_id` that is not the client of the refresh token. Nothing is revoked. Or a `client_credentials` request came from a public client, or from a client whose `grantTypes` do not hold the grant. A device request or poll came from a client without the device grant, or from a pairwise client. An authorize request or a code exchange came from a client whose `grantTypes` lack `authorization_code`. A refresh came from a client whose `grantTypes` lack `refresh_token`.
+- **Do:** Revoke with the client id of the token, or with no client id. For `client_credentials`, use a confidential client of `api.oauth.clients` with the grant. For another grant, add it to the client's `grantTypes`.
 
 | Routes |
 | --- |
