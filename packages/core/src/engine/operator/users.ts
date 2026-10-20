@@ -6,7 +6,12 @@ import type { Where } from "../../storage/port.js";
 import { sessionIsLive } from "../sessions.js";
 import { normalizeEmail, normalizeEmailPrefix } from "../users.js";
 import { activeBan } from "./ban-rule.js";
-import { type OperatorActor, requireScope } from "./guards.js";
+import {
+  holdsPlatformRole,
+  type OperatorActor,
+  platformOrganizationId,
+  requireScope,
+} from "./guards.js";
 
 /**
  * One user as an operator reads it (spec 26 item 4). It holds no password
@@ -92,16 +97,6 @@ function logRead(actor: OperatorActor, fn: string): void {
   console.error("authtempo: operator read", actor.kind, actorId, fn);
 }
 
-/** The id of the platform organization, or null when the config has no platform role. */
-async function platformOrganizationId(config: ResolvedConfig): Promise<string | null> {
-  const o = config.organizations;
-  if (!o || o.platformRole === null || o.platformOrganization === null) return null;
-  const organization = await config.storage.findOne("organization", [
-    { field: "slug", op: "eq", value: o.platformOrganization },
-  ]);
-  return organization?.id ?? null;
-}
-
 /**
  * The `OperatorUser` of each row, in the order of the rows. A call costs
  * a fixed count of storage calls, whatever the count of rows: one read
@@ -127,7 +122,6 @@ async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<O
   const storage = config.storage;
   const now = config.clock.now();
   const platformId = await platformOrganizationId(config);
-  const platformRole = config.organizations?.platformRole ?? null;
   const ids = rows.map((user) => user.id);
   const [members, factors, sessions, identities] = await Promise.all([
     platformId === null
@@ -156,8 +150,7 @@ async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<O
               until: user.banUntil?.toISOString() ?? null,
             }
           : null,
-      platformOperator:
-        platformRole !== null && (member?.role.split(",").includes(platformRole) ?? false),
+      platformOperator: holdsPlatformRole(config, platformId, member),
       secondFactor: factor ? [...factor.methods] : [],
       sessions: Math.min(live.length, SESSION_COUNT_MAX),
       identities: [...new Set(providers)],

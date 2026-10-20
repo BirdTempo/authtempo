@@ -2,7 +2,7 @@ import type { OperatorScope, ResolvedConfig, ResolvedOperatorSecret } from "../.
 import { isOperatorSecret, OPERATOR_USERS_PER_IP } from "../../operator-secret.js";
 import { constantTimeEqual, sha256Hex } from "../../primitives/crypto.js";
 import { fail, ok, type Result } from "../../result.js";
-import type { SessionRow, UserRow } from "../../schema.js";
+import type { MemberRow, SessionRow, UserRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
 import { requireFresh } from "../fresh.js";
 import type { ResolvedSession } from "../sessions.js";
@@ -80,17 +80,44 @@ export async function isPlatformOperator(
   userId: string,
   storage: StorageAdapter = config.storage,
 ): Promise<boolean> {
+  const organizationId = await platformOrganizationId(config, storage);
+  if (organizationId === null) return false;
+  const member = await storage.findOne("member", [
+    { field: "organizationId", op: "eq", value: organizationId },
+    { field: "userId", op: "eq", value: userId },
+  ]);
+  return holdsPlatformRole(config, organizationId, member);
+}
+
+/**
+ * The id of the platform organization, or null when the config has no
+ * platform role or no organization holds the slug.
+ */
+export async function platformOrganizationId(
+  config: ResolvedConfig,
+  storage: StorageAdapter = config.storage,
+): Promise<string | null> {
   const o = config.organizations;
-  if (!o || o.platformRole === null || o.platformOrganization === null) return false;
+  if (!o || o.platformRole === null || o.platformOrganization === null) return null;
   const organization = await storage.findOne("organization", [
     { field: "slug", op: "eq", value: o.platformOrganization },
   ]);
-  if (!organization) return false;
-  const member = await storage.findOne("member", [
-    { field: "organizationId", op: "eq", value: organization.id },
-    { field: "userId", op: "eq", value: userId },
-  ]);
-  return member?.role.split(",").includes(o.platformRole) ?? false;
+  return organization?.id ?? null;
+}
+
+/**
+ * The role rule of `isPlatformOperator` for a member row in hand: a row of
+ * the platform organization whose role parts hold `organizations.platformRole`.
+ * A read of many users passes each row of one `in` read.
+ */
+export function holdsPlatformRole(
+  config: ResolvedConfig,
+  platformId: string | null,
+  member: Pick<MemberRow, "organizationId" | "role"> | null | undefined,
+): boolean {
+  const role = config.organizations?.platformRole ?? null;
+  if (role === null || platformId === null || !member) return false;
+  return member.organizationId === platformId && member.role.split(",").includes(role);
 }
 
 /** True when the user has a second factor with one method or more (plan 12c). */

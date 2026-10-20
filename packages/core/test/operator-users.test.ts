@@ -340,6 +340,14 @@ describe("operator user reads (plan 12f Task 5)", () => {
     expect(later.value.sessions).toBe(0);
   });
 
+  it("marks a member of the platform organization without the role as no operator", async () => {
+    const { auth, operator } = await operatorFixture({ role: "member" });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const got = await operatorApi(auth.config).users.get({ actor: APP, userId: operator.user.id });
+    if (!got.ok) throw new Error(got.code);
+    expect(got.value.platformOperator).toBe(false);
+  });
+
   it("costs the same count of storage calls for a page of 1, 50, and 100 users", async () => {
     const auth = await operatorAuth();
     await seedPlatform(auth);
