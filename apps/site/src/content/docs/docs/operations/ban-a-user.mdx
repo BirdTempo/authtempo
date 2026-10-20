@@ -47,9 +47,10 @@ The ban runs one transaction. It writes the ban fields, and ends these rows of t
 - every second-factor challenge;
 - every handoff code;
 - every OAuth refresh token and OAuth code;
-- the sessions that fit the call, and each impersonation session that the user opened as an operator.
+- the impersonation sessions that the user opened as an operator, as many as fit the call;
+- the sessions of the user, as many as fit the call.
 
-The whole call fits 50 storage calls, the limit of one D1 Free run. The sessions that do not fit stay, with one pending-end row. Until the sweep ends them, every door refuses them. A test on D1 banned a user with 60 sessions and a `session.afterEnd` hook. A secret ban ended 31 sessions in the call, and two sweeps ended the other 29.
+The whole call fits 50 storage calls, the limit of one D1 Free run. The sessions and the impersonation sessions that do not fit stay, with one pending-end row. The sweep ends them. Until then, every door refuses them: the session read, the session JWT mint, and `api.jwt.sessionLive`. A test on D1 banned a user with 60 sessions and a `session.afterEnd` hook. A secret ban ended 31 sessions in the call, and two sweeps ended the other 29.
 
 ## What lives to its exp
 

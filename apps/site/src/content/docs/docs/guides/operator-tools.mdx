@@ -79,7 +79,7 @@ The routes are under `<basePath>/operator/`. [Routes](/docs/reference/routes/#op
 - The mail flows answer a banned user as any user.
 - An API token stays. Core refuses it while the ban holds, and it works again after an unban.
 - The unban restores no session. A session, a refresh token, or an access token from before the end of the ban stays refused.
-- A ban of a platform operator also ends each impersonation session that the operator opened.
+- A ban of a platform operator also ends the impersonation sessions that the operator opened. The call ends those that fit, and the sweep ends the rest. Until then each door refuses them.
 - A session JWT and an OAuth access token live to their `exp`. [Ban a user](/docs/operations/ban-a-user/) gives the check of a resource server.
 - An answer with `familyEndFailed: true` means that the ban committed, and the end of the OAuth families after the commit failed. Call `sessions.endUser` for the user: it reads the refresh tokens again, and ends each family.
 
