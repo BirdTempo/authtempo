@@ -876,7 +876,7 @@ These routes exist when the config sets `organizations.teams`. A team is a named
 | Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `team:create` in the organization |
 | Input | JSON `{ organizationId, name }`. `name` follows the organization name rule. Names are not unique. Another key answers `invalid_body` |
 | Answer | `{ team }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`team_limit`](/docs/reference/errors/#team_limit), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`team_limit`](/docs/reference/errors/#team_limit), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 <h3 id="post-organizations-teams-update"><code>POST /organizations/teams/update</code></h3>
 
@@ -885,7 +885,7 @@ These routes exist when the config sets `organizations.teams`. A team is a named
 | Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `team:update` in the organization of the team |
 | Input | JSON `{ teamId, name }`. Another key answers `invalid_body` |
 | Answer | `{ team }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 <h3 id="post-organizations-teams-delete"><code>POST /organizations/teams/delete</code></h3>
 
@@ -894,7 +894,7 @@ These routes exist when the config sets `organizations.teams`. A team is a named
 | Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `team:delete` in the organization of the team |
 | Input | JSON `{ teamId }` |
 | Answer | `{ ok: true }`. The team rows go, each session that acts in the team loses its active team, and each pending invitation loses the team. With `organizations.teams.keepLastTeam`, the last team answers `last_team` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`last_team`](/docs/reference/errors/#last_team), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`last_team`](/docs/reference/errors/#last_team), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 <h3 id="get-organizations-teams-members"><code>GET /organizations/teams/members</code></h3>
 
@@ -912,7 +912,7 @@ These routes exist when the config sets `organizations.teams`. A team is a named
 | Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `member:update` in the organization of the team. To add another person, the user ranks at least as high as that person and holds each of their rights |
 | Input | JSON `{ teamId, userId }`. The person is a member of the organization, else `not_found` |
 | Answer | `{ member }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`already_member`](/docs/reference/errors/#already_member), [`team_member_limit`](/docs/reference/errors/#team_member_limit), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`already_member`](/docs/reference/errors/#already_member), [`team_member_limit`](/docs/reference/errors/#team_member_limit), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict) |
 
 <h3 id="post-organizations-teams-members-remove"><code>POST /organizations/teams/members/remove</code></h3>
 
@@ -921,7 +921,7 @@ These routes exist when the config sets `organizations.teams`. A team is a named
 | Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The removal of another person needs `member:delete` in the organization of the team, a rank at least as high as that person's, and each of their rights. A member leaves a team with their own `userId` |
 | Input | JSON `{ teamId, userId }` |
 | Answer | `{ ok: true }`. A session of the person that acts in the team loses its active team |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 <h3 id="post-organizations-teams-active"><code>POST /organizations/teams/active</code></h3>
 

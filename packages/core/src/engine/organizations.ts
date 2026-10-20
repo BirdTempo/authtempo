@@ -134,7 +134,8 @@ export async function standing(
   return ok({ ...m, rank, granted });
 }
 
-function verified(user: UserRow): Result<true> {
+/** A write of an organization or a team needs a verified address. */
+export function verified(user: UserRow): Result<true> {
   return user.emailVerified ? ok(true) : fail("email_unverified");
 }
 

@@ -1231,6 +1231,7 @@ export const ROUTES = Object.freeze([
     codes: [
       "unauthorized",
       "invalid_body",
+      "email_unverified",
       "forbidden_rank",
       "team_limit",
       "hook_refused",
@@ -1243,7 +1244,14 @@ export const ROUTES = Object.freeze([
     path: "/organizations/teams/update",
     feature: "teams",
     auth: ["session"],
-    codes: ["unauthorized", "invalid_body", "forbidden_rank", "hook_refused", "hook_failed"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "email_unverified",
+      "forbidden_rank",
+      "hook_refused",
+      "hook_failed",
+    ],
     oauthCodes: [],
   },
   {
@@ -1254,6 +1262,7 @@ export const ROUTES = Object.freeze([
     codes: [
       "unauthorized",
       "invalid_body",
+      "email_unverified",
       "forbidden_rank",
       "last_team",
       "hook_refused",
@@ -1277,6 +1286,7 @@ export const ROUTES = Object.freeze([
     codes: [
       "unauthorized",
       "invalid_body",
+      "email_unverified",
       "forbidden_rank",
       "already_member",
       "team_member_limit",
@@ -1291,7 +1301,14 @@ export const ROUTES = Object.freeze([
     path: "/organizations/teams/members/remove",
     feature: "teams",
     auth: ["session"],
-    codes: ["unauthorized", "invalid_body", "forbidden_rank", "hook_refused", "hook_failed"],
+    codes: [
+      "unauthorized",
+      "invalid_body",
+      "email_unverified",
+      "forbidden_rank",
+      "hook_refused",
+      "hook_failed",
+    ],
     oauthCodes: [],
   },
   {

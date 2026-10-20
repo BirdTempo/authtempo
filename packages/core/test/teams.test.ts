@@ -773,6 +773,42 @@ describe("teams (plan 12k Task 5)", () => {
     expect(row?.activeTeamId).toBe(core.id);
   });
 
+  it("refuses each team write to a user with no verified address", async () => {
+    const w = world();
+    const { ada, carol, organizationId } = await acme(w);
+    const team = mustOk(await w.auth.api.createTeam({ user: ada, organizationId, name: "Core" }));
+    // A password sign-up with no use of the link writes such a row. The check comes before the
+    // rights, so a non-member gets email_unverified, not forbidden_rank.
+    const unverified = await w.storage.create("user", {
+      id: newId(t0),
+      email: "pat@example.com",
+      emailVerified: false,
+      name: null,
+      image: null,
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
+      createdAt: t0,
+      updatedAt: t0,
+    });
+    const answers = [
+      await w.auth.api.createTeam({ user: unverified, organizationId, name: "Web" }),
+      await w.auth.api.updateTeam({ user: unverified, teamId: team.id, name: "Web" }),
+      await w.auth.api.addTeamMember({ user: unverified, teamId: team.id, userId: carol.id }),
+      await w.auth.api.removeTeamMember({ user: unverified, teamId: team.id, userId: carol.id }),
+      await w.auth.api.deleteTeam({ user: unverified, teamId: team.id }),
+    ];
+    expect(answers.map((r) => (r.ok ? "ok" : r.code))).toEqual([
+      "email_unverified",
+      "email_unverified",
+      "email_unverified",
+      "email_unverified",
+      "email_unverified",
+    ]);
+    expect((await w.storage.findMany("team", [])).map((t) => t.name)).toEqual(["Core"]);
+    expect(await w.storage.findMany("teamMember", [])).toEqual([]);
+  });
+
   it("mounts no team route with teams off", async () => {
     const w = world({});
     const { ada, organizationId } = await acme(w);

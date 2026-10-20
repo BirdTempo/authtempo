@@ -6,7 +6,7 @@ import type { TeamMemberRow, TeamRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { hookGuard, runAfter, runBefore } from "./hooks.js";
-import { publicOrganization, standing, validOrganizationName } from "./organizations.js";
+import { publicOrganization, standing, validOrganizationName, verified } from "./organizations.js";
 import { effectiveIn, type Standing, touchCheck } from "./permissions.js";
 import type { ResolvedOrganizations } from "./ranks.js";
 import { type PublicSession, publicSession, type ResolvedSession } from "./sessions.js";
@@ -16,7 +16,8 @@ import { holdUser, userStays } from "./user-hold.js";
  * Teams (plan 12k, spec 29 item 7). A team is a named group of members of
  * one organization. It has no role: every right comes from the organization
  * role (owner decision 1 of 2026-10-14). Each operation answers `not_found`
- * while `organizations.teams` is off.
+ * while `organizations.teams` is off. Each team write needs a verified
+ * address first (`verified`), as every other organization write does.
  */
 
 /** One team of an organization. */
@@ -152,6 +153,8 @@ export async function createTeam(
 ): Promise<Result<TeamSummary>> {
   const sc = scope(config);
   if (!sc) return fail("not_found");
+  const v = verified(input.user);
+  if (!v.ok) return v;
   const s = await standing(config, input.user, input.organizationId, { team: ["create"] });
   if (!s.ok) return s;
   if (!validOrganizationName(input.name)) return fail("invalid_body");
@@ -204,6 +207,8 @@ export async function updateTeam(
   input: { user: UserRow; teamId: string; name: string },
 ): Promise<Result<TeamSummary>> {
   if (!scope(config)) return fail("not_found");
+  const v = verified(input.user);
+  if (!v.ok) return v;
   const t = await teamStanding(config, input.user, input.teamId, { team: ["update"] });
   if (!t.ok) return t;
   if (!validOrganizationName(input.name)) return fail("invalid_body");
@@ -256,6 +261,8 @@ export async function deleteTeam(
 ): Promise<Result<{ ok: true }>> {
   const sc = scope(config);
   if (!sc) return fail("not_found");
+  const v = verified(input.user);
+  if (!v.ok) return v;
   const t = await teamStanding(config, input.user, input.teamId, { team: ["delete"] });
   if (!t.ok) return t;
   const { team, organization } = t.value;
@@ -387,6 +394,8 @@ export async function addTeamMember(
 ): Promise<Result<TeamMemberSummary>> {
   const sc = scope(config);
   if (!sc) return fail("not_found");
+  const v = verified(input.user);
+  if (!v.ok) return v;
   const t = await teamStanding(config, input.user, input.teamId, TEAM_MEMBER_ADD);
   if (!t.ok) return t;
   const { team, organization } = t.value;
@@ -479,6 +488,8 @@ export async function removeTeamMember(
   input: { user: UserRow; teamId: string; userId: string },
 ): Promise<Result<{ ok: true }>> {
   if (!scope(config)) return fail("not_found");
+  const v = verified(input.user);
+  if (!v.ok) return v;
   const self = input.userId === input.user.id;
   const t = await teamStanding(
     config,
