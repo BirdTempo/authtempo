@@ -328,6 +328,26 @@ describe("pairwise subjects (plan 12e Task 11, OIDC Core 8)", () => {
       expect({ host, local: isLocalHost(host) }).toEqual({ host, local: false });
   });
 
+  it("takes each IPv6 loopback form as local, as the URL parser writes it", () => {
+    // Every caller refuses an IP literal first, so only a direct call reaches the IPv6 rule.
+    for (const literal of [
+      "[::1]",
+      "[0:0:0:0:0:0:0:1]",
+      "[::]",
+      "[::ffff:127.0.0.1]",
+      "[::ffff:127.1.2.3]",
+      "[::127.0.0.1]",
+      "[::ffff:0.0.0.0]",
+    ]) {
+      const host = new URL(`https://${literal}/`).hostname;
+      expect({ literal, host, local: isLocalHost(host) }).toEqual({ literal, host, local: true });
+    }
+    for (const literal of ["[::2]", "[::ffff:8.8.8.8]", "[2001:db8::1]"]) {
+      const host = new URL(`https://${literal}/`).hostname;
+      expect({ literal, host, local: isLocalHost(host) }).toEqual({ literal, host, local: false });
+    }
+  });
+
   it("refuses an update that changes the sector of a pairwise client", async () => {
     const h = handle();
     const ada = await signedIn(h);
