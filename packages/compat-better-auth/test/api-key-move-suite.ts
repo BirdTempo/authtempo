@@ -65,7 +65,7 @@ function access() {
 }
 
 /** A shim app on the suite's database, with passwords so a test signs people up as an app does. */
-function app(m: MoveDatabase, references: "user" | "organization") {
+function app(m: MoveDatabase, references: "user" | "organization", rateLimit = false) {
   const mails: { email: string; token: string }[] = [];
   const { ac, roles } = access();
   const auth = betterAuth({
@@ -83,7 +83,7 @@ function app(m: MoveDatabase, references: "user" | "organization") {
         defaultPrefix: "laaa_",
         enableMetadata: true,
         references,
-        rateLimit: { enabled: false },
+        rateLimit: { enabled: rateLimit },
       }),
     ],
     authtempo: {
@@ -160,12 +160,14 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
       references: "user" | "organization",
       dryRun = false,
       movedPrefixes: readonly string[] = ["laaa_"],
+      rateLimitEnabled = false,
     ) =>
       moveBetterAuthApiKeys(m.database, {
         names: m.database.names,
         references,
         dryRun,
         movedPrefixes,
+        rateLimitEnabled,
         statements: { project: ["read", "write"] },
       });
 
@@ -201,8 +203,9 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
         expect(rows).toHaveLength(1);
         // Ruling 2 of plan 12k: a moved row acts, so it holds no retired mark.
         expect(rows[0]?.retiredAt).toBeNull();
-        expect(rows[0]?.rateLimitSeconds).toBe(60);
-        expect(rows[0]?.rateLimitMax).toBe(600);
+        // The plugin has rateLimit enabled false, so Better Auth used no window.
+        expect(rows[0]?.rateLimitSeconds).toBeNull();
+        expect(rows[0]?.rateLimitMax).toBeNull();
         // The hint is Better Auth's start: the first 6 characters, the prefix included.
         expect(rows[0]?.hint).toBe(live.slice(0, 6));
       }),
@@ -317,6 +320,7 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
             references: "user",
             dryRun: false,
             movedPrefixes: ["laaa_"],
+            rateLimitEnabled: false,
           }),
         ).rejects.toThrow("stopped");
         const byUser = [{ field: "userId" as const, op: "eq" as const, value: ada.user.id }];
@@ -377,6 +381,36 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
         ]);
         // Both set the count to refillAmount less the one use.
         expect(rows.map((r) => r.remaining).sort()).toEqual([0, 4]);
+      }),
+    );
+
+    it(
+      "moves a key window only while the plugin's rateLimit is enabled",
+      fresh(async (m) => {
+        // Probe P4 of the Task 12 review: the move added a window that Better Auth skipped.
+        const window = { rateLimitEnabled: true, rateLimitTimeWindow: 60_000, rateLimitMax: 2 };
+        const off = app(m, "user");
+        const ada = await off.person("ada@example.com");
+        const open = generatedKey("laaa_");
+        await m.insertKey(await keyRow(open, { referenceId: ada.user.id, ...window }));
+        expect((await move(m, "user", false, ["laaa_"], false)).moved).toBe(1);
+        const codes = [];
+        for (let i = 0; i < 4; i++)
+          codes.push(
+            (await off.auth.api.verifyApiKey({ body: { key: open } })).error?.code ?? "ok",
+          );
+        expect(codes).toEqual(["ok", "ok", "ok", "ok"]);
+        // With the plugin's rateLimit on, the row's window moves and acts.
+        const on = app(m, "user", true);
+        const held = generatedKey("laaa_");
+        await m.insertKey(await keyRow(held, { referenceId: ada.user.id, ...window }));
+        expect((await move(m, "user", false, ["laaa_"], true)).moved).toBe(1);
+        const limited = [];
+        for (let i = 0; i < 3; i++)
+          limited.push(
+            (await on.auth.api.verifyApiKey({ body: { key: held } })).error?.code ?? "ok",
+          );
+        expect(limited).toEqual(["ok", "ok", "RATE_LIMITED"]);
       }),
     );
 

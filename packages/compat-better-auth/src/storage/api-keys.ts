@@ -54,6 +54,12 @@ export interface ApiKeyMoveInput {
    */
   movedPrefixes: readonly string[];
   /**
+   * The plugin's `rateLimit.enabled` (Better Auth's default: true). False:
+   * Better Auth skips the window of every key (`evaluateRateLimit`,
+   * dist/index.mjs:1586), so the move writes no window.
+   */
+  rateLimitEnabled: boolean;
+  /**
    * The app's own statements in Better Auth's names, as its `ac` holds them.
    * Core's six resources are always known. Absent: only those.
    */
@@ -305,7 +311,7 @@ export async function moveBetterAuthApiKeys(
     const ownerId = String(row.referenceId);
     const { set, dropped } = narrowSet(row.permissions, known);
     const metadata = jsonObjectOf(row.metadata);
-    const window = windowOf(row);
+    const window = input.rateLimitEnabled ? windowOf(row) : null;
     const quota = quotaOf(row);
     const createdAt = dateOf(row.createdAt) ?? now;
     const fields = {

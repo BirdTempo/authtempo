@@ -1216,8 +1216,10 @@ in the answer of the create.
 
 ### Cutover of API keys
 
-`moveBetterAuthApiKeys(storage, { names, references, dryRun, movedPrefixes, statements })`
-moves each `apikey` row into core's token table. `movedPrefixes` is
+`moveBetterAuthApiKeys(storage, { names, references, dryRun, movedPrefixes, rateLimitEnabled, statements })`
+moves each `apikey` row into core's token table. `rateLimitEnabled` is the
+plugin's `rateLimit.enabled` (Better Auth's default is true). With false,
+Better Auth skips the window of every key, so the move writes no window. `movedPrefixes` is
 `movedKeyPrefixesOf(options)`, the list that core's `tokens.movedPrefixes`
 holds. Before any write, and on a dry run too, the move throws a
 `BetterAuthCompatError` when no entry starts a stored prefix, or when a row
