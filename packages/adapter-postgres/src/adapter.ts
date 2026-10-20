@@ -1,4 +1,4 @@
-import type { ModelName, StorageAdapter, StorageError } from "@authtempo/core";
+import type { FindManyOptions, ModelName, StorageAdapter, StorageError } from "@authtempo/core";
 import { assertModel, type SqlStatements, type Statement } from "@authtempo/core/sql";
 import type { Sql, TransactionSql } from "postgres";
 
@@ -84,6 +84,17 @@ function adapterOn(ctx: Ctx): StorageAdapter {
     },
     statementsSent() {
       return ctx.sent.statements;
+    },
+    async lockInOrder(model, where) {
+      await ctx.ready();
+      // A lock outside a transaction ends with its statement, so it holds nothing.
+      if (!ctx.inTransaction) return;
+      const s = ctx.statements.select(model, where, {
+        sort: { field: "id", dir: "asc" },
+      } as FindManyOptions<typeof model>);
+      if (!s) return;
+      // FOR UPDATE takes each lock as the sort hands the row on, so by id (ruling 36 of plan 12f).
+      await query(ctx, { sql: `${s.sql} FOR UPDATE`, params: s.params });
     },
   };
 }

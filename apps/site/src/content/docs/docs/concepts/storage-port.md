@@ -38,6 +38,7 @@ An adapter can leave these out. Core then takes a fixed worst case.
 | Method | What it does |
 | --- | --- |
 | `statementsSent` | Answers the count of statements that the adapter sent since its creation. D1 counts each statement of a batch. The operator session calls read it, so each call fits the 50 queries of D1 Free. |
+| `lockInOrder` | Inside a transaction, takes the row locks of the rows that match, by id, in one statement. Postgres runs `SELECT ... ORDER BY id FOR UPDATE`. D1 and memory have no row lock and leave it out. Each flow that deletes many sessions calls it first, so two such flows wait in turn and never on each other. |
 
 ## The rules
 

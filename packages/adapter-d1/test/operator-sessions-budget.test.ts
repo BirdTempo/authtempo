@@ -164,7 +164,7 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
     await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
   });
 
-  it("an endAll of the app with a hook and a full page sends 50 queries, the schema check too", async () => {
+  it("an endAll of the app with a hook and a full page sends 49 queries, the schema check too", async () => {
     const sent: MailMessage[] = [];
     await signIns(engine(env.DB, sent).auth, sent, "ada@example.com", 60);
     // One invocation: a new adapter, so its first query is the schema check.
@@ -177,10 +177,11 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
       userAgent: null,
     });
     if (!done.ok) throw new Error(done.code);
-    // The schema check, the read, the link read, 46 deletes, and the audit row.
-    expect([done.value.ended, done.value.more, count.queries]).toEqual([46, true, 50]);
+    // The schema check, the read, the link read, 45 deletes, and the audit row. The page
+    // keeps 1 call for the lock read, which D1 has no need to send (ruling 36).
+    expect([done.value.ended, done.value.more, count.queries]).toEqual([45, true, 49]);
     // The counter of the adapter agrees with the binding.
-    expect(invocation.storage.statementsSent?.()).toBe(50);
+    expect(invocation.storage.statementsSent?.()).toBe(49);
   });
 
   it("an endUser of the app with a hook sends 43 queries, the hold batch too", async () => {
@@ -234,7 +235,7 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
       // The whole invocation on the binding, and the counter of the adapter, which
       // leaves out the 2 limiter queries: they go to the binding, not through the adapter.
       expect([done.value.ended, count.queries, invocation.storage.statementsSent?.()]).toEqual(
-        call === "endAll" ? [38, 50, 48] : [21, 43, 41],
+        call === "endAll" ? [37, 49, 47] : [21, 43, 41],
       );
     });
 });

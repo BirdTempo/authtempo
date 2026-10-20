@@ -94,6 +94,8 @@ export async function deleteEndedSessions(
   userId: string,
   now: Date,
 ): Promise<void> {
+  // The row locks of every session of the user first, by id (ruling 36 of plan 12f).
+  await tx.lockInOrder?.("session", [{ field: "userId", op: "eq", value: userId }]);
   await tx.delete("session", [
     { field: "userId", op: "eq", value: userId },
     { field: "expiresAt", op: "lte", value: now },
@@ -363,6 +365,9 @@ export async function endSessions(
   // The outbox reads the user's links; every flow ends the sessions of one user.
   const user = where.find((w) => w.field === "userId" && w.op === "eq")?.value;
   if (typeof user !== "string") throw new Error("authtempo: endSessions needs a userId term");
+  // The row locks first, by id: one DELETE locks in the order of its scan,
+  // and endAll then waits on this flow while it waits on endAll (ruling 36).
+  await tx.lockInOrder?.("session", where);
   // Each read that drives a delete sorts by id, so every flow takes the
   // rows of a table in one order. An unsorted read answers in the order of
   // the index or the heap: on Postgres an update can move a row, and two

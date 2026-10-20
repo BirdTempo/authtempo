@@ -432,24 +432,24 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
         ok: false,
         code: "invalid_body",
       });
-    // 47 calls before the act leave 2 for the work: less than the read, a link read, and a delete.
-    for (const callsUsed of [-1, 1.5, 47, 50])
+    // 46 calls before the act leave 3 for the work: less than the read, the lock, a link read, and a delete.
+    for (const callsUsed of [-1, 1.5, 46, 50])
       expect(await w.api.sessions.endAll({ ...input, callsUsed })).toMatchObject({
         ok: false,
         code: "invalid_body",
       });
-    // endUser of the app: 30 calls before leave 19, the least call; 31 leave 18.
+    // endUser of the app: 29 calls before leave 20, the least call; 30 leave 19.
     const user = await w.storage.findOne("user", [
       { field: "email", op: "eq", value: "ada@example.com" },
     ]);
     if (!user) throw new Error("no user");
     expect(
-      await w.api.sessions.endUser({ ...input, userId: user.id, callsUsed: 31 }),
+      await w.api.sessions.endUser({ ...input, userId: user.id, callsUsed: 30 }),
     ).toMatchObject({ ok: false, code: "invalid_body" });
     expect(await sessionsOf(w.storage)).toHaveLength(1);
     expect(await auditRows(w.storage)).toEqual([]);
     expect(
-      await w.api.sessions.endUser({ ...input, userId: user.id, callsUsed: 30 }),
+      await w.api.sessions.endUser({ ...input, userId: user.id, callsUsed: 29 }),
     ).toMatchObject({ ok: true, value: { ended: 1, more: false } });
     expect(await w.api.sessions.endAll({ ...input, reason: "a\nb" })).toMatchObject({
       ok: false,
@@ -624,7 +624,8 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       ip: null,
       userAgent: null,
     });
-    // The read, 2 link reads, and 2 deletes cost 5; 21 links take 42 of the 48; then the audit row.
+    // The read, the lock, 2 link reads, and 2 deletes cost 6 of the 48; 21 links take 42.
+    // The memory adapter sends no lock, so the call makes 47 calls and the audit row.
     expect(done.ok && [done.value.ended, done.value.more, counts.calls]).toEqual([60, false, 48]);
     expect(await sessionsOf(w.storage)).toEqual([]);
     expect(await w.storage.findMany("oauthLogout", [])).toHaveLength(21);
@@ -668,13 +669,14 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       // The linked session goes in the first call, with its event.
       if (call === 0) expect(await resolveSession(w.config, opened.token)).toBeNull();
     }
-    expect(calls).toEqual([49]);
+    expect(calls).toEqual([47]);
     expect(w.ended).toContain(`${opened.session.id}:operator`);
     expect(await sessionsOf(w.storage)).toEqual([]);
-    // Two sessions: the read, the link read, and 2 deletes cost 4. So 22 logouts fit the
-    // work of 48, and the sweep makes the other 8 and sends all 30.
-    expect(await w.storage.findMany("oauthLogout", [])).toHaveLength(22);
-    expect(await w.storage.findMany("oauthSessionClient", [])).toHaveLength(8);
+    // Two sessions: the read, the lock, the link read, and 2 deletes cost 5. So 21 logouts fit
+    // the work of 48, and the sweep makes the other 9 and sends all 30. The memory adapter
+    // sends no lock, so the call makes 47 calls.
+    expect(await w.storage.findMany("oauthLogout", [])).toHaveLength(21);
+    expect(await w.storage.findMany("oauthSessionClient", [])).toHaveLength(9);
     await sweepAll(w);
     expect(w.sent).toHaveLength(30);
   });
@@ -735,10 +737,11 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       };
     };
     // The session, the user, the refresh; the platform organization, the member, the factor, the limiter; the schema check.
-    // With the reserve of 9 the work gets 40 calls: the read, the link read, and 38 deletes.
-    expect(await whole("default")).toEqual({ before: 8, total: 49, ended: 38 });
-    // With the count of 8 the work gets 41 calls, and the whole call makes 50.
-    expect(await whole("count")).toEqual({ before: 8, total: 50, ended: 39 });
+    // With the reserve of 9 the work gets 40 calls: the read, the lock, the link read, and 37
+    // deletes. The memory adapter sends no lock, so the whole call makes 48.
+    expect(await whole("default")).toEqual({ before: 8, total: 48, ended: 37 });
+    // With the count of 8 the work gets 41 calls, and the whole call makes 49.
+    expect(await whole("count")).toEqual({ before: 8, total: 49, ended: 38 });
   });
 
   it("ends one user's 100 sessions and 5 links in pages of 49 calls or fewer (review m2)", async () => {
@@ -908,14 +911,14 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
       if (!done.ok) throw new Error(done.code);
       pages.push({ ended: done.value.ended, more: done.value.more });
     }
-    // Page 1: the read, the link read, and 46 deletes fill the work of 48.
+    // Page 1: the read, the lock, the link read, and 45 deletes fill the work of 48.
     expect(pages).toEqual([
-      { ended: 46, more: true },
-      { ended: 14, more: false },
+      { ended: 45, more: true },
+      { ended: 15, more: false },
     ]);
     expect(w.ended).toHaveLength(60);
     expect([...w.ended].sort()).toEqual(all.map((x) => `${x.id}:operator`).sort());
     expect(await sessionsOf(w.storage)).toEqual([]);
-    expect((await auditRows(w.storage)).map((r) => r.data)).toEqual([{ ended: 46 }, { ended: 14 }]);
+    expect((await auditRows(w.storage)).map((r) => r.data)).toEqual([{ ended: 45 }, { ended: 15 }]);
   });
 });

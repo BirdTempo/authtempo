@@ -17,7 +17,10 @@ import { freshDatabase } from "./db.js";
 // (`setActiveOrganization`) moves a row to the end of the heap, so an
 // unsorted read gives another order than the id order, and the two
 // transactions wait on each other. Each read that drives a delete now sorts
-// by id. Each row of the test makes its state through the flows.
+// by id. With no hook, one DELETE locks rows in the order of its scan, so a
+// sort cannot help: each flow first takes the row locks by id
+// (`lockInOrder`, ruling 36). Each row of the test makes its state through
+// the flows.
 
 const API = "https://api.example.com";
 /** Every request passes: the race, not the limit, is under test. */
@@ -35,11 +38,12 @@ afterEach(async () => {
 });
 
 /**
- * The engine on Postgres with a `session.afterEnd` hook, and one probe in
- * its transactions. The probe runs once, after the next session delete, on
- * the same open transaction. It starts the other flow and waits `HOLD_MS`.
+ * The engine on Postgres, with a `session.afterEnd` hook unless `hook` is
+ * false, and one probe in its transactions. The probe runs once, after the
+ * next session delete, on the same open transaction. It starts the other
+ * flow and waits `HOLD_MS`.
  */
-function world() {
+function world(options: { hook?: boolean } = {}) {
   const sent: MailMessage[] = [];
   const ended: string[] = [];
   let probe: (() => Promise<void>) | null = null;
@@ -80,13 +84,17 @@ function world() {
       ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
     },
     operator: { users: true },
-    hooks: {
-      session: {
-        afterEnd: ({ session }) => {
-          ended.push(session.id);
-        },
-      },
-    },
+    ...(options.hook === false
+      ? {}
+      : {
+          hooks: {
+            session: {
+              afterEnd: ({ session }) => {
+                ended.push(session.id);
+              },
+            },
+          },
+        }),
   });
   const lastToken = (to: string) => {
     const text = sent.filter((x) => x.to === to).at(-1)?.text ?? "";
@@ -206,5 +214,66 @@ describe("the end of all sessions beside the ban and the account delete on Postg
     expect(await db.sql`SELECT 1 FROM ta_user WHERE id = ${userId}`).toHaveLength(0);
     expect(await db.sql`SELECT 1 FROM ta_session WHERE user_id = ${userId}`).toHaveLength(0);
     expect([...w.ended].sort()).toEqual([owner, ...sessions].map((s) => s.session.id).sort());
+  }, 60_000);
+});
+
+/**
+ * A member of another user's organization with a session in each of two
+ * chunks of endAll: the first session, 50 sessions of another user, then
+ * the second session. The first session sets the organization active, so
+ * its row goes to the end of the heap, after the second.
+ */
+async function memberInTwoChunks(w: World) {
+  const s1 = await w.signIn("ada@example.com");
+  for (let i = 0; i < 50; i++) await w.signIn("filler@example.com");
+  const s2 = await w.signIn("ada@example.com");
+  const owner = await w.signIn("owner@example.com");
+  const org = await w.auth.api.createOrganization({ user: owner.user, slug: "org", name: "Org" });
+  if (!org.ok) throw new Error(org.code);
+  const organizationId = org.value.organization.id;
+  const added = await w.auth.api.addMember({
+    user: owner.user,
+    organizationId,
+    userId: s1.user.id,
+    role: "member",
+  });
+  if (!added.ok) throw new Error(added.code);
+  const active = await w.auth.api.setActiveOrganization({ session: s1, organizationId });
+  if (!active.ok) throw new Error(active.code);
+  const byHeap = await db.sql<{ id: string }[]>`
+    SELECT id FROM ta_session WHERE user_id = ${s1.user.id} ORDER BY ctid`;
+  expect(byHeap.map((r) => r.id)).toEqual([s2.session.id, s1.session.id]);
+  return { sessions: [s1, s2] as const };
+}
+
+describe("the end of all sessions with no hook beside the ban and the account delete on Postgres (ruling 36)", () => {
+  it("endAll with no hook beside the ban: no deadlock, and no session of the user stays", async () => {
+    const w = world({ hook: false });
+    const { sessions } = await memberInTwoChunks(w);
+    const userId = sessions[0].user.id;
+    // endAll deletes its first chunk by id in one statement; then the ban starts.
+    const banning = w.during(() =>
+      w.auth.api.operator.users.ban({
+        actor: APP,
+        userId,
+        reason: "Race",
+        ip: null,
+        userAgent: null,
+      }),
+    );
+    await settled(endAll(w), banning);
+    expect(await db.sql`SELECT 1 FROM ta_session WHERE user_id = ${userId}`).toHaveLength(0);
+  }, 60_000);
+
+  it("endAll with no hook beside the account delete of a member: no deadlock, and the user goes", async () => {
+    const w = world({ hook: false });
+    const { sessions } = await memberInTwoChunks(w);
+    const userId = sessions[0].user.id;
+    const deleting = w.during(() =>
+      w.auth.api.user.delete({ session: sessions[1], ip: null, userAgent: null }),
+    );
+    await settled(endAll(w), deleting);
+    expect(await db.sql`SELECT 1 FROM ta_user WHERE id = ${userId}`).toHaveLength(0);
+    expect(await db.sql`SELECT 1 FROM ta_session WHERE user_id = ${userId}`).toHaveLength(0);
   }, 60_000);
 });

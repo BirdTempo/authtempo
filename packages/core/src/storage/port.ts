@@ -115,4 +115,13 @@ export interface StorageAdapter {
    * a count of a shared adapter can only be too high, never too low.
    */
   statementsSent?(): number;
+  /**
+   * Optional. Inside a transaction, takes the row locks of the rows that
+   * `where` matches, by `id` ascending, before the caller writes them
+   * (ruling 36 of plan 12f). One DELETE locks rows in the order of its
+   * scan, so two flows that delete the same rows in one statement each can
+   * wait on each other. Postgres runs SELECT ... ORDER BY id FOR UPDATE. D1
+   * and memory have no row lock and leave it out. It costs one statement.
+   */
+  lockInOrder?<M extends ModelName>(model: M, where: Where<M>[]): Promise<void>;
 }

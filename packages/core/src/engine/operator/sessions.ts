@@ -65,8 +65,9 @@ function reasonOf(
  * The worst case of each step of `endUserSessions` in D1 statements, for an
  * adapter with no `statementsSent`. Each number is the count of the D1 test
  * `operator-sessions-budget.test.ts`. The hold is a read and a batch of 2.
+ * The expired rows are the lock read of `lockInOrder` and 2 deletes.
  */
-const STEP_WORST = { hold: 3, expired: 2 } as const;
+const STEP_WORST = { hold: 3, expired: 3 } as const;
 
 /**
  * The statements of the work of an act so far (ruling 35 of plan 12f). It
@@ -137,12 +138,12 @@ export async function endUserSessions(
   const reason = reasonOf(config, input);
   if (!reason.ok) return reason;
   const fixed = TARGET_CALLS[input.actor.kind];
-  // The least call: the target, the hold (3), the challenges, the expired rows (2 at most), the
-  // read, and the handoff codes (5), a page of one session (2 more), and the last page.
+  // The least call: the target, the hold (3), the challenges, the lock and the expired rows (3 at
+  // most), the read, and the handoff codes (6), a page of one session (2 more), and the last page.
   const budget = workBudget(
     input.actor,
     input.callsUsed,
-    fixed + 3 + 5 + 2 + LAST_PAGE_CALLS + FAMILY_CALLS,
+    fixed + 3 + 6 + 2 + LAST_PAGE_CALLS + FAMILY_CALLS,
   );
   if (!budget.ok) return budget;
   const target = await targetOf(config, input);
@@ -180,7 +181,16 @@ export async function endUserSessions(
       const rows = read.slice(0, END_ALL_LIMIT.default);
       // The page counts its read again, so it gets 1 more; the handoff delete and the last page stay out.
       const pageBudget = budget.value - meter.used + 1 - 1 - LAST_PAGE_CALLS - FAMILY_CALLS;
-      const page = await endSessionPage(tx, config, rows, ends.ended ?? null, now, pageBudget);
+      // No lock of its own: deleteEndedSessions took the locks of every session of the user.
+      const page = await endSessionPage(
+        tx,
+        config,
+        rows,
+        ends.ended ?? null,
+        now,
+        pageBudget,
+        null,
+      );
       meter.step(page.used - 1);
       await deleteHandoffCodes(tx, userId);
       meter.step(1);
@@ -323,13 +333,23 @@ async function endSessionPage(
   ended: SessionRow[] | null,
   now: Date,
   budget: number,
+  lock: Where<"session">[] | null,
 ): Promise<{ deleted: number; stopped: boolean; used: number }> {
   const chunks = (k: number) => Math.ceil(k / IN_CHUNK);
-  // The read, the link reads, and the deletes of the first k rows.
-  const cost = (k: number) => 1 + chunks(k) + (ended ? k : chunks(k));
+  // The read, the lock, the link reads, and the deletes of the first k rows.
+  const cost = (k: number) => 1 + (lock ? 1 : 0) + chunks(k) + (ended ? k : chunks(k));
   let k = rows.length;
   while (k > 1 && cost(k) > budget) k--;
   const take = rows.slice(0, k);
+  const first = take[0];
+  const last = take.at(-1);
+  // The row locks of the page first, by id, in one statement (ruling 36 of plan 12f).
+  if (lock && first && last)
+    await tx.lockInOrder?.("session", [
+      ...lock,
+      { field: "id", op: "gte", value: first.id },
+      { field: "id", op: "lte", value: last.id },
+    ]);
   // The unique index (sessionId, clientId) leads with sessionId, so each read is by index.
   const links = await findManyIn(
     tx,
@@ -380,15 +400,16 @@ async function endSessionPage(
  * row: a hold costs calls per user, and the page touches only the session
  * and link rows, so it waits on no user row that another flow holds.
  *
- * The cost of a page of n sessions has four parts: 1 read, ceil(n / 50)
- * link reads, the deletes, and the audit row. With no hook the deletes are
- * ceil(n / 50) statements, so the sum is 2 + 2 ceil(n / 50): 22 for 500
- * sessions, and 42 for 1000. With a `session.afterEnd` hook there is one
- * delete per session, and the sum is 2 + ceil(n / 50) + n. The calls left
- * write the logouts of the client links, 2 calls per link, and the sweep
- * logs out the rest. The work gets 48 calls for the app, 47 for a secret,
- * and 40 for a user actor, so a page with a hook ends 46, 45, or 38
- * sessions. A call fits D1 Free, and so it fits Workers Paid too.
+ * The cost of a page of n sessions has five parts: 1 read, the lock read
+ * of `lockInOrder`, ceil(n / 50) link reads, the deletes, and the audit
+ * row. With no hook the deletes are ceil(n / 50) statements, so the sum is
+ * 3 + 2 ceil(n / 50): 23 for 500 sessions, and 43 for 1000. With a
+ * `session.afterEnd` hook there is one delete per session, and the sum is
+ * 3 + ceil(n / 50) + n. D1 has no row lock and sends 1 less. The calls
+ * left write the logouts of the client links, 2 calls per link, and the
+ * sweep logs out the rest. The work gets 48 calls for the app, 47 for a
+ * secret, and 40 for a user actor, so a page with a hook ends 45, 44, or
+ * 37 sessions. A call fits D1 Free, and so it fits Workers Paid too.
  */
 export async function endAllSessions(
   config: ResolvedConfig,
@@ -399,8 +420,8 @@ export async function endAllSessions(
   const limit = input.limit ?? END_ALL_LIMIT.default;
   if (!Number.isInteger(limit) || limit < 1 || limit > END_ALL_LIMIT.max)
     return fail("invalid_body");
-  // The least page: the read, one link read, and one delete.
-  const budget = workBudget(input.actor, input.callsUsed, 3);
+  // The least page: the read, the lock, one link read, and one delete.
+  const budget = workBudget(input.actor, input.callsUsed, 4);
   if (!budget.ok) return budget;
   const drafted = auditDraft(input.actor, {
     action: "sessions_end_all",
@@ -433,6 +454,7 @@ export async function endAllSessions(
         ends.ended ?? null,
         now,
         budget.value - meter.used + 1,
+        keep,
       );
       // The row is the last write of the act, so it can hold the count.
       draft.data = { ended: page.deleted };
