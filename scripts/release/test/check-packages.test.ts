@@ -101,6 +101,13 @@ describe("check-packages", () => {
     );
   });
 
+  it("counts the root package name as a workspace name", () => {
+    expect(run("root-name").failures).toEqual([
+      "@authtempo/core is released and names the unreleased authtempo in dependencies",
+      "@authtempo/client references authtempo as ^0.0.0, not workspace:*",
+    ]);
+  });
+
   it("fails on a runtime reference of a released package to an unreleased one", () => {
     expect(run("runtime-unreleased").failures).toEqual([
       "@authtempo/cli is released and names the unreleased authtempo-example-node in optionalDependencies",
@@ -142,7 +149,9 @@ describe("check-packages", () => {
   });
 
   it("reads the real tree", () => {
-    const r = checkPackages(readInput(fileURLToPath(new URL("../../../", import.meta.url))));
+    const input = readInput(fileURLToPath(new URL("../../../", import.meta.url)));
+    expect(input.rootName).toBe("authtempo");
+    const r = checkPackages(input);
     expect(summaryLine(r)).toMatch(/^check-packages: PASS packages=\d+ released=24 /);
     expect(r.failures).toEqual([]);
   });

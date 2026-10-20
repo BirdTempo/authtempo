@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FIRST_RELEASE } from "./lib/release-facts.ts";
@@ -18,6 +18,8 @@ export interface PackagesInput {
   ignore: string[];
   /** release/unreleased.json: each package outside the group, with its reason. */
   unreleased: Record<string, unknown>;
+  /** The name of the root package.json, or null when it has none. */
+  rootName: string | null;
 }
 
 /** The dependency keys whose workspace references must be `workspace:*`. */
@@ -42,6 +44,9 @@ export function checkPackages(input: PackagesInput): Report {
   const ignore = new Set(input.ignore);
   const unreleased = new Set(Object.keys(input.unreleased));
   const names = new Set(input.packages.map((p) => p.name));
+  // pnpm links the root package as a workspace package, and readWorkspace does
+  // not read the root. Its name authtempo is free on npm, so the reference rules hold it too.
+  const refNames = new Set(input.rootName === null ? names : [...names, input.rootName]);
 
   // One version needs one fixed group (spec 33 item 1.1). A second group or a
   // linked group lets the versions of the released packages differ.
@@ -99,7 +104,7 @@ export function checkPackages(input: PackagesInput): Report {
   for (const p of released)
     for (const key of RUNTIME_KEYS)
       for (const dep of Object.keys(p.manifest[key] ?? {}))
-        if (names.has(dep) && !fixed.has(dep))
+        if (refNames.has(dep) && !fixed.has(dep))
           failures.push(`${p.name} is released and names the unreleased ${dep} in ${key}`);
 
   const versions = new Set(released.map((p) => p.manifest.version));
@@ -126,7 +131,7 @@ export function checkPackages(input: PackagesInput): Report {
   for (const p of input.packages)
     for (const key of DEPENDENCY_KEYS)
       for (const [dep, range] of Object.entries(p.manifest[key] ?? {}))
-        if ((names.has(dep) || dep.startsWith("@authtempo/")) && range !== "workspace:*")
+        if ((refNames.has(dep) || dep.startsWith("@authtempo/")) && range !== "workspace:*")
           failures.push(`${p.name} references ${dep} as ${range}, not workspace:*`);
 
   return requireCounts(
@@ -147,6 +152,10 @@ export function checkPackages(input: PackagesInput): Report {
 /** Reads the input of `checkPackages` from the workspace at `root`. */
 export function readInput(root: string): PackagesInput {
   const config = readChangesetConfig(root);
+  const rootPath = join(root, "package.json");
+  const rootName = existsSync(rootPath)
+    ? ((JSON.parse(readFileSync(rootPath, "utf8")) as { name?: string }).name ?? null)
+    : null;
   return {
     packages: readWorkspace(root),
     fixed: config.fixed[0] ?? [],
@@ -157,6 +166,7 @@ export function readInput(root: string): PackagesInput {
       string,
       unknown
     >,
+    rootName,
   };
 }
 
