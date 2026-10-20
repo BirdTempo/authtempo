@@ -57,7 +57,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | Social sign-in | `startSocial`, `startLink`, `completeSocial` |
 | Passkeys | `passkeyRegistrationOptions`, `verifyPasskeyRegistration`, `passkeyAuthenticationOptions`, `verifyPasskeyAuthentication`, `listPasskeys`, `deletePasskey`, `renamePasskey`. `renamePasskey` needs no fresh session |
 | Handoff | `startHandoff`, `continueHandoff`, `redeemHandoff` |
-| Organizations | `createOrganization`, `listOrganizations`, `updateOrganization`, `deleteOrganization`, `listMembers`, `addMember`, `updateMemberRole`, `removeMember`, `inviteMember`, `listInvitations`, `revokeInvitation`, `acceptInvitation`, `declineInvitation` |
+| Organizations | `createOrganization`, `listOrganizations`, `checkSlug`, `updateOrganization`, `deleteOrganization`, `listMembers`, `addMember`, `updateMemberRole`, `removeMember`, `inviteMember`, `listInvitations`, `revokeInvitation`, `acceptInvitation`, `declineInvitation` |
 | `api.tokens` | `create`, `list`, `revoke`, `current` |
 | `api.session` | `requireFresh(resolved)`, `reauthenticate`, `requestReauthCode`, `reauthPasskeyOptions`, `list`, `revoke`, `revokeOthers`, `refresh(token)`; present in every deployment. `refresh` slides the expiry as `POST /session/refresh` does. `api.passkeyRegistrationOptions`, `api.deletePasskey`, `api.tokens.create`, `api.totp.disableWithCode`, and `api.totp.regenerateBackupCodesWithCode` take a user and apply no fresh rule: call `requireFresh` first. [Fresh sessions](/docs/concepts/fresh-sessions/) |
 | `api.user` | `update`, `changeEmail`, `confirmEmailChange`, `verifyEmailChange`, `delete`, `confirmDelete`; present in every deployment. `verifyEmailChange` answers `not_found` with `emailOtp: false`. `delete` and `confirmDelete` answer `not_found` with `account.delete: false`. With `account.deleteConfirm` on, `delete` mails a link and answers `{ sent: true }` |
@@ -155,7 +155,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | App secrets | `SecretsApi`, `SecretsStatus`, `SecretsRewrap`, `SecretVersionCount` |
 | Operator tools | `OperatorApi`, `OperatorActor`, `OperatorAuditDraft`, `OperatorUser` |
 | JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthClientsApi`, `OAuthAccess`, `OAuthClientAccess`, `CREDENTIALS_PER_CLIENT`, `DEVICE_GRANT`, `DEVICE_START_PER_IP`, `DEVICE_VERIFY_PER_SESSION`, `DEVICE_VERIFY_PER_IP`, `DEVICE_VERIFY_PER_CODE`, `DeviceAuthorizationAnswer`, `OAuthGrantSummary`, `OAuthResult`, `ClientInput`, `ClientSummary`, `ClientFields`, `RegisteredClient`, `CLIENT_SECRET_PREFIX` |
-| Organizations | `Statements`, `RoleTable`, `PermissionInput`, `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |
+| Organizations | `Statements`, `RoleTable`, `PermissionInput`, `SlugStatus`, `SLUG_CHECK_PER_USER`, `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |
 | Captcha | `CaptchaPort`, `CaptchaPage`, `CaptchaFlow` |
 | Hooks | `OrganizationHooks`, `OrganizationHookEvent`, `SessionHooks`, `SessionDraft`, `SessionPatch`, `SessionVia`, `SessionEndReason`, `MemberVia`, `RemoveVia`, `UserHooks`, `UserCreatePatch`, `UserPatch`, `UserCreateVia`, `UserUpdateVia`, `UserVerifyVia`, `IdentityHooks`, `IdentitySummary`, `IdentityLinkVia`, `OperatorHooks` |
 

@@ -797,6 +797,15 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Answer | `{ role, permissions }`: the session's role string and its actions. A non-member gets `role: null` and `{}` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
+<h3 id="post-organizations-check-slug"><code>POST /organizations/check-slug</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The address is verified. An API token answers 401 |
+| Input | JSON `{ slug }`. The slug holds 1 to 64 characters. Another key answers `invalid_body` |
+| Answer | `{ slug, status }`: the slug after the NFKC fold to lower case, and `available`, `taken`, or `reserved`. A slug that does not fold to a valid slug answers `slug: null` and `invalid`. `available` is a hint, not a hold: the create can still answer `slug_taken` when another user takes the slug first |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
 ## API tokens
 
 These routes exist in every deployment.
