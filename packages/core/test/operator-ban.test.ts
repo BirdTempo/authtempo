@@ -493,6 +493,11 @@ describe("the ban (plan 12f Task 6)", () => {
       code: "operator_required",
       status: 403,
     });
+    expect(await api.users.unban({ ...input, actor: actor.value, userId: other.user.id })).toEqual({
+      ok: false,
+      code: "operator_required",
+      status: 403,
+    });
     expect(await f.auth.storage.findMany("operatorAudit", [])).toEqual([]);
     const secret = { kind: "secret", name: "support", scopes: ["users"] } as const;
     expect((await api.users.ban({ ...input, actor: secret, userId: other.user.id })).ok).toBe(true);
@@ -503,6 +508,15 @@ describe("the ban (plan 12f Task 6)", () => {
       code: "operator_required",
       status: 403,
     });
+    expect(await api.users.unban({ ...input, actor: keys, userId: other.user.id })).toEqual({
+      ok: false,
+      code: "operator_required",
+      status: 403,
+    });
+    // The refusals write no row: the one row is the ban by the secret.
+    expect(
+      (await f.auth.storage.findMany("operatorAudit", [])).map((r) => [r.action, r.actorId]),
+    ).toEqual([["ban", "support"]]);
   });
 
   it("ends at banUntil", async () => {
