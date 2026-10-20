@@ -13,11 +13,17 @@ A check that reads zero items fails. Read the failure count from the summary lin
 ## The checks
 
 - `src/check-packages.ts`: each workspace package has its own name and is in exactly one list. The released list is `fixed[0]` of `.changeset/config.json`, the one fixed group, and `linked` is empty. The unreleased list is `release/unreleased.json`, with one reason for each package, and the same names are in `ignore` of `.changeset/config.json`. Each released package is private on `main` and has the group version. Each reference to a workspace package, scoped or not, and each `@authtempo` reference is `workspace:*`. A released package names no unreleased package in `dependencies`, `peerDependencies`, or `optionalDependencies`.
+- `src/check-changesets.ts`: each change to a released package since the merge base with `main` has a changeset that names the package. The rules are in `.changeset/README.md`. Only a changeset that is new since the merge base counts. `changeset status` runs beside it as a note, and its exit code never decides.
+- `src/check-records.ts`: each changelog, the advisory record, and each shipped migration at the merge base with `main` is in the working tree with the same bytes. A changelog grows at the top, and the advisory record grows at the end. `RECORD_GLOBS` holds the rule of each file.
 
-Run a check from the repository root:
+Each git test makes its own repository in the temp folder (`TMPDIR`) and never reads the history of this repository.
+
+Run a check from the repository root. The `ref` is `main` when you give none:
 
 ```sh
 node scripts/release/src/check-packages.ts
+node scripts/release/src/check-changesets.ts [ref]
+node scripts/release/src/check-records.ts [ref]
 ```
 
 Run the tests with the cache off:
