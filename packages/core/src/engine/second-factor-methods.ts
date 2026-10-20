@@ -30,6 +30,7 @@ import {
   TWO_FACTOR_TOKEN_RE,
 } from "./second-factor.js";
 import { endedList, type ResolvedSession, sessionsEnded } from "./sessions.js";
+import { holdUser } from "./user-hold.js";
 import { MAILED_CODES_PER_EMAIL_DAY } from "./verification.js";
 
 /**
@@ -96,6 +97,8 @@ export async function provePassword(
  * on its delete of a held row and then reads the committed factor row, so it
  * sees the method on (Postgres READ COMMITTED). Both take the factor row
  * first and the passkey rows second, so neither waits on the other in turn.
+ * The enable holds the user row before both (user-hold.ts): the account
+ * delete takes the passkey rows before the factor row (plan 12f Task 9).
  */
 export async function enableMethod(
   config: ResolvedConfig,
@@ -111,6 +114,7 @@ export async function enableMethod(
   let added: AddedMethod;
   try {
     added = await config.storage.transaction(async (tx) => {
+      await holdUser(tx, session.user.id);
       const a = await addMethod(
         tx,
         {
@@ -200,9 +204,12 @@ export async function disableMethod(
   if (!proved.ok) return proved;
   const now = config.clock.now();
   try {
-    const removed = await config.storage.transaction((tx) =>
-      removeMethod(tx, input.user.id, input.method, now),
-    );
+    // The hold of the user row first (user-hold.ts): the account delete
+    // deletes the trusted devices before the factor row (plan 12f Task 9).
+    const removed = await config.storage.transaction(async (tx) => {
+      await holdUser(tx, input.user.id);
+      return removeMethod(tx, input.user.id, input.method, now);
+    });
     if (!removed) return fail("totp_not_enabled");
   } catch (err) {
     if (err instanceof FactorRaceError) return fail("conflict");

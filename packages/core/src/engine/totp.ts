@@ -50,6 +50,7 @@ import {
   sessionOpened,
   sessionsEnded,
 } from "./sessions.js";
+import { holdUser } from "./user-hold.js";
 import { attemptsOf, countAttempt } from "./verification.js";
 
 export type { ChallengeMethod, TwoFactorPending } from "./second-factor.js";
@@ -434,6 +435,9 @@ export async function enableTotp(
   let done: Result<{ first: boolean }>;
   try {
     done = await config.storage.transaction(async (tx): Promise<Result<{ first: boolean }>> => {
+      // The hold of the user row first (user-hold.ts): the account delete
+      // ends the sessions before it deletes the totp row (plan 12f Task 9).
+      await holdUser(tx, user.id);
       // The confirm and the replay guard in one statement, as `acceptCode`.
       const n = await tx.update(
         "totp",
@@ -548,6 +552,9 @@ export async function disableTotpWithCode(
   if (!factor || !row) return fail("totp_not_enabled");
   if (!(await proveFactor(config, factor, input.code, now))) return fail("invalid_code");
   try {
+    // No hold of the user row: the totp row is the first write here, and
+    // the account delete takes it before the trusted devices and the factor
+    // row. So neither waits on the other in turn (plan 12f Task 9).
     await config.storage.transaction(async (tx) => {
       await tx.delete("totp", [{ field: "id", op: "eq", value: row.id }]);
       await removeMethod(tx, input.user.id, "totp", now);

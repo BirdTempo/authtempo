@@ -4,6 +4,7 @@ import {
   type MailMessage,
   type StorageAdapter,
 } from "@authtempo/core";
+import { base32Decode, SoftAuthenticator, totpCode } from "@authtempo/core/testing";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
@@ -135,6 +136,7 @@ const cookieOf = (res: Response) =>
     .getSetCookie()
     .find((c) => c.startsWith("__Host-tempo_session="))
     ?.split(";")[0] ?? "";
+const tokenOf = (cookie: string) => cookie.slice("__Host-tempo_session=".length);
 
 /** A verified user with a password and a session, by a magic link and the first password. */
 async function user(w: World, email: string) {
@@ -236,6 +238,99 @@ describe("the second-factor writes beside the account delete on Postgres (plan 1
     const flow =
       w.auth.api.totp?.disable({ userId: u.userId }) ?? Promise.reject(new Error("no totp"));
     expect(await settled(flow, deleting)).toEqual({ ok: true, value: { ok: true } });
+    expect(await rowsOf(u.userId)).toEqual(NONE);
+  }, 60_000);
+
+  it("the route disable of the last method, the email method: no deadlock, and no row of the user stays", async () => {
+    const w = world();
+    const u = await emailWithDevice(w, "cy@example.com");
+    const deleting = w.deleteAfter("secondFactor", "delete", u.token);
+    const flow = w
+      .post(
+        "/second-factor/disable",
+        { method: "email", password: PASSWORD },
+        `__Host-tempo_session=${u.token}`,
+      )
+      .then((res) => res.status);
+    expect(await settled(flow, deleting)).toBe(200);
+    expect(await rowsOf(u.userId)).toEqual(NONE);
+  }, 60_000);
+
+  it("the disable of the last method, TOTP, with a backup code: no deadlock, and no row of the user stays", async () => {
+    const w = world();
+    const u = await user(w, "dee@example.com");
+    const set = await w.post("/totp/setup", { password: PASSWORD }, u.cookie);
+    const { secret, backupCodes } = (await set.json()) as { secret: string; backupCodes: string[] };
+    const code = await totpCode(base32Decode(secret), new Date());
+    expect((await w.post("/totp/enable", { code }, u.cookie)).status).toBe(200);
+    // A sign-in that trusts the device, with the first backup code.
+    const v = await w.auth.api.totp?.verify({
+      challenge: await challenge(w, u.email),
+      backupCode: backupCodes[0],
+      trustDevice: true,
+      ip: null,
+    });
+    if (!v?.ok || !v.value.trustDevice) throw new Error("no trusted device");
+    const session = await w.auth.api.getSession(v.value.token);
+    if (!session) throw new Error("no session");
+    const deleting = w.deleteAfter("secondFactor", "delete", v.value.token);
+    const flow =
+      w.auth.api.totp?.disableWithCode({ user: session.user, code: backupCodes[1] ?? "" }) ??
+      Promise.reject(new Error("no totp"));
+    expect(await settled(flow, deleting)).toEqual({ ok: true, value: { ok: true } });
+    expect(await rowsOf(u.userId)).toEqual(NONE);
+  }, 60_000);
+
+  it("the first TOTP enable of a user with a second session: no deadlock, and no row of the user stays", async () => {
+    const w = world();
+    const u = await user(w, "eve@example.com");
+    // A second session: the first enable ends it, and the delete ends it too.
+    await w.post("/magic-link/request", { email: u.email });
+    expect(cookieOf(await w.post("/magic-link/verify", { token: w.lastToken(u.email) }))).not.toBe(
+      "",
+    );
+    const set = await w.post("/totp/setup", { password: PASSWORD }, u.cookie);
+    const { secret } = (await set.json()) as { secret: string };
+    const session = await w.auth.api.getSession(tokenOf(u.cookie));
+    if (!session) throw new Error("no session");
+    // The enable confirms the setup row first: then the delete starts.
+    const deleting = w.deleteAfter("totp", "update", tokenOf(u.cookie));
+    const flow =
+      w.auth.api.totp?.enable({
+        session,
+        code: await totpCode(base32Decode(secret), new Date()),
+      }) ?? Promise.reject(new Error("no totp"));
+    const enabled = (await settled(flow, deleting)) as { ok: boolean };
+    expect(enabled.ok).toBe(true);
+    expect(await rowsOf(u.userId)).toEqual(NONE);
+  }, 60_000);
+
+  it("the passkey enable as a later method: no deadlock, and no row of the user stays", async () => {
+    const w = world();
+    const u = await user(w, "fay@example.com");
+    const soft = await SoftAuthenticator.create({ rpID: "example.com", origin: APP });
+    const options = (await (await w.post("/passkey/register/options", {}, u.cookie)).json()) as {
+      challenge: string;
+    };
+    const registered = await w.post(
+      "/passkey/register/verify",
+      { response: await soft.register(options.challenge, new TextEncoder().encode(u.userId)) },
+      u.cookie,
+    );
+    expect(registered.status).toBe(200);
+    expect(
+      (await w.post("/second-factor/email/enable", { password: PASSWORD }, u.cookie)).status,
+    ).toBe(200);
+    const signIn = (await (await w.post("/passkey/authenticate/options", {})).json()) as {
+      challenge: string;
+    };
+    const response = await soft.authenticate(signIn.challenge);
+    // The later enable updates the factor row first: then the delete starts.
+    const deleting = w.deleteAfter("secondFactor", "update", tokenOf(u.cookie));
+    const flow = w
+      .post("/second-factor/passkey/enable", { password: PASSWORD, response }, u.cookie)
+      .then((res) => res.status);
+    expect(await settled(flow, deleting)).toBe(200);
     expect(await rowsOf(u.userId)).toEqual(NONE);
   }, 60_000);
 });
