@@ -37,7 +37,7 @@ import {
  * Tokens that an organization owns (plan 12k, spec 29 items 14 to 16). A
  * `to_` token acts for its organization with its own fixed set, never as a
  * user. It stays when its creator leaves or deletes the account (owner
- * decision 2): the row has `createdById`, not `userId`, so the account delete
+ * decision 2). The row has `createdById`, not `userId`, so the account delete
  * of plan 12a leaves it. Only a person with a session manages one, through
  * the rights of `apiToken`; a creator has no right of their own. The window
  * and the quota are the ones of a user token (`token-use.ts`).
@@ -154,9 +154,9 @@ async function creatorIn(config: ResolvedConfig, row: OrganizationTokenRow): Pro
  * the server; the row holds its SHA-256. The route checks the fresh rule; an
  * in-process call is the app's own act (ruling 8 of plan 12k).
  *
- * The cap is a limit that the product sells, so the count and the create run
+ * The cap is a limit that the product sells. So the count and the create run
  * in one transaction after a lock of the organization row (ruling 27 of plan
- * 12k): an update by id that writes `createdAt` to its own value. On Postgres
+ * 12k). The lock is an update by id that writes `createdAt` to its own value. On Postgres
  * a second create waits for the first commit and counts again. D1 runs no
  * isolated transaction, so there two creates at once can pass at 49; the
  * per-user limit bounds that overshoot.
@@ -166,11 +166,11 @@ async function creatorIn(config: ResolvedConfig, row: OrganizationTokenRow): Pro
  * creator's member row again through `tx`. A gone row, or a role without the
  * right or the set, answers `forbidden_rank` as `standing` does (ruling 32).
  *
- * Storage calls: three findOne of `standing`; in the transaction one update
- * (the lock), one findOne of the member row, the role read of `effectiveIn`
- * (none for a role of the config), one delete of the expired rows, one
- * findMany (the count), and one create. One limiter call, before every
- * storage call.
+ * Storage calls: three findOne of `standing`, then the transaction. In it run
+ * one update (the lock) and one findOne of the member row. Then the role read
+ * of `effectiveIn` runs, none for a role of the config. Last run one delete of
+ * the expired rows, one findMany (the count), and one create. One limiter
+ * call runs before every storage call.
  */
 export async function createOrganizationToken(
   config: ResolvedConfig,

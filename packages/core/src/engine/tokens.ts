@@ -463,9 +463,9 @@ export function narrowFormed(config: ResolvedConfig, input: TokenNarrow): boolea
 
 /**
  * The write of a narrow-only change of `row` (spec 29 item 11), or
- * `invalid_body` for a change that widens: a set over a smaller one, null
- * over a set, a later expiry or null over one, a dropped or raised quota, or a
- * changed refill. The one copy of the rule: both token models call it.
+ * `invalid_body` for a change that widens. A set over a smaller one widens,
+ * and so does null over a set. A later expiry, or null over an expiry, widens.
+ * A dropped quota, a raised quota, and a changed refill also widen. The one copy of the rule: both token models call it.
  */
 export function narrowPatch(row: NarrowRow, input: TokenNarrow): Result<TokenPatch> {
   const data: TokenPatch = {};

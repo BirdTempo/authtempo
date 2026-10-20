@@ -930,11 +930,11 @@ a person (plan 12k). It acts with its own fixed `permissions`, never with
 the role of its creator, and it stays when the creator leaves or deletes
 the account. `auth.caller` answers it as `kind: "organizationToken"` with
 `organization` and no `user`. `auth.hasPermission` reads its set in its own
-organization only. A token never manages: each route above but
+organization only. A token never manages. Each route above but
 `GET /organizations/tokens/current` takes a session, so a token bearer
 answers 401. Each organization holds at most 50 live tokens. Pass
 `revokeTokens: true` to the member removal to delete the tokens that the
-person made there, in the same write; that needs `apiToken:revoke` too.
+person made there, in the same write. That needs `apiToken:revoke` too.
 
 **Platform role.** Set `platformOrganization` and `platformRole` to keep one
 role for staff. Core accepts that role in the platform organization only.

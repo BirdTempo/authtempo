@@ -848,7 +848,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 
 | Field | Value |
 | --- | --- |
-| Needs | A to_ bearer token. No other credential |
+| Needs | A `to_` bearer token. No other credential |
 | Input | None |
 | Answer | `{ organization, apiToken }`, with no user: the token acts for the organization. Each answer spends one call of the token's quota |
 | Limit | `token-use:to:<id>`, the token's own window, when it has one |

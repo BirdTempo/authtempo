@@ -935,8 +935,8 @@ const REVOKE_TOKENS: Statements = { apiToken: ["revoke"] };
  * Removes a member, or the caller (a leave). The organization tokens of the
  * person stay (owner decision 2 of plan 12k). With `revokeTokens: true` the
  * rows of this organization with the person as `createdById` go in the same
- * transaction as the member row, after the organization lock of the token
- * create. That needs `apiToken:revoke` as well, also for a leave, checked
+ * transaction as the member row. That transaction first takes the
+ * organization lock of the token create. That needs `apiToken:revoke` as well, also for a leave, checked
  * before any write. The route also checks the fresh
  * rule then; an in-process call is the app's own act (ruling 8 of plan 12k).
  */
@@ -990,8 +990,8 @@ export async function removeMember(
   // The role from the read is in the where: if another request changed it since, zero rows match.
   // The active organization is a choice, not a right; it goes with the membership in the same write.
   const drop = async (storage: StorageAdapter) => {
-    // The lock of the token create (ruling 32 of plan 12k): a create that holds it commits first,
-    // and the token delete below sees its row. No user hold runs here, so the lock is the first
+    // The lock of the token create (ruling 32 of plan 12k). A create that holds it commits
+    // first, and the token delete below sees its row. No user hold runs here, so the lock is the first
     // write, in the order of user-hold.ts. When the organization is gone, the zero answers conflict.
     if (revokeTokens && !(await lockOrganization(storage, s.value.organization))) return 0;
     await runBefore("organization.beforeRemoveMember", hooks.beforeRemoveMember, event);
