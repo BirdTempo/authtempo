@@ -6,6 +6,7 @@ import {
   requireOperatorUser,
   requireScope,
 } from "../src/engine/operator/guards.js";
+import { addMember } from "../src/engine/organizations.js";
 import { passwordSignUp } from "../src/engine/password.js";
 import { constantTimeEqual } from "../src/primitives/crypto.js";
 import { BASE_URL } from "./helpers.js";
@@ -16,7 +17,7 @@ import {
   operatorHeader,
   sessionOf,
 } from "./operator-helpers.js";
-import { PASSWORD } from "./totp-helpers.js";
+import { enrolled, PASSWORD } from "./totp-helpers.js";
 
 // A pass-through spy: the real compare runs, and the test counts the calls.
 vi.mock("../src/primitives/crypto.js", async (importOriginal) => {
@@ -100,6 +101,20 @@ describe("the operator user guard (plan 12f)", () => {
       code: "rate_limited",
       status: 429,
     });
+    // The key holds the user id: a second platform operator keeps a full window.
+    const second = await enrolled(f.auth, "op2@example.com");
+    const added = await addMember(f.auth.config, {
+      user: f.root,
+      organizationId: f.platformOrg.id,
+      userId: second.user.id,
+      role: "operator",
+    });
+    if (!added.ok) throw new Error(added.code);
+    const r = await requireOperatorUser(
+      f.auth.config,
+      await sessionOf(f.auth, second.session.token),
+    );
+    expect(r.ok && r.value.user.id).toBe(second.user.id);
   });
 });
 
