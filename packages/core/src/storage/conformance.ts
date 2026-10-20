@@ -1468,22 +1468,17 @@ export function runAdapterConformance(
       });
 
       it("joins with the other clauses and the sort", async () => {
-        // ASCII rows only: the test server's collation sorts them in byte order, as SQLite does.
+        // The sort is on id: p1, p3, and p4 differ in one digit, so no collation changes the
+        // order. Punctuation in an email sorts differently on glibc, ICU, and byte order.
         const found = await db.findMany(
           "user",
           [
             { field: "email", op: "startsWith", value: "a" },
             { field: "email", op: "ne", value: "abc@example.com" },
           ],
-          {
-            sort: [
-              { field: "email", dir: "asc" },
-              { field: "id", dir: "asc" },
-            ],
-            limit: 2,
-          },
+          { sort: [{ field: "id", dir: "desc" }], limit: 2 },
         );
-        expect(found.map((r) => r.email)).toEqual(["a%b@example.com", "a\\d@example.com"]);
+        expect(found.map((r) => r.id)).toEqual(["p4", "p3"]);
       });
 
       it("never matches null", async () => {
