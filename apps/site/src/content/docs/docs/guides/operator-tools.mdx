@@ -1,0 +1,188 @@
+---
+title: Run the operator tools
+description: Turn on the user, session, and audit tools of an operator, give each job its own secret, and know what each act ends.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
+  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 14"
+  - packages/core/README.md "Operator tools"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import sample from "../../../../../samples/guides/operator-tools.ts?raw";
+import test from "../../../../../samples/guides/operator-tools.test.ts?raw";
+
+**For:** an operator or an app developer who does support work on the users of a deployment.
+
+**What it does:** this guide turns on the operator tools of core. Each act checks its actor, and writes its change and one audit row in one transaction.
+
+## Before you start
+
+- A working setup from a [getting started tutorial](/docs/start/).
+- For a platform operator: `organizations` with `platformOrganization` and `platformRole`. [Organizations](/docs/reference/config/#organizations) lists the keys.
+- An operator secret for each job, from [`authtempo secret --operator`](/docs/reference/cli/secret/).
+
+## Steps
+
+1. Make one operator secret for each job with `authtempo secret --operator`.
+2. Put the SHA-256 of each secret in `operator.secrets`, with the scopes of its job only.
+3. Set `operator.users: true`. Each tool is off by default.
+4. Send each audit row to a separate system from `hooks.operator.afterAction`.
+5. Call `auth.api.operator` from your admin route, with an app actor.
+
+<Code code={sample} lang="ts" title="The config and an admin route" />
+
+<Code code={test} lang="ts" title="The operator tools as a test" />
+
+## The actors
+
+Three actors can act. Each audit row names its actor, and never holds a secret.
+
+| Actor | Who acts | The name in the audit row |
+| --- | --- | --- |
+| `secret` | A script or the CLI, with a named operator secret | The `name` of the entry in `operator.secrets` |
+| `user` | A platform operator: a user who holds `organizations.platformRole` in the platform organization | The user id |
+| `app` | Your own code in process, as `{ kind: "app", name }` | The name: 1 to 64 characters of `[a-z0-9_.-]` |
+
+- A secret needs the scope of the route: `users`, `sessions`, or `audit`. With no such scope, the route answers `operator_required`.
+- The scopes `keys` and `secrets` open the key rotation and the secret routes. The old `operator.secretHash` is one secret named `default` with these two scopes only.
+- A platform operator passes the operator user guard at each request. The guard checks five steps, in this order:
+  - The session is not an impersonation session.
+  - The user holds the platform role, and the session is not older than the last write of that role.
+  - The address is verified.
+  - A second factor has a method.
+  - The session is fresh.
+- Each failed step answers one code, `operator_required`. So a caller learns nothing about the step that failed.
+- A user actor never acts on their own user (`operator_self`) or on another platform operator (`operator_required`). A secret and the app can act on a platform operator.
+- Core trusts an app actor, and checks only its name. Your app checks its own staff before the call.
+- An in-process call counts on no limiter. Your admin route needs a limit of its own.
+- A secret never starts an impersonation. Only a platform operator starts one.
+
+## The routes and the API
+
+The routes are under `<basePath>/operator/`. [Routes](/docs/reference/routes/#operator-user-tools) lists each one. `auth.api.operator` holds the same acts in process, with the actor as an input. [The in-process API](/docs/reference/api/) lists each entry. [The CLI](/docs/reference/cli/) wraps the routes in `authtempo users`, `authtempo sessions`, `authtempo audit`, and `authtempo create-admin`.
+
+- A request with an operator secret and a session answers 401 `unauthorized`: it has no single actor.
+- A route of a tool that is off answers 404, the answer of a path that does not exist. An in-process call answers `not_found`.
+- Each answer has `cache-control: no-store`.
+- Each write reads a JSON body only. Each write takes a `reason` of 1 to 500 characters with no control character.
+- A secret call counts on `operator-users:ip:<ip>` before the compare, 600 an hour. A secret that matches also counts on `operator-users:secret:<name>`, 600 an hour from any address.
+- A platform operator counts on `operator:user:<userId>`, 600 an hour. [Limits](/docs/reference/limits/) lists each key.
+
+## The ban
+
+- `users.ban` writes the ban in one transaction. The same transaction ends every challenge, handoff code, and OAuth refresh token and code of the user. It ends a page of the sessions too.
+- The whole call fits 50 storage calls, the limit of one D1 Free run. The sessions that do not fit stay, with one pending-end row. The sweep ends them with `session.afterEnd` and the reason `banned`.
+- Until the sweep ends a left session, every door refuses it: the session read, the session JWT mint, and `api.jwt.sessionLive`.
+- A test on D1 banned a user with 60 sessions and a `session.afterEnd` hook. A secret ban ended 31 sessions in 50 queries. Two sweeps of 48 and 22 queries ended the other 29.
+- A sign-in of a banned user answers `account_banned` only after the credential check. So only a person who proved the credential learns of the ban. A wrong password answers `invalid_credentials`, as for any user.
+- The mail flows answer a banned user as any user.
+- An API token stays. Core refuses it while the ban holds, and it works again after an unban.
+- The unban restores no session. A session, a refresh token, or an access token from before the end of the ban stays refused.
+- A ban of a platform operator also ends each impersonation session that the operator opened.
+- A session JWT and an OAuth access token live to their `exp`. [Ban a user](/docs/operations/ban-a-user/) gives the check of a resource server.
+- An answer with `familyEndFailed: true` means that the ban committed, and the end of the OAuth families after the commit failed. Call `sessions.endUser` for the user: it reads the refresh tokens again, and ends each family.
+
+## The sessions
+
+- `sessions.endUser` ends the sessions, challenges, handoff codes, and OAuth refresh tokens and codes of one user. One call ends one page. Call again while `more` is true.
+- `sessions.endAll` ends up to `limit` sessions of all users in one call: 500 by default, at most 1000. It keeps the session of a user actor. Call again while `more` is true.
+- ASVS 5.0.0 7.4.5 asks for both: "Verify that application administrators are able to terminate active sessions for an individual user or for all users."
+- `sessions.endAll` ends the sessions only. The OAuth refresh tokens and the API tokens of every user stay. No tool ends every grant of every user after a breach.
+- Each call fits 50 storage calls with the calls before it. With a `session.afterEnd` hook, one page ends 45 sessions for the app, 43 for a secret, and 36 for a user actor.
+- No act sends a back-channel sign-out message in its call. The messages are due at once, and [the sweep](/docs/guides/sweep/) sends them.
+
+## The platform role
+
+- `platformRole.grant` adds the role to a user with a verified address and no active ban. `platformRole.revoke` takes it away.
+- A revoke ends the access of the user as a ban does: a page of the sessions in the act, the rest at the sweep. A second revoke ends one more page. Until then each operator check refuses the left sessions.
+- A revoke that leaves the platform organization with no owner answers `last_owner`.
+- A session from before the last write of the role row holds no operator power. So after a grant or a re-grant, the operator signs in again.
+- `createAdmin` makes the first operator. [The first operator](/docs/operations/first-operator/) gives the steps.
+
+## The second factor
+
+- `secondFactor.disable` turns the whole second factor of a user off. It takes the proof of an identity check, `{ method, reference, checkedAt }`.
+- ASVS 5.0.0 6.4.4: "Verify that if a multi-factor authentication factor is lost, evidence of identity proofing is performed at the same level as during enrollment."
+- Core checks no proof. It keeps the method, the reference, and the time in the audit row. Your controls are that row and `hooks.operator.beforeAction`, which can check the reference in your case system.
+- The method `knowledge` alone is below the level of an enrollment. Answers about an account prove less than the factor did. Use `document`, `in_person`, or `video`.
+- Before the act, look for a recent change of the address. A person who took the account can change the address, and then ask for a recovery. `user.afterUpdate` with `via: "email_change"` sees each change.
+- `checkedAt` is at most 7 days old, and not later than the clock of the deployment.
+- The act ends no session. The user gets the notice `factor_disabled` unless `account.notices` is false. The notice holds no IP of the operator.
+
+## The impersonation
+
+- `operator.impersonation` turns it on, and needs `operator.users` and `organizations.platformRole`. `ttlMinutes` is 5 to 240, and 60 by default.
+- A platform operator starts it with `POST /operator/impersonate`, from their own fresh session with a second factor. Each operator gets 20 starts an hour.
+- A target that is the operator, a platform operator, banned, or absent answers `impersonation_refused`. It is one code for the four cases.
+- The new session has a fixed expiry. No refresh moves it, and it has no fresh time.
+- The operator's own token goes into the actor cookie: the session cookie name with `_actor` at its end. `POST /operator/impersonate/stop` ends the session and gives the operator's token back.
+- A session JWT of the session holds `act: { sub: <operator id> }` (RFC 8693 section 4.1). Its `exp` is no later than the expiry of the session.
+- The user's session list marks the session with `impersonation: true`, with no operator id.
+- The user gets the notice `impersonation_started` at each start. `operator.impersonation.notice: false` turns it off, and so does `account.notices: false`. The notice holds no IP of the operator.
+- When the operator loses the platform role, each impersonation session of the operator ends. A ban, a revoke, a removal, a leave, a role change, and an account delete of the operator each count.
+
+An impersonation session can never reach the routes of `IMPERSONATION_REFUSED`. Each answers 403 `impersonation_session` before its handler:
+
+- each operator route but the stop;
+- the sign-out: the operator stops the session instead;
+- the re-authentication, which would make the session fresh;
+- each change of a way in: the password, a passkey, the address, an unlink, a social link, a new API token, and the account delete;
+- each second-factor route;
+- the handoff start and the handoff continue;
+- the OAuth authorize, sign-in, device approval, grant revoke, and end-session routes;
+- the organization delete, and the add, the role change, the removal, and the invitation of a member.
+
+## The audit table
+
+- Each act writes one row of `operatorAudit` (table `ta_operator_audit`), as the last write of its transaction. The act commits with its row, or neither commits.
+- A row holds `actorKind`, `actorId`, `action`, `targetUserId`, `reason`, `data`, `ip`, `userAgent`, and the time. `ip` and `userAgent` are the actor's, never the target's.
+- An impersonation start and its stop each write a row. An expiry writes none. Each other end of an impersonation session writes a stop row, with its cause in `data`.
+- `afterAction` runs for these stop rows too, after the commit of the flow. `beforeAction` does not run for them.
+- Core never updates or deletes a row, and the sweep does not read the table. A person with write access to the database can still change a row.
+- ASVS 5.0.0 16.4.3: "Verify that logs are securely transmitted to a logically separate system for analysis, detection, alerting, and escalation." `hooks.operator.afterAction` is that path.
+- `afterAction` runs once per row after the commit. A throw writes one log line, and the act stays.
+- On D1, core undoes a failed act with an undo log. When the Worker stops inside the act, the undo cannot run. So an act can stay with no row.
+- The account delete keeps the rows. A kept row holds the user id, the operator's reason, and `data`, such as the reference of a factor proof.
+- The table has no address column. A row holds an IP of a deleted user only when that user was a platform operator who acted.
+- Core has no retention rule for the table. Your app owns it: decide how long you keep the rows, and delete old rows with your own database job.
+
+## The cost of a prefix search
+
+`users.search` takes one key: `email`, `id`, or `emailPrefix`. A prefix has 3 to 254 characters, and matches with case and with no wildcard. It compiles to `substr(<column>, 1, <n>) = <prefix>`, and no index serves that. So a prefix search reads the whole user table.
+
+The measurement of 2026-10-20 at 03:00 UTC: one search for a prefix that no address has, on a table of 10 000 users. The load averages of the machine were 4.98, 7.68, and 8.85.
+
+| Engine | Plan | Rows read |
+| --- | --- | --- |
+| D1 in Miniflare 5.20261006.0-alpha, in memory | `SCAN ta_user` | 10 000 (`meta.rows_read`) |
+| Postgres 17 (`postgres:17-alpine` in Docker) | `Seq Scan`, 0.386 ms | 10 000, all removed by the filter |
+
+- `limit` bounds the rows that come back, not the rows read.
+- The limits per IP, per secret, and per operator bound the scans an hour. An in-process call counts on no limiter.
+
+## If it fails
+
+- [`not_found`](/docs/reference/errors/#not_found): the tool is off, or no user has the id.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): no credential, a wrong secret, or a secret beside a session.
+- [`operator_required`](/docs/reference/errors/#operator_required): the secret lacks the scope, or the session fails a step of the guard.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): a limit of the hour is spent.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): a body that is not JSON, a bad reason, a bad app name, a bad proof, or a date out of range.
+- [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): a session caller posted from an origin outside `trustedOrigins`.
+- [`operator_self`](/docs/reference/errors/#operator_self): a platform operator acted on their own user.
+- [`account_banned`](/docs/reference/errors/#account_banned): the target of a grant or of `createAdmin` is banned.
+- [`email_unverified`](/docs/reference/errors/#email_unverified): the target of a grant has no verified address.
+- [`last_owner`](/docs/reference/errors/#last_owner): the revoke would leave the platform organization with no owner.
+- [`member_limit`](/docs/reference/errors/#member_limit): the platform organization holds its most members.
+- [`totp_not_enabled`](/docs/reference/errors/#totp_not_enabled): the user has no second factor to turn off.
+- [`impersonation_refused`](/docs/reference/errors/#impersonation_refused): the target is the operator, a platform operator, banned, or absent.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): an impersonation session called a refused route.
+- [`conflict`](/docs/reference/errors/#conflict): another write changed the row at the same time. Try again.
+- [`hook_refused`](/docs/reference/errors/#hook_refused): `hooks.operator.beforeAction` or another before hook refused the act.
+- [`hook_failed`](/docs/reference/errors/#hook_failed): a before hook threw another error.
+
+## Next
+
+- [The first operator](/docs/operations/first-operator/)
+- [Ban a user](/docs/operations/ban-a-user/)
+- [Run your code at a flow point (hooks)](/docs/guides/hooks/)

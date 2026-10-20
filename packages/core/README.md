@@ -1106,7 +1106,7 @@ Plan 12f gives the operator of a deployment the support tools of day one. `opera
 - The routes under `<basePath>/operator/` are in the table above. `POST users/create-admin` takes a secret only.
 - A request with an operator secret and a session answers 401. A route of a tool that is off answers 404. With `operator.users` and no secret entry, the four secret routes of plans 11c and 11c2 answer 404 too.
 - The limits: every secret call counts on `operator-users:ip:<ip>`, 600 per hour, before the secret compare. A secret that matches also counts on `operator-users:secret:<name>`, 600 per hour from any address. A platform operator counts on `operator:user:<userId>`, 600 per hour.
-- `auth.api.operator` holds the same tools in process, with the actor as an input. Its entries are `users`, `platformRole`, `secondFactor`, `createAdmin`, `sessions`, and `audit`.
+- `auth.api.operator` holds the same tools in process, with the actor as an input. Its entries are `users`, `platformRole`, `secondFactor`, `createAdmin`, `sessions`, `audit`, `impersonate`, and `stopImpersonating`.
 - The audit table `ta_operator_audit` is append-only: core never updates or deletes a row. `hooks.operator.afterAction` sends each row to a separate system.
 
 ## Hooks
@@ -1176,9 +1176,11 @@ const auth = createAuth({
   the user points below).
 - Organization points: `beforeCreate`, `afterCreate`, `beforeUpdate`,
   `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeAddMember` and
-  `afterAddMember` (`via`: `create` for the creator's owner row, `add`, or
-  `invitation`), `beforeUpdateMemberRole`, `afterUpdateMemberRole`,
-  `beforeRemoveMember` and `afterRemoveMember` (`via`: `remove` or `leave`),
+  `afterAddMember` (`via`: `create` for the creator's owner row, `add`,
+  `invitation`, or `operator` for a grant of the platform role and
+  `createAdmin` since plan 12f), `beforeUpdateMemberRole`, `afterUpdateMemberRole`,
+  `beforeRemoveMember` and `afterRemoveMember` (`via`: `remove`, `leave`, or
+  `operator` for a revoke of the platform role),
   `beforeInvite`, `afterInvite`, `afterAcceptInvitation`,
   `afterDeclineInvitation` (`user` is null when the decline carried no
   session), and `afterRevokeInvitation`. An accept runs `beforeAddMember`
@@ -1187,13 +1189,15 @@ const auth = createAuth({
   runs `beforeUpdateMemberRole` and `afterUpdateMemberRole` too, with the
   inviter as `by` (the accepting user when the inviter's user row is
   gone). A refusal keeps the role and the invitation pending. A delete
-  runs no member hook for the rows it removes.
+  runs no member hook for the rows it removes. In the six member points, `by`
+  is null for an act of an operator secret or of the app (plan 12f).
 - Session points: `beforeCreate` and `afterCreate` (`via`: `password`,
-  `magic_link`, `social`, `passkey`, `handoff`, or `email_otp`; a reset by
-  code is `password`), and `afterEnd`
+  `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, or
+  `impersonation` since plan 12f; a reset by code is `password`), and `afterEnd`
   (`reason`: `sign_out`, `password_reset`, `password_change`, `claim`,
   `expired`, `two_factor`, `revoked`, `email_change`, or `account_deleted` since plan 12a, or
-  `oidc_logout` since plan 12e), once per ended
+  `oidc_logout` since plan 12e, or `banned`, `operator`, or
+  `impersonation_end` since plan 12f), once per ended
   row. `sweepExpired` deletes expired rows in bulk and fires no hook for them, so
   `expired` fires only when a request presents the token after its expiry. A claim ends a claimant's sessions with
   `claim` in every flow that proves the address: the magic link, the
@@ -1202,8 +1206,9 @@ const auth = createAuth({
 - Plan 9f adds the end reason `two_factor`: the enable of a second factor ends every other session of the user. A session that a challenge opens has `via: "password"`.
 - User points (plan 12a): `beforeCreate`, `afterCreate`, `beforeUpdate`,
   `afterUpdate`, `beforeDelete`, and `afterDelete`. The `via` of a create is
-  the sign-in's `via`, or `password_reset` for a reset that creates the
-  user. The `via` of an update is `profile` or `email_change`, and `patch`
+  the sign-in's `via`, `password_reset` for a reset that creates the
+  user, or `operator` for `createAdmin` (plan 12f). The `via` of an update
+  is `profile`, `email_change`, `ban`, or `unban`, and `patch`
   holds the fields the flow writes. `beforeDelete` gets the ids of the
   organizations that go with the account. The account delete runs
   `beforeDelete` and `afterDelete`, and no member or identity hook for the
@@ -1229,6 +1234,12 @@ const auth = createAuth({
   a flow creates verified fires `beforeCreate` and `afterCreate`, not these
   points. The change of address fires `beforeUpdate` and `afterUpdate`. A
   verify is not a change of a credential, so it sends no notice mail.
+- Operator points (plan 12f): `hooks.operator.beforeAction` and
+  `afterAction`. They need `operator.users`. `beforeAction` gets the audit
+  row with no id, before the act's transaction, and a refusal answers
+  `hook_refused` with no write. `afterAction` gets each stored row once
+  after the commit. It also gets each `impersonation_stop` row that another
+  flow writes, with no `beforeAction`.
 - Identity points (plan 12a): `beforeLink`, `afterLink`, `beforeUnlink`,
   and `afterUnlink`. The `via` of a link is `sign_in` or `link`. `sign_in`
   is a social sign-in that creates a user or links a verified equal

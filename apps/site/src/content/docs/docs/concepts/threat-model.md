@@ -11,6 +11,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 22
   - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 12"
   - docs/superpowers/plans/2026-10-14-12b-security-hardening.md "Task 13"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
 ---
 
 **For:** a security reviewer, or a developer who must explain the risks of authtempo to one.
@@ -38,6 +39,8 @@ sources:
 | A claimant | An account that they made with an address that they do not own | The account of the real owner, when the owner proves the address later. |
 | A hostile page | A page in the person's browser | A request that the person did not mean, or a code sent to another origin. |
 | A reader of a database copy | A copy of the tables | The tokens, the codes, or the secrets in the rows. |
+| A thief of an operator secret | One named operator secret | The users that the scopes of the secret reach. |
+| A thief of an operator session | A session of a platform operator | An impersonation, or an act on many users. |
 
 ## The controls
 
@@ -61,6 +64,11 @@ sources:
 - **Fetch Metadata.** A page of another site cannot post a form to core: the browser's `Sec-Fetch-Site` header must say the post came from the API's own origin.
 - **No provider redirect.** Core follows no redirect on a provider call. A provider endpoint cannot steer a request to an internal address.
 - **No secrets in logs.** A log line holds an event name and ids. It never holds a token, a code, a cookie, an address, or an error message.
+- **Operator acts with a record.** Each operator act checks its actor, and writes its change and an audit row in one transaction. A named secret holds the scopes of its job only. [Run the operator tools](/docs/guides/operator-tools/) tells how.
+- **The operator user guard.** A platform operator acts only from a session that is no impersonation session. The user needs the platform role, a verified address, and a second factor, and the session needs a fresh time. Each failed step answers one code.
+- **A ban at every door.** A ban ends the sessions, challenges, handoff codes, and OAuth refresh tokens and codes in its transaction. A session that the call leaves gets refused at each door until the sweep ends it.
+- **A bounded impersonation.** An impersonation session can never reach a route of `IMPERSONATION_REFUSED`. That list holds each operator act, the re-authentication, each change of a way in, each second-factor route, the handoff, and the OAuth grant routes.
+- **An impersonation that the user sees.** The session ends at a fixed time of 5 to 240 minutes, and no refresh moves it. Its session JWT holds `act` with the operator's id. The user's session list marks it, and the user gets a notice mail at each start.
 
 ## The odds
 
@@ -82,6 +90,14 @@ An email code of 8 digits divides each figure of its row by 100.
 - A person who lost every method and every backup code needs the operator. [Second factor recovery](/docs/operations/second-factor-recovery/) gives the steps. The operator's check of who the person is must reach the level of the enrollment. A weaker check is an easier path past the factor than the factor itself.
 - A person with the password and a session turns the passkey and the email method off with the password alone. TOTP turns off only with a code.
 - A session JWT and an OAuth access token live to their `exp`. A sign-out does not end them.
+- A ban does not end them either. A session JWT lives up to 15 minutes after a ban by default, and at most 60 with `jwtMint.ttlMinutes`. A resource server that checks the signature alone accepts it. [Ban a user](/docs/operations/ban-a-user/) gives the checks.
+- After `sessions.endAll`, the OAuth refresh tokens and the API tokens of every user stay. No tool ends every grant of every user after a breach.
+- An impersonation session acts as the user on each route that it can reach, until its fixed end. The app can turn the notice off with `operator.impersonation.notice: false` or `account.notices: false`.
+- Core checks no proof of a factor disable. The audit row and `hooks.operator.beforeAction` are the controls.
+- Core trusts an app actor. A hole in the app's admin route acts with every scope, and an in-process call counts on no limiter.
+- A person with write access to the database can change an audit row. On D1 an act can stay with no row when the Worker stops inside it. `hooks.operator.afterAction` sends each row to a separate system.
+- The reason of an audit row can hold U+0085 and U+202E: the rule refuses only C0 control characters and DEL. U+202E turns the order of the text after it, so show a reason as plain data.
+- The account delete keeps the audit rows of the user. Core has no retention rule for them, so the app sets one.
 - A legacy password hash verifies slower than PBKDF2. The response time shows an address that is not yet migrated.
 - Off Workers, a caller can set `cf-connecting-ip`. The app must pass `clientIp`, or every per-IP limit fails open.
 - A uniform sign-up of a new address writes rows, and one of a known address does not. The time of the answer can differ by that work, so core does not claim ASVS 5.0.0 6.3.8 in full.

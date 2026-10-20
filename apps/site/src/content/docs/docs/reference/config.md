@@ -251,7 +251,7 @@ Another key of `oauth` is refused.
 
 ## Operator
 
-Another key of `operator` is refused. Set `operator.secretHash` or `operator.secrets`, not both. With `operator.users` and `organizations.platformRole`, you can set neither: only platform operators then use the tools, and each secret route answers 401. Each tool is off by default, so an upgrade opens no new route and widens no secret. A presented secret is compared against every entry, also after a match.
+Another key of `operator` is refused. Set `operator.secretHash` or `operator.secrets`, not both. With `operator.users` and `organizations.platformRole`, you can set neither. Only platform operators then use the tools, and each secret route answers 404 as a tool that is off. Each tool is off by default, so an upgrade opens no new route and widens no secret. A presented secret is compared against every entry, also after a match.
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
@@ -263,7 +263,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `operator.users` | `true` | off | Turns on the user, session, and audit tools of plan 12f. It needs a secret with the scope `users` or `organizations.platformRole`, so that an actor can use the tools. |
 | `operator.impersonation` | object | off | Turns on impersonation. It needs `operator.users` and `organizations.platformRole`: only a platform operator starts one. |
 | `operator.impersonation.ttlMinutes` | number | 60 | A whole number from 5 to 240. The life of an impersonation session. The sliding refresh never moves it. |
-| `operator.impersonation.notice` | boolean | true | Sends the user a notice mail at each start. |
+| `operator.impersonation.notice` | boolean | true | Sends the user a notice mail at each start. `account.notices: false` turns it off too. |
 
 ## Hooks
 

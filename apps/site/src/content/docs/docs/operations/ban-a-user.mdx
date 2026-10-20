@@ -1,0 +1,94 @@
+---
+title: Ban a user
+description: Stop a user from signing in with authtempo users ban, know what ends at once and what lives to its exp, and check a token at a resource server.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
+  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 14"
+  - packages/core/src/engine/operator/ban.ts
+sidebar:
+  order: 9
+---
+
+**For:** an operator who must stop one user from using the app now.
+
+**What it does:** this runbook bans the user, lists what ends at once, and makes each resource server refuse the tokens that live on.
+
+## Before you start
+
+- An operator secret with the scopes `users` and `audit`. [The first operator](/docs/operations/first-operator/) makes the entry.
+- A sweep that runs from a scheduler. [Delete expired rows (the sweep)](/docs/guides/sweep/) tells how.
+
+## Steps
+
+Do the steps in this order. Each step names what breaks when you skip it.
+
+1. Run `authtempo users search <base url> --email <address>`. Copy the user id from the `ID` column.
+   - The ban takes a user id, not an address.
+2. Run `authtempo users ban <base url> <user id> --reason "<reason>" --yes`. Add `--until <date>` for a ban with an end.
+   - The reason goes into the audit row. A later reader sees why you acted.
+   - The deployment answers `banned <user id>; audit row <id>`.
+3. Run `authtempo users get <base url> <user id>`. Read the `BAN` column: `no-end`, or the end of the ban.
+   - A `-` means that no ban holds. Read the stop text of step 2.
+4. Make sure that the sweep runs at least once an hour.
+   - The sweep ends the sessions that the call left, and sends the sign-out messages to OAuth clients.
+   - Skip it, and those rows stay. Each door refuses them, but no `session.afterEnd` hook fires for them.
+5. Tell each resource server that reads a session JWT to call `POST /token/live`, or `api.jwt.sessionLive` in process.
+   - A server that checks the signature alone accepts the JWT until its `exp`.
+6. Tell each resource server that reads an OAuth access token to call the introspection route.
+   - Introspection answers `active: false` for a token of a banned user. The signature alone does not show the ban.
+7. Run `authtempo audit list <base url> --user <user id>`. The last row has the action `ban`.
+   - The row is the record of the act. Without the check, you do not see a refused act.
+
+## What ends at once
+
+The ban runs one transaction. It writes the ban fields, and ends these rows of the user:
+
+- every second-factor challenge;
+- every handoff code;
+- every OAuth refresh token and OAuth code;
+- the sessions that fit the call, and each impersonation session that the user opened as an operator.
+
+The whole call fits 50 storage calls, the limit of one D1 Free run. The sessions that do not fit stay, with one pending-end row. Until the sweep ends them, every door refuses them. A test on D1 banned a user with 60 sessions and a `session.afterEnd` hook. A secret ban ended 31 sessions in the call, and two sweeps ended the other 29.
+
+## What lives to its exp
+
+| Token | Its life | The check of a resource server |
+| --- | --- | --- |
+| A session JWT | `jwtMint.ttlMinutes`: 15 minutes by default, at most 60 | [`POST /token/live`](/docs/reference/routes/#post-token-live), or `api.jwt.sessionLive` |
+| An OAuth access token | `oauth.accessTtlMinutes`: `jwtMint.ttlMinutes` by default, at most 60 | [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect) |
+| An API token | Its own expiry. Core refuses it while the ban holds | Core's own check of each request |
+
+Core refuses each of them at its own doors: the session read, the JWT mint, the user info, and the introspection. A resource server that verifies a JWT alone cannot see the ban. ASVS 5.0.0 7.4.1 asks for a control of a self-contained token after the end of its session. `api.jwt.sessionLive` and the introspection are the controls that core gives.
+
+## How it behaves
+
+- A sign-in of a banned user answers `account_banned` only after the credential check. A wrong password answers `invalid_credentials`, as for any user.
+- The mail flows answer a banned user as any user. A magic link still goes out, and its use answers `account_banned`.
+- An API token works again after an unban. A session does not come back.
+- The unban writes the end of the ban. A session or a token from before that end stays refused.
+- A timed ban ends at `--until`. The same rule then holds: no credential from before the end comes back.
+- A ban of a platform operator also ends the impersonation sessions that the operator opened. Until the sweep ends a left one, each door refuses it.
+
+:::caution
+Warning: the CLI prints no `familyEndFailed`. After a storage error of a ban, run `authtempo sessions end <base url> <user id>`. It needs a secret with the scope `sessions`. It reads the refresh tokens of the user again, and ends each family.
+:::
+
+## If it fails
+
+- [`not_found`](/docs/reference/errors/#not_found): no user has the id, or the user tools are off.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the secret is wrong, or its hash is not in `operator.secrets`.
+- [`operator_required`](/docs/reference/errors/#operator_required): the entry lacks the scope `users`.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): the 600 calls of this hour from this IP, or of this secret, are spent.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the reason or the date breaks its rule.
+- [`operator_self`](/docs/reference/errors/#operator_self): a platform operator tried to ban their own user.
+- [`conflict`](/docs/reference/errors/#conflict): another change of the user ran at the same time. Run the command again.
+- [`hook_refused`](/docs/reference/errors/#hook_refused): a before hook of your app refused the ban.
+- [`hook_failed`](/docs/reference/errors/#hook_failed): a before hook of your app threw another error.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): a session caller used an impersonation session.
+
+## Next
+
+- [Run the operator tools](/docs/guides/operator-tools/)
+- [authtempo users ban](/docs/reference/cli/users-ban/)
+- [authtempo users unban](/docs/reference/cli/users-unban/)

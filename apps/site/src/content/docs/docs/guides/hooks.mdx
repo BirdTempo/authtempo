@@ -1,11 +1,12 @@
 ---
 title: Run your code at a flow point (hooks)
-description: Run the app's code before or after an organization, session, user, or identity write, refuse a write, or patch a new row.
+description: Run the app's code before or after an organization, session, user, identity, or operator write, refuse a write, or patch a new row.
 type: how-to
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.9
   - packages/core/README.md "Hooks"
   - packages/compat-better-auth/README.md "Hooks"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
 ---
 
 import { Code } from "@astrojs/starlight/components";
@@ -23,7 +24,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 
 ## Steps
 
-1. Pass plain objects of functions in `hooks.organization`, `hooks.session`, `hooks.user`, and `hooks.identity`.
+1. Pass plain objects of functions in `hooks.organization`, `hooks.session`, `hooks.user`, `hooks.identity`, and `hooks.operator`.
 2. To refuse, throw `hookRefusal(message)` in a before hook. The caller gets `hook_refused` with your message.
 3. To write the app's own row with each core row, write it in the before hook.
    - The app's row takes the id that core minted, so the two rows match.
@@ -42,13 +43,14 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 | `hooks.session` | `beforeCreate`, `afterCreate`, `afterEnd` |
 | `hooks.user` | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeVerify`, `afterVerify` |
 | `hooks.identity` | `beforeLink`, `afterLink`, `beforeUnlink`, `afterUnlink` |
-| `via` of a member | `create`, `add`, `invitation`; for a removal `remove` or `leave` |
-| `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp` |
-| `via` of a user create | the `via` of the sign-in, or `password_reset` for a reset that creates the user |
-| `via` of a user update | `profile`, `email_change` |
+| `hooks.operator` | `beforeAction`, `afterAction` |
+| `via` of a member | `create`, `add`, `invitation`, `operator`; for a removal `remove`, `leave`, or `operator` |
+| `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `impersonation` |
+| `via` of a user create | the `via` of the sign-in, `password_reset` for a reset that creates the user, or `operator` for `createAdmin` |
+| `via` of a user update | `profile`, `email_change`, `ban`, `unban` |
 | `via` of a user verify | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset` |
 | `via` of an identity link | `sign_in` for a social sign-in, `link` for the link of a signed-in user |
-| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout` |
+| `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end` |
 
 ## How it behaves
 
@@ -80,6 +82,17 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 :::caution
 Warning: on Postgres with a pool of one connection, a before hook that queries the same client stops the request until the pool times out. Use a second connection for the app's own write.
 :::
+
+## The operator points
+
+- `hooks.operator` needs `operator.users`. [Run the operator tools](/docs/guides/operator-tools/) turns the tools on.
+- `beforeAction` gets the audit row of the act, with no id yet. It runs before the act's transaction, so before its first write. A refusal answers `hook_refused`, and the act writes nothing.
+- `afterAction` gets each stored audit row once, after the commit. A throw writes one log line, and the act stays. Send the row to a separate system here.
+- `afterAction` also gets each `impersonation_stop` row that another flow writes, such as the user's end of an impersonation session. No `beforeAction` runs for such a row.
+- In the six member points, `by` is null for an act of an operator secret or of the app. Those acts have no user.
+- `via: "operator"` of a member is the grant or the revoke of the platform role, or `createAdmin`.
+- `banned`: a ban, or a session of a banned user that a request or the sweep ends. `operator`: an operator ends the sessions, or revokes the platform role. `impersonation_end`: the stop of an impersonation.
+- `user.beforeUpdate` with `via: "ban"` can run more than once for one ban, when a parallel write lands first.
 
 ## If it fails
 

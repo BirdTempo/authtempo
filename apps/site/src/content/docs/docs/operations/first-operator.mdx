@@ -1,0 +1,86 @@
+---
+title: The first operator
+description: Make the first platform operator of a new deployment with the CLI, then give that person the proof and the second factor that the guard needs.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
+  - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 14"
+  - packages/cli/src/commands/create-admin.ts
+sidebar:
+  order: 8
+---
+
+**For:** an operator who sets up a new deployment and needs its first platform operator.
+
+**What it does:** this runbook makes an operator secret, creates the first platform operator with `authtempo create-admin`, and checks that the operator can act.
+
+## Before you start
+
+- The CLI of this repo. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how.
+- A deployed API with `organizations` on. [Organizations](/docs/reference/config/#organizations) lists the keys.
+- A mailbox at the address of the new operator. [The claim rule](/docs/concepts/claim-rule/) tells why the proof of the mailbox matters.
+
+## Steps
+
+Do the steps in this order. Each step names what breaks when you skip it.
+
+1. Run `authtempo secret --operator --out operator-secret.txt`. The file gets mode 0600, and stdout gets `secretHash: <hex>`.
+   - Skip it, and no secret can call `create-admin`. Only a secret or the app makes the first operator.
+2. Add an entry to `operator.secrets`, such as `{ name: "support", secretHash: "<hex>", scopes: ["users", "audit"] }`.
+   - Without the scope `users`, `create-admin` answers `operator_required`.
+   - The command of step 1 names `operator.secretHash`. That key gives the scopes `keys` and `secrets` only.
+   - The audit row names the secret by `name`: 1 to 32 characters of `a-z`, `0-9`, `_`, and `-`.
+   - The first character of the name is a letter or a digit.
+3. Set `operator.users: true`, `organizations.platformOrganization`, and `organizations.platformRole`.
+   - Without `operator.users`, every route of the user tools answers 404.
+   - Without the two platform keys, `create-admin` answers `not_found`.
+4. Deploy the config. The CLI calls the deployed API, not your local file.
+5. Put the secret in `AUTHTEMPO_OPERATOR_SECRET`, or pass `--token-file operator-secret.txt`.
+   - Without a secret, the command stops before it sends a request.
+6. Run `authtempo create-admin <base url> --email <address> --reason "first operator" --yes`. It prints the user id.
+   - In a new deployment it makes the platform organization with this person as `owner` and the platform role.
+   - It makes the user when no user has the address, with no password and an unverified address.
+   - Without `--yes`, a run with no terminal stops and changes nothing.
+7. Ask the person to sign in with a magic link to the address. An email code works too, when it is on.
+   - The proof of the mailbox verifies the address. Without it, the guard answers `operator_required`.
+   - The proof claims the address. A stranger who signed up at it first loses each credential.
+   - Sign in after `create-admin`. A session from before the grant holds no operator power.
+8. Ask the person to turn a second factor on, from the account settings of your app.
+   - Without a method of the second factor, the guard answers `operator_required`.
+9. Run `authtempo users get <base url> <user id>`. Read the columns `VERIFIED`, `OPERATOR`, and `FACTORS`.
+   - `VERIFIED yes`, `OPERATOR yes`, and a method in `FACTORS` mean that the operator can act.
+   - Skip the check, and you learn of a missing step only at the first act.
+10. Keep `operator-secret.txt` as a secret, or delete it. Core keeps only its hash.
+    - A person who holds the file can act with each scope of the entry.
+
+:::caution
+Warning: the secret prints once. Core stores its SHA-256 only, so a lost secret needs a new entry.
+:::
+
+## How it behaves
+
+- `create-admin` runs one transaction: the organization, the user, the member row, and one audit row `create_admin`.
+- The sign-up rule does not apply. The operator, not a stranger, makes the user.
+- A user who exists keeps the account. `create-admin` adds the platform role to the member row, and `created` is false.
+- The guard reads the session at each request. A session is fresh for `session.freshMinutes` after the sign-in, 1440 by default. After that, the operator signs in again or re-authenticates.
+- The new operator has no power before the proof of the mailbox and a second factor.
+
+## If it fails
+
+- [`not_found`](/docs/reference/errors/#not_found): the user tools or the platform keys are off, or no user has the id.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the secret is wrong, or its hash is not in `operator.secrets`.
+- [`operator_required`](/docs/reference/errors/#operator_required): the entry lacks the scope `users`.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): the 600 calls of this hour from this IP, or of this secret, are spent.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the address, the name, or the reason breaks its rule.
+- [`account_banned`](/docs/reference/errors/#account_banned): a user with the address exists, and is banned. Unban the user first.
+- [`member_limit`](/docs/reference/errors/#member_limit): the platform organization holds its most members.
+- [`conflict`](/docs/reference/errors/#conflict): another change ran at the same time. Run the command again.
+- [`hook_refused`](/docs/reference/errors/#hook_refused): a before hook of your app refused the act.
+- [`hook_failed`](/docs/reference/errors/#hook_failed): a before hook of your app threw another error.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): a session caller used an impersonation session.
+
+## Next
+
+- [Run the operator tools](/docs/guides/operator-tools/)
+- [Ban a user](/docs/operations/ban-a-user/)
+- [authtempo create-admin](/docs/reference/cli/create-admin/)
