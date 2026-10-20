@@ -296,6 +296,21 @@ describe("createAdmin (plan 12f Task 8)", () => {
     expect(await auth.storage.findMany("member", [])).toEqual([]);
     const rows = await auth.storage.findMany("operatorAudit", []);
     expect(rows.map((r) => r.action)).toEqual(["ban"]);
+    // A parallel createAdmin makes the platform organization after the read.
+    between = () => createAdmin(auth, APP, "root@example.com");
+    expect(await createAdmin(auth, APP)).toEqual({ ok: false, code: "conflict", status: 409 });
+    const root = await userByEmail(auth, "root@example.com");
+    const org = await platform(auth);
+    const members = await auth.storage.findMany("member", []);
+    expect(members.map((m) => [m.organizationId, m.userId, m.role])).toEqual([
+      [org?.id, root?.id, "owner,operator"],
+    ]);
+    expect(await userByEmail(auth, ADMIN)).toBeNull();
+    const after = await auth.storage.findMany("operatorAudit", []);
+    expect(after.map((r) => [r.action, r.targetUserId, r.data])).toEqual([
+      ["ban", ada.user.id, { until: null }],
+      ["create_admin", root?.id, { created: true, organizationCreated: true }],
+    ]);
   });
 
   it("refuses a user actor, a bad address, and a bad name", async () => {

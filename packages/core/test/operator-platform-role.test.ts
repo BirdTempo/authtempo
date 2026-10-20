@@ -1,3 +1,4 @@
+import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
@@ -8,12 +9,24 @@ import { passwordSignUp } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
-import { get, seedPlatform, tokenFromMail } from "./helpers.js";
+import { get, post, seedPlatform, tokenFromMail } from "./helpers.js";
+import {
+  authorizeGet,
+  consentPost,
+  exchange,
+  pkce,
+  REDIRECT,
+  RESOURCE,
+  requestIdOf,
+  SCOPES,
+} from "./oauth-helpers.js";
 import { type OperatorAuth, operatorAuth, operatorFixture } from "./operator-helpers.js";
 import { PASSWORD, verifiedSession } from "./totp-helpers.js";
 
 const APP: OperatorActor = { kind: "app", name: "support-tool" };
 const EMAIL = "ada@example.com";
+/** The back-channel logout URI of the test client (plan 12e Task 16). */
+const BC = "https://client.example.com/backchannel";
 
 /**
  * The engine view with member hooks that write one line per event: the
@@ -136,15 +149,141 @@ describe("the platform role (plan 12f Task 8)", () => {
   });
 
   it("ends the sessions of a revoked operator at once", async () => {
-    const { auth, operator } = await operatorFixture();
+    const ended: string[] = [];
+    const { auth, operator } = await operatorFixture({
+      config: {
+        hooks: {
+          session: {
+            afterEnd: ({ session, reason }) => {
+              ended.push(`${session.id}:${reason}`);
+            },
+          },
+        },
+      },
+    });
     const handle = createRouter(auth.config, coreRoutes(auth.config));
     const cookie = { cookie: `${auth.config.cookieName}=${operator.token}` };
     expect((await handle(get("/auth/session", cookie))).status).toBe(200);
+    const sessions = await auth.storage.findMany("session", [
+      { field: "userId", op: "eq", value: operator.user.id },
+    ]);
+    // The fixture leaves one session of the operator: the session of its sign-in.
+    expect(sessions.map((s) => s.id)).toEqual([operator.session.id]);
+    ended.length = 0;
     const revoked = await revoke(auth, operator.user.id);
     if (!revoked.ok) throw new Error(revoked.code);
     expect(await resolveSession(auth.config, operator.token)).toBeNull();
     expect((await handle(get("/auth/session", cookie))).status).toBe(401);
     expect(await auth.storage.findMany("session", [])).toEqual([]);
+    // One session.afterEnd with the reason operator for each session (ruling 2).
+    expect([...ended].sort()).toEqual(sessions.map((s) => `${s.id}:operator`).sort());
+  });
+
+  it("sends the back-channel logout of each linked client after the revoke", async () => {
+    const posts: string[] = [];
+    const fetchFn = (async (_url: RequestInfo | URL, init?: RequestInit) => {
+      posts.push(new URLSearchParams(String(init?.body)).get("logout_token") ?? "");
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+    const auth = await operatorAuth({
+      oauth: {
+        resources: [RESOURCE],
+        scopes: SCOPES,
+        registration: { cimd: false, dynamic: true },
+        fetch: fetchFn,
+      },
+    });
+    await seedPlatform(auth);
+    const ada = await verifiedSession(auth, EMAIL);
+    expect((await grant(auth, ada.user.id)).ok).toBe(true);
+    // The code exchange with an ID token links ada's session to the client (plan 12e Task 16).
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const reg = await handle(
+      post("/auth/oauth/register", { redirect_uris: [REDIRECT], backchannel_logout_uri: BC }),
+    );
+    if (reg.status !== 201) throw new Error(`register answered ${reg.status}`);
+    const clientId = ((await reg.json()) as { client_id: string }).client_id;
+    const p = await pkce();
+    const cookie = `${auth.config.cookieName}=${ada.token}`;
+    const page = await handle(
+      authorizeGet({ clientId, challenge: p.challenge, scope: "openid mcp:read" }, cookie),
+    );
+    const done = await handle(
+      consentPost({ request_id: requestIdOf(await page.text()), decision: "allow" }, { cookie }),
+    );
+    const code = new URL(done.headers.get("location") ?? "").searchParams.get("code");
+    if (!code) throw new Error("no code");
+    expect((await handle(exchange(code, clientId, p.verifier))).status).toBe(200);
+    expect(posts).toEqual([]);
+    expect((await revoke(auth, ada.user.id)).ok).toBe(true);
+    expect(posts.map((t) => decodeJwt(t).sid)).toEqual([ada.session.id]);
+    expect(await auth.storage.findMany("oauthLogout", [])).toEqual([]);
+  });
+
+  it("changes no role and fires no member hook for a grant to a holder, and writes the audit row", async () => {
+    const { auth, events } = await hooked();
+    const { platformOrg } = await seedPlatform(auth);
+    const ada = await verifiedSession(auth, EMAIL);
+    expect((await grant(auth, ada.user.id)).ok).toBe(true);
+    events.length = 0;
+    auth.clock.advance(1);
+    const again = await grant(auth, ada.user.id);
+    if (!again.ok) throw new Error(again.code);
+    expect(await platformMember(auth, platformOrg.id, ada.user.id)).toMatchObject({
+      role: "operator",
+    });
+    expect(events).toEqual([]);
+    const rows = await auth.storage.findMany("operatorAudit", [], {
+      sort: { field: "id", dir: "asc" },
+    });
+    expect(rows.map((r) => r.action)).toEqual(["platform_role_grant", "platform_role_grant"]);
+    expect(rows[1]?.id).toBe(again.value.auditId);
+  });
+
+  it("changes no row, ends no session, and fires no hook for a revoke of a non-holder, and writes the audit row", async () => {
+    const { auth, events } = await hooked();
+    const { root, platformOrg } = await seedPlatform(auth);
+    const ada = await verifiedSession(auth, EMAIL);
+    const added = await addMember(auth.config, {
+      user: root,
+      organizationId: platformOrg.id,
+      userId: ada.user.id,
+      role: "member",
+    });
+    if (!added.ok) throw new Error(added.code);
+    events.length = 0;
+    const revoked = await revoke(auth, ada.user.id);
+    if (!revoked.ok) throw new Error(revoked.code);
+    expect(await platformMember(auth, platformOrg.id, ada.user.id)).toMatchObject({
+      role: "member",
+    });
+    expect(await resolveSession(auth.config, ada.token)).not.toBeNull();
+    expect(events).toEqual([]);
+    const rows = await auth.storage.findMany("operatorAudit", []);
+    expect(rows.map((r) => [r.id, r.action])).toEqual([
+      [revoked.value.auditId, "platform_role_revoke"],
+    ]);
+  });
+
+  it("answers member_limit for a new member row in a full platform organization", async () => {
+    const { auth, events } = await hooked({
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+        limits: { membersPerOrganization: 1 },
+      },
+    });
+    const { platformOrg } = await seedPlatform(auth);
+    const ada = await verifiedSession(auth, EMAIL);
+    expect(await grant(auth, ada.user.id)).toEqual({
+      ok: false,
+      code: "member_limit",
+      status: 409,
+    });
+    expect(await platformMember(auth, platformOrg.id, ada.user.id)).toBeNull();
+    expect(events).toEqual([]);
+    expect(await auth.storage.findMany("operatorAudit", [])).toEqual([]);
   });
 
   it("keeps the last owner of the platform organization", async () => {
