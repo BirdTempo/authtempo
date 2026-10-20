@@ -37,6 +37,8 @@ export const inviteBody = z.object({
   organizationId: id,
   email: z.string().min(1).max(320),
   role,
+  // Plan 12k: the teams that the accept adds the person to. The engine checks each one.
+  teamIds: z.array(id).max(20).optional(),
 });
 export const revokeBody = z.object({ organizationId: id, invitationId: id });
 export const tokenBody = z.object({ token: z.string().min(1).max(64) });

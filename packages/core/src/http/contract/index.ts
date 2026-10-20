@@ -16,6 +16,7 @@ import { ROLES_CONTRACT } from "./roles.js";
 import { SECOND_FACTOR_CONTRACT } from "./second-factor.js";
 import { SESSIONS_CONTRACT } from "./sessions.js";
 import { SOCIAL_CONTRACT } from "./social.js";
+import { TEAMS_CONTRACT } from "./teams.js";
 import { TOKENS_CONTRACT } from "./tokens.js";
 import { TOTP_CONTRACT } from "./totp.js";
 import type { RouteContract } from "./types.js";
@@ -43,6 +44,7 @@ export const ROUTE_CONTRACT = {
   ...HANDOFF_CONTRACT,
   ...ORGANIZATIONS_CONTRACT,
   ...ROLES_CONTRACT,
+  ...TEAMS_CONTRACT,
   ...TOKENS_CONTRACT,
   ...JWT_CONTRACT,
   ...OPERATOR_CONTRACT,

@@ -57,7 +57,12 @@ export function everyFeature(): ResolvedConfig {
     social: SOCIAL,
     passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] },
     handoff: { schemes: ["example://"] },
-    organizations: { platformRole: "owner", platformOrganization: "platform-co", dynamicRoles: {} },
+    organizations: {
+      platformRole: "owner",
+      platformOrganization: "platform-co",
+      dynamicRoles: {},
+      teams: {},
+    },
     password: {},
     oauth: {
       resources: [`${BASE}/mcp`],

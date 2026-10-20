@@ -6,6 +6,7 @@ import type { OperatorAuditRow, SessionRow, UserRow } from "../schema.js";
 import type { InvitationSummary } from "./invitations.js";
 import type { OperatorAuditDraft } from "./operator/audit.js";
 import type { MemberSummary, OrganizationSummary } from "./organizations.js";
+import type { TeamMemberSummary, TeamSummary } from "./teams.js";
 
 /**
  * Hooks (plan 9d, spec 8.9). A hook is the app's code at a named point of a
@@ -84,6 +85,17 @@ export type SessionEndReason =
 export interface ProposedMember {
   userId: string;
   role: string;
+}
+
+/** The team member a before hook sees: no row exists yet (plan 12k). */
+export interface ProposedTeamMember {
+  teamId: string;
+  userId: string;
+}
+
+/** The fields a team update writes (plan 12k). */
+export interface TeamPatch {
+  name: string;
 }
 
 /** The fields an organization update writes. Only the fields the caller sent are present. */
@@ -190,6 +202,73 @@ export interface OrganizationHooks {
   afterRevokeInvitation?(e: {
     organization: OrganizationSummary;
     invitation: InvitationSummary;
+    by: UserRow;
+  }): Awaitable<void>;
+  // The ten team points (plan 12k): Better Auth 1.7.2's names (`organization/types.d.mts`, read 2026-10-14).
+  // A cascade fires none: a member removal, a team delete, and an organization delete drop team rows
+  // with no team hook. The default team of a create and the team rows of an accept are part of that
+  // flow's own write, and fire no team hook either.
+  /** `user` is the caller. `team` holds the id that core minted; no row exists yet. */
+  beforeCreateTeam?(e: {
+    organization: OrganizationSummary;
+    team: TeamSummary;
+    user: UserRow;
+  }): Awaitable<void>;
+  afterCreateTeam?(e: {
+    organization: OrganizationSummary;
+    team: TeamSummary;
+    user: UserRow;
+  }): Awaitable<void>;
+  beforeUpdateTeam?(e: {
+    organization: OrganizationSummary;
+    team: TeamSummary;
+    patch: TeamPatch;
+    user: UserRow;
+  }): Awaitable<void>;
+  /** `team` is the stored row after the update. */
+  afterUpdateTeam?(e: {
+    organization: OrganizationSummary;
+    team: TeamSummary;
+    user: UserRow;
+  }): Awaitable<void>;
+  beforeDeleteTeam?(e: {
+    organization: OrganizationSummary;
+    team: TeamSummary;
+    user: UserRow;
+  }): Awaitable<void>;
+  afterDeleteTeam?(e: {
+    organization: OrganizationSummary;
+    team: TeamSummary;
+    user: UserRow;
+  }): Awaitable<void>;
+  /** `memberUser` is the person who joins the team; `by` is the caller. */
+  beforeAddTeamMember?(e: {
+    organization: OrganizationSummary;
+    team: TeamSummary;
+    teamMember: ProposedTeamMember;
+    memberUser: UserRow;
+    by: UserRow;
+  }): Awaitable<void>;
+  afterAddTeamMember?(e: {
+    organization: OrganizationSummary;
+    team: TeamSummary;
+    teamMember: TeamMemberSummary;
+    memberUser: UserRow;
+    by: UserRow;
+  }): Awaitable<void>;
+  /** A leave of the team has `by` equal to `memberUser`. */
+  beforeRemoveTeamMember?(e: {
+    organization: OrganizationSummary;
+    team: TeamSummary;
+    teamMember: TeamMemberSummary;
+    memberUser: UserRow;
+    by: UserRow;
+  }): Awaitable<void>;
+  afterRemoveTeamMember?(e: {
+    organization: OrganizationSummary;
+    team: TeamSummary;
+    teamMember: TeamMemberSummary;
+    memberUser: UserRow;
     by: UserRow;
   }): Awaitable<void>;
 }
@@ -409,6 +488,16 @@ export const ORGANIZATION_HOOK_POINTS: Readonly<Record<keyof OrganizationHooks, 
   afterAcceptInvitation: true,
   afterDeclineInvitation: true,
   afterRevokeInvitation: true,
+  beforeCreateTeam: true,
+  afterCreateTeam: true,
+  beforeUpdateTeam: true,
+  afterUpdateTeam: true,
+  beforeDeleteTeam: true,
+  afterDeleteTeam: true,
+  beforeAddTeamMember: true,
+  afterAddTeamMember: true,
+  beforeRemoveTeamMember: true,
+  afterRemoveTeamMember: true,
 };
 
 export const SESSION_HOOK_POINTS: Readonly<Record<keyof SessionHooks, true>> = {

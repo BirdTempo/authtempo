@@ -29,6 +29,7 @@ export type {
   OrganizationsConfig,
   PasswordConfig,
   ResolvedEmailOtp,
+  TeamsConfig,
   TotpConfig,
   TotpGateConfig,
 } from "./config.js";
@@ -86,12 +87,14 @@ export {
   type OrganizationHooks,
   type OrganizationPatch,
   type ProposedMember,
+  type ProposedTeamMember,
   type RemoveVia,
   type SessionDraft,
   type SessionEndReason,
   type SessionHooks,
   type SessionPatch,
   type SessionVia,
+  type TeamPatch,
   type UserCreatePatch,
   type UserCreateVia,
   type UserHooks,
@@ -177,6 +180,7 @@ export type {
   SocialStarted,
 } from "./engine/social.js";
 export type { SweepResult } from "./engine/sweep.js";
+export type { TeamMemberSummary, TeamSummary } from "./engine/teams.js";
 export {
   API_TOKEN_PREFIX,
   type ApiTokenCreate,

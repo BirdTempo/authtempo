@@ -4,7 +4,8 @@ import { ipKey } from "../limiter/ip-key.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
-import type { InvitationRow, MemberRow, OrganizationRow, UserRow } from "../schema.js";
+import type { InvitationRow, MemberRow, OrganizationRow, TeamRow, UserRow } from "../schema.js";
+import { findManyIn } from "../storage/batch.js";
 import { StorageError } from "../storage/port.js";
 import { HookStop, hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import {
@@ -27,6 +28,8 @@ const ACCEPT_LIMIT = { seconds: 15 * 60, max: 20 };
 /** Each invite sends a mail from the app's sender. The product owns this limit, not the mail supplier. */
 const INVITE_USER_LIMIT = { seconds: 15 * 60, max: 20 };
 const INVITE_EMAIL_LIMIT = { seconds: 60 * 60, max: 5 };
+/** The most teams that one invitation names (plan 12k). */
+const INVITE_TEAMS_MAX = 20;
 
 export interface InvitationSummary {
   id: string;
@@ -67,9 +70,35 @@ async function adminStanding(
   return ok({ organization, standing });
 }
 
+/**
+ * The team ids of an invite (plan 12k): with teams on, at most 20 distinct
+ * ids, each a team of the organization; else `invalid_body`. An empty list
+ * is null. One read for each 50 ids.
+ */
+async function inviteTeams(
+  config: ResolvedConfig,
+  organizationId: string,
+  teamIds: string[] | undefined,
+): Promise<Result<string[] | null>> {
+  if (teamIds === undefined) return ok(null);
+  if (!config.organizations?.teams) return fail("invalid_body");
+  if (
+    !Array.isArray(teamIds) ||
+    teamIds.length > INVITE_TEAMS_MAX ||
+    teamIds.some((id) => typeof id !== "string") ||
+    new Set(teamIds).size !== teamIds.length
+  )
+    return fail("invalid_body");
+  if (teamIds.length === 0) return ok(null);
+  const found = await findManyIn(config.storage, "team", "id", teamIds, [
+    { field: "organizationId", op: "eq", value: organizationId },
+  ]);
+  return found.length === teamIds.length ? ok([...teamIds]) : fail("invalid_body");
+}
+
 export async function inviteMember(
   config: ResolvedConfig,
-  input: Caller & { organizationId: string; email: string; role: string },
+  input: Caller & { organizationId: string; email: string; role: string; teamIds?: string[] },
 ): Promise<Result<InvitationSummary>> {
   const o = config.organizations;
   if (!o) return fail("not_found");
@@ -80,6 +109,8 @@ export async function inviteMember(
   if (email === null) return fail("invalid_body");
   const g = await grantable(config, o, s.value.organization, s.value.standing, input.role);
   if (!g.ok) return g;
+  const teams = await inviteTeams(config, input.organizationId, input.teamIds);
+  if (!teams.ok) return teams;
   // After the rank checks, so a stranger cannot spend an admin's budget.
   if (!(await config.limiter.allow(`invite:user:${input.user.id}`, INVITE_USER_LIMIT)))
     return fail("rate_limited");
@@ -96,7 +127,7 @@ export async function inviteMember(
     tokenHash: await sha256Hex(token),
     expiresAt: new Date(now.getTime() + o.invitationTtlDays * 86_400_000),
     acceptedAt: null,
-    teamIds: null,
+    teamIds: teams.value,
     createdAt: now,
     updatedAt: now,
   };
@@ -245,6 +276,7 @@ type Accepted =
   | { row: MemberRow; created: boolean; raised: { previousRole: string; by: UserRow } | null }
   | "inviter_lost"
   | "member_limit"
+  | "team_member_limit"
   | null;
 
 export async function acceptInvitation(
@@ -270,6 +302,8 @@ export async function acceptInvitation(
   const organization = publicOrganization(organizationRow);
   const invitation = summary(inv);
   const limit = o.limits.membersPerOrganization;
+  const teamLimit = o.limits.membersPerTeam;
+  const teamIds = o.teams ? (inv.teamIds ?? []) : [];
   let accepted: Accepted = null;
   try {
     accepted = await config.storage.transaction(async (tx): Promise<Accepted> => {
@@ -326,6 +360,29 @@ export async function acceptInvitation(
         );
         if (held.length >= limit) return "member_limit";
       }
+      // Plan 12k: the teams of the invitation that still exist. A missing team is skipped. A full
+      // team answers before any write, so the invitation stays pending.
+      const joins: TeamRow[] = [];
+      for (const team of await findManyIn(tx, "team", "id", teamIds, [
+        { field: "organizationId", op: "eq", value: inv.organizationId },
+      ])) {
+        if (
+          await tx.findOne("teamMember", [
+            { field: "teamId", op: "eq", value: team.id },
+            { field: "userId", op: "eq", value: input.user.id },
+          ])
+        )
+          continue;
+        if (teamLimit !== null) {
+          const held = await tx.findMany(
+            "teamMember",
+            [{ field: "teamId", op: "eq", value: team.id }],
+            { limit: teamLimit },
+          );
+          if (held.length >= teamLimit) return "team_member_limit";
+        }
+        joins.push(team);
+      }
       // Before the consume, on every accept, as Better Auth's beforeAcceptInvitation.
       // A refusal throws, so the invitation stays pending.
       await runBefore("organization.beforeAddMember", hooks.beforeAddMember, {
@@ -366,6 +423,16 @@ export async function acceptInvitation(
         { acceptedAt: now, updatedAt: now },
       );
       if (n === 0) return null;
+      // The team rows are part of the accept, so they fire no team hook.
+      for (const team of joins)
+        await tx.create("teamMember", {
+          id: newId(now),
+          teamId: team.id,
+          organizationId: inv.organizationId,
+          userId: input.user.id,
+          createdAt: now,
+          updatedAt: now,
+        });
       if (existing) {
         if (raise) {
           await tx.update("member", [{ field: "id", op: "eq", value: existing.id }], {
@@ -408,6 +475,7 @@ export async function acceptInvitation(
   }
   // The limit answers before any write, so the invitation stays pending.
   if (accepted === "member_limit") return fail("member_limit");
+  if (accepted === "team_member_limit") return fail("team_member_limit");
   // Both a lost race for the token and a lost inviter answer invalid_token: the link is dead either way.
   if (accepted === null || accepted === "inviter_lost") return fail("invalid_token");
   const member = memberSummary(accepted.row, input.user);
@@ -495,10 +563,16 @@ export async function setActiveOrganization(
     if (!m) return fail("forbidden_rank");
   }
   const now = config.clock.now();
+  // A team belongs to one organization, so a change of the active organization clears the
+  // active team in the same update (plan 12k). The same organization keeps it.
+  const activeTeamId =
+    input.organizationId === input.session.session.activeOrganizationId
+      ? input.session.session.activeTeamId
+      : null;
   await config.storage.update(
     "session",
     [{ field: "id", op: "eq", value: input.session.session.id }],
-    { activeOrganizationId: input.organizationId, updatedAt: now },
+    { activeOrganizationId: input.organizationId, activeTeamId, updatedAt: now },
   );
   return ok(
     publicSession({
@@ -506,6 +580,7 @@ export async function setActiveOrganization(
       session: {
         ...input.session.session,
         activeOrganizationId: input.organizationId,
+        activeTeamId,
         updatedAt: now,
       },
     }),

@@ -163,7 +163,14 @@ export function organizationRoutes(config: ResolvedConfig): Route[] {
       removeMember(config, { user: s.user, ...b }),
     ),
     post("/organizations/invite", inviteBody, "invitation", (s, b) =>
-      inviteMember(config, { user: s.user, ...b }),
+      // exactOptionalPropertyTypes: pass teamIds only when the caller sent it.
+      inviteMember(config, {
+        user: s.user,
+        organizationId: b.organizationId,
+        email: b.email,
+        role: b.role,
+        ...(b.teamIds !== undefined && { teamIds: b.teamIds }),
+      }),
     ),
     getByOrg("/organizations/invitations", "invitations", (user, organizationId) =>
       listInvitations(config, { user, organizationId }),

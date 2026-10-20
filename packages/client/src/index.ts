@@ -20,6 +20,8 @@ export {
   type RoleJSON,
   type SecondFactorEnableJSON,
   type SessionSummaryJSON,
+  type TeamJSON,
+  type TeamMemberJSON,
   type TotpStatusJSON,
   type TwoFactorChallengeJSON,
   type TwoFactorSessionJSON,

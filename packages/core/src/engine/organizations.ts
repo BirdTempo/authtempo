@@ -32,6 +32,7 @@ import {
 } from "./ranks.js";
 import { endedList, sessionsEnded } from "./sessions.js";
 import { spendSlugRead } from "./slug-check.js";
+import { createDefaultTeam, dropMemberTeams } from "./teams.js";
 import { holdUser, userStays } from "./user-hold.js";
 
 export interface Caller {
@@ -386,6 +387,9 @@ export async function createOrganization(
         await holdUser(tx, input.user.id);
         await tx.create("organization", organization);
         await tx.create("member", member);
+        // Plan 12k: the default team is part of the create, so it fires no team hook.
+        if (o.teams?.defaultTeam)
+          await createDefaultTeam(tx, organization.id, organization.name, input.user.id, now);
         await userStays(tx, input.user.id);
         return ok(true);
       }),
@@ -596,10 +600,15 @@ export async function deleteOrganizationRows(
     (await tx.findMany("member", byOrganization)).some((m) => m.userId !== alone)
   )
     stopWith("conflict");
+  // Plan 12k: the teams and their rows go before the members, and fire no team hook.
+  await tx.delete("teamMember", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("team", [{ field: "organizationId", op: "eq", value: id }]);
   await tx.delete("member", byOrganization);
   // A session that points at a deleted organization would make every later rank check read a missing row.
+  // Its active team is a team of that organization, so it goes in the same write.
   await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {
     activeOrganizationId: null,
+    activeTeamId: null,
   });
 }
 
@@ -973,6 +982,8 @@ export async function removeMember(
       { field: "role", op: "eq", value: target.member.role },
     ]);
     if (n === 0) return 0;
+    // Plan 12k: the person's team rows and active team go with the membership, with no team hook.
+    await dropMemberTeams(storage, organizationId, target.member.userId);
     await storage.update(
       "session",
       [

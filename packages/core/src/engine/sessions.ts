@@ -685,6 +685,7 @@ export function publicSession(resolved: ResolvedSession): {
     expiresAt: string;
     activeOrganizationId: string | null;
     actorId: string | null;
+    activeTeamId: string | null;
   };
 } {
   const { user, session } = resolved;
@@ -695,6 +696,8 @@ export function publicSession(resolved: ResolvedSession): {
       expiresAt: session.expiresAt.toISOString(),
       activeOrganizationId: session.activeOrganizationId,
       actorId: session.actorId,
+      // A team of the active organization (plan 12k). Null with teams off.
+      activeTeamId: session.activeTeamId,
     },
   };
 }

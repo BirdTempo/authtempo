@@ -19,6 +19,7 @@ import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../src/eng
 import { requestReauthCode } from "../src/engine/reauth.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { createSession } from "../src/engine/sessions.js";
+import { addTeamMember, createTeam } from "../src/engine/teams.js";
 import { API_TOKEN_CAP, createApiToken } from "../src/engine/tokens.js";
 import { CHALLENGE_MAX_ATTEMPTS } from "../src/engine/totp.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
@@ -146,6 +147,12 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   },
   "POST /organizations/roles/update": { organizationId: "$org", name: "editor", rank: 1 },
   "POST /organizations/roles/delete": { organizationId: "$org", name: "editor" },
+  "POST /organizations/teams/create": { organizationId: "$org", name: "Core" },
+  "POST /organizations/teams/update": { teamId: "$team", name: "Web" },
+  "POST /organizations/teams/delete": { teamId: "$team" },
+  "POST /organizations/teams/members/add": { teamId: "$team", userId: "u2" },
+  "POST /organizations/teams/members/remove": { teamId: "$team", userId: "u2" },
+  "POST /organizations/teams/active": { teamId: "$team" },
   "POST /tokens": { name: "ci" },
   "POST /tokens/revoke": { id: "t1" },
   "POST /oauth/register": { redirect_uris: ["https://client.example.com/callback"] },
@@ -168,6 +175,8 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /organizations/invitations": { organizationId: "$org" },
   "GET /organizations/roles": { organizationId: "$org" },
   "GET /organizations/roles/get": { organizationId: "$org", name: "editor" },
+  "GET /organizations/teams": { organizationId: "$org" },
+  "GET /organizations/teams/members": { teamId: "$team" },
 };
 
 /** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
@@ -185,6 +194,7 @@ const UNFILLED: Fills = {
   $inviteToken: BODY43,
   $challenge: BODY43,
   $org: "o1",
+  $team: "t1",
 };
 
 /** `value` with its placeholder filled from `fills`, or from `UNFILLED`. */
@@ -282,7 +292,7 @@ function world(extra: Partial<AuthConfig> = {}) {
     passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL] },
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
-    organizations: { dynamicRoles: {} },
+    organizations: { dynamicRoles: {}, teams: {} },
     oauth: {
       resources: [`${BASE_URL}/mcp`],
       registration: { cimd: false, dynamic: true },
@@ -488,11 +498,20 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     const org = must(
       await createOrganization(config, { user: ada.user, slug: "acme", name: "Acme" }),
     );
+    // A team of the organization, so each team route reaches the rank check (plan 12k Task 5).
+    const team = must(
+      await createTeam(config, {
+        user: ada.user,
+        organizationId: org.organization.id,
+        name: "Core",
+      }),
+    );
     const carol = await verifiedSession(w.auth, "carol@example.com");
     const routes = declaring("forbidden_rank");
     expect(routes.length).toBeGreaterThan(0);
     const results = await probe(w, routes, () => w.cookie(carol.token), {
       $org: org.organization.id,
+      $team: team.id,
     });
     expect(unlike(results, "forbidden_rank", 403)).toEqual({});
   });
@@ -984,6 +1003,11 @@ function hookWorld(mode: "refuse" | "throw", extra: Partial<AuthConfig> = {}) {
         beforeUpdateMemberRole: guard,
         beforeRemoveMember: guard,
         beforeInvite: guard,
+        beforeCreateTeam: guard,
+        beforeUpdateTeam: guard,
+        beforeDeleteTeam: guard,
+        beforeAddTeamMember: guard,
+        beforeRemoveTeamMember: guard,
       },
       identity: { beforeLink: guard, beforeUnlink: guard },
     },
@@ -1019,6 +1043,10 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
     }),
   );
   const inviteToken = w.lastInvitation();
+  // Two teams (plan 12k Task 5): carol is in the first, for the removal; the second has room for the add.
+  const team = must(await createTeam(config, { user: ada.user, organizationId, name: "Core" }));
+  const empty = must(await createTeam(config, { user: ada.user, organizationId, name: "Web" }));
+  must(await addTeamMember(config, { user: ada.user, teamId: team.id, userId: carol.user.id }));
   must(await requestMagicLink(config, { email: ada.user.email, ip: null }));
   const magicToken = w.lastToken();
   must(await requestEmailOtp(config, { email: ada.user.email, ip: null }));
@@ -1091,6 +1119,11 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
     "POST /organizations/members/remove": { organizationId, userId: carol.user.id },
     "POST /organizations/invite": { organizationId, email: "eve@example.com", role: "member" },
     "POST /organizations/invitations/accept": { token: inviteToken },
+    "POST /organizations/teams/create": { organizationId, name: "Ops" },
+    "POST /organizations/teams/update": { teamId: team.id, name: "Platform" },
+    "POST /organizations/teams/delete": { teamId: team.id },
+    "POST /organizations/teams/members/add": { teamId: empty.id, userId: carol.user.id },
+    "POST /organizations/teams/members/remove": { teamId: team.id, userId: carol.user.id },
   };
   const headersOf = (key: RouteKey): Record<string, string> => {
     if (key === "POST /organizations/invitations/accept") return w.cookie(dan.token);

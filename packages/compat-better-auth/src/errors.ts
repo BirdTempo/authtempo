@@ -126,6 +126,11 @@ export const BETTER_AUTH_CODES = {
   role_in_use: "ROLE_IN_USE",
   role_limit: "ROLE_LIMIT",
   role_taken: "ROLE_TAKEN",
+  // Plan 12k Task 5. Core's own names for now, as for the role codes above. Task 11
+  // of plan 12k maps teams and reads Better Auth's names for these three refusals.
+  team_limit: "TEAM_LIMIT",
+  team_member_limit: "TEAM_MEMBER_LIMIT",
+  last_team: "LAST_TEAM",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

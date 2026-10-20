@@ -16,6 +16,7 @@ import { roleRoutes } from "./roles.js";
 import { secondFactorRoutes } from "./second-factor.js";
 import { sessionRoutes } from "./sessions.js";
 import { socialRoutes } from "./social.js";
+import { teamRoutes } from "./teams.js";
 import { tokenRoutes } from "./tokens.js";
 import { totpRoutes } from "./totp.js";
 import { userRoutes } from "./user.js";
@@ -36,6 +37,7 @@ export type RouteModule =
   | "handoff"
   | "organizations"
   | "roles"
+  | "teams"
   | "tokens"
   | "jwt"
   | "operator"
@@ -64,6 +66,7 @@ export function coreRouteModules(
     { module: "handoff", routes: handoffRoutes(config) },
     { module: "organizations", routes: organizationRoutes(config) },
     { module: "roles", routes: roleRoutes(config) },
+    { module: "teams", routes: teamRoutes(config) },
     { module: "tokens", routes: tokenRoutes(config) },
     { module: "jwt", routes: jwtRoutes(config) },
     { module: "operator", routes: operatorRoutes(config) },

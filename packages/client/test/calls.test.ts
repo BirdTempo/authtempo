@@ -52,7 +52,7 @@ describe("the call table of the client (plan 11d)", () => {
     for (const c of CLIENT_CALLS) expect(routes).toContain(`${c.method} ${c.path}`);
     const operations = CLIENT_CALLS.map((c) => c.operation);
     expect(new Set(operations).size).toBe(operations.length);
-    expect(CLIENT_CALLS).toHaveLength(83);
+    expect(CLIENT_CALLS).toHaveLength(92);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -118,6 +118,15 @@ describe("the call table of the client (plan 11d)", () => {
     });
     await c.organizations.roles.update({ ...org, name: "editor", rank: 1 });
     await c.organizations.roles.delete({ ...org, name: "editor" });
+    await c.organizations.teams.list(org);
+    await c.organizations.teams.create({ ...org, name: "Core" });
+    await c.organizations.teams.update({ teamId: "t", name: "Web" });
+    await c.organizations.teams.delete({ teamId: "t" });
+    await c.organizations.teams.members.list({ teamId: "t" });
+    await c.organizations.teams.members.add({ teamId: "t", userId: "u" });
+    await c.organizations.teams.members.remove({ teamId: "t", userId: "u" });
+    await c.organizations.teams.setActive({ teamId: null });
+    await c.organizations.teams.mine();
     await c.tokens.create({ name: "ci" });
     await c.tokens.list();
     await c.tokens.revoke({ id: "t" });
@@ -173,11 +182,11 @@ describe("the call table of the client (plan 11d)", () => {
     const notCompared = NOT_COMPARED.map((r) => r.operation);
     // Every row is in one of the two lists, and no row is in both.
     expect([...COMPARED, ...notCompared].sort()).toEqual(operations);
-    expect(COMPARED).toHaveLength(77);
+    expect(COMPARED).toHaveLength(86);
     expect(NOT_COMPARED).toHaveLength(6);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.
-    expect(BODY_AS_INPUT).toHaveLength(42);
+    expect(BODY_AS_INPUT).toHaveLength(48);
     for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
     // Every row with `select` is compared: the type test reads the key.
     for (const r of CLIENT_CALLS)

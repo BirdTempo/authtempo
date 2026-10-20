@@ -169,6 +169,19 @@ import {
 } from "./engine/social.js";
 import { type SweepResult, sweepExpired } from "./engine/sweep.js";
 import {
+  addTeamMember,
+  createTeam,
+  deleteTeam,
+  listTeamMembers,
+  listTeams,
+  listUserTeams,
+  removeTeamMember,
+  setActiveTeam,
+  type TeamMemberSummary,
+  type TeamSummary,
+  updateTeam,
+} from "./engine/teams.js";
+import {
   type ApiTokenCreate,
   type ApiTokenSummary,
   type Caller,
@@ -537,11 +550,13 @@ export interface AuthApi {
     organizationId: string;
     userId: string;
   }): Promise<Result<{ ok: true }>>;
+  /** `teamIds` (plan 12k): the teams that the accept adds the person to, at most 20, each a team of the organization. */
   inviteMember(input: {
     user: UserRow;
     organizationId: string;
     email: string;
     role: string;
+    teamIds?: string[];
   }): Promise<Result<InvitationSummary>>;
   listInvitations(input: {
     user: UserRow;
@@ -594,6 +609,40 @@ export interface AuthApi {
     organizationId: string;
     name: string;
   }): Promise<Result<{ ok: true }>>;
+  /**
+   * Teams (plan 12k, spec 29 item 7). Each of the nine answers `not_found`
+   * while `organizations.teams` is off. The create, the update, and the
+   * delete need `team:create`, `team:update`, and `team:delete`. The add of a
+   * team member needs `member:update`, the removal of another person
+   * `member:delete`, and the members list `member:read`. A member leaves a
+   * team, and reads the list of teams, with membership only.
+   */
+  createTeam(input: {
+    user: UserRow;
+    organizationId: string;
+    name: string;
+  }): Promise<Result<TeamSummary>>;
+  updateTeam(input: { user: UserRow; teamId: string; name: string }): Promise<Result<TeamSummary>>;
+  deleteTeam(input: { user: UserRow; teamId: string }): Promise<Result<{ ok: true }>>;
+  listTeams(input: { user: UserRow; organizationId: string }): Promise<Result<TeamSummary[]>>;
+  listTeamMembers(input: { user: UserRow; teamId: string }): Promise<Result<TeamMemberSummary[]>>;
+  addTeamMember(input: {
+    user: UserRow;
+    teamId: string;
+    userId: string;
+  }): Promise<Result<TeamMemberSummary>>;
+  removeTeamMember(input: {
+    user: UserRow;
+    teamId: string;
+    userId: string;
+  }): Promise<Result<{ ok: true }>>;
+  /** A team of the session's active organization of which the user is a member, else `forbidden_rank`. `null` clears it. */
+  setActiveTeam(input: {
+    session: ResolvedSession;
+    teamId: string | null;
+  }): Promise<Result<PublicSession>>;
+  /** The teams of the user in every organization. */
+  listUserTeams(input: { user: UserRow }): Promise<Result<TeamSummary[]>>;
   getSession(token: string): Promise<ResolvedSession | null>;
   signOut(token: string): Promise<void>;
   tokens: TokensApi;
@@ -763,6 +812,15 @@ export function createAuth(input: AuthConfig): Auth {
       createRole: (i) => createRole(config, i),
       updateRole: (i) => updateRole(config, i),
       deleteRole: (i) => deleteRole(config, i),
+      createTeam: (i) => createTeam(config, i),
+      updateTeam: (i) => updateTeam(config, i),
+      deleteTeam: (i) => deleteTeam(config, i),
+      listTeams: (i) => listTeams(config, i),
+      listTeamMembers: (i) => listTeamMembers(config, i),
+      addTeamMember: (i) => addTeamMember(config, i),
+      removeTeamMember: (i) => removeTeamMember(config, i),
+      setActiveTeam: (i) => setActiveTeam(config, i),
+      listUserTeams: (i) => listUserTeams(config, i),
       getSession: (token) => resolveSession(config, token),
       async signOut(token) {
         const ended = await destroySession(config, token);

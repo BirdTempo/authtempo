@@ -112,7 +112,12 @@ function world(secretHash = "0".repeat(64)) {
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     // The platform role turns on the impersonation routes (plan 12f).
-    organizations: { platformRole: "owner", platformOrganization: "platform-co", dynamicRoles: {} },
+    organizations: {
+      platformRole: "owner",
+      platformOrganization: "platform-co",
+      dynamicRoles: {},
+      teams: {},
+    },
     oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true }, device: {} },
     // One secret with every scope, the user tools, and the impersonation of plan 12f.
     operator: {
@@ -579,6 +584,43 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
       refused: INVALID_BODY,
     },
+    // The team rows name an id that no team holds: the engine answers not_found, past the parse.
+    {
+      key: "POST /organizations/teams/create",
+      body: { organizationId: org, name: "Core" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /organizations/teams/update",
+      body: { teamId: id, name: "Web" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /organizations/teams/delete",
+      body: { teamId: id },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /organizations/teams/members/add",
+      body: { teamId: id, userId: id },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /organizations/teams/members/remove",
+      body: { teamId: id, userId: id },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /organizations/teams/active",
+      body: { teamId: null },
+      session: true,
+      refused: INVALID_BODY,
+    },
     {
       key: "POST /organizations/check-slug",
       body: { slug: "beta" },
@@ -647,7 +689,7 @@ describe("the route contract (plan 11g)", () => {
   it("gives every route of ROUTES one contract, and no contract without a route", () => {
     const keys = Object.keys(ROUTE_CONTRACT).sort();
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
-    expect(keys.length).toBe(129);
+    expect(keys.length).toBe(138);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -658,7 +700,7 @@ describe("the route contract (plan 11g)", () => {
         expect(CONTRACT[route.key], `${route.key} has no contract`).toBeDefined();
         mounted.add(route.key);
       }
-    expect(modules.length).toBe(19);
+    expect(modules.length).toBe(20);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -686,6 +728,13 @@ describe("the route contract (plan 11g)", () => {
         ),
       ),
       "the role create",
+    );
+    // A team, so the valid query of the team members finds a row.
+    const { team } = await jsonOf<{ team: { id: string } }>(
+      await w.handle(
+        post("/auth/organizations/teams/create", { organizationId: org, name: "Core" }, cookie),
+      ),
+      "the team create",
     );
     const clientId = await registeredClient(w);
     const INVALID_REQUEST: Answer = { status: 400, code: "invalid_request" };
@@ -865,6 +914,24 @@ describe("the route contract (plan 11g)", () => {
         missing: { organizationId: INVALID_BODY },
       },
       {
+        key: "GET /organizations/teams",
+        path: "/organizations/teams",
+        query: { organizationId: org },
+        headers: cookie,
+        required: ["organizationId"],
+        valid: { status: 200, code: null },
+        missing: { organizationId: INVALID_BODY },
+      },
+      {
+        key: "GET /organizations/teams/members",
+        path: "/organizations/teams/members",
+        query: { teamId: team.id },
+        headers: cookie,
+        required: ["teamId"],
+        valid: { status: 200, code: null },
+        missing: { teamId: INVALID_BODY },
+      },
+      {
         // With no session: the sign-in step, a redirect with no error. The first two keys are
         // refused as JSON; the others go back to the client with the error.
         key: "GET /oauth/authorize",
@@ -923,7 +990,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_QUERIES.map((row) => row.key).sort());
-    expect(hand.length).toBe(19);
+    expect(hand.length).toBe(21);
     let wrongForms = 0;
     for (const row of VALID_QUERIES) {
       const contract = CONTRACT[row.key];
@@ -1131,7 +1198,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
-    expect(withBody.length).toBe(70);
+    expect(withBody.length).toBe(76);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1157,7 +1224,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(68);
+    expect(refusals).toBe(74);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1175,7 +1242,7 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 62, both: 9, form: 7 });
+    expect(counts).toEqual({ json: 68, both: 9, form: 7 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

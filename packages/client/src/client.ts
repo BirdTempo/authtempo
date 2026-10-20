@@ -11,6 +11,8 @@ import type {
   PublicSession,
   PublicUser,
   SessionSummary,
+  TeamMemberSummary,
+  TeamSummary,
 } from "@authtempo/core";
 import { ERRORS, type ErrorCode, type OAuthErrorCode } from "@authtempo/core/errors";
 import { PROVIDER_NAME_RE, type RouteMethod } from "@authtempo/core/routes";
@@ -52,6 +54,13 @@ export interface RoleJSON {
   createdAt: string;
   updatedAt: string;
 }
+/** One team of an organization (plan 12k), as `TeamSummary` answers it on the wire. */
+export type TeamJSON = Omit<TeamSummary, "createdAt" | "updatedAt"> & {
+  createdAt: string;
+  updatedAt: string;
+};
+/** One member of a team (plan 12k), as `TeamMemberSummary` answers it on the wire. */
+export type TeamMemberJSON = Omit<TeamMemberSummary, "createdAt"> & { createdAt: string };
 export type InvitationJSON = Omit<InvitationSummary, "expiresAt" | "createdAt"> & {
   expiresAt: string;
   createdAt: string;
@@ -392,6 +401,8 @@ export interface Client {
         organizationId: string;
         email: string;
         role: string;
+        /** Plan 12k: the teams that the accept adds the person to, at most 20. */
+        teamIds?: string[] | undefined;
       }): Promise<ClientResult<InvitationJSON>>;
       list(input: { organizationId: string }): Promise<ClientResult<InvitationJSON[]>>;
       revoke(input: {
@@ -450,6 +461,29 @@ export interface Client {
         permissions?: Record<string, string[]> | undefined;
       }): Promise<ClientResult<RoleJSON>>;
       delete(input: { organizationId: string; name: string }): Promise<ClientResult<{ ok: true }>>;
+    };
+    /**
+     * The teams of an organization (plan 12k). They exist when the server
+     * sets `organizations.teams`. A team has no role. The create, the update,
+     * and the delete need `team:create`, `team:update`, and `team:delete`.
+     * The member add needs `member:update`, the removal of another person
+     * `member:delete`, and the members list `member:read`.
+     */
+    teams: {
+      list(input: { organizationId: string }): Promise<ClientResult<TeamJSON[]>>;
+      create(input: { organizationId: string; name: string }): Promise<ClientResult<TeamJSON>>;
+      update(input: { teamId: string; name: string }): Promise<ClientResult<TeamJSON>>;
+      delete(input: { teamId: string }): Promise<ClientResult<{ ok: true }>>;
+      members: {
+        list(input: { teamId: string }): Promise<ClientResult<TeamMemberJSON[]>>;
+        add(input: { teamId: string; userId: string }): Promise<ClientResult<TeamMemberJSON>>;
+        /** A member leaves a team with their own `userId`. */
+        remove(input: { teamId: string; userId: string }): Promise<ClientResult<{ ok: true }>>;
+      };
+      /** Answers the session, so the caller reads `session.activeTeamId` from it. `null` clears it. */
+      setActive(input: { teamId: string | null }): Promise<ClientResult<PublicSessionJSON>>;
+      /** The teams of the session's user in every organization. */
+      mine(): Promise<ClientResult<TeamJSON[]>>;
     };
   };
   /**
@@ -1369,6 +1403,46 @@ export function createClient(options: ClientOptions): Client {
             input,
           ),
         delete: (input) => send<{ ok: true }>("organizations.roles.delete", input),
+      },
+      teams: {
+        list: (input) =>
+          part<{ teams: TeamJSON[] }, "organizations.teams.list">(
+            "organizations.teams.list",
+            undefined,
+            { organizationId: input.organizationId },
+          ),
+        create: (input) =>
+          part<{ team: TeamJSON }, "organizations.teams.create">(
+            "organizations.teams.create",
+            input,
+          ),
+        update: (input) =>
+          part<{ team: TeamJSON }, "organizations.teams.update">(
+            "organizations.teams.update",
+            input,
+          ),
+        // Core clears the active team when its team is deleted, so the session data changes.
+        delete: (input) => changes(send<{ ok: true }>("organizations.teams.delete", input)),
+        members: {
+          list: (input) =>
+            part<{ members: TeamMemberJSON[] }, "organizations.teams.members.list">(
+              "organizations.teams.members.list",
+              undefined,
+              { teamId: input.teamId },
+            ),
+          add: (input) =>
+            part<{ member: TeamMemberJSON }, "organizations.teams.members.add">(
+              "organizations.teams.members.add",
+              input,
+            ),
+          // A member who leaves the active team loses it from the session.
+          remove: (input) =>
+            changes(send<{ ok: true }>("organizations.teams.members.remove", input)),
+        },
+        setActive: (input) =>
+          changes(send<PublicSessionJSON>("organizations.teams.setActive", input)),
+        mine: () =>
+          part<{ teams: TeamJSON[] }, "organizations.teams.mine">("organizations.teams.mine"),
       },
     },
     tokens: {

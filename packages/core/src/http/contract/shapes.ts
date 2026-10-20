@@ -25,6 +25,8 @@ export const SessionJson = z.strictObject({
   expiresAt: z.iso.datetime(),
   activeOrganizationId: z.string().nullable(),
   actorId: z.string().nullable(),
+  /** A team of the active organization (plan 12k). */
+  activeTeamId: z.string().nullable(),
 });
 
 /**

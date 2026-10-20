@@ -807,6 +807,19 @@ export interface OrganizationsConfig {
    * off. `maxPerOrganization` is 1 to 1000, default 50.
    */
   dynamicRoles?: DynamicRolesConfig;
+  /**
+   * Teams inside each organization (plan 12k, spec 29 item 7). Absent: off.
+   * A team has no role: every right comes from the organization role.
+   */
+  teams?: TeamsConfig;
+}
+
+/** The options of `organizations.teams` (plan 12k). Both default to false. */
+export interface TeamsConfig {
+  /** The create of an organization also creates one team named as the organization, with the creator in it. */
+  defaultTeam?: boolean;
+  /** The delete of the last team of an organization answers `last_team`. */
+  keepLastTeam?: boolean;
 }
 
 /** The options of `organizations.dynamicRoles` (plan 12k). */
@@ -823,6 +836,10 @@ export interface OrganizationLimits {
   membersPerOrganization?: number;
   /** The pending, unexpired invitations of one organization. Invite answers `invitation_limit` at it. */
   pendingInvitationsPerOrganization?: number;
+  /** The teams of one organization (plan 12k). A team create answers `team_limit` at it. */
+  teamsPerOrganization?: number;
+  /** The member rows of one team (plan 12k). A team member add and an accept answer `team_member_limit` at it. */
+  membersPerTeam?: number;
 }
 
 type ResolvedLimits = { [K in keyof OrganizationLimits]-?: number | null };
@@ -881,6 +898,8 @@ export interface ResolvedConfig {
     limits: ResolvedLimits;
     /** Null: dynamic roles are off, and no read of a role row runs (plan 12k). */
     dynamicRoles: { maxPerOrganization: number } | null;
+    /** Null: teams are off, and no team route is mounted (plan 12k). */
+    teams: { defaultTeam: boolean; keepLastTeam: boolean } | null;
   } | null;
   signUp: "open" | "invited" | false;
   password: {
@@ -1138,6 +1157,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         ((token) => `${appURL}/?invitation=${encodeURIComponent(token)}`),
       limits: resolveLimits(o.limits),
       dynamicRoles: resolveDynamicRoles(o.dynamicRoles),
+      teams: resolveTeams(o.teams),
     };
   }
   const basePath = input.basePath ?? DEFAULT_BASE_PATH;
@@ -1406,6 +1426,8 @@ const NO_LIMITS: ResolvedLimits = {
   perUser: null,
   membersPerOrganization: null,
   pendingInvitationsPerOrganization: null,
+  teamsPerOrganization: null,
+  membersPerTeam: null,
 };
 
 const SESSION_KEYS: Readonly<Record<keyof NonNullable<AuthConfig["session"]>, true>> = {
@@ -1467,6 +1489,29 @@ function resolveDynamicRoles(
   return { maxPerOrganization: integerIn(path, max, 1, 1000) };
 }
 
+const TEAMS_KEYS: Readonly<Record<keyof TeamsConfig, true>> = {
+  defaultTeam: true,
+  keepLastTeam: true,
+};
+
+/** `organizations.teams` (plan 12k). Absent: off. */
+function resolveTeams(
+  input: TeamsConfig | undefined,
+): { defaultTeam: boolean; keepLastTeam: boolean } | null {
+  if (input === undefined) return null;
+  if (!isPlainObject(input)) throw new ConfigError("organizations.teams must be an object");
+  for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
+    if (!Object.hasOwn(TEAMS_KEYS, key))
+      throw new ConfigError(
+        `organizations.teams.${key} is not an option; core has defaultTeam and keepLastTeam`,
+      );
+    if (value !== undefined && typeof value !== "boolean")
+      throw new ConfigError(`organizations.teams.${key} must be a boolean`);
+  }
+  const t = input as TeamsConfig;
+  return { defaultTeam: t.defaultTeam ?? false, keepLastTeam: t.keepLastTeam ?? false };
+}
+
 function resolveLimits(input: OrganizationLimits | undefined): ResolvedLimits {
   const out: ResolvedLimits = { ...NO_LIMITS };
   if (input === undefined) return out;
@@ -1475,7 +1520,7 @@ function resolveLimits(input: OrganizationLimits | undefined): ResolvedLimits {
     if (value === undefined) continue;
     if (!Object.hasOwn(NO_LIMITS, key))
       throw new ConfigError(
-        `organizations.limits.${key} is not a limit; core has perUser, membersPerOrganization, and pendingInvitationsPerOrganization`,
+        `organizations.limits.${key} is not a limit; core has perUser, membersPerOrganization, pendingInvitationsPerOrganization, teamsPerOrganization, and membersPerTeam`,
       );
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
       throw new ConfigError(`organizations.limits.${key} must be a positive integer`);

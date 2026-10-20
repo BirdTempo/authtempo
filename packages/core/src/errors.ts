@@ -65,6 +65,10 @@ export const ERRORS = {
   role_in_use: 409,
   role_limit: 409,
   role_taken: 409,
+  // plan 12k: teams
+  team_limit: 409,
+  team_member_limit: 409,
+  last_team: 409,
   // plan 11g: an unhandled error of a route. The router answers it; no route names it.
   internal: 500,
   // plan 12f: operator tools

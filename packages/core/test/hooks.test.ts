@@ -113,6 +113,17 @@ describe("hooks config (plan 9d)", () => {
         "afterAcceptInvitation",
         "afterDeclineInvitation",
         "afterRevokeInvitation",
+        // Plan 12k Task 5: the ten team points.
+        "beforeCreateTeam",
+        "afterCreateTeam",
+        "beforeUpdateTeam",
+        "afterUpdateTeam",
+        "beforeDeleteTeam",
+        "afterDeleteTeam",
+        "beforeAddTeamMember",
+        "afterAddTeamMember",
+        "beforeRemoveTeamMember",
+        "afterRemoveTeamMember",
       ].sort(),
     );
     expect(Object.keys(SESSION_HOOK_POINTS).sort()).toEqual([
@@ -146,11 +157,20 @@ describe("organizations.limits (plan 9d)", () => {
       perUser: null,
       membersPerOrganization: null,
       pendingInvitationsPerOrganization: null,
+      teamsPerOrganization: null,
+      membersPerTeam: null,
     });
     expect(
-      makeAuth({ organizations: { limits: { perUser: 3, membersPerOrganization: 50 } } }).config
-        .organizations?.limits,
-    ).toEqual({ perUser: 3, membersPerOrganization: 50, pendingInvitationsPerOrganization: null });
+      makeAuth({
+        organizations: { limits: { perUser: 3, membersPerOrganization: 50, membersPerTeam: 5 } },
+      }).config.organizations?.limits,
+    ).toEqual({
+      perUser: 3,
+      membersPerOrganization: 50,
+      pendingInvitationsPerOrganization: null,
+      teamsPerOrganization: null,
+      membersPerTeam: 5,
+    });
   });
 
   it("refuses a limit that is not a positive integer, and a key that is no limit", () => {
