@@ -1,6 +1,8 @@
-import { NOT_SUPPORTED } from "../errors.js";
-import type { AdminOptions } from "../types.js";
+import type { Auth, OperatorUser, UserRow } from "@authtempo/core";
+import { BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
+import type { AdminOptions, AdminUser } from "../types.js";
 import type { Mapped } from "./map-options.js";
+import { toUser } from "./shapes.js";
 
 /**
  * Better Auth 1.7.7's admin paths (dist/plugins/admin/routes.mjs, read
@@ -116,6 +118,9 @@ export function listUsersTarget(q: URLSearchParams): ListUsersTarget {
   const search = searchValue !== null && searchValue !== "";
   const filter = filterValue !== null;
   if (search && filter) return { ok: false, why: ONE_KEY };
+  // The shim's own key: the `next` of the page before (core's cursor), since core has no offset.
+  const after = q.get("after");
+  if (after !== null) query.after = after;
   if (search) {
     if ((q.get("searchField") ?? "email") !== "email" || q.get("searchOperator") !== "starts_with")
       return { ok: false, why: BY_ADDRESS };
@@ -223,4 +228,252 @@ export async function adminRefusal(mapped: Mapped, request: Request): Promise<Re
       );
   }
   return null;
+}
+
+/**
+ * Better Auth's code of each refusal by the operator guard, per path
+ * (dist/plugins/admin/routes.mjs and error-codes.mjs, read 2026-10-21).
+ * Core answers `operator_required` for each step of the guard and for a
+ * target that is a platform operator. Better Auth names the refused action,
+ * so each path answers its own name with core's status, 403.
+ */
+export const ADMIN_FORBIDDEN: Readonly<Record<string, string>> = {
+  "/admin/list-users": "YOU_ARE_NOT_ALLOWED_TO_LIST_USERS",
+  "/admin/get-user": "YOU_ARE_NOT_ALLOWED_TO_GET_USER",
+  "/admin/ban-user": "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS",
+  "/admin/unban-user": "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS",
+  "/admin/set-role": "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE",
+  "/admin/revoke-user-sessions": "YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS",
+};
+
+/** Better Auth's code for an unknown user (@better-auth/core dist/error/codes.mjs:4, read 2026-10-21). */
+const USER_NOT_FOUND = "USER_NOT_FOUND";
+/** Better Auth's code for a ban of the caller's own user (error-codes.mjs, read 2026-10-21). */
+const BAN_YOURSELF = "YOU_CANNOT_BAN_YOURSELF";
+
+/**
+ * Better Auth's user with the admin fields, from core's user row. `role`
+ * is the platform role or `user`. The ban fields hold a ban that holds
+ * now, by core's rule (spec 26 item 6). A ban that ended reads as no ban.
+ */
+export function toAdminUser(row: UserRow, role: string, now: Date): AdminUser {
+  const holds =
+    row.bannedAt !== null && (row.banUntil === null || row.banUntil.getTime() > now.getTime());
+  return {
+    ...toUser(row),
+    role,
+    banned: holds,
+    banReason: holds ? row.banReason : null,
+    banExpires: holds ? row.banUntil : null,
+  };
+}
+
+type Body = Record<string, unknown>;
+
+/** A JSON body of Better Auth's form with core's headers: the renewed cookie and CORS. */
+function withHeaders(body: unknown, status: number, from: Response): Response {
+  const headers = new Headers(from.headers);
+  headers.delete("content-length");
+  return Response.json(body, { status, headers });
+}
+
+/**
+ * Core's refusal in Better Auth's form, with core's status and headers.
+ * `operator_required` answers the path's own name, `not_found` answers
+ * `USER_NOT_FOUND`, and `operator_self` on a ban answers
+ * `YOU_CANNOT_BAN_YOURSELF`: the shim's actor is always a user, so
+ * `operator_self` names the caller's own user. Each other code answers its
+ * name in `BETTER_AUTH_CODES`.
+ */
+async function refusalOf(path: string, res: Response): Promise<Response> {
+  const body = (await res
+    .clone()
+    .json()
+    .catch(() => null)) as Body | null;
+  const error = typeof body?.error === "string" ? body.error : "unexpected";
+  const code =
+    error === "operator_required"
+      ? (ADMIN_FORBIDDEN[path] ?? BETTER_AUTH_CODES.operator_required)
+      : error === "not_found"
+        ? USER_NOT_FOUND
+        : error === "operator_self" && path === "/admin/ban-user"
+          ? BAN_YOURSELF
+          : Object.hasOwn(BETTER_AUTH_CODES, error)
+            ? BETTER_AUTH_CODES[error as keyof typeof BETTER_AUTH_CODES]
+            : BETTER_AUTH_CODES.unexpected;
+  // A hook refusal carries the app's own text (plan 9d).
+  const message = typeof body?.message === "string" ? body.message : messageOf(code);
+  return withHeaders({ code, message }, res.status, res);
+}
+
+/** A VALIDATION_ERROR of the shim's own, before any core route runs. */
+function invalid(): Response {
+  const code = BETTER_AUTH_CODES.invalid_body;
+  return Response.json({ code, message: messageOf(code) }, { status: 400 });
+}
+
+/** The JSON object of a POST, or null for no object. */
+async function objectOf(request: Request): Promise<Body | null> {
+  const v: unknown = await request
+    .clone()
+    .json()
+    .catch(() => null);
+  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Body) : null;
+}
+
+/** The `userId` of a body: a string of one character or more, else null. */
+function userIdOf(body: Body | null): string | null {
+  const v = body?.userId;
+  return typeof v === "string" && v !== "" ? v : null;
+}
+
+/**
+ * The answer to one of the six admin paths that map onto the operator
+ * routes of plan 12f Task 10, or null for any other request. Each call
+ * posts core's own route with the caller's headers, so the session of the
+ * caller is the actor. Core's guard runs there: the platform role, a
+ * verified address, a second factor, and a fresh session (spec 26 item 2).
+ * The shim adds no power and no check of its own past Better Auth's
+ * shapes.
+ *
+ * The cost on D1: an act answers Better Auth's `{ user }` from one read of
+ * the user row after core's route. That read is the one statement on top
+ * of the route's call budget (ruling 37 of plan 12f).
+ */
+export async function adminRoute(
+  auth: Auth,
+  mapped: Mapped,
+  request: Request,
+): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (!url.pathname.startsWith(`${mapped.basePath}/admin/`)) return null;
+  const path = url.pathname.slice(mapped.basePath.length);
+  if (!Object.hasOwn(ADMIN_FORBIDDEN, path)) return null;
+  const get = path === "/admin/list-users" || path === "/admin/get-user";
+  // Any other method, an OPTIONS preflight too, goes to core's router.
+  if (request.method !== (get ? "GET" : "POST")) return null;
+  const platformRole = mapped.platformRole ?? "admin";
+  const storage = mapped.config.storage;
+  /** One core route with the caller's headers: the cookie, the Origin, and the client IP. */
+  const core = (to: string, body?: Body) => {
+    const headers = new Headers(request.headers);
+    headers.delete("content-length");
+    if (body !== undefined) headers.set("content-type", "application/json");
+    return auth.handle(
+      new Request(`${mapped.origin}${mapped.basePath}${to}`, {
+        method: body === undefined ? "GET" : "POST",
+        headers,
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      }),
+    );
+  };
+  /** The user row after an act, in Better Auth's shape with `role`. */
+  const userAfter = async (res: Response, userId: string, role: string) => {
+    const row = await storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
+    if (!row) throw new Error("authtempo compat: the user of an answered admin call is gone");
+    return withHeaders({ user: toAdminUser(row, role, new Date()) }, 200, res);
+  };
+
+  if (path === "/admin/list-users") {
+    // adminRefusal answered every query that core's reads cannot answer.
+    const target = listUsersTarget(url.searchParams);
+    if (!target.ok) return null;
+    const res = await core(`${target.path}?${new URLSearchParams(target.query)}`);
+    if (!res.ok) return refusalOf(path, res);
+    const page = (await res.json()) as { users: OperatorUser[]; next: string | null };
+    const users = await usersOf(storage, page.users, platformRole);
+    const limit = target.query.limit === undefined ? undefined : Number(target.query.limit);
+    // Core gives no total (a count scans the table on D1). The total is
+    // exact when this page ends the list; else `next` names the next page.
+    return withHeaders(
+      page.next === null
+        ? { users, total: users.length, limit, offset: 0 }
+        : { users, limit, offset: 0, next: page.next },
+      200,
+      res,
+    );
+  }
+  if (path === "/admin/get-user") {
+    const id = url.searchParams.get("id");
+    if (id === null || id === "") return invalid();
+    const res = await core(`/operator/users/get?${new URLSearchParams({ userId: id })}`);
+    if (!res.ok) return refusalOf(path, res);
+    const { user } = (await res.json()) as { user: OperatorUser };
+    const [one] = await usersOf(storage, [user], platformRole);
+    // Better Auth answers the user itself, not `{ user }` (routes.mjs getUser).
+    return withHeaders(one ?? null, 200, res);
+  }
+  const body = await objectOf(request);
+  const userId = userIdOf(body);
+  if (userId === null) return invalid();
+  switch (path) {
+    case "/admin/ban-user": {
+      const ban = banBodyOf(body, new Date());
+      if (ban === null) return invalid();
+      const res = await core("/operator/users/ban", ban);
+      // Core refuses an act on a platform operator, so the target's role is `user`.
+      return res.ok ? userAfter(res, userId, USER_ROLE) : refusalOf(path, res);
+    }
+    case "/admin/unban-user": {
+      const res = await core("/operator/users/unban", {
+        userId,
+        reason: adminReason(path),
+      });
+      return res.ok ? userAfter(res, userId, USER_ROLE) : refusalOf(path, res);
+    }
+    case "/admin/set-role": {
+      // adminRefusal answered every role that is not the platform role or `user`.
+      const change = setRoleChange(body?.role, platformRole);
+      if (change === null) return invalid();
+      const res = await core("/operator/users/platform-role", {
+        userId,
+        grant: change === "grant",
+        reason: adminReason(path),
+      });
+      return res.ok
+        ? userAfter(res, userId, change === "grant" ? platformRole : USER_ROLE)
+        : refusalOf(path, res);
+    }
+    case "/admin/revoke-user-sessions": {
+      const res = await core("/operator/sessions/end-user", {
+        userId,
+        reason: adminReason(path),
+      });
+      if (!res.ok) return refusalOf(path, res);
+      const done = (await res.json()) as { ended: number; more: boolean };
+      // One call ends one page within the call budget. While sessions stay,
+      // the answer says so, and the caller calls again (spec 26 item 5).
+      return withHeaders(
+        done.more ? { success: false, more: true, ended: done.ended } : { success: true },
+        200,
+        res,
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * Better Auth's users of core's operator users, in core's order. One read
+ * of the user rows gives `image` and `updatedAt`, which core's operator
+ * answer does not hold. `platformOperator` gives `role`.
+ */
+async function usersOf(
+  storage: Mapped["config"]["storage"],
+  users: readonly OperatorUser[],
+  platformRole: string,
+): Promise<AdminUser[]> {
+  if (users.length === 0) return [];
+  const rows = await storage.findMany("user", [
+    { field: "id", op: "in", value: users.map((u) => u.id) },
+  ]);
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const now = new Date();
+  const out: AdminUser[] = [];
+  for (const u of users) {
+    const row = byId.get(u.id);
+    // A user deleted between the two reads is left out of the answer.
+    if (row) out.push(toAdminUser(row, u.platformOperator ? platformRole : USER_ROLE, now));
+  }
+  return out;
 }

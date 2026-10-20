@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { admin, organization } from "../src/plugins.js";
 import {
+  ADMIN_FORBIDDEN,
   ADMIN_NOT_SUPPORTED,
   banBodyOf,
   listUsersTarget,
@@ -17,11 +18,12 @@ import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
 import type { AdminOptions, BetterAuthOptions, CompatDatabase } from "../src/types.js";
+import { adminApp, OPERATOR, PASSWORD } from "./admin-helpers.js";
 
 // Plan 12f Task 13: Better Auth's admin plugin on core's operator tools
 // (spec section 26 item 14, ruling 39). This file holds the options, the
-// refusals, and the mapping logic. The calls that reach core's operator
-// routes land with those routes (Tasks 10 and 11).
+// refusals, the mapping logic, and the calls that reach core's operator
+// routes of Task 10. The impersonation calls land with Task 11.
 
 const BASE = "https://api.example.com";
 const fast = betterAuthPasswordHash({ pbkdf2: createPbkdf2PasswordHash({ iterations: 1000 }) });
@@ -292,6 +294,12 @@ describe("the mapping logic of the admin calls (plan 12f)", () => {
       path: "/operator/users/search",
       query: { id: "u1" },
     });
+    // The shim's own key: the next page after core's cursor.
+    expect(t("limit=2&after=u2")).toEqual({
+      ok: true,
+      path: "/operator/users",
+      query: { limit: "2", after: "u2" },
+    });
   });
 
   it("maps a ban-user body onto core's ban: the reason, else the path, and the end in seconds", () => {
@@ -334,5 +342,218 @@ describe("the mapping logic of the admin calls (plan 12f)", () => {
     for (const role of ["owner", "member", "editor", "admin,user", ["admin", "user"], [1], 3, null])
       expect({ role, change: setRoleChange(role, "admin") }).toEqual({ role, change: null });
     expect(setRoleChange("owner", "owner")).toBe("grant");
+  });
+});
+
+const json = async (res: Response) => ({ status: res.status, body: await res.json() });
+const ADMIN_USER_KEYS = [
+  "banExpires",
+  "banReason",
+  "banned",
+  "createdAt",
+  "email",
+  "emailVerified",
+  "id",
+  "image",
+  "name",
+  "role",
+  "updatedAt",
+];
+
+describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
+  it("maps the admin plugin calls onto the operator tools", async () => {
+    const a = await adminApp(memoryDatabase());
+    const ann = await a.user("ann@example.com");
+    const anna = await a.user("anna@example.com");
+    const bob = await a.user("bob@example.com");
+
+    // list-users by prefix: core's search by the start of the address, by address.
+    const listed = await json(
+      await a.read("/admin/list-users?searchValue=ann&searchOperator=starts_with", a.op),
+    );
+    expect(listed.status).toBe(200);
+    expect(listed.body.users.map((u: { email: string }) => u.email)).toEqual([
+      "ann@example.com",
+      "anna@example.com",
+    ]);
+    expect(Object.keys(listed.body.users[0]).sort()).toEqual(ADMIN_USER_KEYS);
+    expect(listed.body).toMatchObject({ total: 2, offset: 0 });
+    expect(listed.body.users[0]).toMatchObject({ role: "user", banned: false, banReason: null });
+    // A page that does not end the list names the next page, and the next page ends it.
+    const first = await json(await a.read("/admin/list-users?limit=2", a.op));
+    expect(first.body.total).toBeUndefined();
+    expect(first.body.users).toHaveLength(2);
+    const second = await json(
+      await a.read(`/admin/list-users?limit=2&after=${first.body.next}`, a.op),
+    );
+    expect(second.body.users).toHaveLength(2);
+    expect(second.body.total).toBe(2);
+    const everyone = [...first.body.users, ...second.body.users];
+    expect(everyone.find((u: { email: string }) => u.email === OPERATOR).role).toBe("admin");
+    // An exact id through filterField.
+    const byId = await json(
+      await a.read(`/admin/list-users?filterField=id&filterValue=${bob.id}`, a.op),
+    );
+    expect(byId.body.users.map((u: { id: string }) => u.id)).toEqual([bob.id]);
+
+    // get-user answers the user itself.
+    const got = await json(await a.read(`/admin/get-user?id=${ann.id}`, a.op));
+    expect(got.status).toBe(200);
+    expect(got.body).toMatchObject({ id: ann.id, email: "ann@example.com", role: "user" });
+    expect(await json(await a.read("/admin/get-user?id=nobody", a.op))).toEqual({
+      status: 404,
+      body: { code: "USER_NOT_FOUND", message: "User not found" },
+    });
+
+    // ban-user with a reason and an end in seconds.
+    const before = Date.now();
+    const banned = await json(
+      await a.call(
+        "/admin/ban-user",
+        { userId: ann.id, banReason: "Spam", banExpiresIn: 3600 },
+        a.op,
+      ),
+    );
+    expect(banned.status).toBe(200);
+    expect(banned.body.user).toMatchObject({ id: ann.id, banned: true, banReason: "Spam" });
+    const end = Date.parse(banned.body.user.banExpires);
+    expect(end).toBeGreaterThanOrEqual(before + 3_600_000);
+    expect(end).toBeLessThanOrEqual(Date.now() + 3_600_000);
+    // The ban holds at core's doors: the session ended, and a sign-in is refused.
+    expect(await (await a.read("/get-session", ann.cookie)).json()).toBeNull();
+    expect(
+      await json(
+        await a.call("/password/sign-in", { email: "ann@example.com", password: PASSWORD }),
+      ),
+    ).toMatchObject({ status: 403, body: { error: "account_banned" } });
+
+    // unban-user.
+    const unbanned = await json(await a.call("/admin/unban-user", { userId: ann.id }, a.op));
+    expect(unbanned.status).toBe(200);
+    expect(unbanned.body.user).toMatchObject({
+      id: ann.id,
+      banned: false,
+      banReason: null,
+      banExpires: null,
+    });
+
+    // revoke-user-sessions ends every session of the user.
+    expect(
+      await json(await a.call("/admin/revoke-user-sessions", { userId: bob.id }, a.op)),
+    ).toEqual({ status: 200, body: { success: true } });
+    expect(await (await a.read("/get-session", bob.cookie)).json()).toBeNull();
+
+    // set-role: the platform role grants it, and user revokes it.
+    const granted = await json(
+      await a.call("/admin/set-role", { userId: anna.id, role: "admin" }, a.op),
+    );
+    expect(granted).toMatchObject({ status: 200, body: { user: { id: anna.id, role: "admin" } } });
+    const annaNow = await json(await a.read(`/admin/get-user?id=${anna.id}`, a.op));
+    expect(annaNow.body.role).toBe("admin");
+    // A user actor acts on no other platform operator (spec 26 item 1), so a
+    // revoke of anna's role needs a secret or the app. A revoke of bob changes no role.
+    expect(
+      await json(await a.call("/admin/set-role", { userId: anna.id, role: "user" }, a.op)),
+    ).toMatchObject({ status: 403, body: { code: "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE" } });
+    const revoked = await json(
+      await a.call("/admin/set-role", { userId: bob.id, role: "user" }, a.op),
+    );
+    expect(revoked).toMatchObject({ status: 200, body: { user: { id: bob.id, role: "user" } } });
+
+    // Each act wrote core's audit row, with the operator as the actor.
+    const by = { actorKind: "user", actorId: a.opId };
+    expect(await a.audit(ann.id)).toEqual([
+      { action: "ban", ...by, reason: "Spam" },
+      { action: "unban", ...by, reason: "better-auth admin plugin /admin/unban-user" },
+    ]);
+    expect(await a.audit(bob.id)).toEqual([
+      {
+        action: "sessions_end_user",
+        ...by,
+        reason: "better-auth admin plugin /admin/revoke-user-sessions",
+      },
+      { action: "platform_role_revoke", ...by, reason: "better-auth admin plugin /admin/set-role" },
+    ]);
+    expect(await a.audit(anna.id)).toEqual([
+      { action: "platform_role_grant", ...by, reason: "better-auth admin plugin /admin/set-role" },
+    ]);
+
+    // The operator's own user: Better Auth's code on a ban, core's FORBIDDEN on
+    // another act. The status stays core's, 409.
+    expect(await json(await a.call("/admin/ban-user", { userId: a.opId }, a.op))).toEqual({
+      status: 409,
+      body: { code: "YOU_CANNOT_BAN_YOURSELF", message: "You cannot ban yourself" },
+    });
+    expect(
+      await json(await a.call("/admin/revoke-user-sessions", { userId: a.opId }, a.op)),
+    ).toMatchObject({ status: 409, body: { code: "FORBIDDEN" } });
+    // A body that Better Auth refuses too, and no session.
+    expect((await a.call("/admin/ban-user", { userId: "" }, a.op)).status).toBe(400);
+    expect(await json(await a.call("/admin/unban-user", { userId: ann.id }))).toMatchObject({
+      status: 401,
+      body: { code: "UNAUTHORIZED" },
+    });
+  });
+
+  it("answers success false with more while sessions stay, and success at the last page", async () => {
+    // A limiter that allows each call: 501 sign-ins of one user, past the page of 500.
+    const a = await adminApp({ ...memoryDatabase(), limiter: { allow: async () => true } });
+    const ann = await a.user("ann@example.com");
+    for (let i = 0; i < 500; i++)
+      await a.call("/password/sign-in", { email: "ann@example.com", password: PASSWORD });
+    const revoke = () => a.call("/admin/revoke-user-sessions", { userId: ann.id }, a.op);
+    expect(await json(await revoke())).toEqual({
+      status: 200,
+      body: { success: false, more: true, ended: 500 },
+    });
+    expect(await (await a.read("/get-session", ann.cookie)).json()).toBeNull();
+    expect(await json(await revoke())).toEqual({ status: 200, body: { success: true } });
+    expect((await a.audit(ann.id)).map((r) => r.action)).toEqual([
+      "sessions_end_user",
+      "sessions_end_user",
+    ]);
+  });
+
+  it("refuses an admin with no second factor", async () => {
+    const a = await adminApp(memoryDatabase(), { factor: false });
+    const ann = await a.user("ann@example.com");
+    const ban = await json(await a.call("/admin/ban-user", { userId: ann.id }, a.op));
+    expect(ban).toEqual({
+      status: 403,
+      body: {
+        code: "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS",
+        message: "You are not allowed to ban users",
+      },
+    });
+    // No change and no audit row.
+    expect(await (await a.read("/get-session", ann.cookie)).json()).not.toBeNull();
+    expect(await a.audit(ann.id)).toEqual([]);
+    // Each mapped path answers Better Auth's name of its own refused action.
+    const calls: [string, () => Promise<Response>][] = [
+      ["/admin/list-users", () => a.read("/admin/list-users", a.op)],
+      ["/admin/get-user", () => a.read(`/admin/get-user?id=${ann.id}`, a.op)],
+      ["/admin/ban-user", () => a.call("/admin/ban-user", { userId: ann.id }, a.op)],
+      ["/admin/unban-user", () => a.call("/admin/unban-user", { userId: ann.id }, a.op)],
+      ["/admin/set-role", () => a.call("/admin/set-role", { userId: ann.id, role: "admin" }, a.op)],
+      [
+        "/admin/revoke-user-sessions",
+        () => a.call("/admin/revoke-user-sessions", { userId: ann.id }, a.op),
+      ],
+    ];
+    expect(calls.map(([p]) => p).sort()).toEqual(Object.keys(ADMIN_FORBIDDEN).sort());
+    const codes: Record<string, unknown> = {};
+    for (const [path, send] of calls) {
+      const res = await send();
+      codes[path] = [res.status, ((await res.json()) as { code: string }).code];
+    }
+    expect(codes).toEqual({
+      "/admin/list-users": [403, "YOU_ARE_NOT_ALLOWED_TO_LIST_USERS"],
+      "/admin/get-user": [403, "YOU_ARE_NOT_ALLOWED_TO_GET_USER"],
+      "/admin/ban-user": [403, "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS"],
+      "/admin/unban-user": [403, "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS"],
+      "/admin/set-role": [403, "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE"],
+      "/admin/revoke-user-sessions": [403, "YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS"],
+    });
+    expect(await a.audit(ann.id)).toEqual([]);
   });
 });

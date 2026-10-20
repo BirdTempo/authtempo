@@ -3,7 +3,7 @@ import { BetterAuthCompatError } from "../compat-error.js";
 import { BETTER_AUTH_CODES, messageOf, passwordPolicyCode } from "../errors.js";
 import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
 import { accountRoute } from "./account.js";
-import { adminRefusal } from "./admin.js";
+import { adminRefusal, adminRoute } from "./admin.js";
 import { createApi } from "./api.js";
 import { checkOptions } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
@@ -128,8 +128,11 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
     const refusal = crossSiteRefusal(auth, req);
     if (refusal) return invalidOrigin(refusal);
     const copy = req.method === "POST" ? req.clone() : null;
-    // Better Auth's admin calls that core does not serve (plan 12f). Null for every other request.
-    const admin = plugins.has("admin") ? await adminRefusal(mapped, req) : null;
+    // Better Auth's admin calls (plan 12f): the refusals of the calls that core does not
+    // serve, then the calls that map onto core's operator routes. Null for every other request.
+    const admin = plugins.has("admin")
+      ? ((await adminRefusal(mapped, req)) ?? (await adminRoute(auth, mapped, req)))
+      : null;
     // Better Auth's get-session and account paths, in Better Auth's shapes (plan 12a). Null for every other request.
     const account =
       admin ??

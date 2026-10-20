@@ -19,6 +19,19 @@ export interface User {
   updatedAt: Date;
 }
 
+/**
+ * Better Auth 1.7.7's user with the admin plugin's fields
+ * (dist/plugins/admin/schema.mjs, read 2026-10-21), as the admin paths
+ * answer it (plan 12f). `role` is the platform role or `user`. The ban
+ * fields hold a ban that holds now, else `false` and null.
+ */
+export interface AdminUser extends User {
+  role: string;
+  banned: boolean;
+  banReason: string | null;
+  banExpires: Date | null;
+}
+
 export interface Session {
   id: string;
   /** The caller's own session token, read from the request. The `session.token` column holds its SHA-256 hex. */
