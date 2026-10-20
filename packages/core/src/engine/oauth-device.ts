@@ -365,7 +365,7 @@ export async function pollDevice(
 ): Promise<OAuthResult<TokenAnswer>> {
   const { client } = input.client;
   if (!client.grantTypes.includes(DEVICE_GRANT)) return oauthFail("unauthorized_client");
-  // A read after the client auth, not the row of the count: the auth of a
+  // A read after the client auth, not the row of the count. The auth of a
   // metadata document can drop the client's device rows (ruling 48).
   const row = await findDeviceCode(config, input.deviceCode);
   if (!row || row.clientId !== client.id) return oauthFail("invalid_grant");

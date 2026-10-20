@@ -366,8 +366,8 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         today: new Date(),
       }),
   },
-  // Ruling 55 of plan 12e: an authtempo cell of /compare/ that denies a route or a
-  // config key fails while ROUTES or the config keys hold it.
+  // Ruling 55 of plan 12e. An authtempo cell of /compare/ can deny a route or a
+  // config key. It fails while ROUTES or the config keys hold that fact.
   {
     name: "check-compare",
     run: () => checkCompare({ rows: COMPARE_ROWS, routes: ROUTES, keys: configKeyPaths() }),

@@ -22,8 +22,8 @@ export const endSessionLimited = async (config: ResolvedConfig, ip: string | nul
 
 /**
  * What a valid `id_token_hint` names. `clientId` is its `aud`, and `client`
- * its row. `sid` is the `sid` of the token as the client got it, or null
- * when the code had no session: `hintNamesSession` maps it to a session.
+ * its row. `sid` is the `sid` of the token as the client got it. It is null
+ * when the code had no session. `hintNamesSession` maps it to a session.
  * `sub` is the user id: a pairwise subject is mapped back to its user.
  */
 export interface IdTokenHint {
@@ -36,7 +36,7 @@ export interface IdTokenHint {
 /**
  * True when the hint names the session `sessionId`. A pairwise client holds
  * its own sid (review M2 of plan 12e). A link of the session and the client
- * holds the sid of its ID tokens, so the hint matches after the secret
+ * holds the sid of its ID tokens. So the hint matches after the secret
  * version that made it is gone (ruling 57). With no link, the hash runs
  * under each version that the keyring holds.
  */
@@ -218,9 +218,9 @@ export async function linkIdToken(
 /**
  * The logout token of one outbox row (section 2.4). `sub` and `sid` are
  * the values that the client knows. The row holds the `sid` of the ID
- * token, so a new secret version since then changes nothing (ruling 57). An account delete removes a pairwise subject first.
- * Then the token holds `sid` alone, which section 2.4 allows. It never holds
- * a nonce.
+ * token, so a new secret version since then changes nothing (ruling 57). An
+ * account delete removes a pairwise subject first. Then the token holds
+ * `sid` alone, which section 2.4 allows. It never holds a nonce.
  */
 export async function logoutToken(
   config: ResolvedConfig,

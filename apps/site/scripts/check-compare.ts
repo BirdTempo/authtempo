@@ -89,10 +89,10 @@ export function denies(topic: string, cell: string, term: string): boolean {
  * The authtempo cells of /compare/ against the code (ruling 55 of plan 12e).
  * A cell fails when it denies a fact of CODE_FACTS that ROUTES or the config
  * keys hold. A cell denies a fact with "no", "not", "never", or "without" up
- * to two words before its words, or "only" up to two words after them. A
- * topic that names the fact is denied by a cell sentence that starts with
- * "No" or "Not supported", or ends with "only". The count `held` is the
- * number of facts that the code holds now.
+ * to two words before its words. The word "only" up to two words after them
+ * denies it too. A topic that names the fact is denied by a cell sentence
+ * that starts with "No" or "Not supported", or ends with "only". The count
+ * `held` is the number of facts that the code holds now.
  */
 export function checkCompare(input: {
   rows: readonly Pick<CompareRow, "id" | "topic" | "authtempo">[];
