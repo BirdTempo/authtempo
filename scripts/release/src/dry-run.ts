@@ -95,6 +95,11 @@ export const PNPM_PUBLISH_ARGS: readonly string[] = [
   // pnpm 12.8.1 also reads the package document first. With the default
   // retries on the dead address, it waits 70 s (read 2026-10-21). One try fails at once.
   "--config.fetch-retries=0",
+  // pnpm 12.8.1 reads a proxy from the root .npmrc of the copy, from pnpm-workspace.yaml,
+  // and from its config.yaml under HOME (review of the Task 6 fix, m1).
+  // Through a proxy, it sends each package document read to the proxy host and still prints the dead registry.
+  // No proxy serves the dead address. pnpm 12.8.1 ignores noproxy=* (read 2026-10-21).
+  "--config.noproxy=127.0.0.1",
 ];
 
 /** The body of the one temporary changeset. */

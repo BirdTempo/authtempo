@@ -1010,3 +1010,85 @@ describe("dry run against a remote cache", () => {
     }
   });
 });
+
+/** A release copy of the fixture after changeset version and prepare, after `edit`. */
+function preparedCopy(edit: (dir: string) => void = () => {}): string {
+  const repo = copyFixture((d) => {
+    changesetVersion(d, "Add the first release.");
+    writeFileSync(join(d, ".release-copy"), "");
+    edit(d);
+  });
+  made.push(repo);
+  expect(prepare(repo).failures).toEqual([]);
+  return repo;
+}
+
+describe("dry run behind a proxy", () => {
+  it("sends no request to a proxy of the copy or of HOME", async () => {
+    // pnpm 12.8.1 reads a proxy from three files that the env allowlist does
+    // not hold (review of the Task 6 fix, m1).
+    const temp = mkdtempSync(join(tmpdir(), "authtempo-proxy-test-"));
+    made.push(temp);
+    const log = join(temp, "requests.log");
+    const listener = await listen(log);
+    try {
+      const proxy = (a: string, b: string) => `${a}${listener.url}\n${b}${listener.url}\n`;
+      // The config.yaml of pnpm under HOME: the macOS folder and the XDG folder of Linux.
+      const home = join(temp, "person");
+      for (const dir of ["Library/Preferences/pnpm", ".config/pnpm"]) {
+        mkdirSync(join(home, dir), { recursive: true });
+        writeFileSync(join(home, dir, "config.yaml"), proxy("httpProxy: ", "httpsProxy: "));
+      }
+      const plain = preparedCopy();
+      const { files, paths } = childFiles(join(temp, "child"));
+      // The parent has the HOME of the person, as the dry run of the person does.
+      const env = childEnv({ ...process.env, HOME: home }, files, paths);
+      const noproxy = (args: readonly string[]) => args.filter((a) => !a.includes("noproxy"));
+      const cases: [label: string, repo: string, env: ChildEnv, args: readonly string[]][] = [
+        [
+          "the root .npmrc of the copy",
+          preparedCopy((d) => writeFileSync(join(d, ".npmrc"), proxy("proxy=", "https-proxy="))),
+          env,
+          PNPM_PUBLISH_ARGS,
+        ],
+        [
+          "pnpm-workspace.yaml",
+          preparedCopy((d) => {
+            const file = join(d, "pnpm-workspace.yaml");
+            writeFileSync(file, readFileSync(file, "utf8") + proxy("httpProxy: ", "httpsProxy: "));
+          }),
+          env,
+          PNPM_PUBLISH_ARGS,
+        ],
+        ["config.yaml under HOME", plain, { ...env, HOME: home }, PNPM_PUBLISH_ARGS],
+        // The empty HOME holds no config.yaml, also with no noproxy.
+        ["config.yaml under the empty HOME", plain, env, noproxy(PNPM_PUBLISH_ARGS)],
+      ];
+      // One expect for all cases, so a failure names each source that reached the proxy.
+      const seen = cases.map(([label, repo, e, args]) => {
+        const r = spawnRun("pnpm", args, repo, e);
+        const said = r.stdout
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => l.includes(" → "))
+          .sort();
+        const requests = readFileSync(log, "utf8");
+        writeFileSync(log, "");
+        return [label, r.status, said, requests];
+      });
+      expect(seen).toEqual(
+        cases.map(([label]) => [
+          label,
+          0,
+          [
+            "📦 @authtempo/client@0.1.0 → http://127.0.0.1:9/",
+            "📦 @authtempo/core@0.1.0 → http://127.0.0.1:9/",
+          ],
+          "",
+        ]),
+      );
+    } finally {
+      listener.stop();
+    }
+  });
+});
