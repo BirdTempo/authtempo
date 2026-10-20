@@ -398,6 +398,23 @@ describe("client auth at the token endpoint (plan 12e)", () => {
     ).toBe("invalid_request");
   });
 
+  it("counts an empty nonce as absent, so it never stands in for PKCE (review m2 of plan 12e)", async () => {
+    const h = oauthHandle();
+    const s = await signedIn(h);
+    const post = await confidential(h, "client_secret_post");
+    const noChallenge = { clientId: post.clientId, challenge: null, scope: "openid mcp:read" };
+    expect(await authorizeError(h, s.cookie, { ...noChallenge, nonce: "" })).toBe(
+      "invalid_request",
+    );
+    // With a challenge, an empty nonce leaves no nonce in the ID token.
+    const c = await codeOf(h, s.cookie, post.clientId, { scope: "openid", nonce: "" });
+    const res = await h.auth.handle(
+      tokenPost({ ...codeBody(c), client_id: post.clientId, client_secret: post.secret }),
+    );
+    const { id_token } = (await res.json()) as { id_token: string };
+    expect(decodeJws(id_token)?.payload).not.toHaveProperty("nonce");
+  });
+
   it("needs the verifier for a code issued with a challenge", async () => {
     const h = oauthHandle();
     const s = await signedIn(h);

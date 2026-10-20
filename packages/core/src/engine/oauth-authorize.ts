@@ -232,7 +232,8 @@ export async function checkAuthorize(
   const scopes = [...new Set((scope ?? "").split(" ").filter((s) => s.length > 0))];
   if (scopes.length === 0 || scopes.some((s) => !oauth.scopes.has(s)))
     return back("invalid_scope", state);
-  const nonce = single(params, "nonce");
+  // given: an empty nonce binds nothing, so it never stands in for PKCE (review m2 of plan 12e).
+  const nonce = given(params, "nonce");
   if (!shortText(nonce)) return back("invalid_request", state);
   if (challenge === null && pkceRequired(client, scopes, nonce))
     return back("invalid_request", state);
