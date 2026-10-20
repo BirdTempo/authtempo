@@ -166,8 +166,9 @@ async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<O
 }
 
 /**
- * The users by `id` ascending (a ULID, so the order of creation). `after`
- * is the `next` of the page before. `limit` is 1 to 100, default 50. The
+ * The users by `id` ascending. For a core id (a ULID) this is about the
+ * order of creation: two ids of one millisecond sort by their random part,
+ * and a compat id has no time part. `after` is the `next` of the page before. `limit` is 1 to 100, default 50. The
  * read takes `limit + 1` rows, so `next` is set only when more users
  * follow. No total count: a count of every row scans the table on D1.
  * Needs `operator.users` (else `not_found`) and the scope `users`. A page
