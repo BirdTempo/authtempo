@@ -319,6 +319,46 @@ describe("the quota (plan 12k Task 7)", () => {
     expect(await remaining(h)).toEqual([10]);
   });
 
+  it("answers conflict to a quota update when spends ran between its read and its write", async () => {
+    const h = useHandle();
+    const ada = await h.seedUser("ada@example.com");
+    const made = mustOk(
+      await h.auth.api.tokens.create({ user: ada, name: "ci", quota: { remaining: 10 } }),
+    );
+    // The first use stamps lastUsedAt; spends within the hour then write the count only.
+    expect(await code(h, made.token)).toBe("ok");
+    h.clock.advance(60_000);
+    let hook: (() => Promise<void>) | null = async () => {
+      for (let i = 0; i < 7; i++) expect(await code(h, made.token)).toBe("ok");
+    };
+    const storage: StorageAdapter = {
+      ...h.storage,
+      async findOne(model, where) {
+        const row = await h.storage.findOne(model, where);
+        const run = hook;
+        // The update reads the row by id and user id; a resolve reads it by its hash.
+        if (model === "apiToken" && where.some((w) => w.field === "userId") && run) {
+          hook = null;
+          await run();
+        }
+        return row;
+      },
+    };
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage,
+      mail: { send: async () => {} },
+      clock: h.clock,
+    });
+    expect(
+      await auth.api.tokens.update({ user: ada, id: made.apiToken.id, quota: { remaining: 5 } }),
+    ).toMatchObject({ ok: false, code: "conflict" });
+    // The row keeps the spent count: the update would give back three calls that nobody sold.
+    expect(await remaining(h)).toEqual([2]);
+  });
+
   it("lowers the quota and drops the refill in process, and refuses a raise", async () => {
     const h = useHandle();
     const ada = await h.seedUser("ada@example.com");
