@@ -3,8 +3,9 @@ import { type AuthConfig, resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
 import { hookGuard } from "../src/engine/hooks.js";
-import { sessionLive } from "../src/engine/jwt.js";
+import { mintSessionJwt, sessionLive } from "../src/engine/jwt.js";
 import { liveUser } from "../src/engine/oauth-token.js";
+import { activeBan } from "../src/engine/operator/ban-rule.js";
 import { requireOperatorUser } from "../src/engine/operator/guards.js";
 import { operatorApi } from "../src/engine/operator/index.js";
 import { addMember } from "../src/engine/organizations.js";
@@ -48,6 +49,9 @@ async function world(extra: Partial<AuthConfig> = {}) {
   const base = makeAuth();
   const ended: string[] = [];
   const updates: string[] = [];
+  // The unban keeps bannedAt (ruling 28), so the hooks read the one active-ban rule.
+  const banState = (user: Parameters<typeof activeBan>[0]) =>
+    activeBan(user, base.clock.now()) ? "banned" : "open";
   const input: AuthConfig = {
     baseURL: BASE_URL,
     secret: "0123456789abcdef0123456789abcdef",
@@ -90,12 +94,10 @@ async function world(extra: Partial<AuthConfig> = {}) {
       },
       user: {
         beforeUpdate: ({ user, via }) => {
-          updates.push(`before:${via}:${user.bannedAt === null ? "open" : "banned"}`);
+          updates.push(`before:${via}:${banState(user)}`);
         },
         afterUpdate: ({ user, previous, via }) => {
-          updates.push(
-            `after:${via}:${previous.bannedAt === null ? "open" : "banned"}>${user.bannedAt === null ? "open" : "banned"}`,
-          );
+          updates.push(`after:${via}:${banState(previous)}>${banState(user)}`);
         },
       },
     },
@@ -179,6 +181,40 @@ async function handoffCode(w: World, session: { id: string; userId: string }) {
 const status = async (w: World, request: Request) => (await w.auth.handle(request)).status;
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 const GRANT = { status: 400, body: { error: "invalid_grant" } };
+const UNAUTHORIZED = { ok: false, code: "unauthorized", status: 401 };
+
+/** The user row of `userId`, read from storage. */
+const userRow = (w: World, userId: string) =>
+  w.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
+
+/**
+ * The ban, with a race row: a session that a sign-in writes beside the ban.
+ * On Postgres a sign-in of an unverified user takes no row lock. Its insert
+ * can commit after the ban's delete began, so the delete does not see the
+ * row (break P2 of Task 6). The fixture writes that row with the write step
+ * of openSession while the ban's transaction is open, after its deletes.
+ */
+async function raceRow(w: World, userId: string, until?: string) {
+  let raced: { token: string; session: { id: string } } | null = null;
+  const storage = w.storage as StorageAdapter;
+  const transaction = storage.transaction.bind(storage);
+  storage.transaction = (fn) =>
+    transaction((tx) =>
+      fn({
+        ...tx,
+        create: async (model, data) => {
+          if (model === "operatorAudit" && raced === null)
+            raced = await createSession(w.config, { userId, ip: null, userAgent: null });
+          return tx.create(model, data);
+        },
+      }),
+    );
+  expect((await ban(w, userId, until)).ok).toBe(true);
+  storage.transaction = transaction;
+  const row = raced as { token: string; session: { id: string } } | null;
+  if (!row) throw new Error("the race row was not written");
+  return row;
+}
 
 describe("the ban (plan 12f Task 6)", () => {
   it("ends the access of a banned user", async () => {
@@ -252,32 +288,7 @@ describe("the ban (plan 12f Task 6)", () => {
   it("ends a session that a race opened before the ban", async () => {
     const w = await world();
     const s = await signedIn(w);
-    // On Postgres a sign-in of an unverified user takes no row lock. Its
-    // insert can commit after the ban's delete began, so the delete does
-    // not see the row. The fixture writes that row with the write step of
-    // openSession while the ban's transaction is open, after its deletes.
-    let raced: { token: string; session: { id: string } } | null = null;
-    const storage = w.storage as StorageAdapter;
-    const transaction = storage.transaction.bind(storage);
-    storage.transaction = (fn) =>
-      transaction((tx) =>
-        fn({
-          ...tx,
-          create: async (model, data) => {
-            if (model === "operatorAudit" && raced === null)
-              raced = await createSession(w.config, {
-                userId: s.user.id,
-                ip: null,
-                userAgent: null,
-              });
-            return tx.create(model, data);
-          },
-        }),
-      );
-    expect((await ban(w, s.user.id)).ok).toBe(true);
-    storage.transaction = transaction;
-    const row = raced as { token: string; session: { id: string } } | null;
-    if (!row) throw new Error("the race row was not written");
+    const row = await raceRow(w, s.user.id);
     w.ended.length = 0;
     expect(await sessionLive(w.config, { sid: row.session.id })).toBe(false);
     // Ruling 4: a read-only resolve answers null and writes nothing.
@@ -286,6 +297,89 @@ describe("the ban (plan 12f Task 6)", () => {
     expect(await resolveSession(w.config, row.token)).toBeNull();
     expect(await w.storage.findMany("session", [])).toEqual([]);
     expect(w.ended).toEqual([`${row.session.id}:banned`]);
+  });
+
+  it("keeps a race row ended after the unban", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    const row = await raceRow(w, s.user.id);
+    // Nobody presents the row while the ban holds. The operator unbans later.
+    w.clock.advance(MINUTE_MS);
+    expect((await unban(w, s.user.id)).ok).toBe(true);
+    w.ended.length = 0;
+    expect(await sessionLive(w.config, { sid: row.session.id })).toBe(false);
+    expect(await resolveSession(w.config, row.token, "read-only")).toBeNull();
+    expect(await resolveSession(w.config, row.token)).toBeNull();
+    expect(await w.storage.findMany("session", [])).toEqual([]);
+    expect(w.ended).toEqual([`${row.session.id}:banned`]);
+  });
+
+  it("keeps a race row ended after a timed ban ends", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    const until = new Date(w.clock.now().getTime() + MINUTE_MS).toISOString();
+    const row = await raceRow(w, s.user.id, until);
+    w.clock.advance(MINUTE_MS);
+    expect(await sessionLive(w.config, { sid: row.session.id })).toBe(false);
+    expect(await resolveSession(w.config, row.token)).toBeNull();
+    expect(await w.storage.findMany("session", [])).toEqual([]);
+  });
+
+  it("mints no session JWT for a race row, during the ban and after the unban", async () => {
+    const w = await world({ jwtMint: { audience: ["https://rs.example.com"] } });
+    const s = await signedIn(w);
+    const row = await raceRow(w, s.user.id);
+    const mint = () => mintSessionJwt(w.config, { userId: s.user.id, sessionId: row.session.id });
+    expect(await mint()).toEqual(UNAUTHORIZED);
+    w.clock.advance(MINUTE_MS);
+    expect((await unban(w, s.user.id)).ok).toBe(true);
+    expect(await mint()).toEqual(UNAUTHORIZED);
+  });
+
+  it("ends the ban window at the unban and keeps the time and the reason of the ban", async () => {
+    const w = await world({ jwtMint: { audience: ["https://rs.example.com"] } });
+    const s = await signedIn(w);
+    const bannedAt = w.clock.now();
+    expect((await ban(w, s.user.id)).ok).toBe(true);
+    w.clock.advance(MINUTE_MS);
+    const unbannedAt = w.clock.now();
+    expect((await unban(w, s.user.id)).ok).toBe(true);
+    expect(await userRow(w, s.user.id)).toMatchObject({
+      bannedAt,
+      banReason: "Abuse report 7",
+      banUntil: unbannedAt,
+    });
+    // A session that opens after the unban passes each door.
+    const again = await signedIn(w);
+    expect(await resolveSession(w.config, again.token)).toMatchObject({
+      session: { id: again.session.id },
+    });
+    expect(await sessionLive(w.config, { sid: again.session.id })).toBe(true);
+    expect(
+      (await mintSessionJwt(w.config, { userId: s.user.id, sessionId: again.session.id })).ok,
+    ).toBe(true);
+  });
+
+  it("writes no ban field at the unban of a user with no active ban", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    expect((await unban(w, s.user.id)).ok).toBe(true);
+    expect(await userRow(w, s.user.id)).toMatchObject({
+      bannedAt: null,
+      banReason: null,
+      banUntil: null,
+    });
+    // An ended timed ban keeps its own end.
+    const bannedAt = w.clock.now();
+    const until = new Date(bannedAt.getTime() + MINUTE_MS);
+    expect((await ban(w, s.user.id, until.toISOString())).ok).toBe(true);
+    w.clock.advance(2 * MINUTE_MS);
+    expect((await unban(w, s.user.id)).ok).toBe(true);
+    expect(await userRow(w, s.user.id)).toMatchObject({
+      bannedAt,
+      banReason: "Abuse report 7",
+      banUntil: until,
+    });
   });
 
   it("fires afterEnd with the reason banned once per session, and the user hooks with via ban", async () => {

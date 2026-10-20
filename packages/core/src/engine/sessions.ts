@@ -20,7 +20,7 @@ import {
   stopWith,
 } from "./hooks.js";
 import { endSessionById, writeLogouts } from "./oauth-outbox.js";
-import { activeBan } from "./operator/ban-rule.js";
+import { activeBan, bannedFor } from "./operator/ban-rule.js";
 import { holdUser } from "./user-hold.js";
 
 // The credential facts moved to primitives/credentials.ts (plan 11d). They stay exported here, so no importer changes.
@@ -453,10 +453,12 @@ export function readModeOf(
  * ended row answers null and stays for the sweep, and a due refresh sets
  * `needsRefresh`. No mode changes `freshAt`.
  *
- * A session of a user with an active ban answers null (plan 12f). The ban
- * ended every session in its transaction, so such a row is one that a
- * sign-in wrote in a race with the ban. In `"write"` mode the call deletes
- * it by id; in `"read-only"` mode it writes nothing (ruling 4).
+ * A session from before the end of the user's last ban answers null (plan
+ * 12f, `bannedFor`). The ban ended every session in its transaction, so
+ * such a row is one that a sign-in wrote in a race with the ban. It stays
+ * ended after the unban and after `banUntil` (ruling 28). In `"write"` mode
+ * the call deletes it by id; in `"read-only"` mode it writes nothing
+ * (ruling 4).
  */
 export async function resolveSession(
   config: ResolvedConfig,
@@ -485,7 +487,7 @@ export async function resolveSession(
     { field: "id", op: "eq", value: session.userId },
   ]);
   if (!user) return null;
-  if (activeBan(user, now)) {
+  if (bannedFor(user, session.createdAt)) {
     if (!write) return null;
     // As for an expired row: the links go to the outbox, and the sweep delivers them.
     const n = await endSessionById(config.storage, session, now);

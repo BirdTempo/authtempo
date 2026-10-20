@@ -9,6 +9,7 @@ import { later } from "../second-factor.js";
 import { endAllAccess } from "../session-list.js";
 import { deleteEndedSessions, sessionsEnded } from "../sessions.js";
 import { auditDraft, type OperatorActEnds, operatorAct, operatorReason } from "./audit.js";
+import { activeBan } from "./ban-rule.js";
 import { isPlatformOperator, type OperatorActor, requireScope } from "./guards.js";
 
 const MINUTE_MS = 60_000;
@@ -82,18 +83,21 @@ async function targetOf(
   return ok(true);
 }
 
+/** The ban fields that an act writes, from the row that it read. */
+type BanPatch = Pick<UserPatch, "bannedAt" | "banReason" | "banUntil">;
+
 /**
  * The write of the ban fields in the act's transaction: `user.beforeUpdate`,
  * then a compare-and-set on `updatedAt` (spec 8.15 item 10: the user row
  * first, the lock order of every account write). A lost round reads the
- * row again and runs the hook again with it. After `ROUNDS` lost rounds the
- * answer is `conflict`.
+ * row again, and makes the patch and runs the hook again with it. After
+ * `ROUNDS` lost rounds the answer is `conflict`.
  */
 async function writeBanFields(
   config: ResolvedConfig,
   tx: StorageAdapter,
   userId: string,
-  patch: Required<Pick<UserPatch, "bannedAt" | "banReason" | "banUntil">>,
+  patchOf: (previous: UserRow) => BanPatch,
   via: UserUpdateVia,
   now: Date,
 ): Promise<Result<{ previous: UserRow; user: UserRow }>> {
@@ -101,6 +105,7 @@ async function writeBanFields(
   let previous = await tx.findOne("user", byId);
   for (let round = 0; round < ROUNDS; round++) {
     if (!previous) return fail("not_found");
+    const patch = patchOf(previous);
     await runBefore("user.beforeUpdate", config.hooks.user.beforeUpdate, {
       user: previous,
       patch,
@@ -174,7 +179,7 @@ export async function banUser(
         config,
         tx,
         input.userId,
-        { bannedAt: now, banReason: reason.value, banUntil: until.value },
+        () => ({ bannedAt: now, banReason: reason.value, banUntil: until.value }),
         "ban",
         now,
       );
@@ -198,10 +203,13 @@ export async function banUser(
 }
 
 /**
- * Lifts a ban (spec 26 item 5): the three ban fields go to null, with the
- * audit row in the same transaction. It restores no session: each one the
- * ban ended stays ended. An unban of a user with no ban answers ok and
- * writes its row, because the operator's intent is a record.
+ * Lifts a ban (spec 26 item 5), with the audit row in the same transaction.
+ * While a ban is active, the unban writes `banUntil` = now and keeps
+ * `bannedAt` and `banReason` (ruling 28). So `bannedFor` still ends each
+ * credential from before the unban: no session that the ban ended, and no
+ * race row, comes back. With no active ban it writes no ban field, so an
+ * ended timed ban keeps its own end. An unban of a user with no ban
+ * answers ok and writes its row, because the operator's intent is a record.
  */
 export async function unbanUser(
   config: ResolvedConfig,
@@ -229,7 +237,7 @@ export async function unbanUser(
         config,
         tx,
         input.userId,
-        { bannedAt: null, banReason: null, banUntil: null },
+        (previous) => (activeBan(previous, now) ? { banUntil: now } : {}),
         "unban",
         now,
       ),

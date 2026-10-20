@@ -238,7 +238,7 @@ export interface UserPatch {
   name?: string | null;
   image?: string | null;
   email?: string;
-  /** The ban and the unban write the three ban fields (plan 12f). */
+  /** The ban writes the three ban fields. The unban writes `banUntil` alone, while a ban is active (ruling 28). */
   bannedAt?: Date | null;
   banReason?: string | null;
   banUntil?: Date | null;

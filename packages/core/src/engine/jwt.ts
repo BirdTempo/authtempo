@@ -21,7 +21,7 @@ import { currentSecret, secretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { JwkRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
-import { activeBan } from "./operator/ban-rule.js";
+import { bannedFor } from "./operator/ban-rule.js";
 import { sessionIsLive } from "./sessions.js";
 
 /**
@@ -340,7 +340,8 @@ export async function mintSessionJwt(
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
   ]);
-  if (!user) return fail("unauthorized");
+  // The ban rule of resolveSession (ruling 28): a race row of a ban mints nothing.
+  if (!user || bannedFor(user, session.createdAt)) return fail("unauthorized");
   const extra = await appClaims(mint, user, session);
   if (extra === null) return fail("hook_failed");
   const own = Object.fromEntries(Object.entries(extra).filter(([k]) => !RESERVED_CLAIMS.has(k)));
@@ -389,7 +390,8 @@ export async function verifySessionJwt(
  * fix wave, review M-1). A resource server that must end access at a
  * sign-out asks this with the `sid` of a verified session JWT. It reads the
  * row by id and renews nothing. It reads the user for the ban (plan 12f):
- * a user with an active ban has no live session.
+ * a session from before the end of the user's last ban is not live, as in
+ * resolveSession (`bannedFor`, ruling 28).
  */
 export async function sessionLive(
   config: ResolvedConfig,
@@ -403,7 +405,7 @@ export async function sessionLive(
   const now = config.clock.now();
   if (row === null || !sessionIsLive(config, row, now)) return false;
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: row.userId }]);
-  return user !== null && !activeBan(user, now);
+  return user !== null && !bannedFor(user, row.createdAt);
 }
 
 /**

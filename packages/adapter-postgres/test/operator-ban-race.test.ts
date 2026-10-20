@@ -170,10 +170,14 @@ describe("the ban on Postgres (plan 12f Task 6)", () => {
         // A sign-in that holds the user row waits for the ban, and the read
         // after its insert sees the ban: no row stays (ruling 3).
         if (method === "magic link") expect(await rows()).toHaveLength(0);
+        // In odd rounds the unban comes before any token is presented. A row
+        // that the ban did not see stays ended after the unban (ruling 28).
+        const unbanFirst = delay % 2 === 1;
+        if (unbanFirst) expect((await w.unban(userId)).ok).toBe(true);
         // Each token answers null, and its resolve ends a row that the ban did not see.
         expect(await liveRows(w, tokens)).toBe(0);
         expect(await rows()).toHaveLength(0);
-        expect((await w.unban(userId)).ok).toBe(true);
+        if (!unbanFirst) expect((await w.unban(userId)).ok).toBe(true);
       }
     },
     60_000,
