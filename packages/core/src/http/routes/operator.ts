@@ -223,7 +223,8 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
  */
 export function operatorRoutes(config: ResolvedConfig): Route[] {
   if (!config.operator) return [];
-  return [...secretRoutes(config), ...toolRoutes(config)];
+  // The impersonation needs no secret entry: a platform operator starts it with a session.
+  return [...secretRoutes(config), ...toolRoutes(config), ...impersonationRoutes(config)];
 }
 
 /** The four secret routes of plans 11c and 11c2, or none when the config holds no secret entry. */
@@ -305,7 +306,6 @@ function secretRoutes(config: ResolvedConfig): Route[] {
         });
       },
     },
-    ...impersonationRoutes(config),
   ];
 }
 

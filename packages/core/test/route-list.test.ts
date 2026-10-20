@@ -206,6 +206,13 @@ describe("ROUTES (plan 11a)", () => {
       },
       features: ["operatorImpersonation"],
     },
+    // A platform operator starts it with a session, so no secret entry is needed.
+    {
+      name: "operator impersonation with no secret",
+      start: { organizations: PLATFORM, operator: { users: true } },
+      delta: { organizations: PLATFORM, operator: { users: true, impersonation: {} } },
+      features: ["operatorImpersonation"],
+    },
     { name: "openapi", delta: { openapi: true }, features: ["openapi"] },
   ];
 
