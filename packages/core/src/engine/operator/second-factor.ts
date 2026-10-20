@@ -74,9 +74,9 @@ function proofOf(raw: unknown, now: Date): Result<FactorProof> {
  * `data`. With the factor off it answers `totp_not_enabled`, and the undo
  * of the transaction leaves no change and no row.
  *
- * After the commit the user gets the notice `factor_disabled`, with no IP
- * and no user agent: those are the operator's (plan 12f deviation 13). The
- * act ends no session. Its storage calls are fixed: one read of the user
+ * After the commit the user gets the notice `factor_disabled`, unless
+ * `account.notices` is false. The notice has no IP and no user agent: those
+ * are the operator's (plan 12f deviation 13). The act ends no session. Its storage calls are fixed: one read of the user
  * (three for a user actor), the hold of the user row (one read and one
  * update), four deletes, and the audit insert: 8, and 10 for a user actor.
  */
