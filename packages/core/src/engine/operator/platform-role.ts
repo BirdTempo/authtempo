@@ -13,7 +13,7 @@ import {
   ownerLock,
   publicOrganization,
 } from "../organizations.js";
-import { type ResolvedOrganizations, rankOf } from "../ranks.js";
+import { holdsRolePart, type ResolvedOrganizations, rankOf } from "../ranks.js";
 import { endAllAccess } from "../session-list.js";
 import { deleteEndedSessions, sessionsEnded } from "../sessions.js";
 import { holdUser, userStays } from "../user-hold.js";
@@ -71,11 +71,6 @@ function platformOf(
 /** The user who acts in a member hook event, or null for a secret and the app. */
 function byOf(actor: OperatorActor): UserRow | null {
   return actor.kind === "user" ? actor.user : null;
-}
-
-/** True when the role string holds `part` as one of its comma parts. */
-function holdsPart(role: string, part: string): boolean {
-  return role.split(",").includes(part);
 }
 
 function memberSummary(member: MemberRow, user: UserRow): MemberSummary {
@@ -156,7 +151,7 @@ async function addRolePart(
   const hooks = config.hooks.organization;
   const organization = publicOrganization(input.organization);
   const { user, member, by } = input;
-  if (member && holdsPart(member.role, p.role)) return ok(null);
+  if (member && holdsRolePart(member.role, p.role)) return ok(null);
   if (member) {
     const role = `${member.role},${p.role}`;
     await runBefore("organization.beforeUpdateMemberRole", hooks.beforeUpdateMemberRole, {
@@ -362,7 +357,7 @@ export async function revokePlatformRole(
     drafted.value,
     async (tx, _draft, ends: OperatorActEnds): Promise<Result<{ change: MemberChange }>> => {
       const member = await memberOf(tx, organization.id, user.id);
-      if (!member || !holdsPart(member.role, role)) return ok({ change: null });
+      if (!member || !holdsRolePart(member.role, role)) return ok({ change: null });
       const rest = member.role
         .split(",")
         .filter((part) => part !== role)

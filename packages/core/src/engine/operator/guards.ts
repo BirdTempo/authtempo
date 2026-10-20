@@ -5,6 +5,7 @@ import { fail, ok, type Result } from "../../result.js";
 import type { MemberRow, SessionRow, UserRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
 import { requireFresh } from "../fresh.js";
+import { holdsRolePart } from "../ranks.js";
 import type { ResolvedSession } from "../sessions.js";
 
 /**
@@ -117,7 +118,7 @@ export function holdsPlatformRole(
 ): boolean {
   const role = config.organizations?.platformRole ?? null;
   if (role === null || platformId === null || !member) return false;
-  return member.organizationId === platformId && member.role.split(",").includes(role);
+  return member.organizationId === platformId && holdsRolePart(member.role, role);
 }
 
 /** True when the user has a second factor with one method or more (plan 12c). */

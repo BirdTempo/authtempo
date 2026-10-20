@@ -15,6 +15,15 @@ export function rankOf(ranks: Readonly<Record<string, number>>, role: string): n
   return best;
 }
 
+/**
+ * True when the role string holds `part` as one of its comma parts. This is
+ * the one part rule: the platform guard, the platform role acts, and
+ * `roleAllowedIn` read it, so a platform operator is the same user for all.
+ */
+export function holdsRolePart(role: string, part: string): boolean {
+  return role.split(",").includes(part);
+}
+
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
 /** NFKC, then lower case, then the shape check. A look-alike such as fullwidth letters folds to ASCII, so a reserved word cannot hide behind it. */
@@ -30,7 +39,7 @@ export function roleAllowedIn(
   organizationSlug: string,
 ): boolean {
   if (config.platformRole === null) return true;
-  if (!role.split(",").includes(config.platformRole)) return true;
+  if (!holdsRolePart(role, config.platformRole)) return true;
   return organizationSlug === config.platformOrganization;
 }
 
