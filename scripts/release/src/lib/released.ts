@@ -28,7 +28,9 @@ export function readChangesetConfig(root: string): ChangesetConfig {
 
 /**
  * The released packages: `fixed[0]` of .changeset/config.json, the one list
- * of the group (spec 33 item 2). Every release check reads it from here.
+ * of the group (spec 33 item 2). Every release check reads it from here. The
+ * run lines of release.yml read the same path with jq (RELEASED_JQ of
+ * src/lib/release-copy.ts), and a test runs both on the real config.
  */
 export function releasedNames(root: string): string[] {
   const group = readChangesetConfig(root).fixed[0];

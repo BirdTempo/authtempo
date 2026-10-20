@@ -9,6 +9,7 @@ import {
   packCommand,
   RELEASE_COPY_MARKER,
   RELEASED_FILTERS_SHELL,
+  RELEASED_NAMES_SHELL,
   shellLine,
 } from "./lib/release-copy.ts";
 import {
@@ -279,7 +280,7 @@ const JOBS: Record<string, Record<string, Job>> = {
           name: "Pack each released package",
           run: [
             "mkdir out",
-            "for name in $(jq -r '.fixed[0][]' .changeset/config.json); do",
+            `for name in ${RELEASED_NAMES_SHELL}; do`,
             `  ${shellLine(packCommand('"$name"', '"$PWD/out"'))}`,
             "done",
           ].join("\n"),

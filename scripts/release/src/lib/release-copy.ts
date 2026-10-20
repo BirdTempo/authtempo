@@ -25,8 +25,18 @@ export const buildCommand = (names: readonly string[]): readonly string[] => [
   ...names.map((name) => `--filter=${name}`),
 ];
 
-/** The released names as the shell of a workflow reads them: fixed[0] of the Changesets config. */
-export const RELEASED_FILTERS_SHELL = `$(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`;
+/**
+ * The jq path of the released names: fixed[0] of the Changesets config, which
+ * releasedNames of src/lib/released.ts also reads. test/release-copy.test.ts
+ * runs both on the real config.
+ */
+const RELEASED_JQ = ".fixed[0][]";
+
+/** The released names as the shell of a workflow reads them, one word for each. */
+export const RELEASED_NAMES_SHELL = `$(jq -r '${RELEASED_JQ}' .changeset/config.json)`;
+
+/** One filter for each released name, as the shell of a workflow reads them. */
+export const RELEASED_FILTERS_SHELL = `$(jq -r '"--filter=" + ${RELEASED_JQ}' .changeset/config.json)`;
 
 /**
  * The pack of one released package, from the root of the copy, into `out`.
