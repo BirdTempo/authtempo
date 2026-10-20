@@ -79,7 +79,7 @@ jobs:
         run: |
           mkdir out
           for name in $(jq -r '.fixed[0][]' .changeset/config.json); do
-            pnpm --filter "$name" pack --pack-destination "$PWD/out"
+            pnpm --filter "$name" pack --ignore-scripts --pack-destination "$PWD/out"
           done
         working-directory: ${{ runner.temp }}/release-copy
       # The tarballs that npm receives, checked file by file. Without it, a

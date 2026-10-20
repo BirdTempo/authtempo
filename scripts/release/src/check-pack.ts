@@ -9,6 +9,7 @@ import {
   CHANGELOG_FILE,
   DECLARED_BINARIES,
   forbiddenMatch,
+  PACK_SCRIPTS,
   RELEASE_LICENSE,
   repositoryFor,
 } from "./lib/pack-rules.ts";
@@ -36,6 +37,8 @@ export interface PackInput {
   breaking: Record<string, string[]>;
   /** release/deprecations.json. Read for core only. */
   deprecations: unknown[];
+  /** The scripts of the workspace manifest. pnpm 12.8.1 pack strips the publish scripts from the packed one. */
+  scripts: Record<string, unknown>;
 }
 
 /** The version of every package on main. No release carries it (spec 33 item 11). */
@@ -106,6 +109,10 @@ export function checkPack(input: PackInput): Report {
         failures.push(`${key} holds ${dep} as ${range}, which npm cannot resolve`);
 
   if ("private" in manifest) failures.push("the manifest holds private");
+  const packed = (manifest.scripts ?? {}) as Record<string, unknown>;
+  for (const script of PACK_SCRIPTS)
+    if (script in packed || script in input.scripts)
+      failures.push(`scripts.${script} runs at pack or publish`);
   // The scaffold reads 0.0.0 as unpublished, so a CLI at 0.0.0 on npm tells
   // each app to run a clone. This is ruling 13 of the plan 12j lane.
   if (manifest.version === UNPUBLISHED_VERSION)
@@ -256,6 +263,7 @@ export function checkTarballs(root: string, paths: string[]): Report {
   const released = new Set(releasedNames(root));
   const packages = readWorkspace(root).filter((p) => released.has(p.name));
   const dirs = new Map(packages.map((p) => [p.name, p.dir]));
+  const scripts = new Map(packages.map((p) => [p.name, p.manifest.scripts ?? {}]));
   const versions = [...new Set(packages.map((p) => p.manifest.version))];
   const needs = JSON.parse(readFileSync(join(root, "release/pack-needs.json"), "utf8")) as Record<
     string,
@@ -300,6 +308,7 @@ export function checkTarballs(root: string, paths: string[]): Report {
       repository: repositoryFor(url, dir),
       breaking: breakingByMinor(t.changelog ?? ""),
       deprecations,
+      scripts: (scripts.get(name) ?? {}) as Record<string, unknown>,
     });
     files += t.files.length;
     for (const f of r.failures) failures.push(`${name}@${t.manifest.version}: ${f}`);

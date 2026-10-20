@@ -28,12 +28,16 @@ export const buildCommand = (names: readonly string[]): readonly string[] => [
 /** The released names as the shell of a workflow reads them: fixed[0] of the Changesets config. */
 export const RELEASED_FILTERS_SHELL = `$(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`;
 
-/** The pack of one released package, from the root of the copy, into `out`. */
+/**
+ * The pack of one released package, from the root of the copy, into `out`.
+ * It runs no prepack or postpack script, and check-pack refuses one.
+ */
 export const packCommand = (name: string, out: string): readonly string[] => [
   "pnpm",
   "--filter",
   name,
   "pack",
+  "--ignore-scripts",
   "--pack-destination",
   out,
 ];

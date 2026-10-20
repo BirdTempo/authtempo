@@ -5,6 +5,21 @@
 // syntax that type stripping erases.
 
 /**
+ * The scripts that npm or pnpm runs at pack or at publish. A dry run that runs
+ * one is not dry, so no released manifest holds one. pnpm 12.8.1 runs each one
+ * under publish --dry-run (review of Task 6, m1).
+ */
+export const PACK_SCRIPTS = [
+  "prepack",
+  "postpack",
+  "prepare",
+  "prepublish",
+  "prepublishOnly",
+  "publish",
+  "postpublish",
+] as const;
+
+/**
  * Names that never ship, each with what it holds. A name that ends in "/" is a
  * folder at the start of a path or after any "/". A name that starts with "*"
  * matches the file name. Any other name matches a path part that starts with it.

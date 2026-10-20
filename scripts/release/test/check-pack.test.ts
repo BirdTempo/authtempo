@@ -54,6 +54,7 @@ function input(change: Partial<PackInput> = {}): PackInput {
     },
     breaking: {},
     deprecations: [],
+    scripts: {},
     ...change,
   };
 }
@@ -275,6 +276,61 @@ describe("check-pack", () => {
         m.private = false;
       }),
     ).toEqual(["the manifest holds private"]);
+  });
+
+  it("fails each script that runs at pack or publish", () => {
+    // One script per row, typed here. pnpm 12.8.1 pack strips the publish
+    // scripts from the packed manifest, so the workspace manifest counts too.
+    const rows = [
+      "prepack",
+      "postpack",
+      "prepare",
+      "prepublish",
+      "prepublishOnly",
+      "publish",
+      "postpublish",
+    ];
+    for (const script of rows) {
+      const line = `scripts.${script} runs at pack or publish`;
+      const packed = withManifest((m) => {
+        m.scripts = { [script]: "node x.mjs" };
+      });
+      expect([script, "packed", packed]).toEqual([script, "packed", [line]]);
+      const source = failuresOf({ scripts: { [script]: "node x.mjs" } });
+      expect([script, "workspace", source]).toEqual([script, "workspace", [line]]);
+    }
+    // A script that no pack and no publish runs passes.
+    expect(failuresOf({ scripts: { build: "tsc", test: "vitest run", postinstall: "x" } })).toEqual(
+      [],
+    );
+  });
+
+  it("reads the scripts of the workspace manifest, which pnpm pack strips", () => {
+    const tree = copyRoot((dir) => {
+      const file = join(dir, "packages/fixture/package.json");
+      const m = JSON.parse(readFileSync(file, "utf8")) as Manifest;
+      m.scripts = { prepack: "node -e \"require('fs').writeFileSync('ran.txt', '')\"" };
+      writeFileSync(file, `${JSON.stringify(m, null, 2)}\n`);
+    });
+    const out = mkdtempSync(join(tmpdir(), "authtempo-check-pack-"));
+    try {
+      const folder = join(tree, "packages/fixture");
+      execFileSync("pnpm", ["pack", "--ignore-scripts", "--pack-destination", out], {
+        cwd: folder,
+        env: { ...process.env, NO_COLOR: "1" },
+        stdio: "pipe",
+      });
+      expect(readdirSync(folder)).not.toContain("ran.txt");
+      const [tarball = ""] = readdirSync(out);
+      const path = join(out, tarball);
+      expect(readTarball(path).manifest.scripts).toEqual({});
+      expect(checkTarballs(tree, [path]).failures).toEqual([
+        "@authtempo/fixture@0.1.0: scripts.prepack runs at pack or publish",
+      ]);
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+      rmSync(tree, { recursive: true, force: true });
+    }
   });
 
   it("fails a publishConfig without public access and provenance", () => {

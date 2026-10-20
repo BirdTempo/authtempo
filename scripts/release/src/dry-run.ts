@@ -85,6 +85,8 @@ export const PNPM_PUBLISH_ARGS: readonly string[] = [
   "-r",
   "--dry-run",
   "--no-git-checks",
+  // pnpm 12.8.1 runs the publish scripts under --dry-run (review of Task 6, m1).
+  "--ignore-scripts",
   "--access",
   "public",
   "--registry",

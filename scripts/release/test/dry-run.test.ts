@@ -290,7 +290,7 @@ describe("dry run", () => {
       "pnpm install --frozen-lockfile --offline",
       "node scripts/release/src/prepare.ts",
       `pnpm turbo run build --force $(jq -r '"--filter=" + .fixed[0][]' .changeset/config.json)`,
-      'pnpm --filter "$name" pack --pack-destination "$PWD/out"',
+      'pnpm --filter "$name" pack --ignore-scripts --pack-destination "$PWD/out"',
       "node scripts/release/src/check-pack.ts out/*.tgz",
     ]);
   });
@@ -421,6 +421,67 @@ describe("dry run", () => {
             c.kind,
             "http://127.0.0.1:9",
           ]);
+  });
+
+  it("runs no script at pack or publish", async () => {
+    const { report, calls } = await passingRun();
+    expect(report.exit).toBe(0);
+    const scripted = calls.filter((c) => c.kind === "pnpm pack" || c.kind === "pnpm publish");
+    expect(scripted.map((c) => [c.kind, c.args.includes("--ignore-scripts")])).toEqual([
+      ["pnpm pack", true],
+      ["pnpm pack", true],
+      ["pnpm publish", true],
+    ]);
+
+    // A prepack script of core does not run at the real pack, and check-pack refuses it.
+    const { root, tmp } = setup((d) => {
+      const file = join(d, "packages/core/package.json");
+      const m = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+      m.scripts = { prepack: "node -e \"require('fs').writeFileSync('ran.txt', '')\"" };
+      writeFileSync(file, `${JSON.stringify(m, null, 2)}\n`);
+    });
+    let ran = true;
+    const f = fake({
+      "node check-pack.ts": (c) => {
+        ran = existsSync(join(c.cwd, "packages/core/ran.txt"));
+        return undefined;
+      },
+    });
+    const scriptRun = await dryRun({ root, run: f.run, tmp });
+    expect(ran).toBe(false);
+    expect(failuresOf(scriptRun)).toEqual([
+      "check-pack exited 1: check-pack: FAIL tarballs=2 files=10 failures=1",
+      "check-pack: @authtempo/core@0.1.0: scripts.prepack runs at pack or publish",
+    ]);
+    expect(dryRunLine(scriptRun)).toBe(
+      "release-dry-run: FAIL packages=1 of 2 version=0.1.0 tarballs=2 files=10 smoke=0 failures=2",
+    );
+  });
+
+  it("runs no script at the real pnpm publish", () => {
+    const repo = copyFixture((d) => {
+      changesetVersion(d, "Add the first release.");
+      writeFileSync(join(d, ".release-copy"), "");
+    });
+    made.push(repo);
+    expect(prepare(repo).failures).toEqual([]);
+    const scripts = ["prepublishOnly", "prepack", "prepare", "publish", "postpack", "postpublish"];
+    const file = join(repo, "packages/core/package.json");
+    const m = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    m.scripts = Object.fromEntries(
+      scripts.map((s) => [s, `node -e "require('fs').writeFileSync('ran-${s}.txt', '')"`]),
+    );
+    writeFileSync(file, `${JSON.stringify(m, null, 2)}\n`);
+    const npmrc = { user: join(repo, "npmrc-user"), global: join(repo, "npmrc-global") };
+    writeFileSync(npmrc.user, "");
+    writeFileSync(npmrc.global, "");
+    const r = spawnRun("pnpm", PNPM_PUBLISH_ARGS, repo, childEnv(process.env, npmrc));
+    expect([r.status, r.stdout.includes("📦 @authtempo/core@0.1.0 → http://127.0.0.1:9/")]).toEqual(
+      [0, true],
+    );
+    expect(readdirSync(join(repo, "packages/core")).filter((f) => f.startsWith("ran-"))).toEqual(
+      [],
+    );
   });
 
   it("gives each child the keys of the allowlist only", async () => {
