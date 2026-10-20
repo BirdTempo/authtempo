@@ -292,9 +292,14 @@ describe("the operator audit row (plan 12f Task 4)", () => {
     ]);
   });
 
-  it("refuses a reason with a control character", () => {
+  it("refuses a reason with a control character or a lone surrogate", () => {
     for (const raw of ["a\nb", "a\u0000", "", "x".repeat(REASON_MAX + 1), 7, null, undefined])
       expect(operatorReason(raw)).toEqual({ ok: false, code: "invalid_body", status: 400 });
+    // A lone surrogate is no code point: Postgres stores U+FFFD in its place,
+    // and memory keeps it (plan 12f Task 9 review m2).
+    for (const raw of ["Spam \ud800", "\udfffSpam"])
+      expect(operatorReason(raw)).toEqual({ ok: false, code: "invalid_body", status: 400 });
+    expect(operatorReason("Spam \ud83d\udce7")).toEqual({ ok: true, value: "Spam \ud83d\udce7" });
     expect(operatorReason("x".repeat(500))).toEqual({ ok: true, value: "x".repeat(500) });
     // No trim: the reason is kept as the operator wrote it.
     expect(operatorReason(" Spam. ")).toEqual({ ok: true, value: " Spam. " });

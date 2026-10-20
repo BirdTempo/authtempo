@@ -12,3 +12,13 @@ export function hasControlChar(s: string): boolean {
 export function removeControlChars(s: string): string {
   return s.replace(CONTROL_ALL_RE, "");
 }
+
+/**
+ * True when the string holds a lone surrogate: half of a pair, which is no
+ * code point (plan 12f Task 9 review m2). Postgres refuses it in a jsonb
+ * value, and stores U+FFFD for it in a text column. Memory and D1 keep it.
+ * So one input would get two answers or two stored values.
+ */
+export function hasLoneSurrogate(s: string): boolean {
+  return /\p{Cs}/u.test(s);
+}

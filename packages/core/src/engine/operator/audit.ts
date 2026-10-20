@@ -1,7 +1,7 @@
 import type { ResolvedConfig } from "../../config.js";
 import { appErrorName } from "../../primitives/app-error.js";
 import { newId } from "../../primitives/ids.js";
-import { hasControlChar, removeControlChars } from "../../primitives/text.js";
+import { hasControlChar, hasLoneSurrogate, removeControlChars } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { OperatorAction, OperatorAuditRow, SessionRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
@@ -66,13 +66,14 @@ export interface OperatorAuditDraft {
 /**
  * The reason of an operator act (ASVS 16.4.1). It answers `invalid_body`
  * for a value that is not a string, and for an empty string. It answers
- * the same for a string longer than `REASON_MAX` or with a control
- * character. No trim: the row keeps the text as the operator wrote it.
+ * the same for a string longer than `REASON_MAX`, with a control
+ * character, or with a lone surrogate. No trim: the row keeps the text as
+ * the operator wrote it.
  */
 export function operatorReason(raw: unknown): Result<string> {
   if (typeof raw !== "string" || raw.length === 0 || raw.length > REASON_MAX)
     return fail("invalid_body");
-  if (hasControlChar(raw)) return fail("invalid_body");
+  if (hasControlChar(raw) || hasLoneSurrogate(raw)) return fail("invalid_body");
   return ok(raw);
 }
 

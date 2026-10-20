@@ -167,6 +167,10 @@ describe("the disable of the second factor with a proof (plan 12f Task 9)", () =
       { ...good, reference: "" },
       { ...good, reference: "x".repeat(201) },
       { ...good, reference: "CASE\n4821" },
+      // A lone surrogate is no code point: Postgres refuses it in the jsonb
+      // column, and memory and D1 keep it (plan 12f Task 9 review m2).
+      { ...good, reference: "CASE-\ud800" },
+      { ...good, reference: "\udc00CASE" },
       { ...good, reference: 4821 },
       // Hour 24 does not exist. `Date` reads it as 00:00 of the next day,
       // which is inside the window here.
@@ -184,12 +188,28 @@ describe("the disable of the second factor with a proof (plan 12f Task 9)", () =
         ok: false,
         code: "invalid_body",
       });
+    // The reason of the row takes the same rule.
+    expect(await disable(auth, user.id, { reason: "Lost the phone \ud83d" })).toMatchObject({
+      ok: false,
+      code: "invalid_body",
+    });
     expect(await auditRows(auth)).toEqual([]);
     // The longest reference passes, with each method of the list.
     const done = await disable(auth, user.id, {
       proof: { ...good, method: "knowledge", reference: "x".repeat(200) },
     });
     expect(done.ok).toBe(true);
+    // A whole surrogate pair is one code point, and it passes.
+    const again = await enrolled(auth, "bob@example.com");
+    const pair = await disable(auth, again.user.id, {
+      reason: "Lost the phone \ud83d\udcf1",
+      proof: { ...good, reference: "CASE-\ud83d\udcf1" },
+    });
+    expect(pair.ok).toBe(true);
+    expect((await auditRows(auth)).at(-1)).toMatchObject({
+      reason: "Lost the phone \ud83d\udcf1",
+      data: { reference: "CASE-\ud83d\udcf1" },
+    });
   });
 
   it("writes no row when the factor was off", async () => {

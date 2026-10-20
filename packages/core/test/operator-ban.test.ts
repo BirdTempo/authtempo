@@ -574,6 +574,16 @@ describe("the ban (plan 12f Task 6)", () => {
         userAgent: null,
       }),
     ).toEqual({ ok: false, code: "invalid_body", status: 400 });
+    // The ban reason is a text column: Postgres would store U+FFFD for a lone surrogate.
+    expect(
+      await w.api.users.ban({
+        actor: APP,
+        userId: s.user.id,
+        reason: "Spam \ud800",
+        ip: null,
+        userAgent: null,
+      }),
+    ).toEqual({ ok: false, code: "invalid_body", status: 400 });
     expect(await ban(w, "01JNOSUCHUSER0000000000000")).toEqual({
       ok: false,
       code: "not_found",
