@@ -19,7 +19,9 @@ function deployment(o: { jwks?: number; route?: number; listsNewKey?: boolean } 
     if (url === `${BASE}/auth/operator/keys/rotate` && init.method === "POST") {
       const right = new Headers(init.headers).get("authorization") === `Operator ${SECRET}`;
       const status = o.route ?? (right ? 200 : 401);
-      if (status !== 200) return Response.json({ error: "refused" }, { status });
+      // Core answers 403 operator_required to a named secret with no keys scope.
+      const error = status === 403 ? "operator_required" : "refused";
+      if (status !== 200) return Response.json({ error }, { status });
       rotated = true;
       return Response.json({ kid: "K2" });
     }
@@ -92,6 +94,7 @@ describe("authtempo keys rotate (spec 19)", () => {
         "the operator route is off: set operator.secretHash in the config of the deployment",
       ],
       [{ route: 401 }, "the deployment refused the operator secret"],
+      [{ route: 403 }, "the operator secret has no keys scope"],
       [
         { route: 429 },
         "the operator route allows 5 calls per IP per hour; wait, then run it again",

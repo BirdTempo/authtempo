@@ -65,7 +65,7 @@ export const KEYS_HELP: HelpText = {
     { code: 0, says: "The deployment made a new key. The command prints its kid." },
     {
       code: 2,
-      says: "A usage error, or a stop: no answer, the route is off, or the deployment refused the secret.",
+      says: "A usage error, or a stop: no answer, the route is off, the deployment refused the secret, or the secret has no keys scope.",
     },
   ],
 };

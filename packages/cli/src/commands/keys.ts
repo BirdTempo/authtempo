@@ -108,7 +108,10 @@ export const keysCommand: Command = {
       throw new Stop(
         `the operator route allows ${OPERATOR_PER_IP.max} calls per IP per hour; wait, then run it again`,
       );
-    const body = (await res.json().catch(() => null)) as { kid?: unknown } | null;
+    const body = (await res.json().catch(() => null)) as { kid?: unknown; error?: unknown } | null;
+    // A named secret with no keys scope (spec 26 item 3).
+    if (res.status === 403 && body?.error === "operator_required")
+      throw new Stop("the operator secret has no keys scope");
     if (res.status !== 200 || typeof body?.kid !== "string")
       throw new Stop(`the operator route answered ${res.status} with no kid`);
     const kid = body.kid;

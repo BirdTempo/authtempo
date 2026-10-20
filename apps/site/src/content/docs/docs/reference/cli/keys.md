@@ -42,7 +42,7 @@ authtempo keys rotate https://api.example.com --yes
 | Exit code | What it means |
 | --- | --- |
 | 0 | The deployment made a new key. The command prints its kid. |
-| 2 | A usage error, or a stop: no answer, the route is off, or the deployment refused the secret. |
+| 2 | A usage error, or a stop: no answer, the route is off, the deployment refused the secret, or the secret has no keys scope. |
 
 The command prints `kid: <kid>` only. It reads the key set before and after the call, and warns when a cache still serves the old set.
 
