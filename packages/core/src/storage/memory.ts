@@ -103,7 +103,7 @@ interface Lock {
 /**
  * The prefix rule of the port: a non-empty string on a string field, with no
  * lone surrogate. A lone surrogate is no code point, and each engine reads it
- * another way.
+ * another way. The guard refuses NUL too, as the SQL codec does in every string.
  */
 function assertPrefixes<M extends ModelName>(model: M, where: Where<M>[]): void {
   const fields = schema[model].fields as Record<string, { type: string }>;
@@ -113,7 +113,8 @@ function assertPrefixes<M extends ModelName>(model: M, where: Where<M>[]): void 
       fields[w.field]?.type !== "string" ||
       typeof w.value !== "string" ||
       w.value === "" ||
-      /\p{Cs}/u.test(w.value)
+      /\p{Cs}/u.test(w.value) ||
+      w.value.includes("\u0000")
     ) {
       throw new StorageError("invalid_argument", model, [w.field]);
     }

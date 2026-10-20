@@ -1512,6 +1512,10 @@ export function runAdapterConformance(
         await expect(
           db.findMany("user", [{ field: "email", op: "startsWith", value: "a\uDD1E" }]),
         ).rejects.toMatchObject(refused);
+        // NUL: the SQL codec refuses it in every string, and memory does the same.
+        await expect(
+          db.findMany("user", [{ field: "email", op: "startsWith", value: "a\u0000" }]),
+        ).rejects.toMatchObject(refused);
         // The refusal holds on an empty table too, and on update and delete.
         await expect(
           db.findMany("session", [{ field: "id", op: "startsWith", value: "" }]),
