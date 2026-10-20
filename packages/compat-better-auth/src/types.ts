@@ -1118,10 +1118,61 @@ export interface AuthClient<TF extends boolean = false> {
     verifyOtp(input: { code: string }): Promise<CompatClientResult<never>>;
   };
   /** In `./client` a store. `./react` replaces it with the hook. */
+  /**
+   * Better Auth's `authClient.admin` calls (ruling 60 m1 of plan 12f). The
+   * mapped calls send the shim's `/admin/*` paths, so core's operator guard
+   * decides. Each call that core does not serve answers NOT_SUPPORTED.
+   */
+  admin: AdminClientCalls;
   useSession: SessionStore;
   /** Expo only: the stored session as one cookie header value, `__Host-tempo_session=<token>`, or "" when none. */
   getCookie(): string;
   $Infer: { Session: { session: ClientSession; user: ClientSessionUser } };
+}
+
+/** A call of `authClient.admin` that core does not serve: it answers NOT_SUPPORTED with a section 26 line. */
+type AdminNotSupported = (input?: unknown) => Promise<CompatClientResult<never>>;
+
+/** Better Auth 1.7.7's `authClient.admin` (dist/plugins/admin/client.mjs and routes.mjs, read 2026-10-21). */
+export interface AdminClientCalls {
+  listUsers(input?: { query?: AdminListUsersQuery }): Promise<CompatClientResult<AdminUserList>>;
+  getUser(input: { query: { id: string } }): Promise<CompatClientResult<AdminUser>>;
+  /** `banExpiresIn` is in seconds. */
+  banUser(input: {
+    userId: string;
+    banReason?: string;
+    banExpiresIn?: number;
+  }): Promise<CompatClientResult<{ user: AdminUser }>>;
+  unbanUser(input: { userId: string }): Promise<CompatClientResult<{ user: AdminUser }>>;
+  /** The platform role grants it, and `user` revokes it. */
+  setRole(input: {
+    userId: string;
+    role: string | string[];
+  }): Promise<CompatClientResult<{ user: AdminUser }>>;
+  /** One page per call: while sessions stay, `{ success: false, more: true, ended }`. */
+  revokeUserSessions(input: {
+    userId: string;
+  }): Promise<
+    CompatClientResult<{ success: true } | { success: false; more: true; ended: number }>
+  >;
+  impersonateUser(input: {
+    userId: string;
+  }): Promise<CompatClientResult<{ session: AdminSession; user: AdminUser }>>;
+  stopImpersonating(): Promise<
+    CompatClientResult<{ session: AdminSession | null; user: AdminUser | null }>
+  >;
+  createUser: AdminNotSupported;
+  updateUser: AdminNotSupported;
+  listUserSessions: AdminNotSupported;
+  revokeUserSession: AdminNotSupported;
+  removeUser: AdminNotSupported;
+  setUserPassword: AdminNotSupported;
+  hasPermission: AdminNotSupported;
+  /**
+   * Better Auth answers a boolean here, with no request. Core has no
+   * permission statements, so this call throws: an answer could read as a grant.
+   */
+  checkRolePermission(input?: unknown): never;
 }
 
 export interface ReactAuthClient<TF extends boolean = false>

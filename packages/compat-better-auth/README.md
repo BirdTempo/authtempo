@@ -675,8 +675,12 @@ null. With `adminClient()` from `better-auth/client/plugins`,
 the client's `getSession` and `useSession` read `/get-session`. So the user
 has the same four fields, and `banExpires` is a `Date` or null. Without
 `adminClient()`, the client reads core's own session, and its user has no
-such field. The client has no `admin.*` calls: send the admin paths with
-`fetch` and the session cookie.
+such field. The client's `admin` calls send the mapped paths with the
+client's fetch, headers, and credentials. Each answers `{ data, error }`,
+with dates as `Date` values. `impersonateUser` and `stopImpersonating` read the
+session again. Each call that core does not serve answers `NOT_SUPPORTED`
+with the handler's line, with no request. `checkRolePermission` throws,
+because core has no permission statements.
 
 The deviations from Better Auth (ruling 53 of plan 12f):
 

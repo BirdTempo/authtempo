@@ -1019,3 +1019,129 @@ describe("the admin calls of auth.api (ruling 60 m2)", () => {
     expect(await thrown(off.api.stopImpersonating({ headers }))).toMatchObject({ status: 404 });
   });
 });
+
+describe("the admin calls of the client (ruling 60 m1)", () => {
+  it("sends Better Auth's authClient.admin calls to the admin paths, with dates", async () => {
+    const a = await adminApp(memoryDatabase());
+    const ann = await a.user("ann@example.com");
+    const bob = await a.user("bob@example.com");
+    const cy = await a.user("cy@example.com");
+    const seen: string[] = [];
+    const client = (cookie: string) =>
+      createAuthClient({
+        baseURL: `${BASE}/api/auth`,
+        plugins: [adminClient()],
+        fetchOptions: {
+          headers: { cookie },
+          customFetchImpl: async (input, init) => {
+            const req = new Request(input, init);
+            const url = new URL(req.url);
+            seen.push(`${req.method} ${url.pathname}${url.search}`);
+            return a.auth.handler(req);
+          },
+        },
+      });
+    const admin = client(a.op).admin;
+    const listed = await admin.listUsers({
+      query: { searchValue: "ann", searchOperator: "starts_with", limit: 10 },
+    });
+    expect(listed.error).toBeNull();
+    expect(listed.data?.users.map((u) => u.email)).toEqual(["ann@example.com"]);
+    expect(listed.data?.users[0]?.createdAt).toBeInstanceOf(Date);
+    expect(seen).toEqual([
+      "GET /api/auth/admin/list-users?searchValue=ann&searchOperator=starts_with&limit=10",
+    ]);
+    expect((await admin.getUser({ query: { id: ann.id } })).data).toMatchObject({
+      id: ann.id,
+      role: "user",
+    });
+    const banned = await admin.banUser({ userId: ann.id, banReason: "Spam", banExpiresIn: 3600 });
+    expect(banned.data?.user).toMatchObject({ banned: true, banReason: "Spam" });
+    expect(banned.data?.user.banExpires).toBeInstanceOf(Date);
+    expect((await admin.unbanUser({ userId: ann.id })).data?.user.banned).toBe(false);
+    expect((await admin.setRole({ userId: bob.id, role: "admin" })).data?.user.role).toBe("admin");
+    expect(await admin.revokeUserSessions({ userId: cy.id })).toEqual({
+      data: { success: true },
+      error: null,
+    });
+    const start = await admin.impersonateUser({ userId: ann.id });
+    expect(start.data?.session).toMatchObject({ userId: ann.id, impersonatedBy: a.opId });
+    expect(start.data?.session.expiresAt).toBeInstanceOf(Date);
+    const opToken = a.op.slice(COOKIE_NAME.length + 1);
+    const stop = await client(
+      `${COOKIE_NAME}=${start.data?.session.token}; ${ACTOR}=${opToken}`,
+    ).admin.stopImpersonating();
+    expect(stop.data?.session).toMatchObject({ userId: a.opId, impersonatedBy: null });
+    // A refusal answers Better Auth's error, with the code of the path.
+    const missing = await admin.getUser({ query: { id: "nobody" } });
+    expect({
+      data: missing.data,
+      code: missing.error?.code,
+      status: missing.error?.status,
+    }).toEqual({ data: null, code: "USER_NOT_FOUND", status: 404 });
+    // A user with no platform role (ann's sessions ended at the ban).
+    const dee = await a.user("dee@example.com");
+    const asDee = await client(dee.cookie).admin.listUsers();
+    expect(asDee.error).toMatchObject({ code: "YOU_ARE_NOT_ALLOWED_TO_LIST_USERS", status: 403 });
+  });
+
+  it("answers NOT_SUPPORTED with the handler's line for each call that core does not serve", async () => {
+    const on = betterAuth(options());
+    const seen: string[] = [];
+    const admin = createAuthClient({
+      baseURL: `${BASE}/api/auth`,
+      plugins: [adminClient()],
+      fetchOptions: {
+        customFetchImpl: async (input, init) => {
+          seen.push(new Request(input, init).url);
+          return on.handler(new Request(input, init));
+        },
+      },
+    }).admin;
+    expect(Object.keys(admin).sort()).toEqual([
+      "banUser",
+      "checkRolePermission",
+      "createUser",
+      "getUser",
+      "hasPermission",
+      "impersonateUser",
+      "listUserSessions",
+      "listUsers",
+      "removeUser",
+      "revokeUserSession",
+      "revokeUserSessions",
+      "setRole",
+      "setUserPassword",
+      "stopImpersonating",
+      "unbanUser",
+      "updateUser",
+    ]);
+    const unmapped = {
+      "/admin/create-user": admin.createUser,
+      "/admin/update-user": admin.updateUser,
+      "/admin/list-user-sessions": admin.listUserSessions,
+      "/admin/revoke-user-session": admin.revokeUserSession,
+      "/admin/remove-user": admin.removeUser,
+      "/admin/set-user-password": admin.setUserPassword,
+      "/admin/has-permission": admin.hasPermission,
+    };
+    for (const [path, call] of Object.entries(unmapped)) {
+      const r = await call({ userId: "u1" });
+      // The same line as the handler's answer to the path.
+      const res = await on.handler(post(path, { userId: "u1" }));
+      const { message } = (await res.json()) as { message: string };
+      expect({ path, data: r.data, code: r.error?.code, status: r.error?.status }).toEqual({
+        path,
+        data: null,
+        code: "NOT_SUPPORTED",
+        status: 501,
+      });
+      expect({ path, message: r.error?.message }).toEqual({ path, message });
+      expect(message).toMatch(/\(spec section 26 items? [\d and]+\)$/);
+    }
+    expect(seen).toEqual([]);
+    expect(() => admin.checkRolePermission({ role: "admin", permissions: {} })).toThrow(
+      /spec section 26 items 2 and 15/,
+    );
+  });
+});

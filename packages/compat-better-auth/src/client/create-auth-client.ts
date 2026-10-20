@@ -13,8 +13,13 @@ import { LEGACY_SESSION_COOKIE, type PublicSession } from "@authtempo/core";
 import { createHandoff } from "@authtempo/handoff";
 import { expoCrypto, expoOpener } from "@authtempo/handoff/expo";
 import { BETTER_AUTH_CODES, clientError, compatClientError } from "../errors.js";
+import { ADMIN_NOT_SUPPORTED } from "../server/admin-lines.js";
 import { COOKIE_NAME, toNext } from "../server/shapes.js";
 import type {
+  AdminClientCalls,
+  AdminListUsersQuery,
+  AdminSession,
+  AdminUser,
   AuthClient,
   ClientOptions,
   ClientPasskey,
@@ -153,6 +158,39 @@ export const CLIENT_SESSION_KEYS = keys<ClientSession>()([
   "expiresAt",
   "activeOrganizationId",
 ]);
+
+/** The date keys of the admin answers: the user's and the session's (ruling 60 m1). */
+const ADMIN_DATE_KEYS = new Set(["createdAt", "updatedAt", "banExpires", "expiresAt"]);
+/** A JSON reviver that gives each date key a `Date`, as Better Auth's client parses its answers. */
+function reviveDates(key: string, value: unknown): unknown {
+  return ADMIN_DATE_KEYS.has(key) && typeof value === "string" ? new Date(value) : value;
+}
+
+/** The admin calls that answer NOT_SUPPORTED: every call of the type but the mapped eight. */
+type AdminUnmapped = Exclude<
+  keyof AdminClientCalls,
+  | "listUsers"
+  | "getUser"
+  | "banUser"
+  | "unbanUser"
+  | "setRole"
+  | "revokeUserSessions"
+  | "impersonateUser"
+  | "stopImpersonating"
+  | "checkRolePermission"
+>;
+
+/** The query text of a GET admin call, with each key that has a value. */
+function queryOf(query: AdminListUsersQuery | { id: string } | undefined): string {
+  const q = new URLSearchParams();
+  for (const [k, v] of Object.entries(query ?? {})) if (v !== undefined) q.set(k, String(v));
+  const text = q.toString();
+  return text ? `?${text}` : "";
+}
+
+/** Better Auth's client name of an admin path: `/admin/list-user-sessions` is `listUserSessions`. */
+const adminCallName = (path: string) =>
+  path.slice("/admin/".length).replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
 
 const notSupported = <T>(message: string): CompatClientResult<T> => ({
   data: null,
@@ -423,14 +461,19 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
    * fetch, headers, credentials, and Expo bearer as `run`. The shim answers
    * Better Auth's error body `{ code, message }`.
    */
-  async function shim<T>(path: string, body: unknown): Promise<CompatClientResult<T>> {
+  async function shim<T>(
+    path: string,
+    body: unknown,
+    method: "GET" | "POST" = "POST",
+    revive = false,
+  ): Promise<CompatClientResult<T>> {
     const resolved = resolveBase();
     if (!resolved) return noBase();
     const url = `${resolved.origin}${resolved.basePath}${path}`;
-    const request = { url, method: "POST" };
+    const request = { url, method };
     let res: Response;
     try {
-      res = await shimFetch(url, "POST", body);
+      res = await shimFetch(url, method, body);
     } catch {
       const error = clientError(BETTER_AUTH_CODES.network, 0);
       if (fo.onError) await fo.onError({ error, response: null, request });
@@ -438,7 +481,8 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     }
     const json = (await res
       .clone()
-      .json()
+      .text()
+      .then((t) => JSON.parse(t, revive ? reviveDates : undefined))
       .catch(() => null)) as Record<string, unknown> | null;
     if (res.ok && json) {
       if (fo.onSuccess) await fo.onSuccess({ data: json, response: res, request });
@@ -917,6 +961,48 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
       },
       sendOtp: async () => notSupported("core has no email or SMS second factor"),
       verifyOtp: async () => notSupported("core has no email or SMS second factor"),
+    },
+    admin: {
+      listUsers: (input) =>
+        shim(`/admin/list-users${queryOf(input?.query)}`, undefined, "GET", true),
+      getUser: (input) => shim(`/admin/get-user${queryOf(input.query)}`, undefined, "GET", true),
+      banUser: (input) => shim("/admin/ban-user", input, "POST", true),
+      unbanUser: (input) => shim("/admin/unban-user", input, "POST", true),
+      setRole: (input) => shim("/admin/set-role", input, "POST", true),
+      revokeUserSessions: (input) => shim("/admin/revoke-user-sessions", input),
+      // Better Auth's client reads the session again after both (client.mjs atomListeners).
+      async impersonateUser(input) {
+        const r = await shim<{ session: AdminSession; user: AdminUser }>(
+          "/admin/impersonate-user",
+          input,
+          "POST",
+          true,
+        );
+        if (r.data) store.refetchIfStarted();
+        return r;
+      },
+      async stopImpersonating() {
+        const r = await shim<{ session: AdminSession | null; user: AdminUser | null }>(
+          "/admin/stop-impersonating",
+          {},
+          "POST",
+          true,
+        );
+        if (r.data) store.refetchIfStarted();
+        return r;
+      },
+      // The calls core does not serve answer the handler's own lines, with no request.
+      ...(Object.fromEntries(
+        Object.entries(ADMIN_NOT_SUPPORTED).map(([path, { why }]) => [
+          adminCallName(path),
+          async () => notSupported<never>(why),
+        ]),
+      ) as Record<AdminUnmapped, () => Promise<CompatClientResult<never>>>),
+      checkRolePermission() {
+        throw new Error(
+          `authtempo compat: admin.checkRolePermission: ${ADMIN_NOT_SUPPORTED["/admin/has-permission"]?.why}`,
+        );
+      },
     },
     useSession: store,
     getCookie() {

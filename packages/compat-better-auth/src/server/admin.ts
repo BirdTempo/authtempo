@@ -9,8 +9,11 @@ import {
 } from "@authtempo/core";
 import { APIError, apiError, BETTER_AUTH_CODES, messageOf, NOT_SUPPORTED } from "../errors.js";
 import type { AdminOptions, AdminSession, AdminUser } from "../types.js";
+import { ADMIN_NOT_SUPPORTED } from "./admin-lines.js";
 import type { Mapped } from "./map-options.js";
 import { sessionTokenOf, toSession, toUser } from "./shapes.js";
+
+export { ADMIN_NOT_SUPPORTED };
 
 /**
  * Better Auth 1.7.7's admin paths (dist/plugins/admin/routes.mjs, read
@@ -18,8 +21,9 @@ import { sessionTokenOf, toSession, toUser } from "./shapes.js";
  * spec section 26 item 14). The shim maps list-users, get-user, ban-user,
  * unban-user, revoke-user-sessions, impersonate-user, stop-impersonating,
  * and set-role onto core's operator routes, with the caller's session as a
- * user actor (ruling 39). The calls below have no core tool, so each one
- * answers NOT_SUPPORTED with a line that names section 26.
+ * user actor (ruling 39). The calls of `ADMIN_NOT_SUPPORTED` (admin-lines.ts)
+ * have no core tool, so each one answers NOT_SUPPORTED with a line that
+ * names section 26.
  */
 
 /**
@@ -41,37 +45,6 @@ const DEFAULT_ADMIN_ROLES = ["admin"];
 export const USER_ROLE = "user";
 /** Better Auth's default impersonation life (admin.mjs `getDate(3600, "sec")`). */
 export const IMPERSONATION_SECONDS = 3600;
-
-const NOT_A_DELETE =
-  "core has no password set and no user delete by an operator in plan 12f; an operator bans, and the person resets the password or deletes the account (spec section 26 item 15)";
-
-/** Each admin call that core does not serve, by path, with its method and its line. */
-export const ADMIN_NOT_SUPPORTED: Readonly<
-  Record<string, { method: "GET" | "POST"; why: string }>
-> = {
-  "/admin/set-user-password": { method: "POST", why: NOT_A_DELETE },
-  "/admin/remove-user": { method: "POST", why: NOT_A_DELETE },
-  "/admin/create-user": {
-    method: "POST",
-    why: "core has no user create by an operator in plan 12f; createAdmin makes the first operator only (spec section 26 items 11 and 15)",
-  },
-  "/admin/update-user": {
-    method: "POST",
-    why: "core has no user update by an operator in plan 12f (spec section 26 item 15)",
-  },
-  "/admin/list-user-sessions": {
-    method: "POST",
-    why: "core gives an operator the count of live sessions in get-user, never the session rows (spec section 26 item 4)",
-  },
-  "/admin/revoke-user-session": {
-    method: "POST",
-    why: "core ends all sessions of a user, never one by its token; use /admin/revoke-user-sessions (spec section 26 item 5)",
-  },
-  "/admin/has-permission": {
-    method: "POST",
-    why: "core has no permission statements for operators; the platform role holds every operator tool (spec section 26 items 2 and 15)",
-  },
-};
 
 /** The roles of `adminRoles`, as Better Auth reads them: a list, or a text split at each comma. */
 export function adminRolesOf(options: AdminOptions): string[] {
