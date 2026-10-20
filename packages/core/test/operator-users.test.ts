@@ -313,6 +313,29 @@ describe("operator user reads (plan 12f Task 5)", () => {
     expect(log).not.toHaveBeenCalled();
   });
 
+  describe("refuses an app name outside the rule before the log line (spec 26 item 1)", () => {
+    const bad: OperatorActor = { kind: "app", name: "ada@example.com\r\nforged line" };
+    const refused = { ok: false, code: "invalid_body", status: 400 };
+    const reads = {
+      list: (api: ReturnType<typeof operatorApi>) => api.users.list({ actor: bad }),
+      search: (api: ReturnType<typeof operatorApi>) =>
+        api.users.search({ actor: bad, emailPrefix: "ada" }),
+      get: (api: ReturnType<typeof operatorApi>) =>
+        api.users.get({ actor: bad, userId: "01NOSUCHUSER" }),
+    };
+    for (const [name, read] of Object.entries(reads)) {
+      it(`users.${name} answers invalid_body and writes no log line, on and off`, async () => {
+        const auth = await operatorAuth();
+        await signUpAll(auth, ["ada@example.com"]);
+        const log = vi.spyOn(console, "error").mockImplementation(() => {});
+        expect(await read(operatorApi(auth.config))).toEqual(refused);
+        // With operator.users off, the actor check still comes first.
+        expect(await read(operatorApi(makeAuth().config))).toEqual(refused);
+        expect(log).not.toHaveBeenCalled();
+      });
+    }
+  });
+
   it("refuses a secret without the users scope", async () => {
     const auth = await operatorAuth();
     const api = operatorApi(auth.config);
