@@ -22,7 +22,7 @@ import { auditDraft, type OperatorActEnds, operatorAct, operatorReason } from ".
 import { targetOf } from "./ban.js";
 import { activeBan } from "./ban-rule.js";
 import { type OperatorActor, requireScope } from "./guards.js";
-import { TARGET_CALLS, workBudget } from "./sessions.js";
+import { STEP_WORST, TARGET_CALLS, workBudget } from "./sessions.js";
 import { endImpersonations } from "./impersonation.js";
 
 /** The input of a grant or a revoke of the platform role (spec 26 item 5). */
@@ -379,6 +379,11 @@ export async function revokePlatformRole(
     drafted.value,
     async (tx, _draft, ends: OperatorActEnds): Promise<Result<{ change: MemberChange }>> => {
       const meter = meterOf(tx, fixed);
+      // The user row first (user-hold.ts). An impersonation start holds it
+      // too, so the start either sees the role gone or commits its start
+      // row before `endImpersonations` reads (ruling 42 of plan 12f).
+      await holdUser(tx, user.id);
+      meter.step(STEP_WORST.hold);
       const member = await memberOf(tx, organization.id, user.id);
       meter.step(1);
       if (!member || !holdsRolePart(member.role, role)) {

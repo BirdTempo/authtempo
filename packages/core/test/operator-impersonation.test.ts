@@ -430,6 +430,54 @@ describe("the impersonation (plan 12f Task 11)", () => {
     }
   });
 
+  it("refuses the start when a ban or a revoke of the operator commits during it", async () => {
+    for (const act of ["ban", "revoke"] as const) {
+      // The limiter runs between the guard and the transaction: the act of a
+      // second request commits there, as two parallel requests can.
+      let during: (() => Promise<void>) | null = null;
+      const limiter = {
+        allow: async (key: string) => {
+          const run = during;
+          if (key.startsWith("operator-impersonate:") && run) {
+            during = null;
+            await run();
+          }
+          return true;
+        },
+      };
+      const w = await world({}, { limiter });
+      const api = operatorApi(w.auth.config);
+      const input = {
+        actor: APP,
+        userId: w.operator.user.id,
+        reason: "The operator left",
+        ip: null,
+        userAgent: null,
+      };
+      during = async () => {
+        const r = act === "ban" ? await api.users.ban(input) : await api.platformRole.revoke(input);
+        if (!r.ok) throw new Error(r.code);
+      };
+      const r = await startImpersonation(w.auth.config, {
+        operator: w.operator,
+        userId: w.target.user.id,
+        reason: REASON,
+        ip: null,
+        userAgent: null,
+      });
+      expect(during, act).toBeNull();
+      expect(r, act).toEqual({ ok: false, code: "operator_required", status: 403 });
+      expect(
+        await w.auth.storage.findMany("session", [{ field: "actorId", op: "ne", value: null }]),
+        act,
+      ).toEqual([]);
+      expect(
+        (await auditRows(w)).map((row) => row.action),
+        act,
+      ).toEqual([act === "ban" ? "ban" : "platform_role_revoke"]);
+    }
+  });
+
   it("answers each code of the start and the stop", async () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const refusing = await world(

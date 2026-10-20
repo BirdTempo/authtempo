@@ -11,6 +11,7 @@ import {
   sessionOpened,
   sessionsEnded,
 } from "../sessions.js";
+import { holdUser } from "../user-hold.js";
 import { auditDraft, impersonationTargets, operatorAct, operatorReason } from "./audit.js";
 import { activeBan } from "./ban-rule.js";
 import { IMPERSONATE_PER_USER, isPlatformOperator, requireOperatorUser } from "./guards.js";
@@ -62,7 +63,10 @@ export function refuseImpersonation(resolved: Pick<ResolvedSession, "session">):
  * does not tell a missing user from a protected one.
  *
  * Through `operatorAct` with the action `impersonation_start`, one
- * transaction opens the session through `openSession` with `via:
+ * transaction first holds the operator's user row and reads the operator
+ * again through it. An active ban or a lost platform role answers
+ * `operator_required` (ruling 42 of plan 12f). Then it opens the session
+ * through `openSession` with `via:
  * "impersonation"`: `actorId` is the operator, `freshAt` is null, and
  * `expiresAt` is now plus `ttlMinutes`. The row holds no IP and no user
  * agent, because the user's session list shows them (plan 12f deviation
@@ -117,6 +121,14 @@ export async function startImpersonation(
     config,
     drafted.value,
     async (tx, draft) => {
+      // The operator's user row first (user-hold.ts), then the operator again
+      // through tx. A ban or a revoke that committed after the guard stops
+      // the start here; one that starts later waits for this commit, and
+      // then its `endImpersonations` reads the start row.
+      await holdUser(tx, actor.user.id);
+      const self = await tx.findOne("user", [{ field: "id", op: "eq", value: actor.user.id }]);
+      if (!self || activeBan(self, now)) return fail("operator_required");
+      if (!(await isPlatformOperator(config, self.id, tx))) return fail("operator_required");
       const opened = await openSession(
         config,
         {
