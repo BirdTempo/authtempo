@@ -12,6 +12,8 @@ describe("the redaction source (plan 12h Task 1, spec 31 item 9)", () => {
         out: "pw and ***",
       },
       { text: "u:pw12 and pw12", secrets: new Set(["pw12", "u:pw12"]), out: "*** and ***" },
+      // One secret twice in a line, with no overlap: each one goes.
+      { text: "s3cret s3cret", secrets: new Set(["s3cret"]), out: "*** ***" },
     ];
     for (const { text, secrets, out } of rows) expect(scrub(text, secrets), text).toBe(out);
   });
@@ -63,6 +65,10 @@ describe("the redaction source (plan 12h Task 1, spec 31 item 9)", () => {
       "0123456789abcdef0123456789abcdef",
     );
     expect(FIELD_KINDS.status(404)).toBe(404);
+    expect(FIELD_KINDS.durationMs(-1)).toBe(REJECT);
+    expect(FIELD_KINDS.durationMs(1.5)).toBe(REJECT);
+    expect(FIELD_KINDS.durationMs("5")).toBe(REJECT);
+    expect(FIELD_KINDS.durationMs(5)).toBe(5);
   });
 
   it("derives a keyed hash of 32 hex that depends on the secret and the info", async () => {
