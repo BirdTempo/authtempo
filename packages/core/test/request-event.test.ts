@@ -404,3 +404,49 @@ describe("the request event (plan 12h Task 4)", () => {
     expect(plain?.rejected).toBeUndefined();
   });
 });
+
+describe("the raw IP and the raw agent of a request (plan 12h Task 12, ruling 29)", () => {
+  const SECRET = "0123456789abcdef0123456789abcdef";
+  /** A social client secret in the form of an IP address: the app may set any text. */
+  const IP_SECRET = "2001:db8::77";
+  const RAW = { include: { ip: "raw", userAgent: "raw", email: "none" } } as const;
+
+  /** One health request with these headers. Answers its request event. */
+  async function requestEvent(s: Observed, headers: Record<string, string>): Promise<AuthEvent> {
+    await s.auth.handle(get("/auth/health", headers));
+    const [event] = only(await s.events(), "request");
+    if (!event) throw new Error("no request event");
+    return event;
+  }
+
+  it("lets no config secret in the agent or the IP header reach a sink event", async () => {
+    const s = observed({}, RAW);
+    await s.auth.handle(
+      get("/auth/health", { "user-agent": `x ${SECRET}`, "cf-connecting-ip": SECRET }),
+    );
+    const events = await s.events();
+    expect(events.length).toBeGreaterThan(0);
+    for (const e of events) expect(JSON.stringify(e), e.name).not.toContain(SECRET);
+    expect(only(events, "request")[0]).toMatchObject({ userAgent: "x ***" });
+  });
+
+  it("scrubs a config secret in a raw IP that is an IP address", async () => {
+    const s = observed({ social: { google: { clientId: "gid", clientSecret: IP_SECRET } } }, RAW);
+    const event = await requestEvent(s, { "cf-connecting-ip": IP_SECRET });
+    expect(JSON.stringify(event)).not.toContain(IP_SECRET);
+    expect(event).not.toHaveProperty("ip");
+  });
+
+  it("drops a raw IP that is not an IP address, and keeps one that is", async () => {
+    const bad = await requestEvent(observed({}, RAW), { "cf-connecting-ip": "not an address" });
+    expect(bad).not.toHaveProperty("ip");
+    const good = await requestEvent(observed({}, RAW), { "cf-connecting-ip": "203.0.113.9" });
+    expect(good.ip).toBe("203.0.113.9");
+  });
+
+  it("scrubs the agent before the cut at 256 characters, so no head of a secret stays", async () => {
+    const s = observed({}, RAW);
+    const event = await requestEvent(s, { "user-agent": `${"a".repeat(240)}${SECRET}` });
+    expect(event.userAgent).toBe(`${"a".repeat(240)}***`);
+  });
+});

@@ -1,3 +1,4 @@
+import { isIpLiteral } from "../limiter/ip-key.js";
 import type { Clock } from "../primitives/clock.js";
 import { CONTROL, KEYED_HASH_INFO, keyedHashKey, keyedHashWith, scrub } from "../redact.js";
 import type { ResolvedObserve } from "./config.js";
@@ -109,23 +110,30 @@ export function createObserver(
     // The scrub of the default output, also with a sink: no sink is the only
     // guard of a secret (spec 31 item 9). A field kind can keep a secret that
     // a client sends, such as a method token. The stamp is set first and is
-    // not scrubbed: the name, the level, the time, the ids, and the route key
-    // are checked by their kinds. A sink of @authtempo/observe scrubs again
-    // with the secrets of the app. It skips the same fields, but not the route key.
+    // not scrubbed. Its kinds check the name, the level, the time, the ids,
+    // and the route key. A sink of @authtempo/observe scrubs again with the
+    // secrets of the app. It skips the same fields, but not the route key.
     for (const [key, value] of Object.entries(checkedFields(input)))
       if (!Object.hasOwn(event, key))
         event[key] = typeof value === "string" ? scrub(value, deps.secrets) : value;
     if (unscoped) event.rejected = [...(event.rejected ?? []), "unscoped"];
     const { include } = config;
+    // The raw IP and the raw agent come from the client, so each one gets the
+    // scrub too. Outside the Cloudflare edge a client sets cf-connecting-ip
+    // (workersClientIp reads it with no check). So a raw IP that is not an IP
+    // address after the scrub is dropped.
     if (scope?.ip) {
-      if (include.ip === "raw") event.ip = scope.ip;
-      else if (include.ip === "hash") held.ip = scope.ip;
+      if (include.ip === "raw") {
+        const ip = scrub(scope.ip, deps.secrets);
+        if (isIpLiteral(ip)) event.ip = ip;
+      } else if (include.ip === "hash") held.ip = scope.ip;
     }
+    // The scrub comes before the cut: a cut through a secret would keep its head.
     if (scope?.userAgent && include.userAgent === "raw")
-      event.userAgent = scope.userAgent
-        .replace(CONTROL, "")
-        .replaceAll("\t", "")
-        .slice(0, USER_AGENT_MAX);
+      event.userAgent = scrub(
+        scope.userAgent.replace(CONTROL, "").replaceAll("\t", ""),
+        deps.secrets,
+      ).slice(0, USER_AGENT_MAX);
     if (include.email === "hash" && typeof input.email === "string") held.email = input.email;
     return held;
   }
