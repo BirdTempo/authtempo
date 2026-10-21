@@ -192,6 +192,69 @@ describe("the OIDC sign-in of an SSO connection (plan 12d Task 4)", () => {
     expect(w.calls).toEqual([]);
   });
 
+  it("refuses a wrong and a missing binding cookie before any call to the IdP", async () => {
+    const w = oidcWorld();
+    const { a } = await twoConnections(w);
+    const answers: (string | null)[] = [];
+    for (const bind of ["A".repeat(43), null]) {
+      const s = await start(w, a);
+      // A token that passes each later step, so only the binding check can stop the flow.
+      w.tokens[`token-${s.nonce}`] = {
+        audience: "acme-client",
+        issuer: issuerOf("acme"),
+        claims: { sub: "a-1", nonce: s.nonce },
+      };
+      const query = { code: `token-${s.nonce}`, state: s.state };
+      const res =
+        bind === null
+          ? await w.handle(get(`/auth/sso/${a}/callback?${new URLSearchParams(query)}`))
+          : await callback(w, a, query, bind);
+      answers.push(authError(res));
+    }
+    expect(answers).toEqual(["sso_failed", "sso_failed"]);
+    expect(stepsOf(a)).toEqual(["binding", "binding"]);
+    expect(w.calls).toEqual([]);
+  });
+
+  it("refuses an ID token with a wrong nonce or no nonce", async () => {
+    const w = oidcWorld();
+    const { a } = await twoConnections(w);
+    const answers: (string | null)[] = [];
+    for (const claims of [{ sub: "a-1", nonce: "a-nonce-of-another-start" }, { sub: "a-1" }]) {
+      const s = await start(w, a);
+      const code = `token-${s.state}`;
+      w.tokens[code] = { audience: "acme-client", issuer: issuerOf("acme"), claims };
+      answers.push(authError(await callback(w, a, { code, state: s.state }, s.bind)));
+    }
+    expect(answers).toEqual(["sso_failed", "sso_failed"]);
+    expect(stepsOf(a)).toEqual(["nonce", "nonce"]);
+  });
+
+  it("refuses a state at the end of its 10 minutes", async () => {
+    const w = oidcWorld();
+    const { a } = await twoConnections(w);
+    const late = await start(w, a);
+    const inTime = await start(w, a);
+    for (const s of [late, inTime])
+      w.tokens[`token-${s.nonce}`] = {
+        audience: "acme-client",
+        issuer: issuerOf("acme"),
+        claims: { sub: "a-1", nonce: s.nonce },
+      };
+    // One millisecond before the end the state passes, and the flow reaches the resolution of Task 5.
+    w.clock.advance(10 * 60_000 - 1);
+    await callback(w, a, { code: `token-${inTime.nonce}`, state: inTime.state }, inTime.bind);
+    w.clock.advance(1);
+    const res = await callback(w, a, { code: `token-${late.nonce}`, state: late.state }, late.bind);
+    expect(authError(res)).toBe("sso_failed");
+    expect(stepsOf(a)).toEqual(["resolve", "state"]);
+    // The late state is not spent: the refusal wrote nothing.
+    const row = await w.storage.findOne("verification", [
+      { field: "valueHash", op: "eq", value: await sha256Hex(late.state) },
+    ]);
+    expect(row?.consumedAt).toBeNull();
+  });
+
   it("refuses a discovery document with another issuer, and a discovered private host", async () => {
     const w = oidcWorld();
     const other = await connection(w, await seedOrganization(w, "acme"), "acme", null);
