@@ -29,7 +29,7 @@ runAdapterConformance(
     await truncateAll();
     return { adapter: createD1Adapter(env.DB), close: truncateAll };
   },
-  { updateInTransaction: 2, oldStore },
+  { updateInTransaction: 2, oldStore, ping: true },
 );
 
 /** The live shape of the test database, read with the two exported SQL texts. */

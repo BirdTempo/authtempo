@@ -73,6 +73,12 @@ export interface ConformanceOptions {
    */
   rowLocks?: boolean;
   /**
+   * True for an adapter that must have `ping` (plan 12h Task 8). The ping
+   * row passes when an adapter has no `ping`, so this option holds the
+   * method to the adapter. Default false.
+   */
+  ping?: boolean;
+  /**
    * The statements of one update inside a transaction, for `statementsSent`.
    * D1 sends 2: the read of the rows for the undo and the write. Default 1.
    */
@@ -1632,6 +1638,10 @@ export function runAdapterConformance(
         const first = await db.readyStatements();
         expect(Number.isInteger(first) && first >= 0).toBe(true);
         expect(await growth(async () => expect(await db.readyStatements?.()).toBe(first))).toBe(0);
+      });
+
+      it("has ping when the target says it must", () => {
+        if (options.ping) expect(typeof db.ping).toBe("function");
       });
 
       it("ping answers for a ready store and throws schema_mismatch for an old one", async () => {

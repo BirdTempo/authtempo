@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 import { runAdapterConformance } from "../src/storage/conformance.js";
 import { createMemoryAdapter, sameUniqueKey } from "../src/storage/memory.js";
 
-runAdapterConformance("memory", async () => ({
-  adapter: createMemoryAdapter(),
-  close: async () => {},
-}));
+// Each adapter of this repository has ping (plan 12h Task 8).
+runAdapterConformance(
+  "memory",
+  async () => ({
+    adapter: createMemoryAdapter(),
+    close: async () => {},
+  }),
+  { ping: true },
+);
 
 describe("memory adapter transactions", () => {
   it("runs transactions one at a time, so a read-then-create never collides", async () => {

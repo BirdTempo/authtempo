@@ -74,7 +74,7 @@ runAdapterConformance(
     await migrateWithoutLock(pg.sql, s.names);
     return { adapter: s.storage, close: () => pg.close(), stop: () => pg.stop() };
   },
-  { rowLocks: true, oldStore: oldStore(BETTER_AUTH_PG) },
+  { rowLocks: true, ping: true, oldStore: oldStore(BETTER_AUTH_PG) },
 );
 
 runAdapterConformance(
@@ -87,6 +87,7 @@ runAdapterConformance(
   },
   {
     rowLocks: true,
+    ping: true,
     oldStore: oldStore(CONSUMER_I_PG, { casing: "snake" }),
   },
 );

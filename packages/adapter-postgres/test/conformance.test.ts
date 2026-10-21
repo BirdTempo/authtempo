@@ -22,7 +22,7 @@ runAdapterConformance(
       stop: () => db.stop(),
     };
   },
-  { rowLocks: true, oldStore },
+  { rowLocks: true, oldStore, ping: true },
 );
 
 describe("postgres migration matches the core schema", () => {
