@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { checkExports, exportNames, readExports } from "../scripts/check-exports.ts";
+import { readRepoFile } from "../scripts/lib/load.ts";
 
 describe("exportNames", () => {
   it("reads value exports, type exports, renamed exports, and declarations", () => {
@@ -128,5 +129,32 @@ describe("checkExports", () => {
       ["Exports"],
     );
     expect(r.failures).toHaveLength(1);
+  });
+});
+
+describe("the observe entry of core (plan 12h deviation 14)", () => {
+  it("exports the names of deviation 14, TRACE_HEADER and SIGN_IN_ROUTES too", () => {
+    // The entry is exempt from a page, so this list is its exports check.
+    const file = "packages/core/src/observe/index.ts";
+    const read = readExports(readRepoFile(file) ?? "", file);
+    expect(read.unreadable).toEqual([]);
+    expect(read.names).toEqual([
+      "AuthEvent",
+      "EVENTS",
+      "EventInput",
+      "EventName",
+      "EventSpec",
+      "FaultLine",
+      "FieldSpec",
+      "HandleOptions",
+      "LIMIT_FAMILIES",
+      "LimitFamily",
+      "ObserveConfig",
+      "ObserveSink",
+      "ObserveStats",
+      "SIGN_IN_ROUTES",
+      "TRACE_HEADER",
+      "validateEvent",
+    ]);
   });
 });
