@@ -7,6 +7,8 @@ sources:
   - apps/site/scripts/measure-performance.ts
   - apps/site/src/data/performance.json
   - examples/worker-d1/src/measure.ts
+  - apps/site/src/data/observe-timing.json
+  - packages/core/test/observer.test.ts
 sidebar:
   order: 10
 ---
@@ -21,7 +23,15 @@ sidebar:
 
 ## What is measured
 
-The run starts the example Worker on D1 under `wrangler dev --local`, with the password config at the default PBKDF2 iterations. It measures five operations:
+The run starts the measure entry `examples/worker-d1/src/measure.ts` under `wrangler dev --local`, with the `wrangler.jsonc` of the D1 example. The measure entry differs from the shipped entry `src/index.ts` in three ways:
+
+- It turns on the password config, at the default PBKDF2 iterations.
+- Its outbox mail port writes each mail, with its link, to the log as one line.
+- Its sink writes one extra line to the log for each request event, after the Workers Logs sink.
+
+Do not deploy the measure entry. Its log holds the link of each mail. The `main` of `wrangler.jsonc` stays `src/index.ts`, and a site test holds it.
+
+The run measures five operations:
 
 - `POST /password/sign-in`: a password sign-in. The PBKDF2 hash is most of its cost.
 - `GET /session`: a read of the session of a cookie.
@@ -64,12 +74,33 @@ Local workerd is not a deployed Worker. A deployed Worker runs at the edge, near
 - The client time is the wall time of the call on the same machine. It includes the body of the answer.
 - p50 and p95 are nearest-rank percentiles of the measured calls.
 
+## The observer timing run
+
+An observer must not slow a sign-in. The timing test of core runs 5000 password sign-ins in one process, twice. The first run has a sink that never settles, and the second run has no observer. The test fails when the first median is more than 1.1 times the second median.
+
+<!-- timing:start -->
+| Condition | Value |
+| --- | --- |
+| Date (UTC) | 2026-10-21T19:06:02.000Z |
+| Commit | `36da5bcdf0b55fe3c8180f7f70249e71c1677cd1` |
+| Cores | 18 |
+| Load before the run | 3.68, 9.12, 13.49 (1, 5, and 15 minutes) |
+| Load after the run | 3.47, 8.99, 13.41 (1, 5, and 15 minutes) |
+| Sign-ins in each run | 5000, after 20 to warm up |
+| Median with a sink that never settles | 0.2530 ms |
+| Median with no observer | 0.2403 ms |
+<!-- timing:end -->
+
+The medians come from one Node process with a fast test hash, not from workerd. They compare the two runs and give no time of a deployed sign-in.
+
 ## Run it again
 
 1. Commit each change. The run refuses a tree that is not clean, because the record names the commit.
 2. Wait until the one-minute load is at most a quarter of the cores. The run refuses a higher load.
 3. Run `pnpm --filter @authtempo/site run measure:performance`. The run writes `src/data/performance.json` and the block above.
 4. Run the site checks. `check-performance` fails on a missing condition, a hand edit of the block, a loaded machine, or too few samples.
+5. For the timing run, wait until the one-minute load is at most a quarter of the cores. Then run `AUTHTEMPO_OBSERVE_TIMING=1 pnpm --filter @authtempo/core exec vitest run test/observer.test.ts --silent=false -t "does not slow a sign-in"`. Without `--silent=false`, vitest hides the line of the two medians when the test passes.
+6. Write the two medians and the conditions to `src/data/observe-timing.json`, and change the timing block to match. `check-observe-timing` fails on a difference, a loaded machine, or a median above the bound.
 
 ## Next
 

@@ -1,0 +1,12 @@
+{
+  "measuredAt": "2026-10-21T19:06:02.000Z",
+  "commit": "36da5bcdf0b55fe3c8180f7f70249e71c1677cd1",
+  "cores": 18,
+  "load": {
+    "before": [3.68, 9.12, 13.49],
+    "after": [3.47, 8.99, 13.41]
+  },
+  "signIns": 5000,
+  "observedMedianMs": 0.253,
+  "plainMedianMs": 0.2403
+}

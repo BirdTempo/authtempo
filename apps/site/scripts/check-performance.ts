@@ -239,3 +239,108 @@ export function checkPerformance(page: string, data: PerformanceData, cores: num
     ["operations", "samples"],
   );
 }
+
+/** The record of the observer timing run, by its path under apps/site/. A person writes it. */
+export const OBSERVE_TIMING_DATA = "src/data/observe-timing.json";
+
+/** The block of the timing run on the page. renderObserveTiming(record) gives its text. */
+export const TIMING_START = "<!-- timing:start -->";
+export const TIMING_END = "<!-- timing:end -->";
+
+/** The bound of ruling 1 point 16: the observed median is at most 1.1 times the plain median. */
+export const TIMING_BOUND = 1.1;
+
+/** The timing run waits for a one-minute load of at most this share of the cores. */
+export const TIMING_LOAD_SHARE = 0.25;
+
+/**
+ * The record of one timing run of ruling 3 q3 of plan 12h: the test "a sink
+ * that never settles does not slow a sign-in" of packages/core/test/observer.test.ts,
+ * with AUTHTEMPO_OBSERVE_TIMING=1. The test prints the two medians.
+ */
+export interface ObserveTimingData {
+  measuredAt: string;
+  commit: string;
+  cores: number;
+  load: { before: [number, number, number]; after: [number, number, number] };
+  signIns: number;
+  observedMedianMs: number;
+  plainMedianMs: number;
+}
+
+/** The block between the timing markers, from the record. */
+export function renderObserveTiming(t: ObserveTimingData): string {
+  return [
+    "| Condition | Value |",
+    "| --- | --- |",
+    `| Date (UTC) | ${t.measuredAt} |`,
+    `| Commit | \`${t.commit}\` |`,
+    `| Cores | ${t.cores} |`,
+    `| Load before the run | ${loadText(t.load.before)} |`,
+    `| Load after the run | ${loadText(t.load.after)} |`,
+    `| Sign-ins in each run | ${t.signIns}, after 20 to warm up |`,
+    `| Median with a sink that never settles | ${t.observedMedianMs.toFixed(4)} ms |`,
+    `| Median with no observer | ${t.plainMedianMs.toFixed(4)} ms |`,
+  ].join("\n");
+}
+
+/**
+ * The record of the timing run and its block on the page. The check never
+ * runs the test: it holds the record of a person's run, as checkPerformance does.
+ */
+export function checkObserveTiming(page: string, t: ObserveTimingData): CheckReport {
+  const failures: string[] = [];
+  const measuredAt = at(t, "measuredAt");
+  if (typeof measuredAt !== "string" || !isIsoTime(measuredAt))
+    failures.push(`the timing date ${String(measuredAt)} is not an ISO time`);
+  const commit = at(t, "commit");
+  if (typeof commit !== "string" || !/^[0-9a-f]{40}$/.test(commit))
+    failures.push(`the timing commit ${String(commit)} is not 40 hex characters`);
+  for (const f of ["cores", "signIns"]) {
+    const v = at(t, f);
+    if (typeof v !== "number" || !Number.isInteger(v) || v <= 0)
+      failures.push(`the timing condition ${f} is missing or not a positive integer`);
+  }
+  for (const f of LOAD_FIELDS) {
+    const v = at(t, f);
+    if (!Array.isArray(v) || v.length !== 3 || !v.every(isTime))
+      failures.push(`the timing condition ${f} is missing or not three load averages`);
+  }
+  // A median bound fails by chance on a loaded machine, so the run needs a quiet one.
+  const cores = at(t, "cores");
+  const before = at(t, "load.before");
+  const first = Array.isArray(before) ? before[0] : undefined;
+  if (typeof cores === "number" && isTime(first) && first > cores * TIMING_LOAD_SHARE)
+    failures.push(
+      `the load before the timing run is ${first}, above ${cores * TIMING_LOAD_SHARE} for ${cores} cores`,
+    );
+  const observed = at(t, "observedMedianMs");
+  const plain = at(t, "plainMedianMs");
+  if (!isTime(observed) || !isTime(plain)) failures.push("the timing record needs two medians");
+  else if (observed > plain * TIMING_BOUND)
+    failures.push(
+      `the observed median ${observed} ms is above ${TIMING_BOUND} times the plain median ${plain} ms`,
+    );
+
+  const starts = page.split(TIMING_START).length - 1;
+  const ends = page.split(TIMING_END).length - 1;
+  const from = page.indexOf(TIMING_START);
+  const to = page.indexOf(TIMING_END);
+  if (starts !== 1 || ends !== 1 || to < from) {
+    failures.push(`the page needs one ${TIMING_START} and one ${TIMING_END} after it`);
+  } else if (failures.length === 0) {
+    // A record that failed above may not render; its failure already stands.
+    const block = page.slice(from + TIMING_START.length, to);
+    if (block !== `\n${renderObserveTiming(t)}\n`)
+      failures.push("the timing block of the page differs from renderObserveTiming(record)");
+  }
+  const signIns = at(t, "signIns");
+  return requireCounts(
+    {
+      name: "check-observe-timing",
+      counts: { signIns: typeof signIns === "number" ? signIns : 0 },
+      failures,
+    },
+    ["signIns"],
+  );
+}

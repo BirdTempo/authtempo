@@ -1,13 +1,19 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
+  checkObserveTiming,
   checkPerformance,
   MEASURED_END,
   MEASURED_START,
+  OBSERVE_TIMING_DATA,
+  type ObserveTimingData,
   PERFORMANCE_DATA,
   PERFORMANCE_PAGE,
   type PerformanceData,
+  renderObserveTiming,
   renderPerformanceTable,
+  TIMING_END,
+  TIMING_START,
 } from "../scripts/check-performance.ts";
 import { docsPages } from "../scripts/lib/load.ts";
 import { SITE } from "../scripts/lib/paths.ts";
@@ -198,6 +204,109 @@ describe("checkPerformance", () => {
     expect(r.failures).toEqual([
       "the condition runtime.workerd is remote, not local",
       "the condition storage is d1-remote, not d1-local",
+    ]);
+  });
+});
+
+/** A record of the timing run, as a person copies it from the printed line. */
+function timing(): ObserveTimingData {
+  return {
+    measuredAt: "2026-10-22T03:00:00.000Z",
+    commit: "0123456789abcdef0123456789abcdef01234567",
+    cores: 8,
+    load: { before: [1.5, 2, 2.5], after: [1.75, 2, 2.5] },
+    signIns: 5000,
+    observedMedianMs: 0.25,
+    plainMedianMs: 0.24,
+  };
+}
+
+/** A page with the timing block of the record. */
+function timingPage(t: ObserveTimingData): string {
+  return `# Performance\n\n${TIMING_START}\n${renderObserveTiming(t)}\n${TIMING_END}\n\nMore text.\n`;
+}
+
+describe("checkObserveTiming", () => {
+  it("passes on the real page and the real record", () => {
+    const t = JSON.parse(
+      readFileSync(`${SITE}${OBSERVE_TIMING_DATA}`, "utf8"),
+    ) as ObserveTimingData;
+    const real = docsPages().find((p) => p.path === PERFORMANCE_PAGE)?.source ?? "";
+    const r = checkObserveTiming(real, t);
+    expect(r.failures).toEqual([]);
+    expect(r.counts).toEqual({ signIns: 5000 });
+  });
+
+  it("passes on a record and its page", () => {
+    const t = timing();
+    const r = checkObserveTiming(timingPage(t), t);
+    expect(r.failures).toEqual([]);
+    expect(r.counts).toEqual({ signIns: 5000 });
+  });
+
+  it("renders the medians with four decimals", () => {
+    expect(renderObserveTiming(timing())).toContain(
+      "| Median with a sink that never settles | 0.2500 ms |\n| Median with no observer | 0.2400 ms |",
+    );
+  });
+
+  it("fails on a date that is not an ISO time and a commit that is not 40 hex characters", () => {
+    const t = { ...timing(), measuredAt: "2026-10-22", commit: "abc" };
+    const r = checkObserveTiming(timingPage(timing()), t);
+    expect(r.failures).toEqual([
+      "the timing date 2026-10-22 is not an ISO time",
+      "the timing commit abc is not 40 hex characters",
+    ]);
+  });
+
+  it("fails on a count that is not a positive integer and a missing load", () => {
+    const t = timing();
+    const { after: _after, ...rest } = t.load;
+    const broken = { ...t, signIns: 0, load: rest } as unknown as ObserveTimingData;
+    const r = checkObserveTiming(timingPage(t), broken);
+    expect(r.failures).toEqual([
+      "the timing condition signIns is missing or not a positive integer",
+      "the timing condition load.after is missing or not three load averages",
+      "read 0 signIns",
+    ]);
+  });
+
+  it("fails on a load above a quarter of the cores", () => {
+    const t = timing();
+    t.load.before = [2.5, 2, 2.5];
+    const r = checkObserveTiming(timingPage(t), t);
+    expect(r.failures).toEqual(["the load before the timing run is 2.5, above 2 for 8 cores"]);
+  });
+
+  it("fails on a missing median", () => {
+    const { plainMedianMs: _plain, ...rest } = timing();
+    const r = checkObserveTiming(timingPage(timing()), rest as unknown as ObserveTimingData);
+    expect(r.failures).toEqual(["the timing record needs two medians"]);
+  });
+
+  it("fails on an observed median above 1.1 times the plain median", () => {
+    const t = { ...timing(), observedMedianMs: 0.27, plainMedianMs: 0.24 };
+    const r = checkObserveTiming(timingPage(t), t);
+    expect(r.failures).toEqual([
+      "the observed median 0.27 ms is above 1.1 times the plain median 0.24 ms",
+    ]);
+  });
+
+  it("fails when the timing block differs from the record", () => {
+    const t = timing();
+    const edited = timingPage(t).replace("0.2400 ms", "0.2300 ms");
+    expect(edited).not.toBe(timingPage(t));
+    const r = checkObserveTiming(edited, t);
+    expect(r.failures).toEqual([
+      "the timing block of the page differs from renderObserveTiming(record)",
+    ]);
+  });
+
+  it("fails on a page with no timing block", () => {
+    const t = timing();
+    const r = checkObserveTiming(timingPage(t).replace(TIMING_END, ""), t);
+    expect(r.failures).toEqual([
+      "the page needs one <!-- timing:start --> and one <!-- timing:end --> after it",
     ]);
   });
 });

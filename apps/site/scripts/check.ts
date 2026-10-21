@@ -47,7 +47,10 @@ import { checkMigrate } from "./check-migrate.ts";
 import { checkMotion } from "./check-motion.ts";
 import { checkOpenApi } from "./check-openapi.ts";
 import {
+  checkObserveTiming,
   checkPerformance,
+  OBSERVE_TIMING_DATA,
+  type ObserveTimingData,
   PERFORMANCE_DATA,
   PERFORMANCE_PAGE,
   type PerformanceData,
@@ -421,6 +424,15 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
       const data = JSON.parse(readSiteFile(PERFORMANCE_DATA) ?? "{}") as PerformanceData;
       const page = docsPages().find((p) => p.path === PERFORMANCE_PAGE)?.source ?? "";
       return checkPerformance(page, data, data.machine?.cores ?? 0);
+    },
+  },
+  // The record of the observer timing run (ruling 3 q3 of plan 12h) and its block.
+  {
+    name: "check-observe-timing",
+    run: () => {
+      const timing = JSON.parse(readSiteFile(OBSERVE_TIMING_DATA) ?? "{}") as ObserveTimingData;
+      const page = docsPages().find((p) => p.path === PERFORMANCE_PAGE)?.source ?? "";
+      return checkObserveTiming(page, timing);
     },
   },
 ];
