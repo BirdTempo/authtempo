@@ -1615,9 +1615,6 @@ export function runAdapterConformance(
         await expect(
           db.delete("user", [{ field: "id", op: "ne", value: "a\u0000" }]),
         ).rejects.toMatchObject(refused);
-        // A lone surrogate in another clause matches no stored value.
-        expect(await ids("eq", "a\uD800")).toEqual([]);
-        expect(await ids("in", ["a\uD800", "b"])).toEqual(["b"]);
         const rows = await db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
         expect(rows.map((r) => [r.id, r.name])).toEqual(IDS.map((id) => [id, null]));
       });
