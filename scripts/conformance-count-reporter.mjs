@@ -1,8 +1,10 @@
 // The count of each conformance run (plan 12g, ruling 7). A vitest reporter.
 // A suite that silently does not run looks like a pass, so this reporter
 // prints the test count of each run and fails the run when an expected run
-// is missing or has no passed test. A run is a top-level describe whose name
-// starts with one of PREFIXES, such as "storage conformance: d1".
+// is missing or has no passed test. It also fails a run whose passed count is
+// below its test count: a skipped test is a test that did not run. A run is a
+// top-level describe whose name starts with one of PREFIXES, such as
+// "storage conformance: d1".
 
 /** The describe prefixes of core's suites (rulings 5 and 7 of plan 12g). */
 export const PREFIXES = [
@@ -12,6 +14,8 @@ export const PREFIXES = [
   "refresh reuse race: ",
   "refresh revoke race: ",
   "shape conformance: ",
+  // The driver tests of the SQLite adapter (plan 12g Task 4): the batch unit and the version floor.
+  "sqlite driver: ",
 ];
 
 /**
@@ -49,6 +53,11 @@ export function conformanceCountReporter({ expected }) {
         return;
       }
       let failed = false;
+      for (const [name, run] of runs)
+        if (run.passed < run.tests) {
+          console.error(`conformance: ${name} passed ${run.passed} of ${run.tests} tests`);
+          failed = true;
+        }
       for (const name of expected) {
         const run = runs.get(name);
         if (run === undefined) console.error(`conformance: ${name} is missing`);

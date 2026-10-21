@@ -5,7 +5,7 @@
 /** The describe prefixes of core's suites (rulings 5 and 7 of plan 12g). */
 export declare const PREFIXES: readonly string[];
 
-/** A vitest reporter that prints the count of each conformance run and fails a missing or empty one. */
+/** A vitest reporter that prints the count of each conformance run. It fails a missing or empty run, and a run with a skipped test. */
 export declare function conformanceCountReporter(options: { expected: readonly string[] }): {
   onInit(ctx: unknown): void;
   onTestRunEnd(testModules: readonly unknown[]): Promise<void>;
