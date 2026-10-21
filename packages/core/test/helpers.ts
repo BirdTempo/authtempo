@@ -8,6 +8,41 @@ import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 
 export const BASE_URL = "https://api.example.com";
+
+/** The hook that the event recorder sets (plan 12h Task 12). With no recorder, a call does nothing. */
+type RecordHook = (kind: "credential" | "address", value: string) => void;
+const record = (): RecordHook | undefined =>
+  (globalThis as { __authtempoRecord?: RecordHook }).__authtempoRecord;
+
+/**
+ * Puts a token, a code, or a password that a helper mints on the deny list
+ * of the event check: no event of the suite may hold it. Answers the value.
+ */
+export function recordCredential(value: string): string {
+  record()?.("credential", value);
+  return value;
+}
+
+/**
+ * Puts an email, an IP, or a user agent of a request on the address list of
+ * the event check: no event may hold it under the default include. Answers the value.
+ */
+export function recordAddress(value: string): string {
+  record()?.("address", value);
+  return value;
+}
+
+/** The addresses of a request that a helper builds: the IP and agent headers, and a body email. */
+function recordRequest(headers: Record<string, string>, body?: unknown): void {
+  for (const name of ["cf-connecting-ip", "x-forwarded-for", "user-agent"]) {
+    const value = headers[name];
+    if (value !== undefined) recordAddress(value);
+  }
+  if (typeof body === "object" && body !== null) {
+    const email: unknown = (body as { email?: unknown }).email;
+    if (typeof email === "string") recordAddress(email);
+  }
+}
 export const APP_ORIGIN = "https://app.example.com";
 
 export function makeAuth(overrides: Partial<AuthConfig> = {}) {
@@ -34,6 +69,7 @@ export function makeAuth(overrides: Partial<AuthConfig> = {}) {
     ...overrides,
   });
   async function seedUser(email: string): Promise<UserRow> {
+    recordAddress(email);
     const now = clock.now();
     return storage.create("user", {
       id: newId(now),
@@ -52,6 +88,7 @@ export function makeAuth(overrides: Partial<AuthConfig> = {}) {
 }
 
 export function post(path: string, body: unknown, headers: Record<string, string> = {}): Request {
+  recordRequest(headers, body);
   return new Request(`${BASE_URL}${path}`, {
     method: "POST",
     headers: { "content-type": "application/json", origin: APP_ORIGIN, ...headers },
@@ -60,6 +97,7 @@ export function post(path: string, body: unknown, headers: Record<string, string
 }
 
 export function get(path: string, headers: Record<string, string> = {}): Request {
+  recordRequest(headers);
   return new Request(`${BASE_URL}${path}`, { headers });
 }
 
@@ -67,7 +105,7 @@ export function get(path: string, headers: Record<string, string> = {}): Request
 export function tokenFromMail(text: string): string {
   const m = /token=([A-Za-z0-9_%-]+)/.exec(text);
   if (!m?.[1]) throw new Error("no token in mail");
-  return decodeURIComponent(m[1]);
+  return recordCredential(decodeURIComponent(m[1]));
 }
 
 export function platformAuth() {

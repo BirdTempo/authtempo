@@ -1426,9 +1426,10 @@ const SECRET_MIN_LENGTH = 32;
  * secret string of the config: each keyring value, each social client
  * secret, and the Apple private key. It also holds the parts of each value
  * that a driver can print. The observer scrubs each event with it, with or
- * without a sink.
+ * without a sink. The event recorder of the tests reads it as its deny list
+ * of secrets (plan 12h Task 12).
  */
-function secretValues(keyring: Keyring, social: AuthConfig["social"]): ReadonlySet<string> {
+export function secretValues(keyring: Keyring, social: AuthConfig["social"]): ReadonlySet<string> {
   const strings: unknown[] = [
     ...keyring.versions.map((version) => keyring.valueOf(version)),
     social?.google?.clientSecret,

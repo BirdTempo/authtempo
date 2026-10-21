@@ -3,7 +3,7 @@ import { matchOperatorSecret, type OperatorActor } from "../src/engine/operator/
 import { addMember } from "../src/engine/organizations.js";
 import { type ResolvedSession, resolveSession } from "../src/engine/sessions.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
-import { BASE_URL, makeAuth, seedPlatform } from "./helpers.js";
+import { BASE_URL, makeAuth, recordCredential, seedPlatform } from "./helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
 import { enrolled, PASSWORD, verifiedSession } from "./totp-helpers.js";
 
@@ -26,6 +26,7 @@ export const operatorHeader = (secret: string) => ({ authorization: `Operator ${
  * named secrets with the user tools on. `extra` replaces a top key.
  */
 export async function operatorAuth(extra: Partial<AuthConfig> = {}) {
+  for (const secret of Object.values(OPERATOR_SECRETS)) recordCredential(secret);
   return makeAuth({
     password: { hash: FAST, uniformSignUp: false },
     organizations: {

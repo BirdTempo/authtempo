@@ -3,11 +3,11 @@ import { passwordSignIn } from "../src/engine/password.js";
 import { type ResolvedSession, resolveSession } from "../src/engine/sessions.js";
 import { enableTotp, setupTotp } from "../src/engine/totp.js";
 import { base32Decode, totpCode } from "../src/primitives/totp.js";
-import { makeAuth } from "./helpers.js";
+import { makeAuth, recordAddress, recordCredential } from "./helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
 
 export const EMAIL = "ada@example.com";
-export const PASSWORD = "correct horse battery";
+export const PASSWORD = recordCredential("correct horse battery");
 export type Auth = ReturnType<typeof makeAuth>;
 
 /** The engine view with password sign-in and the second factor on (plan 9f). */
@@ -21,7 +21,8 @@ export function totpAuth(extra: Partial<AuthConfig> = {}): Auth {
 export const wrongFor = (code: string) => (code === "000000" ? "111111" : "000000");
 
 /** The code that an authenticator app shows now, by the injected clock. */
-export const codeNow = (auth: Auth, secret: Uint8Array) => totpCode(secret, auth.clock.now());
+export const codeNow = async (auth: Auth, secret: Uint8Array) =>
+  recordCredential(await totpCode(secret, auth.clock.now()));
 
 /**
  * A verified user with a password, and the session and token of a password
@@ -32,13 +33,15 @@ export async function verifiedSession(
   email = EMAIL,
   ip = "9.9.9.9",
 ): Promise<ResolvedSession & { token: string }> {
+  recordAddress(email);
+  recordAddress(ip);
   if (!(await auth.storage.findOne("user", [{ field: "email", op: "eq", value: email }])))
     await signUpAndVerify(auth, email, PASSWORD);
   const s = await passwordSignIn(auth.config, { email, password: PASSWORD, ip, userAgent: "ua" });
   if (!s.ok || !("token" in s.value)) throw new Error("the sign-in opened no session");
   const resolved = await resolveSession(auth.config, s.value.token);
   if (!resolved) throw new Error("no session");
-  return { ...resolved, token: s.value.token };
+  return { ...resolved, token: recordCredential(s.value.token) };
 }
 
 /**
@@ -49,6 +52,8 @@ export async function enrolled(auth: Auth, email = EMAIL) {
   const session = await verifiedSession(auth, email);
   const setup = await setupTotp(auth.config, { userId: session.user.id, password: PASSWORD });
   if (!setup.ok) throw new Error(setup.code);
+  recordCredential(setup.value.secret);
+  for (const code of setup.value.backupCodes) recordCredential(code);
   const secret = base32Decode(setup.value.secret);
   const enabled = await enableTotp(auth.config, { session, code: await codeNow(auth, secret) });
   if (!enabled.ok) throw new Error(enabled.code);

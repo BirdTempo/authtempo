@@ -5,7 +5,14 @@ import { createSession } from "../src/engine/sessions.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { randomBase64Url, sha256Base64Url } from "../src/primitives/crypto.js";
 import { newId } from "../src/primitives/ids.js";
-import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
+import {
+  APP_ORIGIN,
+  BASE_URL,
+  makeAuth,
+  post,
+  recordAddress,
+  recordCredential,
+} from "./helpers.js";
 
 export const RESOURCE = `${BASE_URL}/mcp`;
 export const OTHER_RESOURCE = `${BASE_URL}/files`;
@@ -66,6 +73,8 @@ export async function signedIn(h: Handle, email = "ada@example.com", verified = 
     ip: null,
     userAgent: null,
   });
+  recordAddress(email);
+  recordCredential(token);
   return { user, session, token, cookie: `__Host-tempo_session=${token}` };
 }
 
@@ -98,7 +107,7 @@ export async function confidential(
   if (res.status !== 201) throw new Error(`register answered ${res.status}`);
   const body = (await res.json()) as { client_id: string; client_secret?: string };
   if (!body.client_secret) throw new Error("register answered no client_secret");
-  return { clientId: body.client_id, secret: body.client_secret };
+  return { clientId: body.client_id, secret: recordCredential(body.client_secret) };
 }
 
 /** The form encoding of one value (application/x-www-form-urlencoded). */
@@ -110,7 +119,7 @@ export function basicHeader(id: string, secret: string): string {
 }
 
 export async function pkce() {
-  const verifier = randomBase64Url(32);
+  const verifier = recordCredential(randomBase64Url(32));
   return { verifier, challenge: await sha256Base64Url(verifier) };
 }
 
@@ -211,7 +220,7 @@ export async function authorized(h: Handle, cookie: string, i: AuthorizeInput) {
   const url = new URL(location);
   const code = url.searchParams.get("code");
   if (!code) throw new Error(`no code in ${location}`);
-  return { code, url };
+  return { code: recordCredential(code), url };
 }
 
 /** One signed-in user, one registered client, and a code for `scope`. */
@@ -280,9 +289,10 @@ export async function approvedDevice(
     device_code: string;
     user_code: string;
   };
+  recordCredential(user_code);
   const done = await h.auth.handle(
     formPost("/oauth/device", { user_code, decision: "allow" }, { cookie, origin: BASE_URL }),
   );
   if (!(await done.text()).includes("The device is connected.")) throw new Error("no approval");
-  return device_code;
+  return recordCredential(device_code);
 }

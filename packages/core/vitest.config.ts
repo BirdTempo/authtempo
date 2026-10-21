@@ -5,7 +5,8 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     // Plan 11g Task 5: the answer recorder. The global setup empties `.answers/`;
     // the setup file wraps `createRouter` in every test file and records each answer.
-    globalSetup: ["./test/setup/answers-start.ts"],
-    setupFiles: ["./test/setup/answers.ts"],
+    // Plan 12h Task 12: the event recorder, in the same form, with `.events/`.
+    globalSetup: ["./test/setup/answers-start.ts", "./test/setup/events-start.ts"],
+    setupFiles: ["./test/setup/answers.ts", "./test/setup/events.ts"],
   },
 });

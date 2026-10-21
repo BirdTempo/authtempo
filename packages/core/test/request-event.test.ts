@@ -1,9 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../src/config.js";
 import { authErrorRedirect } from "../src/http/redirect.js";
 import { createRouter } from "../src/http/router.js";
 import { SIGN_IN_ROUTES } from "../src/observe/events.js";
-import { createObserver, unscopedOf } from "../src/observe/observer.js";
 import type { AuthEvent } from "../src/observe/port.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { BASE_URL, get, post, tokenFromMail } from "./helpers.js";
@@ -107,6 +106,19 @@ describe("the request event (plan 12h Task 4)", () => {
     });
     expect(requests[0]).not.toHaveProperty("code");
     expect(requests[0]).not.toHaveProperty("rejected");
+  });
+
+  it("reports the request events that a full buffer drops at the head of the next batch", async () => {
+    // A real full buffer of a real Auth (plan 12h Task 12): 12 answers, room for 10 events.
+    const s = observed({}, { buffer: 10 });
+    for (let i = 0; i < 12; i++) await s.auth.handle(get("/auth/health"));
+    expect(s.auth.observe.stats()).toEqual({
+      buffered: 10,
+      dropped: { buffer_full: 2, sink_timeout: 0, sink_threw: 0 },
+    });
+    const events = await s.events();
+    expect(events.map((e) => e.name)).toEqual(["observe.dropped", ...Array(10).fill("request")]);
+    expect(events[0]).toMatchObject({ buffer_full: 2, sink_timeout: 0, sink_threw: 0 });
   });
 
   it("names the code and the outcome of a failure", async () => {
@@ -359,6 +371,11 @@ describe("the request event (plan 12h Task 4)", () => {
   });
 
   it("marks an event of the construction config unscoped", async () => {
+    // The real module, not the event recorder: the check run refuses each
+    // unscoped record, and this test makes two on purpose (plan 12h Task 12).
+    const { createObserver, unscopedOf } = await vi.importActual<
+      typeof import("../src/observe/observer.js")
+    >("../src/observe/observer.js");
     const batches: AuthEvent[][] = [];
     const observer = createObserver(
       {

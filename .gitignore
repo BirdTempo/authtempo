@@ -11,6 +11,8 @@ coverage
 /AGENTS.md
 # The answer records of core's test run (plan 11g). The check run reads them; they are not source.
 packages/core/.answers/
+# The event records of core's test run (plan 12h). The check run reads them; they are not source.
+packages/core/.events/
 # wrangler dev secrets for local runs. Never commit them.
 .dev.vars
 *.env

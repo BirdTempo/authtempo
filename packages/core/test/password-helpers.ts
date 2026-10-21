@@ -13,7 +13,14 @@ import type { Result } from "../src/result.js";
 import type { PasswordRow } from "../src/schema.js";
 import { createPbkdf2PasswordHash } from "../src/seams/password-hash.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, makeAuth, tokenFromMail } from "./helpers.js";
+import {
+  APP_ORIGIN,
+  BASE_URL,
+  makeAuth,
+  recordAddress,
+  recordCredential,
+  tokenFromMail,
+} from "./helpers.js";
 
 /** A low cost, so that a test runs fast. Production uses `PBKDF2_ITERATIONS`. */
 export const FAST = createPbkdf2PasswordHash({ iterations: 1000 });
@@ -31,7 +38,7 @@ export type CapturedMail = MailMessage & { token: string | null };
 
 function linkToken(text: string): string | null {
   const m = /token=([A-Za-z0-9_%-]+)/.exec(text);
-  return m?.[1] ? decodeURIComponent(m[1]) : null;
+  return m?.[1] ? recordCredential(decodeURIComponent(m[1])) : null;
 }
 
 /**
@@ -80,6 +87,8 @@ export async function signUpAndVerify(
   email = "ada@example.com",
   password = "correct horse battery",
 ): Promise<PasswordRow> {
+  recordAddress(email);
+  recordCredential(password);
   const up = await passwordSignUp(auth.config, { email, password, ip: null, userAgent: null });
   if (!up.ok) throw new Error(up.code);
   const mail = auth.mail.findLast((m) => m.to === email && m.subject.startsWith("Confirm"));
