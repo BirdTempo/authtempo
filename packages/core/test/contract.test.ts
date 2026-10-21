@@ -685,6 +685,8 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     { key: "POST /sso/connections/delete", body: { id }, session: true, refused: INVALID_BODY },
+    // The discovery of plan 12d Task 4: an address with no SSO answers { sso: false }.
+    { key: "POST /sso/discover", body: { email: "ada@example.com" }, refused: INVALID_BODY },
     {
       key: "POST /organizations/delete",
       body: { organizationId: org },
@@ -759,7 +761,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
     // Plan 12d Task 2b adds the five domain routes and the operator's override.
     // Plan 12d Task 3 adds the four connection routes.
-    expect(keys.length).toBe(156);
+    // Plan 12d Task 4 adds the discovery, the start, and the callback.
+    expect(keys.length).toBe(159);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -878,6 +881,23 @@ describe("the route contract (plan 11g)", () => {
         query: { code: "c", state: "s", error: "" },
         required: [],
         valid: PAGE_REFUSED,
+        missing: {},
+      },
+      // Plan 12d Task 4: an id that names no connection, and a state of no start.
+      {
+        key: "GET /sso/:connectionId/start",
+        path: "/sso/c-none/start",
+        query: { next: "/inbox" },
+        required: [],
+        valid: { status: 302, code: "sso_not_configured" },
+        missing: {},
+      },
+      {
+        key: "GET /sso/:connectionId/callback",
+        path: "/sso/c-none/callback",
+        query: { code: "c", state: "s", error: "" },
+        required: [],
+        valid: { status: 302, code: "sso_failed" },
         missing: {},
       },
       {
@@ -1071,7 +1091,7 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_QUERIES.map((row) => row.key).sort());
-    expect(hand.length).toBe(22);
+    expect(hand.length).toBe(24);
     let wrongForms = 0;
     for (const row of VALID_QUERIES) {
       const contract = CONTRACT[row.key];
@@ -1280,8 +1300,8 @@ describe("the route contract (plan 11g)", () => {
       .sort();
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
     // Plan 12d Task 2b adds five: four domain writes and the override.
-    // Plan 12d Task 3 adds the three connection writes.
-    expect(withBody.length).toBe(88);
+    // Plan 12d Task 3 adds the three connection writes. Task 4 adds the discovery.
+    expect(withBody.length).toBe(89);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1307,7 +1327,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(86);
+    expect(refusals).toBe(87);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1325,7 +1345,8 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 80, both: 9, form: 7 });
+    // Plan 12d Task 4: the discovery reads JSON and a form.
+    expect(counts).toEqual({ json: 80, both: 10, form: 7 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

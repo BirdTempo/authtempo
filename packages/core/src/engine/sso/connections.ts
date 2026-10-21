@@ -19,6 +19,7 @@ import { holdsRolePart, ROLE_RE, rankOf } from "../ranks.js";
 import { lockOrganization } from "../teams.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
+import { dropDiscovery } from "./oidc.js";
 
 /**
  * The OIDC and SAML connections of an organization (plan 12d Task 3, spec
@@ -826,6 +827,8 @@ export async function updateConnection(
       throw e;
     });
   if (!updated.ok) return updated;
+  // A new issuer or new endpoints must not meet the old discovery result of this isolate.
+  dropDiscovery(held.id);
   await afterAudit(config, updated.value);
   return ok(publicConnection(config, row));
 }
@@ -872,6 +875,7 @@ export async function deleteConnection(
     },
   );
   if (!deleted.ok) return deleted;
+  dropDiscovery(input.id);
   await afterAudit(config, deleted.value);
   return ok({ ok: true });
 }

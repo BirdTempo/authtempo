@@ -503,6 +503,8 @@ async function completeLink(
  * Logs the status or the error name only, never a token or the code.
  * `redirectUri` is the callback of the start: a social provider's, or an
  * SSO connection's (plan 12d deviation 6). One exchange serves both.
+ * `fetchFn` is `social.fetch` for a social provider and `sso.fetch` for a
+ * connection (plan 12d Task 4).
  */
 export async function exchangeProviderCode(
   config: ResolvedConfig,
@@ -511,6 +513,7 @@ export async function exchangeProviderCode(
   verifier: string,
   now: Date,
   redirectUri: string,
+  fetchFn: typeof fetch = config.social.fetch,
 ): Promise<string | null> {
   let clientSecret: string;
   try {
@@ -525,7 +528,7 @@ export async function exchangeProviderCode(
   }
   let res: Response;
   try {
-    res = await config.social.fetch(provider.tokenUrl, {
+    res = await fetchFn(provider.tokenUrl, {
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },

@@ -1246,6 +1246,10 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   if (!basePath.startsWith("/") || basePath.endsWith("/")) {
     throw new ConfigError("basePath must start with / and not end with /");
   }
+  // The router reads a segment that starts with ":" as a path parameter (plan 12d).
+  if (basePath.split("/").some((segment) => segment.startsWith(":"))) {
+    throw new ConfigError("basePath must not hold a segment that starts with :");
+  }
   const clock = input.clock ?? systemClock;
   const providers = socialProviders(input.social);
   // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.

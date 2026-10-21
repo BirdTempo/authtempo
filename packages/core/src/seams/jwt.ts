@@ -31,7 +31,9 @@ export interface JwtSeam {
 
 /**
  * The most remote key sets that one seam keeps. SSO connections add one JWKS
- * URL each, and a tenant can add many (plan 12d). At the limit the oldest set goes.
+ * URL each, and a tenant can add many (plan 12d). At the limit the set that
+ * was used the longest time ago goes. So the sets of many SSO connections
+ * cannot push out the set of Google or Apple while sign-ins use it.
  */
 export const JWKS_SETS_MAX = 500;
 
@@ -44,14 +46,18 @@ export function createJoseJwtSeam(fetchFn: typeof fetch): JwtSeam {
   const sets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
   const jwks = (url: string) => {
     let set = sets.get(url);
-    if (!set) {
+    if (set) {
+      // A use moves the set to the end, so the first key is the least recently used set.
+      sets.delete(url);
+      sets.set(url, set);
+    } else {
       // Core owns the deadline of the JWKS read, as of every provider call
       // (plan 12b). Without it, jose stops the read after its own 5 s default.
       set = createRemoteJWKSet(new URL(url), {
         [customFetch]: fetchFn,
         timeoutDuration: PROVIDER_TIMEOUT_MS,
       });
-      // A Map keeps insert order, so its first key is the oldest set.
+      // A Map keeps insert order, so its first key is the set used the longest time ago.
       const oldest = sets.size >= JWKS_SETS_MAX ? sets.keys().next().value : undefined;
       if (oldest !== undefined) sets.delete(oldest);
       sets.set(url, set);

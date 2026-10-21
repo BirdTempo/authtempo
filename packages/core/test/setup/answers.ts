@@ -90,16 +90,18 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   type JsonJudged = import("./answer-shape.js").ShapeJudged;
   const NO_SHAPE = { absent: [], nulls: [] };
 
-  /** The key of the mounted route, or the entry of ROUTES whose feature is off (the router's `not_found`), or null. */
+  /**
+   * The key of the mounted route, or the entry of ROUTES whose feature is off
+   * (the router's `not_found`), or null. The router's own matcher finds the
+   * mounted route, so a parameter route records its key (plan 12d Task 4).
+   */
   function keyOf(
     config: import("../../src/config.js").ResolvedConfig,
-    routes: readonly import("../../src/http/router.js").Route[],
+    matchRoute: ReturnType<typeof m.createRouteMatcher>,
     method: string,
     pathname: string,
   ): string | null {
-    const mounted = routes.find(
-      (r) => r.method === method && config.basePath + r.path === pathname,
-    );
+    const mounted = matchRoute(method, pathname)?.route;
     if (mounted) return mounted.key ?? null;
     if (!pathname.startsWith(config.basePath)) return null;
     const key = routeKeyOf(method, pathname.slice(config.basePath.length));
@@ -250,9 +252,10 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     createRouter: (...a: Parameters<typeof m.createRouter>) => {
       const handle = m.createRouter(...a);
       const [config, routes] = a;
+      const matchRoute = m.createRouteMatcher(config, routes);
       return async (request: Request) => {
         const res = await handle(request);
-        const key = keyOf(config, routes, request.method, new URL(request.url).pathname);
+        const key = keyOf(config, matchRoute, request.method, new URL(request.url).pathname);
         // The mark of `errorRedirect` is on res, not on its clone.
         const record = await judge(request, res.clone(), key, m.redirectCode(res));
         appendFileSync(FILE, `${JSON.stringify(record)}\n`);

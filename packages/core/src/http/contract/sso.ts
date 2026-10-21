@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { RouteKey } from "../route-list.js";
 import { id } from "./organizations.js";
 import { OkAnswer } from "./shapes.js";
+import { callbackQuery, startQuery } from "./social.js";
 import type { RouteContract } from "./types.js";
 
 // Strict: a key that core does not read answers invalid_body.
@@ -132,6 +133,22 @@ export const ConnectionJson = z.strictObject({
 });
 
 const connectionAnswer = z.strictObject({ connection: ConnectionJson });
+
+/**
+ * The body of the discovery (plan 12d Task 4). Not strict: a form may carry
+ * the name of its button. `next` is the landing path that a form passes on
+ * to the start.
+ */
+export const discoverBody = z.object({
+  email: z.string().max(320),
+  next: z.string().max(2048).optional(),
+});
+
+/** The answer of the discovery: the start path of the connection, or no SSO. */
+const discoverAnswer = z.union([
+  z.strictObject({ sso: z.literal(true), start: z.string() }),
+  z.strictObject({ sso: z.literal(false) }),
+]);
 const jsonBody = <T extends z.ZodType>(schema: T) =>
   ({ schema, media: ["json"], parsedBy: "zod" }) as const;
 
@@ -172,5 +189,19 @@ export const SSO_CONTRACT = {
   "POST /sso/connections/delete": {
     body: jsonBody(connectionIdBody),
     answer: { kind: "json", schema: OkAnswer },
+  },
+  "POST /sso/discover": {
+    body: { schema: discoverBody, media: ["json", "form"], parsedBy: "zod" },
+    // JSON: the answer. A form: a 303 to the start, or to the error page of the app.
+    answer: { kind: "json", schema: discoverAnswer },
+    alt: { kind: "redirect", param: "auth_error", status: 303 },
+  },
+  "GET /sso/:connectionId/start": {
+    query: { schema: startQuery, parsedBy: "hand" },
+    answer: { kind: "redirect", param: "auth_error" },
+  },
+  "GET /sso/:connectionId/callback": {
+    query: { schema: callbackQuery, parsedBy: "hand" },
+    answer: { kind: "redirect", param: "auth_error" },
   },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;

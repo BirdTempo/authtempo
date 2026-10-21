@@ -64,7 +64,7 @@ const reference = () => openApiDocument(openApiReferenceOptions()) as unknown as
 function operations(doc: Doc): { key: string; op: Operation }[] {
   return Object.entries(doc.paths).flatMap(([path, item]) =>
     Object.entries(item).map(([method, op]) => ({
-      key: `${method.toUpperCase()} ${path.replace("{provider}", ":provider")}`,
+      key: `${method.toUpperCase()} ${path.replace(/\{([A-Za-z]+)\}/g, ":$1")}`,
       op,
     })),
   );
@@ -88,8 +88,9 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
     // Plan 12d Task 2b adds the five domain routes and the operator's override.
     // Plan 12d Task 3 adds the four connection routes.
-    expect(keys.length).toBe(156);
-    const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(":provider", "{provider}")))];
+    // Plan 12d Task 4 adds the discovery, the start, and the callback.
+    expect(keys.length).toBe(159);
+    const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
 
@@ -182,8 +183,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12f adds the seven bodies of the operator writes, then the two of
     // the impersonation: 64 became 73. Plan 12d Task 2b adds four domain
     // bodies and the override: 88 became 93. Plan 12d Task 3 adds the three
-    // connection writes: 93 became 96.
-    expect(bodies.length).toBe(96);
+    // connection writes: 93 became 96. Plan 12d Task 4 adds the discovery: 97.
+    expect(bodies.length).toBe(97);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -407,8 +408,9 @@ describe("openApiDocument (plan 11g)", () => {
     // adds the 2 answers of GET /health and GET /ready. Plan 12d
     // Task 2b adds 6 answers, 5 bodies, and the query of the domain list.
     // Plan 12d Task 3 adds 4 answers, 3 bodies, and the query of the
-    // connection list.
-    expect([answers, bodies, queries]).toEqual([132, 96, 28]);
+    // connection list. Plan 12d Task 4 adds the answer and the body of the
+    // discovery, and the queries of the start and the callback.
+    expect([answers, bodies, queries]).toEqual([133, 97, 30]);
   });
 
   it("takes the request_id form of the authorize query", () => {
@@ -457,6 +459,27 @@ describe("openApiDocument (plan 11g)", () => {
         expect(param, path).toMatchObject({ name: "provider", required: true });
         expect(param?.schema.pattern, path).toBe("^[a-z][a-z0-9-]{0,31}$");
       }
+  });
+
+  it("gives each connection path one parameter of the router's segment rule (plan 12d ruling 10)", () => {
+    const paths = Object.entries(reference().paths).filter(([p]) => p.includes("{connectionId}"));
+    expect(paths.map(([p]) => p)).toEqual([
+      "/sso/{connectionId}/start",
+      "/sso/{connectionId}/callback",
+    ]);
+    for (const [path, item] of paths)
+      for (const op of Object.values(item))
+        expect(
+          op.parameters?.filter((p) => p.in === "path"),
+          path,
+        ).toEqual([
+          {
+            name: "connectionId",
+            in: "path",
+            required: true,
+            schema: { type: "string", pattern: "^[A-Za-z0-9._:-]{1,128}$" },
+          },
+        ]);
   });
 
   it("names the page form of the codes of a form post", () => {

@@ -24,6 +24,12 @@ export interface SignInPageInput {
      * label and encodes the name.
      */
     providers: Array<{ name: string; label: string }>;
+    /**
+     * True while `sso` is on (plan 12d): the page shows the form "Sign in
+     * with SSO". It posts one address to `<basePath>/sso/discover` with no
+     * script, and the answer sends the browser to the start of the connection.
+     */
+    sso: boolean;
   };
   /** The script nonce the policy header names. */
   nonce: string;
@@ -99,6 +105,16 @@ ${input.methods.passkey ? `<button id="passkey" type="button">Sign in with a pas
 ${input.methods.google ? social("google", "Continue with Google") : ""}
 ${input.methods.apple ? social("apple", "Continue with Apple") : ""}
 ${input.methods.providers.map((p) => social(p.name, p.label)).join("\n")}
+${
+  input.methods.sso
+    ? `<form id="sso" method="post" action="${base}/sso/discover" autocomplete="on">
+<label for="sso-email">Sign in with SSO</label>
+<input id="sso-email" type="email" name="email" placeholder="you@company.example" autocomplete="username" required>
+<input type="hidden" name="next" value="${cont}">
+<button type="submit">Continue</button>
+</form>`
+    : ""
+}
 <p class="status" id="status"></p>
 </main>
 <script nonce="${escapeHtml(input.nonce)}">

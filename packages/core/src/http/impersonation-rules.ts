@@ -223,6 +223,10 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   // The answer holds no client secret and no sealed value (plan 12d Task 3);
   // a certificate is public. The guard still refuses the session.
   "GET /sso/connections": READ,
+  // The SSO sign-in of plan 12d Task 4, as the social sign-in.
+  "POST /sso/discover": NO_SESSION,
+  "GET /sso/:connectionId/start": NO_SESSION,
+  "GET /sso/:connectionId/callback": "It takes the state of a start, as the social callback.",
 };
 
 /**

@@ -61,7 +61,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback). |
+| [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback). |
 
 <h3 id="oauth_failed"><code>oauth_failed</code> 400</h3>
 
@@ -557,6 +557,24 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | The SSO manager routes of an owner: [`GET /sso/domains`](/docs/reference/routes/#get-sso-domains), [`POST /sso/domains/add`](/docs/reference/routes/#post-sso-domains-add), [`POST /sso/domains/verify`](/docs/reference/routes/#post-sso-domains-verify), [`POST /sso/domains/update`](/docs/reference/routes/#post-sso-domains-update), [`POST /sso/domains/delete`](/docs/reference/routes/#post-sso-domains-delete), [`GET /sso/connections`](/docs/reference/routes/#get-sso-connections), [`POST /sso/connections/create`](/docs/reference/routes/#post-sso-connections-create), [`POST /sso/connections/update`](/docs/reference/routes/#post-sso-connections-update), and [`POST /sso/connections/delete`](/docs/reference/routes/#post-sso-connections-delete). |
+
+<h3 id="sso_failed"><code>sso_failed</code> 400</h3>
+
+- **Meaning:** An SSO sign-in failed at one step: the state, the binding cookie, the discovery document, the code exchange, the ID token, or the nonce. The log line `authtempo: sso failed` names the connection id and the step.
+- **Do:** Start the sign-in again. If it fails again, check the issuer, the client id, and the client secret of the connection.
+
+| Routes |
+| --- |
+| [`GET /sso/:connectionId/start`](/docs/reference/routes/#get-sso-connectionid-start) and [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback), in the `auth_error` query parameter of the redirect. |
+
+<h3 id="sso_not_configured"><code>sso_not_configured</code> 404</h3>
+
+- **Meaning:** No enabled connection can sign in the person: the connection does not exist, it is off, or its kind is off. The discovery found no connection for the address.
+- **Do:** Sign in another way, or ask the organization owner to route the domain to an enabled connection.
+
+| Routes |
+| --- |
+| [`POST /sso/discover`](/docs/reference/routes/#post-sso-discover) as a form post, [`GET /sso/:connectionId/start`](/docs/reference/routes/#get-sso-connectionid-start), and [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback), in the `auth_error` query parameter of the redirect. |
 
 <h3 id="role_in_use"><code>role_in_use</code> 409</h3>
 

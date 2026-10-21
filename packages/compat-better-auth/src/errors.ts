@@ -154,6 +154,9 @@ export const BETTER_AUTH_CODES = {
   // codes of @better-auth/sso. The status stays core's.
   connection_limit: "CONNECTION_LIMIT",
   second_factor_required: "SECOND_FACTOR_REQUIRED",
+  // Plan 12d Task 4, by the same rule until Task 14.
+  sso_failed: "SSO_FAILED",
+  sso_not_configured: "SSO_NOT_CONFIGURED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

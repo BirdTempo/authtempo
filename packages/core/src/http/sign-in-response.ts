@@ -19,6 +19,8 @@ export function signInPageResponse(config: ResolvedConfig, continuePath: string)
     providers: config.social.providers
       .filter((p) => p.name !== "google" && p.name !== "apple")
       .map((p) => ({ name: p.name, label: p.label })),
+    // Plan 12d Task 4: the form "Sign in with SSO" while `sso` is on.
+    sso: config.sso !== null,
   };
   const nonce = randomBase64Url(16);
   const page = config.captcha?.page ?? null;

@@ -78,8 +78,9 @@ describe("the demo lists and the routes of core", () => {
       // routes of teams, so 48 became 57. Plan 12h adds GET /ready of
       // readiness, so 57 became 58. Plan 12d Task 2b adds the five routes
       // of sso and the override of operatorSso, so 58 became 64. Plan 12d Task 3
-      // adds the four connection routes of sso, so 64 became 68.
-      expect(checked).toBe(68);
+      // adds the four connection routes of sso, so 64 became 68. Plan 12d Task 4
+      // adds the discovery, the start, and the callback of sso, so 68 became 71.
+      expect(checked).toBe(71);
     },
     LONG_TEST_MS,
   );

@@ -145,7 +145,8 @@ function documentParts(
   route: RouteCells,
 ): Map<string, { word: string; keys: string[] }> | null {
   const paths = (doc as { paths?: Record<string, Record<string, unknown>> }).paths ?? {};
-  const op = paths[route.path.replace(":provider", "{provider}")]?.[route.method.toLowerCase()] as
+  // Each `:<name>` segment is `{<name>}` in the document (plan 12d ruling 10).
+  const op = paths[route.path.replace(/:([A-Za-z]+)/g, "{$1}")]?.[route.method.toLowerCase()] as
     | {
         parameters?: { name: string; in: string; required?: boolean }[];
         requestBody?: { content: Record<string, { schema: unknown }> };

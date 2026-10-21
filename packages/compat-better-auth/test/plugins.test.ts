@@ -362,6 +362,7 @@ describe("expo()", () => {
         passkey: false,
         password: true,
         providers: [],
+        sso: false,
       },
       nonce: "n",
       appName: "App",

@@ -2120,6 +2120,31 @@ export const ROUTES = Object.freeze([
     oauthCodes: [],
   },
   {
+    // Plan 12d Task 4: the discovery at sign-in. A form gets the code in the redirect.
+    method: "POST",
+    path: "/sso/discover",
+    feature: "sso",
+    auth: ["none"],
+    codes: ["invalid_body", "rate_limited", "sso_not_configured"],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/sso/:connectionId/start",
+    feature: "sso",
+    auth: ["none"],
+    codes: ["rate_limited", "sso_not_configured", "sso_failed"],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/sso/:connectionId/callback",
+    feature: "sso",
+    auth: ["none"],
+    codes: ["sso_failed", "sso_not_configured", "oauth_denied"],
+    oauthCodes: [],
+  },
+  {
     method: "GET",
     path: "/openapi.json",
     feature: "openapi",

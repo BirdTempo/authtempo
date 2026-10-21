@@ -155,6 +155,8 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /sso/connections/create",
   "POST /sso/connections/delete",
   "POST /sso/connections/update",
+  // Plan 12d Task 4: the discovery with sso off.
+  "POST /sso/discover",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
@@ -266,6 +268,8 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /sso/connections/create",
   "POST /sso/connections/delete",
   "POST /sso/connections/update",
+  // Plan 12d Task 4: the discovery at sign-in.
+  "POST /sso/discover",
 ];
 
 /** The two provider callbacks: one engine function, `completeSocial`, after a provider exchange. */

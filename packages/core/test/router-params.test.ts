@@ -89,6 +89,13 @@ describe("router parameter form (plan 12d)", () => {
     });
   });
 
+  it("refuses a basePath segment that starts with a colon (review L1 of Task 4a)", () => {
+    expect(() => resolveConfig({ ...input, basePath: "/:tenant/auth" })).toThrow(
+      "basePath must not hold a segment that starts with :",
+    );
+    expect(() => resolveConfig({ ...input, basePath: "/auth:v2" })).not.toThrow();
+  });
+
   it("refuses two routes of one shape at construction", () => {
     expect(() => createRouter(config, [echo("GET", "/x/:a"), echo("GET", "/x/:b")])).toThrow(
       "two routes match GET /x/:b",

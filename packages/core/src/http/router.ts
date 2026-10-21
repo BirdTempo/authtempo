@@ -8,6 +8,7 @@ import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
 import { REDIRECT_ERROR } from "./redirect.js";
+import { PARAM_SEGMENT_RE } from "./route-key.js";
 import type { RouteKey, RouterCode } from "./route-list.js";
 
 export interface RouteContext {
@@ -39,12 +40,8 @@ export interface PreflightContext {
   config: ResolvedConfig;
 }
 
-/**
- * One path parameter segment (plan 12d deviation 1). No `%` passes, so the
- * raw segment is its decoded value, and no slash can hide in it. The colon
- * and the dot are in the set, because a SCIM schema id is a URN.
- */
-export const PARAM_SEGMENT_RE = /^[A-Za-z0-9._:-]{1,128}$/;
+// The rule lives beside routeKeyOf, so the OpenAPI entry reads it without the router.
+export { PARAM_SEGMENT_RE };
 
 export interface Route {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";

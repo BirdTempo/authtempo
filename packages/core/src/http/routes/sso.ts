@@ -1,6 +1,10 @@
 import type { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
-import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
+import {
+  renewedSessionCookie,
+  sessionFromRequest,
+  sessionMaxAgeSeconds,
+} from "../../engine/sessions.js";
 import {
   connectionOrganization,
   createConnection,
@@ -8,6 +12,7 @@ import {
   listConnections,
   updateConnection,
 } from "../../engine/sso/connections.js";
+import { discoverSso } from "../../engine/sso/discover.js";
 import {
   addDomain,
   deleteDomain,
@@ -17,27 +22,41 @@ import {
   verifyDomain,
 } from "../../engine/sso/domains.js";
 import { requireSsoManager, type SsoActor } from "../../engine/sso/guard.js";
+import { completeSsoOidc, startSso } from "../../engine/sso/oidc.js";
 import { fail, ok, type Result } from "../../result.js";
-import { isJsonRequest } from "../body.js";
+import { isJsonRequest, readBody } from "../body.js";
 import {
   connectionCreateBody,
   connectionIdBody,
   connectionListQuery,
   connectionUpdateBody,
+  discoverBody,
   domainAddBody,
   domainIdBody,
   domainListQuery,
   domainUpdateBody,
 } from "../contract/sso.js";
+import {
+  bindingCookieName,
+  clearOauthCookie,
+  oauthCookie,
+  readCookie,
+  sessionCookie,
+} from "../cookies.js";
 import { json, readJson, respond } from "../json.js";
+import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
+import { challengePageUrl, trustTokenOf } from "../session-answer.js";
 
 /**
  * The calls of one person to the SSO manager routes: 30 per 15 minutes.
  * A setup is a few calls; a stolen session gets few writes.
  */
 export const SSO_MANAGE_PER_USER = { seconds: 900, max: 30 };
+
+/** The life of the binding cookie: the life of the state row. */
+const BIND_MAX_AGE_SECONDS = 600;
 
 /** One query string read by its schema. A repeated key answers `invalid_body`. */
 function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
@@ -51,13 +70,15 @@ function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
 }
 
 /**
- * The SSO manager routes of the domain proof and the connections (plan 12d
- * Tasks 2 and 3, spec 30 items 2 and 5). They exist when `sso` is on. Each
- * takes a session, then counts on `sso-manage:user:<userId>`, then reads
- * its input, then runs the manager guard for the organization of the act.
- * A route with a domain or a connection id reads the organization of the
- * row first: an id that names no row answers `not_found`. A write takes
- * JSON only, so a browser sends a preflight.
+ * The SSO routes (plan 12d): the sign-in of Task 4 (the discovery, the
+ * start, and the callback of a connection), and the manager routes of the
+ * domain proof and the connections (Tasks 2 and 3, spec 30 items 2 and 5).
+ * They exist when `sso` is on. Each manager route takes a session, then
+ * counts on `sso-manage:user:<userId>`, then reads its input, then runs the
+ * manager guard for the organization of the act. A route with a domain or
+ * a connection id reads the organization of the row first: an id that
+ * names no row answers `not_found`. A manager write takes JSON only, so a
+ * browser sends a preflight. The sign-in routes take no session.
  */
 export function ssoRoutes(config: ResolvedConfig): Route[] {
   if (!config.sso) return [];
@@ -113,7 +134,88 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
     handler: (ctx) =>
       managed(ctx, body(schema), organizationOf, (actor, input) => run(actor, input, ctx), answer),
   });
+  const bindName = bindingCookieName(config.cookieName);
+  // The binding cookie of the SSO flows (plan 12d Task 4): the 12b cookie on its own path.
+  const bindPath = `${config.basePath}/sso`;
+  const unbound = (res: Response) => {
+    res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
+    return res;
+  };
   return [
+    {
+      method: "POST",
+      path: "/sso/discover",
+      key: "POST /sso/discover",
+      async handler(ctx) {
+        const jsonCaller = isJsonRequest(ctx.request);
+        const body = await readBody(ctx.request, discoverBody);
+        if (!body.ok) return jsonCaller ? respond(body) : redirect(authErrorUrl(config, body.code));
+        const r = await discoverSso(config, { email: body.value.email, ip: ctx.ip });
+        if (jsonCaller) return r.ok ? json(r.value) : respond(r);
+        // A form: the code goes to the error page of the app, as a social failure does.
+        if (!r.ok) return redirect(authErrorUrl(config, r.code));
+        if (!r.value.sso) return redirect(authErrorUrl(config, "sso_not_configured"));
+        // 303, so the browser follows with a GET.
+        const next = body.value.next;
+        return redirect(
+          next === undefined ? r.value.start : `${r.value.start}?next=${encodeURIComponent(next)}`,
+          303,
+        );
+      },
+    },
+    {
+      method: "GET",
+      path: "/sso/:connectionId/start",
+      key: "GET /sso/:connectionId/start",
+      async handler(ctx) {
+        const r = await startSso(config, {
+          connectionId: ctx.params.connectionId ?? "",
+          next: ctx.url.searchParams.get("next") ?? undefined,
+          ip: ctx.ip,
+        });
+        if (!r.ok) return redirect(authErrorUrl(config, r.code));
+        const res = redirect(r.value.location);
+        res.headers.set(
+          "set-cookie",
+          oauthCookie(bindName, r.value.bindToken, bindPath, BIND_MAX_AGE_SECONDS),
+        );
+        return res;
+      },
+    },
+    {
+      method: "GET",
+      path: "/sso/:connectionId/callback",
+      key: "GET /sso/:connectionId/callback",
+      async handler(ctx) {
+        const q = ctx.url.searchParams;
+        const r = await completeSsoOidc(config, {
+          connectionId: ctx.params.connectionId ?? "",
+          code: q.get("code"),
+          state: q.get("state"),
+          error: q.get("error"),
+          bindToken: readCookie(ctx.request, bindName),
+          ip: ctx.ip,
+          userAgent: ctx.request.headers.get("user-agent"),
+          // A GET callback is a top-level navigation, so a Lax trust cookie comes with it (plan 12c).
+          trustDevice: trustTokenOf(config, ctx.request, undefined),
+        });
+        // Each answer ends the flow of this browser, so the binding cookie goes.
+        if (!r.ok) return unbound(redirect(authErrorUrl(config, r.code)));
+        if ("twoFactor" in r.value)
+          return unbound(redirect(challengePageUrl(config, r.value.twoFactor.challenge)));
+        const res = redirect(resolveNext(config, r.value.next));
+        res.headers.append(
+          "set-cookie",
+          sessionCookie(
+            config.cookieName,
+            r.value.token,
+            sessionMaxAgeSeconds(config),
+            config.cookie.sameSite,
+          ),
+        );
+        return unbound(res);
+      },
+    },
     {
       method: "GET",
       path: "/sso/domains",

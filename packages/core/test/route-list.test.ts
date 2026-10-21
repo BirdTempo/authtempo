@@ -65,7 +65,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
     // Plan 12d Task 2b adds the five domain routes and the operator's override.
     // Plan 12d Task 3 adds the four connection routes.
-    expect(listed.length).toBe(156);
+    // Plan 12d Task 4 adds the discovery, the start, and the callback.
+    expect(listed.length).toBe(159);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {

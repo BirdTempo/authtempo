@@ -1498,6 +1498,35 @@ The manager guard runs these steps in order. An impersonation session answers `f
 | Answer | `{ ok: true }`. Each domain routed to the connection loses its route and its `enforce` flag in the same transaction |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
+The sign-in routes of a connection take no session. `:connectionId` is the id of the connection: one segment of `[A-Za-z0-9._:-]`, 1 to 128 characters. An OIDC connection signs in through the start and the callback. Until plan 12d Task 8, a SAML connection answers `sso_not_configured` at the start.
+
+<h3 id="post-sso-discover"><code>POST /sso/discover</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. It counts on `sso-discover:ip:<ip>`, 30 per 15 minutes |
+| Input | JSON or form `{ email, next? }` |
+| Answer | JSON: `{ sso: true, start }` when a verified domain claims the address, the most specific first, and routes it to an enabled connection. `start` is `<basePath>/sso/<connectionId>/start`. Else `{ sso: false }`. The answer reads no user, so it tells nothing about a person. A form: 303 to `start`, with `next` as its query, or a redirect to `/?auth_error=sso_not_configured` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured) |
+
+<h3 id="get-sso-connectionid-start"><code>GET /sso/:connectionId/start</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. It counts on `sso-start:ip:<ip>`, 30 per 15 minutes |
+| Input | Query `{ next? }` |
+| Answer | 302 to the provider of the connection, with the binding cookie `__Secure-tempo_session_oauth` on the path `<basePath>/sso`. The redirect URI is `<baseURL><basePath>/sso/<connectionId>/callback`. A connection with no `endpoints` reads the discovery document of its issuer, kept one hour per isolate. Each discovered endpoint must be on a public host. A failure redirects to `/?auth_error=<code>` |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`sso_failed`](/docs/reference/errors/#sso_failed) |
+
+<h3 id="get-sso-connectionid-callback"><code>GET /sso/:connectionId/callback</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. The callback reads the binding cookie |
+| Input | Query `{ code?, state?, error? }`. They come from the provider of the connection |
+| Answer | The state must name this connection, and the binding cookie must match. Core exchanges the code, then checks the ID token with the issuer, the audience, and the nonce. It reads `sub`, `email`, `name`, `picture`, `amr`, and `acr`, and never `email_verified`. Until plan 12d Task 5, every callback answers `sso_failed` after these checks. A failure redirects to `/?auth_error=<code>` |
+| Errors | [`sso_failed`](/docs/reference/errors/#sso_failed), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`oauth_denied`](/docs/reference/errors/#oauth_denied) |
+
 ## OpenAPI document
 
 This route exists when the config sets `openapi: true`.

@@ -91,6 +91,8 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
     "The account owns too many organizations to delete at once. Delete some of them first.",
   connection_limit: "The organization holds the most SSO connections it can have.",
   second_factor_required: "Turn on a second factor first, then try again.",
+  sso_failed: "The single sign-on did not complete. Try again.",
+  sso_not_configured: "Single sign-on is not set up for this address.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

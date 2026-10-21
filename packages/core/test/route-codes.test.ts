@@ -192,6 +192,8 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   },
   "POST /sso/connections/update": { id: "$connection", label: "Acme" },
   "POST /sso/connections/delete": { id: "$connection" },
+  // Plan 12d Task 4: the discovery at sign-in.
+  "POST /sso/discover": { email: "ada@example.com" },
 };
 
 /** The query of a GET whose route refuses a request with none. A `$` value is a placeholder too. */
@@ -506,8 +508,12 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
                   : w.cookie(me.token),
       fills,
     );
-    // The two routes that carry the code in a redirect to the app.
-    const redirects: RouteKey[] = ["GET /social/:provider/start", "POST /totp/challenge"];
+    // The three routes that carry the code in a redirect to the app.
+    const redirects: RouteKey[] = [
+      "GET /social/:provider/start",
+      "POST /totp/challenge",
+      "GET /sso/:connectionId/start",
+    ];
     expect(unlike(results, "rate_limited", 429, redirects)).toEqual({});
   });
 
