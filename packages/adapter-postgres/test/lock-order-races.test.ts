@@ -223,9 +223,9 @@ function settle<T>(p: Promise<T>): Promise<T | string> {
 const rows = <M extends ModelName>(m: M) => createPostgresAdapter(db.sql).findMany(m, []);
 
 /**
- * A storage on the shared pool that logs each lock write in a transaction:
- * an update of the user row (holdUser), of the organization row
- * (lockOrganization, or the stamp of ownerWrite), or of a team row (lockTeam).
+ * A storage on the shared pool that logs each lock write in a transaction.
+ * A lock write is an update of the user row (holdUser), the organization row
+ * (lockOrganization, or the stamp of ownerWrite), or a team row (lockTeam).
  */
 function lockLog(log: string[]): StorageAdapter {
   const base = createPostgresAdapter(db.sql);

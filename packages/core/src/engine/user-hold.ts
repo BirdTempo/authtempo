@@ -41,7 +41,7 @@ import { ROUNDS } from "./rounds.js";
  * The role create takes the organization lock before its count, and no
  * user hold. The team member removal takes the team lock, as
  * `setActiveTeam` does, and no user hold. `deleteOrganizationRows` deletes
- * the organization row first and the team rows next, so it waits for each
+ * the organization row first and the team rows next. So it waits for each
  * flow that holds one of these locks, in the same order. It deletes the
  * member rows before the team member rows, as a member removal and the
  * account delete do (ruling 44). The user token

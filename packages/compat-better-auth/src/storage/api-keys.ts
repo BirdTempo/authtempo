@@ -39,8 +39,9 @@ export interface ApiKeyMoveReport {
     /** The metadata breaks core's rule: its JSON is over 4096 bytes. */
     invalidMetadata: number;
     /**
-     * Core cannot hold the window without a wider rate: a stored max below 1,
-     * or a window over one day whose share of the max in one day is below 1.
+     * Core cannot hold the window without a wider rate. That is a stored max
+     * below 1, or a window over one day whose share of the max in one day is
+     * below 1.
      */
     wideWindow: number;
   };

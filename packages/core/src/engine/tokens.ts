@@ -244,8 +244,8 @@ export function lastUsedDue(lastUsedAt: Date | null, now: Date): boolean {
  *
  * The cap is a limit that the product sells (ruling 43 of plan 12k). So the
  * delete of the expired rows, the count, and the create run in one
- * transaction after the hold of the user row (`holdUser`), as the
- * organization token cap runs after its organization lock. On Postgres a
+ * transaction after the hold of the user row (`holdUser`). The organization
+ * token cap runs after its organization lock in the same way. On Postgres a
  * second create of the user waits for the first commit and counts again.
  * D1 runs no isolated transaction, so there two creates at once can pass at
  * 49; the per-user limit of creates bounds that overshoot.

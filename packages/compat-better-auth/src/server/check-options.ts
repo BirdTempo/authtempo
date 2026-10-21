@@ -399,7 +399,7 @@ const wholeSecondsMs: Rule = (v, p, out) => {
 };
 
 /**
- * A moved key prefix, held to core's `tokens.movedPrefixes` rule here, so the
+ * A moved key prefix, held to core's `tokens.movedPrefixes` rule here. So the
  * refusal names the app's own option and not core's (final review of plan 12k).
  */
 const movedPrefix: Rule = (v, p, out) => {
