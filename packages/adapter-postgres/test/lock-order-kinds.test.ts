@@ -450,6 +450,7 @@ const TOUCHED: Record<string, string[]> = {
   "a team member removal": ["session", "team", "team member"],
   "a team leave": ["session", "team", "team member"],
   "a set of the active team": ["session", "team"],
+  "a set of the active organization": ["session", "organization"],
   "an invitation accept with a team": ["user", "team", "invitation", "member", "team member"],
   "an organization token create": ["organization"],
   "a role create": ["organization"],
@@ -565,6 +566,8 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     w.auth.api.removeTeamMember({ user: s.pat.user, teamId: s.core, userId: s.pat.user.id }),
   "a set of the active team": (w, s) =>
     w.auth.api.setActiveTeam({ session: s.pat, teamId: s.core }),
+  "a set of the active organization": (w, s) =>
+    w.auth.api.setActiveOrganization({ session: s.oli, organizationId: s.oliCo }),
   "an invitation accept with a team": async (w, s) => {
     must(
       await w.auth.api.inviteMember({
