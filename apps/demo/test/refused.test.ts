@@ -18,9 +18,9 @@ function paragraphs(doc: string): string[] {
 
 /**
  * The Retry-After that the Worker can answer for `retryAt` at a time from
- * `before` to `after`: the whole seconds left, rounded up, as worker.ts
- * counts them. Two calls a moment apart can cross a second, so each call
- * gets the bounds of its own time (fix wave of plan 12h, item 3).
+ * `before` to `after`. It is the whole seconds left, rounded up, as worker.ts
+ * counts them. Two calls a moment apart can cross a second. So each call gets
+ * the bounds of its own time (fix wave of plan 12h, item 3).
  */
 function waitRange(retryAt: number, before: number, after: number): [number, number] {
   return [Math.ceil((retryAt - after) / 1000), Math.ceil((retryAt - before) / 1000)];

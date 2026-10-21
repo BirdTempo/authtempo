@@ -162,8 +162,9 @@ function eventCode(code: string | null): { code?: string } {
 /**
  * The answer with the trace header. Every route of core builds its own
  * Response, so the headers are mutable here, as `cors` and the cookie move
- * need them to be. A Response with immutable headers makes the set throw, so
- * each call runs inside an error boundary of the router (fix wave of plan 12h, Low 5).
+ * need them to be. A Response with immutable headers makes the set throw. So
+ * each call runs inside an error boundary of the router (fix wave of plan 12h,
+ * Low 5).
  */
 function withTrace(res: Response, traceId: string): Response {
   res.headers.set(TRACE_HEADER, traceId);

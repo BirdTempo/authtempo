@@ -59,8 +59,8 @@ export interface OtlpOptions {
 const TIMEOUT_MS = 2000;
 /**
  * The bound of `timeoutMs`, the bound of `flushTimeoutMs` in core. A probe on
- * Node (2026-10-21) shows the need: 2 ** 31 ms aborted each post in 9 ms, and
- * 5e9 ms threw a `RangeError` in each write.
+ * Node (2026-10-21) shows the need. 2 ** 31 ms aborted each post in 9 ms. 5e9
+ * ms threw a `RangeError` in each write.
  */
 const TIMEOUT_MIN = 100;
 const TIMEOUT_MAX = 10_000;

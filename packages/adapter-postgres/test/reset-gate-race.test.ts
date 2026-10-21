@@ -22,12 +22,12 @@ const CHANGE_ROUNDS = 30;
  * The time limit of each test of this file (fix wave of plan 12h, item 11).
  * Each round makes a user, its passkeys or its factor, and then the race, so
  * one test sends up to 220 requests. That is CPU work, and no lock wait is
- * long. Measured on 2026-10-22 with the probe of the fix wave: two parallel
- * deletes took 2.2 and 2.8 s alone, at a one-minute load of 13 to 17. With
- * 18 busy CPU loops, the test took 6.1 and 7.3 s at a load of 18 to 21. Its
- * rounds took 9.1 to 12.3 s in sum at a load of 29 to 44. The longest delete
- * pair of a round took 246 ms. So the default of 15 s failed in full runs at
- * a load of 23 to 35 (2026-10-21 and 2026-10-22), and 60 s is the bound.
+ * long. The probe of the fix wave measured it on 2026-10-22. Alone, at a
+ * one-minute load of 13 to 17, the delete test took 2.2 and 2.8 s. With 18
+ * busy CPU loops, it took 6.1 and 7.3 s at a load of 18 to 21. Its rounds took
+ * 9.1 to 12.3 s in sum at a load of 29 to 44. The longest delete pair of a
+ * round took 246 ms. The default of 15 s failed in full runs at a load of 23
+ * to 35 (2026-10-21 and 2026-10-22). So 60 s is the bound.
  *
  * A test that times out still runs, and the DROP SCHEMA of `afterEach` meets
  * its open queries. Postgres then reports "deadlock detected" for the DROP

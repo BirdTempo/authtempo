@@ -866,7 +866,7 @@ export function createAuth(input: AuthConfig): Auth {
     // Workers pass `(p) => ctx.waitUntil(p)`: an unbound `ctx.waitUntil` throws.
     // A hook that throws never loses the answer: the route already ran.
     // The flush starts only after waitUntil takes the promise. A hook that
-    // throws starts no flush, so no batch floats with no hook: the batch stays
+    // throws starts no flush, so no batch floats with no hook. The batch stays
     // in the buffer for the next flush (fix wave of plan 12h, Low 4).
     async handle(request, options) {
       const res = await route(request);
