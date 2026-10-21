@@ -238,7 +238,9 @@ The check reads `GET <basePath>/health`, then `GET <basePath>/ready`. It passes 
 
 <h3 id="not_ready"><code>not_ready</code></h3>
 
-`GET <basePath>/ready` answers with another status than 200 or 404. Core answers 503 when its store gives no answer or holds an old schema. Check the database binding or the connection string, and run `authtempo migrate`.
+`GET <basePath>/ready` answers with another status than 200 or 404, or answers 200 with a body whose `status` is not `ready`. Core answers 503 when its store gives no answer or holds an old schema. Check the database binding or the connection string, and run `authtempo migrate`.
+
+Core gives its store 3 seconds, then answers 503. A `--timeout` of 3 seconds or less can stop the request before that answer. The command then stops with exit 2, as for a host that gives no answer.
 
 <h3 id="readiness_off"><code>readiness_off</code></h3>
 
