@@ -778,6 +778,28 @@ describe("teams (plan 12k Task 5)", () => {
     expect(row?.activeTeamId).toBe(core.id);
   });
 
+  it("writes no team back when a delete cleared it after the read of the session", async () => {
+    const w = world();
+    const { ada, carol, organizationId } = await acme(w);
+    const core = mustOk(await w.auth.api.createTeam({ user: ada, organizationId, name: "Core" }));
+    mustOk(await w.auth.api.addTeamMember({ user: ada, teamId: core.id, userId: carol.id }));
+    const token = await w.session("carol@example.com");
+    const h = bearer(token);
+    await w.auth.handle(post("/auth/organizations/active", { organizationId }, h));
+    await w.auth.handle(post(`${P}/active`, { teamId: core.id }, h));
+    // The read of a request: the session still acts in Core.
+    const read = await w.auth.api.getSession(token);
+    if (!read) throw new Error("no session");
+    expect(read.session.activeTeamId).toBe(core.id);
+    mustOk(await w.auth.api.deleteTeam({ user: ada, teamId: core.id }));
+    // The set of the same organization runs on the read from before the delete.
+    mustOk(await w.auth.api.setActiveOrganization({ session: read, organizationId }));
+    const [row] = await w.storage.findMany("session", [
+      { field: "userId", op: "eq", value: carol.id },
+    ]);
+    expect([row?.activeOrganizationId, row?.activeTeamId]).toEqual([organizationId, null]);
+  });
+
   it("refuses each team write to a user with no verified address", async () => {
     const w = world();
     const { ada, carol, organizationId } = await acme(w);

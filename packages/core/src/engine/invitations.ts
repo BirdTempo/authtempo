@@ -580,13 +580,15 @@ export async function setActiveOrganization(
   const organizationId = input.organizationId;
   const now = config.clock.now();
   // A team belongs to one organization, so a change of the active organization clears the
-  // active team in the same update (plan 12k). The same organization keeps it.
-  const activeTeamId =
-    organizationId === input.session.session.activeOrganizationId
-      ? input.session.session.activeTeamId
-      : null;
+  // active team in the same update (plan 12k). The same organization keeps it, so the update
+  // leaves the field out. A team delete can clear it after the read of this session, and the
+  // old id must not come back (ruling 51 of plan 12k).
+  const same = organizationId === input.session.session.activeOrganizationId;
+  const activeTeamId = same ? input.session.session.activeTeamId : null;
   const byId: Where<"session">[] = [{ field: "id", op: "eq", value: input.session.session.id }];
-  const data = { activeOrganizationId: organizationId, activeTeamId, updatedAt: now };
+  const data = same
+    ? { activeOrganizationId: organizationId, updatedAt: now }
+    : { activeOrganizationId: organizationId, activeTeamId: null, updatedAt: now };
   if (organizationId === null) await config.storage.update("session", byId, data);
   else {
     const set = await config.storage.transaction(async (tx): Promise<boolean> => {
