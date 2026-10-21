@@ -22,6 +22,7 @@ import sample from "../../../../../samples/guides/mysql-node.ts?raw";
 ## Before you start
 
 - Node 22 or newer.
+- mysql2 3.24.5 or newer, the peer dependency of [the MySQL adapter](/docs/reference/adapter-mysql/).
 - A MySQL server at version 8.4 or later. The tests run on 8.4.11 and 9.7.2. [Schema and migrations](/docs/reference/schema/#mysql-column-types) gives the column types.
 - A working setup from a [getting started tutorial](/docs/start/).
 
@@ -64,7 +65,8 @@ MySQL starts at one baseline migration, `0001_schema_v13`. MySQL commits each DD
 
 - A stop between a step and its record leaves the object of the step. The next run makes the step again on a temporary copy of its table, and compares the two. When they are equal, it records the step and goes on. Else it stops with the step and the error.
 - The copy needs the `CREATE TEMPORARY TABLES` privilege on the database, beside the privileges of the steps. Without it, the runner stops with the step and MySQL error 1044.
-- The runner takes the named lock `authtempo_migrations` for up to 60 seconds. A MySQL named lock belongs to the server, so two databases on one server share it.
+- The runner takes the named lock `authtempo_migrations` and keeps it until the run ends. It waits up to 60 seconds for another runner to release the lock. When the wait ends, the run stops with an error, and no step runs.
+- A MySQL named lock belongs to the server, so two databases on one server share it.
 
 ## Length bounds
 
@@ -160,7 +162,7 @@ The table holds `MYSQL_STRINGS` of `@authtempo/core/ddl`. A site test holds each
 
 ## Workers through Hyperdrive
 
-A Worker reaches MySQL through Hyperdrive with mysql2 3.13.0 or later, `disableEval: true`, and Node.js compatibility (`nodejs_compat`). A proof of the package bundles a Worker with wrangler and runs it in workerd. That is a proof of the bundle, not a deploy.
+A Worker reaches MySQL through Hyperdrive with mysql2, `disableEval: true`, and Node.js compatibility (`nodejs_compat`). Hyperdrive needs mysql2 3.13.0 or later, and the package needs 3.24.5 or later. A proof of the package bundles a Worker with wrangler and runs it in workerd. That is a proof of the bundle, not a deploy.
 
 ## MariaDB
 

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { MYSQL_MIGRATIONS } from "@authtempo/adapter-mysql";
 import { type ModelName, schema } from "@authtempo/core";
-import { columnType, MYSQL_KEY_LIMIT_BYTES, MYSQL_STRINGS } from "@authtempo/core/ddl";
+import { columnType, MYSQL_KEY_LIMIT_BYTES, MYSQL_STRINGS, schemaDdl } from "@authtempo/core/ddl";
 import { MYSQL } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
@@ -126,6 +126,25 @@ describe("the MySQL column types of the schema page (plan 12g Task 9)", () => {
     expect(codes(cell("integer"))).toEqual(["INT", "BIGINT", "counter", "lastStep"]);
   });
 
+  it("states the table options of each CREATE TABLE of schemaDdl", () => {
+    const options = new Set(
+      schemaDdl(MYSQL)
+        .filter((s) => s.startsWith("CREATE TABLE "))
+        .map((s) => s.slice(s.lastIndexOf(")") + 2)),
+    );
+    expect(options).toEqual(
+      new Set(["ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin"]),
+    );
+    const sentence = part(text, "MySQL column types").find((l) => l.startsWith("Each table is "));
+    const [, engine, charset, collation] =
+      /^Each table is (\w+) with `(\w+)` and the binary collation `(\w+)`, so `=` compares bytes\./.exec(
+        sentence ?? "",
+      ) ?? [];
+    expect(`ENGINE=${engine} DEFAULT CHARSET=${charset} COLLATE=${collation}`).toBe(
+      [...options][0],
+    );
+  });
+
   it("states the InnoDB key limit of the ddl entry", () => {
     const row = tableRows(part(text, "The ddl entry")).find(
       (r) => r[0] === "`MYSQL_KEY_LIMIT_BYTES`",
@@ -162,6 +181,15 @@ describe("the drivers table of the SQLite guide (plan 12g Task 9)", () => {
     );
   });
 
+  it("states the libSQL busy wait of the migration step", () => {
+    expect(readFileSync(`${REPO}packages/adapter-sqlite/src/busy.ts`, "utf8")).toContain(
+      "export const BUSY_WAIT_MS = 10_000;",
+    );
+    expect(part(text, "Migrations").join("\n")).toContain(
+      "the runner tries the step again for up to 10 seconds",
+    );
+  });
+
   it("states the Node floor of the package", () => {
     const floor = nodeFloor("adapter-sqlite");
     expect(part(text, "Before you start")[1]).toBe(
@@ -192,6 +220,37 @@ describe("the facts of the MySQL guide (plan 12g Task 9)", () => {
     );
   });
 
+  it("names the collation of check 4 as the code checks it", () => {
+    const check4 = part(text, "The checks at start").find((l) => l.startsWith("4. "));
+    expect(/^4\. The collation `([^`]+)` of each `ta_` table\./.exec(check4 ?? "")?.[1]).toBe(
+      /export const MYSQL_TABLE_COLLATION = "([^"]+)";/.exec(source("start-checks.ts"))?.[1],
+    );
+  });
+
+  it("states the range of an ascii column as the guard of the code", () => {
+    const guard = source("ascii-guard.ts");
+    const hex = (name: string) => {
+      const m = new RegExp(`^const ${name} = 0x([0-9a-f]+);$`, "m").exec(guard);
+      if (!m?.[1]) throw new Error(`ascii-guard.ts has no const ${name}`);
+      return `U+${m[1].toUpperCase().padStart(4, "0")}`;
+    };
+    expect(hex("FIRST")).toBe("U+0020");
+    expect(hex("LAST")).toBe("U+007E");
+    expect(part(text, "Length bounds").join("\n")).toContain(
+      `An ascii column holds printable ASCII, ${hex("FIRST")} to ${hex("LAST")}, with no trailing space.`,
+    );
+  });
+
+  it("names the mysql2 peer floor of the package", () => {
+    expect(packageJson("adapter-mysql").peerDependencies?.mysql2).toBe("^3.24.5");
+    expect(part(text, "Before you start")).toContain(
+      "- mysql2 3.24.5 or newer, the peer dependency of [the MySQL adapter](/docs/reference/adapter-mysql/).",
+    );
+    expect(part(text, "Workers through Hyperdrive").join("\n")).toContain(
+      "the package needs 3.24.5 or later",
+    );
+  });
+
   it("names the baseline, the deadlock tries, and the lock wait of the code", () => {
     const migrations = part(text, "Migrations").join("\n");
     expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual(
@@ -200,6 +259,8 @@ describe("the facts of the MySQL guide (plan 12g Task 9)", () => {
     expect(source("adapter.ts")).toContain("const STATEMENT_TRIES = 3;");
     expect(part(text, "Transactions").join("\n")).toContain("with three tries in all");
     expect(source("migrations.ts")).toContain("const LOCK_WAIT_SECONDS = 60;");
-    expect(migrations).toContain("for up to 60 seconds");
+    expect(migrations).toContain(
+      "It waits up to 60 seconds for another runner to release the lock.",
+    );
   });
 });

@@ -40,7 +40,7 @@ Workers turn Node.js compatibility on by default from compatibility date 2026-08
 | `@authtempo/legacy-hashes` | `no_nodejs_compat`, `no_nodejs_compat_v2` | Its vectors run in a proof Worker with both flags. |
 | `@authtempo/adapter-postgres` | `nodejs_compat` | postgres.js needs the Node modules of sockets. |
 | `@authtempo/adapter-sqlite` with libSQL | `no_nodejs_compat`, `no_nodejs_compat_v2` | The `libsql` entry and `@libsql/client/web` use `fetch`. A proof Worker bundles them with both flags. |
-| `@authtempo/adapter-mysql` | `nodejs_compat` | mysql2 needs the Node modules of sockets. Hyperdrive also needs mysql2 3.13.0 or later and `disableEval: true`. |
+| `@authtempo/adapter-mysql` | `nodejs_compat` | mysql2 needs the Node modules of sockets. The package needs mysql2 3.24.5 or later. Hyperdrive needs 3.13.0 or later and `disableEval: true`. |
 
 - The example Worker bundles itself in its test, and fails on any `node:` import.
 - The vitest pool of Workers turns Node.js modules on for its own runner. A test in the pool cannot show a `node:` import. Only the bundle check shows it.

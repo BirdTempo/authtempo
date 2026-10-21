@@ -77,12 +77,15 @@ the error, and no later step runs. The copy needs the `CREATE TEMPORARY
 TABLES` privilege on the database, beside the privileges of the steps.
 Without it, the check fails with MySQL error 1044, and the runner stops with
 the step and that error. The runner takes the named lock
-`authtempo_migrations` for 60 s, on one connection. A MySQL named lock
-belongs to the server, so two databases on one server share it.
+`authtempo_migrations` on one connection and keeps it until the run ends.
+`GET_LOCK` waits up to 60 s for another runner to release the lock. When
+the wait ends, the run stops with an error, and no step runs. A MySQL named
+lock belongs to the server, so two databases on one server share it.
 
 ## Workers through Hyperdrive
 
-mysql2 3.13.0 or later, `disableEval: true`, and Node.js compatibility
+mysql2 3.13.0 or later for Hyperdrive (the package needs 3.24.5 or later),
+`disableEval: true`, and Node.js compatibility
 (`nodejs_compat`). `proof/bundle.mjs` bundles a Worker with wrangler and runs
 it in workerd through wrangler dev. That is a proof of the bundle, not a
 deploy.
