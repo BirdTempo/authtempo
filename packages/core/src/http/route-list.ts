@@ -1347,6 +1347,7 @@ export const ROUTES = Object.freeze([
       "last_team",
       "hook_refused",
       "hook_failed",
+      "conflict",
     ],
     oauthCodes: [],
   },

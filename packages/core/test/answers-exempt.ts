@@ -297,6 +297,11 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ),
   ...rows(
     "conflict",
+    "five team delete rounds lost to a set of the active team on Postgres; team-delete-gap-race.test.ts of adapter-postgres proves the engine path",
+    ["POST /organizations/teams/delete"],
+  ),
+  ...rows(
+    "conflict",
     "a change that races the verify; sessions-claim.test.ts proves the engine path",
     ["POST /password/change"],
   ),

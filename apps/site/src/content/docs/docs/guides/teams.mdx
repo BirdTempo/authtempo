@@ -89,7 +89,7 @@ The [hook points](/docs/guides/hooks/#the-hook-points) list the team hooks of `h
 - [`team_member_limit`](/docs/reference/errors/#team_member_limit): the team holds `membersPerTeam` members.
 - [`last_team`](/docs/reference/errors/#last_team): `keepLastTeam` keeps the last team. Create another team first.
 - [`already_member`](/docs/reference/errors/#already_member): the person is already in the team.
-- [`conflict`](/docs/reference/errors/#conflict): another write changed the person at the same moment. Retry.
+- [`conflict`](/docs/reference/errors/#conflict): another write changed the person at the same moment. A team delete answers it after 5 rounds lost to a set of the active team. Retry.
 - [`hook_refused`](/docs/reference/errors/#hook_refused) and [`hook_failed`](/docs/reference/errors/#hook_failed): a before hook refused the write or threw.
 - [`invalid_body`](/docs/reference/errors/#invalid_body): a bad name, a missing field, or another key.
 - [`unauthorized`](/docs/reference/errors/#unauthorized): the route needs a session. A token answers 401.

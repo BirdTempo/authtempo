@@ -223,7 +223,7 @@ describe("the table of locks over a before hook", () => {
         "deleteAccountRows organization.beforeDelete: runDelete > user compare-and-set",
       ],
       ["Account delete", "deleteAccountRows user.beforeDelete: runDelete > user compare-and-set"],
-      ["Team delete", "deleteTeam organization.beforeDeleteTeam: lockOrganization"],
+      ["Team delete", "deleteTeam organization.beforeDeleteTeam: lockOrganization, lockTeam"],
       ["Invite", "inviteMember organization.beforeInvite: lockOrganization"],
       [
         "Impersonation start",

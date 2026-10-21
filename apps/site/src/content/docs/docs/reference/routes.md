@@ -940,8 +940,8 @@ These routes exist when the config sets `organizations.teams`. A team is a named
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The user holds `team:delete` in the organization of the team |
 | Input | JSON `{ teamId }` |
-| Answer | `{ ok: true }`. The team rows go, each session that acts in the team loses its active team, and each pending invitation loses the team. With `organizations.teams.keepLastTeam`, the last team answers `last_team` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`last_team`](/docs/reference/errors/#last_team), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
+| Answer | `{ ok: true }`. The team rows go, each session that acts in the team loses its active team, and each pending invitation loses the team. With `organizations.teams.keepLastTeam`, the last team answers `last_team`. On Postgres, a set of the active team at the same moment makes a round of the delete start again. After 5 such rounds it answers `conflict` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`last_team`](/docs/reference/errors/#last_team), [`conflict`](/docs/reference/errors/#conflict), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 <h3 id="get-organizations-teams-members"><code>GET /organizations/teams/members</code></h3>
 

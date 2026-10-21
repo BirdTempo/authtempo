@@ -4,11 +4,12 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { TeamMemberRow, TeamRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
-import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hookGuard, runAfter, runBefore } from "./hooks.js";
 import { publicOrganization, standing, validOrganizationName, verified } from "./organizations.js";
 import { effectiveIn, type Standing, touchCheck } from "./permissions.js";
 import type { ResolvedOrganizations } from "./ranks.js";
+import { ROUNDS } from "./rounds.js";
 import { type PublicSession, publicSession, type ResolvedSession } from "./sessions.js";
 import { holdUser, userStays } from "./user-hold.js";
 
@@ -263,15 +264,27 @@ export async function updateTeam(
  *
  * The transaction first takes the locks of the sessions that act in the
  * team, before the organization row and the team row, in the order of
- * user-hold.ts. A role loss holds the sessions of a member and then deletes
- * the member's team rows (ruling 48 of plan 12k).
+ * user-hold.ts. A role loss and a member removal hold the sessions of a
+ * member and then delete the member's team rows (rulings 48 and 49 of plan
+ * 12k).
  *
- * Cost: in one transaction, the lock read of the sessions (Postgres only),
- * with `keepLastTeam` the lock of the organization row and the count of at
- * most two teams. Then three writes, one read of every pending invitation
- * of the organization, and one update per invitation that names the team. The read also takes the expired pending
- * rows. So `pendingInvitationsPerOrganization`, which counts only the live
- * rows, does not bound it.
+ * A set of the active team can commit between the lock read and the team
+ * lock. Its session then acts in the team with no lock of this delete. A
+ * removal that holds that session waits on the team member rows of this
+ * delete. So on Postgres the delete reads the ids first and locks them, and
+ * reads the sessions of the team again after the team lock. A new session
+ * there ends the round with no write, and the next round locks it. After
+ * `ROUNDS` lost rounds the answer is `conflict` (ruling 49).
+ *
+ * Cost of one round on Postgres: the read of the session ids and their lock
+ * read. With `keepLastTeam`, the lock of the organization row and the count
+ * of at most two teams. Then the team lock and the second read of the
+ * sessions. D1 and memory have no row lock: they skip all but the
+ * `keepLastTeam` steps. Then three writes, one read of every pending
+ * invitation of the organization, and one update per invitation that names
+ * the team. The read also takes the expired pending rows. So
+ * `pendingInvitationsPerOrganization`, which counts only the live rows, does
+ * not bound it.
  */
 export async function deleteTeam(
   config: ResolvedConfig,
@@ -286,50 +299,64 @@ export async function deleteTeam(
   const { team, organization } = t.value;
   const summary = publicTeam(team);
   const hooks = config.hooks.organization;
-  const deleted = await hookGuard(() =>
-    config.storage.transaction(async (tx): Promise<Result<true>> => {
-      await tx.lockInOrder?.("session", [{ field: "activeTeamId", op: "eq", value: team.id }]);
-      if (sc.keepLastTeam) {
-        if (!(await lockOrganization(tx, organization))) return fail("not_found");
-        const held = await tx.findMany(
-          "team",
-          [{ field: "organizationId", op: "eq", value: team.organizationId }],
-          { limit: 2 },
-        );
-        if (held.length <= 1) return fail("last_team");
-      }
-      await runBefore("organization.beforeDeleteTeam", hooks.beforeDeleteTeam, {
-        organization,
-        team: summary,
-        user: input.user,
-      });
-      if ((await tx.delete("team", [{ field: "id", op: "eq", value: team.id }])) === 0)
-        return fail("not_found");
-      await tx.delete("teamMember", [{ field: "teamId", op: "eq", value: team.id }]);
-      await tx.update("session", [{ field: "activeTeamId", op: "eq", value: team.id }], {
-        activeTeamId: null,
-      });
-      const pending = await tx.findMany("invitation", [
-        { field: "organizationId", op: "eq", value: team.organizationId },
-        { field: "acceptedAt", op: "eq", value: null },
-      ]);
-      for (const invitation of pending) {
-        const ids = invitation.teamIds ?? [];
-        if (!ids.includes(team.id)) continue;
-        const rest = ids.filter((id) => id !== team.id);
-        await tx.update(
-          "invitation",
-          [
-            { field: "id", op: "eq", value: invitation.id },
-            { field: "acceptedAt", op: "eq", value: null },
-          ],
-          { teamIds: rest.length > 0 ? rest : null },
-        );
-      }
-      return ok(true);
-    }),
-  );
+  const byTeam: Where<"session">[] = [{ field: "activeTeamId", op: "eq", value: team.id }];
+  // ok(false): a set moved a session into the team after the lock read. The next round locks it.
+  let deleted: Result<boolean> = ok(false);
+  for (let round = 0; round < ROUNDS && deleted.ok && !deleted.value; round++)
+    deleted = await hookGuard(() =>
+      config.storage.transaction(async (tx): Promise<Result<boolean>> => {
+        // With row locks, the ids of the sessions that act in the team, and their locks.
+        const locks = tx.lockInOrder !== undefined;
+        const ids = locks ? (await tx.findMany("session", byTeam)).map((x) => x.id) : [];
+        await tx.lockInOrder?.("session", [{ field: "id", op: "in", value: ids }]);
+        if (sc.keepLastTeam) {
+          if (!(await lockOrganization(tx, organization))) return fail("not_found");
+          const held = await tx.findMany(
+            "team",
+            [{ field: "organizationId", op: "eq", value: team.organizationId }],
+            { limit: 2 },
+          );
+          if (held.length <= 1) return fail("last_team");
+        }
+        if (locks) {
+          // After the team lock, no set moves a session into the team. A session that a set
+          // moved in after the read above has no lock here, so this round writes nothing.
+          if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
+          if ((await tx.findMany("session", byTeam)).some((x) => !ids.includes(x.id)))
+            return ok(false);
+        }
+        await runBefore("organization.beforeDeleteTeam", hooks.beforeDeleteTeam, {
+          organization,
+          team: summary,
+          user: input.user,
+        });
+        if ((await tx.delete("team", [{ field: "id", op: "eq", value: team.id }])) === 0)
+          return fail("not_found");
+        await tx.delete("teamMember", [{ field: "teamId", op: "eq", value: team.id }]);
+        await tx.update("session", byTeam, { activeTeamId: null });
+        const pending = await tx.findMany("invitation", [
+          { field: "organizationId", op: "eq", value: team.organizationId },
+          { field: "acceptedAt", op: "eq", value: null },
+        ]);
+        for (const invitation of pending) {
+          const teamIds = invitation.teamIds ?? [];
+          if (!teamIds.includes(team.id)) continue;
+          const rest = teamIds.filter((id) => id !== team.id);
+          await tx.update(
+            "invitation",
+            [
+              { field: "id", op: "eq", value: invitation.id },
+              { field: "acceptedAt", op: "eq", value: null },
+            ],
+            { teamIds: rest.length > 0 ? rest : null },
+          );
+        }
+        return ok(true);
+      }),
+    );
   if (!deleted.ok) return deleted;
+  // Each round lost to a set: the person tries again.
+  if (!deleted.value) return fail("conflict");
   await runAfter(
     "organization.afterDeleteTeam",
     hooks.afterDeleteTeam,

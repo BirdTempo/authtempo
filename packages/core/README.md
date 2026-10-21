@@ -144,7 +144,7 @@ The organization routes follow.
 | GET | `/organizations/teams` | session, `?organizationId=` | `{ teams }`, by name; 400; 401; 403 `forbidden_rank` for a non-member. Only with `organizations.teams` |
 | POST | `/organizations/teams/create` | session, `{ organizationId, name }` | `{ team }`; 400; 401; 403 `forbidden_rank` without `team:create`, `email_unverified`, `hook_refused`; 409 `team_limit`; 500 `hook_failed` |
 | POST | `/organizations/teams/update` | session, `{ teamId, name }` | `{ team }`; 400; 401; 403 `forbidden_rank` without `team:update`, `email_unverified`, `hook_refused`; 404; 500 `hook_failed` |
-| POST | `/organizations/teams/delete` | session, `{ teamId }` | `{ ok: true }`; 400; 401; 403 `forbidden_rank` without `team:delete`, `email_unverified`, `hook_refused`; 404; 409 `last_team` with `keepLastTeam`; 500 `hook_failed` |
+| POST | `/organizations/teams/delete` | session, `{ teamId }` | `{ ok: true }`; 400; 401; 403 `forbidden_rank` without `team:delete`, `email_unverified`, `hook_refused`; 404; 409 `last_team` with `keepLastTeam`, `conflict` after 5 rounds lost to a set of the active team; 500 `hook_failed` |
 | GET | `/organizations/teams/members` | session, `?teamId=` | `{ members }`; 400; 401; 403 `forbidden_rank` without `member:read`; 404 |
 | POST | `/organizations/teams/members/add` | session, `{ teamId, userId }` | `{ member }`; 400; 401; 403 `forbidden_rank` without `member:update` or for a person you may not touch, `email_unverified`, `hook_refused`; 404 for a person who is not a member; 409 `already_member`, `team_member_limit`, `conflict`; 500 `hook_failed` |
 | POST | `/organizations/teams/members/remove` | session, `{ teamId, userId }` | `{ ok: true }`; 400; 401; 403 `forbidden_rank` without `member:delete` for another person, or for a person you may not touch, `email_unverified`, `hook_refused`; 404; 500 `hook_failed`. A member leaves with their own `userId` |
@@ -1216,7 +1216,7 @@ const auth = createAuth({
 | Member removal or leave | `organization.beforeRemoveMember` | the person's user row; for an owner or with `revokeTokens`, the organization row; for a loss of the platform role, the sessions of the person and of each impersonation that the person opened |
 | Member role change | `organization.beforeUpdateMemberRole` | for an owner demotion, the organization row; for a loss of the platform role, the member's user row and the sessions of the member and of each impersonation that the member opened |
 | Team create | `organization.beforeCreateTeam` | the organization row |
-| Team delete | `organization.beforeDeleteTeam` | the sessions that act in the team; with `keepLastTeam`, the organization row |
+| Team delete | `organization.beforeDeleteTeam` | the sessions that act in the team; with `keepLastTeam`, the organization row; on Postgres, the team row |
 | Team member add | `organization.beforeAddTeamMember` | the added user's row and the team row |
 | Team member removal | `organization.beforeRemoveTeamMember` | the sessions of the person and the team row |
 | Identity unlink | `identity.beforeUnlink` | the user's row |
