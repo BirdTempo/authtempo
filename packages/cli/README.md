@@ -172,10 +172,11 @@ Nine checks, each `pass`, `fail` with a code, or `skip` with a reason:
 (the clear cookie of a sign-out is HttpOnly, Secure, and `Path=/`), `jwks`
 (public keys only, EdDSA, ES256, or RS256, `use: "sig"`, a cache header),
 `well_known` (both documents at the origin root name the issuer and the
-key set), `schema_version`, `schema_shape`, and `ready` (`GET <basePath>/health`
-answers 200, and `GET <basePath>/ready` answers 200 when the app turns on
-`observe.readiness`; it skips with `readiness_off` when the route answers
-404). The two schema checks need
+key set), `schema_version`, `schema_shape`, and `ready`. The check `ready`
+reads `GET <basePath>/health`, which answers 200, and then
+`GET <basePath>/ready`, which answers 200 when the app turns on
+`observe.readiness`. It skips with `readiness_off` when that route answers
+404. The two schema checks need
 `--target` and the inputs of the database. `schema_shape` compares each
 `ta_` table with the shape that the adapter's migrations make
 (`expectedPostgresShape`, `expectedD1Shape`). A missing table, column, or
