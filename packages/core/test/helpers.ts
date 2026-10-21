@@ -46,6 +46,15 @@ function recordRequest(headers: Record<string, string>, body?: unknown): void {
 }
 export const APP_ORIGIN = "https://app.example.com";
 
+/**
+ * The time limit of a core test that makes hundreds of rows or calls (review
+ * m3 of plan 12d Task 4b). The default of 5 s is too short under load. The
+ * test "keeps at most 500 discovery entries" took 288 ms alone. It timed out
+ * at 5 s in 2 of 3 core runs while other lanes ran their tests. The demo
+ * pool tests use the same limit (apps/demo/test/test-time.ts).
+ */
+export const LONG_TEST_MS = 20_000;
+
 export function makeAuth(overrides: Partial<AuthConfig> = {}) {
   let current = new Date("2026-01-01T00:00:00.000Z");
   const clock = {

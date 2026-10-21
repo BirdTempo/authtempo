@@ -5,7 +5,7 @@ import type { SsoProfile } from "../../src/engine/sso/resolve.js";
 import { sha256Hex } from "../../src/primitives/crypto.js";
 import type { OidcEndpoints } from "../../src/social/oidc.js";
 import { createTestIdp } from "../../src/testing/saml-idp.js";
-import { BASE_URL, get } from "../helpers.js";
+import { BASE_URL, get, LONG_TEST_MS } from "../helpers.js";
 import { type FakeIdToken, fakeFetch, fakeJwt, type TokenCall } from "../social-helpers.js";
 import { SSO_APP, seedOrganization, ssoAuth } from "./helpers.js";
 
@@ -333,37 +333,42 @@ describe("the OIDC sign-in of an SSO connection (plan 12d Task 4)", () => {
     });
   });
 
-  it("keeps at most 500 discovery entries", async () => {
-    const w = oidcWorld();
-    const org = await seedOrganization(w, "acme");
-    const ids: string[] = [];
-    for (let i = 0; i <= SSO_DISCOVERY_MAX; i++) {
-      const slug = `t${i}`;
-      w.docs[`${issuerOf(slug)}/.well-known/openid-configuration`] = {
-        issuer: issuerOf(slug),
-        ...wellKnown(endpointsOf(slug)),
+  it(
+    "keeps at most 500 discovery entries",
+    async () => {
+      const w = oidcWorld();
+      const org = await seedOrganization(w, "acme");
+      const ids: string[] = [];
+      for (let i = 0; i <= SSO_DISCOVERY_MAX; i++) {
+        const slug = `t${i}`;
+        w.docs[`${issuerOf(slug)}/.well-known/openid-configuration`] = {
+          issuer: issuerOf(slug),
+          ...wellKnown(endpointsOf(slug)),
+        };
+        ids.push(await connection(w, org, slug, null));
+      }
+      const reads = (slug: string) =>
+        w.calls.filter((c) => c.url === `${issuerOf(slug)}/.well-known/openid-configuration`)
+          .length;
+      // One IP per start, so the start limit counts none of them twice.
+      const begin = async (i: number) => {
+        const r = await startSso(w.config, {
+          connectionId: ids[i] ?? "",
+          ip: `10.1.${i >> 8}.${i & 255}`,
+        });
+        if (!r.ok) throw new Error(r.code);
       };
-      ids.push(await connection(w, org, slug, null));
-    }
-    const reads = (slug: string) =>
-      w.calls.filter((c) => c.url === `${issuerOf(slug)}/.well-known/openid-configuration`).length;
-    // One IP per start, so the start limit counts none of them twice.
-    const begin = async (i: number) => {
-      const r = await startSso(w.config, {
-        connectionId: ids[i] ?? "",
-        ip: `10.1.${i >> 8}.${i & 255}`,
+      for (let i = 0; i <= SSO_DISCOVERY_MAX; i++) await begin(i);
+      // The 501st entry pushed out the first: its document is read again. The newest entry stays.
+      await begin(0);
+      await begin(SSO_DISCOVERY_MAX);
+      expect({ first: reads("t0"), newest: reads(`t${SSO_DISCOVERY_MAX}`) }).toEqual({
+        first: 2,
+        newest: 1,
       });
-      if (!r.ok) throw new Error(r.code);
-    };
-    for (let i = 0; i <= SSO_DISCOVERY_MAX; i++) await begin(i);
-    // The 501st entry pushed out the first: its document is read again. The newest entry stays.
-    await begin(0);
-    await begin(SSO_DISCOVERY_MAX);
-    expect({ first: reads("t0"), newest: reads(`t${SSO_DISCOVERY_MAX}`) }).toEqual({
-      first: 2,
-      newest: 1,
-    });
-  });
+    },
+    LONG_TEST_MS,
+  );
 
   it("reads the document again after an update of the connection", async () => {
     const w = oidcWorld();
