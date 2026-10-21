@@ -338,7 +338,7 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
   {
     pkg: "@authtempo/core",
     entry: "./errors",
-    reason: "the two error tables; the errors page holds each code (check-errors)",
+    reason: "the three error tables; the errors page holds each code (check-errors)",
   },
   {
     pkg: "@authtempo/core",

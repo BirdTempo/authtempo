@@ -1,6 +1,6 @@
 ---
 title: Error codes
-description: Every error code of core, of the OAuth provider, and of the storage port, with its meaning, what the caller does, and the HTTP status of a route code.
+description: Every error code of core, of the OAuth provider, and of the storage port. Each code has its meaning, what the caller does, and the HTTP status of a route code.
 type: reference
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 10

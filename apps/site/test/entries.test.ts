@@ -1,3 +1,4 @@
+import { existsSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   ADAPTER_PACKAGES,
@@ -6,6 +7,7 @@ import {
   SDK_PACKAGES,
 } from "../scripts/lib/entries.ts";
 import { readRepoFile } from "../scripts/lib/load.ts";
+import { REPO } from "../scripts/lib/paths.ts";
 
 /** The `exports` map of a package of the repo: `@authtempo/x` lives in `packages/x`. */
 function mapOf(pkg: string): Record<string, { types: string }> {
@@ -49,5 +51,17 @@ describe("the export entry list (plan 11d)", () => {
     // Each row names the sections of its exports tables (plan 11d Task 15 review, P5).
     for (const e of EXPORT_ENTRIES) expect(e.headings.length, e.label).toBeGreaterThan(0);
     expect(new Set(EXPORT_ENTRIES.map((e) => e.label)).size).toBe(EXPORT_ENTRIES.length);
+  });
+
+  it("lists the package of each packages/adapter-* folder in ADAPTER_PACKAGES, and no other", () => {
+    // A new adapter folder needs a row, else the entry test never reads its exports (plan 12g Task 9 review, L5).
+    const folders = readdirSync(`${REPO}packages`)
+      .filter((d) => d.startsWith("adapter-") && existsSync(`${REPO}packages/${d}/package.json`))
+      .map(
+        (d) =>
+          (JSON.parse(readRepoFile(`packages/${d}/package.json`) ?? "{}") as { name: string }).name,
+      );
+    expect([...ADAPTER_PACKAGES].sort()).toEqual(folders.sort());
+    expect(folders.length).toBeGreaterThanOrEqual(4);
   });
 });
