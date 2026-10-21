@@ -10,7 +10,8 @@
  * sampled before the sign-in events.
  */
 import type { AuthEvent, EventName, ObserveSink } from "@authtempo/core/observe";
-import { scrub, secretParts } from "@authtempo/core/redact";
+import { secretParts } from "@authtempo/core/redact";
+import { scrubEvent } from "./event-scrub.js";
 
 /**
  * The blob order of each data point. A query reads blob1 as `name`, blob2 as
@@ -26,6 +27,12 @@ export const AE_BLOBS = [
   "family",
   "traceId",
 ] as const;
+
+/**
+ * The fields of the doubles after the count of 1: double2 is `durationMs`
+ * and double3 is `status`. A new field goes at the end, as in `AE_BLOBS`.
+ */
+export const AE_DOUBLES = ["durationMs", "status"] as const;
 
 /**
  * The most data points that one flush writes. Analytics Engine takes at most
@@ -60,7 +67,8 @@ export interface AnalyticsEngineOptions {
   /**
    * Values that no blob may hold, such as a secret of the app. Core puts no
    * secret in an event (spec 31 item 8). This list is the last guard of spec
-   * 31 item 9, and the scrub of `@authtempo/core/redact` applies it.
+   * 31 item 9, and the scrub of `@authtempo/core/redact` applies it. The scrub
+   * skips the fields that the other sinks skip.
    */
   secrets?: readonly string[];
 }
@@ -70,8 +78,8 @@ const number = (value: unknown): number => (typeof value === "number" ? value : 
 
 /**
  * The data point of one event: 1 for the count, then the duration and the
- * status. Each blob passes the scrub. The index is the event name, a key of
- * `EVENTS`, and holds no value of the app.
+ * status. The event passes the scrub of the other sinks. The index is the
+ * event name, a key of `EVENTS`, and holds no value of the app.
  */
 function point(
   event: AuthEvent,
@@ -81,13 +89,11 @@ function point(
   blobs: (string | null)[];
   doubles: number[];
 } {
+  const clean = scrubEvent(event, secrets);
   return {
     indexes: [event.name],
-    blobs: AE_BLOBS.map((field) => {
-      const value = text(event[field]);
-      return value === null ? null : scrub(value, secrets);
-    }),
-    doubles: [1, number(event.durationMs), number(event.status)],
+    blobs: AE_BLOBS.map((field) => text(clean[field])),
+    doubles: [1, ...AE_DOUBLES.map((field) => number(event[field]))],
   };
 }
 
@@ -95,7 +101,9 @@ function point(
  * The sink. `writeDataPoint` does not block and is not awaited. Over
  * `AE_MAX_POINTS` in one batch, the sink writes the first 200 and throws a
  * `RangeError` that names the rest. The observer then counts the batch in
- * `sink_threw`, so the loss is never silent.
+ * `sink_threw`, so the loss is never silent. The count is too high: it holds
+ * the 200 written points too. The port has one count for each batch, so a
+ * true count needs a change of the core port (ruling 31, Low 3).
  */
 export function analyticsEngineSink(
   dataset: AnalyticsEngineDatasetLike,

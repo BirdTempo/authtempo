@@ -73,21 +73,46 @@ describe("analyticsEngineSink", () => {
   it("scrubs each blob with the given secrets", async () => {
     const d = dataset();
     const secret = "s3cr3t-value-of-the-app";
-    const leaked = { ...signIn, route: `POST /${secret}/sign-in`, code: secret };
+    // The provider kind is no closed list, so a secret could reach it.
+    const leaked = built("sign_in", "info", {
+      route: "POST /password/sign-in",
+      outcome: "success",
+      method: "password",
+      provider: secret,
+    });
     await analyticsEngineSink(d, { secrets: [secret] }).write([leaked]);
     expect(d.points[0]?.blobs).toEqual([
       "sign_in",
-      "POST /***/sign-in",
+      "POST /password/sign-in",
       "success",
-      "***",
-      "password",
       null,
+      "password",
+      "***",
       null,
       "4bf92f3577b34da6a3ce929d0e0e4736",
     ]);
     const plain = dataset();
     await analyticsEngineSink(plain).write([leaked]);
-    expect(plain.points[0]?.blobs?.[3]).toBe(secret);
+    expect(plain.points[0]?.blobs?.[5]).toBe(secret);
+  });
+
+  it("keeps the stamp and each field of a closed list out of the scrub", async () => {
+    const limited = built("limit.hit", "warn", {
+      route: "POST /oauth/token",
+      family: "oauth-token:ip",
+    });
+    const plain = dataset();
+    await analyticsEngineSink(plain).write([signIn, limited]);
+    const d = dataset();
+    // Each short secret is a part of a name, a route, an enum value, or the trace id.
+    const secrets = ["sign", "password", "success", "oauth", "4bf9"];
+    await analyticsEngineSink(d, { secrets }).write([signIn, limited]);
+    expect(d.points).toEqual(plain.points);
+    expect(d.points.map((p) => p.blobs?.[1])).toEqual([
+      "POST /password/sign-in",
+      "POST /oauth/token",
+    ]);
+    expect(d.points[1]?.blobs?.[6]).toBe("oauth-token:ip");
   });
 
   it("uses the event name as the index and the fixed blob order", async () => {

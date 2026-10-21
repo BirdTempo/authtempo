@@ -22,6 +22,22 @@ export interface AuthEvent {
   [field: string]: unknown;
 }
 
+/**
+ * The stamp fields: the observer sets them on each event before its own
+ * fields, and the scrub of core skips them. Each one holds a name of
+ * `EVENTS`, a level, a time, a hex id, or a route key. So a sink scrub skips
+ * them too.
+ */
+export const STAMP_FIELDS = [
+  "name",
+  "level",
+  "at",
+  "traceId",
+  "spanId",
+  "parentSpanId",
+  "route",
+] as const;
+
 /** The app's sink. `write` gets one batch for each flush, and core waits for it for at most `flushTimeoutMs`. */
 export interface ObserveSink {
   write(batch: readonly AuthEvent[]): void | Promise<void>;

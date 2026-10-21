@@ -15,4 +15,5 @@ export type {
   ObserveSink,
   ObserveStats,
 } from "./port.js";
+export { STAMP_FIELDS } from "./port.js";
 export { TRACE_HEADER } from "./trace.js";

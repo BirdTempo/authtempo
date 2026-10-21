@@ -70,11 +70,12 @@ describe("workersLogsSink", () => {
   it("scrubs each string field with the given secrets", async () => {
     const c = spies();
     const secret = "s3cr3t-value-of-the-app";
-    const leaked: AuthEvent = { ...internal, route: secret, rejected: [secret, "status"] };
+    // The method kind is no closed list: a client chooses the method token.
+    const leaked: AuthEvent = { ...internal, method: secret, rejected: [secret, "status"] };
     await workersLogsSink({ secrets: [secret] }).write([leaked]);
     expect(c.error.mock.calls[0]?.[0]).toEqual({
       ...internal,
-      route: "***",
+      method: "***",
       rejected: ["***", "status"],
     });
   });
@@ -84,6 +85,17 @@ describe("workersLogsSink", () => {
     // A short secret that is a part of the event name, the level, and the ids.
     await workersLogsSink({ secrets: ["drop", "warn", "4bf9", "00f0", "2026"] }).write([dropped]);
     expect(c.warn.mock.calls[0]?.[0]).toEqual(dropped);
+  });
+
+  it("keeps the route and each field of a closed list out of the scrub", async () => {
+    const c = spies();
+    const limited = built("limit.hit", "warn", {
+      route: "POST /oauth/token",
+      family: "oauth-token:ip",
+    });
+    await workersLogsSink({ secrets: ["oauth", "password", "token"] }).write([request, limited]);
+    expect(c.log.mock.calls[0]?.[0]).toEqual(request);
+    expect(c.warn.mock.calls[0]?.[0]).toEqual(limited);
   });
 
   it("stays far under the 256 KB limit of a log", async () => {

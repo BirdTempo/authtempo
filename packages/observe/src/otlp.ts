@@ -49,13 +49,21 @@ export interface OtlpOptions {
   /**
    * The time in ms after which a post aborts. Default 2000, the default
    * `flushTimeoutMs` of core (packages/core/src/observe/config.ts, read
-   * 2026-10-21). Give the same value as `flushTimeoutMs`, so no post outlives a flush.
+   * 2026-10-21). Give the same value as `flushTimeoutMs`, so no post outlives a
+   * flush. An integer from 100 to 10000, the bound of `flushTimeoutMs`.
    */
   timeoutMs?: number;
 }
 
 /** The default of `timeoutMs`: the default `flushTimeoutMs` of core. */
 const TIMEOUT_MS = 2000;
+/**
+ * The bound of `timeoutMs`, the bound of `flushTimeoutMs` in core. A probe on
+ * Node (2026-10-21) shows the need: 2 ** 31 ms aborted each post in 9 ms, and
+ * 5e9 ms threw a `RangeError` in each write.
+ */
+const TIMEOUT_MIN = 100;
+const TIMEOUT_MAX = 10_000;
 
 /**
  * The parts of a header value that a body may never hold. They are the value
@@ -97,8 +105,10 @@ export function otlpSink(options: OtlpOptions): ObserveSink {
   if (typeof options.serviceName !== "string" || options.serviceName === "")
     throw new TypeError("otlpSink: serviceName must be a string that is not empty");
   const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
-    throw new TypeError("otlpSink: timeoutMs must be an integer of 1 or more");
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < TIMEOUT_MIN || timeoutMs > TIMEOUT_MAX)
+    throw new TypeError(
+      `otlpSink: timeoutMs must be an integer from ${TIMEOUT_MIN} to ${TIMEOUT_MAX}`,
+    );
   const { serviceName } = options;
   // workerd refuses a random value in the global scope, and its clock reads 0 there
   // (probe of workerd 1.20261006.1, 2026-10-21). So the id waits for the first write.

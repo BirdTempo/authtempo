@@ -111,8 +111,9 @@ export function createObserver(
     // guard of a secret (spec 31 item 9). A field kind can keep a secret that
     // a client sends, such as a method token. The stamp is set first and is
     // not scrubbed. Its kinds check the name, the level, the time, the ids,
-    // and the route key. A sink of @authtempo/observe scrubs again with the
-    // secrets of the app. It skips the same fields, but not the route key.
+    // and the route key (STAMP_FIELDS). A sink of @authtempo/observe scrubs
+    // again with the secrets of the app. It skips the same fields, and each
+    // field of a closed list.
     for (const [key, value] of Object.entries(checkedFields(input)))
       if (!Object.hasOwn(event, key))
         event[key] = typeof value === "string" ? scrub(value, deps.secrets) : value;

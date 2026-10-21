@@ -1,33 +1,46 @@
 import { createAuth, createMemoryAdapter } from "@authtempo/core";
-import { type AuthEvent, EVENTS, type EventName, type ObserveSink } from "@authtempo/core/observe";
+import {
+  type AuthEvent,
+  EVENTS,
+  type EventName,
+  type ObserveSink,
+  STAMP_FIELDS,
+} from "@authtempo/core/observe";
 import { describe, expect, it } from "vitest";
-import { AE_BLOBS, AE_DEFAULT_EVENTS, analyticsEngineSink } from "../src/analytics-engine.js";
+import {
+  AE_BLOBS,
+  AE_DEFAULT_EVENTS,
+  AE_DOUBLES,
+  analyticsEngineSink,
+} from "../src/analytics-engine.js";
 import { METRICS } from "../src/metrics.js";
 
 /**
  * The names that this package reads from the events of core (rulings 11 and
  * 15 of plan 12h). A name that core does not emit gives an empty blob or an
- * empty metric with no error, so this test holds each name to `EVENTS`.
+ * empty metric with no error. So this test holds each name to `EVENTS`.
  */
 
-function authWith(sink: ObserveSink) {
+function authWith(sink: ObserveSink, trustTraceparent = false) {
   return createAuth({
     baseURL: "https://api.example.test",
     secret: "kP9vQ2xL7mN4rT8wZ1yB6cF3hJ5sD0gA",
     trustedOrigins: [],
     storage: createMemoryAdapter(),
     mail: { send: async () => {} },
-    observe: { sink },
+    observe: { sink, trustTraceparent },
   });
 }
 
-const health = () => new Request("https://api.example.test/auth/health");
+const health = (headers: HeadersInit = {}) =>
+  new Request("https://api.example.test/auth/health", { headers });
 
 /** The keys that the observer stamps on each event of a request, read from a real event. */
-async function stampKeys(): Promise<Set<string>> {
+async function stampKeys(traceparent?: string): Promise<Set<string>> {
   const seen: AuthEvent[] = [];
-  const auth = authWith({ write: (b) => void seen.push(...b) });
-  expect((await auth.handle(health())).status).toBe(200);
+  const auth = authWith({ write: (b) => void seen.push(...b) }, traceparent !== undefined);
+  const headers: HeadersInit = traceparent === undefined ? {} : { traceparent };
+  expect((await auth.handle(health(headers))).status).toBe(200);
   await auth.observe.flush();
   const request = seen.find((e) => e.name === "request");
   expect(request).toBeDefined();
@@ -50,6 +63,24 @@ describe("the names of core in the sinks", () => {
       AE_DEFAULT_EVENTS.filter(known).flatMap((name) => Object.keys(EVENTS[name].fields)),
     );
     expect(AE_BLOBS.filter((f) => !stamps.has(f) && !fields.has(f))).toEqual([]);
+  });
+
+  it("holds STAMP_FIELDS to the stamp of a real event with a parent span", async () => {
+    const stamp = ["at", "level", "name", "parentSpanId", "route", "spanId", "traceId"];
+    const stamps = await stampKeys("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01");
+    expect([...stamps].sort()).toEqual(stamp);
+    expect([...STAMP_FIELDS].sort()).toEqual(stamp);
+  });
+
+  it("names only a number field of a default event in AE_DOUBLES", () => {
+    expect([...AE_DOUBLES]).toEqual(["durationMs", "status"]);
+    const kinds = new Map<string, string>();
+    for (const name of AE_DEFAULT_EVENTS.filter(known))
+      for (const [field, spec] of Object.entries(EVENTS[name].fields)) kinds.set(field, spec.kind);
+    expect(AE_DOUBLES.map((field) => [field, kinds.get(field)])).toEqual([
+      ["durationMs", "durationMs"],
+      ["status", "status"],
+    ]);
   });
 
   it("reads only a stamp or a field of its source event in each metric", async () => {
@@ -95,6 +126,7 @@ describe("the names of core in the sinks", () => {
     for (let i = 0; i < 201; i++) await auth.handle(health());
     await auth.observe.flush();
     expect(points).toHaveLength(200);
+    // The count holds the 200 written points too, as the README states (ruling 31, Low 3).
     expect(auth.observe.stats().dropped).toEqual({
       buffer_full: 0,
       sink_timeout: 0,

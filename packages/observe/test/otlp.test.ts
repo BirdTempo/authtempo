@@ -201,7 +201,7 @@ describe("otlpSink", () => {
           reject(init.signal?.reason);
         });
       })) as typeof globalThis.fetch;
-    const sink = otlpSink({ endpoint: ENDPOINT, serviceName: "auth", fetch, timeoutMs: 50 });
+    const sink = otlpSink({ endpoint: ENDPOINT, serviceName: "auth", fetch, timeoutMs: 100 });
     const started = Date.now();
     await expect(sink.write([internal])).rejects.toThrow();
     expect(Date.now() - started).toBeLessThan(1000);
@@ -218,10 +218,11 @@ describe("otlpSink", () => {
   it("keeps the kind-checked fields out of the scrub", async () => {
     const r = recorder();
     const limit = built("limit.hit", "warn", { family: "magic-link:email" });
+    // A header value that is a part of the event name, and one inside the parent span id.
     await otlpSink({
       endpoint: ENDPOINT,
       serviceName: "auth",
-      headers: { "x-scope-orgid": "limit" },
+      headers: { "x-scope-orgid": "limit", "x-tenant": "a0ba902b" },
       fetch: r.fetch,
     }).write([{ ...limit, parentSpanId: "20f067aa0ba902b7" }]);
     const [record] = logRecords(r.sent[0]);
@@ -237,6 +238,50 @@ describe("otlpSink", () => {
     expect(r.sent.map((s) => s.url)).toEqual([`${ENDPOINT}/v1/logs`, `${ENDPOINT}/v1/metrics`]);
     const metric = r.sent[1]?.body.resourceMetrics[0].scopeMetrics[0].metrics[0];
     expect(metric.name).toBe("authtempo.limit.hits");
+  });
+
+  it("keeps each field of a closed list out of the scrub", async () => {
+    const r = recorder();
+    const token = built("request", "info", {
+      route: "POST /oauth/token",
+      method: "POST",
+      status: 200,
+      outcome: "ok",
+      durationMs: 30,
+    });
+    const limited = built("limit.hit", "warn", {
+      route: "POST /oauth/token",
+      family: "oauth-token:ip",
+    });
+    // The method kind is no closed list: a client can send the method token oauth.
+    const odd = built("error.internal", "error", {
+      method: "oauth",
+      route: "POST /oauth/token",
+      errorName: "TypeError",
+    });
+    await otlpSink({
+      endpoint: ENDPOINT,
+      serviceName: "auth",
+      headers: { "x-honeycomb-dataset": "oauth" },
+      fetch: r.fetch,
+    }).write([token, limited, odd]);
+    const records = logRecords(r.sent[0]);
+    const attribute = (i: number, key: string) =>
+      records[i].attributes.find((a: { key: string }) => a.key === key)?.value.stringValue;
+    expect([0, 1, 2].map((i) => attribute(i, "route"))).toEqual([
+      "POST /oauth/token",
+      "POST /oauth/token",
+      "POST /oauth/token",
+    ]);
+    expect(attribute(0, "outcome")).toBe("ok");
+    expect(attribute(1, "family")).toBe("oauth-token:ip");
+    expect(attribute(2, "method")).toBe("***");
+    // The metric attributes keep the route and the family, so the streams do not split.
+    const metrics = JSON.stringify(r.sent[2]?.body);
+    expect(r.sent[2]?.url).toBe(`${ENDPOINT}/v1/metrics`);
+    expect(metrics).toContain('"stringValue":"POST /oauth/token"');
+    expect(metrics).toContain('"stringValue":"oauth-token:ip"');
+    expect(metrics).not.toContain("***");
   });
 
   it("writes one log record for each event", async () => {
@@ -431,6 +476,54 @@ describe("otlpSink", () => {
     });
   });
 
+  it("counts the events of an aborted post in sink_timeout, through a real Auth", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const reasons: unknown[] = [];
+    const urls: string[] = [];
+    // biome-ignore lint/suspicious/noExplicitAny: the test reads the JSON body by its OTLP field names.
+    const bodies: any[] = [];
+    let hang = true;
+    // A collector that answers no post of the first flush. Such a post ends only when its signal aborts.
+    const fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      urls.push(String(input));
+      bodies.push(JSON.parse(String(init?.body)));
+      if (!hang) return Promise.resolve(ok());
+      return new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reasons.push(init.signal?.reason);
+          reject(init.signal?.reason);
+        });
+      });
+    }) as typeof globalThis.fetch;
+    // The README advice: timeoutMs takes the value of flushTimeoutMs.
+    const sink = otlpSink({ endpoint: ENDPOINT, serviceName: "auth", fetch, timeoutMs: 100 });
+    const auth = authWith(sink, 100);
+    expect((await auth.handle(sessionRead())).status).toBe(500);
+    await auth.observe.flush();
+    const lost = { buffer_full: 0, sink_timeout: 2, sink_threw: 0 };
+    expect(auth.observe.stats().dropped).toEqual(lost);
+    // Each of the three posts aborts. The abort comes after the flush and changes no count.
+    await vi.waitFor(() => expect(reasons).toHaveLength(3));
+    expect(reasons.map((r) => (r as Error).name)).toEqual([
+      "TimeoutError",
+      "TimeoutError",
+      "TimeoutError",
+    ]);
+    expect(auth.observe.stats().dropped).toEqual(lost);
+    // The next flush sends the drop report with the count of the two lost events.
+    hang = false;
+    await auth.observe.flush();
+    expect(urls.slice(3)).toEqual([`${ENDPOINT}/v1/logs`, `${ENDPOINT}/v1/metrics`]);
+    const [report] = logRecords({ url: urls[3] ?? "", init: {}, body: bodies[3] });
+    expect(report.eventName).toBe("observe.dropped");
+    expect(report.attributes).toContainEqual({ key: "sink_timeout", value: { intValue: "2" } });
+    expect(auth.observe.stats().dropped).toEqual({
+      buffer_full: 0,
+      sink_timeout: 0,
+      sink_threw: 0,
+    });
+  });
+
   it("scrubs the header values", async () => {
     const r = recorder();
     const key = "otlp-key-0123456789abcdef";
@@ -441,15 +534,15 @@ describe("otlpSink", () => {
       headers: { "x-api-key": key, authorization: `Bearer ${token}` },
       fetch: r.fetch,
     });
-    const leaked: AuthEvent = { ...internal, route: `POST /${key}`, rejected: [token] };
+    const leaked: AuthEvent = { ...internal, method: key, rejected: [token] };
     await sink.write([leaked]);
     const text = JSON.stringify(r.sent.map((s) => s.body));
     expect(text).not.toContain(key);
     expect(text).not.toContain(token);
     const [record] = logRecords(r.sent[0]);
     expect(record.attributes).toContainEqual({
-      key: "route",
-      value: { stringValue: "POST /***" },
+      key: "method",
+      value: { stringValue: "***" },
     });
     expect(record.attributes).toContainEqual({
       key: "rejected",
@@ -466,7 +559,7 @@ describe("otlpSink", () => {
       serviceName: "auth",
       secrets: ["s3cr3t-value-of-the-app"],
       fetch: other.fetch,
-    }).write([{ ...internal, route: "s3cr3t-value-of-the-app" }]);
+    }).write([{ ...internal, method: "s3cr3t-value-of-the-app" }]);
     expect(JSON.stringify(other.sent[0]?.body)).not.toContain("s3cr3t-value-of-the-app");
   });
 
@@ -546,10 +639,15 @@ describe("otlpSink", () => {
     );
     expect(make({ signals: [] })).toThrow(signals);
     expect(make({ signals: ["logs", "profiles" as never] })).toThrow(signals);
-    const timeout = new TypeError("otlpSink: timeoutMs must be an integer of 1 or more");
+    const timeout = new TypeError("otlpSink: timeoutMs must be an integer from 100 to 10000");
     expect(make({ timeoutMs: 0 })).toThrow(timeout);
-    expect(make({ timeoutMs: 1.5 })).toThrow(timeout);
+    expect(make({ timeoutMs: 99 })).toThrow(timeout);
+    expect(make({ timeoutMs: 10001 })).toThrow(timeout);
+    expect(make({ timeoutMs: 2 ** 31 })).toThrow(timeout);
+    expect(make({ timeoutMs: 150.5 })).toThrow(timeout);
     expect(make({ timeoutMs: "2000" as never })).toThrow(timeout);
+    expect(make({ timeoutMs: 100 })).not.toThrow();
+    expect(make({ timeoutMs: 10000 })).not.toThrow();
     expect(make({ endpoint: "http://127.0.0.1:4318", signals: ["metrics"] })).not.toThrow();
   });
 });
