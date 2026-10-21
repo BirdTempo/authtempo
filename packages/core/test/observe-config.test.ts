@@ -47,6 +47,18 @@ describe("the observe config (plan 12h Task 2, spec 31 item 1)", () => {
     }
   });
 
+  it("refuses an unknown key of the observe block by name", () => {
+    for (const key of ["bufer", "readines"]) {
+      const e = refusal({ sink, [key]: 10 });
+      expect(e).toBeInstanceOf(ConfigError);
+      expect((e as Error).message).toBe(
+        `observe.${key} is not an option; core has sink, include, trustTraceparent, buffer, flushTimeoutMs, readiness`,
+      );
+    }
+    // A key with the value undefined is no option, as in the other blocks.
+    expect(refusal({ sink, bufer: undefined })).toBeNull();
+  });
+
   it("refuses an unknown include key and an unknown value", () => {
     const value = refusal({ sink, include: { ip: "full" } });
     expect(value).toBeInstanceOf(ConfigError);

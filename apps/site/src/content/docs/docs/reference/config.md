@@ -323,7 +323,7 @@ With no `observe`, core writes its log lines with `console` and sends nothing an
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `observe` | object | off | Turns the event port on. |
+| `observe` | object | off | Turns the event port on. An unknown key is refused. |
 | `observe.sink` | `ObserveSink` | required | An object with `write(batch)`. Core waits for it for at most `observe.flushTimeoutMs`, and logs no error text of it. |
 | `observe.include` | object | each key `"none"` | What an event may hold of an address. An unknown key is refused. |
 | `observe.include.ip` | `"none"` \| `"hash"` \| `"raw"` | `"none"` | `"hash"` writes a keyed hash of 32 hex under the current app secret. A rotation changes every hash. |

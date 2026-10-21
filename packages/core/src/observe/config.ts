@@ -12,6 +12,16 @@ export interface ResolvedObserve {
   readiness: boolean;
 }
 
+/** The keys of `observe`. A Record, so a key added to `ObserveConfig` and not listed here fails the compile. */
+const OBSERVE_KEYS: Readonly<Record<keyof ObserveConfig, true>> = {
+  sink: true,
+  include: true,
+  trustTraceparent: true,
+  buffer: true,
+  flushTimeoutMs: true,
+  readiness: true,
+};
+
 const INCLUDE_VALUES = {
   ip: ["none", "hash", "raw"],
   userAgent: ["none", "raw"],
@@ -39,6 +49,11 @@ function flag(value: unknown, path: string): boolean {
 export function resolveObserve(input: ObserveConfig | undefined): ResolvedObserve | null {
   if (input === undefined) return null;
   if (!isPlainObject(input)) throw new ConfigError("observe must be an object");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(OBSERVE_KEYS, key))
+      throw new ConfigError(
+        `observe.${key} is not an option; core has ${Object.keys(OBSERVE_KEYS).join(", ")}`,
+      );
   const sink: unknown = input.sink;
   if (typeof sink !== "object" || sink === null || typeof Reflect.get(sink, "write") !== "function")
     throw new ConfigError("observe.sink must have a write function");
