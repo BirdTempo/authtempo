@@ -195,6 +195,24 @@ function settle<T>(p: Promise<T>): Promise<T | string> {
 
 const rows = (m: ModelName) => createPostgresAdapter(db.sql).findMany(m, []);
 
+/**
+ * A storage on the shared pool that logs each lock write in a transaction:
+ * an update of the user row (holdUser), of the organization row
+ * (lockOrganization, or the stamp of ownerWrite), or of a team row (lockTeam).
+ */
+function lockLog(log: string[]): StorageAdapter {
+  const base = createPostgresAdapter(db.sql);
+  const wrap = (tx: StorageAdapter): StorageAdapter => ({
+    ...tx,
+    update(m, where, data) {
+      if (m === "user" || m === "organization" || m === "team") log.push(m);
+      return tx.update(m, where, data);
+    },
+    transaction: (fn) => tx.transaction((inner) => fn(wrap(inner))),
+  });
+  return { ...base, transaction: (fn) => base.transaction((tx) => fn(wrap(tx))) };
+}
+
 describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
   it("adds the sole member to a team during the account delete with no deadlock (m3)", async () => {
     const sent: MailMessage[] = [];
@@ -478,5 +496,67 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     expect(first).toMatchObject({ ok: true });
     expect(await second).toMatchObject({ ok: false, code: "token_limit" });
     expect(await rows("apiToken")).toHaveLength(50);
+  });
+});
+
+describe("the lock order of each flow (ruling 43 of plan 12k)", () => {
+  it("takes the user row, then the organization row, then the team row, as user-hold.ts states", async () => {
+    const sent: MailMessage[] = [];
+    const config = { teams: {}, dynamicRoles: { maxPerOrganization: 5 } };
+    const plain = instance(createPostgresAdapter(db.sql), config, sent);
+    const log: string[] = [];
+    const logged = instance(lockLog(log), config, sent);
+    const run = async (call: () => Promise<{ ok: boolean }>): Promise<string[]> => {
+      log.length = 0;
+      expect(await call()).toMatchObject({ ok: true });
+      return [...log];
+    };
+    const a = await user("a");
+    const b = await user("b");
+    const c = await user("c");
+    const d = await user("d");
+    const organizationId = await organization(plain, a);
+    must(await plain.api.addMember({ user: a, organizationId, userId: b.id, role: "member" }));
+    must(await plain.api.addMember({ user: a, organizationId, userId: c.id, role: "owner" }));
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+    must(
+      await plain.api.inviteMember({
+        user: a,
+        organizationId,
+        email: "d@example.com",
+        role: "member",
+        teamIds: [teamId],
+      }),
+    );
+    const token = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(sent.at(-1)?.text ?? "")?.[1] ?? "";
+
+    const order = {
+      add: await run(() => logged.api.addTeamMember({ user: a, teamId, userId: b.id })),
+      accept: await run(() => logged.api.acceptInvitation({ user: d, token, ip: null })),
+      leave: await run(() => logged.api.removeTeamMember({ user: a, teamId, userId: b.id })),
+      removal: await run(() =>
+        logged.api.removeMember({ user: a, organizationId, userId: b.id, revokeTokens: true }),
+      ),
+      ownerRemoval: await run(() =>
+        logged.api.removeMember({ user: a, organizationId, userId: c.id }),
+      ),
+      role: await run(() =>
+        logged.api.createRole({
+          user: a,
+          organizationId,
+          name: "web",
+          permissions: { member: ["read"] },
+        }),
+      ),
+    };
+
+    expect(order).toEqual({
+      add: ["user", "team"],
+      accept: ["user", "team"],
+      leave: ["team"],
+      removal: ["user", "organization"],
+      ownerRemoval: ["user", "organization"],
+      role: ["organization"],
+    });
   });
 });
