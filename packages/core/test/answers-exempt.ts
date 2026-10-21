@@ -150,6 +150,11 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /sso/domains/delete",
   "POST /sso/domains/update",
   "POST /sso/domains/verify",
+  // Plan 12d Task 3: a connection id that names no connection, or an organization that does not exist.
+  "GET /sso/connections",
+  "POST /sso/connections/create",
+  "POST /sso/connections/delete",
+  "POST /sso/connections/update",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
@@ -257,6 +262,10 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /sso/domains/delete",
   "POST /sso/domains/update",
   "POST /sso/domains/verify",
+  // Plan 12d Task 3: the connection writes.
+  "POST /sso/connections/create",
+  "POST /sso/connections/delete",
+  "POST /sso/connections/update",
 ];
 
 /** The two provider callbacks: one engine function, `completeSocial`, after a provider exchange. */
@@ -355,6 +364,12 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "conflict",
     "a parallel add of the same domain loses the unique key, and a parallel write moves updatedAt under an update; no request can cause either on its own",
     ["POST /sso/domains/add", "POST /sso/domains/update"],
+  ),
+  // Plan 12d Task 3: an update of a connection that races another write of the row.
+  ...rows(
+    "conflict",
+    "a parallel write moves updatedAt between the read and the update of a connection; no request can cause it on its own",
+    ["POST /sso/connections/update"],
   ),
   ...rows(
     "conflict",

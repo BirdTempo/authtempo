@@ -37,10 +37,105 @@ export const DomainJson = z.strictObject({
 });
 
 const domainAnswer = z.strictObject({ domain: DomainJson });
+
+/**
+ * The fields of a connection write. The schema holds the types and loose
+ * bounds; the engine holds each rule and answers `invalid_body` with a
+ * message that names the field. 200 000 bounds the IdP metadata of Task 8.
+ */
+const text = z.string().max(4096);
+const connectionFields = {
+  label: text.optional(),
+  enabled: z.boolean().optional(),
+  jit: z.boolean().optional(),
+  defaultRole: text.optional(),
+  mfa: z
+    .strictObject({
+      amr: z.array(text).max(64).optional(),
+      acr: z.array(text).max(64).optional(),
+      authnContext: z.array(text).max(64).optional(),
+    })
+    .nullable()
+    .optional(),
+  scimRoles: z.record(text, text).nullable().optional(),
+  issuer: text.optional(),
+  clientId: text.optional(),
+  clientSecret: text.optional(),
+  scope: text.optional(),
+  endpoints: z
+    .strictObject({ authorizeUrl: text, tokenUrl: text, jwksUrl: text })
+    .nullable()
+    .optional(),
+  idpMetadata: z.string().max(200_000).optional(),
+  idpEntityId: text.optional(),
+  ssoUrl: text.optional(),
+  certificates: z.array(z.string().max(65_536)).max(8).optional(),
+  subjectAttribute: text.nullable().optional(),
+  attributes: z.strictObject({ email: text, name: text.nullable().optional() }).optional(),
+};
+export const connectionListQuery = z.strictObject({ organizationId: id });
+export const connectionCreateBody = z.strictObject({
+  organizationId: id,
+  kind: z.enum(["oidc", "saml"]),
+  ...connectionFields,
+  label: text,
+});
+/** `organizationId` and `kind` may come, so the engine answers that they never change. */
+export const connectionUpdateBody = z.strictObject({
+  id,
+  organizationId: id.optional(),
+  kind: z.enum(["oidc", "saml"]).optional(),
+  ...connectionFields,
+});
+export const connectionIdBody = z.strictObject({ id });
+
+/** One connection, as `SsoConnectionSummary` answers it. It never holds the client secret. */
+export const ConnectionJson = z.strictObject({
+  id: z.string(),
+  organizationId: z.string(),
+  kind: z.enum(["oidc", "saml"]),
+  label: z.string(),
+  enabled: z.boolean(),
+  jit: z.boolean(),
+  defaultRole: z.string(),
+  mfa: z
+    .strictObject({
+      amr: z.array(z.string()),
+      acr: z.array(z.string()),
+      authnContext: z.array(z.string()),
+    })
+    .nullable(),
+  scimRoles: z.record(z.string(), z.string()).nullable(),
+  oidc: z
+    .strictObject({
+      issuer: z.string(),
+      clientId: z.string(),
+      scope: z.string(),
+      endpoints: z
+        .strictObject({ authorizeUrl: z.string(), tokenUrl: z.string(), jwksUrl: z.string() })
+        .nullable(),
+    })
+    .optional(),
+  saml: z
+    .strictObject({
+      idpEntityId: z.string(),
+      ssoUrl: z.string(),
+      certificates: z.array(z.strictObject({ notAfter: z.iso.datetime() })),
+      subjectAttribute: z.string().nullable(),
+      attributes: z.strictObject({ email: z.string(), name: z.string().nullable() }),
+      spEntityId: z.string(),
+      acsUrl: z.string(),
+    })
+    .optional(),
+  createdAt: z.iso.datetime(),
+  updatedAt: z.iso.datetime(),
+});
+
+const connectionAnswer = z.strictObject({ connection: ConnectionJson });
 const jsonBody = <T extends z.ZodType>(schema: T) =>
   ({ schema, media: ["json"], parsedBy: "zod" }) as const;
 
-/** The contract of `routes/sso.ts` (plan 12d Task 2). */
+/** The contract of `routes/sso.ts` (plan 12d Tasks 2 and 3). */
 export const SSO_CONTRACT = {
   "GET /sso/domains": {
     query: { schema: domainListQuery, parsedBy: "zod" },
@@ -60,6 +155,22 @@ export const SSO_CONTRACT = {
   },
   "POST /sso/domains/delete": {
     body: jsonBody(domainIdBody),
+    answer: { kind: "json", schema: OkAnswer },
+  },
+  "GET /sso/connections": {
+    query: { schema: connectionListQuery, parsedBy: "zod" },
+    answer: { kind: "json", schema: z.strictObject({ connections: z.array(ConnectionJson) }) },
+  },
+  "POST /sso/connections/create": {
+    body: jsonBody(connectionCreateBody),
+    answer: { kind: "json", schema: connectionAnswer },
+  },
+  "POST /sso/connections/update": {
+    body: jsonBody(connectionUpdateBody),
+    answer: { kind: "json", schema: connectionAnswer },
+  },
+  "POST /sso/connections/delete": {
+    body: jsonBody(connectionIdBody),
     answer: { kind: "json", schema: OkAnswer },
   },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;

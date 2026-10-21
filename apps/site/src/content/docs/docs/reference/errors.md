@@ -430,7 +430,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /reauth`](/docs/reference/routes/#post-reauth) makes the session fresh. The account routes [`POST /sessions/revoke`](/docs/reference/routes/#post-sessions-revoke), [`POST /sessions/revoke-others`](/docs/reference/routes/#post-sessions-revoke-others), [`POST /user/change-email`](/docs/reference/routes/#post-user-change-email), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /social/:provider/link`](/docs/reference/routes/#post-social-provider-link), and [`POST /user/delete`](/docs/reference/routes/#post-user-delete) need a fresh session. So do the passkey and token routes [`POST /passkey/register/options`](/docs/reference/routes/#post-passkey-register-options), [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete), [`POST /tokens`](/docs/reference/routes/#post-tokens), and [`POST /tokens/update`](/docs/reference/routes/#post-tokens-update). So do the factor routes [`POST /totp/enable`](/docs/reference/routes/#post-totp-enable), [`POST /totp/disable`](/docs/reference/routes/#post-totp-disable), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes), [`POST /second-factor/passkey/enable`](/docs/reference/routes/#post-second-factor-passkey-enable), [`POST /second-factor/email/enable`](/docs/reference/routes/#post-second-factor-email-enable), and [`POST /second-factor/disable`](/docs/reference/routes/#post-second-factor-disable). [`POST /password/change`](/docs/reference/routes/#post-password-change) needs one for a first password, and while the second factor is on. |
+| [`POST /reauth`](/docs/reference/routes/#post-reauth) makes the session fresh. The account routes [`POST /sessions/revoke`](/docs/reference/routes/#post-sessions-revoke), [`POST /sessions/revoke-others`](/docs/reference/routes/#post-sessions-revoke-others), [`POST /user/change-email`](/docs/reference/routes/#post-user-change-email), [`POST /identities/unlink`](/docs/reference/routes/#post-identities-unlink), [`POST /social/:provider/link`](/docs/reference/routes/#post-social-provider-link), and [`POST /user/delete`](/docs/reference/routes/#post-user-delete) need a fresh session. So do the passkey and token routes [`POST /passkey/register/options`](/docs/reference/routes/#post-passkey-register-options), [`POST /passkeys/delete`](/docs/reference/routes/#post-passkeys-delete), [`POST /tokens`](/docs/reference/routes/#post-tokens), and [`POST /tokens/update`](/docs/reference/routes/#post-tokens-update). So do the factor routes [`POST /totp/enable`](/docs/reference/routes/#post-totp-enable), [`POST /totp/disable`](/docs/reference/routes/#post-totp-disable), [`POST /totp/backup-codes`](/docs/reference/routes/#post-totp-backup-codes), [`POST /second-factor/passkey/enable`](/docs/reference/routes/#post-second-factor-passkey-enable), [`POST /second-factor/email/enable`](/docs/reference/routes/#post-second-factor-email-enable), and [`POST /second-factor/disable`](/docs/reference/routes/#post-second-factor-disable). [`POST /password/change`](/docs/reference/routes/#post-password-change) needs one for a first password, and while the second factor is on. An owner needs one at each SSO manager route, such as [`POST /sso/connections/create`](/docs/reference/routes/#post-sso-connections-create) and [`POST /sso/domains/add`](/docs/reference/routes/#post-sso-domains-add). |
 
 <h3 id="last_credential"><code>last_credential</code> 409</h3>
 
@@ -539,6 +539,24 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | [`POST /sso/domains/add`](/docs/reference/routes/#post-sso-domains-add). |
+
+<h3 id="connection_limit"><code>connection_limit</code> 409</h3>
+
+- **Meaning:** The organization holds `sso.limits.connectionsPerOrganization` SSO connections, 10 by default.
+- **Do:** Delete a connection that the organization does not use, or raise the limit in the config.
+
+| Routes |
+| --- |
+| [`POST /sso/connections/create`](/docs/reference/routes/#post-sso-connections-create). |
+
+<h3 id="second_factor_required"><code>second_factor_required</code> 403</h3>
+
+- **Meaning:** The owner of the organization has no second factor. An owner manages the SSO setup only with a second factor on.
+- **Do:** Turn on a second factor, such as TOTP at `POST /totp/enable`, then send the request again with a fresh session.
+
+| Routes |
+| --- |
+| The SSO manager routes of an owner: [`GET /sso/domains`](/docs/reference/routes/#get-sso-domains), [`POST /sso/domains/add`](/docs/reference/routes/#post-sso-domains-add), [`POST /sso/domains/verify`](/docs/reference/routes/#post-sso-domains-verify), [`POST /sso/domains/update`](/docs/reference/routes/#post-sso-domains-update), [`POST /sso/domains/delete`](/docs/reference/routes/#post-sso-domains-delete), [`GET /sso/connections`](/docs/reference/routes/#get-sso-connections), [`POST /sso/connections/create`](/docs/reference/routes/#post-sso-connections-create), [`POST /sso/connections/update`](/docs/reference/routes/#post-sso-connections-update), and [`POST /sso/connections/delete`](/docs/reference/routes/#post-sso-connections-delete). |
 
 <h3 id="role_in_use"><code>role_in_use</code> 409</h3>
 

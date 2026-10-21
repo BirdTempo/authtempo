@@ -105,6 +105,8 @@ const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
   [/^\/tokens\/update$|^\/organizations\/tokens(\/update|\/revoke)?$/, "the token writes"],
   // Plan 12d Task 2b: the four domain writes.
   [/^\/sso\/domains\/(add|verify|update|delete)$/, "the domain writes of SSO"],
+  // Plan 12d Task 3: the three connection writes.
+  [/^\/sso\/connections\/(create|update|delete)$/, "the connection writes of SSO"],
 ];
 
 /** A router code that a page names when its flow can meet it. `internal` is no answer of a flow. */

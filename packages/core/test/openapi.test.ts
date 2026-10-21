@@ -87,7 +87,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12k Task 8 adds the five organization token routes.
     // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
     // Plan 12d Task 2b adds the five domain routes and the operator's override.
-    expect(keys.length).toBe(152);
+    // Plan 12d Task 3 adds the four connection routes.
+    expect(keys.length).toBe(156);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(":provider", "{provider}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -180,8 +181,9 @@ describe("openApiDocument (plan 11g)", () => {
     const bodies = operations(reference()).filter(({ op }) => op.requestBody !== undefined);
     // Plan 12f adds the seven bodies of the operator writes, then the two of
     // the impersonation: 64 became 73. Plan 12d Task 2b adds four domain
-    // bodies and the override: 88 became 93.
-    expect(bodies.length).toBe(93);
+    // bodies and the override: 88 became 93. Plan 12d Task 3 adds the three
+    // connection writes: 93 became 96.
+    expect(bodies.length).toBe(96);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -404,7 +406,9 @@ describe("openApiDocument (plan 11g)", () => {
     // routes, then 2 answers and 2 bodies of the impersonation. Plan 12h
     // adds the 2 answers of GET /health and GET /ready. Plan 12d
     // Task 2b adds 6 answers, 5 bodies, and the query of the domain list.
-    expect([answers, bodies, queries]).toEqual([128, 93, 27]);
+    // Plan 12d Task 3 adds 4 answers, 3 bodies, and the query of the
+    // connection list.
+    expect([answers, bodies, queries]).toEqual([132, 96, 28]);
   });
 
   it("takes the request_id form of the authorize query", () => {

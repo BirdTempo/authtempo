@@ -184,8 +184,11 @@ export function writesPlatformRole(
   return holdsRolePart(before, role);
 }
 
-/** True when the user has a second factor with one method or more (plan 12c). */
-async function hasSecondFactor(config: ResolvedConfig, userId: string): Promise<boolean> {
+/**
+ * True when the user has a second factor with one method or more (plan 12c).
+ * The operator guard and the SSO manager guard of plan 12d read it.
+ */
+export async function hasSecondFactor(config: ResolvedConfig, userId: string): Promise<boolean> {
   const row = await config.storage.findOne("secondFactor", [
     { field: "userId", op: "eq", value: userId },
   ]);

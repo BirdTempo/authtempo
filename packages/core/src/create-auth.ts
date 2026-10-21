@@ -180,6 +180,15 @@ import {
   startSocial,
 } from "./engine/social.js";
 import {
+  type ConnectionFields,
+  type ConnectionInput,
+  createConnection,
+  deleteConnection,
+  listConnections,
+  type SsoConnectionSummary,
+  updateConnection,
+} from "./engine/sso/connections.js";
+import {
   addDomain,
   deleteDomain,
   listDomains,
@@ -353,6 +362,25 @@ export interface SsoApi {
       includeSubdomains?: boolean;
     }): Promise<Result<SsoDomainSummary>>;
     /** Deletes a domain and its claim. */
+    delete(input: { actor: SsoAppActor; id: string }): Promise<Result<{ ok: true }>>;
+  };
+  /**
+   * The OIDC and SAML connections of an organization (plan 12d Task 3). No
+   * answer holds the client secret or its sealed value.
+   */
+  connections: {
+    /** The connections of an organization, oldest first. */
+    list(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+    }): Promise<Result<SsoConnectionSummary[]>>;
+    /** Adds a connection. An OIDC client secret is sealed under the current app secret. */
+    create(input: { actor: SsoAppActor } & ConnectionInput): Promise<Result<SsoConnectionSummary>>;
+    /** Changes the fields of a connection. `kind` and `organizationId` never change. */
+    update(
+      input: { actor: SsoAppActor; id: string } & ConnectionFields,
+    ): Promise<Result<SsoConnectionSummary>>;
+    /** Deletes a connection, and takes the route and `enforce` off its domains. */
     delete(input: { actor: SsoAppActor; id: string }): Promise<Result<{ ok: true }>>;
   };
 }
@@ -1107,6 +1135,12 @@ export function createAuth(input: AuthConfig): Auth {
                 verify: appCall(({ actor, ...i }) => verifyDomain(config, actor, i)),
                 update: appCall(({ actor, ...i }) => updateDomain(config, actor, i)),
                 delete: appCall(({ actor, ...i }) => deleteDomain(config, actor, i)),
+              },
+              connections: {
+                list: appCall(({ actor, ...i }) => listConnections(config, actor, i)),
+                create: appCall(({ actor, ...i }) => createConnection(config, actor, i)),
+                update: appCall(({ actor, ...i }) => updateConnection(config, actor, i)),
+                delete: appCall(({ actor, ...i }) => deleteConnection(config, actor, i)),
               },
             } satisfies SsoApi,
           }

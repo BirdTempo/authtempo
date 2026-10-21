@@ -150,6 +150,10 @@ export const BETTER_AUTH_CODES = {
   domain_limit: "DOMAIN_LIMIT",
   // Plan 12d ruling 30. Better Auth's deleteUser has no such limit: core's own name.
   delete_too_large: "DELETE_TOO_LARGE",
+  // Plan 12d Task 3. authtempo's own names until plan 12d Task 14 reads the
+  // codes of @better-auth/sso. The status stays core's.
+  connection_limit: "CONNECTION_LIMIT",
+  second_factor_required: "SECOND_FACTOR_REQUIRED",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

@@ -1413,52 +1413,90 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 
 ## Enterprise SSO
 
-These routes exist when the config sets `sso` (plan 12d). An organization proves an email domain by a TXT record. Every resolver of `sso.dns` must give the value. Each call counts on `sso-manage:user:<userId>`, 30 per 15 minutes, before the guard. Each write writes one audit row.
+These routes exist when the config sets `sso` (plan 12d). An organization proves an email domain by a TXT record. Every resolver of `sso.dns` must give the value. An organization adds an OIDC or a SAML connection to its sign-in provider. Each call counts on `sso-manage:user:<userId>`, 30 per 15 minutes, before the guard. Each write writes one audit row.
+
+The manager guard runs these steps in order. An impersonation session answers `forbidden_rank`, and the router refuses each write to it with `impersonation_session`. A platform operator who passes the operator user guard manages every organization. The operator user guard needs the platform role, a verified address, a second factor, and a fresh session. An operator who fails it and owns no organization of the call gets `operator_required`. Else the user is an owner of the organization: a member whose role holds a static role of the owner rank, else `forbidden_rank`. The owner needs a second factor (`second_factor_required`) and a fresh session (`session_not_fresh`).
 
 <h3 id="get-sso-domains"><code>GET /sso/domains</code></h3>
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. Until plan 12d Task 3, the user is a platform operator who passes the operator user guard: the platform role, a verified address, a second factor, and a fresh session. An impersonation session answers `forbidden_rank` |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
 | Input | Query `{ organizationId }` |
 | Answer | `{ domains }`: each domain with `id`, `organizationId`, `domain`, `record`, `verified`, `verifiedAt`, `checkedAt`, `connectionId`, `enforce`, `includeSubdomains`, and `expiresAt`, oldest first |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh) |
 
 <h3 id="post-sso-domains-add"><code>POST /sso/domains/add</code></h3>
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. Until plan 12d Task 3, the user is a platform operator who passes the operator user guard: the platform role, a verified address, a second factor, and a fresh session. An impersonation session answers `forbidden_rank` |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
 | Input | JSON `{ organizationId, domain }`. The domain is a host name of two labels or more, with no IP literal and no trailing dot. Its proof name `_authtempo-challenge.<domain>` has at most 253 characters |
 | Answer | `{ domain }`. A pending domain holds `record`, the TXT record to publish, and lives 7 days. A second add of a pending domain gives a new value. A verified domain answers as it is |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`domain_limit`](/docs/reference/errors/#domain_limit), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`domain_limit`](/docs/reference/errors/#domain_limit), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-sso-domains-verify"><code>POST /sso/domains/verify</code></h3>
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. Until plan 12d Task 3, the user is a platform operator who passes the operator user guard: the platform role, a verified address, a second factor, and a fresh session. An impersonation session answers `forbidden_rank` |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
 | Input | JSON `{ id }`. It counts on `sso-domain-verify:org:<organizationId>`, 10 per hour, before any resolver |
 | Answer | `{ domain }` with `verified: true`. A domain that another organization holds answers `domain_taken` |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`token_expired`](/docs/reference/errors/#token_expired), [`domain_unverified`](/docs/reference/errors/#domain_unverified), [`domain_taken`](/docs/reference/errors/#domain_taken), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`token_expired`](/docs/reference/errors/#token_expired), [`domain_unverified`](/docs/reference/errors/#domain_unverified), [`domain_taken`](/docs/reference/errors/#domain_taken), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-sso-domains-update"><code>POST /sso/domains/update</code></h3>
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. Until plan 12d Task 3, the user is a platform operator who passes the operator user guard: the platform role, a verified address, a second factor, and a fresh session. An impersonation session answers `forbidden_rank` |
-| Input | JSON `{ id, connectionId?, enforce?, includeSubdomains? }`. `connectionId` takes null only until plan 12d Task 3. `enforce: true` needs a verified domain routed to an enabled connection, else `invalid_body` with a message |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id, connectionId?, enforce?, includeSubdomains? }`. `connectionId` names a connection of the same organization, else `not_found`, or null for no route. `enforce: true` needs a verified domain routed to an enabled connection, else `invalid_body` with a message |
 | Answer | `{ domain }` |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-sso-domains-delete"><code>POST /sso/domains/delete</code></h3>
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. Until plan 12d Task 3, the user is a platform operator who passes the operator user guard: the platform role, a verified address, a second factor, and a fresh session. An impersonation session answers `forbidden_rank` |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
 | Input | JSON `{ id }` |
 | Answer | `{ ok: true }`. The row and its claim go |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="get-sso-connections"><code>GET /sso/connections</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ organizationId }` |
+| Answer | `{ connections }`, oldest first. Each connection holds `id`, `organizationId`, `kind`, `label`, `enabled`, `jit`, `defaultRole`, `mfa`, `scimRoles`, `createdAt`, and `updatedAt`. An OIDC connection holds `oidc`: `issuer`, `clientId`, `scope`, and `endpoints`. A SAML connection holds `saml`: `idpEntityId`, `ssoUrl`, the `notAfter` of each certificate, `subjectAttribute`, `attributes`, `spEntityId`, and `acsUrl`. No answer holds the client secret or its sealed value |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh) |
+
+<h3 id="post-sso-connections-create"><code>POST /sso/connections/create</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ organizationId, kind, label, enabled?, jit?, defaultRole?, mfa?, scimRoles?, issuer?, clientId?, clientSecret?, scope?, endpoints?, idpMetadata?, idpEntityId?, ssoUrl?, certificates?, subjectAttribute?, attributes? }`. An OIDC connection (`sso.oidc`) needs `issuer`, `clientId`, and `clientSecret`. A SAML connection (`sso.saml`) needs `idpEntityId`, `ssoUrl`, and `certificates`. A field of the other kind answers `invalid_body`. A kind that the config does not turn on answers `not_found`. Each rule failure answers `invalid_body` with a message that names the field. The rules: `label` has 1 to 80 characters. `defaultRole` (default `member`) and each value of `scimRoles` name a role that the organization has, below the owner rank and never the platform role. The issuer and each endpoint are https URLs of a public host: no IP literal, no local name, and not the host of `baseURL`. `scope` holds `openid`. `certificates` holds 1 or 2 PEM certificates. `idpMetadata` answers `invalid_body` until plan 12d Task 8 |
+| Answer | `{ connection }`. Core seals the client secret under the current app secret, bound to the connection id. The organization holds at most `sso.limits.connectionsPerOrganization` connections |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`connection_limit`](/docs/reference/errors/#connection_limit), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-connections-update"><code>POST /sso/connections/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id, organizationId?, kind?, label?, enabled?, jit?, defaultRole?, mfa?, scimRoles?, issuer?, clientId?, clientSecret?, scope?, endpoints?, idpMetadata?, idpEntityId?, ssoUrl?, certificates?, subjectAttribute?, attributes? }`. Each field of the create for the kind of the connection takes its rule. `kind` and `organizationId` never change. A new `clientSecret` is sealed again under the current app secret. `enabled: false` answers `invalid_body` while an enforced domain routes to the connection |
+| Answer | `{ connection }` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-connections-delete"><code>POST /sso/connections/delete</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard above must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id }` |
+| Answer | `{ ok: true }`. Each domain routed to the connection loses its route and its `enforce` flag in the same transaction |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 ## OpenAPI document
 

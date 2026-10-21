@@ -49,6 +49,11 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /sso/domains/verify",
   "POST /sso/domains/update",
   "POST /sso/domains/delete",
+  // The connection writes of plan 12d Task 3: a connection adds an IdP that
+  // outlives the impersonation.
+  "POST /sso/connections/create",
+  "POST /sso/connections/update",
+  "POST /sso/connections/delete",
   // The stop is the one way out. A sign-out would end the session with no
   // stop row and keep the actor cookie (ruling 6 for the end-session route).
   "POST /sign-out",
@@ -215,6 +220,9 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   // Plan 12d (ruling 25 N7): a read of the manager holds no secret. The TXT
   // value is public once published. The guard still refuses the session.
   "GET /sso/domains": READ,
+  // The answer holds no client secret and no sealed value (plan 12d Task 3);
+  // a certificate is public. The guard still refuses the session.
+  "GET /sso/connections": READ,
 };
 
 /**

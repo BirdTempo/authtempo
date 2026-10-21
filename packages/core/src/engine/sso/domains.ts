@@ -94,8 +94,8 @@ export interface SsoActMeta {
   userAgent?: string | null;
 }
 
-/** The after hook of one audit row, after the commit (deviation 3 of plan 12d). */
-async function afterAudit(config: ResolvedConfig, row: OperatorAuditRow): Promise<void> {
+/** The after hook of one audit row, after the commit (deviation 3 of plan 12d). The connections call it too. */
+export async function afterAudit(config: ResolvedConfig, row: OperatorAuditRow): Promise<void> {
   await runAfter("operator.afterAction", config.hooks.operator.afterAction, { audit: row }, row.id);
 }
 
@@ -417,8 +417,8 @@ export async function verifyDomainWith(
 
 /**
  * Changes the routing flags of a domain (spec 30 item 2). `connectionId`
- * takes null only until Task 3 of plan 12d, which adds the connections; a
- * string answers `not_found`. `enforce: true` needs a verified domain
+ * names a connection of the same organization, else `not_found`, or null
+ * for no route. `enforce: true` needs a verified domain
  * routed to an enabled connection of the same organization, else
  * `invalid_body`. A flag that refuses every first factor with no way in
  * through SSO would lock the staff out. One `sso_domain_update` audit row
@@ -436,7 +436,6 @@ export async function updateDomain(
 ): Promise<Result<SsoDomainSummary>> {
   const sso = ssoOn(config);
   if (!sso.ok) return sso;
-  if (typeof input.connectionId === "string") return fail("not_found");
   const changes: Partial<Pick<SsoDomainRow, "connectionId" | "enforce" | "includeSubdomains">> = {};
   if (input.connectionId !== undefined) changes.connectionId = input.connectionId;
   if (input.enforce !== undefined) changes.enforce = input.enforce;
@@ -446,6 +445,16 @@ export async function updateDomain(
   const updated = await config.storage.transaction(async (tx): Promise<Result<Updated>> => {
     const held = await tx.findOne("ssoDomain", [{ field: "id", op: "eq", value: input.id }]);
     if (!held) return fail("not_found");
+    // The connection must be of the domain's own organization. Else one organization would
+    // sign in the staff of another.
+    if (
+      typeof changes.connectionId === "string" &&
+      !(await tx.findOne("ssoConnection", [
+        { field: "id", op: "eq", value: changes.connectionId },
+        { field: "organizationId", op: "eq", value: held.organizationId },
+      ]))
+    )
+      return fail("not_found");
     const row: SsoDomainRow = { ...held, ...changes, updatedAt: now };
     if (row.enforce && !(await enforceable(tx, row))) return ENFORCE_REFUSED;
     const n = await tx.update(

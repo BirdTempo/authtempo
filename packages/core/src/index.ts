@@ -192,6 +192,12 @@ export type {
   SocialStart,
   SocialStarted,
 } from "./engine/social.js";
+export type {
+  ConnectionFields,
+  ConnectionInput,
+  SsoConnectionSummary,
+  SsoMfaInput,
+} from "./engine/sso/connections.js";
 export {
   type DnsTxtPort,
   DOH_BODY_MAX,

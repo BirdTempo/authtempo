@@ -1,59 +1,100 @@
 import type { ResolvedConfig } from "../../config.js";
+import type { ErrorCode } from "../../errors.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SessionRow, SSO_AUDIT_ACTIONS, UserRow } from "../../schema.js";
+import { requireFresh } from "../fresh.js";
 import {
   type AuditActor,
   auditDraft,
   type OperatorAuditDraft,
   SSO_AUDIT_REASON,
 } from "../operator/audit.js";
-import { isPlatformOperator, requireOperatorUser } from "../operator/guards.js";
+import { hasSecondFactor, isPlatformOperator, requireOperatorUser } from "../operator/guards.js";
+import { isOwner } from "../organizations.js";
+import { rankOf } from "../ranks.js";
 import type { ResolvedSession } from "../sessions.js";
 
 /**
- * Who manages the SSO setup of an organization (plan 12d deviation 4). The
- * app in process, or a platform operator with the session of the request.
- * Task 3 of plan 12d adds the owner of the organization.
+ * Who manages the SSO setup of an organization (plan 12d deviation 4): an
+ * owner of the organization, a platform operator, or the app in process.
  */
 export type SsoActor =
-  | { kind: "app"; name: string }
-  | { kind: "platform"; user: UserRow; session: SessionRow };
+  | { kind: "owner"; user: UserRow; session: SessionRow }
+  | { kind: "platform"; user: UserRow; session: SessionRow }
+  | { kind: "app"; name: string };
 
 /** One log line per refusal, with the step name and no user id (plan 12d Task 3 form). */
-function refused(step: string): Result<never> {
+function refused(step: string, code: ErrorCode = "forbidden_rank"): Result<never> {
   console.error("authtempo: sso guard refused", step);
-  return fail("forbidden_rank");
+  return fail(code);
 }
 
 /**
- * The manager guard of the SSO routes. Until Task 3 of plan 12d it passes a
- * platform operator only, through `requireOperatorUser`, for every
- * organization. An impersonation session answers `forbidden_rank`: an
- * operator who acts as a user must not add an IdP. Any other caller answers
- * `forbidden_rank`. A platform operator who fails a step of the operator
- * guard gets its answer, `operator_required` or `rate_limited`. The
- * platform read comes first. So a caller who is no operator writes no line
- * of the operator guard and spends no count of its limiter.
- * `organizationId` is the organization of the act; Task 3 reads it for the
- * owner form.
+ * True when the user has a member row of the organization whose role parts
+ * hold a static role of the owner rank (the rule of plan 12k). `rankOf`
+ * reads only the static ranks of the config, and a dynamic role never
+ * reaches the owner rank.
+ */
+async function ownsOrganization(
+  config: ResolvedConfig,
+  userId: string,
+  organizationId: string,
+): Promise<boolean> {
+  const o = config.organizations;
+  if (!o) return false;
+  const member = await config.storage.findOne("member", [
+    { field: "organizationId", op: "eq", value: organizationId },
+    { field: "userId", op: "eq", value: userId },
+  ]);
+  return member !== null && isOwner(o, rankOf(o.ranks, member.role));
+}
+
+/**
+ * The manager guard of the SSO routes (plan 12d Task 3). The steps, in
+ * this order:
+ *
+ * 1. An impersonation session answers `forbidden_rank`: an operator who
+ *    acts as a user must not add an IdP.
+ * 2. A platform operator who passes `requireOperatorUser` is the actor
+ *    `platform`, for every organization. The platform read comes first.
+ *    So a caller who is no operator writes no line of the operator guard
+ *    and spends no count of its limiter. An operator who fails the operator
+ *    guard and owns no organization of the act gets that guard's answer,
+ *    `operator_required` or `rate_limited`.
+ * 3. Else the user owns the organization, else `forbidden_rank`.
+ * 4. The address is verified, else `email_unverified`. No flow of core
+ *    makes a member with an unverified address, so this is a second guard.
+ * 5. A second factor has a method, else `second_factor_required`.
+ * 6. The session is fresh, else `session_not_fresh`.
+ *
+ * Each refusal of this guard writes one log line with the step name and no
+ * user id. The actor of steps 3 to 6 is `owner`.
  */
 export async function requireSsoManager(
   config: ResolvedConfig,
   resolved: ResolvedSession,
-  _organizationId: string,
+  organizationId: string,
 ): Promise<Result<SsoActor>> {
-  if (resolved.session.actorId !== null) return refused("impersonation");
-  if (!(await isPlatformOperator(config, resolved.user.id))) return refused("rank");
-  const operator = await requireOperatorUser(config, resolved, "sso");
-  if (!operator.ok) return operator;
-  return ok({ kind: "platform", user: operator.value.user, session: operator.value.session });
+  const { user, session } = resolved;
+  if (session.actorId !== null) return refused("impersonation");
+  if (await isPlatformOperator(config, user.id)) {
+    const operator = await requireOperatorUser(config, resolved, "sso");
+    if (operator.ok)
+      return ok({ kind: "platform", user: operator.value.user, session: operator.value.session });
+    if (!(await ownsOrganization(config, user.id, organizationId))) return operator;
+  } else if (!(await ownsOrganization(config, user.id, organizationId))) return refused("rank");
+  if (!user.emailVerified) return refused("email", "email_unverified");
+  if (!(await hasSecondFactor(config, user.id)))
+    return refused("second_factor", "second_factor_required");
+  if (!requireFresh(config, session).ok) return refused("fresh", "session_not_fresh");
+  return ok({ kind: "owner", user, session });
 }
 
 /**
  * The audit draft of one SSO act (plan 12d deviation 3). The reason is the
- * fixed text of the action. The app is named by its name, and a platform
- * operator by the user id. An app name outside the rule of `checkActor`
- * answers `invalid_body`.
+ * fixed text of the action. The app is named by its name, and an owner or
+ * a platform operator by the user id. An app name outside the rule of
+ * `checkActor` answers `invalid_body`.
  */
 export function ssoDraft(
   actor: SsoActor,

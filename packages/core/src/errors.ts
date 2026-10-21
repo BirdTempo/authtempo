@@ -91,6 +91,10 @@ export const ERRORS = {
   domain_limit: 409,
   // plan 12d ruling 30: an account delete takes at most IN_CHUNK solo organizations at once
   delete_too_large: 409,
+  // plan 12d Task 3: the organization holds its limit of SSO connections, and the
+  // SSO manager guard needs a second factor of the owner.
+  connection_limit: 409,
+  second_factor_required: 403,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

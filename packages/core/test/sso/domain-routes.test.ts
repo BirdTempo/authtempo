@@ -213,8 +213,14 @@ describe("the domain routes (plan 12d Task 2b)", () => {
       401,
       { error: "unauthorized" },
     ]);
-    // The owner of the organization manages no domain until Task 3 of plan 12d.
+    // The owner passes the owner step of the guard (plan 12d Task 3), and has no second factor.
     expect(await send(w, "POST", "/sso/domains/add", body, w.owner.token)).toEqual([
+      403,
+      { error: "second_factor_required" },
+    ]);
+    // A user who is no operator and no owner gets forbidden_rank.
+    const stranger = await verifiedSession(w.auth, "stranger@example.com");
+    expect(await send(w, "POST", "/sso/domains/add", body, stranger.token)).toEqual([
       403,
       { error: "forbidden_rank" },
     ]);

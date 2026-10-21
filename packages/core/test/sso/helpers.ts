@@ -1,6 +1,7 @@
 import type { AuthConfig, SsoConfig } from "../../src/config.js";
 import { createOrganization } from "../../src/engine/organizations.js";
 import type { DnsTxtPort } from "../../src/engine/sso/dns.js";
+import { addDomain, verifyDomain } from "../../src/engine/sso/domains.js";
 import { createRouter } from "../../src/http/router.js";
 import { coreRoutes } from "../../src/http/routes/index.js";
 import { makeAuth } from "../helpers.js";
@@ -73,4 +74,24 @@ export async function seedOrganization(
   const made = await createOrganization(auth.config, { user: owner, slug, name: slug });
   if (!made.ok) throw new Error(made.code);
   return made.value.organization.id;
+}
+
+/**
+ * A domain verified through both resolvers of `ssoAuth`, the only way to a
+ * claim: the add, the record on both resolvers, then the verify.
+ */
+export async function verifiedDomain(
+  w: ReturnType<typeof ssoAuth>,
+  organizationId: string,
+  domain = "acme.example",
+): Promise<string> {
+  const added = await addDomain(w.config, SSO_APP, { organizationId, domain });
+  if (!added.ok) throw new Error(added.code);
+  const record = added.value.record;
+  if (record === null) throw new Error("no record");
+  w.answers.a[record.name] = [record.value];
+  w.answers.b[record.name] = [record.value];
+  const verified = await verifyDomain(w.config, SSO_APP, { id: added.value.id });
+  if (!verified.ok) throw new Error(verified.code);
+  return added.value.id;
 }

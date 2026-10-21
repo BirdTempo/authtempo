@@ -23,6 +23,7 @@ import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../src/eng
 import { requestReauthCode } from "../src/engine/reauth.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { createSession } from "../src/engine/sessions.js";
+import { createConnection } from "../src/engine/sso/connections.js";
 import { addDomain } from "../src/engine/sso/domains.js";
 import { addTeamMember, createTeam } from "../src/engine/teams.js";
 import { API_TOKEN_CAP, createApiToken } from "../src/engine/tokens.js";
@@ -180,6 +181,17 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /sso/domains/verify": { id: "$domain" },
   "POST /sso/domains/update": { id: "$domain", includeSubdomains: true },
   "POST /sso/domains/delete": { id: "$domain" },
+  // Plan 12d Task 3: `$connection` names a connection of the world.
+  "POST /sso/connections/create": {
+    organizationId: "$org",
+    kind: "oidc",
+    label: "Acme",
+    issuer: "https://login.idp.example",
+    clientId: "acme",
+    clientSecret: "acme-secret",
+  },
+  "POST /sso/connections/update": { id: "$connection", label: "Acme" },
+  "POST /sso/connections/delete": { id: "$connection" },
 };
 
 /** The query of a GET whose route refuses a request with none. A `$` value is a placeholder too. */
@@ -193,6 +205,7 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /organizations/teams/members": { teamId: "$team" },
   "GET /organizations/tokens": { organizationId: "$org" },
   "GET /sso/domains": { organizationId: "$org" },
+  "GET /sso/connections": { organizationId: "$org" },
 };
 
 /** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
@@ -212,6 +225,7 @@ const UNFILLED: Fills = {
   $org: "o1",
   $team: "t1",
   $domain: "d1",
+  $connection: "c1",
 };
 
 /** `value` with its placeholder filled from `fills`, or from `UNFILLED`. */
@@ -327,8 +341,8 @@ function world(extra: Partial<AuthConfig> = {}) {
       users: true,
     },
     account: { deleteConfirm: { ttlMinutes: 60 } },
-    // The domain routes of plan 12d. No family of this file reaches a resolver.
-    sso: { dns: [{ name: "none", txt: async () => [] }] },
+    // The domain and connection routes of plan 12d. No family of this file reaches a resolver.
+    sso: { oidc: true, dns: [{ name: "none", txt: async () => [] }] },
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.
     trustedOrigins: [BASE_URL],
     ...extra,
@@ -564,10 +578,26 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
         },
       ),
     );
+    // A connection of the organization, for the connection routes with an id (plan 12d Task 3).
+    const connection = must(
+      await createConnection(
+        config,
+        { kind: "app", name: "route-codes" },
+        {
+          organizationId: org.organization.id,
+          kind: "oidc",
+          label: "Acme",
+          issuer: "https://login.idp.example",
+          clientId: "acme",
+          clientSecret: "acme-secret",
+        },
+      ),
+    );
     const results = await probe(w, routes, () => w.cookie(carol.token), {
       $org: org.organization.id,
       $team: team.id,
       $domain: domain.id,
+      $connection: connection.id,
     });
     expect(unlike(results, "forbidden_rank", 403)).toEqual({});
   });

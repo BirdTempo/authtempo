@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigError, resolveConfig } from "../../src/config.js";
 import { deleteOrganization } from "../../src/engine/organizations.js";
+import { passwordSignIn } from "../../src/engine/password.js";
+import { createConnection } from "../../src/engine/sso/connections.js";
 import {
   addDomain,
   claimingDomain,
@@ -18,6 +20,8 @@ import { createMemoryAdapter } from "../../src/storage/memory.js";
 import { meterOf } from "../../src/storage/meter.js";
 import type { StorageAdapter } from "../../src/storage/port.js";
 import { BASE_URL } from "../helpers.js";
+import { FAST, signUpAndVerify } from "../password-helpers.js";
+import { PASSWORD } from "../totp-helpers.js";
 import { fakeDns, SSO_APP, seedOrganization, ssoAuth } from "./helpers.js";
 
 beforeEach(() => {
@@ -559,6 +563,96 @@ describe("the SSO domains", () => {
       { verified: false, verifiedAt: null, checkedAt: null, enforce: false },
     ]);
     expect(await auditOf(w, "sso_enforce_off")).toHaveLength(2);
+  });
+
+  it("turns enforce off by the operator secret with an audit row", async () => {
+    const SSO_SECRET = "operator-sso-0123456789abcdef-012345678";
+    const w = ssoAuth({
+      password: { hash: FAST, uniformSignUp: false },
+      sso: { oidc: true },
+      operator: {
+        secrets: [{ name: "sso", secretHash: await sha256Hex(SSO_SECRET), scopes: ["sso"] }],
+      },
+    });
+    const org = await seedOrganization(w);
+    const connection = await createConnection(w.config, SSO_APP, {
+      organizationId: org,
+      kind: "oidc",
+      label: "Acme IdP",
+      issuer: "https://login.idp.example/acme",
+      clientId: "acme",
+      clientSecret: "acme-secret-0123456789",
+    });
+    if (!connection.ok) throw new Error(connection.code);
+    const d = await verified(w, org);
+    const routed = await updateDomain(w.config, SSO_APP, {
+      id: d.id,
+      connectionId: connection.value.id,
+      enforce: true,
+    });
+    expect(routed.ok && routed.value.enforce).toBe(true);
+    const res = await w.handle(
+      new Request(`${BASE_URL}/auth/operator/sso/enforce-off`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Operator ${SSO_SECRET}`,
+        },
+        body: JSON.stringify({ domainId: d.id, reason: "The IdP is down, ticket 12" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const row = await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: d.id }]);
+    // Only enforce turns off: the claim and the route stay.
+    expect([row?.enforce, row?.connectionId, row?.claimedDomain]).toEqual([
+      false,
+      connection.value.id,
+      "acme.example",
+    ]);
+    expect((await auditOf(w, "sso_enforce_off")).map((a) => [a.actorId, a.reason])).toEqual([
+      ["sso", "The IdP is down, ticket 12"],
+    ]);
+    // A password sign-in of the domain opens a session (Task 5 adds the refusal before the override).
+    await signUpAndVerify(w, "ada@acme.example", PASSWORD);
+    const signIn = await passwordSignIn(w.config, {
+      email: "ada@acme.example",
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    expect(signIn.ok && "token" in signIn.value).toBe(true);
+  });
+
+  it("refuses a connection of another organization as the route", async () => {
+    const w = ssoAuth({ sso: { oidc: true } });
+    const acme = await seedOrganization(w, "acme");
+    const other = await seedOrganization(w, "other");
+    const input = (organizationId: string) => ({
+      organizationId,
+      kind: "oidc" as const,
+      label: "IdP",
+      issuer: "https://login.idp.example/x",
+      clientId: "x",
+      clientSecret: "x-secret-0123456789",
+    });
+    const theirs = await createConnection(w.config, SSO_APP, input(other));
+    const mine = await createConnection(w.config, SSO_APP, input(acme));
+    if (!theirs.ok || !mine.ok) throw new Error("no connection");
+    const d = await added(w, acme);
+    expect(
+      await updateDomain(w.config, SSO_APP, { id: d.id, connectionId: theirs.value.id }),
+    ).toEqual({ ok: false, code: "not_found", status: 404 });
+    expect(await updateDomain(w.config, SSO_APP, { id: d.id, connectionId: "c-none" })).toEqual({
+      ok: false,
+      code: "not_found",
+      status: 404,
+    });
+    const row = await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: d.id }]);
+    expect(row?.connectionId).toBeNull();
+    expect(await auditOf(w, "sso_domain_update")).toEqual([]);
+    // A connection of its own organization routes the domain.
+    const r = await updateDomain(w.config, SSO_APP, { id: d.id, connectionId: mine.value.id });
+    expect(r.ok && r.value.connectionId).toBe(mine.value.id);
   });
 
   it("stops the limiter before the resolvers", async () => {

@@ -2,6 +2,13 @@ import type { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
 import { renewedSessionCookie, sessionFromRequest } from "../../engine/sessions.js";
 import {
+  connectionOrganization,
+  createConnection,
+  deleteConnection,
+  listConnections,
+  updateConnection,
+} from "../../engine/sso/connections.js";
+import {
   addDomain,
   deleteDomain,
   domainOrganization,
@@ -12,7 +19,16 @@ import {
 import { requireSsoManager, type SsoActor } from "../../engine/sso/guard.js";
 import { fail, ok, type Result } from "../../result.js";
 import { isJsonRequest } from "../body.js";
-import { domainAddBody, domainIdBody, domainListQuery, domainUpdateBody } from "../contract/sso.js";
+import {
+  connectionCreateBody,
+  connectionIdBody,
+  connectionListQuery,
+  connectionUpdateBody,
+  domainAddBody,
+  domainIdBody,
+  domainListQuery,
+  domainUpdateBody,
+} from "../contract/sso.js";
 import { json, readJson, respond } from "../json.js";
 import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
@@ -35,12 +51,13 @@ function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
 }
 
 /**
- * The SSO manager routes of the domain proof (plan 12d Task 2, spec 30
- * item 2). They exist when `sso` is on. Each takes a session, then counts on
- * `sso-manage:user:<userId>`, then reads its input, then runs the manager
- * guard for the organization of the act. A route with a domain id reads the
- * organization of the row first: an id that names no row answers
- * `not_found`. A write takes JSON only, so a browser sends a preflight.
+ * The SSO manager routes of the domain proof and the connections (plan 12d
+ * Tasks 2 and 3, spec 30 items 2 and 5). They exist when `sso` is on. Each
+ * takes a session, then counts on `sso-manage:user:<userId>`, then reads
+ * its input, then runs the manager guard for the organization of the act.
+ * A route with a domain or a connection id reads the organization of the
+ * row first: an id that names no row answers `not_found`. A write takes
+ * JSON only, so a browser sends a preflight.
  */
 export function ssoRoutes(config: ResolvedConfig): Route[] {
   if (!config.sso) return [];
@@ -82,6 +99,7 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
     async (ctx: RouteContext): Promise<Result<T>> =>
       isJsonRequest(ctx.request) ? readJson(ctx.request, schema) : fail("invalid_body");
   const byId = (input: { id: string }) => domainOrganization(config, input.id);
+  const byConnection = (input: { id: string }) => connectionOrganization(config, input.id);
   const post = <T, V, P extends RoutePath<"POST">>(
     path: P,
     schema: z.ZodType<T>,
@@ -142,6 +160,40 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       domainIdBody,
       byId,
       (actor, b, ctx) => deleteDomain(config, actor, { ...b, ...meta(ctx) }),
+      (value) => json(value),
+    ),
+    {
+      method: "GET",
+      path: "/sso/connections",
+      key: "GET /sso/connections",
+      handler: (ctx) =>
+        managed(
+          ctx,
+          async (c) => readQuery(c.url, connectionListQuery),
+          async (q) => q.organizationId,
+          (actor, q) => listConnections(config, actor, q),
+          (connections) => json({ connections }),
+        ),
+    },
+    post(
+      "/sso/connections/create",
+      connectionCreateBody,
+      async (b) => b.organizationId,
+      (actor, b, ctx) => createConnection(config, actor, b, meta(ctx)),
+      (connection) => json({ connection }),
+    ),
+    post(
+      "/sso/connections/update",
+      connectionUpdateBody,
+      byConnection,
+      (actor, b, ctx) => updateConnection(config, actor, b, meta(ctx)),
+      (connection) => json({ connection }),
+    ),
+    post(
+      "/sso/connections/delete",
+      connectionIdBody,
+      byConnection,
+      (actor, b, ctx) => deleteConnection(config, actor, b, meta(ctx)),
       (value) => json(value),
     ),
   ];
