@@ -613,7 +613,7 @@ The options:
 | Option | On authtempo |
 | --- | --- |
 | `authtempo.platformOrganization` | Required with `admin`, refused without it. The slug of the platform organization. The app's `auth.tempo.api.operator.createAdmin` creates it with the first operator (see "Admins from Better Auth"). |
-| `adminRoles` | One rank of `viewer`, `member`, `admin`, and `owner`; default `admin`. It is the platform role. A list with two ranks, or a role that is not a rank, is refused. |
+| `adminRoles` | One role of the organization plugin, default `admin`: a key of its `roles`, or `member`, `admin`, or `owner` with no `roles` (plan 12k). It is the platform role. A list with two roles, or a name that is no such role, is refused. |
 | `impersonationSessionDuration` | Seconds, a whole number of minutes from 5 to 240; default 3600. It is core's `operator.impersonation.ttlMinutes`. Core mails the user a notice at each start. |
 | `defaultRole` | `"user"` only, Better Auth's default. |
 | `allowImpersonatingAdmins` | `false` only: core never lets an operator impersonate a platform operator. |

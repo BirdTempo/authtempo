@@ -22,7 +22,7 @@ import {
   type CompatPlugin,
   type OrganizationHookOptions,
 } from "../types.js";
-import { adminRolesOf, COMPAT_RANKS } from "./admin.js";
+import { adminRolesOf } from "./admin.js";
 
 export interface OptionCheck {
   /** `<path>: <reason>`, sorted. Any entry stops the construction. */
@@ -212,13 +212,7 @@ const ADMIN_RULES: Record<string, Rule> = {
       refuse(out, p, "expected a string or a list of strings");
       return;
     }
-    const roles = adminRolesOf({ adminRoles: v as string | string[] });
-    if (roles.length !== 1 || !Object.hasOwn(COMPAT_RANKS, roles[0] ?? ""))
-      refuse(
-        out,
-        p,
-        `core has one platform role: name exactly one rank of ${Object.keys(COMPAT_RANKS).join(", ")} (spec section 26 item 1)`,
-      );
+    // checkOptions holds the one role to the roles of the organization plugin (plan 12k).
   },
   impersonationSessionDuration: seconds(
     60,
@@ -1301,6 +1295,24 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
         "plugins[admin]",
         "needs authtempo.platformOrganization, the slug of the platform organization (spec section 26 item 1)",
       );
+    // The platform role is one role of the organization plugin: a key of
+    // roles, or one of Better Auth's three default roles (plan 12k maps them).
+    const admin = pluginOf(options, "admin");
+    const wanted = admin?.options.adminRoles;
+    const shaped =
+      wanted === undefined ||
+      typeof wanted === "string" ||
+      (Array.isArray(wanted) && wanted.every((r) => typeof r === "string"));
+    if (org && admin && shaped) {
+      const names = Object.keys(plainObject(org.roles) ? org.roles : DEFAULT_ROLE_RANKS);
+      const roles = adminRolesOf(admin.options);
+      if (roles.length !== 1 || !names.includes(roles[0] ?? ""))
+        refuse(
+          out,
+          "plugins[admin].adminRoles",
+          `core has one platform role: name exactly one role of ${names.join(", ")} (spec section 26 item 1)`,
+        );
+    }
   } else if (platformOrganization !== undefined)
     refuse(out, "authtempo.platformOrganization", "only with plugins[admin]");
   if (pluginOf(options, "expo") && appSchemes(options).length === 0) {

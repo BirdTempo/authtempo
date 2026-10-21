@@ -43,6 +43,7 @@ async function seed(db: StorageAdapter) {
       ip: null,
       userAgent: null,
       activeOrganizationId: null,
+      activeTeamId: null,
       freshAt: at,
       actorId: null,
       createdAt: at,

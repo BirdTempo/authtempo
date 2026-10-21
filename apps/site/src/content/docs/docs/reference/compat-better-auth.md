@@ -164,7 +164,7 @@ Better Auth's `admin` plugin runs on core's operator tools (spec section 26). A 
 | Option | On authtempo |
 | --- | --- |
 | `authtempo.platformOrganization` | Required with `admin`, refused without it. The slug of the platform organization. |
-| `adminRoles` | One rank of `viewer`, `member`, `admin`, and `owner`; default `admin`. It is the platform role. |
+| `adminRoles` | One role of the organization plugin, default `admin`: a key of its `roles`, or `member`, `admin`, or `owner` with no `roles`. It is the platform role. |
 | `impersonationSessionDuration` | Seconds, a whole number of minutes from 5 to 240; default 3600. |
 | `defaultRole` | `"user"` only. |
 | `allowImpersonatingAdmins` | `false` only. |

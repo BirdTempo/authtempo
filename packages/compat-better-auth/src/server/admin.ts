@@ -27,19 +27,6 @@ export { ADMIN_NOT_SUPPORTED };
  * names section 26.
  */
 
-/**
- * The ranks of core's organizations in this package. `mapOptions` passes
- * them to core, and the admin check reads them, so the platform role is
- * always one of them. They are Better Auth's organization roles plus
- * core's `viewer`.
- */
-export const COMPAT_RANKS: Readonly<Record<string, number>> = Object.freeze({
-  viewer: 1,
-  member: 2,
-  admin: 3,
-  owner: 4,
-});
-
 /** Better Auth's default `adminRoles` (dist/plugins/admin/admin.mjs, read 2026-10-21). */
 const DEFAULT_ADMIN_ROLES = ["admin"];
 /** Better Auth's role of a user who is not an admin: `defaultRole`, which the shim refuses to change. */

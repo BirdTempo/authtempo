@@ -94,7 +94,15 @@ describe("the admin plugin options (plan 12f)", () => {
       role: "owner",
       slug: "platform-co",
     });
-    expect(org?.ranks).toEqual({ viewer: 1, member: 2, admin: 3, owner: 4 });
+    // Plan 12k maps Better Auth's roles, so core takes roles, not ranks: the three default roles.
+    expect(org?.ranks).toBeUndefined();
+    expect(
+      Object.fromEntries(Object.entries(org?.roles ?? {}).map(([n, r]) => [n, r.rank])),
+    ).toEqual({
+      member: 1,
+      admin: 2,
+      owner: 3,
+    });
     expect(m.config.operator).toEqual({ users: true, impersonation: { ttlMinutes: 15 } });
     expect(m.platformRole).toBe("owner");
     // Better Auth's defaults: adminRoles ["admin"], one hour of impersonation.
@@ -147,7 +155,7 @@ describe("the admin plugin options (plan 12f)", () => {
       expect({ adminRoles, lines: refusalsAt(options({ adminRoles }), "plugins[admin]") }).toEqual({
         adminRoles,
         lines: [
-          "plugins[admin].adminRoles: core has one platform role: name exactly one rank of viewer, member, admin, owner (spec section 26 item 1)",
+          "plugins[admin].adminRoles: core has one platform role: name exactly one role of member, admin, owner (spec section 26 item 1)",
         ],
       });
     for (const impersonationSessionDuration of [60, 90, 330, 14_460, 3600.5])
@@ -707,6 +715,7 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
         userId: "u1",
         expiresAt: "2026-01-08T00:00:00.000Z",
         activeOrganizationId: null,
+        activeTeamId: null,
       },
       user: {
         id: "u1",

@@ -63,7 +63,14 @@ function toClientUser(u: PublicSession["user"]): ClientUser {
 }
 /** The JSON of the shim's `/get-session` answer: Better Auth's session with the admin fields. */
 interface AdminSessionJSON {
-  session: { id: string; userId: string; expiresAt: string; activeOrganizationId: string | null };
+  session: {
+    id: string;
+    userId: string;
+    expiresAt: string;
+    activeOrganizationId: string | null;
+    /** The active team (plan 12k): the server's toAdminSession holds it. */
+    activeTeamId: string | null;
+  };
   user: ClientUser & {
     role: string;
     banned: boolean;
@@ -85,6 +92,7 @@ function toAdminClientSession(p: AdminSessionJSON): {
       userId: p.session.userId,
       expiresAt: new Date(p.session.expiresAt),
       activeOrganizationId: p.session.activeOrganizationId,
+      activeTeamId: p.session.activeTeamId,
     },
     user: {
       ...toClientUser(u),
