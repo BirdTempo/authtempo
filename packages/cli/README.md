@@ -108,15 +108,23 @@ and copies no compat file at or below that version. A file whose text the
 folder holds is not copied again. A copy above that version with another
 text stops the run with exit 2 before any write, and the line names the
 file. The copied files hold Better Auth's default table and column names.
-The shipped 0001, 0006, 0007, and 0009 fail on other names with `no such
-table`. An app with other names writes its own nine files. Its 0001 comes from
+The shipped 0001, 0006, 0007, 0009, and 0010 fail on other names with
+`no such table`. An app with other names writes its own ten files. It copies
+0002 to 0005 and 0008 as shipped. It writes 0001 from
 `storage.migrationSql()`, or from `storage.migrationSql("before-1.7")` for
-tables from before 1.7. Its 0002 to 0005 and 0008 are as shipped. Its 0006 comes
-from `compatMigration0006Sql("sqlite", storage.names)`, 0007 from
-`compatMigration0007Sql("sqlite", storage.names)`, and 0009 from
-`compatMigration0009Sql("sqlite", storage.names)`. It applies
-them with `wrangler d1 migrations apply <database>` before this command.
-Then the compat version is 9, and the command copies nothing. Without `--remote`, the run is on
+tables from before 1.7. It writes 0006 from
+`compatMigration0006Sql("sqlite", storage.names)`, and 0007, 0009, and 0010
+from `compatMigration0007Sql`, `compatMigration0009Sql`, and
+`compatMigration0010Sql` with the same arguments. For tables from before
+1.7, `compatMigration0010Sql` takes `"before-1.7"` as a third argument.
+Tables that hold `session.activeTeamId` and `invitation.teamId` already
+(Better Auth's `teams` option) need an own 0010, also with the default
+names. It is the 0010 text without its two `ADD COLUMN` lines of `session`
+and `invitation`. Without it, the 0010 fails with
+`duplicate column name: activeTeamId`. The
+app applies its own files with `wrangler d1 migrations apply <database>`
+before this command. Then the compat version is 10, and the command copies
+nothing. Without `--remote`, the run is on
 the local database of `wrangler dev`. wrangler records each applied file in
 its table `d1_migrations` (`migrations_table`).
 

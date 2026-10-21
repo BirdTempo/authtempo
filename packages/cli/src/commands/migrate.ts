@@ -176,8 +176,8 @@ function compatVersionOf(raw: string | null): number {
  * wrangler would apply it again, or fail on it at a worse moment (plan 11c
  * deferral, closed by spec 23 item 11). An app with other table names
  * writes its own compat files and applies them with wrangler first. Then the
- * compat version is 7, and this plan copies nothing (the final review of
- * plan 11f, m1).
+ * compat version is the count of the package's files (10 since plan 12k), and
+ * this plan copies nothing (the final review of plan 11f, m1).
  */
 export function planCompatCopy(
   ctx: Ctx,
