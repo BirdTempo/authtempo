@@ -246,13 +246,20 @@ describe("the OIDC sign-in of an SSO connection (plan 12d Task 4)", () => {
         issuer: issuerOf("acme"),
         claims: { sub: "a-1", nonce: s.nonce },
       };
-    // One millisecond before the end the state passes, and the flow reaches the resolution of Task 5.
+    // One millisecond before the end the state passes, and the flow reaches the resolution of
+    // Task 5: the token holds no address, so the answer is email_required.
     w.clock.advance(10 * 60_000 - 1);
-    await callback(w, a, { code: `token-${inTime.nonce}`, state: inTime.state }, inTime.bind);
+    const passed = await callback(
+      w,
+      a,
+      { code: `token-${inTime.nonce}`, state: inTime.state },
+      inTime.bind,
+    );
+    expect(authError(passed)).toBe("email_required");
     w.clock.advance(1);
     const res = await callback(w, a, { code: `token-${late.nonce}`, state: late.state }, late.bind);
     expect(authError(res)).toBe("sso_failed");
-    expect(stepsOf(a)).toEqual(["resolve", "state"]);
+    expect(stepsOf(a)).toEqual(["state"]);
     // The late state is not spent: the refusal wrote nothing.
     const row = await w.storage.findOne("verification", [
       { field: "valueHash", op: "eq", value: await sha256Hex(late.state) },
@@ -517,11 +524,12 @@ describe("the byte caps of the IdP answers of a connection (review m2 of plan 12
         claims: { sub: "a-1", nonce: s.nonce },
       };
       answer(code, bytes);
-      expect(authError(await callback(w, a, { code, state: s.state }, s.bind))).toBe("sso_failed");
-      steps.push(stepsOf(a).at(-1));
+      steps.push(authError(await callback(w, a, { code, state: s.state }, s.bind)));
     }
-    // 65537 bytes fail at the exchange; 65536 bytes reach the resolution of Task 5.
-    expect(steps).toEqual(["exchange", "resolve"]);
+    // 65537 bytes fail at the exchange; 65536 bytes reach the resolution of Task 5, which
+    // answers email_required for a token with no address.
+    expect(steps).toEqual(["sso_failed", "email_required"]);
+    expect(stepsOf(a)).toEqual(["exchange"]);
   });
 
   it("reads the JWKS through sso.fetch, 65536 bytes and not 65537", async () => {
@@ -532,14 +540,17 @@ describe("the byte caps of the IdP answers of a connection (review m2 of plan 12
       w.jwks.bytes = bytes;
       const s = await start(w, a);
       const code = await w.sign(s.nonce);
-      expect(authError(await callback(w, a, { code, state: s.state }, s.bind))).toBe("sso_failed");
-      steps.push(stepsOf(a).at(-1));
+      steps.push([authError(await callback(w, a, { code, state: s.state }, s.bind)), stepsOf(a)]);
       // The JWKS read went through sso.fetch, never through the fetch of the seam.
       expect(w.seamCalls).toEqual([]);
       expect(w.calls.filter((c) => c.url === endpointsOf("acme").jwksUrl)).toHaveLength(1);
     }
-    // 65537 bytes fail at the ID token; 65536 bytes reach the resolution of Task 5.
-    expect(steps).toEqual(["id_token", "resolve"]);
+    // 65537 bytes fail at the ID token; 65536 bytes reach the resolution of Task 5, which
+    // answers email_required for a token with no address.
+    expect(steps).toEqual([
+      ["sso_failed", ["id_token"]],
+      ["email_required", []],
+    ]);
   });
 });
 
@@ -632,10 +643,13 @@ describe("the key sets of the JWKS reads of a connection (review of plan 12d Tas
     for (let i = 0; i < 2; i++) {
       const s = await start(w, a);
       const code = await w.sign(s.nonce);
-      expect(authError(await callback(w, a, { code, state: s.state }, s.bind))).toBe("sso_failed");
+      // The resolution of Task 5 answers email_required: the token holds no address.
+      expect(authError(await callback(w, a, { code, state: s.state }, s.bind))).toBe(
+        "email_required",
+      );
     }
     // Both reach the resolution of Task 5, so both ID tokens pass the key set.
-    expect(stepsOf(a)).toEqual(["resolve", "resolve"]);
+    expect(stepsOf(a)).toEqual([]);
     expect(w.calls.filter((c) => c.url === endpointsOf("acme").jwksUrl)).toHaveLength(1);
   });
 });
