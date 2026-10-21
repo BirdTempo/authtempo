@@ -238,9 +238,10 @@ async function runDelete(
   const ended = endedList(config);
   const stops = impersonationStops(config, "account_delete");
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
-  // Before any write (ruling 30 of plan 12d): more solo organizations than
-  // one set-based delete takes answer delete_too_large, also on D1, where
-  // the undo of a write is no lock. One read of the memberships decides:
+  // Before any write (ruling 30 of plan 12d), more solo organizations than
+  // one set-based delete takes answer delete_too_large. The check is also
+  // for D1, where the undo of a write is no lock. One read of the
+  // memberships decides:
   // with at most IN_CHUNK of them, no count of solo organizations passes it.
   // The rule runs again inside the transaction, after the lock of the user.
   const memberships = await config.storage.findMany("member", [

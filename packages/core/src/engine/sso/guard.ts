@@ -32,7 +32,7 @@ function refused(step: string): Result<never> {
  * operator who acts as a user must not add an IdP. Any other caller answers
  * `forbidden_rank`. A platform operator who fails a step of the operator
  * guard gets its answer, `operator_required` or `rate_limited`. The
- * platform read comes first, so a caller who is no operator writes no line
+ * platform read comes first. So a caller who is no operator writes no line
  * of the operator guard and spends no count of its limiter.
  * `organizationId` is the organization of the act; Task 3 reads it for the
  * owner form.

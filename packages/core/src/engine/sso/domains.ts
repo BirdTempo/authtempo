@@ -18,8 +18,8 @@ import { type SsoActor, ssoDraft } from "./guard.js";
 
 /**
  * The email domains that an organization proves by DNS (plan 12d, spec 30
- * items 2 to 4): the domain form, the proof, the recheck, the routing flags,
- * and the operator's override of `enforce`.
+ * items 2 to 4). The file holds the domain form, the proof, the recheck, the
+ * routing flags, and the operator's override of `enforce`.
  */
 
 /** The label of the TXT record that proves a domain. */
@@ -157,8 +157,8 @@ export function normalizeDomain(raw: unknown): string | null {
  * and each within `PROVIDER_TIMEOUT_MS`. A string of the list must equal a
  * value exactly: no trim, no case fold. A port joins the parts of one TXT
  * string itself (`DnsTxtPort`). A null, a throw, a timeout, or a list with
- * no value is a failure, and the first failure ends the check with one log
- * line that names the port and the domain, never the challenge. `meter`
+ * no value is a failure. The first failure ends the check with one log
+ * line. The line names the port and the domain, never the challenge. `meter`
  * counts each port call as one call of the invocation (a DoH fetch is a
  * subrequest).
  */
@@ -226,7 +226,8 @@ export async function domainOrganization(
  * same domain gets a new challenge and a new expiry: a retry. A verified
  * row answers as it is and writes nothing. A new row and a retry write one
  * `sso_domain_add` audit row. A parallel add of the same domain answers
- * `conflict`.
+ * `conflict`. A retry that updates no row answers the row as it is now: a
+ * parallel verify claimed it, or a parallel delete removed it (`conflict`).
  */
 export async function addDomain(
   config: ResolvedConfig,
@@ -259,7 +260,7 @@ export async function addDomain(
       let row: SsoDomainRow;
       if (held) {
         row = { ...held, challenge, expiresAt, updatedAt: now };
-        await tx.update(
+        const n = await tx.update(
           "ssoDomain",
           [
             { field: "id", op: "eq", value: held.id },
@@ -267,6 +268,13 @@ export async function addDomain(
           ],
           { challenge, expiresAt, updatedAt: now },
         );
+        // The row changed after the read: no new challenge and no audit row.
+        if (n === 0) {
+          const current = await tx.findOne("ssoDomain", [
+            { field: "id", op: "eq", value: held.id },
+          ]);
+          return current ? ok({ row: current, audit: null }) : fail("conflict");
+        }
       } else {
         const limit = sso.value.limits.domainsPerOrganization;
         const rows = await tx.findMany(
@@ -412,7 +420,7 @@ export async function verifyDomainWith(
  * takes null only until Task 3 of plan 12d, which adds the connections; a
  * string answers `not_found`. `enforce: true` needs a verified domain
  * routed to an enabled connection of the same organization, else
- * `invalid_body`: a flag that refuses every first factor with no way in
+ * `invalid_body`. A flag that refuses every first factor with no way in
  * through SSO would lock the staff out. One `sso_domain_update` audit row
  * names the changed keys.
  */
@@ -591,20 +599,21 @@ const RECHECK_ROW_WRITES = 3;
 /**
  * Checks verified domains again (spec 30 item 4). It reads up to
  * `RECHECK_BATCH` rows with `verifiedAt` set and `checkedAt` at or before
- * `now - RECHECK_AFTER_MS`, oldest check first. Each row asks every
- * resolver for its own record, as the verify does. A pass moves `checkedAt`
- * to now and clears the failures. A failure adds one to `failures`, sets
- * `firstFailureAt` when it was null, and sets `checkedAt` so that the next
- * try comes one day later. At `LOSS_FAILURES` failures that span
- * `LOSS_SPAN_MS`, one transaction clears `verifiedAt`, `claimedDomain`, and
- * `enforce`, and writes the `sso_domain_lost` audit row with the app actor
- * `authtempo-sweep`; then one log line names the domain id. The answer is
- * the count of rows checked.
+ * `now - RECHECK_AFTER_MS`. A row with a retry due comes first, then the
+ * oldest check, so a backlog of first rechecks holds no failing domain.
+ * Each row asks every resolver for its own record, as the verify does. A
+ * pass moves `checkedAt` to now and clears the failures. A failure adds one
+ * to `failures`, sets `firstFailureAt` when it was null, and sets
+ * `checkedAt` so that the next try comes one day later. At `LOSS_FAILURES`
+ * failures that span `LOSS_SPAN_MS`, the domain is lost (`loseDomain`). The
+ * answer is the count of rows checked.
  *
  * With `budget`, the step stays inside `budget.limit` calls of
  * `budget.meter` (the sweep's call budget, ruling 37 of plan 12f). Each
  * resolver call counts as one call: a DoH fetch is a subrequest. The read
- * takes only the rows that fit.
+ * takes the rows that fit at the least cost of a row, a check and one
+ * update. A row starts only when its worst cost still fits, so a sweep
+ * of passes checks more rows than a sweep of losses.
  */
 export async function recheckDomains(
   config: ResolvedConfig,
@@ -615,9 +624,11 @@ export async function recheckDomains(
   if (!sso) return 0;
   const perRow = sso.dns.length + RECHECK_ROW_WRITES;
   const meter = budget?.meter;
-  const room = budget ? Math.floor((budget.limit - budget.meter.used - 1) / perRow) : RECHECK_BATCH;
+  // The read and the worst cost of the first row must fit.
+  if (budget && budget.meter.used + 1 + perRow > budget.limit) return 0;
+  const least = sso.dns.length + 1;
+  const room = budget ? Math.floor((budget.limit - budget.meter.used - 1) / least) : RECHECK_BATCH;
   const batch = Math.min(RECHECK_BATCH, room);
-  if (batch < 1) return 0;
   const rows = await config.storage.findMany(
     "ssoDomain",
     [
@@ -625,7 +636,9 @@ export async function recheckDomains(
       { field: "checkedAt", op: "lte", value: new Date(now.getTime() - RECHECK_AFTER_MS) },
     ],
     {
+      // A row with failures has a retry due; a first recheck has 0 failures.
       sort: [
+        { field: "failures", dir: "desc" },
         { field: "checkedAt", dir: "asc" },
         { field: "id", dir: "asc" },
       ],
@@ -676,7 +689,15 @@ function ownExpect(row: SsoDomainRow): { name: string; values: readonly string[]
   return { name: own.name, values: [own.value] };
 }
 
-/** The loss of one domain: the claim, the verify time, and `enforce` go, with the audit row. */
+/**
+ * The loss of one domain. One transaction clears `verifiedAt`,
+ * `claimedDomain`, and `enforce`, and writes the `sso_domain_lost` audit
+ * row with the app actor `authtempo-sweep`. Then one log line names the
+ * domain id. The row becomes a pending row with a new challenge, and it
+ * lives `PENDING_DOMAIN_MS` as every pending row does (spec 30 item 2). So
+ * the old record proves nothing again, and the sweep deletes a row that no
+ * one proves again. The organization proves it again with the new record.
+ */
 async function loseDomain(config: ResolvedConfig, row: SsoDomainRow, now: Date): Promise<void> {
   const draft = ssoDraft(SWEEP_ACTOR, "sso_domain_lost", {
     targetUserId: null,
@@ -699,6 +720,8 @@ async function loseDomain(config: ResolvedConfig, row: SsoDomainRow, now: Date):
         checkedAt: now,
         failures: 0,
         firstFailureAt: null,
+        challenge: randomBase64Url(32),
+        expiresAt: new Date(now.getTime() + PENDING_DOMAIN_MS),
         updatedAt: now,
       },
     );

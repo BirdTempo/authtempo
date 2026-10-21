@@ -647,7 +647,7 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
       refused: INVALID_BODY,
     },
-    // The domain rows of plan 12d: a user who is no platform operator gets
+    // The domain rows of plan 12d. A user who is no platform operator gets
     // forbidden_rank, and an id that names no domain gets not_found, past the parse.
     {
       key: "POST /sso/domains/add",

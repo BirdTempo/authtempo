@@ -5,7 +5,9 @@ import {
   addDomain,
   claimingDomain,
   inOrganizationDomains,
+  listDomains,
   normalizeDomain,
+  recheckDomains,
   updateDomain,
   verifyDomain,
 } from "../../src/engine/sso/domains.js";
@@ -13,6 +15,8 @@ import { sweepExpired } from "../../src/engine/sweep.js";
 import { sha256Hex } from "../../src/primitives/crypto.js";
 import type { OperatorAuditRow } from "../../src/schema.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
+import { meterOf } from "../../src/storage/meter.js";
+import type { StorageAdapter } from "../../src/storage/port.js";
 import { BASE_URL } from "../helpers.js";
 import { fakeDns, SSO_APP, seedOrganization, ssoAuth } from "./helpers.js";
 
@@ -297,6 +301,173 @@ describe("the SSO domains", () => {
     expect(kept.counts).toEqual([1, 1, 1]);
     expect(kept.row).toMatchObject({ claimedDomain: "acme.example", failures: 3 });
     expect(await auditOf(kept.w, "sso_domain_lost")).toEqual([]);
+  });
+
+  it("keeps the claim through failures within 71 hours, and loses it past 72 hours", async () => {
+    const w = ssoAuth();
+    const d = await verified(w, await seedOrganization(w));
+    w.clock.advance(31 * DAY_MS);
+    w.answers.a[d.record.name] = [];
+    w.answers.b[d.record.name] = [];
+    const claimAfter = async (hours: number) => {
+      w.clock.advance(hours * HOUR_MS);
+      const swept = (await sweepExpired(w.config)).ssoDomains;
+      const row = await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: d.id }]);
+      return [swept, row?.failures, row?.claimedDomain ?? null];
+    };
+    // Failures at 0, 36, and 71 hours: three failures that span less than 72 hours.
+    expect(await claimAfter(0)).toEqual([1, 1, "acme.example"]);
+    expect(await claimAfter(36)).toEqual([1, 2, "acme.example"]);
+    expect(await claimAfter(35)).toEqual([1, 3, "acme.example"]);
+    // The next try is one day later, at 95 hours: the fourth failure is past 72 hours.
+    expect(await claimAfter(23)).toEqual([0, 3, "acme.example"]);
+    expect(await claimAfter(1)).toEqual([1, 0, null]);
+    expect(await auditOf(w, "sso_domain_lost")).toHaveLength(1);
+  });
+
+  it("makes a lost domain a pending row that its old record cannot prove", async () => {
+    const w = ssoAuth();
+    const org = await seedOrganization(w);
+    const d = await verified(w, org);
+    w.clock.advance(31 * DAY_MS);
+    // The resolvers lose the record three times over 72 hours.
+    w.answers.a[d.record.name] = [];
+    for (const hours of [0, 36, 36]) {
+      w.clock.advance(hours * HOUR_MS);
+      await sweepExpired(w.config);
+    }
+    const lostAt = w.clock.now();
+    const listed = await listDomains(w.config, SSO_APP, { organizationId: org });
+    if (!listed.ok) throw new Error(listed.code);
+    const pending = listed.value[0];
+    // A pending row of 7 days, with a new record to publish.
+    expect(pending).toMatchObject({
+      id: d.id,
+      verified: false,
+      expiresAt: new Date(lostAt.getTime() + 7 * DAY_MS).toISOString(),
+    });
+    expect(pending?.record?.name).toBe(d.record.name);
+    expect(pending?.record?.value).not.toBe(d.record.value);
+    // The old record comes back on both resolvers: it proves nothing now.
+    publish(w, d.record);
+    expect(await verifyDomain(w.config, SSO_APP, { id: d.id })).toMatchObject({
+      ok: false,
+      code: "domain_unverified",
+    });
+    // The new record proves the domain again, within the 7 days.
+    if (!pending?.record) throw new Error("no record");
+    publish(w, pending.record);
+    const again = await verifyDomain(w.config, SSO_APP, { id: d.id });
+    expect(again.ok && again.value.verified).toBe(true);
+  });
+
+  it("deletes a lost domain that no one proves again within 7 days", async () => {
+    const w = ssoAuth();
+    const org = await seedOrganization(w);
+    const d = await verified(w, org);
+    w.clock.advance(31 * DAY_MS);
+    w.answers.a[d.record.name] = [];
+    for (const hours of [0, 36, 36]) {
+      w.clock.advance(hours * HOUR_MS);
+      await sweepExpired(w.config);
+    }
+    expect(await auditOf(w, "sso_domain_lost")).toHaveLength(1);
+    w.clock.advance(7 * DAY_MS);
+    expect((await sweepExpired(w.config)).ssoPendingDomains).toBe(0);
+    w.clock.advance(1);
+    expect((await sweepExpired(w.config)).ssoPendingDomains).toBe(1);
+    expect(
+      await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: d.id }]),
+    ).toBeNull();
+  });
+
+  it("fails a proof and a recheck when a resolver throws", async () => {
+    const w = ssoAuth();
+    const org = await seedOrganization(w);
+    const d = await added(w, org);
+    w.answers.a[d.record.name] = [d.record.value];
+    w.answers.b[d.record.name] = "throw";
+    expect(await verifyDomain(w.config, SSO_APP, { id: d.id })).toMatchObject({
+      ok: false,
+      code: "domain_unverified",
+      status: 400,
+    });
+    // b gives the value again: the proof passes. Then b throws at the recheck.
+    w.answers.b[d.record.name] = [d.record.value];
+    const r = await verifyDomain(w.config, SSO_APP, { id: d.id });
+    expect(r.ok && r.value.verified).toBe(true);
+    w.answers.b[d.record.name] = "throw";
+    w.clock.advance(31 * DAY_MS);
+    expect((await sweepExpired(w.config)).ssoDomains).toBe(1);
+    const row = await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: d.id }]);
+    expect(row).toMatchObject({
+      claimedDomain: "acme.example",
+      failures: 1,
+      firstFailureAt: w.clock.now(),
+    });
+  });
+
+  it("rechecks a domain with a retry due before a first recheck", async () => {
+    const w = ssoAuth();
+    const first = await verified(w, await seedOrganization(w, "first"), "first.example");
+    w.clock.advance(DAY_MS);
+    const second = await verified(w, await seedOrganization(w, "second"), "second.example");
+    w.clock.advance(31 * DAY_MS);
+    /** A recheck with calls for one row only: the read, two resolvers, and the writes of a loss. */
+    const oneRow = () =>
+      recheckDomains(w.config, w.clock.now(), { meter: meterOf(w.storage, 0), limit: 6 });
+    // Both are due; the oldest check comes first, and it fails.
+    w.answers.a[first.record.name] = [];
+    expect(await oneRow()).toBe(1);
+    const row = (id: string) =>
+      w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: id }]);
+    expect((await row(first.id))?.failures).toBe(1);
+    // One day later its retry is due. Its check time is now later than the
+    // check time of the second domain, and the retry still comes first.
+    w.clock.advance(DAY_MS);
+    const secondBefore = await row(second.id);
+    expect(await oneRow()).toBe(1);
+    expect((await row(first.id))?.failures).toBe(2);
+    expect(await row(second.id)).toEqual(secondBefore);
+  });
+
+  it("answers a retry of an add as the row is when a verify claims it first", async () => {
+    const w = ssoAuth();
+    const org = await seedOrganization(w);
+    const d = await added(w, org);
+    publish(w, d.record);
+    // A parallel verify commits between the read of the retry and its update.
+    // That can occur on Postgres, because the read does not lock the domain row.
+    const storage = w.config.storage;
+    const transaction = storage.transaction.bind(storage);
+    let armed = true;
+    vi.spyOn(storage, "transaction").mockImplementation((fn) =>
+      transaction((tx) => {
+        const view: StorageAdapter = Object.create(tx);
+        view.findOne = (async (model, where) => {
+          const found = await tx.findOne(model, where);
+          if (model === "ssoDomain" && armed && found) {
+            armed = false;
+            await tx.update("ssoDomain", [{ field: "id", op: "eq", value: d.id }], {
+              claimedDomain: "acme.example",
+              verifiedAt: w.clock.now(),
+              checkedAt: w.clock.now(),
+              expiresAt: null,
+            });
+          }
+          return found;
+        }) as StorageAdapter["findOne"];
+        return fn(view);
+      }),
+    );
+    const before = await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: d.id }]);
+    const r = await addDomain(w.config, SSO_APP, { organizationId: org, domain: "acme.example" });
+    expect(armed).toBe(false);
+    // The answer is the claimed row: no record, no new challenge, no audit row of a retry.
+    expect(r).toMatchObject({ ok: true, value: { verified: true, record: null, expiresAt: null } });
+    const after = await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: d.id }]);
+    expect(after?.challenge).toBe(before?.challenge);
+    expect(await auditOf(w, "sso_domain_add")).toHaveLength(1);
   });
 
   it("checks a verified domain again after 30 days, and a pass clears the failures", async () => {

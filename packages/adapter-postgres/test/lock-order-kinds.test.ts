@@ -742,7 +742,7 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null }),
   "an account delete of an operator with an impersonation": (w, s) =>
     w.auth.api.user.delete({ session: s.bob, ip: null, userAgent: null }),
-  // Oli holds one solo organization in the scene; a second one makes the delete set-based
+  // Oli holds one solo organization in the scene. A second one makes the delete set-based
   // over two ids (ruling 30 of plan 12d), with its organization lock in id order.
   "an account delete with two solo organizations": async (w, s) => {
     const made = await w.auth.api.createOrganization({

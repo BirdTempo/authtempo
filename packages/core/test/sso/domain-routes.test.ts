@@ -28,8 +28,9 @@ const SSO_SECRET = "operator-sso-0123456789abcdef-012345678";
 
 /**
  * A platform operator of the 12f fixture, with `sso` on and two fake
- * resolvers, a secret with the scope `sso`, and an organization of another
- * person. `factor: false` leaves the operator's second factor off.
+ * resolvers. The world also holds a secret with the scope `sso`, and an
+ * organization of another person. `factor: false` leaves the operator's
+ * second factor off.
  * `limits` and `hooks` go into the config.
  */
 async function routeWorld(

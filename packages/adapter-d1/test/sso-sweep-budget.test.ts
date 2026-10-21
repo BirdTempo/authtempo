@@ -165,6 +165,7 @@ describe("the recheck of the SSO domains inside the sweep budget on D1 (plan 12d
     ).toBe(25);
     current = new Date(current.getTime() + 31 * DAY_MS);
     // Each sweep checks what fits beside the other steps; every one fits 50 calls.
+    // The outbox and the links are idle, so the recheck takes the calls that they leave.
     const passes: { refused: number; calls: number; domains: number }[] = [];
     for (let i = 0; i < 40; i++) {
       const s = await sweep();
@@ -172,9 +173,12 @@ describe("the recheck of the SSO domains inside the sweep budget on D1 (plan 12d
       if (s.domains === 0) break;
     }
     for (const s of passes) expect([s.refused, s.calls <= 50]).toEqual([0, true]);
-    // Measured 2026-10-21: one domain per sweep at the default budget, so 25 sweeps check all 25.
-    expect(passes.reduce((n, s) => n + s.domains, 0)).toBe(25);
-    expect(passes.filter((s) => s.domains > 0).length).toBe(25);
+    // Measured 2026-10-21 (load 18.6): 9, 9, and 7 domains in sweeps of 46, 46, and 40 calls.
+    // A pass costs 3 calls: two resolvers and the update. A row starts only while its worst
+    // cost still fits: 5 calls, two resolvers and a loss. Before review m4 of Task 2b, a
+    // sweep checked 1 domain.
+    expect(passes.map((s) => s.domains)).toEqual([9, 9, 7, 0]);
+    expect(passes.map((s) => s.calls)).toEqual([46, 46, 40, 19]);
     // Then every record goes: the loss path, with its transaction and audit row, in the budget.
     // The next check is due 30 days after the pass; three failures 36 hours apart lose each domain.
     records.clear();
@@ -189,9 +193,12 @@ describe("the recheck of the SSO domains inside the sweep budget on D1 (plan 12d
       }
     }
     for (const s of lost) expect([s.refused, s.calls <= 50]).toEqual([0, true]);
-    // Measured 2026-10-21: at most 22 calls in a sweep of a pass, and 23 in a sweep of a
-    // loss. The shares of the links and the outbox stay free, so a sweep checks one domain.
-    // Each of the three steps checks all 25 domains, one per sweep.
+    // Measured 2026-10-21 (load 18.6). A failure costs 2 calls: resolver a fails, so b is
+    // not asked. The read takes at most 10 such rows, at 39 calls. A loss costs 4 calls:
+    // the resolver, the read and the write of the update, and the audit row. So a sweep
+    // loses 7 domains in 47 calls. Each of the three steps checks all 25 domains.
+    expect(lost.map((s) => s.domains)).toEqual([10, 10, 5, 0, 10, 10, 5, 0, 7, 7, 7, 4, 0]);
+    expect(Math.max(...lost.map((s) => s.calls))).toBe(47);
     expect(lost.reduce((n, s) => n + s.domains, 0)).toBe(75);
     expect(
       await rows("SELECT count(*) AS n FROM ta_sso_domain WHERE claimed_domain IS NOT NULL"),

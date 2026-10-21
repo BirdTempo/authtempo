@@ -44,9 +44,9 @@ describe("the audit model is append-only (plan 12f Task 4, spec 26 item 8)", () 
     const uses = writer.match(/operatorAudit/g)?.length ?? 0;
     const allowed = writer.match(/\.(create|findMany)\(\s*"operatorAudit",/g)?.length ?? 0;
     // The insert of writeAuditIn, the list, and the read of the impersonation
-    // targets (plan 12f Task 11). operatorAct, the stop rows of ruling 43,
-    // and each act of plan 12d write through writeAuditIn (plan 12d
-    // deviation 3), so the writer holds one insert.
+    // targets (plan 12f Task 11). The writers operatorAct, the stop rows of
+    // ruling 43, and each act of plan 12d call writeAuditIn (plan 12d
+    // deviation 3). So the writer holds one insert.
     expect(allowed).toBe(3);
     expect(writer.match(/\.create\(\s*"operatorAudit",/g)?.length).toBe(1);
     expect(uses).toBe(allowed);

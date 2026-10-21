@@ -120,11 +120,12 @@ export const OUTBOX_SHARE = 16;
 const LINK_SHARE = 8;
 
 /**
- * The calls that the idle client step leaves for the SSO steps (plan 12d),
- * while `sso` is on. The delete of the pending domains and the read of the
- * recheck take 1 each. One recheck row with two resolvers takes 5: a call
- * per resolver, then the update and the audit row of a loss, which is 3 on
- * D1. With more calls left, the recheck takes more rows.
+ * The calls that the idle client, link, and outbox steps leave for the
+ * recheck of the SSO domains (plan 12d), while `sso` is on. The read of the
+ * recheck takes 1 call. One row with two resolvers takes 5 calls at most.
+ * Each resolver takes one call. The update and the audit row of a loss take
+ * 3 calls on D1. The recheck runs after the links and the outbox. So it also takes
+ * the calls that they leave, up to `RECHECK_BATCH` rows.
  */
 export const RECHECK_SHARE = 7;
 
@@ -413,34 +414,37 @@ export async function sweepExpired(
     : 0;
   if (config.sso) meter.step(1);
   const recheckShare = config.sso ? RECHECK_SHARE : 0;
+  const pendingReserve = pending.length > 0 ? PENDING_PAGE_RESERVE : 0;
   const oauthClients = await sweepClients(
     storage,
     now,
     meter,
     budget - LINK_SHARE - OUTBOX_SHARE - recheckShare,
   );
-  // The recheck of the verified domains takes the calls that the clients
-  // left before the share of the links. A lost domain waits for no logout,
-  // so it comes before the links and the outbox only by its share.
-  const ssoDomains = config.sso
-    ? await softStep(
-        "sso recheck",
-        recheckDomains(config, now, { meter, limit: budget - LINK_SHARE - OUTBOX_SHARE }),
-      )
-    : 0;
-  // Last, so a storage limit met here leaves every count above done. The
-  // links of the sessions that ended become outbox rows, and the outbox
-  // sends its due rows (plan 12e Task 16).
+  // Then the steps that may fail on a storage limit, so each count above is
+  // done. The links of the sessions that ended become outbox rows, and the
+  // outbox sends its due rows (plan 12e Task 16). Each stops short of the
+  // share of the recheck.
   const oauthSessionLinks = await softStep(
     config.observe,
     "link",
-    sweepLinks(storage, now, meter, budget - OUTBOX_SHARE),
+    sweepLinks(storage, now, meter, budget - OUTBOX_SHARE - recheckShare),
   );
   const oauthLogouts = await softStep(
     config.observe,
     "outbox",
-    deliverDueLogouts(config, meter, budget - (pending.length > 0 ? PENDING_PAGE_RESERVE : 0)),
+    deliverDueLogouts(config, meter, budget - recheckShare - pendingReserve),
   );
+  // The recheck of the verified domains comes after the logouts, which
+  // reach another party. It takes its share and every call that the links
+  // and the outbox left (review m4 of plan 12d Task 2b). With an idle outbox
+  // a sweep of 50 calls rechecks several domains, not one.
+  const ssoDomains = config.sso
+    ? await softStep(
+        "sso recheck",
+        recheckDomains(config, now, { meter, limit: budget - pendingReserve }),
+      )
+    : 0;
   // Last, in the calls that stay. Every door already refuses such a
   // session: `bannedFor` for a ban, and the live role read of each operator
   // check for a revoke. So a logout, which reaches another party, comes first.
