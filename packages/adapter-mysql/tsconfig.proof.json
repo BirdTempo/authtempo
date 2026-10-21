@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The proof Worker, with the Workers types. The mysql2 types extend the
+  // Node EventEmitter, so they need the Node types too.
+  "compilerOptions": {
+    "noEmit": true,
+    // The base config adds DOM. workers-types declares the same globals and conflicts with it.
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types", "node"]
+  },
+  "include": ["proof/worker"]
+}

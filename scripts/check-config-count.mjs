@@ -31,9 +31,11 @@ import { execFileSync } from "node:child_process";
 // Plan 12h adds packages/observe/vitest.config.ts and vitest.pool.config.ts (48, Task 10).
 // Plan 12h adds packages/core/vitest.events.config.ts (49, Task 12).
 // Plan 12g: the SQLite adapter adds packages/adapter-sqlite/vitest.config.ts,
-// vitest.bun.config.ts, and vitest.pool.config.ts (52, Task 4).
+// vitest.bun.config.ts, and vitest.pool.config.ts (52, Task 4). The MySQL
+// adapter adds packages/adapter-mysql/vitest.config.ts (53, Task 5). Its
+// workerd run is in proof/bundle.mjs, not a pool config.
 // Raise this number when a package adds a vitest config.
-const MINIMUM = 52;
+const MINIMUM = 53;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",

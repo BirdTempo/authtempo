@@ -1,0 +1,6 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The mysql2 types extend the Node EventEmitter, so they need the Node types.
+  "compilerOptions": { "rootDir": "src", "outDir": "dist", "types": ["node"] },
+  "include": ["src"]
+}

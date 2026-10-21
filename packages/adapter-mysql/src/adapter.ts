@@ -1,0 +1,203 @@
+import type { FindManyOptions, ModelName, StorageAdapter, StorageError } from "@authtempo/core";
+import { assertModel, type SqlStatements, type Statement } from "@authtempo/core/sql";
+import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import { guardData, guardWhere } from "./ascii-guard.js";
+import type { Sent } from "./start-checks.js";
+
+type Row = Record<string, unknown>;
+
+/** What the adapter runs. `createMysqlAdapter` passes core's statements and the start checks. */
+export interface MysqlAdapterOptions {
+  statements: SqlStatements;
+  toStorageError(model: ModelName, err: unknown): StorageError | null;
+  /** The start checks, run once per adapter: the version, FOUND_ROWS, strict mode, the collations. */
+  ready(): Promise<void>;
+  /**
+   * The count of statements, shared with the start checks, so that
+   * `statementsSent` and `readyStatements` hold their queries too. A new
+   * count starts at zero when this is left out.
+   */
+  sent?: Sent;
+}
+
+interface Ctx extends Omit<MysqlAdapterOptions, "sent"> {
+  pool: Pool;
+  /** The connection of the open transaction, or null outside one. */
+  conn: PoolConnection | null;
+  /** The savepoint depth inside the open transaction. */
+  depth: number;
+  sent: Sent;
+}
+
+/** MySQL error 1213: InnoDB ended the statement to break a deadlock. */
+const LOCK_DEADLOCK = 1213;
+/** The tries of one statement outside a transaction. */
+const STATEMENT_TRIES = 3;
+
+async function query(ctx: Ctx, s: Statement): Promise<RowDataPacket[] | ResultSetHeader> {
+  for (let attempt = 1; ; attempt++) {
+    ctx.sent.statements++;
+    try {
+      // execute: a server prepared statement, so no value is ever part of the SQL text.
+      const [res] = await (ctx.conn ?? ctx.pool).execute<RowDataPacket[] | ResultSetHeader>(
+        s.sql,
+        s.params as never[],
+      );
+      return res;
+    } catch (e) {
+      // InnoDB locks each row that a statement scans, also a row that does
+      // not match. So a DELETE outside a transaction can meet the locks of a
+      // transaction in another order and end as the victim of a deadlock,
+      // where Postgres waits. Outside a transaction the statement is its own
+      // unit, and InnoDB undid it whole, so the adapter sends it again. A
+      // deadlock in a transaction undoes the transaction, so it passes through.
+      const deadlock = (e as { errno?: unknown } | null)?.errno === LOCK_DEADLOCK;
+      if (ctx.conn || !deadlock || attempt === STATEMENT_TRIES) throw e;
+    }
+  }
+}
+
+const rowsOf = (res: RowDataPacket[] | ResultSetHeader): Row[] =>
+  Array.isArray(res) ? (res as Row[]) : [];
+const countOf = (res: RowDataPacket[] | ResultSetHeader): number =>
+  Array.isArray(res) ? 0 : res.affectedRows;
+
+function adapterOn(ctx: Ctx): StorageAdapter {
+  return {
+    async create(model, data) {
+      await ctx.ready();
+      assertModel(model);
+      guardData(model, data as unknown as Row);
+      try {
+        await query(ctx, ctx.statements.insert(model, data));
+      } catch (e) {
+        throw ctx.toStorageError(model, e) ?? e;
+      }
+      return structuredClone(data);
+    },
+    async findOne(model, where) {
+      await ctx.ready();
+      const w = guardWhere(model, where);
+      const s = w && ctx.statements.select(model, w, { limit: 1 });
+      if (!s) return null;
+      const rows = rowsOf(await query(ctx, s));
+      return rows[0] ? ctx.statements.decode(model, rows[0]) : null;
+    },
+    async findMany(model, where, opts) {
+      await ctx.ready();
+      const w = guardWhere(model, where);
+      const s = w && ctx.statements.select(model, w, opts);
+      if (!s) return [];
+      return rowsOf(await query(ctx, s)).map((r) => ctx.statements.decode(model, r));
+    },
+    async update(model, where, data) {
+      await ctx.ready();
+      guardData(model, data as unknown as Row);
+      const w = guardWhere(model, where);
+      const s = w && ctx.statements.update(model, w, data);
+      if (!s) return 0;
+      try {
+        // FOUND_ROWS (a start check): affectedRows counts the matched rows, as on Postgres.
+        return countOf(await query(ctx, s));
+      } catch (e) {
+        throw ctx.toStorageError(model, e) ?? e;
+      }
+    },
+    async delete(model, where) {
+      await ctx.ready();
+      const w = guardWhere(model, where);
+      const s = w && ctx.statements.delete(model, w);
+      if (!s) return 0;
+      return countOf(await query(ctx, s));
+    },
+    async transaction<T>(fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
+      // The checks run on the pool. So they run before the transaction takes
+      // its connection: on a pool of one, a check after it would wait forever.
+      await ctx.ready();
+      if (ctx.conn) return savepoint(ctx, ctx.conn, fn);
+      return begin(ctx, fn);
+    },
+    statementsSent() {
+      return ctx.sent.statements;
+    },
+    async readyStatements() {
+      await ctx.ready();
+      return ctx.sent.ready;
+    },
+    async lockInOrder(model, where) {
+      await ctx.ready();
+      // A lock outside a transaction ends with its statement, so it holds nothing.
+      if (!ctx.conn) return;
+      const w = guardWhere(model, where);
+      const byId = { sort: { field: "id", dir: "asc" } } as FindManyOptions<typeof model>;
+      const s = w && ctx.statements.select(model, w, byId);
+      if (!s) return;
+      // InnoDB locks each index record as it scans, in the order of the index
+      // that it reads, before ORDER BY. A where on user_id reads the user_id
+      // index, so FOR UPDATE there locks in (user_id, id) order. So the
+      // adapter reads the ids first and then locks them on PRIMARY, which is
+      // id order (ruling 2 of plan 12g).
+      const ids = rowsOf(await query(ctx, s)).map((r) => r.id);
+      if (ids.length === 0) return;
+      const lock = ctx.statements.select(model, [{ field: "id", op: "in", value: ids }], byId);
+      if (!lock) return;
+      await query(ctx, { sql: `${lock.sql} FOR UPDATE`, params: lock.params });
+    },
+  };
+}
+
+/**
+ * MySQL locks rows, so this is the Postgres model, not the D1 undo log. One
+ * pool connection holds the transaction. READ COMMITTED is the Postgres
+ * default and takes fewer gap locks than REPEATABLE READ. A read after a
+ * lock then sees the commit of the other caller, which the 12k limits need.
+ * The undo statements of `coreStatements` are never called here.
+ */
+async function begin<T>(ctx: Ctx, fn: (tx: StorageAdapter) => Promise<T>): Promise<T> {
+  const conn = await ctx.pool.getConnection();
+  // A connection whose rollback failed may still hold the transaction, so it goes, not back to the pool.
+  let broken = false;
+  try {
+    await conn.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+    await conn.query("START TRANSACTION");
+    try {
+      const result = await fn(adapterOn({ ...ctx, conn, depth: 0 }));
+      await conn.query("COMMIT");
+      return result;
+    } catch (e) {
+      try {
+        await conn.query("ROLLBACK");
+      } catch {
+        broken = true;
+      }
+      throw e;
+    }
+  } finally {
+    if (broken) conn.destroy();
+    else conn.release();
+  }
+}
+
+/** A nested transaction is a savepoint on the same connection. */
+async function savepoint<T>(
+  ctx: Ctx,
+  conn: PoolConnection,
+  fn: (tx: StorageAdapter) => Promise<T>,
+): Promise<T> {
+  const depth = ctx.depth + 1;
+  const name = `sp_${depth}`;
+  await conn.query(`SAVEPOINT ${name}`);
+  try {
+    const result = await fn(adapterOn({ ...ctx, conn, depth }));
+    await conn.query(`RELEASE SAVEPOINT ${name}`);
+    return result;
+  } catch (e) {
+    await conn.query(`ROLLBACK TO SAVEPOINT ${name}`);
+    throw e;
+  }
+}
+
+export function createMysqlAdapterOn(pool: Pool, options: MysqlAdapterOptions): StorageAdapter {
+  const { sent = { statements: 0, ready: 0 }, ...rest } = options;
+  return adapterOn({ ...rest, pool, conn: null, depth: 0, sent });
+}

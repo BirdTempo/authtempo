@@ -1,0 +1,10 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "authtempo-adapter-mysql-proof",
+  "main": "index.ts",
+  // The date of reference/runtimes.md. Node.js compatibility is on by default
+  // from 2026-08-04; the flag states it. mysql2 on Workers needs it
+  // (developers.cloudflare.com/hyperdrive/examples/connect-to-mysql/, read 2026-10-14).
+  "compatibility_date": "2026-09-30",
+  "compatibility_flags": ["nodejs_compat"]
+}
