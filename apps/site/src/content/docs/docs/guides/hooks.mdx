@@ -54,7 +54,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 
 ## How it behaves
 
-- A before hook runs inside the flow's transaction, after the rank checks and the limits, and before the first write. A throw leaves no row.
+- A before hook runs inside the flow's transaction, after the rank checks and the limits, and before the first write. The one exception is a lock write: some flows lock a row before the hook, as [Locks over a before hook](#locks-over-a-before-hook) lists. A throw leaves no row and no change of a locked row.
 - An after hook runs after the commit, before the answer. A throw cannot undo the row: core logs one line and answers success.
 - A cascade fires no team hook. A member removal, a team delete, and an organization delete remove team rows with no team hook. The default team of an organization create and the team rows of an accept fire none either.
 - Each hook gets a copy of its event. Only two hooks may change a row. `session.beforeCreate` may change `ip`, `userAgent`, and `activeOrganizationId`. `user.beforeCreate` may change `name` and `image`.

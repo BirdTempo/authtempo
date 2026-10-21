@@ -1193,7 +1193,8 @@ const auth = createAuth({
 
 - A before hook runs inside the flow's transaction, after core's rank
   checks and limits, and before the first write. This holds for
-  `session.beforeCreate` in every sign-in too (see "Session points").
+  `session.beforeCreate` in every sign-in too (see "Session points"). The
+  one exception is a lock write of the table below.
   `throw hookRefusal(message)` answers 403 `{ "error": "hook_refused", "message": "…" }`. A message that
   is empty, longer than 200 characters, or holds a control character becomes
   "The app refused this request.". Any other throw answers 500

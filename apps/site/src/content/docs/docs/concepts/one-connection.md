@@ -22,7 +22,7 @@ sources:
 
 On Workers, the Postgres client of each request has one connection: `max: 1`. A transaction holds that connection from `BEGIN` to `COMMIT`.
 
-A before hook runs inside the flow's transaction, before the first write. Core waits for the hook to settle before it goes on.
+A before hook runs inside the flow's transaction, before the first write. The one exception is a lock write: some flows lock a row before the hook, as [A second hang](#a-second-hang-the-flows-own-lock) tells. Core waits for the hook to settle before it goes on.
 
 ## The hang
 
