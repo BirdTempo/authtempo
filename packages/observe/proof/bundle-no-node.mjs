@@ -1,9 +1,10 @@
 // The bundle proof of @authtempo/observe (plan 12h Task 10), in the form of
 // examples/worker/proof/bundle-no-node.mjs. wrangler bundles proof/index.ts
 // with no_nodejs_compat: it refuses a bare Node.js import and warns on a
-// `node:` import ("is built into node"). The script fails on either, on a
-// `node:` import left in the bundle, and on an entry of package.json that
-// proof/index.ts does not import, so a new entry cannot pass unseen.
+// `node:` import ("is built into node"). The script fails on either, and on a
+// `node:` import left in the bundle. It also fails on an entry of
+// package.json that proof/index.ts does not import, so a new entry cannot
+// pass unseen.
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

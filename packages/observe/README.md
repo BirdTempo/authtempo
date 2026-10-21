@@ -34,25 +34,37 @@ The sink writes one `console` call with one plain object for each event:
 `head_sampling_rate` at `1`: a lower rate drops whole requests, and with them
 their sign-in events.
 
+`handle` starts the flush of its own request. A call outside `handle`, such
+as `auth.session(request)`, puts its events in the buffer too. On such a path,
+start `ctx.waitUntil(auth.observe.flush())` before the answer goes out. Without
+it, the events wait for the next `handle` call. When each request builds its
+own `Auth`, they are lost.
+
 | Option | Default | What it does |
 | --- | --- | --- |
 | `minLevel` | `"info"` | The lowest level that the sink writes. Another value stops `workersLogsSink` with a `TypeError`. |
-| `secrets` | `[]` | Values that no field may hold. The sink replaces each one with `***` in each string field. |
+| `secrets` | `[]` | Values that no field may hold, such as `env.AUTH_SECRET`. The sink replaces each one with `***` in each string field. |
 
 ## Analytics Engine
 
 ```ts
 import { analyticsEngineSink } from "@authtempo/observe/analytics-engine";
 
-const sink = analyticsEngineSink(env.AUTH_EVENTS);
+const sink = analyticsEngineSink(env.AUTH_EVENTS, { secrets: [env.AUTH_SECRET] });
 ```
 
 The sink writes one data point for each event of a chosen list. The default
-list is `request`, `sign_in`, `second_factor.challenge`, `limit.hit`, and
-`sweep`; the `events` option sets another. The index is the event name. The
+list is `request`, `sign_in`, `second_factor.challenge`, `limit.hit`, `sweep`,
+and `observe.dropped`, so a lost event shows in the dataset. The `events`
+option sets another list. The index is the event name. The
 blobs come in the order of `AE_BLOBS`: `name`, `route`, `outcome`, `code`,
 `method`, `provider`, `family`, `traceId`, with `null` for an absent field.
 The doubles are `[1, durationMs, status]`, with `0` for an absent number.
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `events` | `AE_DEFAULT_EVENTS` | The events that the sink writes. |
+| `secrets` | `[]` | Values that no blob may hold, such as `env.AUTH_SECRET`. The sink replaces each one with `***` in each blob. |
 
 A flush writes at most 200 data points (`AE_MAX_POINTS`). Analytics Engine
 takes at most 250 for each Worker invocation. Over the cap, the sink writes the

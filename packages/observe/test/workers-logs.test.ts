@@ -54,6 +54,13 @@ describe("workersLogsSink", () => {
     ]);
   });
 
+  it("refuses an unknown minLevel with a TypeError", () => {
+    expect(() => workersLogsSink({ minLevel: "debug" as never })).toThrow(
+      new TypeError("workersLogsSink: minLevel must be info, warn, or error"),
+    );
+    expect(() => workersLogsSink({ minLevel: "toString" as never })).toThrow(TypeError);
+  });
+
   it("scrubs each string field with the given secrets", async () => {
     const c = spies();
     const secret = "s3cr3t-value-of-the-app";

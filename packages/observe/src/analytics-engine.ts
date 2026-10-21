@@ -1,7 +1,7 @@
 /**
  * The Analytics Engine sink of `@authtempo/observe` (plan 12h, spec 31 item
- * 13). It writes one data point for each event of a chosen list, with the
- * event name as the index and the fields in the fixed order of `AE_BLOBS`.
+ * 13). It writes one data point for each event of a chosen list. The index is
+ * the event name, and the fields come in the fixed order of `AE_BLOBS`.
  *
  * Analytics Engine samples by index on write and on read. Read counts with
  * SUM(_sample_interval), never COUNT()
@@ -10,6 +10,7 @@
  * sampled before the sign-in events.
  */
 import type { AuthEvent, EventName, ObserveSink } from "@authtempo/core/observe";
+import { scrub, secretParts } from "@authtempo/core/redact";
 
 /**
  * The blob order of each data point. A query reads blob1 as `name`, blob2 as
@@ -28,15 +29,16 @@ export const AE_BLOBS = [
 
 /**
  * The most data points that one flush writes. Analytics Engine takes at most
- * 250 data points for each Worker invocation
- * (developers.cloudflare.com/analytics/analytics-engine/limits/, read
- * 2026-10-21). 200 leaves room for the app's own points in the same request.
+ * 250 data points for each Worker invocation (Cloudflare limit, read
+ * 2026-10-21 at developers.cloudflare.com/analytics/analytics-engine/limits/).
+ * 200 leaves room for the app's own points in the same request.
  */
 export const AE_MAX_POINTS = 200;
 
 /**
  * The events that the sink writes by default: the counts that an operator
- * asks for (spec 31). The names join `EVENTS` in plan 12h Tasks 4 to 7.
+ * asks for (spec 31). The first five names join `EVENTS` in plan 12h Tasks 4
+ * to 7. `observe.dropped` is in the list, so a lost event shows in the dataset.
  */
 export const AE_DEFAULT_EVENTS: readonly string[] = [
   "request",
@@ -44,6 +46,7 @@ export const AE_DEFAULT_EVENTS: readonly string[] = [
   "second_factor.challenge",
   "limit.hit",
   "sweep",
+  "observe.dropped",
 ];
 
 /** The part of an Analytics Engine binding that the sink calls. */
@@ -54,20 +57,36 @@ export interface AnalyticsEngineDatasetLike {
 export interface AnalyticsEngineOptions {
   /** The events to write. Default `AE_DEFAULT_EVENTS`. */
   events?: readonly EventName[];
+  /**
+   * Values that no blob may hold, such as a secret of the app. Core puts no
+   * secret in an event (spec 31 item 8). This list is the last guard of spec
+   * 31 item 9, and the scrub of `@authtempo/core/redact` applies it.
+   */
+  secrets?: readonly string[];
 }
 
 const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
 const number = (value: unknown): number => (typeof value === "number" ? value : 0);
 
-/** The data point of one event: 1 for the count, then the duration and the status. */
-function point(event: AuthEvent): {
+/**
+ * The data point of one event: 1 for the count, then the duration and the
+ * status. Each blob passes the scrub. The index is the event name, a key of
+ * `EVENTS`, and holds no value of the app.
+ */
+function point(
+  event: AuthEvent,
+  secrets: ReadonlySet<string>,
+): {
   indexes: string[];
   blobs: (string | null)[];
   doubles: number[];
 } {
   return {
     indexes: [event.name],
-    blobs: AE_BLOBS.map((field) => text(event[field])),
+    blobs: AE_BLOBS.map((field) => {
+      const value = text(event[field]);
+      return value === null ? null : scrub(value, secrets);
+    }),
     doubles: [1, number(event.durationMs), number(event.status)],
   };
 }
@@ -75,14 +94,15 @@ function point(event: AuthEvent): {
 /**
  * The sink. `writeDataPoint` does not block and is not awaited. Over
  * `AE_MAX_POINTS` in one batch, the sink writes the first 200 and throws a
- * `RangeError` that names the rest, so the observer counts the batch in
- * `sink_threw` and the loss is never silent.
+ * `RangeError` that names the rest. The observer then counts the batch in
+ * `sink_threw`, so the loss is never silent.
  */
 export function analyticsEngineSink(
   dataset: AnalyticsEngineDatasetLike,
   options: AnalyticsEngineOptions = {},
 ): ObserveSink {
   const chosen: ReadonlySet<string> = new Set<string>(options.events ?? AE_DEFAULT_EVENTS);
+  const secrets = new Set((options.secrets ?? []).flatMap((s) => secretParts(s)));
   return {
     write(batch) {
       let written = 0;
@@ -93,7 +113,7 @@ export function analyticsEngineSink(
           dropped += 1;
           continue;
         }
-        dataset.writeDataPoint(point(event));
+        dataset.writeDataPoint(point(event, secrets));
         written += 1;
       }
       if (dropped > 0)

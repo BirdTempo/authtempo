@@ -23,10 +23,10 @@ const LONGEST: Readonly<Record<FieldKind, unknown>> = {
 };
 
 /**
- * Until the recorder of plan 12h Task 12 gives the largest event of the core
- * suite: one event with every field of every row of `EVENTS` at the longest
- * value of its kind, the address fields at their longest form, and every
- * field name in `rejected`.
+ * The largest event until the recorder of plan 12h Task 12 gives the largest
+ * event of the core suite. It holds every field of every row of `EVENTS` at
+ * the longest value of its kind. The address fields have their longest form,
+ * and `rejected` holds every field name.
  */
 export function largestEvent(): AuthEvent {
   const fields: Record<string, unknown> = {};

@@ -1098,7 +1098,10 @@ export interface AdminUserList {
 export interface BetterAuthInstance<O extends BetterAuthOptions = BetterAuthOptions> {
   /**
    * Serves the routes. On Workers pass `{ waitUntil: (p) => ctx.waitUntil(p) }`:
-   * the events of `observe` then flush after the answer (plan 12h).
+   * the handler then starts one flush of `tempo.observe` after the answer
+   * (plan 12h). The shim has no `observe` option yet. The engine keeps the
+   * default observer, which writes each fault line at once, so the flush has
+   * nothing to send.
    */
   handler(request: Request, options?: HandleOptions): Promise<Response>;
   api: CompatServerApi<HasTwoFactor<O>, RequiresVerification<O>> &

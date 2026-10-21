@@ -24,11 +24,7 @@ describe("analyticsEngineSink", () => {
     const chosen = ["request", "sign_in", "second_factor.challenge", "limit.hit", "sweep"].map(
       (name) => built(name, "info"),
     );
-    const other = built("observe.dropped", "warn", {
-      buffer_full: 1,
-      sink_timeout: 0,
-      sink_threw: 0,
-    });
+    const other = built("error.internal", "error", { method: "POST", errorName: "TypeError" });
     await analyticsEngineSink(d).write([...chosen, other]);
     expect(d.points.map((p) => p.indexes)).toEqual([
       ["request"],
@@ -38,8 +34,54 @@ describe("analyticsEngineSink", () => {
       ["sweep"],
     ]);
     const only = dataset();
-    await analyticsEngineSink(only, { events: ["observe.dropped"] }).write([...chosen, other]);
-    expect(only.points.map((p) => p.indexes)).toEqual([["observe.dropped"]]);
+    await analyticsEngineSink(only, { events: ["error.internal"] }).write([...chosen, other]);
+    expect(only.points.map((p) => p.indexes)).toEqual([["error.internal"]]);
+  });
+
+  it("writes observe.dropped by default, so a drop shows in the dataset", async () => {
+    const d = dataset();
+    const dropped = built("observe.dropped", "warn", {
+      buffer_full: 3,
+      sink_timeout: 0,
+      sink_threw: 0,
+    });
+    await analyticsEngineSink(d).write([dropped]);
+    expect(d.points).toEqual([
+      {
+        indexes: ["observe.dropped"],
+        blobs: [
+          "observe.dropped",
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          "4bf92f3577b34da6a3ce929d0e0e4736",
+        ],
+        doubles: [1, 0, 0],
+      },
+    ]);
+  });
+
+  it("scrubs each blob with the given secrets", async () => {
+    const d = dataset();
+    const secret = "s3cr3t-value-of-the-app";
+    const leaked = { ...signIn, route: `POST /${secret}/sign-in`, code: secret };
+    await analyticsEngineSink(d, { secrets: [secret] }).write([leaked]);
+    expect(d.points[0]?.blobs).toEqual([
+      "sign_in",
+      "POST /***/sign-in",
+      "success",
+      "***",
+      "password",
+      null,
+      null,
+      "4bf92f3577b34da6a3ce929d0e0e4736",
+    ]);
+    const plain = dataset();
+    await analyticsEngineSink(plain).write([leaked]);
+    expect(plain.points[0]?.blobs?.[3]).toBe(secret);
   });
 
   it("uses the event name as the index and the fixed blob order", async () => {
