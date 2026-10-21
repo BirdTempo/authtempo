@@ -24,9 +24,9 @@ import { ROUNDS } from "./rounds.js";
  * does, so their old order (the password row, then the sessions) forms no
  * cycle with the delete. After `ROUNDS` lost rounds the answer is `conflict`.
  *
- * One lock order holds for every flow (ruling 49 of plan 12k). It joins
- * the order of plan 12f (final review L1) and the order of ruling 43 of
- * plan 12k. The order has six kinds of rows:
+ * One lock order holds for every flow (rulings 49 and 50 of plan 12k). It
+ * joins the order of plan 12f (final review L1) and the order of ruling 43
+ * of plan 12k. The order has seven kinds of rows:
  *
  * 1. this user row (`holdUser`);
  * 2. the session rows: `holdSessions`, or `holdImpersonations`, the one
@@ -34,8 +34,9 @@ import { ROUNDS } from "./rounds.js";
  *    target;
  * 3. the organization row: the stamp of `ownerLock`, or `lockOrganization`;
  * 4. the team row: `lockTeam`, or its delete;
- * 5. the member rows;
- * 6. the team member rows.
+ * 5. the invitation rows;
+ * 6. the member rows;
+ * 7. the team member rows.
  *
  * A flow can write a kind again after a later kind: it holds those rows
  * from the first time. No flow writes a kind first after a later kind. The
@@ -71,7 +72,10 @@ import { ROUNDS } from "./rounds.js";
  * rows next. So it waits for each flow that holds one of these locks, in
  * the same order. It deletes the member rows before the team member rows,
  * as a member removal and the account delete do (ruling 44). An accept that
- * raises a member takes the team lock before its member update.
+ * raises a member takes the team lock before its member update. The accept
+ * consumes its invitation after its team locks and before its member write.
+ * The team delete and the account delete write the invitations before the
+ * team member and member rows (ruling 50).
  *
  * The role create takes the organization lock before its count, and no
  * user hold. The user token create holds the user row before its count of

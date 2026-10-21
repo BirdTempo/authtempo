@@ -305,8 +305,8 @@ async function runDelete(
  * lock of each organization that keeps another owner comes next.
  *
  * The deletes come in this order. First the user row, the solo
- * organizations, the member rows of the user, and the invitations the user
- * sent. Then the sessions, and every other row of `USER_CHILD_MODELS`. The
+ * organizations, the invitations the user sent, and the member rows of the
+ * user. Then the sessions, and every other row of `USER_CHILD_MODELS`. The
  * user row goes before the sessions: D1 has no lock, and a sign-in reads the
  * user row after its session insert. The sessions go before the
  * identities: a link in flight updates its session as its last statement,
@@ -362,11 +362,13 @@ export async function deleteAccountRows(
   }
   await tx.delete("user", byId);
   for (const organization of going) await deleteOrganizationRows(tx, organization.id, user.id);
+  // The invitations come before the member rows, in the order of user-hold.ts
+  // (ruling 50 of plan 12k).
+  await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
   await tx.delete("member", [{ field: "userId", op: "eq", value: user.id }]);
   // D1 has no lock: the recount catches an owner removal that passed the lock.
   for (const organization of owned)
     if ((await ownersOf(config, tx, organization.id)) < 1) stopWith("conflict");
-  await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
   // The user's sessions and the impersonation sessions that the user opened
   // as an operator go together (ruling 42 of plan 12f). The lock read of
   // `hold` came first.

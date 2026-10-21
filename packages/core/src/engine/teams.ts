@@ -280,9 +280,9 @@ export async function updateTeam(
  * read. With `keepLastTeam`, the lock of the organization row and the count
  * of at most two teams. Then the team lock and the second read of the
  * sessions. D1 and memory have no row lock: they skip all but the
- * `keepLastTeam` steps. Then three writes, one read of every pending
- * invitation of the organization, and one update per invitation that names
- * the team. The read also takes the expired pending rows. So
+ * `keepLastTeam` steps. Then the team delete, one read of every pending
+ * invitation of the organization, one update per invitation that names the
+ * team, and two more writes. The read also takes the expired pending rows. So
  * `pendingInvitationsPerOrganization`, which counts only the live rows, does
  * not bound it.
  */
@@ -332,8 +332,8 @@ export async function deleteTeam(
         });
         if ((await tx.delete("team", [{ field: "id", op: "eq", value: team.id }])) === 0)
           return fail("not_found");
-        await tx.delete("teamMember", [{ field: "teamId", op: "eq", value: team.id }]);
-        await tx.update("session", byTeam, { activeTeamId: null });
+        // The invitations come after the team row and before the team member rows, in the order
+        // of user-hold.ts (ruling 50 of plan 12k).
         const pending = await tx.findMany("invitation", [
           { field: "organizationId", op: "eq", value: team.organizationId },
           { field: "acceptedAt", op: "eq", value: null },
@@ -351,6 +351,8 @@ export async function deleteTeam(
             { teamIds: rest.length > 0 ? rest : null },
           );
         }
+        await tx.delete("teamMember", [{ field: "teamId", op: "eq", value: team.id }]);
+        await tx.update("session", byTeam, { activeTeamId: null });
         return ok(true);
       }),
     );
