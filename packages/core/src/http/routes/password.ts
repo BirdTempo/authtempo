@@ -29,7 +29,7 @@ import {
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { defaultPasswordVerifyPage, type ResetPageInput } from "../password-pages.js";
-import { authErrorUrl, errorRedirect, redirect, resolveNext } from "../redirect.js";
+import { authErrorRedirect, errorRedirect, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import {
   challengePageUrl,
@@ -55,7 +55,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
   const pw = config.password;
   const verifyPath = `${config.basePath}/password/verify`;
   const resetPath = `${config.basePath}/password/reset`;
-  const failed = (code: string) => redirect(authErrorUrl(config, code));
+  const failed = (code: string) => authErrorRedirect(config, code);
   const page = (html: string) =>
     new Response(html, { status: 200, headers: pageHeaders(config, noScriptPagePolicy(config)) });
   const cookieFor = (token: string) => sessionCookieFor(config, token);

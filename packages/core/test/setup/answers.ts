@@ -254,7 +254,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
         const res = await handle(request);
         const key = keyOf(config, routes, request.method, new URL(request.url).pathname);
         // The mark of `errorRedirect` is on res, not on its clone.
-        const record = await judge(request, res.clone(), key, m.redirectCode(config, res));
+        const record = await judge(request, res.clone(), key, m.redirectCode(res));
         appendFileSync(FILE, `${JSON.stringify(record)}\n`);
         return res;
       };

@@ -18,7 +18,7 @@ import { isJsonRequest, readBody } from "../body.js";
 import { changeBody, confirmBody, deleteBody, updateBody, verifyBody } from "../contract/user.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
-import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
+import { authErrorRedirect, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
 import { signedOut } from "./sessions.js";
@@ -30,7 +30,7 @@ import { signedOut } from "./sessions.js";
  */
 export function userRoutes(config: ResolvedConfig): Route[] {
   const confirmPath = `${config.basePath}/user/change-email/confirm`;
-  const failed = (code: string) => redirect(authErrorUrl(config, code));
+  const failed = (code: string) => authErrorRedirect(config, code);
   const routes: Route[] = [
     {
       method: "POST",

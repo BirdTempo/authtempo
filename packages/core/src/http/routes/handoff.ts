@@ -11,7 +11,7 @@ import { readBody } from "../body.js";
 import { continueBody, redeemBody } from "../contract/handoff.js";
 import { confirmPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
-import { authErrorUrl, redirect } from "../redirect.js";
+import { authErrorRedirect, redirect } from "../redirect.js";
 import type { Route } from "../router.js";
 import { signInPageResponse } from "../sign-in-response.js";
 
@@ -60,7 +60,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
         const handoffId = ctx.url.searchParams.get("h") ?? "";
         // Never render a page for an id that is spent, expired, or unknown.
         const live = await peekHandoff(ctx.config, handoffId);
-        if (!live.ok) return redirect(authErrorUrl(ctx.config, live.code));
+        if (!live.ok) return authErrorRedirect(ctx.config, live.code);
         const session = await sessionFromRequest(ctx.config, ctx.request);
         // No session yet: the person came back here before any sign-in
         // completed, so show the page again for the same handoff.
@@ -80,11 +80,11 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
         if (site !== null && site !== "same-origin")
           return json({ error: "origin_not_trusted" }, 403);
         const body = await readBody(ctx.request, continueBody);
-        if (!body.ok) return redirect(authErrorUrl(ctx.config, "invalid_token"));
+        if (!body.ok) return authErrorRedirect(ctx.config, "invalid_token");
         const handoffId = body.value.h;
         // The same rule as the GET: no page for a spent, expired, or unknown id.
         const live = await peekHandoff(ctx.config, handoffId);
-        if (!live.ok) return redirect(authErrorUrl(ctx.config, live.code));
+        if (!live.ok) return authErrorRedirect(ctx.config, live.code);
         const session = await sessionFromRequest(ctx.config, ctx.request);
         // No session: mint nothing, and show the sign-in page for this id.
         if (!session) return page(handoffId);
@@ -93,7 +93,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
           userId: session.user.id,
           sessionId: session.session.id,
         });
-        return r.ok ? redirect(r.value.location) : redirect(authErrorUrl(ctx.config, r.code));
+        return r.ok ? redirect(r.value.location) : authErrorRedirect(ctx.config, r.code);
       },
     },
     {

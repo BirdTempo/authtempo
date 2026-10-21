@@ -30,7 +30,7 @@ import {
 import { clearTrustCookie, readCookie, trustCookie } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
-import { authErrorUrl, errorRedirect, redirect, resolveNext } from "../redirect.js";
+import { authErrorRedirect, errorRedirect, redirect, resolveNext } from "../redirect.js";
 import type { Route, RouteContext } from "../router.js";
 import { sessionCookieFor } from "../session-answer.js";
 
@@ -77,7 +77,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       );
     return res;
   };
-  const failed = (code: string) => redirect(authErrorUrl(config, code));
+  const failed = (code: string) => authErrorRedirect(config, code);
   return [
     {
       method: "POST",

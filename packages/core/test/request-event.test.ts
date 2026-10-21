@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../src/config.js";
-import { authErrorUrl, redirect } from "../src/http/redirect.js";
+import { authErrorRedirect } from "../src/http/redirect.js";
 import { createRouter } from "../src/http/router.js";
 import { SIGN_IN_ROUTES } from "../src/observe/events.js";
 import { createObserver, unscopedOf } from "../src/observe/observer.js";
@@ -154,8 +154,9 @@ describe("the request event (plan 12h Task 4)", () => {
   });
 
   it("reads no failure from the next of a sign-in that succeeds", async () => {
-    // The client chooses the next, and safeNext keeps its query (ruling 16 of plan 12h).
-    for (const next of ["/home?auth_error=invalid_token", "/x?error=1"]) {
+    // The client chooses the next, and safeNext keeps its query (rulings 16 and 19 of plan 12h).
+    // "/?auth_error=x" lands on the exact URL of an auth error redirect, with no mark.
+    for (const next of ["/home?auth_error=invalid_token", "/x?error=1", "/?auth_error=x"]) {
       const s = observed();
       const res = await linkSignIn(s, next);
       expect(res.status, next).toBe(302);
@@ -217,12 +218,12 @@ describe("the request event (plan 12h Task 4)", () => {
       mail: { send: async () => {} },
       observe: { sink: { write: (b) => void batches.push([...b]) } },
     });
-    // A route stub of the router: a real authErrorUrl redirect with a code outside the list.
+    // A route stub of the router: a marked auth error redirect with a code outside the list.
     const handle = createRouter(config, [
       {
         method: "GET",
         path: "/stub",
-        handler: async () => redirect(authErrorUrl(config, "not_a_listed_code")),
+        handler: async () => authErrorRedirect(config, "not_a_listed_code"),
       },
     ]);
     const res = await handle(get("/auth/stub"));

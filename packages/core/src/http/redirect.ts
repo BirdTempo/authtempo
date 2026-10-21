@@ -21,17 +21,24 @@ export function resolveNext(config: ResolvedConfig, next: string): string {
 /** The query parameter of the app URL that a browser flow failure lands on (plan 11d: the client reads it). */
 export const AUTH_ERROR_PARAM = "auth_error";
 
-export function authErrorUrl(config: ResolvedConfig, code: string): string {
-  return `${config.appURL}/?${AUTH_ERROR_PARAM}=${code}`;
-}
-
 /**
- * The code of each failure redirect that carries it in an `error` parameter
- * (ruling 16 of plan 12h). The router reads it for the `request` event. The
- * `error` parameter of any other Location is no failure: a sign-in `next`
- * can hold one.
+ * The code of each failure redirect of core (rulings 16 and 19 of plan 12h).
+ * The router reads it for the `request` event. The `auth_error` or `error`
+ * parameter of an unmarked Location is no failure: a sign-in `next` can hold
+ * one, and `safeNext` keeps its query.
  */
 export const REDIRECT_ERROR = new WeakMap<Response, string>();
+
+/**
+ * The failure redirect of a browser flow: `appURL` plus `/?auth_error=<code>`,
+ * with its mark. The URL is built only here, so no route sends an unmarked
+ * one. The source scan of `auth-error-redirect.test.ts` holds that.
+ */
+export function authErrorRedirect(config: ResolvedConfig, code: string): Response {
+  const res = redirect(`${config.appURL}/?${AUTH_ERROR_PARAM}=${code}`);
+  REDIRECT_ERROR.set(res, code);
+  return res;
+}
 
 /**
  * A failure redirect that names its code in an `error` parameter of

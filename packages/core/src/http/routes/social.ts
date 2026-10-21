@@ -12,7 +12,7 @@ import {
   sessionCookie,
 } from "../cookies.js";
 import { json, respond } from "../json.js";
-import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
+import { authErrorRedirect, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import { challengePageUrl, trustTokenOf } from "../session-answer.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
@@ -30,7 +30,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
   const bindName = bindingCookieName(config.cookieName);
   const bindPath = `${config.basePath}/social`;
   const failed = (code: string) => {
-    const res = redirect(authErrorUrl(config, code));
+    const res = authErrorRedirect(config, code);
     // An invalid_token answer keeps the binding cookie: a state of another
     // tab, or no state, consumes no row of this browser's flow. A link
     // refused for its session spent its state, and the cookie expires.
@@ -51,7 +51,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
           next: ctx.url.searchParams.get("next") ?? undefined,
           ip: ctx.ip,
         });
-        if (!r.ok) return redirect(authErrorUrl(ctx.config, r.code));
+        if (!r.ok) return authErrorRedirect(ctx.config, r.code);
         const res = redirect(r.value.location);
         res.headers.set(
           "set-cookie",
@@ -70,7 +70,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         const jsonCaller = isJsonRequest(ctx.request);
         const failure = (r: Extract<Result<unknown>, { ok: false }>) =>
-          sent(jsonCaller ? respond(r) : redirect(authErrorUrl(ctx.config, r.code)), s.renewed);
+          sent(jsonCaller ? respond(r) : authErrorRedirect(ctx.config, r.code), s.renewed);
         const body = await readBody(ctx.request, linkBody);
         if (!body.ok) return failure(body);
         const r = await startLink(ctx.config, {

@@ -77,7 +77,7 @@ import { consentPagePolicy, noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { DEVICE_WARNING, type DevicePageInput } from "../device-page.js";
 import { defaultEndSessionPage } from "../end-session-page.js";
 import { json, readJson, respond } from "../json.js";
-import { authErrorUrl, errorRedirect, redirect } from "../redirect.js";
+import { authErrorRedirect, errorRedirect, redirect } from "../redirect.js";
 import { originTrusted, type Route, type RouteContext } from "../router.js";
 import { safeNext } from "../safe-next.js";
 import { signInPageResponse } from "../sign-in-response.js";
@@ -229,7 +229,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
           !(next.startsWith(`${ctx.config.basePath}/oauth/authorize?`) || deviceNext(next)) ||
           safeNext(next) !== next
         )
-          return redirect(authErrorUrl(ctx.config, "invalid_request"));
+          return authErrorRedirect(ctx.config, "invalid_request");
         return signInPageResponse(ctx.config, next);
       },
     },

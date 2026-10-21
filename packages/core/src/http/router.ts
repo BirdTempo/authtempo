@@ -7,7 +7,7 @@ import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
-import { AUTH_ERROR_PARAM, REDIRECT_ERROR } from "./redirect.js";
+import { REDIRECT_ERROR } from "./redirect.js";
 import type { RouteKey, RouterCode } from "./route-list.js";
 
 export interface RouteContext {
@@ -121,26 +121,14 @@ function cors(res: Response, origin: string): Response {
 }
 
 /**
- * The error code of a redirect, or null. The `auth_error` parameter counts
- * only on `authErrorUrl`: the origin and path of `appURL` plus "/". The
- * `error` parameter counts only on a redirect of `errorRedirect`: an
- * authorize redirect to a registered `redirect_uri`, or the form page of a
- * core route. A client chooses a sign-in `next`, and `safeNext` keeps its
- * query, so another Location is no failure (ruling 16 of plan 12h). The
- * answer recorder of the tests reads the same rule.
+ * The error code of a redirect, or null: the mark of `authErrorRedirect` or
+ * `errorRedirect`. The router reads no parameter of the Location. A client
+ * chooses a sign-in `next`, and `safeNext` keeps its query, so a Location
+ * can hold `auth_error` or `error` with no failure (rulings 16 and 19 of plan
+ * 12h). The answer recorder of the tests reads the same rule.
  */
-export function redirectCode(config: ResolvedConfig, res: Response): string | null {
-  const marked = REDIRECT_ERROR.get(res);
-  if (marked !== undefined) return marked;
-  const location = res.headers.get("location");
-  if (location === null) return null;
-  try {
-    const target = new URL(location, config.baseURL);
-    if (`${target.origin}${target.pathname}` !== `${config.appURL}/`) return null;
-    return target.searchParams.get(AUTH_ERROR_PARAM);
-  } catch {
-    return null;
-  }
+export function redirectCode(res: Response): string | null {
+  return REDIRECT_ERROR.get(res) ?? null;
 }
 
 /**
@@ -148,14 +136,11 @@ export function redirectCode(config: ResolvedConfig, res: Response): string | nu
  * `redirectCode` is a client error. The code is the error of a JSON answer,
  * or the code of that redirect.
  */
-export function outcomeOf(
-  config: ResolvedConfig,
-  res: Response,
-): { outcome: Outcome; code: string | null } {
+export function outcomeOf(res: Response): { outcome: Outcome; code: string | null } {
   const status = res.status;
   const fromBody = ANSWER_CODE.get(res) ?? null;
   if (status >= 300 && status < 400) {
-    const param = redirectCode(config, res);
+    const param = redirectCode(res);
     return param === null
       ? { outcome: "redirect", code: fromBody }
       : { outcome: "client_error", code: param };
@@ -314,7 +299,7 @@ export function createRouter(
       }),
     };
     const res = withTrace(await answer(scoped, request, url, route), traceId);
-    const { outcome, code } = outcomeOf(config, res);
+    const { outcome, code } = outcomeOf(res);
     scoped.observe.emit({
       name: "request",
       method: request.method,

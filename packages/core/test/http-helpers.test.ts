@@ -16,7 +16,7 @@ import {
 import { confirmPagePolicy, formAction, noScriptPagePolicy, pageHeaders } from "../src/http/csp.js";
 import { defaultHandoffConfirmPage } from "../src/http/handoff-confirm-page.js";
 import { json, readJson, respond } from "../src/http/json.js";
-import { authErrorUrl, redirect, resolveNext } from "../src/http/redirect.js";
+import { authErrorRedirect, REDIRECT_ERROR, redirect, resolveNext } from "../src/http/redirect.js";
 import { safeNext } from "../src/http/safe-next.js";
 import { defaultSignInPage } from "../src/http/sign-in-page.js";
 import { defaultTotpPage } from "../src/http/totp-page.js";
@@ -309,7 +309,7 @@ describe("handoff confirm page", () => {
   });
 });
 
-describe("resolveNext and authErrorUrl", () => {
+describe("resolveNext and authErrorRedirect", () => {
   const cfg = resolveConfig({
     baseURL: "https://api.example.com",
     appURL: "https://app.example.com",
@@ -326,10 +326,11 @@ describe("resolveNext and authErrorUrl", () => {
     );
     expect(resolveNext(cfg, "/authx")).toBe("https://app.example.com/authx");
   });
-  it("sends an error to appURL", () => {
-    expect(authErrorUrl(cfg, "invalid_token")).toBe(
-      "https://app.example.com/?auth_error=invalid_token",
-    );
+  it("sends an error to appURL, with the mark that the router reads", () => {
+    const res = authErrorRedirect(cfg, "invalid_token");
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("https://app.example.com/?auth_error=invalid_token");
+    expect(REDIRECT_ERROR.get(res)).toBe("invalid_token");
   });
 });
 
