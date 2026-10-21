@@ -79,3 +79,7 @@ Analytics Engine samples by index on write and on read. Read a count with
 An event holds no secret, no credential, and no free text. It holds no
 address unless the app turns on `observe.include`. A raw email is never in an
 event.
+
+As the last guard, an app passes the secret values of its config to each sink
+it builds. Give the same `secrets` list, such as `[env.AUTH_SECRET]`, to
+`workersLogsSink` and to `analyticsEngineSink` (spec 31 item 9).
