@@ -12,9 +12,9 @@ import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
 // The machine check of the one lock order of user-hold.ts (ruling 49 of
-// plan 12k). The order has five kinds of rows: the user row, the session
-// rows, the organization row, the member rows, and the team rows with the
-// team member rows. A storage wrapper records each create, update, delete,
+// plan 12k). The order has six kinds of rows: the user row, the session
+// rows, the organization row, the team row, the member rows, and the team
+// member rows. A storage wrapper records each create, update, delete,
 // and lock read of these kinds in each transaction, in order. Each test runs
 // one flow of plan 12f or 12k that writes these kinds, most of them two kinds
 // or more. A kind may come again, but a kind never comes first after a later
@@ -28,15 +28,20 @@ const PASSWORD = "correct horse battery";
 /** Every request passes: the order, not the limit, is under test. */
 const OPEN = { allow: async () => true };
 
-/** The kinds of user-hold.ts, in the lock order. */
-const KINDS = ["user", "session", "organization", "member", "team"] as const;
+/**
+ * The kinds of user-hold.ts, in the lock order. The team row comes before
+ * the member rows: the organization delete deletes the team rows first, and
+ * an accept that raises a member takes `lockTeam` before its member update.
+ * No flow takes a member row and then a team row.
+ */
+const KINDS = ["user", "session", "organization", "team", "member", "team member"] as const;
 const KIND_OF = {
   user: 0,
   session: 1,
   organization: 2,
-  member: 3,
-  team: 4,
-  teamMember: 4,
+  team: 3,
+  member: 4,
+  teamMember: 5,
 } as const;
 const kindOf = (model: ModelName): number | undefined =>
   (KIND_OF as Partial<Record<ModelName, number>>)[model];
@@ -372,37 +377,49 @@ const reason = { reason: "Ticket 2", ip: null, userAgent: null } as const;
 
 /** The kinds that each flow touches on the scene, so a flow that stops its writes fails here. */
 const TOUCHED: Record<string, string[]> = {
-  "a member removal": ["user", "session", "member", "team"],
-  "a leave": ["user", "session", "member", "team"],
-  "a member removal with revokeTokens": ["user", "session", "organization", "member", "team"],
-  "an owner removal": ["user", "session", "organization", "member", "team"],
+  "a member removal": ["user", "session", "member", "team member"],
+  "a leave": ["user", "session", "member", "team member"],
+  "a member removal with revokeTokens": [
+    "user",
+    "session",
+    "organization",
+    "member",
+    "team member",
+  ],
+  "an owner removal": ["user", "session", "organization", "member", "team member"],
   "an operator removal with an impersonation": [
     "user",
     "session",
     "organization",
     "member",
-    "team",
+    "team member",
   ],
   "an operator removal with no impersonation": [
     "user",
     "session",
     "organization",
     "member",
-    "team",
+    "team member",
   ],
   "a role change": ["member"],
   "an owner demotion": ["organization", "member"],
-  "a role change that drops the platform role": ["user", "organization", "member"],
+  "a role change that drops the platform role": ["user", "session", "organization", "member"],
   "a member add": ["user", "member"],
-  "an organization create with its default team": ["user", "organization", "member", "team"],
-  "an organization delete": ["session", "organization", "member", "team"],
+  "an organization create with its default team": [
+    "user",
+    "organization",
+    "team",
+    "member",
+    "team member",
+  ],
+  "an organization delete": ["session", "organization", "team", "member", "team member"],
   "a team create": ["organization", "team"],
-  "a team delete": ["session", "team"],
-  "a team member add": ["user", "team"],
-  "a team member removal": ["session", "team"],
-  "a team leave": ["session", "team"],
+  "a team delete": ["session", "team", "team member"],
+  "a team member add": ["user", "team", "team member"],
+  "a team member removal": ["session", "team", "team member"],
+  "a team leave": ["session", "team", "team member"],
   "a set of the active team": ["session", "team"],
-  "an invitation accept with a team": ["user", "member", "team"],
+  "an invitation accept with a team": ["user", "team", "member", "team member"],
   "an organization token create": ["organization"],
   "a role create": ["organization"],
   "a ban": ["user", "session"],
@@ -413,29 +430,30 @@ const TOUCHED: Record<string, string[]> = {
     "session",
     "organization",
     "member",
-    "team",
+    "team member",
   ],
   "a platform role revoke with no impersonation": [
     "user",
     "session",
     "organization",
     "member",
-    "team",
+    "team member",
   ],
   "an admin create": ["user", "member"],
   "an account delete with a solo and a shared organization": [
     "user",
     "session",
     "organization",
-    "member",
     "team",
+    "member",
+    "team member",
   ],
   "an account delete of an operator with an impersonation": [
     "user",
     "session",
     "organization",
     "member",
-    "team",
+    "team member",
   ],
   "an impersonation start": ["user", "session"],
   "an impersonation stop": ["session"],
@@ -574,7 +592,7 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
 
 describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", () => {
   for (const [name, call] of Object.entries(FLOWS))
-    it(`${name} takes the kinds in the order user, session, organization, member, team`, async () => {
+    it(`${name} takes the kinds in the order of user-hold.ts`, async () => {
       const w = world();
       const s = await scene(w);
       const answer = await w.flow(name, () => call(w, s));
@@ -591,7 +609,7 @@ describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", 
     expect(
       await w.flow(name, () => w.auth.api.deleteTeam({ user: s.ada.user, teamId: s.core })),
     ).toMatchObject({ ok: true });
-    expect(w.kindsOf(name)).toEqual(["session", "organization", "team"]);
+    expect(w.kindsOf(name)).toEqual(["session", "organization", "team", "team member"]);
     expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
   }, 60_000);
 
@@ -609,7 +627,7 @@ describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", 
         await tx.delete("teamMember", [none]);
       }),
     );
-    expect(w.kindsOf(name)).toEqual(["user", "session", "organization", "member", "team"]);
+    expect(w.kindsOf(name)).toEqual(["user", "session", "organization", "member", "team member"]);
     expect(w.outOfOrder(name)).toEqual([
       "transaction 1: update user after delete member",
       "transaction 1: lock session after delete member",

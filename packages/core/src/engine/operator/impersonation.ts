@@ -224,12 +224,16 @@ export interface ImpersonationHold {
  *
  * With `own`, the same read also locks the operator's own sessions, which
  * the caller deletes next. While `operator.impersonation` is off, it reads
- * nothing and answers no target. A page of `endAll` locks by id across users.
- * With two lock reads, it could hold a row of one set and wait on the
- * other (ruling 36). The port has no OR, so the read locks every session
- * of the operator and of each target. Call it before any session delete of
- * the transaction. With no target, it locks nothing, and the deletes of
- * the caller take their own locks.
+ * no audit row and answers no target. A page of `endAll` locks by id across
+ * users. With two lock reads, it could hold a row of one set and wait on
+ * the other (ruling 36). The port has no OR, so the read locks every
+ * session of the operator and of each target. Call it before any session
+ * delete of the transaction.
+ *
+ * With `own`, the read runs with no target too. Each caller writes the
+ * user's sessions after the organization, member, or team rows, so the
+ * session locks must come first, in the order of user-hold.ts (ruling 49
+ * of plan 12k). Without `own` and with no target, it locks nothing.
  */
 export async function holdImpersonations(
   tx: StorageAdapter,
@@ -238,19 +242,19 @@ export async function holdImpersonations(
   now: Date,
   own: boolean,
 ): Promise<ImpersonationHold> {
-  // While the tool is off, no act reads the audit table for it (ruling 43).
-  if (!config.operator?.impersonation) return { operatorId, targets: [] };
   const since = new Date(now.getTime() - IMPERSONATION_TTL_MAX_MINUTES * MINUTE_MS);
-  const targets = await impersonationTargets(tx, operatorId, since);
-  if (targets.length > 0)
-    await tx.lockInOrder?.(
-      "session",
-      own
-        ? [{ field: "userId", op: "in", value: [operatorId, ...targets] }]
-        : [
-            { field: "userId", op: "in", value: targets },
-            { field: "actorId", op: "eq", value: operatorId },
-          ],
-    );
+  // While the tool is off, no act reads the audit table for it (ruling 43).
+  const targets = config.operator?.impersonation
+    ? await impersonationTargets(tx, operatorId, since)
+    : [];
+  if (own)
+    await tx.lockInOrder?.("session", [
+      { field: "userId", op: "in", value: [operatorId, ...targets] },
+    ]);
+  else if (targets.length > 0)
+    await tx.lockInOrder?.("session", [
+      { field: "userId", op: "in", value: targets },
+      { field: "actorId", op: "eq", value: operatorId },
+    ]);
   return { operatorId, targets };
 }

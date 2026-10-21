@@ -782,8 +782,8 @@ describe("the lock order of each flow (ruling 43 of plan 12k)", () => {
       active: ["sessions", "team"],
       leave: ["sessions", "team"],
       teamDelete: ["sessions", "organization"],
-      removal: ["user", "organization"],
-      ownerRemoval: ["user", "organization"],
+      removal: ["user", "sessions", "organization"],
+      ownerRemoval: ["user", "sessions", "organization"],
       role: ["organization"],
     });
   });

@@ -39,7 +39,7 @@ import {
 import { endedList, sessionsEnded } from "./sessions.js";
 import { spendSlugRead } from "./slug-check.js";
 import { createDefaultTeam, dropMemberTeams, lockOrganization } from "./teams.js";
-import { holdUser, userStays } from "./user-hold.js";
+import { holdSessions, holdUser, userStays } from "./user-hold.js";
 
 export interface Caller {
   user: UserRow;
@@ -224,8 +224,9 @@ export async function ownerLock(
  * A write that can remove an owner: `ownerLock` in its own transaction. The
  * caller runs it in `hookGuard`. `hold` is a user to hold first, before the
  * lock of the organization row, in the lock order of user-hold.ts (ruling 43
- * of plan 12k). That hold writes no new value, so a refusal after it still
- * changes nothing.
+ * of plan 12k). The locks of that user's sessions come next (ruling 49): a
+ * removal writes them after the member and team member deletes. The hold
+ * writes no new value, so a refusal after it still changes nothing.
  */
 async function ownerWrite(
   config: ResolvedConfig,
@@ -242,8 +243,11 @@ async function ownerWrite(
       loss,
       now,
       async (t) => {
-        // With a loss, withRoleLoss holds the same user first (the removed member).
-        if (hold !== null && hold !== loss?.userId) await holdUser(t, hold);
+        // With a loss, withRoleLoss holds the same user and sessions first (the removed member).
+        if (hold !== null && hold !== loss?.userId) {
+          await holdUser(t, hold);
+          await holdSessions(t, hold);
+        }
         return ownerLock(t, o, organization, write, now);
       },
       (r) => r.ok,
@@ -592,6 +596,9 @@ export async function deleteOrganization(
   const organization = publicOrganization(s.value.organization);
   const deleted = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
+      // The sessions that act in the organization come before its row, in the order of
+      // user-hold.ts (ruling 49 of plan 12k). The delete clears their active organization last.
+      await tx.lockInOrder?.("session", [{ field: "activeOrganizationId", op: "eq", value: id }]);
       await runBefore("organization.beforeDelete", hooks.beforeDelete, {
         organization,
         user: input.user,
@@ -1006,7 +1013,10 @@ const REVOKE_TOKENS: Statements = { apiToken: ["revoke"] };
  * The transaction holds the person's user row first (ruling 43). A team
  * member add and an accept hold the same row, and then read the member row
  * through their transaction. So the removal waits for their commit and then
- * deletes their team rows, or they see the member row gone.
+ * deletes their team rows, or they see the member row gone. The locks of
+ * the person's sessions come next, before the organization lock and the
+ * deletes (ruling 49): the removal clears their active organization and
+ * team last, and a team write locks them before its team row.
  */
 export async function removeMember(
   config: ResolvedConfig,
@@ -1057,8 +1067,8 @@ export async function removeMember(
   // The active organization is a choice, not a right; it goes with the membership in the same write.
   const drop = async (storage: StorageAdapter) => {
     // The lock of the token create (ruling 32 of plan 12k). A create that holds it commits
-    // first, and the token delete below sees its row. The user hold runs before this lock, in the
-    // order of user-hold.ts. When the organization is gone, the zero answers conflict.
+    // first, and the token delete below sees its row. The user hold and the session locks run
+    // before this lock, in the order of user-hold.ts. A gone organization answers conflict.
     if (revokeTokens && !(await lockOrganization(storage, s.value.organization))) return 0;
     await runBefore("organization.beforeRemoveMember", hooks.beforeRemoveMember, event);
     const n = await storage.delete("member", [
@@ -1097,14 +1107,18 @@ export async function removeMember(
     if (isOwner(o, target.rank))
       return ownerWrite(config, o, s.value.organization, drop, loss, target.member.userId);
     // A delete of zero rows writes nothing, and the hold writes no new value, so the commit changes nothing.
-    // With a loss, withRoleLoss holds the member's user row first (ruling 43 of plan 12k).
+    // With a loss, withRoleLoss holds the member's user row and sessions first (ruling 43 of plan 12k).
     const n = await config.storage.transaction((tx) =>
       withRoleLoss(
         tx,
         loss,
         now,
         async (t) => {
-          if (!loss) await holdUser(t, target.member.userId);
+          if (!loss) {
+            await holdUser(t, target.member.userId);
+            // The sessions before the organization lock and the deletes (ruling 49 of plan 12k).
+            await holdSessions(t, target.member.userId);
+          }
           return drop(t);
         },
         (rows) => rows > 0,

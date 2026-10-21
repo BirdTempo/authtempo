@@ -80,6 +80,18 @@ export async function holdUser(storage: StorageAdapter, userId: string): Promise
   stopWith("conflict");
 }
 
+/**
+ * Takes the locks of the sessions of `userId`, by id, in the caller's
+ * transaction. It comes after the hold of that user row and before the
+ * organization row, in the order above. A member removal and a leave call
+ * it: they clear the active organization and team of these sessions after
+ * the member and team member deletes (ruling 49 of plan 12k). It costs one
+ * statement on Postgres. D1 and memory have no row lock and leave it out.
+ */
+export async function holdSessions(storage: StorageAdapter, userId: string): Promise<void> {
+  await storage.lockInOrder?.("session", [{ field: "userId", op: "eq", value: userId }]);
+}
+
 /** The read after an insert: `conflict` when an account delete took the user. */
 export async function userStays(storage: StorageAdapter, userId: string): Promise<void> {
   if (!(await storage.findOne("user", [{ field: "id", op: "eq", value: userId }])))
