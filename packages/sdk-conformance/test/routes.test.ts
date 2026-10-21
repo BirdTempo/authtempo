@@ -252,6 +252,160 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     reason: "the confirm page of the mailed delete link; a browser opens it (plan 12a Task 20)",
   },
   {
+    method: "POST",
+    path: "/operator/sso/enforce-off",
+    reason:
+      "an operator tool: the operator secret or a platform operator turns enforce off (plan 12d); the client SDK has no operator call",
+  },
+  {
+    method: "GET",
+    path: "/sso/domains",
+    reason:
+      "an SSO manager route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/add",
+    reason:
+      "an SSO manager route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/verify",
+    reason:
+      "an SSO manager route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/update",
+    reason:
+      "an SSO manager route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/delete",
+    reason:
+      "an SSO manager route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "GET",
+    path: "/sso/connections",
+    reason:
+      "an SSO manager route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/connections/create",
+    reason:
+      "an SSO manager route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/connections/update",
+    reason:
+      "an SSO manager route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/connections/delete",
+    reason:
+      "an SSO manager route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/discover",
+    reason:
+      "the discovery of the SSO sign-in of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "GET",
+    path: "/sso/:connectionId/start",
+    reason: "the browser opens the SSO start of a connection (plan 12d)",
+  },
+  {
+    method: "GET",
+    path: "/sso/:connectionId/callback",
+    reason: "the sign-in provider of a connection sends the browser back to it (plan 12d)",
+  },
+  {
+    method: "GET",
+    path: "/scim/tokens",
+    reason:
+      "a SCIM token route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "POST",
+    path: "/scim/tokens/create",
+    reason:
+      "a SCIM token route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "POST",
+    path: "/scim/tokens/revoke",
+    reason:
+      "a SCIM token route of plan 12d; the client call comes in plan 12d Task 13, which removes this row",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/ServiceProviderConfig",
+    reason:
+      "a directory such as Entra ID or Okta calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/ResourceTypes",
+    reason:
+      "a directory such as Entra ID or Okta calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/ResourceTypes/:id",
+    reason:
+      "a directory such as Entra ID or Okta calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Schemas",
+    reason:
+      "a directory such as Entra ID or Okta calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Schemas/:id",
+    reason:
+      "a directory such as Entra ID or Okta calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Bulk",
+    reason:
+      "a directory such as Entra ID or Okta calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Me",
+    reason:
+      "a directory such as Entra ID or Okta calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/.search",
+    reason:
+      "a directory such as Entra ID or Okta calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Users/.search",
+    reason:
+      "a directory such as Entra ID or Okta calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Groups/.search",
+    reason:
+      "a directory such as Entra ID or Okta calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d)",
+  },
+  {
     method: "GET",
     path: "/openapi.json",
     reason: "a code generator or an API tool reads the document; no SDK call needs it (plan 11g)",
