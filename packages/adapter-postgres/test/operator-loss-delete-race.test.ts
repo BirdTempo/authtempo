@@ -60,7 +60,7 @@ function world() {
     lockInOrder: (async (model, where) => {
       await tx.lockInOrder?.(model, where);
       if (model === "session") await fire("session lock");
-    }) as typeof tx.lockInOrder,
+    }) as NonNullable<typeof tx.lockInOrder>,
   });
   const storage: StorageAdapter = {
     ...adapter,
