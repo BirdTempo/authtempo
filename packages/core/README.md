@@ -1220,7 +1220,7 @@ const auth = createAuth({
 | Team member add | `organization.beforeAddTeamMember` | the added user's row and the team row |
 | Team member removal | `organization.beforeRemoveTeamMember` | the team row |
 | Identity unlink | `identity.beforeUnlink` | the user's row |
-| Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row |
+| Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row; when the user opened an impersonation, the sessions of the user and of each impersonation that the user opened |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |
 | Impersonation start | `session.beforeCreate` | the operator's user row |
 
