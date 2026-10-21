@@ -278,6 +278,68 @@ describe("the SSO resolution (plan 12d Task 5)", () => {
     expect(await counts(w)).toEqual(full);
   });
 
+  it("lets organization.beforeAddMember refuse an SSO sign-in before any write", async () => {
+    const order: string[] = [];
+    const vias: string[] = [];
+    const w = ssoSignInWorld({
+      password: { hash: FAST, uniformSignUp: false, requireVerified: false },
+      hooks: {
+        sso: {
+          beforeSignIn: () => {
+            order.push("sso.beforeSignIn");
+          },
+        },
+        organization: {
+          beforeAddMember: (e) => {
+            order.push("organization.beforeAddMember");
+            vias.push(e.via);
+            if (e.memberUser.email === ADA) throw hookRefusal("Ada joins by an invitation.");
+          },
+        },
+        session: {
+          beforeCreate: () => {
+            order.push("session.beforeCreate");
+          },
+        },
+      },
+    });
+    const { connectionId } = await acmeWithSso(w);
+    // Ada's unverified sign-up is a claimant, so a refusal must also leave the claim undone.
+    const up = await passwordSignUp(w.config, {
+      email: ADA,
+      password: "a claimant's password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok || !("token" in up.value)) throw new Error("the sign-up opened no session");
+    const claimant = up.value.token;
+    const user = await userAt(w, ADA);
+    if (!user || user.emailVerified) throw new Error("no unverified user");
+    const kept = await passwordOf(w, user.id);
+    const before = await counts(w);
+    order.length = 0;
+    vias.length = 0;
+    const r = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
+    expect(r.error).toBe("hook_refused");
+    expect(order).toEqual(["sso.beforeSignIn", "organization.beforeAddMember"]);
+    expect(vias).toEqual(["sso"]);
+    expect(await counts(w)).toEqual(before);
+    expect(await userAt(w, ADA)).toEqual(user);
+    expect(await identitiesOf(w, user.id)).toEqual([]);
+    expect(await passwordOf(w, user.id)).toEqual(kept);
+    expect((await resolveSession(w.config, claimant))?.user.id).toBe(user.id);
+    // A sign-in that the hook lets through runs the three hooks in this order.
+    order.length = 0;
+    const bo = await ssoSignIn(w, connectionId, "acme", { sub: "b-1", email: "bo@acme.example" });
+    expect(bo.error).toBeNull();
+    expect(order).toEqual([
+      "sso.beforeSignIn",
+      "organization.beforeAddMember",
+      "session.beforeCreate",
+    ]);
+    expect(vias).toEqual(["sso", "sso"]);
+  });
+
   it("wins one claim in the race of plan 6b", async () => {
     let claims = 0;
     const w = ssoSignInWorld({

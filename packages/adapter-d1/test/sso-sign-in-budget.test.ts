@@ -1,5 +1,5 @@
 import { env } from "cloudflare:test";
-import { type AuthConfig, createAuth } from "@authtempo/core";
+import { type AuthConfig, createAuth, hookRefusal } from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { describe, expect, it } from "vitest";
@@ -241,34 +241,59 @@ describe("the queries of one SSO callback on D1 (plan 12d Task 5)", () => {
   }, 120_000);
 });
 
+/**
+ * Ada's unverified sign-up, then one callback that `extra` refuses. It
+ * expects `code`, no write of a row of Ada, and Ada's rows as they were.
+ */
+async function refusedCallback(extra: Partial<AuthConfig>, code: string): Promise<void> {
+  // Ada's sign-up keeps a session, unverified.
+  const w = await world({ ...extra, password: { uniformSignUp: false, requireVerified: false } });
+  const token = await claimant(w);
+  if (token === null) throw new Error("the sign-up opened no session");
+  const store = createD1Adapter(env.DB);
+  const byEmail = [{ field: "email" as const, op: "eq" as const, value: "ada@acme.example" }];
+  const ada = await store.findOne("user", byEmail);
+  if (!ada) throw new Error("no user");
+  const byUser = [{ field: "userId" as const, op: "eq" as const, value: ada.id }];
+  const password = await store.findOne("password", byUser);
+  const sessions = await store.findMany("session", byUser);
+  const r = await callback(w, "code-1");
+  expect(r.error).toBe(code);
+  // No statement of the callback writes a row of Ada, and no undo statement does either.
+  const writes = r.sql.filter((q) =>
+    /^\s*(INSERT|UPDATE|DELETE)\b[^;]*\b(ta_user|ta_session|ta_password|ta_identity|ta_member)\b/i.test(
+      q,
+    ),
+  );
+  expect(writes).toEqual([]);
+  expect(await store.findOne("user", byEmail)).toEqual(ada);
+  expect(await store.findOne("password", byUser)).toEqual(password);
+  expect(await store.findMany("session", byUser)).toEqual(sessions);
+  expect((await w.auth.api.getSession(token))?.user.id).toBe(ada.id);
+}
+
 describe("a member refusal of an SSO callback on D1 (ruling 41 of plan 12d)", () => {
   it("answers member_limit before the claim writes, so no undo runs", async () => {
-    // The owner fills the limit of 1. Ada's sign-up keeps a session, unverified.
-    const w = await world({
-      organizations: { limits: { membersPerOrganization: 1 } },
-      password: { uniformSignUp: false, requireVerified: false },
-    });
-    const token = await claimant(w);
-    if (token === null) throw new Error("the sign-up opened no session");
-    const store = createD1Adapter(env.DB);
-    const byEmail = [{ field: "email" as const, op: "eq" as const, value: "ada@acme.example" }];
-    const ada = await store.findOne("user", byEmail);
-    if (!ada) throw new Error("no user");
-    const byUser = [{ field: "userId" as const, op: "eq" as const, value: ada.id }];
-    const password = await store.findOne("password", byUser);
-    const sessions = await store.findMany("session", byUser);
-    const r = await callback(w, "code-1");
-    expect(r.error).toBe("member_limit");
-    // No statement of the callback writes a row of Ada, and no undo statement does either.
-    const writes = r.sql.filter((q) =>
-      /^\s*(INSERT|UPDATE|DELETE)\b[^;]*\b(ta_user|ta_session|ta_password|ta_identity|ta_member)\b/i.test(
-        q,
-      ),
+    // The owner fills the limit of 1.
+    await refusedCallback(
+      { organizations: { limits: { membersPerOrganization: 1 } } },
+      "member_limit",
     );
-    expect(writes).toEqual([]);
-    expect(await store.findOne("user", byEmail)).toEqual(ada);
-    expect(await store.findOne("password", byUser)).toEqual(password);
-    expect(await store.findMany("session", byUser)).toEqual(sessions);
-    expect((await w.auth.api.getSession(token))?.user.id).toBe(ada.id);
+  }, 120_000);
+
+  it("answers hook_refused from organization.beforeAddMember before the claim writes", async () => {
+    const vias: string[] = [];
+    const hooks: AuthConfig["hooks"] = {
+      organization: {
+        beforeAddMember: (e) => {
+          // The owner's member row of the organization create passes.
+          if (e.memberUser.email !== "ada@acme.example") return;
+          vias.push(e.via);
+          throw hookRefusal("Ada joins by an invitation.");
+        },
+      },
+    };
+    await refusedCallback({ hooks }, "hook_refused");
+    expect(vias).toEqual(["sso"]);
   }, 120_000);
 });
