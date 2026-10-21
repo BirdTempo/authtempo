@@ -277,6 +277,14 @@ export async function holdImpersonations(
  * in pages (`endImpersonationsPage`). One `endSessions` per
  * target deletes the target's sessions whose `actorId` is the operator,
  * with the outbox rows of their links. The answer is the count of sessions.
+ *
+ * It has no call budget (plan 12f, final review L3). The bound is the
+ * start limit: `IMPERSONATE_PER_USER` gives 20 starts an hour, and no
+ * impersonation lives past `IMPERSONATION_TTL_MAX_MINUTES` (240). So
+ * `hold.targets` holds at most 80 users while the limiter holds. D1 Free
+ * allows 50 queries per invocation. Each target costs one `endSessions`,
+ * so with about 10 targets the flow passes 50 queries. Then the query
+ * past the limit throws, and the flow fails.
  */
 export async function endImpersonations(
   tx: StorageAdapter,
