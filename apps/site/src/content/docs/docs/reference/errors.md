@@ -559,7 +559,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="not_ready"><code>not_ready</code> 503</h3>
 
-- **Meaning:** The store gave no answer to the readiness check. The body also carries `reason`: `storage` when the store threw or gave no answer in 3 seconds, `schema` when the stored schema version is older than the adapter. It names no host, no database, no version, and no error name.
+- **Meaning:** The store gave no answer to the readiness check. The body also carries `reason`. It is `storage` when the store threw or gave no answer in 3 seconds. It is `schema` when the stored schema version is older than the adapter. It names no host, no database, no version, and no error name.
 - **Do:** For `schema`, run the migrations of your adapter. For `storage`, check the database and its binding. The route keeps one result for 10 seconds, so call it again after that time.
 
 | Routes |
