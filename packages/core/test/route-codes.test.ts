@@ -21,6 +21,7 @@ import {
 } from "../src/engine/passkeys.js";
 import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../src/engine/password.js";
 import { requestReauthCode } from "../src/engine/reauth.js";
+import { createScimToken } from "../src/engine/scim/tokens.js";
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { createSession } from "../src/engine/sessions.js";
 import { createConnection } from "../src/engine/sso/connections.js";
@@ -194,6 +195,9 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /sso/connections/delete": { id: "$connection" },
   // Plan 12d Task 4: the discovery at sign-in.
   "POST /sso/discover": { email: "ada@example.com" },
+  // Plan 12d Task 9b: `$scimToken` names a SCIM token of the world.
+  "POST /scim/tokens/create": { organizationId: "$org", name: "directory" },
+  "POST /scim/tokens/revoke": { id: "$scimToken" },
 };
 
 /** The query of a GET whose route refuses a request with none. A `$` value is a placeholder too. */
@@ -208,6 +212,7 @@ const QUERIES: { readonly [K in RouteKey]?: Record<string, string> } = {
   "GET /organizations/tokens": { organizationId: "$org" },
   "GET /sso/domains": { organizationId: "$org" },
   "GET /sso/connections": { organizationId: "$org" },
+  "GET /scim/tokens": { organizationId: "$org" },
 };
 
 /** The values of the placeholders of `BODIES` and `QUERIES`, by placeholder. */
@@ -228,6 +233,7 @@ const UNFILLED: Fills = {
   $team: "t1",
   $domain: "d1",
   $connection: "c1",
+  $scimToken: "k1",
 };
 
 /** `value` with its placeholder filled from `fills`, or from `UNFILLED`. */
@@ -345,6 +351,8 @@ function world(extra: Partial<AuthConfig> = {}) {
     account: { deleteConfirm: { ttlMinutes: 60 } },
     // The domain and connection routes of plan 12d. No family of this file reaches a resolver.
     sso: { oidc: true, dns: [{ name: "none", txt: async () => [] }] },
+    // The SCIM token routes of plan 12d Task 9b.
+    scim: {},
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.
     trustedOrigins: [BASE_URL],
     ...extra,
@@ -599,11 +607,20 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
         },
       ),
     );
+    // A SCIM token of the organization, for the revoke (plan 12d Task 9b).
+    const scimToken = must(
+      await createScimToken(
+        config,
+        { kind: "app", name: "route-codes" },
+        { organizationId: org.organization.id, name: "directory" },
+      ),
+    );
     const results = await probe(w, routes, () => w.cookie(carol.token), {
       $org: org.organization.id,
       $team: team.id,
       $domain: domain.id,
       $connection: connection.id,
+      $scimToken: scimToken.id,
     });
     expect(unlike(results, "forbidden_rank", 403)).toEqual({});
   });

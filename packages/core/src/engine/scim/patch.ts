@@ -21,6 +21,8 @@ export type PatchOp = { op: "add" | "remove" | "replace"; path: PatchPath | null
 type Refusal = { ok: false; status: number; scimType: ScimType; detail: string };
 
 export const NS_SCIM_PATCH_OP = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
+export const NS_SCIM_USER = "urn:ietf:params:scim:schemas:core:2.0:User";
+export const NS_SCIM_GROUP = "urn:ietf:params:scim:schemas:core:2.0:Group";
 export const NS_SCIM_ENTERPRISE = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
 
 /** The most operations of one PATCH, after the no-path form gives one per key. */
@@ -30,12 +32,30 @@ export const PATCH_PATH_MAX = 256;
 /** The deepest value: a no-path value with `members`, a list of objects, is 3 levels. */
 export const PATCH_VALUE_DEPTH_MAX = 3;
 
-interface SubRule {
-  readonly name: string;
-  readonly boolean: boolean;
+/**
+ * The facts of one attribute in the Schema document (RFC 7643 section 7,
+ * as section 8.7.1 gives them, read 2026-10-21). The discovery documents
+ * read them here, so the parser and the documents describe one table.
+ */
+export interface AttrFacts {
+  readonly type: "string" | "boolean" | "complex" | "reference" | "binary";
+  readonly multiValued: boolean;
+  readonly required: boolean;
+  readonly caseExact: boolean;
+  readonly mutability: "readWrite" | "readOnly" | "immutable" | "writeOnly";
+  readonly returned: "always" | "default" | "never" | "request";
+  readonly uniqueness: "none" | "server" | "global";
+  readonly referenceTypes?: readonly string[];
+  readonly canonicalValues?: readonly string[];
 }
 
-interface AttrRule {
+export interface SubRule {
+  readonly name: string;
+  readonly boolean: boolean;
+  readonly facts: AttrFacts;
+}
+
+export interface AttrRule {
   readonly name: string;
   readonly boolean: boolean;
   readonly subs: ReadonlyMap<string, SubRule> | null;
@@ -46,41 +66,97 @@ interface AttrRule {
   readonly refuse: { scimType: ScimType; detail: string } | null;
   // The read of the key in the no-path form: as a path, ignored, or the id.
   readonly noPath: "path" | "ignore" | "id";
+  // The facts of the Schema document. Null for a common attribute of RFC
+  // 7643 section 3.1 (id, externalId, meta, schemas), which no Schema lists.
+  // Null for password too, which core never stores.
+  readonly facts: AttrFacts | null;
 }
 
 function rules(list: AttrRule[]): ReadonlyMap<string, AttrRule> {
   return new Map(list.map((r) => [asciiLower(r.name), r]));
 }
 
-function text(name: string): AttrRule {
-  return { name, boolean: false, subs: null, filter: null, refuse: null, noPath: "path" };
+/** The facts of most attributes of RFC 7643 section 8.7.1: an optional text that a client writes. */
+const PLAIN: AttrFacts = {
+  type: "string",
+  multiValued: false,
+  required: false,
+  caseExact: false,
+  mutability: "readWrite",
+  returned: "default",
+  uniqueness: "none",
+};
+
+function text(name: string, facts: Partial<AttrFacts> | null = {}): AttrRule {
+  return {
+    name,
+    boolean: false,
+    subs: null,
+    filter: null,
+    refuse: null,
+    noPath: "path",
+    facts: facts === null ? null : { ...PLAIN, ...facts },
+  };
 }
 
 function flag(name: string): AttrRule {
-  return { name, boolean: true, subs: null, filter: null, refuse: null, noPath: "path" };
+  return { ...text(name, { type: "boolean" }), boolean: true };
 }
 
-function complex(name: string, subs: string[], filter: "type" | "value" | null): AttrRule {
-  const map = new Map(subs.map((s) => [asciiLower(s), { name: s, boolean: s === "primary" }]));
-  return { name, boolean: false, subs: map, filter, refuse: null, noPath: "path" };
+/** One sub-attribute: a name, or a name with the facts that differ from `PLAIN`. */
+type SubSpec = string | readonly [name: string, facts: Partial<AttrFacts>];
+
+/**
+ * A complex attribute. A sub-attribute takes the mutability of its parent.
+ * `primary` is a boolean and `$ref` a reference, as section 8.7.1 has them.
+ */
+function complex(
+  name: string,
+  subs: readonly SubSpec[],
+  filter: "type" | "value" | null,
+  facts: Partial<AttrFacts> = {},
+): AttrRule {
+  const own: AttrFacts = { ...PLAIN, type: "complex", ...facts };
+  const map = new Map(
+    subs.map((spec) => {
+      const [sub, extra] = typeof spec === "string" ? [spec, {}] : spec;
+      const kind =
+        sub === "primary"
+          ? ({ type: "boolean" } as const)
+          : sub === "$ref"
+            ? ({ type: "reference" } as const)
+            : {};
+      const subFacts: AttrFacts = { ...PLAIN, mutability: own.mutability, ...kind, ...extra };
+      return [asciiLower(sub), { name: sub, boolean: sub === "primary", facts: subFacts }];
+    }),
+  );
+  return { ...text(name), subs: map, filter, facts: own };
 }
 
 function readOnly(name: string, noPath: AttrRule["noPath"]): AttrRule {
   return {
-    ...text(name),
+    ...text(name, null),
     refuse: { scimType: "mutability", detail: `${name} is read-only` },
     noPath,
   };
 }
 
-const MULTI_SUBS = ["value", "display", "type", "primary"];
+/** The sub-attributes of a multi-valued attribute, with the canonical values of its `type`. */
+function multi(types: readonly string[] | null, value: Partial<AttrFacts> = {}): SubSpec[] {
+  return [
+    ["value", value],
+    "display",
+    types === null ? "type" : ["type", { canonicalValues: types }],
+    "primary",
+  ];
+}
 
 // The core User schema (RFC 7643 sections 3.1 and 4.1). `userName`,
 // `externalId`, and `active` are columns, and `password` is refused. Every
 // other attribute of this table goes into `scimUser.data` (Task 10 Behavior 1).
-const USER_RULES = rules([
-  text("userName"),
-  text("externalId"),
+export const USER_RULES = rules([
+  text("userName", { required: true, uniqueness: "server" }),
+  text("externalId", null),
   complex(
     "name",
     ["formatted", "familyName", "givenName", "middleName", "honorificPrefix", "honorificSuffix"],
@@ -88,17 +164,27 @@ const USER_RULES = rules([
   ),
   text("displayName"),
   text("nickName"),
-  text("profileUrl"),
+  text("profileUrl", { type: "reference", referenceTypes: ["external"] }),
   text("title"),
   text("userType"),
   text("preferredLanguage"),
   text("locale"),
   text("timezone"),
   flag("active"),
-  complex("emails", MULTI_SUBS, "type"),
-  complex("phoneNumbers", MULTI_SUBS, "type"),
-  complex("ims", MULTI_SUBS, "type"),
-  complex("photos", MULTI_SUBS, "type"),
+  complex("emails", multi(["work", "home", "other"]), "type", { multiValued: true }),
+  complex("phoneNumbers", multi(["work", "home", "mobile", "fax", "pager", "other"]), "type", {
+    multiValued: true,
+  }),
+  complex("ims", multi(["aim", "gtalk", "icq", "xmpp", "msn", "skype", "qq", "yahoo"]), "type", {
+    multiValued: true,
+  }),
+  complex(
+    "photos",
+    multi(["photo", "thumbnail"], { type: "reference", referenceTypes: ["external"] }),
+    "type",
+    { multiValued: true },
+  ),
+  // Section 8.7.1 lists no primary here; section 8.2 sends one, so core reads it as on the others.
   complex(
     "addresses",
     [
@@ -108,17 +194,18 @@ const USER_RULES = rules([
       "region",
       "postalCode",
       "country",
-      "type",
+      ["type", { canonicalValues: ["work", "home", "other"] }],
       "primary",
     ],
     "type",
+    { multiValued: true },
   ),
-  complex("entitlements", MULTI_SUBS, "type"),
-  complex("roles", MULTI_SUBS, "type"),
-  complex("x509Certificates", MULTI_SUBS, "type"),
+  complex("entitlements", multi(null), "type", { multiValued: true }),
+  complex("roles", multi(null), "type", { multiValued: true }),
+  complex("x509Certificates", multi(null, { type: "binary" }), "type", { multiValued: true }),
   // The ServiceProviderConfig says changePassword.supported is false.
   {
-    ...text("password"),
+    ...text("password", null),
     refuse: { scimType: "invalidValue", detail: "password is not supported" },
   },
   // Task 10 Behavior 1 (RFC 7643 section 2.2): id, meta, and groups in a
@@ -126,11 +213,28 @@ const USER_RULES = rules([
   readOnly("id", "id"),
   readOnly("meta", "ignore"),
   readOnly("schemas", "path"),
-  readOnly("groups", "ignore"),
+  // The Schema lists groups with its sub-attributes; the parser refuses a path to it first.
+  {
+    ...complex(
+      "groups",
+      [
+        "value",
+        ["$ref", { referenceTypes: ["User", "Group"] }],
+        "display",
+        ["type", { canonicalValues: ["direct", "indirect"] }],
+      ],
+      null,
+      { multiValued: true, mutability: "readOnly" },
+    ),
+    refuse: { scimType: "mutability", detail: "groups is read-only" },
+    noPath: "ignore",
+  },
 ]);
 
 // The enterprise User extension (RFC 7643 section 4.3), read only as `<URN>:attr`.
-const ENTERPRISE_RULES = rules([
+// Task 10 (ruling 24, i5) makes manager the complex attribute of section 4.3;
+// the Schema document follows this table.
+export const ENTERPRISE_RULES = rules([
   text("employeeNumber"),
   text("costCenter"),
   text("organization"),
@@ -140,10 +244,24 @@ const ENTERPRISE_RULES = rules([
 ]);
 
 // The core Group schema (RFC 7643 section 4.2).
-const GROUP_RULES = rules([
-  text("displayName"),
-  text("externalId"),
-  complex("members", ["value", "display", "type", "$ref"], "value"),
+// Section 4.2 makes displayName REQUIRED, where section 8.7.1 says false.
+// Core needs it and holds it unique in the organization, so the Schema
+// says required and server (Task 9b question Q3). Section 8.7.1 lists no
+// members.display; it takes the immutable facts of its siblings.
+export const GROUP_RULES = rules([
+  text("displayName", { required: true, uniqueness: "server" }),
+  text("externalId", null),
+  complex(
+    "members",
+    [
+      ["value", { mutability: "immutable" }],
+      ["display", { mutability: "immutable" }],
+      ["type", { mutability: "immutable", canonicalValues: ["User", "Group"] }],
+      ["$ref", { mutability: "immutable", referenceTypes: ["User", "Group"] }],
+    ],
+    "value",
+    { multiValued: true },
+  ),
   readOnly("id", "id"),
   readOnly("meta", "ignore"),
   readOnly("schemas", "path"),

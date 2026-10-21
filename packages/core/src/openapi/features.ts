@@ -30,6 +30,7 @@ export const FEATURE_INFO: Record<RouteFeature, { configKey: string; default: "o
   oauthRegistration: { configKey: "oauth.registration.dynamic", default: "off" },
   oauthDevice: { configKey: "oauth.device", default: "off" },
   sso: { configKey: "sso", default: "off" },
+  scim: { configKey: "scim", default: "off" },
   operatorSso: { configKey: "operator and sso", default: "off" },
   openapi: { configKey: "openapi", default: "off" },
   health: { configKey: "always on", default: "on" },

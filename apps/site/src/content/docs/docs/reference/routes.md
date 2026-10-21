@@ -1527,6 +1527,135 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | Answer | The state must name this connection, and the binding cookie must match. Core exchanges the code, then checks the ID token with the issuer, the audience, and the nonce. It reads `sub`, `email`, `name`, `picture`, `amr`, and `acr`, and never `email_verified`. Until plan 12d Task 5, every callback answers `sso_failed` after these checks. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`sso_failed`](/docs/reference/errors/#sso_failed), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`oauth_denied`](/docs/reference/errors/#oauth_denied) |
 
+## SCIM
+
+These routes exist when the config sets `scim` (plan 12d). A directory, such as Entra ID or Okta, provisions the staff of an organization with a SCIM token. A token holds `sk_` and 43 characters. Core stores its SHA-256 only, so the answer of the create is the one time the token leaves core.
+
+The three token routes run the steps of the SSO manager routes: a session, the count on `sso-manage:user:<userId>`, then the manager guard of [Enterprise SSO](#enterprise-sso). The router refuses each of them to an impersonation session with `impersonation_session`. Each write writes one audit row, and no row holds the token or its hash.
+
+<h3 id="get-scim-tokens"><code>GET /scim/tokens</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | Query `{ organizationId }` |
+| Answer | `{ tokens }`, oldest first. Each token holds `id`, `name`, `hint`, `scopes`, `createdAt`, `lastUsedAt`, and `expiresAt`. No answer holds the token or its hash |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-scim-tokens-create"><code>POST /scim/tokens/create</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ organizationId, name, scopes?, expiresInDays? }`. `name` has 1 to 64 characters with no control character. `scopes` is a non-empty list of distinct scopes of `scim.users.read`, `scim.users.write`, `scim.groups.read`, and `scim.groups.write`; absent gives all four. `expiresInDays` is a whole number from 1 to 730; absent, the token never expires |
+| Answer | `{ token, id, hint }`. An organization holds at most 2 live tokens: the one in use and the next one of a rollover. An expired token does not count |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`token_limit`](/docs/reference/errors/#token_limit), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-scim-tokens-revoke"><code>POST /scim/tokens/revoke</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
+| Input | JSON `{ id }` |
+| Answer | `{ ok: true }`. The row goes, and the next SCIM call with the token answers 401 |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+The routes under `/scim/v2` take an `sk_` bearer token as `Authorization: Bearer <token>`, and no session. The organization of each call is the organization of the token, never a value of the path or the body. Each answer is `application/scim+json` with `cache-control: no-store`. A failure is the SCIM error message of RFC 7644 section 3.12, `{ schemas, status, scimType?, detail }`, never a code of the errors page.
+
+A missing, wrong, expired, or revoked token answers 401 with `WWW-Authenticate: Bearer realm="scim"`. Each such failure counts on `scim-auth:ip:<ip>`, 60 per 15 minutes, and a refused count answers 429. A valid token never counts on that key. It counts on `scim:token:<id>`, 1200 per 10 minutes, and a refused count answers 429. A token without the scope of a route answers 403. Plans 12d Tasks 10 and 11 add the Users and Groups routes.
+
+<h3 id="get-scim-v2-serviceproviderconfig"><code>GET /scim/v2/ServiceProviderConfig</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | The ServiceProviderConfig of RFC 7643 section 5: PATCH, filters with at most 100 results, and ETags are on; bulk, sort, and the password change are off. The one scheme is `oauthbearertoken` |
+| Errors | None |
+
+<h3 id="get-scim-v2-resourcetypes"><code>GET /scim/v2/ResourceTypes</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | A ListResponse of the resource types `User`, with the enterprise extension as not required, and `Group`. The discovery lists ignore paging and sorting, as RFC 7644 section 4 says. A `filter` answers 403 |
+| Errors | None |
+
+<h3 id="get-scim-v2-resourcetypes-id"><code>GET /scim/v2/ResourceTypes/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | The resource type `User` or `Group`. Another id answers 404 |
+| Errors | None |
+
+<h3 id="get-scim-v2-schemas"><code>GET /scim/v2/Schemas</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | A ListResponse of the core User, the core Group, and the enterprise User schemas, with the facts of each attribute that core reads or stores. The discovery lists ignore paging and sorting, as RFC 7644 section 4 says. A `filter` answers 403 |
+| Errors | None |
+
+<h3 id="get-scim-v2-schemas-id"><code>GET /scim/v2/Schemas/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | The schema of the URN in the path. Another id answers 404 |
+| Errors | None |
+
+Core does not serve these SCIM operations. Each answers 501 with the detail "not supported by this server", after the token check.
+
+<h3 id="post-scim-v2-bulk"><code>POST /scim/v2/Bulk</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | 501 with the SCIM error message |
+| Errors | None |
+
+<h3 id="get-scim-v2-me"><code>GET /scim/v2/Me</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | 501 with the SCIM error message |
+| Errors | None |
+
+<h3 id="post-scim-v2-search"><code>POST /scim/v2/.search</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | 501 with the SCIM error message |
+| Errors | None |
+
+<h3 id="post-scim-v2-users-search"><code>POST /scim/v2/Users/.search</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | 501 with the SCIM error message |
+| Errors | None |
+
+<h3 id="post-scim-v2-groups-search"><code>POST /scim/v2/Groups/.search</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. Any scope of the token passes |
+| Input | None |
+| Answer | 501 with the SCIM error message |
+| Errors | None |
+
 ## OpenAPI document
 
 This route exists when the config sets `openapi: true`.

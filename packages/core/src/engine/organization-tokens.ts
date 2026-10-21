@@ -21,7 +21,6 @@ import {
 import {
   copySet,
   expiryOf,
-  HINT_LENGTH,
   knownSet,
   lastUsedDue,
   movedFormed,
@@ -31,6 +30,7 @@ import {
   spendTokenCreate,
   type TokenNarrow,
   tokenDays,
+  tokenHint,
   validMetadata,
   validTokenName,
 } from "./tokens.js";
@@ -205,10 +205,7 @@ export async function createOrganizationToken(
     createdById: user.id,
     name: input.name,
     tokenHash: await sha256Hex(token),
-    hint: token.slice(
-      ORGANIZATION_TOKEN_PREFIX.length,
-      ORGANIZATION_TOKEN_PREFIX.length + HINT_LENGTH,
-    ),
+    hint: tokenHint(ORGANIZATION_TOKEN_PREFIX, token),
     permissions: copySet(input.permissions),
     metadata,
     expiresAt: expiryOf(days.value, now),

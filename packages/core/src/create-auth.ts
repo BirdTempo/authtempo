@@ -145,6 +145,12 @@ import {
   type RoleSummary,
   updateRole,
 } from "./engine/roles.js";
+import {
+  createScimToken,
+  listScimTokens,
+  revokeScimToken,
+  type ScimTokenSummary,
+} from "./engine/scim/tokens.js";
 import type { SignInChallenge } from "./engine/second-factor.js";
 import {
   rewrapSecrets,
@@ -250,7 +256,7 @@ import { unscopedOf } from "./observe/observer.js";
 import type { HandleOptions, ObserveStats } from "./observe/port.js";
 import type { PublicJwk } from "./primitives/jwk.js";
 import { fail, type Result } from "./result.js";
-import type { SessionRow, UserRow } from "./schema.js";
+import type { ScimScope, SessionRow, UserRow } from "./schema.js";
 import type {
   PublicKeyCredentialCreationOptionsJSON,
   PublicKeyCredentialRequestOptionsJSON,
@@ -382,6 +388,35 @@ export interface SsoApi {
     ): Promise<Result<SsoConnectionSummary>>;
     /** Deletes a connection, and takes the route and `enforce` off its domains. */
     delete(input: { actor: SsoAppActor; id: string }): Promise<Result<{ ok: true }>>;
+  };
+}
+
+/**
+ * The SCIM setup in process (plan 12d Task 9). Present when `scim` is set.
+ * Each call takes the app as its actor and writes the audit rows of the
+ * routes. An app name outside 1 to 64 characters of `[a-z0-9_.-]` answers
+ * `invalid_body`.
+ */
+export interface ScimApi {
+  tokens: {
+    /** The SCIM tokens of an organization, oldest first. No answer holds a token or its hash. */
+    list(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+    }): Promise<Result<ScimTokenSummary[]>>;
+    /**
+     * A new SCIM token. The answer holds the token, the one time it leaves
+     * core. At most two live tokens per organization, else `token_limit`.
+     */
+    create(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      name: string;
+      scopes?: ScimScope[];
+      expiresInDays?: number;
+    }): Promise<Result<{ token: string; id: string; hint: string }>>;
+    /** Deletes a token. The next SCIM call with it answers 401. */
+    revoke(input: { actor: SsoAppActor; id: string }): Promise<Result<{ ok: true }>>;
   };
 }
 
@@ -805,6 +840,7 @@ export interface AuthApi {
   jwt?: JwtApi;
   oauth?: OAuthApi;
   sso?: SsoApi;
+  scim?: ScimApi;
 }
 
 export interface Auth {
@@ -1152,6 +1188,17 @@ export function createAuth(input: AuthConfig): Auth {
                 delete: appCall(({ actor, ...i }) => deleteConnection(config, actor, i)),
               },
             } satisfies SsoApi,
+          }
+        : {}),
+      ...(config.scim
+        ? {
+            scim: {
+              tokens: {
+                list: appCall(({ actor, ...i }) => listScimTokens(config, actor, i)),
+                create: appCall(({ actor, ...i }) => createScimToken(config, actor, i)),
+                revoke: appCall(({ actor, ...i }) => revokeScimToken(config, actor, i)),
+              },
+            } satisfies ScimApi,
           }
         : {}),
       ...(config.oauth

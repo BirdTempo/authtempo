@@ -156,7 +156,13 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /sso/connections/delete",
   "POST /sso/connections/update",
   // Plan 12d Task 4: the discovery with sso off.
-  "POST /sso/discover",
+  "POST /sso/discover", // Plan 12d Task 9b: the SCIM posts with scim off, and a token id that names no token.
+  "POST /scim/tokens/create",
+  "POST /scim/tokens/revoke",
+  "POST /scim/v2/.search",
+  "POST /scim/v2/Bulk",
+  "POST /scim/v2/Groups/.search",
+  "POST /scim/v2/Users/.search",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
@@ -269,7 +275,13 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /sso/connections/delete",
   "POST /sso/connections/update",
   // Plan 12d Task 4: the discovery at sign-in.
-  "POST /sso/discover",
+  "POST /sso/discover", // Plan 12d Task 9b: the SCIM token writes and the posts of /scim/v2.
+  "POST /scim/tokens/create",
+  "POST /scim/tokens/revoke",
+  "POST /scim/v2/.search",
+  "POST /scim/v2/Bulk",
+  "POST /scim/v2/Groups/.search",
+  "POST /scim/v2/Users/.search",
 ];
 
 /** The two provider callbacks: one engine function, `completeSocial`, after a provider exchange. */

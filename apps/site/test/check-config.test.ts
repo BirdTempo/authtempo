@@ -23,7 +23,8 @@ describe("checkConfig", () => {
     // Plan 12h Task 2 adds observe, its six keys, and the three keys of observe.include.
     // Plan 12d Task 2b adds sso, its five keys, sso.saml.clockSkewSeconds, and the two
     // keys of sso.limits.
-    expect(keys.length).toBe(206);
+    // Plan 12d Task 9b adds scim, scim.groups, and scim.defaultRole.
+    expect(keys.length).toBe(209);
     expect(keys).toContain("observe.include.email");
     expect(keys).toContain("hooks.operator");
     expect(keys).toContain("operator.secrets[].scopes");

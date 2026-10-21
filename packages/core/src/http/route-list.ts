@@ -1,4 +1,4 @@
-import type { ErrorCode, OAuthErrorCode } from "../errors.js";
+import type { ErrorCode, OAuthErrorCode, ScimType } from "../errors.js";
 
 /**
  * Every route that core can serve, with the config that turns it on (plan
@@ -36,6 +36,7 @@ export const ROUTE_FEATURES = [
   "oauthRegistration",
   "oauthDevice",
   "sso",
+  "scim",
   "openapi",
   "health",
   "readiness",
@@ -56,7 +57,8 @@ export type AuthForm =
   | "dpopAccessToken" // a DPoP-bound access token with its proof, RFC 9449 section 7.1 (plan 12e)
   | "operator" // Authorization: Operator <secret>
   | "initialAccessToken" // the initial access token of RFC 7591 as the bearer (plan 12e)
-  | "clientSecretBasic"; // the client id and secret as HTTP Basic, RFC 6749 section 2.3.1 (plan 12e)
+  | "clientSecretBasic" // the client id and secret as HTTP Basic, RFC 6749 section 2.3.1 (plan 12e)
+  | "scimToken"; // an sk_ bearer of an organization's directory (plan 12d)
 
 export interface RouteEntry {
   readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -77,7 +79,8 @@ export interface RouteEntry {
    * `teams` (plan 12k) needs `organizations` with `teams`.
    * `health` (plan 12h) is in every deployment. `readiness` (plan 12h)
    * needs `observe.readiness: true`. `sso` (plan 12d) needs `organizations`
-   * and `sso`. `operatorSso` (plan 12d) needs `operator` and `sso`.
+   * and `sso`. `operatorSso` (plan 12d) needs `operator` and `sso`. `scim`
+   * (plan 12d) needs `organizations` and `scim`.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -86,6 +89,12 @@ export interface RouteEntry {
   readonly codes: readonly ErrorCode[];
   /** The codes of OAUTH_ERRORS that the route answers. Empty outside the provider routes. */
   readonly oauthCodes: readonly OAuthErrorCode[];
+  /**
+   * The `scimType` values of the SCIM error message that the route answers
+   * (plan 12d deviation 14). Set on each `/scim/v2` route only, and empty
+   * for a route that answers no `scimType`.
+   */
+  readonly scimTypes?: readonly ScimType[];
   /** The POST skips the router's Origin check: Apple's form_post callback, and the end-session form of a relying party (plan 12e). */
   readonly crossSiteForm?: true;
 }
@@ -2143,6 +2152,151 @@ export const ROUTES = Object.freeze([
     auth: ["none"],
     codes: ["sso_failed", "sso_not_configured", "oauth_denied"],
     oauthCodes: [],
+  },
+  {
+    // Plan 12d Task 9: the SCIM tokens of an organization, behind the manager guard.
+    method: "GET",
+    path: "/scim/tokens",
+    feature: "scim",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "second_factor_required",
+      "session_not_fresh",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/scim/tokens/create",
+    feature: "scim",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "second_factor_required",
+      "session_not_fresh",
+      "token_limit",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/scim/tokens/revoke",
+    feature: "scim",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "second_factor_required",
+      "session_not_fresh",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    // Plan 12d Task 9: the SCIM server. Each route answers the SCIM error message, not a code.
+    method: "GET",
+    path: "/scim/v2/ServiceProviderConfig",
+    feature: "scim",
+    auth: ["scimToken"],
+    codes: [],
+    oauthCodes: [],
+    scimTypes: [],
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/ResourceTypes",
+    feature: "scim",
+    auth: ["scimToken"],
+    codes: [],
+    oauthCodes: [],
+    scimTypes: [],
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/ResourceTypes/:id",
+    feature: "scim",
+    auth: ["scimToken"],
+    codes: [],
+    oauthCodes: [],
+    scimTypes: [],
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Schemas",
+    feature: "scim",
+    auth: ["scimToken"],
+    codes: [],
+    oauthCodes: [],
+    scimTypes: [],
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Schemas/:id",
+    feature: "scim",
+    auth: ["scimToken"],
+    codes: [],
+    oauthCodes: [],
+    scimTypes: [],
+  },
+  {
+    // The refusals of the design's 9.5: 501 with the SCIM error message.
+    method: "POST",
+    path: "/scim/v2/Bulk",
+    feature: "scim",
+    auth: ["scimToken"],
+    codes: [],
+    oauthCodes: [],
+    scimTypes: [],
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Me",
+    feature: "scim",
+    auth: ["scimToken"],
+    codes: [],
+    oauthCodes: [],
+    scimTypes: [],
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/.search",
+    feature: "scim",
+    auth: ["scimToken"],
+    codes: [],
+    oauthCodes: [],
+    scimTypes: [],
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Users/.search",
+    feature: "scim",
+    auth: ["scimToken"],
+    codes: [],
+    oauthCodes: [],
+    scimTypes: [],
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Groups/.search",
+    feature: "scim",
+    auth: ["scimToken"],
+    codes: [],
+    oauthCodes: [],
+    scimTypes: [],
   },
   {
     method: "GET",

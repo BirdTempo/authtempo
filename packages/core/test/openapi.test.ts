@@ -89,7 +89,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12d Task 2b adds the five domain routes and the operator's override.
     // Plan 12d Task 3 adds the four connection routes.
     // Plan 12d Task 4 adds the discovery, the start, and the callback.
-    expect(keys.length).toBe(159);
+    // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
+    expect(keys.length).toBe(172);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -184,7 +185,8 @@ describe("openApiDocument (plan 11g)", () => {
     // the impersonation: 64 became 73. Plan 12d Task 2b adds four domain
     // bodies and the override: 88 became 93. Plan 12d Task 3 adds the three
     // connection writes: 93 became 96. Plan 12d Task 4 adds the discovery: 97.
-    expect(bodies.length).toBe(97);
+    // Plan 12d Task 9b adds the two SCIM token writes: 97 became 99.
+    expect(bodies.length).toBe(99);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -246,6 +248,7 @@ describe("openApiDocument (plan 11g)", () => {
       initialAccessToken: ["initialAccessToken"],
       clientSecretBasic: ["clientSecretBasic"],
       dpopAccessToken: ["oauthDpop"],
+      scimToken: ["scimToken"],
     };
     for (const { key, op } of operations(reference())) {
       const auth = entryOf(key).auth;
@@ -409,8 +412,10 @@ describe("openApiDocument (plan 11g)", () => {
     // Task 2b adds 6 answers, 5 bodies, and the query of the domain list.
     // Plan 12d Task 3 adds 4 answers, 3 bodies, and the query of the
     // connection list. Plan 12d Task 4 adds the answer and the body of the
-    // discovery, and the queries of the start and the callback.
-    expect([answers, bodies, queries]).toEqual([133, 97, 30]);
+    // discovery, and the queries of the start and the callback. Plan 12d
+    // Task 9b adds the 3 JSON answers, 2 bodies, and the query of the SCIM
+    // token routes. Task 13 holds the SCIM answers of /scim/v2.
+    expect([answers, bodies, queries]).toEqual([136, 99, 31]);
   });
 
   it("takes the request_id form of the authorize query", () => {

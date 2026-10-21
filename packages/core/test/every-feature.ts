@@ -83,6 +83,8 @@ export function everyFeature(): ResolvedConfig {
     },
     // Plan 12d: one resolver that answers no record. No test of the list asks it.
     sso: { dns: [{ name: "none", txt: async () => [] }] },
+    // Plan 12d Task 9b: the SCIM token routes and the SCIM server.
+    scim: {},
     openapi: true,
     // The readiness route of plan 12h needs a sink; this one keeps nothing.
     observe: { sink: { write: () => {} }, readiness: true },

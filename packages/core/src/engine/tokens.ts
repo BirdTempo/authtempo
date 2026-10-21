@@ -63,6 +63,15 @@ export function movedFormed(prefix: string, bearer: string): boolean {
 const METADATA_MAX_BYTES = 4096;
 /** The characters after the prefix that a list shows. */
 export const HINT_LENGTH = 8;
+
+/**
+ * The hint of a token: the first `HINT_LENGTH` characters after its prefix
+ * (plan 8b). A list shows it, so a person tells the tokens apart. The API
+ * tokens, the organization tokens, and the SCIM tokens read this one rule.
+ */
+export function tokenHint(prefix: string, token: string): string {
+  return token.slice(prefix.length, prefix.length + HINT_LENGTH);
+}
 const DAY_MS = 86_400_000;
 const NAME_MAX = 80;
 const DEFAULT_EXPIRES_IN_DAYS = 90;
@@ -290,7 +299,7 @@ export async function createApiToken(
     userId: user.id,
     name: input.name,
     tokenHash: await sha256Hex(token),
-    hint: token.slice(API_TOKEN_PREFIX.length, API_TOKEN_PREFIX.length + HINT_LENGTH),
+    hint: tokenHint(API_TOKEN_PREFIX, token),
     expiresAt: expiryOf(days.value, now),
     lastUsedAt: null,
     organizationId,

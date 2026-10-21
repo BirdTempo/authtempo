@@ -23,6 +23,7 @@ import type {
   OrganizationLimits,
   OrganizationsConfig,
   PasswordConfig,
+  ScimConfig,
   SecretVersion,
   SsoConfig,
   TeamsConfig,
@@ -79,6 +80,7 @@ export const CONFIG_KEYS = {
     oauth: true,
     operator: true,
     sso: true,
+    scim: true,
     openapi: true,
     hooks: true,
     account: true,
@@ -277,6 +279,7 @@ export const CONFIG_KEYS = {
     connectionsPerOrganization: true,
     domainsPerOrganization: true,
   } satisfies Keys<NonNullable<SsoConfig["limits"]>>,
+  scim: { groups: true, defaultRole: true } satisfies Keys<ScimConfig>,
   hooks: {
     organization: true,
     session: true,

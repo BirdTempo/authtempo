@@ -52,6 +52,7 @@ Each operation has one security requirement for each credential form that the ro
 | `initialAccessToken` | `http` | The initial access token of RFC 7591 as the bearer, for `POST /oauth/register` while `oauth.registration.initialAccessTokenHash` is set |
 | `clientSecretBasic` | `http` | The client id and secret of a client with a secret, as HTTP Basic, for `POST /oauth/token` and `POST /oauth/revoke`. Each half is form-encoded first |
 | `oauthDpop` | `http` | A DPoP-bound access token as `Authorization: DPoP <token>`, with a proof of its key in the `DPoP` header (RFC 9449 section 7.1), for the userinfo routes |
+| `scimToken` | `http` | A SCIM token of an organization as the bearer, for the routes under `/scim/v2`. It starts with `sk_` |
 
 ## Tags
 
@@ -83,6 +84,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `oauthDevice` | `oauth.device` | off |
 | `sso` | `sso` | off |
 | `operatorSso` | `operator` and `sso` | off |
+| `scim` | `scim` | off |
 | `openapi` | `openapi` | off |
 | `health` | always on | on |
 | `readiness` | `observe.readiness` | off |

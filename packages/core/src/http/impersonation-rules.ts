@@ -54,6 +54,11 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /sso/connections/create",
   "POST /sso/connections/update",
   "POST /sso/connections/delete",
+  // The SCIM token routes of plan 12d Task 9: a credential route, as POST
+  // /organizations/tokens (12k ruling 7). A token outlives the impersonation.
+  "GET /scim/tokens",
+  "POST /scim/tokens/create",
+  "POST /scim/tokens/revoke",
   // The stop is the one way out. A sign-out would end the session with no
   // stop row and keep the actor cookie (ruling 6 for the end-session route).
   "POST /sign-out",
@@ -130,6 +135,8 @@ const NO_SESSION = "It takes no session.";
 const READ = "It reads what the user sees.";
 /** Each change behind the fresh rule refuses: the session has no fresh time. */
 const FRESH = "It needs a fresh session, and an impersonation session is never fresh.";
+/** A route of the SCIM server: the credential is a SCIM token (plan 12d). */
+const SCIM_TOKEN = "It takes a SCIM token, never a session.";
 /** A team write gives or takes no role, and the user can undo it; only the owner writes are refused. */
 const TEAM_WRITE = "It writes a team of the organization; it gives or takes no role.";
 
@@ -227,6 +234,17 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "POST /sso/discover": NO_SESSION,
   "GET /sso/:connectionId/start": NO_SESSION,
   "GET /sso/:connectionId/callback": "It takes the state of a start, as the social callback.",
+  // The SCIM server of plan 12d Task 9. impersonationRefusal reads only a session.
+  "GET /scim/v2/ServiceProviderConfig": SCIM_TOKEN,
+  "GET /scim/v2/ResourceTypes": SCIM_TOKEN,
+  "GET /scim/v2/ResourceTypes/:id": SCIM_TOKEN,
+  "GET /scim/v2/Schemas": SCIM_TOKEN,
+  "GET /scim/v2/Schemas/:id": SCIM_TOKEN,
+  "POST /scim/v2/Bulk": SCIM_TOKEN,
+  "GET /scim/v2/Me": SCIM_TOKEN,
+  "POST /scim/v2/.search": SCIM_TOKEN,
+  "POST /scim/v2/Users/.search": SCIM_TOKEN,
+  "POST /scim/v2/Groups/.search": SCIM_TOKEN,
 };
 
 /**

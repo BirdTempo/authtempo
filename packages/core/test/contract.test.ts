@@ -130,6 +130,8 @@ function world(secretHash = "0".repeat(64)) {
     account: { deleteConfirm: { ttlMinutes: 60 } },
     // The domain routes of plan 12d; no test of this file asks the resolver.
     sso: { dns: [{ name: "none", txt: async () => [] }] },
+    // The SCIM token routes of plan 12d Task 9b.
+    scim: {},
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const cookieOf = (token: string) => ({ cookie: `${auth.config.cookieName}=${token}` });
@@ -685,6 +687,15 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       refused: INVALID_BODY,
     },
     { key: "POST /sso/connections/delete", body: { id }, session: true, refused: INVALID_BODY },
+    // The SCIM token rows of plan 12d Task 9b: forbidden_rank for the create, and not_found for
+    // an id that names no token, past the parse.
+    {
+      key: "POST /scim/tokens/create",
+      body: { organizationId: org, name: "Entra ID" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    { key: "POST /scim/tokens/revoke", body: { id }, session: true, refused: INVALID_BODY },
     // The discovery of plan 12d Task 4: an address with no SSO answers { sso: false }.
     { key: "POST /sso/discover", body: { email: "ada@example.com" }, refused: INVALID_BODY },
     {
@@ -762,7 +773,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 2b adds the five domain routes and the operator's override.
     // Plan 12d Task 3 adds the four connection routes.
     // Plan 12d Task 4 adds the discovery, the start, and the callback.
-    expect(keys.length).toBe(159);
+    // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
+    expect(keys.length).toBe(172);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -774,8 +786,9 @@ describe("the route contract (plan 11g)", () => {
         mounted.add(route.key);
       }
     // Plan 12h Task 8 adds the module of http/health.ts, so 20 became 21.
-    // Plan 12d Task 2b adds the module sso, so 21 became 22.
-    expect(modules.length).toBe(22);
+    // Plan 12d Task 2b adds the module sso, so 21 became 22, and Task 9b the
+    // module scim, so 22 became 23.
+    expect(modules.length).toBe(23);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -1301,7 +1314,8 @@ describe("the route contract (plan 11g)", () => {
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
     // Plan 12d Task 2b adds five: four domain writes and the override.
     // Plan 12d Task 3 adds the three connection writes. Task 4 adds the discovery.
-    expect(withBody.length).toBe(89);
+    // Plan 12d Task 9b adds the two SCIM token writes.
+    expect(withBody.length).toBe(91);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1327,7 +1341,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(87);
+    expect(refusals).toBe(89);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1345,8 +1359,8 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    // Plan 12d Task 4: the discovery reads JSON and a form.
-    expect(counts).toEqual({ json: 80, both: 10, form: 7 });
+    // Plan 12d Task 4: the discovery reads JSON and a form. Task 9b: the two SCIM token writes.
+    expect(counts).toEqual({ json: 82, both: 10, form: 7 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

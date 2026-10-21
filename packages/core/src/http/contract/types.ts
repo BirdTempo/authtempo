@@ -6,7 +6,8 @@ import type { z } from "zod";
  * script, its own CSP. `redirect` is a 302, or the 303 that `status` names:
  * the answer to a form post that the browser follows with a GET. `param` is
  * the query parameter of the error that a redirect carries, and a redirect
- * with an error is a 302. `metadata` is a standard document.
+ * with an error is a 302. `metadata` is a standard document. `scim` is a
+ * SCIM answer (plan 12d).
  */
 export type AnswerKind =
   | { readonly kind: "json"; readonly schema: z.ZodType; readonly status?: 200 | 201 }
@@ -19,7 +20,14 @@ export type AnswerKind =
   | {
       readonly kind: "metadata";
       readonly standard: "rfc8414" | "oidc-discovery" | "jwks" | "openapi";
-    };
+    }
+  /**
+   * A SCIM answer (plan 12d deviation 14): `application/scim+json` that
+   * `schema` describes, with the status 200. A failure is the SCIM error
+   * message of RFC 7644 section 3.12. A null schema: the route answers only
+   * that error, with 501.
+   */
+  | { readonly kind: "scim"; readonly schema: z.ZodType | null };
 
 /**
  * The contract of one route (plan 11g): its input schemas and its answer.

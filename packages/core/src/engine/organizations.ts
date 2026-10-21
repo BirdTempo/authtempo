@@ -29,6 +29,7 @@ import {
   touchCheck,
 } from "./permissions.js";
 import {
+  isOwner,
   needs,
   normalizeSlug,
   type ResolvedOrganizations,
@@ -167,10 +168,8 @@ async function ownerCount(
   return members.filter((m) => rankOf(o.ranks, m.role) >= ownerRank).length;
 }
 
-/** True when `rank` is at the owner rank or above: the member counts as an owner. */
-export function isOwner(o: ResolvedOrganizations, rank: number): boolean {
-  return rank >= (o.ranks.owner ?? Number.POSITIVE_INFINITY);
-}
+// The owner rule lives in ranks.ts, so the config reads it too (plan 12d Task 9b).
+export { isOwner };
 
 /**
  * The owner lock in the caller's transaction (plan 6): the owner count, the

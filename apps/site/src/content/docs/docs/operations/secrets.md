@@ -84,7 +84,7 @@ The packages are not on a registry yet. In this repo, run each command below as 
 
    In the API's process, run `auth.api.secrets.status()`. Read the entry of version 1. When `emailCodes` is above 0, wait for `emailOtp.ttlMinutes` again, then repeat step 9.
 
-10. Remove version 1 from `secrets` when `totpSecrets`, `signingKeys`, `emailCodes`, `backupCodes`, and `ssoClientSecrets` are 0. A count of `ssoClientSecrets` above 0 means a sealed client secret of an SSO connection. Without the version, its sign-in fails. Make sure that the config has no key `secret`. Deploy.
+10. Remove version 1 from `secrets` when `totpSecrets`, `signingKeys`, `emailCodes`, `backupCodes`, and `ssoClientSecrets` are 0. A count of `ssoClientSecrets` above 0 means a sealed client secret of an SSO connection. Without the version, its sign-in fails. A SCIM token has no count. Core stores its SHA-256, not a sealed value, so a new app secret keeps it working. Make sure that the config has no key `secret`. Deploy.
 
    On Node and Bun, restart each process: it reads the environment only at start.
 

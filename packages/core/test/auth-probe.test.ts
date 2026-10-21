@@ -42,6 +42,11 @@ async function answerOf(res: Response): Promise<Answer> {
     const body = (await res.json()) as { error?: string };
     return { status: res.status, code: body.error ?? null };
   }
+  // A SCIM route answers the SCIM error message, whose code is its scimType (plan 12d).
+  if (type.startsWith("application/scim+json")) {
+    const body = (await res.json()) as { scimType?: string };
+    return { status: res.status, code: body.scimType ?? null };
+  }
   return { status: res.status, code: null };
 }
 
@@ -130,6 +135,8 @@ describe("the auth probe (plan 11g)", () => {
       if (CONTRACT[key]?.answer.kind === "html" && key.startsWith("GET "))
         expected[key] = { status: 302, code: null };
       else if (auth.includes("accessToken")) expected[key] = { status: 401, code: "invalid_token" };
+      // The SCIM 401 of RFC 7644 section 3.12 has no scimType (plan 12d).
+      else if (auth.includes("scimToken")) expected[key] = { status: 401, code: null };
       else expected[key] = { status: 401, code: "unauthorized" };
     }
     expect(await probe(w, needs, {})).toEqual(expected);
@@ -170,6 +177,7 @@ describe("the auth probe (plan 11g)", () => {
       "garbage access token": { authorization: `Bearer ${garbage}` },
       "wrong operator secret": { authorization: `Operator ${garbage}` },
       "garbage bearer": { authorization: "Bearer nope" },
+      "wrong sk_ bearer": { authorization: `Bearer sk_${garbage}` },
     };
     const formsOf: Record<string, string[]> = {
       session: ["wrong cookie", "wrong ts_ bearer"],
@@ -177,6 +185,7 @@ describe("the auth probe (plan 11g)", () => {
       sessionJwt: ["garbage JWT"],
       accessToken: ["garbage access token"],
       operator: ["wrong operator secret"],
+      scimToken: ["wrong sk_ bearer"],
     };
     const needs = keys.filter((key) => !authOf(key).includes("none"));
     const results: Record<string, Answer> = {};
@@ -184,7 +193,11 @@ describe("the auth probe (plan 11g)", () => {
     for (const key of needs) {
       const auth = authOf(key);
       const labels = [...auth.flatMap((form) => formsOf[form] ?? []), "garbage bearer"];
-      const code = auth.includes("accessToken") ? "invalid_token" : "unauthorized";
+      const code = auth.includes("accessToken")
+        ? "invalid_token"
+        : auth.includes("scimToken")
+          ? null
+          : "unauthorized";
       for (const label of labels) {
         const headers = wrong[label];
         if (!headers) throw new Error(`no credential ${label}`);

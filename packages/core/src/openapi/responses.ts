@@ -81,6 +81,24 @@ function answerOf(kind: AnswerKind, schemaOf: SchemaOf): [string, OpenApiRespons
           content: { "text/html": { schema: { type: "string" } } },
         },
       ];
+    case "scim":
+      // Plan 12d: the 501 refusals have no success answer (schema null).
+      return kind.schema === null
+        ? [
+            "501",
+            {
+              description:
+                "Not supported by this server: the SCIM error message of RFC 7644 section 3.12.",
+              content: { "application/scim+json": { schema: { type: "object" } } },
+            },
+          ]
+        : [
+            "200",
+            {
+              description: "The answer.",
+              content: { "application/scim+json": { schema: schemaOf(kind.schema, "output") } },
+            },
+          ];
     case "redirect":
       return [
         String(kind.status ?? 302),

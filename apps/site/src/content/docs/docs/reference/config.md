@@ -299,6 +299,16 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `sso.limits.connectionsPerOrganization` | number | 10 | A positive whole number. |
 | `sso.limits.domainsPerOrganization` | number | 20 | A positive whole number. The add of one more domain answers `domain_limit`. |
 
+## SCIM
+
+`scim` turns on the SCIM token routes and the SCIM server under `<basePath>/scim/v2` (plan 12d). It needs `organizations`, else the config is refused with "scim needs organizations". Another key of `scim` is refused.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `scim` | object | off | Turns on the SCIM routes. See [SCIM](/docs/reference/routes/#scim). |
+| `scim.groups` | string | `roles` | `roles`, `teams`, or `both`: what a SCIM group gives. `teams` and `both` need `organizations.teams`. |
+| `scim.defaultRole` | string | `member` | The role of a member that SCIM adds. Each part is a role of the role table, below the owner rank, and never the platform role. A dynamic role is refused, because the config knows no organization. |
+
 ## Hooks
 
 | Key | Type | Default | Rule |

@@ -43,7 +43,14 @@ import type { CimdEntry, JwksEntry } from "./engine/oauth-clients.js";
 import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
 import { defaultExistingAccountMail, type ExistingAccountMailInput } from "./engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
-import { deriveRoles, normalizeSlug, ROLE_RE } from "./engine/ranks.js";
+import {
+  deriveRoles,
+  holdsRolePart,
+  isOwner,
+  normalizeSlug,
+  ROLE_RE,
+  rankOf,
+} from "./engine/ranks.js";
 import type { DnsTxtPort } from "./engine/sso/dns.js";
 import { validWindow, WINDOW_CALLS_MAX, WINDOW_SECONDS_MAX } from "./engine/token-use.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
@@ -382,6 +389,12 @@ export interface AuthConfig {
    * absent or `false`. Needs `organizations` and `sso.dns`.
    */
   sso?: SsoConfig | false;
+  /**
+   * A SCIM 2.0 server for each organization (plan 12d Task 9, spec 30). A
+   * directory provisions and removes the staff of an organization with a
+   * SCIM token. Off when absent or `false`. Needs `organizations`.
+   */
+  scim?: ScimConfig | false;
   /**
    * `GET <basePath>/openapi.json`, the OpenAPI document of the routes that
    * this config mounts (plan 11g). Off when absent. It lists no route of a
@@ -914,6 +927,27 @@ export interface ResolvedSso {
   limits: { connectionsPerOrganization: number; domainsPerOrganization: number };
 }
 
+/** The SCIM config (plan 12d Task 9, spec 30 item 17). */
+export interface ScimConfig {
+  /**
+   * What a SCIM group gives (Task 11): `roles` (the default), the role map
+   * of the connection; `teams`, a team of 12k per group; or `both`.
+   * `teams` and `both` need `organizations.teams`.
+   */
+  groups?: "roles" | "teams" | "both";
+  /**
+   * The role of a member that SCIM adds. A role of the role table, below the
+   * owner rank, and never the platform role. Default `member`.
+   */
+  defaultRole?: string;
+}
+
+/** The SCIM config after construction (plan 12d). */
+export interface ResolvedScim {
+  groups: "roles" | "teams" | "both";
+  defaultRole: string;
+}
+
 export interface ResolvedConfig {
   basePath: string;
   baseURL: string;
@@ -991,6 +1025,8 @@ export interface ResolvedConfig {
   operator: ResolvedOperator | null;
   /** Null: SSO is off, and no SSO route is mounted (plan 12d). */
   sso: ResolvedSso | null;
+  /** Null: SCIM is off, and no SCIM route is mounted (plan 12d Task 9). */
+  scim: ResolvedScim | null;
   openapi: boolean;
   hooks: ResolvedHooks;
   account: ResolvedAccount;
@@ -1387,6 +1423,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     }),
     operator: resolveOperator(input.operator, organizations?.platformRole ?? null),
     sso: resolveSso(input.sso, organizations !== null),
+    scim: resolveScim(input.scim, organizations),
     openapi,
     // The operator key resolved above, so `users` is true or absent here.
     hooks: resolveHooks(
@@ -2085,6 +2122,47 @@ function resolveSso(
       domainsPerOrganization: ssoLimit(l.domainsPerOrganization, "domainsPerOrganization", 20),
     },
   };
+}
+
+const SCIM_KEYS: Readonly<Record<keyof ScimConfig, true>> = { groups: true, defaultRole: true };
+const SCIM_GROUPS: ReadonlySet<string> = new Set(["roles", "teams", "both"]);
+
+/**
+ * `scim` (plan 12d Task 9 Behavior 11). Off when absent or `false`. It
+ * needs `organizations`: a SCIM token belongs to an organization. A group
+ * gives a team only with `organizations.teams`. `defaultRole` names a role
+ * of the role table, each part of it, below the owner rank, and never the
+ * platform role. So a directory never makes an owner or a platform
+ * operator. The config knows no dynamic role: those rows live per
+ * organization.
+ */
+function resolveScim(
+  input: ScimConfig | false | undefined,
+  organizations: ResolvedConfig["organizations"],
+): ResolvedScim | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown)) throw new ConfigError("scim must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(SCIM_KEYS, key))
+      throw new ConfigError(`scim.${key} is not an option; core has groups and defaultRole`);
+  if (organizations === null) throw new ConfigError("scim needs organizations");
+  const groups: unknown = input.groups ?? "roles";
+  if (typeof groups !== "string" || !SCIM_GROUPS.has(groups))
+    throw new ConfigError("scim.groups must be roles, teams, or both");
+  if (groups !== "roles" && organizations.teams === null)
+    throw new ConfigError(`scim.groups ${groups} needs organizations.teams`);
+  const role: unknown = input.defaultRole ?? "member";
+  if (
+    typeof role !== "string" ||
+    !ROLE_RE.test(role) ||
+    role.split(",").some((part) => !Object.hasOwn(organizations.roles, part))
+  )
+    throw new ConfigError("scim.defaultRole must be a role of the role table");
+  if (isOwner(organizations, rankOf(organizations.ranks, role)))
+    throw new ConfigError("scim.defaultRole must rank below owner");
+  if (organizations.platformRole !== null && holdsRolePart(role, organizations.platformRole))
+    throw new ConfigError("scim.defaultRole must not hold the platform role");
+  return { groups: groups as ResolvedScim["groups"], defaultRole: role };
 }
 
 const OPERATOR_KEYS: Readonly<Record<keyof OperatorConfig, true>> = {

@@ -973,7 +973,10 @@ const SITES: Record<string, readonly string[] | string> = {
   "sso/connections updateConnection":
     "no kind: reads of role rows, the connection row, reads of domains, then its audit row",
   "sso/connections deleteConnection":
-    "no kind: the connection row, then the domain rows routed to it, then its audit row",
+    "no kind: the connection row, then the domain rows routed to it, then its audit row", // The SCIM tokens of plan 12d Task 9b. Their rows are of no kind of user-hold.ts.
+  "scim/tokens createScimToken":
+    "one kind: the lock of the organization row, then reads of token rows, then the token row and its audit row",
+  "scim/tokens revokeScimToken": "no kind: the token row, then its audit row",
 };
 
 /** The sites that SITES pins to the flow `name`, sorted. */
@@ -987,8 +990,8 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
   it("each has a flow of FLOWS or a reason, and no entry is stale", () => {
     const found = sites("src").map((s) => s.key);
     // Plan 12d Task 2b adds the six sites of sso/domains.ts, and Task 3 the
-    // three of sso/connections.ts.
-    expect(found.length).toBe(72);
+    // three of sso/connections.ts. Task 9b adds the two of scim/tokens.ts.
+    expect(found.length).toBe(74);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {

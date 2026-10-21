@@ -60,6 +60,8 @@ async function featureConfig(): Promise<Partial<AuthConfig>> {
     },
     // The domain routes of plan 12d mount with sso; no test here asks the resolver.
     sso: { dns: [{ name: "none", txt: async () => [] }] },
+    // The SCIM token routes and the SCIM server of plan 12d Task 9b.
+    scim: {},
   };
 }
 

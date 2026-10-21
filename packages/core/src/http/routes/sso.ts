@@ -61,7 +61,7 @@ export const SSO_MANAGE_PER_USER = { seconds: 900, max: 30 };
 const BIND_MAX_AGE_SECONDS = 600;
 
 /** One query string read by its schema. A repeated key answers `invalid_body`. */
-function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
+export function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
   const raw: Record<string, string> = Object.create(null);
   for (const [key, value] of url.searchParams) {
     if (key in raw) return fail("invalid_body");
@@ -72,55 +72,69 @@ function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
 }
 
 /**
- * The SSO routes (plan 12d). Task 4 adds the sign-in: the discovery, and
- * the start and the callback of a connection. Tasks 2 and 3 add the manager
- * routes of the domain proof and the connections (spec 30 items 2 and 5).
- * They exist when `sso` is on. Each manager route takes a session, then
- * counts on `sso-manage:user:<userId>`, then reads its input, then runs the
- * manager guard for the organization of the act. A route with a domain or
- * a connection id reads the organization of the row first: an id that
- * names no row answers `not_found`. A manager write takes JSON only, so a
- * browser sends a preflight. The sign-in routes take no session.
+ * The steps of one manager route before the act (plan 12d Tasks 2, 3, and
+ * 9). They are the session, the count on `sso-manage:user:<userId>`, and the
+ * input. Then the manager guard runs for the organization that
+ * `organizationOf` names from the input. An id that names no row answers
+ * `not_found`. The SSO routes and the SCIM token routes run these steps, so
+ * the two cannot drift.
  */
-export function ssoRoutes(config: ResolvedConfig): Route[] {
-  if (!config.sso) return [];
+export async function managedCall<T, V>(
+  config: ResolvedConfig,
+  ctx: RouteContext,
+  input: (ctx: RouteContext) => Promise<Result<T>>,
+  organizationOf: (input: T) => Promise<string | null>,
+  run: (actor: SsoActor, input: T) => Promise<Result<V>>,
+  answer: (value: V) => Response,
+): Promise<Response> {
   const send = (res: Response, renewed: string | null) => {
     if (renewed) res.headers.append("set-cookie", renewed);
     return res;
   };
+  const resolved = await sessionFromRequest(config, ctx.request);
+  if (!resolved) return json({ error: "unauthorized" }, 401);
+  const renewed = renewedSessionCookie(config, ctx.request, resolved);
+  if (!(await config.limiter.allow(`sso-manage:user:${resolved.user.id}`, SSO_MANAGE_PER_USER)))
+    return send(respond(fail("rate_limited")), renewed);
+  const read = await input(ctx);
+  if (!read.ok) return send(respond(read), renewed);
+  const organizationId = await organizationOf(read.value);
+  if (organizationId === null) return send(respond(fail("not_found")), renewed);
+  const actor = await requireSsoManager(config, resolved, organizationId);
+  if (!actor.ok) return send(respond(actor), renewed);
+  const r = await run(actor.value, read.value);
+  return send(r.ok ? answer(r.value) : respond(r), renewed);
+}
+
+/** The JSON body of a manager write by its schema. A manager write takes JSON only, so a browser sends a preflight. */
+export function managedBody<T>(schema: z.ZodType<T>) {
+  return async (ctx: RouteContext): Promise<Result<T>> =>
+    isJsonRequest(ctx.request) ? readJson(ctx.request, schema) : fail("invalid_body");
+}
+
+/**
+ * The SSO routes (plan 12d). Task 4 adds the sign-in: the discovery, and
+ * the start and the callback of a connection. Tasks 2 and 3 add the manager
+ * routes of the domain proof and the connections (spec 30 items 2 and 5).
+ * They exist when `sso` is on. Each manager route runs `managedCall`. A
+ * route with a domain or a connection id reads the organization of the row
+ * first. A manager write takes JSON only, so a browser sends a preflight.
+ * The sign-in routes take no session.
+ */
+export function ssoRoutes(config: ResolvedConfig): Route[] {
+  if (!config.sso) return [];
   const meta = (ctx: RouteContext) => ({
     ip: ctx.ip,
     userAgent: ctx.request.headers.get("user-agent"),
   });
-  /**
-   * The steps before the act: the session, the limiter, and the input.
-   * `organizationOf` names the organization of the act from the input.
-   */
-  const managed = async <T, V>(
+  const managed = <T, V>(
     ctx: RouteContext,
     input: (ctx: RouteContext) => Promise<Result<T>>,
     organizationOf: (input: T) => Promise<string | null>,
     run: (actor: SsoActor, input: T) => Promise<Result<V>>,
     answer: (value: V) => Response,
-  ): Promise<Response> => {
-    const resolved = await sessionFromRequest(config, ctx.request);
-    if (!resolved) return json({ error: "unauthorized" }, 401);
-    const renewed = renewedSessionCookie(config, ctx.request, resolved);
-    if (!(await config.limiter.allow(`sso-manage:user:${resolved.user.id}`, SSO_MANAGE_PER_USER)))
-      return send(respond(fail("rate_limited")), renewed);
-    const read = await input(ctx);
-    if (!read.ok) return send(respond(read), renewed);
-    const organizationId = await organizationOf(read.value);
-    if (organizationId === null) return send(respond(fail("not_found")), renewed);
-    const actor = await requireSsoManager(config, resolved, organizationId);
-    if (!actor.ok) return send(respond(actor), renewed);
-    const r = await run(actor.value, read.value);
-    return send(r.ok ? answer(r.value) : respond(r), renewed);
-  };
-  const body =
-    <T>(schema: z.ZodType<T>) =>
-    async (ctx: RouteContext): Promise<Result<T>> =>
-      isJsonRequest(ctx.request) ? readJson(ctx.request, schema) : fail("invalid_body");
+  ) => managedCall(config, ctx, input, organizationOf, run, answer);
+  const body = managedBody;
   const byId = (input: { id: string }) => domainOrganization(config, input.id);
   const byConnection = (input: { id: string }) => connectionOrganization(config, input.id);
   const post = <T, V, P extends RoutePath<"POST">>(

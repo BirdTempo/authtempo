@@ -14,6 +14,7 @@ import { PASSKEYS_CONTRACT } from "./passkeys.js";
 import { PASSWORD_CONTRACT } from "./password.js";
 import { REAUTH_CONTRACT } from "./reauth.js";
 import { ROLES_CONTRACT } from "./roles.js";
+import { SCIM_CONTRACT } from "./scim.js";
 import { SECOND_FACTOR_CONTRACT } from "./second-factor.js";
 import { SESSIONS_CONTRACT } from "./sessions.js";
 import { SOCIAL_CONTRACT } from "./social.js";
@@ -53,6 +54,7 @@ export const ROUTE_CONTRACT = {
   ...OAUTH_CONTRACT,
   ...HEALTH_CONTRACT,
   ...SSO_CONTRACT,
+  ...SCIM_CONTRACT,
   ...OPENAPI_CONTRACT,
 } as const satisfies Record<RouteKey, RouteContract>;
 

@@ -34,15 +34,21 @@ const FS_MODULE = "node:fs";
  * 6. A JSON error body holds only the keys of its table's error schema in
  *    the OpenAPI document (plan 12h Task 8). So the body of a 503 `not_ready`
  *    cannot gain a key, such as the name of the error, with no sign.
+ * 7. A route of the `scim` kind (plan 12d) answers `application/scim+json`
+ *    with `cache-control: no-store`. A failure is the SCIM error message of
+ *    RFC 7644 section 3.12. It holds the Error URN and the status as its
+ *    string. A `scimType` is one of the entry's `scimTypes`, with the status
+ *    of `SCIM_ERRORS`.
+ *    A 401 carries `Bearer realm="scim"`. A 2xx parses under the schema.
+ *    The record's code is the `scimType`, or null.
  * An answer for a path of no route has the key `null` and the verdict `ok`.
  */
 vi.mock("../../src/http/router.js", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../src/http/router.js")>();
   const { appendFileSync }: AppendFs = await import(/* @vite-ignore */ FS_MODULE);
   const { shapeVerdict } = await import("./answer-shape.js");
-  const { DPOP_PROOF_AT_RESOURCE, ERRORS, INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS } = await import(
-    "../../src/errors.js"
-  );
+  const { DPOP_PROOF_AT_RESOURCE, ERRORS, INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS, SCIM_ERRORS } =
+    await import("../../src/errors.js");
   const { ROUTE_CONTRACT } = await import("../../src/http/contract/index.js");
   const { ERROR_SCHEMAS } = await import("../../src/openapi/responses.js");
   const { answerKinds } = await import("../../src/http/contract/types.js");
@@ -158,6 +164,43 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     return { verdict, ...NO_SHAPE };
   }
 
+  const NS_ERROR = "urn:ietf:params:scim:api:messages:2.0:Error";
+
+  /** Rule 7: a SCIM answer, judged by the SCIM error message or by the schema of its kind. */
+  function scimVerdict(
+    key: string,
+    res: Response,
+    body: unknown,
+    schema: import("zod").ZodType | null,
+  ): { code: string | null; verdict: string } {
+    if (res.headers.get("cache-control") !== "no-store")
+      return { code: null, verdict: "a SCIM answer is not no-store" };
+    const status = res.status;
+    if (status < 400) {
+      if (schema === null) return { code: null, verdict: `a ${status} answer of a 501 route` };
+      const parsed = schema.safeParse(body);
+      return { code: null, verdict: parsed.success ? "ok" : parsed.error.message };
+    }
+    const e = body as { schemas?: unknown; status?: unknown; scimType?: unknown; detail?: unknown };
+    const keys = Object.keys(e).sort().join(",");
+    if (keys !== "detail,schemas,status" && keys !== "detail,schemas,scimType,status")
+      return { code: null, verdict: `the SCIM error holds the keys ${keys}` };
+    if (JSON.stringify(e.schemas) !== JSON.stringify([NS_ERROR]) || typeof e.detail !== "string")
+      return { code: null, verdict: "the SCIM error has no Error URN or no detail" };
+    if (e.status !== String(status))
+      return { code: null, verdict: `the SCIM error says status ${String(e.status)}` };
+    if (status === 401 && res.headers.get("www-authenticate") !== 'Bearer realm="scim"')
+      return { code: null, verdict: "a SCIM 401 carries no Bearer realm challenge" };
+    if (e.scimType === undefined) return { code: null, verdict: "ok" };
+    const type = String(e.scimType);
+    const declared = (ENTRIES.get(key)?.scimTypes ?? []) as readonly string[];
+    if (!declared.includes(type))
+      return { code: type, verdict: `the scimType ${type} is not declared` };
+    if (SCIM_ERRORS[type as keyof typeof SCIM_ERRORS] !== status)
+      return { code: type, verdict: `the scimType ${type} answered ${status}` };
+    return { code: type, verdict: "ok" };
+  }
+
   /**
    * The answer of one request. `carried` is the code that a redirect carries
    * to the app or to the OAuth client. The rule of the router gives it
@@ -184,6 +227,12 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     if (key === null) return { ...base, verdict: "ok" };
     const contract = CONTRACT[key];
     if (!contract) return { ...base, verdict: `no contract for ${key}` };
+    if (type === "application/scim+json") {
+      if (contract.answer.kind !== "scim")
+        return { ...base, verdict: "a SCIM answer fits no kind of the contract" };
+      const judged = scimVerdict(key, res, await res.json(), contract.answer.schema);
+      return { ...base, ...judged };
+    }
     const allowed = kinds(contract);
     if (redirected) {
       const redirects = allowed.filter((k) => k.kind === "redirect");

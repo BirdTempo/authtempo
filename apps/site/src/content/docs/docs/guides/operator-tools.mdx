@@ -139,6 +139,7 @@ An impersonation session can never reach the routes of `IMPERSONATION_REFUSED`. 
 - the role writes of dynamic roles, and the token writes: an API token narrow, and an organization token create, narrow, or revoke.
 - the domain writes of SSO: the add, the verify, the update, and the delete of a domain (plan 12d).
 - the connection writes of SSO: the create, the update, and the delete of a connection to a sign-in provider (plan 12d).
+- the SCIM token routes: the list, the create, and the revoke of the tokens of a directory, because a token outlives the impersonation (plan 12d).
 
 ## The audit table
 
