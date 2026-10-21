@@ -1506,7 +1506,7 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | --- | --- |
 | Needs | Nothing. It counts on `sso-discover:ip:<ip>`, 30 per 15 minutes |
 | Input | JSON or form `{ email, next? }` |
-| Answer | JSON: `{ sso: true, start }` when a verified domain claims the address, the most specific first, and routes it to an enabled connection. `start` is `<basePath>/sso/<connectionId>/start`. Else `{ sso: false }`. The answer reads no user, so it tells nothing about a person. A form: a page of this origin with a link and a meta refresh to `start`, with `next` as its query. The page has no script. Or a 302 to `/?auth_error=<code>` of `appURL`. Chromium applies `form-action` to each redirect after a form post, so a redirect to `start` would stop at the IdP step |
+| Answer | JSON: `{ sso: true, start }` when a verified domain claims the address, the most specific first, and routes it to an enabled connection. `start` is `<basePath>/sso/<connectionId>/start`. Else `{ sso: false }`. The answer reads no user, so it tells nothing about a person. A form: a page of this origin with a link and a meta refresh to `start`, with `next` as its query. The page has no script. Or a 302 to `/?auth_error=<code>` of `appURL`. Chromium applies `form-action` to each redirect after a form post, so a redirect to `start` would stop at the step to the provider |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured) |
 
 <h3 id="get-sso-connectionid-start"><code>GET /sso/:connectionId/start</code></h3>
