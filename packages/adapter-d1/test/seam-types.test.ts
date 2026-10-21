@@ -11,7 +11,7 @@ import {
 describe("the seam of plan 12g", () => {
   it("a D1 binding satisfies D1Subset", async () => {
     // The assignment is the type check: tsconfig.test.json fails it when the
-    // binding's types stop to satisfy the seam.
+    // binding's types no longer satisfy the seam.
     const s: D1Subset = env.DB;
     const sent = { statements: 0, ready: 0 };
     const db = createD1AdapterOn(s, {
