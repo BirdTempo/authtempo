@@ -39,7 +39,7 @@ import test from "../../../../../samples/guides/social-providers.test.ts?raw";
 
 ## How it behaves
 
-- A `name` matches `^[a-z][a-z0-9-]{0,31}$`, is unique across both lists, and is not a preset name, `email`, or `credential`. The preset names are `google`, `apple`, `github`, `linkedin`, `microsoft`, `discord`, `gitlab`, `slack`, `twitter`, and `facebook`.
+- A `name` matches `^[a-z][a-z0-9-]{0,31}$`, is unique across both lists, and is not a preset name, `email`, or `credential`. The preset names are `google`, `apple`, `github`, `linkedin`, `microsoft`, `discord`, and `gitlab`. The names `slack`, `twitter`, and `facebook` are reserved for coming presets.
 - The `label` is the button text, 1 to 80 characters.
 - An `oidc` entry with no `endpoints` reads `<issuer>/.well-known/openid-configuration` at its first start, and keeps it for the life of the instance.
 - The issuer of that document must equal `issuer` exactly. A failed read answers `oauth_failed` and is not kept.

@@ -11,9 +11,9 @@ export interface GitLabConfig {
 export const DEFAULT_GITLAB_ISSUER = "https://gitlab.com";
 
 /**
- * True for an `https:` origin with no path, query, fragment, user, or
- * trailing slash, on a public host: no IP literal, no local name, and not
- * the host of `baseURL`. Core posts the client secret to this host, so a
+ * True for an `https:` origin on a public host. The origin has no path,
+ * query, fragment, user, or trailing slash. A public host is not an IP
+ * literal, not a local name, and not the host of `baseURL`. Core posts the client secret to this host, so a
  * config must not point it inside a network or at core itself.
  */
 export function isGitlabIssuer(value: unknown, baseURL: string): value is string {
@@ -31,8 +31,8 @@ export function isGitlabIssuer(value: unknown, baseURL: string): value is string
 
 /**
  * GitLab, on gitlab.com or on the app's own instance, as an `oauth2`
- * provider (plan 12i Task 13), with Better Auth 1.7.2's endpoints and
- * subject (the numeric `id` as a string). Scope `read_user` gives `GET
+ * provider (plan 12i Task 13). The endpoints and the subject are those of
+ * Better Auth 1.7.2: the subject is the numeric `id` as a string. Scope `read_user` gives `GET
  * /api/v4/user`.
  */
 export function gitlabProvider(c: GitLabConfig): OAuth2Provider {

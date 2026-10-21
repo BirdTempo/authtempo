@@ -2905,7 +2905,7 @@ function socialProviders(social: AuthConfig["social"], baseURL: string): Configu
       throw new ConfigError(`${path}.name must match ${PROVIDER_NAME_RE.source}`);
     if (RESERVED_PROVIDER_NAMES.has(name))
       throw new ConfigError(
-        `${path}.name ${name} is reserved: google, apple, github, linkedin, microsoft, discord, gitlab, slack, twitter, and facebook are presets, and email and credential are identity kinds`,
+        `${path}.name ${name} is reserved: google, apple, github, linkedin, microsoft, discord, and gitlab are presets; slack, twitter, and facebook are kept for coming presets; email and credential are identity kinds`,
       );
     if (names.has(name)) throw new ConfigError(`${path}.name ${name} is given twice`);
     names.add(name);

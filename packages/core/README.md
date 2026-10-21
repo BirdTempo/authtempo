@@ -339,8 +339,8 @@ Any other provider is a list entry. `social.oidc` takes OpenID Connect
 providers, and `social.oauth2` takes providers that issue no ID token. A
 `name` matches `^[a-z][a-z0-9-]{0,31}$`, is unique across both lists, and is
 not a preset name, `email`, or `credential`. The preset names are `google`,
-`apple`, `github`, `linkedin`, `microsoft`, `discord`, `gitlab`, `slack`,
-`twitter`, and `facebook`. The
+`apple`, `github`, `linkedin`, `microsoft`, `discord`, and `gitlab`. The names
+`slack`, `twitter`, and `facebook` are reserved for coming presets. The
 `label` is the button text on the sign-in page. An `oidc` entry reads
 `<issuer>/.well-known/openid-configuration` on its first start and keeps the
 endpoints for the life of the `createAuth` instance. The document's `issuer`

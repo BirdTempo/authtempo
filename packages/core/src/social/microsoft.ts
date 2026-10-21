@@ -40,14 +40,15 @@ function tenantIssuer(tid: string): string {
  * is `oid`, the id that Better Auth 1.7.2 stores. Microsoft gives the same
  * `oid` to each app of the tenant; `sub` is pairwise per app.
  *
- * The address rule, from the ID token claims reference and the optional
- * claims reference (both read 2026-10-22): `email` "isn't guaranteed to be
- * correct and is mutable over time". `xms_edov` is a boolean that says the
- * domain owner of the address is verified. So an address is verified only
- * with `xms_edov: true`, and the app must add that optional claim to its
- * registration. Without it, an Entra ID address links no user (nOAuth).
- * Better Auth also counts `email_verified` and the `verified_*_email`
- * lists; the reference pages give them no such meaning, so core does not.
+ * The address rule comes from the ID token claims reference and the
+ * optional claims reference, both read 2026-10-22. They say that `email`
+ * "isn't guaranteed to be correct and is mutable over time". `xms_edov` is
+ * a boolean that says the domain owner of the address is verified. So an
+ * address is verified only with `xms_edov: true`. The app must add that
+ * optional claim to its registration. Without it, an Entra ID address links
+ * no user (nOAuth). Better Auth also counts `email_verified` and the
+ * `verified_*_email` lists. The reference pages give them no such meaning,
+ * so core does not count them.
  */
 export function microsoftProvider(c: MicrosoftConfig): OidcProvider {
   const tenant = c.tenant.toLowerCase();
@@ -83,9 +84,9 @@ export function microsoftProvider(c: MicrosoftConfig): OidcProvider {
 }
 
 /**
- * The issuer to verify a shared tenant's token against: the token's own
- * `iss`, read before the signature check, when it has the form of a tenant
- * issuer. The jwt seam then verifies the signature on the tenant's keys and
+ * The issuer to verify a shared tenant's token against. It is the token's
+ * own `iss`, read before the signature check, when it has the form of a
+ * tenant issuer. The jwt seam then verifies the signature on the tenant's keys and
  * checks `iss` again. `checkClaims` binds that issuer to the verified `tid`.
  */
 function sharedIssuerOf(idToken: string): string[] | null {
@@ -97,9 +98,9 @@ function sharedIssuerOf(idToken: string): string[] | null {
 
 /**
  * The tenant binding of a verified token, as Better Auth 1.7.2's
- * `verifyClaims`: `iss` names the token's own `tid`, a GUID tenant takes
- * only its own tokens, `organizations` refuses a personal account, and
- * `consumers` takes only a personal account.
+ * `verifyClaims`. The `iss` names the token's own `tid`. A GUID tenant
+ * takes only its own tokens. `organizations` refuses a personal account,
+ * and `consumers` takes only a personal account.
  */
 function tenantBound(tenant: string, claims: Record<string, unknown>): boolean {
   const tid = claims.tid;

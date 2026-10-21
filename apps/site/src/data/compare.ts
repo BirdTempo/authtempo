@@ -167,6 +167,7 @@ const P12A = "2026-10-14-12a-account-self-service.md";
 const P12B = "2026-10-14-12b-security-hardening.md";
 const P12C = "2026-10-14-12c-second-factor-reach.md";
 const P12E = "2026-10-14-12e-oauth-provider-v2.md";
+const P12I = "2026-10-14-12i-sign-in-additions.md";
 
 /** A row of the review as it stands, read on the day of the review. */
 function row(
@@ -510,12 +511,13 @@ export const COMPARE_ROWS: readonly CompareRow[] = [
     "A list, the end of one, of the others, or of all, freshAge, and an admin who ends the sessions of a user.",
     [P12A, P12B],
   ),
-  row(
+  moved(
     "b2",
     "better-auth",
     "Social presets",
-    "Presets for Google, Apple, GitHub, and LinkedIn. Any other provider comes through the OIDC or the OAuth 2 setting.",
+    "Presets for Google, Apple, GitHub, LinkedIn, Microsoft Entra ID, Discord, and GitLab. Any other provider comes through the OIDC or the OAuth 2 setting.",
     "Built-in providers from Apple to Zoom, and Cloudflare since 1.7.3.",
+    [P12I],
   ),
   moved(
     "b3",

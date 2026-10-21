@@ -44,9 +44,9 @@ async function signIn(config: ResolvedConfig, provider: string, onStart?: (nonce
 }
 
 /**
- * An Entra ID world: an RS256 test key, its key set at the tenant's JWKS
- * URL, and a token endpoint that signs the claims of `claims()` with the
- * nonce of the start. The jwt seam is core's jose seam on `social.fetch`.
+ * An Entra ID world. It has an RS256 test key and its key set at the
+ * tenant's JWKS URL. Its token endpoint signs the claims of `claims()` with
+ * the nonce of the start. The jwt seam is core's jose seam on `social.fetch`.
  */
 async function entraWorld(tenant: string, extra: Partial<AuthConfig> = {}) {
   const { publicKey, privateKey } = await generateKeyPair("RS256", { extractable: true });
@@ -185,6 +185,19 @@ describe("the presets of plan 12i Task 13", () => {
     expect(await entra.storage.findMany("session", [])).toHaveLength(0);
   });
 
+  it("links no user by a Discord address that Discord has not verified", async () => {
+    const discord = discordWorld(() =>
+      Response.json({ ...json(discordUserText), verified: false }),
+    );
+    const owner = await discord.seedUser("nelly@discord.com");
+    const r = await signIn(discord.config, "discord");
+    expect(r.done).toMatchObject({ ok: false, code: "email_taken_unverified" });
+    expect(
+      await discord.storage.findMany("identity", [{ field: "userId", op: "eq", value: owner.id }]),
+    ).toEqual([]);
+    expect(await discord.storage.findMany("session", [])).toHaveLength(0);
+  });
+
   it("refuses an issuer that does not match tid", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const entra = await entraWorld("common");
@@ -268,7 +281,10 @@ describe("the presets of plan 12i Task 13", () => {
             ],
           },
         }),
-      ).toThrow(new RegExp(`social\\.oauth2\\[0\\]\\.name ${name} is reserved`));
+      ).toThrow(
+        // The text names only the presets that exist, and the reserved names apart.
+        `social.oauth2[0].name ${name} is reserved: google, apple, github, linkedin, microsoft, discord, and gitlab are presets; slack, twitter, and facebook are kept for coming presets; email and credential are identity kinds`,
+      );
   });
 
   it("refuses a GitLab issuer that is not an https origin", () => {
