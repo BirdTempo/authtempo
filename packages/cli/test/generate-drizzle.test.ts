@@ -14,7 +14,7 @@ import { drizzle as drizzleMysql } from "drizzle-orm/mysql2";
 import { drizzle as drizzlePostgres } from "drizzle-orm/postgres-js";
 import mysql from "mysql2/promise";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { assertFreshBuild, PKG, runBin } from "./support/bin.js";
+import { assertFreshBuild, runBin } from "./support/bin.js";
 import { freshMysqlDatabase, MYSQL_SERVERS } from "./support/mysql.js";
 import { freshDatabase } from "./support/pg.js";
 
@@ -22,8 +22,12 @@ import { freshDatabase } from "./support/pg.js";
 // writes four rows. drizzle-orm 0.45.3 reads them through the printed file,
 // and each value must equal the adapter's own read, with the same types.
 
-/** The printed files go into a folder of the package, so the import finds drizzle-orm. */
-const OUT = mkdtempSync(join(PKG, "test", "generated-drizzle-"));
+/**
+ * The printed files go into a temp folder outside the repo, so a stopped run
+ * leaves nothing that git or lint reads. Vitest resolves their drizzle-orm
+ * import from the package root.
+ */
+const OUT = mkdtempSync(join(tmpdir(), "authtempo-cli-generated-drizzle-"));
 afterAll(() => {
   rmSync(OUT, { recursive: true, force: true });
 });
@@ -107,7 +111,7 @@ async function adapterRows(storage: StorageAdapter) {
   };
 }
 
-/** The printed file of one dialect, written into the package and imported. */
+/** The printed file of one dialect, written into the temp folder and imported. */
 async function printedSchema(
   dialect: string,
 ): Promise<{ text: string; schema: Record<string, unknown> }> {

@@ -1,4 +1,5 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expectedMysqlShape } from "@authtempo/adapter-mysql";
 import { expectedPostgresShape } from "@authtempo/adapter-postgres";
@@ -9,7 +10,7 @@ import { getTableConfig as mysqlTable } from "drizzle-orm/mysql-core";
 import { getTableConfig as postgresTable } from "drizzle-orm/pg-core";
 import { getTableConfig as sqliteTable } from "drizzle-orm/sqlite-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { assertFreshBuild, PKG, runBin } from "./support/bin.js";
+import { assertFreshBuild, runBin } from "./support/bin.js";
 
 // The printed Drizzle and Prisma tables against the expected shape of each
 // adapter (the lead note of the 12g ledger, line 97). The read tests cover
@@ -152,8 +153,12 @@ function printed(format: string, d: Dialect): string {
   return r.stdout;
 }
 
-/** The printed Drizzle files go into a folder of the package, so the import finds drizzle-orm. */
-const OUT = mkdtempSync(join(PKG, "test", "generated-shape-"));
+/**
+ * The printed files go into a temp folder outside the repo, so a stopped run
+ * leaves nothing that git or lint reads. Vitest resolves their drizzle-orm
+ * import from the package root.
+ */
+const OUT = mkdtempSync(join(tmpdir(), "authtempo-cli-generated-shape-"));
 afterAll(() => {
   rmSync(OUT, { recursive: true, force: true });
 });
