@@ -100,6 +100,9 @@ const REFUSED_WORDS: readonly (readonly [RegExp, string])[] = [
   [/^\/organizations\/members\/role$/, "the role change"],
   [/^\/organizations\/members\/remove$/, "the removal"],
   [/^\/organizations\/invite$/, "the invitation of a member"],
+  // Plan 12k (ruling 5 of plan 12k): the role writes and the token writes.
+  [/^\/organizations\/roles\/(create|update|delete)$/, "the role writes of dynamic roles"],
+  [/^\/tokens\/update$|^\/organizations\/tokens(\/update|\/revoke)?$/, "the token writes"],
 ];
 
 /** A router code that a page names when its flow can meet it. `internal` is no answer of a flow. */
