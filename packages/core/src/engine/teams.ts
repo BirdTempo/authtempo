@@ -265,8 +265,8 @@ export async function updateTeam(
  * The transaction first takes the locks of the sessions that act in the
  * team, before the organization row and the team row, in the order of
  * user-hold.ts. A role loss and a member removal hold the sessions of a
- * member and then delete the member's team rows (rulings 48 and 49 of plan
- * 12k).
+ * member. Then they delete the member's team rows (rulings 48 and 49 of
+ * plan 12k).
  *
  * A set of the active team can commit between the lock read and the team
  * lock. Its session then acts in the team with no lock of this delete. A
@@ -544,10 +544,11 @@ export async function addTeamMember(
  * act in the team lose their active team. The transaction takes the locks
  * of the person's sessions first, then the lock of the team row, as
  * `setActiveTeam` does (user-hold.ts). So a set in flight commits first,
- * and this removal then clears its active team. A role loss holds the same
- * sessions before it deletes the person's team rows (ruling 48 of plan 12k).
- * All of the person's sessions lock, so no session that a set moves into
- * the team after the lock read stays outside the lock.
+ * and this removal then clears its active team. A role loss and a member
+ * removal hold the same sessions before they delete the person's team rows
+ * (rulings 48 and 49 of plan 12k). All of the person's sessions lock, so no
+ * session that a set moves into the team after the lock read stays outside
+ * the lock.
  */
 export async function removeTeamMember(
   config: ResolvedConfig,
@@ -707,9 +708,12 @@ export async function listUserTeams(
 
 /**
  * Deletes the person's team rows of one organization and clears their active
- * team, in the caller's transaction. A member removal and a leave call it.
- * It fires no team hook: a cascade fires none. It runs with teams off too,
- * so the rows of an earlier config go as well.
+ * team, in the caller's transaction. A member removal, a leave, and the
+ * revoke of the platform role call it. It fires no team hook: a cascade
+ * fires none. It runs with teams off too, so the rows of an earlier config
+ * go as well. The caller holds the person's sessions before its member
+ * delete, in the order of user-hold.ts (ruling 49 of plan 12k). So the
+ * session write here takes no new lock.
  */
 export async function dropMemberTeams(
   tx: StorageAdapter,

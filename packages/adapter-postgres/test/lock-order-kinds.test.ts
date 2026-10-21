@@ -12,9 +12,9 @@ import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
 // The machine check of the one lock order of user-hold.ts (ruling 49 of
-// plan 12k). The order has six kinds of rows: the user row, the session
-// rows, the organization row, the team row, the member rows, and the team
-// member rows. A storage wrapper records each create, update, delete,
+// plan 12k). The order has six kinds of rows. They are the user row, the
+// session rows, the organization row, the team row, the member rows, and
+// the team member rows. A storage wrapper records each create, update, delete,
 // and lock read of these kinds in each transaction, in order. Each test runs
 // one flow of plan 12f or 12k that writes these kinds, most of them two kinds
 // or more. A kind may come again, but a kind never comes first after a later
@@ -30,9 +30,9 @@ const OPEN = { allow: async () => true };
 
 /**
  * The kinds of user-hold.ts, in the lock order. The team row comes before
- * the member rows: the organization delete deletes the team rows first, and
- * an accept that raises a member takes `lockTeam` before its member update.
- * No flow takes a member row and then a team row.
+ * the member rows. The organization delete deletes the team rows first. An
+ * accept that raises a member takes `lockTeam` before its member update. No
+ * flow takes a member row and then a team row.
  */
 const KINDS = ["user", "session", "organization", "team", "member", "team member"] as const;
 const KIND_OF = {
@@ -215,13 +215,13 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
   /**
    * Each step of a transaction of `name` that comes out of order. An
    * update, a delete, or a lock read takes the locks of rows that other
-   * flows see, so its kind never comes first after a later kind. A kind
+   * flows see. So its kind never comes first after a later kind. A kind
    * that came before may come again: its rows are held from the first time.
    *
    * A create takes the lock of its new row only, and no other flow sees
    * that row before the commit. The one wait it can meet is a parallel
    * insert of the same unique key. So the order skips a create, and a
-   * second rule holds instead: a create of a member or team member row
+   * second rule holds instead. A create of a member or team member row
    * comes after a step on the user row in its transaction. Two inserts of
    * one member then run one at a time.
    */

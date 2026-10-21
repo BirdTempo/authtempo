@@ -9,10 +9,10 @@ import { freshDatabase } from "./db.js";
 // removal deleted the member and team member rows and then updated the
 // sessions; an organization delete deleted the team rows first. So each pair
 // waited on each other, and Postgres ended one with a deadlock. Now the
-// removal locks the person's sessions after the user row, and the
-// organization delete locks the sessions that act in it before its row, in
-// the order of user-hold.ts. Each state comes from the flows: the magic
-// link and the organization api.
+// removal locks the person's sessions after the user row. The organization
+// delete locks the sessions that act in it before its row. Both follow the
+// order of user-hold.ts. Each state comes from the flows: the magic link
+// and the organization api.
 
 const API = "https://api.example.com";
 /** Every request passes: the race, not the limit, is under test. */

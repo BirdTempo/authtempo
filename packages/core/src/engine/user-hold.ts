@@ -24,40 +24,63 @@ import { ROUNDS } from "./rounds.js";
  * does, so their old order (the password row, then the sessions) forms no
  * cycle with the delete. After `ROUNDS` lost rounds the answer is `conflict`.
  *
- * One lock order holds for every flow. It joins the order of plan 12f (final
- * review L1) and the order of ruling 43 of plan 12k. First comes this user
- * row. Then comes `holdImpersonations`, the one read that locks the sessions
- * of the user and of each impersonation target. Then comes the organization
- * row: the stamp of `ownerLock`, or `lockOrganization`. Then come the member
- * rows, and last the team row (`lockTeam`). The ban, the revoke of the
- * platform role, `withRoleLoss`, and the account delete take them in that
- * order. The account delete takes the rows of each organization that goes,
- * its team rows among them. So the team member add and the invitation accept
- * hold the user before the team lock. With the team lock first, an add of the
- * sole member beside the account delete formed a deadlock.
- * A member removal holds the person's user row before the organization lock
- * of `ownerWrite` or of `revokeTokens`. So a removal and a team member add or
+ * One lock order holds for every flow (ruling 49 of plan 12k). It joins
+ * the order of plan 12f (final review L1) and the order of ruling 43 of
+ * plan 12k. The order has six kinds of rows:
+ *
+ * 1. this user row (`holdUser`);
+ * 2. the session rows: `holdSessions`, or `holdImpersonations`, the one
+ *    read that locks the sessions of the user and of each impersonation
+ *    target;
+ * 3. the organization row: the stamp of `ownerLock`, or `lockOrganization`;
+ * 4. the team row: `lockTeam`, or its delete;
+ * 5. the member rows;
+ * 6. the team member rows.
+ *
+ * A flow can write a kind again after a later kind: it holds those rows
+ * from the first time. No flow writes a kind first after a later kind. The
+ * test lock-order-kinds.test.ts of adapter-postgres checks each flow of
+ * plans 12f and 12k. A create holds only its new row, so that check skips
+ * it.
+ *
+ * The ban, the revoke of the platform role, `withRoleLoss`, and the account
+ * delete lock the user's sessions with `holdImpersonations`, also with no
+ * impersonation. A member removal and a leave lock the person's sessions
+ * with `holdSessions`. Each of them writes these sessions after its member
+ * or team member deletes. A team write locks the same sessions before its
+ * team row, so the two run one at a time (rulings 48 and 49).
+ *
+ * The account delete takes the rows of each organization that goes, its
+ * team rows among them. So the team member add and the invitation accept
+ * hold the user before the team lock. With the team lock first, an add of
+ * the sole member beside the account delete formed a deadlock. A member
+ * removal holds the person's user row before the organization lock of
+ * `ownerWrite` or of `revokeTokens`. So a removal and a team member add or
  * an accept of that person run one at a time.
+ *
+ * The team member removal, `setActiveTeam`, and the team delete take no
+ * user hold. Each takes the locks of the sessions it writes first, then the
+ * team lock. With `keepLastTeam`, the team delete takes the organization
+ * lock between the two. The team member removal locks every session of the
+ * person, so a set cannot move a session into the team after its lock
+ * read. The team delete reads the sessions of the team again after its team
+ * lock, and starts a new round when a set moved one in. The organization
+ * delete locks the sessions that act in it before its row.
+ *
+ * `deleteOrganizationRows` deletes the organization row first and the team
+ * rows next. So it waits for each flow that holds one of these locks, in
+ * the same order. It deletes the member rows before the team member rows,
+ * as a member removal and the account delete do (ruling 44). An accept that
+ * raises a member takes the team lock before its member update.
+ *
  * The role create takes the organization lock before its count, and no
- * user hold. The team member removal, `setActiveTeam`, and the team delete
- * take no user hold. Each takes the locks of the sessions it writes first,
- * then the team lock (the delete: the organization lock first with
- * `keepLastTeam`). The removal locks every session of the person, so a set
- * cannot move a session into the team after its lock read. A role loss
- * holds the sessions and then deletes the team rows of the member. With the
- * team lock first, a team write beside a loss formed a deadlock (ruling 48).
- * `deleteOrganizationRows` deletes
- * the organization row first and the team rows next. So it waits for each
- * flow that holds one of these locks, in the same order. It deletes the
- * member rows before the team member rows, as a member removal and the
- * account delete do (ruling 44). The user token
- * create holds the user row before its count of the cap, and takes no
- * other lock. The organization create holds the user row before its count of
- * `perUser` (ruling 45). The member add holds the added user, then takes the
- * organization lock before its count of `membersPerOrganization`. The
- * accept takes that lock after its user hold and before its team locks.
- * The invite takes it before its count of `pendingInvitationsPerOrganization`,
- * and no user hold.
+ * user hold. The user token create holds the user row before its count of
+ * the cap, and takes no other lock. The organization create holds the user
+ * row before its count of `perUser` (ruling 45). The member add holds the
+ * added user, then takes the organization lock before its count of
+ * `membersPerOrganization`. The accept takes that lock after its user hold
+ * and before its team locks. The invite takes it before its count of
+ * `pendingInvitationsPerOrganization`, and no user hold.
  *
  * No row returns: a sign-up writes its user later, and a deleted user is
  * found by `userStays`, the read after the insert. A stop here would answer
@@ -84,7 +107,7 @@ export async function holdUser(storage: StorageAdapter, userId: string): Promise
  * Takes the locks of the sessions of `userId`, by id, in the caller's
  * transaction. It comes after the hold of that user row and before the
  * organization row, in the order above. A member removal and a leave call
- * it: they clear the active organization and team of these sessions after
+ * it. They clear the active organization and team of these sessions after
  * the member and team member deletes (ruling 49 of plan 12k). It costs one
  * statement on Postgres. D1 and memory have no row lock and leave it out.
  */

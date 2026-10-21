@@ -231,9 +231,9 @@ export interface ImpersonationHold {
  * delete of the transaction.
  *
  * With `own`, the read runs with no target too. Each caller writes the
- * user's sessions after the organization, member, or team rows, so the
- * session locks must come first, in the order of user-hold.ts (ruling 49
- * of plan 12k). Without `own` and with no target, it locks nothing.
+ * user's sessions after the organization, member, or team rows. So the
+ * session locks come first, in the order of user-hold.ts (ruling 49 of plan
+ * 12k). Without `own` and with no target, it locks nothing.
  */
 export async function holdImpersonations(
   tx: StorageAdapter,

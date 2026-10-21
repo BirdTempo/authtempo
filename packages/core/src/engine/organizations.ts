@@ -273,11 +273,11 @@ interface RoleLoss {
  * The fixed calls of a member write before its transaction, at the worst
  * (ruling 63 of plan 12f). Through the route: the impersonation step of
  * the router, the route limiter, and `resolveSession` (3). Then the
- * standing of the caller (3: the organization, and the organization and
- * member row of `membership`), the target's `membership` (2), and its user
- * (1). The reads of the role rows (plan 12k) and the ready check of the
- * storage come on top: `roleLossOf` takes the count of the role reads that
- * ran. The D1 test `operator-loss-budget.test.ts` counts the whole
+ * standing of the caller (3): the organization, and the organization and
+ * member row of `membership`. Then the target's `membership` (2), and its
+ * user (1). The reads of the role rows (plan 12k) and the ready check of
+ * the storage come on top. `roleLossOf` takes the count of the role reads
+ * that ran. The D1 test `operator-loss-budget.test.ts` counts the whole
  * invocation on the binding.
  */
 const MEMBER_WRITE_CALLS_BEFORE = 9;
@@ -287,9 +287,9 @@ const MEMBER_WRITE_WORST = 5;
 
 /**
  * The loss of a member write, or null when the write keeps the platform
- * role. `roleReads` is the count of the role row reads of `effectiveIn` that
- * ran before the transaction (ruling 48 of plan 12k): the caller's
- * standing, the granted role, and the target's role.
+ * role. `roleReads` is the count of the role row reads of `effectiveIn`
+ * that ran before the transaction (ruling 48 of plan 12k). They are the
+ * reads of the caller's standing, the granted role, and the target's role.
  */
 async function roleLossOf(
   config: ResolvedConfig,
@@ -1016,8 +1016,8 @@ const REVOKE_TOKENS: Statements = { apiToken: ["revoke"] };
  * through their transaction. So the removal waits for their commit and then
  * deletes their team rows, or they see the member row gone. The locks of
  * the person's sessions come next, before the organization lock and the
- * deletes (ruling 49): the removal clears their active organization and
- * team last, and a team write locks them before its team row.
+ * deletes (ruling 49). The removal clears their active organization and
+ * team last. A team write locks them before its team row.
  */
 export async function removeMember(
   config: ResolvedConfig,
