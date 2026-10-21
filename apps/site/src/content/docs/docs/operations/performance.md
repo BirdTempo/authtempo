@@ -46,11 +46,11 @@ Each operation gets calls to warm up, then the measured calls, one after another
 <!-- measured:start -->
 | Condition | Value |
 | --- | --- |
-| Date (UTC) | 2026-10-21T18:08:44.051Z |
-| Commit | `eb530d6b78f3546fac526da12e5af53938891449` |
+| Date (UTC) | 2026-10-21T19:16:24.409Z |
+| Commit | `1bda331760cc73ea5b3da854ee8e54edfb8d9287` |
 | Machine | Darwin 27.0.0, Apple M5 Max, 18 cores, 36 GiB of memory |
-| Load before the run | 4.13, 10.36, 13.08 (1, 5, and 15 minutes) |
-| Load after the run | 3.96, 10.22, 13.02 (1, 5, and 15 minutes) |
+| Load before the run | 3.07, 7.36, 11.35 (1, 5, and 15 minutes) |
+| Load after the run | 2.90, 7.25, 11.29 (1, 5, and 15 minutes) |
 | Runtime | wrangler 4.148.0, local workerd, Node 26.10.0 |
 | Storage | local D1 through Miniflare |
 | PBKDF2 iterations | 100000 |
@@ -60,11 +60,11 @@ All times are in milliseconds.
 
 | Operation | Samples | Server p50 | Server p95 | Server max | Client p50 | Client p95 | Client max |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `POST /password/sign-in` | 200 | 8.0 | 9.0 | 11.0 | 8.9 | 10.6 | 12.0 |
-| `GET /session` | 200 | 1.0 | 1.0 | 3.0 | 1.5 | 2.4 | 3.5 |
-| `GET /token` | 200 | 1.0 | 2.0 | 4.0 | 2.3 | 3.6 | 6.5 |
-| `GET /jwks` | 200 | 1.0 | 1.0 | 5.0 | 1.3 | 2.5 | 5.0 |
-| `POST /magic-link/request` | 200 | 1.0 | 1.0 | 6.0 | 1.7 | 2.9 | 6.6 |
+| `POST /password/sign-in` | 200 | 7.0 | 8.0 | 11.0 | 8.7 | 9.9 | 12.3 |
+| `GET /session` | 200 | 1.0 | 1.0 | 3.0 | 1.6 | 2.5 | 3.9 |
+| `GET /token` | 200 | 1.0 | 2.0 | 4.0 | 2.5 | 3.7 | 6.7 |
+| `GET /jwks` | 200 | 1.0 | 1.0 | 5.0 | 1.3 | 2.6 | 5.6 |
+| `POST /magic-link/request` | 200 | 1.0 | 1.0 | 4.0 | 1.8 | 3.0 | 5.6 |
 <!-- measured:end -->
 
 Local workerd is not a deployed Worker. A deployed Worker runs at the edge, near the user, on other hardware, with D1 over the network.
@@ -81,14 +81,14 @@ An observer must not slow a sign-in. The timing test of core runs 5000 password 
 <!-- timing:start -->
 | Condition | Value |
 | --- | --- |
-| Date (UTC) | 2026-10-21T19:06:02.000Z |
-| Commit | `36da5bcdf0b55fe3c8180f7f70249e71c1677cd1` |
+| Date (UTC) | 2026-10-21T19:16:24.000Z |
+| Commit | `1bda331760cc73ea5b3da854ee8e54edfb8d9287` |
 | Cores | 18 |
-| Load before the run | 3.68, 9.12, 13.49 (1, 5, and 15 minutes) |
-| Load after the run | 3.47, 8.99, 13.41 (1, 5, and 15 minutes) |
+| Load before the run | 2.90, 7.25, 11.29 (1, 5, and 15 minutes) |
+| Load after the run | 3.15, 7.23, 11.25 (1, 5, and 15 minutes) |
 | Sign-ins in each run | 5000, after 20 to warm up |
-| Median with a sink that never settles | 0.2530 ms |
-| Median with no observer | 0.2403 ms |
+| Median with a sink that never settles | 0.2535 ms |
+| Median with no observer | 0.2320 ms |
 <!-- timing:end -->
 
 The medians come from one Node process with a fast test hash, not from workerd. They compare the two runs and give no time of a deployed sign-in.
