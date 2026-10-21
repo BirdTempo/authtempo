@@ -8,5 +8,7 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     testTimeout: 120_000,
     hookTimeout: 180_000,
+    // An afterAll drops each Postgres test database that a timed-out test left.
+    setupFiles: ["./test/support/pg-setup.ts"],
   },
 });
