@@ -50,6 +50,8 @@ import { ROUNDS } from "./rounds.js";
  * `perUser` (ruling 45). The member add holds the added user, then takes the
  * organization lock before its count of `membersPerOrganization`. The
  * accept takes that lock after its user hold and before its team locks.
+ * The invite takes it before its count of `pendingInvitationsPerOrganization`,
+ * and no user hold.
  *
  * No row returns: a sign-up writes its user later, and a deleted user is
  * found by `userStays`, the read after the insert. A stop here would answer

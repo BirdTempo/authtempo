@@ -598,7 +598,8 @@ export async function deleteOrganization(
  * The order closes the gaps of the flows in flight. The organization row
  * goes first (ruling 43 of plan 12k). A token create, a team create, and a
  * role create hold that row (`lockOrganization`). So do a member add and an
- * accept under `membersPerOrganization` (ruling 45). On Postgres such a flow
+ * accept under `membersPerOrganization`, and an invite under
+ * `pendingInvitationsPerOrganization` (ruling 45). On Postgres such a flow
  * commits first, and the deletes below see its rows. A flow that starts
  * later finds no organization. The team rows go next, before the team
  * member rows. A team member add or an accept holds its team row until its

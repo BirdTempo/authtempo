@@ -141,6 +141,9 @@ export async function inviteMember(
   const written = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
       if (limit !== null) {
+        // The lock of the count (ruling 45 of plan 12k). A second invite waits here for this
+        // commit, and then counts its row. A gone organization answers not_found.
+        if (!(await lockOrganization(tx, s.value.organization))) return fail("not_found");
         // The address's own pending row does not count: the invite below replaces it.
         const pending = await tx.findMany(
           "invitation",

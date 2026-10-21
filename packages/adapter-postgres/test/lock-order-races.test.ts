@@ -646,6 +646,33 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     expect((await rows("member")).map((m) => m.userId).sort()).toEqual(["a", "d"]);
   });
 
+  it("of two invites at pendingInvitationsPerOrganization 1, one answers invitation_limit (ruling 45)", async () => {
+    const sent: MailMessage[] = [];
+    const config = { limits: { pendingInvitationsPerOrganization: 1 } };
+    const g = gate();
+    let second: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), config, sent);
+    const two = instance(watch("organization", g.reach), config, sent);
+    const one = instance(createPostgresAdapter(db.sql), config, sent, {
+      beforeInvite: async () => {
+        second = settle(
+          two.api.inviteMember({ user: a, organizationId, email: "c@example.com", role: "member" }),
+        );
+        await Promise.race([g.at, second]);
+      },
+    });
+    const a = await user("a");
+    const organizationId = await organization(plain, a);
+
+    const first = await settle(
+      one.api.inviteMember({ user: a, organizationId, email: "b@example.com", role: "member" }),
+    );
+
+    expect(first).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: false, code: "invitation_limit" });
+    expect((await rows("invitation")).map((x) => x.email)).toEqual(["b@example.com"]);
+  });
+
   it("of two user token creates at 49 tokens, one answers token_limit (L4)", async () => {
     const sent: MailMessage[] = [];
     const g = gate();
