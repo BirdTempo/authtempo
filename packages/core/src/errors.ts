@@ -89,6 +89,8 @@ export const ERRORS = {
   domain_unverified: 400,
   domain_taken: 409,
   domain_limit: 409,
+  // plan 12d ruling 30: an account delete takes at most IN_CHUNK solo organizations at once
+  delete_too_large: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

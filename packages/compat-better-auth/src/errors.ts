@@ -148,6 +148,8 @@ export const BETTER_AUTH_CODES = {
   domain_unverified: "DOMAIN_UNVERIFIED",
   domain_taken: "DOMAIN_TAKEN",
   domain_limit: "DOMAIN_LIMIT",
+  // Plan 12d ruling 30. Better Auth's deleteUser has no such limit: core's own name.
+  delete_too_large: "DELETE_TOO_LARGE",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

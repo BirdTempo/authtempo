@@ -601,6 +601,16 @@ const TOUCHED: Record<string, string[]> = {
     "member",
     "team member",
   ],
+  // Plan 12d ruling 30: the create of a second solo organization, then the set-based delete.
+  "an account delete with two solo organizations": [
+    "user",
+    "session",
+    "organization",
+    "team",
+    "invitation",
+    "member",
+    "team member",
+  ],
   "an impersonation start": ["user", "session"],
   "an impersonation stop": ["session"],
   "an end of the sessions of a user": ["user", "session"],
@@ -732,6 +742,17 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null }),
   "an account delete of an operator with an impersonation": (w, s) =>
     w.auth.api.user.delete({ session: s.bob, ip: null, userAgent: null }),
+  // Oli holds one solo organization in the scene; a second one makes the delete set-based
+  // over two ids (ruling 30 of plan 12d), with its organization lock in id order.
+  "an account delete with two solo organizations": async (w, s) => {
+    const made = await w.auth.api.createOrganization({
+      user: s.oli.user,
+      slug: "oli-two",
+      name: "Oli Two",
+    });
+    if (!made.ok) throw new Error(made.code);
+    return w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null });
+  },
   "an impersonation start": (w, s) =>
     w.auth.api.operator.impersonate({ operator: s.ada, userId: s.pat.user.id, ...reason }),
   "an impersonation stop": async (w, s) =>
@@ -845,6 +866,7 @@ const SITES: Record<string, readonly string[] | string> = {
   "account-delete runDelete": [
     "an account delete with a solo and a shared organization",
     "an account delete of an operator with an impersonation",
+    "an account delete with two solo organizations",
   ],
   "email-change applyChange": ["an email change"],
   "handoff continueHandoff": "one kind: an update of the browser session, then a verification row",
@@ -870,7 +892,10 @@ const SITES: Record<string, readonly string[] | string> = {
     "an owner demotion",
     "a role change that drops the platform role",
   ],
-  "organizations createOrganization": ["an organization create with its default team"],
+  "organizations createOrganization": [
+    "an organization create with its default team",
+    "an account delete with two solo organizations",
+  ],
   "organizations updateOrganization": "one kind: the organization row",
   "organizations deleteOrganization": ["an organization delete"],
   "organizations addMember": ["a member add"],

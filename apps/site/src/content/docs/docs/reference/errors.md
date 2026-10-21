@@ -459,6 +459,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
 
+<h3 id="delete_too_large"><code>delete_too_large</code> 409</h3>
+
+- **Meaning:** The account is the only member of more than 50 organizations. One account delete removes at most 50 of them, so the delete changes nothing.
+- **Do:** Delete some of the organizations with [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), then delete the account again.
+
+| Routes |
+| --- |
+| [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
+
 <h3 id="account_banned"><code>account_banned</code> 403</h3>
 
 - **Meaning:** An operator banned the account. Only a person who proved the credential gets this code.

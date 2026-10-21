@@ -250,8 +250,11 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * This scene deletes no organization, so the run of 2026-10-21 still gives
  * 49. A probe on the binding the same day: the account delete of a user
  * with one solo organization sent 41 queries before the change and 44 after.
+ * Plan 12d ruling 30 reads the memberships once before any write, so the
+ * act reserves one more call and its page ends one session fewer: the run
+ * of 2026-10-21 gives 48 queries, 2 sessions, and sweeps of 47, 47, and 46.
  */
-const DELETE_COUNTS: [number, number, number[]] = [49, 3, [47, 47, 44]];
+const DELETE_COUNTS: [number, number, number[]] = [48, 2, [47, 47, 46]];
 const REMOVE_COUNTS: [number, number, number[]] = [49, 11, [47, 47, 26]];
 
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });

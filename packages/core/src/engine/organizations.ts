@@ -5,7 +5,7 @@ import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { MemberRow, OrganizationRow, SessionRow, UserRow } from "../schema.js";
-import { findManyIn } from "../storage/batch.js";
+import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { meterOf } from "../storage/meter.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import {
@@ -687,21 +687,42 @@ export async function deleteOrganizationRows(
   id: string,
   alone: string | null = null,
 ): Promise<void> {
-  const byOrganization: Where<"member">[] = [{ field: "organizationId", op: "eq", value: id }];
-  await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
+  await deleteOrganizationsRows(tx, [id], alone);
+}
+
+/**
+ * `deleteOrganizationRows` for many organizations at once (ruling 30 of
+ * plan 12d). Each model is one statement with `in` over the ids, so the
+ * cost does not grow with the count of organizations. The order of the
+ * statements is the order above. The organization rows lock first, in id
+ * order (`lockInOrder`), in the step of the organization row. The ids fit
+ * one chunk of `IN_CHUNK`: D1 binds at most 100 parameters. A longer list
+ * throws, so a caller refuses it first (`delete_too_large`).
+ */
+export async function deleteOrganizationsRows(
+  tx: StorageAdapter,
+  ids: readonly string[],
+  alone: string | null = null,
+): Promise<void> {
+  if (ids.length === 0) return;
+  if (ids.length > IN_CHUNK) throw new StorageError("invalid_argument", "organization", ["id"]);
+  const list = [...ids].sort();
+  const byOrganization: Where<"member">[] = [{ field: "organizationId", op: "in", value: list }];
+  await tx.lockInOrder?.("organization", [{ field: "id", op: "in", value: list }]);
+  await tx.delete("organization", [{ field: "id", op: "in", value: list }]);
   // Plan 12d (ruling 28): the SSO and SCIM rows go in the step of the
   // organization row. A kept domain row would hold its claim forever, so no
   // other organization could verify the domain. The three models are no
   // kind of user-hold.ts, so the lock order does not change.
-  await tx.delete("ssoDomain", [{ field: "organizationId", op: "eq", value: id }]);
-  await tx.delete("ssoConnection", [{ field: "organizationId", op: "eq", value: id }]);
-  await tx.delete("scimToken", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("ssoDomain", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("ssoConnection", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("scimToken", [{ field: "organizationId", op: "in", value: list }]);
   // Plan 12k: the teams go before their rows, and fire no team hook.
-  await tx.delete("team", [{ field: "organizationId", op: "eq", value: id }]);
-  await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("team", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("invitation", [{ field: "organizationId", op: "in", value: list }]);
   // The tokens and the role rows of the organization have no use without it (plan 12k).
-  await tx.delete("organizationToken", [{ field: "organizationId", op: "eq", value: id }]);
-  await tx.delete("organizationRole", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("organizationToken", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("organizationRole", [{ field: "organizationId", op: "in", value: list }]);
   if (
     alone !== null &&
     (await tx.findMany("member", byOrganization)).some((m) => m.userId !== alone)
@@ -709,10 +730,10 @@ export async function deleteOrganizationRows(
     stopWith("conflict");
   // The members go before their team rows, in the order of a member removal (ruling 44).
   await tx.delete("member", byOrganization);
-  await tx.delete("teamMember", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("teamMember", [{ field: "organizationId", op: "in", value: list }]);
   // A session that points at a deleted organization would make every later rank check read a missing row.
   // Its active team is a team of that organization, so it goes in the same write.
-  await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {
+  await tx.update("session", [{ field: "activeOrganizationId", op: "in", value: list }], {
     activeOrganizationId: null,
     activeTeamId: null,
   });
@@ -749,16 +770,25 @@ export async function organizationsOfDelete(
   const o = on(config);
   // With organizations off, the engine has no ranks. The member rows still go.
   if (!o) return ok(plan);
-  for (const m of await storage.findMany("member", [
-    { field: "userId", op: "eq", value: userId },
-  ])) {
-    const organization = await storage.findOne("organization", [
-      { field: "id", op: "eq", value: m.organizationId },
-    ]);
+  // Three reads for any count of organizations (ruling 30 of plan 12d):
+  // the memberships, their organizations, and the members of those.
+  const mine = await storage.findMany("member", [{ field: "userId", op: "eq", value: userId }]);
+  if (mine.length === 0) return ok(plan);
+  const organizations = new Map(
+    (
+      await findManyIn(
+        storage,
+        "organization",
+        "id",
+        mine.map((m) => m.organizationId),
+      )
+    ).map((x) => [x.id, x]),
+  );
+  const all = await findManyIn(storage, "member", "organizationId", [...organizations.keys()]);
+  for (const m of mine) {
+    const organization = organizations.get(m.organizationId);
     if (!organization) continue;
-    const members = await storage.findMany("member", [
-      { field: "organizationId", op: "eq", value: organization.id },
-    ]);
+    const members = all.filter((x) => x.organizationId === organization.id);
     const platform = organization.slug === o.platformOrganization;
     if (!platform && members.every((x) => x.userId === userId)) {
       plan.going.push(organization);
@@ -769,6 +799,10 @@ export async function organizationsOfDelete(
     if (owners <= 1) return fail("sole_owner");
     plan.owned.push(organization);
   }
+  // The solo organizations go in one set-based delete, and its ids fit one
+  // chunk of IN_CHUNK (ruling 30 of plan 12d).
+  if (plan.going.length > IN_CHUNK) return fail("delete_too_large");
+  plan.going.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   // One lock order for every delete (review m1): two co-owners of two
   // organizations who delete at once would else wait on each other, and
   // Postgres would abort one with a deadlock in place of `conflict`.

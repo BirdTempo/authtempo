@@ -87,6 +87,8 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   domain_unverified: "The DNS record of the domain was not found. Publish it and try again.",
   domain_taken: "Another organization holds this domain.",
   domain_limit: "The organization holds the most domains it can have.",
+  delete_too_large:
+    "The account owns too many organizations to delete at once. Delete some of them first.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

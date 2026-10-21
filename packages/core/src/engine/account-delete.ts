@@ -6,6 +6,7 @@ import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { OrganizationRow, SessionRow, UserRow } from "../schema.js";
+import { IN_CHUNK } from "../storage/batch.js";
 import { type Meter, meterOf } from "../storage/meter.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { USER_CHILD_MODELS } from "../storage/sql.js";
@@ -20,7 +21,7 @@ import { type ImpersonationStops, impersonationStops } from "./operator/audit.js
 import { holdImpersonations } from "./operator/impersonation.js";
 import { OPERATOR_CALL_BUDGET } from "./operator/sessions.js";
 import {
-  deleteOrganizationRows,
+  deleteOrganizationsRows,
   organizationsOfDelete,
   ownersOf,
   publicOrganization,
@@ -237,7 +238,19 @@ async function runDelete(
   const ended = endedList(config);
   const stops = impersonationStops(config, "account_delete");
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
-  const before = DELETE_CALLS_BEFORE + ((await config.storage.readyStatements?.()) ?? 1);
+  // Before any write (ruling 30 of plan 12d): more solo organizations than
+  // one set-based delete takes answer delete_too_large, also on D1, where
+  // the undo of a write is no lock. One read of the memberships decides:
+  // with at most IN_CHUNK of them, no count of solo organizations passes it.
+  // The rule runs again inside the transaction, after the lock of the user.
+  const memberships = await config.storage.findMany("member", [
+    { field: "userId", op: "eq", value: userId },
+  ]);
+  if (memberships.length > IN_CHUNK) {
+    const plan = await organizationsOfDelete(config, config.storage, userId);
+    if (!plan.ok && plan.code === "delete_too_large") return plan;
+  }
+  const before = DELETE_CALLS_BEFORE + 1 + ((await config.storage.readyStatements?.()) ?? 1);
   // The count of the user's sessions that the delete ended (plan 12h Task 5).
   const counted = { sessions: 0 };
   const done = await hookGuard(() =>
@@ -327,10 +340,11 @@ async function runDelete(
  * identities: a link in flight updates its session as its last statement,
  * so it undoes or commits first.
  *
- * The cost per organization that goes: the 12 storage calls of
- * `deleteOrganizationRows` with `alone`. Plan 12k Task 8 added 2 of them,
- * the deletes of the organization tokens and of the role rows. Plan 12d
- * (ruling 28) added 3: the domain, connection, and SCIM token rows.
+ * The solo organizations go in one call of `deleteOrganizationsRows`
+ * (ruling 30 of plan 12d): 13 storage calls for any count, 0 when none
+ * goes. The organization rule reads in 3 calls for any count. At most
+ * `IN_CHUNK` solo organizations go in one delete; more answer
+ * `delete_too_large` before any write (`runDelete`).
  */
 export async function deleteAccountRows(
   tx: StorageAdapter,
@@ -384,7 +398,12 @@ export async function deleteAccountRows(
     if (held === 0) stopWith("conflict");
   }
   await tx.delete("user", byId);
-  for (const organization of going) await deleteOrganizationRows(tx, organization.id, user.id);
+  // One set-based delete for every solo organization (ruling 30 of plan 12d).
+  await deleteOrganizationsRows(
+    tx,
+    going.map((x) => x.id),
+    user.id,
+  );
   // The invitations come before the member rows, in the order of user-hold.ts
   // (ruling 50 of plan 12k).
   await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
