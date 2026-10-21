@@ -30,7 +30,7 @@ authtempo sessions end-all https://api.example.com --reason "breach" --yes
 | Flag | What it does |
 | --- | --- |
 | `<base url>` | The origin of the API, with no path. |
-| `--reason <text>` | The reason of the act, 1 to 500 characters with no control, format, or separator character and no lone surrogate. The audit row holds it. |
+| `--reason <text>` | The audit row holds the reason of the act. It is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. |
 | `--limit <n>` | The most sessions of one call, from 1 to 1000. The default is 500. A call can end fewer. |
 | `--max-calls <n>` | The most calls of one run, from 1 to 10000. The default is 100. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |

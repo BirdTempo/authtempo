@@ -33,7 +33,7 @@ authtempo create-admin https://api.example.com --email root@example.com --reason
 | `<base url>` | The origin of the API, with no path. |
 | `--email <address>` | The address of the operator. The command prints no address on stderr. |
 | `--name <name>` | The name of a new user, from 1 to 200 characters. |
-| `--reason <text>` | The reason of the act, 1 to 500 characters with no control, format, or separator character and no lone surrogate. The audit row holds it. |
+| `--reason <text>` | The audit row holds the reason of the act. It is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--token-file <path>` | The file of the operator secret. A dash reads stdin, and then the command needs `--yes`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |

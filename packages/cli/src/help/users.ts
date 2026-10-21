@@ -46,7 +46,7 @@ export const GROUP_EXITS: HelpText["exits"] = [
 /** The flag of the reason of a write. */
 export const REASON_FLAG: HelpFlag = {
   flag: "--reason <text>",
-  says: `The reason of the act, ${REASON_RULE}. The audit row holds it.`,
+  says: `The audit row holds the reason of the act. It is ${REASON_RULE}.`,
 };
 
 /** The flags of the confirmation rule of each write, after the operator flags. */

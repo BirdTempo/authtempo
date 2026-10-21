@@ -224,7 +224,7 @@ describe("the operator commands (plan 12f Task 12)", () => {
       const r = await run(["users", "ban", BASE, id, "--reason", reason, "--yes"], f);
       expect(r.code, JSON.stringify(reason)).toBe(2);
       expect(r.io.stderr[0]).toBe(
-        "--reason is 1 to 500 characters with no control, format, or separator character and no lone surrogate",
+        "--reason is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D",
       );
     }
     expect(f.paths).toEqual([]);

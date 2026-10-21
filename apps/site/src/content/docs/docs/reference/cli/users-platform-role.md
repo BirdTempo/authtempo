@@ -33,7 +33,7 @@ authtempo users platform-role https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3
 | `<user id>` | The id of the user. `authtempo users search` finds it by an address. |
 | `--grant` | Grant the role. The user needs a verified address and no active ban. |
 | `--revoke` | Revoke the role. The act ends a page of the user's sessions, and the sweep ends the rest. |
-| `--reason <text>` | The reason of the act, 1 to 500 characters with no control, format, or separator character and no lone surrogate. The audit row holds it. |
+| `--reason <text>` | The audit row holds the reason of the act. It is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--token-file <path>` | The file of the operator secret. A dash reads stdin, and then the command needs `--yes`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |

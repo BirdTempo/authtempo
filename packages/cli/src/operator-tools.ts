@@ -63,9 +63,11 @@ export const END_ALL_MAX = 1000;
 /**
  * The reason rule of core's `isOperatorReason` in words. The CLI error, the
  * help, and each docs copy say it, and a site test holds each copy to it
- * (ruling 65 of plan 12f).
+ * (ruling 65 of plan 12f). The words state the class of `hasRefusedChar`
+ * exactly (ruling 66). It refuses Cc, Cs, Zl, Zp, and each Cf but U+200C and
+ * U+200D. So a space and U+00A0 (Zs) pass. The length counts UTF-16 code units.
  */
-export const REASON_RULE = `1 to ${REASON_MAX} characters with no control, format, or separator character and no lone surrogate`;
+export const REASON_RULE = `1 to ${REASON_MAX} UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D`;
 
 /**
  * Why core refuses a reason, or null. The rule is core's own
