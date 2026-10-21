@@ -1203,8 +1203,10 @@ move, or an expiry. Better Auth answered `KEY_EXPIRED` for an expired key.
 With `permissions`, it checks the key's own set
 after the spend; a key with no set passes no check. So a refused check still
 spends one call of the quota and of the window. Better Auth 1.7.5 checks the
-set before it spends (dist/index.mjs:1660), so there a refused check costs
-nothing. The final review of plan 12k decides whether core checks first. `updateApiKey` narrows
+set before it spends (dist/index.mjs:1663), so there a refused check costs
+nothing. This order is a deviation. Core's resolve checks no set, so the
+spend comes first (ruling 42 of plan 12k and its final review). A test pins
+the spend of a refused check. `updateApiKey` narrows
 only: a wider set or a later expiry answers Better Auth's error for a bad
 body. `enabled: false` and a `metadata` change answer `NOT_SUPPORTED`: core
 has no disabled token and keeps the metadata of the create. The client has

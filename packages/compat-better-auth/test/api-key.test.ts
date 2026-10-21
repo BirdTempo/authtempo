@@ -226,7 +226,7 @@ describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
   });
 
   it("answers KEY_NOT_FOUND for a permission set that the key lacks, as Better Auth does", async () => {
-    // Final review of plan 12k, M2: Better Auth 1.7.5 checks the key's own set (dist/index.mjs:1660).
+    // Final review of plan 12k, M2: Better Auth 1.7.5 checks the key's own set (dist/index.mjs:1663).
     const { auth, person } = app({ references: "user", rateLimit: { enabled: false } });
     const ada = await person("ada@example.com");
     const held = await auth.api.createApiKey({
@@ -249,6 +249,21 @@ describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
       body: { key: held.key, permissions: { apiKey: ["read"] } },
     });
     expect({ valid: v.valid, id: v.key?.id }).toEqual({ valid: true, id: held.id });
+  });
+
+  it("spends one call of the quota at a refused permission check, where Better Auth spends none", async () => {
+    // Ruling 42 of plan 12k, L1: core's resolve spends, and the shim checks the set after it.
+    const { auth, person } = app({ references: "user", rateLimit: { enabled: false } });
+    const ada = await person("ada@example.com");
+    const created = await auth.api.createApiKey({
+      body: { name: "ci", userId: ada.user.id, remaining: 2, permissions: { apiKey: ["read"] } },
+    });
+    const refused = await auth.api.verifyApiKey({
+      body: { key: created.key, permissions: { apiKey: ["delete"] } },
+    });
+    expect(refused.error?.code).toBe("KEY_NOT_FOUND");
+    // Better Auth would answer remaining 1 here; the refused check spent one call.
+    expect((await auth.api.verifyApiKey({ body: { key: created.key } })).key?.remaining).toBe(0);
   });
 
   it("spends remaining and answers the usage code at zero", async () => {
