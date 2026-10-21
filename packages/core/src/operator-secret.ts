@@ -63,8 +63,10 @@ export const REASON_MAX = 500;
 /**
  * True when a reason passes the rule of spec 26 item 5: 1 to `REASON_MAX`
  * UTF-16 code units, with no character of `hasRefusedChar`. That is the
- * class of the user name: no control, format, or separator character, and
- * no lone surrogate (plan 12f, final review m5). The engine
+ * class of the user name: no control character, line or paragraph
+ * separator, lone surrogate, or format character except U+200C and U+200D
+ * (plan 12f, final review m5). A space and U+00A0 (Zs) pass. The CLI
+ * states the same class in `REASON_RULE` (ruling 66). The engine
  * (`operatorReason`) and the CLI check with this one function.
  */
 export function isOperatorReason(value: string): boolean {
