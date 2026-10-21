@@ -210,8 +210,8 @@ function complexValue(item: unknown, rule: AttrRule, name: string): unknown | Re
   const out: Record<string, unknown> = {};
   for (const [key, part] of Object.entries(item)) {
     const sub = rule.subs.get(asciiLower(key));
-    if (sub === undefined)
-      return refused(`${name}.${key} is not an attribute of this server`, "invalidSyntax");
+    // A sub-attribute that the schema does not know is ignored (ruling 45 of plan 12d).
+    if (sub === undefined) continue;
     // A read-only sub-attribute in a request is ignored (RFC 7643 section 2.2).
     if (sub.facts.mutability === "readOnly") continue;
     const v = simpleValue(part, sub.facts, `${name}.${sub.name}`);
@@ -270,8 +270,8 @@ function enterpriseValue(value: unknown): Record<string, unknown> | undefined | 
   const out: Record<string, unknown> = {};
   for (const [key, part] of Object.entries(value)) {
     const rule = ENTERPRISE_RULES.get(asciiLower(key));
-    if (rule === undefined)
-      return refused(`${key} is not an attribute of the enterprise extension`, "invalidSyntax");
+    // An Okta custom attribute can take the enterprise namespace; it is not stored.
+    if (rule === undefined) continue;
     // Entra ID shows the manager as the id text in its User sample ("Develop
     // a SCIM endpoint", Microsoft Learn, read 2026-10-22). RFC 7643 section
     // 4.3 makes it complex, so core reads a text as the manager's `value`.
@@ -310,9 +310,14 @@ const USER_KEY = asciiLower(NS_SCIM_USER);
 /**
  * Reads a User resource of a POST or a PUT body, or the result of a PATCH
  * (Behavior 1). `schemas` holds the core User URN, and the enterprise URN
- * at most. `password` answers `invalidValue`. `id`, `meta`, and `groups` are
- * ignored (RFC 7643 section 2.2). An attribute that the schema does not know
- * answers `invalidSyntax`: core refuses the unknown, never ignores it.
+ * at most; another URN in `schemas` answers `invalidSyntax`. `password`
+ * answers `invalidValue`. `id`, `meta`, and `groups` are ignored (RFC 7643
+ * section 2.2). An attribute that the schema does not know is ignored: core
+ * stores nothing of it and answers the resource as stored (ruling 45 of plan
+ * 12d). RFC 7644 section 3.1 reads a request "in the context of its own
+ * schema", and RFC 7643 section 2 lets the server decide which attributes it
+ * ignores. Entra ID and Okta send attributes of their own maps, and a refusal
+ * would stop the provisioning of each such user.
  */
 export function readUser(body: unknown): { ok: true; doc: UserDoc } | Refused {
   if (!isObject(body)) return refused("the body is not a User resource", "invalidSyntax");
@@ -342,8 +347,8 @@ export function readUser(body: unknown): { ok: true; doc: UserDoc } | Refused {
       continue;
     }
     const rule = USER_RULES.get(lower);
-    if (rule === undefined)
-      return refused(`${key} is not an attribute of this server`, "invalidSyntax");
+    // An unknown attribute, or a URN key that `schemas` does not name, is ignored.
+    if (rule === undefined) continue;
     if (rule.name === "password") return refused("password is not supported", "invalidValue");
     if (rule.name === "id" || rule.name === "meta" || rule.name === "groups") continue;
     if (rule.name === "userName") {

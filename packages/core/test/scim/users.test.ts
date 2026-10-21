@@ -244,6 +244,47 @@ describe("the SCIM Users (plan 12d Task 10)", () => {
     expect((await read(await scim(w, token, "GET", `/Users/${id}`))).etag).toBe('W/"2"');
   });
 
+  it("reads again once after a lost race with no If-Match, then answers 409", async () => {
+    const w = await world();
+    const token = await tokenOf(w, w.organizationId);
+    const id = await created(w, token, ADA);
+    const change = (name: string) => patch({ op: "replace", path: "displayName", value: name });
+    // The read gate: each read of the row that the PATCH under test makes is
+    // held until a rival PATCH commits, so the write of that read loses.
+    const storage = w.config.storage;
+    const findOne = storage.findOne.bind(storage);
+    let rivals = 0;
+    let rivalRuns = false;
+    vi.spyOn(storage, "findOne").mockImplementation(async (model, where) => {
+      const row = await findOne(model, where);
+      if (model === "scimUser" && rivals > 0 && !rivalRuns) {
+        rivals--;
+        rivalRuns = true;
+        const rival = await scim(w, token, "PATCH", `/Users/${id}`, change(`Rival ${rivals}`));
+        rivalRuns = false;
+        expect(rival.status).toBe(200);
+      }
+      return row;
+    });
+    const version = async () =>
+      (await w.storage.findOne("scimUser", [{ field: "id", op: "eq", value: id }]))?.version;
+    // One lost race: the second read sees the rival's version, and the write passes.
+    rivals = 1;
+    const once = await read(await scim(w, token, "PATCH", `/Users/${id}`, change("Ada")));
+    expect([once.status, once.body.displayName, once.etag]).toEqual([200, "Ada", 'W/"3"']);
+    expect(await version()).toBe(3);
+    // Two lost races: the engine tries once more only, then answers 409 with no scimType.
+    rivals = 2;
+    const twice = await read(await scim(w, token, "PATCH", `/Users/${id}`, change("Lovelace")));
+    expect([twice.status, twice.body.scimType, twice.body.detail]).toEqual([
+      409,
+      undefined,
+      "the User changed twice during the write; send it again",
+    ]);
+    const row = await w.storage.findOne("scimUser", [{ field: "id", op: "eq", value: id }]);
+    expect([row?.version, row?.displayName]).toEqual([5, "Rival 0"]);
+  });
+
   it("applies the operations of one PATCH atomically", async () => {
     const w = await world();
     const token = await tokenOf(w, w.organizationId);
@@ -439,6 +480,131 @@ describe("the SCIM Users (plan 12d Task 10)", () => {
       "password is not supported",
     ]);
     expect(await userAt(w, ADA)).toBeNull();
+  });
+
+  it("ignores the attributes that the schema does not know in an Okta body (ruling 45)", async () => {
+    const w = await world();
+    const token = await tokenOf(w, w.organizationId);
+    const address = "test.user@acme.example";
+    // The create of the Okta SCIM 2.0 protocol reference (developer.okta.com,
+    // read 2026-10-22), at an address of the verified domain. Its password is
+    // left out: this server refuses a password (Behavior 1). An Okta custom
+    // attribute goes to the namespace of its mapping: the core User at the
+    // top, or the enterprise extension.
+    const okta = {
+      schemas: [USER_URN, ENTERPRISE_URN],
+      userName: address,
+      name: { givenName: "Test", familyName: "User" },
+      emails: [{ primary: true, value: address, type: "work" }],
+      displayName: "Test User",
+      locale: "en-US",
+      externalId: "00ujl29u0le5T6Aj10h7",
+      groups: [],
+      active: true,
+      isContractor: true,
+      [ENTERPRISE_URN]: { employeeNumber: "701984", department: "Tour Operations", badgeId: "B-7" },
+    };
+    const r = await read(await scim(w, token, "POST", "/Users", okta));
+    expect(r.status).toBe(201);
+    const id = String(r.body.id);
+    // The unknown attributes are not stored, and the answer is the resource as stored.
+    const row = await w.storage.findOne("scimUser", [{ field: "id", op: "eq", value: id }]);
+    expect(row?.data).toEqual({
+      name: { givenName: "Test", familyName: "User" },
+      emails: [{ primary: true, value: address, type: "work" }],
+      locale: "en-US",
+      [ENTERPRISE_URN]: { employeeNumber: "701984", department: "Tour Operations" },
+    });
+    expect(r.body.isContractor).toBeUndefined();
+    expect(r.body[ENTERPRISE_URN]).toEqual({
+      employeeNumber: "701984",
+      department: "Tour Operations",
+    });
+    const got = await read(await scim(w, token, "GET", `/Users/${id}`));
+    expect(got.body).toEqual(r.body);
+    // The replace of the same reference: id, meta, and groups are ignored, and
+    // a custom attribute again stores nothing.
+    const put = await read(
+      await scim(w, token, "PUT", `/Users/${id}`, {
+        schemas: [USER_URN],
+        id,
+        userName: address,
+        name: { givenName: "Another", middleName: "Excited", familyName: "User" },
+        emails: [{ primary: true, value: address, type: "work", display: address }],
+        active: true,
+        groups: [],
+        meta: { resourceType: "User" },
+        isContractor: false,
+      }),
+    );
+    expect([put.status, put.body.isContractor, put.body.name]).toEqual([
+      200,
+      undefined,
+      { givenName: "Another", middleName: "Excited", familyName: "User" },
+    ]);
+  });
+
+  it("ignores an unknown sub-attribute, and stores the rest of its value", async () => {
+    const w = await world();
+    const token = await tokenOf(w, w.organizationId);
+    const r = await read(
+      await scim(
+        w,
+        token,
+        "POST",
+        "/Users",
+        userBody(ADA, { name: { givenName: "Ada", pronunciation: "AY-da" } }),
+      ),
+    );
+    expect([r.status, r.body.name]).toEqual([201, { givenName: "Ada" }]);
+  });
+
+  it("takes an Entra ID body, and refuses only a schema URN that it does not serve (ruling 45)", async () => {
+    const w = await world();
+    const token = await tokenOf(w, w.organizationId);
+    const address = "test_user_11bb11bb@acme.example";
+    // The Create User request of "Develop a SCIM endpoint" (Microsoft Learn,
+    // read 2026-10-22), at an address of the verified domain, with the
+    // enterprise manager of the schema sample of the same page.
+    const entra = {
+      schemas: [USER_URN, ENTERPRISE_URN],
+      externalId: "0a21f0f2-8d2a-4f8e-bf98-7363c4aed4ef",
+      userName: "Test_User_00aa00aa-bb11-cc22-dd33-44ee44ee44ee",
+      active: true,
+      emails: [{ primary: true, type: "work", value: address }],
+      meta: { resourceType: "User" },
+      name: { formatted: "givenName familyName", familyName: "familyName", givenName: "givenName" },
+      roles: [],
+      [ENTERPRISE_URN]: { manager: "123456" },
+    };
+    const r = await read(await scim(w, token, "POST", "/Users", entra));
+    expect([r.status, r.body[ENTERPRISE_URN]]).toEqual([201, { manager: { value: "123456" } }]);
+    expect((await userAt(w, address))?.emailVerified).toBe(true);
+    // The schema sample of the same page names a custom extension in schemas.
+    // This server does not serve it, so the body answers invalidSyntax.
+    const custom = "urn:ietf:params:scim:schemas:extension:CustomExtensionName:2.0:User";
+    const other = "bjensen@acme.example";
+    const refusedBody = await read(
+      await scim(w, token, "POST", "/Users", {
+        schemas: [USER_URN, ENTERPRISE_URN, custom],
+        userName: other,
+        externalId: "bjensen",
+        name: { familyName: "Jensen", givenName: "Barbara" },
+        [ENTERPRISE_URN]: { manager: "123456" },
+        [custom]: { tag: "701984" },
+      }),
+    );
+    expect([refusedBody.status, refusedBody.body.scimType]).toEqual([400, "invalidSyntax"]);
+    expect(await userAt(w, other)).toBeNull();
+    // A URN key that schemas does not name is an unknown attribute, and is ignored.
+    const ignored = await read(
+      await scim(w, token, "POST", "/Users", {
+        schemas: [USER_URN],
+        userName: other,
+        [custom]: { tag: "701984" },
+      }),
+    );
+    expect([ignored.status, ignored.body[custom]]).toEqual([201, undefined]);
   });
 
   it("refuses a read token, and a body of another type, too large, or not JSON, at POST /Users", async () => {
