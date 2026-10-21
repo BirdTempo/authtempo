@@ -164,6 +164,7 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /scim/v2/.search",
   "POST /scim/v2/Bulk",
   "POST /scim/v2/Groups/.search",
+  "POST /scim/v2/Users",
   "POST /scim/v2/Users/.search",
 ];
 
@@ -283,6 +284,7 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /scim/v2/.search",
   "POST /scim/v2/Bulk",
   "POST /scim/v2/Groups/.search",
+  "POST /scim/v2/Users",
   "POST /scim/v2/Users/.search",
 ];
 
@@ -434,8 +436,8 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ),
   ...rows(
     "account_disabled",
-    "no flow writes a scimUser row before the SCIM Users of plan 12d Task 10, which proves the refusal",
-    ["GET /sso/:connectionId/callback", "POST /sso/:connectionId/acs"],
+    "the ACS needs a signed SAML Response; it shares resolveSsoUser with the OIDC callback, where sso/resolve.test.ts proves the refusal (plan 12d Task 10)",
+    ["POST /sso/:connectionId/acs"],
   ),
   ...rows(
     "conflict",

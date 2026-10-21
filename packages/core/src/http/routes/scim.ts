@@ -14,6 +14,15 @@ import {
   type ScimCaller,
   scimTokenOrganization,
 } from "../../engine/scim/tokens.js";
+import {
+  type ScimResult,
+  scimCreateUser,
+  scimDeleteUser,
+  scimGetUser,
+  scimListUsers,
+  scimPatchUser,
+  scimReplaceUser,
+} from "../../engine/scim/users.js";
 import { readCappedBytes } from "../../primitives/read-capped.js";
 import type { ScimScope } from "../../schema.js";
 import { scimTokenCreateBody, scimTokenIdBody, scimTokenListQuery } from "../contract/scim.js";
@@ -140,6 +149,16 @@ function notSupported(): Promise<Response> {
 }
 
 /**
+ * The Response of a SCIM answer. A 204 holds no body and no type (RFC 7644
+ * section 3.6), and is never cached either.
+ */
+export function scimAnswer(result: ScimResult): Response {
+  if (result.status === 204)
+    return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+  return scimJson(result.body, result.status, result.headers ?? {});
+}
+
+/**
  * The SCIM routes (plan 12d Task 9): the token routes of an organization's
  * manager, and the base of the SCIM server under `/scim/v2`. They exist
  * when `scim` is on. The token routes run the steps of the SSO manager
@@ -154,6 +173,23 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
   });
   const discovery = (path: string, key: RouteKey, handle: ScimRouteSpec["handle"]) =>
     scimRoute(config, { method: "GET", path, key, scope: "any", body: false, handle });
+  const users = (
+    method: Route["method"],
+    path: string,
+    key: RouteKey,
+    scope: ScimScope,
+    body: boolean,
+    run: (ctx: RouteContext, caller: ScimCaller, value: unknown) => Promise<ScimResult>,
+  ) =>
+    scimRoute(config, {
+      method,
+      path,
+      key,
+      scope,
+      body,
+      handle: async (ctx, caller, value) => scimAnswer(await run(ctx, caller, value)),
+    });
+  const ifMatch = (ctx: RouteContext) => ctx.request.headers.get("if-match");
   const refused = (method: "GET" | "POST", path: string, key: RouteKey) =>
     scimRoute(config, { method, path, key, scope: "any", body: false, handle: notSupported });
   return [
@@ -213,6 +249,45 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
     ),
     discovery("/scim/v2/Schemas/:id", "GET /scim/v2/Schemas/:id", async (ctx) =>
       discoveryOne(ctx, scimSchemas(config)),
+    ),
+    // The Users of plan 12d Task 10, each through the builder: the token, the scope, the body.
+    users("GET", "/scim/v2/Users", "GET /scim/v2/Users", "scim.users.read", false, (ctx, c) =>
+      scimListUsers(config, c, ctx.url),
+    ),
+    users("POST", "/scim/v2/Users", "POST /scim/v2/Users", "scim.users.write", true, (_, c, b) =>
+      scimCreateUser(config, c, b),
+    ),
+    users(
+      "GET",
+      "/scim/v2/Users/:id",
+      "GET /scim/v2/Users/:id",
+      "scim.users.read",
+      false,
+      (ctx, c) => scimGetUser(config, c, ctx.params.id ?? "", ctx.url),
+    ),
+    users(
+      "PUT",
+      "/scim/v2/Users/:id",
+      "PUT /scim/v2/Users/:id",
+      "scim.users.write",
+      true,
+      (ctx, c, b) => scimReplaceUser(config, c, ctx.params.id ?? "", b, ifMatch(ctx)),
+    ),
+    users(
+      "PATCH",
+      "/scim/v2/Users/:id",
+      "PATCH /scim/v2/Users/:id",
+      "scim.users.write",
+      true,
+      (ctx, c, b) => scimPatchUser(config, c, ctx.params.id ?? "", b, ifMatch(ctx)),
+    ),
+    users(
+      "DELETE",
+      "/scim/v2/Users/:id",
+      "DELETE /scim/v2/Users/:id",
+      "scim.users.write",
+      false,
+      (ctx, c) => scimDeleteUser(config, c, ctx.params.id ?? "", ifMatch(ctx)),
     ),
     // The refusals of the design's 9.5, and the two resource searches. Without the two,
     // a search of a directory meets a 404 that does not say "not supported".

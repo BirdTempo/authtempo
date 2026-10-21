@@ -320,6 +320,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `hooks.identity` | `IdentityHooks` | none | `beforeLink`, `afterLink`, `beforeUnlink`, and `afterUnlink`. The `email` identity fires none. |
 | `hooks.operator` | `OperatorHooks` | none | Needs `operator.users`. `beforeAction` runs before an operator act and can refuse it. `afterAction` gets each audit row after the commit; send the row to a separate system there. |
 | `hooks.sso` | `SsoHooks` | none | Needs `sso`. `beforeSignIn` runs in an SSO sign-in before its first write and can refuse it. |
+| `hooks.scim` | `ScimHooks` | none | Needs `scim`. `afterChange` runs once after the commit of each SCIM write. A throw writes one log line, and the write stays. |
 
 ## Captcha
 

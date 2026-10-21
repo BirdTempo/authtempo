@@ -33,6 +33,8 @@ import {
   ORGANIZATION_HOOK_POINTS,
   type OrganizationHooks,
   type ResolvedHooks,
+  SCIM_HOOK_POINTS,
+  type ScimHooks,
   SESSION_HOOK_POINTS,
   type SessionHooks,
   SSO_HOOK_POINTS,
@@ -1441,6 +1443,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       organizations !== null,
       typeof input.operator === "object" && input.operator.users === true,
       input.sso !== undefined && input.sso !== false,
+      input.scim !== undefined && input.scim !== false,
     ),
     account: resolveAccount(input.account),
     captcha: resolveCaptcha(
@@ -2642,6 +2645,7 @@ const HOOK_GROUPS: readonly string[] = [
   "identity",
   "operator",
   "sso",
+  "scim",
 ];
 
 function resolveHooks(
@@ -2649,14 +2653,23 @@ function resolveHooks(
   organizationsOn: boolean,
   operatorUsersOn: boolean,
   ssoOn: boolean,
+  scimOn: boolean,
 ): ResolvedHooks {
   if (input === undefined)
-    return { organization: {}, session: {}, user: {}, identity: {}, operator: {}, sso: {} };
+    return {
+      organization: {},
+      session: {},
+      user: {},
+      identity: {},
+      operator: {},
+      sso: {},
+      scim: {},
+    };
   if (!isHookObject(input)) throw new ConfigError("hooks must be a plain object");
   for (const key of Object.keys(input))
     if (!HOOK_GROUPS.includes(key))
       throw new ConfigError(
-        `hooks.${key} is not a hook group; core has organization, session, user, identity, operator, and sso`,
+        `hooks.${key} is not a hook group; core has organization, session, user, identity, operator, sso, and scim`,
       );
   // Each value passed the function check in hookGroup; the interfaces type the events.
   const organization = hookGroup(
@@ -2689,7 +2702,11 @@ function resolveHooks(
   // Only an SSO sign-in runs this point (plan 12d).
   if (Object.keys(sso).length > 0 && !ssoOn)
     throw new ConfigError("hooks.sso needs sso: the hooks would never run");
-  return { organization, session, user, identity, operator, sso };
+  const scim = hookGroup("hooks.scim", input.scim, SCIM_HOOK_POINTS) as unknown as ScimHooks;
+  // Only a SCIM write runs this point (plan 12d Task 10).
+  if (Object.keys(scim).length > 0 && !scimOn)
+    throw new ConfigError("hooks.scim needs scim: the hooks would never run");
+  return { organization, session, user, identity, operator, sso, scim };
 }
 
 const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {

@@ -91,7 +91,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12d Task 4 adds the discovery, the start, and the callback.
     // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
     // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
-    expect(keys.length).toBe(174);
+    // Plan 12d Task 10 adds the six routes of the SCIM Users.
+    expect(keys.length).toBe(180);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });

@@ -232,15 +232,20 @@ export const USER_RULES = rules([
 ]);
 
 // The enterprise User extension (RFC 7643 section 4.3), read only as `<URN>:attr`.
-// Task 10 (ruling 24, i5) makes manager the complex attribute of section 4.3;
-// the Schema document follows this table.
+// manager is the complex attribute of section 4.3 (ruling 24, i5): the id of
+// the manager's User, its `$ref`, and its read-only `displayName`. The Schema
+// document follows this table.
 export const ENTERPRISE_RULES = rules([
   text("employeeNumber"),
   text("costCenter"),
   text("organization"),
   text("division"),
   text("department"),
-  text("manager"),
+  complex(
+    "manager",
+    ["value", ["$ref", { referenceTypes: ["User"] }], ["displayName", { mutability: "readOnly" }]],
+    null,
+  ),
 ]);
 
 // The core Group schema (RFC 7643 section 4.2).

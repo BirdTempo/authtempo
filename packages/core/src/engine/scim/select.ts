@@ -53,28 +53,96 @@ export function pageParams(
 /** The attributes that every answer holds (RFC 7643 section 7, `returned: always`). */
 const ALWAYS: ReadonlySet<string> = new Set(["id", "schemas", "meta"]);
 
-/** The names of one list parameter, in lower case, or null for a name that `known` lacks. */
-function namesOf(text: string, known: ReadonlySet<string>): Set<string> | null {
-  const names = new Set<string>();
+/**
+ * The sub-attributes and the schema URN that an attribute name of a
+ * resource may carry (RFC 7644 section 3.10). `subs` maps a top-level name,
+ * in lower case, to the names of its sub-attributes. `core` is the URN of
+ * the resource's core schema, in lower case. A top-level name of `known`
+ * that starts with `urn:` is an extension, and its sub-attributes are its
+ * attributes.
+ */
+export interface AttributeNotation {
+  readonly subs: ReadonlyMap<string, ReadonlySet<string>>;
+  readonly core: string;
+}
+
+/** One name of a list: a top-level name, and a sub-attribute or null. */
+type Name = { top: string; sub: string | null };
+
+/**
+ * One name in the standard notation of RFC 7644 section 3.10, or null: `attr`,
+ * `attr.sub`, either one after the core URN and a colon, an extension URN,
+ * or `<extension URN>:attr`. Each part is read in lower case.
+ */
+function nameOf(
+  part: string,
+  known: ReadonlySet<string>,
+  notation: AttributeNotation | null,
+): Name | null {
+  let text = asciiLower(part.trim());
+  if (notation !== null && text.startsWith(`${notation.core}:`))
+    text = text.slice(notation.core.length + 1);
+  let name: Name;
+  const extension =
+    notation === null
+      ? undefined
+      : [...known].find((k) => k.startsWith("urn:") && (text === k || text.startsWith(`${k}:`)));
+  if (extension !== undefined)
+    name = {
+      top: extension,
+      sub: text === extension ? null : text.slice(extension.length + 1),
+    };
+  else {
+    const dot = text.indexOf(".");
+    name =
+      dot < 0 ? { top: text, sub: null } : { top: text.slice(0, dot), sub: text.slice(dot + 1) };
+  }
+  if (!known.has(name.top)) return null;
+  if (name.sub !== null && notation?.subs.get(name.top)?.has(name.sub) !== true) return null;
+  return name;
+}
+
+/** The names of one list parameter, or null for a name that `known` lacks. */
+function namesOf(
+  text: string,
+  known: ReadonlySet<string>,
+  notation: AttributeNotation | null,
+): Name[] | null {
+  const names: Name[] = [];
   for (const part of text.split(",")) {
-    const name = asciiLower(part.trim());
-    if (!known.has(name)) return null;
-    names.add(name);
+    const name = nameOf(part, known, notation);
+    if (name === null) return null;
+    names.push(name);
   }
   return names;
 }
 
+/** The value with only the sub-attributes of `subs` (`keep`) or without them. A list maps each item. */
+function pickSubs(value: unknown, subs: ReadonlySet<string>, keep: boolean): unknown {
+  const one = (item: unknown): unknown => {
+    if (typeof item !== "object" || item === null || Array.isArray(item)) return item;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(item)) if (subs.has(asciiLower(k)) === keep) out[k] = v;
+    return out;
+  };
+  return Array.isArray(value) ? value.map(one) : one(value);
+}
+
 /**
  * `attributes` or `excludedAttributes` (RFC 7644 section 3.9), not both.
- * Each is a comma-separated list of the top-level names of the resource's
- * schema, or of the enterprise URN, in any case. `known` holds those names
- * in lower case. An unknown name answers 400 `invalidValue`. `id`,
- * `schemas`, and `meta` are always returned.
+ * Each is a comma-separated list of names of the resource's schema, in any
+ * case. `known` holds the top-level names in lower case, an extension URN
+ * among them. With `notation`, a name may also take the standard notation
+ * of section 3.10: a sub-attribute (`name.givenName`), the core URN before
+ * it, or an extension URN before an attribute of the extension. Then only
+ * that sub-attribute is returned, or left out. An unknown name answers 400
+ * `invalidValue`. `id`, `schemas`, and `meta` are always returned.
  */
 export function selectAttributes(
   resource: Record<string, unknown>,
   url: URL,
   known: ReadonlySet<string>,
+  notation: AttributeNotation | null = null,
 ): { ok: true; value: Record<string, unknown> } | { ok: false; response: Response } {
   const refuse = (detail: string) => ({
     ok: false as const,
@@ -88,13 +156,22 @@ export function selectAttributes(
     return refuse("send attributes or excludedAttributes, not both");
   const list = wanted ?? excluded;
   if (list === null) return { ok: true, value: resource };
-  const names = namesOf(list, known);
+  const names = namesOf(list, known, notation);
   if (names === null) return refuse("the list names an attribute that this resource does not have");
+  const whole = new Set(names.filter((n) => n.sub === null).map((n) => n.top));
+  const parts = new Map<string, Set<string>>();
+  for (const n of names)
+    if (n.sub !== null && !whole.has(n.top))
+      parts.set(n.top, (parts.get(n.top) ?? new Set()).add(n.sub));
   const value: Record<string, unknown> = {};
   for (const [key, v] of Object.entries(resource)) {
     const name = asciiLower(key);
-    const keep = ALWAYS.has(name) || (wanted !== null ? names.has(name) : !names.has(name));
-    if (keep) value[key] = v;
+    const subs = parts.get(name);
+    if (ALWAYS.has(name)) value[key] = v;
+    else if (wanted !== null) {
+      if (whole.has(name)) value[key] = v;
+      else if (subs) value[key] = pickSubs(v, subs, true);
+    } else if (!whole.has(name)) value[key] = subs ? pickSubs(v, subs, false) : v;
   }
   return { ok: true, value };
 }

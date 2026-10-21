@@ -253,8 +253,11 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * after. Plan 12d ruling 30 reads the memberships once before any write. So
  * the act reserves one more call, and its page ends one session fewer. The
  * run of 2026-10-21 gives 48 queries, 2 sessions, and sweeps of 47, 47, and 46.
+ * Plan 12d Task 10 (ruling 25) reads the user's scimUser rows for their
+ * scimGroupMember rows, and reserves 2 calls for it. The run of 2026-10-22
+ * gives 49 queries, 2 sessions, and the same sweeps.
  */
-const DELETE_COUNTS: [number, number, number[]] = [48, 2, [47, 47, 46]];
+const DELETE_COUNTS: [number, number, number[]] = [49, 2, [47, 47, 46]];
 const REMOVE_COUNTS: [number, number, number[]] = [49, 11, [47, 47, 26]];
 
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });

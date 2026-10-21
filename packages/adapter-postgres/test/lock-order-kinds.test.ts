@@ -259,6 +259,8 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
         return Response.json({ id_token: code, token_type: "Bearer" });
       },
     },
+    // Plan 12d Task 10: the SCIM Users of Acme.
+    scim: {},
     jwt: {
       verifyIdToken: async (input) => {
         const claims = idTokens[input.token];
@@ -422,6 +424,13 @@ function must<T>(r: { ok: true; value: T } | { ok: false; code: string }): T {
   return r.value;
 }
 
+/** Uma's user id. */
+async function umaId(_w: World): Promise<string> {
+  const rows = await db.sql<{ id: string }[]>`
+    SELECT id FROM ta_user WHERE email = 'uma@example.org'`;
+  return rows[0]?.id ?? "";
+}
+
 /** The platform organization's id. */
 async function platformId(): Promise<string> {
   const rows = await db.sql<{ id: string }[]>`
@@ -552,7 +561,14 @@ async function scene(w: World) {
     }),
   );
 
+  const scim = w.auth.api.scim;
+  if (!scim) throw new Error("no scim api");
+  const scimToken = must(
+    await scim.tokens.create({ actor: APP, organizationId: acme, name: "directory" }),
+  ).token;
+
   return {
+    scimToken,
     ada,
     bob: bobActive,
     cal: calActive,
@@ -688,7 +704,46 @@ const TOUCHED: Record<string, string[]> = {
   "an email change": ["user", "session"],
   // Plan 12d Task 5: the claim of Uma, then her member row of Acme, then her session.
   "an SSO sign-in that claims a user": ["user", "session", "member"],
+  // Plan 12d Task 10: the SCIM create claims Uma and adds her member row.
+  "a SCIM create that claims a user": ["user", "session", "member"],
+  "a SCIM update": ["user", "session", "member"],
+  // The team member add of the setup takes the team row.
+  "a SCIM deactivate": ["user", "session", "organization", "team", "member", "team member"],
+  "a SCIM reactivate": ["user", "session", "organization", "member", "team member"],
+  "a SCIM delete": ["user", "session", "organization", "member", "team member"],
 };
+
+/** One SCIM request of Acme's directory, and its answer as a Result. */
+async function scimCall(w: World, s: Scene, method: string, path: string, body?: unknown) {
+  const res = await w.auth.handle(
+    new Request(`${API}/auth/scim/v2${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${s.scimToken}`,
+        ...(body === undefined ? {} : { "content-type": "application/scim+json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }),
+  );
+  const text = await res.text();
+  return res.ok
+    ? { ok: true as const, value: text === "" ? null : (JSON.parse(text) as { id: string }) }
+    : { ok: false as const, code: `${res.status} ${text}` };
+}
+
+/** Uma's SCIM User, made by Acme's directory: the claim of her unverified sign-up. */
+async function scimUma(w: World, s: Scene) {
+  return scimCall(w, s, "POST", "/Users", {
+    schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+    userName: "uma@example.org",
+  });
+}
+
+/** A PatchOp body of one operation. */
+const scimPatch = (op: Record<string, unknown>) => ({
+  schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+  Operations: [op],
+});
 
 /** Each flow of plans 12f and 12k that writes a kind of user-hold.ts, most of them two kinds or more. */
 const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
@@ -849,6 +904,54 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     );
     const error = new URL(res.headers.get("location") ?? "", API).searchParams.get("auth_error");
     return error === null ? { ok: true, value: res.status } : { ok: false, code: error };
+  },
+  "a SCIM create that claims a user": (w, s) => scimUma(w, s),
+  "a SCIM update": async (w, s) => {
+    const id = must(await scimUma(w, s))?.id ?? "";
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Users/${id}`,
+      scimPatch({ op: "replace", path: "displayName", value: "Uma" }),
+    );
+  },
+  "a SCIM deactivate": async (w, s) => {
+    const id = must(await scimUma(w, s))?.id ?? "";
+    // Uma joins the team Core, so the deactivate deletes her team member row.
+    must(
+      await w.auth.api.addTeamMember({ user: s.ada.user, teamId: s.core, userId: await umaId(w) }),
+    );
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Users/${id}`,
+      scimPatch({ op: "replace", path: "active", value: false }),
+    );
+  },
+  "a SCIM reactivate": async (w, s) => {
+    const id = must(await scimUma(w, s))?.id ?? "";
+    must(
+      await scimCall(
+        w,
+        s,
+        "PATCH",
+        `/Users/${id}`,
+        scimPatch({ op: "replace", path: "active", value: false }),
+      ),
+    );
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Users/${id}`,
+      scimPatch({ op: "replace", path: "active", value: true }),
+    );
+  },
+  "a SCIM delete": async (w, s) => {
+    const id = must(await scimUma(w, s))?.id ?? "";
+    return scimCall(w, s, "DELETE", `/Users/${id}`);
   },
   "an invitation accept that raises a member": async (w, s) => {
     must(
@@ -1014,7 +1117,7 @@ const SITES: Record<string, readonly string[] | string> = {
   "teams createTeam": ["a team create"],
   "teams updateTeam": "one kind: the team row",
   "teams deleteTeam": ["a team delete"],
-  "teams addTeamMember": ["a team member add"],
+  "teams addTeamMember": ["a team member add", "a SCIM deactivate"],
   "teams removeTeamMember": ["a team member removal", "a team leave"],
   "teams setActiveTeam": ["a set of the active team"],
   "tokens createApiToken": "one kind: the user hold, then token rows",
@@ -1023,7 +1126,15 @@ const SITES: Record<string, readonly string[] | string> = {
   "totp twoFactorGate": "no kind: the password row and the challenge row",
   // The body of verifyTwoFactor, which emits the challenge event around it (plan 12h Task 5).
   "totp answerChallenge": "a sign-in after the second factor challenge",
-  "users createOrFindInTransaction": ["a sign-in", "an email claim by a magic link"],
+  "users createOrFindInTransaction": [
+    "a sign-in",
+    "an email claim by a magic link",
+    "a SCIM create that claims a user",
+    "a SCIM update",
+    "a SCIM deactivate",
+    "a SCIM reactivate",
+    "a SCIM delete",
+  ],
   "operator/access-end endPendingRows": "one kind: the session rows of a pending end",
   [DOOR]: "the door of the operator acts: each call of operatorAct is a site of its own",
   "operator/ban banUser": ["a ban", "a ban of an operator with an impersonation"],
@@ -1063,6 +1174,14 @@ const SITES: Record<string, readonly string[] | string> = {
   "scim/tokens createScimToken":
     "one kind: the lock of the organization row, then reads of token rows, then the token row and its audit row",
   "scim/tokens revokeScimToken": "no kind: the token row, then its audit row",
+  // The SCIM Users of plan 12d Task 10: the user hold, the sessions, the scimUser row,
+  // the organization lock, the member and team member rows, then the audit row.
+  "scim/users writeChange": [
+    "a SCIM update",
+    "a SCIM deactivate",
+    "a SCIM reactivate",
+    "a SCIM delete",
+  ],
 };
 
 /** The sites that SITES pins to the flow `name`, sorted. */
@@ -1077,7 +1196,8 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     const found = sites("src").map((s) => s.key);
     // Plan 12d Task 2b adds the six sites of sso/domains.ts, and Task 3 the
     // three of sso/connections.ts. Task 9b adds the two of scim/tokens.ts.
-    expect(found.length).toBe(74);
+    // Task 10 adds the one of scim/users.ts.
+    expect(found.length).toBe(75);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {

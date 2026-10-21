@@ -41,6 +41,7 @@ const FS_MODULE = "node:fs";
  *    string. A `scimType` is one of the entry's `scimTypes`, with the status
  *    of `SCIM_ERRORS`.
  *    A 401 carries `Bearer realm="scim"`. A 2xx parses under the schema.
+ *    A 204 of a DELETE carries no body and no type.
  *    The record's code is the `scimType`, or null.
  * An answer for a path of no route has the key `null` and the verdict `ok`.
  */
@@ -228,6 +229,20 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     if (key === null) return { ...base, verdict: "ok" };
     const contract = CONTRACT[key];
     if (!contract) return { ...base, verdict: `no contract for ${key}` };
+    // Rule 6: a SCIM delete answers 204 with no body and no type (RFC 7644 section 3.6).
+    if (status === 204 && contract.answer.kind === "scim") {
+      const text = await res.text();
+      const bare = text === "" && res.headers.get("content-type") === null;
+      const verdict =
+        request.method !== "DELETE"
+          ? "a SCIM 204 answers a method that is not DELETE"
+          : !bare
+            ? "a SCIM 204 carries a body or a type"
+            : res.headers.get("cache-control") !== "no-store"
+              ? "a SCIM answer is not no-store"
+              : "ok";
+      return { ...base, verdict };
+    }
     if (type === "application/scim+json") {
       if (contract.answer.kind !== "scim")
         return { ...base, verdict: "a SCIM answer fits no kind of the contract" };

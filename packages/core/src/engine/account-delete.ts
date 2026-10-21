@@ -55,6 +55,14 @@ export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
  */
 const DELETE_CALLS_BEFORE = 6;
 
+/**
+ * The read of the user's scimUser rows and the delete of their
+ * scimGroupMember rows (ruling 25 of plan 12d). A user has one scimUser row
+ * per organization, and one delete takes `IN_CHUNK` of them. The reserve
+ * holds the read and one delete.
+ */
+const SCIM_GROUP_CALLS = 2;
+
 /** The models that `deleteAccountRows` deletes by `userId` after the sessions. */
 const LAST_MODELS = USER_CHILD_MODELS.filter(
   (m) => m !== "session" && m !== "member" && m !== "oauthLogout",
@@ -62,11 +70,11 @@ const LAST_MODELS = USER_CHILD_MODELS.filter(
 
 /**
  * The calls of a delete after the page of the impersonation sessions. In
- * the transaction: the outbox update and one delete per model of
- * `LAST_MODELS`. After the commit: the delete of the verification rows,
+ * the transaction: the outbox update, the read and the delete of the
+ * scimGroupMember rows, and one delete per model of `LAST_MODELS`. After the commit: the delete of the verification rows,
  * and the read of `deliverLogouts`.
  */
-const DELETE_KEEP = 1 + LAST_MODELS.length + 2;
+const DELETE_KEEP = 1 + SCIM_GROUP_CALLS + LAST_MODELS.length + 2;
 
 export interface AccountDelete {
   session: ResolvedSession;
@@ -450,6 +458,18 @@ export async function deleteAccountRows(
     ],
     { nextAttemptAt: now, updatedAt: now },
   );
+  // A scimGroupMember row names a scimUser row, not the user, so it is no
+  // user child model (ruling 25 of plan 12d). One read takes the user's
+  // scimUser ids, and their member rows go before them.
+  const scimUsers = await tx.findMany("scimUser", [{ field: "userId", op: "eq", value: user.id }]);
+  for (let i = 0; i < scimUsers.length; i += IN_CHUNK)
+    await tx.delete("scimGroupMember", [
+      {
+        field: "scimUserId",
+        op: "in",
+        value: scimUsers.slice(i, i + IN_CHUNK).map((r) => r.id),
+      },
+    ]);
   for (const model of USER_CHILD_MODELS) {
     if (model === "session" || model === "member" || model === "oauthLogout") continue;
     // Each model of the list has a `userId` field: USER_CHILD_MODELS reads

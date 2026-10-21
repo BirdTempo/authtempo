@@ -719,6 +719,8 @@ export async function deleteOrganizationsRows(
   await tx.delete("ssoConnection", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("ssoDomain", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("scimToken", [{ field: "organizationId", op: "in", value: list }]);
+  // Plan 12d Task 10: the SCIM view of the staff is personal data of the organization.
+  await tx.delete("scimUser", [{ field: "organizationId", op: "in", value: list }]);
   // Plan 12k: the teams go before their rows, and fire no team hook.
   await tx.delete("team", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("invitation", [{ field: "organizationId", op: "in", value: list }]);

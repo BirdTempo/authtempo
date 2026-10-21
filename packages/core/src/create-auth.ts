@@ -151,6 +151,15 @@ import {
   revokeScimToken,
   type ScimTokenSummary,
 } from "./engine/scim/tokens.js";
+import {
+  type ScimResult,
+  scimCreateUser,
+  scimDeleteUser,
+  scimGetUser,
+  scimListUsers,
+  scimPatchUser,
+  scimReplaceUser,
+} from "./engine/scim/users.js";
 import type { SignInChallenge } from "./engine/second-factor.js";
 import {
   rewrapSecrets,
@@ -417,6 +426,47 @@ export interface ScimApi {
     }): Promise<Result<{ token: string; id: string; hint: string }>>;
     /** Deletes a token. The next SCIM call with it answers 401. */
     revoke(input: { actor: SsoAppActor; id: string }): Promise<Result<{ ok: true }>>;
+  };
+  /**
+   * The SCIM Users of one organization (plan 12d Task 10), with the rules of
+   * the routes: the address rule, the version, the deactivate, and the audit
+   * rows with the app as the actor. Each call answers the SCIM answer of its
+   * route: the status, the body, and the headers. A `url` holds the query of
+   * a list or a read, as the route reads it.
+   */
+  users: {
+    create(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      body: unknown;
+    }): Promise<ScimResult>;
+    get(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      url?: URL;
+    }): Promise<ScimResult>;
+    list(input: { actor: SsoAppActor; organizationId: string; url?: URL }): Promise<ScimResult>;
+    replace(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      body: unknown;
+      ifMatch?: string;
+    }): Promise<ScimResult>;
+    patch(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      body: unknown;
+      ifMatch?: string;
+    }): Promise<ScimResult>;
+    delete(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      ifMatch?: string;
+    }): Promise<ScimResult>;
   };
 }
 
@@ -981,6 +1031,18 @@ function appCall<I extends { actor: SsoAppActor }, R>(
   };
 }
 
+/**
+ * The app as the caller of `api.scim.users`: the organization of the call
+ * in place of the token's. A write checks the name rule of the app actor
+ * when it writes its audit row.
+ */
+function scimApp(input: { actor: SsoAppActor; organizationId: string }) {
+  return { organizationId: input.organizationId, actor: input.actor };
+}
+
+/** The URL of a call of `api.scim.users` with no query. */
+const SCIM_NO_QUERY = new URL("https://scim.invalid/");
+
 export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
   // The route modules get a config whose observer marks each event unscoped.
@@ -1197,6 +1259,15 @@ export function createAuth(input: AuthConfig): Auth {
                 list: appCall(({ actor, ...i }) => listScimTokens(config, actor, i)),
                 create: appCall(({ actor, ...i }) => createScimToken(config, actor, i)),
                 revoke: appCall(({ actor, ...i }) => revokeScimToken(config, actor, i)),
+              },
+              users: {
+                create: (i) => scimCreateUser(config, scimApp(i), i.body),
+                get: (i) => scimGetUser(config, scimApp(i), i.id, i.url ?? SCIM_NO_QUERY),
+                list: (i) => scimListUsers(config, scimApp(i), i.url ?? SCIM_NO_QUERY),
+                replace: (i) =>
+                  scimReplaceUser(config, scimApp(i), i.id, i.body, i.ifMatch ?? null),
+                patch: (i) => scimPatchUser(config, scimApp(i), i.id, i.body, i.ifMatch ?? null),
+                delete: (i) => scimDeleteUser(config, scimApp(i), i.id, i.ifMatch ?? null),
               },
             } satisfies ScimApi,
           }

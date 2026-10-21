@@ -105,7 +105,11 @@ describe("the account delete of solo organizations on D1 (rulings 29 and 30 of p
     // Measured on the binding on 2026-10-21 (load 14.5): 30, 45, 45, 45. Before ruling 30
     // the delete ran per organization: 29, 44, 59, 74 at 339bf900, so 2 solo organizations
     // passed 50. The read of the memberships before any write adds 1 to each count.
-    expect(runs.map((r) => r.queries)).toEqual([30, 45, 45, 45]);
+    // Plan 12d Task 10 (ruling 25) adds the read of the user's scimUser rows to
+    // each count, and the delete of the scimUser rows of the solo organizations:
+    // 31, 47, 47, 47 on 2026-10-22. The user has no scimUser row here, so no
+    // scimGroupMember delete runs.
+    expect(runs.map((r) => r.queries)).toEqual([31, 47, 47, 47]);
     for (const r of runs) expect([r.queries <= 50, r.left]).toEqual([true, 0]);
   }, 120_000);
 

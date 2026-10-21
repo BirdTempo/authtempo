@@ -1580,7 +1580,7 @@ The three token routes run the steps of the SSO manager routes: a session, the c
 
 The routes under `/scim/v2` take an `sk_` bearer token as `Authorization: Bearer <token>`, and no session. The organization of each call is the organization of the token, never a value of the path or the body. Each answer is `application/scim+json` with `cache-control: no-store`. A failure is the SCIM error message of RFC 7644 section 3.12, `{ schemas, status, scimType?, detail }`, never a code of the errors page.
 
-A missing, wrong, expired, or revoked token answers 401 with `WWW-Authenticate: Bearer realm="scim"`. Each such failure counts on `scim-auth:ip:<ip>`, 60 per 15 minutes, and a refused count answers 429. A valid token never counts on that key. It counts on `scim:token:<id>`, 1200 per 10 minutes, and a refused count answers 429. A token without the scope of a route answers 403. Plans 12d Tasks 10 and 11 add the Users and Groups routes.
+A missing, wrong, expired, or revoked token answers 401 with `WWW-Authenticate: Bearer realm="scim"`. Each such failure counts on `scim-auth:ip:<ip>`, 60 per 15 minutes, and a refused count answers 429. A valid token never counts on that key. It counts on `scim:token:<id>`, 1200 per 10 minutes, and a refused count answers 429. A token without the scope of a route answers 403. Plan 12d Task 11 adds the Groups routes.
 
 <h3 id="get-scim-v2-serviceproviderconfig"><code>GET /scim/v2/ServiceProviderConfig</code></h3>
 
@@ -1625,6 +1625,62 @@ A missing, wrong, expired, or revoked token answers 401 with `WWW-Authenticate: 
 | Needs | An `sk_` bearer token. Any scope of the token passes |
 | Input | None |
 | Answer | The schema of the URN in the path. Another id answers 404 |
+| Errors | None |
+
+The Users routes (plan 12d Task 10) serve the SCIM view of the staff of the token's organization. A create, and a change of the address, needs an address in a verified domain of the organization. Each write answers the version as a weak `ETag`, and `If-Match` with another version answers 412.
+
+<h3 id="get-scim-v2-users"><code>GET /scim/v2/Users</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.read` |
+| Input | None. The query may hold `filter`, `startIndex`, `count`, `attributes`, or `excludedAttributes`. The filter is one `eq` of `userName`, `externalId`, `emails.value`, or `id` |
+| Answer | A ListResponse of the Users of the organization, by `id`, at most 100 per page |
+| Errors | None |
+
+<h3 id="post-scim-v2-users"><code>POST /scim/v2/Users</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
+| Input | None. The body is a User of RFC 7643 section 4.1, with the enterprise extension at most. A `password` answers 400 |
+| Answer | 201 with the User, `Location`, and `ETag`. The user at the address gets a member row with `scim.defaultRole`, or a new user comes with a verified address and no password |
+| Errors | None |
+
+<h3 id="get-scim-v2-users-id"><code>GET /scim/v2/Users/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.read` |
+| Input | None. The query may hold `attributes` or `excludedAttributes` |
+| Answer | The User, with `ETag`. An id of another organization answers 404 |
+| Errors | None |
+
+<h3 id="put-scim-v2-users-id"><code>PUT /scim/v2/Users/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
+| Input | None. The body is a User, and `If-Match` may name the version |
+| Answer | The User. `active: false` removes the member row, and ends the access of a user whose address the organization's domain claims |
+| Errors | None |
+
+<h3 id="patch-scim-v2-users-id"><code>PATCH /scim/v2/Users/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
+| Input | None. The body is a PatchOp message of RFC 7644 section 3.5.2, and `If-Match` may name the version |
+| Answer | The User. The operations apply together, or none applies |
+| Errors | None |
+
+<h3 id="delete-scim-v2-users-id"><code>DELETE /scim/v2/Users/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
+| Input | None. `If-Match` may name the version |
+| Answer | 204 with no body. The deactivate runs first, and the core user stays |
 | Errors | None |
 
 Core does not serve these SCIM operations. Each answers 501 with the detail "not supported by this server", after the token check.

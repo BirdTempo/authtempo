@@ -36,6 +36,11 @@ describe("the scim config (plan 12d Task 9 Behavior 11)", () => {
   it("refuses each setting outside its rule with a text that names the key", () => {
     const rows: [Partial<AuthConfig>, string][] = [
       [{ scim: {} }, "scim needs organizations"],
+      // Plan 12d Task 10: only a SCIM write runs hooks.scim.
+      [
+        { organizations: ORGS, hooks: { scim: { afterChange: () => {} } } },
+        "hooks.scim needs scim: the hooks would never run",
+      ],
       [{ organizations: ORGS, scim: [] as never }, "scim must be an object or false"],
       [
         { organizations: ORGS, scim: { tokens: 3 } as never },

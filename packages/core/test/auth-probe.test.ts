@@ -66,11 +66,14 @@ function requestOf(key: RouteKey, headers: Record<string, string>): Request {
   const entry = entryOf(key);
   const url = `${BASE}/auth${entry.path.replace(":provider", "google")}`;
   if (entry.method === "GET") return new Request(url, { headers });
+  // A DELETE carries no body (plan 12d Task 10, the SCIM Users).
+  if (entry.method === "DELETE")
+    return new Request(url, { method: "DELETE", headers: { origin: BASE, ...headers } });
   const body = PROBE_BODIES[key] ?? {};
   const media = CONTRACT[key]?.body?.media ?? ["json"];
   if (media.includes("json"))
     return new Request(url, {
-      method: "POST",
+      method: entry.method,
       headers: { "content-type": "application/json", origin: BASE, ...headers },
       body: JSON.stringify(body),
     });
@@ -244,7 +247,8 @@ describe("the auth probe (plan 11g)", () => {
     );
     if (!made.ok) throw new Error(made.code);
     const others = keys.filter((key) => !key.includes(" /scim/v2/"));
-    expect(others.length).toBe(keys.length - 10);
+    // Plan 12d Task 10 adds the six routes of the SCIM Users to the ten of Task 9b.
+    expect(others.length).toBe(keys.length - 16);
     // A route of client auth answers any Authorization header with a 401 and no header with a
     // 400 (ruling 19 of plan 12e). There, the live token answers as a token that names no row.
     const unknown = { authorization: `Bearer sk_${"C".repeat(43)}` };

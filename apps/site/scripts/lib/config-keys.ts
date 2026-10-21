@@ -288,6 +288,7 @@ export const CONFIG_KEYS = {
     identity: true,
     operator: true,
     sso: true,
+    scim: true,
   } satisfies Keys<HooksConfig>,
   account: {
     mail: true,

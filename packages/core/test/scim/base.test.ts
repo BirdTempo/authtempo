@@ -136,6 +136,16 @@ describe("the SCIM base (plan 12d Task 9)", () => {
       "department",
       "manager",
     ]);
+    // RFC 7643 section 4.3: manager is complex (ruling 24, i5 of plan 12d).
+    const manager = byName(enterprise.attributes as Attribute[], "manager");
+    expect([manager?.type, manager?.subAttributes?.map((x) => [x.name, x.mutability])]).toEqual([
+      "complex",
+      [
+        ["value", "readWrite"],
+        ["$ref", "readWrite"],
+        ["displayName", "readOnly"],
+      ],
+    ]);
     for (const path of ["/Schemas/urn:x:y", "/ResourceTypes/Device"])
       expect(await read(await scim(w, token, "GET", path))).toEqual([
         404,

@@ -35,11 +35,12 @@ import { END_ALL_LIMIT, endSessionPage, FAMILY_CALLS, STEP_WORST } from "./sessi
  * names. `banned` and `operator` come from a ban and a revoke.
  * `account_deleted` and `impersonation_end` come from an account delete
  * and a role loss of an operator (ruling 63 of plan 12f). Those two rows
- * name only impersonation sessions.
+ * name only impersonation sessions. `revoked` comes from a SCIM deactivate
+ * (plan 12d Task 10).
  */
 export type PendingEndReason = Extract<
   SessionEndReason,
-  "banned" | "operator" | "account_deleted" | "impersonation_end"
+  "banned" | "operator" | "account_deleted" | "impersonation_end" | "revoked"
 >;
 
 /** The cause of the stop row of an impersonation session that a pending-end row ends. */
@@ -48,6 +49,8 @@ const PENDING_STOP_CAUSE: Readonly<Record<PendingEndReason, Exclude<StopCause, "
   operator: "revoke",
   account_deleted: "account_delete",
   impersonation_end: "role_loss",
+  // A SCIM deactivate of plan 12d Task 10: an end by another party.
+  revoked: "deprovision",
 };
 
 /** The reason of a pending-end row. A row with no known reason is a ban, as before ruling 63. */

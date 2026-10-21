@@ -3,12 +3,14 @@ import { hookRefusal } from "../../src/engine/hooks.js";
 import { requestMagicLink, verifyMagicLink } from "../../src/engine/magic-link.js";
 import { passwordSignUp } from "../../src/engine/password.js";
 import { createRole, deleteRole } from "../../src/engine/roles.js";
+import { createScimToken } from "../../src/engine/scim/tokens.js";
 import { resolveSession } from "../../src/engine/sessions.js";
 import { updateDomain } from "../../src/engine/sso/domains.js";
 import { sha256Hex } from "../../src/primitives/crypto.js";
 import type { ModelName } from "../../src/schema.js";
 import { tokenFromMail } from "../helpers.js";
 import { FAST, signUpAndVerify } from "../password-helpers.js";
+import { scim } from "../scim/helpers.js";
 import { SSO_APP, seedOrganization, verifiedDomain } from "./helpers.js";
 import {
   acmeWithSso,
@@ -163,6 +165,31 @@ describe("the SSO resolution (plan 12d Task 5)", () => {
     expect((await userAt(w, ADA))?.emailVerified).toBe(true);
     const sessions = await sessionsOf(w, user.id);
     expect(sessions.map((s) => s.tokenHash)).toEqual([await sha256Hex(r.token ?? "")]);
+  });
+
+  it("refuses a user disabled by SCIM", async () => {
+    const w = ssoSignInWorld({ scim: {} });
+    const { connectionId, organizationId } = await acmeWithSso(w);
+    const made = await createScimToken(w.config, SSO_APP, { organizationId, name: "directory" });
+    if (!made.ok) throw new Error(made.code);
+    const token = made.value.token;
+    const created = await scim(w, token, "POST", "/Users", {
+      schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+      userName: ADA,
+    });
+    expect(created.status).toBe(201);
+    const id = ((await created.json()) as { id: string }).id;
+    const off = await scim(w, token, "PATCH", `/Users/${id}`, {
+      schemas: ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+      Operations: [{ op: "replace", path: "active", value: false }],
+    });
+    expect(off.status).toBe(200);
+    const user = await userAt(w, ADA);
+    const before = await counts(w);
+    const r = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
+    expect([r.res.status, r.error, r.token]).toEqual([302, "account_disabled", null]);
+    expect(await sessionsOf(w, user?.id ?? "")).toEqual([]);
+    expect(await counts(w)).toEqual(before);
   });
 
   it("provisions a user just in time with no password", async () => {

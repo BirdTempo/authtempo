@@ -54,7 +54,7 @@ const CHANGE_PURPOSES: readonly VerificationPurpose[] = ["email-change", "email-
  * address, so a live magic link there would make a new user. A live reset
  * there would set a password and end the sessions.
  */
-const OLD_ADDRESS_PROOFS: readonly VerificationPurpose[] = [
+export const OLD_ADDRESS_PROOFS: readonly VerificationPurpose[] = [
   "magic-link",
   "password-reset",
   "email-otp",

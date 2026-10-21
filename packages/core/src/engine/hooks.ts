@@ -374,14 +374,19 @@ export const USER_CREATE_VIA = {
   operator: true,
   scim: true,
 } as const satisfies Record<UserCreateVia, true>;
-/** The profile update, the change of address (plan 12a), or an operator's ban and unban (plan 12f). */
-export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban";
+/**
+ * The profile update, the change of address (plan 12a), or an operator's ban
+ * and unban (plan 12f). `scim`: the organization's directory moves the
+ * address of its staff (plan 12d).
+ */
+export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban" | "scim";
 /**
  * The flow that proves the address of an existing unverified user (plan
  * 12a). `social` is a sign-in with a verified provider address.
  * `password_reset` is the reset link or the reset code. `sso` is an SSO
  * sign-in: a verified domain of the organization proves the address (plan
- * 12d).
+ * 12d). `scim` is a create by the organization's directory: the address rule
+ * of a verified domain proves it too (plan 12d).
  */
 export type UserVerifyVia =
   | "password_verify"
@@ -389,7 +394,8 @@ export type UserVerifyVia =
   | "email_otp"
   | "social"
   | "password_reset"
-  | "sso";
+  | "sso"
+  | "scim";
 /** Each value of `UserVerifyVia`, for the event `email.verify` (plan 12h Task 5). */
 export const USER_VERIFY_VIA = {
   password_verify: true,
@@ -398,6 +404,7 @@ export const USER_VERIFY_VIA = {
   social: true,
   password_reset: true,
   sso: true,
+  scim: true,
 } as const satisfies Record<UserVerifyVia, true>;
 /**
  * How an identity came (plan 12a). `sign_in` is a social sign-in that
@@ -524,6 +531,22 @@ export interface SsoHooks {
   }): Awaitable<void>;
 }
 
+/**
+ * The SCIM point (plan 12d Task 10). It needs `scim`.
+ */
+export interface ScimHooks {
+  /**
+   * After the commit of each SCIM write, once per write. `id` is the id of
+   * the SCIM resource. A throw writes one log line, and the write stays.
+   */
+  afterChange?(e: {
+    organizationId: string;
+    resource: "User" | "Group";
+    action: "create" | "update" | "deactivate" | "delete";
+    id: string;
+  }): Awaitable<void>;
+}
+
 export interface HooksConfig {
   organization?: OrganizationHooks;
   session?: SessionHooks;
@@ -531,6 +554,7 @@ export interface HooksConfig {
   identity?: IdentityHooks;
   operator?: OperatorHooks;
   sso?: SsoHooks;
+  scim?: ScimHooks;
 }
 
 /** After `resolveConfig`: every group present, each hook bound to the object it came on. */
@@ -541,6 +565,7 @@ export interface ResolvedHooks {
   identity: IdentityHooks;
   operator: OperatorHooks;
   sso: SsoHooks;
+  scim: ScimHooks;
 }
 
 /** The name in a log line. */
@@ -550,7 +575,8 @@ export type HookName =
   | `user.${keyof UserHooks & string}`
   | `identity.${keyof IdentityHooks & string}`
   | `operator.${keyof OperatorHooks & string}`
-  | `sso.${keyof SsoHooks & string}`;
+  | `sso.${keyof SsoHooks & string}`
+  | `scim.${keyof ScimHooks & string}`;
 
 /** Every hook point. A Record, so a point added to the interface and not listed here fails the compile. */
 export const ORGANIZATION_HOOK_POINTS: Readonly<Record<keyof OrganizationHooks, true>> = {
@@ -614,6 +640,10 @@ export const OPERATOR_HOOK_POINTS: Readonly<Record<keyof OperatorHooks, true>> =
 
 export const SSO_HOOK_POINTS: Readonly<Record<keyof SsoHooks, true>> = {
   beforeSignIn: true,
+};
+
+export const SCIM_HOOK_POINTS: Readonly<Record<keyof ScimHooks, true>> = {
+  afterChange: true,
 };
 
 /** The longest refusal text, in UTF-16 code units. The text goes into a JSON body that a client shows. */

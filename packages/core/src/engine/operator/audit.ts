@@ -324,7 +324,8 @@ export type StopCause =
   | "revoke"
   | "role_loss"
   | "account_delete"
-  | "operator_end";
+  | "operator_end"
+  | "deprovision";
 
 /**
  * The fixed reason of each stop row that a flow writes. The stop act keeps
@@ -339,6 +340,7 @@ const STOP_REASONS: Readonly<Record<Exclude<StopCause, "stop">, string>> = {
   role_loss: "A change of the operator's platform role ended the impersonation session.",
   account_delete: "An account delete ended the impersonation session.",
   operator_end: "An operator ended the sessions, and the impersonation session with them.",
+  deprovision: "A deactivate by the organization's directory ended the impersonation session.",
 };
 
 /**

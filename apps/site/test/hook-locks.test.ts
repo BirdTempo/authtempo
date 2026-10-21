@@ -224,7 +224,12 @@ describe("the table of locks over a before hook", () => {
         "acceptInvitation organization.beforeUpdateMemberRole: holdUser, lockOrganization, lockTeam",
       ],
       // The member add of ruling 25 N3 of plan 12d: addMember and the SSO sign-in call it.
-      ["Member add", "addMemberIn organization.beforeAddMember: holdUser, lockOrganization"],
+      // The SCIM writes of plan 12d Task 10 call it through joinWrite, after their user
+      // hold, with checked: then it runs no hook. Their joinChecks ran the hook before any lock.
+      [
+        "Member add",
+        "addMemberIn organization.beforeAddMember: holdUser, lockOrganization, joinWrite > scimCreateUser > holdUser, joinWrite > writeChange > holdUser, joinWrite > writeChange > lockOrganization",
+      ],
       ["Team member add", "addTeamMember organization.beforeAddTeamMember: holdUser, lockTeam"],
       ["Organization create", "createOrganization organization.beforeAddMember: holdUser"],
       ["Organization create", "createOrganization organization.beforeCreate: holdUser"],

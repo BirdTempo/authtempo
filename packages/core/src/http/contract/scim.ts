@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  type AttrRule,
+  ENTERPRISE_RULES,
+  NS_SCIM_ENTERPRISE,
+  USER_RULES,
+} from "../../engine/scim/patch.js";
 import { id } from "./organizations.js";
 import { OkAnswer } from "./shapes.js";
 import type { RouteContract } from "./types.js";
@@ -117,6 +123,72 @@ const listOf = <T extends z.ZodType>(resource: T) =>
 const jsonBody = <T extends z.ZodType>(schema: T) =>
   ({ schema, media: ["json"], parsedBy: "zod" }) as const;
 
+/** The value of one attribute of a User answer, by the facts of its rule in patch.ts. */
+function userValue(rule: AttrRule): z.ZodType {
+  const facts = rule.facts;
+  const simple = facts?.type === "boolean" ? z.boolean() : z.string();
+  if (facts?.type !== "complex" || rule.subs === null) return simple;
+  const item = z.strictObject(
+    Object.fromEntries(
+      [...rule.subs.values()].map((sub) => [
+        sub.name,
+        (sub.facts.type === "boolean" ? z.boolean() : z.string()).optional(),
+      ]),
+    ),
+  );
+  return facts.multiValued ? z.array(item) : item;
+}
+
+/**
+ * A User of RFC 7643 section 4.1, as `toScimUser` writes it (plan 12d Task
+ * 10). Each attribute comes from the tables of patch.ts, so the answer and
+ * the parser read one table.
+ */
+const UserJson = z.strictObject({
+  ...Object.fromEntries(
+    [...USER_RULES.values()]
+      .filter((r) => r.facts !== null && r.name !== "groups")
+      .map((r) => [r.name, userValue(r).optional()]),
+  ),
+  schemas: z.array(z.string()),
+  id: z.string(),
+  externalId: z.string().optional(),
+  userName: z.string(),
+  active: z.boolean(),
+  groups: z
+    .array(
+      z.strictObject({
+        value: z.string(),
+        $ref: z.string(),
+        display: z.string(),
+        type: z.string(),
+      }),
+    )
+    .optional(),
+  [NS_SCIM_ENTERPRISE]: z
+    .strictObject(
+      Object.fromEntries(
+        [...ENTERPRISE_RULES.values()].map((r) => [r.name, userValue(r).optional()]),
+      ),
+    )
+    .optional(),
+  meta: z.strictObject({
+    resourceType: z.string(),
+    created: z.iso.datetime(),
+    lastModified: z.iso.datetime(),
+    location: z.string(),
+    version: z.string(),
+  }),
+});
+
+/**
+ * The User answer after `attributes` or `excludedAttributes` (RFC 7644
+ * section 3.9): each attribute but id, schemas, and meta may be left out.
+ * A complex attribute may hold part of its sub-attributes, as each
+ * sub-attribute is optional.
+ */
+const UserSelectedJson = UserJson.partial().required({ schemas: true, id: true, meta: true });
+
 /** The refusals of the design's 9.5: the route answers only the SCIM error, with 501. */
 const NOT_SUPPORTED = { answer: { kind: "scim", schema: null } } as const;
 
@@ -141,6 +213,13 @@ export const SCIM_CONTRACT = {
   "GET /scim/v2/ResourceTypes/:id": { answer: { kind: "scim", schema: ResourceTypeJson } },
   "GET /scim/v2/Schemas": { answer: { kind: "scim", schema: listOf(SchemaJson) } },
   "GET /scim/v2/Schemas/:id": { answer: { kind: "scim", schema: SchemaJson } },
+  "GET /scim/v2/Users": { answer: { kind: "scim", schema: listOf(UserSelectedJson) } },
+  "POST /scim/v2/Users": { answer: { kind: "scim", schema: UserJson } },
+  "GET /scim/v2/Users/:id": { answer: { kind: "scim", schema: UserSelectedJson } },
+  "PUT /scim/v2/Users/:id": { answer: { kind: "scim", schema: UserJson } },
+  "PATCH /scim/v2/Users/:id": { answer: { kind: "scim", schema: UserJson } },
+  // A delete answers 204 with no body (RFC 7644 section 3.6).
+  "DELETE /scim/v2/Users/:id": { answer: { kind: "scim", schema: z.null() } },
   "POST /scim/v2/Bulk": NOT_SUPPORTED,
   "GET /scim/v2/Me": NOT_SUPPORTED,
   "POST /scim/v2/.search": NOT_SUPPORTED,
