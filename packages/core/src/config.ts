@@ -1361,7 +1361,11 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       password !== null,
     ),
     observe: observeConfig
-      ? createObserver(observeConfig, { clock, hashSecret: () => currentSecret(keyring) })
+      ? createObserver(observeConfig, {
+          clock,
+          hashSecret: () => currentSecret(keyring),
+          secrets: secretValues(keyring, input.social),
+        })
       : createDefaultObserver({ clock, secrets: secretValues(keyring, input.social) }),
     observeConfig,
     instance: Object.freeze({}),
@@ -1418,10 +1422,11 @@ function listOf<T>(path: string, value: T[] | undefined): T[] {
 const SECRET_MIN_LENGTH = 32;
 
 /**
- * The scrub list of the default output (spec 31 item 9). It holds each
+ * The scrub list of the events (spec 31 item 9). It holds each
  * secret string of the config: each keyring value, each social client
  * secret, and the Apple private key. It also holds the parts of each value
- * that a driver can print.
+ * that a driver can print. The observer scrubs each event with it, with or
+ * without a sink.
  */
 function secretValues(keyring: Keyring, social: AuthConfig["social"]): ReadonlySet<string> {
   const strings: unknown[] = [

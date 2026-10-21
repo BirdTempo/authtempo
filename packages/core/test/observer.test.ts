@@ -59,7 +59,10 @@ function observer(sink: ResolvedObserve["sink"], options: Partial<ResolvedObserv
     readiness: false,
     ...options,
   };
-  return { clock, o: createObserver(config, { clock, hashSecret: () => SECRET }) };
+  return {
+    clock,
+    o: createObserver(config, { clock, hashSecret: () => SECRET, secrets: new Set() }),
+  };
 }
 
 function median(values: number[]): number {

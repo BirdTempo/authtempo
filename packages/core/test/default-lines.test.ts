@@ -293,6 +293,27 @@ describe("the router line (plan 11g)", () => {
     ]);
   });
 
+  it("scrubs a social client secret from each event with a sink", async () => {
+    const clientSecret = "GOCSPX-scrub-0123456789abcdef";
+    const { sink, events } = recording();
+    const auth = createAuth(
+      input({
+        storage: downStore(new TypeError("db down")),
+        social: { google: { clientId: "gid", clientSecret } },
+        observe: { sink },
+      }),
+    );
+    // The same request as the line above: the method token is the secret.
+    expect((await auth.handle(legacyRead(clientSecret))).status).toBe(500);
+    await auth.observe.flush();
+    const written = events();
+    expect(written.map((e) => [e.name, e.method])).toEqual([
+      ["error.internal", "***"],
+      ["request", "***"],
+    ]);
+    expect(JSON.stringify(written)).not.toContain(clientSecret);
+  });
+
   it("writes no line with a sink, and the sink gets the fault event", async () => {
     const log = errors();
     const { sink, events } = recording();

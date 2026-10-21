@@ -1,5 +1,5 @@
 import type { Clock } from "../primitives/clock.js";
-import { CONTROL, KEYED_HASH_INFO, keyedHashKey, keyedHashWith } from "../redact.js";
+import { CONTROL, KEYED_HASH_INFO, keyedHashKey, keyedHashWith, scrub } from "../redact.js";
 import type { ResolvedObserve } from "./config.js";
 import { defaultOutput } from "./default-output.js";
 import { type EventInput, type EventName, specOf, validateEvent } from "./events.js";
@@ -96,7 +96,7 @@ function noDrops(): Dropped {
  */
 export function createObserver(
   config: ResolvedObserve,
-  deps: { clock: Clock; hashSecret: () => string },
+  deps: { clock: Clock; hashSecret: () => string; secrets: ReadonlySet<string> },
 ): Observer {
   let buffer: Held[] = [];
   let dropped = noDrops();
@@ -106,8 +106,12 @@ export function createObserver(
   function hold(input: EventInput, scope: RequestScope | null, unscoped: boolean) {
     const event = stamp(input.name, scope);
     const held: Held = { event };
+    // The scrub of the default output, also with a sink: no sink is the only
+    // guard of a secret (spec 31 item 9). A field kind can keep a secret that
+    // a client sends, such as a method token.
     for (const [key, value] of Object.entries(checkedFields(input)))
-      if (!Object.hasOwn(event, key)) event[key] = value;
+      if (!Object.hasOwn(event, key))
+        event[key] = typeof value === "string" ? scrub(value, deps.secrets) : value;
     if (unscoped) event.rejected = [...(event.rejected ?? []), "unscoped"];
     const { include } = config;
     if (scope?.ip) {

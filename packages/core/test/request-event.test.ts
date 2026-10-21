@@ -369,7 +369,11 @@ describe("the request event (plan 12h Task 4)", () => {
         flushTimeoutMs: 2000,
         readiness: false,
       },
-      { clock: { now: () => new Date("2026-01-01T00:00:00.000Z") }, hashSecret: () => "s" },
+      {
+        clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
+        hashSecret: () => "s",
+        secrets: new Set(),
+      },
     );
     unscopedOf(observer).emit({ name: "passkey.counter_moved" });
     unscopedOf(observer).emit({ name: "passkey.counter_moved" });
