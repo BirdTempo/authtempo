@@ -132,6 +132,40 @@ export async function impersonationLoss(
 }
 
 /**
+ * True when a SCIM deactivate ended the access of the user after this
+ * session began (ruling 50 of plan 12d). The deactivate ends a page of the
+ * sessions in its transaction. The rest stay on a pending-end row of
+ * reason `revoked` until the sweep. Each door refuses them here, after
+ * `bannedFor`: `resolveSession`, the session JWT mint, and `sessionLive`.
+ * A row with `targets` names the impersonation sessions of an operator, so
+ * it does not count.
+ *
+ * The cost: when sessions stay, the deactivate sets `user.updatedAt` to a
+ * time at or after the row. A session that began after the last write of
+ * the user reads nothing more: +0 D1 queries. A session that began at or
+ * before that write reads the pending-end rows of the user once, by the
+ * index ix_ta_verification__purpose__identifier: +1 D1 query.
+ */
+export async function revokedFor(
+  config: ResolvedConfig,
+  user: Pick<UserRow, "id" | "updatedAt">,
+  session: Pick<SessionRow, "createdAt">,
+): Promise<boolean> {
+  const began = session.createdAt.getTime();
+  if (began > user.updatedAt.getTime()) return false;
+  const rows = await config.storage.findMany("verification", [
+    { field: "purpose", op: "eq", value: "session-end" },
+    { field: "identifier", op: "eq", value: user.id },
+  ]);
+  return rows.some(
+    (row) =>
+      row.data?.reason === "revoked" &&
+      row.data.targets === undefined &&
+      new Date(String(row.data.before)).getTime() >= began,
+  );
+}
+
+/**
  * The id of the platform organization, or null when the config has no
  * platform role or no organization holds the slug.
  */

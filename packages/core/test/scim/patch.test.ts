@@ -185,6 +185,41 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
     }
   });
 
+  it("ignores an unknown key of the no-path form of a User, as POST and PUT do (ruling 50)", () => {
+    // Entra ID sends the attributes of its own map in this form.
+    const input = body({
+      op: "Replace",
+      value: {
+        shoeSize: 1,
+        "urn:ietf:params:scim:schemas:extension:CustomExtensionName:2.0:User:badge": "b",
+        [`${ENTERPRISE}:badge`]: "b",
+        title: "t",
+        [`${ENTERPRISE}:department`]: "d",
+      },
+    });
+    expect(parsePatch(input, "User")).toEqual({
+      ok: true,
+      ops: [
+        { op: "replace", path: at("title"), value: "t" },
+        { op: "replace", path: at(`${ENTERPRISE}:department`), value: "d" },
+      ],
+      id: null,
+    });
+    // A key of a known attribute keeps the path rules.
+    expect(parsePatch(body({ op: "add", value: { "nickName.first": "n" } }), "User")).toMatchObject(
+      {
+        ok: false,
+        scimType: "invalidPath",
+      },
+    );
+    // A value of unknown keys alone gives no operation.
+    expect(parsePatch(body({ op: "add", value: { shoeSize: 1 } }), "User")).toEqual({
+      ok: true,
+      ops: [],
+      id: null,
+    });
+  });
+
   it("takes the id out of the no-path form and ignores meta and groups (Okta)", () => {
     const rows: [string, unknown, "User" | "Group", unknown[], string | null][] = [
       [
@@ -325,10 +360,10 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
         400,
       ],
       [
-        // The unknown key after the bound would answer invalidPath, so this
+        // The schemas key after the bound would answer mutability, so this
         // row shows that the parser stops at operation 101 (review l1).
-        "one operation with 101 keys and then an unknown key",
-        body({ op: "replace", value: { ...keys101, shoeSize: 1 } }),
+        "one operation with 101 keys and then a read-only key",
+        body({ op: "replace", value: { ...keys101, schemas: [] } }),
         "User",
         "invalidValue",
         400,
@@ -625,8 +660,31 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
         400,
       ],
       [
-        "an unknown key of the no-path form",
-        body({ op: "replace", value: { title: "t", shoeSize: 1 } }),
+        // A User ignores such a key (ruling 50 of plan 12d); a Group keeps the refusal.
+        "an unknown key of the no-path form of a Group",
+        body({ op: "replace", value: { displayName: "t", shoeSize: 1 } }),
+        "Group",
+        "invalidPath",
+        400,
+      ],
+      [
+        "an explicit path to an unknown attribute (Behavior 8)",
+        body({ op: "replace", path: "shoeSize", value: 1 }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        // The URN alone is the known extension, not an unknown key, so it keeps the refusal.
+        "the enterprise URN alone as a key of the no-path form",
+        body({ op: "replace", value: { [ENTERPRISE]: { department: "d" } } }),
+        "User",
+        "invalidPath",
+        400,
+      ],
+      [
+        "an explicit path to an unknown attribute of the enterprise extension",
+        body({ op: "replace", path: `${ENTERPRISE}:badge`, value: "b" }),
         "User",
         "invalidPath",
         400,

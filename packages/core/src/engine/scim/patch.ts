@@ -345,6 +345,21 @@ function readPath(path: string, resource: "User" | "Group"): Target | Refusal {
 }
 
 /**
+ * True when a key of the no-path form names an attribute of the User
+ * schema or of the enterprise extension: the name before any `.` or `[`.
+ * A key of a known attribute keeps the path rules of `readPath`. The
+ * enterprise URN alone counts as known, so its refusal stays.
+ */
+function namesUserAttribute(key: string): boolean {
+  const lower = asciiLower(key);
+  if (`${lower}:` === ENTERPRISE_PREFIX) return true;
+  const enterprise = lower.startsWith(ENTERPRISE_PREFIX);
+  const rest = enterprise ? lower.slice(ENTERPRISE_PREFIX.length) : lower;
+  const name = /^[^.[]*/.exec(rest)?.[0] ?? "";
+  return (enterprise ? ENTERPRISE_RULES : USER_RULES).has(name);
+}
+
+/**
  * Reads the value of a boolean target. Entra ID sends `"True"` and `"False"`
  * as text (its SCIM docs); RFC 7644 section 3.5.2 gives the value the type of
  * the attribute, so core reads these two texts as the booleans, and no other.
@@ -448,6 +463,10 @@ export function parsePatch(
           id = part;
           continue;
         }
+        // A key that names no attribute of the User schema is ignored, as POST
+        // and PUT ignore it (ruling 50 of plan 12d). Entra ID sends this form
+        // with the attributes of its own map. A path to it stays invalidPath.
+        if (resource === "User" && !namesUserAttribute(key)) continue;
         const op = target(name, key, part, resource);
         if ("ok" in op) return { ...op, detail: `operation ${i}: ${op.detail}` };
         ops.push(op);

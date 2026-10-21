@@ -256,9 +256,14 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * Plan 12d Task 10 (ruling 25) reads the user's scimUser rows for their
  * scimGroupMember rows, and reserves 2 calls for it. The run of 2026-10-22
  * gives 49 queries, 2 sessions, and the same sweeps.
+ * Ruling 50 of plan 12d adds the pending-end read of `revokedFor` to the
+ * worst session read, so each act keeps 1 more call before it. The run of
+ * 2026-10-22 gives the delete 47 queries, 1 session, and sweeps of 47, 47,
+ * and 48. The removal sends 50 queries with the one more read, and its
+ * page still ends 11.
  */
-const DELETE_COUNTS: [number, number, number[]] = [49, 2, [47, 47, 46]];
-const REMOVE_COUNTS: [number, number, number[]] = [49, 11, [47, 47, 26]];
+const DELETE_COUNTS: [number, number, number[]] = [47, 1, [47, 47, 48]];
+const REMOVE_COUNTS: [number, number, number[]] = [50, 11, [47, 47, 26]];
 
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });
 
@@ -394,10 +399,13 @@ async function auditorPart(setup: Auth, byToken: string, email: string) {
  * target, on the binding on 2026-10-21 (ruling 48 of plan 12k): the queries
  * of the act, the sessions it ended, and the queries of each sweep. Before
  * the fix the act did not count its role reads: the removal took 51 queries
- * and the role change 52.
+ * and the role change 52. Ruling 50 of plan 12d adds the pending-end read
+ * of `revokedFor` to the session read (run of 2026-10-22): the removal reads
+ * it and sends 50 queries, and the role change keeps 1 more call and ends 1
+ * session fewer.
  */
-const DYNAMIC_REMOVE_COUNTS: [number, number, number[]] = [49, 10, [47, 47, 30]];
-const DYNAMIC_ROLE_COUNTS: [number, number, number[]] = [50, 12, [47, 47, 26]];
+const DYNAMIC_REMOVE_COUNTS: [number, number, number[]] = [50, 10, [47, 47, 30]];
+const DYNAMIC_ROLE_COUNTS: [number, number, number[]] = [49, 11, [47, 47, 28]];
 
 describe("the losses of an operator outside the operator acts on D1 (ruling 63 of plan 12f)", () => {
   beforeEach(async () => {

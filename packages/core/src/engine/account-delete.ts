@@ -48,12 +48,13 @@ export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
 /**
  * The calls of a delete invocation before its transaction, at the worst
  * (ruling 63 of plan 12f). Through the route: the impersonation step of
- * the router, the route limiter, `resolveSession` (3), and the limiter of
+ * the router, the route limiter, `resolveSession` (4, with the pending-end
+ * read of ruling 50 of plan 12d), and the limiter of
  * the delete or of the confirm. The ready check of the storage comes on
  * top. The D1 test `operator-loss-budget.test.ts` counts the whole
  * invocation on the binding.
  */
-const DELETE_CALLS_BEFORE = 6;
+const DELETE_CALLS_BEFORE = 7;
 
 /**
  * The read of the user's scimUser rows and the delete of their

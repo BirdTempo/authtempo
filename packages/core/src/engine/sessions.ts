@@ -30,7 +30,7 @@ import {
   writeStopRow,
 } from "./operator/audit.js";
 import { activeBan, bannedFor } from "./operator/ban-rule.js";
-import { impersonationLoss } from "./operator/guards.js";
+import { impersonationLoss, revokedFor } from "./operator/guards.js";
 import { holdUser } from "./user-hold.js";
 
 // The credential facts moved to primitives/credentials.ts (plan 11d). They stay exported here, so no importer changes.
@@ -614,7 +614,8 @@ export function readModeOf(
  * such a row is one that a sign-in wrote in a race with the ban. It stays
  * ended after the unban and after `banUntil` (ruling 28). In `"write"` mode
  * the call deletes it by id; in `"read-only"` mode it writes nothing
- * (ruling 4).
+ * (ruling 4). A session that a SCIM deactivate left for the sweep answers
+ * null in the same way (`revokedFor`, ruling 50 of plan 12d).
  */
 export async function resolveSession(
   config: ResolvedConfig,
@@ -650,6 +651,14 @@ export async function resolveSession(
     const stops = impersonationStops(config, "ban");
     const n = await endSessionById(config.storage, session, now, stops);
     if (n === 1) await sessionsEnded(config, [session], "banned", stops, n);
+    return null;
+  }
+  // A SCIM deactivate left this session for the sweep (ruling 50 of plan 12d).
+  if (await revokedFor(config, user, session)) {
+    if (!write) return null;
+    const stops = impersonationStops(config, "deprovision");
+    const n = await endSessionById(config.storage, session, now, stops);
+    if (n === 1) await sessionsEnded(config, [session], "revoked", stops);
     return null;
   }
   // The door of the operator of an impersonation session (the plan 12f Task 11 fix).

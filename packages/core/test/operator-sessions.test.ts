@@ -766,13 +766,15 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
         ended: done.value.ended,
       };
     };
-    // The session, the user, the refresh; the platform organization, the member, the factor, the limiter; the schema check.
-    // With the reserve of 10 the work gets 39 calls: the read, the lock, the link read, and 36
+    // The session, the user, the pending-end read (ruling 50 of plan 12d: the session began
+    // at the last write of the user), the refresh; the platform organization, the member, the
+    // factor, the limiter; the schema check.
+    // With the reserve of 11 the work gets 38 calls: the read, the lock, the link read, and 35
     // deletes. The memory adapter sends no lock, so the whole call makes 47. The reserve
     // holds the session read of the router's impersonation step, which this call skips.
-    expect(await whole("default")).toEqual({ before: 8, total: 47, ended: 36 });
-    // With the count of 8 the work gets 41 calls, and the whole call makes 49.
-    expect(await whole("count")).toEqual({ before: 8, total: 49, ended: 38 });
+    expect(await whole("default")).toEqual({ before: 9, total: 47, ended: 35 });
+    // With the count of 9 the work gets 40 calls, and the whole call makes 49.
+    expect(await whole("count")).toEqual({ before: 9, total: 49, ended: 37 });
   });
 
   it("ends one user's 100 sessions and 5 links in pages of 49 calls or fewer (review m2)", async () => {
@@ -967,9 +969,10 @@ describe("the end of sessions by an operator (plan 12f Task 7)", () => {
     });
     if (!done.ok) throw new Error(done.code);
     const total = counts.calls + limited.calls + SCHEMA_CHECK;
-    // The reserve of 10 leaves the work 39 calls; the whole call makes 40. The reserve
+    // The reserve of 11 leaves the work 38 calls; the whole call makes 40. The reserve
     // holds the session read of the router's impersonation step, which this call skips.
-    expect([before, total, done.value.ended, done.value.more]).toEqual([8, 40, 21, true]);
+    // The 9 before hold the pending-end read of ruling 50 of plan 12d.
+    expect([before, total, done.value.ended, done.value.more]).toEqual([9, 40, 20, true]);
   });
 
   it("ends 60 sessions with a hook in two pages, with no session lost or ended twice", async () => {

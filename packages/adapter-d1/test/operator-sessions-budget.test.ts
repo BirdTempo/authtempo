@@ -308,16 +308,18 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
           ? await invocation.auth.api.operator.sessions.endAll(input)
           : await invocation.auth.api.operator.sessions.endUser({ ...input, userId });
       if (!done.ok) throw new Error(done.code);
-      // The route limiter, the schema check, the session, the user, the refresh, the
-      // platform organization, the member, the factor, and the guard limiter: 9.
-      expect(before).toBe(9);
+      // The route limiter, the schema check, the session, the user, the pending-end
+      // read of ruling 50 of plan 12d, the refresh, the platform organization, the
+      // member, the factor, and the guard limiter: 10.
+      expect(before).toBe(10);
       expect(done.value.more).toBe(true);
       // The whole invocation on the binding, and the counter of the adapter, which
       // leaves out the 2 limiter queries: they go to the binding, not through the adapter.
       expect([done.value.ended, count.queries, invocation.storage.statementsSent?.()]).toEqual(
         // The work keeps 1 call for the session read of the router's
         // impersonation step (plan 12f Task 11), which this direct call skips.
-        call === "endAll" ? [36, 48, 46] : [20, 41, 39],
+        // Since ruling 50 of plan 12d the calls before are 10, so a page ends 1 fewer.
+        call === "endAll" ? [35, 48, 46] : [19, 41, 39],
       );
     });
 });

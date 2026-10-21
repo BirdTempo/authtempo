@@ -257,19 +257,21 @@ async function auditOf(userId: string): Promise<string[]> {
  */
 // The sweeps count 1 more query since plan 12k (the runs of 2026-10-21 at the rebase): the
 // delete of the organization tokens. The acts do not change.
+// Since ruling 50 of plan 12d (run of 2026-10-22), the session read of a user actor keeps 1
+// more call for the pending-end read of `revokedFor`, so its act ends 1 session fewer.
 const BAN_COUNTS: Record<string, [number, number, number[]]> = {
   "secret 45": [50, 31, [36]],
-  "user 45": [49, 22, [45]],
+  "user 45": [49, 21, [46]],
   "secret 60": [50, 31, [48, 24]],
-  "user 60": [49, 22, [48, 33]],
+  "user 60": [49, 21, [48, 34]],
 };
 // The revoke ends 3 sessions fewer in the act since ruling 16 of plan 12k: it deletes the team
 // rows of the member row it deletes, and so the sweep and a retry end more.
 const REVOKE_COUNTS: Record<string, [number, number, number, number, number[]]> = {
   "secret 45": [50, 46, 21, 24, [21]],
-  "user 45": [50, 49, 21, 19, [29]],
+  "user 45": [50, 49, 21, 18, [30]],
   "secret 60": [50, 50, 21, 28, [35]],
-  "user 60": [50, 49, 21, 19, [44]],
+  "user 60": [50, 49, 21, 18, [45]],
 };
 
 const asSecret = { authorization: `Operator ${SECRET}` };

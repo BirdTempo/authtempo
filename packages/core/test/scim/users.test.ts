@@ -1,14 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
 import { createAuth } from "../../src/create-auth.js";
+import { mintSessionJwt, sessionLive } from "../../src/engine/jwt.js";
 import {
   addMember,
   createOrganization,
   deleteOrganization,
 } from "../../src/engine/organizations.js";
 import { passwordSignUp } from "../../src/engine/password.js";
+import { updateProfile } from "../../src/engine/profile.js";
 import { createScimToken } from "../../src/engine/scim/tokens.js";
-import { resolveSession } from "../../src/engine/sessions.js";
+import { createSession, resolveSession } from "../../src/engine/sessions.js";
 import { createApiToken } from "../../src/engine/tokens.js";
 import type { ScimScope } from "../../src/schema.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
@@ -763,5 +765,217 @@ describe("api.scim.users (plan 12d Task 10)", () => {
       ["scim_user_update", "app", "scim-test"],
     ]);
     expect((await users.delete({ actor: SCIM_APP, organizationId, id })).status).toBe(204);
+  });
+});
+
+describe("the session door of a SCIM deactivate (ruling 50 of plan 12d)", () => {
+  const MINUTE = 60_000;
+  const UNAUTHORIZED = { ok: false, code: "unauthorized", status: 401 };
+
+  /** The world with a session.afterEnd hook, the worst case of the page, and the JWT mint. */
+  async function doorWorld() {
+    const ended: string[] = [];
+    const w = await world({
+      hooks: {
+        session: { afterEnd: ({ session, reason }) => void ended.push(`${session.id}:${reason}`) },
+      },
+      jwtMint: { audience: ["https://rs.example.com"] },
+    });
+    const token = await tokenOf(w, w.organizationId);
+    await signUpAndVerify(w, ADA);
+    const user = await userAt(w, ADA);
+    if (!user) throw new Error("no user");
+    const id = await created(w, token, ADA);
+    return { w, token, user, id, ended };
+  }
+
+  /** `n` sessions of the user, through the session write of every sign-in. Each holds its token. */
+  async function sessionsOf(w: World, userId: string, n: number) {
+    const out: { token: string; id: string }[] = [];
+    for (let i = 0; i < n; i++) {
+      const s = await createSession(w.config, { userId, ip: null, userAgent: null });
+      out.push({ token: s.token, id: s.session.id });
+    }
+    return out;
+  }
+
+  const live = (w: World, userId: string) =>
+    w.storage.findMany("session", [{ field: "userId", op: "eq", value: userId }]);
+
+  /** The reads of the pending-end rows through the engine storage. */
+  function pendingReads(w: World) {
+    const spy = vi.spyOn(w.storage, "findMany");
+    return () =>
+      spy.mock.calls.filter(
+        ([model, where]) =>
+          model === "verification" &&
+          (where as { field: string; value: unknown }[]).some(
+            (c) => c.field === "purpose" && c.value === "session-end",
+          ),
+      ).length;
+  }
+
+  it("refuses each of 40 sessions at once at each of the three doors, before any sweep", async () => {
+    const { w, token, user, id, ended } = await doorWorld();
+    // The sessions begin after the last write of the user.
+    w.clock.advance(MINUTE);
+    const before = await live(w, user.id);
+    const made = await sessionsOf(w, user.id, 40 - before.length);
+    const tokens = new Map(made.map((s) => [s.id, s.token]));
+    expect(await live(w, user.id)).toHaveLength(40);
+    w.clock.advance(MINUTE);
+    const off = await read(
+      await scim(
+        w,
+        token,
+        "PATCH",
+        `/Users/${id}`,
+        patch({ op: "replace", path: "active", value: false }),
+      ),
+    );
+    expect(off.status).toBe(200);
+    // The page ended part of the sessions; a pending-end row of reason revoked holds the rest.
+    const left = (await live(w, user.id)).filter((s) => tokens.has(s.id));
+    expect(left.length).toBeGreaterThan(0);
+    expect(left.length).toBeLessThan(40);
+    const pending = await w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "session-end" },
+      { field: "identifier", op: "eq", value: user.id },
+    ]);
+    expect(pending.map((r) => r.data?.reason)).toEqual(["revoked"]);
+    ended.length = 0;
+    for (const s of left) {
+      const t = tokens.get(s.id) ?? "";
+      expect(await sessionLive(w.config, { sid: s.id }), s.id).toBe(false);
+      expect(await mintSessionJwt(w.config, { userId: user.id, sessionId: s.id })).toEqual(
+        UNAUTHORIZED,
+      );
+      // Read-only mode answers null and writes nothing.
+      expect(await resolveSession(w.config, t, "read-only")).toBeNull();
+      expect(
+        await w.storage.findOne("session", [{ field: "id", op: "eq", value: s.id }]),
+      ).not.toBeNull();
+      // Write mode ends the row by id, with the reason revoked.
+      expect(await resolveSession(w.config, t)).toBeNull();
+      expect(
+        await w.storage.findOne("session", [{ field: "id", op: "eq", value: s.id }]),
+      ).toBeNull();
+    }
+    expect(ended).toEqual(left.map((s) => `${s.id}:revoked`));
+    expect(await live(w, user.id)).toEqual([]);
+  });
+
+  it("reads the pending-end rows once for a session from before a user write, and not after it", async () => {
+    const { w, user } = await doorWorld();
+    w.clock.advance(MINUTE);
+    const [s] = await sessionsOf(w, user.id, 1);
+    if (!s) throw new Error("no session");
+    const reads = pendingReads(w);
+    const first = await resolveSession(w.config, s.token);
+    expect(first).not.toBeNull();
+    // The session began after the last write of the user: +0 queries.
+    expect(reads()).toBe(0);
+    w.clock.advance(MINUTE);
+    if (!first) throw new Error("no session");
+    expect((await updateProfile(w.config, { session: first, name: "Ada L" })).ok).toBe(true);
+    // A user write after the session began: one read, and no refusal.
+    expect(await resolveSession(w.config, s.token)).toMatchObject({ session: { id: s.id } });
+    expect(reads()).toBe(1);
+    expect(await sessionLive(w.config, { sid: s.id })).toBe(true);
+    expect(reads()).toBe(2);
+    expect((await mintSessionJwt(w.config, { userId: user.id, sessionId: s.id })).ok).toBe(true);
+    expect(reads()).toBe(3);
+  });
+
+  it("does not refuse a session made after the deactivate by the old row", async () => {
+    const { w, token, user, id } = await doorWorld();
+    w.clock.advance(MINUTE);
+    const before = await live(w, user.id);
+    await sessionsOf(w, user.id, 40 - before.length);
+    w.clock.advance(MINUTE);
+    const off = await scim(
+      w,
+      token,
+      "PATCH",
+      `/Users/${id}`,
+      patch({ op: "replace", path: "active", value: false }),
+    );
+    expect(off.status).toBe(200);
+    const pending = await w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "session-end" },
+      { field: "identifier", op: "eq", value: user.id },
+    ]);
+    expect(pending).toHaveLength(1);
+    w.clock.advance(MINUTE);
+    const on = await scim(
+      w,
+      token,
+      "PATCH",
+      `/Users/${id}`,
+      patch({ op: "replace", path: "active", value: true }),
+    );
+    expect(on.status).toBe(200);
+    w.clock.advance(MINUTE);
+    const [s] = await sessionsOf(w, user.id, 1);
+    if (!s) throw new Error("no session");
+    const first = await resolveSession(w.config, s.token);
+    if (!first) throw new Error("the new session was refused");
+    // A user write after the new session makes each door read the old row.
+    w.clock.advance(MINUTE);
+    expect((await updateProfile(w.config, { session: first, name: "Ada L" })).ok).toBe(true);
+    const reads = pendingReads(w);
+    expect(await resolveSession(w.config, s.token)).toMatchObject({ session: { id: s.id } });
+    expect(await sessionLive(w.config, { sid: s.id })).toBe(true);
+    expect((await mintSessionJwt(w.config, { userId: user.id, sessionId: s.id })).ok).toBe(true);
+    expect(reads()).toBe(3);
+    // The old row is still there: the sweep has not run.
+    expect(
+      await w.storage.findMany("verification", [
+        { field: "id", op: "eq", value: pending[0]?.id ?? "" },
+      ]),
+    ).toHaveLength(1);
+  });
+});
+
+describe("the PATCH forms of an unknown attribute (ruling 50 of plan 12d)", () => {
+  it("ignores an unknown key of a no-path value, and refuses a path to it", async () => {
+    const w = await world();
+    const token = await tokenOf(w, w.organizationId);
+    const id = await created(w, token, ADA);
+    // The no-path form of Entra ID, with an attribute of its own map.
+    const noPath = await read(
+      await scim(
+        w,
+        token,
+        "PATCH",
+        `/Users/${id}`,
+        patch({ op: "Replace", value: { displayName: "Ada", shoeSize: 42 } }),
+      ),
+    );
+    expect([noPath.status, noPath.body.displayName, noPath.body.shoeSize]).toEqual([
+      200,
+      "Ada",
+      undefined,
+    ]);
+    const row = await w.storage.findOne("scimUser", [{ field: "id", op: "eq", value: id }]);
+    expect(row?.displayName).toBe("Ada");
+    expect(JSON.stringify(row?.data)).not.toContain("shoeSize");
+    // Plan Behavior 8: an explicit path to an unknown attribute.
+    const path = await read(
+      await scim(
+        w,
+        token,
+        "PATCH",
+        `/Users/${id}`,
+        patch({ op: "replace", path: "shoeSize", value: 42 }),
+      ),
+    );
+    expect([path.status, path.body.schemas, path.body.scimType]).toEqual([
+      400,
+      [ERROR_URN],
+      "invalidPath",
+    ]);
+    const after = await w.storage.findOne("scimUser", [{ field: "id", op: "eq", value: id }]);
+    expect(after?.version).toBe(row?.version);
   });
 });

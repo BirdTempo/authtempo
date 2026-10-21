@@ -1629,6 +1629,12 @@ A missing, wrong, expired, or revoked token answers 401 with `WWW-Authenticate: 
 
 The Users routes (plan 12d Task 10) serve the SCIM view of the staff of the token's organization. A create, and a change of the address, needs an address in a verified domain of the organization. Each write answers the version as a weak `ETag`, and `If-Match` with another version answers 412.
 
+Core ignores an attribute that the User schema does not know. It stores nothing of it and answers the User as stored. Entra ID and Okta send such attributes from their attribute maps. In a PATCH with no path, core ignores an unknown key of the value in the same way. A path to an unknown attribute answers 400 `invalidPath`.
+
+A schema URN in `schemas` other than the core User and the enterprise extension answers 400 `invalidSyntax`. A custom extension in the attribute map of Entra ID or Okta sends such a URN. To fix it, remove the custom mapping in the directory, or ask for the extension.
+
+A deactivate ends the sessions that fit its call budget. The other sessions stay until the sweep, but each session read, JWT mint, and `sessionLive` call refuses them at once.
+
 <h3 id="get-scim-v2-users"><code>GET /scim/v2/Users</code></h3>
 
 | Field | Value |

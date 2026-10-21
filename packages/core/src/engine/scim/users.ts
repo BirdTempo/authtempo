@@ -1269,19 +1269,29 @@ async function writeChange(
             { field: "createdById", op: "eq", value: user.id },
           ]);
           // The sessions, challenges, handoff codes, and OAuth tokens, inside the
-          // call budget. The sessions that do not fit stay for the sweep. One call
-          // stays for the audit row.
-          await endAllAccessPage(
+          // call budget. The sessions that do not fit stay for the sweep. Three calls
+          // stay: the user write below (2 on D1: the undo read and the update) and
+          // the audit row.
+          const page = await endAllAccessPage(
             tx,
             config,
             user.id,
             ends,
             now,
             meter,
-            OPERATOR_CALL_BUDGET - 1,
+            OPERATOR_CALL_BUDGET - 3,
             "revoked",
             stops,
           );
+          // The door of the sessions that stay (`revokedFor`, ruling 50 of plan 12d)
+          // reads the pending-end rows only for a session from before this write.
+          // The clock reads after the row, so the time is at or after its `before`.
+          if (page.left) {
+            await tx.update("user", [{ field: "id", op: "eq", value: user.id }], {
+              updatedAt: later(config.clock.now(), user.updatedAt),
+            });
+            meter.step(2);
+          }
         }
       }
       const j = join as Join | null;
