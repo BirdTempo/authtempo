@@ -492,3 +492,40 @@ describe("the order of the audit rows in one millisecond (ruling 58 Q4 of plan 1
     ]);
   });
 });
+
+describe("the lock order of the revoke (final review L1 of plan 12f)", () => {
+  it("locks the user row, then the sessions of the impersonation targets, then the member rows", async () => {
+    const w = await world();
+    await impersonate(w);
+    // The writes and the locks of the act's transaction, in order. Memory has no
+    // lockInOrder; the view adds the one that Postgres has, and records it.
+    const steps: string[] = [];
+    const storage = w.auth.storage as StorageAdapter;
+    const transaction = storage.transaction.bind(storage);
+    storage.transaction = (fn) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          update: (model, where, patch) => {
+            steps.push(`update ${model}`);
+            return tx.update(model, where, patch);
+          },
+          delete: (model, where) => {
+            steps.push(`delete ${model}`);
+            return tx.delete(model, where);
+          },
+          lockInOrder: async (model) => {
+            steps.push(`lock ${model}`);
+          },
+        }),
+      );
+    const r = await operatorApi(w.auth.config).platformRole.revoke(input(w.operator.user.id));
+    storage.transaction = transaction;
+    expect(r.ok).toBe(true);
+    const lock = steps.indexOf("lock session");
+    const member = steps.findIndex((s) => s.endsWith(" member"));
+    expect(steps[0]).toBe("update user");
+    expect(lock).toBe(1);
+    expect(member).toBeGreaterThan(lock);
+  });
+});

@@ -396,6 +396,12 @@ export async function revokePlatformRole(
       // commits its start row before `endImpersonations` reads.
       await holdUser(tx, user.id);
       meter.step(STEP_WORST.hold);
+      // The locks of the user's sessions and of the impersonation sessions
+      // that the user opened, in one read, right after the user row, as in
+      // the ban and `withRoleLoss` (user-hold.ts): the audit read and the
+      // lock read. So no owner lock comes between the two holds.
+      const hold = await holdImpersonations(tx, config, user.id, now, true);
+      meter.step(2);
       const member = await memberOf(tx, organization.id, user.id);
       meter.step(1);
       if (!member || !holdsRolePart(member.role, role)) {
@@ -453,11 +459,6 @@ export async function revokePlatformRole(
         if (!locked.ok) return locked;
       } else if ((await write(tx)) === 0) return fail("conflict");
       meter.step(losesOwner ? REVOKE_WRITE_WORST : 2);
-      // The locks of the user's sessions and of the impersonation sessions
-      // that the user opened, in one read, before any delete (ruling 42 L3):
-      // the audit read and the lock read.
-      const hold = await holdImpersonations(tx, config, user.id, now, true);
-      meter.step(2);
       // The impersonation sessions first, inside the budget (rulings 31 and 44).
       await endImpersonationsPage(
         tx,

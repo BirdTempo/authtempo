@@ -24,6 +24,14 @@ import { ROUNDS } from "./rounds.js";
  * does, so their old order (the password row, then the sessions) forms no
  * cycle with the delete. After `ROUNDS` lost rounds the answer is `conflict`.
  *
+ * The operator acts that end the sessions of a user keep one lock order
+ * (plan 12f, final review L1). First comes this user row. Then comes
+ * `holdImpersonations`, the one read that locks the sessions of the user
+ * and of each impersonation target. Then come the member rows and the
+ * owner lock. The ban, the revoke of the platform role, and `withRoleLoss`
+ * all take them in that order. So two acts on a shared target wait, and
+ * do not deadlock.
+ *
  * No row returns: a sign-up writes its user later, and a deleted user is
  * found by `userStays`, the read after the insert. A stop here would answer
  * the same `conflict` on both stores, so the one check is that read.
