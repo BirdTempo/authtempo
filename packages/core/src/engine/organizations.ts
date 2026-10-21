@@ -602,6 +602,11 @@ export async function deleteOrganization(
  * member rows: a team member add or an accept holds its team row until its
  * commit, so the team member delete below sees its row.
  *
+ * The member rows go before the team member rows (ruling 44 of plan 12k).
+ * A member removal and the account delete delete the member row first, and
+ * then its team rows. This delete takes them in the same order. So on
+ * Postgres it waits for the member row, and no deadlock forms.
+ *
  * Then the gap of an accept in flight (plan 12a Task 11). On Postgres an
  * accept holds its invitation row until its commit. So this delete waits,
  * and the member read below sees that member. An accept that starts later
@@ -629,9 +634,9 @@ export async function deleteOrganizationRows(
     (await tx.findMany("member", byOrganization)).some((m) => m.userId !== alone)
   )
     stopWith("conflict");
-  // The team rows go before the members.
-  await tx.delete("teamMember", [{ field: "organizationId", op: "eq", value: id }]);
+  // The members go before their team rows, in the order of a member removal (ruling 44).
   await tx.delete("member", byOrganization);
+  await tx.delete("teamMember", [{ field: "organizationId", op: "eq", value: id }]);
   // A session that points at a deleted organization would make every later rank check read a missing row.
   // Its active team is a team of that organization, so it goes in the same write.
   await tx.update("session", [{ field: "activeOrganizationId", op: "eq", value: id }], {

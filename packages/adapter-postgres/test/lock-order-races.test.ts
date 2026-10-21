@@ -100,6 +100,25 @@ function afterRead(
   return { ...base, transaction: (fn) => base.transaction((tx) => fn(wrap(tx))) };
 }
 
+/** A storage on the shared pool that runs `fire` once, after the first delete of `model` in a transaction. */
+function afterDelete(model: ModelName, fire: () => Promise<void>): StorageAdapter {
+  let armed = true;
+  const base = createPostgresAdapter(db.sql);
+  const wrap = (tx: StorageAdapter): StorageAdapter => ({
+    ...tx,
+    async delete(m, where) {
+      const n = await tx.delete(m, where);
+      if (m === model && armed) {
+        armed = false;
+        await fire();
+      }
+      return n;
+    },
+    transaction: (fn) => tx.transaction((inner) => fn(wrap(inner))),
+  });
+  return { ...base, transaction: (fn) => base.transaction((tx) => fn(wrap(tx))) };
+}
+
 /**
  * A storage on the shared pool that runs `fire` once, after the first
  * findMany of `model`, in a transaction or outside one.
@@ -479,6 +498,68 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     expect(await rows("team")).toEqual([]);
     expect(await rows("teamMember")).toEqual([]);
   });
+  it("holds an organization delete during a member removal with no deadlock (m1 of ruling 44)", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let deleted: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
+    const two = instance(watch("member", g.reach), { teams: {} }, sent);
+    const one = instance(
+      afterDelete("member", async () => {
+        deleted = settle(two.api.deleteOrganization({ user: a, organizationId }));
+        await Promise.race([g.at, deleted]);
+      }),
+      { teams: {} },
+      sent,
+    );
+    const a = await user("a");
+    const b = await user("b");
+    const organizationId = await organization(plain, a);
+    must(await plain.api.addMember({ user: a, organizationId, userId: b.id, role: "member" }));
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+    must(await plain.api.addTeamMember({ user: a, teamId, userId: b.id }));
+
+    const removed = await settle(one.api.removeMember({ user: a, organizationId, userId: b.id }));
+
+    expect(removed).toMatchObject({ ok: true });
+    expect(await deleted).toEqual({ ok: true, value: { ok: true } });
+    expect(await rows("organization")).toEqual([]);
+    expect(await rows("member")).toEqual([]);
+    expect(await rows("teamMember")).toEqual([]);
+  });
+
+  it("holds an organization delete during the account delete of a member with no deadlock (m1 of ruling 44)", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let deleted: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
+    const two = instance(watch("member", g.reach), { teams: {} }, sent);
+    const one = instance(
+      afterDelete("member", async () => {
+        deleted = settle(two.api.deleteOrganization({ user: a, organizationId }));
+        await Promise.race([g.at, deleted]);
+      }),
+      { teams: {} },
+      sent,
+    );
+    const a = await user("a");
+    const b = await user("b");
+    const organizationId = await organization(plain, a);
+    must(await plain.api.addMember({ user: a, organizationId, userId: b.id, role: "member" }));
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+    must(await plain.api.addTeamMember({ user: a, teamId, userId: b.id }));
+    const session = await sessionAt(plain, await sessionOf(plain, sent, "b@example.com"));
+
+    const gone = await settle(one.api.user.delete({ session, ip: null, userAgent: null }));
+
+    expect(gone).toEqual({ ok: true, value: { ok: true } });
+    expect(await deleted).toEqual({ ok: true, value: { ok: true } });
+    expect((await rows("user")).map((x) => x.id)).toEqual(["a"]);
+    expect(await rows("organization")).toEqual([]);
+    expect(await rows("member")).toEqual([]);
+    expect(await rows("teamMember")).toEqual([]);
+  });
+
   it("of two user token creates at 49 tokens, one answers token_limit (L4)", async () => {
     const sent: MailMessage[] = [];
     const g = gate();
