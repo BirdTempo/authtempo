@@ -1435,7 +1435,7 @@ This route exists when the config sets `openapi: true`.
 | Needs | Nothing |
 | Input | None |
 | Answer | `{ status: "ready" }` when the store answers. It calls `storage.ping()`, which reads the schema version with no cache; an adapter with no `ping` gets one read of a user row. One result holds for 10 seconds for each `Auth` instance |
-| Errors | [`not_ready`](/docs/reference/errors/#not_ready) 503 with `reason`: `storage` when the store throws, `schema` for an old schema version. The body names no host, no database, no version, and no error name |
+| Errors | [`not_ready`](/docs/reference/errors/#not_ready) 503 with `reason`: `storage` when the store throws or gives no answer in 3 seconds, `schema` for an old schema version. The body names no host, no database, no version, and no error name |
 
 ## Next
 

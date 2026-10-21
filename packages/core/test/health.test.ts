@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
-import { READY_CACHE_MS, READY_PROBE_ID } from "../src/http/health.js";
+import { READY_CACHE_MS, READY_PROBE_ID, READY_TIMEOUT_MS } from "../src/http/health.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -129,6 +129,43 @@ describe("GET /health and GET /ready (plan 12h Task 8)", () => {
     expect(res.status).toBe(200);
     expect(reads).toEqual([["user", [{ field: "id", op: "eq", value: "authtempo:ready-probe" }]]]);
     expect(READY_PROBE_ID).toBe("authtempo:ready-probe");
+  });
+
+  it("answers not_ready storage after 3 seconds when the ping never settles, and keeps that answer", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const storage = createMemoryAdapter();
+      let pings = 0;
+      storage.ping = () => {
+        pings++;
+        return new Promise<void>(() => {});
+      };
+      const { auth, clock } = authOn(storage, READY);
+      let first: Response | null = null;
+      void auth.handle(get("/auth/ready")).then((res) => {
+        first = res;
+      });
+      await vi.advanceTimersByTimeAsync(2_999);
+      expect(first).toBeNull();
+      await vi.advanceTimersByTimeAsync(1);
+      const res = first as Response | null;
+      expect(res?.status).toBe(503);
+      expect(await res?.json()).toEqual({ error: "not_ready", reason: "storage" });
+      // The next call in the 10-second window gets the same answer at once, with no wait.
+      clock.advance(5_000);
+      let second: Response | null = null;
+      void auth.handle(get("/auth/ready")).then((r) => {
+        second = r;
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      const again = second as Response | null;
+      expect(again?.status).toBe(503);
+      expect(await again?.json()).toEqual({ error: "not_ready", reason: "storage" });
+      expect(pings).toBe(1);
+      expect(READY_TIMEOUT_MS).toBe(3_000);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("counts on no limiter", async () => {
