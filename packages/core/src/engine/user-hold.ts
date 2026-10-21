@@ -35,6 +35,9 @@ import { ROUNDS } from "./rounds.js";
  * its team rows among them. So the team member add and the invitation accept
  * hold the user before the team lock. With the team lock first, an add of the
  * sole member beside the account delete formed a deadlock.
+ * A member removal holds the person's user row before the organization lock
+ * of `ownerWrite` or of `revokeTokens`. So a removal and a team member add or
+ * an accept of that person run one at a time.
  *
  * No row returns: a sign-up writes its user later, and a deleted user is
  * found by `userStays`, the read after the insert. A stop here would answer

@@ -346,6 +346,8 @@ export async function acceptInvitation(
         !roleAllowedIn(o, inv.role, organizationRow.slug)
       )
         return lost();
+      // After the hold: a member removal holds the same user (ruling 43). So the removal commits
+      // before this read, or it waits for this commit and then deletes the new team rows.
       const existing = await tx.findOne("member", [
         { field: "organizationId", op: "eq", value: inv.organizationId },
         { field: "userId", op: "eq", value: input.user.id },

@@ -178,6 +178,10 @@ export function isOwner(o: ResolvedOrganizations, rank: number): boolean {
  *
  * A refusal before the first write returns a value and does not throw: no
  * write has run at that point, so the commit changes nothing.
+ *
+ * `hold` is a user to hold first, before the lock of the organization row,
+ * in the lock order of user-hold.ts (ruling 43). That hold writes no new
+ * value, so a refusal after it still changes nothing.
  */
 export async function ownerLock(
   tx: StorageAdapter,
@@ -205,13 +209,20 @@ export async function ownerLock(
   return ok(true);
 }
 
-/** A write that can remove an owner: `ownerLock` in its own transaction. The caller runs it in `hookGuard`. */
+/**
+ * A write that can remove an owner: `ownerLock` in its own transaction. The
+ * caller runs it in `hookGuard`. `hold` is a user to hold first, before the
+ * lock of the organization row, in the lock order of user-hold.ts (ruling 43
+ * of plan 12k). That hold writes no new value, so a refusal after it still
+ * changes nothing.
+ */
 async function ownerWrite(
   config: ResolvedConfig,
   o: ResolvedOrganizations,
   organization: OrganizationRow,
   write: (tx: StorageAdapter) => Promise<number>,
   loss: RoleLoss | null = null,
+  hold: string | null = null,
 ): Promise<Result<true>> {
   const now = config.clock.now();
   return config.storage.transaction((tx) =>
@@ -219,7 +230,11 @@ async function ownerWrite(
       tx,
       loss,
       now,
-      (t) => ownerLock(t, o, organization, write, now),
+      async (t) => {
+        // With a loss, withRoleLoss holds the same user first (the removed member).
+        if (hold !== null && hold !== loss?.userId) await holdUser(t, hold);
+        return ownerLock(t, o, organization, write, now);
+      },
       (r) => r.ok,
     ),
   );
@@ -939,6 +954,11 @@ const REVOKE_TOKENS: Statements = { apiToken: ["revoke"] };
  * organization lock of the token create. That needs `apiToken:revoke` as well, also for a leave, checked
  * before any write. The route also checks the fresh
  * rule then; an in-process call is the app's own act (ruling 8 of plan 12k).
+ *
+ * The transaction holds the person's user row first (ruling 43). A team
+ * member add and an accept hold the same row, and then read the member row
+ * through their transaction. So the removal waits for their commit and then
+ * deletes their team rows, or they see the member row gone.
  */
 export async function removeMember(
   config: ResolvedConfig,
@@ -991,8 +1011,8 @@ export async function removeMember(
   // The active organization is a choice, not a right; it goes with the membership in the same write.
   const drop = async (storage: StorageAdapter) => {
     // The lock of the token create (ruling 32 of plan 12k). A create that holds it commits
-    // first, and the token delete below sees its row. No user hold runs here, so the lock is the first
-    // write, in the order of user-hold.ts. When the organization is gone, the zero answers conflict.
+    // first, and the token delete below sees its row. The user hold runs before this lock, in the
+    // order of user-hold.ts. When the organization is gone, the zero answers conflict.
     if (revokeTokens && !(await lockOrganization(storage, s.value.organization))) return 0;
     await runBefore("organization.beforeRemoveMember", hooks.beforeRemoveMember, event);
     const n = await storage.delete("member", [
@@ -1023,10 +1043,21 @@ export async function removeMember(
   const now = config.clock.now();
   const removed = await hookGuard(async (): Promise<Result<true>> => {
     // The removal of an owner: count, lock, and write in one transaction.
-    if (isOwner(o, target.rank)) return ownerWrite(config, o, s.value.organization, drop, loss);
-    // A delete of zero rows writes nothing, so the commit changes nothing.
+    if (isOwner(o, target.rank))
+      return ownerWrite(config, o, s.value.organization, drop, loss, target.member.userId);
+    // A delete of zero rows writes nothing, and the hold writes no new value, so the commit changes nothing.
+    // With a loss, withRoleLoss holds the member's user row first (ruling 43 of plan 12k).
     const n = await config.storage.transaction((tx) =>
-      withRoleLoss(tx, loss, now, drop, (rows) => rows > 0),
+      withRoleLoss(
+        tx,
+        loss,
+        now,
+        async (t) => {
+          if (!loss) await holdUser(t, target.member.userId);
+          return drop(t);
+        },
+        (rows) => rows > 0,
+      ),
     );
     return n === 0 ? fail("conflict") : ok(true);
   });

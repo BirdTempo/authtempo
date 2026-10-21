@@ -46,6 +46,31 @@ function watch(model: ModelName, reached: () => void): StorageAdapter {
   return { ...base, transaction: (fn) => base.transaction((tx) => fn(wrap(tx))) };
 }
 
+/**
+ * A storage on the shared pool that runs `fire` once, after the first read
+ * of a `member` row of `userId` outside a transaction. That read is the
+ * check before the write.
+ */
+function onMemberRead(userId: string, fire: () => Promise<void>): StorageAdapter {
+  const base = createPostgresAdapter(db.sql);
+  let armed = true;
+  return {
+    ...base,
+    async findOne(m, where) {
+      const r = await base.findOne(m, where);
+      if (
+        m === "member" &&
+        armed &&
+        where.some((w) => w.field === "userId" && w.value === userId)
+      ) {
+        armed = false;
+        await fire();
+      }
+      return r;
+    },
+  } as StorageAdapter;
+}
+
 /** A promise that resolves at the first call of `reach`. */
 function gate() {
   let reach = () => {};
@@ -147,6 +172,117 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     expect(await deleted).toEqual({ ok: true, value: { ok: true } });
     expect(await rows("user")).toEqual([]);
     expect(await rows("team")).toEqual([]);
+    expect(await rows("teamMember")).toEqual([]);
+  });
+  it("holds a member removal during a team member add, so no team row of a non-member stays (m2)", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let removal: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
+    const two = instance(watch("user", g.reach), { teams: {} }, sent);
+    const one = instance(createPostgresAdapter(db.sql), { teams: {} }, sent, {
+      beforeAddTeamMember: async () => {
+        removal = two.api.removeMember({ user: a, organizationId, userId: b.id });
+        await Promise.race([g.at, removal]);
+      },
+    });
+    const a = await user("a");
+    const b = await user("b");
+    const organizationId = await organization(plain, a);
+    must(await plain.api.addMember({ user: a, organizationId, userId: b.id, role: "member" }));
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+
+    const added = await one.api.addTeamMember({ user: a, teamId, userId: b.id });
+
+    expect(added).toMatchObject({ ok: true });
+    expect(await removal).toEqual({ ok: true, value: { ok: true } });
+    expect((await rows("member")).map((m) => m.userId)).toEqual(["a"]);
+    expect(await rows("teamMember")).toEqual([]);
+  });
+
+  it("holds the removal of a second owner during a team member add, so no team row of a non-member stays (m2)", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let removal: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
+    const two = instance(watch("user", g.reach), { teams: {} }, sent);
+    const one = instance(createPostgresAdapter(db.sql), { teams: {} }, sent, {
+      beforeAddTeamMember: async () => {
+        removal = two.api.removeMember({ user: a, organizationId, userId: b.id });
+        await Promise.race([g.at, removal]);
+      },
+    });
+    const a = await user("a");
+    const b = await user("b");
+    const organizationId = await organization(plain, a);
+    must(await plain.api.addMember({ user: a, organizationId, userId: b.id, role: "owner" }));
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+
+    const added = await one.api.addTeamMember({ user: a, teamId, userId: b.id });
+
+    expect(added).toMatchObject({ ok: true });
+    expect(await removal).toEqual({ ok: true, value: { ok: true } });
+    expect((await rows("member")).map((m) => m.userId)).toEqual(["a"]);
+    expect(await rows("teamMember")).toEqual([]);
+  });
+
+  it("answers not_found to a team member add when a removal commits after its member read (m2)", async () => {
+    const sent: MailMessage[] = [];
+    const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
+    const one = instance(
+      onMemberRead("b", async () => {
+        must(await plain.api.removeMember({ user: a, organizationId, userId: b.id }));
+      }),
+      { teams: {} },
+      sent,
+    );
+    const a = await user("a");
+    const b = await user("b");
+    const organizationId = await organization(plain, a);
+    must(await plain.api.addMember({ user: a, organizationId, userId: b.id, role: "member" }));
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+
+    const added = await one.api.addTeamMember({ user: a, teamId, userId: b.id });
+
+    expect(added).toMatchObject({ ok: false, code: "not_found" });
+    expect((await rows("member")).map((m) => m.userId)).toEqual(["a"]);
+    expect(await rows("teamMember")).toEqual([]);
+  });
+
+  it("holds a member removal during an accept by that member, so no team row of a non-member stays (m2)", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let removal: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
+    const two = instance(watch("user", g.reach), { teams: {} }, sent);
+    const one = instance(createPostgresAdapter(db.sql), { teams: {} }, sent, {
+      beforeAddMember: async (e) => {
+        if (e.via !== "invitation") return;
+        removal = two.api.removeMember({ user: a, organizationId, userId: d.id });
+        await Promise.race([g.at, removal]);
+      },
+    });
+    const a = await user("a");
+    const d = await user("d");
+    const organizationId = await organization(plain, a);
+    must(await plain.api.addMember({ user: a, organizationId, userId: d.id, role: "member" }));
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+    must(
+      await plain.api.inviteMember({
+        user: a,
+        organizationId,
+        email: "d@example.com",
+        role: "member",
+        teamIds: [teamId],
+      }),
+    );
+    const token = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(sent.at(-1)?.text ?? "")?.[1] ?? "";
+
+    const accepted = await one.api.acceptInvitation({ user: d, token, ip: null });
+
+    expect(accepted).toMatchObject({ ok: true });
+    expect(await removal).toEqual({ ok: true, value: { ok: true } });
+    expect((await rows("member")).map((m) => m.userId)).toEqual(["a"]);
     expect(await rows("teamMember")).toEqual([]);
   });
 });

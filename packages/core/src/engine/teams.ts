@@ -449,6 +449,15 @@ export async function addTeamMember(
         await holdUser(tx, input.userId);
         // Zero rows: a delete ran after the read. A zero-row update writes nothing.
         if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
+        // The member row again, after the hold: a member removal holds the same user (ruling 43).
+        // So the removal commits before this read, or it waits for this commit.
+        if (
+          !(await tx.findOne("member", [
+            { field: "organizationId", op: "eq", value: team.organizationId },
+            { field: "userId", op: "eq", value: input.userId },
+          ]))
+        )
+          return fail("not_found");
         // A no-op add runs no hook. The unique key stays the guard for a race.
         if (
           await tx.findOne("teamMember", [
