@@ -48,6 +48,18 @@ export function adminShim(database: CompatDatabase, links: string[] = [], slug =
   });
 }
 
+/** An app with no admin plugin on `database`: the password sign-in only. */
+export function plainShim(database: CompatDatabase) {
+  return betterAuth({
+    baseURL: BASE,
+    secret: "0123456789abcdef0123456789abcdef",
+    database,
+    authtempo: { passwordHash: fast },
+    emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
+    emailVerification: { sendVerificationEmail: async () => {} },
+  });
+}
+
 export async function adminApp(
   database: CompatDatabase,
   opts: { factor?: boolean; slug?: string } = {},
@@ -149,4 +161,16 @@ INSERT INTO "account" ("id","issuer","accountId","providerId","userId","password
     user("bob", true, "Spam", "2026-09-02T00:00:00.000Z"),
     user("cy", false, null, null),
   ].join("\n");
+}
+
+/**
+ * The users of a Better Auth database with no admin plugin, as SQLite
+ * statements: "ann" and "cy" with a password. The user table has no ban
+ * column (ruling 65 of plan 12f, X3).
+ */
+export function betterAuthPlainUsers(): string {
+  const user = (id: string) =>
+    `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt") VALUES ('${id}','${id}','${id}@example.com',1,NULL,'${ERA}','${ERA}');
+INSERT INTO "account" ("id","issuer","accountId","providerId","userId","password","createdAt","updatedAt") VALUES ('${id}-cred','${issuerFor("credential")}','${id}','credential','${id}','${BA_HASH}','${ERA}','${ERA}');`;
+  return [user("ann"), user("cy")].join("\n");
 }
