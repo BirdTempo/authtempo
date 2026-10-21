@@ -96,5 +96,64 @@ for (const server of MYSQL_SERVERS) {
       // Both rows hold the winner's write; the victim's first write was undone.
       expect(rows.map((r) => r.userAgent)).toEqual([winner, winner]);
     });
+
+    it("passes a deadlock inside a nested transaction through, and the outer transaction cannot commit", async () => {
+      db = await freshDatabase(server);
+      const adapter = createMysqlAdapter(db.pool);
+      for (const id of ["r1", "r2", "r3", "r4", "r5", "r6"])
+        await adapter.create("session", rowOf("session", { id }));
+      const byId = (id: string) => [{ field: "id" as const, op: "eq" as const, value: id }];
+      let aHolds: () => void = () => {};
+      let bHolds: () => void = () => {};
+      const aHeld = new Promise<void>((r) => {
+        aHolds = r;
+      });
+      const bHeld = new Promise<void>((r) => {
+        bHolds = r;
+      });
+      let inner: unknown = null;
+      let after: unknown = null;
+      // A locks r1, then r2 in a savepoint. B locks r2 and four more rows,
+      // then r1. B is the heavier one, so InnoDB ends A.
+      const a = adapter.transaction(async (t) => {
+        await t.update("session", byId("r1"), { userAgent: "a" });
+        aHolds();
+        await bHeld;
+        await new Promise((r) => setTimeout(r, 200));
+        try {
+          await t.transaction(async (t2) => {
+            await t2.update("session", byId("r2"), { userAgent: "a" });
+          });
+        } catch (e) {
+          inner = e;
+        }
+        // A caller that goes on after the failed savepoint, as Postgres allows.
+        try {
+          await t.create("session", rowOf("session", { id: "a1" }));
+        } catch (e) {
+          after = e;
+        }
+        return "a";
+      });
+      const b = adapter.transaction(async (t) => {
+        for (const id of ["r2", "r3", "r4", "r5", "r6"])
+          await t.update("session", byId(id), { userAgent: "b" });
+        bHolds();
+        await aHeld;
+        await t.update("session", byId("r1"), { userAgent: "b" });
+        return "b";
+      });
+      const [ra, rb] = await Promise.allSettled([a, b]);
+      expect((inner as { errno?: number } | null)?.errno).toBe(1213);
+      expect(String((after as Error | null)?.message)).toMatch(/after a deadlock \(1213\)/);
+      expect(ra.status).toBe("rejected");
+      expect(String((ra as PromiseRejectedResult).reason?.message)).toMatch(/after a deadlock/);
+      expect(rb).toEqual({ status: "fulfilled", value: "b" });
+      const rows = await adapter.findMany("session", [], { sort: { field: "id", dir: "asc" } });
+      // No write of A is left: the create after the deadlock never ran in autocommit.
+      expect(rows.map((r) => [r.id, r.userAgent])).toEqual(
+        ["r1", "r2", "r3", "r4", "r5", "r6"].map((id) => [id, "b"]),
+      );
+    });
   });
 }

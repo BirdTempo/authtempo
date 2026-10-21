@@ -49,7 +49,10 @@ parent row must see the commit of the other caller.
   statements. InnoDB locks rows in the order of the index that it reads.
 - A statement outside a transaction that InnoDB ends in a deadlock (1213) is
   sent again, at most three times. A deadlock in a transaction ends the
-  transaction, and the error passes through.
+  transaction, and the error passes through. InnoDB undoes the whole
+  transaction, also from inside a savepoint. So the 1213 error passes out of
+  a nested call too. Each later statement of that transaction and its commit
+  then throw, and the transaction writes nothing.
 - The lock order of the kinds (plan 12k) is held on Postgres only: the check
   records the port calls above the adapter, so a MySQL run gives the same
   verdict. The races `lock-order-races`, `organization-races`,
@@ -63,11 +66,16 @@ parent row must see the commit of the other caller.
 
 Run `applyMysqlMigrations(pool)` at deploy, or `authtempo migrate --target
 mysql`. MySQL starts at the baseline `0001_schema_v13`: no MySQL database
-held an older version. MySQL commits each DDL statement at once, so the
-runner records each statement as a step in `ta_migrations` and resumes at the
-next step after a failure. The last step writes the version. The runner takes
-the named lock `authtempo_migrations` for 60 s, on one connection. A MySQL
-named lock belongs to the server, so two databases on one server share it.
+held an older version. MySQL commits each DDL statement at once. So the
+runner records each statement as a step in `ta_migrations`, and after a
+failure it resumes at the first step with no record. The last step writes the
+version. A step and its record are two statements. After a stop between the
+two, the next run finds the object of the step. The runner then runs the step
+again on a temporary copy of its table and compares the two. When they are
+equal, it records the step and goes on. Otherwise it stops with the step and
+the error, and no later step runs. The runner takes the named lock
+`authtempo_migrations` for 60 s, on one connection. A MySQL named lock
+belongs to the server, so two databases on one server share it.
 
 ## Workers through Hyperdrive
 

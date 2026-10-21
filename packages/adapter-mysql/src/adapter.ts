@@ -20,10 +20,18 @@ export interface MysqlAdapterOptions {
   sent?: Sent;
 }
 
+/** The state of one open transaction, shared by its savepoints. */
+interface Txn {
+  /** The deadlock error that ended the transaction, or null while it is alive. */
+  dead: unknown;
+}
+
 interface Ctx extends Omit<MysqlAdapterOptions, "sent"> {
   pool: Pool;
   /** The connection of the open transaction, or null outside one. */
   conn: PoolConnection | null;
+  /** The open transaction, or null outside one. */
+  txn: Txn | null;
   /** The savepoint depth inside the open transaction. */
   depth: number;
   sent: Sent;
@@ -39,7 +47,25 @@ const LOCK_DEADLOCK = 1213;
  */
 const STATEMENT_TRIES = 3;
 
+const isDeadlock = (e: unknown): boolean =>
+  (e as { errno?: unknown } | null)?.errno === LOCK_DEADLOCK;
+
+/**
+ * InnoDB undoes the whole transaction on a deadlock, also inside a
+ * savepoint. The session then runs each later statement in autocommit. So
+ * the adapter refuses each later statement and the COMMIT of a dead
+ * transaction.
+ */
+function assertAlive(txn: Txn | null): void {
+  if (txn?.dead == null) return;
+  throw new Error(
+    "authtempo mysql: InnoDB rolled back this transaction after a deadlock (1213), so it takes no other statement",
+    { cause: txn.dead },
+  );
+}
+
 async function query(ctx: Ctx, s: Statement): Promise<RowDataPacket[] | ResultSetHeader> {
+  assertAlive(ctx.txn);
   for (let attempt = 1; ; attempt++) {
     ctx.sent.statements++;
     try {
@@ -56,8 +82,9 @@ async function query(ctx: Ctx, s: Statement): Promise<RowDataPacket[] | ResultSe
       // deadlock, where Postgres waits. Outside a transaction the statement
       // is its own unit, and InnoDB undid it whole, so the adapter sends it
       // again. A deadlock in a transaction undoes the transaction, so it
-      // passes through.
-      const deadlock = (e as { errno?: unknown } | null)?.errno === LOCK_DEADLOCK;
+      // passes through and marks the transaction dead.
+      const deadlock = isDeadlock(e);
+      if (ctx.txn && deadlock) ctx.txn.dead ??= e;
       if (ctx.conn || !deadlock || attempt === STATEMENT_TRIES) throw e;
     }
   }
@@ -166,8 +193,11 @@ async function begin<T>(ctx: Ctx, fn: (tx: StorageAdapter) => Promise<T>): Promi
   try {
     await conn.query("SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
     await conn.query("START TRANSACTION");
+    const txn: Txn = { dead: null };
     try {
-      const result = await fn(adapterOn({ ...ctx, conn, depth: 0 }));
+      const result = await fn(adapterOn({ ...ctx, conn, txn, depth: 0 }));
+      // A caller that caught the deadlock and returned must not see a commit.
+      assertAlive(txn);
       await conn.query("COMMIT");
       return result;
     } catch (e) {
@@ -192,18 +222,26 @@ async function savepoint<T>(
 ): Promise<T> {
   const depth = ctx.depth + 1;
   const name = `sp_${depth}`;
+  assertAlive(ctx.txn);
   await conn.query(`SAVEPOINT ${name}`);
   try {
     const result = await fn(adapterOn({ ...ctx, conn, depth }));
+    assertAlive(ctx.txn);
     await conn.query(`RELEASE SAVEPOINT ${name}`);
     return result;
   } catch (e) {
-    await conn.query(`ROLLBACK TO SAVEPOINT ${name}`);
+    // After a deadlock the savepoint is gone, and ROLLBACK TO fails with
+    // 1305. The first error is the cause, so it passes through.
+    try {
+      await conn.query(`ROLLBACK TO SAVEPOINT ${name}`);
+    } catch {
+      // The savepoint is gone with the transaction. The first error follows.
+    }
     throw e;
   }
 }
 
 export function createMysqlAdapterOn(pool: Pool, options: MysqlAdapterOptions): StorageAdapter {
   const { sent = { statements: 0, ready: 0 }, ...rest } = options;
-  return adapterOn({ ...rest, pool, conn: null, depth: 0, sent });
+  return adapterOn({ ...rest, pool, conn: null, txn: null, depth: 0, sent });
 }
