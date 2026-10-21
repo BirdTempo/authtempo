@@ -16,6 +16,16 @@ function paragraphs(doc: string): string[] {
   return [...main.matchAll(/<(?:h1|p)>([^<]*)<\/(?:h1|p)>/g)].map((m) => m[1] ?? "");
 }
 
+/**
+ * The Retry-After that the Worker can answer for `retryAt` at a time from
+ * `before` to `after`: the whole seconds left, rounded up, as worker.ts
+ * counts them. Two calls a moment apart can cross a second, so each call
+ * gets the bounds of its own time (fix wave of plan 12h, item 3).
+ */
+function waitRange(retryAt: number, before: number, after: number): [number, number] {
+  return [Math.ceil((retryAt - after) / 1000), Math.ceil((retryAt - before) / 1000)];
+}
+
 /** The time of the oldest gate row of `ip`, in ms since the epoch. */
 function oldestRow(ip: string): Promise<number> {
   return runInDurableObject(env.GATE.get(env.GATE.idFromName("gate")), (_i, state) =>
@@ -28,7 +38,9 @@ describe("a refused page view", () => {
     const ip = "198.51.100.41";
     for (let i = 0; i < DEMO_LIMITS.sandboxesPerIp; i++)
       expect((await call({ cookies: new Map(), ip }, "GET", "/")).status).toBe(303);
+    const viewAt = Date.now();
     const res = await call({ cookies: new Map(), ip }, "GET", "/password", undefined, VIEW);
+    const viewEnd = Date.now();
     expect(res.status).toBe(429);
     expect(res.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(res.headers.get("content-security-policy")).toBe(PAGE_POLICY);
@@ -42,9 +54,19 @@ describe("a refused page view", () => {
       `Try again after ${utcTime((await oldestRow(ip)) + 3_600_000)}.`,
     ]);
     // A call of a page script asks for JSON, and it keeps the JSON body.
+    const apiAt = Date.now();
     const api = await call({ cookies: new Map(), ip }, "GET", "/");
+    const apiEnd = Date.now();
     expect(await api.json()).toEqual({ error: "demo_limit", limit: "sandboxesPerIp" });
-    expect(api.headers.get("retry-after")).toBe(res.headers.get("retry-after"));
+    // Both answers count to the same reset, each from the time of its own call.
+    const retryAt = (await oldestRow(ip)) + 3_600_000;
+    const [viewLow, viewHigh] = waitRange(retryAt, viewAt, viewEnd);
+    expect(wait).toBeGreaterThanOrEqual(viewLow);
+    expect(wait).toBeLessThanOrEqual(viewHigh);
+    const apiWait = Number(api.headers.get("retry-after"));
+    const [apiLow, apiHigh] = waitRange(retryAt, apiAt, apiEnd);
+    expect(apiWait).toBeGreaterThanOrEqual(apiLow);
+    expect(apiWait).toBeLessThanOrEqual(apiHigh);
   });
 
   it("names the limit requestsPerIpPerMinute", async () => {
