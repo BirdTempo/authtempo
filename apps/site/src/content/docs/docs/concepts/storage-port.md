@@ -48,6 +48,7 @@ An adapter can leave these out. Core then takes a fixed worst case.
 - `startsWith` matches a string field whose value begins with the exact text of the prefix. Case counts, as it does for `eq`. A `%` or a `_` is plain text. It never matches null.
 - The prefix goes to the database as a parameter, never as SQL text. An SQL adapter compares `substr(column, 1, n)`, where n is the count of code points. No index serves that clause, so each call reads the whole table.
 - `startsWith` throws `invalid_argument` for an empty prefix, a value that is not a string, or a field that is not a string. It also refuses a prefix with a lone surrogate or with NUL.
+- A string with NUL in any `where` value throws `invalid_argument`, also in an `in` list.
 - `update` and `delete` take a `where`, never a bare id. So core can say "spend this token only if it is not spent" in one statement.
 - An empty `in` list matches nothing. An empty `where` on `update` or `delete` is an error.
 - Two null values never conflict on a unique key.

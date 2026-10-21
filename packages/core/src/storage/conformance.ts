@@ -1596,6 +1596,31 @@ export function runAdapterConformance(
         expect(await db.delete("user", [{ field: "id", op: "ne", value: "b " }])).toBe(4);
         expect(await db.findMany("user", [])).toEqual([]);
       });
+
+      it("refuses a NUL in each clause and a lone surrogate in a prefix (ruling 16)", async () => {
+        // The SQL codec refuses both, so no store may answer rows for them.
+        await seed();
+        const refused = { name: "StorageError", code: "invalid_argument" };
+        for (const op of ["eq", "ne", "lt", "lte", "gt", "gte", "startsWith"] as const)
+          await expect(ids(op, "a\u0000")).rejects.toMatchObject(refused);
+        await expect(ids("in", ["a\u0000", "b"])).rejects.toMatchObject(refused);
+        await expect(ids("startsWith", "a\uD800")).rejects.toMatchObject(refused);
+        await expect(ids("startsWith", "\uDC00b")).rejects.toMatchObject(refused);
+        await expect(
+          db.findOne("user", [{ field: "id", op: "eq", value: "\u0000" }]),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.update("user", [{ field: "id", op: "eq", value: "a\u0000" }], { name: "x" }),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.delete("user", [{ field: "id", op: "ne", value: "a\u0000" }]),
+        ).rejects.toMatchObject(refused);
+        // A lone surrogate in another clause matches no stored value.
+        expect(await ids("eq", "a\uD800")).toEqual([]);
+        expect(await ids("in", ["a\uD800", "b"])).toEqual(["b"]);
+        const rows = await db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+        expect(rows.map((r) => [r.id, r.name])).toEqual(IDS.map((id) => [id, null]));
+      });
     });
 
     describe("startsWith (plan 12f)", () => {

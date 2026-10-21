@@ -80,15 +80,26 @@ function rangeClause<M extends ModelName>(w: Where<M>, s: string, length: number
 }
 
 /**
+ * True for a where value that core refuses with invalid_argument: a NUL in
+ * any string, or a lone surrogate in a prefix (core/src/storage/sql.ts).
+ */
+function coreRefuses(op: Where<ModelName>["op"], v: unknown): boolean {
+  if (Array.isArray(v)) return v.some((x) => typeof x === "string" && x.includes("\u0000"));
+  if (typeof v !== "string") return false;
+  return v.includes("\u0000") || (op === "startsWith" && /\p{Cs}/u.test(v));
+}
+
+/**
  * The where clauses with each value on an ascii column that breaks the rule
  * rewritten, or null when no row can match. Other clauses pass unchanged,
- * and core checks them.
+ * and core checks them. A value that core refuses also passes unchanged. An
+ * answer here would give rows where every other store refuses the call.
  */
 export function guardWhere<M extends ModelName>(model: M, where: Where<M>[]): Where<M>[] | null {
   const out: Where<M>[] = [];
   for (const w of where) {
     const length = ASCII_LENGTH.get(`${model}.${w.field}`);
-    if (length === undefined) {
+    if (length === undefined || coreRefuses(w.op, w.value)) {
       out.push(w);
       continue;
     }
