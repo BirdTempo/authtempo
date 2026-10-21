@@ -28,7 +28,8 @@ Do the steps in this order. Each step names what breaks when you skip it.
    - Skip it, and no secret can call `create-admin`. Only a secret or the app makes the first operator.
 2. Add an entry to `operator.secrets`, such as `{ name: "support", secretHash: "<hex>", scopes: ["users", "audit"] }`.
    - Without the scope `users`, `create-admin` answers `operator_required`.
-   - The command of step 1 names `operator.secretHash`. That key gives the scopes `keys` and `secrets` only.
+   - The command of step 1 prints the next step: an entry with a name, the hash, and the scopes.
+   - Do not set `operator.secretHash` in place of the entry. That key gives the scopes `keys` and `secrets` only.
    - The audit row names the secret by `name`: 1 to 32 characters of `a-z`, `0-9`, `_`, and `-`.
    - The first character of the name is a letter or a digit.
 3. Set `operator.users: true`, `organizations.platformOrganization`, and `organizations.platformRole`.

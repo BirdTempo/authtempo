@@ -132,7 +132,7 @@ export interface SecretJson extends RunKeys {
   /** entropyBits(value) of core, rounded down. */
   estimateBits: number;
   out: string | null;
-  /** --operator only: the SHA-256 hex for operator.secretHash. */
+  /** --operator only: the SHA-256 hex for the secretHash of an entry of operator.secrets. */
   secretHash: string | null;
 }
 export const SECRET_JSON_KEYS = {

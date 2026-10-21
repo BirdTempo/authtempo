@@ -17,7 +17,7 @@ sidebar:
 ## Before you start
 
 - For an app secret: know the two-phase change of a version. [Secrets](/docs/operations/secrets/) gives the steps.
-- For an operator secret: the operator routes read `operator.secretHash` from the config. [Configuration](/docs/reference/config/) lists the key.
+- For an operator secret: the operator routes read the entries of `operator.secrets` from the config. [Configuration](/docs/reference/config/) lists the key.
 
 ## The command
 
@@ -33,7 +33,7 @@ authtempo secret --operator
 | --- | --- |
 | `--version <n>` | The version of the app secret, from 1 to 999999. The value does not change with it. The command then prints the next step of the change. |
 | `--out <path>` | Writes the value to a new file with mode 0600, and prints no value. The command refuses a path that exists. It needs `--version` or `--operator`. |
-| `--operator` | Makes an operator secret, and prints its SHA-256 as `secretHash: <hex>` for `operator.secretHash`. Do not give it with `--version`. |
+| `--operator` | Makes an operator secret, and prints its SHA-256 as `secretHash: <hex>` for the `secretHash` of an entry of `operator.secrets`. Do not give it with `--version`. |
 | `--json` | Prints the document of [The JSON](#the-json). `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 

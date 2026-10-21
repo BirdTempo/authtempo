@@ -389,7 +389,7 @@ async function runGenerator(argv: string[], ctx: Ctx): Promise<number> {
     );
   if (operator)
     ctx.err(
-      `Next: set operator.secretHash to this hash, and give the secret to authtempo in ${DEFAULT_TOKEN_ENV}.`,
+      `Next: add an entry to operator.secrets with a name, this hash as secretHash, and the scopes of its job, such as users. Give the secret to authtempo in ${DEFAULT_TOKEN_ENV}.`,
     );
   return 0;
 }

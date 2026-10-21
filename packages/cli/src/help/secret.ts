@@ -37,7 +37,7 @@ export const SECRET_HELP: HelpText = {
     },
     {
       flag: "--operator",
-      says: "Make an operator secret, and print its SHA-256 for operator.secretHash. Do not give it with --version.",
+      says: "Make an operator secret, and print its SHA-256 for the secretHash of an entry of operator.secrets. Do not give it with --version.",
     },
     ...COMMON_FLAGS,
   ],

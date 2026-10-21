@@ -218,7 +218,7 @@ describe("authtempo secret (plan 11c2)", () => {
     expect(isOperatorSecret(value)).toBe(true);
     expect(doc).toMatchObject({ kind: "operator", version: null, bytes: 32, out: null });
     expect(io.stderr).toContain(
-      "Next: set operator.secretHash to this hash, and give the secret to authtempo in AUTHTEMPO_OPERATOR_SECRET.",
+      "Next: add an entry to operator.secrets with a name, this hash as secretHash, and the scopes of its job, such as users. Give the secret to authtempo in AUTHTEMPO_OPERATOR_SECRET.",
     );
     const auth = createAuth({
       baseURL: "https://api.example.com",
@@ -226,7 +226,8 @@ describe("authtempo secret (plan 11c2)", () => {
       trustedOrigins: ["https://app.example.com"],
       storage: createMemoryAdapter(),
       mail: { send: async () => {} },
-      operator: { secretHash },
+      // The entry that the next line names: a name, the hash, and the scopes of its job.
+      operator: { secrets: [{ name: "keys", secretHash, scopes: ["keys"] }] },
     });
     const res = await auth.handle(
       new Request("https://api.example.com/auth/operator/keys/rotate", {
