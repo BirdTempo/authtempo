@@ -26,8 +26,9 @@ services:
       - "8089:8080"
   # A second libSQL server for the CLI tests of plan 12g Task 6 (map point 15,
   # ruling 1). The adapter-sqlite suite empties every ta_ table of the server
-  # on 8089, and Turbo runs the two packages at once, so one shared database
-  # would fail at random. Port 8090 was free by lsof on 2026-10-21.
+  # on 8089. Turbo runs the two packages at once. So on one shared database,
+  # that suite could empty the tables of a CLI test. Port 8090 was free by
+  # lsof on 2026-10-21.
   libsql-cli:
     image: ghcr.io/tursodatabase/libsql-server:v0.24.32@sha256:dedf5273da945d90f3b85fe367ed8f821349117ac2c488bf43c4a6bf9f2123e0
     container_name: authtempo-libsql-cli
