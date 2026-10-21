@@ -222,9 +222,12 @@ describe("the facts of the MySQL guide (plan 12g Task 9)", () => {
 
   it("names the collation of check 4 as the code checks it", () => {
     const check4 = part(text, "The checks at start").find((l) => l.startsWith("4. "));
-    expect(/^4\. The collation `([^`]+)` of each `ta_` table\./.exec(check4 ?? "")?.[1]).toBe(
-      /export const MYSQL_TABLE_COLLATION = "([^"]+)";/.exec(source("start-checks.ts"))?.[1],
-    );
+    const code = /export const MYSQL_TABLE_COLLATION = "([^"]+)";/.exec(
+      source("start-checks.ts"),
+    )?.[1];
+    // Two misses would compare undefined with undefined and pass.
+    expect(code).toBeDefined();
+    expect(/^4\. The collation `([^`]+)` of each `ta_` table\./.exec(check4 ?? "")?.[1]).toBe(code);
   });
 
   it("states the range of an ascii column as the guard of the code", () => {
@@ -249,6 +252,9 @@ describe("the facts of the MySQL guide (plan 12g Task 9)", () => {
     expect(part(text, "Workers through Hyperdrive").join("\n")).toContain(
       "the package needs 3.24.5 or later",
     );
+    const runtimes = readFileSync(`${DOCS}docs/reference/runtimes.md`, "utf8");
+    const row = runtimes.split("\n").find((l) => l.startsWith("| `@authtempo/adapter-mysql` |"));
+    expect(row).toContain("The package needs mysql2 3.24.5 or later.");
   });
 
   it("names the baseline, the deadlock tries, and the lock wait of the code", () => {
