@@ -20,7 +20,13 @@ import { type ImpersonationStops, impersonationStops } from "./operator/audit.js
 import { writesPlatformRole } from "./operator/guards.js";
 import { holdImpersonations } from "./operator/impersonation.js";
 import { OPERATOR_CALL_BUDGET, STEP_WORST } from "./operator/sessions.js";
-import { effectiveIn, grantCheck, type Standing, touchCheck } from "./permissions.js";
+import {
+  effectiveIn,
+  grantCheck,
+  type RoleStanding,
+  type Standing,
+  touchCheck,
+} from "./permissions.js";
 import {
   needs,
   normalizeSlug,
@@ -107,6 +113,7 @@ export async function membership(
  * forbidden_rank. Ids are ULIDs and slugs are public, so existence is not a
  * secret; the distinct codes let a client tell a dead link from a missing
  * right. `granted` is the caller's effective set in the organization.
+ * `reads` is the count of role row reads of `effectiveIn` (0 or 1).
  */
 export async function standing(
   config: ResolvedConfig,
@@ -114,7 +121,13 @@ export async function standing(
   organizationId: string,
   wanted: Statements | null,
 ): Promise<
-  Result<{ member: MemberRow; organization: OrganizationRow; rank: number; granted: Statements }>
+  Result<{
+    member: MemberRow;
+    organization: OrganizationRow;
+    rank: number;
+    granted: Statements;
+    reads: number;
+  }>
 > {
   const organization = await config.storage.findOne("organization", [
     { field: "id", op: "eq", value: organizationId },
@@ -123,7 +136,7 @@ export async function standing(
   const m = await membership(config, organizationId, user.id);
   if (!m) return fail("forbidden_rank");
   // The rank of a dynamic role counts too (plan 12k Task 4), so a grant compares like with like.
-  const { rank, granted } = await effectiveIn(
+  const { rank, granted, reads } = await effectiveIn(
     config,
     config.storage,
     organizationId,
@@ -131,7 +144,7 @@ export async function standing(
   );
   // A null set needs membership only: a member may leave at any rank, rank 0 included.
   if (wanted !== null && !can(granted, wanted)) return fail("forbidden_rank");
-  return ok({ ...m, rank, granted });
+  return ok({ ...m, rank, granted, reads });
 }
 
 /** A write of an organization or a team needs a verified address. */
@@ -255,24 +268,32 @@ interface RoleLoss {
 }
 
 /**
- * The calls of a member write before its transaction, at the worst
+ * The fixed calls of a member write before its transaction, at the worst
  * (ruling 63 of plan 12f). Through the route: the impersonation step of
  * the router, the route limiter, and `resolveSession` (3). Then the
- * standing of the caller (2), the member row of the target, and its user.
- * The ready check of the storage comes on top. The D1 test
- * `operator-loss-budget.test.ts` counts the whole invocation on the
- * binding.
+ * standing of the caller (3: the organization, and the organization and
+ * member row of `membership`), the target's `membership` (2), and its user
+ * (1). The reads of the role rows (plan 12k) and the ready check of the
+ * storage come on top: `roleLossOf` takes the count of the role reads that
+ * ran. The D1 test `operator-loss-budget.test.ts` counts the whole
+ * invocation on the binding.
  */
 const MEMBER_WRITE_CALLS_BEFORE = 9;
 
 /** The worst case of the member write in `withRoleLoss`: the owner lock, the write, and the recount. */
 const MEMBER_WRITE_WORST = 5;
 
-/** The loss of a member write, or null when the write keeps the platform role. */
+/**
+ * The loss of a member write, or null when the write keeps the platform
+ * role. `roleReads` is the count of the role row reads of `effectiveIn` that
+ * ran before the transaction (ruling 48 of plan 12k): the caller's
+ * standing, the granted role, and the target's role.
+ */
 async function roleLossOf(
   config: ResolvedConfig,
   organization: OrganizationRow,
   member: MemberRow,
+  roleReads: number,
 ): Promise<RoleLoss | null> {
   if (!writesPlatformRole(config, organization, member.role)) return null;
   return {
@@ -280,7 +301,8 @@ async function roleLossOf(
     userId: member.userId,
     ended: endedList(config),
     stops: impersonationStops(config, "role_loss"),
-    before: MEMBER_WRITE_CALLS_BEFORE + ((await config.storage.readyStatements?.()) ?? 1),
+    before:
+      MEMBER_WRITE_CALLS_BEFORE + roleReads + ((await config.storage.readyStatements?.()) ?? 1),
   };
 }
 
@@ -769,7 +791,7 @@ export async function grantable(
   organization: OrganizationRow,
   caller: Standing,
   role: string,
-): Promise<Result<Standing>> {
+): Promise<Result<RoleStanding>> {
   if (!ROLE_RE.test(role) || !roleAllowedIn(o, role, organization.slug))
     return fail("invalid_body");
   const target = await effectiveIn(config, config.storage, organization.id, role);
@@ -893,14 +915,14 @@ export async function updateMemberRole(
   if (!g.ok) return g;
   const target = await membership(config, input.organizationId, input.userId);
   if (!target) return fail("not_found");
+  const targetStanding = await effectiveIn(
+    config,
+    config.storage,
+    input.organizationId,
+    target.member.role,
+  );
   // A caller never touches a member above their own rank or with a right the caller lacks.
-  if (
-    !touchCheck(
-      s.value,
-      await effectiveIn(config, config.storage, input.organizationId, target.member.role),
-    )
-  )
-    return fail("forbidden_rank");
+  if (!touchCheck(s.value, targetStanding)) return fail("forbidden_rank");
   // Read the user before any write, so a missing user never answers not_found after a change.
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
@@ -937,7 +959,12 @@ export async function updateMemberRole(
     );
   };
   // A change that drops the platform role ends the member's impersonations (ruling 42 I1).
-  const loss = await roleLossOf(config, s.value.organization, target.member);
+  const loss = await roleLossOf(
+    config,
+    s.value.organization,
+    target.member,
+    s.value.reads + g.value.reads + targetStanding.reads,
+  );
   const written = await hookGuard(async (): Promise<Result<true>> => {
     // The demotion can remove an owner: count, lock, and write in one transaction.
     if (isOwner(o, target.rank) && !isOwner(o, g.value.rank))
@@ -1000,13 +1027,11 @@ export async function removeMember(
   if (!s.ok) return s;
   const target = self ? s.value : await membership(config, input.organizationId, input.userId);
   if (!target) return fail("not_found");
-  if (
-    !self &&
-    !touchCheck(
-      s.value,
-      await effectiveIn(config, config.storage, input.organizationId, target.member.role),
-    )
-  )
+  // A leave reads no second role: the caller is the target.
+  const targetStanding = self
+    ? null
+    : await effectiveIn(config, config.storage, input.organizationId, target.member.role);
+  if (targetStanding !== null && !touchCheck(s.value, targetStanding))
     return fail("forbidden_rank");
   // The member's user, for the hook event. Read before any write.
   const memberUser = self
@@ -1062,7 +1087,12 @@ export async function removeMember(
   };
   // A removal or a leave of the platform organization ends the member's
   // impersonations (ruling 42 I1).
-  const loss = await roleLossOf(config, s.value.organization, target.member);
+  const loss = await roleLossOf(
+    config,
+    s.value.organization,
+    target.member,
+    s.value.reads + (targetStanding?.reads ?? 0),
+  );
   const now = config.clock.now();
   const removed = await hookGuard(async (): Promise<Result<true>> => {
     // The removal of an owner: count, lock, and write in one transaction.

@@ -21,9 +21,14 @@ export interface Standing {
   granted: Statements;
 }
 
-/** A standing, and the count of its parts that neither the config nor a role row with a good shape names. */
+/**
+ * A standing, and the count of its parts that neither the config nor a role
+ * row with a good shape names. `reads` is the count of storage calls that
+ * the read made: 0 or 1.
+ */
 export interface RoleStanding extends Standing {
   unnamed: number;
+  reads: number;
 }
 
 /**
@@ -57,12 +62,12 @@ export async function effectiveIn(
   role: string,
 ): Promise<RoleStanding> {
   const o = config.organizations;
-  if (!o) return { rank: 0, granted: {}, unnamed: 0 };
+  if (!o) return { rank: 0, granted: {}, unnamed: 0, reads: 0 };
   let rank = rankOf(o.ranks, role);
   const granted = effectiveOf(role, o.roles);
   const unknown = [...new Set(role.split(","))].filter((part) => !Object.hasOwn(o.roles, part));
   if (o.dynamicRoles === null || unknown.length === 0)
-    return { rank, granted, unnamed: unknown.length };
+    return { rank, granted, unnamed: unknown.length, reads: 0 };
   const rows = await storage.findMany(
     "organizationRole",
     [
@@ -83,7 +88,7 @@ export async function effectiveIn(
     if (def.rank > rank) rank = def.rank;
     sets.push(def.permissions);
   }
-  return { rank, granted: union(...sets), unnamed };
+  return { rank, granted: union(...sets), unnamed, reads: 1 };
 }
 
 /**

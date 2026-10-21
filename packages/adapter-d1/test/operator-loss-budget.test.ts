@@ -144,9 +144,15 @@ async function signIns(auth: Auth, sent: MailMessage[], email: string, count: nu
 /**
  * A platform operator through the flows: `createAdmin`, a magic link
  * sign-in, the first password, and the email method of the second factor.
- * Answers the token of a fresh session.
+ * `granted` runs after `createAdmin` and before the sign-in. Answers the
+ * token of a fresh session.
  */
-async function platformOperator(auth: Auth, sent: MailMessage[], email = "op@example.com") {
+async function platformOperator(
+  auth: Auth,
+  sent: MailMessage[],
+  email = "op@example.com",
+  granted?: () => Promise<void>,
+) {
   const made = await auth.api.operator.createAdmin({
     actor: APP,
     email,
@@ -155,6 +161,7 @@ async function platformOperator(auth: Auth, sent: MailMessage[], email = "op@exa
     userAgent: null,
   });
   if (!made.ok) throw new Error(made.code);
+  await granted?.();
   const { token } = await signIns(auth, sent, email, 1);
   const session = await auth.api.getSession(token);
   if (!session) throw new Error("no session");
@@ -262,12 +269,24 @@ const on = async () =>
  * Two platform operators, and 40 impersonation sessions that the second
  * one opened, 4 on each of 10 users. The starts come 3 minutes apart: 20
  * an hour, the start limit (`IMPERSONATE_PER_USER`), and all inside the
- * life of 240 minutes.
+ * life of 240 minutes. With `auditors`, each operator gets the role
+ * `operator,auditor` before the impersonations (`auditorPart`). A write of
+ * an operator's member row ends the impersonations, so it comes first.
  */
-async function fortyImpersonations(sent: MailMessage[], extra: Partial<AuthConfig>) {
+async function fortyImpersonations(
+  sent: MailMessage[],
+  extra: Partial<AuthConfig>,
+  auditors = false,
+) {
   const { auth: setup } = await engine(env.DB, sent, undefined, extra);
   const first = await platformOperator(setup, sent);
-  const bobToken = await platformOperator(setup, sent, "bob@example.com");
+  const bobToken = await platformOperator(
+    setup,
+    sent,
+    "bob@example.com",
+    auditors ? () => auditorPart(setup, first, "bob@example.com") : undefined,
+  );
+  if (auditors) await auditorPart(setup, bobToken, "op@example.com");
   const targets: string[] = [];
   for (let i = 0; i < 10; i++)
     targets.push((await signIns(setup, sent, `user${i}@example.com`, 1)).userId);
@@ -306,6 +325,67 @@ async function stopCauses(): Promise<string[]> {
   ).all<{ data: string }>();
   return rows.results.map((r) => JSON.parse(r.data).cause);
 }
+
+/** The impersonation tool on, and dynamic roles on (plan 12k). */
+const withDynamicRoles = async () =>
+  ({
+    ...(await on()),
+    organizations: {
+      platformRole: "operator",
+      platformOrganization: "platform-co",
+      ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+      dynamicRoles: { maxPerOrganization: 10 },
+    },
+  }) satisfies Partial<AuthConfig>;
+
+/**
+ * Gives the user of `email` the role `operator,auditor` through
+ * `updateMemberRole`, as the user of `byToken`. The first call makes the
+ * dynamic role `auditor` of the platform organization. So each standing and
+ * each target role of a member write reads the role rows (ruling 48 of plan
+ * 12k).
+ */
+async function auditorPart(setup: Auth, byToken: string, email: string) {
+  const platform = await env.DB.prepare("SELECT id FROM ta_organization WHERE slug = ?")
+    .bind("platform-co")
+    .first<{ id: string }>();
+  const organizationId = platform?.id ?? "";
+  const by = await setup.api.getSession(byToken);
+  if (!by) throw new Error("no session");
+  const role = await env.DB.prepare(
+    "SELECT id FROM ta_organization_role WHERE name = 'auditor'",
+  ).first();
+  if (!role) {
+    const made = await setup.api.createRole({
+      user: by.user,
+      organizationId,
+      name: "auditor",
+      rank: 1,
+      permissions: {},
+    });
+    if (!made.ok) throw new Error(made.code);
+  }
+  const user = await env.DB.prepare("SELECT id FROM ta_user WHERE email = ?")
+    .bind(email)
+    .first<{ id: string }>();
+  const part = await setup.api.updateMemberRole({
+    user: by.user,
+    organizationId,
+    userId: user?.id ?? "",
+    role: "operator,auditor",
+  });
+  if (!part.ok) throw new Error(part.code);
+}
+
+/**
+ * The counts of the member writes with a dynamic part on the caller and the
+ * target, on the binding on 2026-10-21 (ruling 48 of plan 12k): the queries
+ * of the act, the sessions it ended, and the queries of each sweep. Before
+ * the fix the act did not count its role reads: the removal took 51 queries
+ * and the role change 52.
+ */
+const DYNAMIC_REMOVE_COUNTS: [number, number, number[]] = [49, 10, [47, 47, 30]];
+const DYNAMIC_ROLE_COUNTS: [number, number, number[]] = [50, 12, [47, 47, 26]];
 
 describe("the losses of an operator outside the operator acts on D1 (ruling 63 of plan 12f)", () => {
   beforeEach(async () => {
@@ -385,6 +465,52 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
     expect([r.queries, inAct, sweeps]).toEqual(REMOVE_COUNTS);
     expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
   });
+
+  for (const act of ["removal", "role change"] as const)
+    it(`counts the role reads before a ${act} of an operator with dynamic roles in 50 queries (ruling 48 of plan 12k)`, async () => {
+      const sent: MailMessage[] = [];
+      const extra = await withDynamicRoles();
+      const { first, bobId } = await fortyImpersonations(sent, extra, true);
+      const platform = await env.DB.prepare("SELECT id FROM ta_organization WHERE slug = ?")
+        .bind("platform-co")
+        .first<{ id: string }>();
+      const organizationId = platform?.id ?? "";
+      const roles = await env.DB.prepare("SELECT role FROM ta_member WHERE organization_id = ?")
+        .bind(organizationId)
+        .all<{ role: string }>();
+      expect(roles.results.map((m) => m.role)).toEqual(["operator,auditor", "operator,auditor"]);
+      expect(await impersonations()).toBe(40);
+      const r =
+        act === "removal"
+          ? await invoke(
+              sent,
+              "/organizations/members/remove",
+              asUser(first),
+              { organizationId, userId: bobId },
+              extra,
+            )
+          : await invoke(
+              sent,
+              "/organizations/members/role",
+              asUser(first),
+              { organizationId, userId: bobId, role: "auditor" },
+              extra,
+            );
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      // D1 Free allows 50 queries per invocation: the route, the role reads, the act, and the steps after it.
+      expect(r.queries).toBeLessThanOrEqual(50);
+      const inAct = endings.length;
+      const sweeps = await sweepAll(sent, extra);
+      expect(await impersonations()).toBe(0);
+      // Each impersonation session ends once, with one stop row of the cause.
+      expect(await stopCauses()).toEqual(Array(40).fill("role_loss"));
+      expect(endings.map((e) => e.reason)).toEqual(Array(40).fill("impersonation_end"));
+      expect(new Set(endings.map((e) => e.id)).size).toBe(40);
+      expect([r.queries, inAct, sweeps]).toEqual(
+        act === "removal" ? DYNAMIC_REMOVE_COUNTS : DYNAMIC_ROLE_COUNTS,
+      );
+      expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+    });
 
   it("keeps the own session of a removed operator through a later revoke (ruling 65 of plan 12f)", async () => {
     const sent: MailMessage[] = [];
