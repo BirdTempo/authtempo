@@ -1356,7 +1356,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     ),
     observe: observeConfig
       ? createObserver(observeConfig, { clock, hashSecret: () => currentSecret(keyring) })
-      : createDefaultObserver({ clock, secrets: secretValues(keyring) }),
+      : createDefaultObserver({ clock, secrets: secretValues(keyring, input.social) }),
     observeConfig,
     configKeys: configKeyPaths(input),
   };
@@ -1411,20 +1411,34 @@ function listOf<T>(path: string, value: T[] | undefined): T[] {
 const SECRET_MIN_LENGTH = 32;
 
 /**
+ * The scrub list of the default output (spec 31 item 9). It holds each
+ * secret string of the config: each keyring value, each social client
+ * secret, and the Apple private key. It also holds the parts of each value
+ * that a driver can print.
+ */
+function secretValues(keyring: Keyring, social: AuthConfig["social"]): ReadonlySet<string> {
+  const strings: unknown[] = [
+    ...keyring.versions.map((version) => keyring.valueOf(version)),
+    social?.google?.clientSecret,
+    social?.apple?.privateKey,
+    social?.github?.clientSecret,
+    social?.linkedin?.clientSecret,
+    ...(social?.oidc ?? []).map((e) => e.clientSecret),
+    ...(social?.oauth2 ?? []).map((e) => e.clientSecret),
+  ];
+  const values = new Set<string>();
+  for (const value of strings)
+    if (typeof value === "string") for (const part of secretParts(value)) values.add(part);
+  return values;
+}
+
+/**
  * `secret` and `secrets` as one keyring (plan 12b, spec 22). The rules:
  * one of the two at least; a version is an integer from 1 to 999999; no
  * version and no value twice; with both keys, `secret` is version 1. The
  * entropy rule refuses only the current value: a weak old version gets one
  * warning line, because a refusal would block the move away from it.
  */
-/** Each value of the keyring and the parts of it that a driver can print: the scrub list of the default output. */
-function secretValues(keyring: Keyring): ReadonlySet<string> {
-  const values = new Set<string>();
-  for (const version of keyring.versions)
-    for (const part of secretParts(keyring.valueOf(version) ?? "")) values.add(part);
-  return values;
-}
-
 function resolveSecrets(secret: unknown, secrets: unknown): Keyring {
   if (secret === undefined && secrets === undefined)
     throw new ConfigError("secret or secrets is required");

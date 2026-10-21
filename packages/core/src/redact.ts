@@ -60,7 +60,8 @@ export type FieldKind =
   | "durationMs"
   | "status"
   | "hash"
-  | "clientRef";
+  | "clientRef"
+  | "method";
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
@@ -68,6 +69,11 @@ const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
 const HASH_RE = /^[0-9a-f]{32}$/;
 /** A `cl_` id as it is, or `cimd:` and 32 hex of a metadata document URL (spec 31 item 8). */
 const CLIENT_REF_RE = /^(cl_[A-Za-z0-9_-]{1,64}|cimd:[0-9a-f]{32})$/;
+/**
+ * A request method: a token of RFC 9110 section 5.6.2, one or more tchar
+ * characters. The client chooses the method, so the kind caps it at 32.
+ */
+const METHOD_RE = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,32}$/;
 /** The `typeof` names that `appErrorName` gives for a thrown value that is no Error. */
 const TYPEOF_NAMES = new Set([
   "bigint",
@@ -117,12 +123,13 @@ export const FIELD_KINDS: Readonly<Record<FieldKind, (value: unknown) => unknown
     status: whole,
     hash: matches(HASH_RE),
     clientRef: matches(CLIENT_REF_RE),
+    method: matches(METHOD_RE),
   });
 
 /**
- * The reference of a client in an event and a log line (spec 31 item 8): a
- * `cl_` id as it is, else `cimd:` and the first 32 hex of the SHA-256 of the
- * metadata document URL. An event never holds the URL.
+ * The reference of a client in an event and a log line (spec 31 item 8).
+ * A `cl_` id stays as it is. Any other id gives `cimd:` and the first 32 hex
+ * of the SHA-256 of the metadata document URL. An event never holds the URL.
  */
 export async function clientRef(clientId: string): Promise<string> {
   if (clientId.startsWith("cl_")) return clientId;

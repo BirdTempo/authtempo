@@ -4,11 +4,11 @@ import { FIELD_KINDS } from "../src/redact.js";
 
 /**
  * From the grep of plan 12h Task 1 Step 1. A new line joins EVENTS and this list.
- * The 61 texts of the start list at 24c7237f, and the 2 texts of the 12k merge
- * read again at 91c26417: the waitUntil line of 12h Task 2 and the role row line
- * of 12k. A text that one call builds for each value is one text for each value:
- * the email code and second-factor counts, and the three sweep steps. A part
- * that a field fills is written `<field>`.
+ * The list holds the 61 texts of the start list at 24c7237f. It also holds the
+ * 2 texts of the 12k merge, read again at 91c26417. These are the waitUntil line
+ * of 12h Task 2 and the role row line of 12k. A call that builds a text for each
+ * value gives one text for each value. These are the email code and second-factor
+ * counts, and the three sweep steps. A part that a field fills is written `<field>`.
  */
 const START_LIST: readonly string[] = [
   "authtempo: the captcha port threw",
@@ -124,6 +124,13 @@ describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
     expect(validateEvent("social.token_status", { provider: "Google", status: 500 })).toEqual({
       fields: { status: 500 },
       rejected: ["provider"],
+    });
+  });
+
+  it("validateEvent rejects a value outside the list of an enum field", () => {
+    expect(validateEvent("hook.copy_failed", { hook: "x.y" })).toEqual({
+      fields: {},
+      rejected: ["hook"],
     });
   });
 

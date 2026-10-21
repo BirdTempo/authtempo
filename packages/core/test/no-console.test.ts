@@ -35,9 +35,12 @@ describe("console in core (plan 12h Task 3)", () => {
     const files = walk(fs, SRC);
     expect(files).toContain(DEFAULT_OUTPUT);
     // Read as text, comments too: a comment that names console. misleads the next reader.
-    const holders = files.filter(
-      (f) => f !== DEFAULT_OUTPUT && fs.readFileSync(new URL(f, SRC), "utf8").includes("console."),
-    );
+    // The console[ form is a call too, as in the default output itself.
+    const holders = files.filter((f) => {
+      if (f === DEFAULT_OUTPUT) return false;
+      const text = fs.readFileSync(new URL(f, SRC), "utf8");
+      return text.includes("console.") || text.includes("console[");
+    });
     expect(holders).toEqual([]);
   });
 });

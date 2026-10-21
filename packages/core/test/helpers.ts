@@ -117,5 +117,8 @@ export function noVerifyHooks(via: UserVerifyVia): VerifySteps {
   );
 }
 
-/** The observer of a config with no `observe`, for a test that calls an engine part directly: it writes the log lines of today (plan 12h). */
+/**
+ * The observer of a config with no `observe` (plan 12h). A test that calls an
+ * engine part directly uses it. It writes the log lines of today.
+ */
 export const DEFAULT_OBSERVE = createDefaultObserver({ clock: systemClock, secrets: new Set() });

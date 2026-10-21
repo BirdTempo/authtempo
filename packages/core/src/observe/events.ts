@@ -1,8 +1,9 @@
 /**
- * The event table of core (plan 12h, spec 31 item 6): each event name, its
- * level, its fields with a field kind, and the default line of each fault
- * event. The validator, the default output, the adapters, the events page,
- * and the test recorder read it. No second list of events exists.
+ * The event table of core (plan 12h, spec 31 item 6). It holds each event
+ * name, its level, and its fields with a field kind. A fault event also
+ * holds its default line. The validator, the default output, the adapters,
+ * the events page, and the test recorder read it. No second list of events
+ * exists.
  */
 import { CAPTCHA_FLOWS } from "../captcha.js";
 import {
@@ -163,8 +164,9 @@ const SWEEP_STOP = { errorClass: ERROR_CLASS } as const;
 
 /**
  * The events. The fault events (those with `line`) are one row for each
- * text of the log lines of core: the start list of plan 12h Task 1, read
- * again at the 12k merge (63 texts). Tasks 4 to 8 add the other groups.
+ * text of the log lines of core. The texts are the start list of plan 12h
+ * Task 1, read again at the 12k merge (63 texts). Tasks 4 to 8 add the
+ * other groups.
  */
 export const EVENTS = {
   "observe.dropped": {
@@ -203,7 +205,8 @@ export const EVENTS = {
     "error",
     "authtempo: unhandled error",
     {
-      method: enumOf(["GET", "POST", "OPTIONS"]),
+      // Each method token as today, HEAD too (ruling 12 of plan 12h): the router passes any method.
+      method: { kind: "method" },
       route: { kind: "route" },
       errorName: ERROR_NAME,
     },
@@ -536,8 +539,8 @@ function checked(spec: FieldSpec, value: unknown): unknown {
 
 /**
  * Checks each field against its kind (spec 31 item 7). It answers the kept
- * fields and the names of the rejected ones: a field that fails its kind,
- * and a field that the row does not name. It never drops the event.
+ * fields and the names of the rejected ones. A field is rejected when it
+ * fails its kind, or when the row does not name it. It never drops the event.
  */
 export function validateEvent(
   name: EventName,

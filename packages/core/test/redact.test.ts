@@ -77,6 +77,20 @@ describe("the redaction source (plan 12h Task 1, spec 31 item 9)", () => {
       expect(FIELD_KINDS.clientRef(bad), bad).toBe(REJECT);
   });
 
+  it("keeps each method token and refuses a value that is not one", () => {
+    for (const method of [
+      "GET",
+      "HEAD",
+      "PROPFIND",
+      "M-SEARCH",
+      "x!#$%&'*+.^_`|~9",
+      "A".repeat(32),
+    ])
+      expect(FIELD_KINDS.method(method), method).toBe(method);
+    for (const bad of ["", "GET /", "GE(T", "G\u00e9T", "A".repeat(33), 1])
+      expect(FIELD_KINDS.method(bad), String(bad)).toBe(REJECT);
+  });
+
   it("rejects a value that fails its kind", () => {
     expect(FIELD_KINDS.hash("x")).toBe(REJECT);
     expect(FIELD_KINDS.count(-1)).toBe(REJECT);

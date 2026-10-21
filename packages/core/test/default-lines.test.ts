@@ -69,10 +69,10 @@ import {
 
 /**
  * The default lines (plan 12h Task 3, spec 31 item 2). With no `observe`,
- * each fault event writes the line of today at once, word for word: one test
- * for each fault entry of EVENTS, named after the event. Each test causes
- * the fault through the flow, with the setup of the test that held the line
- * before the move, and asserts every argument.
+ * each fault event writes the line of today at once, word for word. One test
+ * covers each fault entry of EVENTS and has the name of the event. Each test
+ * causes the fault through the flow and asserts every argument. It uses the
+ * setup of the test that held the line before the move.
  */
 
 const SECRET = "0123456789abcdef0123456789abcdef";
@@ -112,6 +112,16 @@ function downStore(thrown: unknown): StorageAdapter {
 const sessionRead = () =>
   new Request(`${BASE_URL}/auth/session`, {
     headers: { authorization: `Bearer ts_${"a".repeat(43)}` },
+  });
+
+/**
+ * A request with the legacy session cookie and `method`. The cookie move
+ * reads the store for each method, so a store that is down throws at the boundary.
+ */
+const legacyRead = (method: string) =>
+  new Request(`${BASE_URL}/auth/session`, {
+    method,
+    headers: { cookie: `tempo_session=ts_${"a".repeat(43)}` },
   });
 
 /** A magic link sign-in to its end, through the engine. */
@@ -253,6 +263,34 @@ describe("the router line (plan 11g)", () => {
     const p = await passkeyWorld({ verifyRegistration: leaky });
     expect(await p.register()).toMatchObject({ ok: false, code: "passkey_failed" });
     expect(log.mock.calls).toEqual([["authtempo: passkey registration rejected", "Error"]]);
+  });
+
+  it("writes the method of the request, HEAD too", async () => {
+    const log = errors();
+    const res = await createAuth(input({ storage: downStore(new TypeError("db down")) })).handle(
+      legacyRead("HEAD"),
+    );
+    expect(res.status).toBe(500);
+    // The method of today, as 91c26417 wrote it (ruling 12 of plan 12h). HEAD /session is no route.
+    expect(log.mock.calls).toEqual([
+      ["authtempo: unhandled error", "HEAD", "unmatched", "TypeError"],
+    ]);
+  });
+
+  it("scrubs a social client secret from a line", async () => {
+    const clientSecret = "GOCSPX-scrub-0123456789abcdef";
+    const log = errors();
+    const auth = createAuth(
+      input({
+        storage: downStore(new TypeError("db down")),
+        social: { google: { clientId: "gid", clientSecret } },
+      }),
+    );
+    // A client sends the client secret as its method: the method kind keeps it, and the scrub writes ***.
+    expect((await auth.handle(legacyRead(clientSecret))).status).toBe(500);
+    expect(log.mock.calls).toEqual([
+      ["authtempo: unhandled error", "***", "unmatched", "TypeError"],
+    ]);
   });
 
   it("writes no line with a sink, and the sink gets the fault event", async () => {
@@ -444,7 +482,7 @@ async function passkeyWorld(
 
 /**
  * Another request writes the user row before each of the next `times` user
- * updates inside a transaction, so each compare of the flow matches no row.
+ * updates inside a transaction. Thus each compare of the flow matches no row.
  */
 function raceUserWrites(storage: StorageAdapter, userId: string, times = 5) {
   const original = storage.transaction.bind(storage);
@@ -1441,6 +1479,30 @@ describe("the operator lines (plan 12f)", () => {
     expect(log.mock.calls).toEqual([
       ["authtempo: operator route unauthorized", "GET /operator/users", "secret_mismatch"],
     ]);
+  });
+
+  it("keeps the operator 401 as one event with a sink, and writes no line", async () => {
+    const { sink, events } = recording();
+    const auth = await operatorAuth({ observe: { sink } });
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const log = errors();
+    const res = await handle(
+      new Request(`${BASE_URL}/auth/operator/users`, {
+        headers: { authorization: "Operator operator-wrong-0123456789abcdef-012345" },
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(log).not.toHaveBeenCalled();
+    await auth.config.observe.flush();
+    // The one-line promise of spec 9 (ruling 1 point 19 of plan 12h): one fault event, no second.
+    const faults = events().filter((e) => (EVENTS as Record<string, EventSpec>)[e.name]?.line);
+    expect(faults).toHaveLength(1);
+    expect(faults[0]).toMatchObject({
+      name: "operator.route_unauthorized",
+      level: "error",
+      route: "GET /operator/users",
+      reason: "secret_mismatch",
+    });
   });
 
   /** A user, and the draft of a ban of that user by the app. */
