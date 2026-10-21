@@ -24,7 +24,8 @@ describe("checkConfig", () => {
     // Plan 12d Task 2b adds sso, its five keys, sso.saml.clockSkewSeconds, and the two
     // keys of sso.limits.
     // Plan 12d Task 9b adds scim, scim.groups, and scim.defaultRole.
-    expect(keys.length).toBe(209);
+    // Plan 12d Task 5 adds totp.gate.sso and hooks.sso.
+    expect(keys.length).toBe(211);
     expect(keys).toContain("observe.include.email");
     expect(keys).toContain("hooks.operator");
     expect(keys).toContain("operator.secrets[].scopes");

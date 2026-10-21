@@ -24,7 +24,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 
 ## Steps
 
-1. Pass plain objects of functions in `hooks.organization`, `hooks.session`, `hooks.user`, `hooks.identity`, and `hooks.operator`.
+1. Pass plain objects of functions in `hooks.organization`, `hooks.session`, `hooks.user`, `hooks.identity`, `hooks.operator`, and `hooks.sso`.
 2. To refuse, throw `hookRefusal(message)` in a before hook. The caller gets `hook_refused` with your message.
 3. To write the app's own row with each core row, write it in the before hook.
    - The app's row takes the id that core minted, so the two rows match.
@@ -44,9 +44,10 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 | `hooks.user` | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeVerify`, `afterVerify` |
 | `hooks.identity` | `beforeLink`, `afterLink`, `beforeUnlink`, `afterUnlink` |
 | `hooks.operator` | `beforeAction`, `afterAction` |
-| `via` of a member | `create`, `add`, `invitation`, `operator`; for a removal `remove`, `leave`, or `operator` |
-| `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `impersonation` |
-| `via` of a user create | the `via` of the sign-in, `password_reset` for a reset that creates the user, or `operator` for `createAdmin` |
+| `hooks.sso` | `beforeSignIn` |
+| `via` of a member | `create`, `add`, `invitation`, `operator`, `sso`, `scim`; for a removal `remove`, `leave`, `operator`, or `scim` |
+| `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `impersonation`, `sso` |
+| `via` of a user create | the `via` of the sign-in, `password_reset` for a reset that creates the user, `operator` for `createAdmin`, or `scim` for a create by the directory |
 | `via` of a user update | `profile`, `email_change`, `ban`, `unban` |
 | `via` of a user verify | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset` |
 | `via` of an identity link | `sign_in` for a social sign-in, `link` for the link of a signed-in user |
@@ -84,6 +85,12 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 Warning: on Postgres with a pool of one connection, a before hook that queries the same client stops the request until the pool times out. Use a second connection for the app's own write.
 :::
 
+## The SSO hook point
+
+- `hooks.sso` needs `sso`.
+- `beforeSignIn` gets the connection, the profile from the provider, and the user that the sign-in answers. The user is null when the sign-in creates the user.
+- It runs in the sign-in's transaction, before its first write. A refusal answers `hook_refused`, and the sign-in writes nothing.
+
 ## The operator hook points
 
 - `hooks.operator` needs `operator.users`. [Run the operator tools](/docs/guides/operator-tools/) turns the tools on.
@@ -108,7 +115,7 @@ Some flows lock a row before their before hook. The lock holds until the commit.
 | Flow | Before hooks | Rows locked before the hook |
 | --- | --- | --- |
 | Organization create | `organization.beforeCreate`, `organization.beforeAddMember` | the creator's user row |
-| Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row |
+| Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row; in an SSO sign-in that claims the address, also the sessions that the claim ends |
 | Invitation accept | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the accepting user's row; for a new member with `membersPerOrganization`, the organization row; each team row of the invitation |
 | Invite | `organization.beforeInvite` | with `pendingInvitationsPerOrganization`, the organization row |
 | Member removal or leave | `organization.beforeRemoveMember` | the person's user row and sessions; for an owner or with `revokeTokens`, the organization row; for a loss of the platform role, the sessions of each impersonation that the person opened |

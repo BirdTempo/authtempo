@@ -13,6 +13,7 @@ import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
 import { gatedSteps, type TwoFactorPending, touchTrust } from "./second-factor.js";
 import { challengeOpened, endedList, sessionOpened, sessionsEnded } from "./sessions.js";
+import { enforcedAnswer, ssoRequiredFor } from "./sso/enforce.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { attemptsOf, countAttempt, MAILED_CODES_PER_EMAIL_DAY } from "./verification.js";
 
@@ -181,6 +182,8 @@ async function requestCode(
   if (!(await limit(config, "otp:email", email, REQUEST_PER_EMAIL))) return fail("rate_limited");
   if (!(await limit(config, "otp:email-day", email, MAILED_CODES_PER_EMAIL_DAY)))
     return fail("rate_limited");
+  // An enforced address gets no mail and the normal answer, so the answer tells nothing (plan 12d).
+  if (await ssoRequiredFor(config, email)) return ok({ sent: true });
   const code = await issueCode(config, otp, purpose, email, {});
   const build = purpose === "email-otp" ? otp.mail : otp.resetMail;
   const message = build({ email, code, ttlMinutes: otp.ttlMinutes, appName: config.appName });
@@ -314,6 +317,9 @@ export async function verifyEmailOtp(
   if (!config.emailOtp) return fail("not_found");
   const gate = await verifyGate(config, input);
   if (!gate.ok) return gate;
+  // Only SSO signs in an address of an enforced domain (plan 12d, spec 30 item 12).
+  const enforced = gate.value === null ? null : await enforcedAnswer(config, gate.value);
+  if (enforced) return enforced;
   const now = config.clock.now();
   const checked = await checkCode(config, "email-otp", gate.value, input.code, now);
   if (!checked.ok) return checked;

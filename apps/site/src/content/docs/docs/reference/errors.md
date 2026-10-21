@@ -576,6 +576,51 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /sso/discover`](/docs/reference/routes/#post-sso-discover) as a form post, [`GET /sso/:connectionId/start`](/docs/reference/routes/#get-sso-connectionid-start), and [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback), in the `auth_error` query parameter of the redirect. |
 
+<h3 id="sso_required"><code>sso_required</code> 403</h3>
+
+- **Meaning:** The address is in a verified domain whose owner turned `enforce` on, so only SSO signs it in. The body holds `detail`, the SSO start path. A social callback carries the code in the `auth_error` query parameter of the redirect.
+- **Do:** Send the person to `detail` to sign in through the organization's provider. The magic link, email code, and reset requests of such an address send no mail and answer as usual.
+
+| Routes |
+| --- |
+| [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), and [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify). |
+
+<h3 id="sso_domain_mismatch"><code>sso_domain_mismatch</code> 403</h3>
+
+- **Meaning:** The provider of the connection gave an address that no verified domain of the connection's organization claims. Core never reads the `email_verified` of the provider: only the organization's DNS proof makes an address true.
+- **Do:** Ask the organization owner to verify the domain of the address, or to fix the address at the provider.
+
+| Routes |
+| --- |
+| [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback), in the `auth_error` query parameter of the redirect. |
+
+<h3 id="sso_not_provisioned"><code>sso_not_provisioned</code> 403</h3>
+
+- **Meaning:** The connection has `jit` off, and no user has the address. The sign-in creates no user.
+- **Do:** Ask the organization to create the account first, for example through its directory.
+
+| Routes |
+| --- |
+| [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback), in the `auth_error` query parameter of the redirect. |
+
+<h3 id="account_disabled"><code>account_disabled</code> 403</h3>
+
+- **Meaning:** The organization's directory turned the user off through SCIM, so the SSO sign-in of that organization refuses the user.
+- **Do:** Ask the organization to turn the account on again in its directory.
+
+| Routes |
+| --- |
+| [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback), in the `auth_error` query parameter of the redirect. |
+
+<h3 id="role_not_found"><code>role_not_found</code> 409</h3>
+
+- **Meaning:** The connection gives new members a role that the organization no longer has, so the sign-in adds no member row and writes nothing.
+- **Do:** Ask the organization owner to set the connection's `defaultRole` to a role that exists.
+
+| Routes |
+| --- |
+| [`GET /sso/:connectionId/callback`](/docs/reference/routes/#get-sso-connectionid-callback), in the `auth_error` query parameter of the redirect. |
+
 <h3 id="role_in_use"><code>role_in_use</code> 409</h3>
 
 - **Meaning:** A member of the organization or a pending invitation holds the role name, alone or as a part of its role string. A delete of the role, or a create of a role with that name, answers this code.

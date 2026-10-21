@@ -99,6 +99,15 @@ export const ERRORS = {
   // is gone, is off, or is of a kind that cannot sign in yet.
   sso_failed: 400,
   sso_not_configured: 404,
+  // plan 12d Task 5: only SSO signs in an address of an enforced domain; the
+  // address is outside the verified domains of the connection's organization;
+  // the connection creates no user (jit off); SCIM deactivated the user.
+  sso_required: 403,
+  sso_domain_mismatch: 403,
+  sso_not_provisioned: 403,
+  account_disabled: 403,
+  // plan 12d ruling 25 N2: the connection's default role is gone from the organization.
+  role_not_found: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

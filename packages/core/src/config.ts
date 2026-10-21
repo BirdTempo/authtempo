@@ -35,6 +35,8 @@ import {
   type ResolvedHooks,
   SESSION_HOOK_POINTS,
   type SessionHooks,
+  SSO_HOOK_POINTS,
+  type SsoHooks,
   USER_HOOK_POINTS,
   type UserHooks,
 } from "./engine/hooks.js";
@@ -514,6 +516,11 @@ export interface TotpGateConfig {
   emailOtp?: boolean;
   /** Every social provider. Default true. */
   social?: boolean;
+  /**
+   * Every SSO connection (plan 12d). Default true. A connection's `mfa` list
+   * passes the gate when the IdP asserts one of its values.
+   */
+  sso?: boolean;
 }
 
 export interface TotpConfig {
@@ -556,7 +563,7 @@ export interface ResolvedTotp {
   trustDays: number;
   trustCookieName: string;
   challengePage: (input: TotpChallengePageInput) => string;
-  gate: { magicLink: boolean; emailOtp: boolean; social: boolean };
+  gate: { magicLink: boolean; emailOtp: boolean; social: boolean; sso: boolean };
   emailMail: (input: EmailOtpMailInput) => MailMessage;
 }
 
@@ -1433,6 +1440,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       input.hooks,
       organizations !== null,
       typeof input.operator === "object" && input.operator.users === true,
+      input.sso !== undefined && input.sso !== false,
     ),
     account: resolveAccount(input.account),
     captcha: resolveCaptcha(
@@ -1851,19 +1859,20 @@ const TOTP_GATE_KEYS: Readonly<Record<keyof TotpGateConfig, true>> = {
   magicLink: true,
   emailOtp: true,
   social: true,
+  sso: true,
 };
 
 /** `totp.gate` (plan 12c): each method on unless the app sets it false. */
 function resolveGate(input: unknown): ResolvedTotp["gate"] {
-  const gate = { magicLink: true, emailOtp: true, social: true };
+  const gate = { magicLink: true, emailOtp: true, social: true, sso: true };
   if (input === undefined) return gate;
   if (!isPlainObject(input)) throw new ConfigError("totp.gate must be an object");
   for (const [key, value] of Object.entries(input))
     if (value !== undefined && !Object.hasOwn(TOTP_GATE_KEYS, key))
       throw new ConfigError(
-        `totp.gate.${key} is not an option; core has magicLink, emailOtp, and social. The handoff has no key: it continues a browser session that passed the gate`,
+        `totp.gate.${key} is not an option; core has magicLink, emailOtp, social, and sso. The handoff has no key: it continues a browser session that passed the gate`,
       );
-  for (const key of ["magicLink", "emailOtp", "social"] as const) {
+  for (const key of ["magicLink", "emailOtp", "social", "sso"] as const) {
     const value = (input as TotpGateConfig)[key];
     if (value === undefined) continue;
     if (typeof value !== "boolean") throw new ConfigError(`totp.gate.${key} must be true or false`);
@@ -2626,20 +2635,28 @@ function hookGroup(
 }
 
 /** The hook groups of core. The refusal message names them in this order. */
-const HOOK_GROUPS: readonly string[] = ["organization", "session", "user", "identity", "operator"];
+const HOOK_GROUPS: readonly string[] = [
+  "organization",
+  "session",
+  "user",
+  "identity",
+  "operator",
+  "sso",
+];
 
 function resolveHooks(
   input: HooksConfig | undefined,
   organizationsOn: boolean,
   operatorUsersOn: boolean,
+  ssoOn: boolean,
 ): ResolvedHooks {
   if (input === undefined)
-    return { organization: {}, session: {}, user: {}, identity: {}, operator: {} };
+    return { organization: {}, session: {}, user: {}, identity: {}, operator: {}, sso: {} };
   if (!isHookObject(input)) throw new ConfigError("hooks must be a plain object");
   for (const key of Object.keys(input))
     if (!HOOK_GROUPS.includes(key))
       throw new ConfigError(
-        `hooks.${key} is not a hook group; core has organization, session, user, identity, and operator`,
+        `hooks.${key} is not a hook group; core has organization, session, user, identity, operator, and sso`,
       );
   // Each value passed the function check in hookGroup; the interfaces type the events.
   const organization = hookGroup(
@@ -2668,7 +2685,11 @@ function resolveHooks(
   // Only an operator act runs these points, and the acts need operator.users.
   if (Object.keys(operator).length > 0 && !operatorUsersOn)
     throw new ConfigError("hooks.operator needs operator.users: the hooks would never run");
-  return { organization, session, user, identity, operator };
+  const sso = hookGroup("hooks.sso", input.sso, SSO_HOOK_POINTS) as unknown as SsoHooks;
+  // Only an SSO sign-in runs this point (plan 12d).
+  if (Object.keys(sso).length > 0 && !ssoOn)
+    throw new ConfigError("hooks.sso needs sso: the hooks would never run");
+  return { organization, session, user, identity, operator, sso };
 }
 
 const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {

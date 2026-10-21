@@ -158,7 +158,7 @@ export async function seedPlatform(auth: ReturnType<typeof makeAuth>) {
 export function noVerifyHooks(via: UserVerifyVia): VerifySteps {
   return verifySteps(
     {
-      hooks: { organization: {}, session: {}, user: {}, identity: {}, operator: {} },
+      hooks: { organization: {}, session: {}, user: {}, identity: {}, operator: {}, sso: {} },
       observe: DEFAULT_OBSERVE,
     },
     via,

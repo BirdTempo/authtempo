@@ -136,6 +136,8 @@ export interface SessionInput {
   freshAt?: Date;
   /** Set only through `openSession` for an impersonation (plan 12f). */
   impersonation?: SessionImpersonation;
+  /** The latest expiry that the sign-in allows: a SAML `SessionNotOnOrAfter` (plan 12d). */
+  notAfter?: Date;
 }
 
 /**
@@ -162,6 +164,8 @@ export interface SessionOpen {
   signedInAt?: Date;
   /** The marks of an impersonation session, with `via: "impersonation"` (plan 12f). */
   impersonation?: SessionImpersonation;
+  /** The latest expiry that the sign-in allows: a SAML `SessionNotOnOrAfter` (plan 12d). */
+  notAfter?: Date;
 }
 
 export interface ResolvedSession {
@@ -189,11 +193,14 @@ export async function createSession(
 ): Promise<{ token: string; session: SessionRow }> {
   const now = config.clock.now();
   const token = randomToken(SESSION_TOKEN_PREFIX);
+  const expiry = input.impersonation?.expiresAt ?? sessionExpiry(config, now, now);
   const session = await storage.create("session", {
     id: newId(now),
     userId: input.userId,
     tokenHash: await sha256Hex(token),
-    expiresAt: input.impersonation?.expiresAt ?? sessionExpiry(config, now, now),
+    // The IdP's cap holds when it is earlier (plan 12d Task 5 Behavior 9).
+    expiresAt:
+      input.notAfter && input.notAfter.getTime() < expiry.getTime() ? input.notAfter : expiry,
     lastSeenAt: now,
     ip: input.ip,
     userAgent: input.userAgent,
@@ -315,8 +322,9 @@ export async function prepareSession(
   );
   const patched = await patchedInput(config, storage, draft, patch);
   const signedIn = input.signedInAt ? { ...patched, freshAt: input.signedInAt } : patched;
+  const capped = input.notAfter ? { ...signedIn, notAfter: input.notAfter } : signedIn;
   const prepared = {
-    input: input.impersonation ? { ...signedIn, impersonation: input.impersonation } : signedIn,
+    input: input.impersonation ? { ...capped, impersonation: input.impersonation } : capped,
   };
   // After the hook: the hold is a write, and a before hook runs before the
   // first write (the D1 undo). Before the flow's other writes: the lock order.

@@ -178,6 +178,12 @@ afterEach(async () => {
  */
 function world(teams: { keepLastTeam?: boolean } = {}) {
   const sent: MailMessage[] = [];
+  // The fake DNS and the fake IdP of the SSO sign-in (plan 12d Task 5). The
+  // token endpoint answers the code as the ID token, and the jwt seam knows
+  // the tokens of `idTokens`.
+  const txt: Record<string, string[]> = {};
+  const idTokens: Record<string, Record<string, unknown>> = {};
+  const dns = (name: string) => ({ name, txt: async (asked: string) => txt[asked] ?? [] });
   let current: string | null = null;
   const runs: { flow: string; steps: Step[] }[] = [];
   /** The engine site of each transaction that a flow opens, nested ones too. */
@@ -243,6 +249,24 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
       ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
     },
     operator: { users: true, impersonation: {} },
+    sso: {
+      oidc: true,
+      dns: [dns("a"), dns("b")],
+      fetch: async (_url, init) => {
+        const code = new URLSearchParams(typeof init?.body === "string" ? init.body : "").get(
+          "code",
+        );
+        return Response.json({ id_token: code, token_type: "Bearer" });
+      },
+    },
+    jwt: {
+      verifyIdToken: async (input) => {
+        const claims = idTokens[input.token];
+        if (!claims) throw new Error("fake jwt: verify failed");
+        return claims;
+      },
+      signES256: async () => "es256",
+    },
   });
   const post = (path: string, body: unknown, cookie: string) =>
     auth.handle(
@@ -374,6 +398,8 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
   return {
     auth,
     storage,
+    txt,
+    idTokens,
     signIn,
     sessionOf,
     operator,
@@ -491,6 +517,41 @@ async function scene(w: World) {
   const oliSecond = await w.signIn("oli@example.com");
   await activate(w, oliSecond, oliCo, den);
 
+  // Plan 12d Task 5: Acme proves example.org and adds an OIDC connection. Uma
+  // signs up at that domain by password and does not verify the address.
+  const sso = w.auth.api.sso;
+  if (!sso) throw new Error("no sso api");
+  const domain = must(
+    await sso.domains.add({ actor: APP, organizationId: acme, domain: "example.org" }),
+  );
+  if (domain.record === null) throw new Error("no domain record");
+  w.txt[domain.record.name] = [domain.record.value];
+  must(await sso.domains.verify({ actor: APP, id: domain.id }));
+  const connection = must(
+    await sso.connections.create({
+      actor: APP,
+      organizationId: acme,
+      kind: "oidc",
+      label: "Acme IdP",
+      issuer: "https://login.acme-idp.example",
+      clientId: "acme-client",
+      clientSecret: "acme-secret-0123456789",
+      endpoints: {
+        authorizeUrl: "https://login.acme-idp.example/authorize",
+        tokenUrl: "https://login.acme-idp.example/token",
+        jwksUrl: "https://login.acme-idp.example/keys",
+      },
+    }),
+  ).id;
+  must(
+    await passwordApi(w).signUp({
+      email: "uma@example.org",
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    }),
+  );
+
   return {
     ada,
     bob: bobActive,
@@ -503,6 +564,7 @@ async function scene(w: World) {
     acme,
     core,
     oliCo,
+    connection,
     impersonation: started.token,
   };
 }
@@ -624,6 +686,8 @@ const TOUCHED: Record<string, string[]> = {
   "an email claim by the sign-up link": ["user", "session"],
   "a second factor enable": ["user", "session"],
   "an email change": ["user", "session"],
+  // Plan 12d Task 5: the claim of Uma, then her member row of Acme, then her session.
+  "an SSO sign-in that claims a user": ["user", "session", "member"],
 };
 
 /** Each flow of plans 12f and 12k that writes a kind of user-hold.ts, most of them two kinds or more. */
@@ -765,6 +829,27 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     w.auth.api.operator.sessions.endUser({ actor: APP, userId: s.pat.user.id, ...reason }),
   "an end of all sessions": (w) => w.auth.api.operator.sessions.endAll({ actor: APP, ...reason }),
   "a sign-in": async (w) => ({ ok: true, value: await w.signIn("pat@example.com") }),
+  "an SSO sign-in that claims a user": async (w, s) => {
+    const started = await w.auth.handle(new Request(`${API}/auth/sso/${s.connection}/start`));
+    const url = new URL(started.headers.get("location") ?? "");
+    const bind = started.headers
+      .getSetCookie()
+      .find((c) => c.startsWith("__Secure-tempo_session_oauth="))
+      ?.split(";")[0];
+    w.idTokens["code-uma"] = {
+      sub: "uma-1",
+      email: "uma@example.org",
+      nonce: url.searchParams.get("nonce") ?? "",
+    };
+    const q = new URLSearchParams({ code: "code-uma", state: url.searchParams.get("state") ?? "" });
+    const res = await w.auth.handle(
+      new Request(`${API}/auth/sso/${s.connection}/callback?${q}`, {
+        headers: { cookie: bind ?? "" },
+      }),
+    );
+    const error = new URL(res.headers.get("location") ?? "", API).searchParams.get("auth_error");
+    return error === null ? { ok: true, value: res.status } : { ok: false, code: error };
+  },
   "an invitation accept that raises a member": async (w, s) => {
     must(
       await w.auth.api.inviteMember({
@@ -922,8 +1007,8 @@ const SITES: Record<string, readonly string[] | string> = {
   "session-list revokeSession": "one kind: a session row",
   "session-list revokeOtherSessions": "one kind: session rows",
   "social completeLink": "one kind: an update of the session, then a new identity row",
-  "social resolveSocialUser":
-    "a sign-in by a provider: claimEmail, then the session, as in an email claim by a magic link",
+  // Plan 12d Task 5: the SSO sign-in resolves through it, and adds a member row.
+  "social resolveSocialUser": ["an SSO sign-in that claims a user"],
   "sweep sweepLinks": "no kind: oauth logout rows only",
   "sweep sweepExpired": "one kind: ended session rows",
   "teams createTeam": ["a team create"],

@@ -33,6 +33,7 @@ import {
   sessionsEnded,
   writeSession,
 } from "./sessions.js";
+import { enforcedAnswer, ssoRequiredFor } from "./sso/enforce.js";
 import {
   deleteTwoFactorChallenges,
   secondFactorOn,
@@ -224,6 +225,9 @@ export async function passwordSignUp(
   // Before the policy and before any read: the policy and the lookups trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return fail("invalid_body");
+  // Only SSO signs in an address of an enforced domain (plan 12d, spec 30 item 12).
+  const enforced = await enforcedAnswer(config, email);
+  if (enforced) return enforced;
   // Before any read of a user: the answer is the same for every address (plan 12b).
   if (config.signUp === false) return fail("sign_up_closed");
   const name = input.name;
@@ -650,6 +654,9 @@ export async function passwordSignIn(
   const email = normalizeEmail(input.email);
   if (email !== null && !(await limit(config, "password:email", email, SIGN_IN_PER_EMAIL)))
     return fail("rate_limited");
+  // Only SSO signs in an address of an enforced domain (plan 12d, spec 30 item 12).
+  const enforced = email === null ? null : await enforcedAnswer(config, email);
+  if (enforced) return enforced;
   // The length is the caller's own input, so this refusal tells nothing about an account. It bounds the CPU.
   if ([...input.password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
   // The floor of every failure from here on (spec 17.4). Date.now, not the
@@ -983,6 +990,8 @@ export async function requestPasswordReset(
   if (captcha) return captcha;
   if (!(await limit(config, "password-reset:email", email, RESET_PER_EMAIL)))
     return fail("rate_limited");
+  // An enforced address gets no mail and the normal answer, so the answer tells nothing (plan 12d).
+  if (await ssoRequiredFor(config, email)) return ok({ sent: true });
   const now = config.clock.now();
   const token = randomToken(PASSWORD_RESET_PREFIX);
   await config.storage.create("verification", {
@@ -1485,6 +1494,9 @@ export async function changePassword(
   // With the factor on, the password proves one factor only (ASVS 5.0.0
   // 7.5.1). Both need a fresh session (plan 12a). The two reads come before
   // the limit, so a stale session counts no try.
+  // A first password is a new first factor: none for an address of an enforced domain (plan 12d).
+  const enforced = row ? null : await enforcedAnswer(config, user.email);
+  if (enforced) return enforced;
   if (!row || (await secondFactorOn(config, user.id))) {
     const fresh = requireFresh(config, session);
     if (!fresh.ok) return fresh;

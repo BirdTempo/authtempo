@@ -40,11 +40,8 @@ export async function readJson<T>(request: Request, schema: z.ZodType<T>): Promi
 
 export function respond<T>(result: Result<T>, headers: Record<string, string> = {}): Response {
   if (result.ok) return json(result.value, 200, headers);
-  return json(
-    result.message !== undefined
-      ? { error: result.code, message: result.message }
-      : { error: result.code },
-    result.status,
-    headers,
-  );
+  const body: { error: string; message?: string; detail?: string } = { error: result.code };
+  if (result.message !== undefined) body.message = result.message;
+  if (result.detail !== undefined) body.detail = result.detail;
+  return json(body, result.status, headers);
 }

@@ -344,6 +344,9 @@ function profileOf(claims: Record<string, unknown>): SsoProfile | null {
     image: image !== null && validImageUrl(image) ? image : null,
     amr: stringList(claims.amr),
     acr: typeof claims.acr === "string" ? claims.acr : null,
+    // SAML fields: an OIDC sign-in has neither.
+    authnContext: null,
+    sessionNotOnOrAfter: null,
   };
 }
 

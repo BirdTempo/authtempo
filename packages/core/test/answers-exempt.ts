@@ -412,7 +412,23 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows(
     "account_banned",
     "the sign-in needs a passkey ceremony or a provider exchange; operator-ban-doors.test.ts proves the ban at the engine door of each",
-    [...CALLBACKS, "POST /passkey/authenticate/verify"],
+    [...CALLBACKS, "POST /passkey/authenticate/verify", "GET /sso/:connectionId/callback"],
+  ),
+  // Plan 12d Task 5: the doors of the enforcement and the SSO resolution.
+  ...rows(
+    "sso_required",
+    "the Apple callback needs an Apple key; sso/enforce.test.ts drives the same door of completeSocial through the Google callback",
+    ["POST /social/apple/callback"],
+  ),
+  ...rows(
+    "account_disabled",
+    "no flow writes a scimUser row before the SCIM Users of plan 12d Task 10, which proves the refusal",
+    ["GET /sso/:connectionId/callback"],
+  ),
+  ...rows(
+    "conflict",
+    "five lost rounds of the user hold, or an account delete inside the sign-in; no request can cause either on its own",
+    ["GET /sso/:connectionId/callback"],
   ),
   ...rows(
     "account_banned",

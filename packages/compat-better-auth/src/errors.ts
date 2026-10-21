@@ -157,6 +157,12 @@ export const BETTER_AUTH_CODES = {
   // Plan 12d Task 4, by the same rule until Task 14.
   sso_failed: "SSO_FAILED",
   sso_not_configured: "SSO_NOT_CONFIGURED",
+  // Plan 12d Task 5, by the same rule until Task 14.
+  sso_required: "SSO_REQUIRED",
+  sso_domain_mismatch: "SSO_DOMAIN_MISMATCH",
+  sso_not_provisioned: "SSO_NOT_PROVISIONED",
+  account_disabled: "ACCOUNT_DISABLED",
+  role_not_found: "ROLE_NOT_FOUND",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

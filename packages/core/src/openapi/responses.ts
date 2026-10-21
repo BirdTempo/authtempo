@@ -25,6 +25,10 @@ export const ERROR_SCHEMAS = {
         enum: ["storage", "schema"],
         description: "What is not ready. Present only on `not_ready`.",
       },
+      detail: {
+        type: "string",
+        description: "The SSO start path of the address. Present only on `sso_required`.",
+      },
     },
     required: ["error"],
     additionalProperties: false,

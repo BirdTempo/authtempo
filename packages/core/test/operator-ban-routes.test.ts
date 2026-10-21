@@ -42,6 +42,8 @@ const BAN_ROUTES = [
   "POST /handoff/redeem",
   "POST /totp/verify",
   "POST /totp/challenge",
+  // Plan 12d Task 5: the SSO callback opens a session through prepareSession.
+  "GET /sso/:connectionId/callback",
 ] as const;
 
 /** The routes of the operator tools that refuse a banned target (plan 12f Task 10). */

@@ -93,6 +93,11 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   second_factor_required: "Turn on a second factor first, then try again.",
   sso_failed: "The single sign-on did not complete. Try again.",
   sso_not_configured: "Single sign-on is not set up for this address.",
+  sso_required: "This address signs in with single sign-on only.",
+  sso_domain_mismatch: "The organization did not prove the domain of this address.",
+  sso_not_provisioned: "Ask your organization to give you access first.",
+  account_disabled: "Your organization turned off this account.",
+  role_not_found: "The organization no longer has the role of this sign-in.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

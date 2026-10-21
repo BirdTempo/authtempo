@@ -1210,7 +1210,7 @@ const auth = createAuth({
 | Flow | Before hooks | Rows locked before the hook |
 | --- | --- | --- |
 | Organization create | `organization.beforeCreate`, `organization.beforeAddMember` | the creator's user row |
-| Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row |
+| Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row; in an SSO sign-in that claims the address, also the sessions that the claim ends |
 | Invitation accept | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the accepting user's row; for a new member with `membersPerOrganization`, the organization row; each team row of the invitation |
 | Invite | `organization.beforeInvite` | with `pendingInvitationsPerOrganization`, the organization row |
 | Member removal or leave | `organization.beforeRemoveMember` | the person's user row and sessions; for an owner or with `revokeTokens`, the organization row; for a loss of the platform role, the sessions of each impersonation that the person opened |
@@ -1318,6 +1318,10 @@ const auth = createAuth({
   a flow creates verified fires `beforeCreate` and `afterCreate`, not these
   points. The change of address fires `beforeUpdate` and `afterUpdate`. A
   verify is not a change of a credential, so it sends no notice mail.
+- SSO point (plan 12d): `hooks.sso.beforeSignIn`, with the connection,
+  the IdP's profile, and the user that the sign-in answers, or null for a
+  create. It needs `sso`. It runs in the sign-in's transaction before its
+  first write. A refusal answers `hook_refused` with no write.
 - Operator points (plan 12f): `hooks.operator.beforeAction` and
   `afterAction`. They need `operator.users`. `beforeAction` gets the audit
   row with no id, before the act's transaction, and a refusal answers

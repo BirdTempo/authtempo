@@ -322,11 +322,13 @@ describe("the OIDC sign-in of an SSO connection (plan 12d Task 4)", () => {
         image: "https://img.acme.example/a.png",
         amr: ["mfa", "pwd"],
         acr: "urn:x",
+        authnContext: null,
+        sessionNotOnOrAfter: null,
       },
     ]);
-    // Task 5 writes the resolution; until then the answer is sso_failed at the step resolve.
-    expect(r).toEqual({ ok: false, code: "sso_failed", status: 400 });
-    expect(stepsOf(a)).toEqual(["resolve"]);
+    // The organization proved no domain, so the resolution of Task 5 refuses the address.
+    expect(r).toEqual({ ok: false, code: "sso_domain_mismatch", status: 403 });
+    expect(stepsOf(a)).toEqual([]);
     const exchange = w.calls.find((c) => c.url === endpointsOf("acme").tokenUrl);
     expect(exchange?.form).toEqual({
       grant_type: "authorization_code",

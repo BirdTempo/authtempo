@@ -21,6 +21,9 @@ import {
 import { enableEmailMethod } from "../src/engine/second-factor-methods.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startSocial } from "../src/engine/social.js";
+import { createConnection } from "../src/engine/sso/connections.js";
+import { addDomain, verifyDomain } from "../src/engine/sso/domains.js";
+import { completeSsoOidc, startSso } from "../src/engine/sso/oidc.js";
 import { verifyTwoFactor } from "../src/engine/totp.js";
 import { randomBase64Url, sha256Base64Url } from "../src/primitives/crypto.js";
 import type { Result } from "../src/result.js";
@@ -29,7 +32,8 @@ import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { tokenFromMail } from "./helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
 import { recordNextTransaction, signUpAndVerify } from "./password-helpers.js";
-import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
+import { type FakeIdToken, fakeFetch, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
+import { fakeDns, SSO_APP, seedOrganization } from "./sso/helpers.js";
 import { codeNow, enrolled, PASSWORD } from "./totp-helpers.js";
 
 const EMAIL = "ada@example.com";
@@ -46,8 +50,14 @@ async function world(extra: Partial<AuthConfig> = {}) {
   const tokens: Record<string, FakeIdToken> = {};
   const { fetchFn } = tokenEndpoint("idtok-default");
   const before: SessionVia[] = [];
+  // The fake DNS ports and the fake IdP of the SSO door (plan 12d Task 5).
+  const txt: Record<string, string[]> = {};
+  const idp = fakeFetch((call) =>
+    Response.json({ id_token: call.form.code, token_type: "Bearer" }),
+  );
   const auth = await operatorAuth({
     social: { google: GOOGLE, fetch: fetchFn },
+    sso: { oidc: true, fetch: idp.fetchFn, dns: [fakeDns("a", txt), fakeDns("b", txt)] },
     jwt: fakeJwt(tokens),
     passkey: RP,
     handoff: { schemes: ["consumera://"] },
@@ -60,7 +70,7 @@ async function world(extra: Partial<AuthConfig> = {}) {
     },
     ...extra,
   });
-  return { auth, tokens, before };
+  return { auth, tokens, before, txt };
 }
 
 type World = Awaited<ReturnType<typeof world>>;
@@ -125,6 +135,52 @@ async function social(w: World): Promise<Answer> {
     ip: null,
     userAgent: null,
   });
+}
+
+/** One OIDC sign-in of the address through the engine of plan 12d Task 4, with the fake IdP. */
+async function sso(w: World, connectionId: string): Promise<Answer> {
+  const started = await startSso(w.auth.config, { connectionId, next: "/", ip: null });
+  if (!started.ok) throw new Error(started.code);
+  const url = new URL(started.value.location);
+  w.tokens["sso-token"] = {
+    audience: "example-client",
+    issuer: "https://login.example-idp.example",
+    claims: { sub: "s-1", email: EMAIL, nonce: url.searchParams.get("nonce") ?? "" },
+  };
+  return completeSsoOidc(w.auth.config, {
+    connectionId,
+    state: url.searchParams.get("state") ?? "",
+    code: "sso-token",
+    error: null,
+    bindToken: started.value.bindToken,
+    ip: null,
+    userAgent: null,
+  });
+}
+
+/** An organization with the verified domain of the address and one OIDC connection: its id. */
+async function ssoConnection(w: World): Promise<string> {
+  const organizationId = await seedOrganization(w.auth, "acme");
+  const added = await addDomain(w.auth.config, SSO_APP, { organizationId, domain: "example.com" });
+  if (!added.ok || added.value.record === null) throw new Error("no domain record");
+  w.txt[added.value.record.name] = [added.value.record.value];
+  const verified = await verifyDomain(w.auth.config, SSO_APP, { id: added.value.id });
+  if (!verified.ok) throw new Error(verified.code);
+  const made = await createConnection(w.auth.config, SSO_APP, {
+    organizationId,
+    kind: "oidc",
+    label: "Example IdP",
+    issuer: "https://login.example-idp.example",
+    clientId: "example-client",
+    clientSecret: "example-secret-0123456789",
+    endpoints: {
+      authorizeUrl: "https://login.example-idp.example/authorize",
+      tokenUrl: "https://login.example-idp.example/token",
+      jwksUrl: "https://login.example-idp.example/keys",
+    },
+  });
+  if (!made.ok) throw new Error(made.code);
+  return made.value.id;
 }
 
 /** The session token of a sign-in that must open a session. */
@@ -235,6 +291,15 @@ const DOORS: Door[] = [
     async setup(w) {
       tokenOf(await emailCode(w));
       return () => emailCode(w);
+    },
+  },
+  {
+    via: "sso",
+    async setup(w) {
+      // The first sign-in creates the user just in time (plan 12d Task 5).
+      const connectionId = await ssoConnection(w);
+      tokenOf(await sso(w, connectionId));
+      return () => sso(w, connectionId);
     },
   },
 ];

@@ -11,6 +11,7 @@ import { createSteps, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import { challengeOpened, endedList, sessionOpened, sessionsEnded } from "./sessions.js";
+import { enforcedAnswer, ssoRequiredFor } from "./sso/enforce.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { consumeVerification } from "./verification.js";
 
@@ -52,6 +53,8 @@ export async function requestMagicLink(
   const captcha = await checkCaptcha(config, "magic-link-request", input.captchaToken, input.ip);
   if (captcha) return captcha;
   if (!(await limit(config, "magic-link:email", email, PER_EMAIL))) return fail("rate_limited");
+  // An enforced address gets no mail and the normal answer, so the answer tells nothing (plan 12d).
+  if (await ssoRequiredFor(config, email)) return ok({ sent: true });
   const now = config.clock.now();
   const token = randomToken(MAGIC_LINK_PREFIX);
   const next = safeNext(input.next);
@@ -96,6 +99,9 @@ export async function verifyMagicLink(
   });
   if (!consumed.ok) return consumed;
   const row = consumed.value;
+  // Only SSO signs in an address of an enforced domain (plan 12d, spec 30 item 12).
+  const enforced = await enforcedAnswer(config, row.identifier);
+  if (enforced) return enforced;
   const next = safeNext((row.data as { next?: unknown } | null)?.next);
   // A failure after this point burns the link by design. The person
   // requests a new one.

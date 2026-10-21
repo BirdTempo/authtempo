@@ -220,6 +220,7 @@ Another key of `totp` is refused.
 | `totp.gate.magicLink` | boolean | `true` | `false` lets the magic link open a session with no second factor. |
 | `totp.gate.emailOtp` | boolean | `true` | `false` lets the email code sign-in open a session with no second factor. |
 | `totp.gate.social` | boolean | `true` | `false` lets every social provider open a session with no second factor. |
+| `totp.gate.sso` | boolean | `true` | `false` lets every SSO connection open a session with no second factor. A connection's `mfa` list passes the gate when the provider asserts one of its values. |
 | `totp.emailMail` | function of `EmailOtpMailInput` | `defaultSecondFactorMail` | Answers the mail of a second-factor email code. Core sends it to the user's address. |
 
 ## JWT minting
@@ -318,6 +319,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `hooks.user` | `UserHooks` | none | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeVerify`, and `afterVerify`. [Run your code at a hook point](/docs/guides/hooks/) gives the order. |
 | `hooks.identity` | `IdentityHooks` | none | `beforeLink`, `afterLink`, `beforeUnlink`, and `afterUnlink`. The `email` identity fires none. |
 | `hooks.operator` | `OperatorHooks` | none | Needs `operator.users`. `beforeAction` runs before an operator act and can refuse it. `afterAction` gets each audit row after the commit; send the row to a separate system there. |
+| `hooks.sso` | `SsoHooks` | none | Needs `sso`. `beforeSignIn` runs in an SSO sign-in before its first write and can refuse it. |
 
 ## Captcha
 

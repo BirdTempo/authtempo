@@ -28,7 +28,14 @@ import {
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
-import { hookGuard, type IdentitySummary, runAfter, runBefore, stopWith } from "./hooks.js";
+import {
+  HookStop,
+  hookGuard,
+  type IdentitySummary,
+  runAfter,
+  runBefore,
+  stopWith,
+} from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import {
@@ -39,6 +46,7 @@ import {
   sessionOpened,
   sessionsEnded,
 } from "./sessions.js";
+import { enforcedAnswer } from "./sso/enforce.js";
 import {
   type BeforeResolveWrite,
   ClaimLostError,
@@ -305,6 +313,10 @@ export async function completeSocial(
       : await userinfoProfile(config, provider, token);
   const bounded = profile ? boundProfile(config.observe, profile, provider.name) : null;
   if (!bounded) return fail("oauth_failed");
+  // Only SSO signs in an address of an enforced domain (plan 12d), by the profile address, before the resolution.
+  const address = bounded.email === null ? null : normalizeEmail(bounded.email);
+  const enforced = link || address === null ? null : await enforcedAnswer(config, address);
+  if (enforced) return enforced;
   // A link (plan 12a): no session opens, and no sign-in gate applies.
   if (link)
     return completeLink(
@@ -351,7 +363,13 @@ export async function completeSocial(
       verified,
       (tx) => steps.write(tx),
       ended,
-      steps.before,
+      async (tx, user, created) => {
+        // A known identity can carry another address than its user's (plan 12d): that user's address decides too.
+        const held =
+          created || user.email === address ? null : await enforcedAnswer(config, user.email, tx);
+        if (held) throw new HookStop(held);
+        await steps.before(tx, user);
+      },
       made,
     ),
   );

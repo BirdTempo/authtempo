@@ -212,6 +212,7 @@ export const CONFIG_KEYS = {
     magicLink: true,
     emailOtp: true,
     social: true,
+    sso: true,
   } satisfies Keys<TotpGateConfig>,
   jwtMint: {
     alg: true,
@@ -286,6 +287,7 @@ export const CONFIG_KEYS = {
     user: true,
     identity: true,
     operator: true,
+    sso: true,
   } satisfies Keys<HooksConfig>,
   account: {
     mail: true,

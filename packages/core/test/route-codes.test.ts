@@ -667,7 +667,12 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
       $resetToken: resetToken,
     };
     // The callback of a provider needs a provider exchange: sign-up-rule.test.ts proves it on the engine.
-    const callbacks: RouteKey[] = ["GET /social/:provider/callback", "POST /social/apple/callback"];
+    // The SSO callback needs an IdP exchange: sso/resolve.test.ts proves it through the route (plan 12d).
+    const callbacks: RouteKey[] = [
+      "GET /social/:provider/callback",
+      "POST /social/apple/callback",
+      "GET /sso/:connectionId/callback",
+    ];
     const routes = declaring("sign_up_closed").filter((key) => !callbacks.includes(key));
     expect(routes.length).toBeGreaterThan(0);
     const otpReset = "POST /otp/reset";
@@ -1113,6 +1118,8 @@ const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "POST /operator/impersonate/stop",
   // The override of plan 12d runs through operatorAct: sso/domain-routes.test.ts arms beforeAction.
   "POST /operator/sso/enforce-off",
+  // The SSO callback needs an IdP exchange: sso/resolve.test.ts drives hooks.sso.beforeSignIn (plan 12d).
+  "GET /sso/:connectionId/callback",
 ];
 
 /** A world whose before hooks all refuse, or all throw, once `armed`. The setup runs before. */

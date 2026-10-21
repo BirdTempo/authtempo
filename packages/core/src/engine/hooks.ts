@@ -6,6 +6,8 @@ import type { OperatorAuditRow, SessionRow, UserRow } from "../schema.js";
 import type { InvitationSummary } from "./invitations.js";
 import type { OperatorAuditDraft } from "./operator/audit.js";
 import type { MemberSummary, OrganizationSummary } from "./organizations.js";
+import type { SsoConnectionSummary } from "./sso/connections.js";
+import type { SsoProfile } from "./sso/resolve.js";
 import type { TeamMemberSummary, TeamSummary } from "./teams.js";
 
 /**
@@ -24,12 +26,21 @@ export type Awaitable<T> = T | Promise<T>;
 /**
  * How a member row came. `create`: the creator's owner row. `add`: an add by
  * an admin. `invitation`: an accepted invitation. `operator`: an operator act
- * of plan 12f, the grant of the platform role or `createAdmin`.
+ * of plan 12f, the grant of the platform role or `createAdmin`. `sso`: the
+ * first SSO sign-in of a person (plan 12d). `scim`: a write of the
+ * organization's directory (plan 12d).
  */
-export type MemberVia = "create" | "add" | "invitation" | "operator";
-/** A remove by another member, a leave by the member, or the revoke of the platform role (plan 12f). */
-export type RemoveVia = "remove" | "leave" | "operator";
-/** How a session came. `impersonation`: a platform operator opened it for the user (plan 12f). */
+export type MemberVia = "create" | "add" | "invitation" | "operator" | "sso" | "scim";
+/**
+ * A remove by another member, a leave by the member, or the revoke of the
+ * platform role (plan 12f). `scim`: a write of the organization's directory
+ * (plan 12d).
+ */
+export type RemoveVia = "remove" | "leave" | "operator" | "scim";
+/**
+ * How a session came. `impersonation`: a platform operator opened it for the
+ * user (plan 12f). `sso`: the IdP of an organization's connection (plan 12d).
+ */
 export type SessionVia =
   | "password"
   | "magic_link"
@@ -37,7 +48,8 @@ export type SessionVia =
   | "passkey"
   | "handoff"
   | "email_otp"
-  | "impersonation";
+  | "impersonation"
+  | "sso";
 /**
  * Each value of `SessionVia` (plan 12f). The ban doors test reads it, so a
  * new value fails that test until the test gets a row for it.
@@ -50,6 +62,7 @@ export const SESSION_VIA = {
   handoff: true,
   email_otp: true,
   impersonation: true,
+  sso: true,
 } as const satisfies Record<SessionVia, true>;
 export type SessionEndReason =
   | "sign_out"
@@ -339,9 +352,15 @@ export interface SessionHooks {
  * How a user row came: the flow's sign-in, or a reset that created the user
  * (plan 12a). `operator`: `createAdmin` of plan 12f creates the user, with no
  * proof of the address. An impersonation opens a session of a user that
- * exists, so it creates no user.
+ * exists, so it creates no user. `sso` comes through `SessionVia`: the
+ * just-in-time create of plan 12d. `scim`: a create by the organization's
+ * directory (plan 12d).
  */
-export type UserCreateVia = Exclude<SessionVia, "impersonation"> | "password_reset" | "operator";
+export type UserCreateVia =
+  | Exclude<SessionVia, "impersonation">
+  | "password_reset"
+  | "operator"
+  | "scim";
 /** Each value of `UserCreateVia`, for the event `sign_up` (plan 12h Task 5). */
 export const USER_CREATE_VIA = {
   password: true,
@@ -350,22 +369,27 @@ export const USER_CREATE_VIA = {
   passkey: true,
   handoff: true,
   email_otp: true,
+  sso: true,
   password_reset: true,
   operator: true,
+  scim: true,
 } as const satisfies Record<UserCreateVia, true>;
 /** The profile update, the change of address (plan 12a), or an operator's ban and unban (plan 12f). */
 export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban";
 /**
  * The flow that proves the address of an existing unverified user (plan
  * 12a). `social` is a sign-in with a verified provider address.
- * `password_reset` is the reset link or the reset code.
+ * `password_reset` is the reset link or the reset code. `sso` is an SSO
+ * sign-in: a verified domain of the organization proves the address (plan
+ * 12d).
  */
 export type UserVerifyVia =
   | "password_verify"
   | "magic_link"
   | "email_otp"
   | "social"
-  | "password_reset";
+  | "password_reset"
+  | "sso";
 /** Each value of `UserVerifyVia`, for the event `email.verify` (plan 12h Task 5). */
 export const USER_VERIFY_VIA = {
   password_verify: true,
@@ -373,6 +397,7 @@ export const USER_VERIFY_VIA = {
   email_otp: true,
   social: true,
   password_reset: true,
+  sso: true,
 } as const satisfies Record<UserVerifyVia, true>;
 /**
  * How an identity came (plan 12a). `sign_in` is a social sign-in that
@@ -483,12 +508,29 @@ export interface OperatorHooks {
   afterAction?(e: { audit: OperatorAuditRow }): Awaitable<void>;
 }
 
+/**
+ * The SSO point (plan 12d, spec 30 item 11). It needs `sso`.
+ */
+export interface SsoHooks {
+  /**
+   * In the resolution's transaction, before its first write. `user` is the
+   * user that the sign-in answers, or null when the sign-in creates the
+   * user. A refusal answers `hook_refused`, and the sign-in writes nothing.
+   */
+  beforeSignIn?(e: {
+    connection: SsoConnectionSummary;
+    profile: SsoProfile;
+    user: UserRow | null;
+  }): Awaitable<void>;
+}
+
 export interface HooksConfig {
   organization?: OrganizationHooks;
   session?: SessionHooks;
   user?: UserHooks;
   identity?: IdentityHooks;
   operator?: OperatorHooks;
+  sso?: SsoHooks;
 }
 
 /** After `resolveConfig`: every group present, each hook bound to the object it came on. */
@@ -498,6 +540,7 @@ export interface ResolvedHooks {
   user: UserHooks;
   identity: IdentityHooks;
   operator: OperatorHooks;
+  sso: SsoHooks;
 }
 
 /** The name in a log line. */
@@ -506,7 +549,8 @@ export type HookName =
   | `session.${keyof SessionHooks & string}`
   | `user.${keyof UserHooks & string}`
   | `identity.${keyof IdentityHooks & string}`
-  | `operator.${keyof OperatorHooks & string}`;
+  | `operator.${keyof OperatorHooks & string}`
+  | `sso.${keyof SsoHooks & string}`;
 
 /** Every hook point. A Record, so a point added to the interface and not listed here fails the compile. */
 export const ORGANIZATION_HOOK_POINTS: Readonly<Record<keyof OrganizationHooks, true>> = {
@@ -566,6 +610,10 @@ export const IDENTITY_HOOK_POINTS: Readonly<Record<keyof IdentityHooks, true>> =
 export const OPERATOR_HOOK_POINTS: Readonly<Record<keyof OperatorHooks, true>> = {
   beforeAction: true,
   afterAction: true,
+};
+
+export const SSO_HOOK_POINTS: Readonly<Record<keyof SsoHooks, true>> = {
+  beforeSignIn: true,
 };
 
 /** The longest refusal text, in UTF-16 code units. The text goes into a JSON body that a client shows. */
