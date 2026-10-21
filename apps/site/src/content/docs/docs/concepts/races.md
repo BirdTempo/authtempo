@@ -41,7 +41,8 @@ Two right password sign-ins can both try to rehash one row. One update wins. The
 
 ## What stays open
 
-- **Counts before a write.** The cap of 50 API tokens, and each organization limit, is a count before the create. On D1, and on Postgres at read committed, two creates at the same moment can both pass at the limit minus one. For API tokens, the limit of 20 creates per user per hour bounds the overshoot.
+- **Counts on D1.** Each cap and each organization limit is a count before the create. D1 has no lock, so two creates at the same moment can both pass at the limit minus one. For API tokens, the limit of 20 creates per user per hour bounds the overshoot.
+- **Counts on Postgres with no lock.** On Postgres some counts run after a row lock, so a second create waits for the first commit. The cap of 50 API tokens counts after the hold of the user row. The cap of 50 organization tokens, `dynamicRoles.maxPerOrganization`, and `teamsPerOrganization` count after the lock of the organization row. `membersPerTeam` counts after the lock of the team row. The other limits count under no lock: `perUser`, `membersPerOrganization`, and `pendingInvitationsPerOrganization`. At read committed, two creates at the same moment can pass one of these at the limit minus one.
 - **A dead isolate on D1.** The undo log lives in memory. An isolate that stops during a transaction never rolls back, and the writes before the stop stay.
 - **A cascade on D1.** A foreign key with `ON DELETE CASCADE` deletes child rows inside SQLite, so the undo log holds no entry for them. Core's tables have no foreign key. Code of your own on the Better Auth tables must delete the child rows first.
 - **Two invitations.** Two invites for one address at the same moment can leave two pending invitations. The pair of organization and address is an index, not a unique key.

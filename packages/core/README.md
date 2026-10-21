@@ -1399,8 +1399,16 @@ const auth = createAuth({
 
 Core counts inside the transaction, before the before hook. On D1 the count
 and the write are not isolated, so two writes at the same moment can both
-pass at the limit minus one. Postgres read committed has the same window.
-The API token cap has the same rule.
+pass at the limit minus one. `perUser`, `membersPerOrganization`, and
+`pendingInvitationsPerOrganization` count under no lock, so Postgres read
+committed has the same window for these three.
+
+The other counts run after a row lock. On Postgres a second write waits for
+the first commit and counts its row, so these limits hold there.
+`teamsPerOrganization`, `dynamicRoles.maxPerOrganization`, and the cap of 50
+organization tokens count after the lock of the organization row.
+`membersPerTeam` counts after the lock of the team row. The cap of 50 API
+tokens counts after the hold of the user row, so it can pass 50 on D1 only.
 
 ## Sweep
 
