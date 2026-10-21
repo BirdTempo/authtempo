@@ -2,7 +2,7 @@ import type { StorageAdapter } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
 import { BETTER_AUTH_PG, CONSUMER_I_PG } from "./fixtures.js";
-import { freshBetterAuthSchema } from "./pg.js";
+import { freshBetterAuthSchema, migrateWithoutLock } from "./pg.js";
 
 // The two optional port methods of plan 12f (rulings 35 and 36) on the compat
 // storage. Core's multi-row session deletes take `lockInOrder` first, so two
@@ -64,7 +64,7 @@ describe.each(NAMINGS)(
       const pg = await freshBetterAuthSchema(tables);
       try {
         const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql, casing });
-        await s.migrate();
+        await migrateWithoutLock(pg.sql, s.names);
         await seed(s.storage);
         const session = s.names.table("session");
         // NOWAIT on another connection: 55P03 while a lock is held, the row while it is not.
@@ -89,7 +89,7 @@ describe.each(NAMINGS)(
       const pg = await freshBetterAuthSchema(tables);
       try {
         const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql, casing });
-        await s.migrate();
+        await migrateWithoutLock(pg.sql, s.names);
         await seed(s.storage);
         const before = s.storage.statementsSent?.() ?? Number.NaN;
         await s.storage.transaction(async (tx) => {

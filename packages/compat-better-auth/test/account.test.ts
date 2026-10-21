@@ -20,7 +20,7 @@ import { betterAuthSchemaStorage } from "../src/storage/index.js";
 import { issuerFor } from "../src/storage/mapping.js";
 import type { BetterAuthOptions, CompatDatabase } from "../src/types.js";
 import { BETTER_AUTH_PG } from "./fixtures.js";
-import { freshBetterAuthSchema } from "./pg.js";
+import { freshBetterAuthSchema, migrateWithoutLock } from "./pg.js";
 
 const BASE = "https://api.example.com";
 const PATH = `${BASE}/api/auth`;
@@ -923,7 +923,7 @@ describe("the accounts on Better Auth rows (plan 12a)", () => {
     pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     await pg.sql.unsafe(ERA_ROWS);
     const db = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    await db.migrate();
+    await migrateWithoutLock(pg.sql, db.names);
     const hooks: unknown[] = [];
     const t = instance(
       {
@@ -1064,7 +1064,7 @@ describe("the last way in through the shim (Task 14 review L3)", () => {
       ].join("\n"),
     );
     const db = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    await db.migrate();
+    await migrateWithoutLock(pg.sql, db.names);
     const t = instance(
       { socialProviders: { google: { clientId: "gid", clientSecret: "gs" } } },
       [],

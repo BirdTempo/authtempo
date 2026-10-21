@@ -14,7 +14,7 @@ import {
 } from "@authtempo/core";
 import { runAdapterConformance } from "@authtempo/core/conformance";
 import { columnName, columnsOf, TABLES, uniqueIndexName } from "@authtempo/core/sql";
-import type { Sql } from "postgres";
+import postgres, { type Sql } from "postgres";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "../src/server/better-auth.js";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
@@ -23,7 +23,7 @@ import { COMPAT_MIGRATION_NAMES, compatMigrationSql } from "../src/storage/migra
 import { resolveNames, TABLE_FIELDS } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
 import { BETTER_AUTH_PG, CONSUMER_I_PG } from "./fixtures.js";
-import { freshBetterAuthSchema } from "./pg.js";
+import { freshBetterAuthSchema, migrateWithoutLock, PG_URL } from "./pg.js";
 
 /** Core's unique indexes and indexes of one model, with core's names and column order. */
 function expectedIndexes(model: ModelName) {
@@ -50,7 +50,7 @@ runAdapterConformance(
   async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    await s.migrate();
+    await migrateWithoutLock(pg.sql, s.names);
     return { adapter: s.storage, close: () => pg.close() };
   },
   { rowLocks: true },
@@ -61,7 +61,7 @@ runAdapterConformance(
   async () => {
     const pg = await freshBetterAuthSchema(CONSUMER_I_PG);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql, casing: "snake" });
-    await s.migrate();
+    await migrateWithoutLock(pg.sql, s.names);
     return { adapter: s.storage, close: () => pg.close() };
   },
   { rowLocks: true },
@@ -108,6 +108,57 @@ describe("the compat runner on postgres (plan 11c)", () => {
       await pg.close();
     }
   });
+
+  // The beforeEach of the mapping tests ran these two checks until ruling 53
+  // of plan 12k moved it to the steps without the lock.
+  it("applies 0001 to 0010 on the Better Auth era rows, and a second run applies none", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    try {
+      await pg.sql.unsafe(BETTER_AUTH_ERA);
+      const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+      expect(await s.migrate()).toEqual([
+        "0001_compat_better_auth",
+        "0002_compat_schema_v5",
+        "0003_compat_schema_v6",
+        "0004_compat_schema_v7",
+        "0005_compat_schema_v8",
+        "0006_compat_schema_v9",
+        "0007_compat_schema_v10",
+        "0008_compat_schema_v11",
+        "0009_compat_schema_v12",
+        "0010_compat_schema_v13",
+      ]);
+      expect(await s.migrate()).toEqual([]);
+    } finally {
+      await pg.close();
+    }
+  });
+
+  it("lets two runners start at once on one schema: each migration runs once", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    const other = postgres(PG_URL, {
+      max: 1,
+      onnotice: () => {},
+      connection: {
+        search_path: (await pg.sql<{ s: string }[]>`SELECT current_schema() AS s`)[0]?.s ?? "",
+      },
+    });
+    try {
+      const results = await Promise.allSettled([
+        betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql }).migrate(),
+        betterAuthSchemaStorage({ dialect: "postgres", sql: other }).migrate(),
+      ]);
+      expect(results.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
+      // The lock is per migration, so the two runners can share the list.
+      const lists = results.map((r) => (r.status === "fulfilled" ? r.value : []));
+      expect([...(lists[0] ?? []), ...(lists[1] ?? [])].sort()).toEqual([
+        ...COMPAT_MIGRATION_NAMES,
+      ]);
+    } finally {
+      await other.end({ timeout: 5 });
+      await pg.close();
+    }
+  });
 });
 
 describe("the Better Auth mapping on postgres", () => {
@@ -120,19 +171,7 @@ describe("the Better Auth mapping on postgres", () => {
     pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     await pg.sql.unsafe(BETTER_AUTH_ERA);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    expect(await s.migrate()).toEqual([
-      "0001_compat_better_auth",
-      "0002_compat_schema_v5",
-      "0003_compat_schema_v6",
-      "0004_compat_schema_v7",
-      "0005_compat_schema_v8",
-      "0006_compat_schema_v9",
-      "0007_compat_schema_v10",
-      "0008_compat_schema_v11",
-      "0009_compat_schema_v12",
-      "0010_compat_schema_v13",
-    ]);
-    expect(await s.migrate()).toEqual([]);
+    await migrateWithoutLock(pg.sql, s.names);
     db = s.storage;
   });
   afterEach(async () => {
@@ -479,7 +518,7 @@ describe("the compat migration on postgres", () => {
         INSERT INTO "account" ("id","account_id","provider_id","user_id","password") VALUES ('a1','u','credential','u','h'), ('a2','g-sub','google','u',NULL);
       `);
       const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql, casing: "snake" });
-      await s.migrate();
+      await migrateWithoutLock(pg.sql, s.names);
       const rows = await pg.sql.unsafe<{ id: string; issuer: string }[]>(
         'SELECT "id", "issuer" FROM "account" ORDER BY "id"',
       );
@@ -718,7 +757,7 @@ describe("the compat undo of a created user", () => {
   beforeEach(async () => {
     pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    await s.migrate();
+    await migrateWithoutLock(pg.sql, s.names);
     db = s.storage;
   });
   afterEach(async () => {
@@ -865,7 +904,7 @@ describe("the Better Auth foreign keys on postgres", () => {
   beforeEach(async () => {
     pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    await s.migrate();
+    await migrateWithoutLock(pg.sql, s.names);
     db = s.storage;
   });
   afterEach(async () => {
@@ -899,7 +938,7 @@ describe("the compat migration and core's own write paths on postgres", () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-      await s.migrate();
+      await migrateWithoutLock(pg.sql, s.names);
       const mail: string[] = [];
       const auth = createAuth({
         baseURL: "https://api.example.com",
@@ -938,7 +977,7 @@ describe("the compat migration and core's own write paths on postgres", () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-      await s.migrate();
+      await migrateWithoutLock(pg.sql, s.names);
       // The detailed answer of plan 8 writes the session row too (plan 12b).
       const pw = authOn(s, false).api.password;
       if (!pw) throw new Error("the password api is missing");
@@ -986,7 +1025,7 @@ describe("the compat migration and core's own write paths on postgres", () => {
         INSERT INTO "member" ("id","organizationId","userId","role","createdAt") VALUES ('m1','org','o1','owner','2026-09-07T10:11:12.345678Z'), ('m2','org','o2','owner','2026-09-07T10:11:12.345678Z');
       `);
       const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-      await s.migrate();
+      await migrateWithoutLock(pg.sql, s.names);
       const caller = await s.storage.findOne("user", [eq("id", "o1")]);
       if (!caller) throw new Error("the caller is missing");
       // Demoting an owner runs ownerWrite: update organization where updatedAt = the read value.
@@ -1162,7 +1201,7 @@ INSERT INTO "account" ("id","issuer","accountId","providerId","userId","createdA
     try {
       await pg.sql.unsafe(BA_ROWS);
       const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-      await s.migrate();
+      await migrateWithoutLock(pg.sql, s.names);
       const auth = createAuth({
         baseURL: "https://api.example.com",
         secret: "0123456789abcdef0123456789abcdef",
@@ -1198,7 +1237,7 @@ INSERT INTO "account" ("id","issuer","accountId","providerId","userId","createdA
     try {
       await pg.sql.unsafe(BA_ROWS);
       const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-      await s.migrate();
+      await migrateWithoutLock(pg.sql, s.names);
       const auth = betterAuth({
         baseURL: "https://api.example.com",
         secret: "0123456789abcdef0123456789abcdef",

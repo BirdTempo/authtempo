@@ -3,7 +3,7 @@ import { COOKIE_NAME } from "../src/server/shapes.js";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
 import { adminApp, adminShim, betterAuthBans, PASSWORD } from "./admin-helpers.js";
 import { BETTER_AUTH_PG } from "./fixtures.js";
-import { freshBetterAuthSchema } from "./pg.js";
+import { freshBetterAuthSchema, migrateWithoutLock } from "./pg.js";
 
 // Plan 12f Task 13 on Postgres: a ban through Better Auth's admin path
 // lives in core's compat columns (taBannedAt, taBanReason, taBanUntil). So
@@ -20,7 +20,7 @@ describe("the admin plugin on Postgres (plan 12f Task 13)", () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     closers.push(() => pg.close());
     const first = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    await first.migrate();
+    await migrateWithoutLock(pg.sql, first.names);
     const a = await adminApp(first);
     const ann = await a.user("ann@example.com");
     const ban = await a.call(
@@ -63,7 +63,7 @@ describe("the admin plugin on Postgres (plan 12f Task 13)", () => {
     closers.push(() => pg.close());
     await pg.sql.unsafe(betterAuthBans("postgres"));
     const storage = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    await storage.migrate();
+    await migrateWithoutLock(pg.sql, storage.names);
     const rows = await pg.sql<
       { id: string; taBannedAt: Date | null; taBanReason: string | null; taBanUntil: Date | null }[]
     >`SELECT "id", "taBannedAt", "taBanReason", "taBanUntil" FROM "user" ORDER BY "id"`;
@@ -94,7 +94,7 @@ describe("the admin plugin on Postgres (plan 12f Task 13)", () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     closers.push(() => pg.close());
     const storage = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-    await storage.migrate();
+    await migrateWithoutLock(pg.sql, storage.names);
     const a = await adminApp(storage);
     const ann = await a.user("ann@example.com");
     const start = await a.call("/admin/impersonate-user", { userId: ann.id }, a.op);

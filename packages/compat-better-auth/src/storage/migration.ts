@@ -1085,6 +1085,22 @@ if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
     `the compat runner has ${POSTGRES_TEXTS.length} texts for ${COMPAT_MIGRATION_NAMES.length} names in COMPAT_MIGRATION_NAMES`,
   );
 
+/**
+ * The steps of the compat runner on Postgres, in order: the version that
+ * each writes, its name, and its text for these names. The test fixtures
+ * run the same list without the lock (ruling 53 of plan 12k).
+ */
+export function compatPostgresSteps(
+  names: Names,
+): { version: number; name: string; text: string }[] {
+  // Migration n writes compat_better_auth = n, so the version is the place in the list.
+  return COMPAT_MIGRATION_NAMES.map((name, i) => ({
+    version: i + 1,
+    name,
+    text: (POSTGRES_TEXTS[i] as (names: Names) => string)(names),
+  }));
+}
+
 /** One fixed advisory lock key for every compat migration run. */
 const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_compat_migrations'))";
 
@@ -1095,14 +1111,8 @@ const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_compat_migration
  * `compat_better_auth` row of ta_meta: no third table.
  */
 export async function applyBetterAuthCompatMigrations(sql: Sql, names: Names): Promise<string[]> {
-  // Migration n writes compat_better_auth = n, so the version is the place in the list.
-  const migrations = COMPAT_MIGRATION_NAMES.map((name, i) => ({
-    version: i + 1,
-    name,
-    text: (POSTGRES_TEXTS[i] as (names: Names) => string)(names),
-  }));
   const applied: string[] = [];
-  for (const m of migrations) {
+  for (const m of compatPostgresSteps(names)) {
     const ran = await sql.begin(async (tx) => {
       await tx.unsafe(LOCK);
       const reg = await tx.unsafe<{ t: string | null }[]>(

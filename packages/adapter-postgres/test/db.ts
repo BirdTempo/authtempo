@@ -1,5 +1,5 @@
 import postgres, { type Sql } from "postgres";
-import { applyPostgresMigrations } from "../src/migrations.js";
+import { MIGRATIONS } from "../src/migrations.js";
 
 // The package has no @types/node, so type the one global this file reads.
 const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } })
@@ -22,6 +22,32 @@ async function createSchema(): Promise<string> {
   return name;
 }
 
+/**
+ * The steps of `applyPostgresMigrations` without its advisory lock (ruling
+ * 53 of plan 12k). It creates the table `ta_migrations`, then runs each
+ * migration and its name row in its own transaction. Each test schema has
+ * one owner, so the lock guards nothing here. The spec fixes the lock name,
+ * so every schema of a database shares it. With the locked runner here,
+ * each fixture waited on the migrations of every other suite on tempo_auth.
+ * Measured on 2026-10-21 with 18 busy CPU loops and this suite in a loop, at
+ * a load of 16 to 28. With the locked runner, tempo_auth had a mean of 5.34
+ * and a maximum of 17 advisory lock waiters. With these steps, the mean was
+ * 0.01 and the maximum 1. The import and CLI tests keep their own copy of
+ * these steps. migrations.test.ts and conformance.test.ts still run the
+ * locked runner, the product path.
+ */
+export async function migrateWithoutLock(sql: Sql): Promise<void> {
+  await sql.unsafe(
+    "CREATE TABLE ta_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())",
+  );
+  for (const m of MIGRATIONS) {
+    await sql.begin(async (tx) => {
+      await tx.unsafe(m.sql);
+      await tx.unsafe("INSERT INTO ta_migrations (name) VALUES ($1)", [m.name]);
+    });
+  }
+}
+
 function client(schemaName: string): Sql {
   return postgres(PG_URL, { max: 4, onnotice: () => {}, connection: { search_path: schemaName } });
 }
@@ -34,7 +60,7 @@ function client(schemaName: string): Sql {
 export async function freshDatabase(): Promise<{ sql: Sql; close(): Promise<void> }> {
   const name = await createSchema();
   const sql = client(name);
-  await applyPostgresMigrations(sql);
+  await migrateWithoutLock(sql);
   return {
     sql,
     async close() {
@@ -56,7 +82,7 @@ export async function freshDatabaseOf(max: number): Promise<{ sql: Sql; close():
   const name = await createSchema();
   const setup = client(name);
   try {
-    await applyPostgresMigrations(setup);
+    await migrateWithoutLock(setup);
   } finally {
     await setup.end({ timeout: 5 });
   }

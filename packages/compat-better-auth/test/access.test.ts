@@ -32,7 +32,7 @@ import {
   BETTER_AUTH_ROLE_SQLITE,
   BETTER_AUTH_SQLITE,
 } from "./fixtures.js";
-import { freshBetterAuthSchema } from "./pg.js";
+import { freshBetterAuthSchema, migrateWithoutLock } from "./pg.js";
 
 /** Core's organizations config of mapped options. The organization plugin is set, so it is an object. */
 function organizationsOf(o: BetterAuthOptions) {
@@ -403,7 +403,7 @@ describe("the access control shim (spec 29 item 18)", () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const database = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-      await database.migrate();
+      await migrateWithoutLock(pg.sql, database.names);
       const { auth, person } = app(database, {
         ac,
         roles,
@@ -456,7 +456,7 @@ describe("the access control shim (spec 29 item 18)", () => {
     async function era() {
       const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
       const database = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-      await database.migrate();
+      await migrateWithoutLock(pg.sql, database.names);
       const { auth, person } = app(database, {
         ac,
         roles,
@@ -706,7 +706,7 @@ describe("the access control shim (spec 29 item 18)", () => {
               [at.toISOString()],
             );
           const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-          await s.migrate();
+          await migrateWithoutLock(pg.sql, s.names);
           const columns = await pg.sql.unsafe<{ c: string; n: string; d: string | null }[]>(
             `SELECT column_name AS c, is_nullable AS n, column_default AS d FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'organizationRole' ORDER BY ordinal_position`,
           );

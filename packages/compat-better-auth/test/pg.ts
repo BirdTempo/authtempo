@@ -1,4 +1,6 @@
 import postgres, { type Sql } from "postgres";
+import { compatPostgresSteps } from "../src/storage/migration.js";
+import type { Names } from "../src/storage/names.js";
 
 // The package has no @types/node, so type the one global this file reads.
 const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } })
@@ -34,4 +36,24 @@ export async function freshBetterAuthSchema(
       await sql.end({ timeout: 5 });
     },
   };
+}
+
+/**
+ * The steps of the compat runner (`migrate()`) without its advisory lock,
+ * on a schema with no compat migration (ruling 53 of plan 12k). Each step
+ * runs in its own transaction, from the list that the runner reads. Each
+ * test schema has one owner, so the lock guards nothing here. The spec
+ * fixes the lock name, so every schema of tempo_auth shares it. Each fixture
+ * then waited on the compat migrations of every other file. Evidence run 2
+ * of 3d0b2044 (2026-10-21, load 24) failed one teams.test.ts case on that
+ * wait at 5 s. With these steps, teams.test.ts passed 10 of 10 runs beside
+ * 18 busy CPU loops and the adapter-postgres suite in a loop. The tests that
+ * check what migrate() answers still call it, the product path.
+ */
+export async function migrateWithoutLock(sql: Sql, names: Names): Promise<void> {
+  for (const m of compatPostgresSteps(names)) {
+    await sql.begin(async (tx) => {
+      await tx.unsafe(m.text);
+    });
+  }
 }

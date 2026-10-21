@@ -28,7 +28,7 @@ import {
   BETTER_AUTH_TEAMS_PG,
   BETTER_AUTH_TEAMS_SQLITE,
 } from "./fixtures.js";
-import { freshBetterAuthSchema } from "./pg.js";
+import { freshBetterAuthSchema, migrateWithoutLock } from "./pg.js";
 
 const BASE = "https://api.example.com";
 const SECRET = "0123456789abcdef0123456789abcdef";
@@ -165,7 +165,7 @@ describe("the teams shim (spec 29 item 19)", () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-      await s.migrate();
+      await migrateWithoutLock(pg.sql, s.names);
       await user(s.storage, "u1", "u1@example.com");
       await user(s.storage, "user-ada", "ada@example.com");
       await organizationRow(s.storage, "o1");
@@ -217,7 +217,7 @@ describe("the teams shim (spec 29 item 19)", () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-      await s.migrate();
+      await migrateWithoutLock(pg.sql, s.names);
       await user(s.storage, "u1", "u1@example.com");
       await organizationRow(s.storage, "o1");
       await s.storage.create("invitation", {
@@ -532,7 +532,7 @@ describe("the teams shim (spec 29 item 19)", () => {
             );
           }
           const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-          await s.migrate();
+          await migrateWithoutLock(pg.sql, s.names);
           const columns = await pg.sql.unsafe<{ c: string }[]>(
             `SELECT column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'teamMember' ORDER BY ordinal_position`,
           );
@@ -709,7 +709,7 @@ describe("the teams shim (spec 29 item 19)", () => {
         [at.toISOString()],
       );
       const database = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-      await database.migrate();
+      await migrateWithoutLock(pg.sql, database.names);
       const columns = await pg.sql.unsafe<
         { t: string; c: string; type: string; nullable: string; dflt: string | null }[]
       >(

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
 import { issuerFor } from "../src/storage/mapping.js";
 import { BETTER_AUTH_PG } from "./fixtures.js";
-import { freshBetterAuthSchema } from "./pg.js";
+import { freshBetterAuthSchema, migrateWithoutLock } from "./pg.js";
 
 // The last-credential guard of plan 12a on Better Auth's tables. Core's own
 // writers give a user with no proved address one way in at most. The passkey
@@ -52,7 +52,7 @@ async function tables(rows: string) {
   pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
   await pg.sql.unsafe(rows);
   const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
-  await s.migrate();
+  await migrateWithoutLock(pg.sql, s.names);
   return s.storage;
 }
 
