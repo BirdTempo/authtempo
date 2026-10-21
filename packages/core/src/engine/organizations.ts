@@ -190,11 +190,9 @@ export function isOwner(o: ResolvedOrganizations, rank: number): boolean {
  * answers the throw outside the transaction.
  *
  * A refusal before the first write returns a value and does not throw: no
- * write has run at that point, so the commit changes nothing.
- *
- * `hold` is a user to hold first, before the lock of the organization row,
- * in the lock order of user-hold.ts (ruling 43). That hold writes no new
- * value, so a refusal after it still changes nothing.
+ * write has run at that point, so the commit changes nothing. A hold that
+ * the caller took before this lock writes no new value, so a refusal after
+ * it still changes nothing (`ownerWrite`, ruling 43).
  */
 export async function ownerLock(
   tx: StorageAdapter,
