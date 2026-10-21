@@ -1,11 +1,17 @@
 import type { ResolvedConfig } from "../../config.js";
 import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
-import type { MemberRow, SsoConnectionRow, SsoMfaList, UserRow } from "../../schema.js";
+import type {
+  MemberRow,
+  OrganizationRow,
+  SsoConnectionRow,
+  SsoMfaList,
+  UserRow,
+} from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
 import { type CreateSteps, createSteps, verifySteps } from "../create-steps.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "../hooks.js";
-import { addMemberIn, publicOrganization } from "../organizations.js";
+import { addMemberIn, atMemberLimit, holdsMember, publicOrganization } from "../organizations.js";
 import { effectiveIn } from "../permissions.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "../second-factor.js";
 import { endedList, sessionOpened, sessionsEnded } from "../sessions.js";
@@ -73,32 +79,34 @@ export function idpPassedMfa(mfa: SsoMfaList | null, profile: SsoProfile): boole
   return passedKey(mfa, profile) !== null;
 }
 
+/** The member add that the checks of `joinChecks` passed: the after step writes it. */
+interface Join {
+  organization: OrganizationRow;
+  member: MemberRow;
+}
+
 /**
- * The member row of the connection's organization (Behavior 6), in the
- * resolution's transaction. A row that exists stays as it is, and the
- * answer is null. Else `addMemberIn` adds a row with the connection's
- * `defaultRole`, under the member limits and the lock order of
- * user-hold.ts. A role that the organization no longer has answers
- * `role_not_found` (ruling 25 N2), and the throw undoes the sign-in.
+ * The checks of the member row of the connection's organization (Behavior
+ * 6), before the resolution's first write (ruling 41 of plan 12d). A row
+ * that exists stays as it is, and the answer is null. A role that the
+ * organization no longer has answers `role_not_found` (ruling 25 N2). Then
+ * the member limit, and `organization.beforeAddMember`. So a refusal throws
+ * before the claim and the identity create, and on D1 no undo runs.
  */
-async function joinOrganization(
+async function joinChecks(
   config: ResolvedConfig,
   tx: StorageAdapter,
   connection: SsoConnectionRow,
   user: UserRow,
   now: Date,
-): Promise<MemberRow | null> {
+): Promise<Join | null> {
   const o = config.organizations;
   if (!o) stopWith("sso_not_configured");
   // A member needs a verified address, as `addMember` does. An SSO identity
   // comes with a proof of the address, so its user is verified.
   if (!user.emailVerified) return null;
   const organizationId = connection.organizationId;
-  const held = await tx.findOne("member", [
-    { field: "organizationId", op: "eq", value: organizationId },
-    { field: "userId", op: "eq", value: user.id },
-  ]);
-  if (held) return null;
+  if (await holdsMember(tx, organizationId, user.id)) return null;
   const organization = await tx.findOne("organization", [
     { field: "id", op: "eq", value: organizationId },
   ]);
@@ -106,6 +114,7 @@ async function joinOrganization(
   // A dynamic role can go after the connection names it: a delete of the role does not read the connections.
   if ((await effectiveIn(config, tx, organizationId, connection.defaultRole)).unnamed > 0)
     stopWith("role_not_found");
+  if (await atMemberLimit(tx, o, organizationId)) stopWith("member_limit");
   const member: MemberRow = {
     id: newId(now),
     organizationId,
@@ -114,14 +123,34 @@ async function joinOrganization(
     createdAt: now,
     updatedAt: now,
   };
-  const added = await addMemberIn(config, tx, o, {
-    organization,
-    member,
-    user,
+  // The hook of `addMemberIn`, which runs no hook with `checked`.
+  await runBefore("organization.beforeAddMember", config.hooks.organization.beforeAddMember, {
+    organization: publicOrganization(organization),
+    member: { userId: user.id, role: member.role },
+    memberUser: user,
     by: null,
     via: "sso",
+    invitation: null,
   });
-  if (added.ok) return member;
+  return { organization, member };
+}
+
+/**
+ * The member row that `joinChecks` passed, in the after step. `addMemberIn`
+ * takes the locks of user-hold.ts, reads the row and the count again, and
+ * adds the row. Only a parallel add between the checks and the locks makes
+ * it refuse here.
+ */
+async function joinWrite(
+  config: ResolvedConfig,
+  tx: StorageAdapter,
+  join: Join,
+  user: UserRow,
+): Promise<MemberRow | null> {
+  const o = config.organizations;
+  if (!o) stopWith("sso_not_configured");
+  const added = await addMemberIn(config, tx, o, { ...join, user, by: null, via: "sso" }, true);
+  if (added.ok) return join.member;
   // A parallel sign-in added the row after the read: it stays as it is.
   if (added.code === "already_member") return null;
   stopWith(added.code === "not_found" ? "sso_not_configured" : added.code);
@@ -165,7 +194,8 @@ async function beforeSignIn(
  * 4. A user at the address gets the identity; an unverified one is claimed.
  * 5. No user: a just-in-time create under the sign-up rule, or
  *    `sso_not_provisioned` with `jit` off.
- * 6. The member row of the organization, with the connection's role.
+ * 6. The member row of the organization, with the connection's role. Its
+ *    checks and its before hook run before the first write.
  * 7. A user that SCIM deactivated answers `account_disabled`.
  * 8. The gate of section 8.14, unless the IdP did the second factor by the
  *    connection's `mfa` list.
@@ -212,6 +242,7 @@ export async function resolveSsoUser(
   };
   const verified = verifySteps(config, "sso");
   const summary = publicConnection(config, connection);
+  let join: Join | null = null;
   let joined: MemberRow | null = null;
   const resolved = await hookGuard(() =>
     resolveSocialUser(
@@ -222,12 +253,17 @@ export async function resolveSsoUser(
       now,
       verified,
       async (tx, user) => {
-        joined = await joinOrganization(config, tx, connection, user, now);
+        const j = join;
+        joined = j ? await joinWrite(config, tx, j, user) : null;
         return gate.write(tx);
       },
       ended,
       async (tx, user, created) => {
+        // A retry reads again, so the newer reads win.
+        join = null;
         await beforeSignIn(config, tx, { connection: summary, profile }, user, created);
+        // Before the gate: the session step holds the user row, a write.
+        join = await joinChecks(config, tx, connection, user, now);
         await gate.before(tx, user);
       },
       steps,

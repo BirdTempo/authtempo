@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
-import { createAuth } from "@authtempo/core";
+import { type AuthConfig, createAuth } from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
+import { base32Decode, totpCode } from "@authtempo/core/testing";
 import { describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
 
@@ -14,9 +15,12 @@ import { createD1Adapter } from "../src/index.js";
 const BASE = "https://api.example.com";
 const APP = { kind: "app", name: "sso-budget" } as const;
 
-/** A view of `db` that counts each statement, and each statement of a batch. */
+/**
+ * A view of `db` that counts each statement, and each statement of a batch.
+ * `sql` keeps the text of each prepared statement.
+ */
 function counting(db: D1Database) {
-  const c = { n: 0 };
+  const c = { n: 0, sql: [] as string[] };
   const hit = (b: PropertyKey) => b === "run" || b === "all" || b === "first" || b === "raw";
   const wrap = (s: D1PreparedStatement): D1PreparedStatement =>
     new Proxy(s, {
@@ -29,7 +33,11 @@ function counting(db: D1Database) {
     });
   const counted = new Proxy(db, {
     get(t, k) {
-      if (k === "prepare") return (sql: string) => wrap(t.prepare(sql));
+      if (k === "prepare")
+        return (sql: string) => {
+          c.sql.push(sql);
+          return wrap(t.prepare(sql));
+        };
       if (k === "batch")
         return (st: D1PreparedStatement[]) => {
           c.n += st.length;
@@ -42,12 +50,16 @@ function counting(db: D1Database) {
   return { db: counted as D1Database, c };
 }
 
-/** The engine on `db`, with organizations, OIDC connections, the fake DNS, and the fake IdP. */
+/**
+ * The engine on `db`, with organizations, OIDC connections, the fake DNS,
+ * and the fake IdP. `extra` replaces a top key of the config.
+ */
 function make(
   db: D1Database,
   txt: Record<string, string[]>,
   idTokens: Record<string, object>,
   mail: string[] = [],
+  extra: Partial<AuthConfig> = {},
 ) {
   return createAuth({
     baseURL: BASE,
@@ -76,21 +88,17 @@ function make(
       },
       signES256: async () => "es256",
     },
+    ...extra,
   });
 }
 
-/**
- * The queries of each of three callbacks for one address: the first sign-in,
- * which creates the user and the member row just in time; a second sign-in
- * of the known identity; and, with `claim`, a first sign-in that claims an
- * unverified password sign-up at the address.
- */
-async function callbacks(claim: boolean): Promise<number[]> {
+/** The organization acme with its verified domain and one OIDC connection, on the binding. */
+async function world(extra: Partial<AuthConfig> = {}) {
   await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
   const txt: Record<string, string[]> = {};
   const idTokens: Record<string, object> = {};
   const mail: string[] = [];
-  const auth = make(env.DB, txt, idTokens, mail);
+  const auth = make(env.DB, txt, idTokens, mail, extra);
   const sso = auth.api.sso;
   if (!sso) throw new Error("no sso api");
   // The owner signs in by a magic link, so the user is verified by the product.
@@ -125,50 +133,142 @@ async function callbacks(claim: boolean): Promise<number[]> {
     },
   });
   if (!connection.ok) throw new Error(connection.code);
-  if (claim) {
-    const up = await auth.api.password?.signUp({
-      email: "ada@acme.example",
-      password: "a claimant's password",
-      ip: null,
-      userAgent: null,
-    });
-    if (!up?.ok) throw new Error("no claimant");
-  }
+  return { auth, txt, idTokens, mail, extra, connectionId: connection.value.id };
+}
+
+type World = Awaited<ReturnType<typeof world>>;
+
+/** One callback for Ada, on a counting view of the binding. */
+async function callback(w: World, code: string) {
+  const started = await w.auth.handle(new Request(`${BASE}/auth/sso/${w.connectionId}/start`));
+  const url = new URL(started.headers.get("location") ?? "");
+  const bind = started.headers
+    .getSetCookie()
+    .find((x) => x.startsWith("__Secure-tempo_session_oauth="))
+    ?.split(";")[0];
+  w.idTokens[code] = {
+    sub: "ada-1",
+    email: "ada@acme.example",
+    nonce: url.searchParams.get("nonce") ?? "",
+  };
+  const q = new URLSearchParams({ code, state: url.searchParams.get("state") ?? "" });
+  const { db, c } = counting(env.DB);
+  const res = await make(db, w.txt, w.idTokens, [], w.extra).handle(
+    new Request(`${BASE}/auth/sso/${w.connectionId}/callback?${q}`, {
+      headers: { cookie: bind ?? "" },
+    }),
+  );
+  const at = new URL(res.headers.get("location") ?? "", BASE).searchParams;
+  return { n: c.n, sql: c.sql, error: at.get("auth_error"), challenge: at.get("challenge") };
+}
+
+/**
+ * An unverified password sign-up of Ada. The token of its session, or null
+ * under the uniform answer of plan 12b.
+ */
+async function claimant(w: World): Promise<string | null> {
+  const up = await w.auth.api.password?.signUp({
+    email: "ada@acme.example",
+    password: "a claimant's password",
+    ip: null,
+    userAgent: null,
+  });
+  if (!up?.ok) throw new Error("no claimant");
+  return "token" in up.value ? up.value.token : null;
+}
+
+/** Ada with a verified password and the second factor on, by the enable of plan 9f. */
+async function withFactor(w: World): Promise<void> {
+  const password = "correct horse battery";
+  const up = await w.auth.api.password?.signUp({
+    email: "ada@acme.example",
+    password,
+    ip: null,
+    userAgent: null,
+  });
+  if (!up?.ok) throw new Error("no sign-up");
+  const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(w.mail.at(-1) ?? "")?.[1] ?? "");
+  const v = await w.auth.api.password?.verifyEmail({ token, ip: null, userAgent: null });
+  if (!v?.ok || v.value.signedIn === null) throw new Error("the verify link did not sign in");
+  const session = await w.auth.api.getSession(v.value.signedIn.token);
+  const totp = w.auth.api.totp;
+  if (!session || !totp) throw new Error("no session or no totp");
+  const setup = await totp.setup({ userId: session.user.id, password });
+  if (!setup.ok) throw new Error(setup.code);
+  const code = await totpCode(base32Decode(setup.value.secret), new Date());
+  const on = await totp.enable({ session, code });
+  if (!on.ok) throw new Error(on.code);
+}
+
+/**
+ * The queries of two callbacks for one address. The first callback of
+ * "create" creates the user and the member row just in time. The first of
+ * "claim" claims an unverified password sign-up at the address. The first
+ * of "factor" links a verified user with the second factor on. The second
+ * callback signs in the known identity.
+ */
+async function callbacks(kind: "create" | "claim" | "factor"): Promise<number[]> {
+  const w = await world();
+  if (kind === "claim") await claimant(w);
+  if (kind === "factor") await withFactor(w);
   const counts: number[] = [];
   for (const code of ["code-1", "code-2"]) {
-    const started = await auth.handle(new Request(`${BASE}/auth/sso/${connection.value.id}/start`));
-    const url = new URL(started.headers.get("location") ?? "");
-    const bind = started.headers
-      .getSetCookie()
-      .find((x) => x.startsWith("__Secure-tempo_session_oauth="))
-      ?.split(";")[0];
-    idTokens[code] = {
-      sub: "ada-1",
-      email: "ada@acme.example",
-      nonce: url.searchParams.get("nonce") ?? "",
-    };
-    const q = new URLSearchParams({ code, state: url.searchParams.get("state") ?? "" });
-    const { db, c } = counting(env.DB);
-    const res = await make(db, txt, idTokens).handle(
-      new Request(`${BASE}/auth/sso/${connection.value.id}/callback?${q}`, {
-        headers: { cookie: bind ?? "" },
-      }),
-    );
-    const error = new URL(res.headers.get("location") ?? "", BASE).searchParams.get("auth_error");
-    if (error !== null) throw new Error(error);
-    counts.push(c.n);
+    const r = await callback(w, code);
+    if (r.error !== null) throw new Error(r.error);
+    // The gate answers a challenge, not a session, for a user with the factor on.
+    if ((r.challenge !== null) !== (kind === "factor")) throw new Error("a wrong answer kind");
+    counts.push(r.n);
   }
   return counts;
 }
 
 describe("the queries of one SSO callback on D1 (plan 12d Task 5)", () => {
-  it("stays inside 50 queries for a create, a known identity, and a claim", async () => {
-    const created = await callbacks(false);
-    const claimed = await callbacks(true);
+  it("stays inside 50 queries for a create, a known identity, a claim, and the factor", async () => {
+    const created = await callbacks("create");
+    const claimed = await callbacks("claim");
+    const factor = await callbacks("factor");
     // Measured on the binding on 2026-10-21 (load 18.2): a create 23, a claim 35,
     // and a known identity 15 after each. The first callback of each pair adds
-    // the member row; the claim also ends the claimant's rows.
-    expect({ created, claimed }).toEqual({ created: [23, 15], claimed: [35, 15] });
-    for (const n of [...created, ...claimed]) expect(n).toBeLessThanOrEqual(50);
+    // the member row; the claim also ends the claimant's rows. With the second
+    // factor on, each callback writes a challenge. Measured on 2026-10-22 (load
+    // 4.1 to 15.2): a link of a verified user 21, and the known identity 11 after it.
+    expect({ created, claimed, factor }).toEqual({
+      created: [23, 15],
+      claimed: [35, 15],
+      factor: [21, 11],
+    });
+    for (const n of [...created, ...claimed, ...factor]) expect(n).toBeLessThanOrEqual(50);
+  }, 120_000);
+});
+
+describe("a member refusal of an SSO callback on D1 (ruling 41 of plan 12d)", () => {
+  it("answers member_limit before the claim writes, so no undo runs", async () => {
+    // The owner fills the limit of 1. Ada's sign-up keeps a session, unverified.
+    const w = await world({
+      organizations: { limits: { membersPerOrganization: 1 } },
+      password: { uniformSignUp: false, requireVerified: false },
+    });
+    const token = await claimant(w);
+    if (token === null) throw new Error("the sign-up opened no session");
+    const store = createD1Adapter(env.DB);
+    const byEmail = [{ field: "email" as const, op: "eq" as const, value: "ada@acme.example" }];
+    const ada = await store.findOne("user", byEmail);
+    if (!ada) throw new Error("no user");
+    const byUser = [{ field: "userId" as const, op: "eq" as const, value: ada.id }];
+    const password = await store.findOne("password", byUser);
+    const sessions = await store.findMany("session", byUser);
+    const r = await callback(w, "code-1");
+    expect(r.error).toBe("member_limit");
+    // No statement of the callback writes a row of Ada, and no undo statement does either.
+    const writes = r.sql.filter((q) =>
+      /^\s*(INSERT|UPDATE|DELETE)\b[^;]*\b(ta_user|ta_session|ta_password|ta_identity|ta_member)\b/i.test(
+        q,
+      ),
+    );
+    expect(writes).toEqual([]);
+    expect(await store.findOne("user", byEmail)).toEqual(ada);
+    expect(await store.findOne("password", byUser)).toEqual(password);
+    expect(await store.findMany("session", byUser)).toEqual(sessions);
+    expect((await w.auth.api.getSession(token))?.user.id).toBe(ada.id);
   }, 120_000);
 });
