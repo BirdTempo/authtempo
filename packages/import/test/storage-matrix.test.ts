@@ -1,4 +1,4 @@
-import { applyPostgresMigrations, createPostgresAdapter } from "@authtempo/adapter-postgres";
+import { createPostgresAdapter } from "@authtempo/adapter-postgres";
 import { betterAuthSchemaStorage } from "@authtempo/compat-better-auth";
 import { createMemoryAdapter, type StorageAdapter } from "@authtempo/core";
 import { LEGACY_FORMATS } from "@authtempo/legacy-hashes";
@@ -19,7 +19,7 @@ import {
 import { SUPABASE_FIXTURE_CREATED } from "./fixtures/supabase-counts.js";
 import identities from "./fixtures/supabase-identities.csv?raw";
 import users from "./fixtures/supabase-users.csv?raw";
-import { freshSchema } from "./pg.js";
+import { freshSchema, migrateWithoutLock } from "./pg.js";
 
 const now = () => new Date("2026-10-11T00:00:00.000Z");
 
@@ -64,7 +64,7 @@ const targets: [string, () => Promise<Target>][] = [
     "core's tables on adapter-postgres",
     () =>
       schema(async (sql) => {
-        await applyPostgresMigrations(sql);
+        await migrateWithoutLock(sql);
         return {
           storage: createPostgresAdapter(sql),
           storedPublicKey: PASSKEY.publicKey,
