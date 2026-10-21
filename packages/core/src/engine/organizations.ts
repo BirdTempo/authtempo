@@ -373,7 +373,11 @@ export async function createOrganization(
   try {
     const written = await hookGuard(() =>
       config.storage.transaction(async (tx): Promise<Result<true>> => {
-        // The count and the slug read run before any write, so a refusal commits nothing.
+        // First, in the lock order of user-hold.ts. A member row of a deleted user would count as
+        // an owner (plan 12a Task 11). The hold also makes a second create of the user wait here,
+        // so it counts the first one's member row (ruling 45 of plan 12k). It writes no new value.
+        await holdUser(tx, input.user.id);
+        // The count and the slug read run before any other write, so a refusal changes nothing.
         // perUser counts the user's member rows at any rank, as Better Auth's numeric limit does.
         if (limit !== null) {
           const held = await tx.findMany(
@@ -398,9 +402,6 @@ export async function createOrganization(
           via: "create",
           invitation: null,
         });
-        // After the hooks (the D1 undo), and before the writes. A member row
-        // of a deleted user would count as an owner (plan 12a Task 11).
-        await holdUser(tx, input.user.id);
         await tx.create("organization", organization);
         await tx.create("member", member);
         // Plan 12k: the default team is part of the create, so it fires no team hook.

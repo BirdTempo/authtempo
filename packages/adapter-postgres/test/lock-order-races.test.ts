@@ -560,6 +560,27 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     expect(await rows("teamMember")).toEqual([]);
   });
 
+  it("of two organization creates of one user at perUser 1, one answers organization_limit (ruling 45)", async () => {
+    const sent: MailMessage[] = [];
+    const config = { limits: { perUser: 1 } };
+    const g = gate();
+    let second: Promise<unknown> | null = null;
+    const two = instance(watch("user", g.reach), config, sent);
+    const one = instance(createPostgresAdapter(db.sql), config, sent, {
+      beforeAddMember: async () => {
+        second = settle(two.api.createOrganization({ user: a, slug: "beta", name: "Beta" }));
+        await Promise.race([g.at, second]);
+      },
+    });
+    const a = await user("a");
+
+    const first = await settle(one.api.createOrganization({ user: a, slug: "acme", name: "Acme" }));
+
+    expect(first).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: false, code: "organization_limit" });
+    expect((await rows("organization")).map((x) => x.slug)).toEqual(["acme"]);
+  });
+
   it("of two user token creates at 49 tokens, one answers token_limit (L4)", async () => {
     const sent: MailMessage[] = [];
     const g = gate();
