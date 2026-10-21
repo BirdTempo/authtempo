@@ -1,16 +1,8 @@
 import type { D1Subset, D1SubsetResult, D1SubsetStatement } from "@authtempo/adapter-d1/seam";
 import type { Statement } from "@authtempo/core/sql";
-import type { Client, InValue, ResultSet, Transaction } from "@libsql/client";
+import type { Client, InValue, ResultSet } from "@libsql/client";
 import type { SqliteDriver } from "./adapter.js";
-
-/**
- * How long `migrateStep` waits for the write lock of a local file. A libSQL
- * file client gets SQLITE_BUSY at once when another connection holds the
- * lock, and its `timeout` option blocks the thread (read 2026-10-21, 0.18.0).
- * So the step tries again after a short pause.
- */
-const BUSY_WAIT_MS = 10_000;
-const BUSY_PAUSE_MS = 20;
+import { retryBusy } from "./busy.js";
 
 function plainRows(rs: ResultSet): Record<string, unknown>[] {
   return rs.rows.map((r) => Object.fromEntries(rs.columns.map((c, i) => [c, r[i]])));
@@ -48,22 +40,6 @@ class LibsqlStatement implements D1SubsetStatement {
   }
 }
 
-function isBusy(e: unknown): boolean {
-  return typeof e === "object" && e !== null && (e as { code?: unknown }).code === "SQLITE_BUSY";
-}
-
-async function writeTransaction(client: Client): Promise<Transaction> {
-  const deadline = Date.now() + BUSY_WAIT_MS;
-  for (;;) {
-    try {
-      return await client.transaction("write");
-    } catch (e) {
-      if (!isBusy(e) || Date.now() > deadline) throw e;
-      await new Promise((resolve) => setTimeout(resolve, BUSY_PAUSE_MS));
-    }
-  }
-}
-
 /**
  * A SqliteDriver over a libSQL client that the app opened: a `file:` URL on
  * Node or Bun, or `https:` and `libsql:` through `@libsql/client/web` on
@@ -89,7 +65,7 @@ export function libsql(client: Client): SqliteDriver {
       // The adapter opens no interactive transaction. The runner needs "run this
       // file only when ta_migrations lacks its name" in one unit, which a batch
       // cannot express (plan 12g, deviation 11).
-      const tx = await writeTransaction(client);
+      const tx = await retryBusy(() => client.transaction("write"));
       try {
         const found = await tx.execute({ sql: done.sql, args: done.params as InValue[] });
         if (found.rows.length > 0) {
