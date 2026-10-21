@@ -251,6 +251,44 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
     expect(JSON.stringify(batches)).not.toContain("203.0.113.7");
   });
 
+  it("writes a raw address of the scope: the agent at most 256 characters, no control character", async () => {
+    const { batches, sink } = recording();
+    const { o } = observer(sink, { include: { ip: "raw", userAgent: "raw", email: "none" } });
+    // 300 characters, with a NUL and a tab after the product.
+    const userAgent = `Mozilla/5.0\u0000\t(${"x".repeat(285)})`;
+    expect(userAgent).toHaveLength(300);
+    o.scope({ ...SCOPE, userAgent }).emit({ name: "passkey.counter_moved" });
+    await o.flush();
+    const [event] = batches[0] ?? [];
+    expect(event?.ip).toBe("203.0.113.7");
+    expect(event?.userAgent).toBe(`Mozilla/5.0(${"x".repeat(244)}`);
+    expect(event?.userAgent).toHaveLength(256);
+    const codes = Array.from(String(event?.userAgent), (c) => c.charCodeAt(0));
+    expect(codes.filter((c) => c < 0x20 || c === 0x7f)).toEqual([]);
+    expect(event).not.toHaveProperty("ipHash");
+  });
+
+  it("drops each address field that a flow passes, with the default include", async () => {
+    const { batches, sink } = recording();
+    const { o } = observer(sink);
+    o.scope(SCOPE).emit({
+      name: "passkey.counter_moved",
+      ip: "198.51.100.9",
+      ipHash: "f".repeat(32),
+      userAgent: "curl/8.0",
+      emailHash: "e".repeat(32),
+      provider: "google",
+    });
+    await o.flush();
+    const [event] = batches[0] ?? [];
+    expect(event).toMatchObject({ name: "passkey.counter_moved", provider: "google" });
+    for (const key of ["ip", "ipHash", "userAgent", "email", "emailHash"])
+      expect(event ?? {}).not.toHaveProperty(key);
+    const text = JSON.stringify(batches);
+    for (const value of ["198.51.100.9", "f".repeat(32), "curl/8.0", "e".repeat(32)])
+      expect(text).not.toContain(value);
+  });
+
   it(
     "a sink that never settles does not slow a sign-in, and the buffer holds its bound",
     async () => {
