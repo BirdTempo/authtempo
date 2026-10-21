@@ -29,7 +29,7 @@ import {
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { defaultPasswordVerifyPage, type ResetPageInput } from "../password-pages.js";
-import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
+import { authErrorUrl, errorRedirect, redirect, resolveNext } from "../redirect.js";
 import type { Route } from "../router.js";
 import {
   challengePageUrl,
@@ -212,8 +212,9 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           if (jsonCaller) return respond(r);
           // The link is still valid after a refused password: send the person back to the form.
           if (isPageError(r.code))
-            return redirect(
+            return errorRedirect(
               `${ctx.config.baseURL}${resetPath}?token=${encodeURIComponent(body.value.token)}&error=${r.code}`,
+              r.code,
             );
           return failed(r.code);
         }

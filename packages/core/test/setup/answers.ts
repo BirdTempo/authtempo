@@ -45,7 +45,6 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   );
   const { ROUTE_CONTRACT } = await import("../../src/http/contract/index.js");
   const { ERROR_SCHEMAS } = await import("../../src/openapi/responses.js");
-  const { AUTH_ERROR_PARAM } = await import("../../src/http/redirect.js");
   const { routeKeyOf } = await import("../../src/http/route-key.js");
   const { ROUTER_CODES, ROUTES } = await import("../../src/http/route-list.js");
   type RouteContract = import("../../src/http/contract/types.js").RouteContract;
@@ -111,12 +110,6 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     return contract.alt ? [contract.answer, contract.alt] : [contract.answer];
   }
 
-  /** The code that a redirect carries to the app or to the OAuth client, or null. */
-  function redirectCode(res: Response, requestUrl: string): string | null {
-    const location = new URL(res.headers.get("location") ?? "", requestUrl);
-    return location.searchParams.get(AUTH_ERROR_PARAM) ?? location.searchParams.get("error");
-  }
-
   /** Rule 1: the code is declared for the route, with the status of its table (a redirect has none). */
   function codeVerdict(key: RouteKey, code: string, status: number, redirected: boolean): string {
     const entry = ENTRIES.get(key);
@@ -162,13 +155,23 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     return { verdict, ...NO_SHAPE };
   }
 
-  async function judge(request: Request, res: Response, key: string | null): Promise<AnswerRecord> {
+  /**
+   * The answer of one request. `carried` is the code that a redirect carries
+   * to the app or to the OAuth client, by the rule of the router
+   * (`redirectCode`, ruling 16 of plan 12h).
+   */
+  async function judge(
+    request: Request,
+    res: Response,
+    key: string | null,
+    carried: string | null,
+  ): Promise<AnswerRecord> {
     const status = res.status;
     const type = (res.headers.get("content-type") ?? "").split(";")[0]?.trim() ?? "";
     const redirected = status === 302 || status === 303;
     let code: string | null = null;
     let body: unknown;
-    if (redirected) code = redirectCode(res, request.url);
+    if (redirected) code = carried;
     else if (type === "application/json") {
       body = await res.json();
       const error = (body as { error?: unknown }).error;
@@ -250,7 +253,8 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
       return async (request: Request) => {
         const res = await handle(request);
         const key = keyOf(config, routes, request.method, new URL(request.url).pathname);
-        const record = await judge(request, res.clone(), key);
+        // The mark of `errorRedirect` is on res, not on its clone.
+        const record = await judge(request, res.clone(), key, m.redirectCode(config, res));
         appendFileSync(FILE, `${JSON.stringify(record)}\n`);
         return res;
       };

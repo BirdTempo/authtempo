@@ -7,7 +7,7 @@ import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
-import { AUTH_ERROR_PARAM, OAUTH_REDIRECT_ERROR } from "./redirect.js";
+import { AUTH_ERROR_PARAM, REDIRECT_ERROR } from "./redirect.js";
 import type { RouteKey, RouterCode } from "./route-list.js";
 
 export interface RouteContext {
@@ -123,14 +123,15 @@ function cors(res: Response, origin: string): Response {
 /**
  * The error code of a redirect, or null. The `auth_error` parameter counts
  * only on `authErrorUrl`: the origin and path of `appURL` plus "/". The
- * OAuth `error` counts only on an authorize redirect to a registered
- * `redirect_uri`, which the route marks in `OAUTH_REDIRECT_ERROR`. A
- * client chooses a sign-in `next`, and `safeNext` keeps its query,
- * so another Location is no failure (ruling 16 of plan 12h).
+ * `error` parameter counts only on a redirect of `errorRedirect`: an
+ * authorize redirect to a registered `redirect_uri`, or the form page of a
+ * core route. A client chooses a sign-in `next`, and `safeNext` keeps its
+ * query, so another Location is no failure (ruling 16 of plan 12h). The
+ * answer recorder of the tests reads the same rule.
  */
-function redirectCode(config: ResolvedConfig, res: Response): string | null {
-  const oauth = OAUTH_REDIRECT_ERROR.get(res);
-  if (oauth !== undefined) return oauth;
+export function redirectCode(config: ResolvedConfig, res: Response): string | null {
+  const marked = REDIRECT_ERROR.get(res);
+  if (marked !== undefined) return marked;
   const location = res.headers.get("location");
   if (location === null) return null;
   try {

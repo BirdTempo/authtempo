@@ -30,7 +30,7 @@ import {
 import { clearTrustCookie, readCookie, trustCookie } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
-import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
+import { authErrorUrl, errorRedirect, redirect, resolveNext } from "../redirect.js";
 import type { Route, RouteContext } from "../router.js";
 import { sessionCookieFor } from "../session-answer.js";
 
@@ -276,8 +276,9 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         if (r.ok) return withCookies(redirect(resolveNext(ctx.config, r.value.next)), r.value);
         // The challenge still lives after a wrong code: send the person back to the form.
         if (r.code === CHALLENGE_PAGE_ERROR)
-          return redirect(
+          return errorRedirect(
             `${page}${backupCode !== undefined ? "&backup=1" : emailCode !== undefined ? "&method=email" : ""}&error=${CHALLENGE_PAGE_ERROR}`,
+            CHALLENGE_PAGE_ERROR,
           );
         return failed(r.code);
       },

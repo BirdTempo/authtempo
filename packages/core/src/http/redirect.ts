@@ -26,8 +26,20 @@ export function authErrorUrl(config: ResolvedConfig, code: string): string {
 }
 
 /**
- * The OAuth error of each authorize redirect to a registered `redirect_uri`
- * (plan 12h ruling 16). The router reads it for the `request` event. The
- * `error` parameter of any other Location is no failure.
+ * The code of each failure redirect that carries it in an `error` parameter
+ * (ruling 16 of plan 12h). The router reads it for the `request` event. The
+ * `error` parameter of any other Location is no failure: a sign-in `next`
+ * can hold one.
  */
-export const OAUTH_REDIRECT_ERROR = new WeakMap<Response, string>();
+export const REDIRECT_ERROR = new WeakMap<Response, string>();
+
+/**
+ * A failure redirect that names its code in an `error` parameter of
+ * `location`: an authorize redirect to a registered `redirect_uri`, or the
+ * form page of a core route.
+ */
+export function errorRedirect(location: string, code: string): Response {
+  const res = redirect(location);
+  REDIRECT_ERROR.set(res, code);
+  return res;
+}
