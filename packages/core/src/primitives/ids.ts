@@ -14,3 +14,42 @@ export function newId(now: Date): string {
   for (let i = 0; i < 16; i++) rand += CROCKFORD[(bytes[i] ?? 0) % 32];
   return time + rand;
 }
+
+/** The last id of `newMonotonicId` in this isolate, or "" before the first. */
+let lastMonotonic = "";
+
+/** The id plus 1, with the carry of the last char into the char before it. */
+function increment(id: string): string {
+  const chars = id.split("");
+  for (let i = chars.length - 1; i >= 0; i--) {
+    const digit = CROCKFORD.indexOf(chars[i] ?? "");
+    if (digit < 31) {
+      chars[i] = CROCKFORD[digit + 1] ?? "";
+      return chars.join("");
+    }
+    chars[i] = "0";
+  }
+  throw new Error("authtempo: the monotonic id has no next value");
+}
+
+/**
+ * A monotonic ULID (the ULID spec, section "Monotonicity"). In a later
+ * millisecond it is a new `newId`. In the same millisecond as the last id
+ * of this isolate, it is the last id plus 1. When the clock goes back, it
+ * is the last id plus 1 too, so each id of one isolate sorts after the one
+ * before it. The ids of two isolates in one millisecond have no defined
+ * order between them.
+ *
+ * Only the audit rows use it (ruling 58 Q4 of plan 12f): the audit list
+ * reads them in id order, and a record lists in the order it happened.
+ * The other tables keep `newId`. A monotonic id tells its neighbor: from
+ * one session, handoff, or verification id, the next id of that millisecond
+ * is the id plus 1. Those ids reach the client, and an audit id reaches
+ * only an operator.
+ */
+export function newMonotonicId(now: Date): string {
+  const fresh = newId(now);
+  const next = fresh.slice(0, 10) > lastMonotonic.slice(0, 10) ? fresh : increment(lastMonotonic);
+  lastMonotonic = next;
+  return next;
+}

@@ -1108,6 +1108,7 @@ Plan 12f gives the operator of a deployment the support tools of day one. `opera
 - The limits: every secret call counts on `operator-users:ip:<ip>`, 600 per hour, before the secret compare. A secret that matches also counts on `operator-users:secret:<name>`, 600 per hour from any IP. A platform operator counts on `operator:user:<userId>`, 600 per hour.
 - `auth.api.operator` holds the same tools in process, with the actor as an input. Its entries are `users`, `platformRole`, `secondFactor`, `createAdmin`, `sessions`, `audit`, `impersonate`, and `stopImpersonating`.
 - The audit table `ta_operator_audit` is append-only: core never updates or deletes a row. `hooks.operator.afterAction` sends each row to a separate system.
+- An audit id is a monotonic ULID (`newMonotonicId`). The audit list reads the rows in id order. So the rows of one isolate list in the order of their writes, also inside one millisecond. The rows of two isolates in one millisecond have no defined order between them.
 
 ## Hooks
 

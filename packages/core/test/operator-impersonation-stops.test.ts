@@ -21,6 +21,7 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { base32Decode } from "../src/primitives/totp.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import { post, tokenFromMail } from "./helpers.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
 import { codeNow, PASSWORD, verifiedSession } from "./totp-helpers.js";
@@ -419,5 +420,75 @@ describe("the stop rows of the impersonation (ruling 43 of plan 12f)", () => {
     }
     expect(costs[0]).toBe((costs[1] ?? 0) + 1);
     expect(impersonationStops({}, "ban")).toBeNull();
+  });
+});
+
+describe("the order of the audit rows in one millisecond (ruling 58 Q4 of plan 12f)", () => {
+  it("lists two acts and their stop rows in write order, 100 times on a fixed clock", async () => {
+    // Every request passes: 300 starts on one clock would fill the start limit.
+    const w = await world({ limiter: { allow: async () => true } });
+    // The ids of the audit rows in the order of their writes, inside and outside a transaction.
+    const written: string[] = [];
+    const record = <T extends { create: StorageAdapter["create"] }>(handle: T): T => {
+      const create = handle.create.bind(handle);
+      handle.create = (async (model, data) => {
+        const row = await create(model, data);
+        if (model === "operatorAudit") written.push((row as { id: string }).id);
+        return row;
+      }) as StorageAdapter["create"];
+      return handle;
+    };
+    const storage = record(w.auth.storage as StorageAdapter);
+    const transaction = storage.transaction.bind(storage);
+    storage.transaction = (fn) => transaction((tx) => fn(record({ ...tx })));
+    const api = operatorApi(w.auth.config);
+    const end = async () => {
+      const r = await api.sessions.endUser({
+        actor: APP,
+        userId: w.target.user.id,
+        reason: "Key leak",
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+    };
+    // The clock never moves: every row of the test shares one millisecond.
+    const at = w.auth.clock.now().getTime();
+    for (let i = 0; i < 100; i++) {
+      await impersonate(w);
+      await impersonate(w);
+      await end();
+      await impersonate(w);
+      await end();
+    }
+    storage.transaction = transaction;
+    expect(w.auth.clock.now().getTime()).toBe(at);
+    // 100 rounds of 3 starts, 3 stop rows, and 2 end acts.
+    expect(written).toHaveLength(800);
+    const listed: string[] = [];
+    let after: string | undefined;
+    for (;;) {
+      const page = await api.audit.list({ actor: APP, limit: 100, ...(after ? { after } : {}) });
+      if (!page.ok) throw new Error(page.code);
+      listed.push(...page.value.rows.map((r) => r.id));
+      if (page.value.next === null) break;
+      after = page.value.next;
+    }
+    expect(listed).toEqual(written);
+    const actions = (
+      await w.auth.storage.findMany("operatorAudit", [], {
+        sort: { field: "id", dir: "asc" },
+      })
+    ).map((r) => r.action);
+    expect(actions.slice(0, 8)).toEqual([
+      "impersonation_start",
+      "impersonation_start",
+      "impersonation_stop",
+      "impersonation_stop",
+      "sessions_end_user",
+      "impersonation_start",
+      "impersonation_stop",
+      "sessions_end_user",
+    ]);
   });
 });

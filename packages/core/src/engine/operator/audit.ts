@@ -1,7 +1,7 @@
 import type { ResolvedConfig } from "../../config.js";
 import { isOperatorReason } from "../../operator-secret.js";
 import { appErrorName } from "../../primitives/app-error.js";
-import { newId } from "../../primitives/ids.js";
+import { newMonotonicId } from "../../primitives/ids.js";
 import { hasControlChar, removeControlChars } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { OperatorAction, OperatorAuditRow, SessionRow, UserRow } from "../../schema.js";
@@ -187,7 +187,7 @@ export async function operatorAct<T extends object>(
       // The draft first, so no field of it can replace the id or the times.
       const row = await tx.create("operatorAudit", {
         ...draft,
-        id: newId(now),
+        id: newMonotonicId(now),
         createdAt: now,
         updatedAt: now,
       });
@@ -290,7 +290,7 @@ export async function writeStopRow(
 ): Promise<void> {
   if (session.actorId === null) return;
   const row = await tx.create("operatorAudit", {
-    id: newId(now),
+    id: newMonotonicId(now),
     createdAt: now,
     updatedAt: now,
     actorKind: "user",
@@ -343,8 +343,11 @@ function idInput(value: unknown): boolean {
 }
 
 /**
- * The audit rows, oldest first, by `id` ascending (a ULID, so the order of
- * the writes). `targetUserId` reads one user's rows through its index.
+ * The audit rows, oldest first, by `id` ascending. The id is a monotonic
+ * ULID (`newMonotonicId`), so the rows of one isolate list in the order of
+ * their writes, also inside one millisecond. The rows of two isolates in
+ * one millisecond have no defined order between them. `targetUserId`
+ * reads one user's rows through its index.
  * `after` is the `next` of the page before. `limit` is 1 to 100, default
  * 50. `next` is the last id when the page is full, else null; so one
  * empty page comes after a full last page. Needs `operator.users` (else
