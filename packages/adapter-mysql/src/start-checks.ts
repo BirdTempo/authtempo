@@ -116,9 +116,11 @@ export function mysqlStartChecks(
 }
 
 /**
- * The `ping` of the adapter (plan 12h Task 8, ruling 26 of the 12g lane):
- * the version read of the checks with no cache, each call. It never sets
- * the gate of the checks. Its query counts in `statementsSent` only.
+ * The version read of the adapter's `ping` (plan 12h Task 8, ruling 26 of
+ * the 12g lane): the version read of the checks with no cache, each call.
+ * It never sets the gate of the checks. Its query counts in
+ * `statementsSent` only. The adapter runs the start checks before it
+ * (ruling 27).
  */
 export function mysqlSchemaVersionPing(
   pool: Pool,

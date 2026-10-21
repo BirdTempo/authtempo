@@ -13,9 +13,10 @@ export interface MysqlAdapterOptions {
   /** The start checks, run once per adapter: the version, FOUND_ROWS, strict mode, the collations. */
   ready(): Promise<void>;
   /**
-   * The version read of `ready` with no cache, each call: the adapter's
-   * `ping` (plan 12h Task 8). It counts its own query in `sent`. Leave it
-   * out, and the adapter has no `ping`.
+   * The version read of `ready` with no cache, each call (plan 12h Task 8).
+   * It counts its own query in `sent`. The adapter's `ping` runs `ready`
+   * first, then this read (ruling 27 of the 12g lane). Leave it out, and the
+   * adapter has no `ping`.
    */
   ping?(): Promise<void>;
   /**
@@ -183,7 +184,16 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       await query(ctx, { sql: `${lock.sql} FOR UPDATE`, params: lock.params });
     },
   };
-  if (ctx.ping) self.ping = ctx.ping;
+  // The start checks come first, so a pool that every call refuses is not
+  // ready (ruling 27 of the 12g lane). `ready` keeps a pass and not a
+  // failure, so the version read below is the only statement of a ping
+  // after the first pass.
+  const ping = ctx.ping;
+  if (ping)
+    self.ping = async () => {
+      await ctx.ready();
+      await ping();
+    };
   return self;
 }
 

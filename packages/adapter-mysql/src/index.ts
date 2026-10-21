@@ -8,8 +8,9 @@ import { mysqlSchemaVersionPing, mysqlStartChecks, type Sent } from "./start-che
 /**
  * The storage adapter on MySQL 8.4 and later through a mysql2 pool. The app
  * opens the pool. The adapter runs its four checks at start on the first
- * call (see README "Checks at start"). Its `ping` reads the schema version
- * with no cache, each call.
+ * call (see README "Checks at start"). Its `ping` runs those checks, which
+ * keep a pass and not a failure, then reads the schema version with no
+ * cache, each call.
  */
 export function createMysqlAdapter(pool: Pool): StorageAdapter {
   const sent: Sent = { statements: 0, ready: 0 };

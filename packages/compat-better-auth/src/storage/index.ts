@@ -90,13 +90,15 @@ export function betterAuthSchemaStorage(
     // The D1 code over the SQLite seam of plan 12g: the same statements, the
     // same undo log, the same readiness check. Before the check, the handle
     // must read integers as numbers, as on the core SQLite adapter. The ping
-    // is the D1 ping over the seam (ruling 26 of the 12g lane).
+    // runs that check first (ruling 27 of the 12g lane), then the D1 ping
+    // over the seam (ruling 26).
     const { driver } = options;
     const variant = options.variant ?? "1.7";
     const st = compatStatements("sqlite", names);
     const sent = { statements: 0, ready: 0 };
     const probe = integerProbe(driver.db, sent);
     const compatReady = d1CompatReady(driver.db, names, sent);
+    const compatPing = d1CompatPing(driver.db, names, sent);
     const sqlite: SqliteSchemaStorage = {
       kind: "authtempo-compat-database",
       dialect: "sqlite",
@@ -108,7 +110,10 @@ export function betterAuthSchemaStorage(
           await probe();
           await compatReady();
         },
-        ping: d1CompatPing(driver.db, names, sent),
+        ping: async () => {
+          await probe();
+          await compatPing();
+        },
         sent,
       }),
       limiter: createD1LimiterOnSeam(driver.db),

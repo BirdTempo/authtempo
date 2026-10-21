@@ -24,7 +24,7 @@ sources:
 
 | Export | What it is |
 | --- | --- |
-| `createSqliteAdapter` | The storage port on SQLite, from a `SqliteDriver`. The first call checks the integer reads, then the schema version. Its `ping` reads the schema version with no cache, for `GET /auth/ready`. |
+| `createSqliteAdapter` | The storage port on SQLite, from a `SqliteDriver`. The first call checks the integer reads, then the schema version. Its `ping` checks the integer reads (a pass is kept, a failure is not), then reads the schema version with no cache, for `GET /auth/ready`. |
 | `createSqliteLimiter` | The owned limiter on SQLite, from a `SqliteDriver`. It keeps its counts in `ta_limit`. |
 | `SqliteDriver` | One database through one driver. An entry of a driver makes it from the handle that the app opens. |
 | `applySqliteMigrations` | Applies each migration that `ta_migrations` lacks, and answers the names that ran. It is safe on every start. |
