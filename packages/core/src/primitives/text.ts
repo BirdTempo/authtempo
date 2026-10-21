@@ -19,8 +19,8 @@ export function hasControlChar(s: string): boolean {
  * Persian names and joined emoji carry them (the lead's ruling, 2026-10-15).
  *
  * This one class holds for the user name, the passkey name, the operator
- * reason (so the ban reason too), the proof reference, and the strip of the
- * audit user agent (plan 12f, final review m5).
+ * reason, and so the ban reason. It holds for the proof reference and the
+ * strip of the audit user agent too (plan 12f, final review m5).
  */
 const REFUSED_RE = /[\p{Cc}\p{Cs}\p{Zl}\p{Zp}]|(?![\u200c\u200d])\p{Cf}/u;
 // The class of REFUSED_RE, with the global flag, so the test and the strip cannot drift.

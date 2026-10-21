@@ -130,9 +130,10 @@ export type VerificationPurpose =
   | "account-delete"
   /**
    * The sessions that a ban or a revoke of the platform role left for the
-   * sweep (ruling 44 of plan 12f). identifier: the user id; valueHash: the
-   * SHA-256 hex of `session-end:<id>`; data: { reason, before }. Lives
-   * 3650 days; the sweep deletes it when no session from before `before` stays.
+   * sweep (ruling 44 of plan 12f). The identifier is the user id, and the
+   * valueHash is the SHA-256 hex of `session-end:<id>`. The data is
+   * { reason, before }. The row lives 3650 days. The sweep deletes it when
+   * no session from before `before` stays.
    */
   | "session-end";
 

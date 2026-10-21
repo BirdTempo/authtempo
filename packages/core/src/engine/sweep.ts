@@ -76,7 +76,7 @@ export const SWEEP_CALL_BUDGET = 50;
  * The largest `callBudget` of `sweepExpired` (ruling 41 item 1 of plan 12f).
  * D1 Paid allows 1000 queries per invocation (D1 limits page, read
  * 2026-10-20). A deployment on Workers Paid, or on Postgres, may raise the
- * budget up to it, so one sweep sends more logouts and ends more left
+ * budget up to it. Then one sweep sends more logouts and ends more left
  * sessions. A budget below the default is refused: the shares of the steps
  * (`OUTBOX_SHARE`, `LINK_SHARE`, the pending page) assume 50.
  */
@@ -181,8 +181,9 @@ async function sweepClients(
  * links. Each link with no session costs 1 more, and one delete removes
  * those links. The rows of a page go in one transaction with their delete.
  * A link that does not fit keeps its time, so the next sweep reads it
- * first. 50 ids and one more term stay under the 100 bound parameters of a
- * D1 query (D1 limits page updated 21 April 2026, read 2026-10-21).
+ * first. A read of 50 ids and one more term stays under the 100 bound
+ * parameters of a D1 query. The source is the D1 limits page (updated 21
+ * April 2026, read 2026-10-21).
  */
 export const LINK_SWEEP_PAGE = 50;
 export const LINK_SWEEP_PAGES = 5;
@@ -359,8 +360,8 @@ export async function sweepExpired(
   if (config.limiter.sweep) meter.add(1);
   const limits = (await config.limiter.sweep?.(now)) ?? 0;
   // The pending-end rows of a ban or a revoke are read here, before the
-  // idle clients: the read takes its 1 call from the clients and the links,
-  // not from the outbox. While a row waits, the outbox leaves the calls of
+  // idle clients. So the read takes its 1 call from the clients and the
+  // links, not from the outbox. While a row waits, the outbox leaves the calls of
   // one page for it (ruling 50 of plan 12f), so a backlog cannot hold it.
   const pending: VerificationRow[] = [];
   await softStep(

@@ -655,10 +655,11 @@ export type ResolvedAccess =
   | { kind: "oauth-client"; access: OAuthClientAccess };
 
 /**
- * The caller of an access token, or null: a JWT that verifies under a key
- * of this instance, with `typ: "at+jwt"`, this issuer, an `aud` in
- * `oauth.resources`, a live `exp`, and a number `iat`. Then a user that
- * exists, with no ban window over `iat`, and each scope still in `oauth.scopes`. For a `client_credentials` token, a client
+ * The caller of an access token, or null. The token is a JWT that verifies
+ * under a key of this instance, with `typ: "at+jwt"` and this issuer. It
+ * has an `aud` in `oauth.resources`, a live `exp`, and a number `iat`. Then
+ * a user that exists, with no ban window over `iat`, and each scope still
+ * in `oauth.scopes`. For a `client_credentials` token, a client
  * that still holds the grant and each scope. A session JWT of `GET /token`
  * and an ID token have `typ: "JWT"` and never pass.
  */

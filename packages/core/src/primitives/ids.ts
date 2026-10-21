@@ -40,7 +40,7 @@ function increment(id: string): string {
  * before it. The ids of two isolates in one millisecond have no defined
  * order between them.
  *
- * Only the audit rows use it (ruling 58 Q4 of plan 12f): the audit list
+ * Only the audit rows use it (ruling 58 Q4 of plan 12f). The audit list
  * reads them in id order, and a record lists in the order it happened.
  * The other tables keep `newId`. A monotonic id tells its neighbor: from
  * one session, handoff, or verification id, the next id of that millisecond

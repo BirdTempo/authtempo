@@ -338,7 +338,7 @@ export async function grantPlatformRole(
  * Until then each operator check reads the role again and refuses them. A
  * target with no role part gets no change and the audit row. When a
  * pending-end row of the target exists, such a revoke ends a page of the
- * sessions again (ruling 45), so a retry does what the first call left.
+ * sessions again (ruling 45). So a retry does what the first call left.
  * The act also ends the impersonation sessions that the target opened
  * (`endImpersonations`, ruling 31).
  *
@@ -396,10 +396,11 @@ export async function revokePlatformRole(
       // commits its start row before `endImpersonations` reads.
       await holdUser(tx, user.id);
       meter.step(STEP_WORST.hold);
-      // The locks of the user's sessions and of the impersonation sessions
-      // that the user opened, in one read, right after the user row, as in
-      // the ban and `withRoleLoss` (user-hold.ts): the audit read and the
-      // lock read. So no owner lock comes between the two holds.
+      // One read takes the locks of the user's sessions and of the
+      // impersonation sessions that the user opened. It comes right after
+      // the user row, as in the ban and `withRoleLoss` (user-hold.ts). It
+      // costs the audit read and the lock read. So no owner lock comes
+      // between the two holds.
       const hold = await holdImpersonations(tx, config, user.id, now, true);
       meter.step(2);
       const member = await memberOf(tx, organization.id, user.id);
@@ -509,8 +510,9 @@ export async function revokePlatformRole(
 
 /**
  * The worst case of the member write of a revoke in D1 statements, for an
- * adapter with no `statementsSent`: the owner lock reads the owners, updates
- * the organization (2), writes the member row (2), and reads the owners again.
+ * adapter with no `statementsSent`. The owner lock reads the owners and
+ * updates the organization (2). Then it writes the member row (2), and
+ * reads the owners again.
  */
 const REVOKE_WRITE_WORST = 6;
 

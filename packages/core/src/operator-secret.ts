@@ -5,9 +5,9 @@ import { hasRefusedChar } from "./primitives/text.js";
  * characters. The operator route and `authtempo keys rotate` read this one
  * rule, so the CLI refuses a value before it costs one of the five calls per
  * hour. The entry `@authtempo/core/operator-secret` exports it, outside the
- * main entry: it is for the CLI, not for an app. The entry exports the
- * limits of the operator routes that the CLI prints too, and the text rules
- * of the operator tools that the CLI checks before a request (plan 12f
+ * main entry: it is for the CLI, not for an app. The entry also exports the
+ * limits of the operator routes, which the CLI prints. It exports the text
+ * rules of the operator tools too, which the CLI checks before a request (plan 12f
  * ruling 40). It imports `primitives/text.ts` only, so the CLI loads no
  * engine module.
  */
@@ -37,8 +37,8 @@ export const OPERATOR_SECRETS_PER_IP = { seconds: 3600, max: 120 };
 
 /**
  * The limit of every secret call to the user, session, and audit routes
- * (plan 12f, spec 26 item 12). 600 per IP per hour, with a right or a
- * wrong secret. A support script that pages through 50 000 users at 100
+ * (plan 12f, spec 26 item 12). It is 600 per IP per hour, with a right or
+ * a wrong secret. A support script that pages through 50 000 users at 100
  * per page needs 500 calls. A guess costs one count of 600. The CLI prints
  * this value (ruling 10 of plan 12f).
  */

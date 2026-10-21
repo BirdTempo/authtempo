@@ -10,9 +10,9 @@ import type { ResolvedSession } from "../sessions.js";
 import { bannedFor } from "./ban-rule.js";
 
 /**
- * The actor of an operator act (plan 12f, spec 26 item 1): a named operator
- * secret, a platform operator with the session of this request, or the app
- * in process. The audit row names the actor by the secret's name, the user
+ * The actor of an operator act (plan 12f, spec 26 item 1). It is a named
+ * operator secret, a platform operator with the session of this request,
+ * or the app in process. The audit row names the actor by the secret's name, the user
  * id, or the app's name, never by a secret.
  */
 export type OperatorActor =
@@ -201,10 +201,10 @@ function refused(route: string): Result<never> {
  * order:
  *
  * 1. The session is not an impersonation session.
- * 2. The user holds the platform role in the platform organization, and
- *    the session is not older than the last write of that member row
- *    (ruling 50 of plan 12f). Each write of a role, a grant too, sets
- *    `updatedAt`, so a re-grant gives no power to a session from before
+ * 2. The user holds the platform role in the platform organization. The
+ *    session is not older than the last write of that member row (ruling
+ *    50 of plan 12f). Each write of a role, a grant too, sets
+ *    `updatedAt`. So a re-grant gives no power to a session from before
  *    it, such as a session that a revoke left for the sweep.
  * 3. The address is verified.
  * 4. A second factor has a method.

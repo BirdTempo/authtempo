@@ -96,10 +96,11 @@ export const TARGET_CALLS: Readonly<Record<OperatorActor["kind"], number>> = {
 
 /**
  * The calls that the last page of `endUserSessions` keeps for its own
- * steps: the delete of a session that a sign-in wrote after the read, the
- * read of the refresh tokens, their delete, the 2 statements of
- * `deleteOAuthCodes`, and the read of `endFamilies` after the commit. Then
- * one family at the least: 2 calls of `revokeFamily`.
+ * steps. First comes the delete of a session that a sign-in wrote after
+ * the read. Then come the read of the refresh tokens and their delete, and
+ * the 2 statements of `deleteOAuthCodes`. Last comes the read of
+ * `endFamilies` after the commit. Then one family at the least: 2 calls of
+ * `revokeFamily`.
  */
 const LAST_PAGE_CALLS = 6;
 export const FAMILY_CALLS = 2;
@@ -141,8 +142,9 @@ export async function endUserSessions(
   const reason = reasonOf(config, input);
   if (!reason.ok) return reason;
   const fixed = TARGET_CALLS[input.actor.kind];
-  // The least call: the target, the hold (3), the challenges, the lock and the expired rows (3 at
-  // most), the read, and the handoff codes (6), a page of one session (2 more), and the last page.
+  // The least call. The target, the hold, and the challenges cost 3. The lock, the expired
+  // rows (3 at most), the read, and the handoff codes cost 6. A page of one session costs 2
+  // more, then comes the last page.
   const budget = await workBudget(
     config.storage,
     input.actor,
@@ -428,12 +430,12 @@ export async function endSessionPage(
  * now, as far as the budget allows, and the sweep makes the rest. The
  * sweep sends them all (ruling 1). A call sends none, because
  * 500 users can mean 5000 HTTP calls in one request. It holds no user
- * row: a hold costs calls per user, and the page touches only the session
- * and link rows, so it waits on no user row that another flow holds.
+ * row: a hold costs calls per user. The page touches only the session and
+ * link rows, so it waits on no user row that another flow holds.
  *
- * The cost of a page of n sessions has five parts: 1 read, the lock read
- * of `lockInOrder`, ceil(n / 50) link reads, the deletes, and the audit
- * row. With no hook the deletes are ceil(n / 50) statements, so the sum is
+ * The cost of a page of n sessions has five parts. They are 1 read, the
+ * lock read of `lockInOrder`, ceil(n / 50) link reads, the deletes, and
+ * the audit row. With no hook the deletes are ceil(n / 50) statements, so the sum is
  * 3 + 2 ceil(n / 50): 23 for 500 sessions, and 43 for 1000. With a
  * `session.afterEnd` hook there is one delete per session, and the sum is
  * 3 + ceil(n / 50) + n. Each live impersonation session costs 2 more with

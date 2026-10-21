@@ -11,8 +11,9 @@ const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
 const USER_NAME_MAX = 200;
 
 /**
- * The rule of a name that other people or other devices show: a string of 1
- * to `max` UTF-16 code units, with no character of `hasRefusedChar`. The user
+ * The rule of a name that other people or other devices show. It is a
+ * string of 1 to `max` UTF-16 code units with no character of
+ * `hasRefusedChar`. The user
  * name and the passkey name (plan 12a Task 19) apply it, so one character
  * rule holds for both.
  */

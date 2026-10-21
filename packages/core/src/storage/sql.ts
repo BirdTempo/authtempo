@@ -307,8 +307,9 @@ function compileWhere<M extends ModelName>(
         if (/\p{Cs}/u.test(w.value))
           throw invalid(model, w.field, "startsWith refuses a lone surrogate");
         // substr, not LIKE: SQLite's LIKE ignores the case of ASCII letters, and a
-        // wildcard needs an escape. substr counts characters on both dialects, so
-        // the match is exact (plan 12f deviation 2). No index serves it: a scan.
+        // wildcard needs an escape. The function substr counts characters on both
+        // dialects, so the match is exact (plan 12f deviation 2). No index serves
+        // it: a scan.
         parts.push(`substr(${col}, 1, ${p.add([...w.value].length)}) = ${p.add(enc(w.value))}`);
         break;
       }

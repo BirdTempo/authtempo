@@ -200,9 +200,9 @@ async function userUpdated(
  * Bans a user (spec 26 items 5 and 6). ASVS 5.0.0 7.4.2: "Verify that the
  * application terminates all active sessions when a user account is
  * disabled or deleted (such as an employee leaving the company)." One
- * transaction writes the ban fields, ends every challenge, handoff code,
- * and OAuth refresh token and code, and a page of the sessions
- * (`endAllAccessPage`), and writes the audit row. The API tokens stay, and
+ * transaction writes the ban fields and the audit row. It ends every
+ * challenge, handoff code, and OAuth refresh token and code, and a page of
+ * the sessions (`endAllAccessPage`). The API tokens stay, and
  * work again after an unban. A ban of a banned user replaces the time, the
  * reason, and the end.
  *
@@ -265,9 +265,9 @@ export async function banUser(
       if (!written.ok) return written;
       // The read and the update: a batch of 2 on D1.
       meter.step(STEP_WORST.hold);
-      // The locks of the user's sessions and of the impersonation sessions
-      // that the user opened, in one read, before any delete (ruling 42 L3):
-      // the audit read and the lock read.
+      // One read takes the locks of the user's sessions and of the
+      // impersonation sessions that the user opened, before any delete
+      // (ruling 42 L3). It costs the audit read and the lock read.
       const hold = await holdImpersonations(tx, config, input.userId, now, true);
       meter.step(2);
       // The impersonation sessions first, inside the budget (rulings 31 and 44).

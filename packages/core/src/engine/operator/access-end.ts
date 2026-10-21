@@ -15,12 +15,12 @@ import { END_ALL_LIMIT, endSessionPage, FAMILY_CALLS, STEP_WORST } from "./sessi
 
 /**
  * The end of all access of one user by a ban or a revoke of the platform
- * role, inside the call budget (ruling 44 of plan 12f). The act ends a
- * page of the sessions in its transaction. The sessions that do not fit
- * stay, with one pending-end row, and the sweep ends them
- * (`sweepPendingEnds`). Until then each door refuses such a row: a ban
- * through `bannedFor`, and a revoke through the live read of the platform
- * role at each operator check.
+ * role (ruling 44 of plan 12f). It stays inside the call budget. The act
+ * ends a page of the sessions in its transaction. The sessions that do not
+ * fit stay, with one pending-end row, and the sweep ends them
+ * (`sweepPendingEnds`). Until then each door refuses such a row. For a ban
+ * the door is `bannedFor`. For a revoke it is the live read of the
+ * platform role at each operator check.
  */
 
 /** The `session.afterEnd` reason of the sessions that a pending-end row names. */
@@ -35,9 +35,10 @@ export type PendingEndReason = Extract<SessionEndReason, "banned" | "operator">;
 export const PENDING_END_MS = 3650 * 86_400_000;
 
 /**
- * The calls of the last steps of `endAllAccessPage`: the handoff codes, the
- * delete of the refresh tokens, the 2 statements of `deleteOAuthCodes`, and
- * the pending-end row or the delete of a late session.
+ * The calls of the last steps of `endAllAccessPage`. They are the handoff
+ * codes, the delete of the refresh tokens, and the 2 statements of
+ * `deleteOAuthCodes`. Then comes the pending-end row or the delete of a
+ * late session.
  */
 const TAIL_CALLS = 5;
 
@@ -45,19 +46,20 @@ const TAIL_CALLS = 5;
 const PAGE_LEAST = 3;
 
 /**
- * The least calls of the work of a ban or a revoke after its own write:
- * the expired rows (3), the challenges, the token read, the session read,
- * the last steps, and the read of `endFamilies` after the commit.
+ * The least calls of the work of a ban or a revoke after its own write.
+ * They are the expired rows (3), the challenges, the token read, and the
+ * session read. Then come the last steps, and the read of `endFamilies`
+ * after the commit.
  */
 export const ACCESS_END_LEAST = STEP_WORST.expired + 3 + TAIL_CALLS + 1;
 
 /**
  * Ends the access of one user in the act's transaction, inside `budget`
  * calls of `meter` (rulings 37 and 44 of plan 12f). The order is the order
- * of every session end: the expired sessions with no hook, the challenges,
- * a page of the live sessions by id (`endSessionPage`), the handoff codes,
- * then the OAuth refresh tokens and codes. The API tokens stay (spec 26
- * item 6).
+ * of every session end. First come the expired sessions with no hook, the
+ * challenges, and a page of the live sessions by id (`endSessionPage`).
+ * Then come the handoff codes, then the OAuth refresh tokens and codes.
+ * The API tokens stay (spec 26 item 6).
  *
  * The refresh tokens all go in the act. The read of the tokens comes
  * first, so the page keeps the calls of `endFamilies` after the commit:
@@ -256,7 +258,7 @@ export async function readPendingEnds(
  * The work of the sweep step of the pending-end rows, inside `limit` calls
  * of `meter`. For each row, one transaction ends a page of the user's
  * sessions from before `data.before` (`endSessionPage`, with the locks by
- * id), and deletes the row when no such session stays. `session.afterEnd`
+ * id). It deletes the row when no such session stays. `session.afterEnd`
  * fires after the commit, with the reason of the row. A row that does not
  * fit waits for the next sweep. The answer is the count of ended sessions.
  */

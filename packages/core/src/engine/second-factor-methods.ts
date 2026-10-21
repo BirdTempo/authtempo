@@ -96,8 +96,8 @@ export async function provePassword(
  * passkey. After `addMethod`, the enable writes `updatedAt` of every passkey
  * row of the user, so it holds those rows until its commit. Zero rows: no
  * passkey, and the throw undoes the method. A parallel `deletePasskey` waits
- * on its delete of a held row and then reads the committed factor row, so it
- * sees the method on (Postgres READ COMMITTED). Both take the factor row
+ * on its delete of a held row. Then it reads the committed factor row, so
+ * it sees the method on (Postgres READ COMMITTED). Both take the factor row
  * first and the passkey rows second, so neither waits on the other in turn.
  * The enable holds the user row before both (user-hold.ts): the account
  * delete takes the passkey rows before the factor row (plan 12f Task 9).

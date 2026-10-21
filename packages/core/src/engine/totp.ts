@@ -555,8 +555,8 @@ export async function disableTotpWithCode(
   if (!factor || !row) return fail("totp_not_enabled");
   if (!(await proveFactor(config, factor, input.code, now))) return fail("invalid_code");
   try {
-    // No hold of the user row: the totp row is the first write here, and
-    // the account delete takes it before the trusted devices and the factor
+    // No hold of the user row: the totp row is the first write here. The
+    // account delete takes it before the trusted devices and the factor
     // row. So neither waits on the other in turn (plan 12f Task 9).
     await config.storage.transaction(async (tx) => {
       await tx.delete("totp", [{ field: "id", op: "eq", value: row.id }]);
