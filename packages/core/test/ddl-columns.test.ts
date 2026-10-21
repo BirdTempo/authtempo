@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { tokenUseKey } from "../src/engine/token-use.js";
 import { ipKey } from "../src/limiter/ip-key.js";
+import { LIMIT_FAMILIES } from "../src/limiter/limit.js";
 import { limiterKey } from "../src/limiter/memory.js";
 import { type FieldType, type ModelName, schema } from "../src/schema.js";
 import {
@@ -65,15 +65,19 @@ function longestPart(expr: string): string {
   throw new Error(`no longest form for the key part \${${expr}}: give it a row in this test`);
 }
 
-/** The longest key that one `allow` call can build, from the text of its first argument. */
-function longestKey(file: string, text: string, arg: string): string {
-  if (arg.startsWith("`"))
-    return arg.slice(1, -1).replace(/\$\{([^}]*)\}/g, (_, e) => longestPart(e));
-  if (/^tokenUseKey\(/.test(arg)) return tokenUseKey("tk", "i".repeat(64));
-  // A name: the template that the same file assigns to it.
-  const assigned = new RegExp(`const ${arg} = (\`[^\`]*\`);`).exec(text)?.[1];
-  if (assigned === undefined) throw new Error(`${file}: no template for the key ${arg}`);
-  return longestKey(file, text, assigned);
+/**
+ * The longest key that one `limit` call can build (plan 12h): the key is
+ * <family>:<subject>. The family argument is a literal, or a choice of
+ * literals; each literal with a colon must be a family of LIMIT_FAMILIES.
+ * A literal with no colon is a test of the choice, such as "tk".
+ */
+function longestKey(file: string, family: string, subject: string): string {
+  const names = [...family.matchAll(/"([^"]*:[^"]*)"/g)].map((m) => m[1] ?? "");
+  if (names.length === 0) throw new Error(`${file}: no family literal in ${family}`);
+  for (const n of names)
+    expect((LIMIT_FAMILIES as readonly string[]).includes(n), `${file} ${n}`).toBe(true);
+  const longest = names.reduce((a, b) => (a.length >= b.length ? a : b));
+  return `${longest}:${longestPart(subject)}`;
 }
 
 describe("the column map (plan 12g)", () => {
@@ -187,17 +191,22 @@ describe("the column map (plan 12g)", () => {
   });
 
   it("keeps the stored key of each limiter site within ta_limit.key on MySQL", () => {
-    // Ruling 3 of plan 12g: ta_limit.key is VARBINARY(3072). Each allow call
+    // Ruling 3 of plan 12g: ta_limit.key is VARBINARY(3072). Each limit call
     // of core is found in the source, so a new site with no longest form fails.
+    // Since plan 12h each site calls limit(config, family, subject, window).
     const sites: string[] = [];
     const longest = new Map<string, number>();
     let calls = 0;
+    const part = String.raw`((?:[^,()]|\([^()]*\))+?)`;
+    const call = new RegExp(String.raw`(?<![\w.])limit\(\s*[\w.]+,\s*${part},\s*${part},`, "g");
     for (const [file, text] of SOURCES) {
       if (file.startsWith("limiter/")) continue;
-      calls += text.match(/\.allow\(/g)?.length ?? 0;
-      for (const m of text.matchAll(/\.allow\(\s*(`[^`]*`|tokenUseKey\([^)]*\)|\w+)\s*,/g)) {
-        const arg = m[1] ?? "";
-        const stored = limiterKey(longestKey(file, text, arg), {
+      calls += text.match(/(?<![\w.])limit\(/g)?.length ?? 0;
+      for (const m of text.matchAll(call)) {
+        const family = (m[1] ?? "").replace(/\s+/g, " ").trim();
+        const subject = (m[2] ?? "").trim();
+        const arg = `${family} ${subject}`;
+        const stored = limiterKey(longestKey(file, family, subject), {
           seconds: Number.MAX_SAFE_INTEGER,
           max: Number.MAX_SAFE_INTEGER,
         });
@@ -209,14 +218,16 @@ describe("the column map (plan 12g)", () => {
     }
     // Each call has a key form that this test reads: a call it cannot read fails here.
     expect(sites.length).toBe(calls);
-    // The count of the call sites at the 12k merge.
+    // The count of the call sites at the 12k merge, the same after plan 12h.
     expect(sites.length).toBe(76);
-    expect(sites).toContain(`engine/slug-check.ts \`slug-check:user:\${userId}\``);
-    expect(sites).toContain("engine/token-use.ts tokenUseKey(kind, row.id)");
+    expect(sites).toContain('engine/slug-check.ts "slug-check:user" userId');
+    expect(sites).toContain(
+      'engine/token-use.ts kind === "tk" ? "token-use:tk" : "token-use:to" row.id',
+    );
     // 25 characters of prefix, the 46 of a cl_ id, and two separators with
     // the two 16-digit window values.
     expect(
-      longest.get(`engine/oauth-credentials.ts \`oauth-credentials:client:\${client.id}\``),
+      longest.get('engine/oauth-credentials.ts "oauth-credentials:client" client.id'),
     ).toBe(105);
   });
 });
