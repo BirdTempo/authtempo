@@ -143,7 +143,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
-| `passkey.rpID` | string | required | The registrable domain that the passkeys bind to. |
+| `passkey.rpID` | string | required | The registrable domain that the passkeys bind to. Write it in lowercase ASCII, with an internationalized domain in punycode, such as `xn--bcher-kva.example`. `createAuth` refuses another form and names the punycode form. |
 | `passkey.rpName` | string | required | The name that the device shows. Not empty. |
 | `passkey.origins` | string list | required | Exact origins on `rpID`, not empty. Each must be `baseURL` or in `trustedOrigins`. |
 | `passkey.relatedOrigins` | boolean | `false` | With `true`, `auth.wellKnown` serves `/.well-known/webauthn` on the `rpID` host, and `origins` may hold at most five origins outside `rpID` (WebAuthn Level 3). |

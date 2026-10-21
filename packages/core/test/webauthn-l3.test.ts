@@ -9,6 +9,7 @@ import {
 import { createSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { passkeyRoutes } from "../src/http/routes/passkeys.js";
+import { onDomainTree } from "../src/primitives/host.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, get, makeAuth, post } from "./helpers.js";
@@ -143,6 +144,24 @@ describe("the related origins document (WebAuthn Level 3)", () => {
     expect(await res.json()).toEqual({ origins: outside });
   });
 
+  it("puts a host that only ends in the RP ID outside its domain tree", async () => {
+    // evilexample.com ends in example.com, but it is no subdomain of it (ruling 10 of plan 12i).
+    expect(onDomainTree("evilexample.com", RP_ID)).toBe(false);
+    expect(onDomainTree("app.example.com", RP_ID)).toBe(true);
+    expect(onDomainTree(RP_ID, RP_ID)).toBe(true);
+    const auth = authWith({ ...RELATED, origins: [APP_ORIGIN, "https://evilexample.com"] });
+    const res = await auth.wellKnown(new Request("https://example.com/.well-known/webauthn"));
+    expect(await res.json()).toEqual({ origins: ["https://evilexample.com"] });
+    // With relatedOrigins off, the config refuses the host as off the RP ID.
+    expect(() =>
+      authWith({
+        rpID: RP_ID,
+        rpName: "Example",
+        origins: [APP_ORIGIN, "https://evilexample.com"],
+      }),
+    ).toThrow("passkey.origins host evilexample.com is not on rpID example.com");
+  });
+
   it("answers 404 on another host and with relatedOrigins off", async () => {
     const auth = authWith(RELATED);
     for (const url of [
@@ -220,6 +239,28 @@ describe("the related origins document (WebAuthn Level 3)", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "passkey_failed" });
     expect(await w.auth.storage.findMany("passkey", [])).toHaveLength(1);
+  });
+});
+
+describe("the form of the RP ID (ruling 10 of plan 12i)", () => {
+  it("refuses an RP ID that is not lowercase ASCII and names the punycode form", () => {
+    for (const [rpID, form] of [
+      ["Example.com", "example.com"],
+      ["bücher.example", "xn--bcher-kva.example"],
+      ["BÜCHER.example", "xn--bcher-kva.example"],
+    ] as const) {
+      expect(() => authWith({ rpID, rpName: "Example", origins: [APP_ORIGIN] })).toThrow(
+        `passkey.rpID ${rpID} is not lowercase ASCII; write the punycode form ${form}`,
+      );
+    }
+    // The punycode form passes, with its origins.
+    expect(() =>
+      authWith({
+        rpID: "xn--bcher-kva.example",
+        rpName: "Example",
+        origins: ["https://app.xn--bcher-kva.example"],
+      }),
+    ).not.toThrow();
   });
 });
 

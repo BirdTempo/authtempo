@@ -466,6 +466,10 @@ export interface AuthConfig {
  * adds related origins and hints.
  */
 export interface PasskeyConfig {
+  /**
+   * A host in lowercase ASCII. Write an internationalized domain in its
+   * punycode form, such as `xn--bcher-kva.example` for `bücher.example`.
+   */
   rpID: string;
   rpName: string;
   origins: string[];
@@ -504,6 +508,28 @@ export interface ResolvedPasskey {
  * only these origins, so an origin on the tree takes no label slot.
  */
 const RELATED_ORIGINS_MAX = 5;
+
+/**
+ * The RP ID in the form a browser compares: lowercase ASCII, with an
+ * internationalized label in punycode. The URL parser makes that form. A
+ * host in another form never equals the browser's RP ID, and the domain
+ * tree check of the origins and the related origins document compare
+ * strings. So core refuses it and names the form to write.
+ */
+function checkRpID(rpID: string): void {
+  // Printable ASCII with no capital letter: a control character or a Unicode letter fails.
+  if (rpID === rpID.toLowerCase() && /^[\x20-\x7e]*$/.test(rpID)) return;
+  let form: string;
+  try {
+    // A scheme-relative URL on a reserved base: the parser reads `rpID` as the host.
+    form = new URL(`//${rpID}`, "https://rp.invalid").hostname;
+  } catch {
+    form = rpID.toLowerCase();
+  }
+  throw new ConfigError(
+    `passkey.rpID ${rpID} is not lowercase ASCII; write the punycode form ${form}`,
+  );
+}
 
 /** A hint list of the config: each value a WebAuthn hint, each value once. */
 function passkeyHints(path: string, list: readonly string[] | undefined): PasskeyHint[] {
@@ -1391,6 +1417,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   let passkey: ResolvedConfig["passkey"] = null;
   if (input.passkey) {
     requireFields("passkey", input.passkey, ["rpID", "rpName"]);
+    checkRpID(input.passkey.rpID);
     if (input.passkey.origins.length === 0)
       throw new ConfigError("passkey.origins must not be empty");
     let outside = 0;
