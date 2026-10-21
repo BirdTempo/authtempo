@@ -126,6 +126,10 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   tracker. The site sets no cookie.
 - The demo holds no secret and sends no request out of its Worker. Each
   limit of the demo is our own code.
+- Every operator act writes an audit row in the transaction of the act. Core
+  never changes or deletes an audit row. An operator secret reaches only the
+  scopes of its config entry, and an impersonation never reaches an operator
+  route, a re-authentication, or a second-factor change.
 
 ## Owner-run items of the site and the demo
 
