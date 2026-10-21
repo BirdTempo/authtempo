@@ -10,8 +10,8 @@ import { FAST } from "./password-helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
 
 // The two JWT doors of an impersonation session that an operator ban left
-// for the sweep (ruling 52 c, the final review m1 of plan 12f). They are the
-// mint of a session JWT and the live check of POST /token/live.
+// for the sweep. See ruling 52 c and the final review m1 of plan 12f. They
+// are the mint of a session JWT and the live check of POST /token/live.
 
 const TARGET = "ada@example.com";
 const APP = { kind: "app", name: "support-tool" } as const;

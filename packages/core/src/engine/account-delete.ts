@@ -364,7 +364,8 @@ export async function deleteAccountRows(
     if ((await ownersOf(config, tx, organization.id)) < 1) stopWith("conflict");
   await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
   // The user's sessions and the impersonation sessions that the user opened
-  // as an operator go together, after the lock read of `hold` (ruling 42 of plan 12f).
+  // as an operator go together (ruling 42 of plan 12f). The lock read of
+  // `hold` came first.
   await endSessions(
     tx,
     [{ field: "userId", op: "eq", value: user.id }],
