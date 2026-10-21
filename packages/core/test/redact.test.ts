@@ -63,6 +63,20 @@ describe("the redaction source (plan 12h Task 1, spec 31 item 9)", () => {
     expect(FIELD_KINDS.errorName(`${"A".repeat(60)}Error`)).toBe("Error");
   });
 
+  it("keeps a client reference and refuses a raw URL, a short or long hex, and an empty string", () => {
+    expect(FIELD_KINDS.clientRef("cl_abc_DEF-123")).toBe("cl_abc_DEF-123");
+    expect(FIELD_KINDS.clientRef("cimd:31c67c351206ab0ec26c672384aa30a2")).toBe(
+      "cimd:31c67c351206ab0ec26c672384aa30a2",
+    );
+    for (const bad of [
+      "https://client.example.com/oauth/metadata.json",
+      "cimd:31c67c351206ab0ec26c672384aa30a",
+      "cimd:31c67c351206ab0ec26c672384aa30a2a",
+      "",
+    ])
+      expect(FIELD_KINDS.clientRef(bad), bad).toBe(REJECT);
+  });
+
   it("rejects a value that fails its kind", () => {
     expect(FIELD_KINDS.hash("x")).toBe(REJECT);
     expect(FIELD_KINDS.count(-1)).toBe(REJECT);
