@@ -141,12 +141,17 @@ describe("the request event (plan 12h Task 4)", () => {
     });
   });
 
-  it("names an unmatched path, and a method outside the router as other", async () => {
+  it("names an unmatched path, and the real method of a HEAD and a PUT", async () => {
     const s = observed();
     const res = await s.auth.handle(get("/auth/nope"));
     expect(res.status).toBe(404);
+    // The router serves GET and POST only, so a HEAD and a PUT of a route path answer 404.
     const head = await s.auth.handle(new Request(`${BASE_URL}/auth/session`, { method: "HEAD" }));
     expect(head.status).toBe(404);
+    const put = await s.auth.handle(
+      new Request(`${BASE_URL}/auth/magic-link/request`, { method: "PUT", body: "{}" }),
+    );
+    expect(put.status).toBe(404);
     const requests = only(await s.events(), "request");
     expect(requests).toMatchObject([
       {
@@ -156,7 +161,8 @@ describe("the request event (plan 12h Task 4)", () => {
         outcome: "client_error",
         code: "not_found",
       },
-      { route: "unmatched", method: "other", status: 404 },
+      { route: "unmatched", method: "HEAD", status: 404, code: "not_found" },
+      { route: "unmatched", method: "PUT", status: 404, code: "not_found" },
     ]);
     for (const e of requests) expect(e.rejected).toBeUndefined();
   });

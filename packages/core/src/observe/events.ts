@@ -201,11 +201,11 @@ const SWEEP_STOP = { errorClass: ERROR_CLASS } as const;
  */
 export const EVENTS = {
   // One event for each answer of `handle` (plan 12h Task 4). The router
-  // stamps the route key. A method other than the three of the router is `other`.
+  // stamps the route key. The method is the real token of the request (ruling 12 of plan 12h).
   request: {
     level: "info",
     fields: {
-      method: enumOf(["GET", "POST", "OPTIONS", "other"]),
+      method: { kind: "method" },
       status: STATUS,
       outcome: enumOf(OUTCOMES),
       code: { kind: "code", optional: true },

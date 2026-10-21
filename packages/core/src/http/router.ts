@@ -302,10 +302,9 @@ export function createRouter(
     };
     const res = withTrace(await answer(scoped, request, url, route), traceId);
     const { outcome, code } = outcomeOf(config, res);
-    const method = request.method;
     scoped.observe.emit({
       name: "request",
-      method: method === "GET" || method === "POST" || method === "OPTIONS" ? method : "other",
+      method: request.method,
       status: res.status,
       outcome,
       ...eventCode(code),
