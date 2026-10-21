@@ -46,6 +46,12 @@ import { checkMcp } from "./check-mcp.ts";
 import { checkMigrate } from "./check-migrate.ts";
 import { checkMotion } from "./check-motion.ts";
 import { checkOpenApi } from "./check-openapi.ts";
+import {
+  checkPerformance,
+  PERFORMANCE_DATA,
+  PERFORMANCE_PAGE,
+  type PerformanceData,
+} from "./check-performance.ts";
 import { checkRoutes } from "./check-routes.ts";
 import { checkSchema } from "./check-schema.ts";
 import { checkScript } from "./check-script.ts";
@@ -407,6 +413,16 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
   },
   { name: "check-size", run: () => checkSize(sizesOf(DIST)) },
   { name: "check-deploy", run: () => checkDeploy(wranglerDryRun) },
+  // The record of the performance run and the block of its page (plan 12h Task 15).
+  // The load rule reads the cores of the machine that ran it, from the record.
+  {
+    name: "check-performance",
+    run: () => {
+      const data = JSON.parse(readSiteFile(PERFORMANCE_DATA) ?? "{}") as PerformanceData;
+      const page = docsPages().find((p) => p.path === PERFORMANCE_PAGE)?.source ?? "";
+      return checkPerformance(page, data, data.machine?.cores ?? 0);
+    },
+  },
 ];
 
 const reports = CHECKS.map((c) => c.run());

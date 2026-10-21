@@ -5,6 +5,7 @@ type: reference
 sources:
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 15"
   - apps/site/scripts/measure-performance.ts
+  - apps/site/src/data/performance.json
   - examples/worker-d1/src/measure.ts
 sidebar:
   order: 10
@@ -33,6 +34,27 @@ Each operation gets calls to warm up, then the measured calls, one after another
 ## The numbers
 
 <!-- measured:start -->
+| Condition | Value |
+| --- | --- |
+| Date (UTC) | 2026-10-21T18:08:44.051Z |
+| Commit | `eb530d6b78f3546fac526da12e5af53938891449` |
+| Machine | Darwin 27.0.0, Apple M5 Max, 18 cores, 36 GiB of memory |
+| Load before the run | 4.13, 10.36, 13.08 (1, 5, and 15 minutes) |
+| Load after the run | 3.96, 10.22, 13.02 (1, 5, and 15 minutes) |
+| Runtime | wrangler 4.148.0, local workerd, Node 26.10.0 |
+| Storage | local D1 through Miniflare |
+| PBKDF2 iterations | 100000 |
+| Calls to warm up | 20 for each operation, not in the table |
+
+All times are in milliseconds.
+
+| Operation | Samples | Server p50 | Server p95 | Server max | Client p50 | Client p95 | Client max |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `POST /password/sign-in` | 200 | 8.0 | 9.0 | 11.0 | 8.9 | 10.6 | 12.0 |
+| `GET /session` | 200 | 1.0 | 1.0 | 3.0 | 1.5 | 2.4 | 3.5 |
+| `GET /token` | 200 | 1.0 | 2.0 | 4.0 | 2.3 | 3.6 | 6.5 |
+| `GET /jwks` | 200 | 1.0 | 1.0 | 5.0 | 1.3 | 2.5 | 5.0 |
+| `POST /magic-link/request` | 200 | 1.0 | 1.0 | 6.0 | 1.7 | 2.9 | 6.6 |
 <!-- measured:end -->
 
 Local workerd is not a deployed Worker. A deployed Worker runs at the edge, near the user, on other hardware, with D1 over the network.

@@ -1,11 +1,16 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   checkPerformance,
   MEASURED_END,
   MEASURED_START,
+  PERFORMANCE_DATA,
+  PERFORMANCE_PAGE,
   type PerformanceData,
   renderPerformanceTable,
 } from "../scripts/check-performance.ts";
+import { docsPages } from "../scripts/lib/load.ts";
+import { SITE } from "../scripts/lib/paths.ts";
 
 /** A record as measure-performance.ts writes it, with five operations of 200 samples. */
 function fixture(): PerformanceData {
@@ -40,6 +45,14 @@ function page(data: PerformanceData): string {
 }
 
 describe("checkPerformance", () => {
+  it("passes on the real page and the real data", () => {
+    const data = JSON.parse(readFileSync(`${SITE}${PERFORMANCE_DATA}`, "utf8")) as PerformanceData;
+    const real = docsPages().find((p) => p.path === PERFORMANCE_PAGE)?.source ?? "";
+    const r = checkPerformance(real, data, data.machine.cores);
+    expect(r.failures).toEqual([]);
+    expect(r.counts).toEqual({ operations: 5, samples: 1000 });
+  });
+
   it("passes on a record and its page", () => {
     const data = fixture();
     const r = checkPerformance(page(data), data, 8);
