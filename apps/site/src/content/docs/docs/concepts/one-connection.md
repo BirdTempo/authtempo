@@ -1,6 +1,6 @@
 ---
 title: The one-connection rule
-description: Why a before hook must not query core's Postgres client while its pool has one connection, and what to do instead.
+description: Two hangs that a before hook can cause on Postgres, and how to avoid each.
 type: explanation
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.9
@@ -11,7 +11,7 @@ sources:
 
 **For:** a developer who writes a hook on Postgres, and above all on Workers through Hyperdrive.
 
-**What it does:** this page explains one hang that a hook can cause, and the three ways to avoid it.
+**What it does:** this page explains two hangs that a hook can cause, and the ways to avoid them.
 
 ## Before you start
 
@@ -41,6 +41,18 @@ The request hangs until the client ends. postgres.js has no default queue timeou
 - **D1.** On D1 a write through the binding is a separate request and takes no lock, so the hang cannot occur.
 
 A before hook must also not open a transaction on core's storage. It runs inside one already.
+
+## A second hang: the flow's own lock
+
+Some flows lock a row before their before hook, such as the user row of an organization create. [Locks over a before hook](/docs/guides/hooks/#locks-over-a-before-hook) lists each flow and its rows.
+
+1. Core opens a transaction and locks the row.
+2. Core calls the before hook and waits.
+3. The hook awaits a core write of the same row, such as `auth.api.user.update` of the same user.
+4. The write waits for the row lock.
+5. The lock holds until the commit, and the commit waits for the hook.
+
+This hang occurs with a pool of any size, because a second connection waits for the same lock. No error names the cause. A second connection is no way out here. Write from the after hook, or start the write with no `await` and catch its error. D1 has no row lock, so this hang cannot occur there.
 
 ## Why core does not stop it
 

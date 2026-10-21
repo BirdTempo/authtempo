@@ -1201,11 +1201,38 @@ const auth = createAuth({
   The error name is logged only when it is a plain class name such as
   `TypeError`; any other name logs as `Error`, because the app sets it.
   Either way, no row is written.
-- Three flows have a write before the before hook. An owner demotion and
-  an owner removal stamp the owner lock first, and a passkey sign-in moves
-  the passkey counter first. A refusal undoes the stamp. On Postgres the
-  stamp's row lock is held while the hook runs, so a slow hook on an owner
-  write blocks the other owner writes of that organization.
+- Some flows lock a row before their before hook, and the lock holds
+  until the commit. The table names each flow, its before hooks, and the
+  rows it locks first. A refusal rolls back these lock writes with the
+  transaction.
+
+| Flow | Before hooks | Rows locked before the hook |
+| --- | --- | --- |
+| Organization create | `organization.beforeCreate`, `organization.beforeAddMember` | the creator's user row |
+| Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row |
+| Invitation accept | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the accepting user's row; for a new member with `membersPerOrganization`, the organization row; each team row of the invitation |
+| Invite | `organization.beforeInvite` | with `pendingInvitationsPerOrganization`, the organization row |
+| Member removal or leave | `organization.beforeRemoveMember` | the person's user row; for an owner or with `revokeTokens`, the organization row |
+| Owner demotion | `organization.beforeUpdateMemberRole` | the organization row |
+| Team create | `organization.beforeCreateTeam` | the organization row |
+| Team delete | `organization.beforeDeleteTeam` | with `keepLastTeam`, the organization row |
+| Team member add | `organization.beforeAddTeamMember` | the added user's row and the team row |
+| Team member removal | `organization.beforeRemoveTeamMember` | the team row |
+| Identity unlink | `identity.beforeUnlink` | the user's row |
+| Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row |
+
+- On Postgres a slow before hook in one of these flows blocks every other
+  write of its locked rows until the commit. A sign-in of a verified user
+  writes its user row, so it waits too.
+- A before hook must not await a core write of a row that its flow locks,
+  such as `auth.api.user.update` of the same user. On Postgres that write
+  waits for the lock of its own flow, and the flow waits for the hook. The
+  request hangs with no error, with a pool of any size. Write from the
+  after hook instead, or start the write with no `await` and catch its
+  error. D1 has no row lock, so this hang cannot occur there.
+- A passkey sign-in moves the passkey counter before `session.beforeCreate`,
+  outside the transaction of the session. So a refusal keeps the new
+  counter, and no lock of the passkey row holds while the hook runs.
 - An after hook runs after the commit, before the answer. A throw cannot
   undo the row: core logs `authtempo: after hook failed <hook> <row id>
   <error name>` and answers success. If your app must not keep a core row
