@@ -1,9 +1,15 @@
 import { createD1AdapterOn, createD1Limiter } from "@authtempo/adapter-d1";
+import {
+  createD1AdapterOn as createD1AdapterOnSeam,
+  createD1Limiter as createD1LimiterOnSeam,
+} from "@authtempo/adapter-d1/seam";
 import { createPostgresAdapterOn, createPostgresLimiter } from "@authtempo/adapter-postgres";
+import { integerProbe, type SqliteDriver } from "@authtempo/adapter-sqlite";
 import type { Sql } from "postgres";
 import type { CompatDatabase } from "../types.js";
 import {
   applyBetterAuthCompatMigrations,
+  applyBetterAuthCompatSqliteMigrations,
   compatMigrationSql,
   d1CompatPing,
   d1CompatReady,
@@ -51,6 +57,22 @@ export type D1SchemaStorage = CompatDatabase & {
   migrationSql(variant?: SqliteVariant): string;
 };
 
+export interface SqliteSchemaStorageOptions extends Omit<NamingOptions, "pgSchema"> {
+  dialect: "sqlite";
+  /** A driver entry of `@authtempo/adapter-sqlite` over the database that the app opened (plan 12g). */
+  driver: SqliteDriver;
+  /** "before-1.7" for tables with no `account.issuer` column. The default is "1.7". */
+  variant?: SqliteVariant;
+}
+
+export type SqliteSchemaStorage = CompatDatabase & {
+  readonly names: Names;
+  /** The text of migration 0001 for these names, as on D1. */
+  migrationSql(variant?: SqliteVariant): string;
+  /** Runs the compat migrations that the database does not hold, in their variant. Safe on every start. */
+  migrate(): Promise<string[]>;
+};
+
 /** The adapter's own parameter type. Without workers-types it is `any`, so the structural binding passes. */
 type D1 = Parameters<typeof createD1AdapterOn>[0];
 
@@ -59,10 +81,41 @@ export function betterAuthSchemaStorage(
   options: PostgresSchemaStorageOptions,
 ): PostgresSchemaStorage;
 export function betterAuthSchemaStorage(options: D1SchemaStorageOptions): D1SchemaStorage;
+export function betterAuthSchemaStorage(options: SqliteSchemaStorageOptions): SqliteSchemaStorage;
 export function betterAuthSchemaStorage(
-  options: PostgresSchemaStorageOptions | D1SchemaStorageOptions,
-): PostgresSchemaStorage | D1SchemaStorage {
+  options: PostgresSchemaStorageOptions | D1SchemaStorageOptions | SqliteSchemaStorageOptions,
+): PostgresSchemaStorage | D1SchemaStorage | SqliteSchemaStorage {
   const names = resolveNames(options);
+  if (options.dialect === "sqlite") {
+    // The D1 code over the SQLite seam of plan 12g: the same statements, the
+    // same undo log, the same readiness check. Before the check, the handle
+    // must read integers as numbers, as on the core SQLite adapter.
+    const { driver } = options;
+    const variant = options.variant ?? "1.7";
+    const st = compatStatements("sqlite", names);
+    const sent = { statements: 0, ready: 0 };
+    const probe = integerProbe(driver.db, sent);
+    const compatReady = d1CompatReady(driver.db, names, sent);
+    const sqlite: SqliteSchemaStorage = {
+      kind: "authtempo-compat-database",
+      dialect: "sqlite",
+      names,
+      storage: createD1AdapterOnSeam(driver.db, {
+        statements: st,
+        toStorageError: st.toStorageError,
+        ready: async () => {
+          await probe();
+          await compatReady();
+        },
+        sent,
+      }),
+      limiter: createD1LimiterOnSeam(driver.db),
+      migrationSql: (v?: SqliteVariant) => compatMigrationSql("sqlite", names, v ?? variant),
+      migrate: () => applyBetterAuthCompatSqliteMigrations(driver, names, variant),
+    };
+    registerRawRead(sqlite, async (q) => (await driver.db.prepare(q).all()).results);
+    return sqlite;
+  }
   if (options.dialect === "d1") {
     const st = compatStatements("sqlite", names);
     const db = options.db as unknown as D1;

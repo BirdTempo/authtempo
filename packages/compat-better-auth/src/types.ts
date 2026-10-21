@@ -174,7 +174,7 @@ export interface TeamMember {
 /** What `drizzleAdapter` and `betterAuthSchemaStorage` answer. `betterAuth` refuses any other `database`. */
 export interface CompatDatabase {
   readonly kind: "authtempo-compat-database";
-  readonly dialect: "postgres" | "d1";
+  readonly dialect: "postgres" | "d1" | "sqlite";
   readonly storage: StorageAdapter;
   /** The owned limiter on the same database, in `ta_limit`. */
   readonly limiter: LimiterPort;

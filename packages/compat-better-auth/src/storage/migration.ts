@@ -1,3 +1,4 @@
+import type { SqliteDriver } from "@authtempo/adapter-sqlite";
 import { StorageError } from "@authtempo/core";
 import {
   assertSchemaValue,
@@ -1106,6 +1107,86 @@ export function compatPostgresSteps(
     name,
     text: (POSTGRES_TEXTS[i] as (names: Names) => string)(names),
   }));
+}
+
+/**
+ * The SQLite text of each compat migration, in the order of
+ * COMPAT_MIGRATION_NAMES (plan 12g). Each one holds the statements of the
+ * shipped D1 file of its name and variant. 0001 and 0010 differ by variant,
+ * the others do not. A length that differs stops the module at load.
+ */
+const SQLITE_TEXTS: readonly ((names: Names, variant: SqliteVariant) => string)[] = [
+  (names, variant) => compatMigrationSql("sqlite", names, variant),
+  () => COMPAT_MIGRATION_0002_SQL,
+  () => COMPAT_MIGRATION_0003_SQL.sqlite,
+  () => COMPAT_MIGRATION_0004_SQL.sqlite,
+  () => COMPAT_MIGRATION_0005_SQL.sqlite,
+  (names) => compatMigration0006Sql("sqlite", names),
+  (names) => compatMigration0007Sql("sqlite", names),
+  () => compatMigration0008Sql("sqlite"),
+  (names) => compatMigration0009Sql("sqlite", names),
+  (names, variant) => compatMigration0010Sql("sqlite", names, variant),
+];
+if (SQLITE_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
+  throw new Error(
+    `the compat runner has ${SQLITE_TEXTS.length} SQLite texts for ${COMPAT_MIGRATION_NAMES.length} names in COMPAT_MIGRATION_NAMES`,
+  );
+
+/** The steps of the compat runner on SQLite, in order, as compatPostgresSteps (plan 12g). */
+export function compatSqliteSteps(
+  names: Names,
+  variant: SqliteVariant = "1.7",
+): { version: number; name: string; text: string }[] {
+  // Migration n writes compat_better_auth = n, so the version is the place in the list.
+  return COMPAT_MIGRATION_NAMES.map((name, i) => ({
+    version: i + 1,
+    name,
+    text: (SQLITE_TEXTS[i] as (names: Names, variant: SqliteVariant) => string)(names, variant),
+  }));
+}
+
+/** What the SQLite runner calls on a SqliteDriver of `@authtempo/adapter-sqlite` (plan 12g). */
+export type SqliteMigrationDriver = Pick<SqliteDriver, "db" | "migrateStep">;
+
+const SQLITE_RECORD_TABLE =
+  "CREATE TABLE IF NOT EXISTS ta_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL)";
+const SQLITE_RECORD = "INSERT INTO ta_migrations (name, applied_at) VALUES (?, ?)";
+
+/**
+ * Applies the compat migrations that the SQLite database does not hold yet,
+ * each with its record in one write transaction (plan 12g). The compat
+ * version stays in ta_meta, the rule of Postgres and D1, and the gate reads
+ * it. ta_migrations is the record of the SQLite runner only, so two runners
+ * at once apply each migration once: the second waits for the write lock and
+ * then finds the name (plan 12g). A step also counts as done when ta_meta
+ * holds its version or a later one. The D1 flow and other tools write the
+ * version and no record. The check of the version runs inside the write
+ * transaction too, so a step that another runner applied meanwhile is skipped.
+ */
+export async function applyBetterAuthCompatSqliteMigrations(
+  driver: SqliteMigrationDriver,
+  names: Names,
+  variant: SqliteVariant = "1.7",
+): Promise<string[]> {
+  await driver.db.prepare(SQLITE_RECORD_TABLE).run();
+  const applied: string[] = [];
+  for (const m of compatSqliteSteps(names, variant)) {
+    // ta_meta exists from migration 0001 on. Before it, only the record can say done.
+    const meta = await driver.db
+      .prepare("SELECT 1 AS n FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .bind(META_TABLE)
+      .first("n");
+    const done =
+      meta === null
+        ? { sql: "SELECT 1 FROM ta_migrations WHERE name = ?", params: [m.name] }
+        : {
+            sql: `SELECT 1 FROM ta_migrations WHERE name = ? UNION ALL SELECT 1 FROM ${META_TABLE} WHERE key = ? AND CAST(value AS INTEGER) >= ?`,
+            params: [m.name, COMPAT_META_KEY, m.version],
+          };
+    const record = { sql: SQLITE_RECORD, params: [m.name, Date.now()] };
+    if (await driver.migrateStep(done, m.text, record)) applied.push(m.name);
+  }
+  return applied;
 }
 
 /** One fixed advisory lock key for every compat migration run. */
