@@ -3,10 +3,10 @@ import type { AuthConfig } from "../../src/config.js";
 import { hookRefusal } from "../../src/engine/hooks.js";
 import { createRole, deleteRole } from "../../src/engine/roles.js";
 import { resolveSession } from "../../src/engine/sessions.js";
-import { acsUrl } from "../../src/engine/sso/saml-sp.js";
+import { acsUrl, SAML_FORM_MAX, SAML_REQUEST_TTL_MS } from "../../src/engine/sso/saml-sp.js";
 import { randomToken } from "../../src/primitives/crypto.js";
-import type { XmlElement } from "../../src/saml/xml.js";
-import type { TestResponseInput } from "../../src/testing/saml-idp.js";
+import { XML_LIMITS, type XmlElement } from "../../src/saml/xml.js";
+import { createTestIdp, type TestResponseInput } from "../../src/testing/saml-idp.js";
 import { post } from "../helpers.js";
 import {
   attackerKeyInfo,
@@ -322,6 +322,206 @@ describe("the SAML ACS (plan 12d Task 8)", () => {
     expect(await rowCounts(w)).toEqual(before);
   });
 
+  it("refuses an Assertion that is not a child of the root", async () => {
+    const w = samlWorld();
+    const { idp, connectionId } = await orgWithSaml(w);
+    const before = await rowCounts(w);
+    const start = await samlStart(w, connectionId);
+    const valid = await idp.response(responseFor(w, connectionId, start));
+    // The one signed Assertion, moved into the Response's Extensions. Its signature still
+    // holds, and the document still has exactly one Assertion.
+    const assertion = /<saml:Assertion[\s\S]*<\/saml:Assertion>/.exec(valid)?.[0];
+    if (assertion === undefined) throw new Error("no Assertion");
+    const nested = valid
+      .replace(assertion, "")
+      .replace("<samlp:Status>", `<samlp:Extensions>${assertion}</samlp:Extensions><samlp:Status>`);
+    expect(nested).not.toBe(valid);
+    const r = await postResponse(w, connectionId, start, nested);
+    expect([r.error, r.token]).toEqual(["sso_failed", null]);
+    expect(stepsOf(connectionId)).toEqual(["wrapping"]);
+    expect(await rowCounts(w)).toEqual(before);
+  });
+
+  it("refuses the request row of another connection", async () => {
+    const w = samlWorld();
+    const a = await orgWithSaml(w, "acme");
+    const b = await orgWithSaml(w, "beta");
+    const before = await rowCounts(w);
+    const startA = await samlStart(w, a.connectionId);
+    // B's IdP signs a valid Response for B that names A's request, and the browser posts it
+    // to B's ACS with A's RelayState and cookie.
+    const xml = await b.idp.response(responseFor(w, b.connectionId, startA));
+    const r = await postResponse(w, b.connectionId, startA, xml);
+    expect([r.error, r.token]).toEqual(["sso_failed", null]);
+    expect(stepsOf(b.connectionId)).toEqual(["request"]);
+    expect(await rowCounts(w)).toEqual(before);
+    // A's row is not spent: A's own Response still signs in.
+    const own = await a.idp.response(responseFor(w, a.connectionId, startA));
+    expect((await postResponse(w, a.connectionId, startA, own)).token).toMatch(/^ts_/);
+  });
+
+  it("refuses a request row at the end of its life", async () => {
+    const w = samlWorld();
+    const { idp, connectionId } = await orgWithSaml(w);
+    const before = await rowCounts(w);
+    const late = await samlStart(w, connectionId);
+    w.clock.advance(SAML_REQUEST_TTL_MS);
+    // The Response is new: its own conditions hold at the post.
+    const xml = await idp.response(responseFor(w, connectionId, late));
+    const r = await postResponse(w, connectionId, late, xml);
+    expect([r.error, r.token]).toEqual(["sso_failed", null]);
+    expect(stepsOf(connectionId)).toEqual(["request"]);
+    expect(await rowCounts(w)).toEqual(before);
+    const rows = await w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "saml-request" },
+    ]);
+    expect(rows.map((v) => v.consumedAt)).toEqual([null]);
+    // One millisecond before the end, the row is live.
+    const start = await samlStart(w, connectionId);
+    w.clock.advance(SAML_REQUEST_TTL_MS - 1);
+    const live = await idp.response(responseFor(w, connectionId, start));
+    expect((await postResponse(w, connectionId, start, live)).token).toMatch(/^ts_/);
+  });
+
+  it("takes a Response of the spec's size with broken lines at the ACS", async () => {
+    const w = samlWorld();
+    const { idp, connectionId } = await orgWithSaml(w);
+    const start = await samlStart(w, connectionId);
+    // A pad attribute brings the signed Response to XML_LIMITS.bytes exactly.
+    const sized = async (pad: number) =>
+      idp.response(
+        responseFor(w, connectionId, start, {
+          attributes: { email: [ADA], pad: ["x".repeat(pad)] },
+        }),
+      );
+    const first = await sized(1000);
+    const xml = await sized(1000 + XML_LIMITS.bytes - new TextEncoder().encode(first).length);
+    expect(new TextEncoder().encode(xml).length).toBe(XML_LIMITS.bytes);
+    // The IdP breaks its base64 every 64 characters with CRLF, and the form encodes
+    // each "+", "/", "=", CR, and LF as three bytes.
+    const lines = (b64(xml).match(/.{1,64}/g) ?? []).join("\r\n");
+    const body = new URLSearchParams({ SAMLResponse: lines, RelayState: start.relayState });
+    expect(body.toString().length).toBeGreaterThan(360_000);
+    const r = await postAcs(w, connectionId, body, start.bind);
+    expect([r.error, r.token?.slice(0, 3)]).toEqual([null, "ts_"]);
+  });
+
+  it("reads a form at SAML_FORM_MAX bytes and refuses one byte more", async () => {
+    const w = samlWorld();
+    const { connectionId } = await orgWithSaml(w);
+    // The worst encoding of a Response of XML_LIMITS.bytes: base64 of only "+" (the bytes
+    // FB EF BE, not UTF-8), CRLF after every 64 characters, and each character as "%XX".
+    const chars = Math.ceil(XML_LIMITS.bytes / 3) * 4;
+    const value = `${"+".repeat(chars - 4)}+w==`;
+    const broken = `${(value.match(/.{1,64}/g) ?? []).join("\r\n")}\r\n`;
+    const pct = (text: string) =>
+      Array.from(
+        text,
+        (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`,
+      ).join("");
+    const formOf = (relayState: string) =>
+      `SAMLResponse=${pct(broken)}&RelayState=${pct(relayState)}`;
+    const post = (start: { bind: string }, body: string) =>
+      w.handle(
+        new Request(`https://api.example.com/auth/sso/${connectionId}/acs`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            origin: IDP_ORIGIN,
+            "sec-fetch-site": "cross-site",
+            cookie: `__Secure-tempo_session_oauth=${start.bind}`,
+          },
+          body,
+        }),
+      );
+    const atBound = await samlStart(w, connectionId);
+    const at = formOf(atBound.relayState);
+    expect(at.length).toBe(SAML_FORM_MAX);
+    expect((await post(atBound, at)).status).toBe(302);
+    // The form step passed: the 262 144 bytes reach the parse.
+    expect(stepsOf(connectionId)).toEqual(["parse"]);
+    const over = await samlStart(w, connectionId);
+    expect((await post(over, `${formOf(over.relayState)}&`)).status).toBe(302);
+    expect(stepsOf(connectionId)).toEqual(["parse", "form"]);
+  });
+
+  it("lets no unsigned or forged body spend, change, or tell a request row", async () => {
+    const w = samlWorld();
+    const { idp, connectionId } = await orgWithSaml(w);
+    const evilIdp = await createTestIdp({ alg: "rsa", entityId: idp.entityId });
+    const verifications = async () =>
+      JSON.stringify(
+        (await w.storage.findMany("verification", [])).sort((x, y) => x.id.localeCompare(y.id)),
+      );
+    const start = await samlStart(w, connectionId);
+    const good = await idp.response(responseFor(w, connectionId, start));
+    const unsigned = await idp.response({
+      ...responseFor(w, connectionId, start),
+      signAssertion: false,
+    });
+    const forged = await evilIdp.response(responseFor(w, connectionId, start));
+    const rows0 = await verifications();
+    const counts0 = await rowCounts(w);
+    // A live row with its RelayState and cookie: unsigned, forged, and junk bodies change no row.
+    const liveUnsigned = await postResponse(w, connectionId, start, unsigned);
+    const liveForged = await postResponse(w, connectionId, start, forged);
+    const liveJunk = await postAcs(
+      w,
+      connectionId,
+      { SAMLResponse: b64("<x/>"), RelayState: start.relayState },
+      start.bind,
+    );
+    expect(await verifications()).toBe(rows0);
+    expect(await rowCounts(w)).toEqual(counts0);
+    // The real Response still signs in: the refused posts spent nothing.
+    expect((await postResponse(w, connectionId, start, good)).token).toMatch(/^ts_/);
+    const rows1 = await verifications();
+    // A spent row, no cookie, an unknown RelayState, and a wrong cookie change no row.
+    const spentUnsigned = await postResponse(w, connectionId, start, unsigned);
+    const spentForged = await postResponse(w, connectionId, start, forged);
+    const noCookie = await postResponse(w, connectionId, { ...start, bind: "" }, unsigned);
+    const unknown = await postAcs(
+      w,
+      connectionId,
+      { SAMLResponse: b64(unsigned), RelayState: randomToken("rs_") },
+      start.bind,
+    );
+    const wrongCookie = await postResponse(
+      w,
+      connectionId,
+      { ...start, bind: "A".repeat(43) },
+      unsigned,
+    );
+    expect(await verifications()).toBe(rows1);
+    // The browser sees one answer in every refused case: status, location, and cookies.
+    const seen = (a: { res: Response }) => ({
+      status: a.res.status,
+      location: a.res.headers.get("location"),
+      cookies: a.res.headers.getSetCookie(),
+    });
+    const all = [
+      liveUnsigned,
+      liveForged,
+      liveJunk,
+      spentUnsigned,
+      spentForged,
+      noCookie,
+      unknown,
+      wrongCookie,
+    ].map(seen);
+    for (const s of all) expect(s).toEqual(all[0]);
+    expect(stepsOf(connectionId)).toEqual([
+      "signature_shape",
+      "signature",
+      "wrapping",
+      "request_spent",
+      "request_spent",
+      "request",
+      "request",
+      "request",
+    ]);
+  });
+
   it("refuses a replayed assertion, also under a new request", async () => {
     const w = samlWorld();
     const { idp, connectionId } = await orgWithSaml(w);
@@ -372,7 +572,7 @@ describe("the SAML ACS (plan 12d Task 8)", () => {
     const big = await postAcs(
       w,
       connectionId,
-      { SAMLResponse: "A".repeat(360_000), RelayState: start.relayState },
+      { SAMLResponse: "A".repeat(SAML_FORM_MAX), RelayState: start.relayState },
       start.bind,
     );
     expect(big.error).toBe("sso_failed");

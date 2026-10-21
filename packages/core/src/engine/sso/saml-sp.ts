@@ -32,14 +32,26 @@ export { acsUrl, spEntityId };
 
 /** The life of a `saml-request` row: the life of the binding cookie and of the OIDC state row. */
 export const SAML_REQUEST_TTL_MS = 10 * 60_000;
-/**
- * The most bytes of one ACS form. A Response of `XML_LIMITS.bytes` in
- * base64 is 4/3 of that (349 526), with the `RelayState` and the URL
- * encoding beside it.
- */
-export const SAML_FORM_MAX = 360_000;
 /** The prefix of a `RelayState` token (deviation 17): 3 + 43 characters, under the 80 bytes of SAML Bindings 3.4.3. */
 export const RELAY_STATE_PREFIX = "rs_";
+/** The base64 characters of a Response of `XML_LIMITS.bytes` (spec 30 item 7): 349 528. */
+const RESPONSE_BASE64_MAX = Math.ceil(XML_LIMITS.bytes / 3) * 4;
+/** An IdP may break its base64 lines: a CRLF after each 64 characters (the PEM width) is 5 462 breaks. */
+const RESPONSE_LINE_BREAKS = Math.ceil(RESPONSE_BASE64_MAX / 64);
+/**
+ * The most bytes of one ACS form: 1 081 519. The form must carry each
+ * Response of `XML_LIMITS.bytes`, so the cap counts the worst encoding.
+ * Each character of the two values takes at most 3 bytes in the URL
+ * encoding: `%2B` for `+`, `%2F` for `/`, `%3D` for `=`, and `%0D%0A` for
+ * a line break. The values are the base64 with its line breaks, and a
+ * `RelayState` of 46 characters. An IdP that breaks its lines more often
+ * than each 64 characters can go over this cap, and then it answers `form`.
+ */
+export const SAML_FORM_MAX =
+  "SAMLResponse=".length +
+  3 * (RESPONSE_BASE64_MAX + 2 * RESPONSE_LINE_BREAKS) +
+  "&RelayState=".length +
+  3 * (RELAY_STATE_PREFIX.length + 43);
 /** The most bytes of an IdP metadata document (Behavior 6). */
 export const IDP_METADATA_MAX = 100 * 1024;
 
