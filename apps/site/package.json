@@ -32,6 +32,7 @@
     "@authtempo/cli": "workspace:*",
     "@authtempo/demo": "workspace:*",
     "@authtempo/mcp": "workspace:*",
+    "@authtempo/observe": "workspace:*",
     "@types/node": "24.19.1",
     "astro": "7.3.8",
     "jose": "6.2.12",

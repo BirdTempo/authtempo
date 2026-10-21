@@ -12,6 +12,8 @@ sources:
   - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 12"
   - docs/superpowers/plans/2026-10-14-12b-security-hardening.md "Task 13"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
+  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
 ---
 
 **For:** a security reviewer, or a developer who must explain the risks of authtempo to one.
@@ -64,6 +66,10 @@ sources:
 - **Fetch Metadata.** A page of another site cannot post a form to core: the browser's `Sec-Fetch-Site` header must say the post came from the API's own origin.
 - **No provider redirect.** Core follows no redirect on a provider call. A provider endpoint cannot steer a request to an internal address.
 - **No secrets in logs.** A log line holds an event name and ids. It never holds a token, a code, a cookie, an address, or an error message.
+- **Events with no secret.** An event holds no secret, no credential, no free text, and no limiter key. Each field has a kind, and core drops a field that fails it.
+- **No address by default.** An event holds no IP, no user agent, and no email unless `observe.include` turns it on. A hash is HMAC-SHA256 under a key from the app secret. An event never holds a raw email.
+- **A last scrub.** Core replaces each secret value of the config with `***` in each string field of an event. Each sink of `@authtempo/observe` scrubs again.
+- **A client reference, not a URL.** An event names an OAuth client by its `cl_` id, or by `cimd:` and 32 hex of the SHA-256 of its metadata URL.
 - **Operator acts with a record.** Each operator act checks its actor, and writes its change and an audit row in one transaction. A named secret holds the scopes of its job only. [Run the operator tools](/docs/guides/operator-tools/) tells how.
 - **The operator user guard.** A platform operator acts only from a session that is no impersonation session. The user needs the platform role, a verified address, and a second factor, and the session needs a fresh time. Each failed step answers one code.
 - **A ban at every door.** A ban ends the sessions, challenges, handoff codes, and OAuth refresh tokens and codes in its transaction. A session that the call leaves gets refused at each door until the sweep ends it.
@@ -107,6 +113,8 @@ An email code of 8 digits divides each figure of its row by 100.
 - The timing of the verify-mail resend shows an unverified account.
 - An API token survives a password reset and a sign-out.
 - There is no lockout per account. The limits bound the guesses instead.
+- The sink of an app is app code. It can write what it wants, and core cannot see it. A sink that copies events with `include.ip: "raw"` to a third party sends the addresses there. The app owns its sink and its log inventory (ASVS 5.0.0 16.2.3).
+- An event can drop. A full buffer and a slow sink lose events, and `observe.dropped` counts them. An isolate that stops before a flush loses its buffer with no count. The audit table, not an event, is the record of an operator act.
 
 ## A browser client on another origin
 

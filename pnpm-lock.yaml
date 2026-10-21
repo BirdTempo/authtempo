@@ -264,6 +264,9 @@ importers:
       '@authtempo/mcp':
         specifier: workspace:*
         version: link:../../packages/mcp
+      '@authtempo/observe':
+        specifier: workspace:*
+        version: link:../../packages/observe
       '@types/node':
         specifier: 24.19.1
         version: 24.19.1

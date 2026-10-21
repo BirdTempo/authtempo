@@ -43,6 +43,7 @@
         "$TURBO_ROOT$/examples/react/src/App.tsx",
         "$TURBO_ROOT$/examples/react/src/main.tsx",
         "$TURBO_ROOT$/examples/worker-d1/src/index.ts",
+        "$TURBO_ROOT$/examples/worker-d1/test/observe-flush.test.ts",
         "$TURBO_ROOT$/examples/worker-d1/test/sign-in.test.ts",
         "$TURBO_ROOT$/examples/worker-d1/wrangler.jsonc",
         "$TURBO_ROOT$/examples/worker-postgres/scripts/migrate.ts",

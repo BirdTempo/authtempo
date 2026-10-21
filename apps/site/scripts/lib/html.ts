@@ -105,3 +105,38 @@ export function pageCss(html: string, read: (href: string) => string | null): st
   const inline = [...html.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style>/g)].map((m) => m[1] ?? "");
   return [...linked, ...inline].join("\n");
 }
+
+/** The text of a cell, with its tags removed. */
+export function cellText(cell: string): string {
+  return stripTags(cell);
+}
+
+/** The text of every `<code>` element of a cell, in order. */
+export function cellCodes(cell: string): string[] {
+  return [...cell.matchAll(/<code[^>]*>([\s\S]*?)<\/code>/g)].map((m) => stripTags(m[1] ?? ""));
+}
+
+/**
+ * The body rows of every table whose first column header is `first`. Each
+ * row maps a header text to the HTML of its cell, so a check reads a cell by
+ * the name of its column.
+ */
+export function tableRows(html: string, first: string): Record<string, string>[] {
+  const out: Record<string, string>[] = [];
+  for (const t of html.matchAll(/<table>([\s\S]*?)<\/table>/g)) {
+    const heads = [
+      ...(/<thead>([\s\S]*?)<\/thead>/.exec(t[1] ?? "")?.[1] ?? "").matchAll(
+        /<th[^>]*>([\s\S]*?)<\/th>/g,
+      ),
+    ].map((m) => stripTags(m[1] ?? ""));
+    if (heads[0] !== first) continue;
+    const body = /<tbody>([\s\S]*?)<\/tbody>/.exec(t[1] ?? "")?.[1] ?? "";
+    for (const row of body.matchAll(/<tr>([\s\S]*?)<\/tr>/g)) {
+      const cells = [...(row[1] ?? "").matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(
+        (m) => m[1] ?? "",
+      );
+      out.push(Object.fromEntries(heads.map((h, i) => [h, cells[i] ?? ""])));
+    }
+  }
+  return out;
+}

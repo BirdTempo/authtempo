@@ -1,0 +1,219 @@
+---
+title: Observability
+description: Send the events of authtempo to a sink, read the trace of a request, set the alerts, and read each default line.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.9
+  - packages/observe/README.md "Workers Logs"
+  - packages/observe/README.md "OTLP"
+  - examples/worker-d1/wrangler.jsonc
+  - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
+  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
+sidebar:
+  order: 6
+---
+
+import { Code } from "@astrojs/starlight/components";
+import worker from "../../../../../../../examples/worker-d1/src/index.ts?raw";
+import wrangler from "../../../../../../../examples/worker-d1/wrangler.jsonc?raw";
+import flushTest from "../../../../../../../examples/worker-d1/test/observe-flush.test.ts?raw";
+import counted from "../../../../../samples/operations/observe-analytics-engine.ts?raw";
+import sql from "../../../../../samples/operations/analytics-engine.sql?raw";
+import traced from "../../../../../samples/operations/observe-otlp.ts?raw";
+import nodeFlush from "../../../../../samples/operations/observe-node-flush.ts?raw";
+import tailWorker from "../../../../../samples/operations/tail-worker.ts?raw";
+import test from "../../../../../samples/operations/observe.test.ts?raw";
+
+**For:** an operator who watches an API with authtempo in production.
+
+**What it does:** this guide sends the events of core to a sink, reads the trace of one request, and sets the alerts. It also lists each default line.
+
+## Before you start
+
+- An API that runs. [Deploy](/docs/operations/deploy/) puts it on Workers, on Node, or on Bun.
+- The event list. [Events](/docs/reference/events/) gives the level and the fields of each event.
+
+## Pick a sink
+
+With no `observe` config, core writes each default line with `console`, and nothing leaves the app. With a sink, core writes no `console` line, and the sink gets every event. A sink has one call, `write(batch)`. The package `@authtempo/observe` has three sinks:
+
+| Sink | Where the events go | Use it for |
+| --- | --- | --- |
+| `workersLogsSink` | One `console` call of one object for each event, in Workers Logs | The default on Workers. Each field is indexed. |
+| `analyticsEngineSink` | One data point for each event of a chosen list | Counts over time, read with SQL. |
+| `otlpSink` | OTLP logs, traces, and metrics over HTTP | A collector of the app, off Workers too. |
+
+An app can write its own sink. It gets the events after the answer, and it owns what it does with them.
+
+## Steps
+
+1. Set the observability block in `wrangler.jsonc`: `enabled` is `true`, and `head_sampling_rate` is `1`. A lower rate drops whole requests, and with them their sign-in events. A site test fails when an example config loses either value.
+
+<Code code={wrangler} lang="jsonc" title="examples/worker-d1/wrangler.jsonc" />
+
+2. Give `observe` a sink, and pass `{ waitUntil: (p) => ctx.waitUntil(p) }` to `handle`. Bind it: an unbound `ctx.waitUntil` throws. Make the `Auth`, and with it the sink, once for each isolate.
+
+<Code code={worker} lang="ts" title="examples/worker-d1/src/index.ts" />
+
+3. For counts, bind an Analytics Engine dataset, and give its binding to `analyticsEngineSink`.
+
+```jsonc
+"analytics_engine_datasets": [{ "binding": "AUTH_EVENTS", "dataset": "authtempo_events" }]
+```
+
+<Code code={counted} lang="ts" title="The Analytics Engine sink" />
+
+4. Read the counts with SQL. Analytics Engine samples on write, so count with `SUM(_sample_interval)`, never `COUNT()`.
+
+<Code code={sql} lang="sql" />
+
+5. For a collector, give `otlpSink` the base URL and the headers of the collector. Give `timeoutMs` the value of `observe.flushTimeoutMs`, so no post outlives its flush.
+
+<Code code={traced} lang="ts" title="The OTLP sink" />
+
+6. On Node and on Bun, `handle` has no `waitUntil`. Flush the buffer on a timer, and flush once more at shutdown.
+
+<Code code={nodeFlush} lang="ts" title="The flush on Node and Bun" />
+
+7. In a scheduled handler, call `api.sweepExpired()`. It flushes at its end, so the `sweep` event needs no other call.
+8. Set the alerts. Alert on each event of level `error`, on a rise of `limit.hit`, and on `observe.dropped` above 0.
+9. For a push alert on Workers, add a Tail Worker. It gets the logs of the API Worker and posts each error event.
+
+<Code code={tailWorker} lang="ts" title="A Tail Worker" />
+
+The tests below run the samples. The test of the D1 example checks that its fetch passes `waitUntil` to `handle`.
+
+<Code code={test} lang="ts" title="The test of this guide" />
+
+<Code code={flushTest} lang="ts" title="examples/worker-d1/test/observe-flush.test.ts" />
+
+## The trace of a request
+
+Each answer of `handle` carries the header `x-authtempo-trace`, with the trace id of the request. Each event of that request holds the same `traceId`. A browser on a trusted origin can read the header, because core exposes it there.
+
+1. Ask the person for the value of `x-authtempo-trace`, or read it from the network panel.
+2. Search the sink for that `traceId`. The `request` event names the route, the status, the outcome, and the code.
+
+Core makes a new trace id for each request. With `observe.trustTraceparent: true`, a valid W3C `traceparent` header gives the trace id and the parent span id. An invalid or all-zero header is ignored. A client trace id is off by default, because a client could join its requests to the trace of another person.
+
+## What an event can hold of an address
+
+By default an event holds no IP, no user agent, and no email. `observe.include` turns each one on:
+
+| Key | Values | What the event holds |
+| --- | --- | --- |
+| `ip` | `"none"`, `"hash"`, `"raw"` | `ipHash`, a keyed hash of 32 hex, or `ip`, the address of `clientIp` |
+| `userAgent` | `"none"`, `"raw"` | `userAgent`, at most 256 characters with no control character |
+| `email` | `"none"`, `"hash"` | `emailHash`, a keyed hash of 32 hex. An event never holds a raw email. |
+
+The keyed hash is HMAC-SHA256 under a key that HKDF derives from the current app secret. A rotation of the secret changes every hash, so a hash from before the rotation does not join a hash after it.
+
+## How it behaves
+
+- `emit` is synchronous, and no flow waits for a sink. The buffer holds `observe.buffer` events, 1000 by default. A push into a full buffer drops the event and counts it.
+- The flush runs after the answer. It calls `write` once, and waits for it for at most `observe.flushTimeoutMs`, 2000 ms by default.
+- A lost batch counts as `sink_timeout` or `sink_threw`. The next batch starts with one `observe.dropped` event that holds the counts. `auth.observe.stats()` answers the same counts in process.
+- Core cannot stop a sink that loops on the CPU in a synchronous `write`. Such a sink holds the isolate, so keep `write` short.
+- On Workers, the `waitUntil` work of one request has 30 seconds after the answer in all. Each `waitUntil` of that request shares the time.
+- Core replaces each secret value of the config with `***` in each string field of an event, before the buffer, with or without a sink. Each sink of `@authtempo/observe` scrubs again with its own `secrets` list.
+- The `method` field of the `request` event holds the method token of the request, `HEAD` too.
+- A redirect counts as a failure only when core marked it with an error code. A `next` value of a client that holds `auth_error` gives no failure.
+- Each OTLP post aborts after `timeoutMs`. Each OTLP sink makes a random `service.instance.id` at its first write, so each isolate writes its own metric stream.
+- An event is telemetry, and it can drop. The audit table of the operator tools is the record of an operator act.
+
+## The health and readiness probes
+
+`GET /auth/health` answers 200 `{ "status": "ok" }` in every deployment, and reads no storage. `GET /auth/ready` exists only with `observe.readiness: true`. It checks the store, and answers 200 `{ "status": "ready" }` or 503 [`not_ready`](/docs/reference/errors/#not_ready). One result holds for 10 seconds. [Deploy](/docs/operations/deploy/) gives a probe for each host.
+
+## The default lines
+
+With no sink, core writes each line of this table with `console`, with the text and the arguments of each release before. A line holds an event name, a provider name, a row id, an HTTP status, or an error name. It never holds a token, a code, a cookie, an address, or an error message. The [Events](/docs/reference/events/) page lists the fields of each event. A site check holds this table to the code.
+
+| Line | Event | What to do |
+| --- | --- | --- |
+| `authtempo: waitUntil threw; the flush has no hook` | `observe.wait_until_threw` | Act. The `waitUntil` of `handle` threw, so the events of that request stay in the buffer. Bind it: `(p) => ctx.waitUntil(p)`. |
+| `authtempo: <path> has an estimated <bits> bits of entropy; 120 or more is recommended` | `secret.low_entropy` | Act. Core starts, but the secret is weak. Make one with `openssl rand -base64 32`. |
+| `authtempo: a stored value names secret version <version>, which is not configured` | `secret.unknown_version` | Act. A row names a secret version that `secrets` lacks. Add the version back, or rewrap the rows. |
+| `authtempo: unhandled error` | `error.internal` | Act. A route threw and answered 500. Read the route and the error name. |
+| `authtempo: the captcha port threw` | `captcha.port_threw` | Act. The captcha port of the app threw. Core reads it as no answer. |
+| `authtempo: the captcha did not answer` | `captcha.no_answer` | Act. The captcha gave no answer, and `captcha.onUnavailable` let the flow go on. |
+| `authtempo: hook event copy failed` | `hook.copy_failed` | Act. Core could not copy the event of a hook. Keep the hook data plain. |
+| `authtempo: before hook failed` | `hook.before_failed` | Act. A `before` hook threw, and the flow answered `hook_failed`. Fix the hook. |
+| `authtempo: after hook failed` | `hook.after_failed` | Act. An `after` hook threw after the commit. The app's own row for that id is missing. |
+| `authtempo: user patch refused` | `user.patch_refused` | Act. A user hook answered a change that core refuses. Fix the hook. |
+| `authtempo: session patch refused` | `session.patch_refused` | Act. `session.beforeCreate` answered a key or a type that core refuses. Fix the hook. |
+| `authtempo: user hold gave up` | `user.hold_gave_up` | Watch. A write on one user lost its race too often. |
+| `authtempo: account delete gave up` | `account.delete_gave_up` | Watch. An account delete lost its race too often. The person can try again. |
+| `authtempo: email change gave up` | `email_change.gave_up` | Watch. A change of address lost its race too often. |
+| `authtempo: credential removal gave up` | `credential.removal_gave_up` | Watch. The removal of a credential lost its race too often. |
+| `authtempo: profile update gave up` | `profile.update_gave_up` | Watch. A profile update lost its race too often. |
+| `authtempo: notice mail failed` | `notice.mail_failed` | Act when it repeats. The mail port threw on a notice mail. The act itself kept its result. |
+| `authtempo: email code count gave up` | `email_code.count_gave_up` | Watch. The guess count of an email code lost its race too often. |
+| `authtempo: second-factor challenge count gave up` | `second_factor.count_gave_up` | Watch. The guess count of a challenge lost its race too often. |
+| `authtempo: backup code spend gave up` | `backup_code.spend_gave_up` | Watch. A backup code spend lost its race too often. |
+| `authtempo: backup code replacement gave up` | `backup_code.replace_gave_up` | Watch. A new set of backup codes lost its race too often. |
+| `authtempo: a TOTP secret reseal failed` | `totp.reseal_failed` | Act. A TOTP secret did not move to the current secret. Read [Secrets](/docs/operations/secrets/). |
+| `authtempo: a sealed value did not move to the current secret; it did not open, or a concurrent write changed it first` | `secrets.rewrap_failed` | Act when it repeats. A sealed value did not move to the current secret. Run the rewrap again. |
+| `authtempo: a signing key reseal failed` | `jwt.key_reseal_failed` | Act. A signing key did not move to the current secret. |
+| `authtempo: a signing key does not open under this secret; it retires` | `jwt.key_unopened` | Act when no change was planned. `secret` changed, so a new key signs. |
+| `authtempo: jwtMint.claims answered a value that is not an object` | `jwt.claims_not_object` | Act. The claims function of the app answered a value that is not an object. |
+| `authtempo: jwtMint.claims threw` | `jwt.claims_threw` | Act. The claims function of the app threw. |
+| `authtempo: passkey registration rejected` | `passkey.registration_rejected` | Watch. A passkey registration did not verify. |
+| `authtempo: passkey credential already registered` | `passkey.already_registered` | Watch. A person registered a known passkey again. |
+| `authtempo: passkey authentication rejected` | `passkey.authentication_rejected` | Watch. A passkey sign-in did not verify. |
+| `authtempo: passkey counter moved` | `passkey.counter_moved` | Watch. The counter of a passkey went back, or two uses raced. |
+| `authtempo: social client secret failed` | `social.client_secret_failed` | Act. Core could not make the client secret of a provider, such as the Apple key. |
+| `authtempo: social token request failed` | `social.token_request_failed` | Act when it repeats. The token request to a provider failed. |
+| `authtempo: social token endpoint answered` | `social.token_status` | Act when it repeats. The token endpoint of a provider answered an error status. Check the client secret. |
+| `authtempo: social token answer has no token` | `social.token_missing` | Act when it repeats. The token answer of a provider held no token. |
+| `authtempo: social id token rejected` | `social.id_token_rejected` | Watch. The ID token of a provider did not verify. |
+| `authtempo: social nonce mismatch` | `social.nonce_mismatch` | Watch. The nonce of an ID token did not match the request. |
+| `authtempo: social user info failed` | `social.user_info_failed` | Watch. The user info request to a provider failed. |
+| `authtempo: social user info has a bad subject` | `social.bad_subject` | Watch. The user info of a provider held a subject that core refuses. |
+| `authtempo: oidc discovery request failed` | `oidc.discovery_failed` | Act. The discovery request of an `oidc` provider failed. Check the issuer, or set `endpoints`. |
+| `authtempo: oidc discovery answered` | `oidc.discovery_status` | Act. The discovery document of an `oidc` provider answered an error status. |
+| `authtempo: oidc discovery is not JSON` | `oidc.discovery_not_json` | Act. The discovery document of an `oidc` provider is not JSON. |
+| `authtempo: oidc discovery issuer mismatch` | `oidc.issuer_mismatch` | Act. The discovery document names another issuer. Check `issuer`. |
+| `authtempo: oidc discovery lacks an endpoint` | `oidc.endpoint_missing` | Act. The discovery document lacks an endpoint. Set `endpoints`. |
+| `authtempo: client metadata document refused` | `oauth.client_metadata_refused` | Watch. Core refused the metadata document of a client. The reason names the rule, never a value. |
+| `authtempo: client metadata member dropped` | `oauth.client_metadata_member_dropped` | Watch. A metadata document names a value that core does not serve. Core drops the member and keeps the client. |
+| `authtempo: client key set refused` | `oauth.client_key_set_refused` | Watch. Core refused the key set of a client. |
+| `authtempo: client metadata document dropped its client auth; refresh tokens and device codes revoked` | `oauth.client_auth_dropped` | Watch. A metadata document changed its client auth to `none`. Core revoked the refresh tokens and device codes of the client. |
+| `authtempo: a back-channel logout is dropped after 6 attempts` | `oauth.logout_dropped_attempts` | Watch. A back-channel notice failed 6 times, and core dropped it. |
+| `authtempo: a back-channel logout is dropped: the client refused it` | `oauth.logout_refused` | Watch. A client refused a back-channel notice, and core dropped it. |
+| `authtempo: a back-channel logout attempt failed` | `oauth.logout_attempt_failed` | Watch. One delivery of a back-channel notice failed. |
+| `authtempo: the back-channel logout delivery failed` | `oauth.logout_delivery_failed` | Act when it repeats. The delivery step of the back-channel notices failed. |
+| `authtempo: the delete of a refresh row in a revoked grant failed` | `oauth.refresh_delete_failed` | Watch. A cleanup failed. The sweep deletes the row. |
+| `authtempo: operator step failed` | `operator.step_failed` | Act. One step of an operator act failed. Read the audit row of the act. |
+| `authtempo: operator family end failed` | `operator.family_end_failed` | Act. An operator act could not end a token family. |
+| `authtempo: operator ban write gave up` | `operator.ban_write_gave_up` | Act. A ban write lost its race too often. Run the ban again. |
+| `authtempo: operator guard refused` | `operator.guard_refused` | Act when no operator acted. The operator guard refused a caller. |
+| `authtempo: operator read` | `operator.read` | Watch. An operator read user data. This line is the record of the read. |
+| `authtempo: operator route unauthorized` | `operator.route_unauthorized` | Act when no operator acted. An operator route refused a caller. |
+| `authtempo: role row invalid <rowId>` | `role.row_invalid` | Act. A stored role row does not parse. Core skips it. |
+| `authtempo: the sweep link step stopped` | `sweep.link_stopped` | Act when it repeats. The sweep stopped its link step. The next sweep tries again. |
+| `authtempo: the sweep outbox step stopped` | `sweep.outbox_stopped` | Act when it repeats. The sweep stopped its outbox step. The next sweep tries again. |
+| `authtempo: the sweep pending end step stopped` | `sweep.pending_end_stopped` | Act when it repeats. The sweep stopped its pending end step. The next sweep tries again. |
+| `authtempo: cognito legacy verify failed <reason>` | none | Act when it is every user. Cognito refused an imported user, or did not answer. |
+| `authtempo compat: <note>` | none | Read once at start. An option of the compatibility package changes no promise. |
+| `authtempo compat: a credential account row has no password; …` | none | Act. A Better Auth row has no hash. Give the row a hash, or delete it. |
+| `authtempo compat: organizationHooks.<name> returned data that changes <fields>; …` | none | Act. An organization hook of the app returned changed data. The write stops. |
+| `authtempo compat: databaseHooks.session.create.before changed <fields>; …` | none | Act. The session hook of the app changed a field that core drops. |
+
+The rows that start with `authtempo compat:` come from the compatibility package, and the `cognito` row from `@authtempo/legacy-hashes`. They have no event. The compatibility package writes its notes with `console.info`.
+
+## If it fails
+
+- No event in a day of traffic: `handle` gets no `waitUntil`, or `observability.enabled` is `false`. On Node and Bun, the flush timer does not run.
+- `observe.dropped` above 0: raise `observe.buffer`, or the sink is slow.
+- `sink_timeout` counts: the collector does not answer in `observe.flushTimeoutMs`.
+- Many `authtempo: unhandled error` lines with a storage error: a migration is missing. [Upgrades](/docs/operations/upgrades/) tells how to apply it.
+- [`hook_failed`](/docs/reference/errors/#hook_failed) answers: read the `authtempo: before hook failed` line of the same time.
+
+## Next
+
+- [Events](/docs/reference/events/)
+- [Run your code at a hook point](/docs/guides/hooks/)
+- [Deploy](/docs/operations/deploy/)

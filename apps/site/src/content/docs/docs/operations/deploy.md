@@ -8,6 +8,8 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 9
   - packages/core/README.md "Limits in version 1"
   - docs/superpowers/plans/2026-10-14-11a-docs-site.md "Task 13"
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
+  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
 sidebar:
   order: 1
 ---
@@ -34,6 +36,31 @@ sidebar:
 9. Deploy.
 10. Sign in once by each method that the API serves.
 11. Run `authtempo check` with the base URL of the API. Each check must pass, or skip for a feature that is off.
+12. Point a probe at `GET /auth/health`. With `observe.readiness: true`, point the readiness probe at `GET /auth/ready`.
+
+## The probes
+
+`GET /auth/health` answers 200 `{ "status": "ok" }` in every deployment. It reads no storage, so it shows that the process answers. `GET /auth/ready` exists only with `observe.readiness: true`. It checks the store, and answers 200 `{ "status": "ready" }` or 503 `not_ready` with the reason `storage` or `schema`. It holds one result for 10 seconds, so a probe that calls it often makes one storage call in each window. Neither route counts on a limiter.
+
+On Workers, no host runs a probe. Point an external monitor at the route, once a minute:
+
+```sh
+curl -fsS https://api.example.com/auth/health
+```
+
+On Node, a container probe calls the route from inside the container:
+
+```text
+HEALTHCHECK --interval=30s CMD node -e "fetch('http://localhost:3000/auth/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+```
+
+On Bun, the same probe runs with `bun`:
+
+```text
+HEALTHCHECK --interval=30s CMD bun -e "fetch('http://localhost:3000/auth/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+```
+
+Use `GET`: a `HEAD` request to these routes answers 404.
 
 ## The Workers settings
 
@@ -63,6 +90,7 @@ Warning: a new `secret` that replaces the old value locks every user with the se
 - [`origin_not_trusted`](/docs/reference/errors/#origin_not_trusted): the app's origin is not in `trustedOrigins`.
 - [`rate_limited`](/docs/reference/errors/#rate_limited) for every caller: the host gives no client IP, so all callers share one budget.
 - A sign-in request answers 500: the mail port throws.
+- `GET /auth/ready` answers 503 `not_ready` with `schema`: a migration is missing. With `storage`, the store does not answer in 3 seconds, or it throws.
 - `authtempo check` names a code. [authtempo check](/docs/reference/cli/check/) gives the fix of each code.
 
 ## Next

@@ -8,6 +8,7 @@ sources:
   - packages/core/README.md "Limits"
   - docs/superpowers/plans/2026-10-14-09h-housekeeping.md
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
+  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.
@@ -21,6 +22,8 @@ sources:
 ## The rate limits
 
 A key ends in the address, the IP, or the user id. A request with no client IP uses `unknown` in place of the IP.
+
+The first two parts of a key are its family, such as `magic-link:email`. A refusal emits the event `limit.hit` with the family and no part of the key. Each family of `LIMIT_FAMILIES` has one row here, and a site check holds the table to the code.
 
 | Key | Window | Maximum | Flow |
 | --- | --- | --- | --- |

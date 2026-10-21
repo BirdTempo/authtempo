@@ -8,7 +8,9 @@ import { ALL_CHECK_CODES } from "@authtempo/cli";
 import { PROVIDERS } from "@authtempo/cli/program";
 import { COMPAT_MIGRATION_NAMES } from "@authtempo/compat-better-auth";
 import { ERRORS, OAUTH_ERRORS, SCHEMA_VERSION } from "@authtempo/core";
+import { EVENTS, LIMIT_FAMILIES } from "@authtempo/core/observe";
 import { openApiDocument, openApiJson, openApiReferenceOptions } from "@authtempo/core/openapi";
+import { FIELD_KINDS } from "@authtempo/core/redact";
 import { ROUTES } from "@authtempo/core/routes";
 import { CONFLICT_REASONS, PROVIDER_FILES } from "@authtempo/import";
 import { COMPARE_ROWS, HOSTED_MODELS, otherNames } from "../src/data/compare.ts";
@@ -26,6 +28,7 @@ import { checkCsp } from "./check-csp.ts";
 import { checkDeploy, wranglerDryRun } from "./check-deploy.ts";
 import { checkErrorLinks, errorLinks } from "./check-error-links.ts";
 import { checkErrors } from "./check-errors.ts";
+import { checkEvents } from "./check-events.ts";
 import { checkExports, readExports } from "./check-exports.ts";
 import { checkExternal } from "./check-external.ts";
 import { checkFacts } from "./check-facts.ts";
@@ -36,6 +39,7 @@ import { checkFences } from "./check-fences.ts";
 import { checkFonts } from "./check-fonts.ts";
 import { checkFrontmatter, pageUrl } from "./check-frontmatter.ts";
 import { checkIcons } from "./check-icons.ts";
+import { checkLimits } from "./check-limits.ts";
 import { checkLinks } from "./check-links.ts";
 import { checkLlms } from "./check-llms.ts";
 import { checkMcp } from "./check-mcp.ts";
@@ -197,6 +201,22 @@ export const CHECKS: { name: string; run: () => CheckReport }[] = [
         distPageOrEmpty("/docs/reference/openapi/"),
         ROUTES.length,
       ),
+  },
+  // Plan 12h Task 13: the events page and the default lines against EVENTS,
+  // and the limits page against LIMIT_FAMILIES, one source each.
+  {
+    name: "check-events",
+    run: () =>
+      checkEvents(
+        distPageOrEmpty("/docs/operations/observability/"),
+        distPageOrEmpty("/docs/reference/events/"),
+        EVENTS,
+        Object.keys(FIELD_KINDS),
+      ),
+  },
+  {
+    name: "check-limits",
+    run: () => checkLimits(distPageOrEmpty("/docs/reference/limits/"), LIMIT_FAMILIES),
   },
   {
     name: "check-config",
