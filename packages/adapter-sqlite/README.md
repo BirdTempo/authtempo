@@ -86,6 +86,19 @@ with the `timeout` option, you can pass `{ timeout: 5000 }` to
 `DatabaseSync` instead. better-sqlite3 sets a busy timeout of 5000 ms by
 default.
 
+### The write lock of libSQL
+
+A libSQL `batch()` has no busy retry. On a `file:` database, a batch
+fails at once with `SQLITE_BUSY` while another connection holds the write
+lock, for example a migration. The adapter passes that error through
+unchanged, as a busy write does on D1. Only the migration step tries again
+(probe 2026-10-21, `@libsql/client` 0.18.0).
+
+Over HTTP the server makes a batch wait for the lock. The libSQL server
+v0.24.32 ends a write transaction after 5 s with `TRANSACTION_TIMEOUT`. So
+a process that dies inside a write transaction blocks other writes for
+about 5 s (probe 2026-10-21: the next write ran 3 s to 5 s after the stop).
+
 ## Migrations
 
 The SQLite migrations are the D1 files of `@authtempo/adapter-d1`, copied
