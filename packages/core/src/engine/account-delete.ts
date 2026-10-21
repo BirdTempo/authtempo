@@ -300,7 +300,8 @@ async function runDelete(
  * lock wrote. It answers the organizations that go.
  *
  * The session of the proof is read again: a session that ended proves
- * nothing. Then the organization rule runs, and the before hooks. The owner
+ * nothing. Then `holdImpersonations` locks the sessions, as user-hold.ts
+ * states. Then the organization rule runs, and the before hooks. The owner
  * lock of each organization that keeps another owner comes next.
  *
  * The deletes come in this order. First the user row, the solo
@@ -326,6 +327,10 @@ export async function deleteAccountRows(
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: user.id }];
   const session = await tx.findOne("session", [{ field: "id", op: "eq", value: proof.sessionId }]);
   if (!session || !sessionIsLive(config, session, now)) stopWith("unauthorized");
+  // The one read that locks the user's sessions and the impersonation
+  // sessions that the user opened as an operator. It comes before the owner
+  // lock, in the order of user-hold.ts (ruling 65 of plan 12f).
+  const hold = await holdImpersonations(tx, config, user.id, now, true);
   const plan = await organizationsOfDelete(config, tx, user.id);
   if (!plan.ok) stopWith(plan.code);
   const { going, owned } = plan.value;
@@ -359,8 +364,7 @@ export async function deleteAccountRows(
     if ((await ownersOf(config, tx, organization.id)) < 1) stopWith("conflict");
   await tx.delete("invitation", [{ field: "inviterId", op: "eq", value: user.id }]);
   // The user's sessions and the impersonation sessions that the user opened
-  // as an operator go together, after one lock read (ruling 42 of plan 12f).
-  const hold = await holdImpersonations(tx, config, user.id, now, true);
+  // as an operator go together, after the lock read of `hold` (ruling 42 of plan 12f).
   await endSessions(
     tx,
     [{ field: "userId", op: "eq", value: user.id }],

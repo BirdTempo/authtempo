@@ -28,9 +28,9 @@ import { ROUNDS } from "./rounds.js";
  * (plan 12f, final review L1). First comes this user row. Then comes
  * `holdImpersonations`, the one read that locks the sessions of the user
  * and of each impersonation target. Then come the member rows and the
- * owner lock. The ban, the revoke of the platform role, and `withRoleLoss`
- * all take them in that order. So two acts on a shared target wait, and
- * do not deadlock.
+ * owner lock. The ban, the revoke of the platform role, `withRoleLoss`,
+ * and the account delete all take them in that order. So two acts on a
+ * shared target wait, and do not deadlock.
  *
  * No row returns: a sign-up writes its user later, and a deleted user is
  * found by `userStays`, the read after the insert. A stop here would answer
