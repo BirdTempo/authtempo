@@ -37,30 +37,15 @@ export const MIGRATIONS: readonly Migration[] = [
 
 const TABLE = "ta_migrations";
 
-/**
- * The statement that takes the advisory lock of one migration step. The key
- * names the schema that the step migrates. That is current_schema(), the
- * first schema of the search_path that exists, where an unqualified CREATE
- * TABLE lands. So two runs on one schema wait in turn. Runs on two schemas
- * of one database never wait on each other (ruling 52 of plan 12k). A key
- * with no schema made every migration of the database wait on every other,
- * and test migrations timed out under load. With no schema in the
- * search_path, coalesce still takes a lock, and the step then fails at its
- * first CREATE. The compat runner calls it with its own name. `name` is a
- * fixed name of this repo, never input.
- */
-export function migrationLockSql(name: string): string {
-  return `SELECT pg_advisory_xact_lock(hashtext('${name}:' || coalesce(current_schema(), '')))`;
-}
-
-const LOCK = migrationLockSql("tempo_auth_migrations");
+/** One fixed advisory lock key for every authtempo migration run. */
+const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_migrations'))";
 
 /**
  * Applies the migrations that `ta_migrations` does not list yet, each in its
  * own transaction, in order. Returns the names it applied. Safe to run on
  * every deploy, also from two replicas at once: each migration transaction
- * first takes the advisory lock of its schema, then reads the applied names
- * again under the lock. A second runner waits for the first and then skips its work.
+ * first takes one advisory lock, then reads the applied names again under
+ * the lock. A second runner waits for the first and then skips its work.
  * Without the lock, two runners both see an empty list and one fails on
  * CREATE TABLE, so the deploy fails.
  */

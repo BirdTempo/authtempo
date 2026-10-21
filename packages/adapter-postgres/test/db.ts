@@ -7,8 +7,7 @@ const env = (globalThis as unknown as { process: { env: Record<string, string | 
 
 export const PG_URL = env.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost:5439/tempo_auth";
 
-/** A new, empty schema with a random name. Answers the name. */
-export async function createSchema(): Promise<string> {
+async function createSchema(): Promise<string> {
   const name = `t_${crypto.randomUUID().replaceAll("-", "")}`;
   const admin = postgres(PG_URL, { max: 1, onnotice: () => {} });
   try {

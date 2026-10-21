@@ -53,7 +53,6 @@ authtempo migrate --target postgres --url-env DATABASE_URL
 - A migration is append-only. A new version adds a migration and never changes an old one.
 - A migration of a newer version runs safely under the older code. So apply it first, then deploy.
 - `applyPostgresMigrations` is safe on every deploy, also from two replicas at once. Each migration takes an advisory lock and reads the applied names again.
-- The lock key names the schema of the run. Runs on two schemas of one database never wait on each other.
 - `wrangler d1 migrations apply` rolls back a file that fails, so a refused file changes nothing.
 
 :::caution

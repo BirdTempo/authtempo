@@ -363,9 +363,7 @@ describe("schema.migrate", () => {
     const s = await start(db);
     const id = await plan(s);
     const holder = await db.sql.reserve();
-    // The key names the schema of the run (ruling 52 of plan 12k). The holder
-    // is a link of the same database, so its current_schema() is the same.
-    await holder`SELECT pg_advisory_lock(hashtext('tempo_auth_migrations:' || current_schema()))`;
+    await holder`SELECT pg_advisory_lock(hashtext('tempo_auth_migrations'))`;
     const call = s.call("schema.migrate", { plan_id: id, confirm: true });
     let waiting: number | undefined;
     for (let i = 0; i < 200 && waiting === undefined; i++) {
@@ -398,7 +396,7 @@ describe("schema.migrate", () => {
       plan_id: null,
       next: null,
     });
-    await holder`SELECT pg_advisory_unlock(hashtext('tempo_auth_migrations:' || current_schema()))`;
+    await holder`SELECT pg_advisory_unlock(hashtext('tempo_auth_migrations'))`;
     holder.release();
   });
 });
