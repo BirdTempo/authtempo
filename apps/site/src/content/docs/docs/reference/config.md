@@ -8,6 +8,7 @@ sources:
   - apps/site/scripts/lib/config-keys.ts
   - docs/superpowers/plans/2026-10-14-11g-openapi.md
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
+  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 2"
 ---
 
 **For:** a developer who writes the config of `createAuth`, or reads an error of construction.
@@ -315,6 +316,23 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `account.delete` | boolean | `true` | Turns on `POST /user/delete` and the two routes of its mailed confirm. The right to delete the account is the person's, so it is on by default. `false` removes the routes. |
 | `account.deleteConfirm` | `AccountDeleteConfirmConfig` or `false` | `false` | A mailed link before the delete. The default is off: the fresh session already proves the person (ASVS 5.0.0 7.5.1), and Better Auth deletes at once unless an app sets `sendDeleteAccountVerification`. The link adds a proof of the mailbox, for an app whose sessions live on shared devices. `{}` turns it on. |
 | `account.deleteConfirm.ttlMinutes` | number | 60 | An integer from 5 to 1440. A delete is not undone, and a short window lowers the risk of a link in an old mailbox. Better Auth's default is 24 hours. |
+
+## Observability
+
+With no `observe`, core writes its log lines with `console` and sends nothing anywhere. With a sink, core buffers each event, and a flush sends the batch after the answer. Pass `{ waitUntil }` to `handle`, or call `auth.observe.flush()`.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `observe` | object | off | Turns the event port on. |
+| `observe.sink` | `ObserveSink` | required | An object with `write(batch)`. Core waits for it for at most `observe.flushTimeoutMs`, and logs no error text of it. |
+| `observe.include` | object | each key `"none"` | What an event may hold of an address. An unknown key is refused. |
+| `observe.include.ip` | `"none"` \| `"hash"` \| `"raw"` | `"none"` | `"hash"` writes a keyed hash of 32 hex under the current app secret. A rotation changes every hash. |
+| `observe.include.userAgent` | `"none"` \| `"raw"` | `"none"` | `"raw"` writes at most 256 characters with no control character. |
+| `observe.include.email` | `"none"` \| `"hash"` | `"none"` | `"raw"` is refused: an event never holds a raw email. |
+| `observe.trustTraceparent` | boolean | `false` | Takes the trace id of a valid W3C `traceparent` header. |
+| `observe.buffer` | number | 1000 | An integer from 10 to 10000. A push into a full buffer drops the event and counts it. |
+| `observe.flushTimeoutMs` | number | 2000 | An integer from 100 to 10000. A sink that answers later loses the batch, and core counts it. |
+| `observe.readiness` | boolean | `false` | Turns on `GET <basePath>/ready`. |
 
 ## Next
 

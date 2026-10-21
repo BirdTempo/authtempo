@@ -302,6 +302,12 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
     reason: "the one redaction source that the CLI and the observe sinks share (plan 12h Task 1)",
   },
   {
+    pkg: "@authtempo/core",
+    entry: "./observe",
+    reason:
+      "the types of the observe port for a sink; the config page names its keys (plan 12h Task 2)",
+  },
+  {
     pkg: "@authtempo/client",
     entry: "./conformance",
     reason: "the error-shape suite, for an SDK's own tests; it imports vitest at run time",

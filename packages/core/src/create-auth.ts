@@ -228,6 +228,7 @@ import { ERRORS } from "./errors.js";
 import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
 import { createWellKnownHandler } from "./http/well-known.js";
+import type { HandleOptions, ObserveStats } from "./observe/port.js";
 import type { PublicJwk } from "./primitives/jwk.js";
 import { fail, type Result } from "./result.js";
 import type { SessionRow, UserRow } from "./schema.js";
@@ -736,8 +737,18 @@ export interface Auth {
    * Host answers no 500 of the binding's own (plan 11d2).
    */
   readonly baseURL: string;
-  /** Serves the auth routes under `basePath`. Mount it for any request whose path starts with `basePath`. */
-  handle(request: Request): Promise<Response>;
+  /**
+   * Serves the auth routes under `basePath`. Mount it for any request whose
+   * path starts with `basePath`. With `observe`, pass `{ waitUntil }`: the
+   * flush of the events then runs after the answer (plan 12h).
+   */
+  handle(request: Request, options?: HandleOptions): Promise<Response>;
+  /**
+   * The events of `observe` (plan 12h). `flush()` sends the buffer to the
+   * sink; call it when the host has no `waitUntil`. `stats()` answers the
+   * buffered count and the drop counts in process. No route answers them.
+   */
+  observe: { flush(): Promise<void>; stats(): ObserveStats };
   /**
    * The caller's session from the cookie or the bearer header, or null.
    * With `{ refresh: false }` it is a read with no write: no sliding refresh
@@ -842,11 +853,19 @@ export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
   const routes = coreRoutes(config);
   const gate = createPostGate(config, routes);
-  const handle = createRouter(config, routes, gate);
+  const route = createRouter(config, routes, gate);
   const auth: Auth = {
     basePath: config.basePath,
     baseURL: config.baseURL,
-    handle,
+    // The flush runs after the answer is built and never delays it (owner
+    // decision 4 of 2026-10-14). On Workers pass `(p) => ctx.waitUntil(p)`:
+    // an unbound `ctx.waitUntil` throws.
+    async handle(request, options) {
+      const res = await route(request);
+      options?.waitUntil?.(config.observe.flush());
+      return res;
+    },
+    observe: { flush: () => config.observe.flush(), stats: () => config.observe.stats() },
     session: (request, options) => sessionFromRequest(config, request, options),
     caller: (request) => callerFromRequest(config, request),
     authenticate: (request) => authenticateRequest(config, request),
@@ -855,7 +874,12 @@ export function createAuth(input: AuthConfig): Auth {
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
     wellKnown: createWellKnownHandler(config),
     api: {
-      sweepExpired: (options) => sweepExpired(config, options),
+      // A scheduled handler has no answer to wait for, so the sweep flushes its events itself.
+      async sweepExpired(options) {
+        const result = await sweepExpired(config, options);
+        await config.observe.flush();
+        return result;
+      },
       requestMagicLink: (i) => requestMagicLink(config, i),
       verifyMagicLink: (i) => verifyMagicLink(config, i),
       startSocial: (i) => startSocial(config, i),

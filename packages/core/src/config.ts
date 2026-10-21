@@ -59,6 +59,9 @@ import { defaultSignInPage, type SignInPageInput } from "./http/sign-in-page.js"
 import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.js";
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort, LimitWindow } from "./limiter/port.js";
+import { type ResolvedObserve, resolveObserve } from "./observe/config.js";
+import { createDefaultObserver, createObserver, type Observer } from "./observe/observer.js";
+import type { ObserveConfig } from "./observe/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
 import { movedPrefixFault, sessionCookieNames } from "./primitives/credentials.js";
 import { DPOP_WINDOW_SECONDS } from "./primitives/dpop.js";
@@ -66,6 +69,7 @@ import { FOREIGN_ALGS, type ForeignAlg } from "./primitives/foreign-jwk.js";
 import { JWS_ALGS, type JwsAlg } from "./primitives/jwk.js";
 import {
   createKeyring,
+  currentSecret,
   ENTROPY_REFUSE_BITS,
   ENTROPY_WARN_BITS,
   entropyBits,
@@ -395,6 +399,12 @@ export interface AuthConfig {
    * when absent. `@authtempo/captcha-turnstile` answers the port.
    */
   captcha?: CaptchaConfig;
+  /**
+   * The event port (plan 12h, spec 31). Off when absent: core then writes the
+   * log lines of today and sends nothing anywhere. With a sink, core buffers
+   * each event, and the flush of `auth.observe` sends the batch after the answer.
+   */
+  observe?: ObserveConfig;
 }
 
 export interface PasswordConfig {
@@ -945,6 +955,9 @@ export interface ResolvedConfig {
   hooks: ResolvedHooks;
   account: ResolvedAccount;
   captcha: ResolvedCaptcha | null;
+  /** The observer of this instance (plan 12h). With no `observe` config it sends nothing anywhere. */
+  observe: Observer;
+  observeConfig: ResolvedObserve | null;
   /**
    * The key paths of the input, sorted, for `GET /operator/info` (plan
    * 11c2): each top key that `AUTH_CONFIG_KEYS` names, and `<key>.<sub>`
@@ -1280,6 +1293,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   if (input.openapi !== undefined && typeof input.openapi !== "boolean")
     throw new ConfigError("openapi must be true or false");
   const openapi = input.openapi ?? false;
+  const observeConfig = resolveObserve(input.observe);
   return {
     basePath,
     baseURL: input.baseURL,
@@ -1338,6 +1352,10 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         input.handoff?.signInPage === undefined,
       password !== null,
     ),
+    observe: observeConfig
+      ? createObserver(observeConfig, { clock, hashSecret: () => currentSecret(keyring) })
+      : createDefaultObserver(),
+    observeConfig,
     configKeys: configKeyPaths(input),
   };
 }

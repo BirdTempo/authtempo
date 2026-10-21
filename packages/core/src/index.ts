@@ -242,6 +242,14 @@ export { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.j
 export { ipKey, isIpLiteral } from "./limiter/ip-key.js";
 export { createMemoryLimiter, limiterKey } from "./limiter/memory.js";
 export { KEY_SEPARATOR, type LimiterPort, type LimitWindow } from "./limiter/port.js";
+export type {
+  AuthEvent,
+  EventName,
+  HandleOptions,
+  ObserveConfig,
+  ObserveSink,
+  ObserveStats,
+} from "./observe/port.js";
 export { type Clock, systemClock } from "./primitives/clock.js";
 export {
   createDeriveGate,

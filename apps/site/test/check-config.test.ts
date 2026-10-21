@@ -6,7 +6,7 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 187 keys, the nested ones by their path", () => {
+  it("lists 197 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
@@ -20,7 +20,9 @@ describe("checkConfig", () => {
     // Plan 12k Task 5 adds organizations.teams, its defaultTeam and keepLastTeam,
     // and the limits teamsPerOrganization and membersPerTeam.
     // Plan 12k Task 7 adds tokens, tokens.defaultRateLimit, and tokens.movedPrefixes.
-    expect(keys.length).toBe(187);
+    // Plan 12h Task 2 adds observe, its six keys, and the three keys of observe.include.
+    expect(keys.length).toBe(197);
+    expect(keys).toContain("observe.include.email");
     expect(keys).toContain("hooks.operator");
     expect(keys).toContain("operator.secrets[].scopes");
     expect(keys).toContain("operator.impersonation.ttlMinutes");

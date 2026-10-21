@@ -35,7 +35,7 @@ sources:
 
 | Member | What it does |
 | --- | --- |
-| `handle(request)` | Serves the routes under `basePath`. Mount it for each path that starts with `basePath`. |
+| `handle(request, options?)` | Serves the routes under `basePath`. Mount it for each path that starts with `basePath`. With `observe`, pass `{ waitUntil }`: the flush of the events then runs after the answer. On Workers pass `(p) => ctx.waitUntil(p)`, because an unbound `ctx.waitUntil` throws. |
 | `session(request, options?)` | Answers the `ResolvedSession` of the cookie or the `ts_` bearer token, or null. A `tk_` token answers null. With `{ refresh: false }`, the read writes nothing: no sliding refresh and no delete of an ended row. |
 | `caller(request)` | Answers a `Caller`: a session, an API token, an organization token, or an OAuth access token under its resource, or null. A `client_credentials` token answers `kind: "oauth-client"`, with no user. A `to_` token answers `kind: "organizationToken"`, with `organization` and no user. An `oauth` caller has `user` and `subject`, the token's `sub`: the user id, or the pairwise subject of a pairwise client. |
 | `authenticate(request)` | Answers the `Caller` of `caller(request)` as a `Result`, or the code of the failure: `rate_limited` over a token's window, `token_exhausted` at a quota of zero, `token_retired` for a retired key, `conflict` when a lost spend sees no other spend or after 20 lost spends, and `unauthorized` for any other failure. `caller` answers null for each code. A token spends one call of its quota per request, so `caller` and `authenticate` on one request spend once. |
@@ -43,6 +43,7 @@ sources:
 | `permissionsOf(caller, organizationId)` | Answers `{ role, permissions }` in the organization. A non-member gets `role: null` and `{}`. `not_found` with `organizations` off or for an unknown organization. |
 | `sessionCookie(request, resolved)` | Answers the `Set-Cookie` value after a sliding refresh, or null. Send it, or the browser drops the cookie early. |
 | `wellKnown(request)` | Serves the documents under `/.well-known/` at the origin root. 404 while `oauth` is off. |
+| `observe` | `flush()` sends the buffered events to the sink of `observe`. Call it when the host has no `waitUntil`. `stats()` answers the buffered count and the drop counts. |
 | `api` | The same operations in-process, as an `AuthApi`. |
 | `errors` | The table `ERRORS`. |
 
@@ -161,6 +162,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | JWT and OAuth | `JwtApi`, `MintedJwt`, `SessionJwtClaims`, `TokenAnswer`, `OAuthApi`, `OAuthClientsApi`, `OAuthAccess`, `OAuthClientAccess`, `CREDENTIALS_PER_CLIENT`, `DEVICE_GRANT`, `DEVICE_START_PER_IP`, `DEVICE_VERIFY_PER_SESSION`, `DEVICE_VERIFY_PER_IP`, `DEVICE_VERIFY_PER_CODE`, `DeviceAuthorizationAnswer`, `OAuthGrantSummary`, `OAuthResult`, `ClientInput`, `ClientSummary`, `ClientFields`, `RegisteredClient`, `CLIENT_SECRET_PREFIX` |
 | Organizations | `Statements`, `RoleTable`, `PermissionInput`, `RoleSummary`, `SlugStatus`, `SLUG_CHECK_PER_USER`, `TeamSummary`, `TeamMemberSummary`, `OrganizationSummary`, `MemberSummary`, `InvitationSummary`, `OrganizationPatch`, `ProposedMember` |
 | Captcha | `CaptchaPort`, `CaptchaPage`, `CaptchaFlow` |
+| Observability | `ObserveConfig`, `ObserveSink`, `ObserveStats`, `AuthEvent`, `EventName`, `HandleOptions` |
 | Hooks | `OrganizationHooks`, `OrganizationHookEvent`, `SessionHooks`, `SessionDraft`, `SessionPatch`, `SessionVia`, `SessionEndReason`, `MemberVia`, `RemoveVia`, `ProposedTeamMember`, `TeamPatch`, `UserHooks`, `UserCreatePatch`, `UserPatch`, `UserCreateVia`, `UserUpdateVia`, `UserVerifyVia`, `IdentityHooks`, `IdentitySummary`, `IdentityLinkVia`, `OperatorHooks` |
 
 ## The other entries

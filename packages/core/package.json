@@ -59,6 +59,10 @@
     "./redact": {
       "types": "./dist/redact.d.ts",
       "default": "./dist/redact.js"
+    },
+    "./observe": {
+      "types": "./dist/observe/index.d.ts",
+      "default": "./dist/observe/index.js"
     }
   },
   "files": [

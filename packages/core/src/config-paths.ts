@@ -42,6 +42,7 @@ export const AUTH_CONFIG_KEYS = {
   hooks: true,
   account: true,
   captcha: true,
+  observe: true,
 } as const satisfies Record<keyof Required<AuthConfig>, true>;
 
 export type AuthConfigKey = keyof typeof AUTH_CONFIG_KEYS;
@@ -70,6 +71,7 @@ export const CONFIG_BLOCKS: ReadonlySet<AuthConfigKey> = new Set<AuthConfigKey>(
   "hooks",
   "account",
   "captcha",
+  "observe",
 ]);
 
 /** An object literal or a null-prototype object. A class instance, an array, or a port is none. */

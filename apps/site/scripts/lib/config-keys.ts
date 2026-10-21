@@ -15,6 +15,7 @@ import type {
   LinkedInConfig,
   OAuth2Entry,
   OAuthConfig,
+  ObserveConfig,
   OidcEndpoints,
   OidcEntry,
   OperatorConfig,
@@ -80,6 +81,7 @@ export const CONFIG_KEYS = {
     hooks: true,
     account: true,
     captcha: true,
+    observe: true,
   } satisfies Keys<AuthConfig>,
   "secrets[]": { version: true, value: true } satisfies Keys<SecretVersion>,
   cookie: { sameSite: true } satisfies Keys<Part<"cookie">>,
@@ -276,6 +278,19 @@ export const CONFIG_KEYS = {
   "account.notices": { mail: true } satisfies Keys<AccountNoticesConfig>,
   "account.deleteConfirm": { ttlMinutes: true } satisfies Keys<AccountDeleteConfirmConfig>,
   captcha: { port: true, flows: true, onUnavailable: true } satisfies Keys<CaptchaConfig>,
+  observe: {
+    sink: true,
+    include: true,
+    trustTraceparent: true,
+    buffer: true,
+    flushTimeoutMs: true,
+    readiness: true,
+  } satisfies Keys<ObserveConfig>,
+  "observe.include": {
+    ip: true,
+    userAgent: true,
+    email: true,
+  } satisfies Keys<NonNullable<ObserveConfig["include"]>>,
 } as const;
 
 /**
