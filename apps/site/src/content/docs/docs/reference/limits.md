@@ -128,6 +128,10 @@ These counts live in their rows, so they hold under every limiter.
 | Members of one organization | `organizations.limits.membersPerOrganization` | `member_limit` |
 | Pending invitations of one organization | `organizations.limits.pendingInvitationsPerOrganization` | `invitation_limit` |
 | The `metadata` of one organization | 4096 bytes as JSON | `invalid_body` |
+| Teams of one organization | `organizations.limits.teamsPerOrganization` | `team_limit` |
+| Members of one team | `organizations.limits.membersPerTeam`. A team member add and an accept count | `team_member_limit` |
+| Stored roles of one organization | `organizations.dynamicRoles.maxPerOrganization`, 50 by default | `role_limit` |
+| Live tokens of one organization | 50 | `organization_token_limit` |
 
 ## The lives
 
