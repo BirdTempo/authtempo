@@ -311,6 +311,10 @@ export async function acceptInvitation(
   let accepted: Accepted = null;
   try {
     accepted = await config.storage.transaction(async (tx): Promise<Accepted> => {
+      // First, in the lock order of user-hold.ts: the user row, then the team rows (ruling 43).
+      // A member row of a deleted user would count as an owner (plan 12a Task 11). The hold
+      // writes no new value, so a refusal below changes nothing.
+      await holdUser(tx, input.user.id);
       // An invitation carries its inviter's rank at the time of the invite. If the inviter was
       // removed or demoted since, the grant must die with their right; the check runs here because
       // a removal cannot find every pending invitation by rank.
@@ -419,9 +423,6 @@ export async function acceptInvitation(
           by: raisedBy,
         });
       }
-      // After the hooks (the D1 undo), and before the consume. A member row
-      // of a deleted user would count as an owner (plan 12a Task 11).
-      await holdUser(tx, input.user.id);
       // One conditional update consumes the token: two accepts race for one row and only one wins.
       const n = await tx.update(
         "invitation",

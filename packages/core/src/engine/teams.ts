@@ -398,7 +398,8 @@ export async function listTeamMembers(
  * second add answers `already_member`. The add of another person runs the
  * touch rule on that person (spec 29 item 5). `membersPerTeam` counts
  * inside the transaction, after the lock of the team row and before the
- * write.
+ * write. The hold of the added user comes before the team lock, in the lock
+ * order of user-hold.ts (ruling 43).
  */
 export async function addTeamMember(
   config: ResolvedConfig,
@@ -443,6 +444,9 @@ export async function addTeamMember(
   try {
     const written = await hookGuard(() =>
       config.storage.transaction(async (tx): Promise<Result<true>> => {
+        // The added user first, in the lock order of user-hold.ts, for the reason of the member
+        // add (plan 12a Task 11). The hold writes no new value, so a refusal below changes nothing.
+        await holdUser(tx, input.userId);
         // Zero rows: a delete ran after the read. A zero-row update writes nothing.
         if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
         // A no-op add runs no hook. The unique key stays the guard for a race.
@@ -468,8 +472,6 @@ export async function addTeamMember(
           memberUser,
           by: input.user,
         });
-        // The added user, for the reason of the member add (plan 12a Task 11).
-        await holdUser(tx, input.userId);
         await tx.create("teamMember", row);
         await userStays(tx, input.userId);
         return ok(true);

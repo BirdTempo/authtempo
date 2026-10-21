@@ -24,13 +24,17 @@ import { ROUNDS } from "./rounds.js";
  * does, so their old order (the password row, then the sessions) forms no
  * cycle with the delete. After `ROUNDS` lost rounds the answer is `conflict`.
  *
- * The operator acts that end the sessions of a user keep one lock order
- * (plan 12f, final review L1). First comes this user row. Then comes
- * `holdImpersonations`, the one read that locks the sessions of the user
- * and of each impersonation target. Then come the member rows and the
- * owner lock. The ban, the revoke of the platform role, `withRoleLoss`,
- * and the account delete all take them in that order. So two acts on a
- * shared target wait, and do not deadlock.
+ * One lock order holds for every flow. It joins the order of plan 12f (final
+ * review L1) and the order of ruling 43 of plan 12k. First comes this user
+ * row. Then comes `holdImpersonations`, the one read that locks the sessions
+ * of the user and of each impersonation target. Then comes the organization
+ * row: the stamp of `ownerLock`, or `lockOrganization`. Then come the member
+ * rows, and last the team row (`lockTeam`). The ban, the revoke of the
+ * platform role, `withRoleLoss`, and the account delete take them in that
+ * order. The account delete takes the rows of each organization that goes,
+ * its team rows among them. So the team member add and the invitation accept
+ * hold the user before the team lock. With the team lock first, an add of the
+ * sole member beside the account delete formed a deadlock.
  *
  * No row returns: a sign-up writes its user later, and a deleted user is
  * found by `userStays`, the read after the insert. A stop here would answer
