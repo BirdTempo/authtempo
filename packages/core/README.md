@@ -1472,6 +1472,7 @@ It answers one count for each kind of row:
 - `oauthClientSecrets`: old OAuth client secrets past the overlap of a rotation, cleared from the client.
 - `ssoDomains`: verified SSO domains checked again by DNS, 30 days after their last check (plan 12d). Each row asks every resolver of `sso.dns`, and each resolver call counts as one call of the sweep. The idle clients leave 7 calls for this step and the pending delete below: one row with two resolvers. With more calls left, the step takes up to 20 rows. A failed check tries again one day later. Three failures that span 72 hours lose the domain: its claim and `enforce` go, with one audit row `sso_domain_lost`. 0 while `sso` is off.
 - `ssoPendingDomains`: pending SSO domains past their expiry of 7 days, which no verify can prove. 0 while `sso` is off.
+- `scimTokens`: SCIM tokens past their expiry. A token with no expiry stays. 0 while `scim` is off.
 
 ```ts
 export default {

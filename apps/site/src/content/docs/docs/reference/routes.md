@@ -1539,7 +1539,7 @@ The three token routes run the steps of the SSO manager routes: a session, the c
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
 | Input | Query `{ organizationId }` |
-| Answer | `{ tokens }`, oldest first. Each token holds `id`, `name`, `hint`, `scopes`, `createdAt`, `lastUsedAt`, and `expiresAt`. No answer holds the token or its hash |
+| Answer | `{ tokens }`: the newest 100 tokens, oldest first. The sweep deletes each expired token. Each token holds `id`, `name`, `hint`, `scopes`, `createdAt`, `lastUsedAt`, and `expiresAt`. No answer holds the token or its hash |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh) |
 
 <h3 id="post-scim-tokens-create"><code>POST /scim/tokens/create</code></h3>

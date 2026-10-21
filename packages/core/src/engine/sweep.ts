@@ -49,6 +49,8 @@ export interface SweepResult {
   ssoDomains: number;
   /** Pending SSO domains past `expiresAt`, which no verify can prove (plan 12d). 0 while `sso` is off. */
   ssoPendingDomains: number;
+  /** SCIM tokens past `expiresAt` (plan 12d). A token with no expiry is never swept. 0 while `scim` is off. */
+  scimTokens: number;
 }
 
 // The first delete removes every verification row past `expiresAt`,
@@ -413,6 +415,12 @@ export async function sweepExpired(
       ])
     : 0;
   if (config.sso) meter.step(1);
+  // An expired SCIM token answers 401 (`authenticateScim`), and its row holds a
+  // hash that no flow reads. A null expiry never matches lt, so it stays.
+  const scimTokens = config.scim
+    ? await storage.delete("scimToken", [{ field: "expiresAt", op: "lt", value: now }])
+    : 0;
+  if (config.scim) meter.step(1);
   const recheckShare = config.sso ? RECHECK_SHARE : 0;
   const pendingReserve = pending.length > 0 ? PENDING_PAGE_RESERVE : 0;
   const oauthClients = await sweepClients(
@@ -473,6 +481,7 @@ export async function sweepExpired(
     oauthClientSecrets,
     ssoDomains,
     ssoPendingDomains,
+    scimTokens,
   };
   // One event with every count of the result (plan 12h Task 6). The api flushes it (spec 31 item 4).
   config.observe.emit({

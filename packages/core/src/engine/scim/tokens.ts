@@ -38,6 +38,13 @@ export const SCIM_SCOPES: readonly ScimScope[] = Object.freeze([
  */
 export const SCIM_TOKENS_LIVE_MAX = 2;
 /**
+ * The most rows of one list: 100. An organization holds at most 2 live
+ * tokens, and the sweep deletes each expired row. A token lives one day at
+ * least, so 100 rows need about 49 days with no sweep. Past the bound the
+ * list holds the newest rows, so the live tokens of a rollover stay in it.
+ */
+export const SCIM_TOKENS_LIST_MAX = 100;
+/**
  * The failed SCIM auth checks of one IP: 60 per 15 minutes (deviation 18).
  * A token holds 256 random bits, so no count makes a guess likely. The
  * limit bounds the work of a flood: each failure costs one hash lookup.
@@ -189,7 +196,10 @@ export async function createScimToken(
   return ok({ token, id: row.id, hint: row.hint });
 }
 
-/** The tokens of an organization, oldest first. An organization that does not exist answers `not_found`. */
+/**
+ * The newest `SCIM_TOKENS_LIST_MAX` tokens of an organization, oldest first.
+ * An organization that does not exist answers `not_found`.
+ */
 export async function listScimTokens(
   config: ResolvedConfig,
   _actor: SsoActor,
@@ -204,9 +214,9 @@ export async function listScimTokens(
   const rows = await config.storage.findMany(
     "scimToken",
     [{ field: "organizationId", op: "eq", value: organization.id }],
-    { sort: { field: "id", dir: "asc" } },
+    { sort: { field: "id", dir: "desc" }, limit: SCIM_TOKENS_LIST_MAX },
   );
-  return ok(rows.map(publicScimToken));
+  return ok(rows.reverse().map(publicScimToken));
 }
 
 /** The organization of a token, or null when no row has the id. A route reads it for the manager guard. */

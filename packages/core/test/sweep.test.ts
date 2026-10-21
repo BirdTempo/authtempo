@@ -206,6 +206,7 @@ describe("sweepExpired", () => {
       oauthClientSecrets: 0,
       ssoDomains: 0,
       ssoPendingDomains: 0,
+      scimTokens: 0,
     });
 
     const ids = (await storage.findMany("verification", [])).map((r) => r.id).sort();
@@ -245,6 +246,7 @@ describe("sweepExpired", () => {
       oauthClientSecrets: 0,
       ssoDomains: 0,
       ssoPendingDomains: 0,
+      scimTokens: 0,
     });
   });
 

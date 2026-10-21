@@ -23,6 +23,7 @@ describe("delete expired rows", () => {
       "oauthTokens",
       "organizationTokens",
       "pendingSessions",
+      "scimTokens",
       "sessions",
       "ssoDomains",
       "ssoPendingDomains",

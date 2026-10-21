@@ -54,6 +54,7 @@ import test from "../../../../../samples/guides/sweep.test.ts?raw";
 | `oauthClientSecrets` | Old OAuth client secrets past the overlap of a rotation. The sweep clears them from the client. |
 | `ssoDomains` | Verified SSO domains checked again by DNS, 30 days after their last check. Three failures that span 72 hours lose the domain. A domain with a retry due comes first. The recheck runs after the back-channel steps and takes the calls that they leave, up to 20 domains in one sweep. With two resolvers and an idle outbox, one sweep of 50 calls checks 9 domains. A busy outbox still leaves the calls of 1 domain. A lost domain becomes a pending domain with a new record, for 7 days. 0 while `sso` is off. |
 | `ssoPendingDomains` | Pending SSO domains past their expiry of 7 days. 0 while `sso` is off. |
+| `scimTokens` | SCIM tokens past their expiry. A token with no expiry stays. 0 while `scim` is off. |
 
 ## How it behaves
 

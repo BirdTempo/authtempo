@@ -77,8 +77,11 @@ function resolver(name: string): DnsTxtPort {
   };
 }
 
-/** The engine on `db` with sso and two resolvers. Each call makes a new adapter: one invocation. */
-function engine(db: D1Database) {
+/**
+ * The engine on `db` with sso and two resolvers, and `scim` when `scim` is
+ * true. Each call makes a new adapter: one invocation.
+ */
+function engine(db: D1Database, scim = false) {
   const storage = createD1Adapter(db);
   return createAuth({
     baseURL: BASE,
@@ -90,6 +93,7 @@ function engine(db: D1Database) {
     mail: { send: async () => {} },
     organizations: {},
     sso: { dns: [resolver("a"), resolver("b")] },
+    ...(scim ? { scim: {} } : {}),
   });
 }
 
@@ -139,14 +143,15 @@ async function createUser(email: string) {
 }
 
 /** One sweep in its own invocation with a cap of 50 queries: its queries, its resolver calls, and its counts. */
-async function sweep() {
+async function sweep(scim = false) {
   const { db, count } = counting(env.DB, 50);
   const before = asked.length;
-  const swept = await engine(db).api.sweepExpired();
+  const swept = await engine(db, scim).api.sweepExpired();
   return {
     refused: count.refused,
     calls: count.queries + (asked.length - before),
     domains: swept.ssoDomains,
+    scimTokens: swept.scimTokens,
   };
 }
 
@@ -206,5 +211,42 @@ describe("the recheck of the SSO domains inside the sweep budget on D1 (plan 12d
     expect(
       await rows("SELECT count(*) AS n FROM ta_operator_audit WHERE action = 'sso_domain_lost'"),
     ).toBe(ids.length);
+  }, 300_000);
+
+  it("deletes the expired SCIM tokens and checks the due domains within 50 calls per sweep", async () => {
+    await verifiedDomains(25);
+    const auth = engine(env.DB, true);
+    const orgs = (
+      await env.DB.prepare("SELECT id FROM ta_organization ORDER BY id").all<{
+        id: string;
+      }>()
+    ).results;
+    expect(orgs).toHaveLength(2);
+    for (const org of orgs)
+      for (const name of ["a", "b"]) {
+        const made = await auth.api.scim?.tokens.create({
+          actor: APP,
+          organizationId: org.id,
+          name,
+          expiresInDays: 1,
+        });
+        if (!made?.ok) throw new Error("the create failed");
+      }
+    expect(await rows("SELECT count(*) AS n FROM ta_scim_token")).toBe(4);
+    current = new Date(current.getTime() + 31 * DAY_MS);
+    const passes: { refused: number; calls: number; domains: number; scimTokens: number }[] = [];
+    for (let i = 0; i < 40; i++) {
+      const s = await sweep(true);
+      passes.push(s);
+      if (s.domains === 0) break;
+    }
+    for (const s of passes) expect([s.refused, s.calls <= 50]).toEqual([0, true]);
+    expect(passes.map((s) => s.scimTokens)).toEqual([4, 0, 0, 0]);
+    // Measured 2026-10-22 (load 16.6): the SCIM step costs 1 call in each sweep, so
+    // 46, 46, 40, and 19 calls become 47, 47, 41, and 20. The recheck still checks 9,
+    // 9, and 7 domains. After the ninth row 3 calls stay, and a row starts only while 5 fit.
+    expect(passes.map((s) => s.domains)).toEqual([9, 9, 7, 0]);
+    expect(passes.map((s) => s.calls)).toEqual([47, 47, 41, 20]);
+    expect(await rows("SELECT count(*) AS n FROM ta_scim_token")).toBe(0);
   }, 300_000);
 });

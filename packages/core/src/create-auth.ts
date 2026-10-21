@@ -399,7 +399,7 @@ export interface SsoApi {
  */
 export interface ScimApi {
   tokens: {
-    /** The SCIM tokens of an organization, oldest first. No answer holds a token or its hash. */
+    /** The newest 100 SCIM tokens of an organization, oldest first. No answer holds a token or its hash. */
     list(input: {
       actor: SsoAppActor;
       organizationId: string;

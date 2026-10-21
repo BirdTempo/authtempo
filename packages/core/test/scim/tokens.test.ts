@@ -3,6 +3,7 @@ import { createAuth } from "../../src/create-auth.js";
 import { createOrganization, deleteOrganization } from "../../src/engine/organizations.js";
 import { createScimToken, listScimTokens, revokeScimToken } from "../../src/engine/scim/tokens.js";
 import { sessionFromRequest } from "../../src/engine/sessions.js";
+import { sweepExpired } from "../../src/engine/sweep.js";
 import { authenticateRequest, callerFromRequest } from "../../src/engine/tokens.js";
 import { createRouter, type Route } from "../../src/http/router.js";
 import { scimJson, scimRoute } from "../../src/http/routes/scim.js";
@@ -306,6 +307,37 @@ describe("the SCIM tokens (plan 12d Task 9)", () => {
     expect(
       (await w.storage.findOne("scimToken", [{ field: "id", op: "eq", value: id }]))?.lastUsedAt,
     ).toEqual(w.clock.now());
+  });
+
+  it("lists the newest 100 tokens, oldest first, and the sweep deletes the expired ones", async () => {
+    const w = await scimAuth();
+    // A token lives one day at least, and two are live at once: each day makes two more rows.
+    const ids: string[] = [];
+    // One second apart, so the id order is the order of the creates.
+    for (let day = 0; day < 51; day++) {
+      for (const name of ["a", "b"]) {
+        const made = await createScimToken(w.config, SCIM_APP, {
+          organizationId: w.org,
+          name,
+          expiresInDays: 1,
+        });
+        if (!made.ok) throw new Error(made.code);
+        ids.push(made.value.id);
+        w.clock.advance(name === "a" ? 1_000 : DAY_MS - 1_000);
+      }
+    }
+    const kept = await createScimToken(w.config, SCIM_APP, { organizationId: w.org, name: "kept" });
+    if (!kept.ok) throw new Error(kept.code);
+    ids.push(kept.value.id);
+    expect(await w.storage.findMany("scimToken", [])).toHaveLength(103);
+    const listed = await listScimTokens(w.config, SCIM_APP, { organizationId: w.org });
+    if (!listed.ok) throw new Error(listed.code);
+    expect(listed.value.map((t) => t.id)).toEqual(ids.slice(3));
+    // Past the last expiry, the 102 expired rows go; the token with no expiry stays.
+    w.clock.advance(2_000);
+    expect((await sweepExpired(w.config)).scimTokens).toBe(102);
+    expect((await w.storage.findMany("scimToken", [])).map((r) => r.id)).toEqual([kept.value.id]);
+    expect((await sweepExpired(w.config)).scimTokens).toBe(0);
   });
 
   it("refuses a SCIM token at the caller reads of the app (auth.caller, auth.authenticate, auth.session)", async () => {
