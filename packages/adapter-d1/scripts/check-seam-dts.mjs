@@ -10,6 +10,10 @@ const ENTRY = join(DIST, "seam-entry.d.ts");
 // Each global type of @cloudflare/workers-types that starts with D1 (D1Database,
 // D1Result, D1Meta, ...), but not the seam's own D1Subset types or D1AdapterOptions.
 const FORBIDDEN = [/\bD1(?!Subset|AdapterOptions)[A-Z]\w*/, /@cloudflare\/workers-types/];
+// The fewest declarations that the walk must read (the 12g fix wave, ledger
+// line 38). The entry and its local imports gave 6 files on 2026-10-22. An
+// empty or broken entry gives files=1, and with no floor it passed.
+const MIN_FILES = 6;
 
 if (!existsSync(ENTRY)) {
   console.error(`seam-dts: FAIL ${ENTRY} does not exist; run the build`);
@@ -36,6 +40,9 @@ while (queue.length > 0) {
     else queue.push(next);
   }
 }
+
+if (seen.size < MIN_FILES)
+  failures.push(`the walk read ${seen.size} files; at least ${MIN_FILES} are expected`);
 
 if (failures.length > 0) {
   for (const f of failures) console.error(`seam-dts: FAIL ${f}`);
