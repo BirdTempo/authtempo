@@ -153,7 +153,16 @@ export type VerificationPurpose =
    * Profiles 4.1.4.5). valueHash is unique, so a replay of the assertion
    * fails while the row lives.
    */
-  | "saml-assertion";
+  | "saml-assertion"
+  /**
+   * The latest expiry of one session: a SAML `SessionNotOnOrAfter` (ruling
+   * 38 Q1 of plan 12d). The session create writes it in its own handle.
+   * The sliding refresh reads it, so a refresh never moves `expiresAt` past
+   * the cap. The identifier is the user id. The valueHash is the SHA-256
+   * hex of `session-cap:<sessionId>`. The expiresAt is the cap, and the data
+   * is null. The session ends at the cap, so the sweep deletes the row with it.
+   */
+  | "session-cap";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;

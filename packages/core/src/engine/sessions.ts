@@ -181,6 +181,14 @@ export interface ResolvedSession {
 }
 
 /**
+ * The `valueHash` of the `session-cap` row of a session (ruling 38 Q1 of
+ * plan 12d): the SHA-256 hex of `session-cap:<sessionId>`.
+ */
+export function sessionCapHash(sessionId: string): Promise<string> {
+  return sha256Hex(`session-cap:${sessionId}`);
+}
+
+/**
  * `storage` is the adapter to write through. A sign-in that resolves the
  * user in a transaction passes its `tx`, so the session commits with the
  * claim that deletes a claimant's sessions (plan 7 input).
@@ -194,8 +202,24 @@ export async function createSession(
   const now = config.clock.now();
   const token = randomToken(SESSION_TOKEN_PREFIX);
   const expiry = input.impersonation?.expiresAt ?? sessionExpiry(config, now, now);
+  const id = newId(now);
+  // The cap row goes in the handle of the session, so both commit or neither does.
+  if (input.notAfter) {
+    await storage.create("verification", {
+      id: newId(now),
+      purpose: "session-cap",
+      identifier: input.userId,
+      valueHash: await sessionCapHash(id),
+      expiresAt: input.notAfter,
+      consumedAt: null,
+      data: null,
+      createdAt: now,
+      updatedAt: now,
+      secretVersion: config.keyring.current,
+    });
+  }
   const session = await storage.create("session", {
-    id: newId(now),
+    id,
     userId: input.userId,
     tokenHash: await sha256Hex(token),
     // The IdP's cap holds when it is earlier (plan 12d Task 5 Behavior 9).
@@ -641,7 +665,19 @@ export async function resolveSession(
   const due = session.actorId === null && sinceSeen >= config.session.slidingRefreshDays * DAY_MS;
   if (!write) return { user, session, refreshed: false, needsRefresh: due };
   if (due) {
-    const expiresAt = sessionExpiry(config, session.createdAt, now);
+    const slid = sessionExpiry(config, session.createdAt, now);
+    // A SAML cap holds through every refresh (ruling 38 Q1 of plan 12d). The
+    // row goes with the cap, and the session ends at the cap too, so a
+    // missing row means no cap. Only `sso.saml` writes a cap, so an app with
+    // it off sends no read. An app that turns it off ends its SAML sessions
+    // first, or they slide again.
+    const cap = config.sso?.saml
+      ? await config.storage.findOne("verification", [
+          { field: "valueHash", op: "eq", value: await sessionCapHash(session.id) },
+          { field: "purpose", op: "eq", value: "session-cap" },
+        ])
+      : null;
+    const expiresAt = cap && cap.expiresAt.getTime() < slid.getTime() ? cap.expiresAt : slid;
     await config.storage.update("session", [{ field: "id", op: "eq", value: session.id }], {
       expiresAt,
       lastSeenAt: now,
