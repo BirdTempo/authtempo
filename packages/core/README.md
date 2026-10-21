@@ -1490,6 +1490,12 @@ page, read 2026-10-20). On Workers Paid or on Postgres, a larger budget
 sends more logouts and ends more left sessions in one sweep. Another value
 throws a `RangeError` before any call.
 
+## Observability
+
+Core emits one typed event for each authentication act, each limit hit, each sweep, and each fault.
+With no `observe.sink`, core writes only the fault lines it wrote before plan 12h, and a sink gets the events after the answer.
+The guide `/docs/operations/observability/` sets up a sink, and `/docs/reference/events/` lists each event with its fields.
+
 ## Secrets
 
 `secret` is version 1 of the app secret. `secrets` lists the versions, the

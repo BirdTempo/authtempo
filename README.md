@@ -21,6 +21,7 @@ Plans: `docs/superpowers/plans/README.md`.
 | `@authtempo/legacy-hashes` | Verifies bcrypt, Argon2id, PBKDF2, scrypt, and Firebase scrypt hashes at sign-in and rehashes to PBKDF2. Pure JavaScript. bcryptjs is BSD-3-Clause (see `NOTICE`). |
 | `@authtempo/import` | The readers and `importUsers`: moves users from Supabase Auth, Clerk, Auth0, Firebase, Auth.js, Cognito, and WorkOS through the storage port. A second run writes nothing. The command is `authtempo import` in `@authtempo/cli`. `authtempo import verify` checks that the database holds the whole export. |
 | `@authtempo/cli` | `authtempo`: `init` (a new app from the example of a stack), `migrate` (Postgres and D1, after the version gate), `import`, `check` (a deployment against core's promises), and `keys rotate`. It also has `secret` (a new app secret or operator secret) and `info` (a support report with no secret value). `secret status` and `secret rewrap` count and reseal the rows of each secret version. Node 22 or newer. `authtempo-import` stays for one release. |
+| `@authtempo/observe` | Owned sinks for the events of core: Workers Logs, Analytics Engine, and OTLP JSON over HTTP. No runtime dependency. |
 | `@authtempo/mcp` | `authtempo-mcp`: the MCP server for a coding agent. On stdio in the project, it serves `docs.search`, `docs.read`, `version`, `scaffold`, `migrate.plan`, `migrate.run`, `schema.migrate`, and `check`. The last five tools run the CLI in process. The remote Worker serves only the tools `docs.search`, `docs.read`, and `version`, with the docs resources and the prompts, at the planned address `https://mcp.authtempo.com/mcp` (`REMOTE_MCP_URL`). `authtempo mcp` writes its editor config. |
 | `@authtempo/site` | The docs and the root pages: one Worker of static assets. Private; the owner publishes it. |
 | `@authtempo/demo` | The demo Worker: each sign-in method on test data, one Durable Object per visitor sandbox, deleted 60 minutes after it starts. Private; the owner publishes it at a planned address. |
@@ -130,6 +131,9 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   never changes or deletes an audit row. An operator secret reaches only the
   scopes of its config entry, and an impersonation never reaches an operator
   route, a re-authentication, or a second-factor change.
+- Core sends no event anywhere without a sink of the app. With no sink it
+  writes only the fault lines it wrote before plan 12h. No event holds a
+  secret, a credential, free text, or a raw email.
 
 ## Owner-run items of the site and the demo
 
