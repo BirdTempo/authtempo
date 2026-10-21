@@ -80,10 +80,10 @@ export async function applyMysqlMigrationsWith(pool: Pool, run: RunStep): Promis
 
 /**
  * Applies the steps that `ta_migrations` does not list yet, in order, and
- * answers the names of the migrations that it changed. Safe on every deploy,
- * also from two replicas at once: the runner first takes the named lock
- * `authtempo_migrations`, so a second runner waits and then finds each step
- * recorded.
+ * answers the names of the migrations that it changed. It is safe on every
+ * deploy, also from two replicas at once. The runner first takes the named
+ * lock `authtempo_migrations`. So a second runner waits and then finds each
+ * step recorded.
  */
 export function applyMysqlMigrations(pool: Pool): Promise<string[]> {
   return applyMysqlMigrationsWith(pool, runStep);

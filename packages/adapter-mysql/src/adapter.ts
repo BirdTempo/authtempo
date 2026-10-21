@@ -47,10 +47,11 @@ async function query(ctx: Ctx, s: Statement): Promise<RowDataPacket[] | ResultSe
     } catch (e) {
       // InnoDB locks each row that a statement scans, also a row that does
       // not match. So a DELETE outside a transaction can meet the locks of a
-      // transaction in another order and end as the victim of a deadlock,
-      // where Postgres waits. Outside a transaction the statement is its own
-      // unit, and InnoDB undid it whole, so the adapter sends it again. A
-      // deadlock in a transaction undoes the transaction, so it passes through.
+      // transaction in another order. InnoDB then ends it as the victim of a
+      // deadlock, where Postgres waits. Outside a transaction the statement
+      // is its own unit, and InnoDB undid it whole, so the adapter sends it
+      // again. A deadlock in a transaction undoes the transaction, so it
+      // passes through.
       const deadlock = (e as { errno?: unknown } | null)?.errno === LOCK_DEADLOCK;
       if (ctx.conn || !deadlock || attempt === STATEMENT_TRIES) throw e;
     }

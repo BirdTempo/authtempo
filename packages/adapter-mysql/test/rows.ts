@@ -5,9 +5,9 @@ export const t0 = new Date("2026-01-01T00:00:00.000Z");
 let next = 0;
 
 /**
- * A row of `model` that each adapter stores: a short new string in each
- * string field, 1, false, t0, an empty object, or null where the field is
- * nullable. `over` sets fields of the test.
+ * A row of `model` that each adapter stores. Each string field holds a short
+ * new string. The other fields hold 1, false, t0, or an empty object, or null
+ * where the field is nullable. `over` sets fields of the test.
  */
 export function rowOf<M extends ModelName>(model: M, over: Partial<Models[M]> = {}): Models[M] {
   next += 1;

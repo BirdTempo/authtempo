@@ -119,7 +119,7 @@ export function tagOf(pool: Pool): Tag {
 /**
  * A new database `t_<uuid>` with the binary collation. With `migrate`, the
  * steps of `applyMysqlMigrations` run without GET_LOCK (ruling 2 of plan
- * 12g): a MySQL named lock is held per server, not per database, so every
+ * 12g). A MySQL named lock is held per server, not per database. So every
  * test database on one server would share `authtempo_migrations`.
  * migrations.test.ts keeps the locked runner. It fails, never skips, when
  * the server does not answer.
@@ -175,7 +175,7 @@ export async function freshDatabase(
 
 /**
  * Fresh migrated databases of one server, made `ahead` at a time before a
- * test asks, so a suite that needs one database per test does not wait for
+ * test asks. So a suite that needs one database per test does not wait for
  * each CREATE in turn. `drain` closes the ones that no test took.
  */
 export function databaseSupply(server: MysqlServer, ahead = 3) {

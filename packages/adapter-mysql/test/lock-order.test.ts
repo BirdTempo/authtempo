@@ -5,8 +5,8 @@ import { rowOf } from "./rows.js";
 
 // Ruling 2 of plan 12g. InnoDB locks each index record as it scans, in the
 // order of the index that it reads, before ORDER BY. So a lock by user id
-// in one FOR UPDATE takes the rows in (user_id, id) order, and a caller that
-// locks by id can deadlock with it. lockInOrder reads the ids and then locks
+// in one FOR UPDATE takes the rows in (user_id, id) order. A caller that
+// locks by id can then deadlock with it. lockInOrder reads the ids and then locks
 // them on PRIMARY.
 
 let db: MysqlDatabase | null = null;

@@ -5,8 +5,8 @@
 // deployed run through Hyperdrive is an owner item.
 //
 // The plan put the workerd run in a vitest pool test. @cloudflare/vitest-plugin
-// 1.4.0 loads mysql2 through its own module fallback, and that fallback has
-// no node:process (2026-10-21), with or without the dependency optimizer.
+// 1.4.0 loads mysql2 through its own module fallback. That fallback has no
+// node:process (2026-10-21), with or without the dependency optimizer.
 // wrangler dev runs the bundle that wrangler makes, as a deploy does.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -20,9 +20,10 @@ import { fileURLToPath } from "node:url";
  * The modules that nodejs_compat serves in full or in part, read on
  * developers.cloudflare.com/workers/runtime-apis/nodejs/ on 2026-10-21.
  * A subpath such as stream/web or fs/promises counts under its module. The
- * page lists http2, vm, cluster, domain, trace_events, wasi, dgram,
+ * page lists the other modules as stubs that do not work, so they are not
+ * here. They are http2, vm, cluster, domain, trace_events, wasi, dgram,
  * inspector, sqlite, child_process, readline, repl, tty, v8, and
- * worker_threads as stubs that do not work, so they are not here.
+ * worker_threads.
  */
 const SERVED = new Set([
   "assert",

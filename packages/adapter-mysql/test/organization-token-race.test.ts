@@ -8,9 +8,10 @@ import { freshDatabase, MYSQL_84, type MysqlDatabase } from "./db.js";
 // 8.4 (ruling 2 of plan 12g). The cap of plan 12k Task 8 on the real MySQL
 // adapter, through core's built output. Each instance has its own pool of one
 // connection, so the two creates run as two requests on two connections do.
-// The count after the lock must see the commit of the other caller, so the
-// cap holds only at READ COMMITTED: MySQL's default, REPEATABLE READ, reads
-// the snapshot of the first read.
+// The count after the lock must see the commit of the other caller. These
+// tests also pass at REPEATABLE READ, the MySQL default (a break of
+// 2026-10-21). The count is the first read after the lock, so its snapshot
+// starts after the commit. team-races.test.ts fails at REPEATABLE READ.
 
 const t0 = new Date("2026-01-01T00:00:00.000Z");
 const CAP = 50;

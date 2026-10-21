@@ -4,10 +4,10 @@ import type { Pool, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 /**
  * Insert the key at count 1, or on a duplicate key reset the window when it
  * has ended, else add 1. MySQL has no RETURNING. MySQL applies the
- * assignments of one UPDATE from left to right, and a later one reads the
- * new value of an earlier one, so count and expires_at read window_start
- * before it moves. The parameters: the stored key, then now and the window
- * in ms in the order of the placeholders (`params`).
+ * assignments of one UPDATE from left to right. A later one reads the new
+ * value of an earlier one, so count and expires_at read window_start before
+ * it moves. The parameters are the stored key, then now and the window in
+ * ms in the order of the placeholders (`params`).
  */
 const ALLOW = `INSERT INTO \`ta_limit\` (\`key\`, \`window_start\`, \`count\`, \`expires_at\`) VALUES (?, ?, 1, ? + ?)
 ON DUPLICATE KEY UPDATE

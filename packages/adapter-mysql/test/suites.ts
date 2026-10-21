@@ -19,8 +19,8 @@ import { databaseSupply, freshDatabase, type MysqlDatabase, type MysqlServer } f
 // One migrated database per test, as on Postgres. Deviation 12 of plan 12g
 // shared one database and deleted its rows, but a deleted row stays in a
 // unique index until InnoDB purges it. A duplicate check there takes a gap
-// lock, so an insert of the next test waited on another insert ("keeps a
-// write made outside a failing transaction" on 8.4.11, 2026-10-21). TRUNCATE
+// lock. So an insert of the next test waited on another insert, in "keeps a
+// write made outside a failing transaction" on 8.4.11 (2026-10-21). TRUNCATE
 // took 1.2 to 1.7 s per test. So the databases come from a supply that
 // makes them ahead of the tests.
 

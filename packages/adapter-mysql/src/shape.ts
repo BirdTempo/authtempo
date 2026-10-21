@@ -22,9 +22,9 @@ function byName<T extends { name: string }>(a: T, b: T): number {
 }
 
 /**
- * The shape type of a DDL column type (deviation 3 of plan 12g): the
- * `COLUMN_TYPE` of `information_schema.columns`, then its `COLLATION_NAME`
- * when it has one, in lower case. A TEXT column has the table's collation.
+ * The shape type of a DDL column type (deviation 3 of plan 12g). It is the
+ * `COLUMN_TYPE` of `information_schema.columns` in lower case. Its
+ * `COLLATION_NAME` follows when it has one. A TEXT column has the table's collation.
  */
 export function mysqlShapeType(ddl: string): string {
   const string = /^(.*) CHARACTER SET \w+ COLLATE (\w+)$/.exec(ddl);

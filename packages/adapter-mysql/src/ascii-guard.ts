@@ -63,10 +63,12 @@ export function guardData(model: ModelName, data: Record<string, unknown>): void
  * The bound of a range clause whose value `s` breaks the rule. It gives each
  * stored value `v` the answer of the byte order of `v` against `s`.
  *
- * - A first bad character above U+007E, after the prefix `p`: `v < s` holds
- *   when `v < p + U+007F...`, with one more U+007F than the column holds.
- * - A first bad character below U+0020, or only trailing spaces: `v < s`
- *   holds when `v <= q`, where `q` is the prefix without its trailing spaces.
+ * - The first bad character is above U+007E, after the prefix `p`. Then
+ *   `v < s` holds when `v < p + U+007F...`. The bound holds one more U+007F
+ *   than the column holds characters.
+ * - The first bad character is below U+0020, or `s` ends in spaces. Then
+ *   `v < s` holds when `v <= q`. `q` is the prefix without its trailing
+ *   spaces.
  */
 function rangeClause<M extends ModelName>(w: Where<M>, s: string, length: number): Where<M> {
   const at = firstOutside(s);

@@ -31,9 +31,9 @@ const value = MYSQL.quote("value");
  *
  * 1. The schema version. Only error 1146 reads as no version, so an outage
  *    never reads as "run the migrations".
- * 2. FOUND_ROWS. Without the flag, MySQL answers the changed rows, so an
- *    update that writes the same value counts 0, and the engine reads a lost
- *    race.
+ * 2. FOUND_ROWS. Without the flag, MySQL answers the changed rows. An
+ *    update that writes the same value then counts 0, and the engine reads
+ *    a lost race.
  * 3. Strict mode. Without it, MySQL cuts a long value and stores it.
  * 4. The binary collation of each `ta_` table. A case-blind collation makes
  *    two credential ids that differ only in case one key.
