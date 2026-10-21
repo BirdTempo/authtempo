@@ -1,17 +1,23 @@
 import { createAuth } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { createMysqlAdapter } from "../src/index.js";
-import { freshDatabase, MYSQL_SERVERS } from "./db.js";
+import { freshDatabase, MYSQL_SERVERS, type PoolSettings } from "./db.js";
 
 // The readiness route of plan 12h on MySQL (ruling 26 of the 12g lane). The
 // route calls the adapter's ping, so it answers ready on a migrated database
 // and not_ready schema on a database that never ran the migration. MySQL
-// ships one migration file, so no MySQL store holds an older version.
+// ships one migration file, so no MySQL store holds an older version. The
+// ping runs the start checks first (ruling 27), so a pool that every call
+// refuses answers not_ready storage.
 
 const BASE = "https://api.example.com";
 
-async function ready(server: (typeof MYSQL_SERVERS)[number], migrate: boolean) {
-  const db = await freshDatabase(server, { migrate });
+async function ready(
+  server: (typeof MYSQL_SERVERS)[number],
+  migrate: boolean,
+  settings: PoolSettings = {},
+) {
+  const db = await freshDatabase(server, { ...settings, migrate });
   try {
     const auth = createAuth({
       baseURL: BASE,
@@ -39,6 +45,20 @@ describe.each(MYSQL_SERVERS.map((s) => [s.version, s] as const))(
       expect(await ready(server, false)).toEqual({
         status: 503,
         body: { error: "not_ready", reason: "schema" },
+      });
+    });
+
+    it("answers not_ready storage on a pool without FOUND_ROWS", async () => {
+      expect(await ready(server, true, { flags: ["-FOUND_ROWS"] })).toEqual({
+        status: 503,
+        body: { error: "not_ready", reason: "storage" },
+      });
+    });
+
+    it("answers not_ready storage on a session without strict mode", async () => {
+      expect(await ready(server, true, { onConnect: "SET SESSION sql_mode = ''" })).toEqual({
+        status: 503,
+        body: { error: "not_ready", reason: "storage" },
       });
     });
   },
