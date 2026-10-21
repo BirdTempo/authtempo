@@ -418,8 +418,12 @@ export interface IdentitiesApi {
 }
 
 export interface AuthApi {
-  /** Deletes rows that no flow can use any more. Call it from a scheduled handler. */
-  sweepExpired(): Promise<SweepResult>;
+  /**
+   * Deletes rows that no flow can use any more. Call it from a scheduled
+   * handler. `callBudget` is the calls of one sweep, 50 to 1000, default 50
+   * (Workers Free); another value throws a RangeError.
+   */
+  sweepExpired(options?: { callBudget?: number }): Promise<SweepResult>;
   requestMagicLink(input: MagicLinkRequest): Promise<Result<{ sent: true }>>;
   verifyMagicLink(
     input: MagicLinkVerify,
@@ -651,7 +655,7 @@ export function createAuth(input: AuthConfig): Auth {
     sessionCookie: (request, resolved) => renewedSessionCookie(config, request, resolved),
     wellKnown: createWellKnownHandler(config),
     api: {
-      sweepExpired: () => sweepExpired(config),
+      sweepExpired: (options) => sweepExpired(config, options),
       requestMagicLink: (i) => requestMagicLink(config, i),
       verifyMagicLink: (i) => verifyMagicLink(config, i),
       startSocial: (i) => startSocial(config, i),

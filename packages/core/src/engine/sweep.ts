@@ -73,6 +73,36 @@ const CLIENT_SWEEP_MAX = 100;
 export const SWEEP_CALL_BUDGET = 50;
 
 /**
+ * The largest `callBudget` of `sweepExpired` (ruling 41 item 1 of plan 12f).
+ * D1 Paid allows 1000 queries per invocation (D1 limits page, read
+ * 2026-10-20). A deployment on Workers Paid, or on Postgres, may raise the
+ * budget up to it, so one sweep sends more logouts and ends more left
+ * sessions. A budget below the default is refused: the shares of the steps
+ * (`OUTBOX_SHARE`, `LINK_SHARE`, the pending page) assume 50.
+ */
+export const SWEEP_CALL_BUDGET_MAX = 1000;
+
+/** The options of one sweep. */
+export interface SweepOptions {
+  /**
+   * The calls of this sweep: an integer from `SWEEP_CALL_BUDGET` (50, the
+   * default, for Workers Free) to `SWEEP_CALL_BUDGET_MAX` (1000). Another
+   * value throws a RangeError before any call.
+   */
+  callBudget?: number;
+}
+
+/** The budget of `options`, or a RangeError for a value outside the bounds. */
+function callBudgetOf(options: SweepOptions): number {
+  const budget = options.callBudget ?? SWEEP_CALL_BUDGET;
+  if (!Number.isInteger(budget) || budget < SWEEP_CALL_BUDGET || budget > SWEEP_CALL_BUDGET_MAX)
+    throw new RangeError(
+      `authtempo: sweepExpired callBudget must be an integer from ${SWEEP_CALL_BUDGET} to ${SWEEP_CALL_BUDGET_MAX}`,
+    );
+  return budget;
+}
+
+/**
  * The calls that the steps before the outbox step leave for it: the read
  * and one row of `deliverDueLogouts` need 10. The rest sends more rows.
  */
@@ -228,11 +258,19 @@ async function softStep(name: string, step: Promise<number>): Promise<number> {
   }
 }
 
-/** Deletes rows that no flow can use any more. Call it from a scheduled handler. Safe to run at any time. */
-export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult> {
+/**
+ * Deletes rows that no flow can use any more. Call it from a scheduled
+ * handler. Safe to run at any time. The whole sweep fits
+ * `options.callBudget`, 50 calls by default.
+ */
+export async function sweepExpired(
+  config: ResolvedConfig,
+  options: SweepOptions = {},
+): Promise<SweepResult> {
+  const budget = callBudgetOf(options);
   const { storage } = config;
   const now = config.clock.now();
-  // Each step counts its calls, so the whole sweep fits `SWEEP_CALL_BUDGET`.
+  // Each step counts its calls, so the whole sweep fits `budget`.
   const meter = meterOf(storage, 0);
   const graceEnd = new Date(now.getTime() - CONSUMED_GRACE_MS);
   // The port has no OR, so each condition is one statement. The order does
@@ -327,39 +365,30 @@ export async function sweepExpired(config: ResolvedConfig): Promise<SweepResult>
   const pending: VerificationRow[] = [];
   await softStep(
     "pending end",
-    readPendingEnds(storage, meter, SWEEP_CALL_BUDGET).then((rows) => pending.push(...rows)),
+    readPendingEnds(storage, meter, budget).then((rows) => pending.push(...rows)),
   );
   // After the refresh tokens, so a client whose last token just expired can go.
   // After the four single-statement steps too: the client step may use the
   // calls up to its limit, and the link step must still get `LINK_SHARE`.
   // A page of links needs 5 calls (review m1 of the 12f Task 7 fix 2).
-  const oauthClients = await sweepClients(
-    storage,
-    now,
-    meter,
-    SWEEP_CALL_BUDGET - LINK_SHARE - OUTBOX_SHARE,
-  );
+  const oauthClients = await sweepClients(storage, now, meter, budget - LINK_SHARE - OUTBOX_SHARE);
   // Last, so a storage limit met here leaves every count above done. The
   // links of the sessions that ended become outbox rows, and the outbox
   // sends its due rows (plan 12e Task 16).
   const oauthSessionLinks = await softStep(
     "link",
-    sweepLinks(storage, now, meter, SWEEP_CALL_BUDGET - OUTBOX_SHARE),
+    sweepLinks(storage, now, meter, budget - OUTBOX_SHARE),
   );
   const oauthLogouts = await softStep(
     "outbox",
-    deliverDueLogouts(
-      config,
-      meter,
-      SWEEP_CALL_BUDGET - (pending.length > 0 ? PENDING_PAGE_RESERVE : 0),
-    ),
+    deliverDueLogouts(config, meter, budget - (pending.length > 0 ? PENDING_PAGE_RESERVE : 0)),
   );
   // Last, in the calls that stay. Every door already refuses such a
   // session: `bannedFor` for a ban, and the live role read of each operator
   // check for a revoke. So a logout, which reaches another party, comes first.
   const pendingSessions = await softStep(
     "pending end",
-    endPendingRows(config, pending, meter, SWEEP_CALL_BUDGET),
+    endPendingRows(config, pending, meter, budget),
   );
   return {
     verificationExpired,

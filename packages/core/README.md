@@ -1389,6 +1389,13 @@ export default {
 Add a cron trigger to the Worker config, for example `"triggers": { "crons": ["17 * * * *"] }`.
 Without a trigger, expired rows stay in the database.
 
+`auth.api.sweepExpired({ callBudget })` sets the calls of one sweep
+(ruling 41 of plan 12f). It is an integer from 50 to 1000, and 50 by
+default, for Workers Free. D1 Paid allows 1000 queries per run (D1 limits
+page, read 2026-10-20). On Workers Paid or on Postgres, a larger budget
+sends more logouts and ends more left sessions in one sweep. Another value
+throws a `RangeError` before any call.
+
 ## Secrets
 
 `secret` is version 1 of the app secret. `secrets` lists the versions, the

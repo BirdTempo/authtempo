@@ -272,3 +272,54 @@ describe("the ban and the revoke inside the call budget (rulings 44 and 45 of pl
     expect(rows.map((s) => s.id)).toEqual([after.session.id]);
   });
 });
+
+describe("the call budget option of the sweep (ruling 41 item 1 of plan 12f)", () => {
+  /** A ban of a user with 150 sessions and a hook: the act leaves rows for the sweep. */
+  async function banned() {
+    const w = await world();
+    const ada = await signIns(w, "ada@example.com", 150);
+    const r = await counted(
+      w,
+      post("/operator/users/ban", { userId: ada.userId, reason: REASON }, SECRET),
+    );
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const left = await sessionsOf(w, ada.userId);
+    expect(left).toBeGreaterThan(100);
+    return { w, userId: ada.userId, left };
+  }
+
+  /** One sweep: its answer and its storage calls. */
+  async function sweepOnce(w: World, options?: { callBudget?: number }) {
+    const sent = () => w.auth.storage.statementsSent?.() ?? 0;
+    const start = sent();
+    const result = await sweepExpired(w.auth.config, options);
+    return { result, calls: sent() - start };
+  }
+
+  it("keeps 50 calls by default, and ends every left session in one sweep of a larger budget", async () => {
+    const small = await banned();
+    const byDefault = await sweepOnce(small.w);
+    expect(byDefault.calls).toBeLessThanOrEqual(50);
+    expect(byDefault.result.pendingSessions).toBeLessThan(small.left);
+    const large = await banned();
+    const wide = await sweepOnce(large.w, { callBudget: 200 });
+    expect(wide.calls).toBeGreaterThan(50);
+    expect(wide.calls).toBeLessThanOrEqual(200);
+    expect(wide.result.pendingSessions).toBe(large.left);
+    expect(await sessionsOf(large.w, large.userId)).toBe(0);
+    expect(await pendingRows(large.w)).toEqual([]);
+  });
+
+  it("takes 50 and 1000, and refuses another value before any call", async () => {
+    const w = await world();
+    for (const callBudget of [50, 1000])
+      expect((await sweepOnce(w, { callBudget })).calls).toBeLessThanOrEqual(callBudget);
+    for (const callBudget of [49, 1001, 50.5, Number.NaN, 0, -50]) {
+      const start = w.auth.storage.statementsSent?.() ?? 0;
+      await expect(sweepExpired(w.auth.config, { callBudget })).rejects.toThrow(
+        new RangeError("authtempo: sweepExpired callBudget must be an integer from 50 to 1000"),
+      );
+      expect(w.auth.storage.statementsSent?.() ?? 0).toBe(start);
+    }
+  });
+});
