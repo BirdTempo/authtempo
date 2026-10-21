@@ -1389,26 +1389,28 @@ const auth = createAuth({
 
 ### Limits
 
-`organizations.limits` takes three positive integers. Each is off by default.
+`organizations.limits` takes five positive integers. Each is off by default.
 
 | Limit | Counts | Answer at the limit |
 | --- | --- | --- |
 | `perUser` | the user's member rows at any rank; a leave frees a slot | 409 `organization_limit` on create |
 | `membersPerOrganization` | the organization's member rows, on add and on an accept that makes a member | 409 `member_limit`; the invitation stays pending |
 | `pendingInvitationsPerOrganization` | the pending, unexpired invitations to other addresses | 409 `invitation_limit` on invite |
+| `teamsPerOrganization` | the teams of the organization | 409 `team_limit` on team create |
+| `membersPerTeam` | the member rows of one team, on a team member add and on an accept | 409 `team_member_limit`; the invitation stays pending |
 
-Core counts inside the transaction, before the before hook. On D1 the count
-and the write are not isolated, so two writes at the same moment can both
-pass at the limit minus one. `perUser`, `membersPerOrganization`, and
-`pendingInvitationsPerOrganization` count under no lock, so Postgres read
-committed has the same window for these three.
+Core counts inside the transaction, before the before hook. On Postgres
+every organization limit counts after a row lock, so a second write waits
+for the first commit and counts its row. `perUser` counts after the hold of
+the user row. `membersPerOrganization`, `pendingInvitationsPerOrganization`,
+and `teamsPerOrganization` count after the lock of the organization row.
+`membersPerTeam` counts after the lock of the team row.
 
-The other counts run after a row lock. On Postgres a second write waits for
-the first commit and counts its row, so these limits hold there.
-`teamsPerOrganization`, `dynamicRoles.maxPerOrganization`, and the cap of 50
-organization tokens count after the lock of the organization row.
-`membersPerTeam` counts after the lock of the team row. The cap of 50 API
-tokens counts after the hold of the user row, so it can pass 50 on D1 only.
+D1 is the one exception. There the count and the write are not isolated, so
+two writes at the same moment can both pass at the limit minus one.
+`dynamicRoles.maxPerOrganization`, the cap of 50 organization tokens, and
+the cap of 50 API tokens have the same rule. On Postgres they count after a
+row lock, so each one can pass its cap on D1 only.
 
 ## Sweep
 
