@@ -19,6 +19,7 @@ import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
 import type { BetterAuthOptions, CompatDatabase } from "../src/types.js";
+import { consumerbAccess } from "../typetest/options.js";
 
 /** Core's organizations config of mapped options. The organization plugin is set, so it is an object. */
 function organizationsOf(o: BetterAuthOptions) {
@@ -224,8 +225,6 @@ function consumerd(): BetterAuthOptions {
  * from its own RANK (src/roles.ts).
  */
 function consumerb(): BetterAuthOptions {
-  const KEY_ACTIONS = ["create", "read", "update", "delete"] as const;
-  const ac = createAccessControl({ ...defaultStatements, apiKey: KEY_ACTIONS });
   return {
     appName: "Level AAA",
     baseURL: "https://api.example.com",
@@ -238,20 +237,7 @@ function consumerb(): BetterAuthOptions {
       organization({
         creatorRole: "owner",
         requireEmailVerificationOnInvitation: true,
-        ac,
-        roles: {
-          owner: ac.newRole({ ...ownerAc.statements, apiKey: [...KEY_ACTIONS] }),
-          admin: ac.newRole({ ...adminAc.statements, apiKey: [...KEY_ACTIONS] }),
-          member: ac.newRole({ ...memberAc.statements, apiKey: [] }),
-          viewer: ac.newRole({
-            organization: [],
-            member: [],
-            invitation: [],
-            team: [],
-            ac: [],
-            apiKey: [],
-          }),
-        },
+        ...consumerbAccess(),
         organizationHooks: {},
         sendInvitationEmail: async () => {},
       }),

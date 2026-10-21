@@ -239,6 +239,32 @@ export const consumerd = {
 };
 
 // consumerb apps/api/src/auth.ts, through the usage report.
+/**
+ * consumerb's organization access control (apps/api/src/auth.ts at f4518c7,
+ * read 2026-10-21). test/apps.test.ts reads the same object, so the refusal
+ * pin and the construct test hold one option set.
+ */
+export function consumerbAccess() {
+  const KEY_ACTIONS = ["create", "read", "update", "delete"] as const;
+  const ac = createAccessControl({ ...defaultStatements, apiKey: KEY_ACTIONS });
+  return {
+    ac,
+    roles: {
+      owner: ac.newRole({ ...ownerAc.statements, apiKey: [...KEY_ACTIONS] }),
+      admin: ac.newRole({ ...adminAc.statements, apiKey: [...KEY_ACTIONS] }),
+      member: ac.newRole({ ...memberAc.statements, apiKey: [] }),
+      viewer: ac.newRole({
+        organization: [],
+        member: [],
+        invitation: [],
+        team: [],
+        ac: [],
+        apiKey: [],
+      }),
+    },
+  };
+}
+
 export const consumerb = {
   appName: "Consumerb",
   baseURL: env.BASE_URL,
@@ -259,9 +285,7 @@ export const consumerb = {
     organization({
       creatorRole: "owner",
       requireEmailVerificationOnInvitation: true,
-      // @ts-expect-error since plan 12k Task 10 ac is the object of createAccessControl; this copy keeps the placeholder of the usage report
-      ac: {},
-      roles: {},
+      ...consumerbAccess(),
       organizationHooks: {},
     }),
     // Since plan 12f the admin plugin maps; consumerb still needs authtempo.platformOrganization.

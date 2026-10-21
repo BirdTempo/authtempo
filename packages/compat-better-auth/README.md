@@ -1159,13 +1159,14 @@ The follow-ups of consumerd:
 `freshAge: 600` and `deferSessionRefresh: true` run unchanged since plan 12a: core's window is 10 minutes, and the shim's client posts the deferred refresh. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. `teams: { enabled: true }` runs unchanged since plan 12k: Better Auth's default team and its last-team rule hold. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e. The tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` instead. With snake-case names, the column is `ta_purpose`. The row holds a keyed hash, never the code.
 
 consumerb (follow-ups first): the list after the refusals.
-The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.
+The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].roles.admin`, `plugins[organization].roles.member`, `plugins[organization].roles.owner`, `plugins[organization].roles.viewer`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.
 
 The follow-ups of consumerb:
 - The API key edits of "Cutover of API keys" (the `to_` bearer and the Drizzle reads of `apikey`).
 - The OAuth 2.1 provider through `mcp` and `cimd`.
 - `jwt` and JWKS, refused since plan 9g (see "JWT and the OAuth provider").
 - `authtempo.platformOrganization` for the admin plugin (see "The admin plugin").
+- `authtempo.roleRanks` for its four roles, from its own RANK in `src/roles.ts` (`ac` and `roles` map since plan 12k).
 - `defaultCookieAttributes.secure` and the `.well-known` routes.
 - `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 
