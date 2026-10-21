@@ -199,7 +199,10 @@ export async function stopImpersonation(
       ends.ended?.push(session);
       return ok({});
     },
-    { committed: (_value, ends) => sessionsEnded(config, ends.ended, "impersonation_end", null) },
+    // The delete answered 1, so the count is 1.
+    {
+      committed: (_value, ends) => sessionsEnded(config, ends.ended, "impersonation_end", null, 1),
+    },
   );
   if (!done.ok) return done;
   return ok({ auditId: done.value.auditId });

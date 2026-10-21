@@ -407,11 +407,14 @@ export async function revokePlatformRole(
   const summary = publicOrganization(organization);
   const hooks = config.hooks.organization;
   const stops = impersonationStops(config, "revoke");
+  // The count of the sessions that the act ended, for the event session.end (plan 12h Task 5).
+  let ended = 0;
   const done = await operatorAct(
     config,
     drafted.value,
     async (tx, _draft, ends: OperatorActEnds): Promise<Result<{ change: MemberChange }>> => {
       const meter = meterOf(tx, fixed);
+      ended = 0;
       // The user row first (user-hold.ts). An impersonation start holds it
       // too (ruling 42 of plan 12f). So the start sees the role gone, or it
       // commits its start row before `endImpersonationsPage` reads.
@@ -431,17 +434,19 @@ export async function revokePlatformRole(
         const pending = await hasPendingEnd(tx, user.id);
         meter.step(1);
         if (pending)
-          await endAllAccessPage(
-            tx,
-            config,
-            user.id,
-            ends,
-            now,
-            meter,
-            budget.value,
-            "operator",
-            stops,
-          );
+          ended = (
+            await endAllAccessPage(
+              tx,
+              config,
+              user.id,
+              ends,
+              now,
+              meter,
+              budget.value,
+              "operator",
+              stops,
+            )
+          ).ended;
         return ok({ change: null });
       }
       const rest = member.role
@@ -495,7 +500,7 @@ export async function revokePlatformRole(
       } else if ((await write(tx)) === 0) return fail("conflict");
       meter.step((losesOwner ? REVOKE_WRITE_WORST : 2) + (rest === "" ? DROP_TEAMS_WORST : 0));
       // The impersonation sessions first, inside the budget (rulings 31 and 44).
-      await endImpersonationsPage(
+      const impersonations = await endImpersonationsPage(
         tx,
         config,
         hold,
@@ -507,7 +512,7 @@ export async function revokePlatformRole(
         "operator",
         stops,
       );
-      await endAllAccessPage(
+      const own = await endAllAccessPage(
         tx,
         config,
         user.id,
@@ -518,6 +523,7 @@ export async function revokePlatformRole(
         "operator",
         stops,
       );
+      ended = impersonations.ended + own.ended;
       const change: MemberChange =
         rest === ""
           ? { kind: "remove", member }
@@ -531,7 +537,7 @@ export async function revokePlatformRole(
     {
       async committed({ change }, ends) {
         // A retry with no change can end sessions too.
-        await sessionsEnded(config, ends.ended, "operator", stops);
+        await sessionsEnded(config, ends.ended, "operator", stops, ended);
         if (change === null) return;
         await memberChanged(config, summary, user, by, change);
       },

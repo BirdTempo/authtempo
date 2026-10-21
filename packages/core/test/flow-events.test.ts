@@ -202,6 +202,37 @@ function sessionReads(storage: StorageAdapter): unknown[][] {
   return reads;
 }
 
+/** The app secret of `makeAuth` in test/helpers.ts. */
+const SECRET = "0123456789abcdef0123456789abcdef";
+
+/**
+ * HMAC-SHA256 of the address under a key that HKDF-SHA256 derives from the
+ * secret, with an empty salt and the email info of spec 31 item 8, cut to
+ * 32 hex. Written here with Web Crypto, apart from the code it checks.
+ */
+async function keyedEmailHash(secret: string, address: string): Promise<string> {
+  const enc = new TextEncoder();
+  const base = await crypto.subtle.importKey("raw", enc.encode(secret), "HKDF", false, [
+    "deriveKey",
+  ]);
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new Uint8Array(0),
+      info: enc.encode("authtempo observe email v1"),
+    },
+    base,
+    { name: "HMAC", hash: "SHA-256", length: 256 },
+    false,
+    ["sign"],
+  );
+  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(address));
+  return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 32);
+}
+
 /** The session token of a flow answer that must open a session. */
 function tokenOf(r: { ok: true; value: unknown } | { ok: false; code: string }): string {
   const v = must(r) as { token?: unknown };
@@ -788,6 +819,10 @@ describe("the flow events (plan 12h Task 5)", () => {
         // Each sign-in and sign-up names its address by the keyed hash only.
         expect(hashed.length).toBeGreaterThanOrEqual(5);
         for (const e of hashed) expect(e.emailHash).toMatch(/^[0-9a-f]{32}$/);
+        // The keyed hash of spec 31 item 8 under the app secret, not a plain digest of the address.
+        const social = events.find((e) => e.name === "sign_in" && e.method === "social");
+        expect(social?.emailHash).toBe(await keyedEmailHash(SECRET, di ?? ""));
+        expect(social?.emailHash).not.toBe((await sha256Hex(di ?? "")).slice(0, 32));
       } else expect(hashed).toEqual([]);
     }
   });

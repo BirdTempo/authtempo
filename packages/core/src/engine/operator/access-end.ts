@@ -147,11 +147,12 @@ export async function endAllAccessPage(
   await deleteOAuthCodes(tx, userId);
   meter.step(2);
   const left = page.stopped || read.length > rows.length;
+  let late = 0;
   if (left) await writePendingEnd(tx, config, userId, reason);
   // A sign-in that commits after the read loses its row here, with no hook (plan 9d).
-  else await tx.delete("session", byUser);
+  else late = await tx.delete("session", byUser);
   meter.step(1);
-  return { ended: page.deleted, left };
+  return { ended: page.deleted + late, left };
 }
 
 /**
@@ -165,8 +166,8 @@ export async function endAllAccessPage(
  * caller after it, and one call for the pending-end row. The rows that do
  * not fit stay with a pending-end row that names the operator and the
  * targets, and the sweep ends them. Until then the door of each session
- * read refuses them (`impersonationLoss`). The answer is true when rows
- * stay.
+ * read refuses them (`impersonationLoss`). The answer is the count of
+ * ended sessions, and `left` when rows stay (plan 12h Task 5).
  */
 export async function endImpersonationsPage(
   tx: StorageAdapter,
@@ -179,15 +180,15 @@ export async function endImpersonationsPage(
   keep: number,
   reason: PendingEndReason,
   stops: ImpersonationStops | null,
-): Promise<boolean> {
-  if (hold.targets.length === 0) return false;
+): Promise<{ ended: number; left: boolean }> {
+  if (hold.targets.length === 0) return { ended: 0, left: false };
   const where = impersonationWhere(hold.operatorId, hold.targets);
   const read = await tx.findMany("session", where, {
     sort: { field: "id", dir: "asc" },
     limit: END_ALL_LIMIT.default + 1,
   });
   meter.step(1);
-  if (read.length === 0) return false;
+  if (read.length === 0) return { ended: 0, left: false };
   const rows = read.slice(0, END_ALL_LIMIT.default);
   // The page counts its read again, so it gets 1 more. The calls of the caller and the row stay out.
   const pageBudget = budget - meter.used + 1 - keep - 1;
@@ -202,7 +203,7 @@ export async function endImpersonationsPage(
     await writePendingEnd(tx, config, hold.operatorId, reason, hold.targets);
     meter.step(1);
   }
-  return left;
+  return { ended: page.deleted, left };
 }
 
 /** The calls that a ban or a revoke keeps after `endImpersonationsPage`: the own sessions of the user. */
@@ -345,7 +346,7 @@ export async function endPendingRows(
     });
     meter.step(done.page.used + (done.finished ? 1 : 0));
     n += done.page.deleted;
-    await sessionsEnded(config, ended, reason, stops);
+    await sessionsEnded(config, ended, reason, stops, done.page.deleted);
     if (!done.finished) break;
   }
   return n;

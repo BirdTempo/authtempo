@@ -402,18 +402,20 @@ export async function deleteAccountRows(
   );
   // A page of them ends inside the call budget of the invocation (ruling 63
   // of plan 12f). The rest stay on a pending-end row for the sweep.
-  await endImpersonationsPage(
-    tx,
-    config,
-    hold,
-    proof.ended,
-    now,
-    proof.meter,
-    OPERATOR_CALL_BUDGET,
-    DELETE_KEEP,
-    "account_deleted",
-    proof.stops,
-  );
+  proof.counted.sessions += (
+    await endImpersonationsPage(
+      tx,
+      config,
+      hold,
+      proof.ended,
+      now,
+      proof.meter,
+      OPERATOR_CALL_BUDGET,
+      DELETE_KEEP,
+      "account_deleted",
+      proof.stops,
+    )
+  ).ended;
   // The back-channel outbox stays (plan 12e Task 16, review I3 of Task 1).
   // Its rows are the logouts of this delete, and of earlier ends that wait
   // for a retry. Each one is due now, so the delivery after the commit sends

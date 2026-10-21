@@ -810,8 +810,6 @@ const NO_EVENT_EXEMPT = {
     "No event of plan 12h names this act. The request event carries the answer, and the stored row is the record.",
 } as const;
 /** The reason of a point whose event plan 12h Task 5 adds (question q2 of plan 12h Task 6). */
-const TASK_5_EXEMPT = { exempt: "The event of plan 12h Task 5 carries this point." } as const;
-
 /**
  * The event of each hook point, or an exempt row with its reason (plan 12h
  * Task 6). A Record of every `HookName`, so a new point without a row fails
@@ -847,15 +845,15 @@ export const HOOK_EVENTS: Readonly<Record<HookName, EventName | { readonly exemp
   "organization.afterRemoveTeamMember": "organization.change",
   "session.beforeCreate": REFUSAL_EXEMPT,
   "session.afterCreate": "sign_in",
-  "session.afterEnd": TASK_5_EXEMPT,
+  "session.afterEnd": "session.end",
   "user.beforeCreate": REFUSAL_EXEMPT,
-  "user.afterCreate": TASK_5_EXEMPT,
+  "user.afterCreate": "sign_up",
   "user.beforeUpdate": REFUSAL_EXEMPT,
   "user.afterUpdate": NO_EVENT_EXEMPT,
   "user.beforeDelete": REFUSAL_EXEMPT,
   "user.afterDelete": NO_EVENT_EXEMPT,
   "user.beforeVerify": REFUSAL_EXEMPT,
-  "user.afterVerify": TASK_5_EXEMPT,
+  "user.afterVerify": "email.verify",
   "identity.beforeLink": REFUSAL_EXEMPT,
   "identity.afterLink": NO_EVENT_EXEMPT,
   "identity.beforeUnlink": REFUSAL_EXEMPT,

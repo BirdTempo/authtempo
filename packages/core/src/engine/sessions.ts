@@ -23,7 +23,12 @@ import {
   stopWith,
 } from "./hooks.js";
 import { endSessionById, writeLogouts } from "./oauth-outbox.js";
-import { type ImpersonationStops, impersonationStops, writeStopRow } from "./operator/audit.js";
+import {
+  type ImpersonationStops,
+  impersonationStops,
+  operatorActed,
+  writeStopRow,
+} from "./operator/audit.js";
 import { activeBan, bannedFor } from "./operator/ban-rule.js";
 import { impersonationLoss } from "./operator/guards.js";
 import { holdUser } from "./user-hold.js";
@@ -527,14 +532,8 @@ export async function sessionsEnded(
       { session, reason },
       session.id,
     );
-  for (const audit of stops?.rows ?? [])
-    await runAfter(
-      config.observe,
-      "operator.afterAction",
-      config.hooks.operator.afterAction,
-      { audit },
-      audit.id,
-    );
+  // The hook and the event operator.action of each stop row (plan 12h Task 6).
+  for (const audit of stops?.rows ?? []) await operatorActed(config, audit);
 }
 
 /**

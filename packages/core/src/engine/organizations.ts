@@ -267,6 +267,8 @@ interface RoleLoss {
   config: ResolvedConfig;
   userId: string;
   ended: SessionRow[] | undefined;
+  /** The count of the sessions that the page ended, for the event session.end (plan 12h Task 5). */
+  count: number;
   stops: ImpersonationStops | null;
   before: number;
 }
@@ -304,6 +306,7 @@ async function roleLossOf(
     config,
     userId: member.userId,
     ended: endedList(config),
+    count: 0,
     stops: impersonationStops(config, "role_loss"),
     before:
       MEMBER_WRITE_CALLS_BEFORE + roleReads + ((await config.storage.readyStatements?.()) ?? 1),
@@ -330,6 +333,7 @@ async function withRoleLoss<T>(
   wrote: (value: T) => boolean,
 ): Promise<T> {
   if (!loss) return work(tx);
+  loss.count = 0;
   const meter = meterOf(tx, loss.before);
   await holdUser(loss.config.observe, tx, loss.userId);
   meter.step(STEP_WORST.hold);
@@ -340,18 +344,20 @@ async function withRoleLoss<T>(
   meter.step(MEMBER_WRITE_WORST);
   // No call after the commit reads the storage, so the page keeps none.
   if (wrote(value))
-    await endImpersonationsPage(
-      tx,
-      loss.config,
-      hold,
-      loss.ended ?? null,
-      now,
-      meter,
-      OPERATOR_CALL_BUDGET,
-      0,
-      "impersonation_end",
-      loss.stops,
-    );
+    loss.count = (
+      await endImpersonationsPage(
+        tx,
+        loss.config,
+        hold,
+        loss.ended ?? null,
+        now,
+        meter,
+        OPERATOR_CALL_BUDGET,
+        0,
+        "impersonation_end",
+        loss.stops,
+      )
+    ).ended;
   return value;
 }
 
@@ -1018,7 +1024,7 @@ export async function updateMemberRole(
     return n === 0 ? fail("conflict") : ok(true);
   });
   if (!written.ok) return written;
-  await sessionsEnded(config, loss?.ended, "impersonation_end", loss?.stops ?? null);
+  await sessionsEnded(config, loss?.ended, "impersonation_end", loss?.stops ?? null, loss?.count);
   const updated: MemberSummary = { ...current, role: input.role };
   await runAfter(
     config.observe,
@@ -1171,7 +1177,7 @@ export async function removeMember(
     return n === 0 ? fail("conflict") : ok(true);
   });
   if (!removed.ok) return removed;
-  await sessionsEnded(config, loss?.ended, "impersonation_end", loss?.stops ?? null);
+  await sessionsEnded(config, loss?.ended, "impersonation_end", loss?.stops ?? null, loss?.count);
   await runAfter(
     config.observe,
     "organization.afterRemoveMember",

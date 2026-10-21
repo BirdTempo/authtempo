@@ -255,6 +255,8 @@ export async function banUser(
   });
   if (!drafted.ok) return drafted;
   const stops = impersonationStops(config, "ban");
+  // The count of the sessions that the act ended, for the event session.end (plan 12h Task 5).
+  let ended = 0;
   const done = await operatorAct(
     config,
     drafted.value,
@@ -277,7 +279,7 @@ export async function banUser(
       const hold = await holdImpersonations(tx, config, input.userId, now, true);
       meter.step(2);
       // The impersonation sessions first, inside the budget (rulings 31 and 44).
-      await endImpersonationsPage(
+      const impersonations = await endImpersonationsPage(
         tx,
         config,
         hold,
@@ -289,7 +291,7 @@ export async function banUser(
         "banned",
         stops,
       );
-      await endAllAccessPage(
+      const own = await endAllAccessPage(
         tx,
         config,
         input.userId,
@@ -300,11 +302,12 @@ export async function banUser(
         "banned",
         stops,
       );
+      ended = impersonations.ended + own.ended;
       return written;
     },
     {
       async committed(value, ends) {
-        await sessionsEnded(config, ends.ended, "banned", stops);
+        await sessionsEnded(config, ends.ended, "banned", stops, ended);
         await userUpdated(config, value, "ban");
       },
       answerFamilyEnd: true,
