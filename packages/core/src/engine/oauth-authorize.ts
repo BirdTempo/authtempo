@@ -136,7 +136,8 @@ export function authTimeOf(session: SessionRow): number {
 
 export type AuthorizeStep =
   | { kind: "error"; error: OAuthErrorCode }
-  | { kind: "redirect"; location: string }
+  // `error`: the OAuth error that the redirect to the registered redirect_uri carries.
+  | { kind: "redirect"; location: string; error?: OAuthErrorCode }
   | { kind: "sign-in"; location: string }
   | {
       kind: "consent";
@@ -201,7 +202,11 @@ export async function checkAuthorize(
   if (!redirectUri || !client.redirectUris.includes(redirectUri)) return stop("invalid_request");
   const back = (error: OAuthErrorCode, state: string | null): Checked => ({
     ok: false,
-    step: { kind: "redirect", location: authorizeRedirect(config, redirectUri, { error, state }) },
+    step: {
+      kind: "redirect",
+      location: authorizeRedirect(config, redirectUri, { error, state }),
+      error,
+    },
   });
   const state = single(params, "state");
   if (!shortText(state)) return back("invalid_request", null);
@@ -365,6 +370,7 @@ function denied(
   return {
     kind: "redirect",
     location: authorizeRedirect(config, request.redirectUri, { error, state: request.state }),
+    error,
   };
 }
 

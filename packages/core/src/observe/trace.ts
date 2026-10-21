@@ -1,7 +1,7 @@
 /**
- * The trace of a request (plan 12h, spec 31 item 5), by the W3C Trace
- * Context Recommendation of 2021-11-23: version `00`, lowercase hex, and no
- * all-zero id. No id derives from user data (W3C Trace Context, privacy
+ * The trace of a request (plan 12h, spec 31 item 5). It follows the W3C
+ * Trace Context Recommendation of 2021-11-23: version `00`, lowercase hex,
+ * and no all-zero id. No id derives from user data (W3C Trace Context, privacy
  * section). A client trace id is off by default: a client could join its
  * requests to another person's trace in the app's backend.
  */

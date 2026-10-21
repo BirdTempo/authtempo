@@ -7,6 +7,7 @@ import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
+import { AUTH_ERROR_PARAM, OAUTH_REDIRECT_ERROR } from "./redirect.js";
 import type { RouteKey, RouterCode } from "./route-list.js";
 
 export interface RouteContext {
@@ -107,8 +108,9 @@ function routerError(code: RouterCode): Response {
 
 /**
  * Credentialed CORS for one trusted origin. `Vary: Origin` keeps a cache from
- * serving it to another. The trace header is exposed, so a browser app can
- * show the id to a person who asks for support (ruling 1 point 11 of plan 12h).
+ * serving it to another. The router exposes the trace header (ruling 1 point
+ * 11 of plan 12h). So a browser app can show the id to a person who asks for
+ * support.
  */
 function cors(res: Response, origin: string): Response {
   res.headers.set("access-control-allow-origin", origin);
@@ -118,22 +120,32 @@ function cors(res: Response, origin: string): Response {
   return res;
 }
 
-/** The `auth_error` or `error` parameter of a redirect, or null. */
-function locationCode(config: ResolvedConfig, res: Response): string | null {
+/**
+ * The error code of a redirect, or null. The `auth_error` parameter counts
+ * only on `authErrorUrl`: the origin and path of `appURL` plus "/". The
+ * OAuth `error` counts only on an authorize redirect to a registered
+ * `redirect_uri`, which the route marks in `OAUTH_REDIRECT_ERROR`. A
+ * client chooses a sign-in `next`, and `safeNext` keeps its query,
+ * so another Location is no failure (ruling 16 of plan 12h).
+ */
+function redirectCode(config: ResolvedConfig, res: Response): string | null {
+  const oauth = OAUTH_REDIRECT_ERROR.get(res);
+  if (oauth !== undefined) return oauth;
   const location = res.headers.get("location");
   if (location === null) return null;
   try {
-    const params = new URL(location, config.baseURL).searchParams;
-    return params.get("auth_error") ?? params.get("error");
+    const target = new URL(location, config.baseURL);
+    if (`${target.origin}${target.pathname}` !== `${config.appURL}/`) return null;
+    return target.searchParams.get(AUTH_ERROR_PARAM);
   } catch {
     return null;
   }
 }
 
 /**
- * The outcome of an answer (plan 12h Task 4). A redirect whose `Location`
- * holds an `auth_error` or `error` parameter is a client error. The code is
- * the error of a JSON answer, or that parameter.
+ * The outcome of an answer (plan 12h Task 4). A redirect with the code of
+ * `redirectCode` is a client error. The code is the error of a JSON answer,
+ * or the code of that redirect.
  */
 export function outcomeOf(
   config: ResolvedConfig,
@@ -142,7 +154,7 @@ export function outcomeOf(
   const status = res.status;
   const fromBody = ANSWER_CODE.get(res) ?? null;
   if (status >= 300 && status < 400) {
-    const param = locationCode(config, res);
+    const param = redirectCode(config, res);
     return param === null
       ? { outcome: "redirect", code: fromBody }
       : { outcome: "client_error", code: param };

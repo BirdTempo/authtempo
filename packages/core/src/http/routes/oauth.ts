@@ -77,7 +77,7 @@ import { consentPagePolicy, noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { DEVICE_WARNING, type DevicePageInput } from "../device-page.js";
 import { defaultEndSessionPage } from "../end-session-page.js";
 import { json, readJson, respond } from "../json.js";
-import { authErrorUrl, redirect } from "../redirect.js";
+import { authErrorUrl, OAUTH_REDIRECT_ERROR, redirect } from "../redirect.js";
 import { originTrusted, type Route, type RouteContext } from "../router.js";
 import { safeNext } from "../safe-next.js";
 import { signInPageResponse } from "../sign-in-response.js";
@@ -157,7 +157,12 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
   };
   const stepResponse = (step: AuthorizeStep): Response => {
     if (step.kind === "error") return json({ error: step.error }, OAUTH_ERRORS[step.error]);
-    if (step.kind !== "consent") return redirect(step.location);
+    if (step.kind !== "consent") {
+      const res = redirect(step.location);
+      if (step.kind === "redirect" && step.error !== undefined)
+        OAUTH_REDIRECT_ERROR.set(res, step.error);
+      return res;
+    }
     const { request, client, user, requestId } = step;
     const target = new URL(request.redirectUri);
     const html = oauth.consentPage({

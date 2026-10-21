@@ -28,9 +28,9 @@ function stoppable(): { storage: StorageAdapter; stop: () => void } {
 }
 
 /**
- * One core instance with a recording sink (plan 12h Task 4): the password,
- * email code, passkey, handoff, and social routes, a fake clock, and the
- * mail it sent. `events()` flushes and answers every event so far.
+ * One core instance with a recording sink (plan 12h Task 4). It has the
+ * password, email code, passkey, handoff, and social routes, a fake clock,
+ * and the mail it sent. `events()` flushes and answers every event so far.
  */
 export function observed(
   over: Partial<AuthConfig> = {},

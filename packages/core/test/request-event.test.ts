@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { resolveConfig } from "../src/config.js";
+import { authErrorUrl, redirect } from "../src/http/redirect.js";
+import { createRouter } from "../src/http/router.js";
 import { SIGN_IN_ROUTES } from "../src/observe/events.js";
 import { createObserver, unscopedOf } from "../src/observe/observer.js";
 import type { AuthEvent } from "../src/observe/port.js";
+import { createMemoryAdapter } from "../src/storage/memory.js";
 import { BASE_URL, get, post, tokenFromMail } from "./helpers.js";
+import { REDIRECT, RESOURCE, SCOPES } from "./oauth-helpers.js";
 import { formPost, observed } from "./observe-helpers.js";
 import { FAST } from "./password-helpers.js";
 
@@ -19,6 +24,13 @@ async function answerCode(res: Response): Promise<string | undefined> {
     return new URL(location, BASE_URL).searchParams.get("auth_error") ?? undefined;
   const body: unknown = await res.json();
   return typeof body === "object" && body !== null ? String(Reflect.get(body, "error")) : undefined;
+}
+
+/** The form post of a magic link sign-in with this `next`. Answers its redirect. */
+async function linkSignIn(s: Observed, next: string): Promise<Response> {
+  await s.auth.handle(post("/auth/magic-link/request", { email: "ada@example.com", next }));
+  const token = tokenFromMail(s.mail.at(-1)?.text ?? "");
+  return s.auth.handle(formPost("/auth/magic-link/verify", { token }));
 }
 
 /** A magic link token that a first verify spent. */
@@ -141,6 +153,88 @@ describe("the request event (plan 12h Task 4)", () => {
     });
   });
 
+  it("reads no failure from the next of a sign-in that succeeds", async () => {
+    // The client chooses the next, and safeNext keeps its query (ruling 16 of plan 12h).
+    for (const next of ["/home?auth_error=invalid_token", "/x?error=1"]) {
+      const s = observed();
+      const res = await linkSignIn(s, next);
+      expect(res.status, next).toBe(302);
+      expect(res.headers.get("location"), next).toBe(`${BASE_URL}${next}`);
+      expect(res.headers.get("set-cookie"), next).toContain("__Host-tempo_session=");
+      const events = await s.events();
+      expect(only(events, "request").at(-1), next).toMatchObject({
+        route: "POST /magic-link/verify",
+        status: 302,
+        outcome: "redirect",
+      });
+      expect(only(events, "request").at(-1), next).not.toHaveProperty("code");
+      expect(only(events, "sign_in"), next).not.toContainEqual(
+        expect.objectContaining({ outcome: "failure" }),
+      );
+    }
+  });
+
+  it("reads the OAuth error of an authorize redirect to a registered redirect_uri", async () => {
+    const s = observed({
+      oauth: {
+        resources: [RESOURCE],
+        scopes: SCOPES,
+        registration: { cimd: false, dynamic: true },
+      },
+    });
+    const reg = await s.auth.handle(
+      post("/auth/oauth/register", { redirect_uris: [REDIRECT], client_name: "Test client" }),
+    );
+    expect(reg.status).toBe(201);
+    const { client_id } = (await reg.json()) as { client_id: string };
+    // A response_type other than code: the error goes back to the redirect_uri (RFC 6749 section 4.1.2.1).
+    const query = new URLSearchParams({
+      client_id,
+      redirect_uri: REDIRECT,
+      response_type: "token",
+      state: "s1",
+    });
+    const res = await s.auth.handle(get(`/auth/oauth/authorize?${query}`));
+    expect(res.status).toBe(302);
+    const location = new URL(res.headers.get("location") ?? "");
+    expect(`${location.origin}${location.pathname}`).toBe(REDIRECT);
+    expect(location.searchParams.get("error")).toBe("unsupported_response_type");
+    expect(only(await s.events(), "request").at(-1)).toMatchObject({
+      route: "GET /oauth/authorize",
+      status: 302,
+      outcome: "client_error",
+      code: "unsupported_response_type",
+    });
+  });
+
+  it("keeps no code of a redirect that is not a listed code", async () => {
+    const batches: AuthEvent[][] = [];
+    const config = resolveConfig({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      observe: { sink: { write: (b) => void batches.push([...b]) } },
+    });
+    // A route stub of the router: a real authErrorUrl redirect with a code outside the list.
+    const handle = createRouter(config, [
+      {
+        method: "GET",
+        path: "/stub",
+        handler: async () => redirect(authErrorUrl(config, "not_a_listed_code")),
+      },
+    ]);
+    const res = await handle(get("/auth/stub"));
+    expect(res.headers.get("location")).toBe(`${BASE_URL}/?auth_error=not_a_listed_code`);
+    await config.observe.flush();
+    const [event] = only(batches.flat(), "request");
+    expect(event).toMatchObject({ route: "unmatched", status: 302, outcome: "client_error" });
+    expect(event).not.toHaveProperty("code");
+    // The router drops the code before the emit, so the observer marks no rejected field.
+    expect(event?.rejected).toBeUndefined();
+  });
+
   it("names an unmatched path, and the real method of a HEAD and a PUT", async () => {
     const s = observed();
     const res = await s.auth.handle(get("/auth/nope"));
@@ -195,6 +289,22 @@ describe("the request event (plan 12h Task 4)", () => {
         }),
       ]);
     }
+  });
+
+  it("emits no sign-in failure for an OPTIONS of a sign-in route", async () => {
+    const s = observed();
+    const res = await s.auth.handle(
+      new Request(`${BASE_URL}/auth/password/sign-in`, {
+        method: "OPTIONS",
+        headers: { origin: "https://evil.example" },
+      }),
+    );
+    expect(res.status).toBe(403);
+    const events = await s.events();
+    expect(only(events, "request")).toMatchObject([
+      { route: "POST /password/sign-in", method: "OPTIONS", status: 403, outcome: "denied" },
+    ]);
+    expect(only(events, "sign_in")).toEqual([]);
   });
 
   it("gives every event of a request its trace id", async () => {

@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { createAuth } from "../src/create-auth.js";
 import { APP_ORIGIN, BASE_URL, makeAuth } from "./helpers.js";
 
-// Plan 12h Task 4, ruling 1 point 9: the router copies the config for each
-// request, so the per-request caller cache of tokens.ts keys on the instance,
+// Plan 12h Task 4, ruling 1 point 9. The router copies the config for each
+// request. So the per-request caller cache of tokens.ts keys on the instance,
 // not on the config object.
 
 describe("the caller cache under the request scope (plan 12h Task 4)", () => {

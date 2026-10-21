@@ -148,8 +148,8 @@ export type Outcome = (typeof OUTCOMES)[number];
  * A route that can open a session. An answer with the outcome client_error,
  * denied, or limited is a sign-in failure (ASVS 5.0.0 16.3.1). The second
  * factor routes, the impersonation route, and `GET /oauth/sign-in` are not
- * rows: a row names one `SessionVia`, and those routes cannot (ruling 1
- * point 15 of plan 12h). The engine reports a failed second factor itself.
+ * rows. A row names one `SessionVia`, and those routes cannot name one
+ * (ruling 1 point 15 of plan 12h). The engine reports a failed second factor itself.
  */
 export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
   "POST /password/sign-in": "password",
