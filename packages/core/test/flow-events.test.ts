@@ -827,3 +827,154 @@ describe("the flow events (plan 12h Task 5)", () => {
     }
   });
 });
+
+/** The session cookie name of `makeAuth`. */
+const COOKIE = "__Host-tempo_session";
+
+/**
+ * The routes of a world (ruling 25 of plan 12h, M2). `send` posts JSON to
+ * `/auth` plus `path`, with the session cookie of `token`.
+ */
+function routed(w: World) {
+  const handle = createRouter(w.auth.config, coreRoutes(w.auth.config));
+  return (path: string, body: unknown, token?: string) =>
+    handle(post(`/auth${path}`, body, token === undefined ? {} : { cookie: `${COOKIE}=${token}` }));
+}
+
+/**
+ * The events of `names` that the request of `send` emits. Each must carry
+ * the trace id of the answer and the route key.
+ */
+async function inScope(
+  w: World,
+  names: readonly string[],
+  route: string,
+  send: () => Promise<Response>,
+): Promise<{ res: Response; events: AuthEvent[] }> {
+  const before = (await w.events()).length;
+  const res = await send();
+  const events = (await w.events()).slice(before).filter((e) => names.includes(e.name));
+  const trace = res.headers.get("x-authtempo-trace");
+  expect(trace).toMatch(/^[0-9a-f]{32}$/);
+  expect(events.map((e) => e.name).sort()).toEqual([...names].sort());
+  for (const e of events) {
+    expect(e.traceId, e.name).toBe(trace);
+    expect(e.route, e.name).toBe(route);
+  }
+  return { res, events };
+}
+
+describe("the request scope of the flow events (ruling 25 of plan 12h)", () => {
+  it("gives sign_out and session.end of POST /sign-out the trace of the answer", async () => {
+    const w = world();
+    const s = await verifiedSession(w.auth);
+    const { res, events } = await inScope(w, ["sign_out", "session.end"], "POST /sign-out", () =>
+      routed(w)("/sign-out", {}, s.token),
+    );
+    expect(res.status).toBe(200);
+    expect(events.map(fieldsOf)).toEqual([
+      {
+        name: "sign_out",
+        outcome: "success",
+        userId: s.user.id,
+        sessionId: s.session.id,
+        route: "POST /sign-out",
+      },
+      { name: "session.end", reason: "sign_out", count: 1, route: "POST /sign-out" },
+    ]);
+  });
+
+  it("gives second_factor.challenge of POST /totp/verify the trace of the answer", async () => {
+    const w = world();
+    const { user, backupCodes } = await enrolled(w.auth);
+    const r = must(await passwordSignInOf(w));
+    if (!("twoFactor" in r)) throw new Error("no challenge");
+    const { res, events } = await inScope(w, ["second_factor.challenge"], "POST /totp/verify", () =>
+      routed(w)("/totp/verify", {
+        challenge: r.twoFactor.challenge,
+        backupCode: backupCodes[0],
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(events.map(fieldsOf)).toEqual([
+      {
+        name: "second_factor.challenge",
+        method: "backup_code",
+        outcome: "success",
+        userId: user.id,
+        route: "POST /totp/verify",
+      },
+    ]);
+  });
+
+  it("gives password.change of POST /password/change the trace of the answer", async () => {
+    const w = world();
+    const s = await verifiedSession(w.auth);
+    const { res, events } = await inScope(
+      w,
+      ["password.change", "session.end"],
+      "POST /password/change",
+      () =>
+        routed(w)(
+          "/password/change",
+          { currentPassword: PASSWORD, newPassword: NEW_PASSWORD },
+          s.token,
+        ),
+    );
+    expect(res.status).toBe(200);
+    expect(events.find((e) => e.name === "password.change")).toMatchObject({
+      outcome: "success",
+      userId: s.user.id,
+    });
+  });
+
+  it("gives passkey.register of POST /passkey/register/verify the trace of the answer", async () => {
+    const w = world();
+    const token = tokenOf(await magicLink(w));
+    const user = await userOf(w.auth);
+    const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: RP.origins[0] ?? "" });
+    const reg = must(await passkeyRegistrationOptions(w.auth.config, { user }));
+    const response = await soft.register(reg.challenge, new TextEncoder().encode(user.id));
+    const { res, events } = await inScope(
+      w,
+      ["passkey.register"],
+      "POST /passkey/register/verify",
+      () => routed(w)("/passkey/register/verify", { response }, token),
+    );
+    expect(res.status).toBe(200);
+    expect(events.map(fieldsOf)).toEqual([
+      {
+        name: "passkey.register",
+        outcome: "success",
+        userId: user.id,
+        route: "POST /passkey/register/verify",
+      },
+    ]);
+  });
+
+  it("gives email.verify of POST /password/verify the trace of the answer", async () => {
+    const w = world();
+    must(
+      await passwordSignUp(w.auth.config, {
+        email: EMAIL,
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      }),
+    );
+    const mail = w.auth.mail.findLast((m) => m.subject.startsWith("Confirm"));
+    const { res, events } = await inScope(w, ["email.verify"], "POST /password/verify", () =>
+      routed(w)("/password/verify", { token: tokenFromMail(mail?.text ?? "") }),
+    );
+    expect(res.status).toBe(200);
+    expect(events.map(fieldsOf)).toEqual([
+      {
+        name: "email.verify",
+        method: "password_verify",
+        outcome: "success",
+        userId: (await userOf(w.auth)).id,
+        route: "POST /password/verify",
+      },
+    ]);
+  });
+});
