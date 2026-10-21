@@ -13,8 +13,13 @@ import { assertFreshBuild, PKG, REPO, runBin } from "./support/bin.js";
 /** The lines that each stack's own test prints when it passes. */
 const PASSES: Readonly<Record<Stack, readonly string[]>> = {
   // The tests line with its label: a bare count also matches the files line (plan 11d Task 14 review, L3).
-  "workers-d1": ["Tests  3 passed (3)"],
-  "workers-postgres": ["2 passed", "--dry-run: exiting now."],
+  // Plan 12h ruling 13 adds observe-flush.test.ts with two tests to each Workers example.
+  "workers-d1": ["Test Files  3 passed (3)", "Tests  5 passed (5)"],
+  "workers-postgres": [
+    "Test Files  2 passed (2)",
+    "Tests  4 passed (4)",
+    "--dry-run: exiting now.",
+  ],
   node: ["node-e2e: PASS", "bun-e2e: PASS"],
   bun: ["node-e2e: PASS", "bun-e2e: PASS"],
   // The MCP example: its test file has five tests, and the guarded fetch's file has 44.

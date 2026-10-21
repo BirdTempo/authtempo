@@ -1,5 +1,5 @@
 import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
-import { type Auth, createAuth, type MailPort } from "@authtempo/core";
+import { type Auth, createAuth, type HooksConfig, type MailPort } from "@authtempo/core";
 import { workersLogsSink } from "@authtempo/observe/workers-logs";
 
 /** The bindings and vars of wrangler.jsonc, and the secret of `wrangler secret put AUTH_SECRET`. */
@@ -21,8 +21,8 @@ export const mail: MailPort = {
   },
 };
 
-/** The Worker. The test passes a mail port that keeps the mails. */
-export function createWorker(mailPort: MailPort) {
+/** The Worker. The test passes a mail port that keeps the mails, and hooks of its own. */
+export function createWorker(mailPort: MailPort, hooks?: HooksConfig) {
   // One auth instance per isolate. The bindings stay the same for the life of the isolate.
   let auth: Auth | null = null;
   const getAuth = (env: Env): Auth =>
@@ -35,30 +35,38 @@ export function createWorker(mailPort: MailPort) {
       // The default limiter counts per isolate, and is for tests only.
       limiter: createD1Limiter(env.DB),
       mail: mailPort,
+      ...(hooks ? { hooks } : {}),
       // Each event of core goes to Workers Logs as one JSON object. wrangler.jsonc
       // turns the logs on. With a sink, core writes no console line of its own.
-      observe: { sink: workersLogsSink() },
+      // The sink scrubs the secret of the config from each field, as the last guard.
+      observe: { sink: workersLogsSink({ secrets: [env.AUTH_SECRET] }) },
     }));
 
   return {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       const url = new URL(request.url);
       const a = getAuth(env);
-      // The events flush after the answer. Bound on purpose: an unbound
-      // ctx.waitUntil throws Illegal invocation (Cloudflare Workers best
-      // practices, read 2026-10-14).
-      if (url.pathname.startsWith("/auth/"))
-        return a.handle(request, { waitUntil: (p) => ctx.waitUntil(p) });
-      if (url.pathname === "/me") {
-        const s = await a.session(request);
-        if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
-        const res = Response.json({ email: s.user.email });
-        // A sliding refresh moved the expiry: renew the cookie, or the browser drops it early.
-        const renewed = a.sessionCookie(request, s);
-        if (renewed) res.headers.append("set-cookie", renewed);
-        return res;
+      const viaHandle = url.pathname.startsWith("/auth/");
+      try {
+        // The events flush after the answer. Bound on purpose: an unbound
+        // ctx.waitUntil throws Illegal invocation (Cloudflare Workers best
+        // practices, read 2026-10-14).
+        if (viaHandle) return await a.handle(request, { waitUntil: (p) => ctx.waitUntil(p) });
+        if (url.pathname === "/me") {
+          const s = await a.session(request);
+          if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
+          const res = Response.json({ email: s.user.email });
+          // A sliding refresh moved the expiry: renew the cookie, or the browser drops it early.
+          const renewed = a.sessionCookie(request, s);
+          if (renewed) res.headers.append("set-cookie", renewed);
+          return res;
+        }
+        return new Response("not found", { status: 404 });
+      } finally {
+        // handle flushes its own events. A call outside it, such as the session
+        // read of /me, flushes here, or its events wait for the next handle call.
+        if (!viaHandle) ctx.waitUntil(a.observe.flush());
       }
-      return new Response("not found", { status: 404 });
     },
     // The cron trigger of wrangler.jsonc runs this. It deletes the rows that no flow can use.
     async scheduled(

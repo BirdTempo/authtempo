@@ -136,8 +136,9 @@ export function exampleConfig(env: Env): AuthConfig {
     ...(env.TEST_MODE === "1" ? { hooks: exampleHooks(env.DB) } : {}),
     // The events of core go to Workers Logs, one JSON object each (plan 12h Task 10).
     // wrangler.jsonc turns the logs on. With a sink, core writes no console line of its own.
+    // The sink scrubs the secrets of the config from each field, as the last guard.
     observe: {
-      sink: workersLogsSink(),
+      sink: workersLogsSink({ secrets: configSecrets(env) }),
       // A local test run only (plan 12h Task 9): the readiness route for the CLI check `ready`.
       ...(readinessMode(env) === null ? {} : { readiness: true }),
     },
@@ -160,6 +161,11 @@ export function exampleConfig(env: Env): AuthConfig {
       }),
     },
   };
+}
+
+/** The secret values of the config: no event line may hold one (spec 31 item 9). */
+function configSecrets(env: Env): string[] {
+  return [env.AUTH_SECRET, ...(env.GOOGLE_CLIENT_SECRET ? [env.GOOGLE_CLIENT_SECRET] : [])];
 }
 
 /**
@@ -249,102 +255,114 @@ export function exampleWorker(
       // Bound on purpose: an unbound ctx.waitUntil throws Illegal invocation
       // (Cloudflare Workers best practices, read 2026-10-14).
       const options = { waitUntil: (p: Promise<unknown>) => ctx.waitUntil(p) };
-      if (before) await before(env, a);
-      // RFC 8414 and RFC 9728 put the metadata at the origin root (plan 9g).
-      if (url.pathname.startsWith("/.well-known/")) return a.wellKnown(request);
-      if (url.pathname.startsWith("/auth/")) return a.handle(request, options);
-      if (url.pathname === "/me") {
-        const s = await a.session(request);
-        if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
-        const res = Response.json({ id: s.user.id, email: s.user.email });
-        // After a sliding refresh, renew the cookie or the browser drops it early.
-        const renewed = a.sessionCookie(request, s);
-        if (renewed) res.headers.set("set-cookie", renewed);
-        return res;
-      }
-      // A route that a script may call with an API token (plan 8b). `caller`
-      // resolves the session cookie, a `ts_` bearer, or a `tk_` bearer. `/me`
-      // above calls `session`, so it stays session-only and answers 401 to a token.
-      if (url.pathname === "/whoami") {
-        const c = await a.caller(request);
-        // A client_credentials token acts for no user, so this route has no one to name (plan 12e).
-        // An organization token acts for its organization, not a user (plan 12k).
-        if (!c || c.kind === "oauth-client" || c.kind === "organizationToken")
-          return Response.json({ error: "unauthorized" }, { status: 401 });
-        const res = Response.json({ kind: c.kind, id: c.user.id, email: c.user.email });
-        // After a sliding refresh, renew the cookie or the browser drops it early.
-        const renewed = c.kind === "session" ? a.sessionCookie(request, c) : null;
-        if (renewed) res.headers.set("set-cookie", renewed);
-        return res;
-      }
-      // A session JWT route (plan 11d): what another Worker of the app would serve.
-      if (url.pathname === "/notes") {
-        const v = getVerifier(env);
-        const r = await v.verifyRequest(request);
-        // The auth app limited the live checks: 429. It did not answer: 503.
-        if (!r.ok)
-          return Response.json(
-            { error: r.code },
-            { status: r.code === "rate_limited" ? 429 : 503 },
-          );
-        // A refused bearer gets error="invalid_token" (RFC 6750 section 3.1). No bearer, and a
-        // Basic header is none, gets the plain challenge. The verifier reads the bearer only,
-        // never a cookie, so this route needs no cookie rule (that is /mcp's, through caller).
-        if (r.value?.kind !== "session-jwt")
-          return v.unauthorized({ invalidToken: readBearer(request) !== null });
-        return Response.json({ owner: r.value.email });
-      }
-      // An MCP resource (plan 9g): an OAuth access token for this resource only. A session
-      // or an API token is refused here, and a token for another resource is null at `caller`.
-      if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
-        const resource = `${env.BASE_URL}/mcp`;
-        const c = await a.caller(request);
-        // MCP 2026-07-28: the 401 names the scope of the tools, so a client asks for it.
-        if (c?.kind !== "oauth")
-          return unauthorizedResponse({
-            resource,
-            scope: "mcp:tools",
-            invalidToken: refusedBearer(request),
+      // The two handlers flush the events of their own request. The finally block
+      // flushes the events of a call outside them, such as the session read of /me
+      // or the in-process verifier fetch. Without it, they wait for the next handler call.
+      const viaHandle = url.pathname.startsWith("/auth/") || url.pathname.startsWith("/api/auth/");
+      try {
+        if (before) await before(env, a);
+        // RFC 8414 and RFC 9728 put the metadata at the origin root (plan 9g).
+        if (url.pathname.startsWith("/.well-known/")) return await a.wellKnown(request);
+        if (url.pathname.startsWith("/auth/")) return await a.handle(request, options);
+        if (url.pathname === "/me") {
+          const s = await a.session(request);
+          if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
+          const res = Response.json({ id: s.user.id, email: s.user.email });
+          // After a sliding refresh, renew the cookie or the browser drops it early.
+          const renewed = a.sessionCookie(request, s);
+          if (renewed) res.headers.set("set-cookie", renewed);
+          return res;
+        }
+        // A route that a script may call with an API token (plan 8b). `caller`
+        // resolves the session cookie, a `ts_` bearer, or a `tk_` bearer. `/me`
+        // above calls `session`, so it stays session-only and answers 401 to a token.
+        if (url.pathname === "/whoami") {
+          const c = await a.caller(request);
+          // A client_credentials token acts for no user, so this route has no one to name (plan 12e).
+          // An organization token acts for its organization, not a user (plan 12k).
+          if (!c || c.kind === "oauth-client" || c.kind === "organizationToken")
+            return Response.json({ error: "unauthorized" }, { status: 401 });
+          const res = Response.json({ kind: c.kind, id: c.user.id, email: c.user.email });
+          // After a sliding refresh, renew the cookie or the browser drops it early.
+          const renewed = c.kind === "session" ? a.sessionCookie(request, c) : null;
+          if (renewed) res.headers.set("set-cookie", renewed);
+          return res;
+        }
+        // A session JWT route (plan 11d): what another Worker of the app would serve.
+        if (url.pathname === "/notes") {
+          const v = getVerifier(env);
+          const r = await v.verifyRequest(request);
+          // The auth app limited the live checks: 429. It did not answer: 503.
+          if (!r.ok)
+            return Response.json(
+              { error: r.code },
+              { status: r.code === "rate_limited" ? 429 : 503 },
+            );
+          // A refused bearer gets error="invalid_token" (RFC 6750 section 3.1). No bearer, and a
+          // Basic header is none, gets the plain challenge. The verifier reads the bearer only,
+          // never a cookie, so this route needs no cookie rule (that is /mcp's, through caller).
+          if (r.value?.kind !== "session-jwt")
+            return v.unauthorized({ invalidToken: readBearer(request) !== null });
+          return Response.json({ owner: r.value.email });
+        }
+        // An MCP resource (plan 9g): an OAuth access token for this resource only. A session
+        // or an API token is refused here, and a token for another resource is null at `caller`.
+        if (url.pathname === "/mcp" || url.pathname.startsWith("/mcp/")) {
+          const resource = `${env.BASE_URL}/mcp`;
+          const c = await a.caller(request);
+          // MCP 2026-07-28: the 401 names the scope of the tools, so a client asks for it.
+          if (c?.kind !== "oauth")
+            return unauthorizedResponse({
+              resource,
+              scope: "mcp:tools",
+              invalidToken: refusedBearer(request),
+            });
+          // The tools need the scope mcp:tools. Without this check a token with only
+          // openid calls them, and every app that copies this example inherits that.
+          if (!c.scopes.includes("mcp:tools"))
+            return insufficientScopeResponse({ resource, scope: "mcp:tools" });
+          // c.user is for the app; c.subject is what the client may see.
+          return Response.json({ sub: c.subject, clientId: c.clientId, scopes: c.scopes });
+        }
+        // TEST_MODE only (plan 9c): the fake provider's authorize step, which the browser visits.
+        if (url.pathname.startsWith("/__test/oauth/")) {
+          if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
+          return await testProviderRoute(request, url);
+        }
+        if (url.pathname === "/__test/last-link") {
+          if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
+          return Response.json({ link: lastLink });
+        }
+        // TEST_MODE only (plan 9e): the last code mailed to `?email=`. A deploy must never
+        // serve it: anyone could read a live sign-in code. The gate answers 404 without TEST_MODE.
+        if (url.pathname === "/__test/last-code") {
+          if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
+          return Response.json({
+            code: lastCodes.get(url.searchParams.get("email") ?? "") ?? null,
           });
-        // The tools need the scope mcp:tools. Without this check a token with only
-        // openid calls them, and every app that copies this example inherits that.
-        if (!c.scopes.includes("mcp:tools"))
-          return insufficientScopeResponse({ resource, scope: "mcp:tools" });
-        // c.user is for the app; c.subject is what the client may see.
-        return Response.json({ sub: c.subject, clientId: c.clientId, scopes: c.scopes });
+        }
+        // The Better Auth compatibility instance (plan 9) on BA_DB. Core's routes above do not change.
+        if (url.pathname.startsWith("/api/auth/"))
+          return await getCompat(env).handler(request, options);
+        if (url.pathname === "/compat/me") {
+          const s = await getCompat(env).api.getSession({ headers: request.headers });
+          if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
+          return Response.json({
+            id: s.user.id,
+            email: s.user.email,
+            name: s.user.name,
+            activeOrganizationId: s.session.activeOrganizationId,
+          });
+        }
+        if (url.pathname === "/__test/compat-last-link") {
+          if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
+          return Response.json({ link: compatLastLink(url.searchParams.get("to") ?? "") });
+        }
+        return new Response("not found", { status: 404 });
+      } finally {
+        if (!viaHandle) ctx.waitUntil(a.observe.flush());
+        if (url.pathname === "/compat/me") ctx.waitUntil(getCompat(env).tempo.observe.flush());
       }
-      // TEST_MODE only (plan 9c): the fake provider's authorize step, which the browser visits.
-      if (url.pathname.startsWith("/__test/oauth/")) {
-        if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
-        return testProviderRoute(request, url);
-      }
-      if (url.pathname === "/__test/last-link") {
-        if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
-        return Response.json({ link: lastLink });
-      }
-      // TEST_MODE only (plan 9e): the last code mailed to `?email=`. A deploy must never
-      // serve it: anyone could read a live sign-in code. The gate answers 404 without TEST_MODE.
-      if (url.pathname === "/__test/last-code") {
-        if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
-        return Response.json({ code: lastCodes.get(url.searchParams.get("email") ?? "") ?? null });
-      }
-      // The Better Auth compatibility instance (plan 9) on BA_DB. Core's routes above do not change.
-      if (url.pathname.startsWith("/api/auth/")) return getCompat(env).handler(request, options);
-      if (url.pathname === "/compat/me") {
-        const s = await getCompat(env).api.getSession({ headers: request.headers });
-        if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
-        return Response.json({
-          id: s.user.id,
-          email: s.user.email,
-          name: s.user.name,
-          activeOrganizationId: s.session.activeOrganizationId,
-        });
-      }
-      if (url.pathname === "/__test/compat-last-link") {
-        if (env.TEST_MODE !== "1") return new Response("not found", { status: 404 });
-        return Response.json({ link: compatLastLink(url.searchParams.get("to") ?? "") });
-      }
-      return new Response("not found", { status: 404 });
     },
     // The cron trigger in wrangler.jsonc calls this. It deletes expired tokens, invitations, and sessions.
     async scheduled(
