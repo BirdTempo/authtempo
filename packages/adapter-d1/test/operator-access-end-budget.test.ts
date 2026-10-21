@@ -321,6 +321,75 @@ describe("the ban and the revoke on D1 (rulings 44 and 45 of plan 12f)", () => {
     endings.length = 0;
   });
 
+  it("keeps the left impersonation sessions of a revoked operator refused after a re-grant before the sweep", async () => {
+    const sent: MailMessage[] = [];
+    const on = {
+      operator: {
+        secrets: [
+          { name: "support", secretHash: await sha256Hex(SECRET), scopes: ["users", "sessions"] },
+        ],
+        users: true,
+        impersonation: {},
+      },
+    } satisfies Partial<AuthConfig>;
+    const { auth: setup } = await engine(env.DB, sent, undefined, on);
+    await platformOperator(setup, sent);
+    const bobToken = await platformOperator(setup, sent, "bob@example.com");
+    const { userId: target } = await signIns(setup, sent, "ada@example.com", 1);
+    const bob = await setup.api.getSession(bobToken);
+    if (!bob) throw new Error("the session ended");
+    const tokens: string[] = [];
+    for (let i = 0; i < 60; i++) {
+      const r = await setup.api.operator.impersonate({
+        operator: bob,
+        userId: target,
+        reason: `Ticket ${i}`,
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+      tokens.push(r.value.token);
+    }
+    const revoked = await invoke(
+      sent,
+      "/operator/users/platform-role",
+      asSecret,
+      { userId: bob.user.id, grant: false, reason: REASON },
+      on,
+    );
+    expect(revoked.status).toBe(200);
+    expect(revoked.queries).toBeLessThanOrEqual(50);
+    const impersonations = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM ta_session WHERE actor_id IS NOT NULL",
+        ).first<{ n: number }>()
+      )?.n ?? 0;
+    // The act ends a page; the rows that do not fit stay for the sweep (ruling 52).
+    const leftBefore = await impersonations();
+    expect(leftBefore).toBeGreaterThan(0);
+    // The re-grant before the sweep: a left row keeps no power from it (ruling 50).
+    current = new Date(current.getTime() + 1);
+    const granted = await setup.api.operator.platformRole.grant({
+      actor: APP,
+      userId: bob.user.id,
+      reason: REASON,
+      ip: null,
+      userAgent: null,
+    });
+    if (!granted.ok) throw new Error(granted.code);
+    const left = await leftToken(tokens);
+    expect(await setup.api.getSession(left)).toBeNull();
+    // The door ends the row it refuses, with its stop row; the others stay for the sweep.
+    expect(await impersonations()).toBe(leftBefore - 1);
+    await sweepAll(sent, on);
+    expect(await impersonations()).toBe(0);
+    const stops = await env.DB.prepare(
+      "SELECT COUNT(*) AS n FROM ta_operator_audit WHERE action = 'impersonation_stop'",
+    ).first<{ n: number }>();
+    expect(stops?.n).toBe(60);
+  });
+
   it("ends the left impersonation sessions of a banned target in the sweep, each with its stop row", async () => {
     const sent: MailMessage[] = [];
     const on = {
