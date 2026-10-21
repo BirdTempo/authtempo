@@ -20,4 +20,13 @@ export { HELP } from "./help/index.js";
 export { type HelpFlag, type HelpText, helpProse, pageUrl, renderHelp } from "./help/types.js";
 export * from "./json.js";
 export { type Fetcher, HostError } from "./net.js";
+// The docs site holds the CLI quotes of its runbooks to these (ruling 62 m7 of plan 12f).
+export {
+  bannedText,
+  familyEndWarning,
+  secretHashLine,
+  USER_HEADER,
+  userRow,
+  writtenLine,
+} from "./operator-tools.js";
 export { compareShape, PLAIN_NAME, type ShapeFinding } from "./schema-shape.js";

@@ -18,6 +18,8 @@ import { readOperatorSecret } from "../operator-client.js";
 import {
   ask,
   auditIdOf,
+  bannedText,
+  familyEndWarning,
   needYes,
   operatorUser,
   type PageRule,
@@ -37,6 +39,7 @@ import {
   userRow,
   usersPage,
   WRITE_OPTIONS,
+  writtenLine,
 } from "../operator-tools.js";
 import { type Ctx, printJson } from "../output.js";
 
@@ -208,16 +211,6 @@ interface UserWrite {
 }
 
 /**
- * The warning of a ban or a revoke that answers `familyEndFailed: true`
- * (ruling 37 of plan 12f): the act committed, and the end of the OAuth
- * refresh families after the commit failed. `sessions end` reads the
- * refresh tokens of the user again, and ends each family.
- */
-export function familyEndWarning(userId: string): string {
-  return `warning: the act ran, but the end of the OAuth refresh families failed (familyEndFailed); run authtempo sessions end <base url> ${userId} with a secret of the sessions scope`;
-}
-
-/**
  * The common steps of a write on one user. First the confirmation rule,
  * before the secret. Then the secret, the question, and one POST. Last the
  * audit row id, on stdout or in the JSON document. An answer with
@@ -258,7 +251,7 @@ async function writeUser(
   const exit = (body as { familyEndFailed?: unknown }).familyEndFailed === true ? 1 : 0;
   if (values.json === true)
     printJson(ctx, { auditId, exit, stopped: null } satisfies OperatorWriteJson);
-  else ctx.out(`${w.done}; audit row ${auditId}`);
+  else ctx.out(writtenLine(w.done, auditId));
   if (exit === 1) ctx.err(familyEndWarning(userId));
   return exit;
 }
@@ -276,7 +269,7 @@ async function runBan(argv: string[], ctx: Ctx): Promise<number> {
     body: { reason, ...(values.until === undefined ? {} : { until: values.until }) },
     question: `Ban the user ${userId}, and end the sessions of the user?`,
     act: "ban",
-    done: `banned ${userId}`,
+    done: bannedText(userId),
     invalid: "--until must be a date and time with a zone, from 1 minute to 3650 days after now",
   });
 }

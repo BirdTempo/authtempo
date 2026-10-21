@@ -439,6 +439,32 @@ export function tableLines(
   return [line(header), ...rows.map(line)];
 }
 
+/**
+ * The warning of a ban or a revoke that answers `familyEndFailed: true`
+ * (ruling 37 of plan 12f): the act committed, and the end of the OAuth
+ * refresh families after the commit failed. `sessions end` reads the
+ * refresh tokens of the user again, and ends each family. The runbooks
+ * quote it, and a site test holds them to it (ruling 62 m7).
+ */
+export function familyEndWarning(userId: string): string {
+  return `warning: the act ran, but the end of the OAuth refresh families failed (familyEndFailed); run authtempo sessions end <base url> ${userId} with a secret of the sessions scope`;
+}
+
+/** The stdout line of a write on one user: its result, then the audit row id. */
+export function writtenLine(done: string, auditId: string): string {
+  return `${done}; audit row ${auditId}`;
+}
+
+/** The stdout line of `secret --operator` with the hash for an entry of `operator.secrets`. */
+export function secretHashLine(hash: string): string {
+  return `secretHash: ${hash}`;
+}
+
+/** The result of a ban, before the audit row id. */
+export function bannedText(userId: string): string {
+  return `banned ${userId}`;
+}
+
 /** The header of a user table. */
 export const USER_HEADER = [
   "ID",

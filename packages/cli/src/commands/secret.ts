@@ -15,6 +15,7 @@ import { SECRET_HELP, SECRET_REWRAP_HELP, SECRET_STATUS_HELP } from "../help/sec
 import type { SecretJson, SecretRewrapJson, SecretStatusJson } from "../json.js";
 import { baseOf, basePathOf, timeoutOf } from "../net.js";
 import { type OperatorValues, operatorCall, readOperatorSecret } from "../operator-client.js";
+import { secretHashLine } from "../operator-tools.js";
 import { type Ctx, printJson } from "../output.js";
 import { CALLS_PER_HOUR, DEFAULT_MAX_CALLS, MAX_CALLS_MAX } from "../rewrap-limits.js";
 import { DEFAULT_TOKEN_ENV } from "../secrets.js";
@@ -380,7 +381,7 @@ async function runGenerator(argv: string[], ctx: Ctx): Promise<number> {
   };
   if (json) printJson(ctx, doc);
   else if (out === null) ctx.out(value);
-  if (!json && secretHash !== null) ctx.out(`secretHash: ${secretHash}`);
+  if (!json && secretHash !== null) ctx.out(secretHashLine(secretHash));
   ctx.addSecret(value);
   if (out === null) ctx.err("Store this value now. authtempo keeps no copy of it.");
   if (version !== null)
