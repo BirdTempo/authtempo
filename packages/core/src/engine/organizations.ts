@@ -36,6 +36,7 @@ import {
   rankOf,
   roleAllowedIn,
 } from "./ranks.js";
+import { ROUNDS } from "./rounds.js";
 import { endedList, sessionsEnded } from "./sessions.js";
 import { spendSlugRead } from "./slug-check.js";
 import { createDefaultTeam, dropMemberTeams, lockOrganization } from "./teams.js";
@@ -594,21 +595,40 @@ export async function deleteOrganization(
   const id = input.organizationId;
   const hooks = config.hooks.organization;
   const organization = publicOrganization(s.value.organization);
-  const deleted = await hookGuard(() =>
-    config.storage.transaction(async (tx): Promise<Result<true>> => {
-      await runBefore("organization.beforeDelete", hooks.beforeDelete, {
-        organization,
-        user: input.user,
-      });
-      // The sessions that act in the organization come before its row, in the order of
-      // user-hold.ts (ruling 49 of plan 12k). The delete clears their active organization last.
-      // The lock comes after the hook, so the hook can write these sessions with no wait.
-      await tx.lockInOrder?.("session", [{ field: "activeOrganizationId", op: "eq", value: id }]);
-      await deleteOrganizationRows(tx, id);
-      return ok(true);
-    }),
-  );
+  const byOrganization: Where<"session">[] = [
+    { field: "activeOrganizationId", op: "eq", value: id },
+  ];
+  // ok(false): a set moved a session into the organization after the lock read. The next round
+  // locks it.
+  let deleted: Result<boolean> = ok(false);
+  for (let round = 0; round < ROUNDS && deleted.ok && !deleted.value; round++)
+    deleted = await hookGuard(() =>
+      config.storage.transaction(async (tx): Promise<Result<boolean>> => {
+        // The sessions that act in the organization come before its row, in the order of
+        // user-hold.ts (rulings 49 and 50 of plan 12k). With row locks, the ids are read
+        // first and locked by id. The delete clears their active organization last.
+        const locks = tx.lockInOrder !== undefined;
+        const ids = locks ? (await tx.findMany("session", byOrganization)).map((x) => x.id) : [];
+        await tx.lockInOrder?.("session", [{ field: "id", op: "in", value: ids }]);
+        if (locks) {
+          // After the organization lock, no set moves a session into the organization: a set
+          // takes the same lock. A session that a set moved in after the read above has no
+          // lock here, so this round writes nothing.
+          if (!(await lockOrganization(tx, s.value.organization))) return fail("not_found");
+          if ((await tx.findMany("session", byOrganization)).some((x) => !ids.includes(x.id)))
+            return ok(false);
+        }
+        await runBefore("organization.beforeDelete", hooks.beforeDelete, {
+          organization,
+          user: input.user,
+        });
+        await deleteOrganizationRows(tx, id);
+        return ok(true);
+      }),
+    );
   if (!deleted.ok) return deleted;
+  // Each round lost to a set: the person tries again.
+  if (!deleted.value) return fail("conflict");
   // The member and invitation rows go with the organization and fire no member hook, as in Better Auth.
   await runAfter(
     "organization.afterDelete",

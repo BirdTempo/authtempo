@@ -182,7 +182,7 @@ describe("the table of locks over a before hook", () => {
     expect(page).toEqual(readme);
   });
 
-  it("names the fourteen flows", () => {
+  it("names the fifteen flows", () => {
     expect(readme.map((r) => r.split("|")[1]?.trim())).toEqual([
       "Organization create",
       "Member add",
@@ -190,6 +190,7 @@ describe("the table of locks over a before hook", () => {
       "Invite",
       "Member removal or leave",
       "Member role change",
+      "Organization delete",
       "Team create",
       "Team delete",
       "Team member add",
@@ -223,6 +224,7 @@ describe("the table of locks over a before hook", () => {
         "deleteAccountRows organization.beforeDelete: runDelete > user compare-and-set",
       ],
       ["Account delete", "deleteAccountRows user.beforeDelete: runDelete > user compare-and-set"],
+      ["Organization delete", "deleteOrganization organization.beforeDelete: lockOrganization"],
       ["Team delete", "deleteTeam organization.beforeDeleteTeam: lockOrganization, lockTeam"],
       ["Invite", "inviteMember organization.beforeInvite: lockOrganization"],
       [

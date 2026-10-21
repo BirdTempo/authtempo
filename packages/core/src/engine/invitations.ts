@@ -6,7 +6,7 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { InvitationRow, MemberRow, OrganizationRow, TeamRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
-import { StorageError } from "../storage/port.js";
+import { StorageError, type Where } from "../storage/port.js";
 import { HookStop, hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import {
   type Caller,
@@ -577,22 +577,39 @@ export async function setActiveOrganization(
   input: { session: ResolvedSession; organizationId: string | null },
 ): Promise<Result<ReturnType<typeof publicSession>>> {
   if (!config.organizations) return fail("not_found");
-  if (input.organizationId !== null) {
-    const m = await membership(config, input.organizationId, input.session.user.id);
-    if (!m) return fail("forbidden_rank");
-  }
+  const organizationId = input.organizationId;
   const now = config.clock.now();
   // A team belongs to one organization, so a change of the active organization clears the
   // active team in the same update (plan 12k). The same organization keeps it.
   const activeTeamId =
-    input.organizationId === input.session.session.activeOrganizationId
+    organizationId === input.session.session.activeOrganizationId
       ? input.session.session.activeTeamId
       : null;
-  await config.storage.update(
-    "session",
-    [{ field: "id", op: "eq", value: input.session.session.id }],
-    { activeOrganizationId: input.organizationId, activeTeamId, updatedAt: now },
-  );
+  const byId: Where<"session">[] = [{ field: "id", op: "eq", value: input.session.session.id }];
+  const data = { activeOrganizationId: organizationId, activeTeamId, updatedAt: now };
+  if (organizationId === null) await config.storage.update("session", byId, data);
+  else {
+    const set = await config.storage.transaction(async (tx): Promise<boolean> => {
+      // The session lock, then the organization row, in the order of user-hold.ts (ruling 50
+      // of plan 12k). An organization delete that holds the row commits first, and this set
+      // then finds it gone. So no session moves into an organization after its delete read.
+      await tx.lockInOrder?.("session", byId);
+      const organization = await tx.findOne("organization", [
+        { field: "id", op: "eq", value: organizationId },
+      ]);
+      if (!organization) return false;
+      // D1 has no row lock, so there the lock holds nothing and costs no statement.
+      if (tx.lockInOrder && !(await lockOrganization(tx, organization))) return false;
+      const member = await tx.findOne("member", [
+        { field: "organizationId", op: "eq", value: organizationId },
+        { field: "userId", op: "eq", value: input.session.user.id },
+      ]);
+      if (!member) return false;
+      await tx.update("session", byId, data);
+      return true;
+    });
+    if (!set) return fail("forbidden_rank");
+  }
   return ok(
     publicSession({
       ...input.session,

@@ -1215,6 +1215,7 @@ const auth = createAuth({
 | Invite | `organization.beforeInvite` | with `pendingInvitationsPerOrganization`, the organization row |
 | Member removal or leave | `organization.beforeRemoveMember` | the person's user row and sessions; for an owner or with `revokeTokens`, the organization row; for a loss of the platform role, the sessions of each impersonation that the person opened |
 | Member role change | `organization.beforeUpdateMemberRole` | for an owner demotion, the organization row; for a loss of the platform role, the member's user row and the sessions of the member and of each impersonation that the member opened |
+| Organization delete | `organization.beforeDelete` | the sessions that act in the organization; on Postgres, the organization row |
 | Team create | `organization.beforeCreateTeam` | the organization row |
 | Team delete | `organization.beforeDeleteTeam` | the sessions that act in the team; with `keepLastTeam`, the organization row; on Postgres, the team row |
 | Team member add | `organization.beforeAddTeamMember` | the added user's row and the team row |

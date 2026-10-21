@@ -283,7 +283,7 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ),
   ...rows(
     "conflict",
-    "a write that races the owner lock; organizations.test.ts proves the engine path",
+    "a write that races the owner lock; organizations.test.ts proves the engine path. The organization delete also answers it after five rounds lost to a set of the active organization on Postgres; organization-delete-gap-race.test.ts of adapter-postgres proves that path",
     [
       "POST /organizations/delete",
       "POST /organizations/members/remove",

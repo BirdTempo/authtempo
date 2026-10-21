@@ -66,7 +66,10 @@ import { ROUNDS } from "./rounds.js";
  * person, so a set cannot move a session into the team after its lock
  * read. The team delete reads the sessions of the team again after its team
  * lock, and starts a new round when a set moved one in. The organization
- * delete locks the sessions that act in it before its row.
+ * delete does the same with the sessions that act in it and its
+ * organization row. `setActiveOrganization` locks its session and then the
+ * organization row, so no set moves a session into the organization after
+ * that lock (ruling 50).
  *
  * `deleteOrganizationRows` deletes the organization row first and the team
  * rows next. So it waits for each flow that holds one of these locks, in

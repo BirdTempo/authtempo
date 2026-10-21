@@ -686,7 +686,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The user has the rank `owner` |
 | Input | JSON `{ organizationId }` |
-| Answer | `{ ok: true }` |
+| Answer | `{ ok: true }`. On Postgres, a set of the active organization at the same moment makes a round of the delete start again. After 5 such rounds it answers `conflict` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-organizations-members"><code>GET /organizations/members</code></h3>
