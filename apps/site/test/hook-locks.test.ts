@@ -39,12 +39,19 @@ interface Fn {
 }
 
 /**
- * The top-level functions of the engine folder of core. A function starts at
- * a line that opens `function` or `async function`, with or without `export`.
+ * The top-level functions of the engine folder of core and of its operator
+ * folder, where the flows of plan 12f are. A function starts at a line that
+ * opens `function` or `async function`, with or without `export`.
  */
 function functions(): Fn[] {
   const out: Fn[] = [];
-  for (const f of readdirSync(ENGINE).filter((n) => n.endsWith(".ts"))) {
+  const files = [
+    ...readdirSync(ENGINE).filter((n) => n.endsWith(".ts")),
+    ...readdirSync(`${ENGINE}operator/`)
+      .filter((n) => n.endsWith(".ts"))
+      .map((n) => `operator/${n}`),
+  ];
+  for (const f of files) {
     const src = readFileSync(`${ENGINE}${f}`, "utf8");
     for (const text of src.split(/\n(?=(?:export )?(?:async )?function )/)) {
       const m = /^(?:export )?(?:async )?function (\w+)/.exec(text);
@@ -84,7 +91,7 @@ const CALL = /(?<![\w.])(?<!function )(\w+)\(/g;
  * The scan reads text, not the control flow. A lock on another branch
  * before the hook counts, so a listed lock can miss some paths. The scan
  * misses these locks:
- * - a lock outside the engine folder;
+ * - a lock outside the engine folder and its operator folder;
  * - a lock in an arrow function bound to a top-level `const`, or in a class
  *   method;
  * - a call through a variable or an object field;
@@ -175,20 +182,22 @@ describe("the table of locks over a before hook", () => {
     expect(page).toEqual(readme);
   });
 
-  it("names the twelve flows", () => {
+  it("names the fourteen flows", () => {
     expect(readme.map((r) => r.split("|")[1]?.trim())).toEqual([
       "Organization create",
       "Member add",
       "Invitation accept",
       "Invite",
       "Member removal or leave",
-      "Owner demotion",
+      "Member role change",
       "Team create",
       "Team delete",
       "Team member add",
       "Team member removal",
       "Identity unlink",
       "Account delete",
+      "Platform role revoke",
+      "Impersonation start",
     ]);
   });
 
@@ -217,12 +226,27 @@ describe("the table of locks over a before hook", () => {
       ["Team delete", "deleteTeam organization.beforeDeleteTeam: lockOrganization"],
       ["Invite", "inviteMember organization.beforeInvite: lockOrganization"],
       [
+        "Impersonation start",
+        "prepareSession session.beforeCreate: openSession > startImpersonation > holdUser",
+      ],
+      [
         "Member removal or leave",
-        "removeMember organization.beforeRemoveMember: lockOrganization, ownerWrite, holdUser",
+        "removeMember organization.beforeRemoveMember: lockOrganization, ownerWrite, withRoleLoss, holdUser",
       ],
       ["Team member removal", "removeTeamMember organization.beforeRemoveTeamMember: lockTeam"],
+      [
+        "Platform role revoke",
+        "revokePlatformRole organization.beforeRemoveMember: holdUser, ownerLock",
+      ],
+      [
+        "Platform role revoke",
+        "revokePlatformRole organization.beforeUpdateMemberRole: holdUser, ownerLock",
+      ],
       ["Identity unlink", "unlinkIdentity identity.beforeUnlink: guardedRemove"],
-      ["Owner demotion", "updateMemberRole organization.beforeUpdateMemberRole: ownerWrite"],
+      [
+        "Member role change",
+        "updateMemberRole organization.beforeUpdateMemberRole: ownerWrite, withRoleLoss",
+      ],
     ];
     expect(lockScan()).toEqual(expected.map(([, line]) => line));
     const rows = hooksByFlow(readme);
