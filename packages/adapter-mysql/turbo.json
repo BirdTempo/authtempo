@@ -1,0 +1,11 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    // tsconfig.proof.json reads proof/worker/index.ts, which imports
+    // @authtempo/adapter-mysql from this package's own dist. A build empties
+    // that dist first (scripts/clean-dist.mjs). So the build of the package
+    // comes first: without it, a run that holds both tasks fails with TS2307.
+    "typecheck": { "dependsOn": ["^build", "build"] }
+  }
+}
