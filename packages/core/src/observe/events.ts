@@ -54,7 +54,7 @@ export interface FieldSpec {
   readonly optional?: true;
 }
 
-/** The log line of a fault event: the `console` method, the text, and the arguments of today. */
+/** The log line of a fault event: the output method (error or warn), the text, and the arguments of today. */
 export interface FaultLine {
   readonly method: "error" | "warn";
   /** The text, the first argument. A `<field>` part takes the value of that field. */

@@ -34,12 +34,11 @@ describe("console in core (plan 12h Task 3)", () => {
     const fs: WalkFs = await import(/* @vite-ignore */ FS_MODULE);
     const files = walk(fs, SRC);
     expect(files).toContain(DEFAULT_OUTPUT);
-    // Read as text, comments too: a comment that names console. misleads the next reader.
-    // The console[ form is a call too, as in the default output itself.
+    // Read as text, comments too: a comment that names console misleads the next reader.
+    // Each use of the name can reach a call: a member, a console[ key, a destructure, or an alias.
     const holders = files.filter((f) => {
       if (f === DEFAULT_OUTPUT) return false;
-      const text = fs.readFileSync(new URL(f, SRC), "utf8");
-      return text.includes("console.") || text.includes("console[");
+      return /\bconsole\b/.test(fs.readFileSync(new URL(f, SRC), "utf8"));
     });
     expect(holders).toEqual([]);
   });
