@@ -38,6 +38,28 @@ type Rule = (value: unknown, path: string, out: OptionCheck) => void;
 
 /** Plan 9c maps google, apple, github, and linkedin. Core takes any other provider as a list entry. */
 const OTHER_PROVIDER = "not mapped; add it through core's social.oidc or social.oauth2";
+/**
+ * Better Auth provider ids that a core preset serves (plan 12i Task 13).
+ * Better Auth 1.7.x names its Entra ID provider `microsoft`. Core's
+ * createAuth refuses a list entry with one of these names.
+ */
+const CORE_PRESETS: Readonly<Record<string, string>> = {
+  microsoft: "social.microsoft",
+  discord: "social.discord",
+  gitlab: "social.gitlab",
+};
+/** Names that core reserves for the presets of plan 12i Task 14. Task 14 moves them to CORE_PRESETS. */
+const COMING_PRESETS: ReadonlySet<string> = new Set(["slack", "twitter", "facebook"]);
+const presetProvider = (preset: string) =>
+  `not mapped; use core's preset ${preset} through core's createAuth`;
+const COMING_PROVIDER =
+  "not mapped; core reserves the name for a coming preset, so a core social.oidc or social.oauth2 entry needs another name";
+/** The refusal of a Better Auth provider that the package does not map. */
+function otherProvider(name: string): string {
+  const preset = Object.hasOwn(CORE_PRESETS, name) ? CORE_PRESETS[name] : undefined;
+  if (preset !== undefined) return presetProvider(preset);
+  return COMING_PRESETS.has(name) ? COMING_PROVIDER : OTHER_PROVIDER;
+}
 const NO_REQUEST_HOOKS =
   "core has no request hooks: wrap auth.handler and read auth.tempo.session(request); see the README recipe";
 const noRowHook = (name: string) => `core has no row hook on ${name}; see the plan index`;
@@ -859,7 +881,7 @@ const TOP: Record<string, Rule> = {
         const a = config as Record<string, unknown>;
         if (!a.teamId || !a.keyId || !a.privateKey)
           refuse(out, `${p}.apple`, "needs teamId, keyId, and privateKey");
-      } else refuse(out, `${p}.${name}`, OTHER_PROVIDER);
+      } else refuse(out, `${p}.${name}`, otherProvider(name));
     }
   },
   session: object({
