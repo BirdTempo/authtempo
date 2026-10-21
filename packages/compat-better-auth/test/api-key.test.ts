@@ -224,6 +224,32 @@ describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
     });
   });
 
+  it("answers KEY_NOT_FOUND for a permission set that the key lacks, as Better Auth does", async () => {
+    // Final review of plan 12k, M2: Better Auth 1.7.5 checks the key's own set (dist/index.mjs:1660).
+    const { auth, person } = app({ references: "user", rateLimit: { enabled: false } });
+    const ada = await person("ada@example.com");
+    const held = await auth.api.createApiKey({
+      body: { name: "ci", userId: ada.user.id, permissions: { apiKey: ["read"] } },
+    });
+    const none = await auth.api.createApiKey({ body: { name: "bare", userId: ada.user.id } });
+    const notFound = {
+      valid: false,
+      error: { code: "KEY_NOT_FOUND", message: "API Key not found" },
+      key: null,
+    };
+    expect(
+      await auth.api.verifyApiKey({ body: { key: held.key, permissions: { apiKey: ["delete"] } } }),
+    ).toEqual(notFound);
+    // A key with no set passes no check.
+    expect(
+      await auth.api.verifyApiKey({ body: { key: none.key, permissions: { apiKey: ["read"] } } }),
+    ).toEqual(notFound);
+    const v = await auth.api.verifyApiKey({
+      body: { key: held.key, permissions: { apiKey: ["read"] } },
+    });
+    expect({ valid: v.valid, id: v.key?.id }).toEqual({ valid: true, id: held.id });
+  });
+
   it("spends remaining and answers the usage code at zero", async () => {
     const { auth, person } = app({ rateLimit: { enabled: false } });
     const ada = await person("ada@example.com");
