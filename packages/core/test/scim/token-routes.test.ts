@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
+import { startImpersonation } from "../../src/engine/operator/impersonation.js";
 import { createOrganization } from "../../src/engine/organizations.js";
 import { createScimToken } from "../../src/engine/scim/tokens.js";
 import { createRouter } from "../../src/http/router.js";
@@ -24,9 +25,14 @@ const MINUTE_MS = 60_000;
 /**
  * The 12f fixture with `scim` on, and an owner of `acme` with a factor and
  * a fresh session. `factor: false` leaves the operator's second factor off.
+ * `impersonation: true` turns on the impersonation of plan 12f.
  */
-async function routeWorld(options: { factor?: boolean } = {}) {
-  const config: Partial<AuthConfig> = { sso: { dns: [fakeDns("a", {})] }, scim: {} };
+async function routeWorld(options: { factor?: boolean; impersonation?: boolean } = {}) {
+  const config: Partial<AuthConfig> = {
+    sso: { dns: [fakeDns("a", {})] },
+    scim: {},
+    ...(options.impersonation ? { operator: { users: true, impersonation: {} } } : {}),
+  };
   const f = await operatorFixture({
     ...(options.factor === undefined ? {} : { factor: options.factor }),
     config,
@@ -175,5 +181,47 @@ describe("the SCIM token routes (plan 12d Task 9)", () => {
         { error: "session_not_fresh" },
       ]);
     expect(await w.auth.storage.findMany("scimToken", [])).toHaveLength(1);
+  });
+
+  it("refuses an impersonation session: the router at each write, the guard at the list", async () => {
+    const w = await routeWorld({ impersonation: true });
+    const made = await createScimToken(w.auth.config, SCIM_APP, {
+      organizationId: w.org,
+      name: "first",
+    });
+    if (!made.ok) throw new Error(made.code);
+    const started = await startImpersonation(w.auth.config, {
+      operator: w.operator,
+      userId: w.owner.user.id,
+      reason: "Ticket 12: the owner cannot see the SCIM tokens",
+      ip: null,
+      userAgent: null,
+    });
+    if (!started.ok) throw new Error(started.code);
+    const token = started.value.token;
+    expect(
+      await send(w, "POST", "/scim/tokens/create", { organizationId: w.org, name: "x" }, token),
+    ).toEqual([403, { error: "impersonation_session" }]);
+    expect(await send(w, "POST", "/scim/tokens/revoke", { id: made.value.id }, token)).toEqual([
+      403,
+      { error: "impersonation_session" },
+    ]);
+    // The list holds a hint only, so it passes the router; the guard refuses the session.
+    expect(await send(w, "GET", `/scim/tokens?organizationId=${w.org}`, null, token)).toEqual([
+      403,
+      { error: "forbidden_rank" },
+    ]);
+    // The owner's own session still lists the token.
+    const [status, listed] = await send(
+      w,
+      "GET",
+      `/scim/tokens?organizationId=${w.org}`,
+      null,
+      w.owner.token,
+    );
+    expect([status, (listed.tokens as { id: string }[]).map((t) => t.id)]).toEqual([
+      200,
+      [made.value.id],
+    ]);
   });
 });

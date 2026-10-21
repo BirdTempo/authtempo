@@ -1531,7 +1531,7 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 
 These routes exist when the config sets `scim` (plan 12d). A directory, such as Entra ID or Okta, provisions the staff of an organization with a SCIM token. A token holds `sk_` and 43 characters. Core stores its SHA-256 only, so the answer of the create is the one time the token leaves core.
 
-The three token routes run the steps of the SSO manager routes: a session, the count on `sso-manage:user:<userId>`, then the manager guard of [Enterprise SSO](#enterprise-sso). The router refuses each of them to an impersonation session with `impersonation_session`. Each write writes one audit row, and no row holds the token or its hash.
+The three token routes run the steps of the SSO manager routes: a session, the count on `sso-manage:user:<userId>`, then the manager guard of [Enterprise SSO](#enterprise-sso). An impersonation session gets `impersonation_session` from the router at the create and the revoke, and `forbidden_rank` from the guard at the list. Each write writes one audit row, and no row holds the token or its hash.
 
 <h3 id="get-scim-tokens"><code>GET /scim/tokens</code></h3>
 
@@ -1540,7 +1540,7 @@ The three token routes run the steps of the SSO manager routes: a session, the c
 | Needs | A session cookie, or a `ts_` bearer token. The manager guard of [Enterprise SSO](#enterprise-sso) must pass: an owner of the organization, or a platform operator |
 | Input | Query `{ organizationId }` |
 | Answer | `{ tokens }`, oldest first. Each token holds `id`, `name`, `hint`, `scopes`, `createdAt`, `lastUsedAt`, and `expiresAt`. No answer holds the token or its hash |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh) |
 
 <h3 id="post-scim-tokens-create"><code>POST /scim/tokens/create</code></h3>
 

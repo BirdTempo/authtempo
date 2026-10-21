@@ -54,9 +54,8 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /sso/connections/create",
   "POST /sso/connections/update",
   "POST /sso/connections/delete",
-  // The SCIM token routes of plan 12d Task 9: a credential route, as POST
+  // The SCIM token writes of plan 12d Task 9: a credential route, as POST
   // /organizations/tokens (12k ruling 7). A token outlives the impersonation.
-  "GET /scim/tokens",
   "POST /scim/tokens/create",
   "POST /scim/tokens/revoke",
   // The stop is the one way out. A sign-out would end the session with no
@@ -230,6 +229,9 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   // The answer holds no client secret and no sealed value (plan 12d Task 3);
   // a certificate is public. The guard still refuses the session.
   "GET /sso/connections": READ,
+  // The list holds a hint of each token, never the token or its hash (ruling 25 N7
+  // of plan 12d). The guard still refuses the session.
+  "GET /scim/tokens": READ,
   // The SSO sign-in of plan 12d Task 4, as the social sign-in.
   "POST /sso/discover": NO_SESSION,
   "GET /sso/:connectionId/start": NO_SESSION,
