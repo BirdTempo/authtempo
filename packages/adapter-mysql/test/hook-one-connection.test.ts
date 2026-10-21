@@ -5,10 +5,11 @@ import { createMysqlAdapter } from "../src/index.js";
 import { freshDatabase, MYSQL_84, type MysqlDatabase } from "./db.js";
 
 // The port of adapter-postgres/test/hook-one-connection.test.ts to MySQL 8.4
-// (ruling 1 of plan 12g). The documented hang (spec 8.9, amended 2026-10-13
-// by the plan 9d final fix wave; the README of this package): a before hook that queries core's client
-// while its pool has one connection waits for the connection that the flow's
-// transaction holds, and the transaction waits for the hook. The first test
+// (ruling 1 of plan 12g). It holds the documented hang of spec 8.9 (amended
+// 2026-10-13 by the plan 9d final fix wave) and of the README of this
+// package. A before hook queries core's client while its pool has one
+// connection. The hook waits for the connection that the flow's transaction
+// holds, and the transaction waits for the hook. The first test
 // pins the fact with a 2-second timer. The second is the control: the same
 // hook passes with a pool of two, so the hang comes from the pool size. The
 // control waits 10 seconds, so a loaded machine cannot turn it red (plan 9h

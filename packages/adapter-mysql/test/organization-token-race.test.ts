@@ -30,11 +30,11 @@ async function connection(): Promise<Pool> {
 }
 
 /**
- * A storage, and the storage of each of its transactions, that calls
- * `reached` when the create reaches its lock of the organization row or its
- * count returns, and then waits for `other` before it writes the token. So
- * without the lock both counts run before either create, and with the lock
- * the second count waits for the first commit. No pause runs.
+ * A storage, and the storage of each of its transactions, with a gate. It
+ * calls `reached` when the create reaches its lock of the organization row
+ * or its count returns. Then it waits for `other` before it writes the
+ * token. So without the lock both counts run before either create. With the
+ * lock, the second count waits for the first commit. No pause runs.
  */
 function gated(base: StorageAdapter, reached: () => void, other: Promise<void>): StorageAdapter {
   return {

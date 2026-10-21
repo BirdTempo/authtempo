@@ -223,8 +223,8 @@ export async function verifyPasskeyRegistration(
     config.observe.emit({ name: "passkey.registration_rejected", errorClass: e });
     return fail("passkey_failed");
   }
-  // WebAuthn Level 3 bounds a credential id to 1023 bytes, and the MySQL
-  // column holds its base64url form of 1364 characters (ruling 7 of plan 12g).
+  // WebAuthn Level 3 bounds a credential id to 1023 bytes. The MySQL column
+  // holds its base64url form of 1364 characters (ruling 7 of plan 12g).
   // An id over the bound answers like any other failed ceremony.
   if (base64UrlBytes(registered.id) > CREDENTIAL_ID_MAX_BYTES) {
     console.error("authtempo: passkey credential id over 1023 bytes");
