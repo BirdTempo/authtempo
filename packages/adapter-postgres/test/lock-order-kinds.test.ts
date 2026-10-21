@@ -958,7 +958,10 @@ const SITES: Record<string, readonly string[] | string> = {
   "sso/domains addDomain": "one kind: the lock of the organization row, then domain rows",
   "sso/domains verifyDomainWith": "no kind: the claim of the domain row, then its audit row",
   // Ruling 34 of plan 12d: the connection row comes before the domain rows in the three
-  // sites of a domain and a connection. sso-connection-domain-race.test.ts races them.
+  // sites of a domain and a connection. Ruling 35 adds the organization delete: its
+  // deleteOrganizationsRows deletes the connection rows before the domain rows. The two
+  // models are no kind here, so this check cannot see that order.
+  // sso-connection-domain-race.test.ts races the four.
   "sso/domains updateDomain":
     "no kind: a read of the domain, the lock of the connection row, then the domain row",
   "sso/domains deleteDomain": "no kind: the domain row, then its audit row",

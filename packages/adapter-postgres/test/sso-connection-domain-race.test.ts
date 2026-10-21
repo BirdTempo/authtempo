@@ -8,9 +8,11 @@ import { freshDatabase } from "./db.js";
 // connection, else its staff cannot sign in. The domain update locks the
 // connection row before its check. The connection update writes its row
 // before its check of the enforced domains. The connection delete deletes
-// its row before the domain update. So the three take the connection row
-// first, and then the domain rows. Each state comes from the api: the
-// magic link, the organization api, and the SSO api with a fake resolver.
+// its row before the domain update. The organization delete deletes the
+// connection rows before the domain rows (ruling 35). So the four take the
+// connection row first, and then the domain rows. Each state comes from the
+// api: the magic link, the organization api, and the SSO api with a fake
+// resolver.
 
 const API = "https://api.example.com";
 const APP = { kind: "app", name: "race-test" } as const;
@@ -118,7 +120,7 @@ function world() {
     if (!added.record) throw new Error("no record");
     records[added.record.name] = [added.record.value];
     must(await sso.domains.verify({ actor: APP, id: added.id }));
-    return { sso, connectionId, domainId: added.id };
+    return { sso, user: signed.value.user, organizationId, connectionId, domainId: added.id };
   }
   return { auth, probe, scene };
 }
@@ -127,6 +129,11 @@ function world() {
 async function domains() {
   return db.sql<{ connection: string | null; enforce: boolean }[]>`
     SELECT connection_id AS connection, enforce FROM ta_sso_domain`;
+}
+
+/** The organization rows: the id. */
+async function organizations() {
+  return db.sql<{ id: string }[]>`SELECT id FROM ta_organization`;
 }
 
 /** The connection rows: the id and the flag. */
@@ -196,5 +203,56 @@ describe("a domain write beside a connection write on Postgres (ruling 34 of pla
     expect(await enforcing).toMatchObject({ ok: false, code: "invalid_body" });
     expect(await connections()).toEqual([{ id: s.connectionId, enabled: false }]);
     expect(await domains()).toEqual([{ connection: s.connectionId, enforce: false }]);
+  }, 60_000);
+});
+
+describe("a domain update beside an organization delete on Postgres (ruling 35 of plan 12d)", () => {
+  it("deletes the organization after a domain update that holds the connection row", async () => {
+    const w = world();
+    const s = await w.scene();
+    let deleting: Promise<unknown> | null = null;
+    // 1: the domain update holds the connection row. The delete starts and waits on it.
+    w.probe.hold = async () => {
+      deleting = w.auth.api.deleteOrganization({ user: s.user, organizationId: s.organizationId });
+      deleting.catch(() => {});
+      await pause(HOLD_MS);
+    };
+    const routed = await s.sso.domains.update({
+      actor: APP,
+      id: s.domainId,
+      connectionId: s.connectionId,
+      enforce: true,
+    });
+    expect(routed).toMatchObject({ ok: true });
+    // The delete takes the connection row before the domain rows, so it waits and no deadlock occurs.
+    expect(await deleting).toMatchObject({ ok: true });
+    expect(await organizations()).toEqual([]);
+    expect(await connections()).toEqual([]);
+    expect(await domains()).toEqual([]);
+  }, 60_000);
+
+  it("refuses a domain update that waits on an organization delete", async () => {
+    const w = world();
+    const s = await w.scene();
+    let routing: Promise<unknown> | null = null;
+    // 1: the organization delete holds the connection row after its delete. The update starts.
+    w.probe.hold = async () => {
+      routing = s.sso.domains.update({
+        actor: APP,
+        id: s.domainId,
+        connectionId: s.connectionId,
+        enforce: true,
+      });
+      routing.catch(() => {});
+      await pause(HOLD_MS);
+    };
+    expect(
+      await w.auth.api.deleteOrganization({ user: s.user, organizationId: s.organizationId }),
+    ).toMatchObject({ ok: true });
+    // The update locks the connection row after the commit of the delete, and finds no row.
+    expect(await routing).toMatchObject({ ok: false, code: "not_found" });
+    expect(await organizations()).toEqual([]);
+    expect(await connections()).toEqual([]);
+    expect(await domains()).toEqual([]);
   }, 60_000);
 });

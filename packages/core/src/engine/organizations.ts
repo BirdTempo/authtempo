@@ -713,9 +713,11 @@ export async function deleteOrganizationsRows(
   // Plan 12d (ruling 28): the SSO and SCIM rows go in the step of the
   // organization row. A kept domain row would hold its claim forever, so no
   // other organization could verify the domain. The three models are no
-  // kind of user-hold.ts, so the lock order does not change.
-  await tx.delete("ssoDomain", [{ field: "organizationId", op: "in", value: list }]);
+  // kind of user-hold.ts, so the lock order does not change. The connection
+  // rows go before the domain rows, the order of `lockConnection` in
+  // sso/domains.ts (ruling 35). The other order deadlocks with a domain update.
   await tx.delete("ssoConnection", [{ field: "organizationId", op: "in", value: list }]);
+  await tx.delete("ssoDomain", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("scimToken", [{ field: "organizationId", op: "in", value: list }]);
   // Plan 12k: the teams go before their rows, and fire no team hook.
   await tx.delete("team", [{ field: "organizationId", op: "in", value: list }]);

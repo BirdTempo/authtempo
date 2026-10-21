@@ -493,9 +493,11 @@ const ENFORCE_REFUSED: Result<never> = {
  * organization exists. The update writes `organizationId` with its own
  * value, so no field changes: the form of `lockOrganization` (ruling 34 of
  * plan 12d). On Postgres a parallel `deleteConnection` or `updateConnection`
- * waits at this lock, and so does this update at theirs. The order is the
- * connection row, then the domain rows, in all three. Without the lock, an
- * enforced domain could route to a deleted or disabled connection.
+ * waits at this lock, and so does this update at theirs. The organization
+ * delete (`deleteOrganizationsRows`) deletes the connection rows before the
+ * domain rows (ruling 35). The order is the connection row, then the domain
+ * rows, in all four. Without the lock, an enforced domain could route to a
+ * deleted or disabled connection.
  */
 async function lockConnection(tx: StorageAdapter, row: SsoDomainRow): Promise<boolean> {
   if (row.connectionId === null) return false;
