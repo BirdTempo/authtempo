@@ -65,7 +65,7 @@ A row that did not open counts in `failed`. The log of the deployment names it. 
 The command never reads a sealed value. The route reseals each row inside the deployment, and answers counts only.
 
 :::caution
-Warning: remove a version from `secrets` only when its five counts are 0 in `authtempo secret status`. A backup code and an email code cannot move: each matches under its version until it is used, replaced, or expired.
+Warning: remove a version from `secrets` only when its six counts are 0 in `authtempo secret status`. A backup code and an email code cannot move: each matches under its version until it is used, replaced, or expired.
 :::
 
 ## The JSON

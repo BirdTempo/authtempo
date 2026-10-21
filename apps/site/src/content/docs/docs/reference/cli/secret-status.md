@@ -6,6 +6,7 @@ sources:
   - packages/cli/src/commands/secret.ts
   - packages/cli/src/help/secret.ts
   - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 4"
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "A sealed state payload through the social flow"
 sidebar:
   order: 9
 ---
@@ -46,13 +47,13 @@ authtempo secret status https://api.example.com
 The command prints one line per version on stdout, the current version first:
 
 ```text
-version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0
-version 1: old, configured, totpSecrets 1, backupCodes 10, signingKeys 1, emailCodes 0, ssoClientSecrets 0
+version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0, stateData 0
+version 1: old, configured, totpSecrets 1, backupCodes 10, signingKeys 1, emailCodes 0, ssoClientSecrets 0, stateData 0
 ```
 
 - `current` or `old`: whether the version seals each new value.
 - `configured` or `not configured`: whether the config holds the version.
-- The five counts: the TOTP secrets, the unused backup codes, the signing keys, the live email codes, and the SSO client secrets under the version.
+- The six counts under the version: TOTP secrets, unused backup codes, signing keys, live email codes, SSO client secrets, and live sealed payloads of `social.stateData`.
 
 A version that the config does not hold but has rows gives exit 1 and a warning on stderr. Its rows cannot open until the version is back. Add it back before you remove it: [Secrets](/docs/operations/secrets/) gives the rule.
 
@@ -62,7 +63,7 @@ The command reads counts only. No line holds a secret, a hash, or a sealed value
 
 | Key | What it holds |
 | --- | --- |
-| `versions` | One entry per version, the current version first. Each entry holds `version`, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes`, and `ssoClientSecrets`: the key names of `api.secrets.status()`. |
+| `versions` | One entry per version, the current version first. Each entry holds `version`, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes`, `ssoClientSecrets`, and `stateData`: the key names of `api.secrets.status()`. |
 | `exit` | The exit code of the run. |
 | `stopped` | The reason of a stop or a usage error, or null. |
 

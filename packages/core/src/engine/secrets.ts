@@ -1,6 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { fail, ok, type Result } from "../result.js";
-import type { ModelName, Models } from "../schema.js";
+import type { ModelName, Models, VerificationPurpose } from "../schema.js";
 import { meterOf } from "../storage/meter.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
 import { rewrapKeyRow } from "./jwt.js";
@@ -35,6 +35,11 @@ export interface SecretVersionCount {
    * 12d, ruling 31). A SAML connection seals no secret and does not count.
    */
   ssoClientSecrets: number;
+  /**
+   * Live sealed app payloads of a social flow (plan 12i Task 19): state rows
+   * and challenge rows. `rewrap` leaves them: they live at most 10 minutes.
+   */
+  stateData: number;
 }
 
 export interface SecretsStatus {
@@ -67,12 +72,18 @@ export const REWRAP_LIMIT = { default: 100, max: 1000 } as const;
 /**
  * The page of a status read. The storage port has no count, so status reads
  * every row of the five tables by pages of ids: one query per 1000 rows of
- * each table. The port sets no maximum limit (checked 2026-10-15), and a
+ * each table, and of each of the two code reads. The port sets no maximum limit (checked 2026-10-15), and a
  * page of 1000 is the most rows that `rewrap` reads in one call.
  */
 const PAGE = 1000;
 /** The purposes whose `valueHash` is a keyed hash (plan 9e). */
-const KEYED_PURPOSES = ["email-otp", "password-reset-otp"] as const;
+const KEYED_PURPOSES: readonly VerificationPurpose[] = ["email-otp", "password-reset-otp"];
+/**
+ * The purposes of a social state row, which can hold a sealed app payload
+ * (plan 12i Task 19). The read of the keyed codes reads them too, so status
+ * makes no more queries for them.
+ */
+const STATE_PURPOSES: readonly VerificationPurpose[] = ["oauth-state", "oauth-link-state"];
 /**
  * The sealed tables in the order of a pass. The cursor names the table and
  * the last id read. Plan 12d adds the client secrets of the SSO connections.
@@ -128,6 +139,7 @@ export async function secretsStatus(config: ResolvedConfig): Promise<SecretsStat
         signingKeys: 0,
         emailCodes: 0,
         ssoClientSecrets: 0,
+        stateData: 0,
       };
       counts.set(version, c);
     }
@@ -155,9 +167,11 @@ export async function secretsStatus(config: ResolvedConfig): Promise<SecretsStat
   await eachRow(
     storage,
     "verification",
-    [{ field: "purpose", op: "in", value: [...KEYED_PURPOSES] }, ...live],
+    [{ field: "purpose", op: "in", value: [...KEYED_PURPOSES, ...STATE_PURPOSES] }, ...live],
     (r) => {
-      entry(r.secretVersion).emailCodes++;
+      if (KEYED_PURPOSES.includes(r.purpose)) entry(r.secretVersion).emailCodes++;
+      // A state row seals its payload under the row's version.
+      else if (typeof r.data?.sealedData === "string") entry(r.secretVersion).stateData++;
     },
   );
   // Plan 12c: the email code of a challenge is a keyed hash in `data`.
@@ -167,6 +181,11 @@ export async function secretsStatus(config: ResolvedConfig): Promise<SecretsStat
     [{ field: "purpose", op: "eq", value: "two-factor" }, ...live],
     (r) => {
       if (typeof r.data?.emailCodeHash === "string") entry(r.secretVersion).emailCodes++;
+      // The payload of a challenge names its own version: an email code
+      // send moves the row's `secretVersion` (plan 12i Task 19).
+      const payload = r.data?.sealedDataVersion;
+      if (typeof r.data?.sealedData === "string" && typeof payload === "number")
+        entry(payload).stateData++;
     },
   );
   const order = (c: SecretVersionCount) => {

@@ -1090,7 +1090,7 @@ These routes exist when the config sets `operator.secretHash` or `operator.secre
 | --- | --- |
 | Needs | The operator secret. `Authorization: Operator <secret>`, as `POST /operator/keys/rotate`. The secret needs the scope `secrets` |
 | Input | None |
-| Answer | `{ versions }`: for each version, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes`, and `ssoClientSecrets`, the answer of `api.secrets.status()`. It counts on `operator-secrets:ip:<ip>`, 120 per hour with rewrap and info, right or wrong secret ([Limits](/docs/reference/limits/)) |
+| Answer | `{ versions }`: for each version, `configured`, `current`, `totpSecrets`, `backupCodes`, `signingKeys`, `emailCodes`, `ssoClientSecrets`, and `stateData`, the answer of `api.secrets.status()`. It counts on `operator-secrets:ip:<ip>`, 120 per hour with rewrap and info, right or wrong secret ([Limits](/docs/reference/limits/)) |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-secrets-rewrap"><code>POST /operator/secrets/rewrap</code></h3>

@@ -42,6 +42,7 @@ const SecretVersionCountJson = z.strictObject({
   signingKeys: z.number().int(),
   emailCodes: z.number().int(),
   ssoClientSecrets: z.number().int(),
+  stateData: z.number().int(),
 });
 
 /** A user id or a cursor. A core id has 26 characters; the compat package keeps longer ids, up to 64. */

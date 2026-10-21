@@ -87,10 +87,27 @@ async function seed(storage: StorageAdapter): Promise<void> {
   await code("v7", "email-otp", { spent: true });
   await code("v6", "two-factor", { data: { attempts: 0 } });
   await code("v3", "magic-link", { version: 2 });
+  // The sealed app payloads of plan 12i Task 19. Counted: a state row and a
+  // link state row under their row versions, and a challenge under the version
+  // in its data. An email code send moved that challenge's row to version 2.
+  const sealed = { sealedData: "a-sealed-payload" };
+  await code("s1", "oauth-state", { data: { next: "/", ...sealed } });
+  await code("s2", "oauth-link-state", { version: 9, data: { next: "/", ...sealed } });
+  await code("s3", "two-factor", {
+    version: 2,
+    data: { attempts: 0, emailCodeHash: "h", ...sealed, sealedDataVersion: 1 },
+  });
+  // Not counted: a state row with no payload, an expired one, and a spent challenge.
+  await code("s4", "oauth-state", { data: { next: "/" } });
+  await code("s5", "oauth-state", { expiresAt: new Date(AT.getTime() - 1), data: sealed });
+  await code("s6", "two-factor", {
+    spent: true,
+    data: { attempts: 0, ...sealed, sealedDataVersion: 1 },
+  });
 }
 
 describe("api.secrets (plan 12b)", () => {
-  it("counts the rows per version, lists an unknown version, and counts live keyed codes only", async () => {
+  it("counts the rows per version, lists an unknown version, and counts live keyed codes and payloads only", async () => {
     const storage = createMemoryAdapter();
     await seed(storage);
     const auth = authOn(storage, [
@@ -106,8 +123,9 @@ describe("api.secrets (plan 12b)", () => {
           totpSecrets: 0,
           backupCodes: 0,
           signingKeys: 0,
-          emailCodes: 0,
+          emailCodes: 1,
           ssoClientSecrets: 0,
+          stateData: 0,
         },
         {
           version: 1,
@@ -118,6 +136,7 @@ describe("api.secrets (plan 12b)", () => {
           signingKeys: 0,
           emailCodes: 3,
           ssoClientSecrets: 0,
+          stateData: 2,
         },
         {
           version: 9,
@@ -128,6 +147,7 @@ describe("api.secrets (plan 12b)", () => {
           signingKeys: 0,
           emailCodes: 0,
           ssoClientSecrets: 0,
+          stateData: 1,
         },
       ],
     });
