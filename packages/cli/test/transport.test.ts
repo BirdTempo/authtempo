@@ -1,3 +1,6 @@
+import { realpathSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { Stop } from "../src/errors.js";
 import { describeUrl } from "../src/output.js";
@@ -9,6 +12,7 @@ import {
   requireMysqlTransport,
   urlSecrets,
 } from "../src/transport.js";
+import { PKG } from "./support/bin.js";
 
 // The transport rule of design section 9 item 4 (plan 12g Task 6): pure
 // tests, with no connection.
@@ -160,6 +164,15 @@ describe("the transport rule (plan 12g Task 6)", () => {
         as({ scheme: "https", tls: true, host: "db.example.com" }),
       ),
     ).not.toThrow();
+  });
+
+  it("reads the URL with the @libsql/core copy of @libsql/client", () => {
+    // Two copies of @libsql/core could parse one URL in two ways: the rule
+    // would judge one host, and the driver would connect to another.
+    const cli = createRequire(join(PKG, "package.json"));
+    const client = createRequire(realpathSync(cli.resolve("@libsql/client")));
+    for (const entry of ["@libsql/core/config", "@libsql/core/uri"])
+      expect(realpathSync(cli.resolve(entry)), entry).toBe(realpathSync(client.resolve(entry)));
   });
 
   it("drops the query string and the password from the description", () => {

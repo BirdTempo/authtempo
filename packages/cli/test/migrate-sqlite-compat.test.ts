@@ -2,11 +2,14 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { createClient } from "@libsql/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { assertFreshBuild, linesOf, PKG, runBin } from "./support/bin.js";
 
 // `authtempo migrate --target sqlite --tables compat` (plan 12g Task 8b). The
-// file opens through node:sqlite, the driver of the CLI seam for a file.
+// file opens through node:sqlite, the driver of the CLI seam for a file. A URL
+// opens the libSQL server authtempo-libsql-cli-compat of docker-compose.yml,
+// which only this file uses (ruling 20 of the plan 12g lane).
 
 /** The compat migration names in order, typed here: the files of migrations/d1/. */
 const COMPAT = [
@@ -21,6 +24,9 @@ const COMPAT = [
   "0009_compat_schema_v12",
   "0010_compat_schema_v13",
 ];
+
+/** The libSQL server of this file. migrate-sqlite.test.ts empties the server on 8090 at the same time. */
+const LIBSQL_URL = process.env.AUTHTEMPO_LIBSQL_COMPAT_URL ?? "http://127.0.0.1:8091";
 
 const COMPAT_PKG = join(PKG, "../compat-better-auth");
 /** Better Auth 1.7.2's own SQLite schema, as its CLI writes it. */
@@ -193,6 +199,84 @@ describe("authtempo migrate --target sqlite --tables compat (plan 12g Task 8b)",
       "stopped: the database is at version 14; this CLI knows version 13; use a newer CLI",
     );
     expect(readFileSync(file).equals(before)).toBe(true);
+  });
+
+  it("stops on a file with the tables of core before any write, also with --dry-run", () => {
+    // As a person can make it: core's migrations first, then the app's own Better Auth tables.
+    expect(runBin(["migrate", "--target", "sqlite", "--file", file]).status).toBe(0);
+    execOnFile(BETTER_AUTH);
+    const before = readFileSync(file);
+    for (const extra of [[], ["--dry-run"]]) {
+      const r = migrate(extra);
+      expect(r.status, extra.join(" ")).toBe(2);
+      expect(r.stdout).toBe("");
+      expect(linesOf(r.stderr).at(-1)).toBe(
+        "stopped: the file holds the tables of core; --tables compat needs a file with the Better Auth tables of the app and no tables of core; nothing was written",
+      );
+      expect(readFileSync(file).equals(before)).toBe(true);
+    }
+  });
+
+  it("migrates the Better Auth tables of a libSQL server from a URL", async () => {
+    // The server is this file's own, so the test empties it first. It fails, never
+    // skips, when the server is down: run docker compose up -d libsql-cli-compat.
+    const client = createClient({ url: LIBSQL_URL });
+    try {
+      try {
+        const rs = await client.execute(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'",
+        );
+        // One script on one stream, so the pragma holds for each drop: the Better Auth tables have foreign keys.
+        await client.executeMultiple(
+          [
+            "PRAGMA foreign_keys = OFF;",
+            ...rs.rows.map((row) => `DROP TABLE "${String(row.name)}";`),
+          ].join("\n"),
+        );
+      } catch (e) {
+        throw new Error(
+          `the CLI libSQL compat test needs the server at ${LIBSQL_URL}: ${(e as Error).message}. Run: docker compose up -d libsql-cli-compat`,
+        );
+      }
+      await client.executeMultiple(BETTER_AUTH);
+      const run = () =>
+        runBin(
+          [
+            "migrate",
+            "--target",
+            "sqlite",
+            "--url-env",
+            "LIBSQL_URL",
+            "--tables",
+            "compat",
+            "--json",
+          ],
+          { env: { LIBSQL_URL } },
+        );
+      const r = run();
+      expect(r.status, r.stderr).toBe(0);
+      expect(JSON.parse(r.stdout)).toMatchObject({
+        target: "sqlite",
+        tables: "compat",
+        before: null,
+        after: 13,
+        pending: COMPAT,
+        applied: COMPAT,
+      });
+      expect(linesOf(r.stderr)[0]).toBe(`connecting to ${LIBSQL_URL.replace(/^\w+:\/\//, "")}`);
+      const meta = await client.execute("SELECT key, value FROM ta_meta ORDER BY key");
+      expect(meta.rows.map((row) => ({ key: row.key, value: row.value }))).toEqual([
+        { key: "compat_better_auth", value: "10" },
+        { key: "schema_version", value: "13" },
+      ]);
+      const names = await client.execute("SELECT name FROM ta_migrations ORDER BY name");
+      expect(names.rows.map((row) => row.name)).toEqual(COMPAT);
+      const again = run();
+      expect(again.status, again.stderr).toBe(0);
+      expect(JSON.parse(again.stdout)).toMatchObject({ before: 13, pending: [], applied: [] });
+    } finally {
+      client.close();
+    }
   });
 
   it("stops on a missing file and makes no file, also with --dry-run", () => {

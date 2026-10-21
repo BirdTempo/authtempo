@@ -34,6 +34,15 @@ services:
     container_name: authtempo-libsql-cli
     ports:
       - "8090:8080"
+  # A third libSQL server for the CLI compat test of a libSQL URL (ruling 20
+  # of the plan 12g lane). migrate-sqlite.test.ts empties every table of the
+  # server on 8090, and Vitest runs the two files at once. Port 8091 was free
+  # by lsof on 2026-10-22.
+  libsql-cli-compat:
+    image: ghcr.io/tursodatabase/libsql-server:v0.24.32@sha256:dedf5273da945d90f3b85fe367ed8f821349117ac2c488bf43c4a6bf9f2123e0
+    container_name: authtempo-libsql-cli-compat
+    ports:
+      - "8091:8080"
   # MySQL 8.4 LTS and 9.7 LTS for the MySQL adapter tests (plan 12g, owner
   # decision 2). 8.0 ended on 2026-04-30. Ports 3384 and 3397 name the
   # versions and avoid 3306. Each image is pinned by its digest beside the

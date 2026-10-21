@@ -1,4 +1,4 @@
-import { closeSync, openSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import {
   applySqliteMigrations,
@@ -44,6 +44,36 @@ function codeOf(e: unknown): string {
     return typeof code === "string" && /^[A-Z0-9_]{1,40}$/.test(code) ? code : null;
   };
   return plain(e) ?? plain((e as { cause?: unknown } | null)?.cause) ?? "an error";
+}
+
+/** The first 16 bytes of every SQLite database file, of the 100-byte file header (sqlite.org/fileformat.html). */
+const SQLITE_MAGIC = Buffer.from("SQLite format 3\0", "latin1");
+const SQLITE_HEADER_BYTES = 100;
+
+/**
+ * True when the file at `path` holds bytes that do not start with the SQLite
+ * header. node:sqlite reads a file of one byte as an empty database, and a
+ * write then replaces its bytes (probe on Node 26.10, 2026-10-22). An empty
+ * file is a new database, and a missing file is for the open to judge.
+ */
+function notADatabase(path: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch (e) {
+    if ((e as { code?: unknown }).code === "ENOENT") return false;
+    throw e;
+  }
+  try {
+    const size = fstatSync(fd).size;
+    if (size === 0) return false;
+    if (size < SQLITE_HEADER_BYTES) return true;
+    const head = Buffer.alloc(SQLITE_MAGIC.length);
+    readSync(fd, head, 0, head.length, 0);
+    return !head.equals(SQLITE_MAGIC);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** "no such table" of SQLite, by the text of the driver: no driver gives it a code of its own. */
@@ -114,7 +144,8 @@ export interface SqliteSeam {
 /**
  * Opens the database of `source`. A file opens through `node:sqlite` (Node
  * 22.13 and later), which makes the file when it is missing, unless
- * `readOnly` is set (`check`, and a dry run of `migrate`). A URL first
+ * `readOnly` is set (`check`, and a dry run of `migrate`). A file with
+ * bytes that do not start with the SQLite header stops before the open. A URL first
  * passes `requireLibsqlTransport`, then opens through `@libsql/client`. The
  * seam loads both libSQL packages only for a URL. `addSecret` gets the URL's password and token
  * values before the first line. Every driver error leaves as `storage: <code>
@@ -136,6 +167,10 @@ export async function openSqlite(
     };
     let db: DatabaseSync;
     try {
+      if (notADatabase(source.file))
+        throw new Stop(
+          `${where} is not a SQLite database: its first bytes are not the SQLite header; nothing was written`,
+        );
       // The file holds sealed secrets and password hashes. SQLite makes a new
       // file with mode 0644, less the umask, so the seam makes it with mode
       // 0600 first. A file that exists keeps its mode.
@@ -144,6 +179,7 @@ export async function openSqlite(
       db = new Database(source.file, { readOnly: o.readOnly === true });
       db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);
     } catch (e) {
+      if (e instanceof Stop) throw e;
       throw new Stop(`storage: ${codeOf(e)} at ${where}`);
     }
     driver = nodeSqlite(db);

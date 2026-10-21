@@ -45,7 +45,7 @@ The third line creates or updates the tables in a SQLite file. The fourth line l
 | `--tables compat` | The Better Auth 1.7 tables of `@authtempo/compat-better-auth`, on Postgres, D1, or SQLite. MySQL refuses it. |
 | `--url-env <NAME>` | Postgres and MySQL: the variable of the connection string. The default is `DATABASE_URL`. SQLite: the variable of a libSQL URL. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--url-file <path>` | Postgres, MySQL, and SQLite: the file of the connection string or the libSQL URL. `-` is stdin. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
-| `--file <path>` | SQLite: the path of the database file. The command makes the file when it is missing. |
+| `--file <path>` | SQLite: the path of the database file. The command makes the file when it is missing, except with `--tables compat`. |
 | `--auth-token-env <NAME>` | SQLite with a libSQL URL: the variable of the token. The default is `LIBSQL_AUTH_TOKEN`. With no such variable, the command sends no token. |
 | `--auth-token-file <path>` | SQLite with a libSQL URL: the file of the token. `-` is stdin. |
 | `--database <name>` | D1: the `database_name` in the wrangler config. One D1 database needs no name. |
@@ -82,11 +82,13 @@ The third line creates or updates the tables in a SQLite file. The fourth line l
 - `--file` opens the file through `node:sqlite` (Node.js 22.13 and later). The command waits up to 5 seconds for the write lock of another process.
 - A URL opens a libSQL server through `@libsql/client`. A host that is not a loopback address needs `https:`, `wss:`, or `libsql:` with TLS. A plain `http:` URL to such a host stops the run with exit 2, before any connection.
 - The command reads the URL with the parser of `@libsql/client`, so it judges the host that the driver connects to. A URL with a backslash, or with a query key more than once, stops the run with exit 2.
-- `--dry-run` on a missing file makes no file. It lists every migration as pending.
+- `--dry-run` on a missing file makes no file. Without `--tables compat`, it lists every migration as pending.
+- A file that is not empty and does not start with the SQLite header stops the run with exit 2, before any write. The command never writes over such a file.
 - `applySqliteMigrations` applies the files, which are the D1 files of `@authtempo/adapter-d1`. Each file and its record in `ta_migrations` run in one write transaction.
 - A driver error prints as `storage: <code> at <file>`, or at the host and the name of the URL. The command never prints the message of the driver, the token, or the query of the URL.
 - With `--tables compat`, the command runs the compat migrations of `@authtempo/compat-better-auth` on the Better Auth tables of the database. Add `--before-1.7` for tables from before Better Auth 1.7.
 - With `--tables compat`, a missing file stops the run with exit 2, and the command makes no file. The file must hold the Better Auth tables of the app.
+- With `--tables compat`, a file with the tables of core stops the run with exit 2, before any write. The compat migrations make their own `ta_meta` and `ta_limit`. Use a file with the Better Auth tables of the app and no tables of core.
 - Each compat migration and its record in `ta_migrations` run in one write transaction. The command skips each compat migration at or below `compat_better_auth` of `ta_meta`, so a database that the D1 files migrated goes on from there.
 - On tables with other names, or with Better Auth's `teams` option, apply the app's own compat texts first, as the D1 section tells. Then the command skips them.
 - With `--tables compat`, the command prints one warning when the project holds `better-auth` below 1.7.7. Upgrade it first.

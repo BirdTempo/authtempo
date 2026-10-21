@@ -224,6 +224,12 @@ async function migrateSqliteCompat(
       throw e instanceof Stop ? new Stop(`${e.message}; nothing was written`) : e;
     }
     const done = new Set(await seam.appliedCore());
+    // Core's migrations made core's ta_meta and ta_limit in this file, so the
+    // first compat migration would stop on an opaque driver code.
+    if (SQLITE_CORE_MIGRATIONS.some((n) => done.has(n)))
+      throw new Stop(
+        "the file holds the tables of core; --tables compat needs a file with the Better Auth tables of the app and no tables of core; nothing was written",
+      );
     const before = readableVersion(await seam.schemaVersionText(), done.size);
     gate(before);
     const version = compatVersionOf(await seam.compatText());

@@ -167,6 +167,21 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
     }
   });
 
+  it("stops on a file that is not a SQLite database, and keeps its bytes", () => {
+    // node:sqlite reads a file of one byte as an empty database, and a run
+    // would write over it (the lead note of the 12g ledger, line 77).
+    for (const bytes of ["x", "a note of the app\n", `${"y".repeat(200)}\n`])
+      for (const extra of [[], ["--dry-run"]]) {
+        writeFileSync(file, bytes);
+        const r = migrateFile(extra);
+        expect(r.status, `${bytes.length} bytes ${extra.join(" ")}`).toBe(2);
+        expect(linesOf(r.stderr).at(-1)).toBe(
+          `stopped: ${file} is not a SQLite database: its first bytes are not the SQLite header; nothing was written`,
+        );
+        expect(readFileSync(file, "utf8")).toBe(bytes);
+      }
+  });
+
   it("takes a libSQL URL from an environment variable and its token from a file", async () => {
     // The server is the CLI's own, so the test empties it first. It fails, never
     // skips, when the server is down: run docker compose up -d libsql-cli.

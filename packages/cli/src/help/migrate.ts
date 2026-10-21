@@ -71,7 +71,9 @@ export const MIGRATE_HELP: HelpText = {
   ],
   notes: [
     "With --tables compat, the command warns when the project holds better-auth below 1.7.7.",
-    "With --target sqlite --file, the command makes the file when it is missing.",
+    "With --target sqlite --file, the command makes the file when it is missing, except with --tables compat.",
     "With --target sqlite --tables compat, a missing file stops the run: the file must hold the Better Auth tables.",
+    "With --target sqlite --tables compat, a file with the tables of core stops the run before any write.",
+    "With --target sqlite --file, a file that is not a SQLite database stops the run before any write.",
   ],
 };
