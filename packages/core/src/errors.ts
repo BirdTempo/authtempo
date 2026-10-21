@@ -88,6 +88,11 @@ export const ERRORS = {
 
 export type ErrorCode = keyof typeof ERRORS;
 
+// The codes of `StorageError` (plan 12g, ruling 6 of its lane). The type lives
+// with the storage port. This entry holds every error table, so the site's
+// errors page check reads all three from one entry.
+export { STORAGE_ERROR_CODES } from "./storage/port.js";
+
 /**
  * The OAuth 2.1 and OIDC wire errors of the provider routes (plan 9g), with
  * their status. A key is the string an OAuth client reads, so no map stands
