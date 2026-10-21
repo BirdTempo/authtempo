@@ -71,6 +71,7 @@ Core refuses each of them at its own doors: the session read, the JWT mint, the 
 - The mail flows answer a banned user as any user. A magic link still goes out, and its use answers `account_banned`.
 - An API token works again after an unban. A session does not come back.
 - The unban writes the end of the ban. A session or a token from before that end stays refused.
+- A magic link is not a session. A link mailed before the ban signs in after the unban, within its life: `magicLink.ttlMinutes`, 15 minutes by default.
 - A timed ban ends at `--until`. The same rule then holds: no credential from before the end comes back.
 - A ban of a platform operator also ends the impersonation sessions that the operator opened. Until the sweep ends a left one, each door refuses it.
 
