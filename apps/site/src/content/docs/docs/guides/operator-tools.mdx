@@ -74,7 +74,7 @@ The routes are under `<basePath>/operator/`. [Routes](/docs/reference/routes/#op
 - `users.ban` writes the ban in one transaction. The same transaction ends every challenge, handoff code, and OAuth refresh token and code of the user. It ends a page of the sessions too.
 - The whole call fits 50 storage calls, the limit of one D1 Free run. The sessions that do not fit stay, with one pending-end row. The sweep ends them with `session.afterEnd` and the reason `banned`.
 - Until the sweep ends a left session, every door refuses it: the session read, the session JWT mint, and `api.jwt.sessionLive`.
-- A test on D1 banned a user with 60 sessions and a `session.afterEnd` hook. A secret ban ended 31 sessions in 50 queries. Two sweeps of 48 and 22 queries ended the other 29.
+- A test on D1 banned a user with 60 sessions and a `session.afterEnd` hook. A secret ban ended 31 sessions in 50 queries. Two sweeps of 48 and 24 queries ended the other 29.
 - A sign-in of a banned user answers `account_banned` only after the credential check. So only a person who proved the credential learns of the ban. A wrong password answers `invalid_credentials`, as for any user.
 - The mail flows answer a banned user as any user.
 - An API token stays. Core refuses it while the ban holds, and it works again after an unban.

@@ -1204,7 +1204,8 @@ describe("back-channel logout (plan 12e Task 16)", () => {
       // The view of the store has no statementsSent, so each step counts its worst case. The
       // pairwise subject costs 1 more call per row. The posts count as calls too. The read of the
       // pending-end rows (ruling 50 of plan 12f) takes 1 call from the links: 17 before it.
-      expect([swept.oauthSessionLinks, swept.oauthLogouts, posts], subjectType).toEqual([16, 0, 2]);
+      // The delete of the organization tokens (plan 12k) takes 1 more: 16 became 15.
+      expect([swept.oauthSessionLinks, swept.oauthLogouts, posts], subjectType).toEqual([15, 0, 2]);
       expect((await outbox(w)).filter((r) => r.attempts === 2)).toHaveLength(2);
       expect(total, subjectType).toBe(subjectType === "public" ? 46 : 48);
     }

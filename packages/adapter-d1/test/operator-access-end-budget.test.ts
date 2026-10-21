@@ -255,17 +255,19 @@ async function auditOf(userId: string): Promise<string[]> {
  * fewer. A user actor through the route pays one more session read, the
  * impersonation step of the router, so its act ends 1 session fewer.
  */
+// The sweeps count 1 more query since plan 12k (the runs of 2026-10-21 at the rebase): the
+// delete of the organization tokens. The acts do not change.
 const BAN_COUNTS: Record<string, [number, number, number[]]> = {
-  "secret 45": [50, 31, [35]],
-  "user 45": [49, 22, [44]],
-  "secret 60": [50, 31, [48, 22]],
-  "user 60": [49, 22, [48, 31]],
+  "secret 45": [50, 31, [36]],
+  "user 45": [49, 22, [45]],
+  "secret 60": [50, 31, [48, 24]],
+  "user 60": [49, 22, [48, 33]],
 };
 const REVOKE_COUNTS: Record<string, [number, number, number, number, number[]]> = {
-  "secret 45": [50, 43, 24, 21, [20]],
-  "user 45": [50, 49, 24, 19, [25]],
-  "secret 60": [50, 50, 24, 28, [31]],
-  "user 60": [50, 49, 24, 19, [40]],
+  "secret 45": [50, 43, 24, 21, [21]],
+  "user 45": [50, 49, 24, 19, [26]],
+  "secret 60": [50, 50, 24, 28, [32]],
+  "user 60": [50, 49, 24, 19, [41]],
 };
 
 const asSecret = { authorization: `Operator ${SECRET}` };
@@ -431,8 +433,9 @@ describe("the ban and the revoke on D1 (rulings 44 and 45 of plan 12f)", () => {
     expect(stops.results.map((s) => JSON.parse(s.data).cause)).toEqual(["ban", "ban", "ban"]);
     // The run of 2026-10-21: with the tool on, the act reads the audit table for
     // the user's own impersonations, so it ends 30, not 31. The sweep ends 15
-    // sessions and writes 3 stop rows in 42 queries, inside SWEEP_CALL_BUDGET.
-    expect([r.queries, inAct, sweeps]).toEqual([50, 30, [42]]);
+    // sessions and writes 3 stop rows in 43 queries, inside SWEEP_CALL_BUDGET. It was 42
+    // before the delete of the organization tokens (plan 12k).
+    expect([r.queries, inAct, sweeps]).toEqual([50, 30, [43]]);
     expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
   });
 
@@ -483,8 +486,9 @@ describe("the ban and the revoke on D1 (rulings 44 and 45 of plan 12f)", () => {
     expect(stops?.n).toBe(40);
     // The run of 2026-10-21: the act ends a page of the impersonation sessions, each
     // with its stop row. With the operator's own sessions, it ends 12 in 46 queries. It keeps
-    // calls for the own page. Three sweeps end the rest, at 48 queries or fewer each.
-    expect([r.queries, inAct, sweeps]).toEqual([46, 12, [48, 48, 23]]);
+    // calls for the own page. Three sweeps end the rest, at 47 queries or fewer each. A sweep
+    // page holds one session fewer since the delete of the organization tokens (plan 12k).
+    expect([r.queries, inAct, sweeps]).toEqual([46, 12, [47, 47, 28]]);
     expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
   });
 

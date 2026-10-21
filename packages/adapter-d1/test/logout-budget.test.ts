@@ -331,11 +331,12 @@ describe("the logouts of the operator acts and the sweep on D1 with a cap of 50 
       });
       if ((await rows("ta_oauth_session_client")) + (await rows("ta_oauth_logout")) === 0) break;
     }
-    // Every sweep fits 50 calls with its posts: 47 at the most in the runs of 2026-10-21. While
-    // links stay, the link step makes 16 rows a sweep; then each sweep sends 5 or 6 rows. The
-    // read of the pending-end rows (ruling 50 of plan 12f) takes 1 call: it was 17 before.
+    // Every sweep fits 50 calls with its posts. While links stay, the link step makes 15 rows a
+    // sweep; then each sweep sends 5 or 6 rows. The read of the pending-end rows (ruling 50 of
+    // plan 12f) takes 1 call: it was 17 before. The delete of the organization tokens (plan 12k)
+    // takes 1 more: 16 became 15.
     for (const s of sweeps) expect(s.queries + s.posts).toBeLessThanOrEqual(50);
-    expect(sweeps.map((s) => s.links).slice(0, 6)).toEqual([16, 16, 16, 16, 16, 10]);
+    expect(sweeps.map((s) => s.links).slice(0, 6)).toEqual([15, 15, 15, 15, 15, 15]);
     // Each link gave one post: no row went out twice.
     const sent = posts.map((p) => `${p.aud}:${p.sid}`);
     expect(sent).toHaveLength(90);
@@ -355,30 +356,31 @@ describe("the logouts of the operator acts and the sweep on D1 with a cap of 50 
   // due time, and the read gives them in the order of the page. A pairwise row costs 1 call
   // more than a public row: the read of its subject. Before each row, the outbox step keeps 9
   // calls for it and 2 for each claimed row that waits. Sweep 1 spends 1 more call on the
-  // reseal of the key. Sweeps 4 and 5 read the outbox twice, because 50 or more rows wait. So
-  // in sweeps 1, 4, and 5, a pairwise row first takes the call that a second row needs. The
-  // link sweeps 1 to 6 send 2, 2, 2, 2, 2, and 3 rows with a public row first. With a pairwise
-  // row first, they send 1, 2, 2, 1, 1, and 3. After the links, a sweep sends 6 rows when a
-  // public row is first and fewer than 50 rows wait. Every other sweep after the links sends 5.
-  // So no order sends fewer than 10 rows in the 6 link sweeps, or fewer than 5 in a later
-  // sweep: at most 6 + 80 / 5 = 22 sweeps. The best order takes 20.
+  // reseal of the key. So in some link sweeps a pairwise row first takes the call that a second
+  // row needs. Since plan 12k a sweep makes 15 link rows, so the 90 links take 6 full link
+  // sweeps. In the runs of 2026-10-21 at the plan 12k rebase, the link sweeps send 2 rows each
+  // with a public row first. With a pairwise row first, they send 1, 2, 2, 1, 1, and 1. After
+  // the links, a sweep sends 5 rows, or 6 in some sweeps when fewer rows wait. So no order of
+  // these runs sends fewer than 8 rows in the 6 link sweeps, or fewer than 5 in a later sweep:
+  // at most 6 + 82 / 5, so 23 sweeps. Both orders here take 22. Before plan 12k the bound was
+  // 22, and the best order took 20.
 
   it("delivers each of 90 links once, and leaves no link and no outbox row, after a secret switch", async () => {
     const sweeps = await sweepNinety("by session");
     expect(sweeps.map((s) => s.posts)).toEqual([
-      2, 2, 2, 2, 2, 3, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 6,
+      2, 2, 2, 2, 2, 2, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 3,
     ]);
-    // All 90 rows are sent and deleted within 22 sweeps in any order: 22 hours with an hourly
-    // cron. This order takes 20.
-    expect(sweeps.length).toBeLessThanOrEqual(22);
+    // All 90 rows are sent and deleted within 23 sweeps in any order: 23 hours with an hourly
+    // cron. This order takes 22.
+    expect(sweeps.length).toBeLessThanOrEqual(23);
   }, 300_000);
 
   it("takes 22 sweeps for 90 links when the pairwise links come first, the worst order", async () => {
     const sweeps = await sweepNinety("pairwise first");
-    // A pairwise row is first at sweeps 1, 4, and 5, and after the links until the public rows
-    // lead: 10 rows in the 6 link sweeps, then 5 a sweep, then 6. This order meets the bound.
+    // A pairwise row first costs a post in sweeps 1, 4, 5, and 6, and after the links until the
+    // public rows lead: 8 rows in the 6 link sweeps, then 5 a sweep, then 6. This order takes 22.
     expect(sweeps.map((s) => s.posts)).toEqual([
-      1, 2, 2, 1, 1, 3, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 2,
+      1, 2, 2, 1, 1, 1, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 6, 6, 6, 4,
     ]);
     expect(sweeps.length).toBe(22);
   }, 300_000);

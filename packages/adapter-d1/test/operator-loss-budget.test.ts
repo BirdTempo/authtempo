@@ -230,13 +230,16 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
 }
 
 /**
- * The counts of the first run on the binding, 2026-10-21: the queries of
- * the act, the sessions it ended, and the queries of each sweep. The
- * account delete makes many deletes of its own, so its page ends the own
- * session and 3 impersonation sessions. The removal ends 13.
+ * The counts of the run on the binding at the plan 12k rebase, 2026-10-21:
+ * the queries of the act, the sessions it ended, and the queries of each
+ * sweep. The account delete makes many deletes of its own, so its page ends
+ * the own session and 2 impersonation sessions. The removal ends 11. Plan
+ * 12k adds writes to both acts (the team rows and the tokens), and one
+ * delete to each sweep. So each page ends fewer: the first run of 12f gave
+ * [49, 4, [48, 48, 37]] and [50, 13, [48, 45]].
  */
-const DELETE_COUNTS: [number, number, number[]] = [49, 4, [48, 48, 37]];
-const REMOVE_COUNTS: [number, number, number[]] = [50, 13, [48, 45]];
+const DELETE_COUNTS: [number, number, number[]] = [48, 3, [47, 47, 44]];
+const REMOVE_COUNTS: [number, number, number[]] = [49, 11, [47, 47, 26]];
 
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });
 
