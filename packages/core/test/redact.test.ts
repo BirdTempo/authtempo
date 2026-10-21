@@ -46,6 +46,9 @@ describe("the redaction source (plan 12h Task 1, spec 31 item 9)", () => {
     expect(FIELD_KINDS.errorName("JWTExpired")).toBe("Error");
     // A thrown value that is no Error logs as its typeof (plan 12h ruling 1, point 3).
     expect(FIELD_KINDS.errorName("string")).toBe("string");
+    // A name of 64 characters stays; a name of 65 writes Error, so the field has a bound.
+    expect(FIELD_KINDS.errorName(`${"A".repeat(59)}Error`)).toBe(`${"A".repeat(59)}Error`);
+    expect(FIELD_KINDS.errorName(`${"A".repeat(60)}Error`)).toBe("Error");
   });
 
   it("rejects a value that fails its kind", () => {

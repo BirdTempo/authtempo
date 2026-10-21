@@ -95,10 +95,12 @@ export const FIELD_KINDS: Readonly<Record<FieldKind, (value: unknown) => unknown
     routePath: listed,
     name: matches(NAME_RE),
     identifier: matches(IDENTIFIER_RE),
+    // A name over 64 characters writes `Error`, as in `errorClass`: the thrower
+    // sets the name, so without a bound a field can grow without a limit.
     errorName: (value: unknown) =>
       typeof value !== "string"
         ? REJECT
-        : ERROR_CLASS_RE.test(value) || TYPEOF_NAMES.has(value)
+        : value.length <= 64 && (ERROR_CLASS_RE.test(value) || TYPEOF_NAMES.has(value))
           ? value
           : "Error",
     errorClass: (value: unknown) =>
