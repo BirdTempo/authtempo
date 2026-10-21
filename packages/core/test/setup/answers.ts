@@ -65,6 +65,15 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   const ENTRIES = new Map<string, RouteEntry>(ROUTES.map((r) => [`${r.method} ${r.path}`, r]));
   const CONTRACT: Record<string, RouteContract> = ROUTE_CONTRACT;
   const ROUTER = new Set<string>(ROUTER_CODES);
+  /**
+   * The keys of an error body beside `error`, for each code that has one
+   * (ruling 7 of plan 12h). `message` is only on hook_refused, and `reason`
+   * is only on not_ready.
+   */
+  const CODE_KEYS: Readonly<Record<string, readonly string[]>> = {
+    hook_refused: ["message"],
+    not_ready: ["reason"],
+  };
 
   interface AnswerRecord {
     key: string | null;
@@ -207,14 +216,21 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     )
       return { ...base, verdict: "an invalid_dpop_proof 401 carries no DPoP error challenge" };
     if (code !== null) {
-      // Rule 6: the keys of the error schema of the code's table, and no other key.
+      // Rule 6: error, and the keys of CODE_KEYS for this code alone. Each key
+      // must also be in the error schema of the code's table.
       const oauth = (ENTRIES.get(key)?.oauthCodes as readonly string[] | undefined)?.includes(code);
-      const allowedKeys = Object.keys(
+      const schemaKeys = Object.keys(
         (oauth ? ERROR_SCHEMAS.OAuthError : ERROR_SCHEMAS.Error).properties,
+      );
+      const allowedKeys = ["error", ...(CODE_KEYS[code] ?? [])].filter((k) =>
+        schemaKeys.includes(k),
       );
       const extra = Object.keys(body as object).filter((k) => !allowedKeys.includes(k));
       if (extra.length > 0)
-        return { ...base, verdict: `the error body has the keys ${extra.join(", ")} of no schema` };
+        return {
+          ...base,
+          verdict: `the ${code} body has the keys ${extra.join(", ")} that this code does not carry`,
+        };
       return { ...base, verdict: codeVerdict(key as RouteKey, code, status, false) };
     }
     if (status >= 400) return { ...base, verdict: `a ${status} ${type} answer carries no code` };
