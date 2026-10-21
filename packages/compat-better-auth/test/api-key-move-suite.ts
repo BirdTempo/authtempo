@@ -211,6 +211,7 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
             noOwner: 0,
             invalidName: 0,
             invalidMetadata: 0,
+            wideWindow: 0,
           },
           skippedKeys: [
             { id: "k_1", owner: ada.user.id, reason: "disabled" },
@@ -436,6 +437,57 @@ export function apiKeyMoveSuite(label: string, setup: () => Promise<MoveDatabase
             (await on.auth.api.verifyApiKey({ body: { key: held } })).error?.code ?? "ok",
           );
         expect(limited).toEqual(["ok", "ok", "RATE_LIMITED"]);
+      }),
+    );
+
+    it(
+      "skips a key whose window core cannot keep without a wider rate, with its reason",
+      fresh(async (m) => {
+        // Final review of plan 12k, m1: a max of 0 moved with no window, and 1 in 2 days moved as 1 a day.
+        const { person } = app(m, "user", true);
+        const ada = await person("ada@example.com");
+        const twoDays = 2 * 86_400_000;
+        await m.insertKey(
+          await keyRow(generatedKey("laaa_"), {
+            id: "k_zero",
+            referenceId: ada.user.id,
+            rateLimitMax: 0,
+          }),
+        );
+        await m.insertKey(
+          await keyRow(generatedKey("laaa_"), {
+            id: "k_slow",
+            referenceId: ada.user.id,
+            rateLimitTimeWindow: twoDays,
+            rateLimitMax: 1,
+          }),
+        );
+        // 5 in 2 days holds 2 in one day, rounded down: the rate does not grow.
+        await m.insertKey(
+          await keyRow(generatedKey("laaa_"), {
+            id: "k_kept",
+            referenceId: ada.user.id,
+            rateLimitTimeWindow: twoDays,
+            rateLimitMax: 5,
+          }),
+        );
+        const report = await move(m, "user", false, ["laaa_"], true);
+        expect({
+          moved: report.moved,
+          wideWindow: report.skipped.wideWindow,
+          keys: report.skippedKeys,
+        }).toEqual({
+          moved: 1,
+          wideWindow: 2,
+          keys: [
+            { id: "k_slow", owner: ada.user.id, reason: "wideWindow" },
+            { id: "k_zero", owner: ada.user.id, reason: "wideWindow" },
+          ],
+        });
+        const rows = await m.database.storage.findMany("apiToken", [
+          { field: "userId", op: "eq", value: ada.user.id },
+        ]);
+        expect(rows.map((r) => [r.rateLimitSeconds, r.rateLimitMax])).toEqual([[86_400, 2]]);
       }),
     );
 

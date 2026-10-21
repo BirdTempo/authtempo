@@ -38,6 +38,11 @@ export interface ApiKeyMoveReport {
     invalidName: number;
     /** The metadata breaks core's rule: its JSON is over 4096 bytes. */
     invalidMetadata: number;
+    /**
+     * Core cannot hold the window without a wider rate: a stored max below 1,
+     * or a window over one day whose share of the max in one day is below 1.
+     */
+    wideWindow: number;
   };
   /**
    * Each skipped row: its apikey id (never the key), its owner, and the
@@ -63,7 +68,8 @@ export type SkipReason =
   | "noCreator"
   | "noOwner"
   | "invalidName"
-  | "invalidMetadata";
+  | "invalidMetadata"
+  | "wideWindow";
 
 export interface ApiKeyMoveInput {
   names: Names;
@@ -180,17 +186,27 @@ function narrowSet(
   return { set, dropped };
 }
 
-/** The window of a stored key, never wider than Better Auth's. Null: no window. */
-function windowOf(row: Record<string, unknown>): { seconds: number; max: number } | null {
+/**
+ * The window of a stored key, never wider than Better Auth's. Null: no
+ * window, as Better Auth skips one with no time or no max
+ * (`evaluateRateLimit`, dist/index.mjs:1594). "wide": core cannot hold the
+ * window without a wider rate, so the move skips the key (final review of
+ * plan 12k, m1). With a max below 1, Better Auth allows one call and then
+ * refuses each call until a window passes with no call (dist/index.mjs:1847).
+ * Core's window takes a max of 1 or more (`validWindow`).
+ */
+function windowOf(row: Record<string, unknown>): { seconds: number; max: number } | null | "wide" {
   const ms = numberOf(row.rateLimitTimeWindow);
   const max = numberOf(row.rateLimitMax);
-  if (!boolOf(row.rateLimitEnabled, true) || ms === null || max === null || ms <= 0 || max < 1)
-    return null;
+  if (!boolOf(row.rateLimitEnabled, true) || ms === null || max === null || ms <= 0) return null;
+  if (max < 1) return "wide";
   // Rounded up: a longer window with the same max is narrower.
   const seconds = Math.max(1, Math.ceil(ms / 1000));
   if (seconds <= WINDOW_SECONDS_MAX) return { seconds, max: Math.min(max, WINDOW_CALLS_MAX) };
   // One day with the share of the max that the day holds, rounded down, so the rate never grows.
-  const share = Math.max(1, Math.floor((max * WINDOW_SECONDS_MAX) / seconds));
+  // A share below 1 would grow the rate, so such a key does not move.
+  const share = Math.floor((max * WINDOW_SECONDS_MAX) / seconds);
+  if (share < 1) return "wide";
   return { seconds: WINDOW_SECONDS_MAX, max: Math.min(share, WINDOW_CALLS_MAX) };
 }
 
@@ -297,6 +313,7 @@ export async function moveBetterAuthApiKeys(
       noOwner: 0,
       invalidName: 0,
       invalidMetadata: 0,
+      wideWindow: 0,
     },
     skippedKeys: [],
     byOwner: {},
@@ -373,6 +390,10 @@ export async function moveBetterAuthApiKeys(
     }
     const { set, dropped } = narrowSet(row.permissions, known);
     const window = input.rateLimitEnabled ? windowOf(row) : null;
+    if (window === "wide") {
+      skip("wideWindow");
+      continue;
+    }
     const quota = quotaOf(row);
     const createdAt = dateOf(row.createdAt) ?? now;
     const fields = {
