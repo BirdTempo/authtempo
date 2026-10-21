@@ -212,9 +212,15 @@ importers:
       '@authtempo/adapter-d1':
         specifier: workspace:*
         version: link:../../packages/adapter-d1
+      '@authtempo/adapter-mysql':
+        specifier: workspace:*
+        version: link:../../packages/adapter-mysql
       '@authtempo/adapter-postgres':
         specifier: workspace:*
         version: link:../../packages/adapter-postgres
+      '@authtempo/adapter-sqlite':
+        specifier: workspace:*
+        version: link:../../packages/adapter-sqlite
       '@authtempo/breach-check':
         specifier: workspace:*
         version: link:../../packages/breach-check
@@ -276,6 +282,9 @@ importers:
       jose:
         specifier: 6.2.12
         version: 6.2.12
+      mysql2:
+        specifier: 3.24.5
+        version: 3.24.5(@types/node@24.19.1)
       postgres:
         specifier: 3.4.9
         version: 3.4.9

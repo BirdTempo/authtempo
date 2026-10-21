@@ -16,6 +16,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
   - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 9"
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 7"
+  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 8"
 sidebar:
   order: 2
 ---
@@ -34,7 +35,7 @@ Warning: upgrade Better Auth to 1.7.7 or later before the move. Version 1.7.7 fi
 
 ## Before you start
 
-- An app on Better Auth 1.7, on Postgres through postgres.js or on D1. [Better Auth compatibility](/docs/reference/compat-better-auth/) lists what it keeps.
+- An app on Better Auth 1.7, on Postgres through postgres.js, on D1, or on a SQLite file through `node:sqlite` or better-sqlite3. [Better Auth compatibility](/docs/reference/compat-better-auth/) lists what it keeps.
 - The tables `user`, `session`, `account`, `verification`, `organization`, `member`, `invitation`, and `passkey`. Create a missing table with Better Auth's own SQL for it. [The Better Auth tables](/docs/reference/schema/#the-better-auth-tables) section lists them.
 - The packages of authtempo in the pnpm workspace of the repo. [Choose your stack](/docs/start/) tells why.
 
@@ -54,13 +55,15 @@ The password rows stay in the `account` table. Core verifies a Better Auth hash,
 ### Dry run
 
 1. List the compat migrations that the database lacks, and apply nothing.
-2. Add `--before-1.7` on D1 when the tables are from before Better Auth 1.7.
+2. Add `--before-1.7` on D1 or SQLite when the tables are from before Better Auth 1.7.
+3. On SQLite, name the file that holds the Better Auth tables. A missing file stops the command with exit 2.
 
 The packages are not on a registry yet. In this repo, run each command below as `node /path/to/authtempo/packages/cli/dist/bin/authtempo.js …` in the folder of your app. [Run it from this repo](/docs/reference/cli/#run-it-from-this-repo) tells how. The pnpm filter form runs in `examples/worker` and exits 1 on any failure, so use it for `--help` only.
 
 ```sh
 authtempo migrate --target postgres --url-env DATABASE_URL --tables compat --dry-run
 authtempo migrate --target d1 --database <database> --remote --tables compat --dry-run
+authtempo migrate --target sqlite --file <path> --tables compat --dry-run
 ```
 
 ### Move
@@ -68,6 +71,7 @@ authtempo migrate --target d1 --database <database> --remote --tables compat --d
 1. Run the same command without `--dry-run`.
 2. On D1, the command copies each compat file of the table below into the app's `migrations_dir`, under the next number. Then it applies them.
 3. On Postgres, the server can call `betterAuthSchemaStorage({ dialect: "postgres", sql }).migrate()` once per deploy, before the first request, instead.
+   - On SQLite, `betterAuthSchemaStorage({ dialect: "sqlite", driver }).migrate()` does the same. `driver` comes from an entry of `@authtempo/adapter-sqlite`.
 4. In the app's `package.json`, point each Better Auth name that the app imports at the compatibility package.
 
 ```json

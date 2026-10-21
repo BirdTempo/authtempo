@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { EXEMPT_ENTRIES, EXPORT_ENTRIES, SDK_PACKAGES } from "../scripts/lib/entries.ts";
+import {
+  ADAPTER_PACKAGES,
+  EXEMPT_ENTRIES,
+  EXPORT_ENTRIES,
+  SDK_PACKAGES,
+} from "../scripts/lib/entries.ts";
 import { readRepoFile } from "../scripts/lib/load.ts";
 
 /** The `exports` map of a package of the repo: `@authtempo/x` lives in `packages/x`. */
@@ -21,12 +26,12 @@ function sourceOf(pkg: string, entry: string): string {
 }
 
 describe("the export entry list (plan 11d)", () => {
-  it("lists every entry of every SDK package, with a page or with a reason", () => {
+  it("lists every entry of every SDK package and adapter package, with a page or with a reason", () => {
     const listed = new Set([
       ...EXPORT_ENTRIES.map((e) => `${e.pkg} ${e.entry}`),
       ...EXEMPT_ENTRIES.map((e) => `${e.pkg} ${e.entry}`),
     ]);
-    for (const pkg of SDK_PACKAGES)
+    for (const pkg of [...SDK_PACKAGES, ...ADAPTER_PACKAGES])
       for (const entry of entriesOf(pkg))
         expect(listed, `${pkg} ${entry}`).toContain(`${pkg} ${entry}`);
   });

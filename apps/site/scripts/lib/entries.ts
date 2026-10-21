@@ -2,7 +2,8 @@
  * Every export entry of an SDK package and the page that lists its exports
  * (plan 11d). The runner makes one export check per row, and
  * `test/entries.test.ts` holds the list to the `exports` map of each package
- * in `SDK_PACKAGES`: an entry with no row fails, and a row with no entry fails.
+ * in `SDK_PACKAGES` and `ADAPTER_PACKAGES`: an entry with no row fails, and a
+ * row with no entry fails.
  */
 export interface ExportEntry {
   /** The name of the check: `check-exports-<label>`. */
@@ -74,6 +75,15 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     headings: ["The secrets entry"],
   },
   // The route contract and the OpenAPI generator (plan 11g), on the page of the document.
+  // The column map of each dialect and the DDL of the schema (plan 12g), on the schema page.
+  {
+    label: "core-ddl",
+    pkg: "@authtempo/core",
+    entry: "./ddl",
+    source: "packages/core/src/storage/ddl.ts",
+    page: "/docs/reference/schema/",
+    headings: ["The ddl entry"],
+  },
   {
     label: "core-openapi",
     pkg: "@authtempo/core",
@@ -252,6 +262,65 @@ export const EXPORT_ENTRIES: readonly ExportEntry[] = [
     page: "/docs/reference/tanstack-start/",
     headings: ["Exports"],
   },
+  // The SQLite adapter of plan 12g: the main entry, the four driver entries,
+  // and the D1 seam that each driver runs on, on one page.
+  {
+    label: "adapter-sqlite",
+    pkg: "@authtempo/adapter-sqlite",
+    entry: ".",
+    source: "packages/adapter-sqlite/src/index.ts",
+    page: "/docs/reference/adapter-sqlite/",
+    headings: ["The main entry"],
+  },
+  {
+    label: "adapter-sqlite-node",
+    pkg: "@authtempo/adapter-sqlite",
+    entry: "./node",
+    source: "packages/adapter-sqlite/src/node.ts",
+    page: "/docs/reference/adapter-sqlite/",
+    headings: ["The node entry"],
+  },
+  {
+    label: "adapter-sqlite-better-sqlite3",
+    pkg: "@authtempo/adapter-sqlite",
+    entry: "./better-sqlite3",
+    source: "packages/adapter-sqlite/src/better-sqlite3.ts",
+    page: "/docs/reference/adapter-sqlite/",
+    headings: ["The better-sqlite3 entry"],
+  },
+  {
+    label: "adapter-sqlite-bun",
+    pkg: "@authtempo/adapter-sqlite",
+    entry: "./bun",
+    source: "packages/adapter-sqlite/src/bun.ts",
+    page: "/docs/reference/adapter-sqlite/",
+    headings: ["The bun entry"],
+  },
+  {
+    label: "adapter-sqlite-libsql",
+    pkg: "@authtempo/adapter-sqlite",
+    entry: "./libsql",
+    source: "packages/adapter-sqlite/src/libsql.ts",
+    page: "/docs/reference/adapter-sqlite/",
+    headings: ["The libsql entry"],
+  },
+  {
+    label: "adapter-d1-seam",
+    pkg: "@authtempo/adapter-d1",
+    entry: "./seam",
+    source: "packages/adapter-d1/src/seam-entry.ts",
+    page: "/docs/reference/adapter-sqlite/",
+    headings: ["The D1 seam entry"],
+  },
+  // The MySQL adapter of plan 12g.
+  {
+    label: "adapter-mysql",
+    pkg: "@authtempo/adapter-mysql",
+    entry: ".",
+    source: "packages/adapter-mysql/src/index.ts",
+    page: "/docs/reference/adapter-mysql/",
+    headings: ["Exports"],
+  },
   // The stacks of `authtempo init`, an entry with no import, so the site
   // build bundles it (plan 11b Task 5, ruling 20 of its lane).
   {
@@ -288,11 +357,6 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
   },
   {
     pkg: "@authtempo/core",
-    entry: "./ddl",
-    reason: "the column map of each dialect, for the adapters and the CLI (plan 12g)",
-  },
-  {
-    pkg: "@authtempo/core",
     entry: "./shape-conformance",
     reason: "the shape check of the migrations, for an adapter's own tests (plan 12g)",
   },
@@ -318,6 +382,18 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
       "the types of the observe port for a sink; the config page names its keys (plan 12h Task 2)",
   },
   {
+    pkg: "@authtempo/adapter-d1",
+    entry: ".",
+    reason:
+      "the D1 adapter of the Workers tutorials; no reference page lists its exports yet (a gap from before plan 12g)",
+  },
+  {
+    pkg: "@authtempo/adapter-postgres",
+    entry: ".",
+    reason:
+      "the Postgres adapter of the tutorials; no reference page lists its exports yet (a gap from before plan 12g)",
+  },
+  {
     pkg: "@authtempo/client",
     entry: "./conformance",
     reason: "the error-shape suite, for an SDK's own tests; it imports vitest at run time",
@@ -341,4 +417,16 @@ export const SDK_PACKAGES: readonly string[] = [
   "@authtempo/solid",
   "@authtempo/fastify",
   "@authtempo/tanstack-start",
+];
+
+/**
+ * The storage adapter packages (plan 12g Task 9). The entry test reads their
+ * `exports` maps too, so a new adapter entry needs a row. They are not SDK
+ * packages: the agent index lists no binding of them.
+ */
+export const ADAPTER_PACKAGES: readonly string[] = [
+  "@authtempo/adapter-d1",
+  "@authtempo/adapter-postgres",
+  "@authtempo/adapter-sqlite",
+  "@authtempo/adapter-mysql",
 ];

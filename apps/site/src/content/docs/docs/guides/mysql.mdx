@@ -1,0 +1,180 @@
+---
+title: Run authtempo on MySQL
+description: Store the users and sessions of a Node app in MySQL 8.4 or later, with the MySQL adapter and its four checks at start.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 28
+  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 9"
+  - packages/adapter-mysql/README.md "Checks at start"
+  - packages/adapter-mysql/README.md "Transactions"
+  - packages/adapter-mysql/README.md "Migrations"
+  - packages/adapter-mysql/README.md "Length bounds"
+  - packages/core/src/storage/ddl.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import sample from "../../../../../samples/guides/mysql-node.ts?raw";
+
+**For:** a developer of a Node app that keeps its data in MySQL.
+
+**What it does:** `@authtempo/adapter-mysql` gives core a storage adapter and a shared limiter on MySQL 8.4 LTS and later. It runs on a mysql2 pool that the app opens.
+
+## Before you start
+
+- Node 22 or newer.
+- A MySQL server at version 8.4 or later. The tests run on 8.4.11 and 9.7.2. [Schema and migrations](/docs/reference/schema/#mysql-column-types) gives the column types.
+- A working setup from a [getting started tutorial](/docs/start/).
+
+## Steps
+
+1. Create the database with `CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`.
+2. Open a mysql2 pool. For a host that is not a loopback address, check the certificate and the host name.
+3. Run `applyMysqlMigrations(pool)` at deploy, or run `authtempo migrate --target mysql`.
+4. Pass `createMysqlAdapter(pool)` and `createMysqlLimiter(pool)` to `createAuth`.
+
+<Code code={sample} lang="ts" title="authtempo on MySQL through a mysql2 pool" />
+
+## The checks at start
+
+The first call of the adapter runs four checks, in this order. A pass is kept. A failure is not kept, so the next call checks again. Each message names the setting, never a value.
+
+1. The schema version in `ta_meta`. A database with no `ta_meta` (MySQL error 1146) answers `schema_mismatch`. Any other error, such as a refused connection, passes through.
+2. FOUND_ROWS. An update that writes the same value must count the row. Else `config_mismatch` with "the pool reports changed rows, not matched rows; keep the mysql2 flag FOUND_ROWS". mysql2 sets the flag by default.
+3. Strict mode. Else `config_mismatch` with "the session has no strict mode; set sql_mode to include STRICT_TRANS_TABLES". Without it, MySQL cuts a long value and stores it.
+4. The collation `utf8mb4_0900_bin` of each `ta_` table. Else `config_mismatch`, with each table and its collation. A collation that ignores case makes two passkey ids that differ only in case one key.
+
+## TLS
+
+The adapter does not check the transport: the app opens the pool. For a host that is not a loopback address, set `ssl: { rejectUnauthorized: true, verifyIdentity: true }`. mysql2 checks the certificate chain with `rejectUnauthorized`, and the host name only with `verifyIdentity`.
+
+`authtempo migrate --target mysql` holds the same rule. A URL to such a host needs `?ssl={"rejectUnauthorized":true,"verifyIdentity":true}`, else the command stops with exit 2 before any connection. [authtempo migrate](/docs/reference/cli/migrate/#mysql) gives the rules.
+
+## Transactions
+
+`transaction(fn)` takes one pool connection, sets the isolation level READ COMMITTED, and starts a transaction. It commits, or it rolls back and throws again. A nested call is a savepoint. This is the model of the Postgres adapter, not the undo log of D1.
+
+- READ COMMITTED is necessary. A count after a lock of the parent row must see the commit of the other caller.
+- Do not query the pool from a hook inside a flow when the pool has one connection. The transaction holds that connection, so the hook waits without end.
+- InnoDB can end a statement in a deadlock (MySQL error 1213). Outside a transaction, the adapter sends the statement again, with three tries in all.
+- A deadlock in a transaction ends the transaction, also from inside a savepoint. The error passes through, and each later statement and the commit of that transaction throw.
+
+## Migrations
+
+MySQL starts at one baseline migration, `0001_schema_v13`. MySQL commits each DDL statement at once. So the runner records each statement as a step in `ta_migrations`, and after a failure it resumes at the first step with no record.
+
+- A stop between a step and its record leaves the object of the step. The next run makes the step again on a temporary copy of its table, and compares the two. When they are equal, it records the step and goes on. Else it stops with the step and the error.
+- The copy needs the `CREATE TEMPORARY TABLES` privilege on the database, beside the privileges of the steps. Without it, the runner stops with the step and MySQL error 1044.
+- The runner takes the named lock `authtempo_migrations` for up to 60 seconds. A MySQL named lock belongs to the server, so two databases on one server share it.
+
+## Length bounds
+
+On MySQL, a string field that a key or an index holds has a width. Any other string is `TEXT`. A longer value fails with `invalid_argument` (MySQL error 1406) on MySQL only: D1, Postgres, and SQLite store it.
+
+An ascii column holds printable ASCII, U+0020 to U+007E, with no trailing space. A write of another value answers `invalid_argument` on MySQL only. A `where` with such a value answers as Postgres and D1 do.
+
+The table holds `MYSQL_STRINGS` of `@authtempo/core/ddl`. A site test holds each row equal to the code.
+
+| Field | Length | Character set | Index prefix |
+| --- | --- | --- | --- |
+| `user.id` | 64 | ascii | none |
+| `user.email` | 254 | utf8mb4 | none |
+| `identity.id` | 64 | ascii | none |
+| `identity.userId` | 64 | ascii | none |
+| `identity.provider` | 64 | utf8mb4 | none |
+| `identity.subject` | 255 | utf8mb4 | none |
+| `session.id` | 64 | ascii | none |
+| `session.tokenHash` | 64 | ascii | none |
+| `session.userId` | 64 | ascii | none |
+| `session.activeOrganizationId` | 64 | ascii | none |
+| `verification.id` | 64 | ascii | none |
+| `verification.purpose` | 32 | ascii | none |
+| `verification.identifier` | 2048 | utf8mb4 | 255 |
+| `verification.valueHash` | 64 | ascii | none |
+| `passkey.id` | 64 | ascii | none |
+| `passkey.userId` | 64 | ascii | none |
+| `passkey.credentialId` | 1364 | ascii | none |
+| `organization.id` | 64 | ascii | none |
+| `organization.slug` | 64 | ascii | none |
+| `member.id` | 64 | ascii | none |
+| `member.organizationId` | 64 | ascii | none |
+| `member.userId` | 64 | ascii | none |
+| `invitation.id` | 64 | ascii | none |
+| `invitation.tokenHash` | 64 | ascii | none |
+| `invitation.organizationId` | 64 | ascii | none |
+| `invitation.email` | 254 | utf8mb4 | none |
+| `password.id` | 64 | ascii | none |
+| `password.userId` | 64 | ascii | none |
+| `apiToken.id` | 64 | ascii | none |
+| `apiToken.tokenHash` | 64 | ascii | none |
+| `apiToken.userId` | 64 | ascii | none |
+| `totp.id` | 64 | ascii | none |
+| `totp.userId` | 64 | ascii | none |
+| `trustedDevice.id` | 64 | ascii | none |
+| `trustedDevice.tokenHash` | 64 | ascii | none |
+| `trustedDevice.userId` | 64 | ascii | none |
+| `jwk.id` | 64 | ascii | none |
+| `jwk.slot` | 16 | ascii | none |
+| `oauthClient.id` | 2048 | ascii | none |
+| `oauthConsent.id` | 64 | ascii | none |
+| `oauthConsent.userId` | 64 | ascii | none |
+| `oauthConsent.clientId` | 2048 | ascii | none |
+| `oauthToken.id` | 64 | ascii | none |
+| `oauthToken.tokenHash` | 64 | ascii | none |
+| `oauthToken.userId` | 64 | ascii | none |
+| `oauthToken.clientId` | 2048 | ascii | none |
+| `oauthToken.familyId` | 64 | ascii | none |
+| `oauthToken.parentId` | 64 | ascii | none |
+| `oauthDevice.id` | 64 | ascii | none |
+| `oauthDevice.deviceCodeHash` | 64 | ascii | none |
+| `oauthDevice.userCodeHash` | 64 | ascii | none |
+| `oauthSubject.id` | 64 | ascii | none |
+| `oauthSubject.userId` | 64 | ascii | none |
+| `oauthSubject.sector` | 2048 | ascii | none |
+| `oauthSubject.subject` | 64 | ascii | none |
+| `oauthSessionClient.id` | 64 | ascii | none |
+| `oauthSessionClient.sessionId` | 64 | ascii | none |
+| `oauthSessionClient.userId` | 64 | ascii | none |
+| `oauthSessionClient.clientId` | 2048 | ascii | none |
+| `oauthLogout.id` | 64 | ascii | none |
+| `oauthLogout.userId` | 64 | ascii | none |
+| `secondFactor.id` | 64 | ascii | none |
+| `secondFactor.userId` | 64 | ascii | none |
+| `operatorAudit.id` | 64 | ascii | none |
+| `operatorAudit.targetUserId` | 64 | ascii | none |
+| `operatorAudit.actorId` | 64 | ascii | none |
+| `organizationRole.id` | 64 | ascii | none |
+| `organizationRole.organizationId` | 64 | ascii | none |
+| `organizationRole.name` | 64 | ascii | none |
+| `team.id` | 64 | ascii | none |
+| `team.organizationId` | 64 | ascii | none |
+| `teamMember.id` | 64 | ascii | none |
+| `teamMember.teamId` | 64 | ascii | none |
+| `teamMember.userId` | 64 | ascii | none |
+| `teamMember.organizationId` | 64 | ascii | none |
+| `organizationToken.id` | 64 | ascii | none |
+| `organizationToken.tokenHash` | 64 | ascii | none |
+| `organizationToken.organizationId` | 64 | ascii | none |
+| `movedToken.id` | 64 | ascii | none |
+| `movedToken.source` | 64 | ascii | none |
+| `movedToken.sourceId` | 255 | utf8mb4 | none |
+
+## Workers through Hyperdrive
+
+A Worker reaches MySQL through Hyperdrive with mysql2 3.13.0 or later, `disableEval: true`, and Node.js compatibility (`nodejs_compat`). A proof of the package bundles a Worker with wrangler and runs it in workerd. That is a proof of the bundle, not a deploy.
+
+## MariaDB
+
+MariaDB is not supported. It has no `utf8mb4_0900_bin`, and its `RETURNING` and its JSON differ.
+
+## If it fails
+
+- [`schema_mismatch`](/docs/reference/errors/#schema_mismatch): the migrations did not run. Run them, and the next call checks again.
+- [`config_mismatch`](/docs/reference/errors/#config_mismatch): a check at start failed. The message names the setting to change.
+- [`invalid_argument`](/docs/reference/errors/#invalid_argument): a value is longer than its column, or not printable ASCII on an ascii column.
+- MySQL error 1044 when a run resumes after a stop: the user lacks `CREATE TEMPORARY TABLES`. Grant it, and run the migrations again.
+
+## Next
+
+- [The MySQL adapter](/docs/reference/adapter-mysql/)
+- [Run authtempo on SQLite](/docs/guides/sqlite/)
+- [authtempo generate](/docs/reference/cli/generate/)

@@ -14,7 +14,9 @@
   },
   "dependencies": {
     "@authtempo/adapter-d1": "workspace:*",
+    "@authtempo/adapter-mysql": "workspace:*",
     "@authtempo/adapter-postgres": "workspace:*",
+    "@authtempo/adapter-sqlite": "workspace:*",
     "@authtempo/breach-check": "workspace:*",
     "@authtempo/captcha-turnstile": "workspace:*",
     "@authtempo/client": "workspace:*",
@@ -37,6 +39,7 @@
     "@types/node": "24.19.1",
     "astro": "7.3.8",
     "jose": "6.2.12",
+    "mysql2": "3.24.5",
     "postgres": "3.4.9",
     "typescript": "7.0.2",
     "vitest": "5.0.3",

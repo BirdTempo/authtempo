@@ -31,7 +31,7 @@ sidebar:
 
 | Source | Path | What moves | What the app changes | The command | Guide |
 | --- | --- | --- | --- | --- | --- |
-| Better Auth 1.7 | The compatibility package | Everything stays in the app's own tables | Its package aliases, and the options that core refuses | `authtempo migrate --target <postgres or d1> --tables compat --dry-run` | [From Better Auth](/docs/migrate/better-auth/) |
+| Better Auth 1.7 | The compatibility package | Everything stays in the app's own tables | Its package aliases, and the options that core refuses | `authtempo migrate --target <postgres, d1, or sqlite> --tables compat --dry-run` | [From Better Auth](/docs/migrate/better-auth/) |
 | Supabase Auth | The importer | Users, identities, bcrypt and Argon2id hashes | Its auth calls, to `@authtempo/client` | `authtempo import supabase --users users.csv --identities identities.csv --formats bcrypt,argon2id --target postgres --url-env DATABASE_URL --dry-run` | [From Supabase Auth](/docs/migrate/supabase/) |
 | Clerk | The importer | Users, identities, bcrypt hashes, organizations | Its auth calls | `authtempo import clerk --csv export.csv --users users.json --organizations organizations.json --formats bcrypt --target postgres --url-env DATABASE_URL --dry-run` | [From Clerk](/docs/migrate/clerk/) |
 | Auth0 | The importer | Users, identities, bcrypt hashes from a support case, organizations | Its auth calls | `authtempo import auth0 --users users.ndjson --hashes hashes.ndjson --organizations organizations.json --role-map lead=admin --formats bcrypt --target postgres --url-env DATABASE_URL --dry-run` | [From Auth0](/docs/migrate/auth0/) |

@@ -44,6 +44,8 @@ The `@authtempo` packages are private and at version `0.0.0`. They are not on a 
 | `@authtempo/core` | The engine. `createAuth(config)` answers `handle`, `session`, `caller`, and `api`. |
 | `@authtempo/adapter-d1` | The storage on Cloudflare D1, with its migrations and an owned limiter. |
 | `@authtempo/adapter-postgres` | The storage on Postgres through postgres.js, with its migrations and an owned limiter. |
+| `@authtempo/adapter-sqlite` | The storage on SQLite for Node and Bun, and on remote libSQL, with its migrations and an owned limiter. [Run authtempo on SQLite](/docs/guides/sqlite/) tells how. |
+| `@authtempo/adapter-mysql` | The storage on MySQL 8.4 and later through mysql2, with its migrations and an owned limiter. [Run authtempo on MySQL](/docs/guides/mysql/) tells how. |
 | `@authtempo/client` | The app side: `createClient` calls the routes and answers typed results. It runs in a browser, in Expo, and in Electron. |
 | `@authtempo/handoff` | The sign-in of a native or desktop app through the system browser. |
 | `@authtempo/compat-better-auth` | Runs an app written for Better Auth 1.7 on authtempo, on its own tables. |

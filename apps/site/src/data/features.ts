@@ -236,10 +236,20 @@ export const PACKAGE_FEATURES: Readonly<Record<string, PackageFeature>> = {
     line: "The storage adapter for Cloudflare D1, with no Node dependency.",
     guide: "/docs/start/workers-d1/",
   },
+  "adapter-mysql": {
+    title: "MySQL adapter",
+    line: "The storage adapter and the limiter on MySQL 8.4 LTS and later, through a mysql2 pool.",
+    guide: "/docs/guides/mysql/",
+  },
   "adapter-postgres": {
     title: "Postgres adapter",
     line: "The storage adapter for Postgres through postgres.js.",
     guide: "/docs/start/workers-hyperdrive/",
+  },
+  "adapter-sqlite": {
+    title: "SQLite adapter",
+    line: "The storage adapter and the limiter for SQLite on Node and Bun, and for remote libSQL on Workers.",
+    guide: "/docs/guides/sqlite/",
   },
   astro: {
     title: "Astro",
@@ -357,10 +367,6 @@ export const PACKAGE_FEATURES: Readonly<Record<string, PackageFeature>> = {
 
 /** Each folder of packages/ that has no row, with its reason. check-features prints each one. */
 export const PACKAGE_EXEMPT: Readonly<Record<string, string>> = {
-  // Plan 12g: Task 9 writes the MySQL guide and moves this package to a row.
-  "adapter-mysql": "the MySQL guide comes with plan 12g Task 9",
-  // Plan 12g: Task 9 writes the SQLite guide and moves this package to a row.
-  "adapter-sqlite": "the SQLite guide comes with plan 12g Task 9",
   core: "every route feature is a row of FEATURES",
   "sdk-conformance": "a test package of the SDKs, not a feature",
 };

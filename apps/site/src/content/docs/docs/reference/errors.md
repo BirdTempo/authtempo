@@ -1,10 +1,11 @@
 ---
 title: Error codes
-description: Every error code of core and of the OAuth provider, with its HTTP status, its meaning, and what the caller does.
+description: Every error code of core, of the OAuth provider, and of the storage port, with its meaning, what the caller does, and the HTTP status of a route code.
 type: reference
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 10
   - packages/core/src/errors.ts
+  - packages/core/src/storage/port.ts
   - packages/core/README.md "Organizations"
   - packages/core/src/http/impersonation-rules.ts
   - docs/superpowers/plans/2026-10-14-12h-observability.md
@@ -776,6 +777,46 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | [`POST /oauth/token`](/docs/reference/routes/#post-oauth-token), [`POST /oauth/revoke`](/docs/reference/routes/#post-oauth-revoke), [`POST /oauth/device_authorization`](/docs/reference/routes/#post-oauth-device-authorization). |
+
+## Storage codes
+
+`STORAGE_ERROR_CODES` of `@authtempo/core/errors` holds these codes. A storage adapter throws `StorageError` with one of them. No route answers a storage code. A storage error that no handler catches answers 500 [`internal`](#internal).
+
+<h3 id="unique_violation"><code>unique_violation</code></h3>
+
+- **Meaning:** A unique key refused a write, because a row with the same key exists.
+- **Do:** In an adapter, throw it for each unique key of the schema. The engine reads it as a lost race.
+
+<h3 id="unknown_model"><code>unknown_model</code></h3>
+
+- **Meaning:** A call names a model that `schema` of `@authtempo/core` does not have.
+- **Do:** Use a model name of `schema`.
+
+<h3 id="unknown_field"><code>unknown_field</code></h3>
+
+- **Meaning:** A call names a field that the model does not have.
+- **Do:** Use a field name of the model in `schema`.
+
+<h3 id="invalid_argument"><code>invalid_argument</code></h3>
+
+- **Meaning:** The port refuses a value or a clause. Examples are an empty `where` on `update` or `delete`, and a NUL or a lone surrogate in a `where` value.
+- **Meaning on MySQL:** A string is longer than its column, or a value on an ascii column is not printable ASCII. [Length bounds](/docs/guides/mysql/#length-bounds) lists each column.
+- **Do:** Fix the call. [Write a storage adapter](/docs/guides/adapter/#the-rules) lists the rules of the port.
+
+<h3 id="schema_mismatch"><code>schema_mismatch</code></h3>
+
+- **Meaning:** The `schema_version` in `ta_meta` is older than `SCHEMA_VERSION` of core, or the database has no `ta_meta`. Every operation throws it until the migrations run.
+- **Do:** Run the migrations of the adapter, or [authtempo migrate](/docs/reference/cli/migrate/). Then the next operation reads the version again.
+
+<h3 id="rollback_failed"><code>rollback_failed</code></h3>
+
+- **Meaning:** A D1 or SQLite rollback could not undo every write of the transaction. Its `cause` holds `{ original, failures }`.
+- **Do:** Read `cause`. Check the rows that the transaction wrote, because some of them stay.
+
+<h3 id="config_mismatch"><code>config_mismatch</code></h3>
+
+- **Meaning:** The database or the driver handle has a setting that breaks the rules of the port. The message names the setting, never a value.
+- **Do:** Change the setting. [SQLite](/docs/guides/sqlite/#settings-the-adapter-refuses) lists the driver settings, and [MySQL](/docs/guides/mysql/#the-checks-at-start) lists the server settings.
 
 ## Other answers
 

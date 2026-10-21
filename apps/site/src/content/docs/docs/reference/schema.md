@@ -6,6 +6,9 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 7
   - packages/adapter-d1/README.md "Migrations"
   - packages/adapter-postgres/README.md "Migrations"
+  - packages/adapter-mysql/README.md "Migrations"
+  - packages/adapter-sqlite/README.md "Migrations"
+  - packages/core/src/storage/ddl.ts
   - 'packages/compat-better-auth/README.md "Storage: in place on the Better Auth tables"'
 ---
 
@@ -15,7 +18,7 @@ sources:
 
 ## Before you start
 
-- Know your adapter: D1, Postgres, or the Better Auth tables of the compatibility package. [Choose your stack](/docs/start/) compares them.
+- Know your adapter: D1, Postgres, SQLite, MySQL, or the Better Auth tables of the compatibility package. [Choose your stack](/docs/start/) lists the stacks that have a tutorial.
 
 ## The versions
 
@@ -123,6 +126,40 @@ pnpm --filter my-app exec wrangler d1 migrations apply my-app --remote
 
 - It is safe on every deploy, also from two replicas at once. Each migration takes an advisory lock and reads the applied names again.
 - `MIGRATIONS` exposes the SQL text for review.
+
+## SQLite
+
+`applySqliteMigrations(driver)` of `@authtempo/adapter-sqlite` applies the D1 files of `@authtempo/adapter-d1`, copied into the package at build. [Run authtempo on SQLite](/docs/guides/sqlite/) tells the rest.
+
+## MySQL column types
+
+MySQL starts at one baseline migration of the current version. [Run authtempo on MySQL](/docs/guides/mysql/) gives the steps, and its [length bounds](/docs/guides/mysql/#length-bounds) list the width of each key string.
+
+| Field type | MySQL column |
+| --- | --- |
+| string in `MYSQL_STRINGS` | `VARCHAR(<length>) CHARACTER SET ascii COLLATE ascii_bin`, or the same with `utf8mb4` and `utf8mb4_0900_bin` |
+| any other string | `TEXT` |
+| boolean | `TINYINT(1)` |
+| date | `BIGINT`, the epoch milliseconds |
+| json | `JSON` |
+| integer | `INT`, or `BIGINT` for the passkey `counter` and the TOTP `lastStep` |
+
+Each table is InnoDB with `utf8mb4` and the binary collation `utf8mb4_0900_bin`, so `=` compares bytes. A site test holds this table equal to `columnType` of `@authtempo/core/ddl`.
+
+## The ddl entry
+
+`@authtempo/core/ddl` holds the one column map of every dialect and the DDL of the schema. The adapters, their shape checks, and `authtempo generate` read it. The shipped D1 and Postgres migrations do not: they are records.
+
+| Export | What it is |
+| --- | --- |
+| `columnType` | The column type of one field of a model on a dialect. |
+| `auxColumnType` | The column type of one column of `ta_meta` or `ta_limit` on a dialect. |
+| `schemaDdl` | The statements that make every table, key, and index of the schema on a dialect, then the version row. |
+| `RUNNER_TABLES` | The tables that a migration runner makes for its own records: `ta_migrations`. |
+| `MYSQL_STRINGS` | The MySQL width of each string field that a key or an index holds, keyed `<model>.<field>`. |
+| `MysqlString` | One row of `MYSQL_STRINGS`: the length, the character set, the index prefix, and the reason. |
+| `mysqlKeyBytes` | The bytes of a MySQL key over fields of a model. |
+| `MYSQL_KEY_LIMIT_BYTES` | 3072, the key limit of InnoDB. |
 
 ## The deploy window of version 8
 
