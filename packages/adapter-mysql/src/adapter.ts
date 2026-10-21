@@ -31,7 +31,12 @@ interface Ctx extends Omit<MysqlAdapterOptions, "sent"> {
 
 /** MySQL error 1213: InnoDB ended the statement to break a deadlock. */
 const LOCK_DEADLOCK = 1213;
-/** The tries of one statement outside a transaction. */
+/**
+ * The tries of one statement outside a transaction that InnoDB ends in a
+ * deadlock (ruling 13 of plan 12g). The account delete met one such deadlock
+ * beside a reset (2026-10-21). Three tries cover a second meeting. A fourth
+ * deadlock passes through, so a lock cycle never loops.
+ */
 const STATEMENT_TRIES = 3;
 
 async function query(ctx: Ctx, s: Statement): Promise<RowDataPacket[] | ResultSetHeader> {

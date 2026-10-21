@@ -86,8 +86,10 @@ A value that D1 and Postgres store fails here with `invalid_argument`
 An ascii column holds printable ASCII (U+0020 to U+007E) with no trailing
 space. MySQL answers a non-ASCII value there with error 3988, and `ascii_bin`
 ignores trailing spaces. So a write of another value answers
-`invalid_argument`, and a where clause with such a value answers as Postgres
-does by byte order (`src/ascii-guard.ts`).
+`invalid_argument` on MySQL only: D1, Postgres, and SQLite store it. A where
+clause with such a value answers as Postgres and D1 do, by byte order
+(`src/ascii-guard.ts`). Core's conformance suite holds that answer on every
+store (ruling 9 of plan 12g).
 
 ## MariaDB
 

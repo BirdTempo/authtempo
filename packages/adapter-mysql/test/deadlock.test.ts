@@ -55,5 +55,46 @@ for (const server of MYSQL_SERVERS) {
         (await adapter.findMany("session", [{ field: "ip", op: "eq", value: "x" }])).length,
       ).toBe(0);
     });
+
+    it("passes a deadlock inside a transaction through, and the transaction leaves no write", async () => {
+      db = await freshDatabase(server);
+      const adapter = createMysqlAdapter(db.pool);
+      await adapter.create("session", rowOf("session", { id: "r1" }));
+      await adapter.create("session", rowOf("session", { id: "r2" }));
+      let aHolds: () => void = () => {};
+      let bHolds: () => void = () => {};
+      const aHeld = new Promise<void>((r) => {
+        aHolds = r;
+      });
+      const bHeld = new Promise<void>((r) => {
+        bHolds = r;
+      });
+      // A locks r1, then r2. B locks r2, then r1: a cycle that InnoDB ends in one of them.
+      const run = (first: string, second: string, holds: () => void, other: Promise<void>) =>
+        adapter.transaction(async (t) => {
+          await t.update("session", [{ field: "id", op: "eq", value: first }], {
+            userAgent: first,
+          });
+          holds();
+          await other;
+          await t.update("session", [{ field: "id", op: "eq", value: second }], {
+            userAgent: first,
+          });
+          return first;
+        });
+      const results = await Promise.allSettled([
+        run("r1", "r2", aHolds, bHeld),
+        run("r2", "r1", bHolds, aHeld),
+      ]);
+      const failed = results.filter((r) => r.status === "rejected");
+      const passed = results.filter((r) => r.status === "fulfilled");
+      // A statement sent again inside the undone transaction would let both end.
+      expect(failed.map((r) => (r.reason as { errno?: number }).errno)).toEqual([1213]);
+      expect(passed).toHaveLength(1);
+      const winner = (passed[0] as PromiseFulfilledResult<string>).value;
+      const rows = await adapter.findMany("session", [], { sort: { field: "id", dir: "asc" } });
+      // Both rows hold the winner's write; the victim's first write was undone.
+      expect(rows.map((r) => r.userAgent)).toEqual([winner, winner]);
+    });
   });
 }

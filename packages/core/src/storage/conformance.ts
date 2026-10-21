@@ -31,7 +31,7 @@ import type {
   VerificationRow,
 } from "../schema.js";
 import { createPbkdf2PasswordHash } from "../seams/password-hash.js";
-import { type StorageAdapter, StorageError } from "./port.js";
+import { type StorageAdapter, StorageError, type Where } from "./port.js";
 import { USER_CHILD_MODELS } from "./sql.js";
 
 export { runRefreshRaceConformance } from "./refresh-race-conformance.js";
@@ -1524,6 +1524,77 @@ export function runAdapterConformance(
             await db.findMany("operatorAudit", [{ field: "targetUserId", op: "eq", value: null }])
           ).map((r) => r.id),
         ).toEqual(["a3"]);
+      });
+    });
+
+    describe("where values that no ascii key of MySQL holds (ruling 9 of plan 12g)", () => {
+      // A non-ASCII value, a control character, and a trailing space can come
+      // from input, such as an id cursor. MySQL refuses the first two in an
+      // ascii column, and ascii_bin ignores a trailing space. Every store
+      // answers as Postgres and D1 do, by the stored values. The ids are in
+      // byte order; "a b" holds an inner space.
+      const IDS = ["a", "a b", "ab", "b", "~"];
+      const seed = async () => {
+        for (const [i, id] of IDS.entries())
+          await db.create("user", user(id, `u${i}@example.com`, t0));
+      };
+      const ids = async (op: Where<"user">["op"], value: unknown) =>
+        (
+          await db.findMany("user", [{ field: "id", op, value }], {
+            sort: { field: "id", dir: "asc" },
+          })
+        ).map((r) => r.id);
+
+      it("answers eq, ne, and in by the stored values", async () => {
+        await seed();
+        expect(await ids("eq", "é")).toEqual([]);
+        expect(await ids("eq", "a ")).toEqual([]);
+        expect(await db.findOne("user", [{ field: "id", op: "eq", value: "a " }])).toBeNull();
+        expect(await ids("ne", "é")).toEqual(IDS);
+        expect(await ids("ne", "a ")).toEqual(IDS);
+        expect(await ids("in", ["a", "é", "b "])).toEqual(["a"]);
+        expect(await ids("in", ["é"])).toEqual([]);
+      });
+
+      it("answers startsWith by the stored values", async () => {
+        await seed();
+        expect(await ids("startsWith", "é")).toEqual([]);
+        expect(await ids("startsWith", "a\u0001")).toEqual([]);
+        expect(await ids("startsWith", "a ")).toEqual(["a b"]);
+      });
+
+      it("answers lt, lte, gt, and gte in byte order", async () => {
+        await seed();
+        expect(await ids("lt", "aé")).toEqual(["a", "a b", "ab"]);
+        expect(await ids("lte", "aé")).toEqual(["a", "a b", "ab"]);
+        expect(await ids("gt", "aé")).toEqual(["b", "~"]);
+        expect(await ids("gte", "aé")).toEqual(["b", "~"]);
+        expect(await ids("gt", "~é")).toEqual([]);
+        expect(await ids("lt", "~é")).toEqual(IDS);
+        expect(await ids("lt", "a ")).toEqual(["a"]);
+        expect(await ids("lte", "a ")).toEqual(["a"]);
+        expect(await ids("gt", "a ")).toEqual(["a b", "ab", "b", "~"]);
+        expect(await ids("gte", "a ")).toEqual(["a b", "ab", "b", "~"]);
+        expect(await ids("lt", "a\u0001")).toEqual(["a"]);
+        expect(await ids("gte", "a\u0001")).toEqual(["a b", "ab", "b", "~"]);
+      });
+
+      it("updates and deletes the rows of the same answer", async () => {
+        await seed();
+        expect(
+          await db.update("user", [{ field: "id", op: "eq", value: "a " }], { name: "x" }),
+        ).toBe(0);
+        expect(
+          await db.update("user", [{ field: "id", op: "lt", value: "aé" }], { name: "y" }),
+        ).toBe(3);
+        const named = await db.findMany("user", [{ field: "name", op: "eq", value: "y" }], {
+          sort: { field: "id", dir: "asc" },
+        });
+        expect(named.map((r) => r.id)).toEqual(["a", "a b", "ab"]);
+        expect(await db.delete("user", [{ field: "id", op: "eq", value: "é" }])).toBe(0);
+        expect(await db.delete("user", [{ field: "id", op: "startsWith", value: "a " }])).toBe(1);
+        expect(await db.delete("user", [{ field: "id", op: "ne", value: "b " }])).toBe(4);
+        expect(await db.findMany("user", [])).toEqual([]);
       });
     });
 
