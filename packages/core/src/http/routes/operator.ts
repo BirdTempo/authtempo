@@ -94,12 +94,13 @@ async function operatorAuthorized(
 }
 
 /**
- * The parsed body of a rewrap, or null for a body that is not a limit and a
- * cursor. A NUL or a lone surrogate is null too (`holdsBadText`, ruling 26).
+ * The parsed body of a rewrap, or null for a body that is not a limit, a
+ * cursor, and a call budget. A NUL or a lone surrogate is null too
+ * (`holdsBadText`, ruling 26).
  */
 async function readRewrapBody(
   request: Request,
-): Promise<{ limit?: number; after?: string } | null> {
+): Promise<{ limit?: number; after?: string; callBudget?: number } | null> {
   const text = await request.text();
   let raw: unknown = {};
   if (text !== "") {
@@ -112,10 +113,11 @@ async function readRewrapBody(
   if (holdsBadText(raw)) return null;
   const parsed = rewrapBody.safeParse(raw);
   if (!parsed.success) return null;
-  const { limit, after } = parsed.data;
+  const { limit, after, callBudget } = parsed.data;
   return {
     ...(limit === undefined ? {} : { limit }),
     ...(after === undefined ? {} : { after }),
+    ...(callBudget === undefined ? {} : { callBudget }),
   };
 }
 

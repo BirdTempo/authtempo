@@ -483,10 +483,17 @@ export interface SecretsApi {
   status(): Promise<SecretsStatus>;
   /**
    * `limit`: 1 to 1000 rows, default 100. `after`: the `next` of the call
-   * before, to go on with the pass. `invalid_body` for a limit outside that
-   * range or a cursor that `rewrap` did not answer.
+   * before, to go on with the pass. `callBudget`: the storage calls of the
+   * call, 50 to 1000, default 50 for D1 Free (ruling 33 of plan 12d). A call
+   * that the budget stops answers `more: true` and `next`: call again with
+   * it. `invalid_body` for a limit or a budget outside its range, or a
+   * cursor that `rewrap` did not answer.
    */
-  rewrap(input?: { limit?: number; after?: string }): Promise<Result<SecretsRewrap>>;
+  rewrap(input?: {
+    limit?: number;
+    after?: string;
+    callBudget?: number;
+  }): Promise<Result<SecretsRewrap>>;
 }
 
 /** Present on `api` unless the config sets `emailOtp: false` (plan 9e). */

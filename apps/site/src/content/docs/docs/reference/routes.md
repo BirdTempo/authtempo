@@ -1098,7 +1098,7 @@ These routes exist when the config sets `operator.secretHash` or `operator.secre
 | Field | Value |
 | --- | --- |
 | Needs | The operator secret. `Authorization: Operator <secret>`, as `POST /operator/keys/rotate`. The secret needs the scope `secrets` |
-| Input | JSON `{ limit?, after? }`. `limit` is a whole number from 1 to 1000, default 100. `after` is the `next` of the last answer, so a pass reads each row once. An empty body is `{}`. Another key, a limit of another form, or a cursor that is not `totp:<id>`, `jwk:<id>`, or `ssoConnection:<id>`, answers `invalid_body` |
+| Input | JSON `{ limit?, after?, callBudget? }`. `limit` is a whole number from 1 to 1000, default 100. `after` is the `next` of the last answer, so a pass reads each row once. `callBudget` is the storage calls of the call, 50 to 1000, default 50 for D1 Free. A call that the budget stops answers `more: true` and `next`. An empty body is `{}`. Another key, a limit of another form, or a cursor that is not `totp:<id>`, `jwk:<id>`, or `ssoConnection:<id>`, answers `invalid_body` |
 | Answer | `{ resealed, failed, skipped, more, next }`, the answer of `api.secrets.rewrap({ limit, after })`: the rows this call moved to the current version, the rows that did not open or did not write, the live setups it left, whether a row under a configured old version remains, and the cursor. It counts on `operator-secrets:ip:<ip>` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 

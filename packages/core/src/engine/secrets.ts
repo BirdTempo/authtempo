@@ -1,9 +1,11 @@
 import type { ResolvedConfig } from "../config.js";
 import { fail, ok, type Result } from "../result.js";
 import type { ModelName, Models } from "../schema.js";
+import { meterOf } from "../storage/meter.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
 import { rewrapKeyRow } from "./jwt.js";
 import { rewrapConnectionRow } from "./sso/connections.js";
+import { SWEEP_CALL_BUDGET, SWEEP_CALL_BUDGET_MAX } from "./sweep.js";
 import { isLiveSetupWithCodes, rewrapTotpRow } from "./totp.js";
 
 /**
@@ -175,24 +177,49 @@ export async function secretsStatus(config: ResolvedConfig): Promise<SecretsStat
 }
 
 /**
+ * The calls of one rewrap on Workers Free: D1 Free allows 50 queries per
+ * invocation (D1 limits page updated 21 April 2026, read 2026-10-21). The
+ * bounds are those of the sweep (ruling 33 of plan 12d).
+ */
+export const REWRAP_CALL_BUDGET = SWEEP_CALL_BUDGET;
+/** The largest `callBudget` of a rewrap: D1 Paid allows 1000 queries per invocation. */
+export const REWRAP_CALL_BUDGET_MAX = SWEEP_CALL_BUDGET_MAX;
+/** The worst calls of one row: its conditional update. The open and the seal call no storage. */
+const ROW_CALLS = 1;
+/** The reads at the end of a pass: one per table, for `more`. */
+const LEFT_CALLS = SEALED.length;
+
+/**
  * Reads up to `limit` sealed values under a configured old version, after
  * the cursor `after`, and reseals each under the current version. The TOTP
  * secrets come first, then the keys, then the client secrets of the SSO
- * connections. A row under a version that the config does
- * not hold is never read, so a pass always ends; `status` lists it.
+ * connections. A row under a version that the config does not hold is
+ * never read, so a pass always ends; `status` lists it.
+ *
+ * The call stays inside `callBudget` storage calls, 50 by default for D1
+ * Free, up to 1000 (ruling 33 of plan 12d). The meter counts the ready
+ * check, each read, each row, and the end reads. A call that the budget
+ * stops early answers `more: true` and the cursor of its last row: the
+ * operator calls again with it. A `callBudget` outside 50 to 1000 answers
+ * `invalid_body`.
  */
 export async function rewrapSecrets(
   config: ResolvedConfig,
-  input: { limit?: number; after?: string } = {},
+  input: { limit?: number; after?: string; callBudget?: number } = {},
 ): Promise<Result<SecretsRewrap>> {
   const limit = input.limit ?? REWRAP_LIMIT.default;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > REWRAP_LIMIT.max)
+    return fail("invalid_body");
+  const calls = input.callBudget ?? REWRAP_CALL_BUDGET;
+  if (!Number.isSafeInteger(calls) || calls < REWRAP_CALL_BUDGET || calls > REWRAP_CALL_BUDGET_MAX)
     return fail("invalid_body");
   const cursor = input.after === undefined ? null : CURSOR.exec(input.after);
   if (input.after !== undefined && !cursor) return fail("invalid_body");
   const { keyring, storage } = config;
   const old = keyring.versions.filter((v) => v !== keyring.current);
   if (old.length === 0) return ok({ resealed: 0, failed: 0, skipped: 0, more: false, next: null });
+  // The ready check of the storage counts too: `readyStatements`, or 1 when the storage has none.
+  const meter = meterOf(storage, (await storage.readyStatements?.()) ?? 1);
   const counts = { resealed: 0, failed: 0, skipped: 0 };
   // A row that does not open counts as failed. So does a row whose
   // conditional write matched nothing: a concurrent sign-in, signature, or
@@ -210,10 +237,19 @@ export async function rewrapSecrets(
   const startTable = SEALED.find((t) => t === cursor?.[1]) ?? SEALED[0];
   let budget = limit;
   let next: string | null = null;
+  // The cursor of the last row that this call handled, or the cursor it got.
+  let last: string | null = input.after ?? null;
   for (const model of SEALED.slice(SEALED.indexOf(startTable))) {
+    // The rows that fit after the read of the page and the end reads.
+    const fit = Math.floor((calls - meter.used - 1 - LEFT_CALLS) / ROW_CALLS);
+    if (fit < 1) {
+      next = last;
+      break;
+    }
+    const take = Math.min(budget, fit);
     const after: Where<Sealed>[] =
       cursor && model === startTable ? [{ field: "id", op: "gt", value: cursor[2] ?? "" }] : [];
-    const opts = { sort: byId<Sealed>(), limit: budget };
+    const opts = { sort: byId<Sealed>(), limit: take };
     let read: Array<{ id: string }>;
     if (model === "totp") {
       const rows = await storage.findMany(
@@ -221,10 +257,12 @@ export async function rewrapSecrets(
         [{ field: "secretVersion", op: "in", value: old }, ...after],
         opts,
       );
+      meter.step(1);
       for (const row of rows) {
         if (isLiveSetupWithCodes(row, now)) counts.skipped++;
         else if (await rewrapTotpRow(config, row)) counts.resealed++;
         else failedRow(model, row);
+        meter.step(ROW_CALLS);
       }
       read = rows;
     } else if (model === "jwk") {
@@ -233,9 +271,11 @@ export async function rewrapSecrets(
         [{ field: "secretVersion", op: "in", value: old }, ...after],
         opts,
       );
+      meter.step(1);
       for (const row of rows) {
         if (await rewrapKeyRow(config, row)) counts.resealed++;
         else failedRow(model, row);
+        meter.step(ROW_CALLS);
       }
       read = rows;
     } else {
@@ -248,30 +288,35 @@ export async function rewrapSecrets(
         ],
         opts,
       );
+      meter.step(1);
       for (const row of rows) {
         if (await rewrapConnectionRow(config, row)) counts.resealed++;
         else failedRow(model, row);
+        meter.step(ROW_CALLS);
       }
       read = rows;
     }
     budget -= read.length;
     const end = read.at(-1);
-    if (budget === 0) {
-      if (end) next = `${model}:${end.id}`;
+    if (end) last = `${model}:${end.id}`;
+    // The limit of rows, or the budget of calls, ends the pass in this table.
+    if (budget === 0 || (read.length === take && take < budget + read.length)) {
+      if (end) next = last;
       break;
     }
   }
-  const left = async <M extends Sealed>(model: M) =>
-    (
-      await storage.findMany(
-        model,
-        [
-          { field: "secretVersion" as Where<M>["field"], op: "in", value: old },
-          ...SEALED_ONLY[model],
-        ],
-        { limit: 1 },
-      )
-    ).length > 0;
+  const left = async <M extends Sealed>(model: M) => {
+    const found = await storage.findMany(
+      model,
+      [
+        { field: "secretVersion" as Where<M>["field"], op: "in", value: old },
+        ...SEALED_ONLY[model],
+      ],
+      { limit: 1 },
+    );
+    meter.step(1);
+    return found.length > 0;
+  };
   return ok({
     ...counts,
     more: (await left("totp")) || (await left("jwk")) || (await left("ssoConnection")),

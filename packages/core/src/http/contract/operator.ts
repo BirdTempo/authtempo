@@ -9,12 +9,14 @@ import type { RouteContract } from "./types.js";
 
 /**
  * The body of a rewrap (plan 11c2): `limit`, a whole number, and `after`, the
- * cursor of the last answer. An empty body is `{}`. The engine refuses a
+ * cursor of the last answer. `callBudget` is the storage calls of the call
+ * (ruling 33 of plan 12d). An empty body is `{}`. The engine refuses a
  * cursor that is not `totp:<id>`, `jwk:<id>`, or `ssoConnection:<id>`.
  */
 export const rewrapBody = z.strictObject({
   limit: z.number().int().optional(),
   after: z.string().optional(),
+  callBudget: z.number().int().optional(),
 });
 
 /**

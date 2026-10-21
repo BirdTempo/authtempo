@@ -1,11 +1,11 @@
 import { env } from "cloudflare:test";
-import { createAuth } from "@authtempo/core";
+import { createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
 import { createD1Adapter } from "../src/index.js";
 
-// The queries of one rewrap call with SSO client secrets on the D1 binding
-// (ruling 31 of plan 12d). D1 Free allows 50 queries per invocation (D1
+// The queries of one rewrap call on the D1 binding (rulings 31 and 33 of
+// plan 12d). D1 Free allows 50 queries per invocation (D1
 // limits page updated 21 April 2026, read 2026-10-21). Each connection comes
 // from api.sso.connections.create under version 1; the rewrap runs under
 // versions 2 and 1.
@@ -100,4 +100,113 @@ describe("the rewrap of SSO client secrets on D1 (ruling 31 of plan 12d)", () =>
       [10, 3],
     ]);
   }, 120_000);
+});
+
+const FAST = createPbkdf2PasswordHash({ iterations: 1000 });
+const PW = "correct horse battery";
+
+/**
+ * 20 TOTP setups, 20 signing keys, and 20 connections under version 1, each
+ * made through the API. The clock then moves 16 minutes, so no setup is
+ * live and each of the 60 rows can move.
+ */
+async function sixtyRows() {
+  await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+  let now = new Date("2026-01-01T00:00:00.000Z");
+  const clock = { now: () => now };
+  const mail: { to: string; text: string }[] = [];
+  const make = (db: D1Database, secrets: { version: number; value: string }[]) =>
+    createAuth({
+      baseURL: "https://api.example.com",
+      secrets,
+      trustedOrigins: [],
+      storage: createD1Adapter(db),
+      limiter: { allow: async () => true },
+      mail: { send: async (m) => void mail.push({ to: m.to, text: m.text }) },
+      clock,
+      password: { hash: FAST, uniformSignUp: false },
+      organizations: {},
+      sso: {
+        oidc: true,
+        dns: [{ name: "a", txt: async () => [] }],
+        limits: { connectionsPerOrganization: 20 },
+      },
+    });
+  const v1 = make(env.DB, [{ version: 1, value: V1 }]);
+  const password = v1.api.password;
+  const totp = v1.api.totp;
+  const jwt = v1.api.jwt;
+  if (!password || !totp || !jwt) throw new Error("no api");
+  let owner: Parameters<typeof v1.api.createOrganization>[0]["user"] | null = null;
+  for (let i = 0; i < 20; i++) {
+    const email = `user${i}@example.com`;
+    const up = await password.signUp({ email, password: PW, ip: null, userAgent: null });
+    if (!up.ok || !("user" in up.value)) throw new Error("no user");
+    const token = /token=([A-Za-z0-9_%-]+)/.exec(mail.findLast((m) => m.to === email)?.text ?? "");
+    const verified = await password.verifyEmail({
+      token: decodeURIComponent(token?.[1] ?? ""),
+      ip: null,
+      userAgent: null,
+    });
+    if (!verified.ok) throw new Error(verified.code);
+    owner ??= verified.value.user;
+    const setup = await totp.setup({ userId: up.value.user.id, password: PW });
+    if (!setup.ok) throw new Error(setup.code);
+  }
+  await jwt.jwks();
+  for (let i = 1; i < 20; i++) await jwt.rotate();
+  if (!owner) throw new Error("no owner");
+  const made = await v1.api.createOrganization({ user: owner, slug: "acme", name: "Acme" });
+  if (!made.ok) throw new Error(made.code);
+  for (let i = 0; i < 20; i++) {
+    const c = await v1.api.sso?.connections.create({
+      actor: { kind: "app", name: "budget" },
+      organizationId: made.value.organization.id,
+      kind: "oidc",
+      label: `IdP ${i}`,
+      issuer: "https://login.idp.example/acme",
+      clientId: `client-${i}`,
+      clientSecret: `secret-${i}-0123456789`,
+    });
+    if (!c?.ok) throw new Error("no connection");
+  }
+  now = new Date(now.getTime() + 16 * 60_000);
+  const rows = Number(
+    await env.DB.prepare(
+      "SELECT (SELECT count(*) FROM ta_totp) + (SELECT count(*) FROM ta_jwk) + (SELECT count(*) FROM ta_sso_connection) AS n",
+    ).first("n"),
+  );
+  /** One rewrap call under versions 2 and 1 on a counting view of the binding. */
+  const pass = async (after?: string) => {
+    const { db, c } = counting(env.DB);
+    const r = await make(db, [
+      { version: 2, value: V2 },
+      { version: 1, value: V1 },
+    ]).api.secrets.rewrap({ limit: 100, ...(after ? { after } : {}) });
+    if (!r.ok) throw new Error(r.code);
+    return { queries: c.n, ...r.value };
+  };
+  return { rows, pass };
+}
+
+describe("the call budget of the rewrap on D1 (ruling 33 of plan 12d)", () => {
+  it("stops one call inside 50 queries with more true, and the second call ends the pass", async () => {
+    const w = await sixtyRows();
+    expect(w.rows).toBe(60);
+    const first = await w.pass();
+    expect(first.queries).toBeLessThanOrEqual(50);
+    expect([first.more, first.failed, first.skipped]).toEqual([true, 0, 0]);
+    expect(first.next).toMatch(/^(totp|jwk|ssoConnection):/);
+    const second = await w.pass(first.next ?? undefined);
+    expect(second.queries).toBeLessThanOrEqual(50);
+    expect([second.more, second.failed, second.skipped]).toEqual([false, 0, 0]);
+    expect(first.resealed + second.resealed).toBe(60);
+    // Measured on the binding on 2026-10-21: the first call sends 50 queries
+    // and reseals 43 rows, the second sends 22 and reseals 17. Each call has 7
+    // fixed queries: the ready check, the three page reads, and the three end
+    // reads. Without the meter one call reseals all 60 rows in 67 queries.
+    expect([first.queries, first.resealed, second.queries, second.resealed]).toEqual([
+      50, 43, 22, 17,
+    ]);
+  }, 300_000);
 });

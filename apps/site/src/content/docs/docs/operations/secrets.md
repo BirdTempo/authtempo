@@ -68,9 +68,9 @@ The packages are not on a registry yet. In this repo, run each command below as 
 4. Put version 2 first in `secrets`, then version 1. Deploy to every instance at 100 percent. Each new value is now written under version 2.
 5. Run `authtempo secret rewrap <base url> --yes`. The command ends when no row of an old version remains, when a pass ends, or at `--max-calls`. It exits 1 when a row did not open or rows remain. [authtempo secret rewrap](/docs/reference/cli/secret-rewrap/) gives the flags.
 
-   The operator routes allow 120 calls an hour from one IP address. A run makes at most 100 calls of 100 rows, so it moves 10 000 rows. On a large deployment, add `--limit 1000`: each call then moves up to 1000 rows, and one run moves 100 000.
+   The operator routes allow 120 calls an hour from one IP address. Each call stays inside 50 storage calls, the limit of D1 Free, so it moves at most 43 rows. A call may stop early with `more: true`, and the command calls again. A run makes at most 100 calls, so it moves about 4 300 rows. Run it again while it exits 1.
 
-   In the API's process, the same pass is `auth.api.secrets.rewrap({ limit: 100 })`. The answer is a result: read `value` when `ok` is true.
+   In the API's process, the same pass is `auth.api.secrets.rewrap({ limit: 100 })`. The answer is a result: read `value` when `ok` is true. On Workers Paid or Postgres, pass `callBudget` up to 1000 to move more rows in one call.
 
 6. In the API's process, pass the `next` of each answer as `after` to the next call. Stop when `next` is `null`. That is one pass. The command does this step itself.
 7. Run a new pass from step 5, with no `after`, while the last answer has `more: true`. Wait 15 minutes first when `skipped` or `failed` was above 0. With the command, run it again while it exits 1.
