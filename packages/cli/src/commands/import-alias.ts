@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
+import { scrub, secretParts } from "@authtempo/core/redact";
 import { writePrivate } from "../io.js";
-import { scrub, secretParts } from "../output.js";
 import { openPostgres } from "../seams/postgres.js";
 import { type CliIo, type ParsedImport, parseImportValues, runParsed } from "./import-core.js";
 

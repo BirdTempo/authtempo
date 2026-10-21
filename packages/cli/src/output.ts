@@ -1,41 +1,13 @@
+import { CONTROL, scrub, secretParts } from "@authtempo/core/redact";
 import type { Io } from "./io.js";
 
-/**
- * The text of a secret, and the parts that a driver can print alone: the
- * password of a URL, its decoded form, and the user and password pair. A part
- * under 4 characters is dropped: a scrub of one letter mangles every line.
- */
-export function secretParts(value: string): string[] {
-  const parts = [value];
-  try {
-    const u = new URL(value);
-    if (u.password)
-      parts.push(u.password, decodeURIComponent(u.password), `${u.username}:${u.password}`);
-  } catch {
-    // Not a URL: the value alone.
-  }
-  return [...new Set(parts)].filter((p) => p.length >= 4);
-}
-
-/** Replaces each secret in a line with ***, the longest first. */
-export function scrub(text: string, secrets: ReadonlySet<string>): string {
-  let out = text;
-  for (const s of [...secrets].sort((a, b) => b.length - a.length)) out = out.split(s).join("***");
-  return out;
-}
+// The CLI test of the scrub (test/secrets.test.ts) imports these two from here.
+export { scrub, secretParts };
 
 /** The io of a command: every line passes the scrub, and a command adds each secret it reads. */
 export interface Ctx extends Io {
   addSecret(value: string): void;
 }
-
-/**
- * Each C0 control character but tab, and DEL. Text from a server, a driver,
- * or wrangler can hold an escape sequence that moves the cursor or clears
- * the terminal (spec 19: the CLI writes no escape sequence).
- */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: the filter matches control characters on purpose.
-const CONTROL = /[\u0000-\u0008\u000a-\u001f\u007f]/g;
 
 /** A line as the terminal gets it: the scrub, then each control character as `?`. */
 const clean = (line: string, secrets: ReadonlySet<string>) =>

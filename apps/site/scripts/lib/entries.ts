@@ -297,6 +297,11 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
     reason: "the gate of the server bindings; each binding page names it (plan 11d2)",
   },
   {
+    pkg: "@authtempo/core",
+    entry: "./redact",
+    reason: "the one redaction source that the CLI and the observe sinks share (plan 12h Task 1)",
+  },
+  {
     pkg: "@authtempo/client",
     entry: "./conformance",
     reason: "the error-shape suite, for an SDK's own tests; it imports vitest at run time",

@@ -55,6 +55,10 @@
     "./openapi": {
       "types": "./dist/openapi/index.d.ts",
       "default": "./dist/openapi/index.js"
+    },
+    "./redact": {
+      "types": "./dist/redact.d.ts",
+      "default": "./dist/redact.js"
     }
   },
   "files": [

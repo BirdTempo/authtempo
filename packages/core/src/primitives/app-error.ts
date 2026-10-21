@@ -1,4 +1,5 @@
-const ERROR_CLASS_RE = /^[A-Za-z]+Error$/;
+/** The class name rule of `appErrorName`. `FIELD_KINDS.errorName` of `redact.ts` reads it too. */
+export const ERROR_CLASS_RE = /^[A-Za-z]+Error$/;
 
 /**
  * The name of an error from app code, safe for a log line. The app sets the
