@@ -39,8 +39,14 @@ import { ROUNDS } from "./rounds.js";
  * of `ownerWrite` or of `revokeTokens`. So a removal and a team member add or
  * an accept of that person run one at a time.
  * The role create takes the organization lock before its count, and no
- * user hold. The team member removal takes the team lock, as
- * `setActiveTeam` does, and no user hold. `deleteOrganizationRows` deletes
+ * user hold. The team member removal, `setActiveTeam`, and the team delete
+ * take no user hold. Each takes the locks of the sessions it writes first,
+ * then the team lock (the delete: the organization lock first with
+ * `keepLastTeam`). The removal locks every session of the person, so a set
+ * cannot move a session into the team after its lock read. A role loss
+ * holds the sessions and then deletes the team rows of the member. With the
+ * team lock first, a team write beside a loss formed a deadlock (ruling 48).
+ * `deleteOrganizationRows` deletes
  * the organization row first and the team rows next. So it waits for each
  * flow that holds one of these locks, in the same order. It deletes the
  * member rows before the team member rows, as a member removal and the

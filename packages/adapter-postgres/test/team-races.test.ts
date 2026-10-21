@@ -280,12 +280,18 @@ describe("team races on Postgres (plan 12k Task 5, ruling 26)", () => {
     expect((await teams()).map((t) => t.id)).toEqual([web]);
   });
 
-  it("refuses an active team after a member removal between the checks and the write", async () => {
+  // The set holds the session lock from before its checks (ruling 48 of plan 12k). So a removal
+  // that starts between the checks and the write waits for the commit, and then clears both.
+  // The set waits 600 ms for the removal: with no session lock, the removal commits first, and
+  // the set answers forbidden_rank.
+  it("holds a member removal between the checks and the write, so the removal clears the active team", async () => {
     const sent: MailMessage[] = [];
+    let removal: Promise<unknown> | null = null;
     const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
     const one = instance(
       onRead("teamMember", async () => {
-        must(await plain.api.removeMember({ user: a, organizationId, userId: b.id }));
+        removal = plain.api.removeMember({ user: a, organizationId, userId: b.id });
+        await Promise.race([removal, new Promise((r) => setTimeout(r, 600))]);
       }),
       { teams: {} },
       sent,
@@ -303,10 +309,9 @@ describe("team races on Postgres (plan 12k Task 5, ruling 26)", () => {
 
     const res = await one.handle(post("/organizations/teams/active", { teamId }, token));
 
-    expect({ status: res.status, body: await res.json() }).toEqual({
-      status: 403,
-      body: { error: "forbidden_rank" },
-    });
+    expect(res.status).toBe(200);
+    expect(await removal).toEqual({ ok: true, value: { ok: true } });
+    expect(await createPostgresAdapter(db.sql).findMany("teamMember", [])).toEqual([]);
     const sessions = await createPostgresAdapter(db.sql).findMany("session", [
       { field: "userId", op: "eq", value: b.id },
     ]);

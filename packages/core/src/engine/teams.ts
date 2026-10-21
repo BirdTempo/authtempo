@@ -261,10 +261,15 @@ export async function updateTeam(
  * team rows go, and each session that acts in the team loses its active
  * team. Each pending invitation loses the team id.
  *
- * Cost: in one transaction, with `keepLastTeam` the lock of the organization
- * row and the count of at most two teams. Then three writes, one read of
- * every pending invitation of the organization, and one update per
- * invitation that names the team. The read also takes the expired pending
+ * The transaction first takes the locks of the sessions that act in the
+ * team, before the organization row and the team row, in the order of
+ * user-hold.ts. A role loss holds the sessions of a member and then deletes
+ * the member's team rows (ruling 48 of plan 12k).
+ *
+ * Cost: in one transaction, the lock read of the sessions (Postgres only),
+ * with `keepLastTeam` the lock of the organization row and the count of at
+ * most two teams. Then three writes, one read of every pending invitation
+ * of the organization, and one update per invitation that names the team. The read also takes the expired pending
  * rows. So `pendingInvitationsPerOrganization`, which counts only the live
  * rows, does not bound it.
  */
@@ -283,6 +288,7 @@ export async function deleteTeam(
   const hooks = config.hooks.organization;
   const deleted = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
+      await tx.lockInOrder?.("session", [{ field: "activeTeamId", op: "eq", value: team.id }]);
       if (sc.keepLastTeam) {
         if (!(await lockOrganization(tx, organization))) return fail("not_found");
         const held = await tx.findMany(
@@ -508,9 +514,13 @@ export async function addTeamMember(
  * Removes a person from a team. The removal of another person needs
  * `member:delete` and passes the touch rule on that person (spec 29 item 5).
  * A member leaves a team with membership only. The person's sessions that
- * act in the team lose their active team. The transaction takes the lock
- * of the team row first, as `setActiveTeam` does. So a set in flight
- * commits first, and this removal then clears its active team.
+ * act in the team lose their active team. The transaction takes the locks
+ * of the person's sessions first, then the lock of the team row, as
+ * `setActiveTeam` does (user-hold.ts). So a set in flight commits first,
+ * and this removal then clears its active team. A role loss holds the same
+ * sessions before it deletes the person's team rows (ruling 48 of plan 12k).
+ * All of the person's sessions lock, so no session that a set moves into
+ * the team after the lock read stays outside the lock.
  */
 export async function removeTeamMember(
   config: ResolvedConfig,
@@ -561,6 +571,8 @@ export async function removeTeamMember(
   };
   const removed = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
+      // The session locks come before the team row, in the order of user-hold.ts (ruling 48).
+      await tx.lockInOrder?.("session", [{ field: "userId", op: "eq", value: input.userId }]);
       // The lock of setActiveTeam: a set that holds it commits first, and the session update
       // below sees its active team (ruling 43). Zero rows: a delete ran after the read.
       if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
@@ -590,10 +602,12 @@ export async function removeTeamMember(
  * `forbidden_rank`. `null` clears it.
  *
  * The checks and the write run in one transaction after the lock of the
- * team row (ruling 26). A team delete waits for the commit, then clears the
- * active team. The session update names the active organization: a member
- * removal clears it in its own transaction, so after a removal zero rows
- * match.
+ * session and then of the team row (ruling 26, and ruling 48 of plan 12k
+ * for the order of user-hold.ts). A team delete waits for the commit, then
+ * clears the active team. The session update names the active
+ * organization: a member removal clears it in its own transaction, so
+ * after a removal zero rows match. On Postgres a removal that starts after
+ * the session lock waits for this commit, and then clears both.
  */
 export async function setActiveTeam(
   config: ResolvedConfig,
@@ -612,6 +626,8 @@ export async function setActiveTeam(
     const organizationId = session.activeOrganizationId;
     if (organizationId === null) return fail("forbidden_rank");
     const set = await config.storage.transaction(async (tx): Promise<boolean> => {
+      // The session lock comes before the team row, in the order of user-hold.ts (ruling 48).
+      await tx.lockInOrder?.("session", [{ field: "id", op: "eq", value: session.id }]);
       // Zero rows: no team of the active organization has the id.
       if (!(await lockTeam(tx, teamId, organizationId))) return false;
       const row = await tx.findOne("teamMember", [

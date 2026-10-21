@@ -29,17 +29,25 @@ afterEach(async () => {
   await db.close();
 });
 
-/** A storage on the shared pool that calls `reached` before each update or delete of `model` in a transaction. */
-function watch(model: ModelName, reached: () => void): StorageAdapter {
+/**
+ * A storage on the shared pool that calls `reached` before each lock read,
+ * update, or delete of a model of `models` in a transaction.
+ */
+function watch(models: ModelName | ModelName[], reached: () => void): StorageAdapter {
+  const watched = new Set<ModelName>([models].flat());
   const base = createPostgresAdapter(db.sql);
   const wrap = (tx: StorageAdapter): StorageAdapter => ({
     ...tx,
+    lockInOrder: (async (m, where) => {
+      if (watched.has(m)) reached();
+      await tx.lockInOrder?.(m, where);
+    }) as NonNullable<StorageAdapter["lockInOrder"]>,
     update(m, where, data) {
-      if (m === model) reached();
+      if (watched.has(m)) reached();
       return tx.update(m, where, data);
     },
     delete(m, where) {
-      if (m === model) reached();
+      if (watched.has(m)) reached();
       return tx.delete(m, where);
     },
     transaction: (fn) => tx.transaction((inner) => fn(wrap(inner))),
@@ -223,14 +231,20 @@ function settle<T>(p: Promise<T>): Promise<T | string> {
 const rows = <M extends ModelName>(m: M) => createPostgresAdapter(db.sql).findMany(m, []);
 
 /**
- * A storage on the shared pool that logs each lock write in a transaction.
- * A lock write is an update of the user row (holdUser), the organization row
+ * A storage on the shared pool that logs each lock in a transaction. A lock
+ * is an update of the user row (holdUser), the organization row
  * (lockOrganization, or the stamp of ownerWrite), or a team row (lockTeam).
+ * It is also the lock read of the sessions (`lockInOrder`), logged as
+ * `sessions`.
  */
 function lockLog(log: string[]): StorageAdapter {
   const base = createPostgresAdapter(db.sql);
   const wrap = (tx: StorageAdapter): StorageAdapter => ({
     ...tx,
+    lockInOrder: (async (m, where) => {
+      if (m === "session") log.push("sessions");
+      await tx.lockInOrder?.(m, where);
+    }) as NonNullable<StorageAdapter["lockInOrder"]>,
     update(m, where, data) {
       if (m === "user" || m === "organization" || m === "team") log.push(m);
       return tx.update(m, where, data);
@@ -417,7 +431,8 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     const g = gate();
     let removal: Promise<unknown> | null = null;
     const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
-    const two = instance(watch("team", g.reach), { teams: {} }, sent);
+    // The leave waits at the first lock that the set holds: the session (ruling 48 of plan 12k).
+    const two = instance(watch(["session", "team"], g.reach), { teams: {} }, sent);
     const one = instance(
       afterRead("teamMember", "findOne", async () => {
         removal = two.api.removeTeamMember({ user: a, teamId, userId: a.id });
@@ -699,9 +714,9 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
 });
 
 describe("the lock order of each flow (ruling 43 of plan 12k)", () => {
-  it("takes the user row, then the organization row, then the team row, as user-hold.ts states", async () => {
+  it("takes the user row, then the sessions, then the organization row, then the team row, as user-hold.ts states", async () => {
     const sent: MailMessage[] = [];
-    const config = { teams: {}, dynamicRoles: { maxPerOrganization: 5 } };
+    const config = { teams: { keepLastTeam: true }, dynamicRoles: { maxPerOrganization: 5 } };
     const plain = instance(createPostgresAdapter(db.sql), config, sent);
     const log: string[] = [];
     const logged = instance(lockLog(log), config, sent);
@@ -728,11 +743,23 @@ describe("the lock order of each flow (ruling 43 of plan 12k)", () => {
       }),
     );
     const token = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(sent.at(-1)?.text ?? "")?.[1] ?? "";
+    const spare = must(await plain.api.createTeam({ user: a, organizationId, name: "Spare" })).id;
+    must(await plain.api.addTeamMember({ user: a, teamId, userId: a.id }));
+    const bearer = await sessionOf(plain, sent, "a@example.com");
+    must(
+      await plain.api.setActiveOrganization({
+        session: await sessionAt(plain, bearer),
+        organizationId,
+      }),
+    );
+    const session = await sessionAt(plain, bearer);
 
     const order = {
       add: await run(() => logged.api.addTeamMember({ user: a, teamId, userId: b.id })),
       accept: await run(() => logged.api.acceptInvitation({ user: d, token, ip: null })),
+      active: await run(() => logged.api.setActiveTeam({ session, teamId })),
       leave: await run(() => logged.api.removeTeamMember({ user: a, teamId, userId: b.id })),
+      teamDelete: await run(() => logged.api.deleteTeam({ user: a, teamId: spare })),
       removal: await run(() =>
         logged.api.removeMember({ user: a, organizationId, userId: b.id, revokeTokens: true }),
       ),
@@ -752,7 +779,9 @@ describe("the lock order of each flow (ruling 43 of plan 12k)", () => {
     expect(order).toEqual({
       add: ["user", "team"],
       accept: ["user", "team"],
-      leave: ["team"],
+      active: ["sessions", "team"],
+      leave: ["sessions", "team"],
+      teamDelete: ["sessions", "organization"],
       removal: ["user", "organization"],
       ownerRemoval: ["user", "organization"],
       role: ["organization"],
