@@ -66,10 +66,17 @@ The test below turns the factor off and signs in with the password alone.
 Update 2026-10-21 by plan 12f: the operator tools do step 5 with a record. The text above stays as it was published.
 
 1. Run `authtempo users search <base url> --email <address>`. Copy the user id from the `ID` column.
-2. Run `authtempo users second-factor-off <base url> <user id> --reason "<reason>" --yes` for step 5 above.
-3. Add `--proof-method <method>`: `document`, `in_person`, `video`, `knowledge`, or `other`.
-4. Add `--proof-reference <case id>`: the record of step 4 above in your own system, never the evidence.
-5. Add `--proof-checked-at <time>`: the time of the check of step 3 above, at most 7 days old.
+2. Run this command for step 5 above. The command needs the reason and the three proof flags.
+
+```sh
+authtempo users second-factor-off <base url> <user id> --reason "<reason>" --proof-method <method> --proof-reference <case id> --proof-checked-at <time> --yes
+```
+
+The rules of the flags:
+
+- `--proof-method`: `document`, `in_person`, `video`, `knowledge`, or `other`.
+- `--proof-reference`: the record of step 4 above in your own system, never the evidence.
+- `--proof-checked-at`: the time of the check of step 3 above, at most 7 days old.
 
 - The secret needs the scope `users`. [Run the operator tools](/docs/guides/operator-tools/#the-second-factor) gives the rules of section 26 of the design.
 - The method `knowledge` alone is below the level of an enrollment. Use `document`, `in_person`, or `video`.
