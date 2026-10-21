@@ -69,7 +69,7 @@ An app can write its own sink. It gets the events after the answer, and it owns 
 
 <Code code={sql} lang="sql" />
 
-5. For a collector, give `otlpSink` the base URL and the headers of the collector. Give `timeoutMs` the value of `observe.flushTimeoutMs`, so no post outlives its flush.
+5. For a collector, give `otlpSink` the base URL and the headers of the collector. Give `timeoutMs` the value of `observe.flushTimeoutMs`, so no post outlives its flush. Each one takes an integer from 100 to 10000.
 
 <Code code={traced} lang="ts" title="The OTLP sink" />
 
@@ -121,11 +121,11 @@ The keyed hash is HMAC-SHA256 under a key that HKDF derives from the current app
 - A lost batch counts as `sink_timeout` or `sink_threw`. The next batch starts with one `observe.dropped` event that holds the counts. `auth.observe.stats()` answers the same counts in process.
 - Core cannot stop a sink that loops on the CPU in a synchronous `write`. Such a sink holds the isolate, so keep `write` short.
 - On Workers, the `waitUntil` work of one request has 30 seconds after the answer in all. Each `waitUntil` of that request shares the time.
-- Core scrubs each event before the buffer, with or without a sink. The scrub replaces each secret value of the config with `***`. It covers each string field that a flow passes, and the raw `ip` and `userAgent`. It skips the stamp fields: the event name, the level, the time, the trace ids, and the route key. The kind of each stamp field checks its value. Each sink of `@authtempo/observe` scrubs again with its own `secrets` list.
+- Core scrubs each event before the buffer, with or without a sink. The scrub replaces each secret value of the config with `***`. It covers each string field that a flow passes, and the raw `ip` and `userAgent`. It skips the stamp fields: the event name, the level, the time, the trace ids, and the route key. The kind of each stamp field checks its value. Each sink of `@authtempo/observe` scrubs again with its own `secrets` list. It skips the stamp fields, and each field of a closed list: the kinds `enum`, `code`, `route`, and `routePath`.
 - The `method` field of the `request` event holds the method token of the request, `HEAD` too.
 - A redirect counts as a failure only when core marked it with an error code. A `next` value of a client that holds `auth_error` gives no failure.
 - `analyticsEngineSink` writes at most 200 data points in one flush, `AE_MAX_POINTS`. Analytics Engine takes at most 250 for each Worker invocation (Cloudflare limit, read 2026-10-21). The 50 others stay for the points of the app.
-- Over 200 chosen events in one batch, the sink writes the first 200 and throws. Core then counts each event of the batch in `sink_threw`.
+- Over 200 chosen events in one batch, the sink writes the first 200 and throws. Core then counts each event of the batch in `sink_threw`. So the count is higher than the true loss: it holds the 200 written points too.
 - Each OTLP post aborts after `timeoutMs`. Each OTLP sink makes a random `service.instance.id` at its first write, so each isolate writes its own metric stream.
 - An event is telemetry, and it can drop. The audit table of the operator tools is the record of an operator act.
 
