@@ -116,8 +116,49 @@ export function tagOf(pool: Pool): Tag {
   return tag as Tag;
 }
 
+/** A test database older than one hour is left by a killed run, so a supply drops it. */
+const STALE_AFTER_MS = 60 * 60 * 1000;
+/** The name form of `testDatabaseName`: the creation time in ms, then a random part. */
+const NAME_RE = /^t_(\d{13})_[0-9a-f]{32}$/;
+/** The name form before 2026-10-21 22:30 CST, which holds no time. */
+const LEGACY_RE = /^t_[0-9a-f]{32}$/;
+
+/** The name of a new test database, `t_<ms>_<hex>`. A sweep reads its age from the name. */
+export function testDatabaseName(now = Date.now()): string {
+  return `t_${now}_${crypto.randomUUID().replaceAll("-", "")}`;
+}
+
 /**
- * A new database `t_<uuid>` with the binary collation. With `migrate`, the
+ * Drops each test database of `server` that is older than one hour, and
+ * answers their names. A killed run never closes its databases, and 15 of
+ * them were left on 2026-10-21. A database of the legacy name form is old
+ * when its oldest table is, so a legacy database with no table stays.
+ */
+export async function dropStaleDatabases(server: MysqlServer, now = Date.now()): Promise<string[]> {
+  return admin(server, async (c) => {
+    const [rows] = await c.query<RowDataPacket[]>(
+      `SELECT s.SCHEMA_NAME AS name, TIMESTAMPDIFF(SECOND, MIN(t.CREATE_TIME), NOW()) AS age
+      FROM information_schema.SCHEMATA s
+      LEFT JOIN information_schema.tables t ON t.TABLE_SCHEMA = s.SCHEMA_NAME
+      WHERE s.SCHEMA_NAME LIKE 't\\_%' GROUP BY s.SCHEMA_NAME`,
+    );
+    const stale = rows
+      .filter((r) => {
+        const made = NAME_RE.exec(r.name)?.[1];
+        if (made !== undefined) return now - Number(made) > STALE_AFTER_MS;
+        return LEGACY_RE.test(r.name) && r.age !== null && Number(r.age) * 1000 > STALE_AFTER_MS;
+      })
+      .map((r) => String(r.name));
+    for (const name of stale) await c.query(`DROP DATABASE IF EXISTS \`${name}\``);
+    return stale;
+  });
+}
+
+/** One sweep per server in each test process. A supply waits for it before its first database. */
+const sweeps = new Map<string, Promise<string[]>>();
+
+/**
+ * A new database `t_<ms>_<hex>` with the binary collation. With `migrate`, the
  * steps of `applyMysqlMigrations` run without GET_LOCK (ruling 2 of plan
  * 12g). A MySQL named lock is held per server, not per database. So every
  * test database on one server would share `authtempo_migrations`.
@@ -126,9 +167,9 @@ export function tagOf(pool: Pool): Tag {
  */
 export async function freshDatabase(
   server: MysqlServer,
-  opts: PoolSettings & { migrate?: boolean } = {},
+  opts: PoolSettings & { migrate?: boolean; name?: string } = {},
 ): Promise<MysqlDatabase> {
-  const name = `t_${crypto.randomUUID().replaceAll("-", "")}`;
+  const name = opts.name ?? testDatabaseName();
   await admin(server, (c) =>
     c.query(`CREATE DATABASE \`${name}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin`),
   );
@@ -176,13 +217,22 @@ export async function freshDatabase(
 /**
  * Fresh migrated databases of one server, made `ahead` at a time before a
  * test asks. So a suite that needs one database per test does not wait for
- * each CREATE in turn. `drain` closes the ones that no test took.
+ * each CREATE in turn. `drain` closes the ones that no test took. At the
+ * start, the supply drops the stale databases of killed runs.
  */
 export function databaseSupply(server: MysqlServer, ahead = 3) {
   const queue: Promise<MysqlDatabase>[] = [];
+  let sweep = sweeps.get(server.url);
+  if (!sweep) {
+    sweep = dropStaleDatabases(server);
+    // A failure surfaces in take(); this handler keeps it from being unhandled meanwhile.
+    sweep.catch(() => {});
+    sweeps.set(server.url, sweep);
+  }
+  const swept = sweep;
   const fill = () => {
     while (queue.length < ahead) {
-      const next = freshDatabase(server);
+      const next = swept.then(() => freshDatabase(server));
       // A failure surfaces in take(); this handler keeps it from being unhandled meanwhile.
       next.catch(() => {});
       queue.push(next);
