@@ -78,6 +78,16 @@ describe("the observe config (plan 12h Task 2, spec 31 item 1)", () => {
     );
   });
 
+  it("refuses a flag that is not true or false", () => {
+    const traceparent = refusal({ sink, trustTraceparent: "yes" });
+    expect(traceparent).toBeInstanceOf(ConfigError);
+    expect((traceparent as Error).message).toBe("observe.trustTraceparent must be true or false");
+    const readiness = refusal({ sink, readiness: 1 });
+    expect(readiness).toBeInstanceOf(ConfigError);
+    expect((readiness as Error).message).toBe("observe.readiness must be true or false");
+    expect(refusal({ sink, trustTraceparent: true, readiness: false })).toBeNull();
+  });
+
   it("refuses a buffer and a time limit out of range", () => {
     for (const buffer of [9, 10001, 10.5]) {
       const e = refusal({ sink, buffer });
