@@ -383,7 +383,8 @@ function secretRoutes(config: ResolvedConfig): Route[] {
         if (refused) return refused;
         const body = await readRewrapBody(ctx.request);
         if (body === null) return json({ error: "invalid_body" }, 400);
-        return respond(await rewrapSecrets(ctx.config, body));
+        // The limiter call above counts in the budget of the call (ruling 34 of plan 12d).
+        return respond(await rewrapSecrets(ctx.config, body, "route"));
       },
     },
     {

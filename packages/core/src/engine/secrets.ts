@@ -184,6 +184,15 @@ export async function secretsStatus(config: ResolvedConfig): Promise<SecretsStat
 export const REWRAP_CALL_BUDGET = SWEEP_CALL_BUDGET;
 /** The largest `callBudget` of a rewrap: D1 Paid allows 1000 queries per invocation. */
 export const REWRAP_CALL_BUDGET_MAX = SWEEP_CALL_BUDGET_MAX;
+/**
+ * The calls of the invocation before a rewrap, by caller: the form of
+ * `OPERATOR_CALLS_BEFORE` of plan 12f (ruling 34 of plan 12d). The route
+ * asks the limiter per IP (`operator-secrets:ip`) first, one query on the
+ * D1 limiter. The app calls no limiter. The storage counter cannot see the
+ * limiter query: it goes to the binding, not through the adapter. With 1
+ * left out, one route call sent 51 queries on D1.
+ */
+export const REWRAP_CALLS_BEFORE = { route: 1, app: 0 } as const;
 /** The worst calls of one row: its conditional update. The open and the seal call no storage. */
 const ROW_CALLS = 1;
 /** The reads at the end of a pass: one per table, for `more`. */
@@ -197,8 +206,9 @@ const LEFT_CALLS = SEALED.length;
  * never read, so a pass always ends; `status` lists it.
  *
  * The call stays inside `callBudget` storage calls, 50 by default for D1
- * Free, up to 1000 (ruling 33 of plan 12d). The meter counts the ready
- * check, each read, each row, and the end reads. A call that the budget
+ * Free, up to 1000 (ruling 33 of plan 12d). The meter counts the calls
+ * of `caller` before the act (`REWRAP_CALLS_BEFORE`), the ready check, each
+ * read, each row, and the end reads. A call that the budget
  * stops early answers `more: true` and the cursor of its last row: the
  * operator calls again with it. A `callBudget` outside 50 to 1000 answers
  * `invalid_body`.
@@ -206,6 +216,7 @@ const LEFT_CALLS = SEALED.length;
 export async function rewrapSecrets(
   config: ResolvedConfig,
   input: { limit?: number; after?: string; callBudget?: number } = {},
+  caller: keyof typeof REWRAP_CALLS_BEFORE = "app",
 ): Promise<Result<SecretsRewrap>> {
   const limit = input.limit ?? REWRAP_LIMIT.default;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > REWRAP_LIMIT.max)
@@ -219,7 +230,10 @@ export async function rewrapSecrets(
   const old = keyring.versions.filter((v) => v !== keyring.current);
   if (old.length === 0) return ok({ resealed: 0, failed: 0, skipped: 0, more: false, next: null });
   // The ready check of the storage counts too: `readyStatements`, or 1 when the storage has none.
-  const meter = meterOf(storage, (await storage.readyStatements?.()) ?? 1);
+  const meter = meterOf(
+    storage,
+    REWRAP_CALLS_BEFORE[caller] + ((await storage.readyStatements?.()) ?? 1),
+  );
   const counts = { resealed: 0, failed: 0, skipped: 0 };
   // A row that does not open counts as failed. So does a row whose
   // conditional write matched nothing: a concurrent sign-in, signature, or

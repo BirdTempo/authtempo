@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { createAuth, createPbkdf2PasswordHash } from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
-import { createD1Adapter } from "../src/index.js";
+import { createD1Adapter, createD1Limiter } from "../src/index.js";
 
 // The queries of one rewrap call on the D1 binding (rulings 31 and 33 of
 // plan 12d). D1 Free allows 50 queries per invocation (D1
@@ -103,6 +103,13 @@ describe("the rewrap of SSO client secrets on D1 (ruling 31 of plan 12d)", () =>
 });
 
 const FAST = createPbkdf2PasswordHash({ iterations: 1000 });
+/** The operator secret of the route calls. */
+const OPERATOR = "operator-secret-0123456789abcdef-0123456789";
+
+async function sha256Hex(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
 const PW = "correct horse battery";
 
 /**
@@ -186,7 +193,54 @@ async function sixtyRows() {
     if (!r.ok) throw new Error(r.code);
     return { queries: c.n, ...r.value };
   };
-  return { rows, pass };
+  /**
+   * One call of POST /auth/operator/secrets/rewrap under versions 2 and 1,
+   * as the worker-d1 setup serves it: the D1 limiter and the D1 adapter on
+   * one counting view of the binding, so the count holds the whole invocation.
+   */
+  const routePass = async (after?: string) => {
+    const { db, c } = counting(env.DB);
+    const auth = createAuth({
+      baseURL: "https://api.example.com",
+      secrets: [
+        { version: 2, value: V2 },
+        { version: 1, value: V1 },
+      ],
+      trustedOrigins: [],
+      storage: createD1Adapter(db),
+      limiter: createD1Limiter(db, clock),
+      mail: { send: async () => {} },
+      clock,
+      password: { hash: FAST, uniformSignUp: false },
+      organizations: {},
+      operator: { secretHash: await sha256Hex(OPERATOR) },
+      sso: {
+        oidc: true,
+        dns: [{ name: "a", txt: async () => [] }],
+        limits: { connectionsPerOrganization: 20 },
+      },
+    });
+    const res = await auth.handle(
+      new Request("https://api.example.com/auth/operator/secrets/rewrap", {
+        method: "POST",
+        headers: {
+          "cf-connecting-ip": "203.0.113.9",
+          authorization: `Operator ${OPERATOR}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ limit: 100, ...(after ? { after } : {}) }),
+      }),
+    );
+    const value = (await res.json()) as {
+      resealed: number;
+      failed: number;
+      skipped: number;
+      more: boolean;
+      next: string | null;
+    };
+    return { queries: c.n, status: res.status, ...value };
+  };
+  return { rows, pass, routePass };
 }
 
 describe("the call budget of the rewrap on D1 (ruling 33 of plan 12d)", () => {
@@ -207,6 +261,29 @@ describe("the call budget of the rewrap on D1 (ruling 33 of plan 12d)", () => {
     // reads. Without the meter one call reseals all 60 rows in 67 queries.
     expect([first.queries, first.resealed, second.queries, second.resealed]).toEqual([
       50, 43, 22, 17,
+    ]);
+  }, 300_000);
+});
+
+describe("the rewrap route on D1 with the D1 limiter (ruling 34 of plan 12d)", () => {
+  it("keeps each route call inside 50 queries with the limiter query of the route", async () => {
+    const w = await sixtyRows();
+    expect(w.rows).toBe(60);
+    const first = await w.routePass();
+    expect(first.status).toBe(200);
+    expect(first.queries).toBeLessThanOrEqual(50);
+    expect([first.more, first.failed, first.skipped]).toEqual([true, 0, 0]);
+    const second = await w.routePass(first.next ?? undefined);
+    expect(second.status).toBe(200);
+    expect(second.queries).toBeLessThanOrEqual(50);
+    expect([second.more, second.failed, second.skipped]).toEqual([false, 0, 0]);
+    expect(first.resealed + second.resealed).toBe(60);
+    // Measured on the binding on 2026-10-21: the first call sends 50 queries
+    // and reseals 42 rows, the second sends 24 and reseals 18. The limiter
+    // query of the route comes before the 7 fixed queries of the api call.
+    // With the limiter query left out of the meter, the first call sent 51.
+    expect([first.queries, first.resealed, second.queries, second.resealed]).toEqual([
+      50, 42, 24, 18,
     ]);
   }, 300_000);
 });

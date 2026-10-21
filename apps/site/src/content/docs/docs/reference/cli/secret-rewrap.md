@@ -51,7 +51,7 @@ Each call prints one line on stderr: `call <i>: resealed <n>, failed <n>, skippe
 
 ## The loop
 
-Each call reseals up to `--limit` rows after the cursor of the call before. The server keeps each call inside 50 storage calls, the limit of D1 Free, so a call may reseal fewer rows and answer `more: true`. The command then calls again. The command sends the `next` of each answer back as `after`, so a row that fails or is skipped blocks no row behind it. The loop ends at the first of three events:
+Each call reseals up to `--limit` rows after the cursor of the call before. The server keeps each call inside 50 queries, the limit of D1 Free, with the limiter query of the route among them. So a call may reseal fewer rows and answer `more: true`. The command then calls again. The command sends the `next` of each answer back as `after`, so a row that fails or is skipped blocks no row behind it. The loop ends at the first of three events:
 
 1. The answer has `more: false`. No row of a configured old version remains. The command exits 0.
 2. The answer has `next: null`. The pass read every row that was left. Some rows stay: a row that did not open, or a live setup with codes. The command exits 1 and names the reason.
