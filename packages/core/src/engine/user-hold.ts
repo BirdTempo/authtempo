@@ -40,7 +40,9 @@ import { ROUNDS } from "./rounds.js";
  * an accept of that person run one at a time.
  * The role create takes the organization lock before its count, and no
  * user hold. The team member removal takes the team lock, as
- * `setActiveTeam` does, and no user hold.
+ * `setActiveTeam` does, and no user hold. `deleteOrganizationRows` deletes
+ * the organization row first and the team rows next, so it waits for each
+ * flow that holds one of these locks, in the same order.
  *
  * No row returns: a sign-up writes its user later, and a deleted user is
  * found by `userStays`, the read after the insert. A stop here would answer

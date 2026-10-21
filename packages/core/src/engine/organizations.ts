@@ -594,14 +594,22 @@ export async function deleteOrganization(
  * The rows of one organization, in the caller's transaction. One copy for
  * the organization delete and the account delete (plan 12a).
  *
- * The order closes the gap of an accept in flight (plan 12a Task 11). The
- * invitations go first. On Postgres an accept holds its invitation row
- * until its commit. So this delete waits, and the member read below sees
- * that member. An accept that starts later finds no invitation. The row goes
- * before the members: D1 has no lock, and an accept reads the organization
- * after its member insert. With `alone`, the organization goes with that
- * user's account, so any other member answers `conflict`: the organization
- * is no longer one the user alone holds.
+ * The order closes the gaps of the flows in flight. The organization row
+ * goes first (ruling 43 of plan 12k). On Postgres a flow that holds its lock
+ * (`lockOrganization`: a token create, a team create, a role create)
+ * commits first, and the deletes below see its rows. A flow that starts
+ * later finds no organization. The team rows go next, before the team
+ * member rows: a team member add or an accept holds its team row until its
+ * commit, so the team member delete below sees its row.
+ *
+ * Then the gap of an accept in flight (plan 12a Task 11). On Postgres an
+ * accept holds its invitation row until its commit. So this delete waits,
+ * and the member read below sees that member. An accept that starts later
+ * finds no invitation. The organization row goes before the members: D1 has
+ * no lock, and an accept reads the organization after its member insert.
+ * With `alone`, the organization goes with that user's account, so any
+ * other member answers `conflict`: the organization is no longer one the
+ * user alone holds.
  */
 export async function deleteOrganizationRows(
   tx: StorageAdapter,
@@ -609,19 +617,20 @@ export async function deleteOrganizationRows(
   alone: string | null = null,
 ): Promise<void> {
   const byOrganization: Where<"member">[] = [{ field: "organizationId", op: "eq", value: id }];
+  await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
+  // Plan 12k: the teams go before their rows, and fire no team hook.
+  await tx.delete("team", [{ field: "organizationId", op: "eq", value: id }]);
   await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
   // The tokens and the role rows of the organization have no use without it (plan 12k).
   await tx.delete("organizationToken", [{ field: "organizationId", op: "eq", value: id }]);
   await tx.delete("organizationRole", [{ field: "organizationId", op: "eq", value: id }]);
-  await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
   if (
     alone !== null &&
     (await tx.findMany("member", byOrganization)).some((m) => m.userId !== alone)
   )
     stopWith("conflict");
-  // Plan 12k: the teams and their rows go before the members, and fire no team hook.
+  // The team rows go before the members.
   await tx.delete("teamMember", [{ field: "organizationId", op: "eq", value: id }]);
-  await tx.delete("team", [{ field: "organizationId", op: "eq", value: id }]);
   await tx.delete("member", byOrganization);
   // A session that points at a deleted organization would make every later rank check read a missing row.
   // Its active team is a team of that organization, so it goes in the same write.

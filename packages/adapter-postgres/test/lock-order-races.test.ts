@@ -381,4 +381,58 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
       [organizationId, null],
     ]);
   });
+  it("holds an organization delete during an organization token create, so no token of a gone organization stays (L1)", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let deleted: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), {}, sent);
+    const two = instance(watch("organization", g.reach), {}, sent);
+    const one = instance(
+      afterRead("organizationToken", "findMany", async () => {
+        deleted = two.api.deleteOrganization({ user: a, organizationId });
+        await Promise.race([g.at, deleted]);
+      }),
+      {},
+      sent,
+    );
+    const a = await user("a");
+    const organizationId = await organization(plain, a);
+
+    const made = await one.api.organizationTokens.create({
+      user: a,
+      organizationId,
+      name: "ci",
+      permissions: {},
+    });
+
+    expect(made).toMatchObject({ ok: true });
+    expect(await deleted).toEqual({ ok: true, value: { ok: true } });
+    expect(await rows("organization")).toEqual([]);
+    expect(await rows("organizationToken")).toEqual([]);
+  });
+
+  it("holds an organization delete during a team member add, so no team row of a gone team stays (L1)", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let deleted: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
+    const two = instance(watch("team", g.reach), { teams: {} }, sent);
+    const one = instance(createPostgresAdapter(db.sql), { teams: {} }, sent, {
+      beforeAddTeamMember: async () => {
+        deleted = two.api.deleteOrganization({ user: a, organizationId });
+        await Promise.race([g.at, deleted]);
+      },
+    });
+    const a = await user("a");
+    const organizationId = await organization(plain, a);
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+
+    const added = await one.api.addTeamMember({ user: a, teamId, userId: a.id });
+
+    expect(added).toMatchObject({ ok: true });
+    expect(await deleted).toEqual({ ok: true, value: { ok: true } });
+    expect(await rows("organization")).toEqual([]);
+    expect(await rows("team")).toEqual([]);
+    expect(await rows("teamMember")).toEqual([]);
+  });
 });
