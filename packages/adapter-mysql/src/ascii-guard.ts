@@ -80,13 +80,12 @@ function rangeClause<M extends ModelName>(w: Where<M>, s: string, length: number
 }
 
 /**
- * True for a where value that core refuses with invalid_argument: a NUL in
- * any string, or a lone surrogate in a prefix (core/src/storage/sql.ts).
+ * True for a where value that core refuses with invalid_argument: a string
+ * with a NUL or a lone surrogate (assertWhereText of core/src/storage/sql.ts).
  */
-function coreRefuses(op: Where<ModelName>["op"], v: unknown): boolean {
-  if (Array.isArray(v)) return v.some((x) => typeof x === "string" && x.includes("\u0000"));
-  if (typeof v !== "string") return false;
-  return v.includes("\u0000") || (op === "startsWith" && /\p{Cs}/u.test(v));
+function coreRefuses(v: unknown): boolean {
+  const values = Array.isArray(v) ? v : [v];
+  return values.some((x) => typeof x === "string" && (x.includes("\u0000") || /\p{Cs}/u.test(x)));
 }
 
 /**
@@ -99,7 +98,7 @@ export function guardWhere<M extends ModelName>(model: M, where: Where<M>[]): Wh
   const out: Where<M>[] = [];
   for (const w of where) {
     const length = ASCII_LENGTH.get(`${model}.${w.field}`);
-    if (length === undefined || coreRefuses(w.op, w.value)) {
+    if (length === undefined || coreRefuses(w.value)) {
       out.push(w);
       continue;
     }

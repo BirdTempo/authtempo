@@ -212,6 +212,23 @@ function invalid(model: ModelName, field: string, why: string): StorageError {
 
 const NUL_ESCAPE = /(?<!\\)(?:\\\\)*\\u0000/;
 
+/**
+ * The text rule of a where value, on every store (rulings 16 and 17 of plan
+ * 12g). A NUL is refused in every string, as the codec does. A lone
+ * surrogate is no code point, and the stores read it in other ways. libSQL
+ * over HTTP fails the whole request with HTTP 400. So a where value with
+ * either one throws invalid_argument before any store sees it. An `in`
+ * list is checked item by item.
+ */
+export function assertWhereText(model: ModelName, field: string, value: unknown): void {
+  const values = Array.isArray(value) ? value : [value];
+  for (const v of values) {
+    if (typeof v !== "string") continue;
+    if (v.includes("\u0000")) throw invalid(model, field, "a where value holds a NUL character");
+    if (/\p{Cs}/u.test(v)) throw invalid(model, field, "a where value holds a lone surrogate");
+  }
+}
+
 function isPlainJson(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
   if (Array.isArray(value)) return true;
@@ -341,6 +358,7 @@ function compileWhere<M extends ModelName>(
     // compares jsonb by value. No engine call filters on json, so refuse it.
     if (type === "json")
       throw invalid(model, w.field, "a where clause cannot filter on a json field");
+    assertWhereText(model, w.field, w.value);
     const enc = (v: unknown) => encodeValue(d, type, v, model, w.field);
     switch (w.op) {
       case "eq":
@@ -383,9 +401,7 @@ function compileWhere<M extends ModelName>(
       case "startsWith": {
         if (type !== "string" || typeof w.value !== "string" || w.value === "")
           throw invalid(model, w.field, "startsWith takes a non-empty string on a string field");
-        // A lone surrogate is no code point: memory, Postgres, and SQLite read it three ways.
-        if (/\p{Cs}/u.test(w.value))
-          throw invalid(model, w.field, "startsWith refuses a lone surrogate");
+        // assertWhereText refused a lone surrogate above.
         // substr, not LIKE: SQLite's LIKE ignores the case of ASCII letters, and a
         // wildcard needs an escape. The function substr counts characters on both
         // dialects, so the match is exact (plan 12f deviation 2). No index serves

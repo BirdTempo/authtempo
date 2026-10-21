@@ -1597,15 +1597,29 @@ export function runAdapterConformance(
         expect(await db.findMany("user", [])).toEqual([]);
       });
 
-      it("refuses a NUL in each clause and a lone surrogate in a prefix (ruling 16)", async () => {
-        // The SQL codec refuses both, so no store may answer rows for them.
+      it("refuses a NUL and a lone surrogate in each clause (rulings 16 and 17)", async () => {
+        // Core refuses both in every where value, so no store may answer rows
+        // for them. libSQL over HTTP failed a lone surrogate with HTTP 400.
         await seed();
         const refused = { name: "StorageError", code: "invalid_argument" };
-        for (const op of ["eq", "ne", "lt", "lte", "gt", "gte", "startsWith"] as const)
-          await expect(ids(op, "a\u0000")).rejects.toMatchObject(refused);
-        await expect(ids("in", ["a\u0000", "b"])).rejects.toMatchObject(refused);
-        await expect(ids("startsWith", "a\uD800")).rejects.toMatchObject(refused);
-        await expect(ids("startsWith", "\uDC00b")).rejects.toMatchObject(refused);
+        const OPS = ["eq", "ne", "lt", "lte", "gt", "gte", "startsWith"] as const;
+        for (const value of ["a\u0000", "a\uD800", "\uDC00b"]) {
+          for (const op of OPS) await expect(ids(op, value)).rejects.toMatchObject(refused);
+          await expect(ids("in", [value, "b"])).rejects.toMatchObject(refused);
+          // A field that is not ascii on MySQL takes the same rule.
+          await expect(
+            db.findMany("user", [{ field: "email", op: "eq", value }]),
+          ).rejects.toMatchObject(refused);
+        }
+        await expect(
+          db.findOne("user", [{ field: "id", op: "eq", value: "\uD800" }]),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.update("user", [{ field: "id", op: "lt", value: "a\uD800" }], { name: "x" }),
+        ).rejects.toMatchObject(refused);
+        await expect(
+          db.delete("user", [{ field: "id", op: "ne", value: "\uDC00b" }]),
+        ).rejects.toMatchObject(refused);
         await expect(
           db.findOne("user", [{ field: "id", op: "eq", value: "\u0000" }]),
         ).rejects.toMatchObject(refused);

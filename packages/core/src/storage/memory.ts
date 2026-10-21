@@ -1,5 +1,6 @@
 import { type ModelName, type Models, schema } from "../schema.js";
 import { type FindManyOptions, type StorageAdapter, StorageError, type Where } from "./port.js";
+import { assertWhereText } from "./sql.js";
 
 type Store = Map<ModelName, Map<string, Record<string, unknown>>>;
 
@@ -101,26 +102,16 @@ interface Lock {
 }
 
 /**
- * The prefix rule of the port: a non-empty string on a string field, with no
- * lone surrogate. A lone surrogate is no code point, and each engine reads it
- * another way. The guard refuses NUL too, as the SQL codec does in every string.
- * The SQL codec also refuses NUL in each value of the other clauses, so this
- * guard does the same (ruling 16 of plan 12g).
+ * The prefix rule of the port: a non-empty string on a string field. Each
+ * where value also meets the text rule of the SQL builder. So a NUL or a
+ * lone surrogate throws as on every store (rulings 16 and 17 of plan 12g).
  */
 function assertPrefixes<M extends ModelName>(model: M, where: Where<M>[]): void {
   const fields = schema[model].fields as Record<string, { type: string }>;
   for (const w of where) {
-    const values = Array.isArray(w.value) ? w.value : [w.value];
-    if (values.some((v) => typeof v === "string" && v.includes("\u0000")))
-      throw new StorageError("invalid_argument", model, [w.field]);
+    assertWhereText(model, w.field, w.value);
     if (w.op !== "startsWith") continue;
-    if (
-      fields[w.field]?.type !== "string" ||
-      typeof w.value !== "string" ||
-      w.value === "" ||
-      /\p{Cs}/u.test(w.value) ||
-      w.value.includes("\u0000")
-    ) {
+    if (fields[w.field]?.type !== "string" || typeof w.value !== "string" || w.value === "") {
       throw new StorageError("invalid_argument", model, [w.field]);
     }
   }

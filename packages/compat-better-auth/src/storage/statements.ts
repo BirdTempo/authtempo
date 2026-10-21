@@ -10,6 +10,7 @@ import {
 import {
   assertFields,
   assertModel,
+  assertWhereText,
   columnName,
   coreStatements,
   encodeValue,
@@ -386,6 +387,8 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       const empty = codec === "nullAsEmpty";
       const c = value(model, w.field);
       const isNull = (v: unknown) => v === null || v === undefined || (empty && v === "");
+      // One text rule with core's builder: a NUL or a lone surrogate throws (ruling 17 of plan 12g).
+      assertWhereText(model, w.field, w.value);
       const enc = (v: unknown) => p.add(encode(model, w.field, v), type);
       switch (w.op) {
         case "eq":
@@ -414,9 +417,6 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
         case "startsWith":
           if (type !== "string" || typeof w.value !== "string" || w.value === "")
             throw invalid(model, w.field, "startsWith takes a non-empty string on a string field");
-          // A lone surrogate is no code point: memory, Postgres, and SQLite read it three ways.
-          if (/\p{Cs}/u.test(w.value))
-            throw invalid(model, w.field, "startsWith refuses a lone surrogate");
           // substr, not LIKE, as in core's builder (plan 12f deviation 2): exact, with case,
           // and no wildcard. The count is code points, as substr counts on both dialects.
           // A nullAsEmpty field needs no "<> ''" clause: the prefix is never empty.
