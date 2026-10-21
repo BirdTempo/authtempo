@@ -521,23 +521,44 @@ CREATE INDEX ix_ta_operator_audit__actor_id ON ta_operator_audit (actor_id);`,
  * fields `bannedAt`, `banReason`, and `banUntil` to `user`, `actorId` to
  * `session`, and the model `operatorAudit`. Better Auth's `user` gets
  * `taBannedAt`, `taBanReason`, and `taBanUntil`, and its `session` gets
- * `taActorId` (deviation 11 of plan 12f). The admin plugin's own columns
- * exist only in some apps, and its `banned` is a boolean. Each column is
- * nullable with no default and no fill. `operatorAudit` is core's own table
- * (`CORE_TABLE_MODELS`), with the text of core 0012. The columns take the
- * app's naming, so the text depends on `names`. The D1 files in this package
- * are the text of the default naming, as for 0007. Append-only.
+ * `taActorId` (deviation 11 of plan 12f). Each column is nullable with no
+ * default. `operatorAudit` is core's own table (`CORE_TABLE_MODELS`), with
+ * the text of core 0012. The columns take the app's naming, so the text
+ * depends on `names`. The D1 files in this package are the text of the
+ * default naming, as for 0007.
+ *
+ * The migration also copies each ban of Better Auth's admin plugin into
+ * core's columns (ruling 62 M1). Without the copy, the cutover unbans every
+ * banned user, because core never reads `banned`. `taBannedAt` takes the
+ * row's `updatedAt`, because Better Auth keeps no ban time. The admin
+ * plugin's columns `banned`, `banReason`, and `banExpires` exist only in
+ * some apps, and a static D1 file cannot test for a column. So each read
+ * of one is a subquery on `user` inside a subquery on a one-row table that
+ * has a column of the same name. SQL looks up a name in the nearest query
+ * first. So the name reads the user's column when it exists, and else the
+ * fallback: not banned, and null. The copy skips each row that has
+ * `taBannedAt`, so a second run changes nothing.
  */
 export function compatMigration0009Sql(dialect: "postgres" | "sqlite", n: Names): string {
-  const date = dialect === "postgres" ? "timestamptz" : "TEXT";
-  const text = dialect === "postgres" ? "text" : "TEXT";
+  const pg = dialect === "postgres";
+  const date = pg ? "timestamptz" : "TEXT";
+  const text = pg ? "text" : "TEXT";
   const add = (table: "user" | "session", field: string, type: string) =>
     `ALTER TABLE ${n.table(table)} ADD COLUMN ${n.column(table, field)} ${type};`;
+  // A date as core reads it back: milliseconds on Postgres, the ISO text on SQLite.
+  const at = (c: string) => (pg ? `date_trunc('milliseconds', ${c})` : sqliteIsoText(c));
+  const id = n.column("user", "id");
+  const optional = (field: string, fallback: string, read = (c: string) => c) => {
+    const c = n.column("user", field);
+    return `(SELECT (SELECT ${read(c)} FROM ${n.table("user")} AS b WHERE b.${id} = u.${id}) FROM (SELECT ${fallback} AS ${c}) AS fallback)`;
+  };
+  const copyBans = `UPDATE ${n.table("user")} AS u SET ${n.column("user", "taBannedAt")} = ${at(`u.${n.column("user", "updatedAt")}`)}, ${n.column("user", "taBanReason")} = ${optional("banReason", pg ? "NULL::text" : "NULL")}, ${n.column("user", "taBanUntil")} = ${optional("banExpires", pg ? "NULL::timestamptz" : "NULL", at)} WHERE u.${n.column("user", "taBannedAt")} IS NULL AND ${optional("banned", pg ? "false" : "0")} ${pg ? "IS TRUE" : "= 1"};`;
   return `${[
     add("user", "taBannedAt", date),
     add("user", "taBanReason", text),
     add("user", "taBanUntil", date),
     add("session", "taActorId", text),
+    copyBans,
     COMPAT_0009_CORE[dialect],
     "UPDATE ta_meta SET value = '12' WHERE key = 'schema_version';",
     "UPDATE ta_meta SET value = '9' WHERE key = 'compat_better_auth';",

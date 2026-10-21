@@ -600,7 +600,7 @@ The options:
 
 | Option | On authtempo |
 | --- | --- |
-| `authtempo.platformOrganization` | Required with `admin`, refused without it. The slug of the platform organization. `authtempo create-admin` creates it with the first operator. |
+| `authtempo.platformOrganization` | Required with `admin`, refused without it. The slug of the platform organization. The app's `auth.tempo.api.operator.createAdmin` creates it with the first operator (see "Admins from Better Auth"). |
 | `adminRoles` | One rank of `viewer`, `member`, `admin`, and `owner`; default `admin`. It is the platform role. A list with two ranks, or a role that is not a rank, is refused. |
 | `impersonationSessionDuration` | Seconds, a whole number of minutes from 5 to 240; default 3600. It is core's `operator.impersonation.ttlMinutes`. Core mails the user a notice at each start. |
 | `defaultRole` | `"user"` only, Better Auth's default. |
@@ -653,8 +653,9 @@ ban that holds now. With `twoFactor()`, each user also has
 `twoFactorEnabled`, read from core's `ta_second_factor` rows in one read per
 answer. An operator cannot act on another platform operator through these
 calls. So a ban, an unban, or a `set-role` of `user` on a
-platform operator is refused. The revoke of an operator needs an operator
-secret or the app (`auth.tempo.api.operator.platformRole.revoke`).
+platform operator is refused. The revoke of an operator needs the app
+(`auth.tempo.api.operator.platformRole.revoke`), because this package takes
+no operator secret.
 
 | Core's refusal | Answer |
 | --- | --- |
@@ -724,19 +725,37 @@ the audit row holds no human reason.
 ### Bans from Better Auth
 
 Core reads a ban from its own columns `taBannedAt`, `taBanReason`, and
-`taBanUntil`, never from Better Auth's `banned`. Run this SQL once at the
-cutover to copy the existing bans. It runs only where the admin plugin's
-columns exist. Better Auth keeps no ban time, so `taBannedAt` takes the
-row's `updatedAt`. With another naming, use the column names of your naming.
+`taBanUntil`, never from Better Auth's `banned`. Compat migration 0009 adds
+these columns and copies each ban of the admin plugin into them, in the
+same run. It copies `banReason` and `banExpires` for each user whose
+`banned` is true. Better Auth keeps no ban time, so `taBannedAt` takes the
+row's `updatedAt`. A ban whose `banExpires` passed stays ended.
 
-```sql
--- D1 and SQLite
-UPDATE "user" SET "taBannedAt" = "updatedAt", "taBanReason" = "banReason", "taBanUntil" = "banExpires"
-WHERE "banned" = 1 AND "taBannedAt" IS NULL;
--- Postgres
-UPDATE "user" SET "taBannedAt" = "updatedAt", "taBanReason" = "banReason", "taBanUntil" = "banExpires"
-WHERE "banned" = true AND "taBannedAt" IS NULL;
-```
+The copy reads the admin plugin's columns only where they exist, so an app
+without the plugin runs the same file. A row that has `taBannedAt` is
+skipped, so a second run of the copy changes nothing. The columns take the
+app's naming (`columns.user.banned`, `banReason`, and `banExpires`), as
+`compatMigration0009Sql` writes them.
+
+### Admins from Better Auth
+
+Core gives operator power by the platform role only, never by Better
+Auth's `role` column. Do these steps at the cutover for each user whose
+`role` names the rank of `adminRoles`. Skip them, and each such admin loses
+the admin power: each admin call answers 403.
+
+1. Make one admin the first operator, once, in the app:
+   `auth.tempo.api.operator.createAdmin({ actor, email, reason, ip: null, userAgent: null })`.
+   It makes the platform organization.
+2. Grant the platform role to each other admin with
+   `auth.tempo.api.operator.platformRole.grant`, or with `/admin/set-role`
+   from the first operator's session.
+3. Ask each admin to sign in again and turn a second factor on. A session
+   from before the grant holds no operator power. The guard also needs a
+   verified address and a fresh session.
+
+The `authtempo` option takes no operator secret, so the CLI's
+`create-admin` and `users` commands do not reach this app.
 
 ## Email codes
 

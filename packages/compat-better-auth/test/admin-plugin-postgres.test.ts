@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { COOKIE_NAME } from "../src/server/shapes.js";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
-import { adminApp, adminShim, PASSWORD } from "./admin-helpers.js";
+import { adminApp, adminShim, betterAuthBans, PASSWORD } from "./admin-helpers.js";
 import { BETTER_AUTH_PG } from "./fixtures.js";
 import { freshBetterAuthSchema } from "./pg.js";
 
@@ -56,6 +56,38 @@ describe("the admin plugin on Postgres (plan 12f Task 13)", () => {
     });
     if (!user.ok) throw new Error(user.code);
     expect(user.value.ban?.reason).toBe("Spam");
+  });
+
+  it("copies each Better Auth ban at migration 0009, so a banned user gets BANNED_USER at sign-in (ruling 62 M1)", async () => {
+    const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
+    closers.push(() => pg.close());
+    await pg.sql.unsafe(betterAuthBans("postgres"));
+    const storage = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
+    await storage.migrate();
+    const rows = await pg.sql<
+      { id: string; taBannedAt: Date | null; taBanReason: string | null; taBanUntil: Date | null }[]
+    >`SELECT "id", "taBannedAt", "taBanReason", "taBanUntil" FROM "user" ORDER BY "id"`;
+    const era = new Date("2026-09-01T00:00:00.000Z");
+    expect(rows).toEqual([
+      { id: "ann", taBannedAt: era, taBanReason: "Spam", taBanUntil: null },
+      {
+        id: "bob",
+        taBannedAt: era,
+        taBanReason: "Spam",
+        taBanUntil: new Date("2026-09-02T00:00:00.000Z"),
+      },
+      { id: "cy", taBannedAt: null, taBanReason: null, taBanUntil: null },
+    ]);
+    const auth = adminShim(storage);
+    const signIn = (id: string) =>
+      auth.api.signInEmail({ body: { email: `${id}@example.com`, password: PASSWORD } });
+    await expect(signIn("ann")).rejects.toMatchObject({
+      statusCode: 403,
+      body: { code: "BANNED_USER" },
+    });
+    // A ban that ended in Better Auth stays ended, and a user with no ban signs in.
+    await expect(signIn("bob")).resolves.toMatchObject({ user: { email: "bob@example.com" } });
+    await expect(signIn("cy")).resolves.toMatchObject({ user: { email: "cy@example.com" } });
   });
 
   it("keeps the operator of an impersonation in taActorId, and the stop ends the row", async () => {

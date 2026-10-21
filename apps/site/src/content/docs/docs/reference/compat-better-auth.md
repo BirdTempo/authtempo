@@ -195,7 +195,7 @@ Core's guard decides each mapped call: the platform role, a verified address, a 
 - A stop by a session that impersonates nobody answers 400 with the message `You are not impersonating anyone`.
 - `/admin/stop-impersonating` answers `{ session: null, user: null }` when no operator session comes back. Better Auth answers 500 there.
 
-Each `NOT_SUPPORTED` message names spec section 26. A call with no reason writes the audit reason `better-auth admin plugin <path>`. The README of the package gives the SQL that copies the bans of Better Auth into core's columns at the cutover.
+Each `NOT_SUPPORTED` message names spec section 26. A call with no reason writes the audit reason `better-auth admin plugin <path>`. Compat migration 0009 copies the bans of Better Auth into core's columns. [From Better Auth](/docs/migrate/better-auth/#cut-over) gives the step for the admins.
 
 ## Next
 

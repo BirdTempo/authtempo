@@ -62,7 +62,7 @@ Version 11 comes from the `0011_schema_v11` migration in both adapters, and from
 
 Every other new column is nullable and reads null. Version 11 also adds the verification purposes `client-assertion` and `dpop-proof`, which need no DDL. Plan 12e also adds the purpose `oauth-family-end`, the end mark of a refresh family that a reuse or a revoke ended. It needs no DDL either.
 
-Version 12 comes from the `0012_schema_v12` migration in both adapters, and from `0009_compat_schema_v12` in the compatibility package (plan 12f). Each new column is nullable, with no default and no fill. A row of version 11 holds null: no ban and no impersonation.
+Version 12 comes from the `0012_schema_v12` migration in both adapters, and from `0009_compat_schema_v12` in the compatibility package (plan 12f). Each new column is nullable, with no default. A row of version 11 holds null: no ban and no impersonation. On the Better Auth tables, `0009_compat_schema_v12` copies each ban of Better Auth's admin plugin into the three ban columns.
 
 | Field | Column | Type | What it holds |
 | --- | --- | --- | --- |
@@ -150,7 +150,7 @@ The compatibility package keeps the tables of Better Auth 1.7. It adds columns t
 | `0006_compat_schema_v9` | `secret_version` on `ta_totp`, `ta_second_factor`, and `ta_jwk`, and `taSecretVersion` on `verification`, which holds the same field. Default 1. The text names the verification table, so tables with other names take the text of `compatMigration0006Sql`. |
 | `0007_compat_schema_v10` | `taFreshAt` on `session`, which holds `freshAt`. No default and no fill. The text names the session table, so tables with other names take the text of `compatMigration0007Sql`. |
 | `0008_compat_schema_v11` | The columns and the four tables of version 11, with the same defaults. The text names `ta_` tables only, so it is the same for every naming. |
-| `0009_compat_schema_v12` | `taBannedAt`, `taBanReason`, and `taBanUntil` on `user`, `taActorId` on `session`, and `ta_operator_audit`. No default and no fill. The text names the user and session tables, so tables with other names take the text of `compatMigration0009Sql`. |
+| `0009_compat_schema_v12` | `taBannedAt`, `taBanReason`, and `taBanUntil` on `user`, `taActorId` on `session`, and `ta_operator_audit`. No default. It copies each ban of the admin plugin (`banned`, `banReason`, `banExpires`) into the ban columns, and skips a row that has `taBannedAt`. The text names the user and session tables, so tables with other names take the text of `compatMigration0009Sql`. |
 
 On D1, a database made by a Better Auth older than 1.7 uses the folder `d1-before-1.7`. [Better Auth compatibility](/docs/reference/compat-better-auth/) tells the rest.
 

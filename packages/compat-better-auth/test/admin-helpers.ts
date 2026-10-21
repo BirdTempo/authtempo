@@ -4,6 +4,7 @@ import { betterAuthPasswordHash } from "../src/hash.js";
 import { admin, organization, twoFactor } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { COOKIE_NAME } from "../src/server/shapes.js";
+import { issuerFor } from "../src/storage/mapping.js";
 import type { CompatDatabase } from "../src/types.js";
 
 // The app of the admin plugin tests of plan 12f Task 13, on any compat
@@ -117,4 +118,35 @@ export async function adminApp(
     }));
   };
   return { auth, call, read, user, op, opId: opRow.id, audit };
+}
+
+// A Better Auth scrypt hash of PASSWORD (the vector of hash.test.ts).
+const BA_HASH =
+  "8b963491c29137940a209e5a26de719e:b4ce8a3b919a25198f84eebbede27d1cd0fda32747c6489f0997b993a16de0a2381351c5595013552488269e72aa6507da171fac50e68ce5ff7173ff58b554d3";
+const ERA = "2026-09-01T00:00:00.000Z";
+
+/**
+ * The SQL of a Better Auth database with the admin plugin, before the
+ * compat migrations (ruling 62 M1). The columns are those of Better Auth
+ * 1.7.2's admin schema (dist/plugins/admin/schema.mjs, read 2026-10-21):
+ * user role, banned, banReason, banExpires, and session impersonatedBy.
+ * Three users with a password, as Better Auth writes them: ann is banned
+ * with no end, bob's ban ended on 2026-09-02, and cy was never banned.
+ */
+export function betterAuthBans(dialect: "postgres" | "sqlite"): string {
+  const pg = dialect === "postgres";
+  const bool = (b: boolean) => (pg ? String(b) : b ? "1" : "0");
+  const user = (id: string, banned: boolean, reason: string | null, expires: string | null) =>
+    `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt","role","banned","banReason","banExpires") VALUES ('${id}','${id}','${id}@example.com',${bool(true)},NULL,'${ERA}','${ERA}','user',${bool(banned)},${reason === null ? "NULL" : `'${reason}'`},${expires === null ? "NULL" : `'${expires}'`});
+INSERT INTO "account" ("id","issuer","accountId","providerId","userId","password","createdAt","updatedAt") VALUES ('${id}-cred','${issuerFor("credential")}','${id}','credential','${id}','${BA_HASH}','${ERA}','${ERA}');`;
+  return [
+    `ALTER TABLE "user" ADD COLUMN "role" text;`,
+    `ALTER TABLE "user" ADD COLUMN "banned" ${pg ? "boolean" : "integer"};`,
+    `ALTER TABLE "user" ADD COLUMN "banReason" text;`,
+    `ALTER TABLE "user" ADD COLUMN "banExpires" ${pg ? "timestamptz" : "date"};`,
+    `ALTER TABLE "session" ADD COLUMN "impersonatedBy" text;`,
+    user("ann", true, "Spam", null),
+    user("bob", true, "Spam", "2026-09-02T00:00:00.000Z"),
+    user("cy", false, null, null),
+  ].join("\n");
 }

@@ -109,6 +109,16 @@ export const TABLE_FIELDS: Record<BetterAuthTable, readonly string[]> = {
   ],
 };
 
+/**
+ * Better Auth fields that only some apps have, per table: the admin
+ * plugin's ban fields. Only migration 0009 names them, to copy a ban into
+ * core's columns (ruling 62 M1). They take the same naming rules, and
+ * `fieldOf` does not know them, because no statement reads or writes them.
+ */
+export const OPTIONAL_FIELDS: Partial<Record<BetterAuthTable, readonly string[]>> = {
+  user: ["banned", "banReason", "banExpires"],
+};
+
 export interface NamingOptions {
   /** How a field with no explicit column is named. Default "camel", Better Auth's own default. */
   casing?: "camel" | "snake";
@@ -166,6 +176,14 @@ export function resolveNames(options: NamingOptions = {}): Names {
       f.set(field, column);
       b.set(column, field);
     }
+    for (const field of OPTIONAL_FIELDS[t] ?? [])
+      f.set(
+        field,
+        ident(
+          options.columns?.[t]?.[field] ?? (casing === "snake" ? snake(field) : field),
+          `columns.${t}.${field}`,
+        ),
+      );
     forward.set(t, f);
     back.set(t, b);
   }

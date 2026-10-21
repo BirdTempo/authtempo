@@ -9,6 +9,7 @@ sources:
   - packages/compat-better-auth/README.md "Plugins"
   - packages/compat-better-auth/README.md "Account operations"
   - packages/compat-better-auth/README.md "JWT and the OAuth provider"
+  - packages/compat-better-auth/README.md "The admin plugin"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 23
   - docs/superpowers/plans/2026-10-14-11f-migration.md "Task 9"
@@ -119,6 +120,14 @@ Warning: upgrade Better Auth to 1.7.7 or later before the move. Version 1.7.7 fi
 
 1. Do the steps of [The cutover](/docs/migrate/cutover/).
 2. Register the new callback URL at each social provider before the cutover.
+3. With the admin plugin, carry the admins. Core gives operator power by the platform role only, never by Better Auth's `role` column.
+   - Make one admin the first operator, once, with `auth.tempo.api.operator.createAdmin` in the app. It makes the platform organization.
+   - Grant the platform role to each other admin with `auth.tempo.api.operator.platformRole.grant`, or with `/admin/set-role` from the first operator's session.
+   - Ask each admin to sign in again and turn a second factor on. A session from before the grant holds no operator power.
+   - Skip this step, and each admin loses the admin power at the cutover: each admin call answers 403.
+   - The `authtempo` option takes no operator secret, so the CLI's `create-admin` and `users` commands do not reach the app.
+
+The bans of the admin plugin need no step. Compat migration 0009 copies each ban into core's columns, so a banned user stays banned.
 
 ## The D1 files
 
@@ -132,7 +141,7 @@ Warning: upgrade Better Auth to 1.7.7 or later before the move. Version 1.7.7 fi
 | `0006_compat_schema_v9.sql` | Adds `secret_version` to `ta_totp`, `ta_second_factor`, and `ta_jwk`, and `taSecretVersion` to `verification`, default 1. Tables with other names take the text of `compatMigration0006Sql("sqlite", storage.names)`. |
 | `0007_compat_schema_v10.sql` | Adds `taFreshAt` to `session`, nullable, with no fill. Tables with other names take the text of `compatMigration0007Sql("sqlite", storage.names)`. |
 | `0008_compat_schema_v11.sql` | Adds the version 11 columns to `ta_oauth_client` and `ta_oauth_token`, and adds `ta_oauth_device`, `ta_oauth_subject`, `ta_oauth_session_client`, and `ta_oauth_logout`. The same text for every naming. |
-| `0009_compat_schema_v12.sql` | Adds `taBannedAt`, `taBanReason`, and `taBanUntil` to `user` and `taActorId` to `session`, nullable, with no fill, and adds `ta_operator_audit`. Tables with other names take the text of `compatMigration0009Sql("sqlite", storage.names)`. |
+| `0009_compat_schema_v12.sql` | Adds `taBannedAt`, `taBanReason`, and `taBanUntil` to `user` and `taActorId` to `session`, nullable, and adds `ta_operator_audit`. It copies each ban of the admin plugin into the three ban columns. Tables with other names take the text of `compatMigration0009Sql("sqlite", storage.names)`. |
 
 A file number lower than the Better Auth table migration makes every new database fail at the compat file with `no such table`.
 
