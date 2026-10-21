@@ -1,5 +1,4 @@
-import { schemaDdl } from "@authtempo/core/ddl";
-import { MYSQL } from "@authtempo/core/sql";
+import { createHash } from "node:crypto";
 import mysql, { type RowDataPacket } from "mysql2/promise";
 import { afterEach, describe, expect, it } from "vitest";
 import { statements as baseline } from "../src/migrations/0001_schema_v13.js";
@@ -189,10 +188,14 @@ for (const server of MYSQL_SERVERS) {
       }
     });
 
-    it("holds the baseline to schemaDdl", () => {
-      // One source on the day of the baseline (2026-10-21). After this task
-      // the file is a record, and the shape suite holds it.
-      expect(baseline).toEqual(schemaDdl(MYSQL));
+    it("holds the baseline record to its digest", () => {
+      // The record 0001_schema_v13 is append-only. On 2026-10-21 its text was
+      // schemaDdl(MYSQL), but schema 14 changes schemaDdl, and a compare with
+      // it then fails on a record that did not change (plan 12g fix wave, m2).
+      // The digest pins the record text alone. The shape suite holds the
+      // live tables to the schema.
+      const digest = createHash("sha256").update(JSON.stringify(baseline)).digest("hex");
+      expect(digest).toBe("1c55f449b21a23f5aa8d489d1877d276c88d504e275929993cedffbe0a94bbd9");
       expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual(["0001_schema_v13"]);
     });
   });
