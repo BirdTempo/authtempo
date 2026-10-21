@@ -1,18 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
-import { requestEmailOtp } from "../../src/engine/email-otp.js";
+import { requestEmailOtp, requestResetOtp } from "../../src/engine/email-otp.js";
 import { requestMagicLink, verifyMagicLink } from "../../src/engine/magic-link.js";
 import {
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
   verifyPasskeyRegistration,
 } from "../../src/engine/passkeys.js";
-import { passwordSignIn, requestPasswordReset } from "../../src/engine/password.js";
+import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../../src/engine/password.js";
 import { updateDomain } from "../../src/engine/sso/domains.js";
 import { SoftAuthenticator } from "../../src/testing/soft-authenticator.js";
 import { get, makeAuth, post, tokenFromMail } from "../helpers.js";
 import { FAST, signUpAndVerify } from "../password-helpers.js";
 import { GOOGLE, tokenEndpoint } from "../social-helpers.js";
+import { codeNow, enrolled } from "../totp-helpers.js";
 import { SSO_APP } from "./helpers.js";
 import { acmeWithSso, type SsoWorld, ssoSignInWorld } from "./sign-in-helpers.js";
 
@@ -140,6 +141,55 @@ const DOORS: Door[] = [
       return () => google(w, "ada@mail.example");
     },
   },
+  // Ruling 38 of plan 12d: a proof that was mailed or written before enforce went on.
+  {
+    name: "a reset link mailed before enforce",
+    json: true,
+    async prepare(w) {
+      must(await requestPasswordReset(w.config, { email: ADA, ip: null }));
+      const token = tokenFromMail(w.mail.findLast((m) => m.to === ADA)?.text ?? "");
+      return () => w.handle(post("/auth/password/reset", { token, password: NEW_PASSWORD }));
+    },
+  },
+  {
+    name: "a reset code mailed before enforce",
+    json: true,
+    async prepare(w) {
+      must(await requestResetOtp(w.config, { email: ADA, ip: null }));
+      const code = codeOf(w, ADA);
+      return () => w.handle(post("/auth/otp/reset", { email: ADA, code, password: NEW_PASSWORD }));
+    },
+  },
+  {
+    name: "a sign-up verify link mailed before enforce",
+    json: true,
+    async prepare(w) {
+      const email = "neo@acme.example";
+      must(
+        await passwordSignUp(w.config, { email, password: PASSWORD, ip: null, userAgent: null }),
+      );
+      const token = tokenFromMail(w.mail.findLast((m) => m.to === email)?.text ?? "");
+      return () => w.handle(post("/auth/password/verify", { token }));
+    },
+  },
+  {
+    name: "a second factor challenge written before enforce",
+    json: true,
+    async prepare(w) {
+      const email = "tia@acme.example";
+      const { secret } = await enrolled(w, email);
+      const r = await passwordSignIn(w.config, {
+        email,
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok || !("twoFactor" in r.value)) throw new Error("no challenge");
+      const challenge = r.value.twoFactor.challenge;
+      return async () =>
+        w.handle(post("/auth/totp/verify", { challenge, code: await codeNow(w, secret) }));
+    },
+  },
   {
     name: "a passkey sign-in",
     json: true,
@@ -186,18 +236,32 @@ async function scene(door: Door, enforce: boolean) {
   return { w, call, start: `/auth/sso/${connectionId}/start` };
 }
 
-const sessionCount = async (w: SsoWorld) => (await w.storage.findMany("session", [])).length;
+const NEW_PASSWORD = "a brand new horse battery";
+
+/** The answer of an engine call that a scene needs. */
+function must(r: { ok: boolean; code?: string }): void {
+  if (!r.ok) throw new Error(r.code);
+}
+
+/** The ids of the session rows. */
+const sessionIds = async (w: SsoWorld) =>
+  new Set((await w.storage.findMany("session", [])).map((s) => s.id));
+
+/** The session rows that came after `before`. */
+async function newSessions(w: SsoWorld, before: Set<string>): Promise<number> {
+  return [...(await sessionIds(w))].filter((id) => !before.has(id)).length;
+}
 
 describe("the enforcement of a domain (plan 12d Task 5)", () => {
   it.each(DOORS)("refuses every first factor of an enforced domain: $name", async (door) => {
     const { w, call, start } = await scene(door, true);
-    const before = await sessionCount(w);
+    const before = await sessionIds(w);
     const res = await call();
     if (door.json) {
       expect(res.status).toBe(403);
       expect(await res.json()).toEqual({ error: "sso_required", detail: start });
     } else expect(await answerOf(res)).toEqual({ status: 302, code: "sso_required" });
-    expect(await sessionCount(w)).toBe(before);
+    expect(await newSessions(w, before)).toBe(0);
   });
 
   it("sends nothing from a request of an enforced address", async () => {
@@ -220,12 +284,12 @@ describe("the enforcement of a domain (plan 12d Task 5)", () => {
 
   it.each(DOORS)("keeps every door open with enforce off: $name", async (door) => {
     const { w, call } = await scene(door, false);
-    const before = await sessionCount(w);
+    const before = await sessionIds(w);
     const answer = await answerOf(await call());
     expect(answer.code).toBeNull();
     expect(answer.status).toBe(door.json ? 200 : 302);
-    // Each door but the first password opens a session; the change keeps Pat's one session.
-    expect(await sessionCount(w)).toBe(door.name === "a first password" ? before : before + 1);
+    // Each door but the first password opens one new session.
+    expect(await newSessions(w, before)).toBe(door.name === "a first password" ? 0 : 1);
   });
 
   it("reads the domain table only when sso is on", async () => {

@@ -52,6 +52,7 @@ import {
   sessionOpened,
   sessionsEnded,
 } from "./sessions.js";
+import { enforcedAnswer } from "./sso/enforce.js";
 import { holdUser } from "./user-hold.js";
 import { attemptsOf, countAttempt } from "./verification.js";
 
@@ -949,6 +950,11 @@ async function answerChallenge(
     { field: "id", op: "eq", value: challenge.identifier },
   ]);
   if (!user) return fail("invalid_token");
+  // A challenge of another first factor, written before enforce went on, opens no session
+  // (plan 12d ruling 38). A challenge of an SSO sign-in passes: SSO is the way in.
+  const enforced =
+    challengeOrigin(challenge.data).via === "sso" ? null : await enforcedAnswer(config, user.email);
+  if (enforced) return enforced;
   const data = challenge.data as {
     ip?: unknown;
     userAgent?: unknown;

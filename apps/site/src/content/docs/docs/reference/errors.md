@@ -579,11 +579,11 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 <h3 id="sso_required"><code>sso_required</code> 403</h3>
 
 - **Meaning:** The address is in a verified domain whose owner turned `enforce` on, so only SSO signs it in. The body holds `detail`, the SSO start path. A social callback carries the code in the `auth_error` query parameter of the redirect.
-- **Do:** Send the person to `detail` to sign in through the organization's provider. The magic link, email code, and reset requests of such an address send no mail and answer as usual.
+- **Do:** Send the person to `detail` to sign in through the organization's provider. The magic link, email code, and reset requests of such an address send no mail and answer as usual. A link, a code, or a second factor challenge from before `enforce` went on opens no session either.
 
 | Routes |
 | --- |
-| [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), and [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify). |
+| [`POST /password/sign-in`](/docs/reference/routes/#post-password-sign-in), [`POST /password/sign-up`](/docs/reference/routes/#post-password-sign-up), [`POST /password/change`](/docs/reference/routes/#post-password-change), [`POST /magic-link/verify`](/docs/reference/routes/#post-magic-link-verify), [`POST /otp/verify`](/docs/reference/routes/#post-otp-verify), [`GET /social/:provider/callback`](/docs/reference/routes/#get-social-provider-callback), [`POST /social/apple/callback`](/docs/reference/routes/#post-social-apple-callback), and [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`POST /password/verify`](/docs/reference/routes/#post-password-verify), [`POST /password/reset`](/docs/reference/routes/#post-password-reset), [`POST /otp/reset`](/docs/reference/routes/#post-otp-reset), [`POST /totp/verify`](/docs/reference/routes/#post-totp-verify), and [`POST /totp/challenge`](/docs/reference/routes/#post-totp-challenge). |
 
 <h3 id="sso_domain_mismatch"><code>sso_domain_mismatch</code> 403</h3>
 

@@ -421,6 +421,11 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     ["POST /social/apple/callback"],
   ),
   ...rows(
+    "sso_required",
+    "the form route of verifyTwoFactor; sso/enforce.test.ts drives the same door through POST /totp/verify (ruling 38 of plan 12d)",
+    ["POST /totp/challenge"],
+  ),
+  ...rows(
     "account_disabled",
     "no flow writes a scimUser row before the SCIM Users of plan 12d Task 10, which proves the refusal",
     ["GET /sso/:connectionId/callback"],

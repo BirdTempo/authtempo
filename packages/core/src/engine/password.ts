@@ -890,6 +890,9 @@ export async function verifyPasswordEmail(
   });
   if (!consumed.ok) return consumed;
   const row = consumed.value;
+  // A link mailed before enforce went on opens no session for an address of the domain (plan 12d ruling 38).
+  const enforced = await enforcedAnswer(config, row.identifier);
+  if (enforced) return enforced;
   const passwordId = (row.data as { passwordId?: unknown } | null)?.passwordId;
   if (typeof passwordId !== "string") return fail("invalid_token");
   const ended = endedList(config);
@@ -1108,6 +1111,9 @@ export async function runReset(
   hash: string,
   now: Date,
 ): Promise<Result<ResetResult>> {
+  // A reset link or code mailed before enforce went on opens no session (plan 12d ruling 38).
+  const enforced = await enforcedAnswer(config, proof.identifier);
+  if (enforced) return enforced;
   const ended: ResetEnded = {
     claim: endedList(config),
     reset: endedList(config),

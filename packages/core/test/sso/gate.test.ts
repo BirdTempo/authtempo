@@ -2,10 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
 import type { SessionVia } from "../../src/engine/hooks.js";
 import { resolveSession } from "../../src/engine/sessions.js";
+import { updateDomain } from "../../src/engine/sso/domains.js";
 import { verifyTwoFactor } from "../../src/engine/totp.js";
 import { FAST } from "../password-helpers.js";
 import { codeNow, enrolled } from "../totp-helpers.js";
-import { seedOrganization, verifiedDomain } from "./helpers.js";
+import { SSO_APP, seedOrganization, verifiedDomain } from "./helpers.js";
 import { oidcConnection, type SsoWorld, ssoSignIn, ssoSignInWorld } from "./sign-in-helpers.js";
 
 beforeEach(() => {
@@ -23,8 +24,8 @@ const ADA = "ada@acme.example";
 async function gated(extra: Partial<AuthConfig> = {}) {
   const w = ssoSignInWorld({ password: { hash: FAST, uniformSignUp: false }, ...extra });
   const organizationId = await seedOrganization(w, "acme");
-  await verifiedDomain(w, organizationId, "acme.example");
-  return { w, organizationId };
+  const domainId = await verifiedDomain(w, organizationId, "acme.example");
+  return { w, organizationId, domainId };
 }
 
 /** One sign-in of Ada through the connection with `claims` added. */
@@ -68,7 +69,7 @@ describe("the second factor of an SSO sign-in (plan 12d Task 5)", () => {
 
   it("verifies the challenge with via sso", async () => {
     const opened: SessionVia[] = [];
-    const { w, organizationId } = await gated({
+    const { w, organizationId, domainId } = await gated({
       hooks: {
         session: {
           afterCreate: (e) => {
@@ -79,6 +80,15 @@ describe("the second factor of an SSO sign-in (plan 12d Task 5)", () => {
     });
     const { secret } = await enrolled(w, ADA);
     const connectionId = await oidcConnection(w, organizationId, "acme");
+    // With enforce on, the challenge of an SSO sign-in still opens the session (ruling 38).
+    const routed = await updateDomain(w.config, SSO_APP, {
+      id: domainId,
+      connectionId,
+      enforce: true,
+      ip: null,
+      userAgent: null,
+    });
+    if (!routed.ok) throw new Error(routed.code);
     const r = await signIn(w, connectionId);
     if (r.challenge === null) throw new Error("no challenge");
     opened.length = 0;
