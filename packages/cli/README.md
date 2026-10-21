@@ -113,9 +113,10 @@ The shipped 0001, 0006, 0007, 0009, and 0010 fail on other names with
 0002 to 0005 and 0008 as shipped. It writes 0001 from
 `storage.migrationSql()`, or from `storage.migrationSql("before-1.7")` for
 tables from before 1.7. It writes 0006 from
-`compatMigration0006Sql("sqlite", storage.names)`, and 0007, 0009, and 0010
-from `compatMigration0007Sql`, `compatMigration0009Sql`, and
-`compatMigration0010Sql` with the same arguments. For tables from before
+`compatMigration0006Sql("sqlite", storage.names)`, and 0007 from
+`compatMigration0007Sql("sqlite", storage.names)`. It writes 0009 from
+`compatMigration0009Sql("sqlite", storage.names)`, and 0010 from
+`compatMigration0010Sql("sqlite", storage.names)`. For tables from before
 1.7, `compatMigration0010Sql` takes `"before-1.7"` as a third argument.
 Tables that hold `session.activeTeamId` and `invitation.teamId` already
 (Better Auth's `teams` option) need an own 0010, also with the default

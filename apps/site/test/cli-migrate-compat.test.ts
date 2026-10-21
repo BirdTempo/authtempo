@@ -80,9 +80,9 @@ describe("the CLI pages on compat files for tables with other names", () => {
   const count = compat.COMPAT_MIGRATION_NAMES.length;
 
   it("finds the files that depend on the naming", () => {
-    // The package ships nine files, and four of them take the naming (plan 12f).
-    expect(count).toBe(9);
-    expect(files).toEqual(["0001", "0006", "0007", "0009"]);
+    // The package ships ten files, and five of them take the naming (plan 12f adds 0009, plan 12k 0010).
+    expect(count).toBe(10);
+    expect(files).toEqual(["0001", "0006", "0007", "0009", "0010"]);
   });
 
   for (const [name, path] of Object.entries(PAGES)) {
