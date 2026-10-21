@@ -625,6 +625,11 @@ refused.
 `/admin/set-role` takes the platform role, which grants it, or `user`, which
 revokes it. Any other role is refused.
 
+Each mapped write that takes a body needs `content-type: application/json`,
+as core's operator routes do. A write with another type or with no type
+answers 400 `VALIDATION_ERROR` and changes nothing. The stop of an
+impersonation takes no body, so it takes any type.
+
 Each mapped call posts core's operator route with the caller's cookie, so
 core's guard decides (plan 12f Task 10):
 

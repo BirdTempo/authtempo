@@ -533,6 +533,35 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
     ]);
   });
 
+  it("refuses a write that is not JSON with VALIDATION_ERROR, and changes nothing (ruling 62 m1)", async () => {
+    const a = await adminApp(memoryDatabase());
+    const ann = await a.user("ann@example.com");
+    const text = JSON.stringify({ userId: ann.id, banReason: "Spam" });
+    for (const type of ["text/plain", null]) {
+      // A text body gets the type text/plain, so the row with no type sends bytes.
+      const request = new Request(`${BASE}/api/auth/admin/ban-user`, {
+        method: "POST",
+        headers: { origin: BASE, cookie: a.op, ...(type === null ? {} : { "content-type": type }) },
+        body: type === null ? new TextEncoder().encode(text) : text,
+      });
+      expect(request.headers.get("content-type")).toBe(type);
+      const res = await a.auth.handler(request);
+      expect({
+        type,
+        status: res.status,
+        code: ((await res.json()) as { code: string }).code,
+      }).toEqual({
+        type,
+        status: 400,
+        code: "VALIDATION_ERROR",
+      });
+    }
+    expect(await a.audit(ann.id)).toEqual([]);
+    expect(await (await a.read("/get-session", ann.cookie)).json()).toMatchObject({
+      user: { banned: false },
+    });
+  });
+
   it("gives get-session the role and the ban fields of the admin plugin (ruling 53)", async () => {
     const a = await adminApp(memoryDatabase());
     const ann = await a.user("ann@example.com");

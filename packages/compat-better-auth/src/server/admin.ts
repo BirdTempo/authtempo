@@ -381,6 +381,17 @@ function invalid(): AdminAnswer {
   return failure(code, 400, messageOf(code));
 }
 
+/**
+ * True when the body of a POST is JSON: a form post and a missing type are
+ * false. It is the rule of core's operator routes (isJsonRequest in core's
+ * http/body.ts, ruling 44 m1). The shim posts core its own JSON body, so it
+ * checks the caller's type here (ruling 62 m1).
+ */
+function isJsonRequest(request: Request): boolean {
+  const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
+  return type === "application/json";
+}
+
 /** The JSON object of a POST, or null for no object. */
 async function objectOf(request: Request): Promise<Body | null> {
   const v: unknown = await request
@@ -523,6 +534,9 @@ async function adminAnswer(
       res,
     );
   }
+  // A write that is not JSON gets core's answer: a text/plain post with a
+  // JSON text, or a post with no type, never acts (ruling 62 m1).
+  if (!isJsonRequest(request)) return invalid();
   const body = await objectOf(request);
   const userId = userIdOf(body);
   if (userId === null) return invalid();
