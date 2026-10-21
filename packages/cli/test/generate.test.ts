@@ -1,4 +1,12 @@
-import { mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
@@ -53,6 +61,21 @@ describe("authtempo generate (plan 12g Task 7)", () => {
       `stopped: generate writes no file over a file; ${file} exists`,
     ]);
     expect(readFileSync(file, "utf8")).toBe(text);
+  });
+
+  it("stops on a link to a missing file with --out, and makes no file", () => {
+    const target = join(dir, "missing.sql");
+    const link = join(dir, "link.sql");
+    symlinkSync(target, link);
+    const r = runBin(["generate", "--format", "sql", "--dialect", "sqlite", "--out", "link.sql"], {
+      cwd: dir,
+    });
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe("");
+    expect(linesOf(r.stderr)).toEqual([
+      `stopped: generate writes no file over a file or a link; ${link} exists`,
+    ]);
+    expect(existsSync(target)).toBe(false);
   });
 
   it("refuses --dialect d1 and names sqlite", () => {

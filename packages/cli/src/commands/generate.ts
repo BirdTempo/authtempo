@@ -56,7 +56,15 @@ export const generateCommand: Command = {
     const out = v.out === undefined ? null : resolve(ctx.cwd, v.out);
     if (out !== null) {
       if (ctx.exists(out)) throw new Stop(`generate writes no file over a file; ${out} exists`);
-      ctx.writeNew(out, text);
+      try {
+        ctx.writeNew(out, text);
+      } catch (e) {
+        // exists follows a link, so a link to a missing file passes the check
+        // above. The exclusive open of writeNew refuses it with EEXIST.
+        if ((e as { code?: unknown }).code === "EEXIST")
+          throw new Stop(`generate writes no file over a file or a link; ${out} exists`);
+        throw e;
+      }
       ctx.err(`wrote ${out}`);
     } else if (!json) for (const line of text.replace(/\n$/, "").split("\n")) ctx.out(line);
     if (json)

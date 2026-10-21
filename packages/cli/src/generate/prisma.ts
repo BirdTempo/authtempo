@@ -15,8 +15,11 @@ import {
  * The Prisma type of one field, and the doc line that says what it holds.
  * A date is `BigInt` of epoch milliseconds on SQLite and MySQL: the Prisma
  * 7.10 reference names NUMERIC or text dates on SQLite, not epoch
- * milliseconds (read 2026-10-22). JSON on SQLite is `String`: the SQLite
- * section of the same page says Json is not supported there.
+ * milliseconds (read 2026-10-22). JSON on SQLite is `String`, the JSON
+ * text that the adapter writes. prisma validate 7.10.0 also accepts Json
+ * there. But the SQLite part of the same reference says that Json is not
+ * supported, and its type map gives JSONB. A String field reads the TEXT
+ * column the same way on each Prisma version (review of plan 12g Task 7).
  */
 function prismaType(
   d: GenerateDialect,

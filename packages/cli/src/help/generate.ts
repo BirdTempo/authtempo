@@ -33,7 +33,7 @@ export const GENERATE_HELP: HelpText = {
     },
     {
       flag: "--out <file>",
-      says: "Write the output to a new file. The command writes no file over a file.",
+      says: "Write the output to a new file. The command writes no file over a file or a link.",
     },
     ...COMMON_FLAGS,
   ],

@@ -9,9 +9,9 @@ import { assertFreshBuild, PKG, runBin } from "./support/bin.js";
 
 // `authtempo generate --format prisma` (plan 12g Task 7). The names of each
 // printed model are held to core's naming rules, and prisma validate 7.10.0
-// reads each printed schema. Validate runs with no network and no engine:
-// PRISMA_SCHEMA_ENGINE_BINARY names a stub that exits 1, and the proxy
-// variables point at a closed port (Step 1.3 of the task, opening ruling 1).
+// reads each printed schema. Validate runs with no network and no engine
+// (Step 1.3 of the task, opening ruling 1). PRISMA_SCHEMA_ENGINE_BINARY
+// names a stub that exits 1. The proxy variables point at a closed port.
 
 const PROVIDERS = { sqlite: "sqlite", postgres: "postgresql", mysql: "mysql" } as const;
 const DIALECTS = Object.keys(PROVIDERS) as (keyof typeof PROVIDERS)[];

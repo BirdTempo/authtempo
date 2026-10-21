@@ -37,7 +37,7 @@ authtempo generate --format prisma --dialect mysql
 | --- | --- |
 | `--format sql`, `--format drizzle`, `--format prisma` | The form of the output. It has no default. |
 | `--dialect sqlite`, `--dialect postgres`, `--dialect mysql` | The database of the output. It has no default. A D1 app applies the files of `@authtempo/adapter-d1` with wrangler. |
-| `--out <file>` | Writes the output to a new file. The command writes no file over a file. |
+| `--out <file>` | Writes the output to a new file. The command writes no file over a file or a link. |
 | `--json` | Prints the document of [The JSON](#the-json). `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
 
