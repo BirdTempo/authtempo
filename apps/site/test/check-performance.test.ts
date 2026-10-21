@@ -122,4 +122,82 @@ describe("checkPerformance", () => {
       'the first sentence under the table does not start with "Local workerd is not a deployed Worker"',
     ]);
   });
+
+  it("fails on a spread that is not p50 <= p95 <= max", () => {
+    const data = fixture();
+    const first = data.operations[0];
+    if (first) first.serverMs = { p50: 4, p95: 3, max: 9 };
+    const r = checkPerformance(page(data), data, 8);
+    expect(r.failures).toEqual(["POST /password/sign-in: serverMs is not p50 <= p95 <= max"]);
+  });
+
+  it("fails on a record with no operations", () => {
+    const { operations: _operations, ...rest } = fixture();
+    const broken = rest as unknown as PerformanceData;
+    const r = checkPerformance(page(fixture()), broken, 8);
+    expect(r.failures).toEqual([
+      "the record has no operations",
+      "the record has no operation POST /password/sign-in",
+      "the record has no operation GET /session",
+      "the record has no operation GET /token",
+      "the record has no operation GET /jwks",
+      "the record has no operation POST /magic-link/request",
+      "read 0 operations",
+      "read 0 samples",
+    ]);
+  });
+
+  it("fails on a record with no row for one route", () => {
+    const data = fixture();
+    data.operations = data.operations.filter((o) => o.route !== "GET /jwks");
+    const r = checkPerformance(page(data), data, 8);
+    expect(r.failures).toEqual(["the record has no operation GET /jwks"]);
+  });
+
+  it("fails on a route that is not one of the measured routes", () => {
+    const data = fixture();
+    const last = data.operations[4];
+    if (last) last.route = "POST /magic-link/verify";
+    const r = checkPerformance(page(data), data, 8);
+    expect(r.failures).toEqual([
+      "the record has no operation POST /magic-link/request",
+      "the operation POST /magic-link/verify is not one of the measured routes",
+    ]);
+  });
+
+  it("fails on two rows of one route", () => {
+    const data = fixture();
+    const first = data.operations[0];
+    if (first) data.operations.push({ ...first });
+    const r = checkPerformance(page(data), data, 8);
+    expect(r.failures).toEqual(["the record has the operation POST /password/sign-in 2 times"]);
+  });
+
+  it("fails on a date that is not an ISO time", () => {
+    const data = fixture();
+    data.measuredAt = "2026-10-22 02:00";
+    const r = checkPerformance(page(data), data, 8);
+    expect(r.failures).toEqual(["the date 2026-10-22 02:00 is not an ISO time"]);
+  });
+
+  it("fails on a date of the ISO form that is not a real time", () => {
+    const data = fixture();
+    data.measuredAt = "2026-02-30T02:00:00.000Z";
+    const r = checkPerformance(page(data), data, 8);
+    expect(r.failures).toEqual(["the date 2026-02-30T02:00:00.000Z is not an ISO time"]);
+  });
+
+  it("fails on a runtime or a storage that is not local", () => {
+    const data = fixture();
+    const broken = {
+      ...data,
+      runtime: { ...data.runtime, workerd: "remote" },
+      storage: "d1-remote",
+    } as unknown as PerformanceData;
+    const r = checkPerformance(page(broken), broken, 8);
+    expect(r.failures).toEqual([
+      "the condition runtime.workerd is remote, not local",
+      "the condition storage is d1-remote, not d1-local",
+    ]);
+  });
 });

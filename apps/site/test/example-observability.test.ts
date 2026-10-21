@@ -56,6 +56,15 @@ describe("the observability block of the example Workers", () => {
     expect(observedExamples()).toEqual(["worker", "worker-d1", "worker-postgres"]);
   });
 
+  it("keeps the deploy entry of the D1 example at src/index.ts", () => {
+    // Ruling 30 of plan 12h: src/measure.ts writes each mail, with its link,
+    // to the log. wrangler dev names it on the command line; a deploy reads main.
+    const config = JSON.parse(
+      stripComments(readFileSync(`${REPO}examples/worker-d1/wrangler.jsonc`, "utf8")),
+    ) as { main?: unknown };
+    expect(config.main).toBe("src/index.ts");
+  });
+
   it("turns observability on and samples every request in each one", () => {
     for (const name of observedExamples()) {
       const config = JSON.parse(

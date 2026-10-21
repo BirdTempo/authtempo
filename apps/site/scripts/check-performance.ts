@@ -122,6 +122,19 @@ const TEXT_FIELDS = [
 const COUNT_FIELDS = ["machine.cores", "machine.memoryGiB", "pbkdf2Iterations", "warmup"] as const;
 const LOAD_FIELDS = ["load.before", "load.after"] as const;
 
+/** The fields whose one value the page states: local workerd and local D1. */
+const FIXED_FIELDS = [
+  ["runtime.workerd", "local"],
+  ["storage", "d1-local"],
+] as const;
+
+/** A time as toISOString writes it, such as 2026-10-21T18:08:44.051Z. */
+function isIsoTime(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(s)) return false;
+  const t = Date.parse(s);
+  return Number.isFinite(t) && new Date(t).toISOString() === s;
+}
+
 const isTime = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0;
 
 /** The failures of one spread: each value a time, and p50 <= p95 <= max. */
@@ -154,6 +167,15 @@ export function checkPerformance(page: string, data: PerformanceData, cores: num
     if (!Array.isArray(v) || v.length !== 3 || !v.every(isTime))
       failures.push(`the condition ${f} is missing or not three load averages`);
   }
+  const measuredAt = at(data, "measuredAt");
+  if (typeof measuredAt === "string" && measuredAt.trim() !== "" && !isIsoTime(measuredAt))
+    failures.push(`the date ${measuredAt} is not an ISO time`);
+  // The page says local workerd and local D1; a record of another runtime needs another page.
+  for (const [f, want] of FIXED_FIELDS) {
+    const v = at(data, f);
+    if (typeof v === "string" && v.trim() !== "" && v !== want)
+      failures.push(`the condition ${f} is ${v}, not ${want}`);
+  }
   const commit = at(data, "commit");
   if (typeof commit === "string" && !/^[0-9a-f]{40}$/.test(commit))
     failures.push(`the commit ${commit} is not 40 hex characters`);
@@ -167,8 +189,12 @@ export function checkPerformance(page: string, data: PerformanceData, cores: num
   const list = Array.isArray(ops) ? (ops as unknown[]) : [];
   if (!Array.isArray(ops)) failures.push("the record has no operations");
   const routes = list.map((o) => at(o, "route"));
-  for (const r of MEASURED_ROUTES)
-    if (!routes.includes(r)) failures.push(`the record has no operation ${r}`);
+  for (const r of MEASURED_ROUTES) {
+    const n = routes.filter((x) => x === r).length;
+    if (n === 0) failures.push(`the record has no operation ${r}`);
+    // Two rows of one route give the page two sets of times for one operation.
+    if (n > 1) failures.push(`the record has the operation ${r} ${n} times`);
+  }
   let samples = 0;
   for (const o of list) {
     const route = String(at(o, "route"));
