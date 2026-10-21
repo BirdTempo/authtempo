@@ -427,6 +427,10 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
       expect(dropped.sink_threw).toBe(0);
       if (TIMING_RUN) {
         const plain = await run(null);
+        // Task 15 records the two medians with the conditions of the run.
+        console.log(
+          `observe timing: observed median ${median(observed.times).toFixed(4)} ms, plain median ${median(plain.times).toFixed(4)} ms, ${signIns} sign-ins each`,
+        );
         expect(median(observed.times)).toBeLessThanOrEqual(median(plain.times) * 1.1);
       }
     },
