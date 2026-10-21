@@ -1270,14 +1270,66 @@ until they revoke some.
 
 Each step is a runbook line, with what breaks without it:
 
-1. Before the cutover, copy the database. Apply the compat migrations to the copy: `storage.migrate()` on Postgres, or the D1 files with `wrangler d1 migrations apply`. Without them, `betterAuthSchemaStorage` refuses the copy with `schema_mismatch`, and the dry run cannot start. Then run `moveBetterAuthApiKeys` with `dryRun: true` against the copy. The report gives the count of keys per owner and the stored prefixes. Without it, you do not know whom to tell, or which prefixes to list.
+1. Before the cutover, copy the database. Apply the compat migrations to the copy: `storage.migrate()` on Postgres, or the D1 files with `wrangler d1 migrations apply`. Without them, `betterAuthSchemaStorage` refuses the copy with `schema_mismatch`, and the dry run cannot start. Then run `moveBetterAuthApiKeys` with `dryRun: true` against the copy. On D1, run it in a Worker with the D1 binding, as the compat package README shows. A stored prefix outside `movedPrefixes`, or a row with no prefix, makes the dry run throw `BetterAuthCompatError`. The error names each such prefix and counts the rows with no prefix. Do step 2 for each, and run the dry run again. Else the report gives the count of keys per owner and the stored prefixes. Without it, you do not know whom to tell, or which prefixes to list.
 2. Put each stored prefix other than `defaultPrefix` in `authtempo.movedKeyPrefixes`. Re-issue each key with no prefix, and delete its row. Without it, the move throws and moves nothing.
 3. Tell each owner whose key the report skips: `skippedKeys` names each row id, its owner, and the reason. The reasons are `disabled`, `expired`, `noDigest`, `noCreator`, `noOwner` (the user or the organization is gone), `invalidName`, `invalidMetadata`, and `wideWindow`. A `present` row moved at an earlier run. After the cutover a skipped key answers 401 `token_retired` (`KEY_DISABLED` from `verifyApiKey`), and every script that uses one stops.
-4. Deploy the shim build with migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`.
-5. Run `moveBetterAuthApiKeys` with `dryRun: false`. A second run is safe: it skips each recorded row. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
+4. Deploy the shim build with migration 0010. Without the migration, the storage refuses to start with `schema_mismatch`. From the deploy to the end of step 5, every old key answers 401 `token_retired`. This gap is an outage of each script with an old key, so keep it short. Run step 5 right after the deploy.
+5. Run `moveBetterAuthApiKeys` with `dryRun: false`. On D1, run it in a Worker with the D1 binding, as the compat package README shows. A second run is safe: it skips each recorded row. Without it, every old key answers `token_retired` by its prefix, and the key list shows no row for it.
 6. A resource server with `@authtempo/verify` passes `movedPrefixes`, the same list. It passes `movedKind`, with that kind in `accept`: `"api-token"` for `references: "user"`, `"organization-token"` for `"organization"`. Without them, the verifier answers null for every moved key. A new `to_` key needs `"organization-token"` in `accept`.
 7. Change the app code that reads the `apikey` table itself. consumerb lists, reads, and deletes keys through Drizzle (`routes/api-keys.ts`). It sends a bearer to `verifyApiKey` only when it starts with `laaa_` (`middleware/identity.ts`). A new key starts with `to_`, so that check must also take `to_`. Without these edits, a new key never authenticates, and the key list shows only the old table.
 8. When every owner moved, drop the `apikey` table yourself. No migration of authtempo drops it, because it is your record. Without the drop, nothing breaks; the table only holds stale rows.
+
+#### The move on D1
+
+`moveBetterAuthApiKeys` takes the storage of a D1 binding, so on D1 it runs
+in a Worker. This Worker runs steps 1 and 5. Bind the copy of the database
+as `DB` for step 1, and the real database for step 5. `./auth.js` is the
+app's own module: its `ac`, its apiKey options, and its options of
+`betterAuth`. A dry run with a prefix outside the list answers 409 with the
+refusals. A test runs this file on the D1 test pool of the package
+(`test/d1/move-keys/worker.ts`), and a test holds this copy equal to it.
+
+```ts
+import {
+  BetterAuthCompatError,
+  betterAuthSchemaStorage,
+  type D1DatabaseLike,
+  moveBetterAuthApiKeys,
+  movedKeyPrefixesOf,
+} from "@authtempo/compat-better-auth";
+import { ac, authOptions, keys } from "./auth.js";
+
+/**
+ * Steps 1 and 5 of the key cutover on D1: a Worker with the app's D1 binding
+ * `DB`. `POST /move` runs a dry run, and `POST /move?dryRun=false` moves.
+ * Put it behind a check that only an operator passes, and delete it after
+ * the move.
+ */
+export default {
+  async fetch(request: Request, env: { DB: D1DatabaseLike }): Promise<Response> {
+    const url = new URL(request.url);
+    if (request.method !== "POST" || url.pathname !== "/move")
+      return new Response(null, { status: 404 });
+    const storage = betterAuthSchemaStorage({ dialect: "d1", db: env.DB });
+    try {
+      const report = await moveBetterAuthApiKeys(storage, {
+        names: storage.names,
+        references: keys.references ?? "user",
+        dryRun: url.searchParams.get("dryRun") !== "false",
+        movedPrefixes: movedKeyPrefixesOf(authOptions(env)),
+        rateLimitEnabled: keys.rateLimit?.enabled ?? true,
+        statements: ac.statements,
+      });
+      return Response.json(report);
+    } catch (error) {
+      // A stored prefix outside the list, or a row with no prefix: nothing moved.
+      if (error instanceof BetterAuthCompatError)
+        return Response.json({ refusals: error.refusals }, { status: 409 });
+      throw error;
+    }
+  },
+};
+```
 
 ## JWT and the OAuth provider
 
