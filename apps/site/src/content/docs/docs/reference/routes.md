@@ -815,7 +815,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Input | JSON `{ organizationId, name, expiresInDays?, permissions, metadata? }`. `permissions` is a subset of the user's set in the organization; `{}` grants nothing, and `null` answers `invalid_body`. Another key answers `invalid_body`, so a client sets no window and no quota |
 | Answer | `{ token, apiToken }`; the clear `to_` token appears once. `apiToken` has `createdById` and `creatorIsMember` |
 | Limit | `token-create:user:<userId>`, 20 per hour, the key of `POST /tokens`. An organization holds at most 50 live tokens |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`organization_token_limit`](/docs/reference/errors/#organization_token_limit) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`rate_limited`](/docs/reference/errors/#rate_limited), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`organization_token_limit`](/docs/reference/errors/#organization_token_limit), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-organizations-tokens"><code>GET /organizations/tokens</code></h3>
 
@@ -833,7 +833,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, the address is verified, and the user holds `apiToken:update` |
 | Input | JSON `{ organizationId, id, name?, permissions?, expiresAt? }`. It narrows only, as `POST /tokens/update`. Another key answers `invalid_body` |
 | Answer | The `apiToken` after the change |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`conflict`](/docs/reference/errors/#conflict) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-organizations-tokens-revoke"><code>POST /organizations/tokens/revoke</code></h3>
 
@@ -842,7 +842,7 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | Needs | A session cookie, or a `ts_` bearer token. The address is verified, and the user holds `apiToken:revoke`. The creator of a token has no right of their own |
 | Input | JSON `{ organizationId, id }` |
 | Answer | `{ ok: true }` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-organizations-tokens-current"><code>GET /organizations/tokens/current</code></h3>
 
@@ -883,7 +883,7 @@ These routes exist when the config sets `organizations.dynamicRoles`. An organiz
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh. An API token answers 401. The user holds `ac:create` in the organization |
 | Input | JSON `{ organizationId, name, rank?, permissions }`. `name` is one role name that the config does not hold. `rank` is from 1 to the user's rank and below the owner rank, default 1. `permissions` are known actions that the user holds. Another key answers `invalid_body` |
 | Answer | `{ role }`. A member or a pending invitation that holds the name as a role part answers `role_in_use` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`role_taken`](/docs/reference/errors/#role_taken), [`role_in_use`](/docs/reference/errors/#role_in_use), [`role_limit`](/docs/reference/errors/#role_limit), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`role_taken`](/docs/reference/errors/#role_taken), [`role_in_use`](/docs/reference/errors/#role_in_use), [`role_limit`](/docs/reference/errors/#role_limit), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-organizations-roles-update"><code>POST /organizations/roles/update</code></h3>
 
@@ -892,7 +892,7 @@ These routes exist when the config sets `organizations.dynamicRoles`. An organiz
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh. An API token answers 401. The user holds `ac:update` in the organization, and the role's rank and actions |
 | Input | JSON `{ organizationId, name, rank?, permissions? }`. The rules of the create hold for `rank` and `permissions`. Another key answers `invalid_body` |
 | Answer | `{ role }`. An update that a parallel update of the role overtakes answers `conflict` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`conflict`](/docs/reference/errors/#conflict), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`conflict`](/docs/reference/errors/#conflict), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-organizations-roles-delete"><code>POST /organizations/roles/delete</code></h3>
 
@@ -901,7 +901,7 @@ These routes exist when the config sets `organizations.dynamicRoles`. An organiz
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh. An API token answers 401. The user holds `ac:delete` in the organization, and the role's rank and actions |
 | Input | JSON `{ organizationId, name }` |
 | Answer | `{ ok: true }`. A member or a pending invitation that holds the role answers `role_in_use` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`role_in_use`](/docs/reference/errors/#role_in_use), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`role_in_use`](/docs/reference/errors/#role_in_use), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`unauthorized`](/docs/reference/errors/#unauthorized), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 ## Teams
 
@@ -1026,7 +1026,7 @@ These routes exist in every deployment.
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified. A token of another form answers 401 |
 | Input | JSON `{ id, name?, permissions?, expiresAt? }`. It narrows only. A new set is a subset of the old one, and a set over none narrows. A new `expiresAt` is earlier than the old one. Another key answers `invalid_body`, so a client sets no window and no quota |
 | Answer | The `apiToken` after the change |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="get-tokens-current"><code>GET /tokens/current</code></h3>
 

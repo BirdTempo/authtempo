@@ -39,6 +39,14 @@ async function featureConfig(): Promise<Partial<AuthConfig>> {
       device: {},
     },
     openapi: true,
+    // The role and team routes of plan 12k mount with their two features.
+    organizations: {
+      platformRole: "operator",
+      platformOrganization: "platform-co",
+      ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+      dynamicRoles: {},
+      teams: {},
+    },
     operator: {
       secrets: [
         {

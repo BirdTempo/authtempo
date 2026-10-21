@@ -90,6 +90,16 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /organizations/members/role",
   "POST /organizations/members/remove",
   "POST /organizations/invite",
+  // The role writes of plan 12k (ruling 5 of plan 12k): the rights of other
+  // people outlive the impersonation. The fresh rule also refuses them.
+  "POST /organizations/roles/create",
+  "POST /organizations/roles/update",
+  "POST /organizations/roles/delete",
+  // The token writes of plan 12k: a credential route, as `POST /tokens` (ruling 7).
+  "POST /tokens/update",
+  "POST /organizations/tokens",
+  "POST /organizations/tokens/update",
+  "POST /organizations/tokens/revoke",
   // The OAuth authorize and consent (ruling 6): a grant outlives the impersonation.
   "GET /oauth/authorize",
   "POST /oauth/authorize",
@@ -107,6 +117,8 @@ const NO_SESSION = "It takes no session.";
 const READ = "It reads what the user sees.";
 /** Each change behind the fresh rule refuses: the session has no fresh time. */
 const FRESH = "It needs a fresh session, and an impersonation session is never fresh.";
+/** A team write gives or takes no role, and the user can undo it; only the owner writes are refused. */
+const TEAM_WRITE = "It writes a team of the organization; it gives or takes no role.";
 
 /** Every other route, with the reason that it serves an impersonation session. */
 export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> = {
@@ -154,6 +166,23 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
     "It adds the user by an invitation to the user's address, as the user can.",
   "POST /organizations/invitations/decline": "It ends an invitation; it gives no role.",
   "POST /organizations/active": "It selects the active organization of this session only.",
+  // The routes of plan 12k (ruling 5 of plan 12k).
+  "POST /organizations/has-permission": READ,
+  "GET /organizations/permissions": READ,
+  "GET /organizations/roles": READ,
+  "GET /organizations/roles/get": READ,
+  "POST /organizations/check-slug": "It reads whether a slug is free; it writes no row.",
+  "GET /organizations/teams": READ,
+  "GET /organizations/teams/mine": READ,
+  "GET /organizations/teams/members": READ,
+  "POST /organizations/teams/create": TEAM_WRITE,
+  "POST /organizations/teams/update": TEAM_WRITE,
+  "POST /organizations/teams/delete": TEAM_WRITE,
+  "POST /organizations/teams/members/add": TEAM_WRITE,
+  "POST /organizations/teams/members/remove": TEAM_WRITE,
+  "POST /organizations/teams/active": "It selects the active team of this session only.",
+  "GET /organizations/tokens": READ,
+  "GET /organizations/tokens/current": NO_SESSION,
   "GET /tokens": READ,
   "POST /tokens/revoke": "It ends an API token; it makes none.",
   "GET /tokens/current": NO_SESSION,

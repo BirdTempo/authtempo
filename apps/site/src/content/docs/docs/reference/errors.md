@@ -500,7 +500,8 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| The Errors cell of each route on the [routes page](/docs/reference/routes/) names it. It covers the sign-out, the re-authentication, and every operator route but the stop. It covers each change of a way in, the second-factor routes, and the handoff. It covers the organization writes that give or take a role, and the OAuth authorize, consent, and end-session routes. The in-process calls of the same acts answer it too. |
+| The Errors cell of each route on the [routes page](/docs/reference/routes/) names it. It covers the sign-out, the re-authentication, and every operator route but the stop. It covers each change of a way in, the second-factor routes, and the handoff. It covers the organization writes that give or take a role, and the OAuth authorize, consent, and end-session routes. The in-process calls of the same acts answer it too. It also covers the stored role writes and the token writes of plan 12k. Their in-process calls do not answer it: such a call is the app's own act. |
+
 <h3 id="role_in_use"><code>role_in_use</code> 409</h3>
 
 - **Meaning:** A member of the organization or a pending invitation holds the role name, alone or as a part of its role string. A delete of the role, or a create of a role with that name, answers this code.
