@@ -90,7 +90,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12d Task 3 adds the four connection routes.
     // Plan 12d Task 4 adds the discovery, the start, and the callback.
     // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
-    expect(keys.length).toBe(172);
+    // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
+    expect(keys.length).toBe(174);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -185,8 +186,9 @@ describe("openApiDocument (plan 11g)", () => {
     // the impersonation: 64 became 73. Plan 12d Task 2b adds four domain
     // bodies and the override: 88 became 93. Plan 12d Task 3 adds the three
     // connection writes: 93 became 96. Plan 12d Task 4 adds the discovery: 97.
-    // Plan 12d Task 9b adds the two SCIM token writes: 97 became 99.
-    expect(bodies.length).toBe(99);
+    // Plan 12d Task 9b adds the two SCIM token writes: 97 became 99. Task 8
+    // adds the form of the SAML ACS: 100.
+    expect(bodies.length).toBe(100);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -414,8 +416,10 @@ describe("openApiDocument (plan 11g)", () => {
     // connection list. Plan 12d Task 4 adds the answer and the body of the
     // discovery, and the queries of the start and the callback. Plan 12d
     // Task 9b adds the 3 JSON answers, 2 bodies, and the query of the SCIM
-    // token routes. Task 13 holds the SCIM answers of /scim/v2.
-    expect([answers, bodies, queries]).toEqual([136, 99, 31]);
+    // token routes. Task 13 holds the SCIM answers of /scim/v2. Plan 12d
+    // Task 8 adds the form of the SAML ACS; its answers are a redirect and
+    // the XML of the SP metadata.
+    expect([answers, bodies, queries]).toEqual([136, 100, 31]);
   });
 
   it("takes the request_id form of the authorize query", () => {
@@ -471,6 +475,8 @@ describe("openApiDocument (plan 11g)", () => {
     expect(paths.map(([p]) => p)).toEqual([
       "/sso/{connectionId}/start",
       "/sso/{connectionId}/callback",
+      "/sso/{connectionId}/acs",
+      "/sso/{connectionId}/metadata",
     ]);
     for (const [path, item] of paths)
       for (const op of Object.values(item))

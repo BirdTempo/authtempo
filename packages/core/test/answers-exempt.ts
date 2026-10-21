@@ -155,6 +155,8 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /sso/connections/create",
   "POST /sso/connections/delete",
   "POST /sso/connections/update",
+  // Plan 12d Task 8: the ACS with sso off.
+  "POST /sso/:connectionId/acs",
   // Plan 12d Task 4: the discovery with sso off.
   "POST /sso/discover", // Plan 12d Task 9b: the SCIM posts with scim off, and a token id that names no token.
   "POST /scim/tokens/create",
@@ -412,7 +414,12 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows(
     "account_banned",
     "the sign-in needs a passkey ceremony or a provider exchange; operator-ban-doors.test.ts proves the ban at the engine door of each",
-    [...CALLBACKS, "POST /passkey/authenticate/verify", "GET /sso/:connectionId/callback"],
+    [
+      ...CALLBACKS,
+      "POST /passkey/authenticate/verify",
+      "GET /sso/:connectionId/callback",
+      "POST /sso/:connectionId/acs",
+    ],
   ),
   // Plan 12d Task 5: the doors of the enforcement and the SSO resolution.
   ...rows(
@@ -428,12 +435,12 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows(
     "account_disabled",
     "no flow writes a scimUser row before the SCIM Users of plan 12d Task 10, which proves the refusal",
-    ["GET /sso/:connectionId/callback"],
+    ["GET /sso/:connectionId/callback", "POST /sso/:connectionId/acs"],
   ),
   ...rows(
     "conflict",
     "five lost rounds of the user hold, or an account delete inside the sign-in; no request can cause either on its own",
-    ["GET /sso/:connectionId/callback"],
+    ["GET /sso/:connectionId/callback", "POST /sso/:connectionId/acs"],
   ),
   ...rows(
     "account_banned",

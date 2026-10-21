@@ -21,6 +21,7 @@ import { exchangeProviderCode, OAUTH_STATE_PREFIX, type SocialComplete } from ".
 import { validImageUrl, validUserName } from "../users.js";
 import { connectionSecret } from "./connections.js";
 import { resolveSsoUser, type SsoProfile, type SsoSignedIn } from "./resolve.js";
+import { startSaml } from "./saml-sp.js";
 
 /**
  * The OIDC sign-in of one SSO connection (plan 12d Task 4, spec 30 item 6).
@@ -255,8 +256,8 @@ async function liveConnection(
     { field: "id", op: "eq", value: connectionId },
   ]);
   if (!row?.enabled) return fail("sso_not_configured");
-  // Task 8 of plan 12d adds the SAML start. Until then a SAML row cannot sign in.
-  if (row.kind !== "oidc" || !sso.oidc) return fail("sso_not_configured");
+  // A kind that is off signs in no one (`sso.oidc`, `sso.saml`).
+  if (row.kind === "oidc" ? !sso.oidc : sso.saml === null) return fail("sso_not_configured");
   return ok({ sso, row });
 }
 
@@ -265,7 +266,8 @@ async function liveConnection(
  * `sso-start:ip` comes first, so it bounds the discovery reads. The row
  * must exist and be enabled, else `sso_not_configured`. The state row has
  * the identifier `sso:<connectionId>` and lives 10 minutes. The answer is
- * the authorize URL and the clear binding value for the cookie.
+ * the authorize URL and the clear binding value for the cookie. A SAML
+ * connection goes to `startSaml` (plan 12d Task 8).
  */
 export async function startSso(
   config: ResolvedConfig,
@@ -276,6 +278,8 @@ export async function startSso(
   const live = await liveConnection(config, input.connectionId);
   if (!live.ok) return live;
   const { sso, row } = live.value;
+  // A SAML connection sends an AuthnRequest (plan 12d Task 8).
+  if (row.kind === "saml") return startSaml(config, row, input);
   const provider = await providerOf(config, sso, row);
   if (!provider.ok) return refused(row.id, provider.step, input.ip);
   const now = config.clock.now();
@@ -399,6 +403,8 @@ export async function completeSsoOidc(
   const live = await liveConnection(config, id);
   if (!live.ok) return live;
   const { sso, row: connection } = live.value;
+  // A state row of `sso:<id>` comes from an OIDC start; a kind change is not possible (Task 3).
+  if (connection.kind !== "oidc") return fail("sso_not_configured");
   const provider = await providerOf(config, sso, connection);
   if (!provider.ok) return no(provider.step);
   const p = provider.value;

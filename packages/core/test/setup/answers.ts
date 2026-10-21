@@ -23,6 +23,7 @@ const FS_MODULE = "node:fs";
  * 2. A 2xx JSON body parses under the strict answer schema of the contract.
  * 3. The content type fits a kind of the contract: JSON for `json` and
  *    `metadata`, HTML for `html`, a redirect with `Location` for `redirect`.
+ *    The `saml-metadata` standard of `metadata` answers its own XML type.
  *    A redirect has the status of its kind: a 302, or the 303 that the kind
  *    names. A redirect that carries a code is a 302.
  * 4. A route that takes `clientSecretBasic` answers `invalid_client` after
@@ -293,6 +294,12 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     if (type === "text/html") {
       if (allowed.some((k) => k.kind === "html")) return { ...base, verdict: "ok" };
       return { ...base, verdict: "an HTML answer fits no kind of the contract" };
+    }
+    // The SP metadata of a SAML connection is XML (plan 12d Task 8, SAML Metadata 2.0 section 4.1.1).
+    if (type === "application/samlmetadata+xml" && status === 200) {
+      if (allowed.some((k) => k.kind === "metadata" && k.standard === "saml-metadata"))
+        return { ...base, verdict: "ok" };
+      return { ...base, verdict: "a SAML metadata answer fits no kind of the contract" };
     }
     return { ...base, verdict: `a ${status} ${type} answer fits no kind of the contract` };
   }

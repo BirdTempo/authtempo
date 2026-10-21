@@ -516,11 +516,12 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
                   : w.cookie(me.token),
       fills,
     );
-    // The three routes that carry the code in a redirect to the app.
+    // The four routes that carry the code in a redirect to the app.
     const redirects: RouteKey[] = [
       "GET /social/:provider/start",
       "POST /totp/challenge",
       "GET /sso/:connectionId/start",
+      "POST /sso/:connectionId/acs",
     ];
     expect(unlike(results, "rate_limited", 429, redirects)).toEqual({});
   });
@@ -668,10 +669,12 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     };
     // The callback of a provider needs a provider exchange: sign-up-rule.test.ts proves it on the engine.
     // The SSO callback needs an IdP exchange: sso/resolve.test.ts proves it through the route (plan 12d).
+    // The SAML ACS needs a signed Response of a start; it runs the same resolveSsoUser (plan 12d Task 8).
     const callbacks: RouteKey[] = [
       "GET /social/:provider/callback",
       "POST /social/apple/callback",
       "GET /sso/:connectionId/callback",
+      "POST /sso/:connectionId/acs",
     ];
     const routes = declaring("sign_up_closed").filter((key) => !callbacks.includes(key));
     expect(routes.length).toBeGreaterThan(0);
@@ -1120,6 +1123,8 @@ const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "POST /operator/sso/enforce-off",
   // The SSO callback needs an IdP exchange: sso/resolve.test.ts drives hooks.sso.beforeSignIn (plan 12d).
   "GET /sso/:connectionId/callback",
+  // The SAML ACS needs a signed Response of a start, and it runs the same resolveSsoUser (plan 12d Task 8).
+  "POST /sso/:connectionId/acs",
 ];
 
 /** A world whose before hooks all refuse, or all throw, once `armed`. The setup runs before. */

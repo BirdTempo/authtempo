@@ -1498,7 +1498,7 @@ The manager guard runs these steps in order. An impersonation session answers `f
 | Answer | `{ ok: true }`. Each domain routed to the connection loses its route and its `enforce` flag in the same transaction |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`second_factor_required`](/docs/reference/errors/#second_factor_required), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
-The sign-in routes of a connection take no session. `:connectionId` is the id of the connection: one segment of `[A-Za-z0-9._:-]`, 1 to 128 characters. An OIDC connection signs in through the start and the callback. Until plan 12d Task 8, a SAML connection answers `sso_not_configured` at the start.
+The sign-in routes of a connection take no session. `:connectionId` is the id of the connection: one segment of `[A-Za-z0-9._:-]`, 1 to 128 characters. An OIDC connection signs in through the start and the callback. A SAML connection signs in through the start and the ACS.
 
 <h3 id="post-sso-discover"><code>POST /sso/discover</code></h3>
 
@@ -1515,7 +1515,7 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | --- | --- |
 | Needs | Nothing. It counts on `sso-start:ip:<ip>`, 30 per 15 minutes |
 | Input | Query `{ next? }` |
-| Answer | 302 to the provider of the connection, with the binding cookie `__Secure-tempo_session_oauth` on the path `<basePath>/sso`. The redirect URI is `<baseURL><basePath>/sso/<connectionId>/callback`. A connection with no `endpoints` reads the discovery document of its issuer, kept one hour per isolate. Each discovered endpoint must be on a public host. A failure redirects to `/?auth_error=<code>` |
+| Answer | 302 to the provider of the connection, with the binding cookie `__Secure-tempo_session_oauth` on the path `<basePath>/sso`. For SAML, the 302 goes to the `ssoUrl` with `SAMLRequest` and `RelayState`, by the HTTP-Redirect binding. For OIDC, the redirect URI is `<baseURL><basePath>/sso/<connectionId>/callback`. A connection with no `endpoints` reads the discovery document of its issuer, kept one hour per isolate. Each discovered endpoint must be on a public host. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`sso_failed`](/docs/reference/errors/#sso_failed) |
 
 <h3 id="get-sso-connectionid-callback"><code>GET /sso/:connectionId/callback</code></h3>
@@ -1526,6 +1526,24 @@ The sign-in routes of a connection take no session. `:connectionId` is the id of
 | Input | Query `{ code?, state?, error? }`. They come from the provider of the connection |
 | Answer | The state must name this connection, and the binding cookie must match. Core exchanges the code, then checks the ID token with the issuer, the audience, and the nonce. It reads `sub`, `email`, `name`, `picture`, `amr`, and `acr`, and never `email_verified`. Then the address must be in a verified domain of the connection's organization. A known identity signs in its user, a user at the address gets the identity, and with `jit` a new user is created. The person gets a member row with the connection's `defaultRole`. A user with the second factor on gets the challenge page, unless the provider asserts a value of the connection's `mfa` list. Then a 302 to `next` with the session cookie. A failure redirects to `/?auth_error=<code>` |
 | Errors | [`sso_failed`](/docs/reference/errors/#sso_failed), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`email_required`](/docs/reference/errors/#email_required), [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch), [`sso_not_provisioned`](/docs/reference/errors/#sso_not_provisioned), [`account_disabled`](/docs/reference/errors/#account_disabled), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`member_limit`](/docs/reference/errors/#member_limit), [`role_not_found`](/docs/reference/errors/#role_not_found), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+
+<h3 id="post-sso-connectionid-acs"><code>POST /sso/:connectionId/acs</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. It counts on `sso-acs:ip:<ip>`, 60 per 15 minutes. The provider posts the form cross-site, so the Origin and Fetch Metadata rules skip this route. The request row and the binding cookie bind the post to the browser of the start |
+| Input | Form `{ SAMLResponse, RelayState }`. Each key comes once, and the form holds at most 360 000 bytes. `SAMLResponse` is the base64 of the Response, by the HTTP-POST binding |
+| Answer | The `RelayState` names the request row of a start of this connection, and the binding cookie must match. The Response then passes the checks in order. First come the parse, the wrapping guard, and the signature of the Assertion. The signature of the Response follows when it has one. Then come the status, the `Destination`, the issuer, and the conditions with the clock skew. Last come the audience, the bearer confirmation with `InResponseTo`, the `AuthnStatement`, the subject, and the address. The request row is spent once, and the Assertion ID is kept until its `NotOnOrAfter`, so a replay fails. Then the resolution of the OIDC callback runs. A `SessionNotOnOrAfter` caps the session. A failure redirects to `/?auth_error=<code>` |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`sso_failed`](/docs/reference/errors/#sso_failed), [`sso_not_configured`](/docs/reference/errors/#sso_not_configured), [`email_required`](/docs/reference/errors/#email_required), [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch), [`sso_not_provisioned`](/docs/reference/errors/#sso_not_provisioned), [`account_disabled`](/docs/reference/errors/#account_disabled), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`member_limit`](/docs/reference/errors/#member_limit), [`role_not_found`](/docs/reference/errors/#role_not_found), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned) |
+
+<h3 id="get-sso-connectionid-metadata"><code>GET /sso/:connectionId/metadata</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | None |
+| Answer | `application/samlmetadata+xml`: one `EntityDescriptor` whose `entityID` is this URL, with one `SPSSODescriptor` (`AuthnRequestsSigned="false"`, `WantAssertionsSigned="true"`) and one HTTP-POST `AssertionConsumerService` at the ACS URL. It is not signed. An id that names no SAML connection answers 404 |
+| Errors | [`sso_not_configured`](/docs/reference/errors/#sso_not_configured) |
 
 ## SCIM
 

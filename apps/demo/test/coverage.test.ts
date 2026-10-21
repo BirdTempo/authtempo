@@ -81,7 +81,8 @@ describe("the demo lists and the routes of core", () => {
       // adds the four connection routes of sso, so 64 became 68. Plan 12d Task 4
       // adds the discovery, the start, and the callback of sso, so 68 became 71.
       // Plan 12d Task 9b adds the thirteen routes of scim, so 71 became 84.
-      expect(checked).toBe(84);
+      // Plan 12d Task 8 adds the ACS and the SP metadata of sso, so 84 became 86.
+      expect(checked).toBe(86);
     },
     LONG_TEST_MS,
   );

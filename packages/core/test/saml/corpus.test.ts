@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it } from "vitest";
+import { wrappingGuard } from "../../src/saml/assertion.js";
 import { importVerifyKey, readCertificate } from "../../src/saml/der.js";
 import { type DsigStep, NS_DSIG, verifyEnveloped } from "../../src/saml/dsig.js";
 import { childElements, parseXml, textOf, type XmlElement } from "../../src/saml/xml.js";
@@ -11,7 +12,6 @@ import {
   duplicateId,
   EVIL_NAME_ID,
   NS_SAML,
-  NS_SAMLP,
   secondAssertion,
   unsignedAssertionInSignedResponse,
   validInput,
@@ -27,31 +27,7 @@ import {
 
 type Step = "parse" | "wrapping" | "subject" | DsigStep;
 
-/**
- * The wrapping guards of Task 8 Behavior 3. This test keeps its own copy until Task 8 moves
- * them into `assertion.ts`. The root is the Response, and each `ID` is unique. The document
- * holds one Assertion, as a child of the root, and no `EncryptedAssertion`.
- */
-function wrappingGuard(root: XmlElement): { ok: true; assertion: XmlElement } | { ok: false } {
-  if (root.ns !== NS_SAMLP || root.local !== "Response") return { ok: false };
-  const ids = new Set<string>();
-  const assertions: XmlElement[] = [];
-  for (const el of elementsIn(root)) {
-    for (const a of el.attrs) {
-      if (a.ns !== null || a.local !== "ID") continue;
-      if (ids.has(a.value)) return { ok: false };
-      ids.add(a.value);
-    }
-    if (el.ns === NS_SAML && el.local === "EncryptedAssertion") return { ok: false };
-    if (el.ns === NS_SAML && el.local === "Assertion") assertions.push(el);
-  }
-  const [assertion] = assertions;
-  if (assertions.length !== 1 || assertion === undefined || assertion.parent !== root)
-    return { ok: false };
-  return { ok: true, assertion };
-}
-
-/** The checks that Task 7 owns, in the order of Task 8 Behavior 3. */
+/** The checks that Task 7 owns, in the order of Task 8 Behavior 3, with the guard of `assertion.ts`. */
 async function verifyAssertionOf(
   xml: string,
   keys: readonly CryptoKey[],

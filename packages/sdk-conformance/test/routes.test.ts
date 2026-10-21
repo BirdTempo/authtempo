@@ -213,6 +213,17 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
   },
   {
     method: "POST",
+    path: "/sso/:connectionId/acs",
+    reason: "the SAML identity provider posts the browser's form to it (plan 12d Task 8)",
+  },
+  {
+    method: "GET",
+    path: "/sso/:connectionId/metadata",
+    reason:
+      "an owner gives its URL to the SAML identity provider, which reads it at setup (plan 12d Task 8)",
+  },
+  {
+    method: "POST",
     path: "/operator/sso/enforce-off",
     reason:
       "an operator override: a platform operator turns off SSO enforce for a domain with the operator secret (plan 12d Task 2b); no SDK calls it",

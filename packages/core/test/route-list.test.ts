@@ -68,7 +68,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12d Task 3 adds the four connection routes.
     // Plan 12d Task 4 adds the discovery, the start, and the callback.
     // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
-    expect(listed.length).toBe(172);
+    // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
+    expect(listed.length).toBe(174);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -346,7 +347,11 @@ describe("the entry fields and the module tie (plan 11g)", () => {
       .map((r) => `${r.method} ${r.path}`)
       .sort();
     expect(crossSite).toEqual(marked);
-    expect(marked).toEqual(["POST /oauth/end-session", "POST /social/apple/callback"]);
+    expect(marked).toEqual([
+      "POST /oauth/end-session",
+      "POST /social/apple/callback",
+      "POST /sso/:connectionId/acs",
+    ]);
   });
 
   it("names each code once and no router code", () => {

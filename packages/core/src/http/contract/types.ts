@@ -6,7 +6,8 @@ import type { z } from "zod";
  * script, its own CSP. `redirect` is a 302, or the 303 that `status` names:
  * the answer to a form post that the browser follows with a GET. `param` is
  * the query parameter of the error that a redirect carries, and a redirect
- * with an error is a 302. `metadata` is a standard document. `scim` is a
+ * with an error is a 302. `metadata` is a standard document: JSON, or the
+ * XML of SAML metadata (plan 12d Task 8). `scim` is a
  * SCIM answer (plan 12d).
  */
 export type AnswerKind =
@@ -19,7 +20,7 @@ export type AnswerKind =
     }
   | {
       readonly kind: "metadata";
-      readonly standard: "rfc8414" | "oidc-discovery" | "jwks" | "openapi";
+      readonly standard: "rfc8414" | "oidc-discovery" | "jwks" | "openapi" | "saml-metadata";
     }
   /**
    * A SCIM answer (plan 12d deviation 14): `application/scim+json` that

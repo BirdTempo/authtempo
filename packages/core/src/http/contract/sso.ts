@@ -5,6 +5,13 @@ import { OkAnswer } from "./shapes.js";
 import { callbackQuery, startQuery } from "./social.js";
 import type { RouteContract } from "./types.js";
 
+/**
+ * The form that an IdP posts to the ACS (SAML Bindings 3.5.4). The route
+ * reads it by hand: each key once, else the step `form`. `RelayState` is
+ * the `rs_` token of the start.
+ */
+export const acsBody = z.object({ SAMLResponse: z.string(), RelayState: z.string() });
+
 // Strict: a key that core does not read answers invalid_body.
 export const domainListQuery = z.strictObject({ organizationId: id });
 /** The engine holds the domain to its form; 253 is the longest DNS name. */
@@ -204,4 +211,9 @@ export const SSO_CONTRACT = {
     query: { schema: callbackQuery, parsedBy: "hand" },
     answer: { kind: "redirect", param: "auth_error" },
   },
+  "POST /sso/:connectionId/acs": {
+    body: { schema: acsBody, media: ["form"], parsedBy: "hand" },
+    answer: { kind: "redirect", param: "auth_error" },
+  },
+  "GET /sso/:connectionId/metadata": { answer: { kind: "metadata", standard: "saml-metadata" } },
 } as const satisfies Partial<Record<RouteKey, RouteContract>>;

@@ -2182,6 +2182,40 @@ export const ROUTES = Object.freeze([
     oauthCodes: [],
   },
   {
+    // Plan 12d Task 8: the SAML ACS. The IdP posts the form cross-site; the request row and the binding cookie bind it.
+    method: "POST",
+    path: "/sso/:connectionId/acs",
+    feature: "sso",
+    auth: ["none"],
+    codes: [
+      "rate_limited",
+      "sso_failed",
+      "sso_not_configured",
+      "email_required",
+      "sso_domain_mismatch",
+      "sso_not_provisioned",
+      "account_disabled",
+      "sign_up_closed",
+      "hook_refused",
+      "hook_failed",
+      "member_limit",
+      "role_not_found",
+      "conflict",
+      "account_banned",
+    ],
+    oauthCodes: [],
+    crossSiteForm: true,
+  },
+  {
+    // The SP metadata of a SAML connection, for the IdP setup.
+    method: "GET",
+    path: "/sso/:connectionId/metadata",
+    feature: "sso",
+    auth: ["none"],
+    codes: ["sso_not_configured"],
+    oauthCodes: [],
+  },
+  {
     // Plan 12d Task 9: the SCIM tokens of an organization, behind the manager guard.
     method: "GET",
     path: "/scim/tokens",

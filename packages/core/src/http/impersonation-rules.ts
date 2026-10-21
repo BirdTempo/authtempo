@@ -236,6 +236,9 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "POST /sso/discover": NO_SESSION,
   "GET /sso/:connectionId/start": NO_SESSION,
   "GET /sso/:connectionId/callback": "It takes the state of a start, as the social callback.",
+  // The SAML service provider of plan 12d Task 8, as the OIDC sign-in.
+  "POST /sso/:connectionId/acs": "It takes the request row of a start, as the OIDC callback.",
+  "GET /sso/:connectionId/metadata": NO_SESSION,
   // The SCIM server of plan 12d Task 9. impersonationRefusal reads only a session.
   "GET /scim/v2/ServiceProviderConfig": SCIM_TOKEN,
   "GET /scim/v2/ResourceTypes": SCIM_TOKEN,

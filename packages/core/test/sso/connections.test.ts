@@ -459,7 +459,7 @@ describe("the SSO connections (plan 12d Task 3)", () => {
     ]);
   });
 
-  it("creates a SAML connection from its fields, and refuses the metadata until Task 8", async () => {
+  it("creates a SAML connection from its fields, and refuses a text that is not IdP metadata", async () => {
     const idp = await createTestIdp({ alg: "ec", entityId: "https://idp.example/metadata" });
     const off = ssoAuth({ sso: { oidc: true } });
     const offOrg = await seedOrganization(off);
@@ -490,7 +490,8 @@ describe("the SSO connections (plan 12d Task 3)", () => {
       ok: false,
       code: "invalid_body",
       status: 400,
-      message: "idpMetadata needs plan 12d Task 8",
+      // Task 8 reads the metadata: an element with no namespace is no EntityDescriptor.
+      message: "idpMetadata holds one EntityDescriptor",
     });
     const pem = idp.certificatePem;
     for (const certificates of [[], [pem, pem, pem], ["not a certificate"]])

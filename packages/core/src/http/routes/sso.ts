@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { ResolvedConfig } from "../../config.js";
+import type { SignInChallenge } from "../../engine/second-factor.js";
 import {
   renewedSessionCookie,
   sessionFromRequest,
@@ -23,6 +24,9 @@ import {
 } from "../../engine/sso/domains.js";
 import { requireSsoManager, type SsoActor } from "../../engine/sso/guard.js";
 import { completeSsoOidc, startSso } from "../../engine/sso/oidc.js";
+import type { SsoSignedIn } from "../../engine/sso/resolve.js";
+import { completeSaml, SAML_FORM_MAX, spMetadata } from "../../engine/sso/saml-sp.js";
+import { readCappedBytes } from "../../primitives/read-capped.js";
 import { fail, ok, type Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
 import {
@@ -113,9 +117,32 @@ export function managedBody<T>(schema: z.ZodType<T>) {
 }
 
 /**
+ * The form of an ACS post, at most `SAML_FORM_MAX` bytes. A body past the
+ * cap, a body that is not UTF-8, or another media type gives an empty
+ * form. `completeSaml` refuses an empty form at the step `form`.
+ */
+async function acsForm(request: Request): Promise<URLSearchParams> {
+  const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
+  if (type !== "application/x-www-form-urlencoded") return new URLSearchParams();
+  const length = request.headers.get("content-length");
+  const bytes = await readCappedBytes(
+    new Response(request.body, length === null ? {} : { headers: { "content-length": length } }),
+    SAML_FORM_MAX,
+    request.signal,
+  );
+  if (bytes === null) return new URLSearchParams();
+  try {
+    return new URLSearchParams(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    return new URLSearchParams();
+  }
+}
+
+/**
  * The SSO routes (plan 12d). Task 4 adds the sign-in: the discovery, and
  * the start and the callback of a connection. Tasks 2 and 3 add the manager
  * routes of the domain proof and the connections (spec 30 items 2 and 5).
+ * Task 8 adds the SAML ACS and the SP metadata of a connection.
  * They exist when `sso` is on. Each manager route runs `managedCall`. A
  * route with a domain or a connection id reads the organization of the row
  * first. A manager write takes JSON only, so a browser sends a preflight.
@@ -156,6 +183,24 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
   const unbound = (res: Response) => {
     res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
     return res;
+  };
+  // The answer of the OIDC callback and of the SAML ACS. Each answer ends
+  // the flow of this browser, so the binding cookie goes.
+  const signedInAnswer = (r: Result<SsoSignedIn | SignInChallenge>): Response => {
+    if (!r.ok) return unbound(redirect(authErrorUrl(config, r.code)));
+    if ("twoFactor" in r.value)
+      return unbound(redirect(challengePageUrl(config, r.value.twoFactor.challenge)));
+    const res = redirect(resolveNext(config, r.value.next));
+    res.headers.append(
+      "set-cookie",
+      sessionCookie(
+        config.cookieName,
+        r.value.token,
+        sessionMaxAgeSeconds(config),
+        config.cookie.sameSite,
+      ),
+    );
+    return unbound(res);
   };
   return [
     {
@@ -219,21 +264,43 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
           // A GET callback is a top-level navigation, so a Lax trust cookie comes with it (plan 12c).
           trustDevice: trustTokenOf(config, ctx.request, undefined),
         });
-        // Each answer ends the flow of this browser, so the binding cookie goes.
-        if (!r.ok) return unbound(redirect(authErrorUrl(config, r.code)));
-        if ("twoFactor" in r.value)
-          return unbound(redirect(challengePageUrl(config, r.value.twoFactor.challenge)));
-        const res = redirect(resolveNext(config, r.value.next));
-        res.headers.append(
-          "set-cookie",
-          sessionCookie(
-            config.cookieName,
-            r.value.token,
-            sessionMaxAgeSeconds(config),
-            config.cookie.sameSite,
-          ),
-        );
-        return unbound(res);
+        return signedInAnswer(r);
+      },
+    },
+    {
+      method: "POST",
+      path: "/sso/:connectionId/acs",
+      key: "POST /sso/:connectionId/acs",
+      // The IdP posts the form cross-site, as Apple's callback; the request row and the binding cookie bind it.
+      allowCrossSiteForm: true,
+      async handler(ctx) {
+        const r = await completeSaml(config, {
+          connectionId: ctx.params.connectionId ?? "",
+          form: await acsForm(ctx.request),
+          bindToken: readCookie(ctx.request, bindName),
+          ip: ctx.ip,
+          userAgent: ctx.request.headers.get("user-agent"),
+          // A cross-site form post carries no Lax trust cookie; the challenge page then offers the trusted device (plan 12c).
+          trustDevice: trustTokenOf(config, ctx.request, undefined),
+        });
+        return signedInAnswer(r);
+      },
+    },
+    {
+      method: "GET",
+      path: "/sso/:connectionId/metadata",
+      key: "GET /sso/:connectionId/metadata",
+      async handler(ctx) {
+        const row = await config.storage.findOne("ssoConnection", [
+          { field: "id", op: "eq", value: ctx.params.connectionId ?? "" },
+        ]);
+        // An owner sets up the IdP before the connection is on, so `enabled` does not count here.
+        if (row?.kind !== "saml" || config.sso?.saml === null)
+          return respond(fail("sso_not_configured"));
+        return new Response(spMetadata(config, row), {
+          status: 200,
+          headers: { "content-type": "application/samlmetadata+xml" },
+        });
       },
     },
     {

@@ -50,6 +50,7 @@ const STANDARDS: Record<Extract<AnswerKind, { kind: "metadata" }>["standard"], s
   "oidc-discovery": "The provider metadata of OpenID Connect Discovery 1.0.",
   jwks: "The JSON Web Key Set of RFC 7517.",
   openapi: `This OpenAPI document, by the [OpenAPI Specification ${OPENAPI_VERSION}](https://spec.openapis.org/oas/v${OPENAPI_VERSION}.html).`,
+  "saml-metadata": "The SAML 2.0 metadata of the service provider of one connection.",
 };
 
 interface OpenApiResponse {
@@ -74,7 +75,11 @@ function answerOf(kind: AnswerKind, schemaOf: SchemaOf): [string, OpenApiRespons
         "200",
         {
           description: STANDARDS[kind.standard],
-          content: { "application/json": { schema: { type: "object" } } },
+          // SAML metadata is an XML document (SAML Metadata 2.0 section 4.1.1), not JSON.
+          content:
+            kind.standard === "saml-metadata"
+              ? { "application/samlmetadata+xml": { schema: { type: "string" } } }
+              : { "application/json": { schema: { type: "object" } } },
         },
       ];
     case "html":

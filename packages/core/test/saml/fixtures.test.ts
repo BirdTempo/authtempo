@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { checkResponse } from "../../src/saml/assertion.js";
 import { importVerifyKey, readCertificate } from "../../src/saml/der.js";
 import { NS_DSIG, verifyEnveloped } from "../../src/saml/dsig.js";
 import { childElements, parseXml, textOf, type XmlElement } from "../../src/saml/xml.js";
@@ -69,6 +70,33 @@ describe("the real SAML fixtures", () => {
       expect(await verifyEnveloped(response, [key])).toEqual({ ok: true });
     }
   });
+
+  // Ruling 22 L4 of plan 12d: each node-saml accept fixture holds an Assertion inside Advice.
+  // The ACS reads one Assertion, so the guard refuses the Advice, though both signatures hold.
+  it.each([
+    ["node-saml root-signed assertion-signed 1advice-signed", signed1],
+    ["node-saml root-signed assertion-signed 2advice-signed", signed2],
+    ["node-saml root-unsigned assertion-signed 1advice-signed", unsigned1],
+  ])(
+    "refuses each Advice fixture at the wrapping step of checkResponse: %s",
+    async (_name, xml) => {
+      const key = await keyOf(nodeSamlCert);
+      expect(xml).toContain("Advice>");
+      expect(
+        await checkResponse(new TextEncoder().encode(xml), {
+          acsUrl: "https://sp.example/acs",
+          spEntityId: "https://sp.example/metadata",
+          idpEntityId: "https://idp.example/metadata",
+          requestId: "_request",
+          keys: [key],
+          now: new Date("2020-09-25T16:30:00Z"),
+          skewMs: 120_000,
+          subjectAttribute: null,
+          attributes: { email: "email", name: null },
+        }),
+      ).toEqual({ ok: false, step: "wrapping" });
+    },
+  );
 
   // The signed element of each: the OneLogin fixture signs the Response only.
   it.each([

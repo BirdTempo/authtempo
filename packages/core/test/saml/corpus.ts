@@ -7,6 +7,7 @@
  * and others, USENIX Security 2012). In each shape, the evil Assertion holds the NameID
  * `EVIL_NAME_ID`, so a test can find the element that a naive reader would read.
  */
+import { NS_SAML, NS_SAMLP } from "../../src/saml/assertion.js";
 import { excC14n } from "../../src/saml/c14n.js";
 import { DSIG_ALGORITHMS, NS_DSIG } from "../../src/saml/dsig.js";
 import type { XmlElement, XmlNode } from "../../src/saml/xml.js";
@@ -20,8 +21,7 @@ import {
   type TestResponseInput,
 } from "../../src/testing/saml-idp.js";
 
-export const NS_SAML = "urn:oasis:names:tc:SAML:2.0:assertion";
-export const NS_SAMLP = "urn:oasis:names:tc:SAML:2.0:protocol";
+export { NS_SAML, NS_SAMLP } from "../../src/saml/assertion.js";
 export const EVIL_NAME_ID = "evil@attacker.example";
 const SHA1_DIGEST = "http://www.w3.org/2000/09/xmldsig#sha1";
 

@@ -3,6 +3,7 @@
  * a self-signed certificate, and Responses signed by the owned canonicalizer. It is a test
  * tool. It never ships in an app.
  */
+import { NS_SAML, NS_SAMLP } from "../saml/assertion.js";
 import { excC14n } from "../saml/c14n.js";
 import { DSIG_ALGORITHMS, NS_DSIG } from "../saml/dsig.js";
 import { parseXml, type XmlElement, type XmlNode } from "../saml/xml.js";
@@ -27,6 +28,8 @@ export interface TestResponseInput {
   signAssertion?: boolean;
   /** The Assertion `Issuer`. Default the entity id. The Response `Issuer` stays the entity id. */
   issuer?: string;
+  /** The Assertion `ID`. Default a new random ID; a replay test passes an old one. */
+  assertionId?: string;
   now: Date;
 }
 
@@ -40,8 +43,6 @@ export interface TestIdp {
   sign(xml: string, targetId: string): Promise<string>;
 }
 
-const NS_SAML = "urn:oasis:names:tc:SAML:2.0:assertion";
-const NS_SAMLP = "urn:oasis:names:tc:SAML:2.0:protocol";
 const PERSISTENT = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent";
 const PASSWORD_TRANSPORT = "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport";
 
@@ -195,6 +196,8 @@ async function signElement(
 export async function createTestIdp(options: {
   alg: "rsa" | "ec";
   entityId?: string;
+  /** The `notAfter` of the certificate. Default 2045-01-01; a test of an expired certificate passes an earlier one. */
+  certificateNotAfter?: Date;
 }): Promise<TestIdp> {
   const pair = (
     options.alg === "rsa"
@@ -220,7 +223,7 @@ export async function createTestIdp(options: {
     signer: pair.privateKey,
     commonName: "authtempo test idp",
     notBefore: new Date(Date.UTC(2025, 0, 1)),
-    notAfter: new Date(Date.UTC(2045, 0, 1)),
+    notAfter: options.certificateNotAfter ?? new Date(Date.UTC(2045, 0, 1)),
   });
   const certificatePem = pem("CERTIFICATE", der);
   const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
@@ -238,7 +241,7 @@ export async function createTestIdp(options: {
 
   const response = async (input: TestResponseInput): Promise<string> => {
     const responseId = randomId();
-    const assertionId = randomId();
+    const assertionId = input.assertionId ?? randomId();
     const at = escapeAttr;
     const destination = input.destination === undefined ? input.recipient : input.destination;
     const attributes = Object.entries(input.attributes ?? {});

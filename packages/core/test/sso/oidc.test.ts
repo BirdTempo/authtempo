@@ -414,7 +414,7 @@ describe("the OIDC sign-in of an SSO connection (plan 12d Task 4)", () => {
     expect(authError(await callback(w, b, { code: "c", state: s.state }, s.bind))).toBe(
       "sso_not_configured",
     );
-    // An id that names no connection, a connection that is off, and a SAML connection.
+    // An id that names no connection and a connection that is off. A SAML connection sends an AuthnRequest (Task 8).
     expect(authError((await start(w, "c-none")).res)).toBe("sso_not_configured");
     expect(authError((await start(w, b)).res)).toBe("sso_not_configured");
     const idp = await createTestIdp({ alg: "ec" });
@@ -427,7 +427,13 @@ describe("the OIDC sign-in of an SSO connection (plan 12d Task 4)", () => {
       certificates: [idp.certificatePem],
     });
     if (!saml.ok) throw new Error(saml.code);
-    expect(authError((await start(w, saml.value.id)).res)).toBe("sso_not_configured");
+    const samlStart = await start(w, saml.value.id);
+    expect(authError(samlStart.res)).toBeNull();
+    expect(samlStart.url.searchParams.has("SAMLRequest")).toBe(true);
+    // A SAML connection takes no OIDC callback: no state row of `sso:<id>` exists for it.
+    expect(authError(await callback(w, saml.value.id, { code: "c", state: s.state }, s.bind))).toBe(
+      "sso_failed",
+    );
     // The binding cookie goes with each callback answer.
     expect(res.headers.getSetCookie().join("\n")).toContain(
       "__Secure-tempo_session_oauth=; Path=/auth/sso; Max-Age=0",

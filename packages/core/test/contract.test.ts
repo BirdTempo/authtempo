@@ -128,8 +128,8 @@ function world(secretHash = "0".repeat(64)) {
       impersonation: {},
     },
     account: { deleteConfirm: { ttlMinutes: 60 } },
-    // The domain routes of plan 12d; no test of this file asks the resolver.
-    sso: { dns: [{ name: "none", txt: async () => [] }] },
+    // The domain routes and the SAML ACS of plan 12d; no test of this file asks the resolver.
+    sso: { saml: true, dns: [{ name: "none", txt: async () => [] }] },
     // The SCIM token routes of plan 12d Task 9b.
     scim: {},
   });
@@ -774,7 +774,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 3 adds the four connection routes.
     // Plan 12d Task 4 adds the discovery, the start, and the callback.
     // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
-    expect(keys.length).toBe(172);
+    // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
+    expect(keys.length).toBe(174);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -1264,6 +1265,19 @@ describe("the route contract (plan 11g)", () => {
         missing: { token: { status: 400, code: "invalid_request" } },
       },
       {
+        // The SAML ACS (plan 12d Task 8): a form of no start answers the step request, and a
+        // form without a key the step form. Each failure of the ACS is a redirect with sso_failed.
+        key: "POST /sso/:connectionId/acs",
+        media: "form",
+        body: { SAMLResponse: "PHNhbWxwOlJlc3BvbnNlLz4=", RelayState: `rs_${BODY43}` },
+        required: ["SAMLResponse", "RelayState"],
+        valid: { status: 302, code: "sso_failed" },
+        missing: {
+          SAMLResponse: { status: 302, code: "sso_failed" },
+          RelayState: { status: 302, code: "sso_failed" },
+        },
+      },
+      {
         // OIDC RP-Initiated Logout 1.0 section 2: the POST form of the same optional parameters.
         // With no session it goes on as a GET of the same request (ruling 46 of plan 12e).
         key: "POST /oauth/end-session",
@@ -1279,7 +1293,8 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(hand).toEqual(VALID_FORMS.map((row) => row.key).sort());
-    expect(hand.length).toBe(8);
+    // Plan 12d Task 8 adds the SAML ACS.
+    expect(hand.length).toBe(9);
     for (const row of VALID_FORMS) {
       const contract = CONTRACT[row.key];
       const body = contract?.body;
@@ -1360,7 +1375,8 @@ describe("the route contract (plan 11g)", () => {
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
     // Plan 12d Task 4: the discovery reads JSON and a form. Task 9b: the two SCIM token writes.
-    expect(counts).toEqual({ json: 82, both: 10, form: 7 });
+    // Task 8: the SAML ACS reads a form.
+    expect(counts).toEqual({ json: 82, both: 10, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

@@ -20,6 +20,7 @@ import { lockOrganization } from "../teams.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
 import { dropDiscovery } from "./oidc.js";
+import { importIdpMetadata } from "./saml-sp.js";
 
 /**
  * The OIDC and SAML connections of an organization (plan 12d Task 3, spec
@@ -136,7 +137,7 @@ interface OidcStored {
 }
 
 /** The stored `config` of a SAML connection: the PEM texts of the certificates, which are public. */
-interface SamlStored {
+export interface SamlStored {
   idpEntityId: string;
   ssoUrl: string;
   certificates: string[];
@@ -380,7 +381,8 @@ function checkFields(
     if (key !== "organizationId" && key !== "kind") out.changed.push(key);
   }
   out.changed.sort();
-  const v = input;
+  // A copy: the metadata import below sets three fields, and the caller's object stays as it is.
+  const v: Record<string, unknown> = { ...input };
   if (v.label !== undefined) {
     if (!isText(v.label, 1, LABEL_MAX))
       return refuse(`label must be 1 to ${LABEL_MAX} characters with no control character`);
@@ -441,8 +443,19 @@ function checkFields(
     }
     return ok(out);
   }
-  // Task 8 of plan 12d reads the IdP metadata.
-  if (v.idpMetadata !== undefined) return refuse("idpMetadata needs plan 12d Task 8");
+  // The IdP metadata (plan 12d Task 8 Behavior 6) gives the three fields. They pass the
+  // rules below, as fields that an owner types do, so the two inputs keep one rule.
+  if (v.idpMetadata !== undefined) {
+    if (v.idpEntityId !== undefined || v.ssoUrl !== undefined || v.certificates !== undefined)
+      return refuse("idpMetadata replaces idpEntityId, ssoUrl, and certificates");
+    if (typeof v.idpMetadata !== "string") return refuse("idpMetadata must be an XML text");
+    const imported = importIdpMetadata(v.idpMetadata);
+    if (!imported.ok) return imported;
+    Object.assign(v, imported.value);
+    out.changed = out.changed.filter((k) => k !== "idpMetadata");
+    out.changed.push("idpEntityId", "ssoUrl", "certificates");
+    out.changed.sort();
+  }
   if (v.idpEntityId !== undefined) {
     if (!isText(v.idpEntityId, 1, ENTITY_ID_MAX))
       return refuse(
