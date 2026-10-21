@@ -121,8 +121,8 @@ The routes are under `<basePath>/operator/`. [Routes](/docs/reference/routes/#op
 - The user's session list marks the session with `impersonation: true`, with no operator id.
 - The user gets the notice `impersonation_started` at each start. `operator.impersonation.notice: false` turns it off, and so does `account.notices: false`. The notice holds no IP of the operator.
 - When the operator loses the platform role, each impersonation session of the operator ends. A ban, a revoke, a removal, a leave, a role change, and an account delete of the operator each count.
-- A ban and a revoke end those sessions inside their call budget, and the sweep ends the rest. A removal, a leave, a role change, and an account delete end them in the same flow, with no call budget.
-- Such a flow costs one more query for each user that the operator impersonated in the last 240 minutes, at most 80 users. D1 Free allows 50 queries per invocation, so about 10 such users make the flow fail. Wait 240 minutes after the last start, or run the change on Workers Paid.
+- A ban and a revoke end those sessions inside their call budget, and the sweep ends the rest.
+- An account delete of an operator ends a page of the impersonation sessions of that operator at once. So does a removal, a leave, or a role change of the platform member row. The sweep ends the rest with stop rows (cause `account_delete` or `role_loss`). Until then every door refuses each left session.
 
 An impersonation session can never reach the routes of `IMPERSONATION_REFUSED`. Each answers 403 `impersonation_session` before its handler:
 
