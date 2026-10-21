@@ -136,7 +136,7 @@ describe("the compat runner on postgres (plan 11c)", () => {
 
   // The beforeEach of the mapping tests ran these two checks until ruling 53
   // of plan 12k moved it to the steps without the lock.
-  it("applies 0001 to 0010 on the Better Auth era rows, and a second run applies none", async () => {
+  it("applies 0001 to 0011 on the Better Auth era rows, and a second run applies none", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       await pg.sql.unsafe(BETTER_AUTH_ERA);
@@ -152,6 +152,7 @@ describe("the compat runner on postgres (plan 11c)", () => {
         "0008_compat_schema_v11",
         "0009_compat_schema_v12",
         "0010_compat_schema_v13",
+        "0011_compat_schema_v14",
       ]);
       expect(await s.migrate()).toEqual([]);
     } finally {
@@ -203,8 +204,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 13; a new core version needs migration 0011 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(13);
+  it("serves core schema version 14; a new core version needs migration 0012 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(14);
   });
 
   it("names only columns the table field list knows", () => {
@@ -632,7 +633,14 @@ describe("the compat migration on postgres", () => {
         "ta_oauth_token",
         "ta_operator_audit",
         "ta_organization_token",
+        // Core's own SSO and SCIM tables (migration 0011, plan 12d).
+        "ta_scim_group",
+        "ta_scim_group_member",
+        "ta_scim_token",
+        "ta_scim_user",
         "ta_second_factor",
+        "ta_sso_connection",
+        "ta_sso_domain",
         "ta_totp",
         "ta_trusted_device",
         // Better Auth's own tables of its teams option, which the fixture lacks (migration 0010, Task 11).
@@ -640,8 +648,8 @@ describe("the compat migration on postgres", () => {
         "teamMember",
       ]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "10" },
-        { key: "schema_version", value: "13" },
+        { key: "compat_better_auth", value: "11" },
+        { key: "schema_version", value: "14" },
       ]);
       // Core's columns in core's order (plans 9f and 9g), so core's statements read these tables.
       for (const model of [
@@ -660,6 +668,12 @@ describe("the compat migration on postgres", () => {
         "apiToken",
         "organizationToken",
         "movedToken",
+        "ssoConnection",
+        "ssoDomain",
+        "scimToken",
+        "scimUser",
+        "scimGroup",
+        "scimGroupMember",
       ] as const) {
         const cols = await pg.sql.unsafe<{ c: string }[]>(
           "SELECT column_name AS c FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 ORDER BY ordinal_position",
@@ -692,6 +706,12 @@ describe("the compat migration on postgres", () => {
         "apiToken",
         "organizationToken",
         "movedToken",
+        "ssoConnection",
+        "ssoDomain",
+        "scimToken",
+        "scimUser",
+        "scimGroup",
+        "scimGroupMember",
       ] as const) {
         const cols = await pg.sql.unsafe<
           { column_name: string; is_nullable: string; data_type: string }[]
@@ -739,6 +759,12 @@ describe("the compat migration on postgres", () => {
         "apiToken",
         "organizationToken",
         "movedToken",
+        "ssoConnection",
+        "ssoDomain",
+        "scimToken",
+        "scimUser",
+        "scimGroup",
+        "scimGroupMember",
       ] as const) {
         const rows = await pg.sql.unsafe<{ indexname: string; indexdef: string }[]>(
           "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema() AND tablename = $1 AND indexname <> $2",
@@ -830,8 +856,9 @@ describe("the compat undo of a created user", () => {
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_logout WHERE user_id = ?)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = ?)" +
         // Better Auth's teamMember table keeps its own name, as organizationRole does (plan 12k Task 11).
-        ' AND NOT EXISTS (SELECT 1 FROM "teamMember" WHERE "user_id" = ?)',
-      params: ["u4", 0, ...Array(15).fill("u4")],
+        ' AND NOT EXISTS (SELECT 1 FROM "teamMember" WHERE "user_id" = ?)' +
+        " AND NOT EXISTS (SELECT 1 FROM ta_scim_user WHERE user_id = ?)",
+      params: ["u4", 0, ...Array(16).fill("u4")],
     });
     expect(st.undoCreate("user", user("u5", "y@example.com"))).toEqual({
       sql:
@@ -850,8 +877,9 @@ describe("the compat undo of a created user", () => {
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_session_client WHERE user_id = $13)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_oauth_logout WHERE user_id = $14)" +
         " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = $15)" +
-        ' AND NOT EXISTS (SELECT 1 FROM "teamMember" WHERE "userId" = $16)',
-      params: Array(16).fill("u5"),
+        ' AND NOT EXISTS (SELECT 1 FROM "teamMember" WHERE "userId" = $16)' +
+        " AND NOT EXISTS (SELECT 1 FROM ta_scim_user WHERE user_id = $17)",
+      params: Array(17).fill("u5"),
     });
   });
 

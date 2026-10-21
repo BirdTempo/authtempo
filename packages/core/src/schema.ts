@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 13;
+export const SCHEMA_VERSION = 14;
 
 export interface BaseRow {
   id: string;
@@ -142,7 +142,18 @@ export type VerificationPurpose =
    * opened on those users as an operator. The row lives 3650 days. The sweep
    * deletes it when no session from before `before` stays.
    */
-  | "session-end";
+  | "session-end"
+  /**
+   * One SAML AuthnRequest that core sent (plan 12d). The ACS spends it
+   * once, so one Response opens at most one session.
+   */
+  | "saml-request"
+  /**
+   * The ID of one SAML assertion that the ACS took (plan 12d, SAML
+   * Profiles 4.1.4.5). valueHash is unique, so a replay of the assertion
+   * fails while the row lives.
+   */
+  | "saml-assertion";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;
@@ -479,11 +490,35 @@ export type OperatorAction =
   | "sessions_end_all"
   | "impersonation_start"
   | "impersonation_stop"
-  | "create_admin";
+  | "create_admin"
+  | (typeof SSO_AUDIT_ACTIONS)[number];
+
+/** The audit actions of plan 12d (spec 30 item 22). 12f's `OperatorAction` is their union with its own. */
+export const SSO_AUDIT_ACTIONS = [
+  "sso_connection_create",
+  "sso_connection_update",
+  "sso_connection_delete",
+  "sso_domain_add",
+  "sso_domain_verify",
+  "sso_domain_update",
+  "sso_domain_delete",
+  "sso_domain_lost",
+  "sso_enforce_off",
+  "scim_token_create",
+  "scim_token_revoke",
+  "scim_user_create",
+  "scim_user_update",
+  "scim_user_deactivate",
+  "scim_user_delete",
+  "scim_group_create",
+  "scim_group_update",
+  "scim_group_delete",
+] as const;
 
 /** One operator act (plan 12f). Append-only: core has no update and no delete of it. */
 export interface OperatorAuditRow extends BaseRow {
-  actorKind: "secret" | "user" | "app";
+  /** `scim`: a SCIM token of plan 12d, and `actorId` holds the token's name. */
+  actorKind: "secret" | "user" | "app" | "scim";
   /** The secret's name, the user id, or the app's name. Never the secret. */
   actorId: string;
   action: OperatorAction;
@@ -555,6 +590,109 @@ export interface MovedTokenRow extends BaseRow {
   tokenId: string;
 }
 
+/** The second-factor values of an IdP that pass the gate of plan 12c (owner decision 3 of plan 12d). */
+export interface SsoMfaList {
+  amr?: string[];
+  acr?: string[];
+  authnContext?: string[];
+}
+
+/** One OIDC or SAML connection of one organization to its IdP (plan 12d). */
+export interface SsoConnectionRow extends BaseRow {
+  organizationId: string;
+  kind: "oidc" | "saml";
+  label: string;
+  enabled: boolean;
+  /** True: the first sign-in of a person with no member row adds one. */
+  jit: boolean;
+  defaultRole: string;
+  /** The issuer, the endpoints, or the IdP metadata, by kind. Never a secret. */
+  config: Record<string, unknown>;
+  /** The OIDC client secret, sealed with the keyring. Never the clear secret. */
+  clientSecret: string | null;
+  /** The keyring version that seals `clientSecret` (plan 12b, spec 22). */
+  secretVersion: number;
+  mfa: SsoMfaList | null;
+  /** The SCIM group name to role map (design 9.4). Null: no map. */
+  scimRoles: Record<string, string> | null;
+}
+
+/** One email domain that one organization claims by a DNS proof (plan 12d). */
+export interface SsoDomainRow extends BaseRow {
+  organizationId: string;
+  domain: string;
+  /** The value of the TXT record that proves the claim. */
+  challenge: string;
+  /** The domain while the proof holds, else null. Unique: one organization per claimed domain. */
+  claimedDomain: string | null;
+  connectionId: string | null;
+  /** True: only SSO signs in an address of this domain (owner decision 2). */
+  enforce: boolean;
+  includeSubdomains: boolean;
+  verifiedAt: Date | null;
+  checkedAt: Date | null;
+  /** The count of failed rechecks in a row. */
+  failures: number;
+  /** The first failed recheck of the row of failures, so the loss rule reads the span. */
+  firstFailureAt: Date | null;
+  expiresAt: Date | null;
+}
+
+/** The scopes of a SCIM token (plan 12d). */
+export type ScimScope =
+  | "scim.users.read"
+  | "scim.users.write"
+  | "scim.groups.read"
+  | "scim.groups.write";
+
+/** One SCIM bearer token of one organization (plan 12d). */
+export interface ScimTokenRow extends BaseRow {
+  organizationId: string;
+  name: string;
+  /** SHA-256 hex of the clear token. The clear token is never stored. */
+  tokenHash: string;
+  /** The characters after the prefix, so a list tells the tokens apart. */
+  hint: string;
+  scopes: ScimScope[];
+  expiresAt: Date | null;
+  lastUsedAt: Date | null;
+}
+
+/** The SCIM view of one user in one organization (plan 12d, RFC 7643 4.1). */
+export interface ScimUserRow extends BaseRow {
+  organizationId: string;
+  userId: string;
+  userName: string;
+  /** The lower case of `userName`: RFC 7643 makes userName unique without case. */
+  userNameKey: string;
+  externalId: string | null;
+  active: boolean;
+  displayName: string | null;
+  /** The other attributes of the SCIM resource. */
+  data: Record<string, unknown>;
+  /** The ETag version (RFC 7644 3.14). A write spends the version it read. */
+  version: number;
+}
+
+/** One SCIM group of one organization (plan 12d, RFC 7643 4.2). */
+export interface ScimGroupRow extends BaseRow {
+  organizationId: string;
+  displayName: string;
+  /** The lower case of `displayName`. */
+  displayNameKey: string;
+  externalId: string | null;
+  /** The 12k team that the group feeds. Null: no team. */
+  teamId: string | null;
+  /** The ETag version (RFC 7644 3.14). */
+  version: number;
+}
+
+/** One member of one SCIM group (plan 12d). */
+export interface ScimGroupMemberRow extends BaseRow {
+  groupId: string;
+  scimUserId: string;
+}
+
 export interface Models {
   user: UserRow;
   identity: IdentityRow;
@@ -583,6 +721,12 @@ export interface Models {
   teamMember: TeamMemberRow;
   organizationToken: OrganizationTokenRow;
   movedToken: MovedTokenRow;
+  ssoConnection: SsoConnectionRow;
+  ssoDomain: SsoDomainRow;
+  scimToken: ScimTokenRow;
+  scimUser: ScimUserRow;
+  scimGroup: ScimGroupRow;
+  scimGroupMember: ScimGroupMemberRow;
 }
 
 export type ModelName = keyof Models;
@@ -1029,5 +1173,107 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
     },
     unique: [["source", "sourceId"]],
     indexes: [],
+  },
+  // An IdP connection of one organization (plan 12d). No userId field.
+  ssoConnection: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      kind: { type: "string" },
+      label: { type: "string" },
+      enabled: { type: "boolean" },
+      jit: { type: "boolean" },
+      defaultRole: { type: "string" },
+      config: { type: "json" },
+      clientSecret: { type: "string", nullable: true },
+      secretVersion: { type: "integer" },
+      mfa: { type: "json", nullable: true },
+      scimRoles: { type: "json", nullable: true },
+    },
+    unique: [],
+    indexes: [["organizationId"]],
+  },
+  // A claimed email domain (plan 12d). The unique key on claimedDomain gives a domain to one
+  // organization; a null claimedDomain is no claim, so many rows can hold it.
+  ssoDomain: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      domain: { type: "string" },
+      challenge: { type: "string" },
+      claimedDomain: { type: "string", nullable: true },
+      connectionId: { type: "string", nullable: true },
+      enforce: { type: "boolean" },
+      includeSubdomains: { type: "boolean" },
+      verifiedAt: { type: "date", nullable: true },
+      checkedAt: { type: "date", nullable: true },
+      failures: { type: "integer" },
+      firstFailureAt: { type: "date", nullable: true },
+      expiresAt: { type: "date", nullable: true },
+    },
+    unique: [["organizationId", "domain"], ["claimedDomain"]],
+    indexes: [["connectionId"]],
+  },
+  // A SCIM token of one organization (plan 12d). No userId field: a directory owns it, not a person.
+  scimToken: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      name: { type: "string" },
+      tokenHash: { type: "string" },
+      hint: { type: "string" },
+      scopes: { type: "json" },
+      expiresAt: { type: "date", nullable: true },
+      lastUsedAt: { type: "date", nullable: true },
+    },
+    unique: [["tokenHash"]],
+    indexes: [["organizationId"]],
+  },
+  // The SCIM view of one user (plan 12d). Its userId field makes it a user child model, so the
+  // account delete removes it.
+  scimUser: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      userId: { type: "string" },
+      userName: { type: "string" },
+      userNameKey: { type: "string" },
+      externalId: { type: "string", nullable: true },
+      active: { type: "boolean" },
+      displayName: { type: "string", nullable: true },
+      data: { type: "json" },
+      version: { type: "integer" },
+    },
+    unique: [
+      ["organizationId", "userId"],
+      ["organizationId", "userNameKey"],
+    ],
+    indexes: [["organizationId", "externalId"]],
+  },
+  // A SCIM group of one organization (plan 12d). The role map of the connection is the one
+  // source of a group's role, so the group has no role field.
+  scimGroup: {
+    fields: {
+      ...base,
+      organizationId: { type: "string" },
+      displayName: { type: "string" },
+      displayNameKey: { type: "string" },
+      externalId: { type: "string", nullable: true },
+      teamId: { type: "string", nullable: true },
+      version: { type: "integer" },
+    },
+    unique: [["organizationId", "displayNameKey"]],
+    indexes: [["organizationId", "externalId"]],
+  },
+  // One member of a SCIM group (plan 12d). It names scimUserId, not userId, so it is no user
+  // child model.
+  scimGroupMember: {
+    fields: {
+      ...base,
+      groupId: { type: "string" },
+      scimUserId: { type: "string" },
+    },
+    unique: [["groupId", "scimUserId"]],
+    indexes: [["scimUserId"]],
   },
 };

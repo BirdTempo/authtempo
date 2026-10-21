@@ -113,7 +113,8 @@ function notCredential(provider: string): string {
  * (owner decision 4 of 2026-10-14, plan 12k): `moveBetterAuthApiKeys`
  * moves the rows into them. By ruling 2 of plan 12k a moved row acts: the
  * move writes no retired mark. Core's `movedToken`, the record of each moved
- * row, keeps core's own table too.
+ * row, keeps core's own table too. Plan 12d added its six SSO and SCIM
+ * models, each with core's own table.
  */
 export type MappedModel = Exclude<
   ModelName,
@@ -132,6 +133,12 @@ export type MappedModel = Exclude<
   | "operatorAudit"
   | "organizationToken"
   | "movedToken"
+  | "ssoConnection"
+  | "ssoDomain"
+  | "scimToken"
+  | "scimUser"
+  | "scimGroup"
+  | "scimGroupMember"
 >;
 
 export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {

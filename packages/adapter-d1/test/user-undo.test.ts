@@ -286,6 +286,21 @@ describe("the D1 undo of a user that a child row names (plan 8b)", () => {
         createdAt: t0,
         updatedAt: t0,
       }),
+    scimUser: (db) =>
+      db.create("scimUser", {
+        id: "c1",
+        organizationId: "o1",
+        userId: "u1",
+        userName: "a@example.com",
+        userNameKey: "a@example.com",
+        externalId: null,
+        active: true,
+        displayName: null,
+        data: {},
+        version: 1,
+        createdAt: t0,
+        updatedAt: t0,
+      }),
   };
 
   it("covers every child model of the schema", () => {

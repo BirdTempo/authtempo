@@ -243,9 +243,11 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * the own session and 2 impersonation sessions. The removal ends 11. Plan
  * 12k adds writes to both acts (the team rows and the tokens), and one
  * delete to each sweep. So each page ends fewer: the first run of 12f gave
- * [49, 4, [48, 48, 37]] and [50, 13, [48, 45]].
+ * [49, 4, [48, 48, 37]] and [50, 13, [48, 45]]. Plan 12d Task 1 adds
+ * scimUser to the user child models, so the account delete sends one more
+ * delete: 48 became 49 on 2026-10-21.
  */
-const DELETE_COUNTS: [number, number, number[]] = [48, 3, [47, 47, 44]];
+const DELETE_COUNTS: [number, number, number[]] = [49, 3, [47, 47, 44]];
 const REMOVE_COUNTS: [number, number, number[]] = [49, 11, [47, 47, 26]];
 
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });

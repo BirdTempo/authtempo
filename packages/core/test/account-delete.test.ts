@@ -398,6 +398,23 @@ describe("the account delete (plan 12a, spec 8.15)", () => {
       createdAt: at,
       updatedAt: at,
     });
+    // The SCIM view of the user in Bob's organization (schema version 14,
+    // plan 12d). No engine writes it yet, so the row goes in as the SCIM
+    // user engine writes it: one row per member of the organization.
+    await w.auth.storage.create("scimUser", {
+      id: "scim-ada",
+      organizationId: team.id,
+      userId: me.user.id,
+      userName: EMAIL,
+      userNameKey: EMAIL.toLowerCase(),
+      externalId: null,
+      active: true,
+      displayName: null,
+      data: {},
+      version: 1,
+      createdAt: at,
+      updatedAt: at,
+    });
     // Proofs in flight for the address and for the user id.
     await requestMagicLink(w.auth.config, { email: EMAIL, ip: null });
     expect(

@@ -21,8 +21,14 @@ import type {
   OrganizationRoleRow,
   OrganizationTokenRow,
   PasskeyRow,
+  ScimGroupMemberRow,
+  ScimGroupRow,
+  ScimTokenRow,
+  ScimUserRow,
   SecondFactorRow,
   SessionRow,
+  SsoConnectionRow,
+  SsoDomainRow,
   TeamMemberRow,
   TeamRow,
   TotpRow,
@@ -2112,6 +2118,248 @@ export function runAdapterConformance(
         expect(USER_CHILD_MODELS).not.toContain("organizationToken");
         expect(USER_CHILD_MODELS).not.toContain("organizationRole");
         expect(USER_CHILD_MODELS).not.toContain("team");
+      });
+    });
+
+    describe("SSO and SCIM models (plan 12d)", () => {
+      const at = new Date("2026-10-21T00:00:00.000Z");
+      const later = new Date(at.getTime() + 3_600_000);
+      const connection: SsoConnectionRow = {
+        id: "c1",
+        organizationId: "o1",
+        kind: "oidc",
+        label: "Acme IdP",
+        enabled: true,
+        jit: false,
+        defaultRole: "member",
+        config: { issuer: "https://idp.acme.example", scopes: ["openid", "email"] },
+        clientSecret: "sealed-1",
+        secretVersion: 1,
+        mfa: { amr: ["mfa"], acr: [] },
+        scimRoles: { Admins: "admin" },
+        createdAt: at,
+        updatedAt: at,
+      };
+      const domain = (id: string, organizationId: string): SsoDomainRow => ({
+        id,
+        organizationId,
+        domain: "acme.example",
+        challenge: `challenge-${id}`,
+        claimedDomain: null,
+        connectionId: null,
+        enforce: false,
+        includeSubdomains: false,
+        verifiedAt: null,
+        checkedAt: null,
+        failures: 0,
+        firstFailureAt: null,
+        expiresAt: later,
+        createdAt: at,
+        updatedAt: at,
+      });
+      const scimToken: ScimTokenRow = {
+        id: "st1",
+        organizationId: "o1",
+        name: "Entra",
+        tokenHash: "sh1",
+        hint: "abcdefgh",
+        scopes: ["scim.users.read", "scim.groups.write"],
+        expiresAt: later,
+        lastUsedAt: null,
+        createdAt: at,
+        updatedAt: at,
+      };
+      const scimUser = (
+        id: string,
+        organizationId: string,
+        userId: string,
+        userNameKey: string,
+      ): ScimUserRow => ({
+        id,
+        organizationId,
+        userId,
+        userName: userNameKey.toUpperCase(),
+        userNameKey,
+        externalId: `ext-${id}`,
+        active: true,
+        displayName: null,
+        data: { name: { givenName: "Ada" }, emails: [{ value: userNameKey, primary: true }] },
+        version: 1,
+        createdAt: at,
+        updatedAt: at,
+      });
+      const scimGroup: ScimGroupRow = {
+        id: "sg1",
+        organizationId: "o1",
+        displayName: "Admins",
+        displayNameKey: "admins",
+        externalId: null,
+        teamId: "t1",
+        version: 1,
+        createdAt: at,
+        updatedAt: at,
+      };
+      const scimGroupMember: ScimGroupMemberRow = {
+        id: "sgm1",
+        groupId: "sg1",
+        scimUserId: "su1",
+        createdAt: at,
+        updatedAt: at,
+      };
+      const samlRow = (id: string, purpose: VerificationRow["purpose"]): VerificationRow => ({
+        id,
+        purpose,
+        identifier: "c1",
+        valueHash: `saml-${purpose}`,
+        expiresAt: later,
+        consumedAt: null,
+        data: null,
+        createdAt: at,
+        updatedAt: at,
+        secretVersion: 1,
+      });
+      const byId = (id: string) => [{ field: "id" as const, op: "eq" as const, value: id }];
+
+      it("round-trips the six models", async () => {
+        const claimed: SsoDomainRow = {
+          ...domain("d1", "o1"),
+          claimedDomain: "acme.example",
+          connectionId: "c1",
+          enforce: true,
+          includeSubdomains: true,
+          verifiedAt: at,
+          checkedAt: later,
+          failures: 2,
+          firstFailureAt: at,
+          expiresAt: null,
+        };
+        const bare: SsoConnectionRow = {
+          ...connection,
+          id: "c2",
+          kind: "saml",
+          enabled: false,
+          jit: true,
+          config: {},
+          clientSecret: null,
+          secretVersion: 3,
+          mfa: null,
+          scimRoles: null,
+        };
+        const user1 = scimUser("su1", "o1", "u1", "ada@acme.example");
+        const user2: ScimUserRow = {
+          ...scimUser("su2", "o1", "u2", "bob@acme.example"),
+          externalId: null,
+          active: false,
+          displayName: "Bob",
+          data: {},
+          version: 7,
+        };
+        await db.create("ssoConnection", connection);
+        await db.create("ssoConnection", bare);
+        await db.create("ssoDomain", claimed);
+        await db.create("ssoDomain", domain("d2", "o2"));
+        await db.create("scimToken", scimToken);
+        await db.create("scimUser", user1);
+        await db.create("scimUser", user2);
+        await db.create("scimGroup", scimGroup);
+        await db.create("scimGroupMember", scimGroupMember);
+        // toEqual reads a Date by its time, so each date reads back as the same epoch milliseconds.
+        expect(await db.findOne("ssoConnection", byId("c1"))).toEqual(connection);
+        expect(await db.findOne("ssoConnection", byId("c2"))).toEqual(bare);
+        expect(await db.findOne("ssoDomain", byId("d1"))).toEqual(claimed);
+        expect(await db.findOne("ssoDomain", byId("d2"))).toEqual(domain("d2", "o2"));
+        expect((await db.findOne("ssoDomain", byId("d1")))?.firstFailureAt?.getTime()).toBe(
+          at.getTime(),
+        );
+        expect(await db.findOne("scimToken", byId("st1"))).toEqual(scimToken);
+        expect(await db.findOne("scimUser", byId("su1"))).toEqual(user1);
+        expect(await db.findOne("scimUser", byId("su2"))).toEqual(user2);
+        expect(await db.findOne("scimGroup", byId("sg1"))).toEqual(scimGroup);
+        expect(await db.findOne("scimGroupMember", byId("sgm1"))).toEqual(scimGroupMember);
+        await expect(
+          db.create("scimGroupMember", { ...scimGroupMember, id: "sgm2" }),
+        ).rejects.toMatchObject({ code: "unique_violation", fields: ["groupId", "scimUserId"] });
+        await expect(db.create("scimToken", { ...scimToken, id: "st2" })).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["tokenHash"],
+        });
+      });
+
+      it("keeps one organization per claimed domain", async () => {
+        await db.create("ssoDomain", domain("d1", "o1"));
+        await db.create("ssoDomain", domain("d2", "o2"));
+        const claim = (id: string) =>
+          db.update("ssoDomain", [...byId(id), { field: "claimedDomain", op: "eq", value: null }], {
+            claimedDomain: "acme.example",
+            verifiedAt: at,
+          });
+        expect(await claim("d1")).toBe(1);
+        await expect(claim("d2")).rejects.toBeInstanceOf(StorageError);
+        await expect(claim("d2")).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["claimedDomain"],
+        });
+        expect((await db.findOne("ssoDomain", byId("d2")))?.claimedDomain).toBeNull();
+      });
+
+      it("refuses a second userName key in one organization", async () => {
+        await db.create("scimUser", scimUser("su1", "o1", "u1", "ada@acme.example"));
+        await expect(
+          db.create("scimUser", scimUser("su2", "o1", "u2", "ada@acme.example")),
+        ).rejects.toMatchObject({
+          code: "unique_violation",
+          fields: ["organizationId", "userNameKey"],
+        });
+        await db.create("scimUser", scimUser("su3", "o2", "u2", "ada@acme.example"));
+        expect(
+          (
+            await db.findMany("scimUser", [
+              { field: "userNameKey", op: "eq", value: "ada@acme.example" },
+            ])
+          )
+            .map((r) => r.id)
+            .sort(),
+        ).toEqual(["su1", "su3"]);
+      });
+
+      it("spends a version once", async () => {
+        await db.create("scimUser", scimUser("su1", "o1", "u1", "ada@acme.example"));
+        const spend = () =>
+          db.update("scimUser", [...byId("su1"), { field: "version", op: "eq", value: 1 }], {
+            version: 2,
+            active: false,
+          });
+        expect(await spend()).toBe(1);
+        expect(await spend()).toBe(0);
+        expect(await db.findOne("scimUser", byId("su1"))).toMatchObject({
+          version: 2,
+          active: false,
+        });
+      });
+
+      it("spends a saml-request row once", async () => {
+        await db.create("verification", samlRow("v1", "saml-request"));
+        const spend = () =>
+          db.update(
+            "verification",
+            [...byId("v1"), { field: "consumedAt", op: "eq", value: null }],
+            { consumedAt: later },
+          );
+        expect(await spend()).toBe(1);
+        expect(await spend()).toBe(0);
+        expect((await db.findOne("verification", byId("v1")))?.purpose).toBe("saml-request");
+      });
+
+      it("refuses a second saml-assertion row with one valueHash", async () => {
+        await db.create("verification", samlRow("v1", "saml-assertion"));
+        await expect(
+          db.create("verification", samlRow("v2", "saml-assertion")),
+        ).rejects.toMatchObject({ code: "unique_violation", fields: ["valueHash"] });
+        expect(
+          await db.findMany("verification", [
+            { field: "purpose", op: "eq", value: "saml-assertion" },
+          ]),
+        ).toHaveLength(1);
       });
     });
   });

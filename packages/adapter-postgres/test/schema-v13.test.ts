@@ -46,11 +46,13 @@ describe("schema version 13 on Postgres (plan 12k)", () => {
       await a.unsafe(
         "INSERT INTO ta_api_token (id, created_at, updated_at, user_id, name, token_hash, hint, expires_at, last_used_at, organization_id) VALUES ('t12', '2026-10-20T00:00:00Z', '2026-10-20T00:00:00Z', 'u12', 'ci', 'th12', 'abcdefgh', NULL, '2026-10-20T00:00:00Z', 'o12')",
       );
-      for (const m of MIGRATIONS.slice(i0013)) await a.unsafe(m.sql);
+      await a.unsafe(MIGRATIONS[i0013]?.sql ?? "");
       const version = await a.unsafe<{ value: string }[]>(
         "SELECT value FROM ta_meta WHERE key = 'schema_version'",
       );
       expect(version[0]?.value).toBe("13");
+      // The adapter reads only a database of the current version: apply the later migrations first (0014 since plan 12d).
+      for (const m of MIGRATIONS.slice(i0013 + 1)) await a.unsafe(m.sql);
       const cols = await a.unsafe<Column[]>(
         "SELECT table_name, column_name, is_nullable, data_type, column_default FROM information_schema.columns WHERE table_schema = current_schema() AND ((table_name = 'ta_session' AND column_name = 'active_team_id') OR (table_name = 'ta_invitation' AND column_name = 'team_ids') OR (table_name = 'ta_api_token' AND ordinal_position > 10)) ORDER BY table_name DESC, ordinal_position",
       );
@@ -109,7 +111,8 @@ describe("schema version 13 on Postgres (plan 12k)", () => {
 
   it("names every model of the schema", async () => {
     const models = Object.keys(schema) as (keyof typeof schema)[];
-    expect(models).toHaveLength(27);
+    // 27 models to version 13; plan 12d adds six.
+    expect(models).toHaveLength(33);
     const db = await freshDatabase();
     try {
       const tables = (

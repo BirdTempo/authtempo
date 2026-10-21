@@ -24,6 +24,7 @@ const WORDS = [
   "eight",
   "nine",
   "ten",
+  "eleven",
 ];
 
 /** A whole number as a word, as the pages write it. */
@@ -80,8 +81,9 @@ describe("the CLI pages on compat files for tables with other names", () => {
   const count = compat.COMPAT_MIGRATION_NAMES.length;
 
   it("finds the files that depend on the naming", () => {
-    // The package ships ten files, and five of them take the naming (plan 12f adds 0009, plan 12k 0010).
-    expect(count).toBe(10);
+    // The package ships eleven files, and five of them take the naming (plan 12f adds 0009, plan 12k 0010).
+    // Plan 12d adds 0011, which names ta_ tables only.
+    expect(count).toBe(11);
     expect(files).toEqual(["0001", "0006", "0007", "0009", "0010"]);
   });
 

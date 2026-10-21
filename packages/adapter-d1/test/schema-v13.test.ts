@@ -39,12 +39,14 @@ describe("schema version 13 on D1 (plan 12k)", () => {
         "INSERT INTO ta_api_token (id, created_at, updated_at, user_id, name, token_hash, hint, expires_at, last_used_at, organization_id) VALUES ('t12', 1, 1, 'u12', 'ci', 'th12', 'abcdefgh', NULL, 1, 'o12')",
       ].map((q) => env.STAGED.prepare(q)),
     );
-    await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS);
+    await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS.slice(0, i0013 + 1));
     expect(
       await env.STAGED.prepare("SELECT value FROM ta_meta WHERE key = 'schema_version'").first(
         "value",
       ),
     ).toBe("13");
+    // The adapter reads only a database of the current version: apply the later migrations first (0014 since plan 12d).
+    await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS);
     expect((await columns(env.STAGED, "ta_session")).at(-1)).toEqual(
       nullable("active_team_id", "TEXT"),
     );
@@ -100,7 +102,8 @@ describe("schema version 13 on D1 (plan 12k)", () => {
 
   it("names every model of the schema", async () => {
     const models = Object.keys(schema) as (keyof typeof schema)[];
-    expect(models).toHaveLength(27);
+    // 27 models to version 13; plan 12d adds six.
+    expect(models).toHaveLength(33);
     const tables = (
       await env.DB.prepare(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'ta_%'",

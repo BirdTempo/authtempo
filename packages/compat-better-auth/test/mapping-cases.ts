@@ -45,6 +45,12 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">, rawDb: D1Subse
         "ta_api_token",
         "ta_organization_token",
         "ta_moved_token",
+        "ta_sso_connection",
+        "ta_sso_domain",
+        "ta_scim_token",
+        "ta_scim_user",
+        "ta_scim_group",
+        "ta_scim_group_member",
       ].map((t) => rawDb.prepare(`DELETE FROM ${t}`)),
     );
   };
@@ -132,6 +138,12 @@ export function mappingCases(
         "oauthSessionClient",
         "oauthLogout",
         "operatorAudit",
+        "ssoConnection",
+        "ssoDomain",
+        "scimToken",
+        "scimUser",
+        "scimGroup",
+        "scimGroupMember",
       ] as const) {
         const info = await rows<{ name: string; notnull: number }>(
           `PRAGMA table_info(${TABLES[model]})`,
@@ -159,6 +171,12 @@ export function mappingCases(
         "oauthSessionClient",
         "oauthLogout",
         "operatorAudit",
+        "ssoConnection",
+        "ssoDomain",
+        "scimToken",
+        "scimUser",
+        "scimGroup",
+        "scimGroupMember",
       ] as const) {
         const list = await rows<{ name: string; unique: number; origin: string }>(
           `PRAGMA index_list(${TABLES[model]})`,

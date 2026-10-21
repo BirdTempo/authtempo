@@ -17,6 +17,25 @@ const ACTIONS: Readonly<Record<OperatorAction, true>> = {
   impersonation_start: true,
   impersonation_stop: true,
   create_admin: true,
+  // The actions of plan 12d (SSO_AUDIT_ACTIONS of the schema).
+  sso_connection_create: true,
+  sso_connection_update: true,
+  sso_connection_delete: true,
+  sso_domain_add: true,
+  sso_domain_verify: true,
+  sso_domain_update: true,
+  sso_domain_delete: true,
+  sso_domain_lost: true,
+  sso_enforce_off: true,
+  scim_token_create: true,
+  scim_token_revoke: true,
+  scim_user_create: true,
+  scim_user_update: true,
+  scim_user_deactivate: true,
+  scim_user_delete: true,
+  scim_group_create: true,
+  scim_group_update: true,
+  scim_group_delete: true,
 };
 
 export const OPERATOR_ACTIONS: readonly OperatorAction[] = Object.freeze(

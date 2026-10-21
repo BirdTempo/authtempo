@@ -548,7 +548,8 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     " AND NOT EXISTS (SELECT 1 FROM ta_oauth_session_client WHERE user_id = ?)" +
     " AND NOT EXISTS (SELECT 1 FROM ta_oauth_logout WHERE user_id = ?)" +
     " AND NOT EXISTS (SELECT 1 FROM ta_second_factor WHERE user_id = ?)" +
-    " AND NOT EXISTS (SELECT 1 FROM ta_team_member WHERE user_id = ?)";
+    " AND NOT EXISTS (SELECT 1 FROM ta_team_member WHERE user_id = ?)" +
+    " AND NOT EXISTS (SELECT 1 FROM ta_scim_user WHERE user_id = ?)";
 
   it("lists every model with a userId field as a child, from the schema", () => {
     expect(USER_CHILD_MODELS).toEqual([
@@ -568,6 +569,7 @@ describe("the D1 undo of a user create (plan 8b)", () => {
       "oauthLogout",
       "secondFactor",
       "teamMember",
+      "scimUser",
     ]);
   });
 
@@ -575,18 +577,18 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     const st = coreStatements(SQLITE);
     expect(st.undoCreate("user", user(true))).toEqual({
       sql: `DELETE FROM ta_user WHERE id = ?${children}`,
-      params: Array(17).fill("u1"),
+      params: Array(18).fill("u1"),
     });
     expect(st.undoCreate("user", user(false))).toEqual({
       sql: `DELETE FROM ta_user WHERE id = ? AND email_verified = ?${children}`,
-      params: ["u1", 0, ...Array(16).fill("u1")],
+      params: ["u1", 0, ...Array(17).fill("u1")],
     });
   });
 
   it("numbers the Postgres placeholders after the where", () => {
     const s = coreStatements(POSTGRES).undoCreate("user", user(true));
-    expect(s.sql.endsWith("FROM ta_team_member WHERE user_id = $17)")).toBe(true);
-    expect(s.params).toHaveLength(17);
+    expect(s.sql.endsWith("FROM ta_scim_user WHERE user_id = $18)")).toBe(true);
+    expect(s.params).toHaveLength(18);
   });
 
   it("keeps the undo of any other model a delete by id", () => {

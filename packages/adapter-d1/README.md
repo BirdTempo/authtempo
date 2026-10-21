@@ -73,6 +73,8 @@ Version 12 (plan 12f, 2026-10-20) is the operator tools. It adds `banned_at`, `b
 
 Version 13 (plan 12k, 2026-10-20) is organizations and tokens, second version. It adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token`: the scope, the window, the quota, and the retired mark. It adds the tables `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`, and `ta_moved_token`, the record of each moved key. Each new column is nullable, with no default and no fill: a row of version 12 reads as before. Apply `0013_schema_v13` before you deploy a core at version 13; the adapter refuses a database at version 12.
 
+Version 14 (plan 12d, 2026-10-21) is enterprise SSO and SCIM. It adds the tables `ta_sso_connection`, `ta_sso_domain`, `ta_scim_token`, `ta_scim_user`, `ta_scim_group`, and `ta_scim_group_member`. It changes no table of version 13: a row of version 13 reads as before. Apply `0014_schema_v14` before you deploy a core at version 14; the adapter refuses a database at version 13.
+
 ## Limiter
 
 The memory limiter is per isolate; this one is the limit the product owns.

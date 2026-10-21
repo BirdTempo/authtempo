@@ -14,7 +14,7 @@ sources:
 
 **For:** an operator who deploys a new core, or a developer who reads the tables.
 
-**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 13 needs the migrations up to `0013_schema_v13`.
+**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 14 needs the migrations up to `0014_schema_v14`.
 
 ## Before you start
 
@@ -37,8 +37,9 @@ sources:
 | 11 | `0011_schema_v11` | `ta_oauth_device`, `ta_oauth_subject`, `ta_oauth_session_client`, `ta_oauth_logout`. It also adds the columns of a confidential client to `ta_oauth_client`, and `parent_id` and `dpop_jkt` to `ta_oauth_token` (plan 12e). |
 | 12 | `0012_schema_v12` | `ta_operator_audit`. It also adds the three ban fields to `ta_user` and `actor_id` to `ta_session` (plan 12f). |
 | 13 | `0013_schema_v13` | `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`, `ta_moved_token`. It also adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token` (plan 12k). |
+| 14 | `0014_schema_v14` | `ta_sso_connection`, `ta_sso_domain`, `ta_scim_token`, `ta_scim_user`, `ta_scim_group`, `ta_scim_group_member` (plan 12d). |
 
-`SCHEMA_VERSION` of `@authtempo/core` is 13.
+`SCHEMA_VERSION` of `@authtempo/core` is 14.
 
 Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Its migration is `0009_schema_v9` in both adapters and `0006_compat_schema_v9` in the compatibility package. Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 
@@ -194,6 +195,17 @@ psql "$DATABASE_URL" -c "SELECT s.user_id FROM ta_second_factor s JOIN ta_totp t
 
 ## The Better Auth tables
 
+Version 14 comes from the `0014_schema_v14` migration in both adapters, and from `0011_compat_schema_v14` in the compatibility package (plan 12d). It adds six tables and changes no table of version 13.
+
+| Field | Column | Type | What it holds |
+| --- | --- | --- | --- |
+| `ssoConnection` | `ta_sso_connection` | table | One OIDC or SAML connection of one organization, with an index on `organization_id`. The client secret is sealed with the keyring (plan 12d). |
+| `ssoDomain` | `ta_sso_domain` | table | One email domain that one organization claims by a DNS proof, unique on (`organization_id`, `domain`) and on `claimed_domain`. A null `claimed_domain` is no claim, so one domain has at most one claim (plan 12d). |
+| `scimToken` | `ta_scim_token` | table | A SCIM bearer token of one organization, unique on `token_hash`. It has no `user_id`, so the account delete keeps it (plan 12d). |
+| `scimUser` | `ta_scim_user` | table | The SCIM view of one user in one organization, unique on (`organization_id`, `user_id`) and on (`organization_id`, `user_name_key`). It has a `user_id`, so the account delete removes it (plan 12d). |
+| `scimGroup` | `ta_scim_group` | table | A SCIM group of one organization, unique on (`organization_id`, `display_name_key`) (plan 12d). |
+| `scimGroupMember` | `ta_scim_group_member` | table | One member of one SCIM group, unique on (`group_id`, `scim_user_id`) (plan 12d). |
+
 The compatibility package keeps the tables of Better Auth 1.7. It adds columns to them, and some tables of core beside them.
 
 | Migration | What it adds |
@@ -208,6 +220,7 @@ The compatibility package keeps the tables of Better Auth 1.7. It adds columns t
 | `0008_compat_schema_v11` | The columns and the four tables of version 11, with the same defaults. The text names `ta_` tables only, so it is the same for every naming. |
 | `0009_compat_schema_v12` | `taBannedAt`, `taBanReason`, and `taBanUntil` on `user`, `taActorId` on `session`, and `ta_operator_audit`. No default. It copies each ban of the admin plugin (`banned`, `banReason`, `banExpires`) into the ban columns, and skips a row that has `taBannedAt`. The text names the user and session tables, so tables with other names take the text of `compatMigration0009Sql`. |
 | `0010_compat_schema_v13` | `activeTeamId` on `session` and `teamId` on `invitation`, the columns of Better Auth's teams option. No default and no fill. On Postgres it adds each column only when it is absent. It creates Better Auth's `organizationRole` when it is absent, and adds `taRank` (default 1) and the unique key on (`organizationId`, `role`). It creates Better Auth's `team` and `teamMember` when they are absent. It adds `teamMember.taOrganizationId` and `taUpdatedAt` with a fill, and the unique key on (`teamId`, `userId`). The `d1-before-1.7` file also adds `team.memberCount` (default 0) and `teamMember.membershipKey` (unique), which the team tables of Better Auth 1.4.21 lack. On Postgres it adds these two columns only when they are absent. On D1, tables that hold `session.activeTeamId` and `invitation.teamId` already take an own 0010 file, applied before `authtempo migrate`. It is the shipped file of its directory without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole`, `team`, and `teamMember` tables when they are absent. They add `taRank`, the `ta` columns, and the unique keys, and move the versions. The text names the session, invitation, organization, organizationRole, team, and teamMember tables, so tables with other names take the text of `compatMigration0010Sql`. |
+| `0011_compat_schema_v14` | The six tables of version 14. Better Auth's `ssoProvider` table and the tables of its SCIM plugin stay as they are. The text names `ta_` tables only, so it is the same for every naming. |
 
 On D1, a database made by a Better Auth older than 1.7 uses the folder `d1-before-1.7`. [Better Auth compatibility](/docs/reference/compat-better-auth/) tells the rest.
 

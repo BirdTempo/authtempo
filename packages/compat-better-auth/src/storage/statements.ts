@@ -172,6 +172,15 @@ export const CORE_TABLE_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([
   "organizationToken",
   // The record of each moved apikey row (review finding M2): migration 0010 creates it.
   "movedToken",
+  // Plan 12d: core's own tables beside the Better Auth tables; Better Auth's
+  // ssoProvider and SCIM tables stay in place, and copyBetterAuthSso copies
+  // their rows (Task 14). Migration 0011 creates the six.
+  "ssoConnection",
+  "ssoDomain",
+  "scimToken",
+  "scimUser",
+  "scimGroup",
+  "scimGroupMember",
 ]);
 
 function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): CompatStatements {
