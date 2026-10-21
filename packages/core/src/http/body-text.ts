@@ -5,9 +5,10 @@
  * refuses them first, and a route answers its refusal, not 500. The walk
  * uses a stack, so a deep body cannot overflow the call stack.
  *
- * The readers are readJson and readBody (json.ts, body.ts) and the OAuth
- * readObject and formParams (routes/oauth.ts). One helper holds the rule,
- * so the readers cannot drift.
+ * The readers are readJson and readBody (json.ts, body.ts), the OAuth
+ * readObject and formParams (routes/oauth.ts), and the operator
+ * readRewrapBody and readStopBody (routes/operator.ts). One helper holds the
+ * rule, so the readers cannot drift.
  */
 export function holdsBadText(raw: unknown): boolean {
   const stack: unknown[] = [raw];

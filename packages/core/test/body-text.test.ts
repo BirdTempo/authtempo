@@ -5,6 +5,7 @@ import { readJson } from "../src/http/json.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { createAuth, createMemoryAdapter, createPbkdf2PasswordHash } from "../src/index.js";
+import { sha256Hex } from "../src/primitives/crypto.js";
 import { oauthHandle, REDIRECT, tokenPost } from "./oauth-helpers.js";
 import { GOOGLE } from "./social-helpers.js";
 import { totpAuth, verifiedSession } from "./totp-helpers.js";
@@ -167,5 +168,43 @@ describe("the OAuth body readers refuse a NUL and a lone surrogate (the 12g fix 
     const res = await oauthHandle().auth.handle(tokenPost({ grant_type: "refresh_token\u0000" }));
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "invalid_request" });
+  });
+});
+
+describe("the operator rewrap reader refuses a NUL and a lone surrogate (ruling 26)", () => {
+  const SECRET = "operator-secret-0123456789abcdef-0123456789";
+
+  it.each([
+    ["a NUL in the cursor", '{"after":"totp:a\\u0000"}'],
+    ["a lone surrogate in the cursor", '{"after":"totp:\\ud800"}'],
+  ])("answers 400 invalid_body for %s", async (_, text) => {
+    // Two versions, so the rewrap reads the rows after the cursor. Without
+    // the check the storage port refuses the where value: 500 internal.
+    const auth = createAuth({
+      baseURL: BASE,
+      trustedOrigins: [APP_ORIGIN],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      secrets: [
+        { version: 2, value: "q8JxVd3m0Yv2sZ7rKpT4wN1hLc9eFgAuBiOjQyRtSxM" },
+        { version: 1, value: "0123456789abcdef0123456789abcdef" },
+      ],
+      operator: {
+        secrets: [{ name: "keys", secretHash: await sha256Hex(SECRET), scopes: ["secrets"] }],
+      },
+    });
+    const res = await auth.handle(
+      new Request(`${BASE}/auth/operator/secrets/rewrap`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          origin: APP_ORIGIN,
+          authorization: `Operator ${SECRET}`,
+        },
+        body: text,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_body" });
   });
 });

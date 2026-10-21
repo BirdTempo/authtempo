@@ -30,6 +30,7 @@ import { fail, ok, type Result } from "../../result.js";
 import { SCHEMA_VERSION } from "../../schema.js";
 import { VERSION } from "../../version.js";
 import { isJsonRequest } from "../body.js";
+import { holdsBadText } from "../body-text.js";
 import {
   auditQuery,
   banBody,
@@ -91,7 +92,10 @@ async function operatorAuthorized(
   return allowed.ok ? null : json({ error: allowed.code }, allowed.status);
 }
 
-/** The parsed body of a rewrap, or null for a body that is not a limit and a cursor. */
+/**
+ * The parsed body of a rewrap, or null for a body that is not a limit and a
+ * cursor. A NUL or a lone surrogate is null too (`holdsBadText`, ruling 26).
+ */
 async function readRewrapBody(
   request: Request,
 ): Promise<{ limit?: number; after?: string } | null> {
@@ -104,6 +108,7 @@ async function readRewrapBody(
       return null;
     }
   }
+  if (holdsBadText(raw)) return null;
   const parsed = rewrapBody.safeParse(raw);
   if (!parsed.success) return null;
   const { limit, after } = parsed.data;
@@ -113,7 +118,10 @@ async function readRewrapBody(
   };
 }
 
-/** The body of a stop: `{}` for an empty body, else the parsed JSON, or null for a bad body. */
+/**
+ * The body of a stop: `{}` for an empty body, else the parsed JSON, or null
+ * for a bad body. A NUL or a lone surrogate is a bad body (`holdsBadText`).
+ */
 async function readStopBody(request: Request): Promise<{ reason?: string } | null> {
   const text = await request.text();
   let raw: unknown = {};
@@ -124,6 +132,7 @@ async function readStopBody(request: Request): Promise<{ reason?: string } | nul
       return null;
     }
   }
+  if (holdsBadText(raw)) return null;
   const parsed = impersonateStopBody.safeParse(raw);
   if (!parsed.success) return null;
   return parsed.data.reason === undefined ? {} : { reason: parsed.data.reason };

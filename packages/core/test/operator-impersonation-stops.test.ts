@@ -118,6 +118,28 @@ describe("the stop rows of the impersonation (ruling 43 of plan 12f)", () => {
     ]);
   });
 
+  it("refuses a stop reason with a NUL or a lone surrogate as invalid_body (ruling 26)", async () => {
+    const w = await world();
+    for (const reason of ["Done\u0000", "Done \ud800"]) {
+      // A session with no actor: past the reader, the stop answers not_found.
+      // So the answer shows that the reader refused the body first.
+      const res = await w.handle(
+        post(
+          "/auth/operator/impersonate/stop",
+          { reason },
+          { authorization: `Bearer ${w.target.token}` },
+        ),
+      );
+      expect(res.status, reason).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_body" });
+    }
+    const res = await w.handle(
+      post("/auth/operator/impersonate/stop", {}, { authorization: `Bearer ${w.target.token}` }),
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "not_found" });
+  });
+
   it("writes user_end when the user revokes the session, or all the others", async () => {
     for (const how of ["one", "others"] as const) {
       const w = await world();
