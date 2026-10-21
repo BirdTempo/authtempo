@@ -271,6 +271,43 @@ describe("the SCIM tokens (plan 12d Task 9)", () => {
     expect(await lastUsed()).toEqual(w.clock.now());
   });
 
+  it("changes lastUsedAt once when two parallel calls both read it as null", async () => {
+    const w = await scimAuth();
+    const { token, id } = await scimToken(w);
+    // Each token read waits for the other, as two requests on two connections can.
+    const read = w.storage.findOne.bind(w.storage);
+    let arrived = 0;
+    let both: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      both = resolve;
+    });
+    vi.spyOn(w.storage, "findOne").mockImplementation(async (model, where) => {
+      const row = await read(model, where);
+      if (model !== "scimToken") return row;
+      if (++arrived === 2) both();
+      await gate;
+      return row;
+    });
+    const update = vi.spyOn(w.storage, "update");
+    const answers = await Promise.all([
+      scim(w, token, "GET", "/ServiceProviderConfig"),
+      scim(w, token, "GET", "/ServiceProviderConfig"),
+    ]);
+    expect(answers.map((r) => r.status)).toEqual([200, 200]);
+    // The gate holds both reads until each has its row, so each call read lastUsedAt null.
+    expect(arrived).toBe(2);
+    expect(update.mock.calls.filter(([model]) => model === "scimToken")).toHaveLength(2);
+    const changed = await Promise.all(
+      update.mock.results
+        .filter((_, i) => update.mock.calls[i]?.[0] === "scimToken")
+        .map((r) => r.value as Promise<number>),
+    );
+    expect(changed).toEqual([1, 0]);
+    expect(
+      (await w.storage.findOne("scimToken", [{ field: "id", op: "eq", value: id }]))?.lastUsedAt,
+    ).toEqual(w.clock.now());
+  });
+
   it("refuses a SCIM token at the caller reads of the app (auth.caller, auth.authenticate, auth.session)", async () => {
     const w = await scimAuth();
     const { token } = await scimToken(w);
