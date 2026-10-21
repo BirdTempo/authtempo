@@ -11,10 +11,10 @@ import {
 import { fakeIo } from "./support/fake-io.js";
 
 // The check `ready` of `authtempo check` (plan 12h Task 9, spec 31 items 12
-// and 15). Three Workers of examples/worker run under wrangler dev: the
-// default config, the readiness route over a working D1, and the readiness
-// route over a D1 binding that throws on each call. A fake host gives the
-// answers that core never gives.
+// and 15). Three Workers of examples/worker run under wrangler dev. The first
+// has the default config. The second has the readiness route over a working
+// D1. The third has the readiness route over a D1 binding that throws on each
+// call. A fake host gives the answers that core never gives.
 
 const workers: { default?: ExampleWorker; on?: ExampleWorker; down?: ExampleWorker } = {};
 beforeAll(async () => {

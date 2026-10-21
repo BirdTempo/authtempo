@@ -20,8 +20,9 @@ interface Env {
   /** "1" turns on the operator user, session, and audit tools of plan 12f, with the organization "platform". */
   OPERATOR_USERS?: string;
   /**
-   * A local test run only (plan 12h Task 9; read when BASE_URL is on this machine): "on" mounts
-   * GET /auth/ready, and "store_down" mounts it over a storage adapter whose binding throws.
+   * A local test run only (plan 12h Task 9). The Worker reads it only when the host of BASE_URL
+   * is localhost or 127.0.0.1. "on" mounts GET /auth/ready. "store_down" mounts it over a
+   * storage adapter whose binding throws.
    */
   TEST_READINESS?: string;
   DB: D1Database;
