@@ -1012,6 +1012,46 @@ describe("the admin calls of auth.api (ruling 60 m2)", () => {
     ]);
   });
 
+  it("passes core's familyEndFailed through the ban answer of the path and of auth.api (ruling 62 m2)", async () => {
+    const database = memoryDatabase();
+    const a = await adminApp(database);
+    const ann = await a.user("ann@example.com");
+    const bob = await a.user("bob@example.com");
+    const headers = new Headers({ cookie: a.op });
+    // The read of endFamilies after the commit is the one read of oauthToken
+    // in an act. A storage limit there, such as query 51 on D1 Free, throws.
+    const findMany = database.storage.findMany.bind(database.storage);
+    let refused = 0;
+    database.storage.findMany = ((model, ...rest) => {
+      if (model === "oauthToken") {
+        refused++;
+        throw new Error("Too many API requests by single worker invocation.");
+      }
+      return findMany(model, ...rest);
+    }) as typeof database.storage.findMany;
+
+    const path = await json(await a.call("/admin/ban-user", { userId: ann.id }, a.op));
+    expect(path).toMatchObject({
+      status: 200,
+      body: { user: { id: ann.id, banned: true }, familyEndFailed: true },
+    });
+    await a.call("/admin/unban-user", { userId: ann.id }, a.op);
+    const banned = await a.auth.api.banUser({ body: { userId: ann.id }, headers });
+    expect(banned).toMatchObject({ user: { banned: true }, familyEndFailed: true });
+    expect(refused).toBe(2);
+    // set-role answers through the same step. A grant ends no family, so its
+    // answer holds no such key. A user actor revokes no platform operator,
+    // so only the retry of a revoke that left sessions ends families here.
+    const granted = await a.auth.api.setRole({ body: { userId: bob.id, role: "admin" }, headers });
+    expect(Object.keys(granted)).toEqual(["user"]);
+
+    // With the storage well again, the ban answer holds no such key.
+    database.storage.findMany = findMany;
+    await a.call("/admin/unban-user", { userId: ann.id }, a.op);
+    const again = await a.auth.api.banUser({ body: { userId: ann.id }, headers });
+    expect(Object.keys(again)).toEqual(["user"]);
+  });
+
   it("throws Better Auth's APIError of each path, and 404 without the plugin", async () => {
     const a = await adminApp(memoryDatabase());
     const ann = await a.user("ann@example.com");

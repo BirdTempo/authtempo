@@ -637,9 +637,9 @@ core's guard decides (plan 12f Task 10):
 | --- | --- | --- |
 | `GET /admin/list-users` | `GET /operator/users` or `/operator/users/search` | `{ users, total, limit, offset }` on a first page that ends the list. A page that does not end it answers `{ users, limit, offset, next }`: pass `after=<next>` for the next page. A later page that ends the list answers `{ users, limit, offset }`. |
 | `GET /admin/get-user?id=` | `GET /operator/users/get` | The user. |
-| `POST /admin/ban-user` | `POST /operator/users/ban` | `{ user }`. `banExpiresIn` is in seconds, from 60 seconds to 3650 days. |
+| `POST /admin/ban-user` | `POST /operator/users/ban` | `{ user }`. `banExpiresIn` is in seconds, from 60 seconds to 3650 days. `{ user, familyEndFailed: true }` when the act ran but the end of the OAuth refresh families failed: call `/admin/revoke-user-sessions` for the user. |
 | `POST /admin/unban-user` | `POST /operator/users/unban` | `{ user }`. |
-| `POST /admin/set-role` | `POST /operator/users/platform-role` | `{ user }`. |
+| `POST /admin/set-role` | `POST /operator/users/platform-role` | `{ user }`, with `familyEndFailed: true` as for a ban. |
 | `POST /admin/revoke-user-sessions` | `POST /operator/sessions/end-user` | `{ success: true }`. While sessions stay, `{ success: false, more: true, ended }`: call again. |
 | `POST /admin/impersonate-user` | `POST /operator/impersonate` | `{ session, user }` of the new session. The session cookie holds its token, and core's actor cookie keeps the operator's token. A bearer caller gets the token in `session.token` and no cookie. |
 | `POST /admin/stop-impersonating` | `POST /operator/impersonate/stop` | `{ session, user }` of the operator's own session, which the session cookie holds again. With no actor cookie, or when the operator's session ended, `{ session: null, user: null }`. |

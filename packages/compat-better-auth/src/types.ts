@@ -746,13 +746,13 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
   banUser(input: {
     body: { userId: string; banReason?: string; banExpiresIn?: number };
     headers: Headers;
-  }): Promise<{ user: AdminUser }>;
+  }): Promise<AdminActAnswer>;
   unbanUser(input: { body: { userId: string }; headers: Headers }): Promise<{ user: AdminUser }>;
   /** The platform role grants it, and `user` revokes it. */
   setRole(input: {
     body: { userId: string; role: string | string[] };
     headers: Headers;
-  }): Promise<{ user: AdminUser }>;
+  }): Promise<AdminActAnswer>;
   /** One page per call: while sessions stay, `{ success: false, more: true, ended }`. */
   revokeUserSessions(input: {
     body: { userId: string };
@@ -783,6 +783,16 @@ export interface AdminListUsersQuery {
   filterOperator?: string;
   /** The shim's own key: the `next` of the page before. */
   after?: string;
+}
+
+/**
+ * The answer of a ban and a set-role. `familyEndFailed: true`: the act ran,
+ * but the end of the OAuth refresh families failed. End the user's sessions
+ * again with `/admin/revoke-user-sessions` (ruling 62 m2).
+ */
+export interface AdminActAnswer {
+  user: AdminUser;
+  familyEndFailed?: true;
 }
 
 /** The list-users answer: `total` only on a first page that ends the list, `next` on a page that does not end it (rulings 53 and 62). */
@@ -1142,13 +1152,13 @@ export interface AdminClientCalls {
     userId: string;
     banReason?: string;
     banExpiresIn?: number;
-  }): Promise<CompatClientResult<{ user: AdminUser }>>;
+  }): Promise<CompatClientResult<AdminActAnswer>>;
   unbanUser(input: { userId: string }): Promise<CompatClientResult<{ user: AdminUser }>>;
   /** The platform role grants it, and `user` revokes it. */
   setRole(input: {
     userId: string;
     role: string | string[];
-  }): Promise<CompatClientResult<{ user: AdminUser }>>;
+  }): Promise<CompatClientResult<AdminActAnswer>>;
   /** One page per call: while sessions stay, `{ success: false, more: true, ended }`. */
   revokeUserSessions(input: {
     userId: string;

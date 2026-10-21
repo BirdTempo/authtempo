@@ -466,11 +466,25 @@ async function adminAnswer(
         headers: { authorization: `Bearer ${token}` },
       }),
     );
-  /** The user row after an act, in Better Auth's shape with `role`. */
+  /**
+   * The user row after an act, in Better Auth's shape with `role`. Core's
+   * `familyEndFailed: true` passes through (ruling 62 m2): the act ran, but
+   * the end of the OAuth refresh families failed, so the caller must end
+   * the user's sessions again.
+   */
   const userAfter = async (res: Response, userId: string, role: string) => {
+    const done = (await res
+      .clone()
+      .json()
+      .catch(() => null)) as { familyEndFailed?: unknown } | null;
     const row = await storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
     if (!row) throw new Error("authtempo compat: the user of an answered admin call is gone");
-    return withHeaders({ user: await adminUserOf(mapped, row, role) }, 200, res);
+    const user = await adminUserOf(mapped, row, role);
+    return withHeaders(
+      done?.familyEndFailed === true ? { user, familyEndFailed: true } : { user },
+      200,
+      res,
+    );
   };
 
   if (path === "/admin/list-users") {
