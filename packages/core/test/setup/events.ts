@@ -140,9 +140,11 @@ vi.mock("../../src/observe/observer.js", async (importOriginal) => {
  * The credentials that core mints in the suite: each `randomToken` and each
  * `randomDigits` value joins the deny list (ruling 29 of plan 12h). So each
  * session token, `tk_` token, `to_` token, and email code is on it. A helper
- * of a test need not read the value. A client
- * id (`cl_`) is public, so it stays off the list. A test file that mocks
- * this module itself replaces this mock: its mints are not recorded.
+ * of a test need not read the value. A client id (`cl_`) is public, so it
+ * stays off the list. A test file that mocks this module itself replaces
+ * this mock: its mints are not recorded. Seven test files do that:
+ * email-change-decoy, email-change, email-otp-compare, oauth-client-secret,
+ * operator-guards, password-hash, and totp-primitives (each `.test.ts`).
  */
 vi.mock("../../src/primitives/crypto.js", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../src/primitives/crypto.js")>();
