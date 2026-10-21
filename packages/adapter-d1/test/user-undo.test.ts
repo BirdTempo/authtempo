@@ -601,3 +601,102 @@ describe("the D1 undo of a user hold (ruling 46 of plan 12k)", () => {
     expect(back?.updatedAt).toEqual(new Date("2026-01-01T00:00:00.001Z"));
   });
 });
+
+/**
+ * Ruling 47 of plan 12k (probes P2 to P5): the undo of an update restores
+ * each column on its own. A later write of one column by another request
+ * stays, and the other columns of the rolled-back write still go back.
+ */
+describe("the D1 undo of an update, column by column (ruling 47 of plan 12k)", () => {
+  const t1 = new Date("2026-01-01T00:00:01.000Z");
+  const t2 = new Date("2026-01-01T00:00:02.000Z");
+
+  it("restores a column that no other request moved and keeps the moved ones", async () => {
+    const db = createD1Adapter(env.DB);
+    await db.create("user", user("u1", false));
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.update("user", byId("u1"), { name: "X", updatedAt: t1 });
+        // Another request, outside this transaction: a profile write of the image.
+        await db.update("user", byId("u1"), {
+          image: "https://i.example.com/a.png",
+          updatedAt: t2,
+        });
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(await db.findOne("user", byId("u1"))).toMatchObject({
+      name: null,
+      image: "https://i.example.com/a.png",
+      updatedAt: new Date("2026-01-01T00:00:02.000Z"),
+    });
+  });
+
+  it("restores the first value after two writes of one column", async () => {
+    const db = createD1Adapter(env.DB);
+    await db.create("user", { ...user("u1", false), name: "A" });
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.update("user", byId("u1"), { name: "B", updatedAt: t1 });
+        await tx.update("user", byId("u1"), { name: "C", updatedAt: t2 });
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(await db.findOne("user", byId("u1"))).toMatchObject({ name: "A", updatedAt: t0 });
+  });
+
+  it("restores a json, a null, a boolean, and a date column", async () => {
+    const db = createD1Adapter(env.DB);
+    await db.create("organization", {
+      id: "o1",
+      slug: "a",
+      name: "A",
+      metadata: { k: 1, z: [1, "x"] },
+      createdAt: t0,
+      updatedAt: t0,
+    });
+    await db.create("user", { ...user("u1", false), name: "Bob" });
+    await db.create("user", user("u2", false));
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.update("organization", byId("o1"), {
+          metadata: { b: 2, a: { c: null } },
+          updatedAt: t1,
+        });
+        await tx.update("user", byId("u1"), {
+          name: null,
+          emailVerified: true,
+          bannedAt: t1,
+          updatedAt: t1,
+        });
+        await tx.update("user", byId("u2"), { name: "X", updatedAt: t1 });
+        await tx.update("organization", byId("o1"), { metadata: null });
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(await db.findOne("organization", byId("o1"))).toMatchObject({
+      metadata: { k: 1, z: [1, "x"] },
+      updatedAt: t0,
+    });
+    expect(await db.findOne("user", byId("u1"))).toMatchObject({
+      name: "Bob",
+      emailVerified: false,
+      bannedAt: null,
+      updatedAt: t0,
+    });
+    expect(await db.findOne("user", byId("u2"))).toMatchObject({ name: null, updatedAt: t0 });
+  });
+
+  it("restores the row of an update then a delete", async () => {
+    const db = createD1Adapter(env.DB);
+    await db.create("user", { ...user("u1", false), name: "A" });
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.update("user", byId("u1"), { name: "B", updatedAt: t1 });
+        await tx.delete("user", byId("u1"));
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    expect(await db.findOne("user", byId("u1"))).toMatchObject({ name: "A", updatedAt: t0 });
+  });
+});

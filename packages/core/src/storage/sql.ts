@@ -543,11 +543,13 @@ export interface SqlStatements {
    * another table set must keep the same rule. Plan 9 final review M-1
    * (R-1), 2026-10-10.
    *
-   * The write back runs only while each of those columns still holds the
+   * Each column goes back on its own, and only while it still holds the
    * value the update wrote. The user hold and the row locks write a value
    * back to itself. Another request can then write the row inside the open
    * transaction, such as a profile write in a before hook. A refusal must
-   * keep that write (ruling 46 of plan 12k). The compare is null-safe.
+   * keep that write (ruling 46 of plan 12k). A later write of one column
+   * must not stop the restore of the other columns (ruling 47). The
+   * compare is null-safe.
    */
   restoreRow<M extends ModelName>(
     model: M,
@@ -594,23 +596,21 @@ export function coreStatements(d: Dialect): SqlStatements {
     },
     restoreRow(model, row, data) {
       // Only the columns the update set, through the same field-to-column
-      // map as `updateStatement`, by id, and only while each holds the value
-      // the update wrote. See the interface comment.
+      // map as `updateStatement`, by id. Each column goes back on its own,
+      // and only while it holds the value the update wrote. See the
+      // interface comment.
       const fields = Object.keys(data);
       assertFields(model, fields);
-      const cols = fields.map(columnName);
       const p = new Params(d);
-      const sets = cols.map((c) => `${c} = ${p.add(row[c])}`);
-      const where = [
-        `id = ${p.add(row.id)}`,
-        ...fields.map((f, i) => {
-          const type = fieldType(model, f);
-          const ph = p.add(encodeValue(d, type, (data as Record<string, unknown>)[f], model, f));
-          return `${cols[i]} ${nullSafeEq(d)} ${type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph}`;
-        }),
-      ];
+      const sets = fields.map((f) => {
+        const c = columnName(f);
+        const type = fieldType(model, f);
+        const ph = p.add(encodeValue(d, type, (data as Record<string, unknown>)[f], model, f));
+        const written = type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph;
+        return `${c} = CASE WHEN ${c} ${nullSafeEq(d)} ${written} THEN ${p.add(row[c])} ELSE ${c} END`;
+      });
       return {
-        sql: `UPDATE ${TABLES[model]} SET ${sets.join(", ")} WHERE ${where.join(" AND ")}`,
+        sql: `UPDATE ${TABLES[model]} SET ${sets.join(", ")} WHERE id = ${p.add(row.id)}`,
         params: p.values,
       };
     },

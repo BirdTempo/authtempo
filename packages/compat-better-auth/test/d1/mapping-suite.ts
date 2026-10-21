@@ -224,6 +224,41 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
       });
     });
 
+    it("restores each column on its own and keeps a column that another request moved (ruling 47 of plan 12k)", async () => {
+      const s = db();
+      await s.create("user", {
+        id: "u1",
+        email: "a@example.com",
+        emailVerified: true,
+        name: null,
+        image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
+        createdAt: at,
+        updatedAt: at,
+      });
+      await expect(
+        s.transaction(async (tx) => {
+          await tx.update("user", [eq("id", "u1")], {
+            name: "X",
+            updatedAt: new Date("2026-10-10T00:00:00.001Z"),
+          });
+          // Another request, outside this transaction: a profile write of the image.
+          await s.update("user", [eq("id", "u1")], {
+            image: "https://i.example.com/a.png",
+            updatedAt: new Date("2026-10-10T00:00:00.002Z"),
+          });
+          throw new Error("boom");
+        }),
+      ).rejects.toThrow("boom");
+      expect(await s.findOne("user", [eq("id", "u1")])).toMatchObject({
+        name: null,
+        image: "https://i.example.com/a.png",
+        updatedAt: new Date("2026-10-10T00:00:00.002Z"),
+      });
+    });
+
     it("keeps a user created verified when another request adds a session inside the open transaction (plan 8b)", async () => {
       const s = db();
       await expect(

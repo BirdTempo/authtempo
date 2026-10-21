@@ -603,8 +603,9 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       // Core's rule (`SqlStatements.restoreRow`): only the columns the update
       // set, the column of each field of `data` and each `updateExtras`
       // column, so a claim's change to another column stays (final review M-1).
-      // The write back runs only while each column holds the value the update
-      // wrote, so a later write of another request stays (ruling 46 of plan 12k).
+      // Each column goes back on its own, and only while it holds the value
+      // the update wrote. So a later write of another request stays (ruling
+      // 46 of plan 12k), and the other columns still go back (ruling 47).
       const extras = map.updateExtras?.(data as Row) ?? {};
       const set = [
         ...Object.keys(data).map((f) => map.fields[f]?.column ?? f),
@@ -621,14 +622,13 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
         return c;
       });
       const p = new Params();
-      const sets = cols.map((c) => `${quoteRaw(c)} = ${p.add(row[c])}`);
       const eq = pg ? "IS NOT DISTINCT FROM" : "IS";
-      const where = [
-        `${column(model, "id")} = ${p.add(row[idKey])}`,
-        ...cols.map((c, i) => `${quoteRaw(c)} ${eq} ${p.add(written[i])}`),
-      ];
+      const sets = cols.map((c, i) => {
+        const q = quoteRaw(c);
+        return `${q} = CASE WHEN ${q} ${eq} ${p.add(written[i])} THEN ${p.add(row[c])} ELSE ${q} END`;
+      });
       return {
-        sql: `UPDATE ${table(model)} SET ${sets.join(", ")} WHERE ${where.join(" AND ")}`,
+        sql: `UPDATE ${table(model)} SET ${sets.join(", ")} WHERE ${column(model, "id")} = ${p.add(row[idKey])}`,
         params: p.values,
       };
     },
