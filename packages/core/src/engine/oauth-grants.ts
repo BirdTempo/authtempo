@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { clientRef } from "../redact.js";
 import { ok, type Result } from "../result.js";
 import { findManyIn } from "../storage/batch.js";
 import type { StorageAdapter } from "../storage/port.js";
@@ -106,6 +107,11 @@ export async function revokeGrant(
     ]);
   });
   await endFamilies(config, ends);
+  config.observe.emit({
+    name: "oauth.revoke",
+    clientRef: await clientRef(input.clientId),
+    outcome: "success",
+  });
   return ok({ ok: true });
 }
 

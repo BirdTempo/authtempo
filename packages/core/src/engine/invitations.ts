@@ -1,6 +1,7 @@
 import { can } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { organizationChange } from "../observe/events.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -181,6 +182,7 @@ export async function inviteMember(
     { organization, invitation: summary(row), by: input.user },
     row.id,
   );
+  config.observe.emit(organizationChange("afterInvite", organization.id));
   const link = o.invitationLinkBuilder(token, {
     slug: s.value.organization.slug,
     name: s.value.organization.name,
@@ -248,6 +250,7 @@ export async function revokeInvitation(
     },
     row.id,
   );
+  config.observe.emit(organizationChange("afterRevokeInvitation", s.value.organization.id));
   return ok({ ok: true });
 }
 
@@ -505,7 +508,7 @@ export async function acceptInvitation(
   // Both a lost race for the token and a lost inviter answer invalid_token: the link is dead either way.
   if (accepted === null || accepted === "inviter_lost") return fail("invalid_token");
   const member = memberSummary(accepted.row, input.user);
-  if (accepted.raised)
+  if (accepted.raised) {
     await runAfter(
       config.observe,
       "organization.afterUpdateMemberRole",
@@ -519,7 +522,9 @@ export async function acceptInvitation(
       },
       member.id,
     );
-  if (accepted.created)
+    config.observe.emit(organizationChange("afterUpdateMemberRole", organization.id));
+  }
+  if (accepted.created) {
     await runAfter(
       config.observe,
       "organization.afterAddMember",
@@ -534,6 +539,8 @@ export async function acceptInvitation(
       },
       member.id,
     );
+    config.observe.emit(organizationChange("afterAddMember", organization.id));
+  }
   await runAfter(
     config.observe,
     "organization.afterAcceptInvitation",
@@ -541,6 +548,7 @@ export async function acceptInvitation(
     { organization, invitation, member, user: input.user },
     inv.id,
   );
+  config.observe.emit(organizationChange("afterAcceptInvitation", organization.id));
   return ok({ organization, member });
 }
 
@@ -580,6 +588,7 @@ export async function declineInvitation(
         inv.id,
       );
   }
+  config.observe.emit(organizationChange("afterDeclineInvitation", inv.organizationId));
   return ok({ ok: true });
 }
 

@@ -325,6 +325,13 @@ export async function createApiToken(
     }),
   );
   if (!made.ok) return made;
+  config.observe.emit({
+    name: "api_token.create",
+    kind: "tk",
+    tokenId: row.id,
+    ...(organizationId === null ? {} : { organizationId }),
+    outcome: "success",
+  });
   return ok({ token, apiToken: publicApiToken(row) });
 }
 
@@ -447,7 +454,14 @@ export async function revokeApiToken(
     { field: "id", op: "eq", value: input.id },
     { field: "userId", op: "eq", value: input.user.id },
   ]);
-  return n === 0 ? fail("not_found") : ok({ ok: true });
+  if (n === 0) return fail("not_found");
+  config.observe.emit({
+    name: "api_token.revoke",
+    kind: "tk",
+    tokenId: input.id,
+    outcome: "success",
+  });
+  return ok({ ok: true });
 }
 
 /** The fields of a narrow-only change, as both token models store them. */
@@ -580,6 +594,13 @@ export async function updateApiToken(
     data,
   );
   if (n === 0) return fail("conflict");
+  config.observe.emit({
+    name: "api_token.update",
+    kind: "tk",
+    tokenId: row.id,
+    ...(row.organizationId === null ? {} : { organizationId: row.organizationId }),
+    outcome: "success",
+  });
   return ok(publicApiToken({ ...row, ...data }));
 }
 

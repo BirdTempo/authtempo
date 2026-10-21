@@ -12,6 +12,7 @@ import type { DpopBinding } from "../primitives/dpop.js";
 import { newId } from "../primitives/ids.js";
 import { tokenHashClaim } from "../primitives/jwk.js";
 import { namedResource, resourceOf } from "../primitives/resource.js";
+import { clientRef } from "../redact.js";
 import type {
   OAuthClientRow,
   OAuthDeviceRow,
@@ -644,6 +645,11 @@ export async function revokeToken(
       if (owner !== null && owner.authMethod !== "none") return oauthFail("invalid_client");
     } else if (input.client.client.id !== row.clientId) return oauthFail("unauthorized_client");
     await revokeFamily(config, row.familyId);
+    config.observe.emit({
+      name: "oauth.revoke",
+      clientRef: await clientRef(row.clientId),
+      outcome: "success",
+    });
   }
   return oauthOk({ revoked: true });
 }

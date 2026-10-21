@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { randomToken } from "../primitives/crypto.js";
+import { clientRef } from "../redact.js";
 import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import type { Where } from "../storage/port.js";
 import { newClientSecret } from "./oauth-client-secret.js";
@@ -118,8 +119,28 @@ async function clientRow(
   return config.storage.findOne("oauthClient", [{ field: "id", op: "eq", value: clientId }]);
 }
 
-/** A new client of kind `api`. A secret method answers its secret here, once. */
+/**
+ * A new client of kind `api`. A secret method answers its secret here, once.
+ * No route makes such a client, so a refusal emits its event too (plan 12h Task 6).
+ */
 export async function createClient(
+  config: ResolvedConfig,
+  input: ClientInput,
+): Promise<OAuthResult<{ client: ClientSummary; clientSecret?: string }>> {
+  const r = await newApiClient(config, input);
+  config.observe.emit(
+    r.ok
+      ? {
+          name: "oauth.client_register",
+          clientRef: await clientRef(r.value.client.id),
+          outcome: "success",
+        }
+      : { name: "oauth.client_register", outcome: "failure", code: r.error },
+  );
+  return r;
+}
+
+async function newApiClient(
   config: ResolvedConfig,
   input: ClientInput,
 ): Promise<OAuthResult<{ client: ClientSummary; clientSecret?: string }>> {

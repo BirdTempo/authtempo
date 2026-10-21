@@ -71,6 +71,7 @@ import {
 } from "../../engine/sessions.js";
 import { INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS, type OAuthErrorCode } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
+import { clientRef } from "../../redact.js";
 import type { OAuthClientRow } from "../../schema.js";
 import { revokeGrantBody } from "../contract/oauth.js";
 import { consentPagePolicy, noScriptPagePolicy, pageHeaders } from "../csp.js";
@@ -316,43 +317,45 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     // RFC 9449 section 5: the proof is checked and spent before the grant, so a bad proof spends no code.
     const dpop = await tokenDpop(config, request, authed.value.client);
     if (!dpop.ok) return tokenAnswer(dpop);
-    if (grant === "authorization_code")
-      return tokenAnswer(
-        await exchangeCode(config, {
-          code: form.get("code") ?? "",
-          codeVerifier: form.get("code_verifier"),
-          client: authed.value,
-          redirectUri: form.get("redirect_uri") ?? "",
-          resource: form.get("resource"),
-          dpop: dpop.value,
-        }),
-      );
-    if (grant === DEVICE_GRANT)
-      return tokenAnswer(
-        await pollDevice(config, {
-          deviceCode: form.get("device_code") ?? "",
-          client: authed.value,
-          dpop: dpop.value,
-        }),
-      );
-    if (grant === CREDENTIALS_GRANT)
-      return tokenAnswer(
-        await credentialsGrant(config, {
-          client: authed.value,
-          scope: form.get("scope"),
-          resource: form.get("resource"),
-          dpop: dpop.value,
-        }),
-      );
-    return tokenAnswer(
-      await refreshGrant(config, {
-        refreshToken: form.get("refresh_token") ?? "",
-        client: authed.value,
-        scope: form.get("scope"),
-        resource: form.get("resource"),
-        dpop: dpop.value,
-      }),
-    );
+    const r =
+      grant === "authorization_code"
+        ? await exchangeCode(config, {
+            code: form.get("code") ?? "",
+            codeVerifier: form.get("code_verifier"),
+            client: authed.value,
+            redirectUri: form.get("redirect_uri") ?? "",
+            resource: form.get("resource"),
+            dpop: dpop.value,
+          })
+        : grant === DEVICE_GRANT
+          ? await pollDevice(config, {
+              deviceCode: form.get("device_code") ?? "",
+              client: authed.value,
+              dpop: dpop.value,
+            })
+          : grant === CREDENTIALS_GRANT
+            ? await credentialsGrant(config, {
+                client: authed.value,
+                scope: form.get("scope"),
+                resource: form.get("resource"),
+                dpop: dpop.value,
+              })
+            : await refreshGrant(config, {
+                refreshToken: form.get("refresh_token") ?? "",
+                client: authed.value,
+                scope: form.get("scope"),
+                resource: form.get("resource"),
+                dpop: dpop.value,
+              });
+    // The one place that knows the grant. A refusal is in the request event (plan 12h Task 6).
+    if (r.ok)
+      config.observe.emit({
+        name: "oauth.token",
+        grant,
+        clientRef: await clientRef(authed.value.client.id),
+        outcome: "success",
+      });
+    return tokenAnswer(r);
   };
   /**
    * A 401 or 403 of userinfo with its challenges. RFC 9449 section 7.2: the

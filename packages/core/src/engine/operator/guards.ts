@@ -191,9 +191,14 @@ async function hasSecondFactor(config: ResolvedConfig, userId: string): Promise<
   return row !== null && Array.isArray(row.methods) && row.methods.length > 0;
 }
 
-/** One log line per refusal, with the route name and no user id, so a log reader sees the attempts. */
+/**
+ * One log line per refusal, with the route name and no user id, so a log
+ * reader sees the attempts. The flow event `operator.refused` names the act
+ * of a known actor (ruling 1 point 14 of plan 12h).
+ */
 function refused(observe: Observer, route: string): Result<never> {
   observe.emit({ name: "operator.guard_refused", route });
+  observe.emit({ name: "operator.refused", actorKind: "user", code: "operator_required" });
   return fail("operator_required");
 }
 
@@ -231,8 +236,10 @@ export async function requireOperatorUser(
   if (!user.emailVerified) return refused(config.observe, route);
   if (!(await hasSecondFactor(config, user.id))) return refused(config.observe, route);
   if (!requireFresh(config, session).ok) return refused(config.observe, route);
-  if (!(await config.limiter.allow(`operator:user:${user.id}`, OPERATOR_PER_USER)))
+  if (!(await config.limiter.allow(`operator:user:${user.id}`, OPERATOR_PER_USER))) {
+    config.observe.emit({ name: "operator.refused", actorKind: "user", code: "rate_limited" });
     return fail("rate_limited");
+  }
   return ok({ kind: "user", user, session });
 }
 

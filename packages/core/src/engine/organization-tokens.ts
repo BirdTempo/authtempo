@@ -253,6 +253,13 @@ export async function createOrganizationToken(
     return ok(true);
   });
   if (!made.ok) return made;
+  config.observe.emit({
+    name: "api_token.create",
+    kind: "to",
+    tokenId: row.id,
+    organizationId,
+    outcome: "success",
+  });
   return ok({ token, apiToken: publicOrganizationToken(row, true) });
 }
 
@@ -337,6 +344,13 @@ export async function updateOrganizationToken(
     data,
   );
   if (n === 0) return fail("conflict");
+  config.observe.emit({
+    name: "api_token.update",
+    kind: "to",
+    tokenId: row.id,
+    organizationId: row.organizationId,
+    outcome: "success",
+  });
   const changed = { ...row, ...data };
   return ok(publicOrganizationToken(changed, await creatorIn(config, changed)));
 }
@@ -359,7 +373,15 @@ export async function revokeOrganizationToken(
     { field: "id", op: "eq", value: input.id },
     { field: "organizationId", op: "eq", value: input.organizationId },
   ]);
-  return n === 0 ? fail("not_found") : ok({ ok: true });
+  if (n === 0) return fail("not_found");
+  config.observe.emit({
+    name: "api_token.revoke",
+    kind: "to",
+    tokenId: input.id,
+    organizationId: input.organizationId,
+    outcome: "success",
+  });
+  return ok({ ok: true });
 }
 
 /**

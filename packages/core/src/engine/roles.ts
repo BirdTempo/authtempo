@@ -261,6 +261,12 @@ export async function createRole(
     if (err instanceof StorageError && err.code === "unique_violation") return fail("role_taken");
     throw err;
   }
+  config.observe.emit({
+    name: "organization.role_change",
+    action: "create",
+    organizationId: input.organizationId,
+    roleId: row.id,
+  });
   return ok({
     id: row.id,
     name: row.name,
@@ -324,6 +330,12 @@ export async function updateRole(
     return (await findRole(config, input.organizationId, input.name))
       ? fail("conflict")
       : fail("not_found");
+  config.observe.emit({
+    name: "organization.role_change",
+    action: "update",
+    organizationId: input.organizationId,
+    roleId: row.id,
+  });
   return ok({
     id: row.id,
     name: row.name,
@@ -357,9 +369,17 @@ export async function deleteRole(
   if (!row) return fail("not_found");
   if (!grantCheck(s.value, rowStanding(sc.o, row))) return fail("forbidden_rank");
   const now = config.clock.now();
-  return config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
+  const done = await config.storage.transaction(async (tx): Promise<Result<{ ok: true }>> => {
     if (await heldInside(tx, input.organizationId, input.name, now)) return fail("role_in_use");
     const n = await tx.delete("organizationRole", [{ field: "id", op: "eq", value: row.id }]);
     return n === 0 ? fail("not_found") : ok({ ok: true as const });
   });
+  if (done.ok)
+    config.observe.emit({
+      name: "organization.role_change",
+      action: "delete",
+      organizationId: input.organizationId,
+      roleId: row.id,
+    });
+  return done;
 }

@@ -1,5 +1,6 @@
 import { can, type Statements, union } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
+import { organizationChange } from "../observe/events.js";
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
@@ -457,6 +458,7 @@ export async function createOrganization(
     },
     member.id,
   );
+  config.observe.emit(organizationChange("afterAddMember", summary.id));
   await runAfter(
     config.observe,
     "organization.afterCreate",
@@ -464,6 +466,7 @@ export async function createOrganization(
     { organization: summary, member: owner, user: input.user },
     organization.id,
   );
+  config.observe.emit(organizationChange("afterCreate", summary.id));
   return ok({ organization: summary, member: owner });
 }
 
@@ -580,6 +583,7 @@ export async function updateOrganization(
     { organization: stored, member: callerMember, user: input.user },
     stored.id,
   );
+  config.observe.emit(organizationChange("afterUpdate", stored.id));
   return ok(stored);
 }
 
@@ -640,6 +644,7 @@ export async function deleteOrganization(
     { organization, user: input.user },
     id,
   );
+  config.observe.emit(organizationChange("afterDelete", organization.id));
   return ok({ ok: true });
 }
 
@@ -929,6 +934,7 @@ export async function addMember(
     },
     member.id,
   );
+  config.observe.emit(organizationChange("afterAddMember", organization.id));
   return ok(added);
 }
 
@@ -1027,6 +1033,7 @@ export async function updateMemberRole(
     },
     target.member.id,
   );
+  config.observe.emit(organizationChange("afterUpdateMemberRole", organization.id));
   return ok(updated);
 }
 
@@ -1172,5 +1179,6 @@ export async function removeMember(
     event,
     target.member.id,
   );
+  config.observe.emit(organizationChange("afterRemoveMember", event.organization.id));
   return ok({ ok: true });
 }

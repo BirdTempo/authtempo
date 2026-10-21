@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { organizationChange } from "../../observe/events.js";
 import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { MemberRow, OrganizationRow, UserRow } from "../../schema.js";
@@ -143,6 +144,16 @@ async function memberChanged(
       { organization, member, memberUser: user, by, via: "operator" },
       change.member.id,
     );
+  config.observe.emit(
+    organizationChange(
+      change.kind === "add"
+        ? "afterAddMember"
+        : change.kind === "role"
+          ? "afterUpdateMemberRole"
+          : "afterRemoveMember",
+      organization.id,
+    ),
+  );
 }
 
 /**

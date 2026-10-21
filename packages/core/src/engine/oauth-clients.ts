@@ -11,6 +11,7 @@ import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { newClientSecret } from "./oauth-client-secret.js";
 import { deleteFamilies, endFamilies, familyEnds } from "./oauth-family.js";
+import { CREDENTIALS_GRANT, DEVICE_GRANT, GRANT_TYPES } from "./oauth-grant-types.js";
 import {
   CIMD_MAX_BYTES,
   CIMD_TYPES,
@@ -53,11 +54,10 @@ const URI_MAX = 2048;
 const NAME_MAX = 80;
 /** A busy client must not write its row on every request. */
 const LAST_SEEN_EVERY_MS = 86_400_000;
-const GRANT_TYPES = ["authorization_code", "refresh_token"];
-/** RFC 8628 section 3.4 (read 2026-10-20): the grant type of a device poll (plan 12e). */
-export const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
-/** The grant type of RFC 6749 section 4.4.2 (plan 12e). */
-export const CREDENTIALS_GRANT = "client_credentials";
+
+// The grant types live in a file with no import, for the event table (plan 12h).
+export { CREDENTIALS_GRANT, DEVICE_GRANT };
+
 /**
  * The grants that only a client of `api.oauth.clients` takes, beside the
  * registration ones. A registration never takes `client_credentials`: a
@@ -615,6 +615,11 @@ export async function registerClient(
     secretExpiresAt: null,
     previousSecretHash: null,
     previousSecretUntil: null,
+  });
+  config.observe.emit({
+    name: "oauth.client_register",
+    clientRef: await clientRef(row.id),
+    outcome: "success",
   });
   return oauthOk(registeredAnswer(config, row, secret?.secret ?? null));
 }

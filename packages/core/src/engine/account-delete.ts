@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { organizationChange } from "../observe/events.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -275,7 +276,7 @@ async function runDelete(
   await sessionsEnded(config, ended, "account_deleted", stops);
   // Every outbox row of the user, the older ones too: the delete made them due.
   await deliverLogouts(config, user.id);
-  for (const organization of going)
+  for (const organization of going) {
     await runAfter(
       config.observe,
       "organization.afterDelete",
@@ -283,6 +284,8 @@ async function runDelete(
       { organization: publicOrganization(organization), user },
       organization.id,
     );
+    config.observe.emit(organizationChange("afterDelete", organization.id));
+  }
   await runAfter(
     config.observe,
     "user.afterDelete",

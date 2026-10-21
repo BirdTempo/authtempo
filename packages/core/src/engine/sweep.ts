@@ -411,7 +411,7 @@ export async function sweepExpired(
     "pending end",
     endPendingRows(config, pending, meter, budget),
   );
-  return {
+  const result: SweepResult = {
     verificationExpired,
     verificationConsumed,
     invitations: accepted + expired,
@@ -430,4 +430,11 @@ export async function sweepExpired(
     oauthLogouts,
     oauthClientSecrets,
   };
+  // One event with every count of the result (plan 12h Task 6). The api flushes it (spec 31 item 4).
+  config.observe.emit({
+    name: "sweep",
+    ...result,
+    durationMs: Math.max(0, config.clock.now().getTime() - now.getTime()),
+  });
+  return result;
 }

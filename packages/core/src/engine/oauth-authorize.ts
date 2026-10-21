@@ -4,6 +4,7 @@ import { ipKey } from "../limiter/ip-key.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
+import { clientRef } from "../redact.js";
 import type { OAuthClientRow, SessionRow, UserRow, VerificationRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { issuerOf } from "./jwt.js";
@@ -358,6 +359,11 @@ export async function issueCode(
     createdAt: now,
     updatedAt: now,
     secretVersion: config.keyring.current,
+  });
+  config.observe.emit({
+    name: "oauth.authorize",
+    clientRef: await clientRef(request.clientId),
+    outcome: "success",
   });
   return code;
 }

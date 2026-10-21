@@ -106,10 +106,16 @@ function algOf(row: JwkRow): JwsAlg | null {
 
 const asPublic = (row: JwkRow) => row.publicJwk as unknown as PublicJwk;
 
-/** Moves a signing key out of the slot. Zero rows: another call retired it first, which is the same end. */
-async function retireKey(config: ResolvedConfig, row: JwkRow): Promise<void> {
+/** The cause of a retire, in the `jwt.key_retire` event. */
+type RetireCause = "rotate" | "timer" | "alg" | "unopened";
+
+/**
+ * Moves a signing key out of the slot. Zero rows: another call retired it
+ * first, which is the same end, and that call emits the event.
+ */
+async function retireKey(config: ResolvedConfig, row: JwkRow, why: RetireCause): Promise<void> {
   const now = config.clock.now();
-  await config.storage.update(
+  const n = await config.storage.update(
     "jwk",
     [
       { field: "id", op: "eq", value: row.id },
@@ -117,6 +123,7 @@ async function retireKey(config: ResolvedConfig, row: JwkRow): Promise<void> {
     ],
     { slot: null, retiredAt: now, updatedAt: now },
   );
+  if (n > 0) config.observe.emit({ name: "jwt.key_retire", kid: row.id, why });
 }
 
 /**
@@ -152,11 +159,11 @@ export async function signingKey(
       // unique key on slot keeps one new key, and the loser reads the
       // winner's key on the next turn.
       if (options.rotateDue !== true || !rotationDue(config, row)) return row;
-      await retireKey(config, row);
+      await retireKey(config, row, "timer");
       continue;
     }
     if (row) {
-      await retireKey(config, row);
+      await retireKey(config, row, "alg");
       continue;
     }
     const now = config.clock.now();
@@ -231,6 +238,15 @@ export async function signToken(
   typ: string,
   payload: Record<string, unknown>,
 ): Promise<string> {
+  return (await signWithKid(config, typ, payload)).token;
+}
+
+/** `signToken`, with the id of the key that signed. */
+async function signWithKid(
+  config: ResolvedConfig,
+  typ: string,
+  payload: Record<string, unknown>,
+): Promise<{ token: string; kid: string }> {
   const { alg } = mintConfig(config);
   for (let attempt = 0; attempt < 2; attempt++) {
     const row = await signingKey(config, alg, ROTATE_DUE);
@@ -241,10 +257,10 @@ export async function signToken(
     const key = pkcs8 ? await importPrivateKey(pkcs8, alg) : null;
     if (key && pkcs8) {
       await resealKey(config, row, pkcs8);
-      return signJws({ alg, kid: row.id, typ, key, payload });
+      return { token: await signJws({ alg, kid: row.id, typ, key, payload }), kid: row.id };
     }
     config.observe.emit({ name: "jwt.key_unopened", kid: row.id });
-    await retireKey(config, row);
+    await retireKey(config, row, "unopened");
   }
   throw new Error("authtempo: no signing key opens under this secret");
 }
@@ -305,7 +321,7 @@ export async function rotateKey(config: ResolvedConfig): Promise<{ kid: string }
   const row = await config.storage.findOne("jwk", [
     { field: "slot", op: "eq", value: SIGNING_SLOT },
   ]);
-  if (row) await retireKey(config, row);
+  if (row) await retireKey(config, row, "rotate");
   return { kid: (await signingKey(config, mintConfig(config).alg)).id };
 }
 
@@ -378,10 +394,15 @@ export async function mintSessionJwt(
     // RFC 8693 section 4.1: the actor who acts for the subject.
     ...(session.actorId === null ? {} : { act: { sub: session.actorId } }),
   };
-  return ok({
-    token: await signToken(config, SESSION_JWT_TYPE, claims),
-    expiresAt: new Date(exp * 1000),
+  const signed = await signWithKid(config, SESSION_JWT_TYPE, claims);
+  config.observe.emit({
+    name: "jwt.mint",
+    kid: signed.kid,
+    userId: user.id,
+    sessionId: session.id,
+    outcome: "success",
   });
+  return ok({ token: signed.token, expiresAt: new Date(exp * 1000) });
 }
 
 /** The claims of a session JWT of this instance, or null: a bad signature, another typ, issuer, or audience, or a past `exp`. */

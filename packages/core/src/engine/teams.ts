@@ -1,5 +1,6 @@
 import type { Statements } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
+import { organizationChange } from "../observe/events.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { TeamMemberRow, TeamRow, UserRow } from "../schema.js";
@@ -213,6 +214,7 @@ export async function createTeam(
     { organization, team, user: input.user },
     row.id,
   );
+  config.observe.emit(organizationChange("afterCreateTeam", organization.id));
   return ok(team);
 }
 
@@ -255,6 +257,7 @@ export async function updateTeam(
     { organization, team: stored, user: input.user },
     team.id,
   );
+  config.observe.emit(organizationChange("afterUpdateTeam", organization.id));
   return ok(stored);
 }
 
@@ -368,6 +371,7 @@ export async function deleteTeam(
     { organization, team: summary, user: input.user },
     team.id,
   );
+  config.observe.emit(organizationChange("afterDeleteTeam", organization.id));
   return ok({ ok: true });
 }
 
@@ -545,6 +549,7 @@ export async function addTeamMember(
     { organization, team: summary, teamMember: added, memberUser, by: input.user },
     row.id,
   );
+  config.observe.emit(organizationChange("afterAddTeamMember", organization.id));
   return ok(added);
 }
 
@@ -643,6 +648,7 @@ export async function removeTeamMember(
     event,
     row.id,
   );
+  config.observe.emit(organizationChange("afterRemoveTeamMember", event.organization.id));
   return ok({ ok: true });
 }
 

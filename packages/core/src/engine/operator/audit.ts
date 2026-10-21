@@ -11,29 +11,10 @@ import { endFamilies, type FamilyEnds, familyEnds } from "../oauth-family.js";
 import { endedList } from "../sessions.js";
 import { checkActor, type OperatorActor, requireScope } from "./guards.js";
 
-/**
- * Every action of an audit row (spec 26 item 8). A Record, so a value added
- * to `OperatorAction` and not listed here fails the compile.
- */
-const ACTIONS: Readonly<Record<OperatorAction, true>> = {
-  ban: true,
-  unban: true,
-  platform_role_grant: true,
-  platform_role_revoke: true,
-  second_factor_disable: true,
-  sessions_end_user: true,
-  sessions_end_all: true,
-  impersonation_start: true,
-  impersonation_stop: true,
-  create_admin: true,
-};
-
-export const OPERATOR_ACTIONS: readonly OperatorAction[] = Object.freeze(
-  Object.keys(ACTIONS) as OperatorAction[],
-);
-
 // The reason rule lives in the entry @authtempo/core/operator-secret, so the CLI reads the same rule (ruling 40).
 export { REASON_MAX } from "../../operator-secret.js";
+// The event table reads the list too, so it lives in a file with no runtime import (plan 12h).
+export { OPERATOR_ACTIONS } from "./actions.js";
 
 /** The longest user agent of a row, in code points (spec 26 item 8). */
 export const USER_AGENT_MAX = 512;
@@ -207,10 +188,23 @@ export async function operatorAct<T extends object>(
   const reason = operatorReason(draft.reason);
   if (!reason.ok) return reason;
   const ends: OperatorActEnds = { ended: endedList(config), families: familyEnds() };
-  const done = await hookGuard(async () => {
+  const before = await hookGuard(async () => {
     await runBefore(config.observe, "operator.beforeAction", config.hooks.operator.beforeAction, {
       audit: draft,
     });
+    return ok(true);
+  });
+  if (!before.ok) {
+    if (before.code === "hook_refused")
+      config.observe.emit({
+        name: "operator.refused",
+        action: draft.action,
+        actorKind: draft.actorKind,
+        code: before.code,
+      });
+    return before;
+  }
+  const done = await hookGuard(async () => {
     return config.storage.transaction(async (tx) => {
       const answer = await work(tx, draft, ends);
       if (!answer.ok) throw new HookStop(answer);
@@ -235,13 +229,7 @@ export async function operatorAct<T extends object>(
   } finally {
     // endFamilies is a security step: it ends a refresh family that a race
     // wrote during the act. So it runs after any end of the step.
-    await runAfter(
-      config.observe,
-      "operator.afterAction",
-      config.hooks.operator.afterAction,
-      { audit: row },
-      row.id,
-    );
+    await operatorActed(config, row);
     if (steps.answerFamilyEnd)
       try {
         await endFamilies(config, ends.families);
@@ -252,6 +240,27 @@ export async function operatorAct<T extends object>(
     else await endFamilies(config, ends.families);
   }
   return ok({ ...value, auditId: row.id, ...(familyEndFailed ? { familyEndFailed: true } : {}) });
+}
+
+/**
+ * The steps of one committed audit row: `operator.afterAction`, and the
+ * event `operator.action` beside it (plan 12h Task 6). The event is not the
+ * record: the row is (spec 31 item 14).
+ */
+export async function operatorActed(config: ResolvedConfig, row: OperatorAuditRow): Promise<void> {
+  await runAfter(
+    config.observe,
+    "operator.afterAction",
+    config.hooks.operator.afterAction,
+    { audit: row },
+    row.id,
+  );
+  config.observe.emit({
+    name: "operator.action",
+    action: row.action,
+    actorKind: row.actorKind,
+    auditId: row.id,
+  });
 }
 
 /**

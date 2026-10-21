@@ -7,6 +7,7 @@
  */
 import { CAPTCHA_FLOWS } from "../captcha.js";
 import {
+  type HookName,
   IDENTITY_HOOK_POINTS,
   OPERATOR_HOOK_POINTS,
   ORGANIZATION_HOOK_POINTS,
@@ -18,6 +19,7 @@ import {
   USER_HOOK_POINTS,
   USER_PATCH_REFUSALS,
 } from "../engine/hooks.js";
+import { ALL_GRANT_TYPES } from "../engine/oauth-grant-types.js";
 import {
   CIMD_MAX_BYTES,
   CIMD_RULES,
@@ -30,7 +32,9 @@ import {
   notOfTypes,
   overCap,
 } from "../engine/oauth-refusals.js";
+import { OPERATOR_ACTIONS } from "../engine/operator/actions.js";
 import type { OperatorActor } from "../engine/operator/guards.js";
+import { SWEEP_KEYS } from "../engine/sweep-keys.js";
 import { ERRORS, OAUTH_ERRORS } from "../errors.js";
 import { ROUTES, type RouteKey } from "../http/route-list.js";
 import type { UnauthorizedReason } from "../http/routes/operator.js";
@@ -192,6 +196,47 @@ const statusWhy = (text: string) => (e: AuthEvent) => [
 ];
 
 const SWEEP_STOP = { errorClass: ERROR_CLASS } as const;
+
+// The flow events of tokens, OAuth, organizations, operators, and the sweep (plan 12h Task 6).
+
+/** The outcome of an act. A refusal of an act with a route is in the `request` event (plan 12h Task 5). */
+const ACT_OUTCOME = enumOf(["success", "failure"]);
+const ACT_CODE = { kind: "code", optional: true } as const;
+/** The two token forms: a user token (`tk_`) and an organization token (`to_`) (ruling 9 of plan 12h). */
+const TOKEN_EVENT = {
+  kind: enumOf(["tk", "to"]),
+  tokenId: ROW_ID,
+  organizationId: { kind: "id", optional: true },
+  outcome: ACT_OUTCOME,
+  code: ACT_CODE,
+} as const;
+const CLIENT_EVENT = { clientRef: CLIENT_REF, outcome: ACT_OUTCOME, code: ACT_CODE } as const;
+
+/** An `after` point of organizations. */
+export type OrganizationAfterPoint = Extract<
+  keyof typeof ORGANIZATION_HOOK_POINTS,
+  `after${string}`
+>;
+/** The `action` of `organization.change`: the point without `after`, in lower camel case. */
+export type OrganizationChange<P extends OrganizationAfterPoint = OrganizationAfterPoint> =
+  P extends `after${infer R}` ? Uncapitalize<R> : never;
+
+/** The action of an `after` point: `afterAddMember` gives `addMember`. */
+export function changeOf<P extends OrganizationAfterPoint>(point: P): OrganizationChange<P> {
+  const rest = point.slice("after".length);
+  return `${rest.charAt(0).toLowerCase()}${rest.slice(1)}` as OrganizationChange<P>;
+}
+
+/** The actions of `organization.change`, computed from the hook points, so a new point needs no edit here. */
+const CHANGE_ACTIONS: readonly string[] = Object.keys(ORGANIZATION_HOOK_POINTS)
+  .filter((p): p is OrganizationAfterPoint => p.startsWith("after"))
+  .map(changeOf);
+
+/** One count field for each key of `SweepResult`, read from `SWEEP_KEYS`. */
+const SWEEP_COUNTS = Object.fromEntries(Object.keys(SWEEP_KEYS).map((k) => [k, COUNT])) as Record<
+  keyof typeof SWEEP_KEYS,
+  typeof COUNT
+>;
 
 /**
  * The events. The fault events (those with `line`) are one row for each
@@ -521,6 +566,68 @@ export const EVENTS = {
     "authtempo: the sweep pending end step stopped",
     SWEEP_STOP,
   ),
+  // The flow events of plan 12h Task 6. Each success emits after its commit.
+  "api_token.create": { level: "info", fields: TOKEN_EVENT },
+  "api_token.update": { level: "info", fields: TOKEN_EVENT },
+  "api_token.revoke": { level: "info", fields: TOKEN_EVENT },
+  "jwt.mint": {
+    level: "info",
+    fields: {
+      kid: ROW_ID,
+      userId: ROW_ID,
+      sessionId: ROW_ID,
+      outcome: ACT_OUTCOME,
+      code: ACT_CODE,
+    },
+  },
+  // The cause of a retire: a rotate call, the rotateEvery timer, another alg, or a key that does not open.
+  "jwt.key_retire": {
+    level: "info",
+    fields: { kid: ROW_ID, why: enumOf(["rotate", "timer", "alg", "unopened"]) },
+  },
+  "oauth.authorize": { level: "info", fields: CLIENT_EVENT },
+  "oauth.token": {
+    level: "info",
+    fields: { grant: enumOf(ALL_GRANT_TYPES), ...CLIENT_EVENT },
+  },
+  "oauth.revoke": { level: "info", fields: CLIENT_EVENT },
+  // A refused create of `api.oauth.clients` names no client.
+  "oauth.client_register": {
+    level: "info",
+    fields: { ...CLIENT_EVENT, clientRef: { kind: "clientRef", optional: true } },
+  },
+  "organization.change": {
+    level: "info",
+    fields: { action: enumOf(CHANGE_ACTIONS), organizationId: ROW_ID },
+  },
+  // The dynamic roles have no hook point (ruling 9 of plan 12h).
+  "organization.role_change": {
+    level: "info",
+    fields: {
+      action: enumOf(["create", "update", "delete"]),
+      organizationId: ROW_ID,
+      roleId: ROW_ID,
+    },
+  },
+  // After the commit of the act and its audit row (spec 26 item 8).
+  "operator.action": {
+    level: "info",
+    fields: {
+      action: enumOf(OPERATOR_ACTIONS),
+      actorKind: enumOf(Object.keys(ACTOR_KINDS)),
+      auditId: ROW_ID,
+    },
+  },
+  // A refusal of a known actor: the guard, or beforeAction (ruling 1 point 14 of plan 12h).
+  "operator.refused": {
+    level: "warn",
+    fields: {
+      action: { kind: "enum", values: OPERATOR_ACTIONS, optional: true },
+      actorKind: enumOf(Object.keys(ACTOR_KINDS)),
+      code: { kind: "code" },
+    },
+  },
+  sweep: { level: "info", fields: { ...SWEEP_COUNTS, durationMs: { kind: "durationMs" } } },
 } as const satisfies Readonly<Record<string, EventSpec>>;
 
 export type EventName = keyof typeof EVENTS;
@@ -611,4 +718,76 @@ export function validateEvent(
     else kept[key] = out;
   }
   return { fields: kept, rejected };
+}
+
+/** The reason of each `before` point: its refusal is an answer, not an act. */
+const REFUSAL_EXEMPT = {
+  exempt: "A refusal answers hook_refused, and the request event carries it.",
+} as const;
+/** The reason of a point whose act has no event in plan 12h (question q1 of plan 12h Task 6). */
+const NO_EVENT_EXEMPT = {
+  exempt:
+    "No event of plan 12h names this act. The request event carries the answer, and the stored row is the record.",
+} as const;
+/** The reason of a point whose event plan 12h Task 5 adds (question q2 of plan 12h Task 6). */
+const TASK_5_EXEMPT = { exempt: "The event of plan 12h Task 5 carries this point." } as const;
+
+/**
+ * The event of each hook point, or an exempt row with its reason (plan 12h
+ * Task 6). A Record of every `HookName`, so a new point without a row fails
+ * the compile. A test holds each row to the hook point constants.
+ */
+export const HOOK_EVENTS: Readonly<Record<HookName, EventName | { readonly exempt: string }>> = {
+  "organization.beforeCreate": REFUSAL_EXEMPT,
+  "organization.afterCreate": "organization.change",
+  "organization.beforeUpdate": REFUSAL_EXEMPT,
+  "organization.afterUpdate": "organization.change",
+  "organization.beforeDelete": REFUSAL_EXEMPT,
+  "organization.afterDelete": "organization.change",
+  "organization.beforeAddMember": REFUSAL_EXEMPT,
+  "organization.afterAddMember": "organization.change",
+  "organization.beforeUpdateMemberRole": REFUSAL_EXEMPT,
+  "organization.afterUpdateMemberRole": "organization.change",
+  "organization.beforeRemoveMember": REFUSAL_EXEMPT,
+  "organization.afterRemoveMember": "organization.change",
+  "organization.beforeInvite": REFUSAL_EXEMPT,
+  "organization.afterInvite": "organization.change",
+  "organization.afterAcceptInvitation": "organization.change",
+  "organization.afterDeclineInvitation": "organization.change",
+  "organization.afterRevokeInvitation": "organization.change",
+  "organization.beforeCreateTeam": REFUSAL_EXEMPT,
+  "organization.afterCreateTeam": "organization.change",
+  "organization.beforeUpdateTeam": REFUSAL_EXEMPT,
+  "organization.afterUpdateTeam": "organization.change",
+  "organization.beforeDeleteTeam": REFUSAL_EXEMPT,
+  "organization.afterDeleteTeam": "organization.change",
+  "organization.beforeAddTeamMember": REFUSAL_EXEMPT,
+  "organization.afterAddTeamMember": "organization.change",
+  "organization.beforeRemoveTeamMember": REFUSAL_EXEMPT,
+  "organization.afterRemoveTeamMember": "organization.change",
+  "session.beforeCreate": REFUSAL_EXEMPT,
+  "session.afterCreate": "sign_in",
+  "session.afterEnd": TASK_5_EXEMPT,
+  "user.beforeCreate": REFUSAL_EXEMPT,
+  "user.afterCreate": TASK_5_EXEMPT,
+  "user.beforeUpdate": REFUSAL_EXEMPT,
+  "user.afterUpdate": NO_EVENT_EXEMPT,
+  "user.beforeDelete": REFUSAL_EXEMPT,
+  "user.afterDelete": NO_EVENT_EXEMPT,
+  "user.beforeVerify": REFUSAL_EXEMPT,
+  "user.afterVerify": TASK_5_EXEMPT,
+  "identity.beforeLink": REFUSAL_EXEMPT,
+  "identity.afterLink": NO_EVENT_EXEMPT,
+  "identity.beforeUnlink": REFUSAL_EXEMPT,
+  "identity.afterUnlink": NO_EVENT_EXEMPT,
+  "operator.beforeAction": "operator.refused",
+  "operator.afterAction": "operator.action",
+};
+
+/** The `organization.change` event of an `after` point, emitted beside its hook. */
+export function organizationChange(
+  point: OrganizationAfterPoint,
+  organizationId: string,
+): EventInput<"organization.change"> {
+  return { name: "organization.change", action: changeOf(point), organizationId };
 }
