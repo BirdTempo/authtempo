@@ -1,4 +1,10 @@
-import { DELETE_CONFIRM_TTL_MINUTES, isAppScheme, normalizeSlug } from "@authtempo/core";
+import {
+  COMING_PRESET_NAMES,
+  DELETE_CONFIRM_TTL_MINUTES,
+  isAppScheme,
+  normalizeSlug,
+  PRESET_PROVIDER_NAMES,
+} from "@authtempo/core";
 import {
   CORE_STATEMENTS,
   NAME_RE,
@@ -39,17 +45,16 @@ type Rule = (value: unknown, path: string, out: OptionCheck) => void;
 /** Plan 9c maps google, apple, github, and linkedin. Core takes any other provider as a list entry. */
 const OTHER_PROVIDER = "not mapped; add it through core's social.oidc or social.oauth2";
 /**
- * Better Auth provider ids that a core preset serves (plan 12i Task 13).
- * Better Auth 1.7.x names its Entra ID provider `microsoft`. Core's
- * createAuth refuses a list entry with one of these names.
+ * Better Auth provider ids that a core preset serves, from core's preset
+ * list. The socialProviders rule maps google, apple, github, and linkedin
+ * first, so only the other presets reach this map. Better Auth 1.7.x names
+ * its Entra ID provider `microsoft`, as core does.
  */
-const CORE_PRESETS: Readonly<Record<string, string>> = {
-  microsoft: "social.microsoft",
-  discord: "social.discord",
-  gitlab: "social.gitlab",
-};
-/** Names that core reserves for the presets of plan 12i Task 14. Task 14 moves them to CORE_PRESETS. */
-const COMING_PRESETS: ReadonlySet<string> = new Set(["slack", "twitter", "facebook"]);
+const CORE_PRESETS: Readonly<Record<string, string>> = Object.fromEntries(
+  PRESET_PROVIDER_NAMES.map((name) => [name, `social.${name}`]),
+);
+/** Names that core reserves for coming presets. Core moves a name to its preset list. */
+const COMING_PRESETS: ReadonlySet<string> = new Set(COMING_PRESET_NAMES);
 const presetProvider = (preset: string) =>
   `not mapped; use core's preset ${preset} through core's createAuth`;
 const COMING_PROVIDER =

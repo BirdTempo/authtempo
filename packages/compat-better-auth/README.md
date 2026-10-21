@@ -131,7 +131,7 @@ What changes at cutover:
   - `slack`, `twitter`, and `facebook`: `not mapped; core reserves the name for a coming preset, so a core social.oidc or social.oauth2 entry needs another name`. Rows under that provider id do not link to a list entry with another name.
   - Any other id: `not mapped; add it through core's social.oidc or social.oauth2`. On core's `createAuth`, a list entry whose `name` is the Better Auth provider id and whose subject is the id that Better Auth stored as `accountId` links these rows on the first sign-in.
 
-  A compat app that needs such a provider uses core's `createAuth` for it, because `betterAuth()` takes no preset or list entry outside the four that it maps.
+  A compat app that needs such a provider uses core's `createAuth`, because `betterAuth()` takes no preset or list entry outside the four it maps.
 - Register `<baseURL><basePath>/social/<provider>/callback` at each provider (Google, Apple, GitHub, LinkedIn) before cutover. Better Auth used `<baseURL>/api/auth/callback/<provider>`. A GitHub OAuth App has one callback URL, so change it at cutover, or use a GitHub App, which takes several. Google and LinkedIn take a list, so add the new URI before cutover.
 - GitHub and LinkedIn accounts link on the first sign-in by the id Better Auth stored: the numeric GitHub id, and LinkedIn's OpenID `sub`. LinkedIn's `sub` stays the same only while the client id stays the same.
 - A credential row (`providerId` `credential`) with a null `account.password` answers `schema_mismatch`, so sign-in and reset for that address answer 500. Better Auth 1.7.2 never writes that row. Give the row a hash or delete it before cutover. A plan 9b input.
