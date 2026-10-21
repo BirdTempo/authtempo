@@ -3,6 +3,8 @@
 //    (the libSQL entry, @libsql/client/web, and the adapter) with Node.js
 //    compatibility off. The proof fails on the "built into node" warning and
 //    on any import or require of a Node built-in left in the bundle.
+//    The bundle must hold a marker of dist/libsql.js and one of
+//    @libsql/client/web: a Worker that imports nothing must not pass.
 // 2. No built entry of the package imports a driver at run time (deviation 5).
 //    The proof reads each file of dist/ for an import of better-sqlite3,
 //    bun:sqlite, node:sqlite, or @libsql/client. The app opens the database.
@@ -43,6 +45,21 @@ const isNodeBuiltin = (s) => s.startsWith("node:") || NODE_BUILTINS.has(s.split(
 const DRIVERS = ["better-sqlite3", "bun:sqlite", "node:sqlite", "@libsql/client"];
 const isDriver = (s) => DRIVERS.some((d) => s === d || s.startsWith(`${d}/`));
 
+/**
+ * The texts that only these modules hold. The proof reads each marker in its
+ * source file first, so a marker that a change removes fails here, not silently.
+ */
+const MARKERS = [
+  {
+    file: join(PKG, "dist", "libsql.js"),
+    texts: ['name: "libsql"', "batch takes statements of this database"],
+  },
+  {
+    file: fileURLToPath(import.meta.resolve("@libsql/client/web")),
+    texts: ["The client that uses Web standard APIs supports only"],
+  },
+];
+
 const failures = [];
 
 // 1. The Worker bundle.
@@ -74,12 +91,23 @@ try {
   // Count what was scanned: a bundle in another file name must not pass unseen.
   if (run.status === 0 && !files.includes(ENTRY))
     failures.push(`${ENTRY} is not in the output; scanned 0 entry files`);
+  let bundle = "";
   for (const f of files) {
     const text = readFileSync(join(out, f), "utf8");
+    bundle += text;
     bytes += statSync(join(out, f)).size;
     for (const s of specifiers(text))
       if (isNodeBuiltin(s)) failures.push(`${f} imports the Node module ${s}`);
   }
+  if (run.status === 0)
+    for (const { file, texts } of MARKERS) {
+      const source = existsSync(file) ? readFileSync(file, "utf8") : "";
+      for (const t of texts) {
+        if (!source.includes(t)) failures.push(`the marker ${JSON.stringify(t)} is not in ${file}`);
+        else if (!bundle.includes(t))
+          failures.push(`the bundle lacks ${JSON.stringify(t)} of ${file}`);
+      }
+    }
 } finally {
   rmSync(out, { recursive: true, force: true });
 }
