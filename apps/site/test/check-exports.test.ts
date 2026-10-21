@@ -153,6 +153,7 @@ describe("the observe entry of core (plan 12h deviation 14)", () => {
       "ObserveSink",
       "ObserveStats",
       "SIGN_IN_ROUTES",
+      "STAMP_FIELDS",
       "TRACE_HEADER",
       "validateEvent",
     ]);
