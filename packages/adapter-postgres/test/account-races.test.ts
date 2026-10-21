@@ -1422,8 +1422,14 @@ describe("the account delete on Postgres (plan 12a Task 11)", () => {
       expect(await rowsOf(me.user.id)).toEqual(NONE);
       // A sign-in after the commit finds no user and makes a new one, a
       // sign-up. A sign-in before it is ended by the delete (the row check above).
-      if (!signedIn.ok) expect(signedIn.code).toBe("conflict");
-      if (!reauthed.ok) expect(["unauthorized", "invalid_token"]).toContain(reauthed.code);
+      // After its commit, the delete removes the verification rows of the user and
+      // the address (account-delete.ts). A sign-in that reads its link after that
+      // finds no link, and answers invalid_token. A re-authentication that reads its
+      // code after that finds no code, and answers invalid_code. Both answers are
+      // correct: the link and the code went with the account (ruling 49 of plan 12k).
+      if (!signedIn.ok) expect(["conflict", "invalid_token"]).toContain(signedIn.code);
+      if (!reauthed.ok)
+        expect(["unauthorized", "invalid_token", "invalid_code"]).toContain(reauthed.code);
       if (!revoked.ok) expect(revoked.code).toBe("not_found");
       // Each ended row fires one event.
       const ids = w.ended.map((e) => e.split(":")[0]);
