@@ -128,6 +128,8 @@ function world(secretHash = "0".repeat(64)) {
       impersonation: {},
     },
     account: { deleteConfirm: { ttlMinutes: 60 } },
+    // The domain routes of plan 12d; no test of this file asks the resolver.
+    sso: { dns: [{ name: "none", txt: async () => [] }] },
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const cookieOf = (token: string) => ({ cookie: `${auth.config.cookieName}=${token}` });
@@ -645,6 +647,22 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
       refused: INVALID_BODY,
     },
+    // The domain rows of plan 12d: a user who is no platform operator gets
+    // forbidden_rank, and an id that names no domain gets not_found, past the parse.
+    {
+      key: "POST /sso/domains/add",
+      body: { organizationId: org, domain: "acme.example" },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    { key: "POST /sso/domains/verify", body: { id }, session: true, refused: INVALID_BODY },
+    {
+      key: "POST /sso/domains/update",
+      body: { id, enforce: false },
+      session: true,
+      refused: INVALID_BODY,
+    },
+    { key: "POST /sso/domains/delete", body: { id }, session: true, refused: INVALID_BODY },
     {
       key: "POST /organizations/delete",
       body: { organizationId: org },
@@ -679,6 +697,13 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
       refused: INVALID_TOKEN,
     },
+    // The secret has no scope sso: the engine answers operator_required, past the parse.
+    {
+      key: "POST /operator/sso/enforce-off",
+      body: { domainId: id, reason: "case 2" },
+      headers: OPERATOR,
+      refused: INVALID_BODY,
+    },
     // The end of all sessions goes last: it ends the session of every row above.
     {
       key: "POST /operator/sessions/end-all",
@@ -710,7 +735,8 @@ describe("the route contract (plan 11g)", () => {
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
     // Plan 12k Task 8 adds the five organization token routes.
     // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
-    expect(keys.length).toBe(146);
+    // Plan 12d Task 2b adds the five domain routes and the operator's override.
+    expect(keys.length).toBe(152);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -722,7 +748,8 @@ describe("the route contract (plan 11g)", () => {
         mounted.add(route.key);
       }
     // Plan 12h Task 8 adds the module of http/health.ts, so 20 became 21.
-    expect(modules.length).toBe(21);
+    // Plan 12d Task 2b adds the module sso, so 21 became 22.
+    expect(modules.length).toBe(22);
     expect([...mounted].sort()).toEqual(keys);
   });
 
@@ -1229,7 +1256,8 @@ describe("the route contract (plan 11g)", () => {
       .map(([key]) => key)
       .sort();
     expect(withBody).toEqual(rows.map((row) => row.key).sort());
-    expect(withBody.length).toBe(80);
+    // Plan 12d Task 2b adds five: four domain writes and the override.
+    expect(withBody.length).toBe(85);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1255,7 +1283,7 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(78);
+    expect(refusals).toBe(83);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1273,7 +1301,7 @@ describe("the route contract (plan 11g)", () => {
       else throw new Error(`${key} names the media ${m}`);
       if (c.body.parsedBy === "hand") expect(m, key).not.toBe("json+form");
     }
-    expect(counts).toEqual({ json: 72, both: 9, form: 7 });
+    expect(counts).toEqual({ json: 77, both: 9, form: 7 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

@@ -84,6 +84,11 @@ export const ERRORS = {
   impersonation_session: 403,
   // plan 12h: the readiness route (spec 31 item 12)
   not_ready: 503,
+  // plan 12d: the domain proof. A resolver did not give the value, another
+  // organization holds the domain, or the organization holds its limit.
+  domain_unverified: 400,
+  domain_taken: 409,
+  domain_limit: 409,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

@@ -19,9 +19,10 @@ export interface Feature {
  * `openapi`, the 18th, and plan 12e adds `oauthDevice`, the 19th. Plan 12f
  * adds `operatorUsers`, the 20th, and `operatorImpersonation`, the 21st.
  * Plan 12k adds `dynamicRoles`, the 22nd, and `teams`, the 23rd. Plan 12h
- * adds `health`, the 24th, and `readiness`, the 25th. A Record over the
- * union fails the site's typecheck when core adds a member, so a new
- * feature cannot
+ * adds `health`, the 24th, and `readiness`, the 25th. Plan 12d adds `sso`
+ * and `operatorSso`; until plan 12d Task 13 writes the SSO guide, both point
+ * to their section of the routes page. A Record over the union fails the
+ * site's typecheck when core adds a member, so a new feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
  * icons, and decision 3 keeps the list). `account` takes `verify`: its first
@@ -133,6 +134,12 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     icon: "organization",
     guide: "/docs/guides/teams/",
   },
+  sso: {
+    title: "Enterprise SSO",
+    line: "An organization proves its email domain by DNS, through every resolver of the config.",
+    icon: "organization",
+    guide: "/docs/reference/routes/#enterprise-sso",
+  },
   tokens: {
     title: "API tokens",
     line: "A script or a CLI calls your routes with an API token.",
@@ -162,6 +169,12 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "A platform operator acts as a user for support, with a time limit, a mark, and a notice.",
     icon: "session",
     guide: "/docs/reference/routes/#impersonation",
+  },
+  operatorSso: {
+    title: "SSO override",
+    line: "The operator turns the enforce flag of a domain off when the sign-in provider of the domain is down.",
+    icon: "session",
+    guide: "/docs/reference/routes/#post-operator-sso-enforce-off",
   },
   oauth: {
     title: "OAuth provider",

@@ -81,6 +81,8 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `oauth` | `oauth` | off |
 | `oauthRegistration` | `oauth.registration.dynamic` | off |
 | `oauthDevice` | `oauth.device` | off |
+| `sso` | `sso` | off |
+| `operatorSso` | `operator` and `sso` | off |
 | `openapi` | `openapi` | off |
 | `health` | always on | on |
 | `readiness` | `observe.readiness` | off |
@@ -89,7 +91,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 
 | Schema | Shape | Used by |
 | --- | --- | --- |
-| `Error` | `{ error, message?, reason? }`. `message` is present only on `hook_refused`, and `reason` only on `not_ready` | A code of `ERRORS` |
+| `Error` | `{ error, message?, reason? }`. `message` is present on `hook_refused`, and on the `invalid_body` of an `enforce` that no connection serves (plan 12d). `reason` is present only on `not_ready` | A code of `ERRORS` |
 | `OAuthError` | `{ error }` | A code of `OAUTH_ERRORS` |
 
 Each operation has one response for each status of its codes, with an `enum` of those codes. Each code links its anchor on [Error codes](/docs/reference/errors/). Every operation also has two codes of the router, `not_found` and `internal`. Each POST also has `origin_not_trusted`, except Apple's form post callback, which takes a cross-site form.

@@ -76,8 +76,9 @@ describe("the demo lists and the routes of core", () => {
       // operatorImpersonation, so 30 became 43. Plan 12k Task 4 adds the five
       // routes of dynamicRoles, so 43 became 48. Plan 12k Task 5 adds the nine
       // routes of teams, so 48 became 57. Plan 12h adds GET /ready of
-      // readiness, so 57 became 58.
-      expect(checked).toBe(58);
+      // readiness, so 57 became 58. Plan 12d Task 2b adds the five routes
+      // of sso and the override of operatorSso, so 58 became 64.
+      expect(checked).toBe(64);
     },
     LONG_TEST_MS,
   );

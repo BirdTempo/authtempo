@@ -41,6 +41,14 @@ export const IMPERSONATION_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   "POST /operator/sessions/end-user",
   "POST /operator/sessions/end-all",
   "GET /operator/audit",
+  "POST /operator/sso/enforce-off",
+  // The SSO writes of plan 12d: an operator who acts as a user must not add
+  // or change a domain proof. The guard refuses such a session too, for the
+  // calls of api.sso (plan 12d deviation 4).
+  "POST /sso/domains/add",
+  "POST /sso/domains/verify",
+  "POST /sso/domains/update",
+  "POST /sso/domains/delete",
   // The stop is the one way out. A sign-out would end the session with no
   // stop row and keep the actor cookie (ruling 6 for the end-session route).
   "POST /sign-out",
@@ -204,6 +212,9 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "GET /openapi.json": NO_SESSION,
   "GET /health": NO_SESSION,
   "GET /ready": NO_SESSION,
+  // Plan 12d (ruling 25 N7): a read of the manager holds no secret. The TXT
+  // value is public once published. The guard still refuses the session.
+  "GET /sso/domains": READ,
 };
 
 /**

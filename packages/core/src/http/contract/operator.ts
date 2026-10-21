@@ -2,7 +2,9 @@ import { z } from "zod";
 import { OPERATOR_ACTIONS, REASON_MAX } from "../../engine/operator/audit.js";
 import { PROOF_METHODS, REFERENCE_MAX } from "../../engine/operator/second-factor.js";
 import { END_ALL_LIMIT } from "../../engine/operator/sessions.js";
+import { AUDIT_ACTOR_KINDS } from "../../schema.js";
 import type { RouteKey } from "../route-list.js";
+import { DomainJson } from "./sso.js";
 import type { RouteContract } from "./types.js";
 
 /**
@@ -101,6 +103,8 @@ export const createAdminBody = z.strictObject({
   name: z.string().min(1).max(200).optional(),
   reason,
 });
+/** The operator's override of `enforce` (plan 12d deviation 5): the domain and the reason. */
+export const enforceOffBody = z.strictObject({ domainId: operatorId, reason });
 export const endAllBody = z.strictObject({
   reason,
   limit: z.number().int().min(1).max(END_ALL_LIMIT.max).optional(),
@@ -136,7 +140,7 @@ const OperatorAuditJson = z.strictObject({
   id: z.string(),
   createdAt: z.iso.datetime(),
   updatedAt: z.iso.datetime(),
-  actorKind: z.enum(["secret", "user", "app"]),
+  actorKind: z.enum(AUDIT_ACTOR_KINDS),
   actorId: z.string(),
   action: z.enum(OPERATOR_ACTIONS),
   targetUserId: z.string().nullable(),
@@ -263,6 +267,11 @@ export const OPERATOR_CONTRACT = {
         auditId: z.string(),
       }),
     },
+  },
+  // The domain after the override, with the id of its audit row (plan 12d).
+  "POST /operator/sso/enforce-off": {
+    body: jsonBody(enforceOffBody),
+    answer: { kind: "json", schema: DomainJson.extend({ auditId: z.string() }) },
   },
   // restored: the answer set the session cookie back to the operator's token.
   "POST /operator/impersonate/stop": {

@@ -21,7 +21,9 @@ describe("checkConfig", () => {
     // and the limits teamsPerOrganization and membersPerTeam.
     // Plan 12k Task 7 adds tokens, tokens.defaultRateLimit, and tokens.movedPrefixes.
     // Plan 12h Task 2 adds observe, its six keys, and the three keys of observe.include.
-    expect(keys.length).toBe(197);
+    // Plan 12d Task 2b adds sso, its five keys, sso.saml.clockSkewSeconds, and the two
+    // keys of sso.limits.
+    expect(keys.length).toBe(206);
     expect(keys).toContain("observe.include.email");
     expect(keys).toContain("hooks.operator");
     expect(keys).toContain("operator.secrets[].scopes");

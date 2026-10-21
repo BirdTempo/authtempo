@@ -44,6 +44,7 @@ import { BUILT_IN_SCOPES, SCOPE_RE } from "./engine/oauth-result.js";
 import { defaultExistingAccountMail, type ExistingAccountMailInput } from "./engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "./engine/password-policy.js";
 import { deriveRoles, normalizeSlug, ROLE_RE } from "./engine/ranks.js";
+import type { DnsTxtPort } from "./engine/sso/dns.js";
 import { validWindow, WINDOW_CALLS_MAX, WINDOW_SECONDS_MAX } from "./engine/token-use.js";
 import { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 import { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
@@ -376,6 +377,12 @@ export interface AuthConfig {
    */
   operator?: OperatorConfig | false;
   /**
+   * Enterprise SSO (plan 12d, spec 30): the email domains that an
+   * organization proves by DNS, and its connections to its IdP. Off when
+   * absent or `false`. Needs `organizations` and `sso.dns`.
+   */
+  sso?: SsoConfig | false;
+  /**
    * `GET <basePath>/openapi.json`, the OpenAPI document of the routes that
    * this config mounts (plan 11g). Off when absent. It lists no route of a
    * feature that is off, and holds no secret.
@@ -584,7 +591,7 @@ export interface ResolvedJwtMint {
 }
 
 /** The scopes of a named operator secret (plan 12f). Each scope opens one group of operator routes. */
-export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit";
+export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit" | "sso";
 
 /** One named operator secret with its scopes (plan 12f, owner decision 1). */
 export interface OperatorSecretEntry {
@@ -878,6 +885,35 @@ export interface TokensConfig {
   movedPrefixes?: string[];
 }
 
+/** The SSO config (plan 12d, spec 30 item 1). */
+export interface SsoConfig {
+  /** OIDC connections (plan 12d Task 3). Off when absent. */
+  oidc?: true;
+  /** SAML connections (plan 12d Task 8). `clockSkewSeconds` is 0 to 300, default 120. */
+  saml?: { clockSkewSeconds?: number } | true;
+  /**
+   * The DNS resolvers of the domain proof, each a `DnsTxtPort`. Required:
+   * core has no default resolver (ruling 15 of plan 12d). Pass the presets
+   * `dohCloudflare` and `dohGoogle` with your fetch, or your own ports.
+   * Every resolver must give the value. Two resolvers: one resolver that
+   * is wrong or compromised must not give a domain to an organization.
+   */
+  dns?: DnsTxtPort[];
+  /** The fetch of the IdP calls. Core wraps it so that no redirect is followed (plan 12b). */
+  fetch?: typeof fetch;
+  /** Default 10 connections and 20 domains per organization. Each is a positive integer. */
+  limits?: { connectionsPerOrganization?: number; domainsPerOrganization?: number };
+}
+
+/** The SSO config after construction (plan 12d). */
+export interface ResolvedSso {
+  oidc: boolean;
+  saml: { clockSkewSeconds: number } | null;
+  dns: readonly DnsTxtPort[];
+  fetch: typeof fetch;
+  limits: { connectionsPerOrganization: number; domainsPerOrganization: number };
+}
+
 export interface ResolvedConfig {
   basePath: string;
   baseURL: string;
@@ -953,6 +989,8 @@ export interface ResolvedConfig {
   jwtMint: ResolvedJwtMint | null;
   oauth: ResolvedOAuth | null;
   operator: ResolvedOperator | null;
+  /** Null: SSO is off, and no SSO route is mounted (plan 12d). */
+  sso: ResolvedSso | null;
   openapi: boolean;
   hooks: ResolvedHooks;
   account: ResolvedAccount;
@@ -1344,6 +1382,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       trustedOrigins: input.trustedOrigins,
     }),
     operator: resolveOperator(input.operator, organizations?.platformRole ?? null),
+    sso: resolveSso(input.sso, organizations !== null),
     openapi,
     // The operator key resolved above, so `users` is true or absent here.
     hooks: resolveHooks(
@@ -1936,6 +1975,114 @@ function resolveJwtMint(
   };
 }
 
+const SSO_KEYS: Readonly<Record<keyof SsoConfig, true>> = {
+  oidc: true,
+  saml: true,
+  dns: true,
+  fetch: true,
+  limits: true,
+};
+const SSO_LIMIT_KEYS: Readonly<Record<keyof NonNullable<SsoConfig["limits"]>, true>> = {
+  connectionsPerOrganization: true,
+  domainsPerOrganization: true,
+};
+const SSO_SAML_KEYS: Readonly<Record<keyof Exclude<SsoConfig["saml"], true | undefined>, true>> = {
+  clockSkewSeconds: true,
+};
+/** The largest clock skew of a SAML assertion, in seconds (plan 12d Task 8). */
+const SAML_SKEW_MAX = 300;
+
+/** One positive integer of `sso.limits`, or its default. */
+function ssoLimit(value: unknown, key: string, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
+    throw new ConfigError(`sso.limits.${key} must be a positive integer`);
+  return value;
+}
+
+/**
+ * `sso` (plan 12d). Off when absent or `false`. It needs `organizations`:
+ * a domain and a connection belong to an organization. `dns` is required
+ * and is never a default (ruling 15 of plan 12d): the app picks its
+ * resolvers. Two resolvers: one resolver that is wrong or compromised must
+ * not give a domain to an organization.
+ */
+function resolveSso(
+  input: SsoConfig | false | undefined,
+  organizations: boolean,
+): ResolvedSso | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown)) throw new ConfigError("sso must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(SSO_KEYS, key))
+      throw new ConfigError(
+        `sso.${key} is not an option; core has oidc, saml, dns, fetch, and limits`,
+      );
+  if (!organizations) throw new ConfigError("sso needs organizations");
+  if (input.oidc !== undefined && input.oidc !== true)
+    throw new ConfigError("sso.oidc must be true or absent");
+  let saml: ResolvedSso["saml"] = null;
+  if (input.saml !== undefined) {
+    const raw: unknown = input.saml;
+    if (raw !== true && !isPlainObject(raw))
+      throw new ConfigError("sso.saml must be true or an object");
+    if (isPlainObject(raw))
+      for (const [key, value] of Object.entries(raw))
+        if (value !== undefined && !Object.hasOwn(SSO_SAML_KEYS, key))
+          throw new ConfigError(`sso.saml.${key} is not an option; core has clockSkewSeconds`);
+    const skew =
+      raw === true ? undefined : (raw as { clockSkewSeconds?: unknown }).clockSkewSeconds;
+    if (
+      skew !== undefined &&
+      (typeof skew !== "number" || !Number.isSafeInteger(skew) || skew < 0 || skew > SAML_SKEW_MAX)
+    )
+      throw new ConfigError(
+        `sso.saml.clockSkewSeconds must be an integer from 0 to ${SAML_SKEW_MAX}`,
+      );
+    saml = { clockSkewSeconds: typeof skew === "number" ? skew : 120 };
+  }
+  const dns: unknown = input.dns;
+  if (!Array.isArray(dns) || dns.length === 0)
+    throw new ConfigError(
+      "sso.dns must list one DNS resolver or more; core has no default resolver",
+    );
+  for (const port of dns as unknown[])
+    if (
+      typeof port !== "object" ||
+      port === null ||
+      typeof (port as { name?: unknown }).name !== "string" ||
+      typeof (port as { txt?: unknown }).txt !== "function"
+    )
+      throw new ConfigError("sso.dns must hold objects with a name string and a txt function");
+  if (input.fetch !== undefined && typeof input.fetch !== "function")
+    throw new ConfigError("sso.fetch must be a function");
+  const limits: unknown = input.limits;
+  if (limits !== undefined) {
+    if (!isPlainObject(limits)) throw new ConfigError("sso.limits must be an object");
+    for (const [key, value] of Object.entries(limits))
+      if (value !== undefined && !Object.hasOwn(SSO_LIMIT_KEYS, key))
+        throw new ConfigError(
+          `sso.limits.${key} is not an option; core has connectionsPerOrganization and domainsPerOrganization`,
+        );
+  }
+  const l = (limits ?? {}) as Record<string, unknown>;
+  return {
+    oidc: input.oidc === true,
+    saml,
+    dns: Object.freeze([...(dns as DnsTxtPort[])]),
+    // A caller's fetch must be callable without a receiver; no redirect is followed (plan 12b).
+    fetch: providerFetch(input.fetch ?? globalThis.fetch.bind(globalThis)),
+    limits: {
+      connectionsPerOrganization: ssoLimit(
+        l.connectionsPerOrganization,
+        "connectionsPerOrganization",
+        10,
+      ),
+      domainsPerOrganization: ssoLimit(l.domainsPerOrganization, "domainsPerOrganization", 20),
+    },
+  };
+}
+
 const OPERATOR_KEYS: Readonly<Record<keyof OperatorConfig, true>> = {
   secretHash: true,
   secrets: true,
@@ -1956,6 +2103,7 @@ const OPERATOR_SCOPES: ReadonlySet<string> = new Set<OperatorScope>([
   "users",
   "sessions",
   "audit",
+  "sso",
 ]);
 const OPERATOR_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -1979,7 +2127,7 @@ function resolveOperatorEntry(input: unknown): ResolvedOperatorSecret {
   for (const scope of scopes as unknown[])
     if (typeof scope !== "string" || !OPERATOR_SCOPES.has(scope))
       throw new ConfigError(
-        "operator.secrets[].scopes holds a scope that is not keys, secrets, users, sessions, or audit",
+        "operator.secrets[].scopes holds a scope that is not keys, secrets, users, sessions, audit, or sso",
       );
   return Object.freeze({
     name,

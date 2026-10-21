@@ -36,6 +36,7 @@ import {
   banBody,
   createAdminBody,
   endAllBody,
+  enforceOffBody,
   factorDisableBody,
   impersonateBody,
   impersonateStopBody,
@@ -264,7 +265,56 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
 export function operatorRoutes(config: ResolvedConfig): Route[] {
   if (!config.operator) return [];
   // The impersonation needs no secret entry: a platform operator starts it with a session.
-  return [...secretRoutes(config), ...toolRoutes(config), ...impersonationRoutes(config)];
+  return [
+    ...secretRoutes(config),
+    ...toolRoutes(config),
+    ...impersonationRoutes(config),
+    ...ssoOperatorRoutes(config),
+  ];
+}
+
+/**
+ * The operator's override of `enforce` (plan 12d deviation 5), only with
+ * `operator` and `sso`. When the IdP is down, no one of an enforced domain
+ * can sign in, so the operator turns the flag off from outside the domain.
+ * The actor is a secret with the scope `sso` or a platform operator who
+ * passes the guard (`readOperatorActor`). The body is JSON only.
+ */
+function ssoOperatorRoutes(config: ResolvedConfig): Route[] {
+  if (!config.operator || !config.sso) return [];
+  const api = operatorApi(config);
+  const path = "/operator/sso/enforce-off";
+  return [
+    {
+      method: "POST",
+      path,
+      key: `POST ${path}`,
+      async handler(ctx) {
+        const caller = await readOperatorActor(config, ctx, `POST ${path}`);
+        if (!caller.ok) return respond(caller);
+        const { actor, renewed } = caller.value;
+        const send = (res: Response) => {
+          if (renewed) res.headers.append("set-cookie", renewed);
+          return res;
+        };
+        const body = isJsonRequest(ctx.request)
+          ? await readJson(ctx.request, enforceOffBody)
+          : fail("invalid_body");
+        if (!body.ok) return send(respond(body));
+        return send(
+          respond(
+            await api.sso.enforceOff({
+              actor,
+              domainId: body.value.domainId,
+              reason: body.value.reason,
+              ip: ctx.ip,
+              userAgent: ctx.request.headers.get("user-agent"),
+            }),
+          ),
+        );
+      },
+    },
+  ];
 }
 
 /** The four secret routes of plans 11c and 11c2, or none when the config holds no secret entry. */

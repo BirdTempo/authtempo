@@ -22,7 +22,8 @@ const count = (text: string) => text.split(RULE).length - 1;
 /** Each copy of the rule and its count: the docs pages and the CLI README. */
 const COPIES: [string, number][] = [
   [`${DOCS}docs/reference/api.md`, 2],
-  [`${DOCS}docs/reference/routes.md`, 9],
+  // Plan 12d Task 2b adds the override of enforce: 9 became 10.
+  [`${DOCS}docs/reference/routes.md`, 10],
   [`${DOCS}docs/guides/operator-tools.mdx`, 1],
   [`${DOCS}docs/concepts/threat-model.md`, 1],
   ...[

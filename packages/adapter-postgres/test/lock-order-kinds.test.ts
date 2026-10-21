@@ -929,6 +929,14 @@ const SITES: Record<string, readonly string[] | string> = {
     "a platform role revoke with no impersonation",
   ],
   "operator/platform-role createAdmin": ["an admin create"],
+  // The domain proof of plan 12d. Its rows are of no kind of user-hold.ts.
+  "sso/domains addDomain": "one kind: the lock of the organization row, then domain rows",
+  "sso/domains verifyDomainWith": "no kind: the claim of the domain row, then its audit row",
+  "sso/domains updateDomain":
+    "no kind: reads of the domain and the connection, then the domain row",
+  "sso/domains deleteDomain": "no kind: the domain row, then its audit row",
+  "sso/domains enforceOff": "no kind: the domain row through operatorAct",
+  "sso/domains loseDomain": "no kind: the loss of the claim of the domain row, then its audit row",
 };
 
 /** The sites that SITES pins to the flow `name`, sorted. */
@@ -941,7 +949,8 @@ const pinnedTo = (name: string): string[] =>
 describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
   it("each has a flow of FLOWS or a reason, and no entry is stale", () => {
     const found = sites("src").map((s) => s.key);
-    expect(found.length).toBe(63);
+    // Plan 12d Task 2b adds the six sites of sso/domains.ts.
+    expect(found.length).toBe(69);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {

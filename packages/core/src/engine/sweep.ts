@@ -7,6 +7,7 @@ import type { StorageAdapter, Where } from "../storage/port.js";
 import { deliverDueLogouts } from "./oauth-logout.js";
 import { writeLogoutPage } from "./oauth-outbox.js";
 import { endPendingRows, PENDING_PAGE_RESERVE, readPendingEnds } from "./operator/access-end.js";
+import { recheckDomains } from "./sso/domains.js";
 import { SETUP_TTL_MS } from "./totp.js";
 
 export interface SweepResult {
@@ -44,6 +45,10 @@ export interface SweepResult {
   oauthLogouts: number;
   /** Client secrets of a rotation past their overlap, cleared from the client row (plan 12e). */
   oauthClientSecrets: number;
+  /** Verified SSO domains checked again by DNS (plan 12d), inside the call budget. 0 while `sso` is off. */
+  ssoDomains: number;
+  /** Pending SSO domains past `expiresAt`, which no verify can prove (plan 12d). 0 while `sso` is off. */
+  ssoPendingDomains: number;
 }
 
 // The first delete removes every verification row past `expiresAt`,
@@ -113,6 +118,15 @@ export const OUTBOX_SHARE = 16;
 
 /** The calls that the idle client step leaves for the link step: one page needs 5. */
 const LINK_SHARE = 8;
+
+/**
+ * The calls that the idle client step leaves for the SSO steps (plan 12d),
+ * while `sso` is on. The delete of the pending domains and the read of the
+ * recheck take 1 each. One recheck row with two resolvers takes 5: a call
+ * per resolver, then the update and the audit row of a loss, which is 3 on
+ * D1. With more calls left, the recheck takes more rows.
+ */
+export const RECHECK_SHARE = 7;
 
 /** The most calls of one idle client: the consent read, the token read, and the update or the delete. */
 const CLIENT_CALLS = 3;
@@ -389,7 +403,31 @@ export async function sweepExpired(
   // After the four single-statement steps too: the client step may use the
   // calls up to its limit, and the link step must still get `LINK_SHARE`.
   // A page of links needs 5 calls (review m1 of the 12f Task 7 fix 2).
-  const oauthClients = await sweepClients(storage, now, meter, budget - LINK_SHARE - OUTBOX_SHARE);
+  // A pending domain past its expiry can never verify, and a verify of it
+  // answers token_expired. A claimed row has no expiry, so it never matches.
+  const ssoPendingDomains = config.sso
+    ? await storage.delete("ssoDomain", [
+        { field: "expiresAt", op: "lt", value: now },
+        { field: "claimedDomain", op: "eq", value: null },
+      ])
+    : 0;
+  if (config.sso) meter.step(1);
+  const recheckShare = config.sso ? RECHECK_SHARE : 0;
+  const oauthClients = await sweepClients(
+    storage,
+    now,
+    meter,
+    budget - LINK_SHARE - OUTBOX_SHARE - recheckShare,
+  );
+  // The recheck of the verified domains takes the calls that the clients
+  // left before the share of the links. A lost domain waits for no logout,
+  // so it comes before the links and the outbox only by its share.
+  const ssoDomains = config.sso
+    ? await softStep(
+        "sso recheck",
+        recheckDomains(config, now, { meter, limit: budget - LINK_SHARE - OUTBOX_SHARE }),
+      )
+    : 0;
   // Last, so a storage limit met here leaves every count above done. The
   // links of the sessions that ended become outbox rows, and the outbox
   // sends its due rows (plan 12e Task 16).
@@ -429,6 +467,8 @@ export async function sweepExpired(
     oauthSessionLinks,
     oauthLogouts,
     oauthClientSecrets,
+    ssoDomains,
+    ssoPendingDomains,
   };
   // One event with every count of the result (plan 12h Task 6). The api flushes it (spec 31 item 4).
   config.observe.emit({

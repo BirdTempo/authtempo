@@ -277,11 +277,27 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `operator.secrets` | list | none | One entry or more, each a named secret with its scopes. Two entries with one name or one hash are refused. |
 | `operator.secrets[].name` | string | required | `^[a-z0-9][a-z0-9_-]{0,31}$`. The audit row names the secret by it. |
 | `operator.secrets[].secretHash` | string | required | The SHA-256 of the secret as 64 lowercase hex characters, as `operator.secretHash`. |
-| `operator.secrets[].scopes` | string list | required | One scope or more of `keys`, `secrets`, `users`, `sessions`, and `audit`. `keys` opens `POST /operator/keys/rotate`, and `secrets` opens the secret status and rewrap routes. A secret with no scope for a route gets 403 `operator_required`. |
+| `operator.secrets[].scopes` | string list | required | One scope or more of `keys`, `secrets`, `users`, `sessions`, `audit`, and `sso`. `keys` opens `POST /operator/keys/rotate`, and `secrets` opens the secret status and rewrap routes. `sso` opens `POST /operator/sso/enforce-off` (plan 12d). A secret with no scope for a route gets 403 `operator_required`. |
 | `operator.users` | `true` | off | Turns on the user, session, and audit tools of plan 12f. It needs a secret with the scope `users` or `organizations.platformRole`, so that an actor can use the tools. |
 | `operator.impersonation` | object | off | Turns on impersonation. It needs `operator.users` and `organizations.platformRole`: only a platform operator starts one. |
 | `operator.impersonation.ttlMinutes` | number | 60 | A whole number from 5 to 240. The life of an impersonation session. The sliding refresh never moves it. |
 | `operator.impersonation.notice` | boolean | true | Sends the user a notice mail at each start. `account.notices: false` turns it off too. |
+
+## SSO
+
+`sso` turns on enterprise SSO (plan 12d). It needs `organizations`, else the config is refused with "sso needs organizations". Another key of `sso` is refused.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `sso` | object | off | Turns on the domain routes. See [Enterprise SSO](/docs/reference/routes/#enterprise-sso). |
+| `sso.dns` | list | required | One DNS resolver or more, each an object with a `name` string and a `txt` function. Core has no default resolver: pick the presets `dohCloudflare` and `dohGoogle` with your fetch, or pass your own. Every resolver must give the value of a proof. Two resolvers: one resolver that is wrong or compromised must not give a domain to an organization. |
+| `sso.oidc` | `true` | off | Turns on the OIDC connections (plan 12d Task 3). |
+| `sso.saml` | `true` or object | off | Turns on the SAML connections (plan 12d Task 8). |
+| `sso.saml.clockSkewSeconds` | number | 120 | A whole number from 0 to 300. |
+| `sso.fetch` | function | `fetch` | The fetch of the calls to the sign-in provider of a connection. Core follows no redirect. |
+| `sso.limits` | object | see below | The limits of one organization. |
+| `sso.limits.connectionsPerOrganization` | number | 10 | A positive whole number. |
+| `sso.limits.domainsPerOrganization` | number | 20 | A positive whole number. The add of one more domain answers `domain_limit`. |
 
 ## Hooks
 

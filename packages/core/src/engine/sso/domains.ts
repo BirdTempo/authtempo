@@ -1,11 +1,103 @@
+import type { ResolvedConfig } from "../../config.js";
+import { ERRORS } from "../../errors.js";
+import { randomBase64Url } from "../../primitives/crypto.js";
 import { isIpLiteral } from "../../primitives/host.js";
+import { newId } from "../../primitives/ids.js";
 import { hasControlChar } from "../../primitives/text.js";
+import { fail, ok, type Result } from "../../result.js";
+import type { OperatorAuditRow, SsoDomainRow } from "../../schema.js";
+import { PROVIDER_TIMEOUT_MS } from "../../social/provider.js";
+import type { Meter } from "../../storage/meter.js";
+import { type StorageAdapter, StorageError } from "../../storage/port.js";
+import { runAfter } from "../hooks.js";
+import { auditDraft, operatorAct, writeAuditIn } from "../operator/audit.js";
+import { type OperatorActor, requireScope } from "../operator/guards.js";
+import { lockOrganization } from "../teams.js";
+import type { DnsTxtPort } from "./dns.js";
+import { type SsoActor, ssoDraft } from "./guard.js";
 
 /**
  * The email domains that an organization proves by DNS (plan 12d, spec 30
- * items 2 to 4). Task 2a holds the domain form only. The proofs, the
- * recheck, and the routes come with the `ssoDomain` model (Task 2b).
+ * items 2 to 4): the domain form, the proof, the recheck, the routing flags,
+ * and the operator's override of `enforce`.
  */
+
+/** The label of the TXT record that proves a domain. */
+export const DOMAIN_RECORD_LABEL = "_authtempo-challenge";
+/** The start of the value of the TXT record. */
+export const DOMAIN_VALUE_PREFIX = "authtempo-domain=";
+/** A pending row lives 7 days (spec 30 item 2). */
+export const PENDING_DOMAIN_MS = 7 * 24 * 60 * 60 * 1000;
+/** A verified domain is checked again 30 days after its last check (spec 30 item 4). */
+export const RECHECK_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+/** The most rows of one recheck. A sweep reads fewer when its share of calls holds fewer. */
+export const RECHECK_BATCH = 20;
+/** A domain is lost after this count of failed rechecks in a row... */
+export const LOSS_FAILURES = 3;
+/** ...that span at least this time, so one bad day of a resolver loses no domain. */
+export const LOSS_SPAN_MS = 72 * 60 * 60 * 1000;
+/** A failed recheck tries again one day later. */
+const RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
+/** The verifies of one organization: 10 per hour. A verify asks every resolver. */
+export const DOMAIN_VERIFY_PER_ORGANIZATION = { seconds: 3600, max: 10 };
+/** The app actor of the sweep in the audit row of a lost domain. */
+const SWEEP_ACTOR = { kind: "app", name: "authtempo-sweep" } as const;
+
+/** One verified or pending domain, as the routes and `api.sso.domains` answer it. */
+export interface SsoDomainSummary {
+  id: string;
+  organizationId: string;
+  domain: string;
+  /** The record to publish while the row is pending, else null. */
+  record: { name: string; type: "TXT"; value: string } | null;
+  verified: boolean;
+  verifiedAt: string | null;
+  checkedAt: string | null;
+  connectionId: string | null;
+  enforce: boolean;
+  includeSubdomains: boolean;
+  expiresAt: string | null;
+}
+
+/** The name and the value of the TXT record of one row. */
+function recordOf(row: Pick<SsoDomainRow, "domain" | "challenge">): {
+  name: string;
+  value: string;
+} {
+  return {
+    name: `${DOMAIN_RECORD_LABEL}.${row.domain}`,
+    value: `${DOMAIN_VALUE_PREFIX}${row.challenge}`,
+  };
+}
+
+/** The answer form of a row. It never holds the challenge outside the record to publish. */
+function summary(row: SsoDomainRow): SsoDomainSummary {
+  const verified = row.claimedDomain !== null;
+  return {
+    id: row.id,
+    organizationId: row.organizationId,
+    domain: row.domain,
+    record: verified ? null : { ...recordOf(row), type: "TXT" },
+    verified,
+    verifiedAt: row.verifiedAt?.toISOString() ?? null,
+    checkedAt: row.checkedAt?.toISOString() ?? null,
+    connectionId: row.connectionId,
+    enforce: row.enforce,
+    includeSubdomains: row.includeSubdomains,
+    expiresAt: row.expiresAt?.toISOString() ?? null,
+  };
+}
+
+/** The meta of an act through a route: the caller's IP and user agent. An app call passes neither. */
+export interface SsoActMeta {
+  ip?: string | null;
+  userAgent?: string | null;
+}
+
+/** The after hook of one audit row, after the commit (deviation 3 of plan 12d). */
+async function afterAudit(config: ResolvedConfig, row: OperatorAuditRow): Promise<void> {
+  await runAfter("operator.afterAction", config.hooks.operator.afterAction, { audit: row }, row.id);
+}
 
 /** The longest DNS name in text form, with no trailing dot (RFC 1035 section 2.3.4). */
 const DOMAIN_MAX = 253;
@@ -58,4 +150,598 @@ export function normalizeDomain(raw: unknown): string | null {
   if (host.length > DOMAIN_MAX) return null;
   if (!mapped.every((l) => LABEL_RE.test(l))) return null;
   return host;
+}
+
+/**
+ * True when every port gives one of `values` at `name`, each port in order
+ * and each within `PROVIDER_TIMEOUT_MS`. A string of the list must equal a
+ * value exactly: no trim, no case fold. A port joins the parts of one TXT
+ * string itself (`DnsTxtPort`). A null, a throw, a timeout, or a list with
+ * no value is a failure, and the first failure ends the check with one log
+ * line that names the port and the domain, never the challenge. `meter`
+ * counts each port call as one call of the invocation (a DoH fetch is a
+ * subrequest).
+ */
+async function everyPortGives(
+  ports: readonly DnsTxtPort[],
+  domain: string,
+  expect: { name: string; values: readonly string[] },
+  meter?: Meter,
+): Promise<boolean> {
+  for (const port of ports) {
+    meter?.add(1);
+    if (!(await portGives(port, expect))) {
+      console.error("authtempo: sso domain unverified", port.name, domain);
+      return false;
+    }
+  }
+  return true;
+}
+
+/** One port within the deadline. The timer is setTimeout, so a test moves it with fake timers. */
+async function portGives(
+  port: DnsTxtPort,
+  expect: { name: string; values: readonly string[] },
+): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), PROVIDER_TIMEOUT_MS);
+  });
+  try {
+    const list: unknown = await Promise.race([port.txt(expect.name), deadline]);
+    return (
+      Array.isArray(list) && list.some((v) => typeof v === "string" && expect.values.includes(v))
+    );
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** The SSO config, or `not_found` while SSO is off. */
+function ssoOn(config: ResolvedConfig): Result<NonNullable<ResolvedConfig["sso"]>> {
+  return config.sso ? ok(config.sso) : fail("not_found");
+}
+
+/**
+ * The organization of a domain row, or null when no row has the id. A
+ * route reads it to run the manager guard for that organization.
+ */
+export async function domainOrganization(
+  config: ResolvedConfig,
+  id: string,
+): Promise<string | null> {
+  if (!config.sso) return null;
+  const row = await config.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: id }]);
+  return row?.organizationId ?? null;
+}
+
+/**
+ * Starts the proof of a domain (spec 30 item 2). The domain takes the form
+ * of `normalizeDomain`, and its proof name fits the DNS limit of 253
+ * characters, else `invalid_body`. One transaction holds the organization
+ * row, then counts its rows, pending and verified, against
+ * `limits.domainsPerOrganization` (`domain_limit`). A pending row of the
+ * same domain gets a new challenge and a new expiry: a retry. A verified
+ * row answers as it is and writes nothing. A new row and a retry write one
+ * `sso_domain_add` audit row. A parallel add of the same domain answers
+ * `conflict`.
+ */
+export async function addDomain(
+  config: ResolvedConfig,
+  actor: SsoActor,
+  input: { organizationId: string; domain: string } & SsoActMeta,
+): Promise<Result<SsoDomainSummary>> {
+  const sso = ssoOn(config);
+  if (!sso.ok) return sso;
+  const domain = normalizeDomain(input.domain);
+  if (domain === null) return fail("invalid_body");
+  // The proof name must be a DNS name too, or the domain can never verify.
+  if (`${DOMAIN_RECORD_LABEL}.${domain}`.length > DOMAIN_MAX) return fail("invalid_body");
+  const now = config.clock.now();
+  const challenge = randomBase64Url(32);
+  const expiresAt = new Date(now.getTime() + PENDING_DOMAIN_MS);
+  type Added = { row: SsoDomainRow; audit: OperatorAuditRow | null };
+  let added: Result<Added>;
+  try {
+    added = await config.storage.transaction(async (tx): Promise<Result<Added>> => {
+      const organization = await tx.findOne("organization", [
+        { field: "id", op: "eq", value: input.organizationId },
+      ]);
+      // The lock holds the count below against a parallel add (the 12k limit form).
+      if (!organization || !(await lockOrganization(tx, organization))) return fail("not_found");
+      const held = await tx.findOne("ssoDomain", [
+        { field: "organizationId", op: "eq", value: organization.id },
+        { field: "domain", op: "eq", value: domain },
+      ]);
+      if (held?.claimedDomain != null) return ok({ row: held, audit: null });
+      let row: SsoDomainRow;
+      if (held) {
+        row = { ...held, challenge, expiresAt, updatedAt: now };
+        await tx.update(
+          "ssoDomain",
+          [
+            { field: "id", op: "eq", value: held.id },
+            { field: "claimedDomain", op: "eq", value: null },
+          ],
+          { challenge, expiresAt, updatedAt: now },
+        );
+      } else {
+        const limit = sso.value.limits.domainsPerOrganization;
+        const rows = await tx.findMany(
+          "ssoDomain",
+          [{ field: "organizationId", op: "eq", value: organization.id }],
+          { limit },
+        );
+        if (rows.length >= limit) return fail("domain_limit");
+        row = {
+          id: newId(now),
+          createdAt: now,
+          updatedAt: now,
+          organizationId: organization.id,
+          domain,
+          challenge,
+          claimedDomain: null,
+          connectionId: null,
+          enforce: false,
+          includeSubdomains: false,
+          verifiedAt: null,
+          checkedAt: null,
+          failures: 0,
+          firstFailureAt: null,
+          expiresAt,
+        };
+        await tx.create("ssoDomain", row);
+      }
+      const draft = ssoDraft(actor, "sso_domain_add", {
+        targetUserId: null,
+        data: { organizationId: organization.id, domainId: row.id, domain },
+        ip: input.ip ?? null,
+        userAgent: input.userAgent ?? null,
+      });
+      if (!draft.ok) return draft;
+      return ok({ row, audit: await writeAuditIn(tx, draft.value, now) });
+    });
+  } catch (e) {
+    // Caught outside the transaction: inside, Postgres has already aborted it.
+    if (e instanceof StorageError && e.code === "unique_violation") return fail("conflict");
+    throw e;
+  }
+  if (!added.ok) return added;
+  if (added.value.audit) await afterAudit(config, added.value.audit);
+  return ok(summary(added.value.row));
+}
+
+/** `verifyDomainWith` with core's own record of the row (spec 30 item 2). */
+export async function verifyDomain(
+  config: ResolvedConfig,
+  actor: SsoActor,
+  input: { id: string } & SsoActMeta,
+): Promise<Result<SsoDomainSummary>> {
+  return verifyDomainWith(config, actor, input, null);
+}
+
+/**
+ * Proves a pending domain (spec 30 item 2, deviation 12 of plan 12d). The
+ * limiter `sso-domain-verify:org:<organizationId>` counts first, before any
+ * resolver. A pending row past `expiresAt` answers `token_expired`. A
+ * verified row answers as it is. Then every resolver of `sso.dns` must give
+ * one of `expect.values` at `expect.name` (`everyPortGives`), else
+ * `domain_unverified`. `expect` null is the row's own record. On success
+ * one transaction claims the domain with a conditional update where
+ * `claimedDomain` is null, and writes the `sso_domain_verify` audit row.
+ * The unique key on `claimedDomain` gives a domain to one organization: the
+ * second organization answers `domain_taken`. A parallel verify of the same
+ * row updates nothing and writes no second row.
+ */
+export async function verifyDomainWith(
+  config: ResolvedConfig,
+  actor: SsoActor,
+  input: { id: string } & SsoActMeta,
+  expect: { name: string; values: readonly string[] } | null,
+): Promise<Result<SsoDomainSummary>> {
+  const sso = ssoOn(config);
+  if (!sso.ok) return sso;
+  const row = await config.storage.findOne("ssoDomain", [
+    { field: "id", op: "eq", value: input.id },
+  ]);
+  if (!row) return fail("not_found");
+  if (
+    !(await config.limiter.allow(
+      `sso-domain-verify:org:${row.organizationId}`,
+      DOMAIN_VERIFY_PER_ORGANIZATION,
+    ))
+  )
+    return fail("rate_limited");
+  if (row.claimedDomain !== null) return ok(summary(row));
+  const now = config.clock.now();
+  if (row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime())
+    return fail("token_expired");
+  if (!(await everyPortGives(sso.value.dns, row.domain, expect ?? ownExpect(row))))
+    return fail("domain_unverified");
+  const draft = ssoDraft(actor, "sso_domain_verify", {
+    targetUserId: null,
+    data: { organizationId: row.organizationId, domainId: row.id, domain: row.domain },
+    ip: input.ip ?? null,
+    userAgent: input.userAgent ?? null,
+  });
+  if (!draft.ok) return draft;
+  const at = config.clock.now();
+  const claim = {
+    claimedDomain: row.domain,
+    verifiedAt: at,
+    checkedAt: at,
+    failures: 0,
+    firstFailureAt: null,
+    expiresAt: null,
+    updatedAt: at,
+  };
+  let audit: OperatorAuditRow | null;
+  try {
+    audit = await config.storage.transaction(async (tx) => {
+      const n = await tx.update(
+        "ssoDomain",
+        [
+          { field: "id", op: "eq", value: row.id },
+          { field: "claimedDomain", op: "eq", value: null },
+        ],
+        claim,
+      );
+      // A parallel verify of this row claimed it first: nothing to write.
+      if (n === 0) return null;
+      return writeAuditIn(tx, draft.value, at);
+    });
+  } catch (e) {
+    // Caught outside the transaction: inside, Postgres has already aborted it.
+    if (e instanceof StorageError && e.code === "unique_violation") return fail("domain_taken");
+    throw e;
+  }
+  if (audit === null) {
+    const current = await config.storage.findOne("ssoDomain", [
+      { field: "id", op: "eq", value: row.id },
+    ]);
+    return current ? ok(summary(current)) : fail("not_found");
+  }
+  await afterAudit(config, audit);
+  return ok(summary({ ...row, ...claim }));
+}
+
+/**
+ * Changes the routing flags of a domain (spec 30 item 2). `connectionId`
+ * takes null only until Task 3 of plan 12d, which adds the connections; a
+ * string answers `not_found`. `enforce: true` needs a verified domain
+ * routed to an enabled connection of the same organization, else
+ * `invalid_body`: a flag that refuses every first factor with no way in
+ * through SSO would lock the staff out. One `sso_domain_update` audit row
+ * names the changed keys.
+ */
+export async function updateDomain(
+  config: ResolvedConfig,
+  actor: SsoActor,
+  input: {
+    id: string;
+    connectionId?: string | null;
+    enforce?: boolean;
+    includeSubdomains?: boolean;
+  } & SsoActMeta,
+): Promise<Result<SsoDomainSummary>> {
+  const sso = ssoOn(config);
+  if (!sso.ok) return sso;
+  if (typeof input.connectionId === "string") return fail("not_found");
+  const changes: Partial<Pick<SsoDomainRow, "connectionId" | "enforce" | "includeSubdomains">> = {};
+  if (input.connectionId !== undefined) changes.connectionId = input.connectionId;
+  if (input.enforce !== undefined) changes.enforce = input.enforce;
+  if (input.includeSubdomains !== undefined) changes.includeSubdomains = input.includeSubdomains;
+  const now = config.clock.now();
+  type Updated = { row: SsoDomainRow; audit: OperatorAuditRow };
+  const updated = await config.storage.transaction(async (tx): Promise<Result<Updated>> => {
+    const held = await tx.findOne("ssoDomain", [{ field: "id", op: "eq", value: input.id }]);
+    if (!held) return fail("not_found");
+    const row: SsoDomainRow = { ...held, ...changes, updatedAt: now };
+    if (row.enforce && !(await enforceable(tx, row))) return ENFORCE_REFUSED;
+    const n = await tx.update(
+      "ssoDomain",
+      [
+        { field: "id", op: "eq", value: held.id },
+        { field: "updatedAt", op: "eq", value: held.updatedAt },
+      ],
+      { ...changes, updatedAt: now },
+    );
+    if (n === 0) return fail("conflict");
+    const draft = ssoDraft(actor, "sso_domain_update", {
+      targetUserId: null,
+      data: {
+        organizationId: row.organizationId,
+        domainId: row.id,
+        domain: row.domain,
+        changed: Object.keys(changes).sort(),
+      },
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+    });
+    if (!draft.ok) return draft;
+    return ok({ row, audit: await writeAuditIn(tx, draft.value, now) });
+  });
+  if (!updated.ok) return updated;
+  await afterAudit(config, updated.value.audit);
+  return ok(summary(updated.value.row));
+}
+
+/** The refusal of `enforce` on a domain that SSO cannot serve, with its reason for the owner. */
+const ENFORCE_REFUSED: Result<never> = {
+  ok: false,
+  code: "invalid_body",
+  status: ERRORS.invalid_body,
+  message: "enforce needs a verified domain routed to an enabled connection",
+};
+
+/** True when the row is verified and routed to an enabled connection of its organization. */
+async function enforceable(tx: StorageAdapter, row: SsoDomainRow): Promise<boolean> {
+  if (row.claimedDomain === null || row.connectionId === null) return false;
+  const connection = await tx.findOne("ssoConnection", [
+    { field: "id", op: "eq", value: row.connectionId },
+    { field: "organizationId", op: "eq", value: row.organizationId },
+  ]);
+  return connection?.enabled === true;
+}
+
+/** Deletes a domain and its claim (spec 30 item 2), with one `sso_domain_delete` audit row. */
+export async function deleteDomain(
+  config: ResolvedConfig,
+  actor: SsoActor,
+  input: { id: string } & SsoActMeta,
+): Promise<Result<{ ok: true }>> {
+  const sso = ssoOn(config);
+  if (!sso.ok) return sso;
+  const now = config.clock.now();
+  const deleted = await config.storage.transaction(
+    async (tx): Promise<Result<OperatorAuditRow>> => {
+      const row = await tx.findOne("ssoDomain", [{ field: "id", op: "eq", value: input.id }]);
+      if (!row) return fail("not_found");
+      const n = await tx.delete("ssoDomain", [{ field: "id", op: "eq", value: row.id }]);
+      if (n === 0) return fail("not_found");
+      const draft = ssoDraft(actor, "sso_domain_delete", {
+        targetUserId: null,
+        data: { organizationId: row.organizationId, domainId: row.id, domain: row.domain },
+        ip: input.ip ?? null,
+        userAgent: input.userAgent ?? null,
+      });
+      if (!draft.ok) return draft;
+      return ok(await writeAuditIn(tx, draft.value, now));
+    },
+  );
+  if (!deleted.ok) return deleted;
+  await afterAudit(config, deleted.value);
+  return ok({ ok: true });
+}
+
+/** The domains of an organization, oldest first. An organization that does not exist answers `not_found`. */
+export async function listDomains(
+  config: ResolvedConfig,
+  _actor: SsoActor,
+  input: { organizationId: string },
+): Promise<Result<SsoDomainSummary[]>> {
+  const sso = ssoOn(config);
+  if (!sso.ok) return sso;
+  const organization = await config.storage.findOne("organization", [
+    { field: "id", op: "eq", value: input.organizationId },
+  ]);
+  if (!organization) return fail("not_found");
+  const rows = await config.storage.findMany(
+    "ssoDomain",
+    [{ field: "organizationId", op: "eq", value: organization.id }],
+    { sort: { field: "id", dir: "asc" } },
+  );
+  return ok(rows.map(summary));
+}
+
+/**
+ * The operator's override of `enforce` (deviation 5 of plan 12d). It needs
+ * the scope `sso` of a secret actor, then runs through `operatorAct` with
+ * the action `sso_enforce_off` and the operator's reason. A secret actor
+ * and a platform operator user both pass. The row keeps its claim and its
+ * route; only `enforce` turns off.
+ */
+export async function enforceOff(
+  config: ResolvedConfig,
+  actor: OperatorActor,
+  input: { domainId: string; reason: string; ip: string | null; userAgent: string | null },
+): Promise<Result<SsoDomainSummary & { auditId: string }>> {
+  const sso = ssoOn(config);
+  if (!sso.ok) return sso;
+  const scoped = requireScope(actor, "sso");
+  if (!scoped.ok) return scoped;
+  const row = await config.storage.findOne("ssoDomain", [
+    { field: "id", op: "eq", value: input.domainId },
+  ]);
+  if (!row) return fail("not_found");
+  const draft = auditDraft(actor, {
+    action: "sso_enforce_off",
+    targetUserId: null,
+    reason: input.reason,
+    data: { organizationId: row.organizationId, domainId: row.id, domain: row.domain },
+    ip: input.ip,
+    userAgent: input.userAgent,
+  });
+  if (!draft.ok) return draft;
+  return operatorAct(config, draft.value, async (tx) => {
+    const now = config.clock.now();
+    const n = await tx.update(
+      "ssoDomain",
+      [
+        { field: "id", op: "eq", value: row.id },
+        { field: "organizationId", op: "eq", value: row.organizationId },
+      ],
+      { enforce: false, updatedAt: now },
+    );
+    if (n === 0) return fail("not_found");
+    const after = await tx.findOne("ssoDomain", [{ field: "id", op: "eq", value: row.id }]);
+    return after ? ok(summary(after)) : fail("not_found");
+  });
+}
+
+/**
+ * The worst calls of one recheck row: the update of its counters, or the
+ * loss transaction with its audit row. On D1 an update in a transaction is
+ * two statements: the read for the undo and the write.
+ */
+const RECHECK_ROW_WRITES = 3;
+
+/**
+ * Checks verified domains again (spec 30 item 4). It reads up to
+ * `RECHECK_BATCH` rows with `verifiedAt` set and `checkedAt` at or before
+ * `now - RECHECK_AFTER_MS`, oldest check first. Each row asks every
+ * resolver for its own record, as the verify does. A pass moves `checkedAt`
+ * to now and clears the failures. A failure adds one to `failures`, sets
+ * `firstFailureAt` when it was null, and sets `checkedAt` so that the next
+ * try comes one day later. At `LOSS_FAILURES` failures that span
+ * `LOSS_SPAN_MS`, one transaction clears `verifiedAt`, `claimedDomain`, and
+ * `enforce`, and writes the `sso_domain_lost` audit row with the app actor
+ * `authtempo-sweep`; then one log line names the domain id. The answer is
+ * the count of rows checked.
+ *
+ * With `budget`, the step stays inside `budget.limit` calls of
+ * `budget.meter` (the sweep's call budget, ruling 37 of plan 12f). Each
+ * resolver call counts as one call: a DoH fetch is a subrequest. The read
+ * takes only the rows that fit.
+ */
+export async function recheckDomains(
+  config: ResolvedConfig,
+  now: Date,
+  budget?: { meter: Meter; limit: number },
+): Promise<number> {
+  const sso = config.sso;
+  if (!sso) return 0;
+  const perRow = sso.dns.length + RECHECK_ROW_WRITES;
+  const meter = budget?.meter;
+  const room = budget ? Math.floor((budget.limit - budget.meter.used - 1) / perRow) : RECHECK_BATCH;
+  const batch = Math.min(RECHECK_BATCH, room);
+  if (batch < 1) return 0;
+  const rows = await config.storage.findMany(
+    "ssoDomain",
+    [
+      { field: "verifiedAt", op: "ne", value: null },
+      { field: "checkedAt", op: "lte", value: new Date(now.getTime() - RECHECK_AFTER_MS) },
+    ],
+    {
+      sort: [
+        { field: "checkedAt", dir: "asc" },
+        { field: "id", dir: "asc" },
+      ],
+      limit: batch,
+    },
+  );
+  meter?.step(1);
+  let checked = 0;
+  for (const row of rows) {
+    if (budget && budget.meter.used + perRow > budget.limit) break;
+    checked++;
+    const passed = await everyPortGives(sso.dns, row.domain, ownExpect(row), meter);
+    const held = [
+      { field: "id", op: "eq", value: row.id },
+      { field: "claimedDomain", op: "eq", value: row.claimedDomain },
+    ] as const;
+    if (passed) {
+      await config.storage.update("ssoDomain", [...held], {
+        checkedAt: now,
+        failures: 0,
+        firstFailureAt: null,
+        updatedAt: now,
+      });
+      meter?.step(1);
+      continue;
+    }
+    const failures = row.failures + 1;
+    const firstFailureAt = row.firstFailureAt ?? now;
+    if (failures >= LOSS_FAILURES && now.getTime() - firstFailureAt.getTime() >= LOSS_SPAN_MS) {
+      await loseDomain(config, row, now);
+      meter?.step(RECHECK_ROW_WRITES);
+      continue;
+    }
+    await config.storage.update("ssoDomain", [...held], {
+      failures,
+      firstFailureAt,
+      checkedAt: new Date(now.getTime() - RECHECK_AFTER_MS + RETRY_AFTER_MS),
+      updatedAt: now,
+    });
+    meter?.step(1);
+  }
+  return checked;
+}
+
+/** The record that a recheck asks for: the row's own name and value. */
+function ownExpect(row: SsoDomainRow): { name: string; values: readonly string[] } {
+  const own = recordOf(row);
+  return { name: own.name, values: [own.value] };
+}
+
+/** The loss of one domain: the claim, the verify time, and `enforce` go, with the audit row. */
+async function loseDomain(config: ResolvedConfig, row: SsoDomainRow, now: Date): Promise<void> {
+  const draft = ssoDraft(SWEEP_ACTOR, "sso_domain_lost", {
+    targetUserId: null,
+    data: { organizationId: row.organizationId, domainId: row.id, domain: row.domain },
+    ip: null,
+    userAgent: null,
+  });
+  if (!draft.ok) return;
+  const audit = await config.storage.transaction(async (tx) => {
+    const n = await tx.update(
+      "ssoDomain",
+      [
+        { field: "id", op: "eq", value: row.id },
+        { field: "claimedDomain", op: "eq", value: row.claimedDomain },
+      ],
+      {
+        claimedDomain: null,
+        verifiedAt: null,
+        enforce: false,
+        checkedAt: now,
+        failures: 0,
+        firstFailureAt: null,
+        updatedAt: now,
+      },
+    );
+    // A delete or a change of the row since the read: nothing is lost here.
+    if (n === 0) return null;
+    return writeAuditIn(tx, draft.value, now);
+  });
+  if (audit === null) return;
+  console.error("authtempo: sso domain lost", row.id);
+  await afterAudit(config, audit);
+}
+
+/**
+ * The verified domain row that claims the address: the exact domain, then
+ * each parent with `includeSubdomains`, the most specific first. Null when
+ * no verified domain claims it. One `in` read takes every candidate.
+ */
+export async function claimingDomain(
+  storage: StorageAdapter,
+  email: string,
+): Promise<SsoDomainRow | null> {
+  const at = email.lastIndexOf("@");
+  if (at < 1) return null;
+  const domain = normalizeDomain(email.slice(at + 1));
+  if (domain === null) return null;
+  const labels = domain.split(".");
+  // The domain and each parent of two labels or more, the most specific first.
+  const names = labels.slice(0, -1).map((_, i) => labels.slice(i).join("."));
+  const rows = await storage.findMany("ssoDomain", [
+    { field: "claimedDomain", op: "in", value: names },
+  ]);
+  for (const name of names) {
+    const row = rows.find((r) => r.claimedDomain === name);
+    if (row && (name === domain || row.includeSubdomains)) return row;
+  }
+  return null;
+}
+
+/** True when a verified domain of the organization claims the address (design 4.4). */
+export async function inOrganizationDomains(
+  storage: StorageAdapter,
+  organizationId: string,
+  email: string,
+): Promise<boolean> {
+  return (await claimingDomain(storage, email))?.organizationId === organizationId;
 }

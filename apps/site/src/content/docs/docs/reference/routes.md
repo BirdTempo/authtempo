@@ -1227,6 +1227,15 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Answer | `{ ended, more, auditId }`. It ends up to `limit` sessions of all users, and keeps the session of a platform operator who calls it. A call stops early to stay inside 50 storage calls. Call again while `more` is true |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
+<h3 id="post-operator-sso-enforce-off"><code>POST /operator/sso/enforce-off</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `sso`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
+| Input | JSON { domainId, reason }. `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D |
+| Answer | The domain with `enforce: false`, and `auditId`. The audit row `sso_enforce_off` holds the reason. The route exists when the config sets `operator` and `sso` |
+| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`invalid_body`](/docs/reference/errors/#invalid_body), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
 <h3 id="get-operator-audit"><code>GET /operator/audit</code></h3>
 
 | Field | Value |
@@ -1401,6 +1410,55 @@ These routes exist when the config sets `oauth`. They answer the codes of the OA
 | Input | None |
 | Answer | The same document, for OpenID Connect Discovery |
 | Errors | None |
+
+## Enterprise SSO
+
+These routes exist when the config sets `sso` (plan 12d). An organization proves an email domain by a TXT record. Every resolver of `sso.dns` must give the value. Each call counts on `sso-manage:user:<userId>`, 30 per 15 minutes, before the guard. Each write writes one audit row.
+
+<h3 id="get-sso-domains"><code>GET /sso/domains</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. Until plan 12d Task 3, the user is a platform operator who passes the operator user guard: the platform role, a verified address, a second factor, and a fresh session. An impersonation session answers `forbidden_rank` |
+| Input | Query `{ organizationId }` |
+| Answer | `{ domains }`: each domain with `id`, `organizationId`, `domain`, `record`, `verified`, `verifiedAt`, `checkedAt`, `connectionId`, `enforce`, `includeSubdomains`, and `expiresAt`, oldest first |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required) |
+
+<h3 id="post-sso-domains-add"><code>POST /sso/domains/add</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. Until plan 12d Task 3, the user is a platform operator who passes the operator user guard: the platform role, a verified address, a second factor, and a fresh session. An impersonation session answers `forbidden_rank` |
+| Input | JSON `{ organizationId, domain }`. The domain is a host name of two labels or more, with no IP literal and no trailing dot. Its proof name `_authtempo-challenge.<domain>` has at most 253 characters |
+| Answer | `{ domain }`. A pending domain holds `record`, the TXT record to publish, and lives 7 days. A second add of a pending domain gives a new value. A verified domain answers as it is |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`domain_limit`](/docs/reference/errors/#domain_limit), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-domains-verify"><code>POST /sso/domains/verify</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. Until plan 12d Task 3, the user is a platform operator who passes the operator user guard: the platform role, a verified address, a second factor, and a fresh session. An impersonation session answers `forbidden_rank` |
+| Input | JSON `{ id }`. It counts on `sso-domain-verify:org:<organizationId>`, 10 per hour, before any resolver |
+| Answer | `{ domain }` with `verified: true`. A domain that another organization holds answers `domain_taken` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`token_expired`](/docs/reference/errors/#token_expired), [`domain_unverified`](/docs/reference/errors/#domain_unverified), [`domain_taken`](/docs/reference/errors/#domain_taken), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-domains-update"><code>POST /sso/domains/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. Until plan 12d Task 3, the user is a platform operator who passes the operator user guard: the platform role, a verified address, a second factor, and a fresh session. An impersonation session answers `forbidden_rank` |
+| Input | JSON `{ id, connectionId?, enforce?, includeSubdomains? }`. `connectionId` takes null only until plan 12d Task 3. `enforce: true` needs a verified domain routed to an enabled connection, else `invalid_body` with a message |
+| Answer | `{ domain }` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-sso-domains-delete"><code>POST /sso/domains/delete</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | A session cookie, or a `ts_` bearer token. Until plan 12d Task 3, the user is a platform operator who passes the operator user guard: the platform role, a verified address, a second factor, and a fresh session. An impersonation session answers `forbidden_rank` |
+| Input | JSON `{ id }` |
+| Answer | `{ ok: true }`. The row and its claim go |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`operator_required`](/docs/reference/errors/#operator_required), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 ## OpenAPI document
 

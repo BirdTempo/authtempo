@@ -1,4 +1,9 @@
+import type { AuthConfig, SsoConfig } from "../../src/config.js";
+import { createOrganization } from "../../src/engine/organizations.js";
 import type { DnsTxtPort } from "../../src/engine/sso/dns.js";
+import { createRouter } from "../../src/http/router.js";
+import { coreRoutes } from "../../src/http/routes/index.js";
+import { makeAuth } from "../helpers.js";
 
 /**
  * A DNS port of a test: it answers from a map and counts its calls. A name
@@ -24,4 +29,48 @@ export function fakeDns(
       return answer;
     },
   };
+}
+
+/** The app as the actor of the engine calls of the SSO tests. */
+export const SSO_APP = { kind: "app", name: "sso-test" } as const;
+
+/**
+ * A memory engine with `organizations`, `sso` with two fake resolvers, and
+ * the test clock of `makeAuth`. `a` and `b` answer from `answers.a` and
+ * `answers.b`, which a test changes between calls. `handle` serves the
+ * routes. `overrides` replaces a top key; its `sso` keeps the two ports.
+ */
+export function ssoAuth(overrides: Partial<AuthConfig> = {}) {
+  const answers: { a: Record<string, AnswerOf>; b: Record<string, AnswerOf> } = { a: {}, b: {} };
+  const a = fakeDns("a", answers.a);
+  const b = fakeDns("b", answers.b);
+  const sso: SsoConfig = { ...(overrides.sso || {}), dns: [a, b] };
+  const auth = makeAuth({
+    organizations: {
+      platformRole: "operator",
+      platformOrganization: "platform-co",
+      ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+    },
+    ...overrides,
+    sso,
+  });
+  const handle = createRouter(auth.config, coreRoutes(auth.config));
+  return { ...auth, a, b, answers, handle };
+}
+
+/** One answer of a fake resolver: a list, null, or a throw. */
+type AnswerOf = string[] | null | "throw";
+
+/**
+ * An organization with a verified owner, through the organization engine,
+ * as `api.createOrganization` makes it. The answer is its id.
+ */
+export async function seedOrganization(
+  auth: ReturnType<typeof makeAuth>,
+  slug = "acme",
+): Promise<string> {
+  const owner = await auth.seedUser(`owner@${slug}.example`);
+  const made = await createOrganization(auth.config, { user: owner, slug, name: slug });
+  if (!made.ok) throw new Error(made.code);
+  return made.value.organization.id;
 }

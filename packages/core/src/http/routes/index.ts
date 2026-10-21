@@ -17,6 +17,7 @@ import { roleRoutes } from "./roles.js";
 import { secondFactorRoutes } from "./second-factor.js";
 import { sessionRoutes } from "./sessions.js";
 import { socialRoutes } from "./social.js";
+import { ssoRoutes } from "./sso.js";
 import { teamRoutes } from "./teams.js";
 import { tokenRoutes } from "./tokens.js";
 import { totpRoutes } from "./totp.js";
@@ -46,6 +47,7 @@ export type RouteModule =
   | "jwt"
   | "operator"
   | "oauth"
+  | "sso"
   | "openapi"
   | "health";
 
@@ -76,6 +78,7 @@ export function coreRouteModules(
     { module: "jwt", routes: jwtRoutes(config) },
     { module: "operator", routes: operatorRoutes(config) },
     { module: "oauth", routes: oauthRoutes(config) },
+    { module: "sso", routes: ssoRoutes(config) },
     { module: "health", routes: healthRoutes(config) },
   ];
   // The thunk reads the final list at the first request, so the document lists this route too.

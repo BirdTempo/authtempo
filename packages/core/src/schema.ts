@@ -515,10 +515,16 @@ export const SSO_AUDIT_ACTIONS = [
   "scim_group_delete",
 ] as const;
 
+/**
+ * The actor kinds of an audit row (plan 12f; `scim` is plan 12d). The row
+ * type and the audit contract read this one list.
+ */
+export const AUDIT_ACTOR_KINDS = ["secret", "user", "app", "scim"] as const;
+
 /** One operator act (plan 12f). Append-only: core has no update and no delete of it. */
 export interface OperatorAuditRow extends BaseRow {
   /** `scim`: a SCIM token of plan 12d, and `actorId` holds the token's name. */
-  actorKind: "secret" | "user" | "app" | "scim";
+  actorKind: (typeof AUDIT_ACTOR_KINDS)[number];
   /** The secret's name, the user id, or the app's name. Never the secret. */
   actorId: string;
   action: OperatorAction;

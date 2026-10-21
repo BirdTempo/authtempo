@@ -29,6 +29,7 @@ export type {
   OrganizationsConfig,
   PasswordConfig,
   ResolvedEmailOtp,
+  SsoConfig,
   TeamsConfig,
   TokensConfig,
   TotpConfig,
@@ -54,6 +55,8 @@ export {
   type PasswordApi,
   type SecretsApi,
   type SessionApi,
+  type SsoApi,
+  type SsoAppActor,
   type TokensApi,
   type TotpApi,
   type UserApi,
@@ -189,6 +192,13 @@ export type {
   SocialStart,
   SocialStarted,
 } from "./engine/social.js";
+export {
+  type DnsTxtPort,
+  DOH_BODY_MAX,
+  dohCloudflare,
+  dohGoogle,
+} from "./engine/sso/dns.js";
+export type { SsoDomainSummary } from "./engine/sso/domains.js";
 export type { SweepResult } from "./engine/sweep.js";
 export type { TeamMemberSummary, TeamSummary } from "./engine/teams.js";
 export type { TokenQuota } from "./engine/token-use.js";

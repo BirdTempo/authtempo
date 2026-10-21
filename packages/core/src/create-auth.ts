@@ -71,6 +71,7 @@ import {
 import { listGrants, type OAuthGrantSummary, revokeGrant } from "./engine/oauth-grants.js";
 import { deliverLogouts } from "./engine/oauth-logout.js";
 import type { OAuthResult } from "./engine/oauth-result.js";
+import { checkActor } from "./engine/operator/guards.js";
 import { refuseImpersonation } from "./engine/operator/impersonation.js";
 import { type OperatorApi, operatorApi } from "./engine/operator/index.js";
 import {
@@ -178,6 +179,14 @@ import {
   startLink,
   startSocial,
 } from "./engine/social.js";
+import {
+  addDomain,
+  deleteDomain,
+  listDomains,
+  type SsoDomainSummary,
+  updateDomain,
+  verifyDomain,
+} from "./engine/sso/domains.js";
 import { type SweepResult, sweepExpired } from "./engine/sweep.js";
 import {
   addTeamMember,
@@ -311,6 +320,43 @@ export interface JwtApi {
  * nothing existed. An access token that a client holds lives on to its
  * `exp`, at most `oauth.accessTtlMinutes`.
  */
+/** The app as the actor of an SSO call in process (plan 12d). The name follows the operator app rule. */
+export type SsoAppActor = { kind: "app"; name: string };
+
+/**
+ * The SSO setup in process (plan 12d, spec 30). Present when `sso` is set.
+ * Each call takes the app as its actor and writes the audit rows of the
+ * routes. An app name outside 1 to 64 characters of `[a-z0-9_.-]` answers
+ * `invalid_body`.
+ */
+export interface SsoApi {
+  domains: {
+    /** The domains of an organization, oldest first. */
+    list(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+    }): Promise<Result<SsoDomainSummary[]>>;
+    /** Starts the proof of a domain and answers the TXT record to publish. */
+    add(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      domain: string;
+    }): Promise<Result<SsoDomainSummary>>;
+    /** Asks every resolver of `sso.dns` for the record, and claims the domain when each gives it. */
+    verify(input: { actor: SsoAppActor; id: string }): Promise<Result<SsoDomainSummary>>;
+    /** Changes the route and the flags of a domain. */
+    update(input: {
+      actor: SsoAppActor;
+      id: string;
+      connectionId?: string | null;
+      enforce?: boolean;
+      includeSubdomains?: boolean;
+    }): Promise<Result<SsoDomainSummary>>;
+    /** Deletes a domain and its claim. */
+    delete(input: { actor: SsoAppActor; id: string }): Promise<Result<{ ok: true }>>;
+  };
+}
+
 export interface OAuthApi {
   grants(input: { userId: string }): Promise<Result<OAuthGrantSummary[]>>;
   revoke(input: { userId: string; clientId: string }): Promise<Result<{ ok: true }>>;
@@ -723,6 +769,7 @@ export interface AuthApi {
   totp?: TotpApi;
   jwt?: JwtApi;
   oauth?: OAuthApi;
+  sso?: SsoApi;
 }
 
 export interface Auth {
@@ -848,6 +895,17 @@ export function crossSiteRefusal(auth: Auth, request: Request): Response | null 
   const gate = gates.get(auth);
   if (!gate) throw new TypeError("crossSiteRefusal takes an Auth from createAuth");
   return gate(request);
+}
+
+/** One SSO call of the app: the name rule of the app actor first, as each operator entry checks it. */
+function appCall<I extends { actor: SsoAppActor }, R>(
+  run: (input: I) => Promise<Result<R>>,
+): (input: I) => Promise<Result<R>> {
+  return async (input) => {
+    const named = checkActor(input.actor);
+    if (!named.ok) return named;
+    return run(input);
+  };
 }
 
 export function createAuth(input: AuthConfig): Auth {
@@ -1038,6 +1096,19 @@ export function createAuth(input: AuthConfig): Auth {
               jwks: () => publicKeySet(config),
               sessionLive: (i) => sessionLive(config, i),
             } satisfies JwtApi,
+          }
+        : {}),
+      ...(config.sso
+        ? {
+            sso: {
+              domains: {
+                list: appCall(({ actor, ...i }) => listDomains(config, actor, i)),
+                add: appCall(({ actor, ...i }) => addDomain(config, actor, i)),
+                verify: appCall(({ actor, ...i }) => verifyDomain(config, actor, i)),
+                update: appCall(({ actor, ...i }) => updateDomain(config, actor, i)),
+                delete: appCall(({ actor, ...i }) => deleteDomain(config, actor, i)),
+              },
+            } satisfies SsoApi,
           }
         : {}),
       ...(config.oauth

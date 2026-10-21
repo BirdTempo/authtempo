@@ -24,6 +24,8 @@ describe("delete expired rows", () => {
       "organizationTokens",
       "pendingSessions",
       "sessions",
+      "ssoDomains",
+      "ssoPendingDomains",
       "totpSetups",
       "trustedDevices",
       "verificationConsumed",

@@ -143,6 +143,11 @@ export const BETTER_AUTH_CODES = {
   organization_token_limit: "ORGANIZATION_TOKEN_LIMIT",
   // Plan 12h. A name of our own: Better Auth 1.7 has no readiness route.
   not_ready: "NOT_READY",
+  // Plan 12d Task 2b. authtempo's own names until plan 12d Task 14 reads the
+  // codes of @better-auth/sso. The status stays core's.
+  domain_unverified: "DOMAIN_UNVERIFIED",
+  domain_taken: "DOMAIN_TAKEN",
+  domain_limit: "DOMAIN_LIMIT",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

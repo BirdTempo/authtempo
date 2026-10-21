@@ -144,6 +144,12 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /user/change-email/verify",
   "POST /user/delete",
   "POST /user/delete/confirm",
+  // Plan 12d: a domain id that names no domain, or sso off.
+  "POST /operator/sso/enforce-off",
+  "POST /sso/domains/add",
+  "POST /sso/domains/delete",
+  "POST /sso/domains/update",
+  "POST /sso/domains/verify",
 ];
 
 /** The POST routes on which a test sends an Origin that is not trusted. */
@@ -245,6 +251,12 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /user/delete",
   "POST /user/delete/confirm",
   "POST /user/update",
+  // Plan 12d: the domain writes and the override.
+  "POST /operator/sso/enforce-off",
+  "POST /sso/domains/add",
+  "POST /sso/domains/delete",
+  "POST /sso/domains/update",
+  "POST /sso/domains/verify",
 ];
 
 /** The two provider callbacks: one engine function, `completeSocial`, after a provider exchange. */
@@ -338,6 +350,12 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
   ...rows("conflict", "five lost rounds of the user hold; profile.test.ts proves the engine path", [
     "POST /user/update",
   ]),
+  // Plan 12d: two adds of one domain at once, and an update that races another write of the row.
+  ...rows(
+    "conflict",
+    "a parallel add of the same domain loses the unique key, and a parallel write moves updatedAt under an update; no request can cause either on its own",
+    ["POST /sso/domains/add", "POST /sso/domains/update"],
+  ),
   ...rows(
     "conflict",
     "five lost rounds of the user hold; account-delete.test.ts proves the engine path",
@@ -477,6 +495,16 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     reason:
       "every ban writes its reason, so no flow leaves a ban with none; the field is nullable because the user row allows it; operator-ban.test.ts proves the ban fields",
   },
+  // Plan 12d: a verify answers 200 only for a verified domain, where both times are set.
+  ...(["verifiedAt", "checkedAt"] as const).map(
+    (field): AnswerShapeExempt => ({
+      key: "POST /sso/domains/verify",
+      field: `domain.${field}`,
+      form: "null",
+      reason:
+        "a verify answers 200 only with the claim, which sets both times; GET /sso/domains and POST /sso/domains/update answer them null; sso/domain-routes.test.ts proves both",
+    }),
+  ),
   {
     key: "POST /passkeys/rename",
     field: "passkey.name",

@@ -24,6 +24,7 @@ import type {
   OrganizationsConfig,
   PasswordConfig,
   SecretVersion,
+  SsoConfig,
   TeamsConfig,
   TokensConfig,
   TotpConfig,
@@ -77,6 +78,7 @@ export const CONFIG_KEYS = {
     jwtMint: true,
     oauth: true,
     operator: true,
+    sso: true,
     openapi: true,
     hooks: true,
     account: true,
@@ -261,6 +263,20 @@ export const CONFIG_KEYS = {
     ttlMinutes: true,
     notice: true,
   } satisfies Keys<NonNullable<OperatorConfig["impersonation"]>>,
+  sso: {
+    oidc: true,
+    saml: true,
+    dns: true,
+    fetch: true,
+    limits: true,
+  } satisfies Keys<SsoConfig>,
+  "sso.saml": { clockSkewSeconds: true } satisfies Keys<
+    Exclude<NonNullable<SsoConfig["saml"]>, true>
+  >,
+  "sso.limits": {
+    connectionsPerOrganization: true,
+    domainsPerOrganization: true,
+  } satisfies Keys<NonNullable<SsoConfig["limits"]>>,
   hooks: {
     organization: true,
     session: true,

@@ -43,8 +43,9 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   teams: ["teams"],
   tokens: ["tokens"],
   jwt: ["jwtMint"],
-  operator: ["operator", "operatorUsers", "operatorImpersonation"],
+  operator: ["operator", "operatorUsers", "operatorImpersonation", "operatorSso"],
   oauth: ["oauth", "oauthRegistration", "oauthDevice"],
+  sso: ["sso"],
   openapi: ["openapi"],
   health: ["health", "readiness"],
 };
@@ -62,7 +63,8 @@ describe("ROUTES (plan 11a)", () => {
     expect(new Set(listed).size).toBe(listed.length);
     // Plan 12k Task 8 adds the five organization token routes.
     // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
-    expect(listed.length).toBe(146);
+    // Plan 12d Task 2b adds the five domain routes and the operator's override.
+    expect(listed.length).toBe(152);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -231,6 +233,27 @@ describe("ROUTES (plan 11a)", () => {
       start: { organizations: PLATFORM, operator: { users: true } },
       delta: { organizations: PLATFORM, operator: { users: true, impersonation: {} } },
       features: ["operatorImpersonation"],
+    },
+    // Plan 12d: the domain routes need organizations and a resolver list.
+    {
+      name: "sso",
+      start: { organizations: {} },
+      delta: { organizations: {}, sso: { dns: [{ name: "a", txt: async () => [] }] } },
+      features: ["sso"],
+    },
+    // The override needs operator and sso; the start holds both of the other features.
+    {
+      name: "operator sso",
+      start: {
+        organizations: {},
+        sso: { dns: [{ name: "a", txt: async () => [] }] },
+      },
+      delta: {
+        organizations: {},
+        sso: { dns: [{ name: "a", txt: async () => [] }] },
+        operator: { secretHash: "0".repeat(64) },
+      },
+      features: ["operator", "operatorSso"],
     },
     { name: "openapi", delta: { openapi: true }, features: ["openapi"] },
     // Plan 12h Task 8: a sink with no readiness adds no route; readiness adds GET /ready.

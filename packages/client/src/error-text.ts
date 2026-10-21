@@ -84,6 +84,9 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   impersonation_refused: "You cannot act as this user.",
   impersonation_session: "You cannot do this while you act as another user.",
   not_ready: "The service is not ready. Try again later.",
+  domain_unverified: "The DNS record of the domain was not found. Publish it and try again.",
+  domain_taken: "Another organization holds this domain.",
+  domain_limit: "The organization holds the most domains it can have.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

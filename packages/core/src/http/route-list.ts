@@ -31,9 +31,11 @@ export const ROUTE_FEATURES = [
   "operator",
   "operatorUsers",
   "operatorImpersonation",
+  "operatorSso",
   "oauth",
   "oauthRegistration",
   "oauthDevice",
+  "sso",
   "openapi",
   "health",
   "readiness",
@@ -74,7 +76,8 @@ export interface RouteEntry {
    * `dynamicRoles` (plan 12k) needs `organizations` with `dynamicRoles`.
    * `teams` (plan 12k) needs `organizations` with `teams`.
    * `health` (plan 12h) is in every deployment. `readiness` (plan 12h)
-   * needs `observe.readiness: true`.
+   * needs `observe.readiness: true`. `sso` (plan 12d) needs `organizations`
+   * and `sso`. `operatorSso` (plan 12d) needs `operator` and `sso`.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -1729,6 +1732,22 @@ export const ROUTES = Object.freeze([
     oauthCodes: [],
   },
   {
+    method: "POST",
+    path: "/operator/sso/enforce-off",
+    feature: "operatorSso",
+    auth: ["operator", "session"],
+    codes: [
+      "rate_limited",
+      "unauthorized",
+      "operator_required",
+      "invalid_body",
+      "hook_refused",
+      "hook_failed",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
     method: "GET",
     path: "/operator/audit",
     feature: "operatorUsers",
@@ -1937,6 +1956,80 @@ export const ROUTES = Object.freeze([
     feature: "oauth",
     auth: ["none"],
     codes: [],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/sso/domains",
+    feature: "sso",
+    auth: ["session"],
+    codes: ["unauthorized", "rate_limited", "invalid_body", "forbidden_rank", "operator_required"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/add",
+    feature: "sso",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "domain_limit",
+      "conflict",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/verify",
+    feature: "sso",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "token_expired",
+      "domain_unverified",
+      "domain_taken",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/update",
+    feature: "sso",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "conflict",
+      "impersonation_session",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/delete",
+    feature: "sso",
+    auth: ["session"],
+    codes: [
+      "unauthorized",
+      "rate_limited",
+      "invalid_body",
+      "forbidden_rank",
+      "operator_required",
+      "impersonation_session",
+    ],
     oauthCodes: [],
   },
   {
