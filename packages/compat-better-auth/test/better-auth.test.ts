@@ -252,8 +252,6 @@ describe("betterAuth", () => {
       apple: { clientId: "com.example.web", teamId: "TEAM123456", keyId: "KEY1234567", privateKey },
       github: { clientId: "h", clientSecret: "hs" },
       linkedin: { clientId: "l", clientSecret: "ls" },
-      // Better Auth takes additionalData with no option (plan 12i Task 19).
-      stateData: {},
     });
     expect(m.config.cookie).toEqual({ sameSite: "None" });
     expect(m.config.cookieName).toBe("__Host-tempo_session");

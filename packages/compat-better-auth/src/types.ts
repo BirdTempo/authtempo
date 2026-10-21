@@ -1443,7 +1443,7 @@ export interface AuthClient<TF extends boolean = false> {
       provider: string;
       callbackURL?: string;
       disableRedirect?: boolean;
-      /** Core's sealed state payload: `stateData` of the session and link hooks (plan 12i Task 19). */
+      /** Answers NOT_SUPPORTED: no shim hook can read it. Core's `social.stateData` takes its place (plan 12i ruling 5). */
       additionalData?: Record<string, unknown>;
     }): Promise<CompatClientResult<{ url: string; redirect: boolean }>>;
     magicLink(input: {

@@ -39,14 +39,14 @@ import test from "../../../../../samples/guides/social-state-data.test.ts?raw";
 - The value must be an object, not a list, with a depth of 4 at most. The depth of the object itself is 1.
 - The state row holds the payload sealed with AES-256-GCM under the current secret version. The row id binds it, so a payload moved to another row does not open.
 - The payload goes to the two hooks only. No redirect, no answer, and no log line holds it.
-- A user with the second factor on gets a challenge at the callback, and the session opens later. Then `session.afterCreate` gets no payload. `identity.afterLink` gets it when the sign-in links a new provider account.
+- A user with the second factor on gets a challenge at the callback. The challenge row holds the payload sealed, and `session.afterCreate` gets it at the challenge verify. `identity.afterLink` gets it at the callback when the sign-in links a new provider account.
 - A state lives 10 minutes. After you make a new secret version current, keep the old version in `secrets` for 10 minutes at least. Else a flow in progress fails with `invalid_token`.
-- The Better Auth shim maps `additionalData` of the social start and of `/link-social` to `data`. Better Auth's `getOAuthState()` is not served. Read `stateData` in core's hooks in its place.
+- The Better Auth shim refuses `additionalData` with `NOT_SUPPORTED`, because it serves no `getOAuthState()`. Use core's `createAuth` for the payload.
 
 ## If it fails
 
 - [`invalid_body`](/docs/reference/errors/#invalid_body): `social.stateData` is off, or `data` is not base64url JSON. It also answers for a list, more than `maxBytes` bytes, or a depth over 4. Core writes no state row.
-- [`invalid_token`](/docs/reference/errors/#invalid_token): the payload did not open at the callback. Its secret version left the config, or the row changed. Start again.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the payload did not open at the callback or at the challenge verify. Its secret version left the config, or the row changed. Start again.
 
 ## Next
 

@@ -239,26 +239,9 @@ export function toNext(
 }
 
 /**
- * Better Auth 1.7.2's `additionalData` of `/sign-in/social` and
- * `/link-social` (a JSON record) as core's `data`: the base64url of its
- * UTF-8 JSON (plan 12i Task 19). Undefined for no field, null for a value
- * that is not a JSON object. Core rules on the size and the depth.
+ * The refusal of Better Auth's `additionalData` (plan 12i ruling 5). A Better
+ * Auth app reads it with `getOAuthState()` in a database hook. The shim
+ * serves no `getOAuthState()`, so a mapped payload would reach no app code.
  */
-export function toStateData(additionalData: unknown): string | undefined | null {
-  if (additionalData === undefined) return undefined;
-  if (
-    typeof additionalData !== "object" ||
-    additionalData === null ||
-    Array.isArray(additionalData)
-  )
-    return null;
-  let text: string;
-  try {
-    text = JSON.stringify(additionalData);
-  } catch {
-    return null;
-  }
-  let binary = "";
-  for (const byte of new TextEncoder().encode(text)) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
+export const STATE_DATA_REFUSAL =
+  "core takes no additionalData through the shim: use social.stateData of core's createAuth, and read stateData in its hooks.session.afterCreate and hooks.identity.afterLink";

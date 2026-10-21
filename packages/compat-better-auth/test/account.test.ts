@@ -586,7 +586,7 @@ describe("the Better Auth account paths (plan 12a)", () => {
     });
   });
 
-  it("maps additionalData of /link-social to core's sealed data, and refuses a value that is not a record", async () => {
+  it("refuses additionalData at /link-social, because no shim hook can read it", async () => {
     const t = instance({ socialProviders: { google: { clientId: "gid", clientSecret: "gs" } } });
     const a = await t.signedIn("ada@example.com");
     const res = await t.post(
@@ -594,22 +594,15 @@ describe("the Better Auth account paths (plan 12a)", () => {
       { provider: "google", additionalData: { plan: "pro" } },
       a.cookie,
     );
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as { url: string; redirect: boolean };
-    expect(new URL(body.url).origin).toBe("https://accounts.google.com");
-    // The payload is in core's row, never in the URL of the provider.
-    expect(body.url).not.toContain("eyJwbGFuIjoicHJvIn0");
-    for (const additionalData of [["pro"], "pro"]) {
-      const refused = await t.post(
-        "/link-social",
-        { provider: "google", additionalData },
-        a.cookie,
-      );
-      expect({ status: refused.status, code: await codeOf(refused) }).toEqual({
-        status: 400,
-        code: BETTER_AUTH_CODES.invalid_body,
-      });
-    }
+    expect(res.status).toBe(501);
+    expect(await res.json()).toEqual({
+      code: "NOT_SUPPORTED",
+      message:
+        "core takes no additionalData through the shim: use social.stateData of core's createAuth, and read stateData in its hooks.session.afterCreate and hooks.identity.afterLink",
+    });
+    // A link with no payload still starts.
+    const ok = await t.post("/link-social", { provider: "google" }, a.cookie);
+    expect(ok.status).toBe(200);
   });
 
   it("changes the address by an email code with emailOTP changeEmail on, and refuses a code for another address", async () => {

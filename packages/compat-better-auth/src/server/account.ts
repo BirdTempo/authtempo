@@ -19,7 +19,7 @@ import {
 } from "./api.js";
 import { translate } from "./email-otp.js";
 import type { Mapped } from "./map-options.js";
-import { listedSession, toNext, toPasskey, toStateData } from "./shapes.js";
+import { listedSession, STATE_DATA_REFUSAL, toNext, toPasskey } from "./shapes.js";
 
 /**
  * Better Auth 1.7.2's account paths (dist/api/routes/session.mjs,
@@ -52,7 +52,7 @@ const GET_PATHS: readonly string[] = ["/list-sessions", "/list-accounts", "/dele
  * Better Auth 1.7.2's link-social fields that core cannot keep
  * (account.mjs:77 to :133). Core starts a redirect link only, with its own
  * scopes and its own error page, so each would be dropped in silence.
- * `additionalData` maps to core's sealed `data` (plan 12i Task 19).
+ * `additionalData` has its own refusal (STATE_DATA_REFUSAL).
  */
 const LINK_NOT_SUPPORTED = [
   "idToken",
@@ -276,20 +276,20 @@ export async function accountRoute(
         const refused = LINK_NOT_SUPPORTED.filter((k) => body[k] !== undefined);
         if (refused.length > 0)
           throw compatApiError("NOT_SUPPORTED", `core takes no ${refused.join(", ")} at the link`);
+        if (body.additionalData !== undefined)
+          throw compatApiError("NOT_SUPPORTED", STATE_DATA_REFUSAL);
         const provider = required(body, "provider");
         const next = toNext(text(body, "callbackURL"), mapped.appOrigin);
         if (next === null) throw compatApiError("INVALID_CALLBACK_URL");
         const disableRedirect = body.disableRedirect;
         if (disableRedirect !== undefined && typeof disableRedirect !== "boolean")
           throw new APIError(400, BETTER_AUTH_CODES.invalid_body);
-        // Better Auth takes a record only (account.mjs:132).
-        const data = toStateData(body.additionalData);
-        if (data === null) throw new APIError(400, BETTER_AUTH_CODES.invalid_body);
         return answer(
-          await core("POST", `/social/${encodeURIComponent(provider)}/link`, {
-            ...(next !== undefined ? { next } : {}),
-            ...(data !== undefined ? { data } : {}),
-          }),
+          await core(
+            "POST",
+            `/social/${encodeURIComponent(provider)}/link`,
+            next !== undefined ? { next } : {},
+          ),
           // Better Auth 1.7.2's answer (account.mjs:257 to :260). Core's headers keep the binding cookie.
           (b) => ({ url: b.url, redirect: disableRedirect !== true }),
         );
