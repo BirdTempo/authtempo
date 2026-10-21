@@ -125,6 +125,32 @@ export const KEYED_HASH_INFO = Object.freeze({
 export type KeyedHashInfo = (typeof KEYED_HASH_INFO)[keyof typeof KEYED_HASH_INFO];
 
 /**
+ * The HMAC key of a keyed hash: HKDF-SHA256 derives it from `secret` with an
+ * empty salt and `info`. A caller that hashes many values derives it once.
+ */
+export async function keyedHashKey(secret: string, info: KeyedHashInfo): Promise<CryptoKey> {
+  const enc = new TextEncoder();
+  const base = await crypto.subtle.importKey("raw", enc.encode(secret), "HKDF", false, [
+    "deriveKey",
+  ]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: enc.encode(info) },
+    base,
+    { name: "HMAC", hash: "SHA-256", length: 256 },
+    false,
+    ["sign"],
+  );
+}
+
+/** HMAC-SHA256 of `value` under a key of `keyedHashKey`, cut to 32 lowercase hex. */
+export async function keyedHashWith(key: CryptoKey, value: string): Promise<string> {
+  const mac = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0"))
+    .join("")
+    .slice(0, 32);
+}
+
+/**
  * HMAC-SHA256 of `value` under a key that HKDF-SHA256 derives from `secret`
  * with an empty salt and `info`, cut to 32 lowercase hex (spec 31 item 8).
  * Web Crypto only.
@@ -134,19 +160,5 @@ export async function keyedHash(
   info: KeyedHashInfo,
   value: string,
 ): Promise<string> {
-  const enc = new TextEncoder();
-  const base = await crypto.subtle.importKey("raw", enc.encode(secret), "HKDF", false, [
-    "deriveKey",
-  ]);
-  const key = await crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(0), info: enc.encode(info) },
-    base,
-    { name: "HMAC", hash: "SHA-256", length: 256 },
-    false,
-    ["sign"],
-  );
-  const mac = await crypto.subtle.sign("HMAC", key, enc.encode(value));
-  return Array.from(new Uint8Array(mac), (b) => b.toString(16).padStart(2, "0"))
-    .join("")
-    .slice(0, 32);
+  return keyedHashWith(await keyedHashKey(secret, info), value);
 }

@@ -239,6 +239,38 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
     expect(text).not.toContain("Mozilla");
   });
 
+  it("swaps the buffer at once, and starts no key work before it yields", async () => {
+    const importKey = vi.spyOn(crypto.subtle, "importKey");
+    const { batches, sink } = recording();
+    const { o } = observer(sink, { include: { ip: "hash", userAgent: "none", email: "none" } });
+    for (let i = 0; i < 3; i++) o.scope(SCOPE).emit({ name: "passkey.counter_moved" });
+    const flushed = o.flush();
+    expect(o.stats().buffered).toBe(0);
+    expect(importKey).not.toHaveBeenCalled();
+    await flushed;
+    expect(importKey).toHaveBeenCalledTimes(1);
+    expect(batches[0]).toHaveLength(3);
+  });
+
+  it("derives each HMAC key once for each flush, not once for each event", async () => {
+    const deriveKey = vi.spyOn(crypto.subtle, "deriveKey");
+    const { batches, sink } = recording();
+    const { o } = observer(sink, { include: { ip: "hash", userAgent: "none", email: "hash" } });
+    for (let i = 0; i < 5; i++)
+      o.scope(SCOPE).emit({ name: "passkey.counter_moved", email: `u${i}@example.com` });
+    await o.flush();
+    expect(deriveKey).toHaveBeenCalledTimes(2);
+    o.scope(SCOPE).emit({ name: "passkey.counter_moved", email: "ada@example.com" });
+    await o.flush();
+    // A new flush derives its keys again, so a rotated secret applies there.
+    expect(deriveKey).toHaveBeenCalledTimes(4);
+    const [first, last] = [batches[0]?.[4], batches[1]?.[0]];
+    expect(first?.emailHash).toBe(
+      await keyedHash(SECRET, "authtempo observe email v1", "u4@example.com"),
+    );
+    expect(last?.ipHash).toBe(await keyedHash(SECRET, "authtempo observe ip v1", "203.0.113.7"));
+  });
+
   it("writes no address with the default include", async () => {
     const { batches, sink } = recording();
     const { o } = observer(sink);

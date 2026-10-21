@@ -1,5 +1,5 @@
 import type { Clock } from "../primitives/clock.js";
-import { CONTROL, KEYED_HASH_INFO, keyedHash } from "../redact.js";
+import { CONTROL, KEYED_HASH_INFO, keyedHashKey, keyedHashWith } from "../redact.js";
 import type { ResolvedObserve } from "./config.js";
 import type { AuthEvent, EventName, ObserveStats } from "./port.js";
 
@@ -31,6 +31,12 @@ const USER_AGENT_MAX = 256;
 const ADDRESS_FIELDS = new Set(["ip", "ipHash", "userAgent", "email", "emailHash"]);
 
 type Dropped = ObserveStats["dropped"];
+
+/** The two HMAC keys of one flush. Each is derived at its first use, and once. */
+interface FlushKeys {
+  ip: () => Promise<CryptoKey>;
+  email: () => Promise<CryptoKey>;
+}
 
 /** An event in the buffer, with the raw addresses that the flush hashes. They stay in memory. */
 interface Held {
@@ -103,12 +109,11 @@ export function createObserver(
     return { ...stamp("observe.dropped", null), ...counts };
   }
 
-  async function finish(held: Held, secret: () => string): Promise<AuthEvent> {
+  async function finish(held: Held, keys: FlushKeys): Promise<AuthEvent> {
     const { event } = held;
-    if (held.ip !== undefined)
-      event.ipHash = await keyedHash(secret(), KEYED_HASH_INFO.ip, held.ip);
+    if (held.ip !== undefined) event.ipHash = await keyedHashWith(await keys.ip(), held.ip);
     if (held.email !== undefined)
-      event.emailHash = await keyedHash(secret(), KEYED_HASH_INFO.email, held.email);
+      event.emailHash = await keyedHashWith(await keys.email(), held.email);
     return event;
   }
 
@@ -123,13 +128,27 @@ export function createObserver(
     let outcome: "ok" | "timeout" | "threw";
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      // The secret is read at the flush, so a rotation applies at the next flush.
+      // One yield after the swap: the caller of flush gets its promise back
+      // before any key work or hash starts.
+      await Promise.resolve();
+      // The secret is read once at the flush, so a rotation applies at the next flush.
+      // Each key is derived once for the flush, not once for each event.
       let secret: string | undefined;
-      const read = () => {
-        secret ??= deps.hashSecret();
-        return secret;
+      let ipKey: Promise<CryptoKey> | undefined;
+      let emailKey: Promise<CryptoKey> | undefined;
+      const keys: FlushKeys = {
+        ip: () => {
+          secret ??= deps.hashSecret();
+          ipKey ??= keyedHashKey(secret, KEYED_HASH_INFO.ip);
+          return ipKey;
+        },
+        email: () => {
+          secret ??= deps.hashSecret();
+          emailKey ??= keyedHashKey(secret, KEYED_HASH_INFO.email);
+          return emailKey;
+        },
       };
-      const events = await Promise.all(held.map((h) => finish(h, read)));
+      const events = await Promise.all(held.map((h) => finish(h, keys)));
       const batch = report ? [droppedEvent(carried), ...events] : events;
       const timeout = new Promise<"timeout">((resolve) => {
         timer = setTimeout(() => resolve("timeout"), config.flushTimeoutMs);

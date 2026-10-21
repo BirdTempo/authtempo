@@ -857,9 +857,10 @@ export function createAuth(input: AuthConfig): Auth {
   const auth: Auth = {
     basePath: config.basePath,
     baseURL: config.baseURL,
-    // The flush runs after the answer is built and never delays it (owner
-    // decision 4 of 2026-10-14). On Workers pass `(p) => ctx.waitUntil(p)`:
-    // an unbound `ctx.waitUntil` throws.
+    // handle starts the flush after the answer is built and never awaits it
+    // (owner decision 4 of 2026-10-14). The flush swaps the buffer and yields
+    // once. The keys, the hashes, and the sink run after that yield. On
+    // Workers pass `(p) => ctx.waitUntil(p)`: an unbound `ctx.waitUntil` throws.
     async handle(request, options) {
       const res = await route(request);
       options?.waitUntil?.(config.observe.flush());
