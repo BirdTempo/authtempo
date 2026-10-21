@@ -32,6 +32,10 @@ A social subject longer than 255 characters is dropped and listed as
 `identity:<provider>:subject_length`. Core's social sign-in never answers
 such a subject, and the MySQL column holds 255 characters.
 
+An Auth.js passkey whose credential id is longer than 1023 bytes is dropped
+and listed as `passkey:credential_id_length`. WebAuthn allows no longer id,
+core's registration refuses one, and the MySQL column holds 1023 bytes.
+
 `--formats` is required, and it has no default. Give it the `formats` list
 of the app's `createLegacyPasswordHash`, comma-separated, or `none` for an app
 with no legacy seam. A hash in another format is refused and listed. The user

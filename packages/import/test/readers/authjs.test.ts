@@ -128,6 +128,25 @@ describe("authjsSource edge rows", () => {
     });
   });
 
+  it("drops a credential id over 1023 bytes and keeps one of 1023 bytes", async () => {
+    const id = (bytes: number) => Buffer.alloc(bytes, 7).toString("base64");
+    const tables = JSON.stringify({
+      users: [{ id: "a", email: "a@example.com", emailVerified: "2024-01-01T00:00:00.000Z" }],
+      authenticators: [key(id(1023), "a"), key(id(1024), "a")],
+    });
+    const [u] = await all(authjsSource({ tables, samePasskeyRpId: true }));
+    if (u?.kind !== "user") throw new Error("expected one user record");
+    expect(u.passkeys.map((p) => p.credentialId.length)).toEqual([1364]);
+    expect(u.dropped).toEqual(["passkey:credential_id_length"]);
+    const db = createMemoryAdapter();
+    const report = await importUsers(db, authjsSource({ tables, samePasskeyRpId: true }), {
+      formats: LEGACY_FORMATS,
+      now,
+    });
+    expect(report.dropped).toContainEqual({ sourceId: "a", item: "passkey:credential_id_length" });
+    expect((await db.findMany("passkey", [])).length).toBe(1);
+  });
+
   it("counts a credential id by its base64url form: AQ== and AQ are one credential", async () => {
     const tables = JSON.stringify({
       users: [
