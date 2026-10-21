@@ -167,4 +167,35 @@ describe("no flow waits for a sink (plan 12h Task 2, Global Constraints)", () =>
     expect(faults[0]).toMatchObject({ level: "error", errorName: "TypeError" });
     error.mockRestore();
   });
+
+  it("starts no flush when waitUntil throws, so the batch waits in the buffer", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const batches: AuthEvent[][] = [];
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      observe: { sink: { write: (batch) => void batches.push([...batch]) } },
+    });
+    const res = await auth.handle(post("/auth/magic-link/request", { email: "ada@example.com" }), {
+      waitUntil: () => {
+        throw new TypeError("Illegal invocation");
+      },
+    });
+    expect(res.status).toBe(200);
+    // A flush that started before the throw writes its batch with no hook, and on Workers the batch is lost.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(batches).toEqual([]);
+    const buffered = auth.observe.stats().buffered;
+    expect(buffered).toBeGreaterThan(1);
+    await auth.observe.flush();
+    expect(batches).toHaveLength(1);
+    expect(batches[0]).toHaveLength(buffered);
+    const names = batches[0]?.map((e) => e.name) ?? [];
+    expect(names).toContain("request");
+    expect(names.at(-1)).toBe("observe.wait_until_threw");
+    error.mockRestore();
+  });
 });
