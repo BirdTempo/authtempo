@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  // The proof Worker and the pool test (plan 12g Task 4), with the Workers
+  // types and no Node types. A Node type in the libSQL entry or in the
+  // adapter fails this check.
+  "compilerOptions": {
+    "noEmit": true,
+    // The base config adds DOM. workers-types declares the same globals and conflicts with it.
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
+  },
+  "include": ["proof/worker/index.ts", "test/pool"]
+}

@@ -39,8 +39,23 @@ function openBigInt(kind: DriverKind, dir: string) {
 describe.each(DRIVER_KINDS)("sqlite runner on %s", (kind) => {
   it("applies every migration once and records it", async () => {
     const d = openDriver(kind);
+    // The longest step, for the record of deviation 11 of plan 12g: a libSQL
+    // step holds the write lock, whose limit is 5 seconds.
+    const step = d.driver.migrateStep.bind(d.driver);
+    let longest = { ms: 0, name: "" };
+    const timed = {
+      ...d.driver,
+      migrateStep: async (...args: Parameters<typeof step>) => {
+        const start = performance.now();
+        const ran = await step(...args);
+        const ms = performance.now() - start;
+        if (ms > longest.ms) longest = { ms, name: String(args[0].params[0]) };
+        return ran;
+      },
+    };
     try {
-      expect(await applySqliteMigrations(d.driver)).toEqual(NAMES);
+      expect(await applySqliteMigrations(timed)).toEqual(NAMES);
+      console.log(`migrate-step: ${kind} longest=${longest.ms.toFixed(1)} ms ${longest.name}`);
       expect(await applySqliteMigrations(d.driver)).toEqual([]);
       const recorded = await rows(d, "SELECT name FROM ta_migrations ORDER BY name");
       expect(recorded.map((r) => r.name)).toEqual(NAMES);

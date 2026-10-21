@@ -15,3 +15,12 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+  # libSQL server for the SQLite adapter tests over HTTP (plan 12g). Port 8089
+  # avoids the sibling projects. The image is pinned by its digest beside the
+  # tag, because a tag can move. Digest read with `docker images --digests`
+  # on 2026-10-21 (ruling 1).
+  libsql:
+    image: ghcr.io/tursodatabase/libsql-server:v0.24.32@sha256:dedf5273da945d90f3b85fe367ed8f821349117ac2c488bf43c4a6bf9f2123e0
+    container_name: authtempo-libsql
+    ports:
+      - "8089:8080"

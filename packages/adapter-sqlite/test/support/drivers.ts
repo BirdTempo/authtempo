@@ -9,7 +9,10 @@ import type { SqliteDriver } from "../../src/index.js";
 import { libsql } from "../../src/libsql.js";
 import { nodeSqlite } from "../../src/node.js";
 
-/** The drivers that run in the Node test run. Task 4 adds Bun and libSQL over HTTP. */
+/**
+ * The drivers of the runner and error tests. libSQL over HTTP and Bun have
+ * their own conformance files (test/conformance-libsql-http.test.ts, test/bun).
+ */
 export const DRIVER_KINDS = ["node", "better-sqlite3", "libsql-file"] as const;
 export type DriverKind = (typeof DRIVER_KINDS)[number];
 

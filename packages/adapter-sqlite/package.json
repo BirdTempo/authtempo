@@ -33,8 +33,8 @@
   ],
   "scripts": {
     "build": "node ../../scripts/clean-dist.mjs && node scripts/copy-migrations.mjs && tsc -p tsconfig.json",
-    "typecheck": "node scripts/copy-migrations.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "typecheck": "node scripts/copy-migrations.mjs && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json && tsc -p tsconfig.pool.json",
+    "test": "vitest run && bun --bun vitest run -c vitest.bun.config.ts && vitest run -c vitest.pool.config.ts && node proof/bundle.mjs"
   },
   "dependencies": {
     "@authtempo/adapter-d1": "workspace:*",
@@ -53,6 +53,8 @@
     }
   },
   "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.4.0",
+    "@cloudflare/workers-types": "5.20261007.1",
     "@libsql/client": "0.18.0",
     "@types/better-sqlite3": "9.6.0",
     "@types/bun": "1.4.3",
@@ -60,6 +62,7 @@
     "better-sqlite3": "13.0.3",
     "bun": "1.4.3",
     "typescript": "7.0.2",
-    "vitest": "5.0.3"
+    "vitest": "5.0.3",
+    "wrangler": "4.148.0"
   }
 }

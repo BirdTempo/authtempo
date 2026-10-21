@@ -30,8 +30,10 @@ import { execFileSync } from "node:child_process";
 // Task 10).
 // Plan 12h adds packages/observe/vitest.config.ts and vitest.pool.config.ts (48, Task 10).
 // Plan 12h adds packages/core/vitest.events.config.ts (49, Task 12).
+// Plan 12g: the SQLite adapter adds packages/adapter-sqlite/vitest.config.ts,
+// vitest.bun.config.ts, and vitest.pool.config.ts (52, Task 4).
 // Raise this number when a package adds a vitest config.
-const MINIMUM = 49;
+const MINIMUM = 52;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",
