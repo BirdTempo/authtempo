@@ -13,8 +13,9 @@ export const DEFAULT_GITLAB_ISSUER = "https://gitlab.com";
 /**
  * True for an `https:` origin on a public host. The origin has no path,
  * query, fragment, user, or trailing slash. A public host is not an IP
- * literal, not a local name, and not the host of `baseURL`. Core posts the client secret to this host, so a
- * config must not point it inside a network or at core itself.
+ * literal, not a local name, and not the host of `baseURL`. Core posts the
+ * client secret to this host, so a config must not point it inside a
+ * network or at core itself.
  */
 export function isGitlabIssuer(value: unknown, baseURL: string): value is string {
   if (typeof value !== "string") return false;

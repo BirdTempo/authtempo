@@ -112,9 +112,11 @@ import {
 import { type OAuth2Entry, oauth2Provider } from "./social/oauth2.js";
 import { isIssuer, type OidcEntry, oidcProvider } from "./social/oidc.js";
 import {
+  COMING_PRESET_NAMES,
   CORE_AUTHORIZE_PARAMS,
   type ConfiguredProvider,
   isHttpsUrl,
+  PRESET_PROVIDER_NAMES,
   PROVIDER_NAME_RE,
   RESERVED_PROVIDER_NAMES,
 } from "./social/provider.js";
@@ -2855,6 +2857,20 @@ function resolveCaptcha(
   };
 }
 
+const listText = (names: readonly string[]) =>
+  new Intl.ListFormat("en", { type: "conjunction" }).format(names);
+/**
+ * Why a list entry name is reserved. It reads the preset lists of
+ * social/provider.ts, so a moved name changes the text with no edit here.
+ */
+const RESERVED_REASON = [
+  `${listText(PRESET_PROVIDER_NAMES)} are presets`,
+  ...(COMING_PRESET_NAMES.length > 0
+    ? [`${listText(COMING_PRESET_NAMES)} are kept for coming presets`]
+    : []),
+  "email and credential are identity kinds",
+].join("; ");
+
 /**
  * The configured providers: google, apple, then the list entries in order.
  * Refuses every entry that could break a flow rule (plan 9c).
@@ -2904,9 +2920,7 @@ function socialProviders(social: AuthConfig["social"], baseURL: string): Configu
     if (typeof name !== "string" || !PROVIDER_NAME_RE.test(name))
       throw new ConfigError(`${path}.name must match ${PROVIDER_NAME_RE.source}`);
     if (RESERVED_PROVIDER_NAMES.has(name))
-      throw new ConfigError(
-        `${path}.name ${name} is reserved: google, apple, github, linkedin, microsoft, discord, and gitlab are presets; slack, twitter, and facebook are kept for coming presets; email and credential are identity kinds`,
-      );
+      throw new ConfigError(`${path}.name ${name} is reserved: ${RESERVED_REASON}`);
     if (names.has(name)) throw new ConfigError(`${path}.name ${name} is given twice`);
     names.add(name);
   };

@@ -355,6 +355,8 @@ export type { MicrosoftConfig } from "./social/microsoft.js";
 export type { OAuth2Entry } from "./social/oauth2.js";
 export type { OidcEndpoints, OidcEntry } from "./social/oidc.js";
 export {
+  COMING_PRESET_NAMES,
+  PRESET_PROVIDER_NAMES,
   PROVIDER_NAME_RE,
   type SocialProfile,
   type SocialProviderName,

@@ -138,6 +138,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `CAPTCHA_HEADER` | `x-captcha-response`, the header of the captcha token. |
 | `CAPTCHA_TOKEN_MAX` | 2048. A longer token answers `captcha_failed` with no call. |
 | `PROVIDER_NAME_RE`, `ROLE_RE`, `TWO_FACTOR_TOKEN_RE` | The patterns of a provider name, a role, and a second factor challenge. |
+| `PRESET_PROVIDER_NAMES`, `COMING_PRESET_NAMES` | The names of the social presets, and the names kept for coming presets. A list entry takes neither. |
 
 ## Types
 

@@ -2,9 +2,9 @@ import type { Observer } from "../observe/observer.js";
 import type { JwtSeam } from "../seams/jwt.js";
 
 /**
- * A provider name: a preset (`google`, `apple`, `github`, `linkedin`) or the
- * name of an entry of `social.oidc` or `social.oauth2` (plan 9c). It is the
- * route segment and the `provider` of the identity row.
+ * A provider name: a preset (`PRESET_PROVIDER_NAMES`) or the name of an
+ * entry of `social.oidc` or `social.oauth2` (plan 9c). It is the route
+ * segment and the `provider` of the identity row.
  */
 export type SocialProviderName = string;
 
@@ -12,16 +12,11 @@ export type SocialProviderName = string;
 export const PROVIDER_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
 
 /**
- * Names a list entry must not take. The presets own the first ten: the six
- * of plan 12i are reserved together, so no list entry takes a name of a
- * later preset. `email`
- * is core's identity for a verified address: the engine finds an identity by
- * `(provider, subject)`, so a list provider named `email` could sign in as
- * the owner of any address that its user info answers as the subject.
- * `credential` is the Better Auth password row, which the compatibility
- * package refuses as an identity (plan 9c).
+ * The presets that exist, in the order that the config builds them. The
+ * compatibility package reads this list, so a preset added here changes its
+ * refusal text with no compat edit.
  */
-export const RESERVED_PROVIDER_NAMES: ReadonlySet<string> = new Set([
+export const PRESET_PROVIDER_NAMES: readonly string[] = [
   "google",
   "apple",
   "github",
@@ -29,9 +24,26 @@ export const RESERVED_PROVIDER_NAMES: ReadonlySet<string> = new Set([
   "microsoft",
   "discord",
   "gitlab",
-  "slack",
-  "twitter",
-  "facebook",
+];
+
+/**
+ * The names of the presets of plan 12i Task 14. They are reserved now, so no
+ * list entry takes a name of a later preset. Task 14 moves each name to
+ * `PRESET_PROVIDER_NAMES`.
+ */
+export const COMING_PRESET_NAMES: readonly string[] = ["slack", "twitter", "facebook"];
+
+/**
+ * Names a list entry must not take: each preset, each coming preset, `email`,
+ * and `credential`. `email` is core's identity for a verified address. The
+ * engine finds an identity by `(provider, subject)`. So a list provider named
+ * `email` could sign in as the owner of any address that its user info
+ * answers as the subject. `credential` is the Better Auth password row, which
+ * the compatibility package refuses as an identity (plan 9c).
+ */
+export const RESERVED_PROVIDER_NAMES: ReadonlySet<string> = new Set([
+  ...PRESET_PROVIDER_NAMES,
+  ...COMING_PRESET_NAMES,
   "email",
   "credential",
 ]);
