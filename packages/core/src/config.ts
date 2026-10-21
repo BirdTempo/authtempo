@@ -338,6 +338,16 @@ export interface AuthConfig {
      * inject one. Core wraps it: no redirect is followed.
      */
     fetch?: typeof fetch;
+    /**
+     * An app payload through the social flow (plan 12i Task 19). The start
+     * takes `data`, the base64url of a UTF-8 JSON object of at most
+     * `maxBytes` bytes (1 to 1024, default 1024) and a depth of at most 4.
+     * The state row holds it sealed. The callback gives it to
+     * `session.afterCreate` and `identity.afterLink` as `stateData`. The
+     * person's browser sent it, so it is never a secret and never a trust
+     * decision. Default false: a start with `data` answers `invalid_body`.
+     */
+    stateData?: { maxBytes?: number } | false;
   };
   /** The ID token verifier and the Apple secret signer. Default: jose. Tests inject a fake. */
   jwt?: JwtSeam;
@@ -1098,7 +1108,12 @@ export interface ResolvedConfig {
     linkBuilder: (token: string, next: string) => string;
     confirmPage: (input: ConfirmPageInput) => string;
   };
-  social: { providers: ConfiguredProvider[]; fetch: typeof fetch };
+  social: {
+    providers: ConfiguredProvider[];
+    fetch: typeof fetch;
+    /** Null while `social.stateData` is off. */
+    stateData: { maxBytes: number } | null;
+  };
   jwt: JwtSeam;
   passkey: ResolvedPasskey | null;
   webauthn: WebAuthnSeam;
@@ -1540,7 +1555,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
           `${input.baseURL}${basePath}/magic-link/verify?token=${encodeURIComponent(token)}`),
       confirmPage: input.magicLink?.confirmPage ?? defaultConfirmPage,
     },
-    social: { providers, fetch: fetchFn },
+    social: { providers, fetch: fetchFn, stateData: resolveStateData(input.social?.stateData) },
     jwt: input.jwt ?? createJoseJwtSeam(fetchFn),
     passkey,
     webauthn: input.webauthn ?? createSimpleWebAuthnSeam(),
@@ -2973,6 +2988,26 @@ const RESERVED_REASON = [
  * The configured providers: google, apple, then the list entries in order.
  * Refuses every entry that could break a flow rule (plan 9c).
  */
+/** The bound of `social.stateData.maxBytes` (plan 12i Task 19): the state payload of the Better Auth docs audit is 1 KB at most. */
+export const STATE_DATA_MAX_BYTES = 1024;
+
+function resolveStateData(
+  input: NonNullable<AuthConfig["social"]>["stateData"],
+): ResolvedConfig["social"]["stateData"] {
+  if (input === undefined || input === false) return null;
+  if (typeof input !== "object" || input === null)
+    throw new ConfigError("social.stateData must be an object or false");
+  for (const key of Object.keys(input))
+    if (key !== "maxBytes")
+      throw new ConfigError(`social.stateData.${key} is not an option; core has maxBytes`);
+  const maxBytes = input.maxBytes ?? STATE_DATA_MAX_BYTES;
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > STATE_DATA_MAX_BYTES)
+    throw new ConfigError(
+      `social.stateData.maxBytes must be a whole number from 1 to ${STATE_DATA_MAX_BYTES}`,
+    );
+  return { maxBytes };
+}
+
 function socialProviders(social: AuthConfig["social"], baseURL: string): ConfiguredProvider[] {
   const providers: ConfiguredProvider[] = [];
   if (social?.google) {

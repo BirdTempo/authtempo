@@ -340,7 +340,17 @@ export interface SessionHooks {
     user: UserRow;
     via: SessionVia;
   }): Awaitable<SessionPatchAnswer>;
-  afterCreate?(e: { session: SessionRow; user: UserRow; via: SessionVia }): Awaitable<void>;
+  /**
+   * Once after the commit. `stateData` is the app payload of a social
+   * sign-in that started with `data` (plan 12i Task 19). The person's
+   * browser sent it: it is never a secret and never a trust decision.
+   */
+  afterCreate?(e: {
+    session: SessionRow;
+    user: UserRow;
+    via: SessionVia;
+    stateData?: Record<string, unknown>;
+  }): Awaitable<void>;
   /**
    * Once per session row that a flow deleted. The sweep fires it only for
    * a session that a ban or a revoke left for it (ruling 44 of plan 12f).
@@ -487,10 +497,12 @@ export interface IdentityHooks {
     identity: IdentitySummary;
     via: IdentityLinkVia;
   }): Awaitable<void>;
+  /** `stateData` is the app payload of a social sign-in or link that started with `data` (plan 12i Task 19), as at `session.afterCreate`. */
   afterLink?(e: {
     user: UserRow;
     identity: IdentitySummary;
     via: IdentityLinkVia;
+    stateData?: Record<string, unknown>;
   }): Awaitable<void>;
   beforeUnlink?(e: { user: UserRow; identity: IdentitySummary }): Awaitable<void>;
   afterUnlink?(e: { user: UserRow; identity: IdentitySummary }): Awaitable<void>;

@@ -115,7 +115,11 @@ export const CONFIG_KEYS = {
     oidc: true,
     oauth2: true,
     fetch: true,
+    stateData: true,
   } satisfies Keys<Part<"social">>,
+  "social.stateData": { maxBytes: true } satisfies Keys<
+    NonNullable<Exclude<Part<"social">["stateData"], false>>
+  >,
   "social.google": { clientId: true, clientSecret: true } satisfies Keys<GoogleConfig>,
   "social.apple": {
     clientId: true,

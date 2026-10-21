@@ -4,14 +4,17 @@ import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
 import type { Observer } from "../observe/observer.js";
+import { openSealed, seal } from "../primitives/aead.js";
 import {
   constantTimeEqual,
+  fromBase64Url,
   randomBase64Url,
   randomToken,
   sha256Base64Url,
   sha256Hex,
 } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import { currentSecret, secretFor } from "../primitives/keyring.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose } from "../schema.js";
@@ -80,6 +83,12 @@ const STATE_PURPOSES: readonly VerificationPurpose[] = ["oauth-state", LINK_STAT
 export interface SocialStart {
   provider: string;
   next?: string | undefined;
+  /**
+   * The app payload (plan 12i Task 19): the base64url of a UTF-8 JSON
+   * object. It needs `social.stateData`; else, or for a value that breaks
+   * the rule, the start answers `invalid_body` and writes no row.
+   */
+  data?: string | undefined;
   ip: string | null;
 }
 
@@ -120,6 +129,70 @@ interface StateData {
   next: string;
   /** Set by `startLink` (plan 12a): the callback links to this user and this session, and opens no session. */
   link?: LinkTarget;
+  /**
+   * The app payload, sealed under the row's secret version with the row id
+   * as AAD (plan 12i Task 19). The clear payload is never in the row.
+   */
+  sealedData?: string;
+}
+
+/** The `info` of the payload's key: one app secret gives one key per use. */
+const STATE_DATA_INFO = "authtempo oauth-state-data";
+/** The depth of the payload: the object itself is 1. */
+const STATE_DATA_MAX_DEPTH = 4;
+
+/** True when `value` nests no deeper than `left` levels of objects and lists. */
+function depthWithin(value: unknown, left: number): boolean {
+  if (typeof value !== "object" || value === null) return true;
+  if (left === 0) return false;
+  return Object.values(value).every((v) => depthWithin(v, left - 1));
+}
+
+/**
+ * The UTF-8 JSON bytes of the payload, or `invalid_body` (plan 12i Task 19).
+ * The rule: `social.stateData` is on, the value is base64url, its bytes are
+ * at most `maxBytes` of valid UTF-8, and they parse to an object (not a
+ * list) with a depth of at most 4. The bytes, not a new form of them, are
+ * sealed, so the callback gives the hooks what the browser sent.
+ */
+function stateDataBytes(config: ResolvedConfig, raw: string): Result<Uint8Array> {
+  const rule = config.social.stateData;
+  if (!rule) return fail("invalid_body");
+  let bytes: Uint8Array;
+  let value: unknown;
+  try {
+    bytes = fromBase64Url(raw);
+    if (bytes.length > rule.maxBytes) return fail("invalid_body");
+    value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    return fail("invalid_body");
+  }
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return fail("invalid_body");
+  if (!depthWithin(value, STATE_DATA_MAX_DEPTH)) return fail("invalid_body");
+  return ok(bytes);
+}
+
+/**
+ * The payload of a consumed state row, or null when the row holds none.
+ * A payload under a secret version that left the config, or one that does
+ * not open under this row's id, answers `invalid_token`: the flow fails
+ * closed, and the person starts again.
+ */
+async function openStateData(
+  config: ResolvedConfig,
+  row: { id: string; secretVersion: number },
+  data: StateData,
+): Promise<Result<Record<string, unknown> | null>> {
+  const sealed = data.sealedData;
+  if (sealed === undefined) return ok(null);
+  if (typeof sealed !== "string") return fail("invalid_token");
+  const secret = secretFor(config.observe, config.keyring, row.secretVersion, row.id);
+  if (secret === null) return fail("invalid_token");
+  const plain = await openSealed(secret, STATE_DATA_INFO, sealed, row.id);
+  if (plain === null) return fail("invalid_token");
+  // The start checked the rule, and the seal proves that these are its bytes.
+  return ok(JSON.parse(new TextDecoder().decode(plain)) as Record<string, unknown>);
 }
 
 interface LinkTarget {
@@ -158,6 +231,9 @@ async function beginSocial(
 ): Promise<Result<SocialStarted>> {
   const entry = findProvider(config, input.provider);
   if (!entry) return fail("not_found");
+  // Before the limits and before any row: a refused payload counts no try.
+  const payload = input.data === undefined ? null : stateDataBytes(config, input.data);
+  if (payload && !payload.ok) return payload;
   if (!(await limit(config, "social-start:ip", ipKey(input.ip), START_LIMIT))) {
     return fail("rate_limited");
   }
@@ -171,15 +247,21 @@ async function beginSocial(
   const verifier = randomBase64Url(32);
   const nonce = randomBase64Url(32);
   const bindToken = randomBase64Url(32);
+  const id = newId(now);
   const data: StateData = {
     verifier,
     nonceHash: await sha256Hex(nonce),
     bindHash: await sha256Hex(bindToken),
     next: safeNext(input.next),
     ...(link ? { link } : {}),
+    ...(payload
+      ? {
+          sealedData: await seal(currentSecret(config.keyring), STATE_DATA_INFO, payload.value, id),
+        }
+      : {}),
   };
   await config.storage.create("verification", {
-    id: newId(now),
+    id,
     purpose: link ? LINK_STATE : "oauth-state",
     identifier: provider.name,
     valueHash: await sha256Hex(state),
@@ -217,6 +299,8 @@ export interface SocialLinkStart {
   provider: string;
   session: ResolvedSession;
   next?: string | undefined;
+  /** The app payload, as `SocialStart.data` (plan 12i Task 19). */
+  data?: string | undefined;
   ip: string | null;
 }
 
@@ -237,7 +321,7 @@ export async function startLink(
   if (!fresh.ok) return fresh;
   return beginSocial(
     config,
-    { provider: input.provider, next: input.next, ip: input.ip },
+    { provider: input.provider, next: input.next, data: input.data, ip: input.ip },
     { userId: user.id, sessionId: session.id },
   );
 }
@@ -291,6 +375,10 @@ export async function completeSocial(
   if (!input.bindToken || !constantTimeEqual(await sha256Hex(input.bindToken), data.bindHash)) {
     return fail("invalid_token");
   }
+  const opened = await openStateData(config, row, data);
+  if (!opened.ok) return opened;
+  // The payload goes to the two hook events only: never to a redirect, an answer, or a line.
+  const stateData = opened.value;
   if (input.error) return fail("oauth_denied");
   if (!input.code) return fail("oauth_failed");
   // A link checks its session before any network call (plan 12a).
@@ -329,6 +417,7 @@ export async function completeSocial(
       safeNext(data.next),
       input,
       now,
+      stateData,
     );
 
   // The session or the challenge commits with the claim in one transaction,
@@ -353,7 +442,10 @@ export async function completeSocial(
     now,
   );
   // The user and identity hooks, with the sign-up rule first (plan 12a).
-  const made = createSteps(config, "social", { signUpRule: true });
+  const made = createSteps(config, "social", {
+    signUpRule: true,
+    ...(stateData ? { stateData } : {}),
+  });
   // The verify hooks of an unverified user that this sign-in claims (plan 12a, Task 18).
   const verified = verifySteps(config, "social");
   const resolved = await hookGuard(() =>
@@ -386,7 +478,7 @@ export async function completeSocial(
     return ok({ ...after.pending, next, user });
   }
   await touchTrust(config, steps.trustId(), now);
-  await sessionOpened(config, after.session, user, "social", provider.name);
+  await sessionOpened(config, after.session, user, "social", provider.name, stateData);
   return ok({ token: after.token, next, user });
 }
 
@@ -442,6 +534,7 @@ async function completeLink(
   next: string,
   input: SocialComplete,
   now: Date,
+  stateData: Record<string, unknown> | null,
 ): Promise<Result<SocialLinked>> {
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: held.userId },
@@ -503,7 +596,7 @@ async function completeLink(
     config.observe,
     "identity.afterLink",
     config.hooks.identity.afterLink,
-    { user, identity, via: "link" },
+    { user, identity, via: "link", ...(stateData ? { stateData } : {}) },
     user.id,
   );
   // After the commit, never inside the transaction (plan 12a Task 6).

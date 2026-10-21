@@ -377,7 +377,7 @@ export const ROUTES = Object.freeze([
     path: "/social/:provider/start",
     feature: "social",
     auth: ["none"],
-    codes: ["oauth_failed", "rate_limited"],
+    codes: ["invalid_body", "oauth_failed", "rate_limited"],
     oauthCodes: [],
   },
   {

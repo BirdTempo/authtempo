@@ -197,6 +197,7 @@ A moved key counts against the cap of 50 live tokens per owner, because it acts.
 - `/two-factor/disable`, `/two-factor/get-totp-uri`, and `/two-factor/generate-backup-codes` need a fresh session too, checked before the password.
 - Better Auth's `list-sessions` needs a fresh session. On authtempo the list needs a session only, as core's `GET /sessions` does.
 - A social link needs the provider's verified address, equal to the account's. Better Auth also links an unverified address of a trusted provider, and a different address with `allowDifferentEmails`. On authtempo the callback answers `email_mismatch` for a different address, and both options are refused at start.
+- `additionalData` of the social start and of the link maps to core's [state payload](/docs/guides/social-state-data/). `getOAuthState()` is not served. Read `stateData` in core's `hooks.session.afterCreate` and `hooks.identity.afterLink`.
 - `user.deleteUser.enabled` stays off by default, as in Better Auth. An organization where the user is the last owner and other members remain stops the delete with `SOLE_OWNER`.
 
 :::caution

@@ -49,6 +49,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
         const r = await startSocial(ctx.config, {
           provider: provider.name,
           next: ctx.url.searchParams.get("next") ?? undefined,
+          data: ctx.url.searchParams.get("data") ?? undefined,
           ip: ctx.ip,
         });
         if (!r.ok) return authErrorRedirect(ctx.config, r.code);
@@ -77,6 +78,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
           provider: provider.name,
           session: s.resolved,
           next: body.value.next,
+          data: body.value.data,
           ip: ctx.ip,
         });
         if (!r.ok) return failure(r);

@@ -76,7 +76,8 @@ export function patchedNewUser(observe: Observer, user: UserRow, patch: unknown)
 export function createSteps(
   config: ResolvedConfig,
   via: UserCreateVia,
-  options: { signUpRule: boolean },
+  // `stateData`: the app payload of a social sign-in, for `identity.afterLink` (plan 12i Task 19).
+  options: { signUpRule: boolean; stateData?: Record<string, unknown> },
 ): CreateSteps {
   const hooks = config.hooks;
   let minted: string | null = null;
@@ -127,7 +128,12 @@ export function createSteps(
           config.observe,
           "identity.afterLink",
           hooks.identity.afterLink,
-          { user, identity: linked.identity, via: "sign_in" },
+          {
+            user,
+            identity: linked.identity,
+            via: "sign_in",
+            ...(options.stateData ? { stateData: options.stateData } : {}),
+          },
           user.id,
         );
     },

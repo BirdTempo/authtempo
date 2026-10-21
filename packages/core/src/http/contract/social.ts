@@ -11,11 +11,18 @@ export const callbackBody = z.object({
   id_token: z.string().max(8192).optional(),
 });
 
-// Not strict: a form may carry the name of its button.
-export const linkBody = z.object({ next: z.string().max(2048).optional() });
+/**
+ * The app payload of plan 12i Task 19: the base64url of a UTF-8 JSON
+ * object. 1366 characters hold 1024 bytes, the most that
+ * `social.stateData.maxBytes` allows. The engine rules on the bytes.
+ */
+const stateData = z.string().max(1366).optional();
 
-/** The query of the start: the landing path after the sign-in. */
-export const startQuery = z.object({ next: z.string().max(2048).optional() });
+// Not strict: a form may carry the name of its button.
+export const linkBody = z.object({ next: z.string().max(2048).optional(), data: stateData });
+
+/** The query of the start: the landing path after the sign-in, and the app payload. */
+export const startQuery = z.object({ next: z.string().max(2048).optional(), data: stateData });
 
 /** The query of a GET callback. Every field is optional; the engine rules on what is missing. */
 export const callbackQuery = z.object({

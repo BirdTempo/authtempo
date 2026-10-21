@@ -590,6 +590,10 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
             ...(linkedin
               ? { linkedin: { clientId: linkedin.clientId, clientSecret: linkedin.clientSecret } }
               : {}),
+            // Better Auth 1.7.2 takes `additionalData` at every social start
+            // with no option (sign-in.mjs:116), so the shim turns on core's
+            // sealed payload at its bound of 1024 bytes (plan 12i Task 19).
+            stateData: {},
           },
         }
       : {}),

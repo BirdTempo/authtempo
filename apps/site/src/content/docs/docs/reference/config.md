@@ -101,6 +101,8 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.oidc` | `OidcEntry` list | empty | OpenID Connect providers. |
 | `social.oauth2` | `OAuth2Entry` list | empty | OAuth 2.0 providers that issue no ID token. |
 | `social.fetch` | fetch | the global fetch | The fetch of every provider call. Tests inject one. |
+| `social.stateData` | object or `false` | `false` | The app payload through the social flow. The start and the link start take `data`, and the hooks get `stateData`. [Carry app data through a social sign-in](/docs/guides/social-state-data/). |
+| `social.stateData.maxBytes` | number | `1024` | 1 to 1024. The most UTF-8 bytes of the JSON of `data`. |
 | `social.google.clientId` | string | required | The client id of the Google OAuth client. |
 | `social.google.clientSecret` | string | required | Core sends it in the token request body. |
 | `social.apple.clientId` | string | required | The Services ID, such as `com.example.web`. |

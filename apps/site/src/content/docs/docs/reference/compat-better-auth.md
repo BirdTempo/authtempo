@@ -145,6 +145,7 @@ Where the shim differs from Better Auth:
 | The credential account can be unlinked | Its unlink answers `NOT_SUPPORTED` with 501. Core has no password removal. |
 | No mail after a credential change | The same. The shim sets core's `account.notices: false`. Use core's `createAuth` for the notice mails. |
 | The user delete runs the account delete hooks | It runs none. A credential account fires no account hook, because core's password row is not an identity. |
+| `additionalData` of `signIn.social` and `/link-social` reaches `getOAuthState()` | The shim sends it to core as `data`, sealed in the state row. `getOAuthState()` is not served, and no `databaseHooks` call gets it. Core's `hooks.session.afterCreate` and `hooks.identity.afterLink` get it as `stateData`. A list, or JSON over 1024 bytes, answers `VALIDATION_ERROR`. |
 
 The shim's own codes `EMAIL_CAN_NOT_BE_UPDATED`, `FIELD_NOT_ALLOWED`, `ACCOUNT_NOT_FOUND`, and `CHANGE_EMAIL_DISABLED` answer 400, as on Better Auth.
 

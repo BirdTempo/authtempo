@@ -420,6 +420,8 @@ export async function sessionOpened(
   user: UserRow,
   via: SessionVia,
   provider?: string,
+  // The app payload of a social sign-in (plan 12i Task 19): the hook event only, never the line.
+  stateData?: Record<string, unknown> | null,
 ): Promise<void> {
   config.observe.emit({
     name: "sign_in",
@@ -435,7 +437,7 @@ export async function sessionOpened(
     config.observe,
     "session.afterCreate",
     config.hooks.session.afterCreate,
-    { session, user, via },
+    { session, user, via, ...(stateData ? { stateData } : {}) },
     session.id,
   );
 }

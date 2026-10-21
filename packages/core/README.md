@@ -410,6 +410,12 @@ its message.
 `social.fetch` and `jwt` exist for tests: inject a fetch for the token
 endpoint and a fake verifier, so no test reaches a provider.
 
+With `social.stateData: {}` (off by default), the start and the link start
+take `data`: the base64url of a UTF-8 JSON object of at most 1024 bytes and
+a depth of 4. The state row holds it sealed, and the callback gives it to
+`hooks.session.afterCreate` and `hooks.identity.afterLink` as `stateData`.
+The browser sent it, so never trust it.
+
 ## Passkeys
 
 Set `passkey: { rpID, rpName, origins }`. `rpID` is the registrable

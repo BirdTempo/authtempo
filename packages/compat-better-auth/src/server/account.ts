@@ -19,7 +19,7 @@ import {
 } from "./api.js";
 import { translate } from "./email-otp.js";
 import type { Mapped } from "./map-options.js";
-import { listedSession, toNext, toPasskey } from "./shapes.js";
+import { listedSession, toNext, toPasskey, toStateData } from "./shapes.js";
 
 /**
  * Better Auth 1.7.2's account paths (dist/api/routes/session.mjs,
@@ -52,11 +52,11 @@ const GET_PATHS: readonly string[] = ["/list-sessions", "/list-accounts", "/dele
  * Better Auth 1.7.2's link-social fields that core cannot keep
  * (account.mjs:77 to :133). Core starts a redirect link only, with its own
  * scopes and its own error page, so each would be dropped in silence.
+ * `additionalData` maps to core's sealed `data` (plan 12i Task 19).
  */
 const LINK_NOT_SUPPORTED = [
   "idToken",
   "scopes",
-  "additionalData",
   "additionalParams",
   "requestSignUp",
   "loginHint",
@@ -282,12 +282,14 @@ export async function accountRoute(
         const disableRedirect = body.disableRedirect;
         if (disableRedirect !== undefined && typeof disableRedirect !== "boolean")
           throw new APIError(400, BETTER_AUTH_CODES.invalid_body);
+        // Better Auth takes a record only (account.mjs:132).
+        const data = toStateData(body.additionalData);
+        if (data === null) throw new APIError(400, BETTER_AUTH_CODES.invalid_body);
         return answer(
-          await core(
-            "POST",
-            `/social/${encodeURIComponent(provider)}/link`,
-            next !== undefined ? { next } : {},
-          ),
+          await core("POST", `/social/${encodeURIComponent(provider)}/link`, {
+            ...(next !== undefined ? { next } : {}),
+            ...(data !== undefined ? { data } : {}),
+          }),
           // Better Auth 1.7.2's answer (account.mjs:257 to :260). Core's headers keep the binding cookie.
           (b) => ({ url: b.url, redirect: disableRedirect !== true }),
         );

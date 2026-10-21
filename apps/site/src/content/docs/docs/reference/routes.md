@@ -253,16 +253,16 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | Query `{ next? }` |
+| Input | Query `{ next?, data? }`. `data` is the base64url of a UTF-8 JSON object for [the state payload](/docs/guides/social-state-data/). It needs `social.stateData` |
 | Answer | 302 to the provider, with the binding cookie `__Secure-tempo_session_oauth`. A failure redirects to `/?auth_error=<code>` |
-| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed) |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed) |
 
 <h3 id="post-social-provider-link"><code>POST /social/:provider/link</code></h3>
 
 | Field | Value |
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the user is verified. The callback needs the binding cookie and the session cookie of that session. Apple's form post needs no session cookie while it is `Lax` |
-| Input | JSON or form `{ next? }` |
+| Input | JSON or form `{ next?, data? }`. `data` is the state payload, as at the start |
 | Answer | JSON: `{ url }` and the binding cookie; the client navigates to `url`. A form: 303 to the provider. The callback links the identity to the session's user and redirects to `next`. It sets no session cookie. A failure at the callback redirects to `/?auth_error=<code>` |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed). The callback answers the codes of [`GET /social/:provider/callback`](#get-social-provider-callback), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 

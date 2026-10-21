@@ -21,7 +21,7 @@ import { defaultRoles, type Role } from "../access.js";
 import { BETTER_AUTH_CODES, clientError, compatClientError } from "../errors.js";
 import { corePermissionsOf, toBetterAuthNames, toCoreNames } from "../role-map.js";
 import { ADMIN_NOT_SUPPORTED } from "../server/admin-lines.js";
-import { COOKIE_NAME, toNext } from "../server/shapes.js";
+import { COOKIE_NAME, toNext, toStateData } from "../server/shapes.js";
 import type {
   AdminClientCalls,
   AdminListUsersQuery,
@@ -802,14 +802,22 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
         if (r.data) store.refetchIfStarted();
         return r;
       },
-      async social({ provider, callbackURL, disableRedirect }) {
+      async social({ provider, callbackURL, disableRedirect, additionalData }) {
         if (expo) return systemBrowser();
         const next = toNext(callbackURL, pageOrigin());
         if (next === null) return { data: null, error: compatClientError("INVALID_CALLBACK_URL") };
+        // Core's sealed state payload (plan 12i Task 19). Better Auth takes a record only.
+        const data = toStateData(additionalData);
+        if (data === null)
+          return { data: null, error: clientError(BETTER_AUTH_CODES.invalid_body, 400) };
         const resolved = resolveBase();
         if (!resolved) return noBase();
         const { origin, basePath } = resolved;
-        const url = `${origin}${basePath}/social/${encodeURIComponent(provider)}/start${next !== undefined ? `?next=${encodeURIComponent(next)}` : ""}`;
+        const query = new URLSearchParams({
+          ...(next !== undefined ? { next } : {}),
+          ...(data !== undefined ? { data } : {}),
+        }).toString();
+        const url = `${origin}${basePath}/social/${encodeURIComponent(provider)}/start${query ? `?${query}` : ""}`;
         const go = disableRedirect !== true && typeof location !== "undefined";
         if (go) location.href = url;
         return { data: { url, redirect: go }, error: null };

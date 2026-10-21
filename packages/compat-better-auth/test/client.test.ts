@@ -341,6 +341,35 @@ describe("createAuthClient", () => {
     expect(start.headers.get("location")?.startsWith("https://accounts.google.com/")).toBe(true);
   });
 
+  it("maps additionalData to core's sealed data at the social start, and refuses a list", async () => {
+    const s = server();
+    const c = createAuthClient({
+      baseURL: BASE,
+      basePath: "/api/auth",
+      fetchOptions: { customFetchImpl: s.fetchImpl },
+    });
+    const r = await c.signIn.social({
+      provider: "google",
+      callbackURL: "/dashboard",
+      disableRedirect: true,
+      additionalData: { plan: "pro" },
+    });
+    // The base64url of {"plan":"pro"}.
+    expect(r.data?.url).toBe(
+      `${BASE}/api/auth/social/google/start?next=%2Fdashboard&data=eyJwbGFuIjoicHJvIn0`,
+    );
+    // The shim turns core's stateData on, so the start goes to Google.
+    const start = await s.auth.handler(new Request(r.data?.url ?? ""));
+    expect(start.status).toBe(302);
+    expect(start.headers.get("location")?.startsWith("https://accounts.google.com/")).toBe(true);
+    const list = await c.signIn.social({
+      provider: "google",
+      disableRedirect: true,
+      additionalData: ["pro"] as unknown as Record<string, unknown>,
+    });
+    expect(list).toMatchObject({ data: null, error: { status: 400, code: "VALIDATION_ERROR" } });
+  });
+
   it("runs consumer-i's organization calls: create, setActive, inviteMember, getFullOrganization, acceptInvitation", async () => {
     const s = server();
     const owner = createAuthClient({
