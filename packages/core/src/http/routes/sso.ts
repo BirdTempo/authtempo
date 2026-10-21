@@ -157,9 +157,9 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
         // A form: the code goes to the error page of the app, as a social failure does.
         if (!r.ok) return redirect(authErrorUrl(config, r.code));
         if (!r.value.sso) return redirect(authErrorUrl(config, "sso_not_configured"));
-        // A page of this origin, not a 303: Chromium applies form-action to each
-        // redirect after the post, so the 302 of the start to the IdP would fail.
-        // A failure above goes to appURL, which is baseURL or a trusted origin.
+        // A page of this origin, not a 303. Chromium applies form-action to each
+        // redirect after the post, so it would block the 302 of the start to the
+        // IdP. A failure above goes to appURL, which is baseURL or a trusted origin.
         const next = body.value.next;
         const location =
           next === undefined ? r.value.start : `${r.value.start}?next=${encodeURIComponent(next)}`;
