@@ -114,9 +114,9 @@ Some flows lock a row before their before hook. The lock holds until the commit.
 | Member removal or leave | `organization.beforeRemoveMember` | the person's user row; for an owner or with `revokeTokens`, the organization row; for a loss of the platform role, the sessions of the person and of each impersonation that the person opened |
 | Member role change | `organization.beforeUpdateMemberRole` | for an owner demotion, the organization row; for a loss of the platform role, the member's user row and the sessions of the member and of each impersonation that the member opened |
 | Team create | `organization.beforeCreateTeam` | the organization row |
-| Team delete | `organization.beforeDeleteTeam` | with `keepLastTeam`, the organization row |
+| Team delete | `organization.beforeDeleteTeam` | the sessions that act in the team; with `keepLastTeam`, the organization row |
 | Team member add | `organization.beforeAddTeamMember` | the added user's row and the team row |
-| Team member removal | `organization.beforeRemoveTeamMember` | the team row |
+| Team member removal | `organization.beforeRemoveTeamMember` | the sessions of the person and the team row |
 | Identity unlink | `identity.beforeUnlink` | the user's row |
 | Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row; when the user opened an impersonation, the sessions of the user and of each impersonation that the user opened |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |
