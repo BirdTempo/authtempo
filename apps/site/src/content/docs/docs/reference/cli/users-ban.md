@@ -59,7 +59,9 @@ warning: the act ran, but the end of the OAuth refresh families failed (familyEn
 
 Run [`authtempo sessions end`](/docs/reference/cli/sessions-end/) for the user. It reads the refresh tokens of the user again, and ends each family.
 
-A refusal stops with exit 2 and names its cause. For example, the user is banned, a hook refused the act, or another change ran at the same time.
+A refusal stops with exit 2 and names its cause. For example, no user has the id, a hook refused the act, or another change ran at the same time.
+
+A ban of a banned user is not refused. It writes the ban fields again: the time of the ban, the reason, and the end take the new values. So a second ban without `--until` makes a timed ban a ban with no end. The act also ends the user's access again, and writes a new audit row.
 
 The act ends a page of the user's sessions, and the sweep ends the rest. Until then, each door refuses a left session. The act ends every challenge, handoff code, and OAuth refresh token and code of the user. An API token stays, and works again after an unban. A session JWT and an OAuth access token live to their `exp`.
 
