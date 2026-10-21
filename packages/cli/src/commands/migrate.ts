@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { COMMON_OPTIONS, oneOf, parseOrUsage } from "../args.js";
@@ -200,7 +201,13 @@ export function sqliteSourceOf(ctx: Ctx, v: DatabaseValues): SqliteSource {
 
 async function migrateSqlite(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
   const source = sqliteSourceOf(ctx, v);
-  const seam = await openSqlite(source, (s) => ctx.addSecret(s));
+  if (plan.dryRun && "file" in source && !existsSync(source.file)) {
+    // node:sqlite makes a missing file on a read-write open, and a dry run writes nothing.
+    plan.note(`no file at ${source.file}; a run without --dry-run makes it`);
+    const pending = [...SQLITE_CORE_MIGRATIONS];
+    return { before: null, after: null, pending, applied: [], copied: [] };
+  }
+  const seam = await openSqlite(source, (s) => ctx.addSecret(s), { readOnly: plan.dryRun });
   plan.note(`${"file" in source ? "opening" : "connecting to"} ${seam.where}`);
   return migrateCore(seam, SQLITE_CORE_MIGRATIONS, plan);
 }

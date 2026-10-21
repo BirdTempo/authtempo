@@ -103,6 +103,20 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
       ...CORE.map((n) => `would apply ${n}`),
       "version before: none; version after: none",
     ]);
+    expect(linesOf(r.stderr)).toContain(`no file at ${file}; a run without --dry-run makes it`);
+    // A read with node:sqlite would make the file, so the test reads the file system only.
+    expect(existsSync(file)).toBe(false);
+  });
+
+  it("reads an existing file with --dry-run and writes nothing", () => {
+    const db = new DatabaseSync(file);
+    db.exec("CREATE TABLE app_note (id INTEGER PRIMARY KEY)");
+    db.close();
+    const before = readFileSync(file);
+    const r = migrateFile(["--dry-run", "--json"]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(JSON.parse(r.stdout)).toMatchObject({ before: null, pending: CORE, applied: [] });
+    expect(readFileSync(file).equals(before)).toBe(true);
     expect(taTables(file)).toEqual([]);
   });
 
