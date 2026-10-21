@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfigError, resolveConfig } from "../../src/config.js";
+import { deleteOrganization } from "../../src/engine/organizations.js";
 import {
   addDomain,
   claimingDomain,
@@ -424,6 +425,26 @@ describe("the SSO domains", () => {
     expect(await inOrganizationDomains(w.storage, acme, "ada@mail.acme.example")).toBe(true);
     expect(await inOrganizationDomains(w.storage, eu, "ada@mail.acme.example")).toBe(false);
     expect(await inOrganizationDomains(w.storage, eu, "ada@eu.acme.example")).toBe(true);
+  });
+
+  it("frees the domain of a deleted organization for another organization (ruling 28)", async () => {
+    const w = ssoAuth();
+    const first = await seedOrganization(w, "first");
+    const d = await verified(w, first);
+    const owner = await w.storage.findOne("user", [
+      { field: "email", op: "eq", value: "owner@first.example" },
+    ]);
+    if (!owner) throw new Error("no owner");
+    const gone = await deleteOrganization(w.config, { user: owner, organizationId: first });
+    expect(gone.ok).toBe(true);
+    expect(
+      await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: d.id }]),
+    ).toBeNull();
+    // The second organization proves the same domain.
+    const second = await added(w, await seedOrganization(w, "second"));
+    publish(w, second.record);
+    const r = await verifyDomain(w.config, SSO_APP, { id: second.id });
+    expect(r.ok && r.value.verified).toBe(true);
   });
 
   it("refuses sso with no resolver and sso with no organizations at construction", () => {

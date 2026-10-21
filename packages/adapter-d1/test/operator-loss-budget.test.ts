@@ -245,7 +245,11 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * delete to each sweep. So each page ends fewer: the first run of 12f gave
  * [49, 4, [48, 48, 37]] and [50, 13, [48, 45]]. Plan 12d Task 1 adds
  * scimUser to the user child models, so the account delete sends one more
- * delete: 48 became 49 on 2026-10-21.
+ * delete: 48 became 49 on 2026-10-21. Plan 12d ruling 28 adds 3 deletes to
+ * each organization that goes, the domain, connection, and SCIM token rows.
+ * This scene deletes no organization, so the run of 2026-10-21 still gives
+ * 49. A probe on the binding the same day: the account delete of a user
+ * with one solo organization sent 41 queries before the change and 44 after.
  */
 const DELETE_COUNTS: [number, number, number[]] = [49, 3, [47, 47, 44]];
 const REMOVE_COUNTS: [number, number, number[]] = [49, 11, [47, 47, 26]];

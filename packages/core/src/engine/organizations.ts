@@ -689,6 +689,13 @@ export async function deleteOrganizationRows(
 ): Promise<void> {
   const byOrganization: Where<"member">[] = [{ field: "organizationId", op: "eq", value: id }];
   await tx.delete("organization", [{ field: "id", op: "eq", value: id }]);
+  // Plan 12d (ruling 28): the SSO and SCIM rows go in the step of the
+  // organization row. A kept domain row would hold its claim forever, so no
+  // other organization could verify the domain. The three models are no
+  // kind of user-hold.ts, so the lock order does not change.
+  await tx.delete("ssoDomain", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("ssoConnection", [{ field: "organizationId", op: "eq", value: id }]);
+  await tx.delete("scimToken", [{ field: "organizationId", op: "eq", value: id }]);
   // Plan 12k: the teams go before their rows, and fire no team hook.
   await tx.delete("team", [{ field: "organizationId", op: "eq", value: id }]);
   await tx.delete("invitation", [{ field: "organizationId", op: "eq", value: id }]);
