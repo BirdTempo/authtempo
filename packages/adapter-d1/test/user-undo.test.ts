@@ -5,7 +5,9 @@ import {
   createAuth,
   createMemoryLimiter,
   createPbkdf2PasswordHash,
+  hookRefusal,
   type MailMessage,
+  type OrganizationHooks,
   type StorageAdapter,
 } from "@authtempo/core";
 import { TABLES, USER_CHILD_MODELS } from "@authtempo/core/sql";
@@ -533,5 +535,69 @@ describe("the D1 undo of an update (plan 9 final review M-1, R-1)", () => {
     const back = await db.findOne("user", byId("u1"));
     expect(back?.name).toBeNull();
     expect(back?.emailVerified).toBe(true);
+  });
+});
+
+/**
+ * Ruling 46 of plan 12k (probe H3): the organization create holds the user
+ * row before its before hook. The hold writes `updatedAt` back to its own
+ * value. On D1 the undo of a refusal wrote the old value back by id, over a
+ * profile write that the hook made through the api.
+ */
+describe("the D1 undo of a user hold (ruling 46 of plan 12k)", () => {
+  it("keeps a profile write that a refused before hook made", async () => {
+    const base = createD1Adapter(env.DB);
+    const clock: Clock = { now: () => t0 };
+    const sent: MailMessage[] = [];
+    let session: Awaited<ReturnType<ReturnType<typeof createAuth>["api"]["getSession"]>> = null;
+    const make = (hooks: OrganizationHooks) =>
+      createAuth({
+        baseURL: "https://api.example.com",
+        secret: "0123456789abcdef0123456789abcdef",
+        trustedOrigins: ["https://app.example.com"],
+        storage: base,
+        mail: {
+          send: async (m) => {
+            sent.push(m);
+          },
+        },
+        limiter: createMemoryLimiter(clock),
+        clock,
+        organizations: {},
+        hooks: { organization: hooks },
+      });
+    const plain = make({});
+    let written = false;
+    const refusing = make({
+      beforeCreate: async () => {
+        if (!session) throw new Error("no session");
+        written = (await plain.api.user.update({ session, name: "Ada" })).ok;
+        throw hookRefusal("No.");
+      },
+    });
+    await base.create("user", user("a", true));
+    await plain.api.requestMagicLink({ email: "a@example.com", ip: null });
+    const link = /token=([A-Za-z0-9_%-]+)/.exec(sent.at(-1)?.text ?? "")?.[1] ?? "";
+    const signedIn = await plain.api.verifyMagicLink({
+      token: decodeURIComponent(link),
+      ip: null,
+      userAgent: null,
+    });
+    if (!signedIn.ok || !("token" in signedIn.value)) throw new Error("no session");
+    session = await plain.api.getSession(signedIn.value.token);
+    const a = await base.findOne("user", byId("a"));
+    if (!a) throw new Error("no user");
+
+    expect(await refusing.api.createOrganization({ user: a, slug: "acme", name: "Acme" })).toEqual({
+      ok: false,
+      code: "hook_refused",
+      status: 403,
+      message: "No.",
+    });
+    expect(written).toBe(true);
+    expect(await base.findMany("organization", [])).toEqual([]);
+    const back = await base.findOne("user", byId("a"));
+    expect(back?.name).toBe("Ada");
+    expect(back?.updatedAt).toEqual(new Date("2026-01-01T00:00:00.001Z"));
   });
 });
