@@ -240,6 +240,9 @@ const REMOVE_COUNTS: [number, number, number[]] = [50, 13, [48, 45]];
 
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });
 
+/** The headers of a call with the operator secret. */
+const asSecret = { authorization: `Operator ${SECRET}` };
+
 /** The impersonation tool on, with the longest life, so 40 starts at the start limit all live. */
 const on = async () =>
   ({
@@ -425,5 +428,103 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
     expect(await ownCount()).toBe(1);
     expect(endings).toEqual([]);
     expect(await impersonations()).toBe(leftBefore);
+  });
+
+  // A user with both kinds of pending-end row (rereview2 of plan 12f, L1).
+  // Two flows write the rows in the two orders. In each order a revoke
+  // retry must read the own row and end own sessions. So a read of one row
+  // alone fails one of the two cases.
+  const BOTH: [string, string[]][] = [
+    ["a revoke that leaves both rows", ["targets", "own"]],
+    ["a revoke, a grant, and a removal", ["own", "targets"]],
+  ];
+  it.each(BOTH)("ends own sessions on a revoke retry after %s", async (flow, order) => {
+    const sent: MailMessage[] = [];
+    const extra = {
+      ...(await on()),
+      totp: { gate: { magicLink: false } },
+    } satisfies Partial<AuthConfig>;
+    const role = (grant: boolean) =>
+      invoke(
+        sent,
+        "/operator/users/platform-role",
+        asSecret,
+        { userId: bobId, grant, reason: "Change of the support team" },
+        extra,
+      );
+    let bobId = "";
+    if (flow === "a revoke that leaves both rows") {
+      const made = await fortyImpersonations(sent, extra);
+      bobId = made.bobId;
+      // 60 own sessions: more than one act can end inside its budget.
+      await signIns(made.setup, sent, "bob@example.com", 60);
+      const r = await role(false);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+    } else {
+      // The own row first: a revoke of an operator with 60 own sessions and no impersonation.
+      const { auth: setup } = await engine(env.DB, sent, undefined, extra);
+      const first = await platformOperator(setup, sent);
+      await platformOperator(setup, sent, "bob@example.com");
+      bobId = (await signIns(setup, sent, "bob@example.com", 60)).userId;
+      const r = await role(false);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      // Then a grant, a fresh session, 40 impersonation sessions, and a removal.
+      const g = await role(true);
+      expect(g.status, JSON.stringify(g.body)).toBe(200);
+      const fresh = (await signIns(setup, sent, "bob@example.com", 1)).token;
+      const targets: string[] = [];
+      for (let i = 0; i < 10; i++)
+        targets.push((await signIns(setup, sent, `user${i}@example.com`, 1)).userId);
+      for (let i = 0; i < 40; i++) {
+        current = new Date(current.getTime() + 3 * 60_000);
+        const bob = await setup.api.getSession(fresh);
+        if (!bob) throw new Error("the session ended");
+        const s = await setup.api.operator.impersonate({
+          operator: bob,
+          userId: targets[i % 10] ?? "",
+          reason: `Ticket ${i}`,
+          ip: null,
+          userAgent: null,
+        });
+        if (!s.ok) throw new Error(s.code);
+      }
+      const platform = await env.DB.prepare("SELECT id FROM ta_organization WHERE slug = ?")
+        .bind("platform-co")
+        .first<{ id: string }>();
+      const m = await invoke(
+        sent,
+        "/organizations/members/remove",
+        asUser(first),
+        { organizationId: platform?.id, userId: bobId },
+        extra,
+      );
+      expect(m.status, JSON.stringify(m.body)).toBe(200);
+    }
+    // The kinds of the rows in the order of their writes.
+    const rows = await env.DB.prepare(
+      "SELECT data FROM ta_verification WHERE purpose = 'session-end' AND identifier = ? ORDER BY rowid",
+    )
+      .bind(bobId)
+      .all<{ data: string }>();
+    expect(
+      rows.results.map((row) => (Array.isArray(JSON.parse(row.data).targets) ? "targets" : "own")),
+    ).toEqual(order);
+    const ownCount = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM ta_session WHERE user_id = ? AND actor_id IS NULL",
+        )
+          .bind(bobId)
+          .first<{ n: number }>()
+      )?.n ?? 0;
+    const before = await ownCount();
+    expect(before).toBeGreaterThan(0);
+    endings.length = 0;
+    // The retry: the user holds no platform role, and the own row still counts.
+    const retry = await role(false);
+    expect(retry.status, JSON.stringify(retry.body)).toBe(200);
+    expect(retry.queries).toBeLessThanOrEqual(50);
+    expect(await ownCount()).toBeLessThan(before);
+    expect(endings.length).toBeGreaterThan(0);
   });
 });
