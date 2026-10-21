@@ -40,7 +40,7 @@ export async function readJson<T>(request: Request, schema: z.ZodType<T>): Promi
 /**
  * True when a key or a string value anywhere in a parsed body holds a NUL or
  * a lone surrogate (plan 12g fix wave, m1). The storage port refuses both in
- * a where value (rulings 16 and 17 of the 12g lane), so the body reader
+ * a where value (rulings 16 and 17 of the 12g lane). So the body reader
  * refuses them first, and a route answers invalid_body, not 500. The walk
  * uses a stack, so a deep body cannot overflow the call stack.
  */

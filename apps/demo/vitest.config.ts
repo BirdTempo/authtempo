@@ -4,9 +4,8 @@ import { conformanceCountReporter } from "../../scripts/conformance-count-report
 import { outboundLog } from "./test/outbound-log.js";
 import { LONG_TEST_MS } from "./test/test-time.js";
 
-// The count reporter fails the run when the storage run or the limiter run of
-// the demo shim is missing or has no passed test (ruling 7 of plan 12g; the
-// 12g fix wave added the demo).
+// The count reporter fails the run when a run of the demo shim is missing or
+// has no passed test (ruling 7 of plan 12g). The 12g fix wave added the demo.
 const RUNS = ["storage conformance: demo sqlite shim", "limiter conformance: demo sqlite shim"];
 
 // The Workers pool of the demo Worker (plan 11b Task 8), on @cloudflare/vitest-plugin

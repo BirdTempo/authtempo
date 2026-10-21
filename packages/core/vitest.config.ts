@@ -2,7 +2,7 @@ import { defineConfig } from "vitest/config";
 import { conformanceCountReporter } from "../../scripts/conformance-count-reporter.mjs";
 
 // The count reporter fails the run when one of these runs is missing or has
-// no passed test (ruling 7 of plan 12g; the 12g fix wave added core).
+// no passed test (ruling 7 of plan 12g). The 12g fix wave added core.
 const RUNS = [
   "storage conformance: memory",
   "limiter conformance: memory",

@@ -190,8 +190,8 @@ for (const server of MYSQL_SERVERS) {
 
     it("holds the baseline record to its digest", () => {
       // The record 0001_schema_v13 is append-only. On 2026-10-21 its text was
-      // schemaDdl(MYSQL), but schema 14 changes schemaDdl, and a compare with
-      // it then fails on a record that did not change (plan 12g fix wave, m2).
+      // schemaDdl(MYSQL). Schema 14 changes schemaDdl, and a compare with it
+      // then fails on a record that did not change (plan 12g fix wave, m2).
       // The digest pins the record text alone. The shape suite holds the
       // live tables to the schema.
       const digest = createHash("sha256").update(JSON.stringify(baseline)).digest("hex");

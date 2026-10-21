@@ -4,7 +4,7 @@ import { defineConfig } from "vitest/config";
 import { conformanceCountReporter } from "../../scripts/conformance-count-reporter.mjs";
 
 // The count reporter fails the run when one of these D1 runs is missing or
-// has no passed test (ruling 7 of plan 12g; the 12g fix wave added D1).
+// has no passed test (ruling 7 of plan 12g). The 12g fix wave added D1.
 const RUNS = [
   "storage conformance: Better Auth tables on D1, Better Auth's own SQLite SQL, with the foreign keys",
   "storage conformance: Better Auth tables on D1, snake_case and plural names (consumer-i's casing)",
