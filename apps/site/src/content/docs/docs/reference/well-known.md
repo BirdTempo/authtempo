@@ -77,7 +77,7 @@ The document of a protected resource holds `resource`, `authorization_servers` (
 
 ## The related origins document
 
-- `GET /.well-known/webauthn` answers `{ origins }`, the list `passkey.origins` (WebAuthn Level 3).
+- `GET /.well-known/webauthn` answers `{ origins }`: the origins of `passkey.origins` outside the domain tree of `rpID`, in config order (WebAuthn Level 3).
 - Only a request to the `rpID` host gets it, and only with `passkey.relatedOrigins: true`. Any other host answers 404.
 - The answer has `content-type: application/json`, `cache-control: public, max-age=300`, and `access-control-allow-origin: *`.
 - The ceremonies check each origin against `passkey.origins` again. The document tells the browser which origins may use the RP ID.

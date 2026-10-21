@@ -41,7 +41,7 @@ export async function readJson<T>(request: Request, schema: z.ZodType<T>): Promi
 /**
  * The body of a route whose contract marks the body `optional`: an empty
  * body reads as `{}`, so a caller of the route before the body existed
- * keeps working (plan 12i).
+ * keeps working (plan 12i). The passkey options read it.
  */
 export async function readOptionalJson<T>(
   request: Request,

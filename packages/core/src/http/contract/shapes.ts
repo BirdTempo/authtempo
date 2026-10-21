@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PASSKEY_HINTS } from "../../primitives/passkey-hints.js";
 
 /**
  * The answer shapes that two or more routes share (plan 11g). Each one is
@@ -113,7 +114,7 @@ export const CreationOptionsJson = z.strictObject({
       userVerification: z.enum(USER_VERIFICATION).optional(),
     })
     .optional(),
-  hints: z.array(z.enum(["hybrid", "security-key", "client-device"])).optional(),
+  hints: z.array(z.enum(PASSKEY_HINTS)).optional(),
   attestation: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
   attestationFormats: z.array(z.string()).optional(),
   extensions: z.record(z.string(), z.unknown()).optional(),
@@ -130,6 +131,6 @@ export const RequestOptionsJson = z.strictObject({
   rpId: z.string().optional(),
   allowCredentials: z.array(CredentialDescriptorJson).optional(),
   userVerification: z.enum(USER_VERIFICATION).optional(),
-  hints: z.array(z.enum(["hybrid", "security-key", "client-device"])).optional(),
+  hints: z.array(z.enum(PASSKEY_HINTS)).optional(),
   extensions: z.record(z.string(), z.unknown()).optional(),
 });

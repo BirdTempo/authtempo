@@ -79,6 +79,7 @@ import { type Clock, systemClock } from "./primitives/clock.js";
 import { movedPrefixFault, sessionCookieNames } from "./primitives/credentials.js";
 import { DPOP_WINDOW_SECONDS } from "./primitives/dpop.js";
 import { FOREIGN_ALGS, type ForeignAlg } from "./primitives/foreign-jwk.js";
+import { onDomainTree } from "./primitives/host.js";
 import { JWS_ALGS, type JwsAlg } from "./primitives/jwk.js";
 import {
   createKeyring,
@@ -493,7 +494,15 @@ export interface ResolvedPasskey {
   hints: { register: PasskeyHint[]; signIn: PasskeyHint[] };
 }
 
-/** The origins that a client must accept from a related origins document (WebAuthn Level 3). */
+/**
+ * The labels that a client must accept from a related origins document
+ * (WebAuthn Level 3 section 5.11.1, read 2026-10-22). A label is the
+ * registrable domain less its public suffix. Core has no public suffix
+ * list, so it counts each origin outside the domain tree of `rpID` as one
+ * label. The count is an upper bound: two origins of one label count twice,
+ * so core may refuse a config that a browser accepts. The document lists
+ * only these origins, so an origin on the tree takes no label slot.
+ */
 const RELATED_ORIGINS_MAX = 5;
 
 /** A hint list of the config: each value a WebAuthn hint, each value once. */
@@ -1396,7 +1405,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         throw new ConfigError(`passkey.origins must hold exact origins, no path: ${o}`);
       const host = u.hostname;
       const rp = input.passkey.rpID;
-      if (host !== rp && !host.endsWith(`.${rp}`)) {
+      if (!onDomainTree(host, rp)) {
         // A related origin (plan 12i): the browser checks it against the
         // document of `rpID`. Without the document, the origin cannot pass.
         if (input.passkey.relatedOrigins !== true)

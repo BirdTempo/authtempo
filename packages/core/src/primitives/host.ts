@@ -78,3 +78,13 @@ export function isPublicHost(hostname: string, baseURL: string): boolean {
   if (host === new URL(baseURL).hostname) return false;
   return true;
 }
+
+/**
+ * True for a host on the domain tree of `domain`: the domain itself or a
+ * subdomain of it. A WebAuthn RP ID covers these hosts (WebAuthn Level 3,
+ * read 2026-10-14). The config check and the related origins document of
+ * plan 12i read this one rule.
+ */
+export function onDomainTree(hostname: string, domain: string): boolean {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}

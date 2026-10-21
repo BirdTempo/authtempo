@@ -4,6 +4,7 @@ import { AUTH_METHODS, SUBJECT_TYPES, tokenGrantTypes } from "../engine/oauth-cl
 import { oauthOf } from "../engine/oauth-result.js";
 import { ID_TOKEN_CLAIMS, SCOPE_CLAIMS } from "../engine/oauth-token.js";
 import { FOREIGN_ALGS } from "../primitives/foreign-jwk.js";
+import { onDomainTree } from "../primitives/host.js";
 import { json } from "./json.js";
 
 /**
@@ -35,12 +36,18 @@ export const WEBAUTHN_PATH = "/.well-known/webauthn";
  * MUST be application/json", so the type has no parameter. The ceremonies
  * check each origin against `passkey.origins` again: the document is the
  * browser's input, not core's.
+ *
+ * The document lists only the origins outside the domain tree of `rpID`,
+ * in config order. The browser needs no document for an origin on the tree.
+ * Each listed origin can take one of the five label slots (section 5.11.1,
+ * read 2026-10-22), so an origin on the tree would push out a fifth label.
  */
 export function relatedOriginsAnswer(config: ResolvedConfig, request: Request): Response | null {
   const rp = config.passkey;
   if (!rp?.relatedOrigins) return null;
   if (new URL(request.url).hostname !== rp.rpID) return null;
-  return json({ origins: [...rp.origins] }, 200, {
+  const outside = rp.origins.filter((o) => !onDomainTree(new URL(o).hostname, rp.rpID));
+  return json({ origins: outside }, 200, {
     ...PUBLIC_METADATA_HEADERS,
     "content-type": "application/json",
   });

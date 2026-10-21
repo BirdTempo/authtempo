@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
+import {
+  passkeyAuthenticationOptions,
+  passkeyRegistrationOptions,
+  verifyPasskeyRegistration,
+} from "../src/engine/passkeys.js";
 import { createSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { passkeyRoutes } from "../src/http/routes/passkeys.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, get, makeAuth, post } from "./helpers.js";
+import { FAST, pwHandle } from "./password-helpers.js";
 
 /**
  * WebAuthn Level 3 (plan 12i Task 9, spec 32 item 3): the related origins
@@ -100,18 +106,41 @@ describe("the related origins document (WebAuthn Level 3)", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/json");
     expect(res.headers.get("cache-control")).toBe("public, max-age=300");
-    expect(await res.json()).toEqual({
-      origins: ["https://app.example.com", "https://shop.example.net"],
-    });
+    expect(await res.json()).toEqual({ origins: ["https://shop.example.net"] });
     // The route under basePath answers the same document when core is mounted on the RP ID host.
     const onRoot = authWith(RELATED, "https://example.com");
     const routed = await onRoot.handle(
       new Request("https://example.com/auth/.well-known/webauthn"),
     );
     expect(routed.status).toBe(200);
-    expect(await routed.json()).toEqual({
-      origins: ["https://app.example.com", "https://shop.example.net"],
+    expect(await routed.json()).toEqual({ origins: ["https://shop.example.net"] });
+  });
+
+  it("lists only the origins outside the RP ID's domain tree, in config order", async () => {
+    // W3C WebAuthn Level 3 section 5.11.1: each listed origin can take one of
+    // the five label slots. An origin on the tree would push out a fifth
+    // outside label (ruling 8 of plan 12i, M1).
+    const outside = [
+      "https://shop.example.net",
+      "https://b.example.org",
+      "https://a.example.dev",
+      "https://example.io",
+      "https://c.example.co",
+    ];
+    const auth = authWith({
+      ...RELATED,
+      origins: [
+        outside[0] ?? "",
+        "https://example.com",
+        APP_ORIGIN,
+        outside[1] ?? "",
+        "https://deep.app.example.com",
+        ...outside.slice(2),
+      ],
     });
+    const res = await auth.wellKnown(new Request("https://example.com/.well-known/webauthn"));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ origins: outside });
   });
 
   it("answers 404 on another host and with relatedOrigins off", async () => {
@@ -258,6 +287,21 @@ describe("the hints (WebAuthn Level 3)", () => {
     );
     expect(bare.status).toBe(200);
   });
+
+  it("refuses a config hint list with a value twice or an unknown value", () => {
+    expect(() =>
+      authWith({ ...RELATED, hints: { register: ["hybrid", "security-key", "hybrid"] } }),
+    ).toThrow("passkey.hints.register has a value twice");
+    expect(() =>
+      // @ts-expect-error: "phone" is no hint; a JavaScript config can hold it.
+      authWith({ ...RELATED, hints: { signIn: ["security-key", "phone"] } }),
+    ).toThrow(
+      "passkey.hints.signIn has phone; a hint is one of security-key, client-device, hybrid",
+    );
+    expect(() =>
+      authWith({ ...RELATED, hints: { register: ["client-device"], signIn: ["hybrid"] } }),
+    ).not.toThrow();
+  });
 });
 
 describe("the inputs of the Signal API (WebAuthn Level 3)", () => {
@@ -297,5 +341,116 @@ describe("the inputs of the Signal API (WebAuthn Level 3)", () => {
     const expected = btoa(w.user.id).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
     expect(body).toEqual({ passkeys: [], rpId: "example.com", userHandle: expected });
     expect(body.userHandle).toBe(creation.user.id);
+  });
+});
+
+const PW = "correct horse battery";
+const SF_RP = { rpID: RP_ID, rpName: "Example", origins: [APP_ORIGIN] };
+
+/** The `name=value` part of the session Set-Cookie of `res`. */
+function sessionPair(res: Response): string {
+  const c = res.headers.getSetCookie().find((v) => v.startsWith("__Host-tempo_session="));
+  if (!c) throw new Error(`the answer ${res.status} set no session cookie`);
+  return c.split(";")[0] ?? "";
+}
+
+/**
+ * A verified user with a password and one registered passkey, the session
+ * cookie of a password sign-in, and a soft authenticator that has no row.
+ */
+async function factorWorld() {
+  const h = pwHandle({ hash: FAST }, { passkey: SF_RP });
+  const email = "ada@example.com";
+  await h.auth.handle(post("/auth/password/sign-up", { email, password: PW }));
+  const token = h.mails.findLast((m) => m.to === email && m.subject.startsWith("Confirm"))?.token;
+  if (!token) throw new Error("no confirm mail");
+  await h.auth.handle(post("/auth/password/verify", { token }));
+  const signedIn = await h.auth.handle(post("/auth/password/sign-in", { email, password: PW }));
+  const user = await h.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  if (!user) throw new Error("no user");
+  const soft = await SoftAuthenticator.create({ rpID: RP_ID, origin: APP_ORIGIN });
+  const options = await passkeyRegistrationOptions(h.config, { user });
+  if (!options.ok) throw new Error(options.code);
+  const registered = await verifyPasskeyRegistration(h.config, {
+    user,
+    response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
+  });
+  if (!registered.ok) throw new Error(registered.code);
+  const stranger = await SoftAuthenticator.create({ rpID: RP_ID, origin: APP_ORIGIN });
+  return { h, email, cookie: sessionPair(signedIn), soft, stranger };
+}
+
+/** A sign-in assertion of `soft` over new sign-in options: the enable's proof. */
+async function signInAssertion(
+  h: ReturnType<typeof pwHandle>,
+  soft: SoftAuthenticator,
+): Promise<unknown> {
+  const options = await passkeyAuthenticationOptions(h.config, { ip: null });
+  if (!options.ok) throw new Error(options.code);
+  return soft.authenticate(options.value.challenge);
+}
+
+describe("a credential with no row at the other passkey routes (ruling 8 of plan 12i, M2)", () => {
+  it("answers passkey_failed at the re-authentication proof", async () => {
+    const { h, cookie, stranger } = await factorWorld();
+    const options = await h.auth.handle(post("/auth/reauth/passkey/options", {}, { cookie }));
+    expect(options.status).toBe(200);
+    const { challenge } = (await options.json()) as { challenge: string };
+    const res = await h.auth.handle(
+      post("/auth/reauth", { passkey: await stranger.authenticate(challenge) }, { cookie }),
+    );
+    expect({ status: res.status, body: await res.json() }).toEqual({
+      status: 400,
+      body: { error: "passkey_failed" },
+    });
+  });
+
+  it("answers passkey_failed at the enable of the passkey method", async () => {
+    const { h, cookie, stranger } = await factorWorld();
+    const res = await h.auth.handle(
+      post(
+        "/auth/second-factor/passkey/enable",
+        { password: PW, response: await signInAssertion(h, stranger) },
+        { cookie },
+      ),
+    );
+    expect({ status: res.status, body: await res.json() }).toEqual({
+      status: 400,
+      body: { error: "passkey_failed" },
+    });
+    expect(await h.storage.findMany("secondFactor", [])).toEqual([]);
+  });
+
+  it("answers invalid_code at the challenge verify, and counts the attempt", async () => {
+    const { h, email, cookie, soft, stranger } = await factorWorld();
+    const enable = await h.auth.handle(
+      post(
+        "/auth/second-factor/passkey/enable",
+        { password: PW, response: await signInAssertion(h, soft) },
+        { cookie },
+      ),
+    );
+    expect(enable.status).toBe(200);
+    const signIn = await h.auth.handle(post("/auth/password/sign-in", { email, password: PW }));
+    const { twoFactor } = (await signIn.json()) as { twoFactor: { challenge: string } };
+    const optionsRes = await h.auth.handle(
+      post("/auth/second-factor/passkey/options", { challenge: twoFactor.challenge }),
+    );
+    expect(optionsRes.status).toBe(200);
+    const options = (await optionsRes.json()) as { challenge: string };
+    const res = await h.auth.handle(
+      post("/auth/totp/verify", {
+        challenge: twoFactor.challenge,
+        passkey: await stranger.authenticate(options.challenge),
+      }),
+    );
+    expect({ status: res.status, body: await res.json() }).toEqual({
+      status: 400,
+      body: { error: "invalid_code" },
+    });
+    const rows = await h.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "two-factor" },
+    ]);
+    expect(rows.map((r) => (r.data as { attempts?: number } | null)?.attempts)).toEqual([1]);
   });
 });

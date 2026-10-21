@@ -60,8 +60,10 @@ import test from "../../../../../samples/guides/passkeys.test.ts?raw";
 WebAuthn Level 3 lets a passkey of one RP ID work on other sites, such as `example.com` and `example.net`.
 
 - Set `passkey.relatedOrigins: true`, and add each origin to `passkey.origins` and to `trustedOrigins`.
-- `passkey.origins` may then hold at most five origins outside the domain tree of `rpID`. A browser must accept at least five.
+- `passkey.origins` may then hold at most five origins outside the domain tree of `rpID`. A browser must accept at least five labels, such as `example` of `example.net`.
+- Core has no public suffix list, so it counts each origin outside the tree as one label. Two origins of one label count twice, so core can refuse a config that a browser accepts.
 - Mount [`auth.wellKnown`](/docs/reference/well-known/) at the origin root of the `rpID` host. It answers `GET /.well-known/webauthn` with `{ origins }` there, and 404 on any other host.
+- The document lists only the origins outside the domain tree of `rpID`, in config order. An origin on the tree needs no document, so it takes no label.
 - Each ceremony still checks the origin of the browser against `passkey.origins`. An origin outside the list never passes.
 
 ## Hints and the Signal API
@@ -69,6 +71,7 @@ WebAuthn Level 3 lets a passkey of one RP ID work on other sites, such as `examp
 - `passkey.hints.register` and `passkey.hints.signIn` give the browser a preference: `security-key`, `client-device`, or `hybrid`. A hint is advice and filters no authenticator.
 - A `hints` field in the body of an options request replaces the list for that ceremony.
 - A sign-in by a credential that the site does not store answers `passkey_unknown`. Call `PublicKeyCredential.signalUnknownCredential` with it, so the device removes the passkey.
+- Only the passkey sign-in answers `passkey_unknown`. The re-authentication and the second factor keep their codes: `passkey_failed`, and `invalid_code` at the challenge verify.
 - `GET /passkeys` answers `rpId` and `userHandle`. Pass them with the credential ids to `PublicKeyCredential.signalAllAcceptedCredentials`.
 - Only the holder of the credential sees `passkey_unknown`: the credential id is random, and the person's own device gives it.
 

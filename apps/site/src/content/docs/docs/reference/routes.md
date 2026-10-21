@@ -1832,7 +1832,7 @@ This route exists when the config sets `passkey` with `relatedOrigins: true`.
 | --- | --- |
 | Needs | Nothing |
 | Input | None |
-| Answer | `{ origins }`, the list `passkey.origins`, with `content-type: application/json` and `cache-control: public, max-age=300`. Only a request to the `rpID` host gets it. The browser reads it at the origin root, so mount [`auth.wellKnown`](/docs/reference/well-known/) there |
+| Answer | `{ origins }`, the origins of `passkey.origins` outside the domain tree of `rpID` in config order, with `content-type: application/json` and `cache-control: public, max-age=300`. Only a request to the `rpID` host gets it. The browser reads it at the origin root, so mount [`auth.wellKnown`](/docs/reference/well-known/) there |
 | Errors | None. Another host answers `not_found` |
 
 ## OpenAPI document
