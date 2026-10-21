@@ -1,7 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { readBody } from "../src/http/body.js";
 import { readJson } from "../src/http/json.js";
+import { createRouter } from "../src/http/router.js";
+import { coreRoutes } from "../src/http/routes/index.js";
 import { createAuth, createMemoryAdapter, createPbkdf2PasswordHash } from "../src/index.js";
+import { oauthHandle, REDIRECT, tokenPost } from "./oauth-helpers.js";
+import { GOOGLE } from "./social-helpers.js";
+import { totpAuth, verifiedSession } from "./totp-helpers.js";
 
 // A NUL or a lone surrogate in a JSON body answers invalid_body (plan 12g fix
 // wave, m1). Before the fix, the storage port refused the where value, and
@@ -101,5 +107,65 @@ describe("the JSON body reader refuses a NUL and a lone surrogate on memory", ()
     const res = await rename('{"id":"\\ud83d\\ude00","name":"Phone"}');
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "not_found" });
+  });
+});
+
+/** A form body, encoded as a browser encodes it. A form cannot carry a lone surrogate. */
+const form = (pairs: [string, string][], path = "/x", headers: Record<string, string> = {}) =>
+  new Request(`${BASE}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", ...headers },
+    body: new URLSearchParams(pairs).toString(),
+  });
+
+describe("readBody refuses a NUL in a form body (the 12g fix wave)", () => {
+  it.each([
+    ["a NUL in a value", [["next", "/inbox\u0000"]]],
+    ["a NUL in a key", [["next\u0000", "/inbox"]]],
+  ] as [string, [string, string][]][])("refuses %s as invalid_body", async (_, pairs) => {
+    expect(await readBody(form(pairs), z.unknown())).toEqual({
+      ok: false,
+      code: "invalid_body",
+      status: 400,
+    });
+  });
+
+  it("answers a social link form with a NUL in next as invalid_body", async () => {
+    const auth = totpAuth({ social: { google: GOOGLE, fetch: async () => new Response(null) } });
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const { token } = await verifiedSession(auth);
+    const res = await handle(
+      form([["next", "/inbox\u0000"]], "/auth/social/google/link", {
+        origin: APP_ORIGIN,
+        cookie: `${auth.config.cookieName}=${token}`,
+      }),
+    );
+    expect(res.status).toBe(302);
+    expect(new URL(res.headers.get("location") ?? "").searchParams.get("auth_error")).toBe(
+      "invalid_body",
+    );
+  });
+});
+
+describe("the OAuth body readers refuse a NUL and a lone surrogate (the 12g fix wave)", () => {
+  it("answers a register body with a lone surrogate as invalid_client_metadata", async () => {
+    const h = oauthHandle();
+    const res = await h.auth.handle(
+      new Request(`${BASE}/auth/oauth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: APP_ORIGIN },
+        body: `{"redirect_uris":["${REDIRECT}"],"client_name":"\\ud800"}`,
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_client_metadata" });
+    expect(await h.storage.findMany("oauthClient", [])).toEqual([]);
+  });
+
+  it("answers a token form with a NUL as invalid_request", async () => {
+    // Without the check the form reaches the grant switch: unsupported_grant_type.
+    const res = await oauthHandle().auth.handle(tokenPost({ grant_type: "refresh_token\u0000" }));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "invalid_request" });
   });
 });

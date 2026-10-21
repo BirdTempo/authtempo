@@ -74,6 +74,7 @@ import { ipKey } from "../../limiter/ip-key.js";
 import { limit } from "../../limiter/limit.js";
 import { clientRef } from "../../redact.js";
 import type { OAuthClientRow } from "../../schema.js";
+import { holdsBadText } from "../body-text.js";
 import { revokeGrantBody } from "../contract/oauth.js";
 import { consentPagePolicy, noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { DEVICE_WARNING, type DevicePageInput } from "../device-page.js";
@@ -95,6 +96,7 @@ export function oauthJson<T>(r: OAuthResult<T>, status = 200): Response {
 async function readObject(request: Request): Promise<Record<string, unknown> | null> {
   try {
     const value: unknown = await request.json();
+    if (holdsBadText(value)) return null;
     return typeof value === "object" && value !== null && !Array.isArray(value)
       ? (value as Record<string, unknown>)
       : null;
@@ -114,6 +116,7 @@ async function formParams(request: Request): Promise<URLSearchParams | null> {
     return null;
   }
   for (const key of new Set(params.keys())) if (params.getAll(key).length > 1) return null;
+  if (holdsBadText([...params])) return null;
   return params;
 }
 

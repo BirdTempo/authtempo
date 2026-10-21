@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import { fail, ok, type Result } from "../result.js";
+import { holdsBadText } from "./body-text.js";
 import { readJson } from "./json.js";
 
 /**
@@ -23,6 +24,7 @@ export async function readBody<T>(request: Request, schema: z.ZodType<T>): Promi
     if (key in raw) return fail("invalid_body");
     raw[key] = value;
   }
+  if (holdsBadText(raw)) return fail("invalid_body");
   const parsed = schema.safeParse(raw);
   return parsed.success ? ok(parsed.data) : fail("invalid_body");
 }
