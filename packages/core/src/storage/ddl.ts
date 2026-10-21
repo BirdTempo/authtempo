@@ -12,9 +12,10 @@ import {
 } from "./sql.js";
 
 /**
- * The column facts of each dialect (plan 12g). One map for every dialect:
- * the D1 and Postgres migrations, the MySQL baseline, the shape checks, and
- * `authtempo generate` read it. Core imports no adapter, so each adapter
+ * The column facts of each dialect (plan 12g), in one map. `schemaDdl`, the
+ * expected shapes of the adapters, the MySQL baseline, and `authtempo
+ * generate` read it. The D1 and Postgres migrations are records written by
+ * hand, so they do not read it. Core imports no adapter, so each adapter
  * test holds its own map equal to this one.
  */
 
@@ -237,10 +238,11 @@ export function columnType(d: Dialect, model: ModelName, field: string): string 
 
 /**
  * The column type of one column of `AUX_TABLES` on `d`. On MySQL,
- * `ta_limit.key` is `VARBINARY(3072)`: a key holds a client id of up to
- * 2048 characters, a `utf8mb4` key cannot pass 768 characters, and the
- * limiter compares bytes already (ruling 3 of plan 12g). A key from a custom
- * `clientIp` hook that passes 3072 bytes fails with MySQL error 1406.
+ * `ta_limit.key` is `VARBINARY(3072)` (ruling 3 of plan 12g). A `utf8mb4`
+ * key cannot pass 768 characters, and the limiter compares bytes already.
+ * A test of each limiter site holds its longest key under 3072 bytes. A key
+ * from a custom `clientIp` hook that passes 3072 bytes fails with MySQL
+ * error 1406.
  */
 export function auxColumnType(d: Dialect, table: string, column: string): string {
   const kind = AUX_TABLES.find((t) => t.name === table)?.columns.find(

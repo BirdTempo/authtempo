@@ -50,6 +50,10 @@ function longestPart(expr: string): string {
     return [ipKey("255.255.255.255"), ipKey("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")].reduce(
       (a, b) => (a.length >= b.length ? a : b),
     );
+  // The client of the client_credentials grant: a cl_ id of 46 characters
+  // (CLIENT_ID_RE, engine/oauth-clients.ts). Only a client that the app
+  // creates holds credentials scopes; a metadata document client holds none.
+  if (expr === "client.id") return `cl_${"c".repeat(43)}`;
   // A row id or a session id: 64 characters (the MySQL width of an id).
   if (/(^|\.)(id|userId|sid)$/.test(expr)) return "i".repeat(64);
   // normalizeEmail keeps at most 254 UTF-16 code units: 3 bytes each at most.
@@ -186,6 +190,7 @@ describe("the column map (plan 12g)", () => {
     // Ruling 3 of plan 12g: ta_limit.key is VARBINARY(3072). Each allow call
     // of core is found in the source, so a new site with no longest form fails.
     const sites: string[] = [];
+    const longest = new Map<string, number>();
     let calls = 0;
     for (const [file, text] of SOURCES) {
       if (file.startsWith("limiter/")) continue;
@@ -199,6 +204,7 @@ describe("the column map (plan 12g)", () => {
         const bytes = new TextEncoder().encode(stored).length;
         expect(bytes, `${file} ${arg}`).toBeLessThanOrEqual(3072);
         sites.push(`${file} ${arg}`);
+        longest.set(`${file} ${arg}`, bytes);
       }
     }
     // Each call has a key form that this test reads: a call it cannot read fails here.
@@ -207,8 +213,10 @@ describe("the column map (plan 12g)", () => {
     expect(sites.length).toBe(76);
     expect(sites).toContain(`engine/slug-check.ts \`slug-check:user:\${userId}\``);
     expect(sites).toContain("engine/token-use.ts tokenUseKey(kind, row.id)");
-    expect(sites).toContain(
-      `engine/oauth-credentials.ts \`oauth-credentials:client:\${client.id}\``,
-    );
+    // 25 characters of prefix, the 46 of a cl_ id, and two separators with
+    // the two 16-digit window values.
+    expect(
+      longest.get(`engine/oauth-credentials.ts \`oauth-credentials:client:\${client.id}\``),
+    ).toBe(105);
   });
 });

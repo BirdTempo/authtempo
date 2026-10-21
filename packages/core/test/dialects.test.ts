@@ -118,7 +118,7 @@ describe("the dialects (plan 12g)", () => {
   it("quotes every identifier on MySQL", () => {
     for (const [name, st] of Object.entries(allStatements(MYSQL))) {
       if (st === null) throw new Error(`${name} built no statement`);
-      // What stays after each quoted name goes holds no bare table or column name.
+      // Remove each quoted name. The text that stays must hold no table or column name.
       const bare = st.sql
         .replace(/`[^`]*`/g, " ")
         .split(/[^A-Za-z0-9_]+/)
@@ -138,6 +138,11 @@ describe("the dialects (plan 12g)", () => {
     expect(s?.params).toEqual([]);
     expect(() => selectStatement(MYSQL, "user", [], { limit: 1.5 })).toThrow(/invalid_argument/);
     expect(() => selectStatement(MYSQL, "user", [], { limit: -1 })).toThrow(/invalid_argument/);
+    // A number past 2^53 - 1 prints in exponent form, which is no SQL integer.
+    expect(() => selectStatement(MYSQL, "user", [], { limit: 1e21 })).toThrow(/invalid_argument/);
+    expect(selectStatement(MYSQL, "user", [], { limit: 9007199254740991 })?.sql).toMatch(
+      / LIMIT 9007199254740991$/,
+    );
   });
 
   it("encodes MySQL dates and booleans as integers", () => {

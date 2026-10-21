@@ -401,7 +401,8 @@ function compileWhere<M extends ModelName>(
 
 function validateLimit(model: ModelName, limit: number | undefined): void {
   if (limit === undefined) return;
-  if (!Number.isInteger(limit) || limit < 0)
+  // A safe integer only: MySQL inlines the limit, and 1e21 prints as "1e+21".
+  if (!Number.isSafeInteger(limit) || limit < 0)
     throw invalid(model, "limit", "expected a non-negative integer");
 }
 

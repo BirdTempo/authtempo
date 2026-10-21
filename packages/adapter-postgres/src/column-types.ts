@@ -9,12 +9,13 @@ const MODELS = Object.keys(schema) as ModelName[];
 
 /**
  * The Postgres column type of each core field, as `information_schema`
- * names it: the migrations write these, and the parity tests of this package
- * and of the compat package read this one map (plan 9f final fix wave: one
- * source for one fact). The rule lives in `@authtempo/core/ddl` (plan 12g),
- * which reads `int64` from the schema. This function keeps its signature for
- * the compat parity tests: it finds the field by its name, because one field
- * name has one meaning across the schema (a test of this package holds it).
+ * names it. The migrations write these types. `expectedPostgresShape`
+ * (`src/shape.ts`) and the parity tests of the compat package read this map
+ * (plan 9f final fix wave: one source for one fact). The rule lives in
+ * `@authtempo/core/ddl` (plan 12g), which reads `int64` from the schema. This
+ * function keeps its signature for the compat parity tests. It finds the
+ * model by the field name, because one field name has one meaning across
+ * the schema. A test of this package holds that rule.
  */
 export function postgresColumnType(field: string, type: CoreFieldType): string {
   const model = MODELS.find(
