@@ -408,6 +408,37 @@ describe("the operator audit row (plan 12f Task 4)", () => {
     expect(text).not.toContain(await sha256Hex(CI_SECRET));
   });
 
+  it("keeps a lone surrogate of the user agent as U+FFFD, and an in-process IP only as an IP literal", async () => {
+    const auth = await operatorAuth();
+    const { user } = await verifiedSession(auth, TARGET);
+    const api = operatorApi(auth.config).users;
+    // Each pair: the IP and the user agent of the call, then the IP and the user agent of the row.
+    const cases: [string | null, string | null, string | null, string | null][] = [
+      ["203.0.113.9", "Agent\ud800/1", "203.0.113.9", "Agent\ufffd/1"],
+      ["2001:db8::1", "\udc00Agent", "2001:db8::1", "\ufffdAgent"],
+      ["::ffff:203.0.113.9", "Agent \ud83d\udce7", "::ffff:203.0.113.9", "Agent \ud83d\udce7"],
+      [
+        "0000:0000:0000:0000:0000:ffff:203.0.113.9",
+        null,
+        "0000:0000:0000:0000:0000:ffff:203.0.113.9",
+        null,
+      ],
+      ["203.0.113.9\u202e", null, null, null],
+      ["203.0.113.9, 198.51.100.7", null, null, null],
+      ["unknown", null, null, null],
+      ["", null, null, null],
+      [null, null, null, null],
+    ];
+    for (const [ip, userAgent, rowIp, rowAgent] of cases) {
+      const r = await api.ban({ actor: APP, userId: user.id, reason: "Spam.", ip, userAgent });
+      if (!r.ok) throw new Error(r.code);
+      const row = await auth.storage.findOne("operatorAudit", [
+        { field: "id", op: "eq", value: r.value.auditId },
+      ]);
+      expect([row?.ip, row?.userAgent], JSON.stringify(ip)).toEqual([rowIp, rowAgent]);
+    }
+  });
+
   it("names a secret actor by its name, a user actor by the user id, and the app by its name", async () => {
     const ci = { kind: "secret", name: "ci", scopes: ["users"] } as const;
     const auth = await operatorAuth();

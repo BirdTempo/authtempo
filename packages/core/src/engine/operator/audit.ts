@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { isIpLiteral } from "../../limiter/ip-key.js";
 import { isOperatorReason } from "../../operator-secret.js";
 import { appErrorName } from "../../primitives/app-error.js";
 import { newMonotonicId } from "../../primitives/ids.js";
@@ -37,6 +38,33 @@ export { REASON_MAX } from "../../operator-secret.js";
 
 /** The longest user agent of a row, in code points (spec 26 item 8). */
 export const USER_AGENT_MAX = 512;
+
+/**
+ * The longest IP of a row: 45 characters, an IPv6 address with an IPv4 tail
+ * (RFC 4291 section 2.2). The route gives the IP of `clientIp`, and an
+ * in-process caller gives any string (plan 12f, final review L2).
+ */
+export const AUDIT_IP_MAX = 45;
+
+/**
+ * The IP of a row: the input when it is an IP literal (`isIpLiteral`) of at
+ * most `AUDIT_IP_MAX` characters, else null. A literal holds only hex
+ * digits, dots, and colons, so no text of the caller reaches a reader of
+ * the audit. A cut IP would name another host, so the rule keeps the whole
+ * value or none of it. No IP literal is longer than 45 characters, so the
+ * length check changes no answer: it spares the URL parse of a long string.
+ */
+function auditIp(ip: string | null): string | null {
+  return ip !== null && ip.length <= AUDIT_IP_MAX && isIpLiteral(ip) ? ip : null;
+}
+
+/**
+ * `String.prototype.toWellFormed` of ES2024: each lone surrogate becomes
+ * U+FFFD. Node 20 and Workers have it; the lib of this build is ES2023.
+ */
+function wellFormed(s: string): string {
+  return (s as string & { toWellFormed(): string }).toWellFormed();
+}
 
 /** The page size of `listAudit`: 1 to 100 rows, 50 by default. */
 const PAGE = { default: 50, max: 100 };
@@ -82,9 +110,11 @@ export type AuditActor = OperatorActor | { kind: "user"; user: Pick<UserRow, "id
 /**
  * The draft of one act. The actor is named by the secret's name, the user
  * id, or the app's name, never by a secret. An app name outside the rule of
- * `checkActor` answers `invalid_body`. The user agent loses each character
- * of `hasRefusedChar` and is cut to `USER_AGENT_MAX` code points, so the
- * cut splits no character.
+ * `checkActor` answers `invalid_body`. The user agent first turns each lone
+ * surrogate into U+FFFD (`toWellFormed`), so the row shows that one was
+ * there. Then it loses each character of `hasRefusedChar` and is cut to
+ * `USER_AGENT_MAX` code points, so the cut splits no character. The IP
+ * follows `auditIp`.
  */
 export function auditDraft(
   actor: AuditActor,
@@ -103,7 +133,9 @@ export function auditDraft(
   const userAgent =
     input.userAgent === null
       ? null
-      : Array.from(removeRefusedChars(input.userAgent)).slice(0, USER_AGENT_MAX).join("");
+      : Array.from(removeRefusedChars(wellFormed(input.userAgent)))
+          .slice(0, USER_AGENT_MAX)
+          .join("");
   return ok({
     actorKind: actor.kind,
     actorId,
@@ -111,7 +143,7 @@ export function auditDraft(
     targetUserId: input.targetUserId,
     reason: input.reason,
     data: input.data,
-    ip: input.ip,
+    ip: auditIp(input.ip),
     userAgent,
   });
 }
