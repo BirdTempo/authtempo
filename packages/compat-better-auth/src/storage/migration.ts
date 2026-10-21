@@ -1,4 +1,4 @@
-import type { SqliteDriver } from "@authtempo/adapter-sqlite";
+import { SQLITE_MIGRATIONS_TABLE_SQL, type SqliteDriver } from "@authtempo/adapter-sqlite";
 import { StorageError } from "@authtempo/core";
 import {
   assertSchemaValue,
@@ -1148,8 +1148,6 @@ export function compatSqliteSteps(
 /** What the SQLite runner calls on a SqliteDriver of `@authtempo/adapter-sqlite` (plan 12g). */
 export type SqliteMigrationDriver = Pick<SqliteDriver, "db" | "migrateStep">;
 
-const SQLITE_RECORD_TABLE =
-  "CREATE TABLE IF NOT EXISTS ta_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL)";
 const SQLITE_RECORD = "INSERT INTO ta_migrations (name, applied_at) VALUES (?, ?)";
 
 /**
@@ -1168,7 +1166,8 @@ export async function applyBetterAuthCompatSqliteMigrations(
   names: Names,
   variant: SqliteVariant = "1.7",
 ): Promise<string[]> {
-  await driver.db.prepare(SQLITE_RECORD_TABLE).run();
+  // The record table of the core runner, from its one source (plan 12g fix wave).
+  await driver.db.prepare(SQLITE_MIGRATIONS_TABLE_SQL).run();
   const applied: string[] = [];
   for (const m of compatSqliteSteps(names, variant)) {
     // ta_meta exists from migration 0001 on. Before it, only the record can say done.
