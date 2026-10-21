@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../../src/config.js";
+import { createAuth } from "../../src/create-auth.js";
 import { createOrganization, deleteOrganization } from "../../src/engine/organizations.js";
 import { createRole } from "../../src/engine/roles.js";
 import { rewrapSecrets, secretsStatus } from "../../src/engine/secrets.js";
@@ -13,6 +14,7 @@ import {
 import { updateDomain } from "../../src/engine/sso/domains.js";
 import { createRouter } from "../../src/http/router.js";
 import { coreRoutes } from "../../src/http/routes/index.js";
+import { sha256Hex } from "../../src/primitives/crypto.js";
 import type { OperatorAuditRow, SsoConnectionRow } from "../../src/schema.js";
 import type { StorageAdapter } from "../../src/storage/port.js";
 import { createTestIdp } from "../../src/testing/saml-idp.js";
@@ -546,5 +548,193 @@ describe("the SSO connections (plan 12d Task 3)", () => {
     expect(res.status).toBe(200);
     expect(await rowOf(w, byAccount.id)).toBeNull();
     expect(await w.storage.findMany("ssoConnection", [])).toEqual([]);
+  });
+});
+
+/** The operator secret of the rewrap route calls. */
+const OPERATOR = "operator-secret-0123456789abcdef-0123456789";
+
+/**
+ * The engine on the storage of `w` under versions 2 and 1, with the
+ * operator routes on. `storage` replaces the storage of `w`, for a wrapper.
+ */
+async function rotatedAuth(w: SsoWorld, storage: StorageAdapter = w.storage) {
+  return createAuth({
+    baseURL: BASE_URL,
+    secrets: [
+      { version: 2, value: V2 },
+      { version: 1, value: V1 },
+    ],
+    trustedOrigins: [],
+    storage,
+    mail: { send: async () => {} },
+    clock: w.clock,
+    organizations: {},
+    operator: { secretHash: await sha256Hex(OPERATOR) },
+    sso: {
+      oidc: true,
+      saml: true,
+      dns: w.config.sso?.dns ? [...w.config.sso.dns] : [],
+      limits: { connectionsPerOrganization: 50 },
+    },
+  });
+}
+
+/** 50 OIDC connections of one organization under version 1, each made by the app. */
+async function fiftyConnections() {
+  const w = connectionAuth({ connectionsPerOrganization: 50 });
+  const org = await seedOrganization(w);
+  for (let i = 0; i < 50; i++) await oidcConnection(w, org);
+  return w;
+}
+
+/** A POST of the rewrap route with the operator secret and `body`. */
+function rewrapRoute(body: Record<string, unknown>): Request {
+  return new Request(`${BASE_URL}/auth/operator/secrets/rewrap`, {
+    method: "POST",
+    headers: {
+      "cf-connecting-ip": "203.0.113.7",
+      authorization: `Operator ${OPERATOR}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+}
+
+describe("the rewrap of the SSO client secrets (ruling 34 of plan 12d)", () => {
+  it("keeps a client secret that the owner writes between the read and the write of the rewrap", async () => {
+    const w = connectionAuth();
+    const org = await seedOrganization(w);
+    const created = await oidcConnection(w, org);
+    let between: (() => Promise<void>) | null = async () => {
+      const r = await updateConnection(w.config, SSO_APP, {
+        id: created.id,
+        clientSecret: "the-owner-secret-0123456789",
+      });
+      if (!r.ok) throw new Error(r.code);
+    };
+    // The owner update runs once, right after the rewrap reads the connection rows.
+    const storage = new Proxy(w.storage, {
+      get(target, key) {
+        if (key === "findMany")
+          return async (model: string, ...rest: unknown[]) => {
+            const rows = await (target.findMany as (...a: unknown[]) => Promise<unknown>)(
+              model,
+              ...rest,
+            );
+            const run = model === "ssoConnection" ? between : null;
+            if (run) {
+              between = null;
+              await run();
+            }
+            return rows;
+          };
+        const value = Reflect.get(target, key, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const auth = await rotatedAuth(w, storage);
+    expect(await auth.api.secrets.rewrap({ limit: 100 })).toMatchObject({
+      ok: true,
+      value: { resealed: 0, failed: 1, skipped: 0 },
+    });
+    expect(between).toBeNull();
+    const row = await rowOf(w, created.id);
+    if (!row) throw new Error("no row");
+    // The rewrap wrote nothing: the row holds the owner's new secret under version 1.
+    expect(row.secretVersion).toBe(1);
+    expect(await connectionSecret(w.config, row)).toBe("the-owner-secret-0123456789");
+  });
+
+  it("refuses a call budget below 50, above 1000, or not whole, through the api and the route", async () => {
+    const w = await fiftyConnections();
+    const auth = await rotatedAuth(w);
+    for (const callBudget of [49, 1001, 50.5]) {
+      expect(await auth.api.secrets.rewrap({ callBudget }), String(callBudget)).toEqual({
+        ok: false,
+        code: "invalid_body",
+        status: 400,
+      });
+      const res = await auth.handle(rewrapRoute({ callBudget }));
+      expect(res.status, String(callBudget)).toBe(400);
+      expect(await res.json()).toEqual({ error: "invalid_body" });
+    }
+    // No refused call moved a row.
+    const rows = await w.storage.findMany("ssoConnection", []);
+    expect(rows.map((r) => r.secretVersion)).toEqual(rows.map(() => 1));
+  });
+
+  it("reseals more rows in one api call with a budget above 50", async () => {
+    const low = await fiftyConnections();
+    // The memory storage has no counter, so each step counts its worst case.
+    // The ready check, the three page reads, and the three end reads leave 43 rows of 50.
+    expect(await (await rotatedAuth(low)).api.secrets.rewrap({ limit: 100 })).toMatchObject({
+      ok: true,
+      value: { resealed: 43, more: true },
+    });
+    const high = await fiftyConnections();
+    expect(
+      await (await rotatedAuth(high)).api.secrets.rewrap({ limit: 100, callBudget: 60 }),
+    ).toMatchObject({ ok: true, value: { resealed: 50, more: false, next: null } });
+  });
+
+  it("passes the callBudget of the route body to the engine, and counts the route limiter", async () => {
+    const low = await fiftyConnections();
+    const lowRes = await (await rotatedAuth(low)).handle(rewrapRoute({ limit: 100 }));
+    expect(lowRes.status).toBe(200);
+    // The limiter call of the route takes one call of the 50: 42 rows, one less than the api.
+    expect(await lowRes.json()).toMatchObject({ resealed: 42, more: true });
+    const high = await fiftyConnections();
+    const highRes = await (await rotatedAuth(high)).handle(
+      rewrapRoute({ limit: 100, callBudget: 60 }),
+    );
+    expect(highRes.status).toBe(200);
+    expect(await highRes.json()).toMatchObject({ resealed: 50, more: false, next: null });
+  });
+});
+
+describe("the checks of a connection update and a certificate (ruling 34 of plan 12d)", () => {
+  it("refuses an update that changes the organization of a connection", async () => {
+    const w = connectionAuth();
+    const org = await seedOrganization(w);
+    const other = await seedOrganization(w, "other");
+    const created = await oidcConnection(w, org);
+    expect(
+      await updateConnection(w.config, SSO_APP, {
+        id: created.id,
+        organizationId: other,
+        label: "Moved",
+      }),
+    ).toEqual(refusedFor("organizationId"));
+    const row = await rowOf(w, created.id);
+    expect([row?.organizationId, row?.label]).toEqual([org, "Acme Entra ID"]);
+    // The same organization is no change, and the update passes.
+    const same = await updateConnection(w.config, SSO_APP, {
+      id: created.id,
+      organizationId: org,
+      label: "Renamed",
+    });
+    expect(same.ok && same.value.label).toBe("Renamed");
+  });
+
+  it("takes a certificate of 16384 characters and refuses one of 16385", async () => {
+    const idp = await createTestIdp({ alg: "ec" });
+    const pem = idp.certificatePem;
+    // Trailing line breaks keep the PEM readable, so only the bound can refuse it.
+    const padded = (length: number) => pem + "\n".repeat(length - pem.length);
+    const w = connectionAuth();
+    const org = await seedOrganization(w);
+    const input = (certificate: string) => ({
+      organizationId: org,
+      kind: "saml" as const,
+      label: "Acme Okta",
+      idpEntityId: idp.entityId,
+      ssoUrl: "https://idp.example/sso",
+      certificates: [certificate],
+    });
+    expect((await createConnection(w.config, SSO_APP, input(padded(16 * 1024)))).ok).toBe(true);
+    expect(await createConnection(w.config, SSO_APP, input(padded(16 * 1024 + 1)))).toEqual(
+      refusedFor("certificates"),
+    );
   });
 });

@@ -30,8 +30,9 @@ function refused(step: string, code: ErrorCode = "forbidden_rank"): Result<never
 }
 
 /**
- * True when the user has a member row of the organization whose role parts
- * hold a static role of the owner rank (the rule of plan 12k). `rankOf`
+ * True when the user has a member row of the organization with a static
+ * role of the owner rank. One role part of the row holds it: the rule of
+ * plan 12k. `rankOf`
  * reads only the static ranks of the config, and a dynamic role never
  * reaches the owner rank.
  */
