@@ -15,7 +15,7 @@ sources:
 
 ## Before you start
 
-- Read [Run your code at a flow point](/docs/guides/hooks/) for the before hooks and the after hooks.
+- Read [Run your code at a hook point](/docs/guides/hooks/) for the before hooks and the after hooks.
 - Read [Workers on Postgres through Hyperdrive](/docs/start/workers-hyperdrive/) for the client of one connection.
 
 ## The setup
@@ -48,6 +48,6 @@ Core sets no timeout on a hook, as it sets none on the mail port. The rule stays
 
 ## Next
 
-- [Run your code at a flow point](/docs/guides/hooks/)
+- [Run your code at a hook point](/docs/guides/hooks/)
 - [The race rules](/docs/concepts/races/)
 - [Workers on Postgres through Hyperdrive](/docs/start/workers-hyperdrive/)

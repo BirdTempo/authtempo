@@ -70,6 +70,6 @@ Each line starts with `authtempo:` or `authtempo compat:`. It holds an event nam
 
 ## Next
 
-- [Run your code at a flow point](/docs/guides/hooks/)
+- [Run your code at a hook point](/docs/guides/hooks/)
 - [The threat model](/docs/concepts/threat-model/)
 - [Deploy](/docs/operations/deploy/)

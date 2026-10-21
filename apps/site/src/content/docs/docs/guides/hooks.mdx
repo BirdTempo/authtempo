@@ -1,5 +1,5 @@
 ---
-title: Run your code at a flow point (hooks)
+title: Run your code at a hook point (hooks)
 description: Run the app's code before or after an organization, session, user, identity, or operator write, refuse a write, or patch a new row.
 type: how-to
 sources:
@@ -15,7 +15,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 
 **For:** an app developer who must write a row of the app, refuse a write, or audit an event at a core flow.
 
-**What it does:** core calls your function at a named point of a flow. A before hook can refuse the flow. An after hook runs after the commit.
+**What it does:** core calls your function at a named hook point of a flow. A before hook can refuse the flow. An after hook runs after the commit.
 
 ## Before you start
 
@@ -37,7 +37,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 
 ## The hook points
 
-| Group | Points |
+| Group | Hook points |
 | --- | --- |
 | `hooks.organization` | `beforeCreate`, `afterCreate`, `beforeUpdate`, `afterUpdate`, `beforeDelete`, `afterDelete`, `beforeAddMember`, `afterAddMember`, `beforeUpdateMemberRole`, `afterUpdateMemberRole`, `beforeRemoveMember`, `afterRemoveMember`, `beforeInvite`, `afterInvite`, `afterAcceptInvitation`, `afterDeclineInvitation`, `afterRevokeInvitation` |
 | `hooks.session` | `beforeCreate`, `afterCreate`, `afterEnd` |
@@ -62,9 +62,9 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 - A flow that moves an existing user from `emailVerified: false` to true runs `user.beforeVerify` and `user.afterVerify` once. They take the place of `user.beforeCreate` and `user.afterCreate` in that order.
 - `user.beforeVerify` sees the stored row, still unverified. A refusal leaves the user unverified. The magic link, the email code, the verify link, and social spend their proof first, so a refusal spends it. The reset keeps its link.
 - Two proofs of one user at once both run `user.beforeVerify`. One claims the user and runs `user.afterVerify`. The other finds the user verified. The magic link, the email code, social, and the reset sign in that user. The verify link opens no session. It answers `invalid_token` when the claim deleted the user's password. So a before can have no after.
-- A user that a flow creates verified fires the create points, not the verify points. The change of address fires the update points.
+- A user that a flow creates verified fires the create hook points, not the verify hook points. The change of address fires the update hook points.
 - The sign-up rule runs before `user.beforeCreate`. So no user hook sees a create that `signUp` refuses.
-- A claim fires the verify points only. The `email` identity, the social fill of the name and the image, the sweep, and the importer fire no user or identity hook.
+- A claim fires the verify hook points only. The `email` identity, the social fill of the name and the image, the sweep, and the importer fire no user or identity hook.
 - `user.beforeUpdate` can run more than once for one change, with `via: "profile"` and with `via: "email_change"`.
 - A parallel write that lands first makes core read the user row again. Then `user.beforeUpdate` runs again on the new row. Write the hook so that a second call does no harm.
 - `identity.beforeLink` with `via: "link"` runs inside the transaction of the link, before the identity write.
@@ -83,13 +83,13 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 Warning: on Postgres with a pool of one connection, a before hook that queries the same client stops the request until the pool times out. Use a second connection for the app's own write.
 :::
 
-## The operator points
+## The operator hook points
 
 - `hooks.operator` needs `operator.users`. [Run the operator tools](/docs/guides/operator-tools/) turns the tools on.
 - `beforeAction` gets the audit row of the act, with no id yet. It runs before the act's transaction, so before its first write. A refusal answers `hook_refused`, and the act writes nothing.
 - `afterAction` gets each stored audit row once, after the commit. A throw writes one log line, and the act stays. Send the row to a separate system here.
 - `afterAction` also gets each `impersonation_stop` row that another flow writes, such as the user's end of an impersonation session. No `beforeAction` runs for such a row.
-- In the six member points, `by` is null for an act of an operator secret or of the app. Those acts have no user.
+- In the six member hook points, `by` is null for an act of an operator secret or of the app. Those acts have no user.
 - `via: "operator"` of a member is the grant or the revoke of the platform role, or `createAdmin`.
 - `banned`: a ban, or a session of a banned user that a request or the sweep ends.
 - `operator`: an operator ends the sessions of a user or of all users, or revokes the platform role.
