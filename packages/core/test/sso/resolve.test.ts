@@ -9,7 +9,7 @@ import { sha256Hex } from "../../src/primitives/crypto.js";
 import type { ModelName } from "../../src/schema.js";
 import { tokenFromMail } from "../helpers.js";
 import { FAST, signUpAndVerify } from "../password-helpers.js";
-import { SSO_APP } from "./helpers.js";
+import { SSO_APP, seedOrganization, verifiedDomain } from "./helpers.js";
 import {
   acmeWithSso,
   oidcConnection,
@@ -71,6 +71,46 @@ describe("the SSO resolution (plan 12d Task 5)", () => {
     const none = await ssoSignIn(w, connectionId, "acme", { sub: "c-2", email_verified: true });
     expect(none.error).toBe("email_required");
     expect(await counts(w)).toEqual(before);
+  });
+
+  it("refuses an address that a verified domain of another organization claims", async () => {
+    const w = ssoSignInWorld({
+      password: { hash: FAST, uniformSignUp: false, requireVerified: false },
+    });
+    await acmeWithSso(w);
+    const kept = await signUpAndVerify(w, ADA);
+    const ada = await userAt(w, ADA);
+    if (!ada) throw new Error("no user");
+    // Bo is an unverified password sign-up of acme.example, with a session.
+    const up = await passwordSignUp(w.config, {
+      email: "bo@acme.example",
+      password: "a claimant's password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok || !("token" in up.value)) throw new Error("the sign-up opened no session");
+    const bo = await userAt(w, "bo@acme.example");
+    if (!bo || bo.emailVerified) throw new Error("no unverified user");
+    // Organization beta has its own verified domain and a connection.
+    const beta = await seedOrganization(w, "beta");
+    await verifiedDomain(w, beta, "beta.example");
+    const betaIdp = await oidcConnection(w, beta, "beta");
+    const before = await counts(w);
+    for (const [sub, email] of [
+      ["x-1", ADA],
+      ["x-2", "bo@acme.example"],
+    ] as const) {
+      const r = await ssoSignIn(w, betaIdp, "beta", { sub, email });
+      expect(r.error).toBe("sso_domain_mismatch");
+      expect(r.token).toBeNull();
+    }
+    // No link, no session, and no claim: each row of Ada and Bo stays as it was.
+    expect(await counts(w)).toEqual(before);
+    expect(await identitiesOf(w, ada.id)).toEqual(["email"]);
+    expect(await passwordOf(w, ada.id)).toEqual(kept);
+    expect((await resolveSession(w.config, up.value.token))?.user.id).toBe(bo.id);
+    expect(await passwordOf(w, bo.id)).not.toBeNull();
+    expect((await userAt(w, "bo@acme.example"))?.emailVerified).toBe(false);
   });
 
   it("signs in a known identity", async () => {
