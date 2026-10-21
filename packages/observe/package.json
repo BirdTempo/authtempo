@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "The owned sinks of the authtempo event port: Workers Logs and Analytics Engine.",
+  "description": "The owned sinks of the authtempo event port: Workers Logs, Analytics Engine, and OTLP.",
   "exports": {
     "./workers-logs": {
       "types": "./dist/workers-logs.d.ts",
@@ -12,6 +12,10 @@
     "./analytics-engine": {
       "types": "./dist/analytics-engine.d.ts",
       "default": "./dist/analytics-engine.js"
+    },
+    "./otlp": {
+      "types": "./dist/otlp.d.ts",
+      "default": "./dist/otlp.js"
     }
   },
   "files": [

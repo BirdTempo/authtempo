@@ -1,9 +1,11 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { analyticsEngineSink } from "../../src/analytics-engine.js";
+import { otlpSink } from "../../src/otlp.js";
 import { workersLogsSink } from "../../src/workers-logs.js";
 import { built } from "../events.js";
 
-// The two sinks in workerd (plan 12h Task 10): the console of the pool and a fake dataset.
+// The three sinks in workerd (plan 12h Tasks 10 and 11): the console of the
+// pool, a fake dataset, and a fake fetch. The pool refuses a real outbound fetch.
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -43,4 +45,49 @@ it("writes one data point for a chosen event to a dataset in workerd", async () 
       doubles: [1, 0, 0],
     },
   ]);
+});
+
+it("posts the three OTLP bodies through the fetch of the app in workerd", async () => {
+  const sent: { url: string; redirect: RequestInit["redirect"]; body: unknown }[] = [];
+  const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    sent.push({
+      url: String(input),
+      redirect: init?.redirect,
+      body: JSON.parse(String(init?.body)),
+    });
+    return new Response(null, { status: 200 });
+  }) as typeof globalThis.fetch;
+  const request = built("request", "info", {
+    route: "POST /password/sign-in",
+    method: "POST",
+    status: 200,
+    outcome: "ok",
+    durationMs: 12,
+  });
+  await otlpSink({ endpoint: "https://collector.example.test", serviceName: "auth", fetch }).write([
+    request,
+  ]);
+  expect(sent.map((s) => [s.url, s.redirect])).toEqual([
+    ["https://collector.example.test/v1/logs", "manual"],
+    ["https://collector.example.test/v1/traces", "manual"],
+    ["https://collector.example.test/v1/metrics", "manual"],
+  ]);
+  expect(sent[1]?.body).toMatchObject({
+    resourceSpans: [
+      {
+        scopeSpans: [
+          {
+            spans: [
+              {
+                name: "POST /password/sign-in",
+                kind: 2,
+                startTimeUnixNano: "1792576799988000000",
+                endTimeUnixNano: "1792576800000000000",
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  });
 });

@@ -4,8 +4,9 @@
  * Logs keeps the object as JSON with each field indexed, so a query reads the
  * fields and not a text. The level of the event picks the method.
  */
-import type { AuthEvent, ObserveSink } from "@authtempo/core/observe";
-import { scrub, secretParts } from "@authtempo/core/redact";
+import type { ObserveSink } from "@authtempo/core/observe";
+import { secretParts } from "@authtempo/core/redact";
+import { scrubEvent } from "./event-scrub.js";
 
 export type WorkersLogsLevel = "info" | "warn" | "error";
 
@@ -23,17 +24,6 @@ export interface WorkersLogsOptions {
 const RANK: Readonly<Record<WorkersLogsLevel, number>> = { info: 0, warn: 1, error: 2 };
 const METHOD = { info: "log", warn: "warn", error: "error" } as const;
 
-/** A string field with each secret replaced by ***. An array of strings, such as `rejected`, too. */
-function scrubbed(event: AuthEvent, secrets: ReadonlySet<string>): AuthEvent {
-  const out: AuthEvent = { ...event };
-  for (const [key, value] of Object.entries(out)) {
-    if (typeof value === "string") out[key] = scrub(value, secrets);
-    else if (Array.isArray(value))
-      out[key] = value.map((v: unknown) => (typeof v === "string" ? scrub(v, secrets) : v));
-  }
-  return out;
-}
-
 /** The sink. It refuses an unknown `minLevel` at once, so a typo never writes every event in silence. */
 export function workersLogsSink(options: WorkersLogsOptions = {}): ObserveSink {
   const minLevel = options.minLevel ?? "info";
@@ -48,7 +38,7 @@ export function workersLogsSink(options: WorkersLogsOptions = {}): ObserveSink {
         const level: WorkersLogsLevel = Object.hasOwn(RANK, event.level) ? event.level : "error";
         if (RANK[level] < min) continue;
         // One argument, a plain object: a second argument or a JSON text loses the field index.
-        console[METHOD[level]](secrets.size > 0 ? scrubbed(event, secrets) : { ...event });
+        console[METHOD[level]](secrets.size > 0 ? scrubEvent(event, secrets) : { ...event });
       }
     },
   };
