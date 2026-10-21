@@ -76,7 +76,7 @@ const sessionRead = () =>
     headers: { authorization: `Bearer ts_${"a".repeat(43)}` },
   });
 
-/** A real Auth with the sink. A session read on the down store emits one error.internal event. */
+/** A real Auth with the sink. A session read on the down store emits error.internal and request. */
 function authWith(sink: ObserveSink, flushTimeoutMs?: number) {
   return createAuth({
     baseURL: "https://api.example.test",
@@ -379,17 +379,24 @@ describe("otlpSink", () => {
     const auth = authWith(otlpSink({ endpoint: ENDPOINT, serviceName: "auth", fetch: r.fetch }));
     expect((await auth.handle(sessionRead())).status).toBe(500);
     await auth.observe.flush();
-    // One error.internal event: a log record only, so one post, and no second one.
-    expect(r.sent.map((s) => s.url)).toEqual([`${ENDPOINT}/v1/logs`]);
+    // The error.internal and request events: one post for each signal, and no second one.
+    expect(r.sent.map((s) => s.url)).toEqual([
+      `${ENDPOINT}/v1/logs`,
+      `${ENDPOINT}/v1/traces`,
+      `${ENDPOINT}/v1/metrics`,
+    ]);
     expect(auth.observe.stats().dropped).toEqual({
       buffer_full: 0,
       sink_timeout: 0,
-      sink_threw: 1,
+      // The observer counts the events of the batch: error.internal and request.
+      sink_threw: 2,
     });
     // The next flush sends only the drop report, once.
     await auth.observe.flush();
     expect(r.sent.map((s) => s.url)).toEqual([
       `${ENDPOINT}/v1/logs`,
+      `${ENDPOINT}/v1/traces`,
+      `${ENDPOINT}/v1/metrics`,
       `${ENDPOINT}/v1/logs`,
       `${ENDPOINT}/v1/metrics`,
     ]);
@@ -415,10 +422,11 @@ describe("otlpSink", () => {
     const waited = Date.now() - started;
     expect(waited).toBeGreaterThanOrEqual(90);
     expect(waited).toBeLessThan(2000);
-    expect(never.sent).toHaveLength(1);
+    // One post for each signal of the error.internal and request events.
+    expect(never.sent).toHaveLength(3);
     expect(auth.observe.stats().dropped).toEqual({
       buffer_full: 0,
-      sink_timeout: 1,
+      sink_timeout: 2,
       sink_threw: 0,
     });
   });
@@ -490,7 +498,11 @@ describe("otlpSink", () => {
     expect(res.status).toBe(500);
     expect(waited).toHaveLength(1);
     await Promise.all(waited);
-    expect(done).toEqual([`${ENDPOINT}/v1/logs`]);
+    expect(done).toEqual([
+      `${ENDPOINT}/v1/logs`,
+      `${ENDPOINT}/v1/traces`,
+      `${ENDPOINT}/v1/metrics`,
+    ]);
     const [record] = logRecords(r.sent[0]);
     expect(record.eventName).toBe("error.internal");
     expect(auth.observe.stats().dropped).toEqual({

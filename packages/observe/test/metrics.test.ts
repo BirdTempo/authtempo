@@ -5,10 +5,11 @@ import { otlpSink } from "../src/otlp.js";
 import { built } from "./events.js";
 
 /**
- * One source event for each row of `METRICS`. The names of plan 12h Tasks 4
+ * One source event for each row of `METRICS`. The names of plan 12h Tasks 5
  * to 7 have no row in `EVENTS` yet, so their fields are the ones of spec 31.
- * Each carries the ids that a flow event holds, so a metric that copies one
- * shows here.
+ * Each of them carries the ids that a flow event holds, so a metric that
+ * copies one shows here. The sign_in row of Task 4 has no id field yet, so
+ * the sign_in source carries none until Task 5 adds them.
  */
 const IDS = { userId: "usr_0123456789", sessionId: "ses_0123456789" };
 const SOURCES: Readonly<Record<string, AuthEvent>> = {
@@ -19,7 +20,7 @@ const SOURCES: Readonly<Record<string, AuthEvent>> = {
     outcome: "ok",
     durationMs: 30,
   }),
-  sign_in: built("sign_in", "info", { method: "password", outcome: "success", ...IDS }),
+  sign_in: built("sign_in", "info", { method: "password", outcome: "success" }),
   "second_factor.challenge": built("second_factor.challenge", "info", {
     method: "totp",
     outcome: "failure",
