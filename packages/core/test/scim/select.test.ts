@@ -87,3 +87,30 @@ describe("the paging and the attributes of a SCIM list (plan 12d Task 9)", () =>
       expect([query, pick(query)]).toEqual([query, 400]);
   });
 });
+
+/**
+ * The two node:fs calls of the layer check. Core's typecheck has no Node
+ * types, because core runs on Workers; vitest runs in Node. A specifier in a
+ * constant keeps the import out of the typecheck.
+ */
+interface SourceFs {
+  readdirSync(dir: URL): string[];
+  readFileSync(file: URL, encoding: "utf8"): string;
+}
+const FS_MODULE = "node:fs";
+
+describe("the layers of the SCIM engine (review l2 of plan 12d Task 9b)", () => {
+  it("reads no http module from engine/scim, so no import cycle runs through the routes", async () => {
+    const { readdirSync, readFileSync }: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
+    const dir = new URL("../../src/engine/scim/", import.meta.url);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".ts"));
+    expect(files.length).toBeGreaterThanOrEqual(6);
+    const reads = files.flatMap((f) =>
+      [...readFileSync(new URL(f, dir), "utf8").matchAll(/from "([^"]+)"/g)]
+        .map((m) => m[1] ?? "")
+        .filter((spec) => spec.includes("/http/"))
+        .map((spec) => `${f} ${spec}`),
+    );
+    expect(reads).toEqual([]);
+  });
+});

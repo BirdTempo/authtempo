@@ -5,7 +5,7 @@
  * 400 `invalidValue`, never a silent default.
  */
 
-import { scimError } from "../../http/routes/scim.js";
+import { scimError } from "./answer.js";
 import { asciiLower } from "./filter.js";
 
 /** The most resources of one page. The ServiceProviderConfig gives it as `filter.maxResults`. */

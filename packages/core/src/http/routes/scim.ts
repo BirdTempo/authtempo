@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { NS_SCIM_ERROR, SCIM_MEDIA, scimError, scimJson } from "../../engine/scim/answer.js";
 import {
   listResponse,
   resourceTypes,
@@ -13,7 +14,6 @@ import {
   type ScimCaller,
   scimTokenOrganization,
 } from "../../engine/scim/tokens.js";
-import type { ScimType } from "../../errors.js";
 import { readCappedBytes } from "../../primitives/read-capped.js";
 import type { ScimScope } from "../../schema.js";
 import { scimTokenCreateBody, scimTokenIdBody, scimTokenListQuery } from "../contract/scim.js";
@@ -22,41 +22,11 @@ import type { RouteKey } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
 import { managedBody, managedCall, readQuery } from "./sso.js";
 
-/** The media type of every SCIM answer (RFC 7644 section 3.1). */
-export const SCIM_MEDIA = "application/scim+json";
-export const NS_SCIM_ERROR = "urn:ietf:params:scim:api:messages:2.0:Error";
+// The answer form lives on the engine side (review l2 of plan 12d Task 9b); the routes export it too.
+export { NS_SCIM_ERROR, SCIM_MEDIA, scimError, scimJson };
+
 /** The largest SCIM request body: 1 MB. */
 export const SCIM_BODY_MAX = 1_048_576;
-
-/** A SCIM answer: `application/scim+json`, never cached (a list holds personal data). */
-export function scimJson(
-  body: unknown,
-  status = 200,
-  headers: Record<string, string> = {},
-): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...headers, "content-type": SCIM_MEDIA, "cache-control": "no-store" },
-  });
-}
-
-/**
- * The SCIM error message (RFC 7644 section 3.12): the Error URN, the status
- * as a string, the `scimType` when one applies, and the detail. A SCIM
- * route answers this shape and never a code of `ERRORS`. No detail holds a
- * token, a hash, or a value of the request body.
- */
-export function scimError(status: number, detail: string, scimType?: ScimType): Response {
-  return scimJson(
-    {
-      schemas: [NS_SCIM_ERROR],
-      status: String(status),
-      ...(scimType === undefined ? {} : { scimType }),
-      detail,
-    },
-    status,
-  );
-}
 
 /** The media types that a SCIM body may carry; a parameter such as `charset` may follow. */
 const BODY_MEDIA: ReadonlySet<string> = new Set([SCIM_MEDIA, "application/json"]);
