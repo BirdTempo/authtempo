@@ -115,12 +115,25 @@ export const FIELD_KINDS: Readonly<Record<FieldKind, (value: unknown) => unknown
     hash: matches(HASH_RE),
   });
 
+/** The HKDF info of each opt-in keyed hash (spec 31 item 8). Task 2 reads them here. */
+export const KEYED_HASH_INFO = Object.freeze({
+  ip: "authtempo observe ip v1",
+  email: "authtempo observe email v1",
+} as const);
+
+/** One of the two infos: a free or an empty info would give a key of no spec. */
+export type KeyedHashInfo = (typeof KEYED_HASH_INFO)[keyof typeof KEYED_HASH_INFO];
+
 /**
  * HMAC-SHA256 of `value` under a key that HKDF-SHA256 derives from `secret`
  * with an empty salt and `info`, cut to 32 lowercase hex (spec 31 item 8).
  * Web Crypto only.
  */
-export async function keyedHash(secret: string, info: string, value: string): Promise<string> {
+export async function keyedHash(
+  secret: string,
+  info: KeyedHashInfo,
+  value: string,
+): Promise<string> {
   const enc = new TextEncoder();
   const base = await crypto.subtle.importKey("raw", enc.encode(secret), "HKDF", false, [
     "deriveKey",

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { CONTROL, FIELD_KINDS, keyedHash, REJECT, scrub, secretParts } from "../src/redact.js";
+import {
+  CONTROL,
+  FIELD_KINDS,
+  KEYED_HASH_INFO,
+  keyedHash,
+  REJECT,
+  scrub,
+  secretParts,
+} from "../src/redact.js";
 
 describe("the redaction source (plan 12h Task 1, spec 31 item 9)", () => {
   // The rows of packages/cli/test/secrets.test.ts:87 and :88, plus one row
@@ -106,5 +114,17 @@ describe("the redaction source (plan 12h Task 1, spec 31 item 9)", () => {
       .join("")
       .slice(0, 32);
     expect(hash).toBe(expected);
+  });
+
+  it("names the two infos of the keyed hash", () => {
+    expect(KEYED_HASH_INFO).toEqual({
+      ip: "authtempo observe ip v1",
+      email: "authtempo observe email v1",
+    });
+    expect(Object.isFrozen(KEYED_HASH_INFO)).toBe(true);
+    // The test typecheck fails when the info parameter takes any string.
+    // @ts-expect-error: an empty info is not one of the two infos.
+    const empty: Parameters<typeof keyedHash>[1] = "";
+    expect(empty).toBe("");
   });
 });
