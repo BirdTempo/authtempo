@@ -1,3 +1,4 @@
+import { closeSync, openSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 import {
   applySqliteMigrations,
@@ -135,6 +136,10 @@ export async function openSqlite(
     };
     let db: DatabaseSync;
     try {
+      // The file holds sealed secrets and password hashes. SQLite makes a new
+      // file with mode 0644, less the umask, so the seam makes it with mode
+      // 0600 first. A file that exists keeps its mode.
+      if (o.readOnly !== true) closeSync(openSync(source.file, "a", 0o600));
       // A read-only open of a missing file fails (SQLITE_CANTOPEN) and makes no file.
       db = new Database(source.file, { readOnly: o.readOnly === true });
       db.exec(`PRAGMA busy_timeout = ${BUSY_TIMEOUT_MS}`);

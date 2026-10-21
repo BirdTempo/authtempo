@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -94,6 +102,19 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
       pending: [],
       applied: [],
     });
+  });
+
+  it("makes a new file with mode 0600 and keeps the mode of a file that exists", () => {
+    // The file holds sealed secrets and password hashes (ruling 22 of the plan 12g lane, m2).
+    // SQLite alone makes a new file with mode 0644 at the umask 022 of a shell.
+    expect(migrateFile().status).toBe(0);
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const other = join(dir, "kept.db");
+    writeFileSync(other, "");
+    chmodSync(other, 0o640);
+    const r = runBin(["migrate", "--target", "sqlite", "--file", other]);
+    expect(r.status, r.stderr).toBe(0);
+    expect(statSync(other).mode & 0o777).toBe(0o640);
   });
 
   it("lists the pending files with --dry-run and writes nothing", () => {
