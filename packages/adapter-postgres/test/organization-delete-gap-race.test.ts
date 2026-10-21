@@ -36,9 +36,11 @@ const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /**
  * The engine on Postgres with teams on. `probe.next` runs once, after the
  * next lock read of the sessions in a transaction, on that transaction.
+ * `hooks.before` counts the calls of `beforeDelete`.
  */
 function world() {
   const sent: MailMessage[] = [];
+  const hooks = { before: 0 };
   const probe: { next: (() => Promise<void>) | null } = { next: null };
   const adapter = createPostgresAdapter(db.sql);
   const wrap = (tx: StorageAdapter): StorageAdapter => ({
@@ -69,6 +71,13 @@ function world() {
       },
     },
     organizations: { teams: {} },
+    hooks: {
+      organization: {
+        beforeDelete: async () => {
+          hooks.before++;
+        },
+      },
+    },
   });
   /** A sign-in by a magic link: the user on the first one. Answers the session and its token. */
   async function signIn(email: string) {
@@ -81,7 +90,7 @@ function world() {
     if (!s) throw new Error("no session");
     return { ...s, token: r.value.token };
   }
-  return { auth, signIn, probe };
+  return { auth, signIn, probe, hooks };
 }
 
 function must<T>(r: { ok: true; value: T } | { ok: false; code: string }): T {
@@ -181,10 +190,44 @@ describe("the organization delete beside a set of the active organization and te
       code: "conflict",
     });
     expect(rest).toEqual([]);
+    // A lost round runs no before hook.
+    expect(w.hooks.before).toBe(0);
     expect(await db.sql`SELECT 1 FROM ta_organization`).toHaveLength(1);
     expect(await db.sql`SELECT 1 FROM ta_member`).toHaveLength(2);
     expect(
       await db.sql`SELECT 1 FROM ta_session WHERE active_organization_id = ${organizationId}`,
     ).toHaveLength(5);
+  }, 60_000);
+  it("runs the before hook once, in the round that commits, after 2 rounds that lose", async () => {
+    const w = world();
+    const ada = await w.signIn("ada@example.com");
+    const organizationId = must(
+      await w.auth.api.createOrganization({ user: ada.user, slug: "acme", name: "Acme" }),
+    ).organization.id;
+    // Two more sessions of Ada act in no organization.
+    const rest = [await w.signIn("ada@example.com"), await w.signIn("ada@example.com")];
+    // Rounds 1 and 2: after the lock read, a set moves one more session into Acme.
+    const arm = () => {
+      const s = rest.shift();
+      if (!s) return;
+      w.probe.next = async () => {
+        expect(
+          await w.auth.api.setActiveOrganization({ session: s, organizationId }),
+        ).toMatchObject({ ok: true });
+        arm();
+      };
+    };
+    arm();
+
+    // Round 3 locks both sessions and commits.
+    expect(await w.auth.api.deleteOrganization({ user: ada.user, organizationId })).toMatchObject({
+      ok: true,
+    });
+    expect(rest).toEqual([]);
+    expect(w.hooks.before).toBe(1);
+    expect(await db.sql`SELECT 1 FROM ta_organization`).toHaveLength(0);
+    expect(
+      await db.sql`SELECT 1 FROM ta_session WHERE active_organization_id = ${organizationId}`,
+    ).toHaveLength(0);
   }, 60_000);
 });

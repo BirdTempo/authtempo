@@ -32,11 +32,12 @@ afterEach(async () => {
 /**
  * The engine on Postgres with teams on. `probes` runs in order, one for each
  * lock read of the sessions in a transaction, after the read; a null entry
- * passes that read.
+ * passes that read. `hooks.before` counts the calls of `beforeDeleteTeam`.
  */
 function world() {
   const sent: MailMessage[] = [];
   const probes: ((() => Promise<void>) | null)[] = [];
+  const hooks = { before: 0 };
   const adapter = createPostgresAdapter(db.sql);
   const wrap = (tx: StorageAdapter): StorageAdapter => ({
     ...tx,
@@ -62,6 +63,13 @@ function world() {
       },
     },
     organizations: { teams: {} },
+    hooks: {
+      organization: {
+        beforeDeleteTeam: async () => {
+          hooks.before++;
+        },
+      },
+    },
   });
   /** A sign-in by a magic link: the user on the first one. Answers the session and its token. */
   async function signIn(email: string) {
@@ -74,7 +82,7 @@ function world() {
     if (!s) throw new Error("no session");
     return { ...s, token: r.value.token };
   }
-  return { auth, signIn, probes };
+  return { auth, signIn, probes, hooks };
 }
 
 function must<T>(r: { ok: true; value: T } | { ok: false; code: string }): T {
@@ -190,8 +198,45 @@ describe("the team delete beside a set and a member removal on Postgres (ruling 
       code: "conflict",
     });
     expect(w.probes).toEqual([]);
+    // A lost round runs no before hook.
+    expect(w.hooks.before).toBe(0);
     expect(await db.sql`SELECT 1 FROM ta_team`).toHaveLength(1);
     expect(await db.sql`SELECT 1 FROM ta_team_member`).toHaveLength(1);
     expect(await db.sql`SELECT 1 FROM ta_session WHERE active_team_id = ${teamId}`).toHaveLength(5);
+  }, 60_000);
+  it("runs the before hook once, in the round that commits, after 2 rounds that lose", async () => {
+    const w = world();
+    const ada = await w.signIn("ada@example.com");
+    const organizationId = must(
+      await w.auth.api.createOrganization({ user: ada.user, slug: "acme", name: "Acme" }),
+    ).organization.id;
+    const teamId = must(
+      await w.auth.api.createTeam({ user: ada.user, organizationId, name: "Core" }),
+    ).id;
+    must(await w.auth.api.addTeamMember({ user: ada.user, teamId, userId: ada.user.id }));
+    // Two sessions of Ada act in Acme, in no team.
+    const sessions = [];
+    for (let i = 0; i < 2; i++) {
+      const s = await w.signIn("ada@example.com");
+      must(await w.auth.api.setActiveOrganization({ session: s, organizationId }));
+      const inAcme = await w.auth.api.getSession(s.token);
+      if (!inAcme) throw new Error("no session");
+      sessions.push(inAcme);
+    }
+    // Rounds 1 and 2: after the lock read, a set moves one more session into the team.
+    for (const s of sessions) {
+      w.probes.push(async () => {
+        expect(await w.auth.api.setActiveTeam({ session: s, teamId })).toMatchObject({ ok: true });
+      });
+      // The set's own session lock: no pause.
+      w.probes.push(null);
+    }
+
+    // Round 3 locks both sessions and commits.
+    expect(await w.auth.api.deleteTeam({ user: ada.user, teamId })).toMatchObject({ ok: true });
+    expect(w.probes).toEqual([]);
+    expect(w.hooks.before).toBe(1);
+    expect(await db.sql`SELECT 1 FROM ta_team`).toHaveLength(0);
+    expect(await db.sql`SELECT 1 FROM ta_session WHERE active_team_id = ${teamId}`).toHaveLength(0);
   }, 60_000);
 });
