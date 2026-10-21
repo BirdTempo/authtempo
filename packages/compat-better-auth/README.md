@@ -820,9 +820,10 @@ that Better Auth wrote holds no `member: ["read"]`. The read adds it, so a
 person whose only role is such a row lists the members, as in Better Auth.
 
 The client has Better Auth's role calls, on core's routes under
-`/organizations/roles`: `organization.createRole`, `deleteRole`, `listRoles`,
-`getRole`, `updateRole`, and `hasPermission`, in Better Auth's shapes, and
-`checkRolePermission` on the roles of `organizationClient({ ac, roles })`.
+`/organizations/roles`. They are `organization.createRole`, `deleteRole`,
+`listRoles`, `getRole`, `updateRole`, and `hasPermission`, in Better Auth's
+shapes. `checkRolePermission` reads the roles of
+`organizationClient({ ac, roles })`.
 Each write needs a fresh session and core's `ac` statement. Core's role routes take the name, not the id. So `getRole`, `updateRole`, and `deleteRole` with `roleId` list the roles first, and need `ac:read` as well. Better Auth's update and delete by `roleId` need only `ac:update` and `ac:delete`. Pass `roleName` to need one statement only. A role's
 `additionalFields`, a new `roleName` in `updateRole`, and
 `allowCreatorAllPermissions: true` answer `NOT_SUPPORTED` (501). The codes are

@@ -965,7 +965,7 @@ These routes exist when the config sets `organizations.teams`. A team is a named
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The removal of another person needs `member:delete` in the organization of the team, a rank at least as high as that person's, and each of their rights. A member leaves a team with their own `userId` |
+| Needs | A session cookie, or a `ts_` bearer token. An API token answers 401. The removal of another person needs `member:delete` in the organization of the team. It also needs a rank at least as high as that person's, and each of their rights. A member leaves a team with their own `userId` |
 | Input | JSON `{ teamId, userId }` |
 | Answer | `{ ok: true }`. A session of the person that acts in the team loses its active team |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
@@ -1024,7 +1024,7 @@ These routes exist in every deployment.
 | Field | Value |
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified. A token of another form answers 401 |
-| Input | JSON `{ id, name?, permissions?, expiresAt? }`. It narrows only: a new set is a subset of the old one, a set over none narrows, and a new `expiresAt` is earlier than the old one. Another key answers `invalid_body`, so a client sets no window and no quota |
+| Input | JSON `{ id, name?, permissions?, expiresAt? }`. It narrows only. A new set is a subset of the old one, and a set over none narrows. A new `expiresAt` is earlier than the old one. Another key answers `invalid_body`, so a client sets no window and no quota |
 | Answer | The `apiToken` after the change |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict) |
 
