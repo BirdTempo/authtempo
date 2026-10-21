@@ -43,9 +43,12 @@ describe("the limiter families (plan 12h Task 7)", () => {
     expect(files.map((f) => f.file)).toContain(HELPER);
     expect(files.map((f) => f.file)).toContain("engine/magic-link.ts");
     // A call, a call through call, bind, or apply, and a computed member.
+    const member = /\.allow\s*[(.]|\[\s*["'`]allow["'`]\s*\]/;
+    // A destructure that takes allow: an assignment, a typed parameter, or an arrow parameter.
+    const destructure = /\{[^{}]*\ballow\b[^{}]*\}\s*(?:=(?![=>])|:\s*[A-Za-z]|\)\s*=>)/;
     const holders = files
       .filter(({ file }) => !ALLOWED.has(file))
-      .filter(({ text }) => /\.allow\s*[(.]|\[\s*["'`]allow["'`]\s*\]/.test(text))
+      .filter(({ text }) => member.test(text) || destructure.test(text))
       .map(({ file }) => file);
     expect(holders).toEqual([]);
   });
