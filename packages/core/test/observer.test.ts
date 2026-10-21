@@ -274,6 +274,44 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
     expect(last?.ipHash).toBe(await keyedHash(SECRET, "authtempo observe ip v1", "203.0.113.7"));
   });
 
+  it("scrubs each field with the config secrets, and keeps the stamp and the scope ids", async () => {
+    const { batches, sink } = recording();
+    const clock = fakeClock();
+    const config: ResolvedObserve = {
+      sink,
+      include: { ip: "none", userAgent: "none", email: "none" },
+      trustTraceparent: false,
+      buffer: 1000,
+      flushTimeoutMs: 2000,
+      readiness: false,
+    };
+    // Each secret is a part of a stamp field or of a field of the flow.
+    const secrets = new Set([
+      SCOPE.traceId,
+      SCOPE.spanId,
+      "magic-link",
+      "social.token",
+      "2026-01-01",
+      "error",
+      "google",
+    ]);
+    const o = createObserver(config, { clock, hashSecret: () => SECRET, secrets });
+    o.scope(SCOPE).emit({ name: "social.token_status", provider: "google", status: 500 });
+    await o.flush();
+    expect(batches.flat()).toEqual([
+      {
+        name: "social.token_status",
+        level: "error",
+        at: "2026-01-01T00:00:00.000Z",
+        traceId: SCOPE.traceId,
+        spanId: SCOPE.spanId,
+        route: SCOPE.route,
+        provider: "***",
+        status: 500,
+      },
+    ]);
+  });
+
   it("writes no address with the default include", async () => {
     const { batches, sink } = recording();
     const { o } = observer(sink);

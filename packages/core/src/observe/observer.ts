@@ -108,7 +108,10 @@ export function createObserver(
     const held: Held = { event };
     // The scrub of the default output, also with a sink: no sink is the only
     // guard of a secret (spec 31 item 9). A field kind can keep a secret that
-    // a client sends, such as a method token.
+    // a client sends, such as a method token. The stamp is set first and is
+    // not scrubbed: the name, the level, the time, the ids, and the route key
+    // are checked by their kinds. A sink of @authtempo/observe scrubs again
+    // with the secrets of the app. It skips the same fields, but not the route key.
     for (const [key, value] of Object.entries(checkedFields(input)))
       if (!Object.hasOwn(event, key))
         event[key] = typeof value === "string" ? scrub(value, deps.secrets) : value;
