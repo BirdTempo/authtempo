@@ -7,6 +7,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./seam": {
+      "types": "./dist/seam-entry.d.ts",
+      "default": "./dist/seam-entry.js"
     }
   },
   "files": [
@@ -16,7 +20,7 @@
   "scripts": {
     "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
-    "test": "vitest run"
+    "test": "vitest run && node scripts/check-seam-dts.mjs"
   },
   "dependencies": {
     "@authtempo/core": "workspace:*"

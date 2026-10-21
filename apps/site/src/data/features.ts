@@ -357,6 +357,8 @@ export const PACKAGE_FEATURES: Readonly<Record<string, PackageFeature>> = {
 
 /** Each folder of packages/ that has no row, with its reason. check-features prints each one. */
 export const PACKAGE_EXEMPT: Readonly<Record<string, string>> = {
+  // Plan 12g: Task 9 writes the SQLite guide and moves this package to a row.
+  "adapter-sqlite": "the SQLite guide comes with plan 12g Task 9",
   core: "every route feature is a row of FEATURES",
   "sdk-conformance": "a test package of the SDKs, not a feature",
 };

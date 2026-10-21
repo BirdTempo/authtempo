@@ -1,4 +1,5 @@
 import { type Clock, type LimiterPort, limiterKey, systemClock } from "@authtempo/core";
+import type { D1Subset } from "./seam.js";
 
 /**
  * One statement: insert the key at count 1, or on conflict reset the window
@@ -25,14 +26,14 @@ const SWEEP = "DELETE FROM ta_limit WHERE expires_at <= ?1";
  * isolate, kept in `ta_limit` (schema version 3). The memory limiter counts
  * per isolate, so its real limit is its limit times the isolate count.
  */
-export function createD1Limiter(db: D1Database, clock: Clock = systemClock): LimiterPort {
+export function createD1Limiter(db: D1Subset, clock: Clock = systemClock): LimiterPort {
   return {
     async allow(key, window) {
       const id = limiterKey(key, window);
-      const row = await db
+      const row = (await db
         .prepare(ALLOW)
         .bind(id, clock.now().getTime(), window.seconds * 1000)
-        .first<{ count: number }>();
+        .first()) as { count: number } | null;
       if (row === null) throw new Error("authtempo limiter: the upsert returned no row");
       return Number(row.count) <= window.max;
     },

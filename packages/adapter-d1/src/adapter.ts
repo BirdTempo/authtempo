@@ -1,6 +1,7 @@
 import type { ModelName, StorageAdapter } from "@authtempo/core";
 import { StorageError } from "@authtempo/core";
 import { assertModel, type SqlStatements, type Statement } from "@authtempo/core/sql";
+import type { D1Subset, D1SubsetResult } from "./seam.js";
 
 type Row = Record<string, unknown>;
 
@@ -45,20 +46,20 @@ interface Ctx extends D1AdapterOptions {
   sent: { statements: number; ready?: number };
 }
 
-async function run(db: D1Database, s: Statement, sent: Ctx["sent"]): Promise<D1Result<Row>> {
+async function run(db: D1Subset, s: Statement, sent: Ctx["sent"]): Promise<D1SubsetResult> {
   sent.statements++;
   return db
     .prepare(s.sql)
     .bind(...s.params)
-    .run<Row>();
+    .run();
 }
 
-async function all(db: D1Database, s: Statement, sent: Ctx["sent"]): Promise<Row[]> {
+async function all(db: D1Subset, s: Statement, sent: Ctx["sent"]): Promise<Row[]> {
   sent.statements++;
   const res = await db
     .prepare(s.sql)
     .bind(...s.params)
-    .all<Row>();
+    .all();
   return res.results;
 }
 
@@ -73,7 +74,7 @@ async function all(db: D1Database, s: Statement, sent: Ctx["sent"]): Promise<Row
  * No db.batch here: a batch that fails midway applies nothing.
  */
 async function rethrowAfterUndo(
-  db: D1Database,
+  db: D1Subset,
   entries: Undo[],
   original: unknown,
   sent: Ctx["sent"],
@@ -93,7 +94,7 @@ async function rethrowAfterUndo(
   throw new StorageError("rollback_failed", model, fields, { cause: { original, failures } });
 }
 
-function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
+function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
   const st = ctx.statements;
   const self: StorageAdapter = {
     async create(model, data) {
@@ -145,11 +146,11 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       // never overwrites a row that another request wrote in between.
       const sel = st.undoSelect(model, where);
       if (!sel) return 0;
-      let results: D1Result<Row>[];
+      let results: D1SubsetResult[];
       // A batch sends each of its statements.
       ctx.sent.statements += 2;
       try {
-        results = await db.batch<Row>([
+        results = await db.batch([
           db.prepare(sel.sql).bind(...sel.params),
           db.prepare(s.sql).bind(...s.params),
         ]);
@@ -217,7 +218,7 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
   return self;
 }
 
-export function createD1AdapterOn(db: D1Database, options: D1AdapterOptions): StorageAdapter {
+export function createD1AdapterOn(db: D1Subset, options: D1AdapterOptions): StorageAdapter {
   return adapterOn(db, { ...options, undo: null, sent: options.sent ?? { statements: 0 } });
 }
 

@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "lib": ["ES2023"],
+    // Each driver entry imports its driver's types only (plan 12g, deviation 5).
+    "types": ["node", "bun"]
+  },
+  "include": ["src"]
+}

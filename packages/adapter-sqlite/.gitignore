@@ -1,0 +1,3 @@
+# Written by scripts/copy-migrations.mjs from the D1 files at each build.
+src/migrations.generated.ts
+dist
