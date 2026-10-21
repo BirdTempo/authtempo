@@ -8,9 +8,9 @@ import { freshDatabase } from "./db.js";
 // organization, and then deletes its rows. A set of the active organization
 // could commit between the two, so a session acted in the organization with
 // no lock of the delete. A set of the active team on that session then held
-// the session and waited on the team row that the delete removed, while the
+// the session. It waited on the team row that the delete removed, while the
 // delete waited on the session. Now the set of the active organization takes
-// the organization lock after its session lock, and the delete reads the
+// the organization lock after its session lock. The delete reads the
 // sessions of the organization again after the organization lock. When a new
 // one is there, the round writes nothing, and the next round locks it. Each
 // state comes from the flows: the magic link and the organization api.
