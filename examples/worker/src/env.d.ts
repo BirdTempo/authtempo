@@ -19,6 +19,11 @@ interface Env {
   OPERATOR_SECRETS?: string;
   /** "1" turns on the operator user, session, and audit tools of plan 12f, with the organization "platform". */
   OPERATOR_USERS?: string;
+  /**
+   * A local test run only (plan 12h Task 9; read when BASE_URL is on this machine): "on" mounts
+   * GET /auth/ready, and "store_down" mounts it over a storage adapter whose binding throws.
+   */
+  TEST_READINESS?: string;
   DB: D1Database;
   /** Better Auth 1.7's tables with compat migration 0001, for the compat instance (plan 9). */
   BA_DB: D1Database;

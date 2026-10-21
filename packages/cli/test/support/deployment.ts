@@ -32,11 +32,18 @@ export const doc =
 export function healthy(): Map<string, Route> {
   return new Map<string, Route>([
     ["GET /auth/session", () => Response.json({ error: "unauthorized" }, { status: 401 })],
+    // Core answers /health in every deployment; /ready is off by default (plan 12h).
+    ["GET /auth/health", () => Response.json({ status: "ok" })],
     ["POST /auth/sign-out", signOut(COOKIE)],
     ["GET /auth/jwks", () => keySet([KEY])],
     ["GET /.well-known/openid-configuration", doc()],
     ["GET /.well-known/oauth-authorization-server", doc()],
   ]);
+}
+/** The deployment with `observe.readiness: true` and a store that answers (plan 12h). */
+export function readinessOn(routes: Map<string, Route>): Map<string, Route> {
+  routes.set("GET /auth/ready", () => Response.json({ status: "ready" }));
+  return routes;
 }
 export const deployment = (routes: Map<string, Route>) => async (url: string, init: RequestInit) =>
   routes.get(`${init.method ?? "GET"} ${new URL(url).pathname}`)?.(init) ??

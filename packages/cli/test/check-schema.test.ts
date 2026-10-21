@@ -10,7 +10,7 @@ import { main } from "../src/main.js";
 import { SCHEMA_VERSION } from "../src/version.js";
 import { PKG } from "./support/bin.js";
 import { D1_MODULES, d1Project, removeScaffolds } from "./support/d1-project.js";
-import { BASE, deployment, healthy } from "./support/deployment.js";
+import { BASE, deployment, healthy, readinessOn } from "./support/deployment.js";
 import { freshDatabase } from "./support/pg.js";
 
 // The schema_shape check of `authtempo check` on a real database (plan 11c2
@@ -27,7 +27,11 @@ const ENV = {
   TMPDIR: process.env.TMPDIR ?? "/tmp",
 };
 
-/** The real io with the output lines kept, and the fetch of a healthy deployment. */
+/**
+ * The real io with the output lines kept, and the fetch of a healthy
+ * deployment. Its readiness route is on, so with --strict the one skip is
+ * the one of the database (plan 12h).
+ */
 async function cli(args: string[], o: { cwd?: string; env?: Record<string, string> } = {}) {
   const stdout: string[] = [];
   const stderr: string[] = [];
@@ -41,7 +45,7 @@ async function cli(args: string[], o: { cwd?: string; env?: Record<string, strin
     },
     env: { ...ENV, ...o.env },
     cwd: o.cwd ?? PKG,
-    fetch: deployment(healthy()),
+    fetch: deployment(readinessOn(healthy())),
   };
   const code = await main(args, io);
   return { code, stdout, stderr };

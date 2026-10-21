@@ -9,6 +9,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 8"
   - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 7"
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
+  - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 9"
 sidebar:
   order: 5
 ---
@@ -49,7 +50,7 @@ authtempo check https://api.example.com --target postgres --url-env DATABASE_URL
 | 1 | A check failed. A person must look. |
 | 2 | A usage error, a host or a database that gives no answer, or a schema version that this CLI cannot read. |
 
-The command runs eight checks. Each check reports `pass`, `fail` with a code, or `skip` with a reason. A skip never counts as a pass. The last line counts the checks, such as `checks: 8 run, 6 pass, 0 fail, 2 skip`.
+The command runs nine checks. Each check reports `pass`, `fail` with a code, or `skip` with a reason. A skip never counts as a pass. The last line counts the checks, such as `checks: 9 run, 6 pass, 0 fail, 3 skip`.
 
 The first read of the key set on a new database writes its first signing key. That is the first-use rule of core.
 
@@ -226,6 +227,22 @@ A warning: the table has an extra NOT NULL column with no default, so each inser
 <h3 id="schema_table_extra"><code>schema_table_extra</code></h3>
 
 A warning: the database has a `ta_` table that the migrations do not make, and the `ta_` prefix is for core's tables. Give the table of your app another name.
+
+## ready
+
+The check reads `GET <basePath>/health`, then `GET <basePath>/ready`. It passes when both answer 200 with the JSON of core. The detail names the status code only: the command never prints a value of the answer body. The skip `no_mount` is the one of `mount`.
+
+<h3 id="health_missing"><code>health_missing</code></h3>
+
+`GET <basePath>/health` does not answer 200 `{ "status": "ok" }`. Core answers it in every deployment, so another handler answers the path, or the core of the deployment is older than the route. Mount core at `basePath`, or update core.
+
+<h3 id="not_ready"><code>not_ready</code></h3>
+
+`GET <basePath>/ready` answers with another status than 200 or 404. Core answers 503 when its store gives no answer or holds an old schema. Check the database binding or the connection string, and run `authtempo migrate`.
+
+<h3 id="readiness_off"><code>readiness_off</code></h3>
+
+A skip: `GET <basePath>/ready` answers 404, because the app does not set `observe.readiness: true`. Set it to let a probe read the store. With `--strict`, this skip is a failure.
 
 ## Next
 

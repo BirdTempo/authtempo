@@ -68,7 +68,8 @@ async function serve(
 /**
  * A deployment that puts the injected text in each place a check reads. The
  * places are the cookie name, a header, each body, a key id, the
- * cache-control of the key set, and the issuer. Its routes are under `prefix`.
+ * cache-control of the key set, the issuer, and the reason of the readiness
+ * route (plan 12h). Its routes are under `prefix`.
  */
 function hostileDeployment(prefix: string, jwksUri: string) {
   return (req: IncomingMessage, res: ServerResponse) => {
@@ -100,6 +101,10 @@ function hostileDeployment(prefix: string, jwksUri: string) {
         path === "/.well-known/oauth-authorization-server")
     )
       return send(200, { issuer: INJECTED, jwks_uri: jwksUri });
+    if (req.method === "GET" && path === `${prefix}/health`)
+      return send(200, { status: "ok", message: INJECTED });
+    if (req.method === "GET" && path === `${prefix}/ready`)
+      return send(503, { error: "not_ready", reason: INJECTED });
     return send(404, { error: INJECTED });
   };
 }
@@ -112,6 +117,8 @@ const runOf = (prefix: string) => [
   `GET ${prefix}/jwks`,
   "GET /.well-known/openid-configuration",
   "GET /.well-known/oauth-authorization-server",
+  `GET ${prefix}/health`,
+  `GET ${prefix}/ready`,
 ];
 
 /** The answer to the hostile deployment: fixed values only. */
@@ -136,9 +143,10 @@ const hostileAnswer = (base: string) => ({
     },
     { id: "schema_version", status: "skip", code: "no_database", docs: `${PAGE}#no_database` },
     { id: "schema_shape", status: "skip", code: "no_database", docs: `${PAGE}#no_database` },
+    { id: "ready", status: "fail", code: "not_ready", docs: `${PAGE}#not_ready` },
   ],
   warnings: ["cookie_samesite_none"],
-  summary: { run: 8, pass: 4, fail: 2, skip: 2 },
+  summary: { run: 9, pass: 4, fail: 3, skip: 2 },
   exit: 1,
   stopped: null,
 });
@@ -220,7 +228,8 @@ describe("check against the example Worker", () => {
     const checks = doc.checks as { id: string; status: string; code: string | null }[];
     expect(checks.map((c) => c.id)).toEqual([...CHECK_IDS]);
     for (const c of checks) if (c.code !== null) expect(ALL_CHECK_CODES).toContain(c.code);
-    // The live run of the CLI: six passes, and the two schema checks skip with no database.
+    // The live run of the CLI: six passes, the two schema checks skip with no database,
+    // and ready skips, because the example has no readiness route (plan 12h).
     expect(checks.map((c) => [c.status, c.code])).toEqual([
       ["pass", null],
       ["pass", null],
@@ -230,11 +239,12 @@ describe("check against the example Worker", () => {
       ["pass", null],
       ["skip", "no_database"],
       ["skip", "no_database"],
+      ["skip", "readiness_off"],
     ]);
     expect(doc).toMatchObject({
       base,
       warnings: [],
-      summary: { run: 8, pass: 6, fail: 0, skip: 2 },
+      summary: { run: 9, pass: 6, fail: 0, skip: 3 },
       exit: 0,
       stopped: null,
     });
@@ -346,11 +356,12 @@ describe("check", () => {
       ["well_known", "fail", "oauth_off"],
       ["schema_version", "fail", "no_database"],
       ["schema_shape", "fail", "no_database"],
+      ["ready", "fail", "no_mount"],
     ]);
-    expect(doc).toMatchObject({ summary: { run: 8, pass: 1, fail: 7, skip: 0 }, exit: 1 });
+    expect(doc).toMatchObject({ summary: { run: 9, pass: 1, fail: 8, skip: 0 }, exit: 1 });
 
     const hostileChecks = (hostile.structured?.checks ?? []) as typeof checks;
-    expect(hostileChecks).toHaveLength(8);
+    expect(hostileChecks).toHaveLength(9);
     for (const c of [...checks, ...hostileChecks]) {
       if (c.status === "pass") {
         expect(c.docs, c.id).toBeNull();
@@ -378,7 +389,7 @@ describe("check", () => {
       const r = await s.call("check", { base_url: site.origin });
       expect(r.structured).toEqual(hostileAnswer(site.origin));
       const urls = spy.mock.calls.map((c) => String(c[0]));
-      expect(urls).toHaveLength(6);
+      expect(urls).toHaveLength(8);
       for (const u of urls) expect(new URL(u).origin).toBe(site.origin);
 
       // A redirect to another host is a stop, and the other host gets no request.

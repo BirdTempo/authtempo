@@ -24,6 +24,7 @@ import {
   KEY,
   keySet,
   type Route,
+  readinessOn,
   signedOut,
   signOut,
 } from "./support/deployment.js";
@@ -101,9 +102,10 @@ describe("authtempo check (spec 19)", () => {
       "pass  well_known",
       "skip  schema_version no_database",
       "skip  schema_shape no_database",
+      "skip  ready readiness_off",
       "checks",
     ]);
-    expect(io.stdout.at(-1)).toBe("checks: 8 run, 6 pass, 0 fail, 2 skip");
+    expect(io.stdout.at(-1)).toBe("checks: 9 run, 6 pass, 0 fail, 3 skip");
     expect(io.stderr[0]).toBe(`reading ${BASE}/auth and ${BASE}/.well-known/`);
   });
 
@@ -118,7 +120,7 @@ describe("authtempo check (spec 19)", () => {
     expect(io.stdout).toHaveLength(1);
     expect(Object.keys(report ?? {}).sort()).toEqual(Object.keys(CHECK_JSON_KEYS).sort());
     expect(report?.checks.map((c) => c.id)).toEqual([...CHECK_IDS]);
-    expect(report?.summary).toEqual({ run: 8, pass: 6, fail: 0, skip: 2 });
+    expect(report?.summary).toEqual({ run: 9, pass: 6, fail: 0, skip: 3 });
   });
 
   it("fails with the named code of each fault, and exits 1", async () => {
@@ -253,6 +255,16 @@ describe("authtempo check (spec 19)", () => {
         "well_known",
         "well_known_not_at_root",
       ],
+      ["no health route", (r) => r.delete("GET /auth/health"), "ready", "health_missing"],
+      [
+        "a readiness route of 503",
+        (r) =>
+          r.set("GET /auth/ready", () =>
+            Response.json({ error: "not_ready", reason: "storage" }, { status: 503 }),
+          ),
+        "ready",
+        "not_ready",
+      ],
     ];
     for (const [name, change, id, code] of faults) {
       const routes = healthy();
@@ -316,7 +328,7 @@ describe("authtempo check (spec 19)", () => {
     const r = await check([], routes);
     expect(r.code).toBe(1);
     expect(result(r.report, "mount")).toMatchObject({ status: "fail", code: "mount_missing" });
-    for (const id of ["origin_rule", "cookie", "jwks"] as const)
+    for (const id of ["origin_rule", "cookie", "jwks", "ready"] as const)
       expect(result(r.report, id)).toMatchObject({ status: "skip", code: "no_mount" });
   });
 
@@ -364,7 +376,8 @@ describe("authtempo check (spec 19)", () => {
       runChecks({
         base: BASE,
         basePath: "/auth",
-        fetch: deployment(healthy()),
+        // The readiness route is on, so the one skip is the one of the database (plan 12h).
+        fetch: deployment(readinessOn(healthy())),
         timeoutMs: 1000,
         schemaVersion: 7,
         strict: true,
@@ -385,7 +398,7 @@ describe("authtempo check (spec 19)", () => {
       status: "skip",
       code: "compat_database",
     });
-    expect(compat.summary).toEqual({ run: 8, pass: 7, fail: 0, skip: 1 });
+    expect(compat.summary).toEqual({ run: 9, pass: 8, fail: 0, skip: 1 });
   });
 
   it("stops with exit 2 when the host gives no answer, and reports no check", async () => {
@@ -522,7 +535,7 @@ describe("authtempo check (spec 19)", () => {
       expect((await run(["migrate", "--target", "postgres"])).code).toBe(0);
       const current = await run(["check", BASE, "--target", "postgres"]);
       expect(current.code).toBe(0);
-      expect(current.io.stdout.at(-1)).toBe("checks: 8 run, 8 pass, 0 fail, 0 skip");
+      expect(current.io.stdout.at(-1)).toBe("checks: 9 run, 8 pass, 0 fail, 1 skip");
 
       // Applied migrations with no version row: migrate stops on it, so check stops the same way.
       await db.sql`DELETE FROM ta_meta WHERE key = 'schema_version'`;
@@ -721,7 +734,7 @@ describe("authtempo check (spec 19)", () => {
     };
     const current = d1(String(SCHEMA_VERSION));
     expect(await main(["check", BASE, "--target", "d1"], current)).toBe(0);
-    expect(current.stdout.at(-1)).toBe("checks: 8 run, 8 pass, 0 fail, 0 skip");
+    expect(current.stdout.at(-1)).toBe("checks: 9 run, 8 pass, 0 fail, 1 skip");
     expect(current.stderr).toContain("reading the local D1 database cli-d1");
     expectNoCredential(current);
 

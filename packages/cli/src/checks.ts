@@ -17,6 +17,7 @@ export const CHECK_IDS = [
   "well_known",
   "schema_version",
   "schema_shape",
+  "ready",
 ] as const;
 export type CheckId = (typeof CHECK_IDS)[number];
 export type CheckStatus = "pass" | "fail" | "skip";
@@ -97,6 +98,8 @@ export const CHECK_CODES = {
     ],
     skip: ["no_database", "schema_not_current", "compat_database"],
   },
+  // plan 12h: the health and readiness routes of core (spec 31 items 12 and 15).
+  ready: { fail: ["health_missing", "not_ready"], warn: [], skip: ["no_mount", "readiness_off"] },
 } as const satisfies Record<
   CheckId,
   { fail: readonly string[]; warn: readonly string[]; skip: readonly string[] }
@@ -213,7 +216,7 @@ function sharedCache(value: string): boolean {
 }
 
 /**
- * Runs the eight checks in the order of CHECK_IDS. A host that gives no HTTP
+ * Runs the nine checks in the order of CHECK_IDS. A host that gives no HTTP
  * answer throws a HostError (exit 2); every answer is a result. The function
  * fails itself when it reports another list than CHECK_IDS, so a check that
  * does not run cannot pass in silence.
@@ -505,6 +508,42 @@ export async function runChecks(input: CheckInput): Promise<CheckReport> {
         first.code,
         `${failures.slice(0, 5).map(findingText).join("; ")}${rest > 0 ? `; and ${rest} more` : ""}`,
       );
+    }
+  }
+
+  // The health and readiness routes of core (plan 12h, spec 31 item 12). Each
+  // detail names a status code only. The body of /ready holds a reason, and a
+  // text of the deployment never reaches the terminal.
+  if (mount !== null) add("ready", "skip", "no_mount", `the routes are not at ${auth}`);
+  else {
+    const health = await get(`${auth}/health`);
+    const healthBody = await jsonOf(health, `GET ${auth}/health`);
+    if (health.status !== 200 || healthBody?.status !== "ok")
+      add(
+        "ready",
+        "fail",
+        "health_missing",
+        `GET ${auth}/health answers ${health.status} with no core status; core answers 200 in every deployment`,
+      );
+    else {
+      const ready = await get(`${auth}/ready`);
+      const readyBody = await jsonOf(ready, `GET ${auth}/ready`);
+      if (ready.status === 404)
+        add(
+          "ready",
+          "skip",
+          "readiness_off",
+          `GET ${auth}/ready answers 404: observe.readiness is off`,
+        );
+      else if (ready.status === 200 && readyBody?.status === "ready")
+        add("ready", "pass", null, `GET ${auth}/health and GET ${auth}/ready answer 200`);
+      else
+        add(
+          "ready",
+          "fail",
+          "not_ready",
+          `GET ${auth}/ready answers ${ready.status}; core answers 200 when its store answers`,
+        );
     }
   }
 

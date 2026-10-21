@@ -58,7 +58,7 @@ export function exampleConfig(env: Env): AuthConfig {
     appName: "authtempo example",
     secret: env.AUTH_SECRET,
     trustedOrigins: [env.BASE_URL],
-    storage: createD1Adapter(env.DB),
+    storage: createD1Adapter(readinessMode(env) === "store_down" ? stoppedDatabase() : env.DB),
     // The owned limiter keeps its counts in D1, so every isolate shares them.
     limiter: createD1Limiter(env.DB),
     mail: {
@@ -133,6 +133,20 @@ export function exampleConfig(env: Env): AuthConfig {
     // TEST_MODE only (plan 9d): the hooks the end-to-end test proves on D1. They write
     // app_tenant, a table of the test setup, so a deploy without the table sets none.
     ...(env.TEST_MODE === "1" ? { hooks: exampleHooks(env.DB) } : {}),
+    // A local test run only (plan 12h Task 9): the readiness route for the CLI check `ready`.
+    // The sink writes each event as one JSON line, so a fault line still reaches the log.
+    ...(readinessMode(env) === null
+      ? {}
+      : {
+          observe: {
+            readiness: true,
+            sink: {
+              write(batch) {
+                for (const event of batch) console.log(JSON.stringify(event));
+              },
+            },
+          },
+        }),
     // Password sign-in. The default PBKDF2 seam costs 100000 iterations per
     // hash. That needs more CPU than Workers Free allows, so a deployment needs
     // Workers Paid. In TEST_MODE only, use 1000 iterations so the end-to-end
@@ -152,6 +166,38 @@ export function exampleConfig(env: Env): AuthConfig {
       }),
     },
   };
+}
+
+/**
+ * The readiness mode of a local test run (plan 12h Task 9), or null. The
+ * Worker reads TEST_READINESS only when BASE_URL is on this machine, so a
+ * deploy never reads it. TEST_MODE does not gate it: the test provider of
+ * TEST_MODE needs an https base, and wrangler dev of the CLI test serves http.
+ */
+function readinessMode(env: Env): "on" | "store_down" | null {
+  const host = new URL(env.BASE_URL).hostname;
+  if (host !== "localhost" && host !== "127.0.0.1") return null;
+  return env.TEST_READINESS === "on" || env.TEST_READINESS === "store_down"
+    ? env.TEST_READINESS
+    : null;
+}
+
+/**
+ * A D1 binding whose every call throws, as a stopped database does: the
+ * storage adapter over it is real, and its next call fails. The limiter keeps
+ * env.DB, so the start probe of the test still gets its answers.
+ */
+function stoppedDatabase(): D1Database {
+  const stopped = (): never => {
+    throw new Error("D1_ERROR: the database of this test is stopped");
+  };
+  return {
+    prepare: stopped,
+    batch: stopped,
+    exec: stopped,
+    dump: stopped,
+    withSession: stopped,
+  } as unknown as D1Database;
 }
 
 /**

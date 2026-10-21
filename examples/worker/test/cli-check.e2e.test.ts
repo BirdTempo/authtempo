@@ -33,9 +33,14 @@ const wrap =
 
 it("passes each check against the example Worker on D1, and skips the schema checks with no database (plan 11c)", async () => {
   const r = await check(worker);
+  // The example has no readiness route, so ready skips (plan 12h).
   expect(lines(r)).toEqual(
     CHECK_IDS.map((id) =>
-      id === "schema_version" || id === "schema_shape" ? `${id} skip no_database` : `${id} pass`,
+      id === "schema_version" || id === "schema_shape"
+        ? `${id} skip no_database`
+        : id === "ready"
+          ? "ready skip readiness_off"
+          : `${id} pass`,
     ),
   );
 });
@@ -123,6 +128,13 @@ it("fails with the named code of each fault of a deployment", async () => {
           }),
       ),
       "well_known fail well_known_issuer",
+    ],
+    [
+      wrap(
+        (u) => u.pathname === "/auth/health",
+        async () => new Response("not found", { status: 404 }),
+      ),
+      "ready fail health_missing",
     ],
   ];
   for (const [fetch, expected] of faults) expect(lines(await check(fetch))).toContain(expected);

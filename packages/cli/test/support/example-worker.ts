@@ -124,10 +124,12 @@ export interface ExampleWorker {
  * route must accept it. Another Worker on the port refuses it, and the start
  * fails with that name. With `operatorUsers`, the Worker holds the secret
  * as the named secret "live" with the scopes users and sessions. The user
- * tools of plan 12f are then on.
+ * tools of plan 12f are then on. With `readiness` (plan 12h Task 9), the
+ * Worker gets TEST_READINESS: "on" mounts the readiness route, and
+ * "store_down" mounts it over a database binding that throws.
  */
 export async function startExampleWorker(
-  options: { operatorUsers?: boolean } = {},
+  options: { operatorUsers?: boolean; readiness?: "on" | "store_down" } = {},
 ): Promise<ExampleWorker> {
   const deadline = Date.now() + START_LIMIT_MS;
   const port = await freePort();
@@ -175,6 +177,7 @@ export async function startExampleWorker(
       `BASE_URL:${base}`,
       "--var",
       "TEST_MODE:0",
+      ...(options.readiness === undefined ? [] : ["--var", `TEST_READINESS:${options.readiness}`]),
       "--var",
       "AUTH_SECRET:0123456789abcdef0123456789abcdef",
       // The user tools of plan 12f need a named secret with their scopes (OPERATOR_SECRETS).

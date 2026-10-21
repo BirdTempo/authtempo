@@ -35,7 +35,7 @@ export const CHECK_HELP: HelpText = {
   examples: [
     {
       line: "authtempo check https://api.example.com",
-      says: "Check the routes, the origin rule, the cookie, the key set, and the well-known documents.",
+      says: "Check the routes, the origin rule, the cookie, the key set, the well-known documents, and the health and readiness routes.",
     },
     {
       line: "authtempo check https://api.example.com --target postgres --url-env DATABASE_URL",
