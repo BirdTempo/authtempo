@@ -64,10 +64,10 @@ async function side(d: SqliteDriver): Promise<ShapeSide> {
 }
 
 /**
- * Every core suite on one SQLite driver (plan 12g Task 4): the storage
- * conformance suite, the limiter suite, the secret rotation suite, the two
- * refresh race suites, and the shape check. `run` names each describe, such
- * as "storage conformance: node:sqlite".
+ * Every core suite on one SQLite driver (plan 12g Task 4). The suites are the
+ * storage conformance suite, the limiter suite, the secret rotation suite, the
+ * two refresh race suites, and the shape check. `run` names each describe,
+ * such as "storage conformance: node:sqlite".
  */
 export function runSqliteSuites(
   run: string,

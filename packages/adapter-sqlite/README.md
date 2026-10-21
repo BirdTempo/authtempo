@@ -38,11 +38,25 @@ conditional updates.
 A process that stops during a transaction never rolls back, because the
 undo log lives in memory. The writes made before the stop stay.
 
-In a transaction, `update` runs its prior read and its write in one batch.
+In a transaction, `update` runs its prior read and its write in one batch,
+and `delete` uses `RETURNING`. So a rollback never overwrites a write that
+landed between the read and the write. A write that lands after this
+transaction's own write and before its rollback is still overwritten.
+
 On the three synchronous drivers a batch is `BEGIN IMMEDIATE`, the
 statements, and `COMMIT` in one synchronous block. On libSQL a batch is
 `client.batch(statements, "write")`. No transaction stays open across an
 `await`.
+
+A nested transaction adds its entries to the same undo log. If the nested
+function throws, the rollback affects only the entries of the nested
+transaction. The outer transaction can catch the error and continue.
+
+If an undo entry fails, the adapter still runs the other entries. It then
+throws `StorageError` with code `rollback_failed`. Its `cause` holds
+`{ original, failures }`. The adapter does not throw the original error
+in this case, so a failed rollback never looks like a normal unique
+conflict.
 
 ## Drivers
 
@@ -97,7 +111,8 @@ unchanged, as a busy write does on D1. Only the migration step tries again
 Over HTTP the server makes a batch wait for the lock. The libSQL server
 v0.24.32 ends a write transaction after 5 s with `TRANSACTION_TIMEOUT`. So
 a process that dies inside a write transaction blocks other writes for
-about 5 s (probe 2026-10-21: the next write ran 3 s to 5 s after the stop).
+about 5 s. In the probe of 2026-10-21, the next write ran 3 s to 5 s after
+the stop.
 
 ## Migrations
 
@@ -152,9 +167,10 @@ has one of these settings:
 
 ## Tests
 
-`pnpm --filter @authtempo/adapter-sqlite test` runs the core suites (the
-storage conformance suite, the limiter suite, the secret rotation suite,
-the two refresh race suites, and the shape check) on `node:sqlite`,
-better-sqlite3, libSQL `file:`, libSQL over HTTP, and `bun:sqlite`. Then it
+`pnpm --filter @authtempo/adapter-sqlite test` runs the core suites on
+`node:sqlite`, better-sqlite3, libSQL `file:`, libSQL over HTTP, and
+`bun:sqlite`. The core suites are the storage conformance suite, the
+limiter suite, the secret rotation suite, the two refresh race suites, and
+the shape check. Then it
 loads the `libsql` entry in workerd and runs the bundle proof. The HTTP run
 needs the libSQL server: `docker compose up -d libsql`.
