@@ -83,7 +83,7 @@ export const MYSQL_STRINGS: Readonly<Record<string, MysqlString>> = {
   "passkey.userId": ascii(64, ROW_ID),
   "passkey.credentialId": ascii(
     1364,
-    "base64url of a credential id of at most 1023 bytes (WebAuthn Level 3); the engine keeps no bound of its own",
+    "base64url of a credential id of at most 1023 bytes (WebAuthn Level 3); the passkey registration refuses a longer id",
   ),
   "organization.id": ascii(64, ROW_ID),
   "organization.slug": ascii(64, "SLUG_RE (engine/ranks.ts): at most 64 of [a-z0-9-]"),
