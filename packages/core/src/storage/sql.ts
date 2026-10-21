@@ -1,6 +1,9 @@
 import { type FieldType, type ModelName, type Models, SCHEMA_VERSION, schema } from "../schema.js";
 import { type FindManyOptions, StorageError, type Where } from "./port.js";
 
+// The bounds that the importer shares with core (plan 12g fix wave).
+export { CREDENTIAL_ID_MAX_BYTES, SUBJECT_MAX } from "../bounds.js";
+
 /**
  * The facts of one SQL dialect. A statement reads these properties, never
  * the name (plan 12g), so a new dialect cannot get the text of another one.

@@ -1,3 +1,4 @@
+import { CREDENTIAL_ID_MAX_BYTES } from "../bounds.js";
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
@@ -192,9 +193,6 @@ export async function passkeyRegistrationOptions(
   });
   return ok(options);
 }
-
-/** The longest credential id of WebAuthn Level 3 (section 5.1, "at most 1023 bytes"). */
-const CREDENTIAL_ID_MAX_BYTES = 1023;
 
 /** The bytes that a base64url text without padding decodes to. */
 function base64UrlBytes(text: string): number {

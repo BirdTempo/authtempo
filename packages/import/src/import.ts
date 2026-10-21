@@ -12,6 +12,9 @@ import {
   validOrganizationName,
   validUserName,
 } from "@authtempo/core";
+// SUBJECT_MAX is the longest subject that core's social sign-in answers. A
+// longer subject is dropped and listed as `identity:<provider>:subject_length`.
+import { SUBJECT_MAX } from "@authtempo/core/sql";
 import { type LegacyFormat, parseLegacyHash } from "@authtempo/legacy-hashes";
 import { importId } from "./ids.js";
 import {
@@ -50,13 +53,6 @@ const SOCIAL: ReadonlyMap<string, ((subject: string) => boolean) | null> = new M
   ["github", isGithubSubject],
   ["linkedin", null],
 ]);
-/**
- * The longest subject that core's social sign-in answers (SUBJECT_MAX,
- * core/src/engine/social.ts). A longer subject is dropped and listed as
- * `identity:<provider>:subject_length`. Core never answers it, and the MySQL
- * column holds 255 characters (ruling 7 of plan 12g).
- */
-const SUBJECT_MAX = 255;
 const RANK: Record<ImportRole, number> = { member: 1, admin: 2, owner: 3 };
 /**
  * The skip for a record whose write meets a unique_violation on both

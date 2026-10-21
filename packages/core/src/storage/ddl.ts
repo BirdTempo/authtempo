@@ -61,7 +61,7 @@ export const MYSQL_STRINGS: Readonly<Record<string, MysqlString>> = {
   ),
   "identity.subject": utf8(
     255,
-    "SUBJECT_MAX (engine/social.ts) bounds the subject of each provider kind, OIDC and generic OAuth2, to 255; the importer drops a longer one and writes an address",
+    "SUBJECT_MAX (bounds.ts) bounds the subject of each provider kind, OIDC and generic OAuth2, to 255; the importer drops a longer one and writes an address",
   ),
   "session.id": ascii(64, ROW_ID),
   "session.tokenHash": ascii(64, HASH),

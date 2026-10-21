@@ -1,3 +1,4 @@
+import { SUBJECT_MAX } from "../bounds.js";
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
@@ -665,8 +666,6 @@ function boundProfile(
   };
 }
 
-/** The identity row's subject. 255 covers every provider id we know and bounds the row. */
-const SUBJECT_MAX = 255;
 /**
  * Links the identity to a user by the spec's rules. One transaction per
  * attempt. A `unique_violation` is caught here, outside the transaction,

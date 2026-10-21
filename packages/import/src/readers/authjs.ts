@@ -1,3 +1,6 @@
+// CREDENTIAL_ID_MAX_BYTES is the bound of core's passkey registration, so the
+// importer writes no passkey that core would refuse.
+import { CREDENTIAL_ID_MAX_BYTES } from "@authtempo/core/sql";
 import { decodeBase64, encodeBase64 } from "@authtempo/legacy-hashes";
 import type { ImportPasskey, ImportUser, Source } from "../types.js";
 import {
@@ -45,12 +48,6 @@ function canonicalBase64Url(v: unknown): string | null {
   return toBase64Url(text);
 }
 
-/**
- * The longest credential id of WebAuthn Level 3 (section 5.1, "at most 1023
- * bytes"). Core's passkey registration refuses a longer one, and the MySQL
- * column holds the base64url form of 1023 bytes (ruling 7 of plan 12g).
- */
-const CREDENTIAL_ID_MAX_BYTES = 1023;
 const DEVICE_TYPES = new Set(["singleDevice", "multiDevice"]);
 /** WebAuthn's signCount is an unsigned 32-bit integer (WebAuthn Level 3, authenticator data). */
 const SIGN_COUNT_MAX = 4_294_967_295;
