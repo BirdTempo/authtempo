@@ -1,3 +1,4 @@
+import type { STORAGE_ERROR_CODES } from "../errors.js";
 import type { ModelName, Models } from "../schema.js";
 
 export type Op = "eq" | "ne" | "in" | "lt" | "lte" | "gt" | "gte" | "startsWith";
@@ -22,30 +23,10 @@ export interface FindManyOptions<M extends ModelName> {
   limit?: number;
 }
 
-/**
- * The codes of `StorageError`, as one list (plan 12g): the type derives from
- * it, and the errors page of the site holds one heading per code.
- */
-export const STORAGE_ERROR_CODES = [
-  "unique_violation",
-  "unknown_model",
-  "unknown_field",
-  "invalid_argument",
-  "schema_mismatch",
-  /**
-   * Thrown when a D1 rollback could not reverse every write. `cause` holds
-   * `{ original, failures }`: the error that started the rollback and the
-   * errors of the undo entries that failed.
-   */
-  "rollback_failed",
-  /**
-   * The database or the driver handle has a setting that breaks the port's
-   * rules (plan 12g): a driver that reads integers as BigInt, a MySQL pool
-   * without FOUND_ROWS, a session without strict mode, a table without a
-   * binary collation. The message names the setting, never a value.
-   */
-  "config_mismatch",
-] as const;
+// The codes of `StorageError` live in ../errors.ts (plan 12g fix wave, M1).
+// That file imports nothing, so the demo browser copy of core/errors.js
+// pulls in no storage file.
+export { STORAGE_ERROR_CODES } from "../errors.js";
 
 export type StorageErrorCode = (typeof STORAGE_ERROR_CODES)[number];
 

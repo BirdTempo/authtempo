@@ -88,10 +88,33 @@ export const ERRORS = {
 
 export type ErrorCode = keyof typeof ERRORS;
 
-// The codes of `StorageError` (plan 12g, ruling 6 of its lane). The type lives
-// with the storage port. This entry holds every error table, so the site's
-// errors page check reads all three from one entry.
-export { STORAGE_ERROR_CODES } from "./storage/port.js";
+/**
+ * The codes of `StorageError`, as one list (plan 12g): the type derives from
+ * it, and the errors page of the site holds one heading per code. The type
+ * and the class live with the storage port (ruling 6 of the 12g lane). The
+ * list lives here, because this file imports nothing: the demo copies
+ * core/errors.js to the browser, and an import of the port adds a file.
+ */
+export const STORAGE_ERROR_CODES = [
+  "unique_violation",
+  "unknown_model",
+  "unknown_field",
+  "invalid_argument",
+  "schema_mismatch",
+  /**
+   * Thrown when a D1 rollback could not reverse every write. `cause` holds
+   * `{ original, failures }`: the error that started the rollback and the
+   * errors of the undo entries that failed.
+   */
+  "rollback_failed",
+  /**
+   * The database or the driver handle has a setting that breaks the port's
+   * rules (plan 12g): a driver that reads integers as BigInt, a MySQL pool
+   * without FOUND_ROWS, a session without strict mode, a table without a
+   * binary collation. The message names the setting, never a value.
+   */
+  "config_mismatch",
+] as const;
 
 /**
  * The OAuth 2.1 and OIDC wire errors of the provider routes (plan 9g), with
