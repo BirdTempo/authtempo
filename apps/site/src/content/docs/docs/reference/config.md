@@ -44,7 +44,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `session` | object | `{ ttlDays: 30, slidingRefreshDays: 7 }`, no `absoluteDays` | See the keys under Session. |
 | `magicLink` | object | the defaults below | See the keys under Magic link. |
 | `social` | object | no provider | See the keys under Social. |
-| `jwt` | `JwtSeam` | jose 6.2.12 | The ID token verifier and the Apple secret signer. Tests inject a fake. |
+| `jwt` | `JwtSeam` | jose 6.2.12 | The ID token verifier and the Apple secret signer. Tests inject a fake. A seam must read the JWKS through `fetch` of `VerifyIdTokenInput` when the call gives one. An SSO sign-in gives the capped `sso.fetch`. |
 | `passkey` | object | off | Passkeys are on when it is set. |
 | `webauthn` | `WebAuthnSeam` | @simplewebauthn/server 14.0.3 | The WebAuthn ceremonies. Tests inject a fake. |
 | `handoff` | object | off | The handoff is on when it is set. |
@@ -294,7 +294,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `sso.oidc` | `true` | off | Turns on the OIDC connections (plan 12d Task 3). |
 | `sso.saml` | `true` or object | off | Turns on the SAML connections (plan 12d Task 8). |
 | `sso.saml.clockSkewSeconds` | number | 120 | A whole number from 0 to 300. |
-| `sso.fetch` | function | `fetch` | The fetch of the calls to the sign-in provider of a connection. Core follows no redirect. |
+| `sso.fetch` | function | `fetch` | The fetch of the calls to the sign-in provider of a connection. Core follows no redirect. Core reads the discovery document, the token answer, and the JWKS with a cap of 65536 bytes each. A larger answer fails the sign-in with `sso_failed`. |
 | `sso.limits` | object | see below | The limits of one organization. |
 | `sso.limits.connectionsPerOrganization` | number | 10 | A positive whole number. |
 | `sso.limits.domainsPerOrganization` | number | 20 | A positive whole number. The add of one more domain answers `domain_limit`. |

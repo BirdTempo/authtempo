@@ -8,6 +8,12 @@ export interface VerifyIdTokenInput {
   audience: string;
   /** The engine clock, so a test can move time and a token can expire. */
   now: Date;
+  /**
+   * The fetch of the JWKS read of this call, in place of the fetch of the
+   * seam. An SSO connection passes `sso.fetch` with a byte cap (plan 12d).
+   * A seam that an app writes must use it, else that cap does not hold.
+   */
+  fetch?: typeof fetch;
 }
 
 export interface SignES256Input {
@@ -41,37 +47,54 @@ export const JWKS_SETS_MAX = 500;
 const ID_TOKEN_ALGS = ["RS256", "ES256"];
 
 export function createJoseJwtSeam(fetchFn: typeof fetch): JwtSeam {
-  // One remote set per JWKS URL. jose caches the keys and refetches on an
-  // unknown kid, with its own cooldown, so a key rotation needs no restart.
+  // One remote set per JWKS URL and fetch. jose caches the keys and refetches
+  // on an unknown kid, with its own cooldown, so a key rotation needs no restart.
   const sets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
-  const jwks = (url: string) => {
-    let set = sets.get(url);
+  // A set keeps the fetch that made it, so the key holds a number per fetch.
+  // Then the set of a social provider never serves an SSO read of the same URL.
+  const fetchIds = new WeakMap<typeof fetch, number>();
+  let nextFetchId = 0;
+  const keyOf = (url: string, f: typeof fetch) => {
+    let id = fetchIds.get(f);
+    if (id === undefined) {
+      id = nextFetchId++;
+      fetchIds.set(f, id);
+    }
+    return `${id} ${url}`;
+  };
+  const jwks = (url: string, f: typeof fetch) => {
+    const key = keyOf(url, f);
+    let set = sets.get(key);
     if (set) {
       // A use moves the set to the end, so the first key is the least recently used set.
-      sets.delete(url);
-      sets.set(url, set);
+      sets.delete(key);
+      sets.set(key, set);
     } else {
       // Core owns the deadline of the JWKS read, as of every provider call
       // (plan 12b). Without it, jose stops the read after its own 5 s default.
       set = createRemoteJWKSet(new URL(url), {
-        [customFetch]: fetchFn,
+        [customFetch]: f,
         timeoutDuration: PROVIDER_TIMEOUT_MS,
       });
       // A Map keeps insert order, so its first key is the set used the longest time ago.
       const oldest = sets.size >= JWKS_SETS_MAX ? sets.keys().next().value : undefined;
       if (oldest !== undefined) sets.delete(oldest);
-      sets.set(url, set);
+      sets.set(key, set);
     }
     return set;
   };
   return {
     async verifyIdToken(input) {
-      const { payload } = await jwtVerify(input.token, jwks(input.jwksUrl), {
-        issuer: input.issuer,
-        audience: input.audience,
-        algorithms: ID_TOKEN_ALGS,
-        currentDate: input.now,
-      });
+      const { payload } = await jwtVerify(
+        input.token,
+        jwks(input.jwksUrl, input.fetch ?? fetchFn),
+        {
+          issuer: input.issuer,
+          audience: input.audience,
+          algorithms: ID_TOKEN_ALGS,
+          currentDate: input.now,
+        },
+      );
       return payload as Record<string, unknown>;
     },
     async signES256(input) {

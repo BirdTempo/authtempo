@@ -10,6 +10,7 @@ import {
 } from "../../primitives/crypto.js";
 import { isPublicHost } from "../../primitives/host.js";
 import { newId } from "../../primitives/ids.js";
+import { readCapped } from "../../primitives/read-capped.js";
 import { hasControlChar } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SsoConnectionRow } from "../../schema.js";
@@ -32,6 +33,20 @@ import { resolveSsoUser, type SsoProfile, type SsoSignedIn } from "./resolve.js"
 export const SSO_DISCOVERY_MAX = 500;
 /** How long one isolate keeps a discovery result. */
 export const SSO_DISCOVERY_TTL_MS = 60 * 60 * 1000;
+
+/*
+ * The byte caps of the three IdP answers that a connection reads (review m2
+ * of plan 12d Task 4b). A tenant names the IdP host, so core bounds each
+ * read through `readCapped`, as the DoH answer of the domain proof (16 KB).
+ * An IdP document is larger than one TXT answer, so each cap is 64 KiB.
+ * The value is an estimate with room: no test reads a real IdP.
+ */
+/** The byte cap of the discovery document of a connection. */
+export const SSO_DISCOVERY_BODY_MAX = 65_536;
+/** The byte cap of the token answer of a connection: the ID token, the access token, and the refresh token. */
+export const SSO_TOKEN_BODY_MAX = 65_536;
+/** The byte cap of the JWKS of a connection. */
+export const SSO_JWKS_BODY_MAX = 65_536;
 
 const STATE_RE = /^os_[A-Za-z0-9_-]{43}$/;
 const STATE_TTL_MS = 10 * 60_000;
@@ -87,6 +102,44 @@ interface Discovered {
  */
 const discovered = new Map<string, Discovered>();
 
+/** A signal that never aborts, for a call that passes none. */
+const NO_SIGNAL = new AbortController().signal;
+
+/**
+ * A fetch whose answer body goes through `readCapped`. A body past `max`
+ * bytes, a body that is not UTF-8, or an abort throws. So the caller fails
+ * as on a network error. The answer is a new response with the status and
+ * the content type of the original.
+ */
+function cappedFetch(fetchFn: typeof fetch, max: number): typeof fetch {
+  return async (input, init) => {
+    const res = await fetchFn(input, init);
+    const text = await readCapped(res, max, init?.signal ?? NO_SIGNAL);
+    if (text === null) throw new Error(`the answer is past ${max} bytes, not UTF-8, or late`);
+    const type = res.headers.get("content-type");
+    return new Response(text, {
+      status: res.status,
+      headers: type === null ? {} : { "content-type": type },
+    });
+  };
+}
+
+/**
+ * The capped JWKS fetch of each `sso.fetch`, made once. The jwt seam keeps
+ * one key set per JWKS URL and fetch. A new function per call would make a
+ * new set and a new JWKS read for each sign-in.
+ */
+const jwksFetches = new WeakMap<typeof fetch, typeof fetch>();
+
+function jwksFetchOf(fetchFn: typeof fetch): typeof fetch {
+  let capped = jwksFetches.get(fetchFn);
+  if (!capped) {
+    capped = cappedFetch(fetchFn, SSO_JWKS_BODY_MAX);
+    jwksFetches.set(fetchFn, capped);
+  }
+  return capped;
+}
+
 /** Removes the discovery result of one connection (an update or a delete of the row). */
 export function dropDiscovery(connectionId: string): void {
   discovered.delete(connectionId);
@@ -125,7 +178,7 @@ async function discoveredEndpoints(
     return { ok: true, value: kept.endpoints };
   discovered.delete(row.id);
   // `discover` refuses a document whose issuer is not this issuer, so another tenant's document fails.
-  const endpoints = await discover("sso", issuer, sso.fetch);
+  const endpoints = await discover("sso", issuer, cappedFetch(sso.fetch, SSO_DISCOVERY_BODY_MAX));
   if (!endpoints) return { ok: false, step: "discovery" };
   // The document is on the tenant's host, and core fetches these URLs (spec 30 item 5).
   if (
@@ -346,7 +399,7 @@ export async function completeSsoOidc(
   const provider = await providerOf(config, sso, connection);
   if (!provider.ok) return no(provider.step);
   const p = provider.value;
-  // The IdP calls go through `sso.fetch` (plan 12d); the JWKS read goes through the jwt seam.
+  // Each IdP call goes through `sso.fetch` with its byte cap (plan 12d), the JWKS read too.
   const token = await exchangeProviderCode(
     config,
     p,
@@ -354,7 +407,7 @@ export async function completeSsoOidc(
     data.verifier,
     now,
     ssoCallbackUrl(config, id),
-    sso.fetch,
+    cappedFetch(sso.fetch, SSO_TOKEN_BODY_MAX),
   );
   if (token === null) return no("exchange");
   let claims: Record<string, unknown>;
@@ -365,6 +418,7 @@ export async function completeSsoOidc(
       issuer: p.issuer,
       audience: p.clientId,
       now,
+      fetch: jwksFetchOf(sso.fetch),
     });
   } catch {
     return no("id_token");

@@ -1,8 +1,10 @@
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createConnection, updateConnection } from "../../src/engine/sso/connections.js";
 import { completeSsoOidc, SSO_DISCOVERY_MAX, startSso } from "../../src/engine/sso/oidc.js";
 import type { SsoProfile } from "../../src/engine/sso/resolve.js";
 import { sha256Hex } from "../../src/primitives/crypto.js";
+import { createJoseJwtSeam } from "../../src/seams/jwt.js";
 import type { OidcEndpoints } from "../../src/social/oidc.js";
 import { createTestIdp } from "../../src/testing/saml-idp.js";
 import { BASE_URL, get, LONG_TEST_MS } from "../helpers.js";
@@ -40,12 +42,14 @@ function endpointsOf(slug: string): OidcEndpoints {
 function oidcWorld() {
   const tokens: Record<string, FakeIdToken> = {};
   const docs: Record<string, unknown> = {};
+  // Extra fields of the token answer, so a test can set its size.
+  const tokenExtra: Record<string, unknown> = {};
   const idp = fakeFetch((call: TokenCall) => {
     if (call.url.endsWith("/.well-known/openid-configuration")) {
       const doc = docs[call.url];
       return doc === undefined ? new Response("no", { status: 404 }) : Response.json(doc);
     }
-    return Response.json({ id_token: call.form.code, token_type: "Bearer" });
+    return Response.json({ id_token: call.form.code, token_type: "Bearer", ...tokenExtra });
   });
   const w = ssoAuth({
     sso: {
@@ -56,7 +60,7 @@ function oidcWorld() {
     },
     jwt: fakeJwt(tokens),
   });
-  return { ...w, tokens, docs, calls: idp.calls };
+  return { ...w, tokens, docs, tokenExtra, calls: idp.calls };
 }
 
 type World = ReturnType<typeof oidcWorld>;
@@ -427,6 +431,112 @@ describe("the OIDC sign-in of an SSO connection (plan 12d Task 4)", () => {
     const over = await start(w, a, "198.51.100.9");
     expect(authError(over.res)).toBe("rate_limited");
     expect(authError((await start(w, a, "198.51.100.10")).res)).toBeNull();
+  });
+});
+
+/** A `pad` string that makes the JSON text of `{ ...value, pad }` exactly `bytes` long. */
+function padTo(value: Record<string, unknown>, bytes: number): Record<string, unknown> {
+  const base = JSON.stringify({ ...value, pad: "" }).length;
+  const out = { ...value, pad: "x".repeat(bytes - base) };
+  expect(new TextEncoder().encode(JSON.stringify(out)).length).toBe(bytes);
+  return out;
+}
+
+/**
+ * A world with the jose seam and a real RS256 key at the JWKS URL of acme.
+ * The seam's own fetch throws, so a JWKS read that does not go through
+ * `sso.fetch` fails. `jwks.bytes` sets the size of the key set answer.
+ */
+async function joseWorld() {
+  const { publicKey, privateKey } = await generateKeyPair("RS256", { extractable: true });
+  const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256", use: "sig" };
+  const jwks = { bytes: 65_536 };
+  const seamCalls: string[] = [];
+  const idp = fakeFetch((call: TokenCall) => {
+    if (call.url === endpointsOf("acme").jwksUrl)
+      return Response.json(padTo({ keys: [jwk] }, jwks.bytes));
+    return Response.json({ id_token: call.form.code, token_type: "Bearer" });
+  });
+  const w = ssoAuth({
+    sso: { oidc: true, fetch: idp.fetchFn },
+    jwt: createJoseJwtSeam(async (input) => {
+      seamCalls.push(String(input));
+      throw new Error("the fetch of the seam");
+    }),
+  });
+  const now = Math.floor(w.clock.now().getTime() / 1000);
+  const sign = (nonce: string) =>
+    new SignJWT({ sub: "a-1", nonce })
+      .setProtectedHeader({ alg: "RS256", kid: "k1" })
+      .setIssuer(issuerOf("acme"))
+      .setAudience("acme-client")
+      .setIssuedAt(now)
+      .setExpirationTime(now + 300)
+      .sign(privateKey);
+  // The fields of World that this world does not use stay empty.
+  const unused: Pick<World, "tokens" | "docs" | "tokenExtra"> = {
+    tokens: {},
+    docs: {},
+    tokenExtra: {},
+  };
+  return { ...w, ...unused, calls: idp.calls, jwks, seamCalls, sign };
+}
+
+describe("the byte caps of the IdP answers of a connection (review m2 of plan 12d Task 4b)", () => {
+  it("reads a discovery document of 65536 bytes and refuses one of 65537", async () => {
+    const w = oidcWorld();
+    const id = await connection(w, await seedOrganization(w, "acme"), "acme", null);
+    const url = `${issuerOf("acme")}/.well-known/openid-configuration`;
+    const doc = { issuer: issuerOf("acme"), ...wellKnown(endpointsOf("acme")) };
+    w.docs[url] = padTo(doc, 65_537);
+    expect(authError((await start(w, id)).res)).toBe("sso_failed");
+    expect(stepsOf(id)).toEqual(["discovery"]);
+    w.docs[url] = padTo(doc, 65_536);
+    const s = await start(w, id);
+    expect(s.res.status).toBe(302);
+    expect(s.url.origin).toBe("https://login.acme-idp.example");
+  });
+
+  it("reads a token answer of 65536 bytes and refuses one of 65537", async () => {
+    const w = oidcWorld();
+    const { a } = await twoConnections(w);
+    const answer = (code: string, bytes: number) => {
+      const sized = padTo({ id_token: code, token_type: "Bearer" }, bytes);
+      w.tokenExtra.pad = sized.pad;
+    };
+    const steps: unknown[] = [];
+    for (const bytes of [65_537, 65_536]) {
+      const s = await start(w, a);
+      const code = `token-${s.nonce}`;
+      w.tokens[code] = {
+        audience: "acme-client",
+        issuer: issuerOf("acme"),
+        claims: { sub: "a-1", nonce: s.nonce },
+      };
+      answer(code, bytes);
+      expect(authError(await callback(w, a, { code, state: s.state }, s.bind))).toBe("sso_failed");
+      steps.push(stepsOf(a).at(-1));
+    }
+    // 65537 bytes fail at the exchange; 65536 bytes reach the resolution of Task 5.
+    expect(steps).toEqual(["exchange", "resolve"]);
+  });
+
+  it("reads the JWKS through sso.fetch, 65536 bytes and not 65537", async () => {
+    const steps: unknown[] = [];
+    for (const bytes of [65_537, 65_536]) {
+      const w = await joseWorld();
+      const { a } = await twoConnections(w);
+      w.jwks.bytes = bytes;
+      const s = await start(w, a);
+      const code = await w.sign(s.nonce);
+      expect(authError(await callback(w, a, { code, state: s.state }, s.bind))).toBe("sso_failed");
+      steps.push(stepsOf(a).at(-1));
+      // The JWKS read went through sso.fetch, never through the fetch of the seam.
+      expect(w.seamCalls).toEqual([]);
+      expect(w.calls.filter((c) => c.url === endpointsOf("acme").jwksUrl)).toHaveLength(1);
+    }
+    // 65537 bytes fail at the ID token; 65536 bytes reach the resolution of Task 5.
+    expect(steps).toEqual(["id_token", "resolve"]);
   });
 });
 
