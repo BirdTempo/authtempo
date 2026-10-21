@@ -937,7 +937,10 @@ export interface ScimConfig {
   groups?: "roles" | "teams" | "both";
   /**
    * The role of a member that SCIM adds. A role of the role table, below the
-   * owner rank, and never the platform role. Default `member`.
+   * owner rank, and never the platform role. Default `member`. A dynamic
+   * role is refused here: core checks the config at construction, and a
+   * dynamic role lives in one organization. The `defaultRole` of a
+   * connection may name a dynamic role (ruling 25 N2 of plan 12d).
    */
   defaultRole?: string;
 }
@@ -2133,8 +2136,9 @@ const SCIM_GROUPS: ReadonlySet<string> = new Set(["roles", "teams", "both"]);
  * gives a team only with `organizations.teams`. `defaultRole` names a role
  * of the role table, each part of it, below the owner rank, and never the
  * platform role. So a directory never makes an owner or a platform
- * operator. The config knows no dynamic role: those rows live per
- * organization.
+ * operator. A dynamic role is refused: this check runs at construction,
+ * and a dynamic role lives in one organization. The connection `defaultRole`
+ * may name one (ruling 25 N2 of plan 12d).
  */
 function resolveScim(
   input: ScimConfig | false | undefined,

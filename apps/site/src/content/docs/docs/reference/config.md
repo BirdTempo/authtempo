@@ -307,7 +307,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | --- | --- | --- | --- |
 | `scim` | object | off | Turns on the SCIM routes. See [SCIM](/docs/reference/routes/#scim). |
 | `scim.groups` | string | `roles` | `roles`, `teams`, or `both`: what a SCIM group gives. `teams` and `both` need `organizations.teams`. |
-| `scim.defaultRole` | string | `member` | The role of a member that SCIM adds. Each part is a role of the role table, below the owner rank, and never the platform role. A dynamic role is refused, because the config knows no organization. |
+| `scim.defaultRole` | string | `member` | The role of a member that SCIM adds. Each part is a role of the role table, below the owner rank, and never the platform role. A dynamic role is refused here: core checks the config at construction, and a dynamic role lives in one organization. The `defaultRole` of a connection may name a dynamic role of its organization. |
 
 ## Hooks
 
