@@ -973,7 +973,8 @@ const SITES: Record<string, readonly string[] | string> = {
   "sso/connections updateConnection":
     "no kind: reads of role rows, the connection row, reads of domains, then its audit row",
   "sso/connections deleteConnection":
-    "no kind: the connection row, then the domain rows routed to it, then its audit row", // The SCIM tokens of plan 12d Task 9b. Their rows are of no kind of user-hold.ts.
+    "no kind: the connection row, then the domain rows routed to it, then its audit row",
+  // The SCIM tokens of plan 12d Task 9b. Their rows are of no kind of user-hold.ts.
   "scim/tokens createScimToken":
     "one kind: the lock of the organization row, then reads of token rows, then the token row and its audit row",
   "scim/tokens revokeScimToken": "no kind: the token row, then its audit row",
