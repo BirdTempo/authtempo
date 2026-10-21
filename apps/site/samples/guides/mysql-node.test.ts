@@ -15,7 +15,14 @@ const STALE_MS = 60 * 60 * 1000;
 
 /** Makes a fresh database, drops the stale ones of killed runs, and answers its URL and its drop. */
 async function freshDatabase(): Promise<{ url: string; drop: () => Promise<void> }> {
-  const admin = await createConnection({ uri: SERVER });
+  let admin: Awaited<ReturnType<typeof createConnection>>;
+  try {
+    admin = await createConnection({ uri: SERVER });
+  } catch (e) {
+    throw new Error(
+      `the MySQL guide test needs MySQL 8.4 at ${new URL(SERVER).host}: ${(e as Error).message}. Run: docker compose up -d mysql84`,
+    );
+  }
   try {
     const [rows] = await admin.query<RowDataPacket[]>("SHOW DATABASES LIKE 'site\\_%'");
     for (const row of rows) {
