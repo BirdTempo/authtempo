@@ -125,9 +125,10 @@ describe("the ban on Postgres (plan 12f Task 6)", () => {
       // The magic link verifies the user, so each sign-in holds the user row.
       // A password sign-up leaves the user unverified: its sign-ins take no
       // row lock, and a sign-in row can commit after the ban's delete began.
-      const userId =
+      // The first session can stay on a pending-end row too, so each round presents its token.
+      const first =
         method === "magic link"
-          ? (await w.signIn(email)).user.id
+          ? await w.signIn(email)
           : await (async () => {
               const up = await password.signUp({
                 email,
@@ -136,11 +137,10 @@ describe("the ban on Postgres (plan 12f Task 6)", () => {
                 userAgent: null,
               });
               if (!up.ok) throw new Error(up.code);
-              const row = await db.sql<
-                { id: string }[]
-              >`SELECT id FROM ta_user WHERE email = ${email}`;
-              return row[0]?.id ?? "";
+              if (!("token" in up.value)) throw new Error("the sign-up opened no session");
+              return up.value;
             })();
+      const userId = first.user.id;
       const signIn = async (): Promise<() => Promise<unknown>> => {
         if (method === "password")
           return () => password.signIn({ email, password: PASSWORD, ip: null, userAgent: null });
@@ -161,20 +161,39 @@ describe("the ban on Postgres (plan 12f Task 6)", () => {
           ...flows.map((flow) => flow()),
         ]);
         expect(banned?.ok).toBe(true);
-        const tokens: string[] = [];
+        const tokens: string[] = [first.token];
         for (const r of signIns as { ok: boolean; value?: { token?: string }; code?: string }[]) {
           if (r.ok && typeof r.value?.token === "string") tokens.push(r.value.token);
           else expect(r).toMatchObject({ ok: false, code: "account_banned" });
         }
-        const rows = () => db.sql`SELECT id FROM ta_session WHERE user_id = ${userId}`;
-        // A sign-in that holds the user row waits for the ban, and the read
-        // after its insert sees the ban: no row stays (ruling 3).
-        if (method === "magic link") expect(await rows()).toHaveLength(0);
+        const rows = () =>
+          db.sql<
+            { created_at: Date }[]
+          >`SELECT created_at FROM ta_session WHERE user_id = ${userId}`;
+        // A sign-in that holds the user row commits before the ban's first
+        // write, or its read after the insert sees the ban (ruling 3). So
+        // the ban reads each committed row. It ends a page of them in its
+        // act, and a pending-end row names the rest (ruling 44 of plan 12f).
+        // The page budget counts the statements of the whole adapter. The
+        // sign-ins on this adapter send statements while the ban waits, so
+        // in some rounds the page is empty and every row stays.
+        if (method === "magic link") {
+          const left = await rows();
+          if (left.length > 0) {
+            const newest = Math.max(...left.map((r) => r.created_at.getTime()));
+            const ends = await db.sql<{ data: { before: string } }[]>`
+              SELECT data FROM ta_verification
+              WHERE purpose = 'session-end' AND identifier = ${userId}`;
+            // The sweep ends each session from before `data.before`.
+            expect(ends.some((e) => Date.parse(e.data.before) >= newest)).toBe(true);
+          }
+        }
         // In odd rounds the unban comes before any token is presented. A row
         // that the ban did not see stays ended after the unban (ruling 28).
         const unbanFirst = delay % 2 === 1;
         if (unbanFirst) expect((await w.unban(userId)).ok).toBe(true);
-        // Each token answers null, and its resolve ends a row that the ban did not see.
+        // Each token answers null, and its resolve ends a row that the ban
+        // did not see or did not end. So the door refuses each row that stays.
         expect(await liveRows(w, tokens)).toBe(0);
         expect(await rows()).toHaveLength(0);
         if (!unbanFirst) expect((await w.unban(userId)).ok).toBe(true);
