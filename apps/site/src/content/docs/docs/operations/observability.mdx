@@ -100,7 +100,7 @@ Each answer of `handle` carries the header `x-authtempo-trace`, with the trace i
 1. Ask the person for the value of `x-authtempo-trace`, or read it from the network panel.
 2. Search the sink for that `traceId`. The `request` event names the route, the status, the outcome, and the code.
 
-Core makes a new trace id for each request. With `observe.trustTraceparent: true`, a valid W3C `traceparent` header gives the trace id and the parent span id. An invalid or all-zero header is ignored. A client trace id is off by default, because a client could join its requests to the trace of another person.
+Core makes a new trace id for each request. With `observe.trustTraceparent: true`, a valid W3C `traceparent` header gives the trace id and the parent span id. An invalid or all-zero header is ignored. A client trace id is off by default, because a client could join its requests to the trace of another person. With it on, the trace id and the parent span id of the client reach a sink as they are. No scrub of core or of `@authtempo/observe` touches them.
 
 ## What an event can hold of an address
 
@@ -108,7 +108,7 @@ By default an event holds no IP, no user agent, and no email. `observe.include` 
 
 | Key | Values | What the event holds |
 | --- | --- | --- |
-| `ip` | `"none"`, `"hash"`, `"raw"` | `ipHash`, a keyed hash of 32 hex, or `ip`, the address of `clientIp` |
+| `ip` | `"none"`, `"hash"`, `"raw"` | `ipHash`, a keyed hash of 32 hex, or `ip`, the address of `clientIp`. With `"raw"`, core drops a value that is not an IP address. |
 | `userAgent` | `"none"`, `"raw"` | `userAgent`, at most 256 characters with no control character |
 | `email` | `"none"`, `"hash"` | `emailHash`, a keyed hash of 32 hex. An event never holds a raw email. |
 
@@ -121,7 +121,7 @@ The keyed hash is HMAC-SHA256 under a key that HKDF derives from the current app
 - A lost batch counts as `sink_timeout` or `sink_threw`. The next batch starts with one `observe.dropped` event that holds the counts. `auth.observe.stats()` answers the same counts in process.
 - Core cannot stop a sink that loops on the CPU in a synchronous `write`. Such a sink holds the isolate, so keep `write` short.
 - On Workers, the `waitUntil` work of one request has 30 seconds after the answer in all. Each `waitUntil` of that request shares the time.
-- Core replaces each secret value of the config with `***` in each string field of an event, before the buffer, with or without a sink. Each sink of `@authtempo/observe` scrubs again with its own `secrets` list.
+- Core scrubs each event before the buffer, with or without a sink. The scrub replaces each secret value of the config with `***`. It covers each string field that a flow passes, and the raw `ip` and `userAgent`. It skips the stamp fields: the event name, the level, the time, the trace ids, and the route key. The kind of each stamp field checks its value. Each sink of `@authtempo/observe` scrubs again with its own `secrets` list.
 - The `method` field of the `request` event holds the method token of the request, `HEAD` too.
 - A redirect counts as a failure only when core marked it with an error code. A `next` value of a client that holds `auth_error` gives no failure.
 - `analyticsEngineSink` writes at most 200 data points in one flush, `AE_MAX_POINTS`. Analytics Engine takes at most 250 for each Worker invocation (Cloudflare limit, read 2026-10-21). The 50 others stay for the points of the app.

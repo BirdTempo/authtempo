@@ -326,10 +326,10 @@ With no `observe`, core writes its log lines with `console` and sends nothing an
 | `observe` | object | off | Turns the event port on. An unknown key is refused. |
 | `observe.sink` | `ObserveSink` | required | An object with `write(batch)`. Core waits for it for at most `observe.flushTimeoutMs`, and logs no error text of it. |
 | `observe.include` | object | each key `"none"` | What an event may hold of an address. An unknown key is refused. |
-| `observe.include.ip` | `"none"` \| `"hash"` \| `"raw"` | `"none"` | `"hash"` writes a keyed hash of 32 hex under the current app secret. A rotation changes every hash. |
+| `observe.include.ip` | `"none"` \| `"hash"` \| `"raw"` | `"none"` | `"hash"` writes a keyed hash of 32 hex under the current app secret. A rotation changes every hash. `"raw"` drops a value that is not an IP address. |
 | `observe.include.userAgent` | `"none"` \| `"raw"` | `"none"` | `"raw"` writes at most 256 characters with no control character. |
 | `observe.include.email` | `"none"` \| `"hash"` | `"none"` | `"raw"` is refused: an event never holds a raw email. |
-| `observe.trustTraceparent` | boolean | `false` | Takes the trace id of a valid W3C `traceparent` header. |
+| `observe.trustTraceparent` | boolean | `false` | Takes the trace id of a valid W3C `traceparent` header. The client trace id then reaches a sink as it is, with no scrub. |
 | `observe.buffer` | number | 1000 | An integer from 10 to 10000. A push into a full buffer drops the event and counts it. |
 | `observe.flushTimeoutMs` | number | 2000 | An integer from 100 to 10000. A sink that answers later loses the batch, and core counts it. |
 | `observe.readiness` | boolean | `false` | Turns on `GET <basePath>/ready`. |
