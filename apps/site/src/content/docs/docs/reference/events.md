@@ -119,6 +119,7 @@ Each event has these fields too:
 | `passkey.already_registered` | error | none | `authtempo: passkey credential already registered` |
 | `passkey.authentication_rejected` | error | `errorClass: errorClass` | `authtempo: passkey authentication rejected` |
 | `passkey.counter_moved` | error | none | `authtempo: passkey counter moved` |
+| `passkey.credential_id_too_long` | error | none | `authtempo: passkey credential id over 1023 bytes` |
 | `social.client_secret_failed` | error | `provider: name`, `errorClass: errorClass` | `authtempo: social client secret failed` |
 | `social.token_request_failed` | error | `provider: name`, `errorClass: errorClass` | `authtempo: social token request failed` |
 | `social.token_status` | error | `provider: name`, `status: status` | `authtempo: social token endpoint answered` |

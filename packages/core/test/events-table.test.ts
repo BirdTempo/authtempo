@@ -74,6 +74,8 @@ const START_LIST: readonly string[] = [
   "authtempo: oidc discovery lacks an endpoint",
   "authtempo: waitUntil threw; the flush has no hook",
   "authtempo: role row invalid <rowId>",
+  // Plan 12g (ruling 7): the credential id bound of a passkey registration.
+  "authtempo: passkey credential id over 1023 bytes",
 ];
 
 /** Field names that can hold a secret, a credential, or free text (spec 31 item 8). */
@@ -99,8 +101,9 @@ const ENTRIES = Object.entries(EVENTS) as [string, EventSpec][];
 describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
   it("has one row for each line of the start list", () => {
     const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
-    expect(START_LIST).toHaveLength(63);
-    expect(texts).toHaveLength(63);
+    // 63 of plan 12h and 1 of plan 12g.
+    expect(START_LIST).toHaveLength(64);
+    expect(texts).toHaveLength(64);
     expect(new Set(texts)).toEqual(new Set(START_LIST));
   });
 

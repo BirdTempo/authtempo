@@ -294,8 +294,8 @@ function act<const F extends Readonly<Record<string, FieldSpec>>>(
 /**
  * The events. The fault events (those with `line`) are one row for each
  * text of the log lines of core. The texts are the start list of plan 12h
- * Task 1, read again at the 12k merge (63 texts). Tasks 4 to 8 add the
- * other groups.
+ * Task 1, read again at the 12k merge (63 texts). Plan 12g adds the line
+ * of the credential id bound (64). Tasks 4 to 8 add the other groups.
  */
 export const EVENTS = {
   // One event for each answer of `handle` (plan 12h Task 4). The router
@@ -520,6 +520,12 @@ export const EVENTS = {
     errorClass: ERROR_CLASS,
   }),
   "passkey.counter_moved": fault("error", "authtempo: passkey counter moved", {}),
+  // The bound of ruling 7 of plan 12g: WebAuthn Level 3 bounds a credential id to 1023 bytes.
+  "passkey.credential_id_too_long": fault(
+    "error",
+    "authtempo: passkey credential id over 1023 bytes",
+    {},
+  ),
   "social.client_secret_failed": fault("error", "authtempo: social client secret failed", {
     provider: PROVIDER,
     errorClass: ERROR_CLASS,

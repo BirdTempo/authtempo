@@ -755,6 +755,22 @@ describe("the passkey lines (plan 4)", () => {
     expect(await p.signIn()).toMatchObject({ ok: false, code: "passkey_failed" });
     expect(log.mock.calls).toEqual([["authtempo: passkey counter moved"]]);
   });
+
+  it("passkey.credential_id_too_long", async () => {
+    const log = errors();
+    const p = await passkeyWorld();
+    // WebAuthn Level 3 bounds a credential id to 1023 bytes (ruling 7 of plan 12g).
+    const long = await SoftAuthenticator.create({
+      rpID: RP.rpID,
+      origin: RP.origins[0] ?? "",
+      credentialIdBytes: 1024,
+    });
+    expect(await p.register(p.session.user, long)).toMatchObject({
+      ok: false,
+      code: "passkey_failed",
+    });
+    expect(log.mock.calls).toEqual([["authtempo: passkey credential id over 1023 bytes"]]);
+  });
 });
 
 describe("the gave-up lines (plans 12a and 12f)", () => {

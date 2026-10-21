@@ -170,6 +170,7 @@ With no sink, core writes each line of this table with `console`, with the text 
 | `authtempo: passkey credential already registered` | `passkey.already_registered` | Watch. A person registered a known passkey again. |
 | `authtempo: passkey authentication rejected` | `passkey.authentication_rejected` | Watch. A passkey sign-in did not verify. |
 | `authtempo: passkey counter moved` | `passkey.counter_moved` | Watch. The counter of a passkey went back, or two uses raced. |
+| `authtempo: passkey credential id over 1023 bytes` | `passkey.credential_id_too_long` | Watch. An authenticator sent a credential id over the WebAuthn bound. |
 | `authtempo: social client secret failed` | `social.client_secret_failed` | Act. Core could not make the client secret of a provider, such as the Apple key. |
 | `authtempo: social token request failed` | `social.token_request_failed` | Act when it repeats. The token request to a provider failed. |
 | `authtempo: social token endpoint answered` | `social.token_status` | Act when it repeats. The token endpoint of a provider answered an error status. Check the client secret. |

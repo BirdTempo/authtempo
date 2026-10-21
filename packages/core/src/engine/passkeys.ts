@@ -225,7 +225,7 @@ export async function verifyPasskeyRegistration(
   // holds its base64url form of 1364 characters (ruling 7 of plan 12g).
   // An id over the bound answers like any other failed ceremony.
   if (base64UrlBytes(registered.id) > CREDENTIAL_ID_MAX_BYTES) {
-    console.error("authtempo: passkey credential id over 1023 bytes");
+    config.observe.emit({ name: "passkey.credential_id_too_long" });
     return fail("passkey_failed");
   }
   const now = config.clock.now();
