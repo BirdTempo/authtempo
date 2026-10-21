@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
+import type { ChallengeEventMethod } from "../observe/events.js";
 import { openSealed, seal } from "../primitives/aead.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
@@ -863,7 +864,7 @@ export async function verifyTwoFactor(
 }
 
 /** The name of each proof in the event `second_factor.challenge`. */
-const CHALLENGE_EVENT_METHOD: Readonly<Record<Proof["method"], string>> = {
+const CHALLENGE_EVENT_METHOD: Readonly<Record<Proof["method"], ChallengeEventMethod>> = {
   totp: "totp",
   backup: "backup_code",
   email: "email",

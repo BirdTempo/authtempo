@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import type { ReauthEventMethod } from "../observe/events.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
@@ -147,7 +148,7 @@ async function reauthenticated(
   config: ResolvedConfig,
   userId: string,
   sessionId: string,
-  method: "password" | "email_otp" | "passkey",
+  method: ReauthEventMethod,
 ): Promise<Result<{ freshUntil: Date }>> {
   const fresh = await markFresh(config, sessionId);
   if (fresh.ok) config.observe.emit({ name: "reauth", method, outcome: "success", userId });

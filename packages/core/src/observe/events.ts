@@ -253,14 +253,23 @@ const FACTOR_METHOD: Readonly<Record<SecondFactorMethod, true>> = {
   email: true,
 };
 const FACTOR_METHODS: readonly string[] = Object.keys(FACTOR_METHOD);
-/** A challenge also passes with a backup code or a trusted device token. */
-const CHALLENGE_METHODS: readonly string[] = [...FACTOR_METHODS, "backup_code", "trusted_device"];
-/** The first proof of a re-authentication, by the `SessionVia` name of its flow. */
+/**
+ * A challenge also passes with a backup code or a trusted device token.
+ * The map of the proofs in totp.ts takes its values from this type.
+ */
+const CHALLENGE_METHOD = { ...FACTOR_METHOD, backup_code: true, trusted_device: true } as const;
+export type ChallengeEventMethod = keyof typeof CHALLENGE_METHOD;
+const CHALLENGE_METHODS: readonly string[] = Object.keys(CHALLENGE_METHOD);
+/**
+ * The first proof of a re-authentication, by the `SessionVia` name of its
+ * flow. The method parameter of reauth.ts takes this type.
+ */
 const REAUTH_METHODS = [
   "password",
   "email_otp",
   "passkey",
 ] as const satisfies readonly SessionVia[];
+export type ReauthEventMethod = (typeof REAUTH_METHODS)[number];
 
 /**
  * The row of a flow event: the fields of the act, then `outcome`, an
