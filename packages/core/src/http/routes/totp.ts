@@ -49,9 +49,9 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
   const withSession = async (
     ctx: RouteContext,
   ): Promise<{ resolved: ResolvedSession; renewed: string | null } | null> => {
-    const resolved = await sessionFromRequest(config, ctx.request);
+    const resolved = await sessionFromRequest(ctx.config, ctx.request);
     if (!resolved) return null;
-    return { resolved, renewed: renewedSessionCookie(config, ctx.request, resolved) };
+    return { resolved, renewed: renewedSessionCookie(ctx.config, ctx.request, resolved) };
   };
   const send = (res: Response, renewed: string | null) => {
     if (renewed) res.headers.append("set-cookie", renewed);
@@ -88,7 +88,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         const body = await readJson(ctx.request, setupBody);
         if (!body.ok) return send(respond(body), s.renewed);
-        const r = await setupTotp(config, {
+        const r = await setupTotp(ctx.config, {
           userId: s.resolved.user.id,
           password: body.value.password,
           ip: ctx.ip,
@@ -105,7 +105,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         const body = await readJson(ctx.request, codeBody);
         if (!body.ok) return send(respond(body), s.renewed);
-        const r = await enableTotp(config, { session: s.resolved, code: body.value.code });
+        const r = await enableTotp(ctx.config, { session: s.resolved, code: body.value.code });
         return send(respond(r), s.renewed);
       },
     },
@@ -119,11 +119,11 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         // A change of the second factor needs a fresh session (ASVS 5.0.0
         // 7.5.1; plan 12a). The engine takes a user, so the rule is here,
         // before the engine's code limit.
-        const fresh = requireFresh(config, s.resolved.session);
+        const fresh = requireFresh(ctx.config, s.resolved.session);
         if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, codeBody);
         if (!body.ok) return send(respond(body), s.renewed);
-        const r = await disableTotpWithCode(config, {
+        const r = await disableTotpWithCode(ctx.config, {
           user: s.resolved.user,
           code: body.value.code,
         });
@@ -140,11 +140,11 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         // New backup codes are a lasting way past the factor, and they void
         // the owner's list (ASVS 5.0.0 7.5.1; plan 12a). Before the code limit.
-        const fresh = requireFresh(config, s.resolved.session);
+        const fresh = requireFresh(ctx.config, s.resolved.session);
         if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, codeBody);
         if (!body.ok) return send(respond(body), s.renewed);
-        const r = await regenerateBackupCodesWithCode(config, {
+        const r = await regenerateBackupCodesWithCode(ctx.config, {
           user: s.resolved.user,
           code: body.value.code,
         });
@@ -158,7 +158,10 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
-        return send(respond(await totpStatus(config, { userId: s.resolved.user.id })), s.renewed);
+        return send(
+          respond(await totpStatus(ctx.config, { userId: s.resolved.user.id })),
+          s.renewed,
+        );
       },
     },
     {
@@ -168,7 +171,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
-        const r = await revokeTrustedDevices(config, { userId: s.resolved.user.id });
+        const r = await revokeTrustedDevices(ctx.config, { userId: s.resolved.user.id });
         return send(clearTrust(respond(r)), s.renewed);
       },
     },
@@ -179,7 +182,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, verifyBody);
         if (!body.ok) return respond(body);
-        const r = await verifyTwoFactor(config, { ...body.value, ip: ctx.ip });
+        const r = await verifyTwoFactor(ctx.config, { ...body.value, ip: ctx.ip });
         if (!r.ok) return respond(r);
         const v = r.value;
         return withCookies(
@@ -206,7 +209,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const challenge = ctx.url.searchParams.get("challenge") ?? "";
         if (!TWO_FACTOR_TOKEN_RE.test(challenge)) return failed("invalid_token");
-        const view = await challengeView(config, {
+        const view = await challengeView(ctx.config, {
           challenge,
           trustToken: readCookie(ctx.request, totp.trustCookieName) ?? undefined,
         });
@@ -227,7 +230,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         const html = totp.challengePage({
           action: challengePath,
           challenge,
-          appName: config.appName,
+          appName: ctx.config.appName,
           backup: method === "backup",
           trustDays: totp.trustDays,
           error:
@@ -241,7 +244,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         });
         return new Response(html, {
           status: 200,
-          headers: pageHeaders(config, noScriptPagePolicy(config)),
+          headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)),
         });
       },
     },
@@ -253,12 +256,12 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
         const body = await readBody(ctx.request, pageBody);
         if (!body.ok) return failed("invalid_token");
         const { challenge, code, backupCode, emailCode, action } = body.value;
-        const page = `${config.baseURL}${challengePath}?challenge=${encodeURIComponent(challenge)}`;
+        const page = `${ctx.config.baseURL}${challengePath}?challenge=${encodeURIComponent(challenge)}`;
         if (action === "send-email") {
-          const sent = await sendSecondFactorEmail(config, { challenge });
+          const sent = await sendSecondFactorEmail(ctx.config, { challenge });
           return sent.ok ? redirect(`${page}&method=email`) : failed(sent.code);
         }
-        const r = await verifyTwoFactor(config, {
+        const r = await verifyTwoFactor(ctx.config, {
           challenge,
           code,
           backupCode,
@@ -270,7 +273,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
           trustDevice: body.value.trustDevice === "1",
           ip: ctx.ip,
         });
-        if (r.ok) return withCookies(redirect(resolveNext(config, r.value.next)), r.value);
+        if (r.ok) return withCookies(redirect(resolveNext(ctx.config, r.value.next)), r.value);
         // The challenge still lives after a wrong code: send the person back to the form.
         if (r.code === CHALLENGE_PAGE_ERROR)
           return redirect(

@@ -7,11 +7,22 @@ export const JSON_HEADERS: Readonly<Record<string, string>> = Object.freeze({
   "cache-control": "no-store",
 });
 
+/**
+ * The error code of each JSON answer that `json` builds (plan 12h). The
+ * router reads it for the `request` event. The body does not change.
+ */
+export const ANSWER_CODE = new WeakMap<Response, string>();
+
 export function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), {
+  const res = new Response(JSON.stringify(body), {
     status,
     headers: { ...JSON_HEADERS, ...headers },
   });
+  if (typeof body === "object" && body !== null) {
+    const code: unknown = Reflect.get(body, "error");
+    if (typeof code === "string") ANSWER_CODE.set(res, code);
+  }
+  return res;
 }
 
 export async function readJson<T>(request: Request, schema: z.ZodType<T>): Promise<Result<T>> {

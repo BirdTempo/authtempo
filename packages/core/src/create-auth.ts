@@ -228,6 +228,7 @@ import { ERRORS } from "./errors.js";
 import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
 import { createWellKnownHandler } from "./http/well-known.js";
+import { unscopedOf } from "./observe/observer.js";
 import type { HandleOptions, ObserveStats } from "./observe/port.js";
 import type { PublicJwk } from "./primitives/jwk.js";
 import { fail, type Result } from "./result.js";
@@ -851,7 +852,9 @@ export function crossSiteRefusal(auth: Auth, request: Request): Response | null 
 
 export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
-  const routes = coreRoutes(config);
+  // The route modules get a config whose observer marks each event unscoped.
+  // A handler emits through ctx.config, the scope of its request (plan 12h).
+  const routes = coreRoutes({ ...config, observe: unscopedOf(config.observe) });
   const gate = createPostGate(config, routes);
   const route = createRouter(config, routes, gate);
   const auth: Auth = {

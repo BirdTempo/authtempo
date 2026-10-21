@@ -6,16 +6,16 @@ import type { Route } from "../router.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
 
 /** The identity routes of a settings page (plan 12a). They exist in every deployment. */
-export function identityRoutes(config: ResolvedConfig): Route[] {
+export function identityRoutes(_config: ResolvedConfig): Route[] {
   return [
     {
       method: "GET",
       path: "/identities",
       key: "GET /identities",
       async handler(ctx) {
-        const s = await withSession(config, ctx.request);
+        const s = await withSession(ctx.config, ctx.request);
         if (!s) return unauthorized();
-        const r = await listIdentities(config, { session: s.resolved });
+        const r = await listIdentities(ctx.config, { session: s.resolved });
         if (!r.ok) return sent(respond(r), s.renewed);
         // JSON writes each `linkedAt` as its ISO text.
         return sent(json(r.value), s.renewed);
@@ -26,13 +26,13 @@ export function identityRoutes(config: ResolvedConfig): Route[] {
       path: "/identities/unlink",
       key: "POST /identities/unlink",
       async handler(ctx) {
-        const s = await withSession(config, ctx.request);
+        const s = await withSession(ctx.config, ctx.request);
         if (!s) return unauthorized();
         const body = await readJson(ctx.request, unlinkBody);
         if (!body.ok) return sent(respond(body), s.renewed);
         return sent(
           respond(
-            await unlinkIdentity(config, {
+            await unlinkIdentity(ctx.config, {
               session: s.resolved,
               id: body.value.id,
               ip: ctx.ip,

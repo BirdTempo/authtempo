@@ -29,12 +29,12 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
   if (!config.passkey) return [];
   /** The session, plus the renewed cookie when the read moved the expiry. Every session route sends that cookie. */
   const withSession = async (ctx: RouteContext) => {
-    const resolved = await sessionFromRequest(config, ctx.request);
+    const resolved = await sessionFromRequest(ctx.config, ctx.request);
     if (!resolved) return null;
     return {
       user: resolved.user,
       session: resolved.session,
-      renewed: renewedSessionCookie(config, ctx.request, resolved),
+      renewed: renewedSessionCookie(ctx.config, ctx.request, resolved),
     };
   };
   const send = (res: Response, renewed: string | null) => {
@@ -52,9 +52,12 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         // A new way in: a stolen session must prove the person again (plan 12a).
         // The engine takes a user, so the rule is here, before any write.
-        const fresh = requireFresh(config, s.session);
+        const fresh = requireFresh(ctx.config, s.session);
         if (!fresh.ok) return send(respond(fresh), s.renewed);
-        return send(respond(await passkeyRegistrationOptions(config, { user: s.user })), s.renewed);
+        return send(
+          respond(await passkeyRegistrationOptions(ctx.config, { user: s.user })),
+          s.renewed,
+        );
       },
     },
     {
@@ -66,7 +69,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         const body = await readJson(ctx.request, registerVerifyBody);
         if (!body.ok) return send(respond(body), s.renewed);
-        const r = await verifyPasskeyRegistration(config, {
+        const r = await verifyPasskeyRegistration(ctx.config, {
           user: s.user,
           response: body.value.response,
           name: body.value.name,
@@ -79,7 +82,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
       path: "/passkey/authenticate/options",
       key: "POST /passkey/authenticate/options",
       async handler(ctx) {
-        return respond(await passkeyAuthenticationOptions(config, { ip: ctx.ip }));
+        return respond(await passkeyAuthenticationOptions(ctx.config, { ip: ctx.ip }));
       },
     },
     {
@@ -89,22 +92,22 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, authenticateVerifyBody);
         if (!body.ok) return respond(body);
-        const r = await verifyPasskeyAuthentication(config, {
+        const r = await verifyPasskeyAuthentication(ctx.config, {
           response: body.value.response,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
         });
         if (!r.ok) return respond(r);
-        const maxAge = sessionMaxAgeSeconds(config);
+        const maxAge = sessionMaxAgeSeconds(ctx.config);
         return json(
           publicSession({ user: r.value.user, session: r.value.session, refreshed: false }),
           200,
           {
             "set-cookie": sessionCookie(
-              config.cookieName,
+              ctx.config.cookieName,
               r.value.token,
               maxAge,
-              config.cookie.sameSite,
+              ctx.config.cookie.sameSite,
             ),
           },
         );
@@ -117,7 +120,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
-        const r = await listPasskeys(config, { user: s.user });
+        const r = await listPasskeys(ctx.config, { user: s.user });
         return send(r.ok ? json({ passkeys: r.value }) : respond(r), s.renewed);
       },
     },
@@ -130,12 +133,12 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         // The removal of a way in (plan 12a). Before the guard, so a stale
         // session takes no lock and removes nothing.
-        const fresh = requireFresh(config, s.session);
+        const fresh = requireFresh(ctx.config, s.session);
         if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, deleteBody);
         if (!body.ok) return send(respond(body), s.renewed);
         return send(
-          respond(await deletePasskey(config, { user: s.user, id: body.value.id })),
+          respond(await deletePasskey(ctx.config, { user: s.user, id: body.value.id })),
           s.renewed,
         );
       },
@@ -151,7 +154,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, renameBody);
         if (!body.ok) return send(respond(body), s.renewed);
         return send(
-          respond(await renamePasskey(config, { user: s.user, ...body.value })),
+          respond(await renamePasskey(ctx.config, { user: s.user, ...body.value })),
           s.renewed,
         );
       },

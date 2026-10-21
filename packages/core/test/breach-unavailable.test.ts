@@ -16,7 +16,11 @@ const PW = "correct horse battery";
 
 /** Status, headers, and body: the full answer, so two answers compare byte for byte. */
 async function wire(res: Response) {
-  return { status: res.status, headers: [...res.headers.entries()], body: await res.text() };
+  // The trace header is random for each answer (plan 12h Task 4). Each answer
+  // carries one, and the compare leaves it out.
+  expect(res.headers.get("x-authtempo-trace")).toMatch(/^[0-9a-f]{32}$/);
+  const headers = [...res.headers.entries()].filter(([k]) => k !== "x-authtempo-trace");
+  return { status: res.status, headers, body: await res.text() };
 }
 
 describe("a breach check that cannot answer (plan 12b)", () => {

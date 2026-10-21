@@ -961,6 +961,12 @@ export interface ResolvedConfig {
   observe: Observer;
   observeConfig: ResolvedObserve | null;
   /**
+   * The identity of this instance (plan 12h). The router copies the config
+   * for each request, and each copy keeps this object. So a cache of the
+   * instance keys on it, not on the config object.
+   */
+  instance: object;
+  /**
    * The key paths of the input, sorted, for `GET /operator/info` (plan
    * 11c2): each top key that `AUTH_CONFIG_KEYS` names, and `<key>.<sub>`
    * under each option block of `CONFIG_BLOCKS`. Names only, never a value.
@@ -1358,6 +1364,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       ? createObserver(observeConfig, { clock, hashSecret: () => currentSecret(keyring) })
       : createDefaultObserver({ clock, secrets: secretValues(keyring, input.social) }),
     observeConfig,
+    instance: Object.freeze({}),
     configKeys: configKeyPaths(input),
   };
 }

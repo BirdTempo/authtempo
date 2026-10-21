@@ -37,9 +37,9 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
   const withSession = async (
     ctx: RouteContext,
   ): Promise<{ resolved: ResolvedSession; renewed: string | null } | null> => {
-    const resolved = await sessionFromRequest(config, ctx.request);
+    const resolved = await sessionFromRequest(ctx.config, ctx.request);
     if (!resolved) return null;
-    return { resolved, renewed: renewedSessionCookie(config, ctx.request, resolved) };
+    return { resolved, renewed: renewedSessionCookie(ctx.config, ctx.request, resolved) };
   };
   const send = (res: Response, renewed: string | null) => {
     if (renewed) res.headers.append("set-cookie", renewed);
@@ -56,7 +56,7 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         const body = await readJson(ctx.request, passkeyEnableBody);
         if (!body.ok) return send(respond(body), s.renewed);
-        const r = await enablePasskeyMethod(config, {
+        const r = await enablePasskeyMethod(ctx.config, {
           session: s.resolved,
           password: body.value.password,
           response: body.value.response,
@@ -72,7 +72,10 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, challengeBody);
         if (!body.ok) return respond(body);
         return respond(
-          await passkeyChallengeOptions(config, { challenge: body.value.challenge, ip: ctx.ip }),
+          await passkeyChallengeOptions(ctx.config, {
+            challenge: body.value.challenge,
+            ip: ctx.ip,
+          }),
         );
       },
     },
@@ -86,11 +89,11 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
         // A change of the second factor needs a fresh session (ASVS 5.0.0
         // 7.5.1; plan 12a). The engine takes a user, so the rule is here,
         // before the engine's password limit.
-        const fresh = requireFresh(config, s.resolved.session);
+        const fresh = requireFresh(ctx.config, s.resolved.session);
         if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, disableBody);
         if (!body.ok) return send(respond(body), s.renewed);
-        const r = await disableMethod(config, {
+        const r = await disableMethod(ctx.config, {
           user: s.resolved.user,
           method: body.value.method,
           password: body.value.password,
@@ -100,7 +103,7 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
         if (r.ok && r.value.methods.length === 0)
           res.headers.append(
             "set-cookie",
-            clearTrustCookie(totp.trustCookieName, trustPath, config.cookie.sameSite),
+            clearTrustCookie(totp.trustCookieName, trustPath, ctx.config.cookie.sameSite),
           );
         return send(res, s.renewed);
       },
@@ -114,7 +117,7 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         const body = await readJson(ctx.request, passwordBody);
         if (!body.ok) return send(respond(body), s.renewed);
-        const r = await enableEmailMethod(config, {
+        const r = await enableEmailMethod(ctx.config, {
           session: s.resolved,
           password: body.value.password,
         });
@@ -128,7 +131,9 @@ export function secondFactorRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, challengeBody);
         if (!body.ok) return respond(body);
-        return respond(await sendSecondFactorEmail(config, { challenge: body.value.challenge }));
+        return respond(
+          await sendSecondFactorEmail(ctx.config, { challenge: body.value.challenge }),
+        );
       },
     },
   ];

@@ -17,15 +17,15 @@ import type { Route, RouteContext } from "../router.js";
  * `sessionFromRequest`, which resolves sessions only, so a `tk_` bearer
  * answers 401: a leaked token cannot mint a token or revoke the others.
  */
-export function tokenRoutes(config: ResolvedConfig): Route[] {
+export function tokenRoutes(_config: ResolvedConfig): Route[] {
   /** The session, plus the renewed cookie when the read moved the expiry. */
   const withSession = async (ctx: RouteContext) => {
-    const resolved = await sessionFromRequest(config, ctx.request);
+    const resolved = await sessionFromRequest(ctx.config, ctx.request);
     if (!resolved) return null;
     return {
       user: resolved.user,
       session: resolved.session,
-      renewed: renewedSessionCookie(config, ctx.request, resolved),
+      renewed: renewedSessionCookie(ctx.config, ctx.request, resolved),
     };
   };
   const send = (res: Response, renewed: string | null) => {
@@ -44,11 +44,11 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
         // A token is a credential for its life (spec 8.8): a stolen session
         // must not mint one (plan 12a). Before the engine's limit, so a stale
         // session counts no try.
-        const fresh = requireFresh(config, s.session);
+        const fresh = requireFresh(ctx.config, s.session);
         if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, createBody);
         if (!body.ok) return send(respond(body), s.renewed);
-        const r = await createApiToken(config, {
+        const r = await createApiToken(ctx.config, {
           user: s.user,
           name: body.value.name,
           expiresInDays: body.value.expiresInDays,
@@ -68,7 +68,7 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
-        const r = await listApiTokens(config, { user: s.user });
+        const r = await listApiTokens(ctx.config, { user: s.user });
         return send(r.ok ? json({ tokens: r.value }) : respond(r), s.renewed);
       },
     },
@@ -82,7 +82,7 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, revokeBody);
         if (!body.ok) return send(respond(body), s.renewed);
         return send(
-          respond(await revokeApiToken(config, { user: s.user, id: body.value.id })),
+          respond(await revokeApiToken(ctx.config, { user: s.user, id: body.value.id })),
           s.renewed,
         );
       },
@@ -96,12 +96,12 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
-        const fresh = requireFresh(config, s.session);
+        const fresh = requireFresh(ctx.config, s.session);
         if (!fresh.ok) return send(respond(fresh), s.renewed);
         const body = await readJson(ctx.request, updateBody);
         if (!body.ok) return send(respond(body), s.renewed);
         const { id, name, permissions, expiresAt } = body.value;
-        const r = await updateApiToken(config, {
+        const r = await updateApiToken(ctx.config, {
           user: s.user,
           id,
           ...(name === undefined ? {} : { name }),
@@ -121,7 +121,7 @@ export function tokenRoutes(config: ResolvedConfig): Route[] {
       path: "/tokens/current",
       key: "GET /tokens/current",
       async handler(ctx) {
-        const r = await apiTokenFromRequest(config, ctx.request);
+        const r = await apiTokenFromRequest(ctx.config, ctx.request);
         if (!r.ok) return respond(r);
         if (r.value.kind !== "token") return unauthorized();
         return json({ user: publicUser(r.value.user), apiToken: r.value.apiToken });

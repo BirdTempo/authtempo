@@ -594,10 +594,12 @@ const accessCaller = (r: ResolvedAccess): Caller =>
  * by instance. So a second `auth.caller` or `auth.authenticate` of one request
  * answers the same. The first call spends the proof's `jti`. It also spends
  * one call of a token quota (ruling 3 of plan 12k). A replay is another
- * request. The key is the config first, so two instances never share an
- * answer (ruling 31 of plan 12e).
+ * request. The key is the instance first, so two instances never share an
+ * answer (ruling 31 of plan 12e). It is not the config object: the router
+ * copies the config for each request (plan 12h), and the copy of a route
+ * and `auth.caller` must find one answer.
  */
-const requestCallers = new WeakMap<ResolvedConfig, WeakMap<Request, Promise<Result<Caller>>>>();
+const requestCallers = new WeakMap<object, WeakMap<Request, Promise<Result<Caller>>>>();
 
 /** The answer of `make` for this request and instance, made once. */
 function once(
@@ -605,10 +607,10 @@ function once(
   request: Request,
   make: () => Promise<Result<Caller>>,
 ): Promise<Result<Caller>> {
-  let mine = requestCallers.get(config);
+  let mine = requestCallers.get(config.instance);
   if (!mine) {
     mine = new WeakMap();
-    requestCallers.set(config, mine);
+    requestCallers.set(config.instance, mine);
   }
   const seen = mine.get(request);
   if (seen) return seen;

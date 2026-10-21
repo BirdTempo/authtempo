@@ -161,8 +161,8 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
       path: "/operator/impersonate",
       key: "POST /operator/impersonate",
       async handler(ctx) {
-        const operator = await sessionFromRequest(config, ctx.request);
-        const token = readSessionToken(config, ctx.request);
+        const operator = await sessionFromRequest(ctx.config, ctx.request);
+        const token = readSessionToken(ctx.config, ctx.request);
         if (withSecret(ctx))
           return refuse(ctx, "POST /operator/impersonate", "secret_not_accepted");
         if (!operator || token === null)
@@ -170,7 +170,7 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, impersonateBody);
         if (!body.ok) return respond(body);
         const r = await startImpersonation(
-          config,
+          ctx.config,
           {
             operator,
             userId: body.value.userId,
@@ -183,13 +183,13 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
         if (!r.ok) return respond(r);
         const { session, auditId } = r.value;
         const expiresAt = session.expiresAt.toISOString();
-        if (sessionCookieToken(config, ctx.request) === null)
+        if (sessionCookieToken(ctx.config, ctx.request) === null)
           return json({ token: r.value.token, expiresAt, auditId });
         const res = json({ expiresAt, auditId });
-        const maxAge = secondsUntil(config, session.expiresAt);
+        const maxAge = secondsUntil(ctx.config, session.expiresAt);
         res.headers.append(
           "set-cookie",
-          sessionCookie(config.cookieName, r.value.token, maxAge, sameSite),
+          sessionCookie(ctx.config.cookieName, r.value.token, maxAge, sameSite),
         );
         res.headers.append("set-cookie", sessionCookie(actorCookie, token, maxAge, sameSite));
         return res;
@@ -200,35 +200,35 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
       path: "/operator/impersonate/stop",
       key: "POST /operator/impersonate/stop",
       async handler(ctx) {
-        const resolved = await sessionFromRequest(config, ctx.request);
+        const resolved = await sessionFromRequest(ctx.config, ctx.request);
         if (withSecret(ctx))
           return refuse(ctx, "POST /operator/impersonate/stop", "secret_not_accepted");
         if (!resolved) return refuse(ctx, "POST /operator/impersonate/stop", "no_session");
         const body = await readStopBody(ctx.request);
         if (body === null) return json({ error: "invalid_body" }, 400);
-        const r = await stopImpersonation(config, {
+        const r = await stopImpersonation(ctx.config, {
           session: resolved,
           ...body,
           ip: ctx.ip,
           userAgent: userAgent(ctx),
         });
         if (!r.ok) return respond(r);
-        if (sessionCookieToken(config, ctx.request) === null)
+        if (sessionCookieToken(ctx.config, ctx.request) === null)
           return json({ auditId: r.value.auditId, restored: false });
         // The operator's own session, when it still lives: the actor cookie holds its token.
         const own = readCookie(ctx.request, actorCookie);
-        const back = own === null ? null : await resolveSession(config, own);
+        const back = own === null ? null : await resolveSession(ctx.config, own);
         const res = json({ auditId: r.value.auditId, restored: back !== null });
         res.headers.append(
           "set-cookie",
           back !== null && own !== null
             ? sessionCookie(
-                config.cookieName,
+                ctx.config.cookieName,
                 own,
-                secondsUntil(config, back.session.expiresAt),
+                secondsUntil(ctx.config, back.session.expiresAt),
                 sameSite,
               )
-            : clearSessionCookie(config.cookieName, sameSite),
+            : clearSessionCookie(ctx.config.cookieName, sameSite),
         );
         res.headers.append("set-cookie", clearSessionCookie(actorCookie, sameSite));
         return res;
@@ -267,17 +267,17 @@ function secretRoutes(config: ResolvedConfig): Route[] {
           path: "/operator/keys/rotate",
           key: "POST /operator/keys/rotate",
           async handler(ctx) {
-            if (!(await config.limiter.allow(`operator:ip:${ipKey(ctx.ip)}`, OPERATOR_PER_IP)))
+            if (!(await ctx.config.limiter.allow(`operator:ip:${ipKey(ctx.ip)}`, OPERATOR_PER_IP)))
               return json({ error: "rate_limited" }, 429);
             const refused = await operatorAuthorized(
-              config,
+              ctx.config,
               ctx,
               "POST /operator/keys/rotate",
               "keys",
             );
             if (refused) return refused;
             // The answer `{ kid }` names the new signing key; the old key verifies for 24 hours and signs nothing.
-            return json(await rotateKey(config));
+            return json(await rotateKey(ctx.config));
           },
         },
       ]
@@ -290,20 +290,20 @@ function secretRoutes(config: ResolvedConfig): Route[] {
       key: "GET /operator/secrets/status",
       async handler(ctx) {
         if (
-          !(await config.limiter.allow(
+          !(await ctx.config.limiter.allow(
             `operator-secrets:ip:${ipKey(ctx.ip)}`,
             OPERATOR_SECRETS_PER_IP,
           ))
         )
           return json({ error: "rate_limited" }, 429);
         const refused = await operatorAuthorized(
-          config,
+          ctx.config,
           ctx,
           "GET /operator/secrets/status",
           "secrets",
         );
         if (refused) return refused;
-        return json(await secretsStatus(config));
+        return json(await secretsStatus(ctx.config));
       },
     },
     {
@@ -312,14 +312,14 @@ function secretRoutes(config: ResolvedConfig): Route[] {
       key: "POST /operator/secrets/rewrap",
       async handler(ctx) {
         if (
-          !(await config.limiter.allow(
+          !(await ctx.config.limiter.allow(
             `operator-secrets:ip:${ipKey(ctx.ip)}`,
             OPERATOR_SECRETS_PER_IP,
           ))
         )
           return json({ error: "rate_limited" }, 429);
         const refused = await operatorAuthorized(
-          config,
+          ctx.config,
           ctx,
           "POST /operator/secrets/rewrap",
           "secrets",
@@ -327,7 +327,7 @@ function secretRoutes(config: ResolvedConfig): Route[] {
         if (refused) return refused;
         const body = await readRewrapBody(ctx.request);
         if (body === null) return json({ error: "invalid_body" }, 400);
-        return respond(await rewrapSecrets(config, body));
+        return respond(await rewrapSecrets(ctx.config, body));
       },
     },
     {
@@ -336,18 +336,18 @@ function secretRoutes(config: ResolvedConfig): Route[] {
       key: "GET /operator/info",
       async handler(ctx) {
         if (
-          !(await config.limiter.allow(
+          !(await ctx.config.limiter.allow(
             `operator-secrets:ip:${ipKey(ctx.ip)}`,
             OPERATOR_SECRETS_PER_IP,
           ))
         )
           return json({ error: "rate_limited" }, 429);
-        const refused = await operatorAuthorized(config, ctx, "GET /operator/info", null);
+        const refused = await operatorAuthorized(ctx.config, ctx, "GET /operator/info", null);
         if (refused) return refused;
         return json({
           core: VERSION,
           schemaVersion: SCHEMA_VERSION,
-          configKeys: config.configKeys,
+          configKeys: ctx.config.configKeys,
         });
       },
     },
@@ -465,7 +465,7 @@ function toolRoutes(config: ResolvedConfig): Route[] {
     path,
     key: `GET ${path}`,
     async handler(ctx) {
-      const caller = await readOperatorActor(config, ctx, `GET ${path}`);
+      const caller = await readOperatorActor(ctx.config, ctx, `GET ${path}`);
       if (!caller.ok) return respond(caller);
       const query = readQuery(ctx.url, schema);
       if (!query.ok) return send(respond(query), caller.value.renewed);
@@ -485,7 +485,7 @@ function toolRoutes(config: ResolvedConfig): Route[] {
     path,
     key: `POST ${path}`,
     async handler(ctx) {
-      const caller = await readOperatorActor(config, ctx, `POST ${path}`);
+      const caller = await readOperatorActor(ctx.config, ctx, `POST ${path}`);
       if (!caller.ok) return respond(caller);
       // JSON only (ruling 38): a JSON body forces a preflight. A text/plain
       // body or a body with no content type is a simple request with none.

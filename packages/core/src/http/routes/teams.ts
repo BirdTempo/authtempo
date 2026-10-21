@@ -34,12 +34,12 @@ export function teamRoutes(config: ResolvedConfig): Route[] {
   if (!config.organizations?.teams) return [];
   // Same helpers as routes/roles.ts. The files evolve apart, so the small copy stays.
   const withSession = async (ctx: RouteContext) => {
-    const resolved = await sessionFromRequest(config, ctx.request);
+    const resolved = await sessionFromRequest(ctx.config, ctx.request);
     if (!resolved) return null;
     return {
       resolved,
       user: resolved.user,
-      renewed: renewedSessionCookie(config, ctx.request, resolved),
+      renewed: renewedSessionCookie(ctx.config, ctx.request, resolved),
     };
   };
   type Signed = NonNullable<Awaited<ReturnType<typeof withSession>>>;
@@ -54,7 +54,7 @@ export function teamRoutes(config: ResolvedConfig): Route[] {
     path: P,
     schema: z.ZodType<T>,
     key: string | null,
-    run: (s: Signed, b: T) => Promise<Result<V>>,
+    run: (s: Signed, b: T, ctx: RouteContext) => Promise<Result<V>>,
   ): Route => ({
     method: "POST",
     path,
@@ -64,7 +64,7 @@ export function teamRoutes(config: ResolvedConfig): Route[] {
       if (!s) return unauthorized();
       const body = await readJson(ctx.request, schema);
       if (!body.ok) return send(respond(body), s.renewed);
-      const r = await run(s, body.value);
+      const r = await run(s, body.value, ctx);
       if (!r.ok) return send(respond(r), s.renewed);
       return send(json(key === null ? r.value : { [key]: r.value }), s.renewed);
     },
@@ -75,7 +75,7 @@ export function teamRoutes(config: ResolvedConfig): Route[] {
     path: P,
     param: string | null,
     key: string,
-    run: (s: Signed, value: string) => Promise<Result<V>>,
+    run: (s: Signed, value: string, ctx: RouteContext) => Promise<Result<V>>,
   ): Route => ({
     method: "GET",
     path,
@@ -89,40 +89,40 @@ export function teamRoutes(config: ResolvedConfig): Route[] {
         if (!parsed.success) return send(respond(fail("invalid_body")), s.renewed);
         value = parsed.data;
       }
-      const r = await run(s, value);
+      const r = await run(s, value, ctx);
       if (!r.ok) return send(respond(r), s.renewed);
       return send(json({ [key]: r.value }), s.renewed);
     },
   });
 
   return [
-    getBy("/organizations/teams", "organizationId", "teams", (s, organizationId) =>
-      listTeams(config, { user: s.user, organizationId }),
+    getBy("/organizations/teams", "organizationId", "teams", (s, organizationId, ctx) =>
+      listTeams(ctx.config, { user: s.user, organizationId }),
     ),
-    post("/organizations/teams/create", teamCreateBody, "team", (s, b) =>
-      createTeam(config, { user: s.user, ...b }),
+    post("/organizations/teams/create", teamCreateBody, "team", (s, b, ctx) =>
+      createTeam(ctx.config, { user: s.user, ...b }),
     ),
-    post("/organizations/teams/update", teamUpdateBody, "team", (s, b) =>
-      updateTeam(config, { user: s.user, ...b }),
+    post("/organizations/teams/update", teamUpdateBody, "team", (s, b, ctx) =>
+      updateTeam(ctx.config, { user: s.user, ...b }),
     ),
-    post("/organizations/teams/delete", teamBody, null, (s, b) =>
-      deleteTeam(config, { user: s.user, ...b }),
+    post("/organizations/teams/delete", teamBody, null, (s, b, ctx) =>
+      deleteTeam(ctx.config, { user: s.user, ...b }),
     ),
-    getBy("/organizations/teams/members", "teamId", "members", (s, teamId) =>
-      listTeamMembers(config, { user: s.user, teamId }),
+    getBy("/organizations/teams/members", "teamId", "members", (s, teamId, ctx) =>
+      listTeamMembers(ctx.config, { user: s.user, teamId }),
     ),
-    post("/organizations/teams/members/add", teamMemberBody, "member", (s, b) =>
-      addTeamMember(config, { user: s.user, ...b }),
+    post("/organizations/teams/members/add", teamMemberBody, "member", (s, b, ctx) =>
+      addTeamMember(ctx.config, { user: s.user, ...b }),
     ),
-    post("/organizations/teams/members/remove", teamMemberBody, null, (s, b) =>
-      removeTeamMember(config, { user: s.user, ...b }),
+    post("/organizations/teams/members/remove", teamMemberBody, null, (s, b, ctx) =>
+      removeTeamMember(ctx.config, { user: s.user, ...b }),
     ),
     // The active team answers the session, as the active organization does.
-    post("/organizations/teams/active", teamActiveBody, null, (s, b) =>
-      setActiveTeam(config, { session: s.resolved, teamId: b.teamId }),
+    post("/organizations/teams/active", teamActiveBody, null, (s, b, ctx) =>
+      setActiveTeam(ctx.config, { session: s.resolved, teamId: b.teamId }),
     ),
-    getBy("/organizations/teams/mine", null, "teams", (s) =>
-      listUserTeams(config, { user: s.user }),
+    getBy("/organizations/teams/mine", null, "teams", (s, _none, ctx) =>
+      listUserTeams(ctx.config, { user: s.user }),
     ),
   ];
 }

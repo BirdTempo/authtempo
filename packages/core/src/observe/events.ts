@@ -13,6 +13,8 @@ import {
   PATCH_SHAPE_REFUSALS,
   SESSION_HOOK_POINTS,
   SESSION_PATCH_REFUSALS,
+  SESSION_VIA,
+  type SessionVia,
   USER_HOOK_POINTS,
   USER_PATCH_REFUSALS,
 } from "../engine/hooks.js";
@@ -30,7 +32,7 @@ import {
 } from "../engine/oauth-refusals.js";
 import type { OperatorActor } from "../engine/operator/guards.js";
 import { ERRORS, OAUTH_ERRORS } from "../errors.js";
-import { ROUTES } from "../http/route-list.js";
+import { ROUTES, type RouteKey } from "../http/route-list.js";
 import type { UnauthorizedReason } from "../http/routes/operator.js";
 import { ENTROPY_WARN_BITS } from "../primitives/keyring.js";
 import { appErrorName, FIELD_KINDS, type FieldKind, REJECT } from "../redact.js";
@@ -131,6 +133,35 @@ const ACTOR_KINDS: Readonly<Record<OperatorActor["kind"], true>> = {
   app: true,
 };
 
+/** The outcome of an answer, from its status and its `Location` (plan 12h Task 4). */
+export const OUTCOMES = [
+  "ok",
+  "redirect",
+  "client_error",
+  "denied",
+  "limited",
+  "server_error",
+] as const;
+export type Outcome = (typeof OUTCOMES)[number];
+
+/**
+ * A route that can open a session. An answer with the outcome client_error,
+ * denied, or limited is a sign-in failure (ASVS 5.0.0 16.3.1). The second
+ * factor routes, the impersonation route, and `GET /oauth/sign-in` are not
+ * rows: a row names one `SessionVia`, and those routes cannot (ruling 1
+ * point 15 of plan 12h). The engine reports a failed second factor itself.
+ */
+export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
+  "POST /password/sign-in": "password",
+  "GET /magic-link/verify": "magic_link",
+  "POST /magic-link/verify": "magic_link",
+  "POST /otp/verify": "email_otp",
+  "POST /passkey/authenticate/verify": "passkey",
+  "POST /handoff/redeem": "handoff",
+  "GET /social/:provider/callback": "social",
+  "POST /social/apple/callback": "social",
+};
+
 /** The template of a route key, or `unmatched`, as the line of an unhandled error prints it. */
 function routeTemplate(e: AuthEvent): unknown {
   const route = e.route;
@@ -169,6 +200,29 @@ const SWEEP_STOP = { errorClass: ERROR_CLASS } as const;
  * other groups.
  */
 export const EVENTS = {
+  // One event for each answer of `handle` (plan 12h Task 4). The router
+  // stamps the route key. A method other than the three of the router is `other`.
+  request: {
+    level: "info",
+    fields: {
+      method: enumOf(["GET", "POST", "OPTIONS", "other"]),
+      status: STATUS,
+      outcome: enumOf(OUTCOMES),
+      code: { kind: "code", optional: true },
+      durationMs: { kind: "durationMs" },
+    },
+  },
+  // A success comes from the commit of the session. A failure comes from the
+  // router, for each route of SIGN_IN_ROUTES (spec 31 item 6).
+  sign_in: {
+    level: "info",
+    fields: {
+      method: enumOf(Object.keys(SESSION_VIA)),
+      provider: { kind: "name", optional: true },
+      outcome: enumOf(["success", "failure", "second_factor_required"]),
+      code: { kind: "code", optional: true },
+    },
+  },
   "observe.dropped": {
     level: "warn",
     fields: { buffer_full: COUNT, sink_timeout: COUNT, sink_threw: COUNT },

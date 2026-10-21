@@ -72,7 +72,11 @@ async function seedInvitation(storage: StorageAdapter, email: string) {
 
 /** Status, every header but the date, and the body text. */
 async function bytes(res: Response) {
-  return { status: res.status, headers: [...res.headers.entries()], body: await res.text() };
+  // The trace header is random for each answer (plan 12h Task 4). Each answer
+  // carries one, and the compare leaves it out.
+  expect(res.headers.get("x-authtempo-trace")).toMatch(/^[0-9a-f]{32}$/);
+  const headers = [...res.headers.entries()].filter(([k]) => k !== "x-authtempo-trace");
+  return { status: res.status, headers, body: await res.text() };
 }
 
 describe("the uniform sign-up (plan 12b)", () => {

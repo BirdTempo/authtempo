@@ -83,31 +83,31 @@ async function sessionAnswer(config: ResolvedConfig, request: Request): Promise<
   return json(body, 200, renewed ? { "set-cookie": renewed } : {});
 }
 
-export function sessionRoutes(config: ResolvedConfig): Route[] {
+export function sessionRoutes(_config: ResolvedConfig): Route[] {
   return [
     {
       method: "GET",
       path: "/session",
       key: "GET /session",
-      handler: (ctx) => sessionAnswer(config, ctx.request),
+      handler: (ctx) => sessionAnswer(ctx.config, ctx.request),
     },
     {
       // On with the key on or off (plan 12a): a client may post it in any deployment.
       method: "POST",
       path: "/session/refresh",
       key: "POST /session/refresh",
-      handler: (ctx) => sessionAnswer(config, ctx.request),
+      handler: (ctx) => sessionAnswer(ctx.config, ctx.request),
     },
     {
       method: "POST",
       path: "/sign-out",
       key: "POST /sign-out",
       async handler(ctx) {
-        const token = readSessionToken(config, ctx.request);
+        const token = readSessionToken(ctx.config, ctx.request);
         // After the commit: the back-channel logouts of the session (plan 12e Task 16).
-        const ended = token ? await destroySession(config, token) : null;
-        if (ended) await deliverLogouts(config, ended.userId);
-        return signedOut(config, ctx.request, token);
+        const ended = token ? await destroySession(ctx.config, token) : null;
+        if (ended) await deliverLogouts(ctx.config, ended.userId);
+        return signedOut(ctx.config, ctx.request, token);
       },
     },
     {
@@ -115,9 +115,9 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
       path: "/sessions",
       key: "GET /sessions",
       async handler(ctx) {
-        const s = await withSession(config, ctx.request);
+        const s = await withSession(ctx.config, ctx.request);
         if (!s) return unauthorized();
-        const r = await listSessions(config, { session: s.resolved });
+        const r = await listSessions(ctx.config, { session: s.resolved });
         return sent(r.ok ? json({ sessions: r.value }) : respond(r), s.renewed);
       },
     },
@@ -126,18 +126,18 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
       path: "/sessions/revoke",
       key: "POST /sessions/revoke",
       async handler(ctx) {
-        const s = await withSession(config, ctx.request);
+        const s = await withSession(ctx.config, ctx.request);
         if (!s) return unauthorized();
         const body = await readJson(ctx.request, revokeBody);
         if (!body.ok) return sent(respond(body), s.renewed);
-        const r = await revokeSession(config, { session: s.resolved, id: body.value.id });
+        const r = await revokeSession(ctx.config, { session: s.resolved, id: body.value.id });
         if (!r.ok) return sent(respond(r), s.renewed);
         // The caller ended its own session: answer as the sign-out does
         // (review M1). The router does not clear the old name when the
         // request carries both names, so `signedOut` does it. `current`
         // tells a bearer client that its token ended (plan 12a Task 13 L1).
         if (r.value.current)
-          return signedOut(config, ctx.request, readSessionToken(config, ctx.request), {
+          return signedOut(ctx.config, ctx.request, readSessionToken(ctx.config, ctx.request), {
             ok: true,
             current: true,
           });
@@ -149,9 +149,12 @@ export function sessionRoutes(config: ResolvedConfig): Route[] {
       path: "/sessions/revoke-others",
       key: "POST /sessions/revoke-others",
       async handler(ctx) {
-        const s = await withSession(config, ctx.request);
+        const s = await withSession(ctx.config, ctx.request);
         if (!s) return unauthorized();
-        return sent(respond(await revokeOtherSessions(config, { session: s.resolved })), s.renewed);
+        return sent(
+          respond(await revokeOtherSessions(ctx.config, { session: s.resolved })),
+          s.renewed,
+        );
       },
     },
   ];

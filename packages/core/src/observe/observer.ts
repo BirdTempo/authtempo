@@ -4,6 +4,7 @@ import type { ResolvedObserve } from "./config.js";
 import { defaultOutput } from "./default-output.js";
 import { type EventInput, type EventName, specOf, validateEvent } from "./events.js";
 import type { AuthEvent, ObserveStats } from "./port.js";
+import { mintTrace } from "./trace.js";
 
 /** The request that an event belongs to. The router builds it (plan 12h Task 4). */
 export interface RequestScope {
@@ -23,6 +24,12 @@ export interface Observer {
   emit(event: EventInput): void;
   /** An observer that stamps the ids of one request and shares the buffer and the counts. */
   scope(scope: RequestScope): Observer;
+  /**
+   * The observer of the config that the route modules get at construction.
+   * It marks each event `unscoped` and gives it a new trace, so the recorder
+   * finds a handler that emits outside the scope of its request.
+   */
+  unscoped(): Observer;
   flush(): Promise<void>;
   stats(): ObserveStats;
 }
@@ -47,14 +54,9 @@ interface Held {
   email?: string;
 }
 
-function hex(bytes: number): string {
-  const b = crypto.getRandomValues(new Uint8Array(bytes));
-  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-}
-
 /** A new trace id and span id, for an event outside a request. */
 function freshIds() {
-  return { traceId: hex(16), spanId: hex(8), parentSpanId: null };
+  return { ...mintTrace(), parentSpanId: null };
 }
 
 /** The stamp of an event: its name, its level from `EVENTS`, the time, and the ids of its scope. */
@@ -101,11 +103,12 @@ export function createObserver(
 
   const stamp = (name: EventName, scope: RequestScope | null) => stamped(name, deps.clock, scope);
 
-  function hold(input: EventInput, scope: RequestScope | null) {
+  function hold(input: EventInput, scope: RequestScope | null, unscoped: boolean) {
     const event = stamp(input.name, scope);
     const held: Held = { event };
     for (const [key, value] of Object.entries(checkedFields(input)))
       if (!Object.hasOwn(event, key)) event[key] = value;
+    if (unscoped) event.rejected = [...(event.rejected ?? []), "unscoped"];
     const { include } = config;
     if (scope?.ip) {
       if (include.ip === "raw") event.ip = scope.ip;
@@ -189,16 +192,17 @@ export function createObserver(
     else dropped.sink_threw += held.length;
   }
 
-  function make(scope: RequestScope | null): Observer {
+  function make(scope: RequestScope | null, unscoped = false): Observer {
     return {
       emit(input) {
         if (buffer.length >= config.buffer) {
           dropped.buffer_full += 1;
           return;
         }
-        buffer.push(hold(input, scope));
+        buffer.push(hold(input, scope, unscoped));
       },
       scope: (next) => make(next),
+      unscoped: () => make(null, true),
       flush,
       stats: () => ({ buffered: buffer.length, dropped: { ...dropped } }),
     };
@@ -225,8 +229,15 @@ export function createDefaultObserver(deps: {
       );
     },
     scope: () => observer,
+    // A line has no trace, so the mark has nothing to change here.
+    unscoped: () => observer,
     flush: async () => {},
     stats: () => ({ buffered: 0, dropped: noDrops() }),
   };
   return observer;
+}
+
+/** The observer of the construction config (plan 12h Task 4): it marks each event `unscoped`. */
+export function unscopedOf(observer: Observer): Observer {
+  return observer.unscoped();
 }

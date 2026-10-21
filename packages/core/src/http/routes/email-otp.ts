@@ -30,7 +30,7 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, requestBody);
         if (!body.ok) return respond(body);
         return respond(
-          await requestEmailOtp(config, {
+          await requestEmailOtp(ctx.config, {
             email: body.value.email,
             ip: ctx.ip,
             captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
@@ -45,12 +45,12 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, verifyBody);
         if (!body.ok) return respond(body);
-        const r = await verifyEmailOtp(config, {
+        const r = await verifyEmailOtp(ctx.config, {
           email: body.value.email,
           code: body.value.code,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
-          trustDevice: trustTokenOf(config, ctx.request, body.value.trustDevice),
+          trustDevice: trustTokenOf(ctx.config, ctx.request, body.value.trustDevice),
         });
         if (!r.ok) return respond(r);
         // A user with the second factor on: the challenge, and no cookie (plan 12c).
@@ -69,7 +69,7 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, requestBody);
         if (!body.ok) return respond(body);
         return respond(
-          await requestResetOtp(config, {
+          await requestResetOtp(ctx.config, {
             email: body.value.email,
             ip: ctx.ip,
             captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
@@ -84,13 +84,13 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, resetBody);
         if (!body.ok) return respond(body);
-        const r = await resetPasswordWithOtp(config, {
+        const r = await resetPasswordWithOtp(ctx.config, {
           email: body.value.email,
           code: body.value.code,
           password: body.value.password,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
-          trustDevice: trustTokenOf(config, ctx.request, body.value.trustDevice),
+          trustDevice: trustTokenOf(ctx.config, ctx.request, body.value.trustDevice),
         });
         if (!r.ok) return respond(r);
         // A user with the second factor on: the challenge, and no cookie (plan 12c).

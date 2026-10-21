@@ -29,7 +29,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, requestBody);
         if (!body.ok) return respond(body);
         return respond(
-          await requestMagicLink(config, {
+          await requestMagicLink(ctx.config, {
             email: body.value.email,
             next: body.value.next,
             ip: ctx.ip,
@@ -48,14 +48,14 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
         if (!MAGIC_LINK_TOKEN_RE.test(token)) return failed("invalid_token");
-        const html = config.magicLink.confirmPage({
+        const html = ctx.config.magicLink.confirmPage({
           action: verifyPath,
           token,
-          appName: config.appName,
+          appName: ctx.config.appName,
         });
         return new Response(html, {
           status: 200,
-          headers: pageHeaders(config, noScriptPagePolicy(config)),
+          headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)),
         });
       },
     },
@@ -69,11 +69,11 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
         // A form with no token is a client bug, not a user error. The
         // person sees the same page they see for a bad link.
         if (!body.ok) return jsonCaller ? respond(fail("invalid_token")) : failed("invalid_token");
-        const result = await verifyMagicLink(config, {
+        const result = await verifyMagicLink(ctx.config, {
           token: body.value.token,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
-          trustDevice: trustTokenOf(config, ctx.request, body.value.trustDevice),
+          trustDevice: trustTokenOf(ctx.config, ctx.request, body.value.trustDevice),
         });
         if (!result.ok) return jsonCaller ? respond(result) : failed(result.code);
         // A user with the second factor on (plan 12c): no cookie. A form goes
@@ -81,26 +81,26 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
         if ("twoFactor" in result.value)
           return jsonCaller
             ? twoFactorJson(result.value)
-            : redirect(challengePageUrl(config, result.value.twoFactor.challenge));
-        const maxAge = sessionMaxAgeSeconds(config);
+            : redirect(challengePageUrl(ctx.config, result.value.twoFactor.challenge));
+        const maxAge = sessionMaxAgeSeconds(ctx.config);
         const cookie = sessionCookie(
-          config.cookieName,
+          ctx.config.cookieName,
           result.value.token,
           maxAge,
-          config.cookie.sameSite,
+          ctx.config.cookie.sameSite,
         );
         if (jsonCaller) {
           // One extra read, on the JSON path only. verifyMagicLink does not return the row.
           // The session row was created a moment ago; a null here is a storage failure, and the token is spent. The caller asks for a new link.
           const resolved = await resolveSession(
-            config,
+            ctx.config,
             result.value.token,
-            readModeOf(config, ctx.request),
+            readModeOf(ctx.config, ctx.request),
           );
           if (!resolved) return respond(fail("invalid_token"));
           return json(publicSession(resolved), 200, { "set-cookie": cookie });
         }
-        const res = redirect(resolveNext(config, result.value.next));
+        const res = redirect(resolveNext(ctx.config, result.value.next));
         res.headers.set("set-cookie", cookie);
         return res;
       },

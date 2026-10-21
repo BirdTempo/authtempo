@@ -136,7 +136,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         // The bearer is the initial access token while its hash is set (RFC 7591 section 3).
         const bearer = readBearer(ctx.request);
         const metadata = await readObject(ctx.request);
-        const r = await registerClient(config, { metadata, ip: ctx.ip, bearer });
+        const r = await registerClient(ctx.config, { metadata, ip: ctx.ip, bearer });
         if (!r.ok && r.error === "invalid_token")
           return json({ error: "invalid_token" }, 401, {
             "www-authenticate": 'Bearer error="invalid_token"',
@@ -187,9 +187,9 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       path: "/oauth/authorize",
       key: "GET /oauth/authorize",
       async handler(ctx) {
-        const session = await sessionFromRequest(config, ctx.request);
+        const session = await sessionFromRequest(ctx.config, ctx.request);
         return stepResponse(
-          await authorizeStep(config, { params: ctx.url.searchParams, session, ip: ctx.ip }),
+          await authorizeStep(ctx.config, { params: ctx.url.searchParams, session, ip: ctx.ip }),
         );
       },
     },
@@ -200,14 +200,14 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         // The consent form posts from this origin only. The router admits a
         // POST with no Origin, as from a script; a consent never comes from one.
-        if (ctx.request.headers.get("origin") !== config.baseURL)
+        if (ctx.request.headers.get("origin") !== ctx.config.baseURL)
           return json({ error: "origin_not_trusted" }, 403);
-        const session = await sessionFromRequest(config, ctx.request);
+        const session = await sessionFromRequest(ctx.config, ctx.request);
         if (!session) return json({ error: "unauthorized" }, 401);
         const form = await formParams(ctx.request);
         if (!form) return json({ error: "invalid_request" }, 400);
         return stepResponse(
-          await decideAuthorize(config, {
+          await decideAuthorize(ctx.config, {
             requestId: form.get("request_id") ?? "",
             decision: form.get("decision") ?? "",
             session,
@@ -224,11 +224,11 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const next = ctx.url.searchParams.get("next") ?? "";
         if (
-          !(next.startsWith(`${config.basePath}/oauth/authorize?`) || deviceNext(next)) ||
+          !(next.startsWith(`${ctx.config.basePath}/oauth/authorize?`) || deviceNext(next)) ||
           safeNext(next) !== next
         )
-          return redirect(authErrorUrl(config, "invalid_request"));
-        return signInPageResponse(config, next);
+          return redirect(authErrorUrl(ctx.config, "invalid_request"));
+        return signInPageResponse(ctx.config, next);
       },
     },
   );
@@ -280,6 +280,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
    * auth does not read it again.
    */
   const grantAnswer = async (
+    config: ResolvedConfig,
     request: Request,
     form: URLSearchParams | null,
     ip: string | null,
@@ -378,20 +379,20 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     const dpopToken = readDpopToken(request);
     if (dpopToken !== null) {
       // RFC 9449 section 7.1: a bound token with a proof of its key.
-      const r = await resolveAccessToken(config, dpopToken);
+      const r = await resolveAccessToken(ctx.config, dpopToken);
       if (r?.kind !== "oauth" || r.access.dpopJkt === null)
         return userinfoRefused(401, "DPoP", "invalid_token");
       // The public URL of this route, not the request URL (ruling 31 of plan 12e).
-      const url = routeUrl(config, "/oauth/userinfo");
+      const url = routeUrl(ctx.config, "/oauth/userinfo");
       const bound = { token: dpopToken, jkt: r.access.dpopJkt };
-      if (!(await resourceProofHolds(config, request, url, bound)))
+      if (!(await resourceProofHolds(ctx.config, request, url, bound)))
         return userinfoRefused(401, "DPoP", "invalid_dpop_proof");
       const claims = userinfoClaims(r.access, r.subject);
       return claims ? json(claims) : userinfoRefused(403, "DPoP", "insufficient_scope");
     }
     const bearer = readBearer(request);
     // A client_credentials token names no user, so userinfo has no claims for it.
-    const r = bearer ? await resolveAccessToken(config, bearer) : null;
+    const r = bearer ? await resolveAccessToken(ctx.config, bearer) : null;
     // RFC 9449 section 7.2: a bound token never passes as a Bearer token.
     const access = r?.kind === "oauth" && r.access.dpopJkt === null ? r : null;
     if (!access) return userinfoRefused(401, bearer ? "Bearer" : null, "invalid_token");
@@ -406,7 +407,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       key: "POST /oauth/token",
       // A foreign origin reaches the handler, which admits only the named client's own origins (plan 11d).
       clientOrigin: true,
-      async preflight({ url, origin, request, ip }) {
+      async preflight({ url, origin, request, ip, config }) {
         // A preflight has no body, so the client rides in the query. Only a registered
         // client, read by its id: a preflight never fetches a metadata document.
         if (request.headers.get("access-control-request-method") !== "POST") return null;
@@ -435,17 +436,17 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         // Origin gets the router's credentialed CORS, as before plan 12b.
         // The router's config decides trust, so the handler and the router agree.
         if (origin === null || originTrusted(ctx.config, origin))
-          return grantAnswer(ctx.request, form, ctx.ip);
+          return grantAnswer(ctx.config, ctx.request, form, ctx.ip);
         // A foreign origin: the check runs before the grant, so a refused origin spends no code and no token.
         if (!(await originChecked(ctx.ip)))
           return json({ error: "rate_limited" }, OAUTH_ERRORS.rate_limited);
         // findClient, not registeredClient: its lastSeenAt write keeps a used client
         // from the sweep. A refused probe can make that write too, at most once
         // per client per day, under the per-IP count above.
-        const client = form ? await findClient(config, form.get("client_id") ?? "") : null;
+        const client = form ? await findClient(ctx.config, form.get("client_id") ?? "") : null;
         if (!client || !corsClient(client, origin))
           return json({ error: "origin_not_trusted" }, 403);
-        return clientCors(await grantAnswer(ctx.request, form, ctx.ip, client), origin);
+        return clientCors(await grantAnswer(ctx.config, ctx.request, form, ctx.ip, client), origin);
       },
     },
     {
@@ -455,16 +456,16 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const form = await formParams(ctx.request);
         if (!form) return oauthJson(oauthFail("invalid_request"));
-        if (await tokenLimited(config, ctx.ip)) return oauthJson(oauthFail("rate_limited"));
+        if (await tokenLimited(ctx.config, ctx.ip)) return oauthJson(oauthFail("rate_limited"));
         // RFC 7009 section 2.1: a client that names itself authenticates. With no
         // client named, revokeToken lets only a public client's token go.
         let client: AuthedClient | null = null;
         if (namesClient(ctx.request, form)) {
-          const authed = await authenticateClient(config, ctx.request, form);
+          const authed = await authenticateClient(ctx.config, ctx.request, form);
           if (!authed.ok) return clientRefused(ctx.request, authed);
           client = authed.value;
         }
-        const r = await revokeToken(config, { token: form.get("token") ?? "", client });
+        const r = await revokeToken(ctx.config, { token: form.get("token") ?? "", client });
         return r.ok ? json({}) : clientRefused(ctx.request, r);
       },
     },
@@ -476,11 +477,11 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const form = await formParams(ctx.request);
         if (!form) return noCache(oauthJson(oauthFail("invalid_request")));
-        if (await introspectLimited(config, ctx.ip))
+        if (await introspectLimited(ctx.config, ctx.ip))
           return noCache(oauthJson(oauthFail("rate_limited")));
-        const authed = await authenticateClient(config, ctx.request, form);
+        const authed = await authenticateClient(ctx.config, ctx.request, form);
         const r = authed.ok
-          ? await introspect(config, {
+          ? await introspect(ctx.config, {
               caller: authed.value,
               token: form.get("token"),
               hint: form.get("token_type_hint"),
@@ -498,9 +499,12 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
   // access token answer 401, so an agent cannot list or end grants. The
   // POST takes the router's Origin rule, as every session POST does.
   const withSession = async (ctx: RouteContext) => {
-    const resolved = await sessionFromRequest(config, ctx.request);
+    const resolved = await sessionFromRequest(ctx.config, ctx.request);
     if (!resolved) return null;
-    return { user: resolved.user, renewed: renewedSessionCookie(config, ctx.request, resolved) };
+    return {
+      user: resolved.user,
+      renewed: renewedSessionCookie(ctx.config, ctx.request, resolved),
+    };
   };
   const send = (res: Response, renewed: string | null) => {
     if (renewed) res.headers.append("set-cookie", renewed);
@@ -514,7 +518,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const s = await withSession(ctx);
         if (!s) return json({ error: "unauthorized" }, 401);
-        const r = await listGrants(config, { userId: s.user.id });
+        const r = await listGrants(ctx.config, { userId: s.user.id });
         return send(r.ok ? json({ grants: r.value }) : respond(r), s.renewed);
       },
     },
@@ -528,7 +532,9 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, revokeGrantBody);
         if (!body.ok) return send(respond(body), s.renewed);
         return send(
-          respond(await revokeGrant(config, { userId: s.user.id, clientId: body.value.clientId })),
+          respond(
+            await revokeGrant(ctx.config, { userId: s.user.id, clientId: body.value.clientId }),
+          ),
           s.renewed,
         );
       },
@@ -539,11 +545,11 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
   // page, so the route skips the router's Origin rule. The hint, or the yes
   // from this origin, binds the end to the person.
   const endSessionAnswer = async (ctx: RouteContext, params: URLSearchParams | null) => {
-    if (await endSessionLimited(config, ctx.ip)) return oauthJson(oauthFail("rate_limited"));
+    if (await endSessionLimited(ctx.config, ctx.ip)) return oauthJson(oauthFail("rate_limited"));
     if (!params) return oauthJson(oauthFail("invalid_request"));
     // An empty value counts as omitted (RFC 6749 section 3.1). logout_hint and ui_locales are ignored.
     const value = (name: string) => params.get(name) || null;
-    const resolved = await sessionFromRequest(config, ctx.request);
+    const resolved = await sessionFromRequest(ctx.config, ctx.request);
     // The rule: no answer says signed out, or redirects as a done logout, when
     // the request could not see the session. A cross-site POST carries no
     // SameSite=Lax cookie, so a POST with no session goes on as a GET of the
@@ -554,22 +560,22 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     const query = new URLSearchParams(
       [...params].filter(([name]) => name !== "confirm"),
     ).toString();
-    const topLevel = `${config.baseURL}${config.basePath}/oauth/end-session${query === "" ? "" : `?${query}`}`;
+    const topLevel = `${ctx.config.baseURL}${ctx.config.basePath}/oauth/end-session${query === "" ? "" : `?${query}`}`;
     if (!resolved && ctx.request.method === "POST") return redirect(topLevel, 303);
     const dest = ctx.request.headers.get("sec-fetch-dest");
     if (!resolved && dest !== null && dest !== "document")
       return new Response(
-        defaultEndSessionPage({ kind: "framed", appName: config.appName, href: topLevel }),
-        { status: 200, headers: pageHeaders(config, noScriptPagePolicy(config)) },
+        defaultEndSessionPage({ kind: "framed", appName: ctx.config.appName, href: topLevel }),
+        { status: 200, headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)) },
       );
     const hintText = value("id_token_hint");
-    let hint = hintText === null ? null : await checkIdTokenHint(config, hintText);
+    let hint = hintText === null ? null : await checkIdTokenHint(ctx.config, hintText);
     // Section 2: a client_id beside the hint must be the client of the hint.
     const clientId = value("client_id");
     if (hint && clientId !== null && clientId !== hint.clientId) hint = null;
     // A hint that names another user than this session's is a suspect request: no hint.
     if (hint && resolved && hint.sub !== resolved.user.id) hint = null;
-    const target = await logoutRedirect(config, {
+    const target = await logoutRedirect(ctx.config, {
       hint,
       uri: value("post_logout_redirect_uri"),
       state: value("state"),
@@ -580,8 +586,9 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       const confirmed =
         ctx.request.method === "POST" &&
         params.get("confirm") === "yes" &&
-        ctx.request.headers.get("origin") === config.baseURL;
-      const named = hint !== null && (await hintNamesSession(config, hint, resolved.session.id));
+        ctx.request.headers.get("origin") === ctx.config.baseURL;
+      const named =
+        hint !== null && (await hintNamesSession(ctx.config, hint, resolved.session.id));
       if (!confirmed && !named) {
         // Section 2: with no valid hint of this session, ask the person first.
         const fields: Record<string, string> = {};
@@ -591,26 +598,26 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         }
         const html = defaultEndSessionPage({
           kind: "confirm",
-          action: `${config.basePath}/oauth/end-session`,
-          appName: config.appName,
+          action: `${ctx.config.basePath}/oauth/end-session`,
+          appName: ctx.config.appName,
           fields,
         });
         // The yes can answer a redirect, and Chromium applies form-action to it.
         const policy =
-          target === null ? noScriptPagePolicy(config) : consentPagePolicy(config, target);
-        return new Response(html, { status: 200, headers: pageHeaders(config, policy) });
+          target === null ? noScriptPagePolicy(ctx.config) : consentPagePolicy(ctx.config, target);
+        return new Response(html, { status: 200, headers: pageHeaders(ctx.config, policy) });
       }
-      ended = await endSession(config, { session: resolved.session });
+      ended = await endSession(ctx.config, { session: resolved.session });
     }
     const res =
       target !== null
         ? redirect(target, ctx.request.method === "POST" ? 303 : 302)
-        : new Response(defaultEndSessionPage({ kind: "signed-out", appName: config.appName }), {
+        : new Response(defaultEndSessionPage({ kind: "signed-out", appName: ctx.config.appName }), {
             status: 200,
-            headers: pageHeaders(config, noScriptPagePolicy(config)),
+            headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)),
           });
     return ended
-      ? clearSessionCookies(config, ctx.request, readSessionToken(config, ctx.request), res)
+      ? clearSessionCookies(ctx.config, ctx.request, readSessionToken(ctx.config, ctx.request), res)
       : res;
   };
   routes.push(
@@ -714,15 +721,15 @@ function deviceRoutes(
         const form = await formParams(ctx.request);
         if (!form) return noCache(oauthJson(oauthFail("invalid_request")));
         const limitKey = `oauth-device:ip:${ipKey(ctx.ip)}`;
-        if (!(await config.limiter.allow(limitKey, DEVICE_START_PER_IP)))
+        if (!(await ctx.config.limiter.allow(limitKey, DEVICE_START_PER_IP)))
           return noCache(oauthJson(oauthFail("rate_limited")));
-        const authed = await authenticateClient(config, ctx.request, form);
+        const authed = await authenticateClient(ctx.config, ctx.request, form);
         if (!authed.ok) return noCache(clientRefused(ctx.request, authed));
-        const dpop = await deviceStartDpop(config, ctx.request);
+        const dpop = await deviceStartDpop(ctx.config, ctx.request);
         if (!dpop.ok) return noCache(oauthJson(dpop));
         return noCache(
           oauthJson(
-            await startDevice(config, {
+            await startDevice(ctx.config, {
               client: authed.value,
               scope: form.get("scope"),
               resource: form.get("resource"),
@@ -740,16 +747,16 @@ function deviceRoutes(
         // RFC 8628 section 3.3.1: the code of the URL fills the field, and the person still submits it.
         const raw = ctx.url.searchParams.get("user_code");
         const userCode = raw === null ? null : normalizeUserCode(raw);
-        const session = await sessionFromRequest(config, ctx.request);
+        const session = await sessionFromRequest(ctx.config, ctx.request);
         if (!session) {
-          const location = await deviceSignIn(config, userCode, ctx.ip);
+          const location = await deviceSignIn(ctx.config, userCode, ctx.ip);
           if (location === null) return json({ error: "rate_limited" }, OAUTH_ERRORS.rate_limited);
           return redirect(location);
         }
         return page({
           step: "code",
           action,
-          appName: config.appName,
+          appName: ctx.config.appName,
           email: session.user.email,
           userCode: userCode ?? "",
           error: null,
@@ -762,13 +769,13 @@ function deviceRoutes(
       key: "POST /oauth/device",
       async handler(ctx) {
         // The page posts from this origin only. The router admits a POST with no Origin; a person's form always sends one.
-        if (ctx.request.headers.get("origin") !== config.baseURL)
+        if (ctx.request.headers.get("origin") !== ctx.config.baseURL)
           return json({ error: "origin_not_trusted" }, 403);
-        const session = await sessionFromRequest(config, ctx.request);
+        const session = await sessionFromRequest(ctx.config, ctx.request);
         if (!session) return json({ error: "unauthorized" }, 401);
         const form = await formParams(ctx.request);
         if (!form) return json({ error: "invalid_request" }, OAUTH_ERRORS.invalid_request);
-        const step = await decideDevice(config, {
+        const step = await decideDevice(ctx.config, {
           userCode: form.get("user_code") ?? "",
           decision: form.get("decision"),
           session,

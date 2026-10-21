@@ -18,10 +18,12 @@ export function jwtRoutes(config: ResolvedConfig): Route[] {
       method: "GET",
       path: "/jwks",
       key: "GET /jwks",
-      async handler() {
+      async handler(ctx) {
         // A resource server caches it. Five minutes bound the wait for a key after a rotation;
         // a retired key stays in the set for 24 hours, so no token fails in that wait.
-        return json(await publicKeySet(config), 200, { "cache-control": "public, max-age=300" });
+        return json(await publicKeySet(ctx.config), 200, {
+          "cache-control": "public, max-age=300",
+        });
       },
     },
     {
@@ -29,11 +31,11 @@ export function jwtRoutes(config: ResolvedConfig): Route[] {
       path: "/token",
       key: "GET /token",
       async handler(ctx) {
-        const s = await sessionFromRequest(config, ctx.request);
+        const s = await sessionFromRequest(ctx.config, ctx.request);
         if (!s) return json({ error: "unauthorized" }, 401);
-        const r = await mintSessionJwt(config, { userId: s.user.id, sessionId: s.session.id });
+        const r = await mintSessionJwt(ctx.config, { userId: s.user.id, sessionId: s.session.id });
         const res = r.ok ? json({ token: r.value.token }) : respond(r);
-        const renewed = renewedSessionCookie(config, ctx.request, s);
+        const renewed = renewedSessionCookie(ctx.config, ctx.request, s);
         if (renewed) res.headers.append("set-cookie", renewed);
         return res;
       },
@@ -45,7 +47,7 @@ export function jwtRoutes(config: ResolvedConfig): Route[] {
       path: "/token/live",
       key: "POST /token/live",
       async handler(ctx) {
-        return respond(await checkSessionLive(config, readBearer(ctx.request)));
+        return respond(await checkSessionLive(ctx.config, readBearer(ctx.request)));
       },
     },
   ];

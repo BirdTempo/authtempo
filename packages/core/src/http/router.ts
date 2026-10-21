@@ -2,14 +2,21 @@ import { CAPTCHA_HEADER } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
 import { peekSession, sessionCapMs } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
+import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.js";
+import { mintTrace, parseTraceparent, TRACE_HEADER } from "../observe/trace.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { impersonationRefusal } from "./impersonation-rules.js";
-import { json } from "./json.js";
+import { ANSWER_CODE, json } from "./json.js";
 import type { RouteKey, RouterCode } from "./route-list.js";
 
 export interface RouteContext {
   request: Request;
   url: URL;
+  /**
+   * The config of this request (plan 12h): the config of construction with
+   * an observer that stamps the trace of the request on each event. A
+   * handler calls the engine with it, never with the config it closes over.
+   */
   config: ResolvedConfig;
   ip: string | null;
   now: Date;
@@ -22,6 +29,8 @@ export interface PreflightContext {
   /** The Origin of the preflight. It is not `baseURL` and not in `trustedOrigins`. */
   origin: string;
   ip: string | null;
+  /** The config of this request, as `RouteContext.config` (plan 12h). */
+  config: ResolvedConfig;
 }
 
 export interface Route {
@@ -96,11 +105,69 @@ function routerError(code: RouterCode): Response {
   return json({ error: code }, ERRORS[code]);
 }
 
-/** Credentialed CORS for one trusted origin. `Vary: Origin` keeps a cache from serving it to another. */
+/**
+ * Credentialed CORS for one trusted origin. `Vary: Origin` keeps a cache from
+ * serving it to another. The trace header is exposed, so a browser app can
+ * show the id to a person who asks for support (ruling 1 point 11 of plan 12h).
+ */
 function cors(res: Response, origin: string): Response {
   res.headers.set("access-control-allow-origin", origin);
   res.headers.set("access-control-allow-credentials", "true");
+  res.headers.set("access-control-expose-headers", TRACE_HEADER);
   res.headers.append("vary", "Origin");
+  return res;
+}
+
+/** The `auth_error` or `error` parameter of a redirect, or null. */
+function locationCode(config: ResolvedConfig, res: Response): string | null {
+  const location = res.headers.get("location");
+  if (location === null) return null;
+  try {
+    const params = new URL(location, config.baseURL).searchParams;
+    return params.get("auth_error") ?? params.get("error");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The outcome of an answer (plan 12h Task 4). A redirect whose `Location`
+ * holds an `auth_error` or `error` parameter is a client error. The code is
+ * the error of a JSON answer, or that parameter.
+ */
+export function outcomeOf(
+  config: ResolvedConfig,
+  res: Response,
+): { outcome: Outcome; code: string | null } {
+  const status = res.status;
+  const fromBody = ANSWER_CODE.get(res) ?? null;
+  if (status >= 300 && status < 400) {
+    const param = locationCode(config, res);
+    return param === null
+      ? { outcome: "redirect", code: fromBody }
+      : { outcome: "client_error", code: param };
+  }
+  if (status >= 500) return { outcome: "server_error", code: fromBody };
+  if (status === 401 || status === 403) return { outcome: "denied", code: fromBody };
+  if (status === 429) return { outcome: "limited", code: fromBody };
+  if (status >= 400) return { outcome: "client_error", code: fromBody };
+  return { outcome: "ok", code: fromBody };
+}
+
+/** The code of an event, kept only when it passes the kind `code`. */
+function eventCode(code: string | null): { code?: string } {
+  if (code === null) return {};
+  const kept = validateEvent("request", { code }).fields.code;
+  return typeof kept === "string" ? { code: kept } : {};
+}
+
+/**
+ * The answer with the trace header. Every route of core builds its own
+ * Response, so the headers are mutable here, as `cors` and the cookie move
+ * need them to be.
+ */
+function withTrace(res: Response, traceId: string): Response {
+  res.headers.set(TRACE_HEADER, traceId);
   return res;
 }
 
@@ -203,13 +270,78 @@ export function createRouter(
   const preflights = new Map(
     routes.filter((r) => r.preflight).map((r) => [`${config.basePath}${r.path}`, r]),
   );
+  const trustTraceparent = config.observeConfig?.trustTraceparent === true;
   return async (request) => {
+    const started = config.clock.now().getTime();
+    const url = new URL(request.url);
+    // An OPTIONS request names the route at its path: the POST, else the GET.
+    const route =
+      request.method === "OPTIONS"
+        ? (table.get(`POST ${url.pathname}`) ?? table.get(`GET ${url.pathname}`))
+        : table.get(`${request.method} ${url.pathname}`);
+    const routeKey = route?.key ?? "unmatched";
+    // A client id only under trustTraceparent (spec 31 item 5). An invalid or all-zero header is ignored.
+    const parent = trustTraceparent ? parseTraceparent(request.headers.get("traceparent")) : null;
+    const minted = mintTrace();
+    const traceId = parent?.traceId ?? minted.traceId;
+    // The handler's own call reads the IP again inside the error boundary, so a throw there answers 500.
+    let ip: string | null = null;
+    try {
+      ip = config.clientIp(request);
+    } catch {}
+    const scoped: ResolvedConfig = {
+      ...config,
+      observe: config.observe.scope({
+        traceId,
+        spanId: minted.spanId,
+        parentSpanId: parent?.parentSpanId ?? null,
+        route: routeKey,
+        ip,
+        userAgent: request.headers.get("user-agent"),
+      }),
+    };
+    const res = withTrace(await answer(scoped, request, url, route), traceId);
+    const { outcome, code } = outcomeOf(config, res);
+    const method = request.method;
+    scoped.observe.emit({
+      name: "request",
+      method: method === "GET" || method === "POST" || method === "OPTIONS" ? method : "other",
+      status: res.status,
+      outcome,
+      ...eventCode(code),
+      durationMs: Math.max(0, config.clock.now().getTime() - started),
+    });
+    const via = route?.key === undefined ? undefined : SIGN_IN_ROUTES[route.key];
+    if (
+      via !== undefined &&
+      request.method !== "OPTIONS" &&
+      (outcome === "client_error" || outcome === "denied" || outcome === "limited")
+    )
+      scoped.observe.emit({
+        name: "sign_in",
+        method: via,
+        // The provider is the third part of the path of a social route.
+        ...(via === "social" && route ? { provider: route.path.split("/")[2] } : {}),
+        outcome: "failure",
+        ...eventCode(code),
+      });
+    return res;
+  };
+
+  /** The answer of one request, before the trace header and the events. */
+  async function answer(
+    scoped: ResolvedConfig,
+    request: Request,
+    url: URL,
+    route: Route | undefined,
+  ): Promise<Response> {
     const origin = request.headers.get("origin");
     const trusted = origin !== null && originTrusted(config, origin);
     if (request.method === "OPTIONS") {
       // A browser on another origin asks before a credentialed request. Only
       // a trusted origin gets an answer it can use.
-      if (!trusted) return (origin !== null && (await foreign(request, origin))) || refused();
+      if (!trusted)
+        return (origin !== null && (await foreign(scoped, request, origin))) || refused();
       return cors(
         new Response(null, {
           status: 204,
@@ -225,15 +357,17 @@ export function createRouter(
     }
     // The one error boundary of a request (plan 11g). A throw of the handler,
     // of the cookie move, or of the CORS write answers `internal` with one log line.
-    const url = new URL(request.url);
-    const route = table.get(`${request.method} ${url.pathname}`);
     try {
-      const res = await moveLegacyCookie(config, request, await dispatch(request, url, route));
+      const res = await moveLegacyCookie(
+        scoped,
+        request,
+        await dispatch(scoped, request, url, route),
+      );
       return trusted ? cors(res, origin) : res;
     } catch (e) {
       // The route key, never the raw path: a client chooses the path (ruling 1
       // point 3 of plan 12h). The app sets the error name, so the kind filters it (plan 9c).
-      config.observe.emit({
+      scoped.observe.emit({
         name: "error.internal",
         method: request.method,
         route: route?.key ?? "unmatched",
@@ -242,21 +376,31 @@ export function createRouter(
       const res = routerError("internal");
       return trusted ? cors(res, origin) : res;
     }
-  };
+  }
 
   function refused(): Response {
     return routerError("origin_not_trusted");
   }
 
   /** A route's own answer to a foreign preflight, or null. A throw is logged and answers 500, as in the boundary above. */
-  async function foreign(request: Request, origin: string): Promise<Response | null> {
+  async function foreign(
+    scoped: ResolvedConfig,
+    request: Request,
+    origin: string,
+  ): Promise<Response | null> {
     const url = new URL(request.url);
     const route = preflights.get(url.pathname);
     if (!route?.preflight) return null;
     try {
-      return await route.preflight({ request, url, origin, ip: config.clientIp(request) });
+      return await route.preflight({
+        request,
+        url,
+        origin,
+        ip: config.clientIp(request),
+        config: scoped,
+      });
     } catch (e) {
-      config.observe.emit({
+      scoped.observe.emit({
         name: "error.internal",
         method: "OPTIONS",
         route: route.key ?? "unmatched",
@@ -266,17 +410,22 @@ export function createRouter(
     }
   }
 
-  async function dispatch(request: Request, url: URL, route: Route | undefined): Promise<Response> {
+  async function dispatch(
+    scoped: ResolvedConfig,
+    request: Request,
+    url: URL,
+    route: Route | undefined,
+  ): Promise<Response> {
     if (!route) return routerError("not_found");
     const refusal = gate(request);
     if (refusal) return refusal;
     // The impersonation step (plan 12f): after the match, before the handler.
-    const impersonated = route.key && (await impersonationRefusal(config, request, route.key));
+    const impersonated = route.key && (await impersonationRefusal(scoped, request, route.key));
     if (impersonated) return impersonated;
     return route.handler({
       request,
       url,
-      config,
+      config: scoped,
       ip: config.clientIp(request),
       now: config.clock.now(),
     });

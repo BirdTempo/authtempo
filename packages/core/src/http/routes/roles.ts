@@ -20,12 +20,12 @@ export function roleRoutes(config: ResolvedConfig): Route[] {
   if (!config.organizations?.dynamicRoles) return [];
   // Same helpers as routes/organizations.ts. The two files evolve apart, so the small copy stays.
   const withSession = async (ctx: RouteContext) => {
-    const resolved = await sessionFromRequest(config, ctx.request);
+    const resolved = await sessionFromRequest(ctx.config, ctx.request);
     if (!resolved) return null;
     return {
       user: resolved.user,
       session: resolved.session,
-      renewed: renewedSessionCookie(config, ctx.request, resolved),
+      renewed: renewedSessionCookie(ctx.config, ctx.request, resolved),
     };
   };
   const send = (res: Response, renewed: string | null) => {
@@ -42,6 +42,7 @@ export function roleRoutes(config: ResolvedConfig): Route[] {
     run: (
       user: NonNullable<Awaited<ReturnType<typeof withSession>>>["user"],
       b: T,
+      ctx: RouteContext,
     ) => Promise<Result<V>>,
   ): Route => ({
     method: "POST",
@@ -51,11 +52,11 @@ export function roleRoutes(config: ResolvedConfig): Route[] {
       const s = await withSession(ctx);
       if (!s) return unauthorized();
       // First, before the body: a stale session and a stolen one learn nothing.
-      const fresh = requireFresh(config, s.session);
+      const fresh = requireFresh(ctx.config, s.session);
       if (!fresh.ok) return send(respond(fresh), s.renewed);
       const body = await readJson(ctx.request, schema);
       if (!body.ok) return send(respond(body), s.renewed);
-      const r = await run(s.user, body.value);
+      const r = await run(s.user, body.value, ctx);
       if (!r.ok) return send(respond(r), s.renewed);
       return send(json(key === null ? r.value : { [key]: r.value }), s.renewed);
     },
@@ -71,7 +72,7 @@ export function roleRoutes(config: ResolvedConfig): Route[] {
         if (!s) return unauthorized();
         const parsed = id.safeParse(ctx.url.searchParams.get("organizationId"));
         if (!parsed.success) return send(respond(fail("invalid_body")), s.renewed);
-        const r = await listRoles(config, { user: s.user, organizationId: parsed.data });
+        const r = await listRoles(ctx.config, { user: s.user, organizationId: parsed.data });
         return send(r.ok ? json({ roles: r.value }) : respond(r), s.renewed);
       },
     },
@@ -88,13 +89,13 @@ export function roleRoutes(config: ResolvedConfig): Route[] {
           name: q.get("name"),
         });
         if (!parsed.success) return send(respond(fail("invalid_body")), s.renewed);
-        const r = await getRole(config, { user: s.user, ...parsed.data });
+        const r = await getRole(ctx.config, { user: s.user, ...parsed.data });
         return send(r.ok ? json({ role: r.value }) : respond(r), s.renewed);
       },
     },
-    write("/organizations/roles/create", roleCreateBody, "role", (user, b) =>
+    write("/organizations/roles/create", roleCreateBody, "role", (user, b, ctx) =>
       // exactOptionalPropertyTypes: pass only the keys the caller sent.
-      createRole(config, {
+      createRole(ctx.config, {
         user,
         organizationId: b.organizationId,
         name: b.name,
@@ -102,8 +103,8 @@ export function roleRoutes(config: ResolvedConfig): Route[] {
         ...(b.rank !== undefined && { rank: b.rank }),
       }),
     ),
-    write("/organizations/roles/update", roleUpdateBody, "role", (user, b) =>
-      updateRole(config, {
+    write("/organizations/roles/update", roleUpdateBody, "role", (user, b, ctx) =>
+      updateRole(ctx.config, {
         user,
         organizationId: b.organizationId,
         name: b.name,
@@ -111,8 +112,8 @@ export function roleRoutes(config: ResolvedConfig): Route[] {
         ...(b.permissions !== undefined && { permissions: b.permissions }),
       }),
     ),
-    write("/organizations/roles/delete", roleNameBody, null, (user, b) =>
-      deleteRole(config, { user, ...b }),
+    write("/organizations/roles/delete", roleNameBody, null, (user, b, ctx) =>
+      deleteRole(ctx.config, { user, ...b }),
     ),
   ];
 }

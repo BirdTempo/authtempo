@@ -426,7 +426,11 @@ describe("the captcha port (plan 12b)", () => {
           ? { email, password: "correct horse battery" }
           : { email };
       const res = await auth.handle(post(path, body));
-      return { status: res.status, headers: [...res.headers], body: await res.text() };
+      // The trace header is random for each answer (plan 12h Task 4). Each answer
+      // carries one, and the compare leaves it out.
+      expect(res.headers.get("x-authtempo-trace")).toMatch(/^[0-9a-f]{32}$/);
+      const headers = [...res.headers].filter(([k]) => k !== "x-authtempo-trace");
+      return { status: res.status, headers, body: await res.text() };
     };
     const paths = Object.values(ROUTE_OF).flatMap((routes) => routes.map((r) => r.path));
     expect(paths).toHaveLength(6);

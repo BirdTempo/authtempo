@@ -36,6 +36,8 @@ const INTERNAL_ANSWERED: readonly RouteKey[] = [
   "GET /oauth/end-session",
   // A store that is down at the session read: the router line of each error class (plan 12h Task 3).
   "GET /session",
+  // A store that stops: the trace header and the request event of a 500 (plan 12h Task 4).
+  "POST /magic-link/request",
   // A family delete that throws after the end mark (ruling 43 of plan 12e).
   "POST /oauth/token",
   "POST /password/sign-up",

@@ -46,12 +46,12 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
       path: `/social/${provider.name}/start`,
       key: "GET /social/:provider/start",
       async handler(ctx) {
-        const r = await startSocial(config, {
+        const r = await startSocial(ctx.config, {
           provider: provider.name,
           next: ctx.url.searchParams.get("next") ?? undefined,
           ip: ctx.ip,
         });
-        if (!r.ok) return redirect(authErrorUrl(config, r.code));
+        if (!r.ok) return redirect(authErrorUrl(ctx.config, r.code));
         const res = redirect(r.value.location);
         res.headers.set(
           "set-cookie",
@@ -66,14 +66,14 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
       path: `/social/${provider.name}/link`,
       key: "POST /social/:provider/link",
       async handler(ctx) {
-        const s = await withSession(config, ctx.request);
+        const s = await withSession(ctx.config, ctx.request);
         if (!s) return unauthorized();
         const jsonCaller = isJsonRequest(ctx.request);
         const failure = (r: Extract<Result<unknown>, { ok: false }>) =>
-          sent(jsonCaller ? respond(r) : redirect(authErrorUrl(config, r.code)), s.renewed);
+          sent(jsonCaller ? respond(r) : redirect(authErrorUrl(ctx.config, r.code)), s.renewed);
         const body = await readBody(ctx.request, linkBody);
         if (!body.ok) return failure(body);
-        const r = await startLink(config, {
+        const r = await startLink(ctx.config, {
           provider: provider.name,
           session: s.resolved,
           next: body.value.next,
@@ -107,7 +107,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
       allowCrossSiteForm: provider.callbackMethod === "POST",
       async handler(ctx) {
         const params = await callbackParams(ctx.request, ctx.url);
-        const r = await completeSocial(config, {
+        const r = await completeSocial(ctx.config, {
           provider: provider.name,
           ...params,
           bindToken: readCookie(ctx.request, bindName),
@@ -116,33 +116,33 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
           // A GET callback is a top-level navigation, so a Lax trust cookie
           // comes with it. Apple's cross-site form post carries none; the
           // challenge page then offers the trusted device (plan 12c).
-          trustDevice: trustTokenOf(config, ctx.request, undefined),
+          trustDevice: trustTokenOf(ctx.config, ctx.request, undefined),
           // The cookie only: a provider's redirect carries no bearer header (plan 12a).
-          sessionToken: sessionCookieToken(config, ctx.request),
+          sessionToken: sessionCookieToken(ctx.config, ctx.request),
         });
         if (!r.ok) return failed(r.code);
         if ("linked" in r.value) {
           // A link (plan 12a): the session does not change, so no session cookie.
           // The state is spent, so the binding cookie goes.
-          const res = redirect(resolveNext(config, r.value.next));
+          const res = redirect(resolveNext(ctx.config, r.value.next));
           res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
           return res;
         }
         if ("twoFactor" in r.value) {
           // A user with the second factor on (plan 12c): no session cookie.
           // The state is spent, so the binding cookie goes.
-          const res = redirect(challengePageUrl(config, r.value.twoFactor.challenge));
+          const res = redirect(challengePageUrl(ctx.config, r.value.twoFactor.challenge));
           res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
           return res;
         }
-        const res = redirect(resolveNext(config, r.value.next));
+        const res = redirect(resolveNext(ctx.config, r.value.next));
         res.headers.append(
           "set-cookie",
           sessionCookie(
-            config.cookieName,
+            ctx.config.cookieName,
             r.value.token,
-            sessionMaxAgeSeconds(config),
-            config.cookie.sameSite,
+            sessionMaxAgeSeconds(ctx.config),
+            ctx.config.cookie.sameSite,
           ),
         );
         res.headers.append("set-cookie", clearOauthCookie(bindName, bindPath));
