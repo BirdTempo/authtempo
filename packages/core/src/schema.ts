@@ -129,11 +129,16 @@ export type VerificationPurpose =
    */
   | "account-delete"
   /**
-   * The sessions that a ban or a revoke of the platform role left for the
-   * sweep (ruling 44 of plan 12f). The identifier is the user id, and the
-   * valueHash is the SHA-256 hex of `session-end:<id>`. The data is
-   * { reason, before }. The row lives 3650 days. The sweep deletes it when
-   * no session from before `before` stays.
+   * The sessions that an act left for the sweep (rulings 44 and 63 of plan
+   * 12f). Four acts write it: a ban, a revoke of the platform role, an
+   * account delete, and a role loss. A role loss is a removal, a leave, or a
+   * role change of the platform member row. The identifier is the user id,
+   * and the valueHash is the SHA-256 hex of `session-end:<id>`. The data is
+   * { reason, before } or { reason, before, targets }. A row with no
+   * `targets` names the user's own sessions: only a ban or a revoke writes
+   * one. A row with `targets` names the impersonation sessions that the user
+   * opened on those users as an operator. The row lives 3650 days. The sweep
+   * deletes it when no session from before `before` stays.
    */
   | "session-end";
 
