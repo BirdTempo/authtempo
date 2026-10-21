@@ -3,8 +3,8 @@
 // four through a sign-in), and one summary line. The route lives in
 // proof/mail-route.ts. This script copies it into the app for its own build
 // and deletes it after, so the example app never ships it; the test script
-// then builds the app again without it. Port 8793: the Node example uses 8791
-// and 8792.
+// then builds the app again without it. Port 8793 is fixed. The Node example
+// takes a free port from the OS.
 import { spawn, spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";

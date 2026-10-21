@@ -13,7 +13,23 @@ const serve: Serve =
   runtime === "bun"
     ? (await import("../src/server-bun.ts")).serveBun
     : (await import("../src/server-node.ts")).serveNode;
-const PORT = runtime === "bun" ? 8792 : 8791;
+/**
+ * A free port from the OS. A fixed port met EADDRINUSE when this test and the
+ * init scaffold test of the CLI ran at once (lane item P1 of plan 12g).
+ */
+async function freePort(): Promise<number> {
+  const { createServer } = await import("node:net");
+  return new Promise((done, fail) => {
+    const probe = createServer();
+    probe.once("error", fail);
+    probe.listen(0, "127.0.0.1", () => {
+      const address = probe.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      probe.close(() => done(port));
+    });
+  });
+}
+const PORT = await freePort();
 const BASE = `http://127.0.0.1:${PORT}`;
 const ADMIN_URL =
   process.env.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost:5439/tempo_auth";
