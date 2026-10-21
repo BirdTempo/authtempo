@@ -2,10 +2,10 @@ import { readdirSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DOCS, REPO } from "../scripts/lib/paths.ts";
 
-// Ruling 46 of plan 12k: the core README "Hooks" and the hooks guide hold one
-// table of the flows that lock a row before a before hook. The two copies
-// must match, and a lock that the engine adds before a before hook must
-// have its hook in the table. A before hook that awaits a core write of a
+// Ruling 46 of plan 12k. The core README "Hooks" and the hooks guide hold
+// one table. It lists the flows that lock a row before a before hook. The
+// two copies must match, and a lock that the engine adds before a before
+// hook must have its hook in the table. A before hook that awaits a core write of a
 // locked row hangs on Postgres, so a missing row hides that hang.
 
 const HEADER = "| Flow | Before hooks | Rows locked before the hook |";
@@ -74,20 +74,24 @@ const CALL = /(?<![\w.])(?<!function )(\w+)\(/g;
  *    compare-and-set write (CAS above), earlier in the same function text.
  * 2. A call of a lock helper earlier in the same function text. A lock
  *    helper is a function that holds form 1 or calls another lock helper.
- * 3. A lock in an earlier function of the same flow. When the hook runs in
- *    a named closure (`const x = async (...) => {`), a form 1 or form 2 lock
- *    after the closure and before its last use counts, such as
- *    `ownerWrite(..., x)`. When an engine function calls the hook's function
- *    after a form 1 lock, that lock counts, and so do the form 1 locks of
- *    its own callers.
+ * 3. A lock in an earlier function of the same flow. The hook can run in a
+ *    named closure (`const x = async (...) => {`). Then a form 1 or form 2
+ *    lock after the closure and before its last use counts, such as
+ *    `ownerWrite(..., x)`. An engine function can call the hook's function
+ *    after a form 1 lock. Then that lock counts, and so do the form 1 locks
+ *    of its callers.
  *
  * The scan reads text, not the control flow. A lock on another branch
  * before the hook counts, so a listed lock can miss some paths. The scan
- * misses these locks: a lock outside the engine folder; a lock in an arrow
- * function bound to a top-level `const`, or in a class method; a call
- * through a variable or an object field; a form 2 helper call in a caller
- * of the hook's function; a closure of another shape; and a lock write
- * with no `updatedAt` compare that is not one of the three lock calls.
+ * misses these locks:
+ * - a lock outside the engine folder;
+ * - a lock in an arrow function bound to a top-level `const`, or in a class
+ *   method;
+ * - a call through a variable or an object field;
+ * - a form 2 helper call in a caller of the hook's function;
+ * - a closure of another shape;
+ * - a lock write with no `updatedAt` compare, other than the three lock
+ *   calls.
  */
 function lockScan(): string[] {
   const fns = functions();

@@ -601,8 +601,9 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       const idKey =
         Object.keys(row).find((c) => fieldOfRaw(t, c) === "id") ?? names.rawColumn(t, "id");
       // Core's rule (`SqlStatements.restoreRow`): only the columns the update
-      // set, the column of each field of `data` and each `updateExtras`
-      // column, so a claim's change to another column stays (final review M-1).
+      // set. These are the column of each field of `data` and each
+      // `updateExtras` column. So a claim's change to another column stays
+      // (final review M-1).
       // Each column goes back on its own, and only while it holds the value
       // the update wrote. So a later write of another request stays (ruling
       // 46 of plan 12k), and the other columns still go back (ruling 47).

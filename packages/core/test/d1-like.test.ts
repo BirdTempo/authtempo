@@ -6,8 +6,8 @@ const t1 = new Date("2026-01-01T00:00:01.000Z");
 const t2 = new Date("2026-01-01T00:00:02.000Z");
 const byId = (id: string) => [{ field: "id" as const, op: "eq" as const, value: id }];
 
-// The test view must keep the D1 adapter's undo rule, or a core test on it
-// answers what real D1 never answers (ruling 47 of plan 12k).
+// The test view must keep the D1 adapter's undo rule (ruling 47 of plan
+// 12k). Otherwise a core test on it answers what real D1 never answers.
 describe("the D1-like view's undo of an update", () => {
   it("restores each field on its own and keeps a field that another request moved", async () => {
     const { config, storage, seedUser } = makeAuth();
