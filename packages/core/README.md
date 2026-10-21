@@ -1493,7 +1493,7 @@ throws a `RangeError` before any call.
 ## Observability
 
 Core emits one typed event for each authentication act, each limit hit, each sweep, and each fault.
-With no `observe.sink`, core writes only the fault lines it wrote before plan 12h, and a sink gets the events after the answer.
+With no `observe.sink`, core writes only the fault lines it wrote before plan 12h, plus one line when the waitUntil of the app throws. A sink gets the events after the answer.
 The guide `/docs/operations/observability/` sets up a sink, and `/docs/reference/events/` lists each event with its fields.
 
 ## Secrets

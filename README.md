@@ -132,8 +132,9 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
   scopes of its config entry, and an impersonation never reaches an operator
   route, a re-authentication, or a second-factor change.
 - Core sends no event anywhere without a sink of the app. With no sink it
-  writes only the fault lines it wrote before plan 12h. No event holds a
-  secret, a credential, free text, or a raw email.
+  writes only the fault lines it wrote before plan 12h, plus one line when
+  the waitUntil of the app throws. No event holds a secret, a credential,
+  free text, or a raw email.
 
 ## Owner-run items of the site and the demo
 
