@@ -88,7 +88,8 @@ const EXEMPT_FLAGS: Readonly<Record<string, Readonly<Record<string, string>>>> =
     database: "a D1 flag: D1 migrations stay a shell command (spec 21 item 6)",
     config: "a D1 flag: D1 migrations stay a shell command (spec 21 item 6)",
     remote: "a D1 flag: D1 migrations stay a shell command (spec 21 item 6)",
-    "before-1.7": "a D1 flag with --tables compat: D1 migrations stay a shell command",
+    "before-1.7":
+      "a D1 and SQLite flag with --tables compat: D1 and SQLite migrations stay a shell command (plan 12g)",
     file: "a SQLite flag: the handler always passes postgres (plan 12g)",
     "auth-token-env": "a SQLite flag: the handler always passes postgres (plan 12g)",
     "auth-token-file": "a SQLite flag: the handler always passes postgres (plan 12g)",

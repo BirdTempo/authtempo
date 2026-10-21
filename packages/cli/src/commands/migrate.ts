@@ -28,7 +28,12 @@ import {
   openPostgres,
   storageFailure,
 } from "../seams/postgres.js";
-import { openSqlite, SQLITE_CORE_MIGRATIONS, type SqliteSource } from "../seams/sqlite.js";
+import {
+  openSqlite,
+  SQLITE_CORE_MIGRATIONS,
+  type SqliteSeam,
+  type SqliteSource,
+} from "../seams/sqlite.js";
 import { DEFAULT_LIBSQL_TOKEN_ENV, DEFAULT_URL_ENV, readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
 
@@ -199,9 +204,48 @@ export function sqliteSourceOf(ctx: Ctx, v: DatabaseValues): SqliteSource {
   return { url: readUrl(ctx, v), authToken: readAuthToken(ctx, v) };
 }
 
+/**
+ * The compat run on SQLite (plan 12g Task 8b), in the order of spec 19 item
+ * 8. A migration is pending when `compat_better_auth` of `ta_meta` is below
+ * its place in the list, as on Postgres. Each migration writes that version
+ * in the transaction of its record. So the list agrees with
+ * `applyBetterAuthCompatSqliteMigrations`, also after the D1 files, which
+ * write no record.
+ */
+async function migrateSqliteCompat(
+  seam: SqliteSeam,
+  before17: boolean,
+  plan: MigratePlan,
+): Promise<MigrateRun> {
+  try {
+    try {
+      await seam.ping();
+    } catch (e) {
+      throw e instanceof Stop ? new Stop(`${e.message}; nothing was written`) : e;
+    }
+    const done = new Set(await seam.appliedCore());
+    const before = readableVersion(await seam.schemaVersionText(), done.size);
+    gate(before);
+    const version = compatVersionOf(await seam.compatText());
+    const pending = compatMigrationNames().slice(version);
+    if (plan.dryRun) return { before, after: before, pending, applied: [], copied: [] };
+    plan.note(`applying ${pending.length} migration(s)`);
+    const applied = await seam.applyCompat(before17);
+    return { before, after: await seam.schemaVersion(), pending, applied, copied: [] };
+  } finally {
+    await seam.close();
+  }
+}
+
 async function migrateSqlite(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
   const source = sqliteSourceOf(ctx, v);
-  if (plan.dryRun && "file" in source && !existsSync(source.file)) {
+  const missing = "file" in source && !existsSync(source.file);
+  // The compat migrations change the Better Auth tables of the app, so a new file cannot hold them.
+  if (missing && plan.tables === "compat")
+    throw new Stop(
+      `no file at ${source.file}; --tables compat needs the file that holds the Better Auth tables; nothing was written`,
+    );
+  if (plan.dryRun && missing) {
     // node:sqlite makes a missing file on a read-write open, and a dry run writes nothing.
     plan.note(`no file at ${source.file}; a run without --dry-run makes it`);
     const pending = [...SQLITE_CORE_MIGRATIONS];
@@ -209,7 +253,9 @@ async function migrateSqlite(ctx: Ctx, v: Values, plan: MigratePlan): Promise<Mi
   }
   const seam = await openSqlite(source, (s) => ctx.addSecret(s), { readOnly: plan.dryRun });
   plan.note(`${"file" in source ? "opening" : "connecting to"} ${seam.where}`);
-  return migrateCore(seam, SQLITE_CORE_MIGRATIONS, plan);
+  return plan.tables === "compat"
+    ? migrateSqliteCompat(seam, v["before-1.7"] === true, plan)
+    : migrateCore(seam, SQLITE_CORE_MIGRATIONS, plan);
 }
 
 async function migrateMysql(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
@@ -427,8 +473,6 @@ export const migrateCommand: Command = {
     // Owner decision 4 of plan 12g: the compat tables run on SQLite, never on MySQL.
     if (tables === "compat" && target === "mysql")
       throw new UsageError("--tables compat is not served on mysql (plan 12g, owner decision 4)");
-    if (tables === "compat" && target === "sqlite")
-      throw new UsageError("--tables compat is not served on sqlite yet (plan 12g Task 8b)");
     const dryRun = values["dry-run"] === true;
     const json = values.json === true;
     const say = sayer(ctx, json);

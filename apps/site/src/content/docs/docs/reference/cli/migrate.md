@@ -8,6 +8,7 @@ sources:
   - packages/adapter-postgres/README.md "Migrations"
   - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 6"
   - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 6"
+  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 8"
 sidebar:
   order: 3
 ---
@@ -41,7 +42,7 @@ The third line creates or updates the tables in a SQLite file. The fourth line l
 | `--target sqlite` | Applies the SQLite migrations of `@authtempo/adapter-sqlite` to a file or to a libSQL server. |
 | `--target mysql` | Applies the MySQL migrations of `@authtempo/adapter-mysql`. |
 | `--tables core` | Core's tables. This is the default. |
-| `--tables compat` | The Better Auth 1.7 tables of `@authtempo/compat-better-auth`. |
+| `--tables compat` | The Better Auth 1.7 tables of `@authtempo/compat-better-auth`, on Postgres, D1, or SQLite. MySQL refuses it. |
 | `--url-env <NAME>` | Postgres and MySQL: the variable of the connection string. The default is `DATABASE_URL`. SQLite: the variable of a libSQL URL. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--url-file <path>` | Postgres, MySQL, and SQLite: the file of the connection string or the libSQL URL. `-` is stdin. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--file <path>` | SQLite: the path of the database file. The command makes the file when it is missing. |
@@ -50,7 +51,7 @@ The third line creates or updates the tables in a SQLite file. The fourth line l
 | `--database <name>` | D1: the `database_name` in the wrangler config. One D1 database needs no name. |
 | `--config <path>` | D1: the wrangler config. The default is `wrangler.jsonc` or `wrangler.json` in the current folder. |
 | `--remote` | D1: the database on Cloudflare. The default is the local database of `wrangler dev`. |
-| `--before-1.7` | D1 with `--tables compat`: the files for tables from before Better Auth 1.7. |
+| `--before-1.7` | D1 or SQLite with `--tables compat`: the migrations for tables from before Better Auth 1.7. |
 | `-n`, `--dry-run` | Lists the migrations, and applies nothing. |
 | `--json` | Prints `{ target, tables, dryRun, before, after, pending, applied, copied, exit, stopped }`. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |
@@ -84,6 +85,11 @@ The third line creates or updates the tables in a SQLite file. The fourth line l
 - `--dry-run` on a missing file makes no file. It lists every migration as pending.
 - `applySqliteMigrations` applies the files, which are the D1 files of `@authtempo/adapter-d1`. Each file and its record in `ta_migrations` run in one write transaction.
 - A driver error prints as `storage: <code> at <file>`, or at the host and the name of the URL. The command never prints the message of the driver, the token, or the query of the URL.
+- With `--tables compat`, the command runs the compat migrations of `@authtempo/compat-better-auth` on the Better Auth tables of the database. Add `--before-1.7` for tables from before Better Auth 1.7.
+- With `--tables compat`, a missing file stops the run with exit 2, and the command makes no file. The file must hold the Better Auth tables of the app.
+- Each compat migration and its record in `ta_migrations` run in one write transaction. The command skips each compat migration at or below `compat_better_auth` of `ta_meta`, so a database that the D1 files migrated goes on from there.
+- On tables with other names, or with Better Auth's `teams` option, apply the app's own compat texts first, as the D1 section tells. Then the command skips them.
+- With `--tables compat`, the command prints one warning when the project holds `better-auth` below 1.7.7. Upgrade it first.
 
 ## MySQL
 

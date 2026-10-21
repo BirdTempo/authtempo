@@ -7,6 +7,7 @@ import {
   type SqliteDriver,
 } from "@authtempo/adapter-sqlite";
 import { nodeSqlite } from "@authtempo/adapter-sqlite/node";
+import { betterAuthSchemaStorage } from "@authtempo/compat-better-auth";
 import type { StorageAdapter } from "@authtempo/core";
 import { type LiveShape, META_TABLE, SCHEMA_VERSION_KEY } from "@authtempo/core/sql";
 import { Stop } from "../errors.js";
@@ -77,8 +78,8 @@ export async function libsqlParser(): Promise<(url: string) => LibsqlTarget> {
 /**
  * The SQLite seam of the CLI (plan 12g Task 6): the one module that names
  * `node:sqlite` and `@libsql/client`. It has the members of `PostgresSeam`
- * that `migrate` and `check` call, and the live shape read. Plan 12g Task 8b
- * adds the compat members here.
+ * that `migrate` and `check` call, the live shape read, and the compat run
+ * of plan 12g Task 8b.
  */
 export interface SqliteSeam {
   /** `ta_meta.schema_version`, or null when it is missing. */
@@ -91,6 +92,13 @@ export interface SqliteSeam {
   appliedCore(): Promise<string[]>;
   /** `applySqliteMigrations`: each migration runs in one write transaction. */
   applyCore(): Promise<string[]>;
+  /**
+   * The compat migrations through `applyBetterAuthCompatSqliteMigrations`
+   * (the `migrate()` of the compat SQLite storage), in the before-1.7 variant
+   * when `before17` is true. Each one and its record run in one write
+   * transaction. A migration that `ta_meta` records already is skipped.
+   */
+  applyCompat(before17: boolean): Promise<string[]>;
   /** Core's tables (`@authtempo/adapter-sqlite`). */
   coreStorage(): StorageAdapter;
   /** The live table shape (`readSqliteShape`). */
@@ -189,6 +197,14 @@ export async function openSqlite(
       }
     },
     applyCore: () => applySqliteMigrations(driver).catch(fail),
+    applyCompat: (before17) =>
+      betterAuthSchemaStorage({
+        dialect: "sqlite",
+        driver,
+        variant: before17 ? "before-1.7" : "1.7",
+      })
+        .migrate()
+        .catch(fail),
     coreStorage: () => createSqliteAdapter(driver),
     liveShape: () => readSqliteShape(driver).catch(fail),
     async ping() {

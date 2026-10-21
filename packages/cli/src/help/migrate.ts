@@ -9,7 +9,7 @@ export const MIGRATE_HELP: HelpText = {
   usage: [
     "authtempo migrate --target postgres [--url-env <NAME> | --url-file <path>] [--tables core|compat] [--dry-run]",
     "authtempo migrate --target d1 [--database <name>] [--config <path>] [--remote] [--tables core|compat [--before-1.7]] [--dry-run]",
-    "authtempo migrate --target sqlite (--file <path> | --url-env <NAME> | --url-file <path>) [--auth-token-env <NAME> | --auth-token-file <path>] [--dry-run]",
+    "authtempo migrate --target sqlite (--file <path> | --url-env <NAME> | --url-file <path>) [--auth-token-env <NAME> | --auth-token-file <path>] [--tables core|compat [--before-1.7]] [--dry-run]",
     "authtempo migrate --target mysql [--url-env <NAME> | --url-file <path>] [--dry-run]",
   ],
   examples: [
@@ -37,7 +37,7 @@ export const MIGRATE_HELP: HelpText = {
     },
     {
       flag: "--tables <core|compat>",
-      says: "Core's tables, or the Better Auth 1.7 tables of the compatibility package. The default is core.",
+      says: "Core's tables, or the Better Auth 1.7 tables of the compatibility package on Postgres, D1, or SQLite. The default is core.",
     },
     ...URL_AND_FILE_FLAGS,
     {
@@ -54,7 +54,7 @@ export const MIGRATE_HELP: HelpText = {
     },
     {
       flag: "--before-1.7",
-      says: "D1 with --tables compat: copy the files for tables from before Better Auth 1.7.",
+      says: "D1 or SQLite with --tables compat: the migrations for tables from before Better Auth 1.7. On D1, the command copies those files.",
     },
     { flag: "-n, --dry-run", says: "List the migrations that a run applies, and apply nothing." },
     ...COMMON_FLAGS,
@@ -72,5 +72,6 @@ export const MIGRATE_HELP: HelpText = {
   notes: [
     "With --tables compat, the command warns when the project holds better-auth below 1.7.7.",
     "With --target sqlite --file, the command makes the file when it is missing.",
+    "With --target sqlite --tables compat, a missing file stops the run: the file must hold the Better Auth tables.",
   ],
 };
