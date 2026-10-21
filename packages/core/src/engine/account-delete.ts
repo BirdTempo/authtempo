@@ -4,6 +4,7 @@ import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { OrganizationRow, SessionRow, UserRow } from "../schema.js";
+import { type Meter, meterOf } from "../storage/meter.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { USER_CHILD_MODELS } from "../storage/sql.js";
 import { sendAccountMail } from "./account-mail.js";
@@ -12,8 +13,10 @@ import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { deliverLogouts } from "./oauth-logout.js";
+import { endImpersonationsPage } from "./operator/access-end.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
-import { endImpersonations, holdImpersonations } from "./operator/impersonation.js";
+import { holdImpersonations } from "./operator/impersonation.js";
+import { OPERATOR_CALL_BUDGET } from "./operator/sessions.js";
 import {
   deleteOrganizationRows,
   organizationsOfDelete,
@@ -38,6 +41,29 @@ export const DELETE_PER_USER = { seconds: 3600, max: 5 };
 /** The prefix of the mailed confirm's token (plan 12a Task 20). */
 export const DELETE_TOKEN_PREFIX = "ad_";
 export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
+
+/**
+ * The calls of a delete invocation before its transaction, at the worst
+ * (ruling 63 of plan 12f). Through the route: the impersonation step of
+ * the router, the route limiter, `resolveSession` (3), and the limiter of
+ * the delete or of the confirm. The ready check of the storage comes on
+ * top. The D1 test `operator-loss-budget.test.ts` counts the whole
+ * invocation on the binding.
+ */
+const DELETE_CALLS_BEFORE = 6;
+
+/** The models that `deleteAccountRows` deletes by `userId` after the sessions. */
+const LAST_MODELS = USER_CHILD_MODELS.filter(
+  (m) => m !== "session" && m !== "member" && m !== "oauthLogout",
+);
+
+/**
+ * The calls of a delete after the page of the impersonation sessions. In
+ * the transaction: the outbox update and one delete per model of
+ * `LAST_MODELS`. After the commit: the delete of the verification rows,
+ * and the read of `deliverLogouts`.
+ */
+const DELETE_KEEP = 1 + LAST_MODELS.length + 2;
 
 export interface AccountDelete {
   session: ResolvedSession;
@@ -209,8 +235,10 @@ async function runDelete(
   const ended = endedList(config);
   const stops = impersonationStops(config, "account_delete");
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
+  const before = DELETE_CALLS_BEFORE + ((await config.storage.readyStatements?.()) ?? 1);
   const done = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<Deleted>> => {
+      const meter = meterOf(tx, before);
       if (ended) ended.length = 0;
       if (stops) stops.rows.length = 0;
       let seen = await tx.findOne("user", byId);
@@ -232,14 +260,17 @@ async function runDelete(
         sessionId: input.session.session.id,
         ended: ended ?? null,
         stops,
+        meter,
       });
       return ok({ user, going });
     }),
   );
   if (!done.ok) return done;
   const { user, going } = done.value;
+  // The pending-end row of the operator stays for the sweep (ruling 63 of plan 12f).
   await config.storage.delete("verification", [
     { field: "identifier", op: "in", value: [user.id, user.email] },
+    { field: "purpose", op: "ne", value: "session-end" },
   ]);
   await sessionsEnded(config, ended, "account_deleted", stops);
   // Every outbox row of the user, the older ones too: the delete made them due.
@@ -285,7 +316,12 @@ export async function deleteAccountRows(
   config: ResolvedConfig,
   user: UserRow,
   now: Date,
-  proof: { sessionId: string; ended: SessionRow[] | null; stops: ImpersonationStops | null },
+  proof: {
+    sessionId: string;
+    ended: SessionRow[] | null;
+    stops: ImpersonationStops | null;
+    meter: Meter;
+  },
 ): Promise<OrganizationRow[]> {
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: user.id }];
   const session = await tx.findOne("session", [{ field: "id", op: "eq", value: proof.sessionId }]);
@@ -332,7 +368,20 @@ export async function deleteAccountRows(
     now,
     proof.stops,
   );
-  await endImpersonations(tx, hold, proof.ended, now, proof.stops);
+  // A page of them inside the call budget of the invocation, and the rest
+  // on a pending-end row for the sweep (ruling 63 of plan 12f).
+  await endImpersonationsPage(
+    tx,
+    config,
+    hold,
+    proof.ended,
+    now,
+    proof.meter,
+    OPERATOR_CALL_BUDGET,
+    DELETE_KEEP,
+    "account_deleted",
+    proof.stops,
+  );
   // The back-channel outbox stays (plan 12e Task 16, review I3 of Task 1).
   // Its rows are the logouts of this delete, and of earlier ends that wait
   // for a retry. Each one is due now, so the delivery after the commit sends

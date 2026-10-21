@@ -4,21 +4,9 @@ import type { SessionRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
 import { sendNotice } from "../notices.js";
 import { endSessionById } from "../oauth-outbox.js";
-import {
-  endSessions,
-  openSession,
-  type ResolvedSession,
-  sessionOpened,
-  sessionsEnded,
-} from "../sessions.js";
+import { openSession, type ResolvedSession, sessionOpened, sessionsEnded } from "../sessions.js";
 import { holdUser } from "../user-hold.js";
-import {
-  auditDraft,
-  type ImpersonationStops,
-  impersonationTargets,
-  operatorAct,
-  operatorReason,
-} from "./audit.js";
+import { auditDraft, impersonationTargets, operatorAct, operatorReason } from "./audit.js";
 import { activeBan } from "./ban-rule.js";
 import { IMPERSONATE_PER_USER, isPlatformOperator, requireOperatorUser } from "./guards.js";
 
@@ -130,7 +118,7 @@ export async function startImpersonation(
       // The operator's user row first (user-hold.ts), then the operator again
       // through tx. A ban or a revoke that committed after the guard stops
       // the start here. One that starts later waits for this commit. Then
-      // its `endImpersonations` reads the start row.
+      // its `endImpersonationsPage` reads the start row.
       await holdUser(tx, actor.user.id);
       const self = await tx.findOne("user", [{ field: "id", op: "eq", value: actor.user.id }]);
       if (!self || activeBan(self, now)) return fail("operator_required");
@@ -220,7 +208,7 @@ export async function stopImpersonation(
 /**
  * The targets of the impersonations that `operatorId` may still hold, and
  * the proof that their session rows are locked (ruling 42 L3 of plan 12f).
- * `holdImpersonations` makes it, and `endImpersonations` reads it.
+ * `holdImpersonations` makes it, and `endImpersonationsPage` reads it.
  */
 export interface ImpersonationHold {
   readonly operatorId: string;
@@ -265,46 +253,4 @@ export async function holdImpersonations(
           ],
     );
   return { operatorId, targets };
-}
-
-/**
- * Ends every impersonation session that the platform operator of `hold`
- * opened, in the caller's transaction (ruling 31 of plan 12f). The losses
- * of the platform role outside the operator acts call it, so nothing of the
- * operator's acts stays (spec 26). They are the account delete, and a
- * removal, a leave, or a role change of the platform member row (ruling 42
- * I1). The ban and the revoke have a call budget, so they end the sessions
- * in pages (`endImpersonationsPage`). One `endSessions` per
- * target deletes the target's sessions whose `actorId` is the operator,
- * with the outbox rows of their links. The answer is the count of sessions.
- *
- * It has no call budget (plan 12f, final review L3). The bound is the
- * start limit: `IMPERSONATE_PER_USER` gives 20 starts an hour, and no
- * impersonation lives past `IMPERSONATION_TTL_MAX_MINUTES` (240). So
- * `hold.targets` holds at most 80 users while the limiter holds. D1 Free
- * allows 50 queries per invocation. Each target costs one `endSessions`,
- * so with about 10 targets the flow passes 50 queries. Then the query
- * past the limit throws, and the flow fails.
- */
-export async function endImpersonations(
-  tx: StorageAdapter,
-  hold: ImpersonationHold,
-  ended: SessionRow[] | null,
-  now: Date,
-  stops: ImpersonationStops | null,
-): Promise<number> {
-  let n = 0;
-  for (const userId of hold.targets) {
-    n += await endSessions(
-      tx,
-      [
-        { field: "userId", op: "eq", value: userId },
-        { field: "actorId", op: "eq", value: hold.operatorId },
-      ],
-      ended,
-      now,
-      stops,
-    );
-  }
-  return n;
 }

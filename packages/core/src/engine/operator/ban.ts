@@ -7,7 +7,12 @@ import { runAfter, runBefore, type UserPatch, type UserUpdateVia } from "../hook
 import { ROUNDS } from "../rounds.js";
 import { later } from "../second-factor.js";
 import { sessionsEnded } from "../sessions.js";
-import { ACCESS_END_LEAST, endAllAccessPage, endImpersonationsPage } from "./access-end.js";
+import {
+  ACCESS_END_KEEP,
+  ACCESS_END_LEAST,
+  endAllAccessPage,
+  endImpersonationsPage,
+} from "./access-end.js";
 import {
   auditDraft,
   impersonationStops,
@@ -212,7 +217,7 @@ async function userUpdated(
  * Until then `bannedFor` refuses each of them at every door. A throw of
  * `endFamilies` after the commit answers ok with `familyEndFailed: true`.
  * The act also ends the impersonation sessions that the user opened as an
- * operator (`endImpersonations`, ruling 31).
+ * operator (`endImpersonationsPage`, ruling 31).
  *
  * After the commit, in the order of ruling 2: `session.afterEnd` with
  * `banned` per session, `user.afterUpdate`, then `afterAction` and
@@ -275,10 +280,11 @@ export async function banUser(
         tx,
         config,
         hold,
-        ends,
+        ends.ended ?? null,
         now,
         meter,
         budget.value,
+        ACCESS_END_KEEP,
         "banned",
         stops,
       );

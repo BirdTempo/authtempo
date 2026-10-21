@@ -18,6 +18,7 @@ import { sessionsEnded } from "../sessions.js";
 import { holdUser, userStays } from "../user-hold.js";
 import { normalizeEmail, validUserName } from "../users.js";
 import {
+  ACCESS_END_KEEP,
   ACCESS_END_LEAST,
   endAllAccessPage,
   endImpersonationsPage,
@@ -340,7 +341,7 @@ export async function grantPlatformRole(
  * pending-end row of the target exists, such a revoke ends a page of the
  * sessions again (ruling 45). So a retry does what the first call left.
  * The act also ends the impersonation sessions that the target opened
- * (`endImpersonations`, ruling 31).
+ * (`endImpersonationsPage`, ruling 31).
  *
  * After the commit, the steps run in the order of ruling 2. First,
  * `session.afterEnd` fires with `operator` for each session. Then the
@@ -393,7 +394,7 @@ export async function revokePlatformRole(
       const meter = meterOf(tx, fixed);
       // The user row first (user-hold.ts). An impersonation start holds it
       // too (ruling 42 of plan 12f). So the start sees the role gone, or it
-      // commits its start row before `endImpersonations` reads.
+      // commits its start row before `endImpersonationsPage` reads.
       await holdUser(tx, user.id);
       meter.step(STEP_WORST.hold);
       // One read takes the locks of the user's sessions and of the
@@ -465,10 +466,11 @@ export async function revokePlatformRole(
         tx,
         config,
         hold,
-        ends,
+        ends.ended ?? null,
         now,
         meter,
         budget.value,
+        ACCESS_END_KEEP,
         "operator",
         stops,
       );

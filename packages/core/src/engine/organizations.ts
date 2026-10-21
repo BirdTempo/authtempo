@@ -4,6 +4,7 @@ import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { MemberRow, OrganizationRow, SessionRow, UserRow } from "../schema.js";
 import { findManyIn } from "../storage/batch.js";
+import { meterOf } from "../storage/meter.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import {
   hookGuard,
@@ -13,9 +14,11 @@ import {
   runBefore,
   stopWith,
 } from "./hooks.js";
+import { endImpersonationsPage } from "./operator/access-end.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { writesPlatformRole } from "./operator/guards.js";
-import { endImpersonations, holdImpersonations } from "./operator/impersonation.js";
+import { holdImpersonations } from "./operator/impersonation.js";
+import { OPERATOR_CALL_BUDGET, STEP_WORST } from "./operator/sessions.js";
 import {
   needs,
   normalizeSlug,
@@ -210,28 +213,45 @@ async function ownerWrite(
 /**
  * A member write that takes the platform role from `userId` (ruling 42 I1
  * of plan 12f). `ended` collects the ended sessions for `session.afterEnd`.
+ * `before` is the count of the calls of the invocation before the
+ * transaction (ruling 63).
  */
 interface RoleLoss {
   config: ResolvedConfig;
   userId: string;
   ended: SessionRow[] | undefined;
   stops: ImpersonationStops | null;
+  before: number;
 }
 
+/**
+ * The calls of a member write before its transaction, at the worst
+ * (ruling 63 of plan 12f). Through the route: the impersonation step of
+ * the router, the route limiter, and `resolveSession` (3). Then the
+ * standing of the caller (2), the member row of the target, and its user.
+ * The ready check of the storage comes on top. The D1 test
+ * `operator-loss-budget.test.ts` counts the whole invocation on the
+ * binding.
+ */
+const MEMBER_WRITE_CALLS_BEFORE = 9;
+
+/** The worst case of the member write in `withRoleLoss`: the owner lock, the write, and the recount. */
+const MEMBER_WRITE_WORST = 5;
+
 /** The loss of a member write, or null when the write keeps the platform role. */
-function roleLossOf(
+async function roleLossOf(
   config: ResolvedConfig,
   organization: OrganizationRow,
   member: MemberRow,
-): RoleLoss | null {
-  return writesPlatformRole(config, organization, member.role)
-    ? {
-        config,
-        userId: member.userId,
-        ended: endedList(config),
-        stops: impersonationStops(config, "role_loss"),
-      }
-    : null;
+): Promise<RoleLoss | null> {
+  if (!writesPlatformRole(config, organization, member.role)) return null;
+  return {
+    config,
+    userId: member.userId,
+    ended: endedList(config),
+    stops: impersonationStops(config, "role_loss"),
+    before: MEMBER_WRITE_CALLS_BEFORE + ((await config.storage.readyStatements?.()) ?? 1),
+  };
 }
 
 /**
@@ -239,9 +259,12 @@ function roleLossOf(
  * (user-hold.ts), then the locks of the member's sessions and impersonation
  * rows in one read (`holdImpersonations`). An impersonation start holds the
  * same user row, so it sees the role gone or commits first. When `wrote`
- * says that the write took effect, the impersonation sessions that the
- * member opened end in the same transaction. No logout goes inline (ruling
- * 37): an impersonation session has no client link.
+ * says that the write took effect, a page of the impersonation sessions
+ * that the member opened ends in the same transaction. The page fits
+ * `OPERATOR_CALL_BUDGET` with the calls before it. The rest stay with a
+ * pending-end row, and the sweep ends them (ruling 63 of plan 12f). Until
+ * then the doors refuse them (`impersonationLoss`). No logout goes inline
+ * (ruling 37): an impersonation session has no client link.
  */
 async function withRoleLoss<T>(
   tx: StorageAdapter,
@@ -251,10 +274,28 @@ async function withRoleLoss<T>(
   wrote: (value: T) => boolean,
 ): Promise<T> {
   if (!loss) return work(tx);
+  const meter = meterOf(tx, loss.before);
   await holdUser(tx, loss.userId);
+  meter.step(STEP_WORST.hold);
   const hold = await holdImpersonations(tx, loss.config, loss.userId, now, true);
+  // The audit read and the lock read.
+  meter.step(2);
   const value = await work(tx);
-  if (wrote(value)) await endImpersonations(tx, hold, loss.ended ?? null, now, loss.stops);
+  meter.step(MEMBER_WRITE_WORST);
+  // No call after the commit reads the storage, so the page keeps none.
+  if (wrote(value))
+    await endImpersonationsPage(
+      tx,
+      loss.config,
+      hold,
+      loss.ended ?? null,
+      now,
+      meter,
+      OPERATOR_CALL_BUDGET,
+      0,
+      "impersonation_end",
+      loss.stops,
+    );
   return value;
 }
 
@@ -812,7 +853,7 @@ export async function updateMemberRole(
     );
   };
   // A change that drops the platform role ends the member's impersonations (ruling 42 I1).
-  const loss = roleLossOf(config, s.value.organization, target.member);
+  const loss = await roleLossOf(config, s.value.organization, target.member);
   const written = await hookGuard(async (): Promise<Result<true>> => {
     // The demotion can remove an owner: count, lock, and write in one transaction.
     if (isOwner(o, target.rank) && !isOwner(o, g.value))
@@ -905,7 +946,7 @@ export async function removeMember(
   };
   // A removal or a leave of the platform organization ends the member's
   // impersonations (ruling 42 I1).
-  const loss = roleLossOf(config, s.value.organization, target.member);
+  const loss = await roleLossOf(config, s.value.organization, target.member);
   const now = config.clock.now();
   const removed = await hookGuard(async (): Promise<Result<true>> => {
     // The removal of an owner: count, lock, and write in one transaction.

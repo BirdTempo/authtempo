@@ -1368,7 +1368,7 @@ It answers one count for each kind of row:
 - `verificationConsumed`: consumed verification rows one day after the consume. This only matters when `magicLink.ttlMinutes` is above one day.
 - `invitations`: invitations that are accepted or expired.
 - `sessions`: sessions past their expiry.
-- `pendingSessions`: sessions that a ban or a revoke of the platform role left past its call budget, ended with `session.afterEnd`. The sweep reads the rows before the idle clients, and the outbox leaves the calls of one page for them. The step runs last, and a row of it waits for the next sweep when it does not fit. Every door refuses such a session in the meantime.
+- `pendingSessions`: sessions that an act left past its call budget, ended with `session.afterEnd`. A ban and a revoke of the platform role leave the sessions of the user and the impersonation sessions that the user opened. An account delete of an operator, and a removal, a leave, or a role change of the platform member row, leave only those impersonation sessions. Each of them ends a page in the act (ruling 63 of plan 12f). The sweep reads the rows before the idle clients, and the outbox leaves the calls of one page for them. The step runs last, and a row of it waits for the next sweep when it does not fit. Every door refuses such a session in the meantime.
 - `apiTokens`: API tokens past their expiry. A token with no expiry stays.
 - `trustedDevices`: trusted devices past their expiry.
 - `totpSetups`: TOTP setups that no enable confirmed within 15 minutes.

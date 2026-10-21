@@ -110,15 +110,6 @@ const SITES: Site[] = [
       "endOtherSessions (the revoke of the other sessions, the password change, the email change) and endAllAccess (the ban, the end of one user's sessions by an operator)",
   },
   {
-    file: "engine/operator/impersonation.ts",
-    fn: "endImpersonations",
-    call: "endSessions",
-    count: 1,
-    kind: "endSessions",
-    reason:
-      "the ban and the revoke of the platform role end the impersonation sessions of the operator (ruling 31); an impersonation session reaches no authorize step, so it has no link",
-  },
-  {
     file: "engine/users.ts",
     fn: "claimEmail",
     call: "endSessions",
@@ -160,7 +151,7 @@ const SITES: Site[] = [
     count: 2,
     kind: "by id list",
     reason:
-      "the end of all sessions, and of one user's sessions, by an operator: one delete per row with a hook, one per chunk of ids without; the outbox rows of the links that fit come first and are due now, and the sweep makes the rest",
+      "the end of all sessions, and of one user's sessions, by an operator, and the impersonation sessions of an operator at a ban, a revoke, an account delete, or a role loss (ruling 63): one delete per row with a hook, one per chunk of ids without; the outbox rows of the links that fit come first and are due now, and the sweep makes the rest",
   },
   {
     file: "engine/operator/sessions.ts",
