@@ -78,6 +78,8 @@ The routes are under `<basePath>/operator/`. [Routes](/docs/reference/routes/#op
 - A sign-in of a banned user answers `account_banned` only after the credential check. So only a person who proved the credential learns of the ban. A wrong password answers `invalid_credentials`, as for any user.
 - The mail flows answer a banned user as any user.
 - An API token stays. Core refuses it while the ban holds, and it works again after an unban.
+- A refused call of an API token spends nothing of its window or its quota: the ban check comes first (plan 12k).
+- An organization token that the user made still acts: it belongs to the organization. Revoke it, or remove the member with `revokeTokens: true`.
 - The unban restores no session. A session, a refresh token, or an access token from before the end of the ban stays refused.
 - A ban of a platform operator also ends the impersonation sessions that the operator opened. The call ends those that fit, and the sweep ends the rest. Until then each door refuses them.
 - A session JWT and an OAuth access token live to their `exp`. [Ban a user](/docs/operations/ban-a-user/) gives the check of a resource server.

@@ -62,6 +62,7 @@ The whole call fits 50 storage calls, the limit of one D1 Free run. The sessions
 | A session JWT | `jwtMint.ttlMinutes`: 15 minutes by default, at most 60 | [`POST /token/live`](/docs/reference/routes/#post-token-live), or `api.jwt.sessionLive` |
 | An OAuth access token | `oauth.accessTtlMinutes`: `jwtMint.ttlMinutes` by default, at most 60 | [`POST /oauth/introspect`](/docs/reference/routes/#post-oauth-introspect) |
 | An API token | Its own expiry. Core refuses it while the ban holds | Core's own check of each request |
+| An organization token that the user made | Its own expiry. The ban does not stop it: it belongs to the organization | Revoke it with [`POST /organizations/tokens/revoke`](/docs/reference/routes/#post-organizations-tokens-revoke), or remove the member with `revokeTokens: true` |
 
 Core refuses each of them at its own doors: the session read, the JWT mint, the user info, and the introspection. A resource server that verifies a JWT alone cannot see the ban. ASVS 5.0.0 7.4.1 asks for a control of a self-contained token after the end of its session. `api.jwt.sessionLive` and the introspection are the controls that core gives.
 
@@ -70,6 +71,7 @@ Core refuses each of them at its own doors: the session read, the JWT mint, the 
 - A sign-in of a banned user answers `account_banned` only after the credential check. A wrong password answers `invalid_credentials`, as for any user.
 - The mail flows answer a banned user as any user. A magic link still goes out, and its use answers `account_banned`.
 - An API token works again after an unban. A session does not come back.
+- A refused call of an API token spends nothing: core checks the ban before the window and the quota of the token.
 - The unban writes the end of the ban. A session or a token from before that end stays refused.
 - A magic link is not a session. A link mailed before the ban signs in after the unban, within its life: `magicLink.ttlMinutes`, 15 minutes by default.
 - A timed ban ends at `--until`. The same rule then holds: no credential from before the end comes back.

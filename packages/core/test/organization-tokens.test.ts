@@ -553,6 +553,82 @@ describe("organization tokens (plan 12k Task 8)", () => {
     expect(await authenticate(h, mine1.token)).toEqual(fault("unauthorized"));
   });
 
+  it("keeps the organization token of a banned creator acting, and refuses the creator's own token with no spend (ruling 7)", async () => {
+    const base = makeAuth({ organizations: ORGANIZATIONS });
+    // The operator tools, so the app can ban. No user here joins the platform organization.
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: base.storage,
+      mail: { send: async () => {} },
+      clock: base.clock,
+      limiter: base.config.limiter,
+      organizations: {
+        ...ORGANIZATIONS,
+        platformRole: "owner",
+        platformOrganization: "platform-co",
+      },
+      operator: { users: true },
+    });
+    const app = { kind: "app", name: "support-tool" } as const;
+    const ada = await base.seedUser("ada@example.com");
+    const created = mustOk(
+      await auth.api.createOrganization({ user: ada, slug: "acme", name: "acme" }),
+    );
+    const own = mustOk(
+      await auth.api.tokens.create({
+        user: ada,
+        name: "own",
+        rateLimit: { seconds: 60, max: 1 },
+        quota: { remaining: 3 },
+      }),
+    );
+    const shared = mustOk(
+      await auth.api.organizationTokens.create({
+        user: ada,
+        organizationId: created.organization.id,
+        name: "ci",
+        permissions: {},
+      }),
+    );
+    const net = { ip: null, userAgent: null };
+    mustOk(
+      await auth.api.operator.users.ban({
+        actor: app,
+        userId: ada.id,
+        reason: "Abuse report 7",
+        ...net,
+      }),
+    );
+    const current = (path: string, token: string) =>
+      auth.handle(get(`/auth/${path}`, bearer(token)));
+    const remaining = async () =>
+      (await base.storage.findOne("apiToken", [{ field: "id", op: "eq", value: own.apiToken.id }]))
+        ?.remaining;
+    // The organization owns its token (owner decision 2), so the ban of its creator stops nothing.
+    expect((await current("organizations/tokens/current", shared.token)).status).toBe(200);
+    // The ban check runs before the window and the spend: three refusals spend nothing.
+    for (let i = 0; i < 3; i++)
+      expect(await answer(await current("tokens/current", own.token))).toEqual({
+        status: 401,
+        body: { error: "unauthorized" },
+      });
+    expect(await remaining()).toBe(3);
+    mustOk(
+      await auth.api.operator.users.unban({
+        actor: app,
+        userId: ada.id,
+        reason: "Appeal granted",
+        ...net,
+      }),
+    );
+    // The window of one call is still free, and the quota spends once.
+    expect((await current("tokens/current", own.token)).status).toBe(200);
+    expect(await remaining()).toBe(2);
+    expect((await current("tokens/current", own.token)).status).toBe(429);
+  });
+
   it("deletes the tokens with the organization", async () => {
     const h = orgHandle();
     const ada = await signedIn(h, "ada@example.com");
