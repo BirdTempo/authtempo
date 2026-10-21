@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createRouter, type Route } from "../../src/http/router.js";
 import { scimJson, scimRoute } from "../../src/http/routes/scim.js";
-import { scim, scimAuth, scimToken } from "./helpers.js";
+import { BASE_URL } from "../helpers.js";
+import { SCIM_IP, scim, scimAuth, scimToken } from "./helpers.js";
 
 const ERROR_URN = "urn:ietf:params:scim:api:messages:2.0:Error";
 const LIST_URN = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
@@ -187,7 +188,7 @@ describe("the SCIM base (plan 12d Task 9)", () => {
     }
   });
 
-  it("refuses a body that is too large, of another type, or not JSON", async () => {
+  it("refuses a body that is too large, of another type, not UTF-8, or not JSON", async () => {
     const w = await scimAuth();
     const { token } = await scimToken(w);
     const seen: unknown[] = [];
@@ -212,7 +213,34 @@ describe("the SCIM base (plan 12d Task 9)", () => {
       {
         schemas: [ERROR_URN],
         status: "413",
-        detail: "the body is more than 1048576 bytes, or is not UTF-8",
+        detail: "the body is more than 1048576 bytes",
+      },
+    ]);
+    // A body of 2 KB in Latin-1: each é is the one byte 0xE9, which is no UTF-8.
+    const latin1 = new Uint8Array([
+      ...new TextEncoder().encode('{"a":"'),
+      ...new Uint8Array(2040).fill(0xe9),
+      ...new TextEncoder().encode('"}'),
+    ]);
+    expect(latin1.length).toBe(2048);
+    const notUtf8 = await probe.handle(
+      new Request(`${BASE_URL}/auth/scim/v2/Probe`, {
+        method: "POST",
+        headers: {
+          "cf-connecting-ip": SCIM_IP,
+          authorization: `Bearer ${token}`,
+          "content-type": "application/scim+json",
+        },
+        body: latin1,
+      }),
+    );
+    expect(await read(notUtf8)).toEqual([
+      400,
+      {
+        schemas: [ERROR_URN],
+        status: "400",
+        scimType: "invalidSyntax",
+        detail: "the body is not UTF-8",
       },
     ]);
     expect(

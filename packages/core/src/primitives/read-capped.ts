@@ -4,18 +4,37 @@
  * client documents and the DNS proofs read a body by one rule.
  */
 
-/** The body as text, or null past `max` bytes, on a read error, or when `signal` aborts. */
+/** The body as text, or null past `max` bytes, on a read error, when `signal` aborts, or when it is not UTF-8. */
 export async function readCapped(
   res: Response,
   max: number,
   signal: AbortSignal,
 ): Promise<string | null> {
+  const bytes = await readCappedBytes(res, max, signal);
+  if (bytes === null) return null;
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The body as bytes, or null past `max` bytes, on a read error, or when
+ * `signal` aborts. A caller that must tell a long body from a body that is
+ * not UTF-8 decodes the bytes itself, as the SCIM body read does.
+ */
+export async function readCappedBytes(
+  res: Response,
+  max: number,
+  signal: AbortSignal,
+): Promise<Uint8Array | null> {
   const declared = Number(res.headers.get("content-length") ?? "0");
   if (declared > max) {
     await res.body?.cancel();
     return null;
   }
-  if (!res.body) return "";
+  if (!res.body) return new Uint8Array(0);
   const reader = res.body.getReader();
   const aborted = new Promise<never>((_resolve, reject) => {
     if (signal.aborted) reject(new Error("aborted"));
@@ -46,9 +65,5 @@ export async function readCapped(
     out.set(c, at);
     at += c.byteLength;
   }
-  try {
-    return new TextDecoder("utf-8", { fatal: true }).decode(out);
-  } catch {
-    return null;
-  }
+  return out;
 }

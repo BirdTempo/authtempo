@@ -14,7 +14,7 @@ import {
   scimTokenOrganization,
 } from "../../engine/scim/tokens.js";
 import type { ScimType } from "../../errors.js";
-import { readCapped } from "../../primitives/read-capped.js";
+import { readCappedBytes } from "../../primitives/read-capped.js";
 import type { ScimScope } from "../../schema.js";
 import { scimTokenCreateBody, scimTokenIdBody, scimTokenListQuery } from "../contract/scim.js";
 import { json } from "../json.js";
@@ -64,9 +64,9 @@ const BODY_MEDIA: ReadonlySet<string> = new Set([SCIM_MEDIA, "application/json"]
 /**
  * The JSON body of a SCIM request (plan 12d Task 9 Behavior 5). The type
  * must be `application/scim+json` or `application/json`, else 400
- * `invalidSyntax`. At most `SCIM_BODY_MAX` bytes through `readCapped`, else
- * 413; `readCapped` also refuses a body that is not UTF-8, and the detail
- * names both. JSON that does not parse answers 400 `invalidSyntax`.
+ * `invalidSyntax`. At most `SCIM_BODY_MAX` bytes through `readCappedBytes`,
+ * else 413. A body that is not UTF-8 answers 400 `invalidSyntax`, as does
+ * JSON that does not parse. So 413 means a long body only.
  */
 export async function readScimBody(
   request: Request,
@@ -82,16 +82,22 @@ export async function readScimBody(
       ),
     };
   const length = request.headers.get("content-length");
-  const text = await readCapped(
+  const bytes = await readCappedBytes(
     new Response(request.body, length === null ? {} : { headers: { "content-length": length } }),
     SCIM_BODY_MAX,
     request.signal,
   );
-  if (text === null)
+  if (bytes === null)
     return {
       ok: false,
-      response: scimError(413, `the body is more than ${SCIM_BODY_MAX} bytes, or is not UTF-8`),
+      response: scimError(413, `the body is more than ${SCIM_BODY_MAX} bytes`),
     };
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return { ok: false, response: scimError(400, "the body is not UTF-8", "invalidSyntax") };
+  }
   try {
     return { ok: true, value: JSON.parse(text) };
   } catch {
