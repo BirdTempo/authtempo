@@ -274,11 +274,19 @@ describe("the remote Worker", () => {
     for (const local of LOCAL_ONLY) expect(String(result.instructions)).not.toContain(local);
   });
 
-  it("reads the same index as the site build", async () => {
+  // The index is about 3 MB. toEqual on two arrays of that size took 2.2 s
+  // at a load of 4.9 (2026-10-22), so a loaded machine went past the 5 s
+  // default. One loop over the bytes took 15 ms at a load of 4.1, with the
+  // fetch. The bound is 30 s, 2000 times the measured time.
+  it("reads the same index as the site build", { timeout: 30_000 }, async () => {
     const r = await ENV.ASSETS.fetch(new Request(`https://${HOST}/index.json`));
     expect(r.status).toBe(200);
     const assets = new Uint8Array(await r.arrayBuffer());
-    expect(assets).toEqual(new TextEncoder().encode(ENV.SITE_INDEX));
+    const site = new TextEncoder().encode(ENV.SITE_INDEX);
+    expect(assets.byteLength).toBe(site.byteLength);
+    expect(assets.byteLength).toBeGreaterThan(0);
+    // The first offset where the two differ, or -1 when every byte is equal.
+    expect(assets.findIndex((b, i) => b !== site[i])).toBe(-1);
   });
 
   it("logs nothing", async () => {
