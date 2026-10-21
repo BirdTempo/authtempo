@@ -72,8 +72,9 @@ export const REWRAP_LIMIT = { default: 100, max: 1000 } as const;
 /**
  * The page of a status read. The storage port has no count, so status reads
  * every row of the five tables by pages of ids: one query per 1000 rows of
- * each table, and of each of the two code reads. The port sets no maximum limit (checked 2026-10-15), and a
- * page of 1000 is the most rows that `rewrap` reads in one call.
+ * each table, and of each of the two code reads. The port sets no maximum
+ * limit (checked 2026-10-15), and a page of 1000 is the most rows that
+ * `rewrap` reads in one call.
  */
 const PAGE = 1000;
 /** The purposes whose `valueHash` is a keyed hash (plan 9e). */
@@ -181,8 +182,9 @@ export async function secretsStatus(config: ResolvedConfig): Promise<SecretsStat
     [{ field: "purpose", op: "eq", value: "two-factor" }, ...live],
     (r) => {
       if (typeof r.data?.emailCodeHash === "string") entry(r.secretVersion).emailCodes++;
-      // The payload of a challenge names its own version: an email code
-      // send moves the row's `secretVersion` (plan 12i Task 19).
+      // The payload of a challenge names its own version (plan 12i Task 19).
+      // An email code send moves the row's `secretVersion`, but no send
+      // reaches a social challenge today, so this count is a second guard.
       const payload = r.data?.sealedDataVersion;
       if (typeof r.data?.sealedData === "string" && typeof payload === "number")
         entry(payload).stateData++;
