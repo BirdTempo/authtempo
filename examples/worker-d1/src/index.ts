@@ -1,5 +1,11 @@
 import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
-import { type Auth, createAuth, type HooksConfig, type MailPort } from "@authtempo/core";
+import {
+  type Auth,
+  type AuthConfig,
+  createAuth,
+  type HooksConfig,
+  type MailPort,
+} from "@authtempo/core";
 import { workersLogsSink } from "@authtempo/observe/workers-logs";
 
 /** The bindings and vars of wrangler.jsonc, and the secret of `wrangler secret put AUTH_SECRET`. */
@@ -21,8 +27,16 @@ export const mail: MailPort = {
   },
 };
 
-/** The Worker. The test passes a mail port that keeps the mails, and hooks of its own. */
-export function createWorker(mailPort: MailPort, hooks?: HooksConfig) {
+/**
+ * The Worker. The test passes a mail port that keeps the mails, and hooks of its own.
+ * `more` adds config keys for one env, after the keys below. The measure entry
+ * (src/measure.ts) adds the password config and its own sink with it.
+ */
+export function createWorker(
+  mailPort: MailPort,
+  hooks?: HooksConfig,
+  more?: (env: Env) => Partial<AuthConfig>,
+) {
   // One auth instance per isolate. The bindings stay the same for the life of the isolate.
   let auth: Auth | null = null;
   const getAuth = (env: Env): Auth =>
@@ -40,6 +54,7 @@ export function createWorker(mailPort: MailPort, hooks?: HooksConfig) {
       // turns the logs on. With a sink, core writes no console line of its own.
       // The sink scrubs the secret of the config from each field, as the last guard.
       observe: { sink: workersLogsSink({ secrets: [env.AUTH_SECRET] }) },
+      ...(more ? more(env) : {}),
     }));
 
   return {
