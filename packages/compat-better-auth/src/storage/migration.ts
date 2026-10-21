@@ -1,3 +1,4 @@
+import { migrationLockSql } from "@authtempo/adapter-postgres";
 import { StorageError } from "@authtempo/core";
 import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@authtempo/core/sql";
 import type { Sql } from "postgres";
@@ -1085,13 +1086,18 @@ if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
     `the compat runner has ${POSTGRES_TEXTS.length} texts for ${COMPAT_MIGRATION_NAMES.length} names in COMPAT_MIGRATION_NAMES`,
   );
 
-/** One fixed advisory lock key for every compat migration run. */
-const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_compat_migrations'))";
+/**
+ * The advisory lock of the compat runner. Its key names current_schema(), the
+ * schema of ta_meta, where the compat version lives (ruling 52 of plan 12k).
+ * The Better Auth tables can sit in `pgSchema`, but the version that the run
+ * reads and writes is in ta_meta.
+ */
+const LOCK = migrationLockSql("tempo_auth_compat_migrations");
 
 /**
  * Applies the compat migrations the database does not hold yet, each in its
- * own transaction under one advisory lock, so two replicas that deploy at
- * once run each migration once. The applied version is the
+ * own transaction under the advisory lock of its schema, so two replicas
+ * that deploy at once run each migration once. The applied version is the
  * `compat_better_auth` row of ta_meta: no third table.
  */
 export async function applyBetterAuthCompatMigrations(sql: Sql, names: Names): Promise<string[]> {

@@ -122,6 +122,7 @@ pnpm --filter my-app exec wrangler d1 migrations apply my-app --remote
 `applyPostgresMigrations(sql)` creates `ta_migrations` and runs each migration that it does not list yet, each in its own transaction.
 
 - It is safe on every deploy, also from two replicas at once. Each migration takes an advisory lock and reads the applied names again.
+- The lock key names the schema of the run, the `current_schema()` of its search path. Runs on two schemas of one database never wait on each other.
 - `MIGRATIONS` exposes the SQL text for review.
 
 ## The deploy window of version 8

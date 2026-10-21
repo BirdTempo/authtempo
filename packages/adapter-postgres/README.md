@@ -38,7 +38,9 @@ migration it does not list yet, each in its own transaction. It is safe
 to run on every deploy, also from two replicas at once. Each migration
 transaction first takes an advisory lock and then reads the applied names
 again. A second runner waits for the first and then skips the migrations
-that the first applied. `MIGRATIONS` exposes the SQL text for review.
+that the first applied. The lock key names the schema of the run, the
+`current_schema()` of its search path. So runs on two schemas of one
+database never wait on each other. `MIGRATIONS` exposes the SQL text for review.
 
 The adapter reads `ta_meta.schema_version` once. If it is older than the
 core's `SCHEMA_VERSION` or missing, every operation throws `StorageError`
