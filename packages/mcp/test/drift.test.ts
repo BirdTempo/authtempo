@@ -80,7 +80,7 @@ const EXEMPT_FLAGS: Readonly<Record<string, Readonly<Record<string, string>>>> =
   migrate: {
     ...HELP_FLAG,
     target:
-      "the handler always passes postgres: D1 migrations stay a shell command (spec 21 item 6)",
+      "the handler always passes postgres: D1, SQLite, and MySQL migrations stay a shell command (spec 21 item 6, plan 12g)",
     "url-env":
       "the handler passes the server's own --url-env: no input names the variable (spec 21 item 5)",
     "url-file":
@@ -89,6 +89,9 @@ const EXEMPT_FLAGS: Readonly<Record<string, Readonly<Record<string, string>>>> =
     config: "a D1 flag: D1 migrations stay a shell command (spec 21 item 6)",
     remote: "a D1 flag: D1 migrations stay a shell command (spec 21 item 6)",
     "before-1.7": "a D1 flag with --tables compat: D1 migrations stay a shell command",
+    file: "a SQLite flag: the handler always passes postgres (plan 12g)",
+    "auth-token-env": "a SQLite flag: the handler always passes postgres (plan 12g)",
+    "auth-token-file": "a SQLite flag: the handler always passes postgres (plan 12g)",
     "dry-run": "the handler passes it for dry_run: true, the plan step of a run",
     json: "the handler always passes it: the tool reads the one --json document",
   },
@@ -102,6 +105,9 @@ const EXEMPT_FLAGS: Readonly<Record<string, Readonly<Record<string, string>>>> =
     database: "a flag of the two schema checks, which the tool skips",
     config: "a flag of the two schema checks, which the tool skips",
     remote: "a flag of the two schema checks, which the tool skips",
+    file: "a flag of the two schema checks, which the tool skips",
+    "auth-token-env": "a flag of the two schema checks, which the tool skips",
+    "auth-token-file": "a flag of the two schema checks, which the tool skips",
     json: "the handler always passes it: the tool reads the one --json document",
   },
 };

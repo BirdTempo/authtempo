@@ -1,12 +1,13 @@
 ---
 title: authtempo migrate
-description: Apply the migrations of the installed adapter on Postgres or on D1, after a check of the schema version.
+description: Apply the migrations of the installed adapter on Postgres, D1, SQLite, or MySQL, after a check of the schema version.
 type: reference
 sources:
   - packages/cli/README.md "migrate"
   - packages/adapter-d1/README.md "Migrations"
   - packages/adapter-postgres/README.md "Migrations"
   - docs/superpowers/plans/2026-10-14-11c-cli.md "Task 6"
+  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 6"
 sidebar:
   order: 3
 ---
@@ -27,16 +28,25 @@ The packages are not on a registry yet. In this repo, run each command below as 
 ```sh
 authtempo migrate --target postgres --url-env DATABASE_URL
 authtempo migrate --target d1 --database my-app --remote
+authtempo migrate --target sqlite --file ./auth.db
+authtempo migrate --target mysql --url-env DATABASE_URL --dry-run
 ```
+
+The third line creates or updates the tables in a SQLite file. The fourth line lists the migrations that a MySQL database lacks.
 
 | Flag | What it does |
 | --- | --- |
 | `--target postgres` | Applies the Postgres migrations of `@authtempo/adapter-postgres`. |
 | `--target d1` | Applies the D1 migrations through the wrangler of the project. |
+| `--target sqlite` | Applies the SQLite migrations of `@authtempo/adapter-sqlite` to a file or to a libSQL server. |
+| `--target mysql` | Applies the MySQL migrations of `@authtempo/adapter-mysql`. |
 | `--tables core` | Core's tables. This is the default. |
 | `--tables compat` | The Better Auth 1.7 tables of `@authtempo/compat-better-auth`. |
-| `--url-env <NAME>` | Postgres: the variable of the connection string. The default is `DATABASE_URL`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
-| `--url-file <path>` | Postgres: the file of the connection string. `-` is stdin. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
+| `--url-env <NAME>` | Postgres and MySQL: the variable of the connection string. The default is `DATABASE_URL`. SQLite: the variable of a libSQL URL. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
+| `--url-file <path>` | Postgres, MySQL, and SQLite: the file of the connection string or the libSQL URL. `-` is stdin. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
+| `--file <path>` | SQLite: the path of the database file. The command makes the file when it is missing. |
+| `--auth-token-env <NAME>` | SQLite with a libSQL URL: the variable of the token. The default is `LIBSQL_AUTH_TOKEN`. With no such variable, the command sends no token. |
+| `--auth-token-file <path>` | SQLite with a libSQL URL: the file of the token. `-` is stdin. |
 | `--database <name>` | D1: the `database_name` in the wrangler config. One D1 database needs no name. |
 | `--config <path>` | D1: the wrangler config. The default is `wrangler.jsonc` or `wrangler.json` in the current folder. |
 | `--remote` | D1: the database on Cloudflare. The default is the local database of `wrangler dev`. |
@@ -64,6 +74,22 @@ authtempo migrate --target d1 --database my-app --remote
 - The command uses one connection, and ends it before it exits.
 - With `--tables compat`, the command runs the migrations of the compatibility package. That package refuses a schema with core's own `ta_meta` and `ta_limit`.
 - With `--tables compat`, the command prints one warning when the project holds `better-auth` below 1.7.7. Upgrade it first.
+
+## SQLite
+
+- Give one of `--file`, `--url-env`, or `--url-file`. Two of them, or none, is a usage error.
+- `--file` opens the file through `node:sqlite` (Node.js 22.13 and later). The command waits up to 5 seconds for the write lock of another process.
+- A URL opens a libSQL server through `@libsql/client`. A host that is not a loopback address needs `https:`, `wss:`, or `libsql:` with TLS. A plain `http:` URL to such a host stops the run with exit 2, before any connection.
+- `applySqliteMigrations` applies the files, which are the D1 files of `@authtempo/adapter-d1`. Each file and its record in `ta_migrations` run in one write transaction.
+- A driver error prints as `storage: <code> at <file>`, or at the host and the name of the URL. The command never prints the message of the driver, the token, or the query of the URL.
+
+## MySQL
+
+- MySQL 8.4 and later. A host that is not a loopback address needs `?ssl={"rejectUnauthorized":true}` in the URL. Without it, the run stops with exit 2, before any connection.
+- `applyMysqlMigrations` applies the migrations. Its named lock makes two runs at once safe.
+- The command uses one connection, and ends it before it exits.
+- A driver error prints as `storage: <code> at <host:port/name>`, such as `storage: ER_ACCESS_DENIED_ERROR at db.example.com:3306/app`. The command never prints the message of the driver, which names the user.
+- `--tables compat` is not served on MySQL. It is a usage error.
 
 ## D1
 

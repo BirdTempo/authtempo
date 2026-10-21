@@ -93,6 +93,28 @@ afterAll(() => {
 });
 
 describe("authtempo info (plan 11c2)", () => {
+  it("lists the SQLite and MySQL adapters of the project among the adapters (plan 12g)", async () => {
+    const files = {
+      "/work/package.json": JSON.stringify({
+        name: "my-app",
+        dependencies: {
+          "@authtempo/adapter-mysql": "0.0.0",
+          "@authtempo/adapter-sqlite": "0.0.0",
+          "@authtempo/core": "0.0.0",
+        },
+      }),
+    };
+    const io = fakeIo({ files });
+    expect(await main(["info", "--json"], io)).toBe(0);
+    const doc = docOf(io.stdout);
+    expect(doc.adapters).toEqual(["adapter-mysql", "adapter-sqlite"]);
+    expect(doc.packages).toEqual({
+      "@authtempo/adapter-mysql": null,
+      "@authtempo/adapter-sqlite": null,
+      "@authtempo/core": null,
+    });
+  });
+
   it("reports the tools and the project, and makes no network call", async () => {
     const io = fakeIo({ files: PROJECT, env: { npm_config_user_agent: AGENT } });
     expect(await main(["info", "--json"], io)).toBe(0);

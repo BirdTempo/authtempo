@@ -93,6 +93,7 @@ A stop prints its `stopped:` line on stderr.
 - No flag takes a secret as its value.
 - A connection string comes from `--url-env <NAME>` or `--url-file <path>`. The default variable is `DATABASE_URL`.
 - The operator secret comes from `--token-env <NAME>` or `--token-file <path>`. The default variable is `AUTHTEMPO_OPERATOR_SECRET`.
+- A libSQL token comes from `--auth-token-env <NAME>` or `--auth-token-file <path>`. The default variable is `LIBSQL_AUTH_TOKEN`. The token is optional.
 - A file of `-` is stdin.
 - No output line holds a secret that the command read. The CLI names a database by its host, its port, and its name only.
 - `authtempo secret` prints the secret that it makes once, or writes it to a new file that only its owner can read. It replaces no file.

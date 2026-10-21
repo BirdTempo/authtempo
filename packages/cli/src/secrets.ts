@@ -14,8 +14,8 @@ export const NAME_ONLY_FLAGS: ReadonlySet<string> = new Set(["password-column"])
 /** The name of an environment variable: a person who types a URL or a token here gets a usage error. */
 export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
-// The two default variable names live in env-names.ts; each command imports them from here.
-export { DEFAULT_TOKEN_ENV, DEFAULT_URL_ENV } from "./env-names.js";
+// The default variable names live in env-names.ts; each command imports them from here.
+export { DEFAULT_LIBSQL_TOKEN_ENV, DEFAULT_TOKEN_ENV, DEFAULT_URL_ENV } from "./env-names.js";
 
 /** The longest variable name that a message prints (review of plan 11c, m12). A secret is longer. */
 const MAX_SHOWN_NAME = 40;

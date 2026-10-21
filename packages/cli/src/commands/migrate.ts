@@ -1,4 +1,4 @@
-import { dirname, join, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { parseArgs } from "node:util";
 import { COMMON_OPTIONS, oneOf, parseOrUsage } from "../args.js";
 import { betterAuthWarning } from "../better-auth-version.js";
@@ -19,6 +19,7 @@ import {
   readD1Project,
   wranglerOf,
 } from "../seams/d1.js";
+import { MYSQL_CORE_MIGRATIONS, openMysql } from "../seams/mysql.js";
 import {
   COMPAT_META_KEY,
   CORE_MIGRATIONS,
@@ -26,7 +27,8 @@ import {
   openPostgres,
   storageFailure,
 } from "../seams/postgres.js";
-import { DEFAULT_URL_ENV, readSecret } from "../secrets.js";
+import { openSqlite, SQLITE_CORE_MIGRATIONS, type SqliteSource } from "../seams/sqlite.js";
+import { DEFAULT_LIBSQL_TOKEN_ENV, DEFAULT_URL_ENV, readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
 
 const OPTIONS = {
@@ -35,6 +37,9 @@ const OPTIONS = {
   tables: { type: "string" },
   "url-env": { type: "string" },
   "url-file": { type: "string" },
+  file: { type: "string" },
+  "auth-token-env": { type: "string" },
+  "auth-token-file": { type: "string" },
   database: { type: "string" },
   config: { type: "string" },
   remote: { type: "boolean" },
@@ -65,8 +70,18 @@ export interface MigratePlan {
   note(line: string): void;
 }
 
-async function migratePostgres(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
-  const url = readSecret(ctx, {
+/** The flags of a database that is read by a URL or a file (plan 12g Task 6); `check` has them too. */
+export interface DatabaseValues {
+  "url-env"?: string | undefined;
+  "url-file"?: string | undefined;
+  file?: string | undefined;
+  "auth-token-env"?: string | undefined;
+  "auth-token-file"?: string | undefined;
+}
+
+/** The connection string of `--url-env` or `--url-file` (spec 19 item 5). */
+export const readUrl = (ctx: Ctx, v: DatabaseValues): string =>
+  readSecret(ctx, {
     envFlag: "url-env",
     fileFlag: "url-file",
     env: v["url-env"],
@@ -74,6 +89,9 @@ async function migratePostgres(ctx: Ctx, v: Values, plan: MigratePlan): Promise<
     defaultEnv: DEFAULT_URL_ENV,
     what: "the connection string",
   });
+
+async function migratePostgres(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
+  const url = readUrl(ctx, v);
   plan.note(`connecting to ${describeUrl(url)}`);
   // One connection: the migrations run one at a time, each in its own transaction.
   const pg = openPostgres(url, 1);
@@ -98,6 +116,100 @@ async function migratePostgres(ctx: Ctx, v: Values, plan: MigratePlan): Promise<
   } finally {
     await pg.close();
   }
+}
+
+/** The members of a seam that the core run of `migrateCore` calls. */
+interface CoreSeam {
+  ping(): Promise<void>;
+  appliedCore(): Promise<string[]>;
+  schemaVersionText(): Promise<string | null>;
+  schemaVersion(): Promise<number | null>;
+  applyCore(): Promise<string[]>;
+  close(): Promise<void>;
+}
+
+/**
+ * The core run on a seam of SQLite or MySQL, in the order of spec 19 item 8.
+ * It reads, gates, lists, applies through the adapter's own runner, and
+ * reads again. `names` are the migrations of the adapter that this CLI
+ * bundles.
+ */
+async function migrateCore(
+  seam: CoreSeam,
+  names: readonly string[],
+  plan: MigratePlan,
+): Promise<MigrateRun> {
+  try {
+    try {
+      await seam.ping();
+    } catch (e) {
+      throw e instanceof Stop ? new Stop(`${e.message}; nothing was written`) : e;
+    }
+    const done = new Set(await seam.appliedCore());
+    const before = readableVersion(await seam.schemaVersionText(), done.size);
+    gate(before);
+    const pending = names.filter((n) => !done.has(n));
+    if (plan.dryRun) return { before, after: before, pending, applied: [], copied: [] };
+    plan.note(`applying ${pending.length} migration(s)`);
+    const applied = await seam.applyCore();
+    return { before, after: await seam.schemaVersion(), pending, applied, copied: [] };
+  } finally {
+    await seam.close();
+  }
+}
+
+/**
+ * The libSQL token: `--auth-token-env`, `--auth-token-file`, or the variable
+ * LIBSQL_AUTH_TOKEN. It is optional, so a missing default variable gives no
+ * token. A local libSQL server takes none.
+ */
+function readAuthToken(ctx: Ctx, v: DatabaseValues): string | null {
+  const env = v["auth-token-env"];
+  const file = v["auth-token-file"];
+  if (env === undefined && file === undefined && !ctx.env[DEFAULT_LIBSQL_TOKEN_ENV]) return null;
+  return readSecret(ctx, {
+    envFlag: "auth-token-env",
+    fileFlag: "auth-token-file",
+    env,
+    file,
+    defaultEnv: DEFAULT_LIBSQL_TOKEN_ENV,
+    what: "the libSQL token",
+  });
+}
+
+/**
+ * The database of `--target sqlite`: `--file`, or a libSQL URL from
+ * `--url-env` or `--url-file`. One of them, never two. The token flags apply
+ * to a URL. A path is not a secret, so its note names it.
+ */
+export function sqliteSourceOf(ctx: Ctx, v: DatabaseValues): SqliteSource {
+  const given = (["file", "url-env", "url-file"] as const).filter((f) => v[f] !== undefined);
+  if (given.length > 1) throw new UsageError("give --file or --url-env or --url-file, not two");
+  if (v.file !== undefined) {
+    for (const flag of ["auth-token-env", "auth-token-file"] as const)
+      if (v[flag] !== undefined)
+        throw new UsageError(`--${flag} applies to a libSQL URL, not to --file`);
+    return { file: resolve(ctx.cwd, v.file) };
+  }
+  if (given.length === 0)
+    throw new UsageError(
+      "name the database: --file <path> for a SQLite file, or --url-env <NAME> or --url-file <path> for a libSQL server",
+    );
+  return { url: readUrl(ctx, v), authToken: readAuthToken(ctx, v) };
+}
+
+async function migrateSqlite(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
+  const source = sqliteSourceOf(ctx, v);
+  const seam = await openSqlite(source, (s) => ctx.addSecret(s));
+  plan.note(`${"file" in source ? "opening" : "connecting to"} ${seam.where}`);
+  return migrateCore(seam, SQLITE_CORE_MIGRATIONS, plan);
+}
+
+async function migrateMysql(ctx: Ctx, v: Values, plan: MigratePlan): Promise<MigrateRun> {
+  const url = readUrl(ctx, v);
+  const seam = openMysql(url, (s) => ctx.addSecret(s));
+  plan.note(`connecting to ${describeUrl(url)}`);
+  return migrateCore(seam, MYSQL_CORE_MIGRATIONS, plan);
 }
 
 /**
@@ -271,7 +383,12 @@ async function migrateD1(
 }
 
 /** The targets of `--target`. */
-const TARGETS = ["d1", "postgres"] as const;
+const TARGETS = ["d1", "postgres", "sqlite", "mysql"] as const;
+
+/** The flags of each kind of database (plan 12g Task 6). */
+const D1_ONLY = ["database", "config", "remote"] as const;
+const URL_FLAGS = ["url-env", "url-file"] as const;
+const SQLITE_ONLY = ["file", "auth-token-env", "auth-token-file"] as const;
 
 /** `authtempo migrate --target <...>` (spec 19): the version gate, the list, the apply, and the gate again. */
 export const migrateCommand: Command = {
@@ -285,15 +402,26 @@ export const migrateCommand: Command = {
     if (target === undefined)
       throw new UsageError(`name a target: --target ${TARGETS.join(" or --target ")}`);
     const tables = oneOf("tables", values.tables, ["core", "compat"] as const) ?? "core";
-    if (target === "postgres")
-      for (const flag of ["database", "config", "remote", "before-1.7"] as const)
+    if (target !== "d1")
+      for (const flag of D1_ONLY)
         if (values[flag] !== undefined) throw new UsageError(`--${flag} applies to --target d1`);
     if (target === "d1")
-      for (const flag of ["url-env", "url-file"] as const)
+      for (const flag of URL_FLAGS)
         if (values[flag] !== undefined)
-          throw new UsageError(`--${flag} applies to --target postgres`);
+          throw new UsageError(`--${flag} applies to --target postgres, mysql, or sqlite`);
+    if (target !== "sqlite")
+      for (const flag of SQLITE_ONLY)
+        if (values[flag] !== undefined)
+          throw new UsageError(`--${flag} applies to --target sqlite`);
+    if (values["before-1.7"] === true && target !== "d1" && target !== "sqlite")
+      throw new UsageError("--before-1.7 applies to --target d1 or sqlite");
     if (values["before-1.7"] === true && tables !== "compat")
       throw new UsageError("--before-1.7 applies to --tables compat");
+    // Owner decision 4 of plan 12g: the compat tables run on SQLite, never on MySQL.
+    if (tables === "compat" && target === "mysql")
+      throw new UsageError("--tables compat is not served on mysql (plan 12g, owner decision 4)");
+    if (tables === "compat" && target === "sqlite")
+      throw new UsageError("--tables compat is not served on sqlite yet (plan 12g Task 8b)");
     const dryRun = values["dry-run"] === true;
     const json = values.json === true;
     const say = sayer(ctx, json);
@@ -308,9 +436,13 @@ export const migrateCommand: Command = {
     }
     const plan: MigratePlan = { tables, dryRun, note: (line) => ctx.err(line) };
     const run =
-      project === null
-        ? await migratePostgres(ctx, values, plan)
-        : await migrateD1(ctx, values, plan, project);
+      project !== null
+        ? await migrateD1(ctx, values, plan, project)
+        : target === "sqlite"
+          ? await migrateSqlite(ctx, values, plan)
+          : target === "mysql"
+            ? await migrateMysql(ctx, values, plan)
+            : await migratePostgres(ctx, values, plan);
     for (const name of run.copied) say(`${dryRun ? "would copy" : "copied"} ${name}`);
     for (const name of dryRun ? run.pending : run.applied)
       say(`${dryRun ? "would apply" : "applied"} ${name}`);

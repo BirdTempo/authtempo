@@ -1,7 +1,10 @@
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { expectedD1Shape } from "@authtempo/adapter-d1";
+import { expectedMysqlShape } from "@authtempo/adapter-mysql";
 import { expectedPostgresShape } from "@authtempo/adapter-postgres";
+import { expectedSqliteShape } from "@authtempo/adapter-sqlite";
+import type { ExpectedShape, LiveShape } from "@authtempo/core/sql";
 import { COMMON_OPTIONS, oneOf, parseOrUsage } from "../args.js";
 import { type CheckInput, runChecks } from "../checks.js";
 import type { Command } from "../command.js";
@@ -18,14 +21,17 @@ import {
   readD1Shape,
   wranglerOf,
 } from "../seams/d1.js";
+import { openMysql } from "../seams/mysql.js";
 import {
   openPostgres,
   type PostgresSeam,
   readPostgresLiveShape,
   storageFailure,
 } from "../seams/postgres.js";
+import { openSqlite } from "../seams/sqlite.js";
 import { DEFAULT_URL_ENV, readSecret } from "../secrets.js";
 import { SCHEMA_VERSION } from "../version.js";
+import { readUrl, sqliteSourceOf } from "./migrate.js";
 
 const OPTIONS = {
   ...COMMON_OPTIONS,
@@ -35,6 +41,9 @@ const OPTIONS = {
   target: { type: "string" },
   "url-env": { type: "string" },
   "url-file": { type: "string" },
+  file: { type: "string" },
+  "auth-token-env": { type: "string" },
+  "auth-token-file": { type: "string" },
   database: { type: "string" },
   config: { type: "string" },
   remote: { type: "boolean" },
@@ -47,8 +56,56 @@ const OPTIONS = {
  */
 const compatRow = (text: string | null) => text !== null && text !== "0";
 
-const POSTGRES_FLAGS = ["url-env", "url-file"] as const;
+const URL_FLAGS = ["url-env", "url-file"] as const;
 const D1_FLAGS = ["database", "config", "remote"] as const;
+const SQLITE_FLAGS = ["file", "auth-token-env", "auth-token-file"] as const;
+
+/** The members of a SQLite or MySQL seam that the two schema checks call. */
+interface ReadSeam {
+  ping(): Promise<void>;
+  appliedCore(): Promise<string[]>;
+  schemaVersionText(): Promise<string | null>;
+  liveShape(): Promise<LiveShape>;
+  close(): Promise<void>;
+}
+
+/**
+ * The two schema checks on a seam of SQLite or MySQL (plan 12g Task 6). Each
+ * read opens the seam, reads, and closes it, as the Postgres reads do. A
+ * driver error leaves the seam as a Stop (exit 2). `compat` answers whether
+ * the database holds the compat tables.
+ */
+function seamInputs<S extends ReadSeam>(
+  open: () => Promise<S>,
+  note: () => void,
+  expected: ExpectedShape,
+  compat: (seam: S) => Promise<boolean>,
+): { readSchema: () => Promise<number | null>; shape: NonNullable<CheckInput["shape"]> } {
+  const using = async <T>(f: (seam: S) => Promise<T>): Promise<T> => {
+    const seam = await open();
+    try {
+      return await f(seam);
+    } finally {
+      await seam.close();
+    }
+  };
+  return {
+    readSchema: () => {
+      note();
+      return using(async (seam) => {
+        await seam.ping();
+        const applied = await seam.appliedCore();
+        // The rule of migrate: a version that is no whole number stops the run (exit 2).
+        return readableVersion(await seam.schemaVersionText(), applied.length);
+      });
+    },
+    shape: {
+      expected,
+      read: () => using((seam) => seam.liveShape()),
+      compat: () => using(compat),
+    },
+  };
+}
 
 /**
  * `authtempo check <base url>` (spec 19). It runs `runChecks` over the
@@ -69,13 +126,16 @@ export const checkCommand: Command = {
     const base = baseOf(positionals[0], { allowHttp: true });
     const basePath = basePathOf(v["base-path"]);
     const timeoutMs = timeoutOf(v.timeout);
-    const target = oneOf("target", v.target, ["d1", "postgres"] as const);
-    for (const flag of POSTGRES_FLAGS)
-      if (v[flag] !== undefined && target !== "postgres")
-        throw new UsageError(`--${flag} needs --target postgres`);
+    const target = oneOf("target", v.target, ["d1", "postgres", "sqlite", "mysql"] as const);
+    for (const flag of URL_FLAGS)
+      if (v[flag] !== undefined && (target === undefined || target === "d1"))
+        throw new UsageError(`--${flag} needs --target postgres, mysql, or sqlite`);
     for (const flag of D1_FLAGS)
       if (v[flag] !== undefined && target !== "d1")
         throw new UsageError(`--${flag} needs --target d1`);
+    for (const flag of SQLITE_FLAGS)
+      if (v[flag] !== undefined && target !== "sqlite")
+        throw new UsageError(`--${flag} needs --target sqlite`);
     let readSchema: (() => Promise<number | null>) | undefined;
     let shape: CheckInput["shape"];
     if (target === "postgres") {
@@ -123,6 +183,25 @@ export const checkCommand: Command = {
           }
         },
       };
+    } else if (target === "sqlite") {
+      const source = sqliteSourceOf(ctx, v);
+      const where =
+        "file" in source ? `opening ${source.file}` : `connecting to ${describeUrl(source.url)}`;
+      ({ readSchema, shape } = seamInputs(
+        () => openSqlite(source, (s) => ctx.addSecret(s), { readOnly: true }),
+        () => ctx.err(where),
+        expectedSqliteShape(),
+        async (seam) => compatRow(await seam.compatText()),
+      ));
+    } else if (target === "mysql") {
+      const url = readUrl(ctx, v);
+      ({ readSchema, shape } = seamInputs(
+        async () => openMysql(url, (s) => ctx.addSecret(s)),
+        () => ctx.err(`connecting to ${describeUrl(url)}`),
+        expectedMysqlShape(),
+        // Owner decision 4 of plan 12g: no compat tables on MySQL.
+        async () => false,
+      ));
     } else if (target === "d1") {
       const project = readD1Project(ctx, findWranglerConfig(ctx, v.config), v.database);
       if (!ctx.exists(wranglerOf(project.cwd)))

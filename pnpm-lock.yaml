@@ -1089,9 +1089,15 @@ importers:
       '@authtempo/adapter-d1':
         specifier: workspace:*
         version: link:../adapter-d1
+      '@authtempo/adapter-mysql':
+        specifier: workspace:*
+        version: link:../adapter-mysql
       '@authtempo/adapter-postgres':
         specifier: workspace:*
         version: link:../adapter-postgres
+      '@authtempo/adapter-sqlite':
+        specifier: workspace:*
+        version: link:../adapter-sqlite
       '@authtempo/compat-better-auth':
         specifier: workspace:*
         version: link:../compat-better-auth
@@ -1104,6 +1110,12 @@ importers:
       '@authtempo/legacy-hashes':
         specifier: workspace:*
         version: link:../legacy-hashes
+      '@libsql/client':
+        specifier: 0.18.0
+        version: 0.18.0
+      mysql2:
+        specifier: 3.24.5
+        version: 3.24.5(@types/node@24.19.1)
       postgres:
         specifier: 3.4.9
         version: 3.4.9

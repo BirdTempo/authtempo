@@ -1,3 +1,4 @@
+import { URL_AND_FILE_FLAGS } from "./check.js";
 import { COMMON_FLAGS, type HelpText } from "./types.js";
 
 export const MIGRATE_HELP: HelpText = {
@@ -8,6 +9,8 @@ export const MIGRATE_HELP: HelpText = {
   usage: [
     "authtempo migrate --target postgres [--url-env <NAME> | --url-file <path>] [--tables core|compat] [--dry-run]",
     "authtempo migrate --target d1 [--database <name>] [--config <path>] [--remote] [--tables core|compat [--before-1.7]] [--dry-run]",
+    "authtempo migrate --target sqlite (--file <path> | --url-env <NAME> | --url-file <path>) [--auth-token-env <NAME> | --auth-token-file <path>] [--dry-run]",
+    "authtempo migrate --target mysql [--url-env <NAME> | --url-file <path>] [--dry-run]",
   ],
   examples: [
     {
@@ -18,21 +21,25 @@ export const MIGRATE_HELP: HelpText = {
       line: "authtempo migrate --target d1 --database my-app --remote",
       says: "Apply the D1 migrations to the database on Cloudflare, through the wrangler of the project.",
     },
+    {
+      line: "authtempo migrate --target sqlite --file ./auth.db",
+      says: "Create or update the tables in a SQLite file.",
+    },
+    {
+      line: "authtempo migrate --target mysql --url-env DATABASE_URL --dry-run",
+      says: "List the migrations that a MySQL database lacks.",
+    },
   ],
   flags: [
-    { flag: "--target <d1|postgres>", says: "The kind of database. It has no default." },
+    {
+      flag: "--target <d1|postgres|sqlite|mysql>",
+      says: "The kind of database. It has no default.",
+    },
     {
       flag: "--tables <core|compat>",
       says: "Core's tables, or the Better Auth 1.7 tables of the compatibility package. The default is core.",
     },
-    {
-      flag: "--url-env <NAME>",
-      says: "Postgres: the variable that holds the connection string. The default is DATABASE_URL.",
-    },
-    {
-      flag: "--url-file <path>",
-      says: "Postgres: the file that holds the connection string. A dash reads stdin.",
-    },
+    ...URL_AND_FILE_FLAGS,
     {
       flag: "--database <name>",
       says: "D1: the database_name in the wrangler config. A project with one D1 database needs no name.",
@@ -64,5 +71,6 @@ export const MIGRATE_HELP: HelpText = {
   ],
   notes: [
     "With --tables compat, the command warns when the project holds better-auth below 1.7.7.",
+    "With --target sqlite --file, the command makes the file when it is missing.",
   ],
 };

@@ -10,6 +10,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-11c2-cli-additions.md "Task 7"
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 9"
+  - docs/superpowers/plans/2026-10-14-12g-adapters-and-generate.md "Task 6"
 sidebar:
   order: 5
 ---
@@ -30,6 +31,7 @@ The packages are not on a registry yet. In this repo, run each command below as 
 ```sh
 authtempo check https://api.example.com
 authtempo check https://api.example.com --target postgres --url-env DATABASE_URL --strict
+authtempo check https://api.example.com --target sqlite --file ./auth.db
 ```
 
 | Flag | What it does |
@@ -38,8 +40,10 @@ authtempo check https://api.example.com --target postgres --url-env DATABASE_URL
 | `--base-path <path>` | The `basePath` of the deployment. The default is `/auth`. |
 | `--timeout <seconds>` | The time limit of each request, from 1 to 120. The default is 10. |
 | `--strict` | Counts each skipped check as a failure, except `compat_database`. |
-| `--target postgres`, `--target d1` | Read the schema version and the table shape from this kind of database. Without it, the two schema checks skip. |
-| `--url-env <NAME>`, `--url-file <path>` | Postgres: the connection string. The default variable is `DATABASE_URL`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
+| `--target postgres`, `--target d1`, `--target sqlite`, `--target mysql` | Read the schema version and the table shape from this kind of database. Without it, the two schema checks skip. |
+| `--url-env <NAME>`, `--url-file <path>` | Postgres and MySQL: the connection string. The default variable is `DATABASE_URL`. SQLite: a libSQL URL. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
+| `--file <path>` | SQLite: the database file. The command opens it read-only and makes no file. |
+| `--auth-token-env <NAME>`, `--auth-token-file <path>` | SQLite with a libSQL URL: the token. The default variable is `LIBSQL_AUTH_TOKEN`. With no such variable, the command sends no token. |
 | `--database <name>`, `--config <path>`, `--remote` | D1: the database of the wrangler config, as for `authtempo migrate`. |
 | `--json` | Prints `{ base, checks, warnings, summary, exit, stopped }`. `exit`: the exit code of the run. `stopped`: the reason of a stop or a usage error, or null. |
 | `-h`, `--help` | Prints the complete help. The command ignores every other argument. |

@@ -541,7 +541,7 @@ describe("authtempo check (spec 19)", () => {
   it("needs --target for the inputs of a database", async () => {
     const io = fakeIo({ fetch: deployment(healthy()) });
     expect(await main(["check", BASE, "--url-env", "DATABASE_URL"], io)).toBe(2);
-    expect(io.stderr[0]).toBe("--url-env needs --target postgres");
+    expect(io.stderr[0]).toBe("--url-env needs --target postgres, mysql, or sqlite");
   });
 
   it("reads the schema version of Postgres with --target postgres", async () => {

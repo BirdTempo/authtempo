@@ -48,7 +48,13 @@ export const INFO_MAX_KEYS = 400;
 /** A tool name or a tool version as the report prints it: the user agent and the packageManager field are untrusted text. */
 const TOOL_WORD = /^[A-Za-z0-9._-]{1,40}$/;
 /** The adapter packages, by their name under the scope. */
-const ADAPTERS = ["adapter-d1", "adapter-postgres", "compat-better-auth"] as const;
+const ADAPTERS = [
+  "adapter-d1",
+  "adapter-mysql",
+  "adapter-postgres",
+  "adapter-sqlite",
+  "compat-better-auth",
+] as const;
 const SCOPE = "@authtempo/";
 /** The two example files of a template that list the secrets of a stack with no value. */
 const EXAMPLE_FILES = new Set([".dev.vars.example", ".env.example"]);

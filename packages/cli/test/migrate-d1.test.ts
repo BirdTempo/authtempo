@@ -415,10 +415,14 @@ describe("authtempo migrate --target d1 (spec 19)", { timeout: 300_000 }, () => 
     const r = migrate(p.dir, ["--url-env", "DATABASE_URL"]);
     expect(r.status).toBe(2);
     const usage = linesOf(r.stderr).filter((l) => l.startsWith("Usage: "));
-    expect(usage).toHaveLength(2);
+    expect(usage).toHaveLength(4);
     expect(usage[0]).toContain("--target postgres");
     expect(usage[1]).toContain("--target d1");
     expect(usage[1]).toContain("--config <path>");
     expect(usage[1]).toContain("--before-1.7");
+    // Plan 12g Task 6: one usage line for each new target.
+    expect(usage[2]).toContain("--target sqlite");
+    expect(usage[2]).toContain("--file <path>");
+    expect(usage[3]).toContain("--target mysql");
   });
 });
