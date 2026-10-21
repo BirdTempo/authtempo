@@ -6,6 +6,7 @@ import {
   statementFault,
   union,
 } from "@authtempo/core/access";
+import { movedPrefixFault } from "@authtempo/core/credentials";
 import { PASSWORD_MAX_LENGTH } from "../errors.js";
 import {
   CORE_KEY,
@@ -14,6 +15,7 @@ import {
   toCoreName,
   toCoreNames,
 } from "../role-map.js";
+import { WINDOW_CALLS_MAX, WINDOW_SECONDS_MAX } from "../storage/api-keys.js";
 import {
   type BetterAuthOptions,
   COMPAT_PLUGIN,
@@ -396,6 +398,39 @@ const wholeSecondsMs: Rule = (v, p, out) => {
     refuse(out, p, `core takes whole seconds: a positive multiple of 1000 ms ${ITEM_20}`);
 };
 
+/**
+ * A moved key prefix, held to core's `tokens.movedPrefixes` rule here, so the
+ * refusal names the app's own option and not core's (final review of plan 12k).
+ */
+const movedPrefix: Rule = (v, p, out) => {
+  if (typeof v !== "string") {
+    refuse(out, p, "expected a string");
+    return;
+  }
+  const fault = movedPrefixFault(v);
+  if (fault === "form")
+    refuse(
+      out,
+      p,
+      `core takes a lower-case letter, at most 15 more letters or digits, and _ ${ITEM_20}`,
+    );
+  else if (fault === "shadow")
+    refuse(out, p, `a prefix that starts a core prefix, or that one starts, is refused ${ITEM_20}`);
+};
+
+/** The window of a key in milliseconds: core's window holds 1 to 86400 whole seconds. */
+const keyWindowMs: Rule = (v, p, out) => {
+  wholeSecondsMs(v, p, out);
+  if (typeof v === "number" && v > WINDOW_SECONDS_MAX * 1000)
+    refuse(out, p, `core's window holds at most ${WINDOW_SECONDS_MAX} seconds ${ITEM_20}`);
+};
+
+/** The max of a key window: core takes 1 to 100000 calls. */
+const keyWindowMax: Rule = (v, p, out) => {
+  if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > WINDOW_CALLS_MAX)
+    refuse(out, p, `core takes a max of 1 to ${WINDOW_CALLS_MAX} calls ${ITEM_20}`);
+};
+
 /** `apiKeyHeaders`: core reads a key from `Authorization: Bearer` only. */
 const bearerHeader: Rule = (v, p, out) => {
   const list = Array.isArray(v) ? v : [v];
@@ -433,7 +468,7 @@ const apiKeyRule = object({
     charactersLength: refused(`core's hint holds 8 characters after the prefix ${ITEM_20}`),
   }),
   defaultKeyLength: noted("core's key holds 32 random bytes in base64url after its prefix"),
-  defaultPrefix: string,
+  defaultPrefix: movedPrefix,
   maximumPrefixLength: noted(
     "a new key has core's prefix, so the create body's prefix is not used",
   ),
@@ -464,8 +499,8 @@ const apiKeyRule = object({
   }),
   rateLimit: object({
     enabled: boolean,
-    timeWindow: wholeSecondsMs,
-    maxRequests: positiveInteger,
+    timeWindow: keyWindowMs,
+    maxRequests: keyWindowMax,
   }),
   enableSessionForAPIKeys: only(false, "a key never acts as a session, spec 8.8 item 6"),
   permissions: object({ defaultPermissions: statementSet }),
@@ -950,8 +985,11 @@ const TOP: Record<string, Rule> = {
         if (typeof rank !== "number" || !Number.isSafeInteger(rank) || rank < 1)
           refuse(out, path, `expected a positive integer ${ITEM_18}`);
       }),
-    // Plan 12k Task 12: core's tokens.movedPrefixes rule checks each entry at createAuth.
-    movedKeyPrefixes: stringList,
+    // Plan 12k Task 12: core's tokens.movedPrefixes rule, on each entry under this option's name.
+    movedKeyPrefixes: (v, p, out) => {
+      if (!Array.isArray(v)) refuse(out, p, "expected a list of strings");
+      else for (const [i, x] of v.entries()) movedPrefix(x, `${p}[${i}]`, out);
+    },
   }),
   databaseHooks,
   hooks: refused(NO_REQUEST_HOOKS),

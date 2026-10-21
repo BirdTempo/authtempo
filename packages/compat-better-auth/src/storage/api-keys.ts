@@ -102,9 +102,13 @@ const NAMELESS = "Moved key";
 const SOURCE = "better-auth:apikey";
 /** Better Auth's digest: SHA-256 in base64url with no padding (`defaultKeyHasher`). */
 const DIGEST_RE = /^[A-Za-z0-9_-]{43}$/;
-/** Core's window bounds (core config.ts `validWindow`): a longer window is cut to one day. */
-const WINDOW_SECONDS_MAX = 86_400;
-const WINDOW_CALLS_MAX = 100_000;
+/**
+ * Core's window bounds (core engine/token-use.ts `validWindow`; core does not
+ * export them). The move cuts a longer window to one day, and checkOptions
+ * refuses a plugin window outside them.
+ */
+export const WINDOW_SECONDS_MAX = 86_400;
+export const WINDOW_CALLS_MAX = 100_000;
 const COUNT_MAX = 2_147_483_647;
 
 /** The hex of a base64url digest, the form of core's `tokenHash`. */

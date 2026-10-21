@@ -158,6 +158,23 @@ describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
     );
   });
 
+  it("refuses a prefix or a window outside core's rule under the app's own option", () => {
+    // Final review of plan 12k: core's refusal named tokens.movedPrefixes and tokens.defaultRateLimit.
+    const o = options({
+      defaultPrefix: "sk_live_",
+      rateLimit: { enabled: true, timeWindow: 172_800_000, maxRequests: 200_000 },
+    });
+    const moved = { ...o, authtempo: { ...o.authtempo, movedKeyPrefixes: ["ci_", "tk_"] } };
+    expect(checkOptions(moved).refusals).toEqual([
+      "authtempo.movedKeyPrefixes[1]: a prefix that starts a core prefix, or that one starts, is refused (spec 29 item 20)",
+      "plugins[api-key].defaultPrefix: core takes a lower-case letter, at most 15 more letters or digits, and _ (spec 29 item 20)",
+      "plugins[api-key].rateLimit.maxRequests: core takes a max of 1 to 100000 calls (spec 29 item 20)",
+      "plugins[api-key].rateLimit.timeWindow: core's window holds at most 86400 seconds (spec 29 item 20)",
+    ]);
+    expect(() => betterAuth(moved)).toThrowError(/plugins\[api-key\]\.defaultPrefix/);
+    expect(checkOptions(options({ defaultPrefix: "laaa_" })).refusals).toEqual([]);
+  });
+
   it("refuses a second argument of apiKey, which JavaScript would drop", () => {
     // Better Auth 1.7.5 takes apiKey(configurations, options); the shim's type has one argument.
     const loose = apiKey as (...args: unknown[]) => ReturnType<typeof apiKey>;
