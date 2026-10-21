@@ -596,13 +596,14 @@ export async function deleteOrganization(
   const organization = publicOrganization(s.value.organization);
   const deleted = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
-      // The sessions that act in the organization come before its row, in the order of
-      // user-hold.ts (ruling 49 of plan 12k). The delete clears their active organization last.
-      await tx.lockInOrder?.("session", [{ field: "activeOrganizationId", op: "eq", value: id }]);
       await runBefore("organization.beforeDelete", hooks.beforeDelete, {
         organization,
         user: input.user,
       });
+      // The sessions that act in the organization come before its row, in the order of
+      // user-hold.ts (ruling 49 of plan 12k). The delete clears their active organization last.
+      // The lock comes after the hook, so the hook can write these sessions with no wait.
+      await tx.lockInOrder?.("session", [{ field: "activeOrganizationId", op: "eq", value: id }]);
       await deleteOrganizationRows(tx, id);
       return ok(true);
     }),

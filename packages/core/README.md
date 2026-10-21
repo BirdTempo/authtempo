@@ -1213,14 +1213,14 @@ const auth = createAuth({
 | Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row |
 | Invitation accept | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the accepting user's row; for a new member with `membersPerOrganization`, the organization row; each team row of the invitation |
 | Invite | `organization.beforeInvite` | with `pendingInvitationsPerOrganization`, the organization row |
-| Member removal or leave | `organization.beforeRemoveMember` | the person's user row; for an owner or with `revokeTokens`, the organization row; for a loss of the platform role, the sessions of the person and of each impersonation that the person opened |
+| Member removal or leave | `organization.beforeRemoveMember` | the person's user row and sessions; for an owner or with `revokeTokens`, the organization row; for a loss of the platform role, the sessions of each impersonation that the person opened |
 | Member role change | `organization.beforeUpdateMemberRole` | for an owner demotion, the organization row; for a loss of the platform role, the member's user row and the sessions of the member and of each impersonation that the member opened |
 | Team create | `organization.beforeCreateTeam` | the organization row |
 | Team delete | `organization.beforeDeleteTeam` | the sessions that act in the team; with `keepLastTeam`, the organization row; on Postgres, the team row |
 | Team member add | `organization.beforeAddTeamMember` | the added user's row and the team row |
 | Team member removal | `organization.beforeRemoveTeamMember` | the sessions of the person and the team row |
 | Identity unlink | `identity.beforeUnlink` | the user's row |
-| Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row; when the user opened an impersonation, the sessions of the user and of each impersonation that the user opened |
+| Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row and sessions; when the user opened an impersonation, the sessions of each impersonation that the user opened |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |
 | Impersonation start | `session.beforeCreate` | the operator's user row |
 
