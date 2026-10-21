@@ -2,7 +2,7 @@ import {
   PAGE_MAX,
   PROOF_MAX_AGE_MS,
   PROOF_METHODS,
-  REASON_MAX,
+  REASON_RULE,
   REFERENCE_MAX,
   TOOL_CALLS_PER_HOUR,
 } from "../operator-tools.js";
@@ -46,7 +46,7 @@ export const GROUP_EXITS: HelpText["exits"] = [
 /** The flag of the reason of a write. */
 export const REASON_FLAG: HelpFlag = {
   flag: "--reason <text>",
-  says: `The reason of the act, from 1 to ${REASON_MAX} characters with no control character. The audit row holds it.`,
+  says: `The reason of the act, ${REASON_RULE}. The audit row holds it.`,
 };
 
 /** The flags of the confirmation rule of each write, after the operator flags. */

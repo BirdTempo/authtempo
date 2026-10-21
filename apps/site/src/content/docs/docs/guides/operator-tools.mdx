@@ -65,7 +65,7 @@ The routes are under `<basePath>/operator/`. [Routes](/docs/reference/routes/#op
 - A request with an operator secret and a session answers 401 `unauthorized`: it has no single actor.
 - A route of a tool that is off answers 404, the answer of a path that does not exist. An in-process call answers `not_found`.
 - Each answer has `cache-control: no-store`.
-- Each write reads a JSON body only. Each write takes a `reason` of 1 to 500 characters with no control character.
+- Each write reads a JSON body only. Each write takes a `reason`: 1 to 500 characters with no control, format, or separator character and no lone surrogate.
 - A secret call counts on `operator-users:ip:<ip>` before the compare, 600 an hour. A secret that matches also counts on `operator-users:secret:<name>`, 600 an hour from any IP.
 - A platform operator counts on `operator:user:<userId>`, 600 an hour. [Limits](/docs/reference/limits/) lists each key.
 

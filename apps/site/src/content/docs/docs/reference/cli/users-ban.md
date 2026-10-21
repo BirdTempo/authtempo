@@ -31,7 +31,7 @@ authtempo users ban https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3 --reason 
 | --- | --- |
 | `<base url>` | The origin of the API, with no path. |
 | `<user id>` | The id of the user. `authtempo users search` finds it by an address. |
-| `--reason <text>` | The reason of the act, from 1 to 500 characters with no control character. The audit row holds it. |
+| `--reason <text>` | The reason of the act, 1 to 500 characters with no control, format, or separator character and no lone surrogate. The audit row holds it. |
 | `--until <date>` | The end of the ban: a date and time with a zone, from 1 minute to 3650 days after now. Without it, the ban has no end. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--token-file <path>` | The file of the operator secret. A dash reads stdin, and then the command needs `--yes`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |

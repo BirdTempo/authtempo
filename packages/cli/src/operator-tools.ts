@@ -61,13 +61,20 @@ export const PAGE_MAX = 100;
 export const END_ALL_MAX = 1000;
 
 /**
+ * The reason rule of core's `isOperatorReason` in words. The CLI error, the
+ * help, and each docs copy say it, and a site test holds each copy to it
+ * (ruling 65 of plan 12f).
+ */
+export const REASON_RULE = `1 to ${REASON_MAX} characters with no control, format, or separator character and no lone surrogate`;
+
+/**
  * Why core refuses a reason, or null. The rule is core's own
  * `isOperatorReason`, so the CLI and the engine cannot drift. The CLI
  * checks before any request, so a bad reason costs none of the 600 calls.
  */
 export function reasonProblem(reason: string): string | null {
   if (isOperatorReason(reason)) return null;
-  return `--reason is 1 to ${REASON_MAX} characters with no control, format, or separator character and no lone surrogate`;
+  return `--reason is ${REASON_RULE}`;
 }
 
 /** The reason of a write, or a usage error. Each write needs one: core writes it in the audit row. */

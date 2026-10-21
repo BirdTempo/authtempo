@@ -271,8 +271,9 @@ only, as for `keys rotate`.
   and a warning). A `next` that does not move, or a stop after the first
   page, stops with exit 2. The command then prints the rows read before it.
 - `users ban|unban|platform-role|second-factor-off`, `sessions end|end-all`,
-  and `create-admin` need `--reason` (1 to 500 characters with no control
-  character, checked before any request). With no terminal, or with
+  and `create-admin` need `--reason` (1 to 500 characters with no control,
+  format, or separator character and no lone surrogate, checked before any
+  request). With no terminal, or with
   `--no-input`, they need `--yes`. Each `users` write and `create-admin`
   writes one audit row, and the command prints its id.
 - A ban or a revoke that answers `familyEndFailed: true` prints its line,

@@ -32,7 +32,7 @@ authtempo users second-factor-off https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1
 | --- | --- |
 | `<base url>` | The origin of the API, with no path. |
 | `<user id>` | The id of the user. `authtempo users search` finds it by an address. |
-| `--reason <text>` | The reason of the act, from 1 to 500 characters with no control character. The audit row holds it. |
+| `--reason <text>` | The reason of the act, 1 to 500 characters with no control, format, or separator character and no lone surrogate. The audit row holds it. |
 | `--proof-method <method>` | How the identity was checked: document, in_person, video, knowledge, or other. |
 | `--proof-reference <text>` | The case id of the check in your own system, from 1 to 200 characters. Never the evidence itself. |
 | `--proof-checked-at <date>` | The time of the check: a date and time with a zone, at most 7 days old. The deployment refuses a time after its own clock. |

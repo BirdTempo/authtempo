@@ -24,6 +24,8 @@ export { type Fetcher, HostError } from "./net.js";
 export {
   bannedText,
   familyEndWarning,
+  REASON_RULE,
+  reasonProblem,
   secretHashLine,
   USER_HEADER,
   userRow,

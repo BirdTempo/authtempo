@@ -96,7 +96,7 @@ An email code of 8 digits divides each figure of its row by 100.
 - Core checks no proof of a factor disable. The audit row and `hooks.operator.beforeAction` are the controls.
 - Core trusts an app actor. A hole in the app's admin route acts with every scope, and an in-process call counts on no limiter.
 - A person with write access to the database can change an audit row. On D1 an act can stay with no row when the Worker stops inside it. `hooks.operator.afterAction` sends each row to a separate system.
-- The reason of an audit row can hold U+0085 and U+202E: the rule refuses only C0 control characters and DEL. U+202E turns the order of the text after it, so show a reason as plain data.
+- The reason of an audit row is 1 to 500 characters with no control, format, or separator character and no lone surrogate. So the rule refuses U+0085 and U+202E. The zero-width non-joiner and joiner pass. Show a reason as plain data all the same.
 - The account delete keeps the audit rows of the user. Core has no retention rule for them, so the app sets one.
 - A legacy password hash verifies slower than PBKDF2. The response time shows an address that is not yet migrated.
 - Off Workers, a caller can set `cf-connecting-ip`. The app must pass `clientIp`, or every per-IP limit fails open.
