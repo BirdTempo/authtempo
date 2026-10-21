@@ -1,12 +1,14 @@
 import { type ModelName, schema } from "@authtempo/core";
+import { auxColumnType } from "@authtempo/core/ddl";
 import {
+  AUX_TABLES,
   columnName,
   type ExpectedShape,
   type ExpectedTable,
   indexName,
   type LiveShape,
   type LiveTable,
-  META_TABLE,
+  POSTGRES,
   type ShapeIndex,
   TABLES,
   uniqueIndexName,
@@ -44,32 +46,22 @@ function modelTable(model: ModelName): ExpectedTable {
 /**
  * The three tables that the Postgres migrations make beside `schema`. A
  * primary key column is NOT NULL in Postgres, so `notNull` is true for it.
+ * `ta_meta` and `ta_limit` (`src/migrations/0001_schema_v1.ts` and
+ * `0003_schema_v3.ts`) come from core's `AUX_TABLES` and its column map
+ * (ruling 12 of plan 12g). `ta_migrations` is the runner's own table.
  */
 const OTHER_TABLES: readonly ExpectedTable[] = [
-  // src/migrations/0001_schema_v1.ts:10-13
-  {
-    name: META_TABLE,
-    columns: [
-      { name: "key", type: "text", notNull: true },
-      { name: "value", type: "text", notNull: true },
-    ],
-    primaryKey: ["key"],
+  ...AUX_TABLES.map((t) => ({
+    name: t.name,
+    columns: t.columns.map((c) => ({
+      name: c.name,
+      type: auxColumnType(POSTGRES, t.name, c.name),
+      notNull: true,
+    })),
+    primaryKey: t.primaryKey,
     unique: [],
-    indexes: [],
-  },
-  // src/migrations/0003_schema_v3.ts:12-18
-  {
-    name: "ta_limit",
-    columns: [
-      { name: "key", type: "text", notNull: true },
-      { name: "window_start", type: "bigint", notNull: true },
-      { name: "count", type: "bigint", notNull: true },
-      { name: "expires_at", type: "bigint", notNull: true },
-    ],
-    primaryKey: ["key"],
-    unique: [],
-    indexes: [{ name: "ix_ta_limit__expires_at", columns: ["expires_at"] }],
-  },
+    indexes: t.indexes,
+  })),
   // src/migrations.ts:52, the list of applied migrations that applyPostgresMigrations keeps.
   {
     name: "ta_migrations",

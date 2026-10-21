@@ -1,5 +1,7 @@
 import { type ModelName, schema } from "@authtempo/core";
+import { auxColumnType } from "@authtempo/core/ddl";
 import {
+  AUX_TABLES,
   columnName,
   type ExpectedShape,
   type ExpectedTable,
@@ -7,8 +9,8 @@ import {
   indexName,
   type LiveShape,
   type LiveTable,
-  META_TABLE,
   type ShapeIndex,
+  SQLITE,
   TABLES,
   uniqueIndexName,
 } from "@authtempo/core/sql";
@@ -61,36 +63,23 @@ function modelTable(model: ModelName): ExpectedTable {
 }
 
 /**
- * The two tables that the D1 migrations make beside `schema`. Wrangler keeps
- * its own list of applied migrations in `d1_migrations`, which has no `ta_`
- * prefix, so the shape does not hold it.
+ * The two tables that the D1 migrations make beside `schema`
+ * (`migrations/0001_schema_v1.sql` and `0003_schema_v3.sql`), from core's
+ * `AUX_TABLES` and its column map (ruling 12 of plan 12g). Each column is
+ * NOT NULL. Wrangler keeps its own list of applied migrations in
+ * `d1_migrations`, which has no `ta_` prefix, so the shape does not hold it.
  */
-const OTHER_TABLES: readonly ExpectedTable[] = [
-  // migrations/0001_schema_v1.sql:7-10
-  {
-    name: META_TABLE,
-    columns: [
-      { name: "key", type: "TEXT", notNull: true },
-      { name: "value", type: "TEXT", notNull: true },
-    ],
-    primaryKey: ["key"],
-    unique: [],
-    indexes: [],
-  },
-  // migrations/0003_schema_v3.sql:8-14
-  {
-    name: "ta_limit",
-    columns: [
-      { name: "key", type: "TEXT", notNull: true },
-      { name: "window_start", type: "INTEGER", notNull: true },
-      { name: "count", type: "INTEGER", notNull: true },
-      { name: "expires_at", type: "INTEGER", notNull: true },
-    ],
-    primaryKey: ["key"],
-    unique: [],
-    indexes: [{ name: "ix_ta_limit__expires_at", columns: ["expires_at"] }],
-  },
-];
+const OTHER_TABLES: readonly ExpectedTable[] = AUX_TABLES.map((t) => ({
+  name: t.name,
+  columns: t.columns.map((c) => ({
+    name: c.name,
+    type: auxColumnType(SQLITE, t.name, c.name),
+    notNull: true,
+  })),
+  primaryKey: t.primaryKey,
+  unique: [],
+  indexes: t.indexes,
+}));
 
 /**
  * The tables that the D1 migrations of this package make, sorted by name

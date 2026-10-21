@@ -32,6 +32,10 @@
       "types": "./dist/storage/ddl.d.ts",
       "default": "./dist/storage/ddl.js"
     },
+    "./shape-conformance": {
+      "types": "./dist/storage/shape-conformance.d.ts",
+      "default": "./dist/storage/shape-conformance.js"
+    },
     "./operator-secret": {
       "types": "./dist/operator-secret.d.ts",
       "default": "./dist/operator-secret.js"

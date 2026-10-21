@@ -1,5 +1,15 @@
-import { type FieldType, type ModelName, schema } from "../schema.js";
-import { AUX_TABLES, type Dialect } from "./sql.js";
+import { type FieldType, type ModelName, SCHEMA_VERSION, schema } from "../schema.js";
+import {
+  AUX_TABLES,
+  type AuxTable,
+  columnName,
+  type Dialect,
+  indexName,
+  META_TABLE,
+  SCHEMA_VERSION_KEY,
+  TABLES,
+  uniqueIndexName,
+} from "./sql.js";
 
 /**
  * The column facts of each dialect (plan 12g). One map for every dialect:
@@ -285,4 +295,122 @@ export function mysqlKeyBytes(d: Dialect, model: ModelName, fields: readonly str
     bytes += (row.prefix ?? row.length) * (row.charset === "ascii" ? 1 : 4);
   }
   return bytes;
+}
+
+/**
+ * The tables that a migration runner makes for its own records. They are a
+ * fact of each runner, not of the schema, so `schemaDdl` does not make them
+ * and the shape check leaves them out. D1's runner table is wrangler's
+ * `d1_migrations`, which has no `ta_` prefix, so no shape read sees it.
+ */
+export const RUNNER_TABLES: readonly string[] = ["ta_migrations"];
+
+/** The table options of each MySQL table: a binary collation, so `=` compares bytes. */
+const MYSQL_TABLE_OPTIONS = "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin";
+
+/** One table of the DDL: its columns, its primary key, its unique keys, and its plain indexes. */
+interface DdlTable {
+  name: string;
+  columns: readonly { name: string; type: string; notNull: boolean }[];
+  primaryKey: readonly string[];
+  unique: readonly { name: string; columns: readonly string[] }[];
+  indexes: readonly {
+    name: string;
+    columns: readonly string[];
+    prefixes: readonly (number | undefined)[];
+  }[];
+}
+
+function modelTable(d: Dialect, model: ModelName): DdlTable {
+  const def = schema[model];
+  const fields = def.fields as Record<string, { nullable?: boolean }>;
+  const prefix = (field: string) =>
+    d.name === "mysql" ? MYSQL_STRINGS[`${model}.${field}`]?.prefix : undefined;
+  return {
+    name: TABLES[model],
+    columns: Object.entries(fields).map(([field, f]) => ({
+      name: columnName(field),
+      type: columnType(d, model, field),
+      notNull: f.nullable !== true,
+    })),
+    primaryKey: ["id"],
+    unique: def.unique.map((f) => ({
+      name: uniqueIndexName(model, f),
+      columns: f.map(columnName),
+    })),
+    indexes: def.indexes.map((f) => ({
+      name: indexName(model, f),
+      columns: f.map(columnName),
+      prefixes: f.map(prefix),
+    })),
+  };
+}
+
+function auxTable(d: Dialect, t: AuxTable): DdlTable {
+  return {
+    name: t.name,
+    columns: t.columns.map((c) => ({
+      name: c.name,
+      type: auxColumnType(d, t.name, c.name),
+      notNull: true,
+    })),
+    primaryKey: t.primaryKey,
+    unique: [],
+    indexes: t.indexes.map((ix) => ({ ...ix, prefixes: ix.columns.map(() => undefined) })),
+  };
+}
+
+/** The column line. A one-column primary key is inline on SQLite and Postgres, in the form of their migrations. */
+function columnLine(d: Dialect, t: DdlTable, c: DdlTable["columns"][number]): string {
+  const inlineKey = d.name !== "mysql" && t.primaryKey.length === 1 && t.primaryKey[0] === c.name;
+  if (inlineKey)
+    // D1: `id TEXT PRIMARY KEY NOT NULL` (0007_schema_v7.sql). Postgres:
+    // `id text PRIMARY KEY` (0007_schema_v7.ts); its key is NOT NULL.
+    return `${d.quote(c.name)} ${c.type} PRIMARY KEY${d.name === "sqlite" ? " NOT NULL" : ""}`;
+  return `${d.quote(c.name)} ${c.type}${c.notNull ? " NOT NULL" : ""}`;
+}
+
+const keyList = (d: Dialect, columns: readonly string[]) => columns.map(d.quote).join(", ");
+
+function tableStatements(d: Dialect, t: DdlTable): string[] {
+  const lines = t.columns.map((c) => columnLine(d, t, c));
+  if (d.name !== "mysql") {
+    if (t.primaryKey.length > 1) lines.push(`PRIMARY KEY (${keyList(d, t.primaryKey)})`);
+    return [
+      `CREATE TABLE ${t.name} (\n  ${lines.join(",\n  ")}\n)`,
+      ...t.unique.map(
+        (u) => `CREATE UNIQUE INDEX ${u.name} ON ${t.name} (${keyList(d, u.columns)})`,
+      ),
+      ...t.indexes.map((ix) => `CREATE INDEX ${ix.name} ON ${t.name} (${keyList(d, ix.columns)})`),
+    ];
+  }
+  // MySQL: each key and index is inside its table, one statement per table.
+  // Only a plain index takes a prefix; a unique key never does.
+  lines.push(`PRIMARY KEY (${keyList(d, t.primaryKey)})`);
+  for (const u of t.unique) lines.push(`UNIQUE KEY ${d.quote(u.name)} (${keyList(d, u.columns)})`);
+  for (const ix of t.indexes) {
+    const cols = ix.columns.map((c, i) => {
+      const n = ix.prefixes[i];
+      return n === undefined ? d.quote(c) : `${d.quote(c)}(${n})`;
+    });
+    lines.push(`KEY ${d.quote(ix.name)} (${cols.join(", ")})`);
+  }
+  return [`CREATE TABLE ${d.quote(t.name)} (\n  ${lines.join(",\n  ")}\n) ${MYSQL_TABLE_OPTIONS}`];
+}
+
+/**
+ * The full DDL of `SCHEMA_VERSION` on `d` (plan 12g), one statement per
+ * entry: each model in schema order with its columns in field order, then
+ * its unique keys and its indexes with core's names, then `AUX_TABLES`, then
+ * the version row. No comment and no `IF NOT EXISTS`, so two calls give the
+ * same text. The shipped D1 and Postgres migrations stay records written by
+ * hand; the shape check holds them equal to this text.
+ */
+export function schemaDdl(d: Dialect): string[] {
+  const models = Object.keys(schema) as ModelName[];
+  const tables = [...models.map((m) => modelTable(d, m)), ...AUX_TABLES.map((t) => auxTable(d, t))];
+  return [
+    ...tables.flatMap((t) => tableStatements(d, t)),
+    `INSERT INTO ${d.quote(META_TABLE)} (${d.quote("key")}, ${d.quote("value")}) VALUES ('${SCHEMA_VERSION_KEY}', '${SCHEMA_VERSION}')`,
+  ];
 }

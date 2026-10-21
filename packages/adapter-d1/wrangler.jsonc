@@ -23,6 +23,12 @@
       "binding": "STAGED",
       "database_name": "authtempo-test-staged",
       "database_id": "authtempo-test-staged"
+    },
+    {
+      // An empty database for the DDL side of the shape check (plan 12g).
+      "binding": "DDL_DB",
+      "database_name": "authtempo-test-ddl",
+      "database_id": "ddl-test"
     }
   ]
 }

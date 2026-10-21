@@ -293,6 +293,11 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
   },
   {
     pkg: "@authtempo/core",
+    entry: "./shape-conformance",
+    reason: "the shape check of the migrations, for an adapter's own tests (plan 12g)",
+  },
+  {
+    pkg: "@authtempo/core",
     entry: "./testing",
     reason: "the soft authenticator and the test helpers",
   },

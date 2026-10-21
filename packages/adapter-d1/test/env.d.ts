@@ -7,6 +7,7 @@ declare global {
     interface Env {
       DB: D1Database;
       STAGED: D1Database;
+      DDL_DB: D1Database;
       TEST_MIGRATIONS: D1Migration[];
     }
   }
