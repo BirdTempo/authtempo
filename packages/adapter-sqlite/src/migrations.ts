@@ -4,7 +4,8 @@ import { D1_FILES } from "./migrations.generated.js";
 /** The SQLite migrations: the D1 files, copied at build into one module (plan 12g). */
 export const SQLITE_MIGRATIONS: readonly { name: string; sql: string }[] = D1_FILES;
 
-const CREATE =
+/** The runner's own table. `authtempo generate` prints this text, so the two cannot differ. */
+export const SQLITE_MIGRATIONS_TABLE_SQL =
   "CREATE TABLE IF NOT EXISTS ta_migrations (name TEXT PRIMARY KEY NOT NULL, applied_at INTEGER NOT NULL)";
 const DONE = "SELECT 1 FROM ta_migrations WHERE name = ?";
 const RECORD = "INSERT INTO ta_migrations (name, applied_at) VALUES (?, ?)";
@@ -20,7 +21,7 @@ export async function runSqliteMigrations(
   driver: SqliteDriver,
   list: readonly { name: string; sql: string }[],
 ): Promise<string[]> {
-  await driver.db.prepare(CREATE).run();
+  await driver.db.prepare(SQLITE_MIGRATIONS_TABLE_SQL).run();
   const ran: string[] = [];
   for (const m of list) {
     const done = { sql: DONE, params: [m.name] };

@@ -33,6 +33,7 @@ const NAMES = [
   "sessions",
   "audit",
   "create-admin",
+  "generate",
 ];
 
 /**
@@ -52,13 +53,14 @@ const NEEDS_ARGUMENT = [
   "sessions",
   "audit",
   "create-admin",
+  "generate",
 ] as const;
 
 /** The commands that run with no argument (ruling 5): `secret` prints a value, and `info` prints a report. */
 const NO_ARGUMENT = ["secret", "info"] as const;
 
 describe("the common rules (spec 19)", () => {
-  it("has the twelve commands in the order of the root help", () => {
+  it("has the thirteen commands in the order of the root help", () => {
     expect(Object.keys(COMMANDS)).toEqual(NAMES);
   });
 

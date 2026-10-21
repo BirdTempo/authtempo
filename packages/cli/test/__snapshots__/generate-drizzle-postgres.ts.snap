@@ -1,0 +1,535 @@
+// authtempo schema version 13, dialect postgres, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
+// Keep this file out of the schema glob of drizzle.config.ts, so drizzle-kit generate writes no migration for it.
+// Set tablesFilter in drizzle.config.ts to the table patterns of the app, so drizzle-kit push and pull leave the ta_ tables alone.
+// The Drizzle Kit page documents no negation form for tablesFilter (orm.drizzle.team/docs/drizzle-config-file, read 2026-10-22).
+
+import { bigint, boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+
+export const taUser = pgTable(
+  "ta_user",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    email: text("email").notNull(),
+    emailVerified: boolean("email_verified").notNull(),
+    name: text("name"),
+    image: text("image"),
+    bannedAt: timestamp("banned_at", { withTimezone: true, mode: "date" }),
+    banReason: text("ban_reason"),
+    banUntil: timestamp("ban_until", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_user__email").on(t.email),
+  ],
+);
+
+export const taIdentity = pgTable(
+  "ta_identity",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    userId: text("user_id").notNull(),
+    provider: text("provider").notNull(),
+    subject: text("subject").notNull(),
+    linkedAt: timestamp("linked_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_identity__provider__subject").on(t.provider, t.subject),
+    index("ix_ta_identity__user_id").on(t.userId),
+  ],
+);
+
+export const taSession = pgTable(
+  "ta_session",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    userId: text("user_id").notNull(),
+    tokenHash: text("token_hash").notNull(), // hash
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }).notNull(),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+    activeOrganizationId: text("active_organization_id"),
+    freshAt: timestamp("fresh_at", { withTimezone: true, mode: "date" }),
+    actorId: text("actor_id"),
+    activeTeamId: text("active_team_id"),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_session__token_hash").on(t.tokenHash),
+    index("ix_ta_session__user_id").on(t.userId),
+    index("ix_ta_session__active_organization_id").on(t.activeOrganizationId),
+  ],
+);
+
+export const taVerification = pgTable(
+  "ta_verification",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    purpose: text("purpose").notNull(),
+    identifier: text("identifier").notNull(),
+    valueHash: text("value_hash").notNull(), // hash
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
+    data: jsonb("data"),
+    secretVersion: integer("secret_version").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_verification__value_hash").on(t.valueHash),
+    index("ix_ta_verification__purpose__identifier").on(t.purpose, t.identifier),
+  ],
+);
+
+export const taPasskey = pgTable(
+  "ta_passkey",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    userId: text("user_id").notNull(),
+    credentialId: text("credential_id").notNull(),
+    publicKey: text("public_key").notNull(),
+    counter: bigint("counter", { mode: "number" }).notNull(),
+    transports: text("transports"),
+    deviceType: text("device_type").notNull(),
+    backedUp: boolean("backed_up").notNull(),
+    name: text("name"),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_passkey__credential_id").on(t.credentialId),
+    index("ix_ta_passkey__user_id").on(t.userId),
+  ],
+);
+
+export const taOrganization = pgTable(
+  "ta_organization",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    slug: text("slug").notNull(),
+    name: text("name").notNull(),
+    metadata: jsonb("metadata"),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_organization__slug").on(t.slug),
+  ],
+);
+
+export const taMember = pgTable(
+  "ta_member",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    userId: text("user_id").notNull(),
+    role: text("role").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_member__organization_id__user_id").on(t.organizationId, t.userId),
+    index("ix_ta_member__user_id").on(t.userId),
+  ],
+);
+
+export const taInvitation = pgTable(
+  "ta_invitation",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    email: text("email").notNull(),
+    role: text("role").notNull(),
+    inviterId: text("inviter_id").notNull(),
+    tokenHash: text("token_hash").notNull(), // hash
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true, mode: "date" }),
+    teamIds: jsonb("team_ids"),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_invitation__token_hash").on(t.tokenHash),
+    index("ix_ta_invitation__organization_id__email").on(t.organizationId, t.email),
+  ],
+);
+
+export const taPassword = pgTable(
+  "ta_password",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    userId: text("user_id").notNull(),
+    hash: text("hash").notNull(), // hash
+  },
+  (t) => [
+    uniqueIndex("ux_ta_password__user_id").on(t.userId),
+  ],
+);
+
+export const taApiToken = pgTable(
+  "ta_api_token",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(), // hash
+    hint: text("hint").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "date" }),
+    organizationId: text("organization_id"),
+    permissions: jsonb("permissions"),
+    metadata: jsonb("metadata"),
+    rateLimitSeconds: integer("rate_limit_seconds"),
+    rateLimitMax: integer("rate_limit_max"),
+    remaining: integer("remaining"),
+    refillAmount: integer("refill_amount"),
+    refillSeconds: integer("refill_seconds"),
+    lastRefillAt: timestamp("last_refill_at", { withTimezone: true, mode: "date" }),
+    retiredAt: timestamp("retired_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_api_token__token_hash").on(t.tokenHash),
+    index("ix_ta_api_token__user_id").on(t.userId),
+  ],
+);
+
+export const taTotp = pgTable(
+  "ta_totp",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    userId: text("user_id").notNull(),
+    secret: text("secret").notNull(), // sealed
+    enabledAt: timestamp("enabled_at", { withTimezone: true, mode: "date" }),
+    lastStep: bigint("last_step", { mode: "number" }).notNull(),
+    backupCodes: jsonb("backup_codes").notNull(), // hash
+    secretVersion: integer("secret_version").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_totp__user_id").on(t.userId),
+  ],
+);
+
+export const taTrustedDevice = pgTable(
+  "ta_trusted_device",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    userId: text("user_id").notNull(),
+    tokenHash: text("token_hash").notNull(), // hash
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_trusted_device__token_hash").on(t.tokenHash),
+    index("ix_ta_trusted_device__user_id").on(t.userId),
+  ],
+);
+
+export const taJwk = pgTable(
+  "ta_jwk",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    publicJwk: jsonb("public_jwk").notNull(),
+    privateKey: text("private_key").notNull(), // sealed
+    slot: text("slot"),
+    retiredAt: timestamp("retired_at", { withTimezone: true, mode: "date" }),
+    secretVersion: integer("secret_version").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_jwk__slot").on(t.slot),
+  ],
+);
+
+export const taOauthClient = pgTable(
+  "ta_oauth_client",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    kind: text("kind").notNull(),
+    name: text("name"),
+    redirectUris: jsonb("redirect_uris").notNull(),
+    lastSeenAt: timestamp("last_seen_at", { withTimezone: true, mode: "date" }).notNull(),
+    authMethod: text("auth_method").notNull(),
+    secretHash: text("secret_hash"), // hash
+    secretExpiresAt: timestamp("secret_expires_at", { withTimezone: true, mode: "date" }),
+    previousSecretHash: text("previous_secret_hash"), // hash
+    previousSecretUntil: timestamp("previous_secret_until", { withTimezone: true, mode: "date" }),
+    jwks: jsonb("jwks"),
+    jwksUri: text("jwks_uri"),
+    grantTypes: jsonb("grant_types").notNull(),
+    credentialsScopes: jsonb("credentials_scopes").notNull(),
+    introspect: boolean("introspect").notNull(),
+    postLogoutRedirectUris: jsonb("post_logout_redirect_uris").notNull(),
+    backchannelLogoutUri: text("backchannel_logout_uri"),
+    backchannelLogoutSessionRequired: boolean("backchannel_logout_session_required").notNull(),
+    subjectType: text("subject_type").notNull(),
+    dpopBound: boolean("dpop_bound").notNull(),
+  },
+);
+
+export const taOauthConsent = pgTable(
+  "ta_oauth_consent",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    userId: text("user_id").notNull(),
+    clientId: text("client_id").notNull(),
+    scopes: jsonb("scopes").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_oauth_consent__client_id__user_id").on(t.clientId, t.userId),
+    index("ix_ta_oauth_consent__user_id").on(t.userId),
+  ],
+);
+
+export const taOauthToken = pgTable(
+  "ta_oauth_token",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    tokenHash: text("token_hash").notNull(), // hash
+    familyId: text("family_id").notNull(),
+    userId: text("user_id").notNull(),
+    clientId: text("client_id").notNull(),
+    scopes: jsonb("scopes").notNull(),
+    resource: text("resource").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true, mode: "date" }),
+    parentId: text("parent_id"),
+    dpopJkt: text("dpop_jkt"),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_oauth_token__token_hash").on(t.tokenHash),
+    index("ix_ta_oauth_token__user_id").on(t.userId),
+    index("ix_ta_oauth_token__family_id").on(t.familyId),
+    index("ix_ta_oauth_token__client_id").on(t.clientId),
+    index("ix_ta_oauth_token__parent_id").on(t.parentId),
+  ],
+);
+
+export const taOauthDevice = pgTable(
+  "ta_oauth_device",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    deviceCodeHash: text("device_code_hash").notNull(), // hash
+    userCodeHash: text("user_code_hash").notNull(), // hash
+    secretVersion: integer("secret_version").notNull(),
+    clientId: text("client_id").notNull(),
+    scopes: jsonb("scopes").notNull(),
+    resource: text("resource").notNull(),
+    status: text("status").notNull(),
+    userId: text("user_id"),
+    sessionId: text("session_id"),
+    interval: integer("interval").notNull(),
+    lastPolledAt: timestamp("last_polled_at", { withTimezone: true, mode: "date" }),
+    dpopJkt: text("dpop_jkt"),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_oauth_device__device_code_hash").on(t.deviceCodeHash),
+    uniqueIndex("ux_ta_oauth_device__user_code_hash").on(t.userCodeHash),
+    index("ix_ta_oauth_device__expires_at").on(t.expiresAt),
+  ],
+);
+
+export const taOauthSubject = pgTable(
+  "ta_oauth_subject",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    userId: text("user_id").notNull(),
+    sector: text("sector").notNull(),
+    subject: text("subject").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_oauth_subject__sector__user_id").on(t.sector, t.userId),
+    uniqueIndex("ux_ta_oauth_subject__subject").on(t.subject),
+    index("ix_ta_oauth_subject__user_id").on(t.userId),
+  ],
+);
+
+export const taOauthSessionClient = pgTable(
+  "ta_oauth_session_client",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    sessionId: text("session_id").notNull(),
+    clientId: text("client_id").notNull(),
+    userId: text("user_id").notNull(),
+    sid: text("sid").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_oauth_session_client__session_id__client_id").on(t.sessionId, t.clientId),
+    index("ix_ta_oauth_session_client__user_id").on(t.userId),
+  ],
+);
+
+export const taOauthLogout = pgTable(
+  "ta_oauth_logout",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    clientId: text("client_id").notNull(),
+    userId: text("user_id").notNull(),
+    sessionId: text("session_id").notNull(),
+    sid: text("sid").notNull(),
+    attempts: integer("attempts").notNull(),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "date" }).notNull(),
+  },
+  (t) => [
+    index("ix_ta_oauth_logout__next_attempt_at").on(t.nextAttemptAt),
+    index("ix_ta_oauth_logout__user_id").on(t.userId),
+  ],
+);
+
+export const taSecondFactor = pgTable(
+  "ta_second_factor",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    userId: text("user_id").notNull(),
+    enabledAt: timestamp("enabled_at", { withTimezone: true, mode: "date" }).notNull(),
+    methods: jsonb("methods").notNull(),
+    backupCodes: jsonb("backup_codes").notNull(), // hash
+    backupCodesVersion: integer("backup_codes_version").notNull(),
+    secretVersion: integer("secret_version").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_second_factor__user_id").on(t.userId),
+  ],
+);
+
+export const taOperatorAudit = pgTable(
+  "ta_operator_audit",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    actorKind: text("actor_kind").notNull(),
+    actorId: text("actor_id").notNull(),
+    action: text("action").notNull(),
+    targetUserId: text("target_user_id"),
+    reason: text("reason").notNull(),
+    data: jsonb("data"),
+    ip: text("ip"),
+    userAgent: text("user_agent"),
+  },
+  (t) => [
+    index("ix_ta_operator_audit__target_user_id").on(t.targetUserId),
+    index("ix_ta_operator_audit__actor_id").on(t.actorId),
+  ],
+);
+
+export const taOrganizationRole = pgTable(
+  "ta_organization_role",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    name: text("name").notNull(),
+    rank: integer("rank").notNull(),
+    permissions: jsonb("permissions").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_organization_role__organization_id__name").on(t.organizationId, t.name),
+  ],
+);
+
+export const taTeam = pgTable(
+  "ta_team",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    name: text("name").notNull(),
+  },
+  (t) => [
+    index("ix_ta_team__organization_id").on(t.organizationId),
+  ],
+);
+
+export const taTeamMember = pgTable(
+  "ta_team_member",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    teamId: text("team_id").notNull(),
+    organizationId: text("organization_id").notNull(),
+    userId: text("user_id").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_team_member__team_id__user_id").on(t.teamId, t.userId),
+    index("ix_ta_team_member__user_id").on(t.userId),
+    index("ix_ta_team_member__organization_id__user_id").on(t.organizationId, t.userId),
+  ],
+);
+
+export const taOrganizationToken = pgTable(
+  "ta_organization_token",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    createdById: text("created_by_id").notNull(),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(), // hash
+    hint: text("hint").notNull(),
+    permissions: jsonb("permissions").notNull(),
+    metadata: jsonb("metadata"),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true, mode: "date" }),
+    rateLimitSeconds: integer("rate_limit_seconds"),
+    rateLimitMax: integer("rate_limit_max"),
+    remaining: integer("remaining"),
+    refillAmount: integer("refill_amount"),
+    refillSeconds: integer("refill_seconds"),
+    lastRefillAt: timestamp("last_refill_at", { withTimezone: true, mode: "date" }),
+    retiredAt: timestamp("retired_at", { withTimezone: true, mode: "date" }),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_organization_token__token_hash").on(t.tokenHash),
+    index("ix_ta_organization_token__organization_id").on(t.organizationId),
+  ],
+);
+
+export const taMovedToken = pgTable(
+  "ta_moved_token",
+  {
+    id: text("id").primaryKey(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
+    source: text("source").notNull(),
+    sourceId: text("source_id").notNull(),
+    tokenId: text("token_id").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_moved_token__source__source_id").on(t.source, t.sourceId),
+  ],
+);

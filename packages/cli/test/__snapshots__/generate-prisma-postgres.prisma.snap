@@ -1,0 +1,473 @@
+// authtempo schema version 13, dialect postgres, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
+// Add these two keys to prisma.config.ts, so Prisma Migrate leaves the ta_ tables alone:
+//   experimental: { externalTables: true },
+//   tables: { external: ["public.ta_user", "public.ta_identity", "public.ta_session", "public.ta_verification", "public.ta_passkey", "public.ta_organization", "public.ta_member", "public.ta_invitation", "public.ta_password", "public.ta_api_token", "public.ta_totp", "public.ta_trusted_device", "public.ta_jwk", "public.ta_oauth_client", "public.ta_oauth_consent", "public.ta_oauth_token", "public.ta_oauth_device", "public.ta_oauth_subject", "public.ta_oauth_session_client", "public.ta_oauth_logout", "public.ta_second_factor", "public.ta_operator_audit", "public.ta_organization_role", "public.ta_team", "public.ta_team_member", "public.ta_organization_token", "public.ta_moved_token"] },
+// Externally managed tables are a Preview feature in Prisma 7.10 (read 2026-10-22).
+// The list names the schema public. Write the schema of the app in its place.
+// Keep ta_meta, ta_limit, and ta_migrations out of each Prisma migration too.
+
+model TaUser {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  email String @map("email")
+  emailVerified Boolean @map("email_verified")
+  name String? @map("name")
+  image String? @map("image")
+  bannedAt DateTime? @map("banned_at") @db.Timestamptz(6)
+  banReason String? @map("ban_reason")
+  banUntil DateTime? @map("ban_until") @db.Timestamptz(6)
+
+  @@unique([email], map: "ux_ta_user__email")
+  @@map("ta_user")
+}
+
+model TaIdentity {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  userId String @map("user_id")
+  provider String @map("provider")
+  subject String @map("subject")
+  linkedAt DateTime @map("linked_at") @db.Timestamptz(6)
+
+  @@unique([provider, subject], map: "ux_ta_identity__provider__subject")
+  @@index([userId], map: "ix_ta_identity__user_id")
+  @@map("ta_identity")
+}
+
+model TaSession {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  userId String @map("user_id")
+  /// hash
+  tokenHash String @map("token_hash")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  lastSeenAt DateTime @map("last_seen_at") @db.Timestamptz(6)
+  ip String? @map("ip")
+  userAgent String? @map("user_agent")
+  activeOrganizationId String? @map("active_organization_id")
+  freshAt DateTime? @map("fresh_at") @db.Timestamptz(6)
+  actorId String? @map("actor_id")
+  activeTeamId String? @map("active_team_id")
+
+  @@unique([tokenHash], map: "ux_ta_session__token_hash")
+  @@index([userId], map: "ix_ta_session__user_id")
+  @@index([activeOrganizationId], map: "ix_ta_session__active_organization_id")
+  @@map("ta_session")
+}
+
+model TaVerification {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  purpose String @map("purpose")
+  identifier String @map("identifier")
+  /// hash
+  valueHash String @map("value_hash")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(6)
+  data Json? @map("data")
+  secretVersion Int @map("secret_version")
+
+  @@unique([valueHash], map: "ux_ta_verification__value_hash")
+  @@index([purpose, identifier], map: "ix_ta_verification__purpose__identifier")
+  @@map("ta_verification")
+}
+
+model TaPasskey {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  userId String @map("user_id")
+  credentialId String @map("credential_id")
+  publicKey String @map("public_key")
+  counter BigInt @map("counter")
+  transports String? @map("transports")
+  deviceType String @map("device_type")
+  backedUp Boolean @map("backed_up")
+  name String? @map("name")
+
+  @@unique([credentialId], map: "ux_ta_passkey__credential_id")
+  @@index([userId], map: "ix_ta_passkey__user_id")
+  @@map("ta_passkey")
+}
+
+model TaOrganization {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  slug String @map("slug")
+  name String @map("name")
+  metadata Json? @map("metadata")
+
+  @@unique([slug], map: "ux_ta_organization__slug")
+  @@map("ta_organization")
+}
+
+model TaMember {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  organizationId String @map("organization_id")
+  userId String @map("user_id")
+  role String @map("role")
+
+  @@unique([organizationId, userId], map: "ux_ta_member__organization_id__user_id")
+  @@index([userId], map: "ix_ta_member__user_id")
+  @@map("ta_member")
+}
+
+model TaInvitation {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  organizationId String @map("organization_id")
+  email String @map("email")
+  role String @map("role")
+  inviterId String @map("inviter_id")
+  /// hash
+  tokenHash String @map("token_hash")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  acceptedAt DateTime? @map("accepted_at") @db.Timestamptz(6)
+  teamIds Json? @map("team_ids")
+
+  @@unique([tokenHash], map: "ux_ta_invitation__token_hash")
+  @@index([organizationId, email], map: "ix_ta_invitation__organization_id__email")
+  @@map("ta_invitation")
+}
+
+model TaPassword {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  userId String @map("user_id")
+  /// hash
+  hash String @map("hash")
+
+  @@unique([userId], map: "ux_ta_password__user_id")
+  @@map("ta_password")
+}
+
+model TaApiToken {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  userId String @map("user_id")
+  name String @map("name")
+  /// hash
+  tokenHash String @map("token_hash")
+  hint String @map("hint")
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz(6)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
+  organizationId String? @map("organization_id")
+  permissions Json? @map("permissions")
+  metadata Json? @map("metadata")
+  rateLimitSeconds Int? @map("rate_limit_seconds")
+  rateLimitMax Int? @map("rate_limit_max")
+  remaining Int? @map("remaining")
+  refillAmount Int? @map("refill_amount")
+  refillSeconds Int? @map("refill_seconds")
+  lastRefillAt DateTime? @map("last_refill_at") @db.Timestamptz(6)
+  retiredAt DateTime? @map("retired_at") @db.Timestamptz(6)
+
+  @@unique([tokenHash], map: "ux_ta_api_token__token_hash")
+  @@index([userId], map: "ix_ta_api_token__user_id")
+  @@map("ta_api_token")
+}
+
+model TaTotp {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  userId String @map("user_id")
+  /// sealed
+  secret String @map("secret")
+  enabledAt DateTime? @map("enabled_at") @db.Timestamptz(6)
+  lastStep BigInt @map("last_step")
+  /// hash
+  backupCodes Json @map("backup_codes")
+  secretVersion Int @map("secret_version")
+
+  @@unique([userId], map: "ux_ta_totp__user_id")
+  @@map("ta_totp")
+}
+
+model TaTrustedDevice {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  userId String @map("user_id")
+  /// hash
+  tokenHash String @map("token_hash")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  lastSeenAt DateTime @map("last_seen_at") @db.Timestamptz(6)
+
+  @@unique([tokenHash], map: "ux_ta_trusted_device__token_hash")
+  @@index([userId], map: "ix_ta_trusted_device__user_id")
+  @@map("ta_trusted_device")
+}
+
+model TaJwk {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  publicJwk Json @map("public_jwk")
+  /// sealed
+  privateKey String @map("private_key")
+  slot String? @map("slot")
+  retiredAt DateTime? @map("retired_at") @db.Timestamptz(6)
+  secretVersion Int @map("secret_version")
+
+  @@unique([slot], map: "ux_ta_jwk__slot")
+  @@map("ta_jwk")
+}
+
+model TaOauthClient {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  kind String @map("kind")
+  name String? @map("name")
+  redirectUris Json @map("redirect_uris")
+  lastSeenAt DateTime @map("last_seen_at") @db.Timestamptz(6)
+  authMethod String @map("auth_method")
+  /// hash
+  secretHash String? @map("secret_hash")
+  secretExpiresAt DateTime? @map("secret_expires_at") @db.Timestamptz(6)
+  /// hash
+  previousSecretHash String? @map("previous_secret_hash")
+  previousSecretUntil DateTime? @map("previous_secret_until") @db.Timestamptz(6)
+  jwks Json? @map("jwks")
+  jwksUri String? @map("jwks_uri")
+  grantTypes Json @map("grant_types")
+  credentialsScopes Json @map("credentials_scopes")
+  introspect Boolean @map("introspect")
+  postLogoutRedirectUris Json @map("post_logout_redirect_uris")
+  backchannelLogoutUri String? @map("backchannel_logout_uri")
+  backchannelLogoutSessionRequired Boolean @map("backchannel_logout_session_required")
+  subjectType String @map("subject_type")
+  dpopBound Boolean @map("dpop_bound")
+
+  @@map("ta_oauth_client")
+}
+
+model TaOauthConsent {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  userId String @map("user_id")
+  clientId String @map("client_id")
+  scopes Json @map("scopes")
+
+  @@unique([clientId, userId], map: "ux_ta_oauth_consent__client_id__user_id")
+  @@index([userId], map: "ix_ta_oauth_consent__user_id")
+  @@map("ta_oauth_consent")
+}
+
+model TaOauthToken {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  /// hash
+  tokenHash String @map("token_hash")
+  familyId String @map("family_id")
+  userId String @map("user_id")
+  clientId String @map("client_id")
+  scopes Json @map("scopes")
+  resource String @map("resource")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  usedAt DateTime? @map("used_at") @db.Timestamptz(6)
+  parentId String? @map("parent_id")
+  dpopJkt String? @map("dpop_jkt")
+
+  @@unique([tokenHash], map: "ux_ta_oauth_token__token_hash")
+  @@index([userId], map: "ix_ta_oauth_token__user_id")
+  @@index([familyId], map: "ix_ta_oauth_token__family_id")
+  @@index([clientId], map: "ix_ta_oauth_token__client_id")
+  @@index([parentId], map: "ix_ta_oauth_token__parent_id")
+  @@map("ta_oauth_token")
+}
+
+model TaOauthDevice {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  /// hash
+  deviceCodeHash String @map("device_code_hash")
+  /// hash
+  userCodeHash String @map("user_code_hash")
+  secretVersion Int @map("secret_version")
+  clientId String @map("client_id")
+  scopes Json @map("scopes")
+  resource String @map("resource")
+  status String @map("status")
+  userId String? @map("user_id")
+  sessionId String? @map("session_id")
+  interval Int @map("interval")
+  lastPolledAt DateTime? @map("last_polled_at") @db.Timestamptz(6)
+  dpopJkt String? @map("dpop_jkt")
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@unique([deviceCodeHash], map: "ux_ta_oauth_device__device_code_hash")
+  @@unique([userCodeHash], map: "ux_ta_oauth_device__user_code_hash")
+  @@index([expiresAt], map: "ix_ta_oauth_device__expires_at")
+  @@map("ta_oauth_device")
+}
+
+model TaOauthSubject {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  userId String @map("user_id")
+  sector String @map("sector")
+  subject String @map("subject")
+
+  @@unique([sector, userId], map: "ux_ta_oauth_subject__sector__user_id")
+  @@unique([subject], map: "ux_ta_oauth_subject__subject")
+  @@index([userId], map: "ix_ta_oauth_subject__user_id")
+  @@map("ta_oauth_subject")
+}
+
+model TaOauthSessionClient {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  sessionId String @map("session_id")
+  clientId String @map("client_id")
+  userId String @map("user_id")
+  sid String @map("sid")
+
+  @@unique([sessionId, clientId], map: "ux_ta_oauth_session_client__session_id__client_id")
+  @@index([userId], map: "ix_ta_oauth_session_client__user_id")
+  @@map("ta_oauth_session_client")
+}
+
+model TaOauthLogout {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  clientId String @map("client_id")
+  userId String @map("user_id")
+  sessionId String @map("session_id")
+  sid String @map("sid")
+  attempts Int @map("attempts")
+  nextAttemptAt DateTime @map("next_attempt_at") @db.Timestamptz(6)
+
+  @@index([nextAttemptAt], map: "ix_ta_oauth_logout__next_attempt_at")
+  @@index([userId], map: "ix_ta_oauth_logout__user_id")
+  @@map("ta_oauth_logout")
+}
+
+model TaSecondFactor {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  userId String @map("user_id")
+  enabledAt DateTime @map("enabled_at") @db.Timestamptz(6)
+  methods Json @map("methods")
+  /// hash
+  backupCodes Json @map("backup_codes")
+  backupCodesVersion Int @map("backup_codes_version")
+  secretVersion Int @map("secret_version")
+
+  @@unique([userId], map: "ux_ta_second_factor__user_id")
+  @@map("ta_second_factor")
+}
+
+model TaOperatorAudit {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  actorKind String @map("actor_kind")
+  actorId String @map("actor_id")
+  action String @map("action")
+  targetUserId String? @map("target_user_id")
+  reason String @map("reason")
+  data Json? @map("data")
+  ip String? @map("ip")
+  userAgent String? @map("user_agent")
+
+  @@index([targetUserId], map: "ix_ta_operator_audit__target_user_id")
+  @@index([actorId], map: "ix_ta_operator_audit__actor_id")
+  @@map("ta_operator_audit")
+}
+
+model TaOrganizationRole {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  organizationId String @map("organization_id")
+  name String @map("name")
+  rank Int @map("rank")
+  permissions Json @map("permissions")
+
+  @@unique([organizationId, name], map: "ux_ta_organization_role__organization_id__name")
+  @@map("ta_organization_role")
+}
+
+model TaTeam {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  organizationId String @map("organization_id")
+  name String @map("name")
+
+  @@index([organizationId], map: "ix_ta_team__organization_id")
+  @@map("ta_team")
+}
+
+model TaTeamMember {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  teamId String @map("team_id")
+  organizationId String @map("organization_id")
+  userId String @map("user_id")
+
+  @@unique([teamId, userId], map: "ux_ta_team_member__team_id__user_id")
+  @@index([userId], map: "ix_ta_team_member__user_id")
+  @@index([organizationId, userId], map: "ix_ta_team_member__organization_id__user_id")
+  @@map("ta_team_member")
+}
+
+model TaOrganizationToken {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  organizationId String @map("organization_id")
+  createdById String @map("created_by_id")
+  name String @map("name")
+  /// hash
+  tokenHash String @map("token_hash")
+  hint String @map("hint")
+  permissions Json @map("permissions")
+  metadata Json? @map("metadata")
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz(6)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
+  rateLimitSeconds Int? @map("rate_limit_seconds")
+  rateLimitMax Int? @map("rate_limit_max")
+  remaining Int? @map("remaining")
+  refillAmount Int? @map("refill_amount")
+  refillSeconds Int? @map("refill_seconds")
+  lastRefillAt DateTime? @map("last_refill_at") @db.Timestamptz(6)
+  retiredAt DateTime? @map("retired_at") @db.Timestamptz(6)
+
+  @@unique([tokenHash], map: "ux_ta_organization_token__token_hash")
+  @@index([organizationId], map: "ix_ta_organization_token__organization_id")
+  @@map("ta_organization_token")
+}
+
+model TaMovedToken {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  source String @map("source")
+  sourceId String @map("source_id")
+  tokenId String @map("token_id")
+
+  @@unique([source, sourceId], map: "ux_ta_moved_token__source__source_id")
+  @@map("ta_moved_token")
+}

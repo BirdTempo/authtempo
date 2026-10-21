@@ -23,6 +23,11 @@ export function createMysqlAdapter(pool: Pool): StorageAdapter {
 export { createMysqlAdapterOn, type MysqlAdapterOptions } from "./adapter.js";
 export { toStorageError } from "./errors.js";
 export { createMysqlLimiter } from "./limiter.js";
-export { applyMysqlMigrations, MYSQL_MIGRATIONS, type MysqlMigration } from "./migrations.js";
+export {
+  applyMysqlMigrations,
+  MIGRATIONS_TABLE_SQL as MYSQL_MIGRATIONS_TABLE_SQL,
+  MYSQL_MIGRATIONS,
+  type MysqlMigration,
+} from "./migrations.js";
 export { expectedMysqlShape, readMysqlShape } from "./shape.js";
 export { mysqlStartChecks } from "./start-checks.js";

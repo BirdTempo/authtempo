@@ -58,6 +58,7 @@ node /path/to/authtempo/packages/cli/dist/bin/authtempo.js --help
 | `authtempo sessions` | Ends the sessions of one user or of all users through the operator user tools. | [authtempo sessions](/docs/reference/cli/sessions/) |
 | `authtempo audit list` | Lists the audit rows of the operator acts. | [authtempo audit list](/docs/reference/cli/audit-list/) |
 | `authtempo create-admin` | Makes the first platform operator of a deployment. | [authtempo create-admin](/docs/reference/cli/create-admin/) |
+| `authtempo generate` | Prints the schema of the authtempo tables as SQL, Drizzle, or Prisma. | [authtempo generate](/docs/reference/cli/generate/) |
 
 ## The flags
 

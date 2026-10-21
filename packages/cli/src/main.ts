@@ -3,6 +3,7 @@ import type { Command } from "./command.js";
 import { auditCommand } from "./commands/audit.js";
 import { checkCommand } from "./commands/check.js";
 import { createAdminCommand } from "./commands/create-admin.js";
+import { generateCommand } from "./commands/generate.js";
 import { importCommand } from "./commands/import.js";
 import { infoCommand } from "./commands/info.js";
 import { initCommand } from "./commands/init.js";
@@ -34,6 +35,7 @@ export const COMMANDS: Readonly<Record<string, Command>> = {
   sessions: sessionsCommand,
   audit: auditCommand,
   "create-admin": createAdminCommand,
+  generate: generateCommand,
 };
 
 /**

@@ -10,6 +10,7 @@ import {
   AUDIT_LIST_JSON_KEYS,
   CHECK_JSON_KEYS,
   CREATE_ADMIN_JSON_KEYS,
+  GENERATE_JSON_KEYS,
   GROUP_JSON_KEYS,
   IMPORT_JSON_KEYS,
   INFO_JSON_KEYS,
@@ -532,6 +533,7 @@ describe("STOP_JSON", () => {
       audit: GROUP_JSON_KEYS,
       "audit list": AUDIT_LIST_JSON_KEYS,
       "create-admin": CREATE_ADMIN_JSON_KEYS,
+      generate: GENERATE_JSON_KEYS,
     };
     expect(Object.keys(STOP_JSON).sort()).toEqual(
       [
@@ -559,6 +561,7 @@ describe("STOP_JSON", () => {
         "audit",
         "audit list",
         "create-admin",
+        "generate",
       ].sort(),
     );
     for (const [name, list] of Object.entries(lists)) {

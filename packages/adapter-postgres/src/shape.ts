@@ -62,7 +62,7 @@ const OTHER_TABLES: readonly ExpectedTable[] = [
     unique: [],
     indexes: t.indexes,
   })),
-  // src/migrations.ts:52, the list of applied migrations that applyPostgresMigrations keeps.
+  // MIGRATIONS_TABLE_SQL of src/migrations.ts, the list of applied migrations that applyPostgresMigrations keeps.
   {
     name: "ta_migrations",
     columns: [

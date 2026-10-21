@@ -2,6 +2,7 @@ import { AUDIT_HELP, AUDIT_LIST_HELP } from "./audit.js";
 import { ROOT_HELP } from "./authtempo.js";
 import { CHECK_HELP } from "./check.js";
 import { CREATE_ADMIN_HELP } from "./create-admin.js";
+import { GENERATE_HELP } from "./generate.js";
 import { IMPORT_HELP } from "./import.js";
 import { INFO_HELP } from "./info.js";
 import { INIT_HELP } from "./init.js";
@@ -54,4 +55,5 @@ export const HELP: readonly HelpText[] = [
   AUDIT_HELP,
   AUDIT_LIST_HELP,
   CREATE_ADMIN_HELP,
+  GENERATE_HELP,
 ];

@@ -37,6 +37,9 @@ export const MIGRATIONS: readonly Migration[] = [
 
 const TABLE = "ta_migrations";
 
+/** The runner's own table. `authtempo generate` prints this text, so the two cannot differ. */
+export const MIGRATIONS_TABLE_SQL = `CREATE TABLE IF NOT EXISTS ${TABLE} (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
+
 /** One fixed advisory lock key for every authtempo migration run. */
 const LOCK = "SELECT pg_advisory_xact_lock(hashtext('tempo_auth_migrations'))";
 
@@ -54,9 +57,7 @@ export async function applyPostgresMigrations(sql: Sql): Promise<string[]> {
   // catalog, so this statement also runs under the lock.
   await sql.begin(async (tx) => {
     await tx.unsafe(LOCK);
-    await tx.unsafe(
-      `CREATE TABLE IF NOT EXISTS ${TABLE} (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`,
-    );
+    await tx.unsafe(MIGRATIONS_TABLE_SQL);
   });
   const applied: string[] = [];
   for (const m of MIGRATIONS) {

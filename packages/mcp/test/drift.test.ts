@@ -45,6 +45,8 @@ const EXEMPT_COMMANDS: Readonly<Record<string, string>> = {
     "an operator command needs the operator secret; no MCP tool takes a secret (spec 21 item 5)",
   "create-admin":
     "an operator command needs the operator secret; no MCP tool takes a secret (spec 21 item 5)",
+  generate:
+    "it prints a schema text from core alone; an agent runs it in the shell, and a later row can add a tool (plan 12g)",
 };
 
 /** The --help flag of every command. An agent reads the tool's own schema, not the help text. */

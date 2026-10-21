@@ -228,6 +228,28 @@ export const INFO_JSON_KEYS = {
 } as const satisfies Record<keyof InfoJson, true>;
 
 /**
+ * `authtempo generate --json` (plan 12g): the schema text of one format and
+ * one dialect. `text` holds the text when the run prints it, and null when
+ * `out` names the file that holds it.
+ */
+export interface GenerateJson extends RunKeys {
+  format: string;
+  dialect: string;
+  schemaVersion: number;
+  out: string | null;
+  text: string | null;
+}
+export const GENERATE_JSON_KEYS = {
+  format: true,
+  dialect: true,
+  schemaVersion: true,
+  out: true,
+  text: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof GenerateJson, true>;
+
+/**
  * The document of a command that has subcommands only (plan 12f): `users`,
  * `sessions`, and `audit` with no subcommand. Such a run is a usage error,
  * so its document holds the two run keys only.
@@ -444,6 +466,15 @@ export const STOP_JSON = {
   audit: { exit: 2, stopped: null },
   "audit list": { rows: [], next: null, exit: 2, stopped: null },
   "create-admin": { userId: "", created: false, auditId: "", exit: 2, stopped: null },
+  generate: {
+    format: "",
+    dialect: "",
+    schemaVersion: 0,
+    out: null,
+    text: null,
+    exit: 2,
+    stopped: null,
+  },
 } satisfies {
   init: InitJson;
   migrate: MigrateJson;
@@ -469,4 +500,5 @@ export const STOP_JSON = {
   audit: GroupJson;
   "audit list": AuditListJson;
   "create-admin": CreateAdminJson;
+  generate: GenerateJson;
 };
