@@ -13,16 +13,20 @@ const SERVER = process.env.AUTHTEMPO_MYSQL84_URL ?? "mysql://root:tempo@127.0.0.
 /** A test database is site_<ms>_<hex>. A killed run leaves one, so a database older than this goes. */
 const STALE_MS = 60 * 60 * 1000;
 
-/** Makes a fresh database, drops the stale ones of killed runs, and answers its URL and its drop. */
-async function freshDatabase(): Promise<{ url: string; drop: () => Promise<void> }> {
-  let admin: Awaited<ReturnType<typeof createConnection>>;
+/** A plain connection to the test server. When no server answers, the error names the compose command. */
+async function connectServer(): Promise<Awaited<ReturnType<typeof createConnection>>> {
   try {
-    admin = await createConnection({ uri: SERVER });
+    return await createConnection({ uri: SERVER });
   } catch (e) {
     throw new Error(
       `the MySQL guide test needs MySQL 8.4 at ${new URL(SERVER).host}: ${(e as Error).message}. Run: docker compose up -d mysql84`,
     );
   }
+}
+
+/** Makes a fresh database, drops the stale ones of killed runs, and answers its URL and its drop. */
+async function freshDatabase(): Promise<{ url: string; drop: () => Promise<void> }> {
+  const admin = await connectServer();
   try {
     const [rows] = await admin.query<RowDataPacket[]>("SHOW DATABASES LIKE 'site\\_%'");
     for (const row of rows) {
@@ -76,6 +80,8 @@ describe("authtempo on MySQL (the MySQL guide)", () => {
   }, 120_000);
 
   it("refuses the self-signed certificate of the test server with the remote pool", async () => {
+    // A refused connection also rejects, so the test first shows that the server answers.
+    await (await connectServer()).end();
     const pool = remotePool(SERVER);
     try {
       await expect(pool.query("SELECT 1")).rejects.toThrow(/certificate/);
