@@ -94,8 +94,9 @@ const driver = libsql(createClient({ url: env.LIBSQL_URL, authToken: env.LIBSQL_
 
 Open a `node:sqlite` or a `bun:sqlite` database with a busy timeout. The
 default timeout of each one is 0 ms. So a second process that writes to the
-same file gets "database is locked" at once (read 2026-10-21, Node 26.10.0;
-probe 2026-10-22, Bun 1.4.3, `SQLITE_BUSY` after 0 ms). Run
+same file gets "database is locked" at once. The Node 26.10.0 docs give this
+default (read 2026-10-21). A probe of Bun 1.4.3 on 2026-10-22 gave
+`SQLITE_BUSY` after 0 ms. Run
 `PRAGMA busy_timeout = 5000` after you open the database. On a Node version
 with the `timeout` option, you can pass `{ timeout: 5000 }` to
 `DatabaseSync` instead. better-sqlite3 sets a busy timeout of 5000 ms by

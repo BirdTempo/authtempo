@@ -21,7 +21,7 @@ const MIGRATIONS_TABLE = "ta_migrations";
 /**
  * Milliseconds that a node:sqlite handle waits for the write lock of another
  * process. The default is 0, so a second `migrate` on one file would fail at
- * once (the adapter-sqlite README, "Locks").
+ * once (adapter-sqlite README, "The busy timeout of node:sqlite and bun:sqlite").
  */
 const BUSY_TIMEOUT_MS = 5000;
 

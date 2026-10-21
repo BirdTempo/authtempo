@@ -48,7 +48,8 @@ parent row must see the commit of the other caller.
 - `lockInOrder` reads the ids, then locks them by id on the primary key: two
   statements. InnoDB locks rows in the order of the index that it reads.
 - A statement outside a transaction that InnoDB ends in a deadlock (1213) is
-  sent again, at most three times. A deadlock in a transaction ends the
+  sent again. It gets three tries in all: the first send and at most two
+  more. A third deadlock passes through. A deadlock in a transaction ends the
   transaction, and the error passes through. InnoDB undoes the whole
   transaction, also from inside a savepoint. So the 1213 error passes out of
   a nested call too. Each later statement of that transaction and its commit
