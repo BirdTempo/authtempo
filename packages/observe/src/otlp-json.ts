@@ -82,12 +82,27 @@ const levelOf = (event: AuthEvent): keyof typeof SEVERITY_NUMBER =>
 
 const timeOf = (event: AuthEvent): number => Date.parse(event.at);
 
-function resource(serviceName: string) {
-  return { attributes: keyValues([["service.name", serviceName]]) };
+/** The resource of each body: the service, and the sink that writes it. */
+export interface OtlpResource {
+  readonly serviceName: string;
+  /**
+   * `service.instance.id`: a random id for each sink. Each isolate and each
+   * Auth then writes its own metric stream, so two writers never share a delta stream.
+   */
+  readonly instanceId: string;
+}
+
+function resource(r: OtlpResource) {
+  return {
+    attributes: keyValues([
+      ["service.name", r.serviceName],
+      ["service.instance.id", r.instanceId],
+    ]),
+  };
 }
 
 /** `ExportLogsServiceRequest`: one log record for each event. Null for an empty batch. */
-export function logsBody(batch: readonly AuthEvent[], serviceName: string) {
+export function logsBody(batch: readonly AuthEvent[], owner: OtlpResource) {
   if (batch.length === 0) return null;
   const logRecords = batch.map((event) => {
     const level = levelOf(event);
@@ -103,7 +118,7 @@ export function logsBody(batch: readonly AuthEvent[], serviceName: string) {
     };
   });
   return {
-    resourceLogs: [{ resource: resource(serviceName), scopeLogs: [{ scope: SCOPE, logRecords }] }],
+    resourceLogs: [{ resource: resource(owner), scopeLogs: [{ scope: SCOPE, logRecords }] }],
   };
 }
 
@@ -113,7 +128,7 @@ export function logsBody(batch: readonly AuthEvent[], serviceName: string) {
  * trace are span events. An `error` event of the trace or a 5xx status sets
  * the status ERROR. Null when the batch holds no `request` event.
  */
-export function tracesBody(batch: readonly AuthEvent[], serviceName: string) {
+export function tracesBody(batch: readonly AuthEvent[], owner: OtlpResource) {
   const requests = batch.filter((e) => e.name === REQUEST);
   if (requests.length === 0) return null;
   const spans = requests.map((request) => {
@@ -141,7 +156,7 @@ export function tracesBody(batch: readonly AuthEvent[], serviceName: string) {
     };
   });
   return {
-    resourceSpans: [{ resource: resource(serviceName), scopeSpans: [{ scope: SCOPE, spans }] }],
+    resourceSpans: [{ resource: resource(owner), scopeSpans: [{ scope: SCOPE, spans }] }],
   };
 }
 
@@ -149,7 +164,7 @@ const metricAttributes = (attributes: MetricAttributes): KeyValue[] =>
   keyValues(Object.entries(attributes));
 
 /** `ExportMetricsServiceRequest`: one metric for each name, one data point for each attribute set. */
-export function metricsBody(points: readonly MetricPoint[], serviceName: string) {
+export function metricsBody(points: readonly MetricPoint[], owner: OtlpResource) {
   if (points.length === 0) return null;
   const byName = new Map<string, MetricPoint[]>();
   for (const p of points) byName.set(p.name, [...(byName.get(p.name) ?? []), p]);
@@ -193,8 +208,6 @@ export function metricsBody(points: readonly MetricPoint[], serviceName: string)
     };
   });
   return {
-    resourceMetrics: [
-      { resource: resource(serviceName), scopeMetrics: [{ scope: SCOPE, metrics }] },
-    ],
+    resourceMetrics: [{ resource: resource(owner), scopeMetrics: [{ scope: SCOPE, metrics }] }],
   };
 }

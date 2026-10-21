@@ -3,7 +3,14 @@
  *
  * Owned OTLP over HTTP with JSON (OTLP 1.11.0, read 2026-10-14; Cloudflare's
  * export takes JSON only). No OpenTelemetry SDK: a supplier change cannot
- * break this promise. No retry: one flush stays inside flushTimeoutMs.
+ * break this promise. No retry, and each post stops at `timeoutMs`.
+ *
+ * Core waits `flushTimeoutMs` for a write and then counts it in
+ * `sink_timeout`, but it cannot stop a fetch. So the sink aborts each post at
+ * `timeoutMs` itself. A post with no end holds a connection: Workers lets 6
+ * connections wait for headers in one invocation, and `waitUntil` runs for at
+ * most 30 s after the answer (read 2026-10-21). On Node it holds the body in
+ * memory until the undici time-out.
  *
  * One flush posts each chosen signal once, at the same time, to
  * `<endpoint>/v1/logs`, `/v1/traces`, and `/v1/metrics`. An answer other than
@@ -16,7 +23,7 @@ import type { ObserveSink } from "@authtempo/core/observe";
 import { secretParts } from "@authtempo/core/redact";
 import { scrubEvent } from "./event-scrub.js";
 import { aggregate } from "./metrics.js";
-import { logsBody, metricsBody, tracesBody } from "./otlp-json.js";
+import { logsBody, metricsBody, type OtlpResource, tracesBody } from "./otlp-json.js";
 
 export type OtlpSignal = "logs" | "traces" | "metrics";
 
@@ -39,7 +46,16 @@ export interface OtlpOptions {
    * each header value. This list is the last guard of spec 31 item 9.
    */
   secrets?: readonly string[];
+  /**
+   * The time in ms after which a post aborts. Default 2000, the default
+   * `flushTimeoutMs` of core (packages/core/src/observe/config.ts, read
+   * 2026-10-21). Give the same value as `flushTimeoutMs`, so no post outlives a flush.
+   */
+  timeoutMs?: number;
 }
+
+/** The default of `timeoutMs`: the default `flushTimeoutMs` of core. */
+const TIMEOUT_MS = 2000;
 
 /**
  * The parts of a header value that a body may never hold. They are the value
@@ -80,7 +96,15 @@ export function otlpSink(options: OtlpOptions): ObserveSink {
   const base = baseOf(options.endpoint);
   if (typeof options.serviceName !== "string" || options.serviceName === "")
     throw new TypeError("otlpSink: serviceName must be a string that is not empty");
+  const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
+    throw new TypeError("otlpSink: timeoutMs must be an integer of 1 or more");
   const { serviceName } = options;
+  // workerd refuses a random value in the global scope, and its clock reads 0 there
+  // (probe of workerd 1.20261006.1, 2026-10-21). So the id waits for the first write.
+  let owner: OtlpResource | undefined;
+  // The start of the next delta interval: the sink creation, then the end of each flush.
+  let since = Date.now();
   const chosen = signalsOf(options.signals);
   const given = options.headers ?? {};
   const headers = new Headers(given);
@@ -99,6 +123,7 @@ export function otlpSink(options: OtlpOptions): ObserveSink {
       body: JSON.stringify(body),
       // A redirect could send the header values to another host. A 3xx throws below.
       redirect: "manual",
+      signal: AbortSignal.timeout(timeoutMs),
     });
     // The sink reads no text of an answer. The cancel frees the connection.
     await res.body?.cancel();
@@ -109,10 +134,17 @@ export function otlpSink(options: OtlpOptions): ObserveSink {
   return {
     async write(batch) {
       const clean = batch.map((event) => scrubEvent(event, secrets));
+      // The clock of Workers moves only at I/O, so the end is at least the last event, and after the start.
+      const times = clean.map((e) => Date.parse(e.at)).filter((t) => t > 0);
+      // A sink made in the global scope of workerd has the time 0: its first point starts at its first event.
+      const start = since > 0 ? since : Math.min(Date.now(), ...times);
+      const end = Math.max(Date.now(), ...times, start + 1);
+      since = end;
+      owner ??= { serviceName, instanceId: crypto.randomUUID() };
       const bodies: Record<OtlpSignal, unknown> = {
-        logs: chosen.has("logs") ? logsBody(clean, serviceName) : null,
-        traces: chosen.has("traces") ? tracesBody(clean, serviceName) : null,
-        metrics: chosen.has("metrics") ? metricsBody(aggregate(clean), serviceName) : null,
+        logs: chosen.has("logs") ? logsBody(clean, owner) : null,
+        traces: chosen.has("traces") ? tracesBody(clean, owner) : null,
+        metrics: chosen.has("metrics") ? metricsBody(aggregate(clean, start, end), owner) : null,
       };
       // A signal with nothing to send makes no post.
       await Promise.all(

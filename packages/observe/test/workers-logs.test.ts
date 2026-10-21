@@ -73,6 +73,13 @@ describe("workersLogsSink", () => {
     });
   });
 
+  it("keeps the kind-checked fields out of the scrub", async () => {
+    const c = spies();
+    // A short secret that is a part of the event name, the level, and the ids.
+    await workersLogsSink({ secrets: ["drop", "warn", "4bf9", "00f0", "2026"] }).write([dropped]);
+    expect(c.warn.mock.calls[0]?.[0]).toEqual(dropped);
+  });
+
   it("stays far under the 256 KB limit of a log", async () => {
     const c = spies();
     const event = largestEvent();

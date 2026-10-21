@@ -7,6 +7,7 @@ import { built } from "./events.js";
 const ENDPOINT = "https://collector.example.test";
 const AT_NANO = "1792576800000000000";
 const TRACE = "4bf92f3577b34da6a3ce929d0e0e4736";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 interface Sent {
   url: string;
@@ -118,8 +119,124 @@ describe("otlpSink", () => {
     expect(Object.keys(r.sent[1]?.body)).toEqual(["resourceSpans"]);
     expect(Object.keys(r.sent[2]?.body)).toEqual(["resourceMetrics"]);
     expect(r.sent[0]?.body.resourceLogs[0].resource).toEqual({
-      attributes: [{ key: "service.name", value: { stringValue: "auth" } }],
+      attributes: [
+        { key: "service.name", value: { stringValue: "auth" } },
+        { key: "service.instance.id", value: { stringValue: expect.stringMatching(UUID) } },
+      ],
     });
+  });
+
+  it("gives each sink its own service.instance.id, the same in each body and flush", async () => {
+    const instanceOf = (body: Record<string, [{ resource: { attributes: unknown[] } }]>) => {
+      const [resources] = Object.values(body);
+      return resources?.[0].resource.attributes[1];
+    };
+    const a = recorder();
+    const b = recorder();
+    const sinkA = otlpSink({ endpoint: ENDPOINT, serviceName: "auth", fetch: a.fetch });
+    const sinkB = otlpSink({ endpoint: ENDPOINT, serviceName: "auth", fetch: b.fetch });
+    await sinkA.write([request]);
+    await sinkA.write([request]);
+    await sinkB.write([request]);
+    const idsA = a.sent.map((s) => instanceOf(s.body));
+    const idsB = b.sent.map((s) => instanceOf(s.body));
+    expect(idsA).toHaveLength(6);
+    expect(new Set(idsA.map((v) => JSON.stringify(v))).size).toBe(1);
+    expect(new Set(idsB.map((v) => JSON.stringify(v))).size).toBe(1);
+    expect(idsA[0]).not.toEqual(idsB[0]);
+  });
+
+  it("starts each delta point at the end of the last flush, the first at the sink creation", async () => {
+    const r = recorder();
+    const startEnd = (s: Sent | undefined) => {
+      const [p] = s?.body.resourceMetrics[0].scopeMetrics[0].metrics[0].sum.dataPoints ?? [];
+      return [p?.startTimeUnixNano, p?.timeUnixNano];
+    };
+    const now = vi.spyOn(Date, "now").mockReturnValue(1792576790000);
+    const sink = otlpSink({
+      endpoint: ENDPOINT,
+      serviceName: "auth",
+      signals: ["metrics"],
+      fetch: r.fetch,
+    });
+    now.mockReturnValue(1792576801000);
+    await sink.write([dropped]);
+    now.mockReturnValue(1792576802000);
+    await sink.write([dropped]);
+    expect(r.sent.map(startEnd)).toEqual([
+      ["1792576790000000000", "1792576801000000000"],
+      ["1792576801000000000", "1792576802000000000"],
+    ]);
+    // A clock that does not move, as on Workers with no I/O: one event still gives start < end.
+    const still = recorder();
+    vi.spyOn(Date, "now").mockReturnValue(1792576800000);
+    await otlpSink({
+      endpoint: ENDPOINT,
+      serviceName: "auth",
+      signals: ["metrics"],
+      fetch: still.fetch,
+    }).write([dropped]);
+    expect(startEnd(still.sent[0])).toEqual(["1792576800000000000", "1792576800001000000"]);
+    // The global scope of workerd reads 0: the first point starts at the first event.
+    const global = recorder();
+    const zero = vi.spyOn(Date, "now").mockReturnValue(0);
+    const early = otlpSink({
+      endpoint: ENDPOINT,
+      serviceName: "auth",
+      signals: ["metrics"],
+      fetch: global.fetch,
+    });
+    zero.mockReturnValue(1792576801000);
+    await early.write([dropped]);
+    expect(startEnd(global.sent[0])).toEqual(["1792576800000000000", "1792576801000000000"]);
+  });
+
+  it("aborts a post that outlives timeoutMs", async () => {
+    const reasons: unknown[] = [];
+    // A collector that never answers. The post ends only when its signal aborts.
+    const fetch = ((_: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => {
+          reasons.push(init.signal?.reason);
+          reject(init.signal?.reason);
+        });
+      })) as typeof globalThis.fetch;
+    const sink = otlpSink({ endpoint: ENDPOINT, serviceName: "auth", fetch, timeoutMs: 50 });
+    const started = Date.now();
+    await expect(sink.write([internal])).rejects.toThrow();
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(reasons).toHaveLength(1);
+    expect((reasons[0] as Error).name).toBe("TimeoutError");
+    // The default is the default flushTimeoutMs of core.
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    await otlpSink({ endpoint: ENDPOINT, serviceName: "auth", fetch: recorder().fetch }).write([
+      internal,
+    ]);
+    expect(timeout).toHaveBeenCalledWith(2000);
+  });
+
+  it("keeps the kind-checked fields out of the scrub", async () => {
+    const r = recorder();
+    const limit = built("limit.hit", "warn", { family: "magic-link:email" });
+    await otlpSink({
+      endpoint: ENDPOINT,
+      serviceName: "auth",
+      headers: { "x-scope-orgid": "limit" },
+      fetch: r.fetch,
+    }).write([{ ...limit, parentSpanId: "20f067aa0ba902b7" }]);
+    const [record] = logRecords(r.sent[0]);
+    expect(record.eventName).toBe("limit.hit");
+    expect(record.traceId).toBe(TRACE);
+    expect(record.spanId).toBe("00f067aa0ba902b7");
+    expect(record.timeUnixNano).toBe(AT_NANO);
+    expect(record.severityText).toBe("WARN");
+    expect(record.attributes).toContainEqual({
+      key: "parentSpanId",
+      value: { stringValue: "20f067aa0ba902b7" },
+    });
+    expect(r.sent.map((s) => s.url)).toEqual([`${ENDPOINT}/v1/logs`, `${ENDPOINT}/v1/metrics`]);
+    const metric = r.sent[1]?.body.resourceMetrics[0].scopeMetrics[0].metrics[0];
+    expect(metric.name).toBe("authtempo.limit.hits");
   });
 
   it("writes one log record for each event", async () => {
@@ -417,6 +534,10 @@ describe("otlpSink", () => {
     );
     expect(make({ signals: [] })).toThrow(signals);
     expect(make({ signals: ["logs", "profiles" as never] })).toThrow(signals);
+    const timeout = new TypeError("otlpSink: timeoutMs must be an integer of 1 or more");
+    expect(make({ timeoutMs: 0 })).toThrow(timeout);
+    expect(make({ timeoutMs: 1.5 })).toThrow(timeout);
+    expect(make({ timeoutMs: "2000" as never })).toThrow(timeout);
     expect(make({ endpoint: "http://127.0.0.1:4318", signals: ["metrics"] })).not.toThrow();
   });
 });

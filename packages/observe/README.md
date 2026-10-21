@@ -99,14 +99,25 @@ the same time:
 - Metrics: the delta points of the batch, from the table `METRICS`. The
   request duration is in seconds, with the bucket list
   `HTTP_DURATION_BUCKETS` of the stable HTTP convention. No attribute holds a
-  user id, a session id, or an address.
+  user id, a session id, or an address. Each point starts at the end of the
+  last flush of the sink (the first at the sink creation) and ends at this
+  flush.
+
+Each body has the resource attributes `service.name` and
+`service.instance.id`. The instance id is a random UUID for each sink, so
+each isolate and each Auth writes its own metric stream.
 
 A signal with nothing to send makes no post. Each post has
 `redirect: "manual"`, so a redirect never sends the headers to another host.
 An answer other than 2xx throws a `RangeError` that names the path and the
 status, and core counts the batch in `sink_threw`. The sink makes no retry,
-also for 429, 502, 503, and 504: one flush stays inside `flushTimeoutMs`. The
-sink reads no text of an answer.
+also for 429, 502, 503, and 504. The sink reads no text of an answer.
+
+Each post aborts after `timeoutMs`. Core stops its wait for a write at
+`flushTimeoutMs`, but it cannot stop a fetch. Give `timeoutMs` the same value
+as `flushTimeoutMs`, so no post outlives its flush. A post with no end holds a
+connection: Workers lets 6 connections wait for headers in one invocation, and
+`waitUntil` runs for at most 30 s after the answer (read 2026-10-21).
 
 | Option | Default | What it does |
 | --- | --- | --- |
@@ -116,9 +127,15 @@ sink reads no text of an answer.
 | `fetch` | the global `fetch` | The fetch of the app. |
 | `signals` | all three | The signals to post: `logs`, `traces`, `metrics`. |
 | `secrets` | `[]` | Values that no body may hold. The sink adds each header value, and the token after the scheme, such as `Bearer`. |
+| `timeoutMs` | `2000` | The time in ms after which a post aborts. The default is the default `flushTimeoutMs` of core. |
 
-A bad `endpoint`, an empty `serviceName`, or an unknown or empty `signals`
-list stops `otlpSink` with a `TypeError`.
+The scrub skips the fields that core checks by kind: `name`, `level`, `at`,
+`traceId`, `spanId`, and `parentSpanId`. They hold no free text. So a short
+header value, such as `limit`, never changes the event name `limit.hit`.
+
+A bad `endpoint`, an empty `serviceName`, an unknown or empty `signals` list,
+or a `timeoutMs` that is not an integer of 1 or more stops `otlpSink` with a
+`TypeError`.
 
 ## What a sink never gets
 

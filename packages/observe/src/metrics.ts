@@ -8,7 +8,7 @@
  * 2026-10-14). A duration there is the I/O time of the request, not its CPU
  * time.
  */
-import type { AuthEvent } from "@authtempo/core/observe";
+import { type AuthEvent, EVENTS } from "@authtempo/core/observe";
 
 /**
  * The bucket bounds of `http.server.request.duration`, in seconds: the
@@ -47,7 +47,7 @@ interface PointBase {
   readonly unit: string;
   readonly description: string;
   readonly attributes: MetricAttributes;
-  /** The time of the first and of the last event of the point, in ms since the epoch. */
+  /** The start and the end of the interval of the point, in ms since the epoch. */
   readonly startUnixMs: number;
   readonly endUnixMs: number;
 }
@@ -190,8 +190,8 @@ function split(
 const sweepCounts = (event: AuthEvent): readonly string[] =>
   Object.keys(event).filter((k) => k !== "durationMs" && typeof event[k] === "number");
 
-/** The three drop counts of `observe.dropped` (spec 31 item 4). */
-const DROP_COUNTS: readonly string[] = ["buffer_full", "sink_timeout", "sink_threw"];
+/** The drop counts of `observe.dropped` (spec 31 item 4): the fields of its row in `EVENTS`, one source. */
+const DROP_COUNTS: readonly string[] = Object.keys(EVENTS["observe.dropped"].fields);
 
 /**
  * The metrics of spec 31 item 11. The source events and their fields are the
@@ -244,9 +244,6 @@ export const METRICS: readonly MetricSpec[] = [
   ),
 ];
 
-/** The time of an event in ms since the epoch. */
-const timeOf = (event: AuthEvent): number => Date.parse(event.at);
-
 /** The index of the bucket of a value: bucket i holds the values over bound i-1 and at most bound i. */
 function bucketOf(value: number, bounds: readonly number[]): number {
   const i = bounds.findIndex((bound) => value <= bound);
@@ -265,21 +262,19 @@ function keyOf(name: string, attributes: MetricAttributes): string {
 interface Total {
   readonly spec: MetricSpec;
   readonly attributes: MetricAttributes;
-  start: number;
-  end: number;
   count: number;
   sum: number;
   readonly buckets: number[];
 }
 
-function pointOf(t: Total): MetricPoint {
+function pointOf(t: Total, startUnixMs: number, endUnixMs: number): MetricPoint {
   const base = {
     name: t.spec.name,
     unit: t.spec.unit,
     description: t.spec.description,
     attributes: t.attributes,
-    startUnixMs: t.start,
-    endUnixMs: t.end,
+    startUnixMs,
+    endUnixMs,
   };
   return t.spec.kind === "sum"
     ? { ...base, kind: "sum", value: t.sum }
@@ -294,30 +289,32 @@ function pointOf(t: Total): MetricPoint {
 }
 
 /**
- * The delta points of one batch: one for each metric and attribute set. A
- * point covers the time from its first event to its last.
+ * The delta points of one batch: one for each metric and attribute set. Each
+ * point covers the interval that the sink gives, from the end of its last
+ * flush to this one. So the intervals of one stream touch and never overlap.
  */
-export function aggregate(batch: readonly AuthEvent[]): MetricPoint[] {
+export function aggregate(
+  batch: readonly AuthEvent[],
+  startUnixMs: number,
+  endUnixMs: number,
+): MetricPoint[] {
   const totals = new Map<string, Total>();
   for (const event of batch)
     for (const spec of METRICS) {
       if (event.name !== spec.source) continue;
-      const at = timeOf(event);
       for (const { attributes, value } of spec.samples(event)) {
         const key = keyOf(spec.name, attributes);
         let t = totals.get(key);
         if (t === undefined) {
           const buckets = new Array<number>(HTTP_DURATION_BUCKETS.length + 1).fill(0);
-          t = { spec, attributes, start: at, end: at, count: 0, sum: 0, buckets };
+          t = { spec, attributes, count: 0, sum: 0, buckets };
           totals.set(key, t);
         }
-        t.start = Math.min(t.start, at);
-        t.end = Math.max(t.end, at);
         t.count += 1;
         t.sum += value;
         const i = bucketOf(value, HTTP_DURATION_BUCKETS);
         t.buckets[i] = (t.buckets[i] ?? 0) + 1;
       }
     }
-  return [...totals.values()].map(pointOf);
+  return [...totals.values()].map((t) => pointOf(t, startUnixMs, endUnixMs));
 }

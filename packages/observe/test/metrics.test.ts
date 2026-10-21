@@ -1,5 +1,5 @@
-import type { AuthEvent } from "@authtempo/core/observe";
-import { describe, expect, it } from "vitest";
+import { type AuthEvent, EVENTS } from "@authtempo/core/observe";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { aggregate, HTTP_DURATION_BUCKETS, METRICS, type MetricPoint } from "../src/metrics.js";
 import { otlpSink } from "../src/otlp.js";
 import { built } from "./events.js";
@@ -37,6 +37,15 @@ const SOURCES: Readonly<Record<string, AuthEvent>> = {
 
 const only = (points: MetricPoint[], name: string) => points.filter((p) => p.name === name);
 
+/** The interval that the sink gives to `aggregate`: 10 s before the events to 1 s after. */
+const FROM = 1792576790000;
+const TO = 1792576801000;
+const pointsOf = (batch: readonly AuthEvent[]) => aggregate(batch, FROM, TO);
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("the metrics of the OTLP sink", () => {
   it("derives each metric of the table from its event", () => {
     expect(METRICS.map((m) => [m.name, m.kind, m.unit, m.source])).toEqual([
@@ -53,17 +62,14 @@ describe("the metrics of the OTLP sink", () => {
       const source = SOURCES[spec.source];
       if (source === undefined) throw new Error(`no source event for ${spec.name}`);
       // Two events of the source: one point, counted twice. Another event gives nothing.
-      const points = only(
-        aggregate([source, source, SOURCES["limit.hit"] as AuthEvent]),
-        spec.name,
-      );
+      const points = only(pointsOf([source, source, SOURCES["limit.hit"] as AuthEvent]), spec.name);
       expect(points.length).toBeGreaterThan(0);
       for (const p of points) {
         expect([p.kind, p.unit]).toEqual([spec.kind, spec.unit]);
         if (p.kind === "histogram") expect(p.count).toBe(2);
       }
     }
-    const all = aggregate(Object.values(SOURCES));
+    const all = pointsOf(Object.values(SOURCES));
     expect(only(all, "authtempo.sign_in")).toMatchObject([
       { kind: "sum", value: 1, attributes: { method: "password", outcome: "success" } },
     ]);
@@ -85,7 +91,7 @@ describe("the metrics of the OTLP sink", () => {
       code: "invalid_credentials",
     } as AuthEvent;
     expect(
-      only(aggregate([SOURCES.sign_in as AuthEvent, failed]), "authtempo.sign_in"),
+      only(pointsOf([SOURCES.sign_in as AuthEvent, failed]), "authtempo.sign_in"),
     ).toHaveLength(2);
   });
 
@@ -95,12 +101,16 @@ describe("the metrics of the OTLP sink", () => {
       sent.push(JSON.parse(String(init?.body)));
       return new Response(null, { status: 200 });
     }) as typeof globalThis.fetch;
-    await otlpSink({
+    // The sink is made at FROM and flushes at TO.
+    const now = vi.spyOn(Date, "now").mockReturnValue(FROM);
+    const sink = otlpSink({
       endpoint: "https://c.example.test",
       serviceName: "auth",
       signals: ["metrics"],
       fetch,
-    }).write(Object.values(SOURCES));
+    });
+    now.mockReturnValue(TO);
+    await sink.write(Object.values(SOURCES));
     // biome-ignore lint/suspicious/noExplicitAny: the test reads the JSON body by its OTLP field names.
     const metrics = (sent[0] as any).resourceMetrics[0].scopeMetrics[0].metrics;
     expect(metrics.map((m: { name: string }) => m.name)).toEqual(METRICS.map((m) => m.name));
@@ -116,8 +126,8 @@ describe("the metrics of the OTLP sink", () => {
         { key: "http.route", value: { stringValue: "/password/sign-in" } },
         { key: "http.response.status_code", value: { intValue: "200" } },
       ],
-      startTimeUnixNano: "1792576800000000000",
-      timeUnixNano: "1792576800000000000",
+      startTimeUnixNano: "1792576790000000000",
+      timeUnixNano: "1792576801000000000",
       count: "1",
       sum: 0.03,
       bucketCounts: ["0", "0", "0", "1", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0", "0"],
@@ -126,12 +136,33 @@ describe("the metrics of the OTLP sink", () => {
     expect(metrics[1].sum.dataPoints[0].asInt).toBe("1");
   });
 
+  it("gives each point the interval of the sink, not the times of its events", () => {
+    const early = { ...SOURCES["limit.hit"], at: "2026-10-21T09:59:59.000Z" } as AuthEvent;
+    const late = { ...SOURCES["limit.hit"], at: "2026-10-21T10:00:00.500Z" } as AuthEvent;
+    const all = aggregate([early, late, SOURCES.request as AuthEvent], 1000, 2000);
+    expect(all.length).toBeGreaterThan(1);
+    for (const p of all) expect([p.startUnixMs, p.endUnixMs]).toEqual([1000, 2000]);
+  });
+
+  it("splits the drops by each count field of the observe.dropped row", () => {
+    // Each field of the row in EVENTS, so a field that core adds gives a reason here with no edit.
+    const fields = Object.keys(EVENTS["observe.dropped"].fields);
+    expect(fields).toContain("buffer_full");
+    for (const field of fields) {
+      const counts = Object.fromEntries(fields.map((f) => [f, f === field ? 7 : 0]));
+      const event = built("observe.dropped", "warn", counts);
+      expect(only(pointsOf([event]), "authtempo.events.dropped")).toMatchObject([
+        { value: 7, attributes: { reason: field } },
+      ]);
+    }
+  });
+
   it("uses the stable bucket list for the request duration, in seconds", () => {
     expect(HTTP_DURATION_BUCKETS).toEqual([
       0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1, 2.5, 5, 7.5, 10,
     ]);
     const at = (durationMs: number) => ({ ...SOURCES.request, durationMs }) as AuthEvent;
-    const [p] = only(aggregate([at(30), at(50), at(10_001)]), "http.server.request.duration");
+    const [p] = only(pointsOf([at(30), at(50), at(10_001)]), "http.server.request.duration");
     if (p?.kind !== "histogram") throw new Error("no histogram point");
     expect(p.count).toBe(3);
     expect(p.sum).toBeCloseTo(10.081);
@@ -145,7 +176,7 @@ describe("the metrics of the OTLP sink", () => {
 
   it("writes _OTHER for a method outside RFC 9110, and no route for an unmatched path", () => {
     const odd = { ...SOURCES.request, method: "BREW", route: "unmatched" } as AuthEvent;
-    const [p] = only(aggregate([odd]), "http.server.request.duration");
+    const [p] = only(pointsOf([odd]), "http.server.request.duration");
     expect(p?.attributes).toEqual({
       "http.request.method": "_OTHER",
       "http.response.status_code": 200,
@@ -156,7 +187,7 @@ describe("the metrics of the OTLP sink", () => {
     const banned = ["user.id", "userId", "sessionId", "ip", "ipHash", "userAgent", "emailHash"];
     for (const spec of METRICS)
       for (const key of spec.attributes) expect(banned).not.toContain(key);
-    const points = aggregate(Object.values(SOURCES));
+    const points = pointsOf(Object.values(SOURCES));
     expect(points.length).toBeGreaterThanOrEqual(METRICS.length);
     for (const p of points) {
       for (const key of Object.keys(p.attributes)) expect(banned).not.toContain(key);
