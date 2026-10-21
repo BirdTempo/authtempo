@@ -592,6 +592,11 @@ export type FieldType = "string" | "boolean" | "integer" | "date" | "json";
 export interface FieldDef {
   type: FieldType;
   nullable?: boolean;
+  /**
+   * An integer that needs 64 bits: bigint on Postgres and MySQL. One source:
+   * the Postgres column map read the field names before plan 12g.
+   */
+  int64?: true;
 }
 
 /**
@@ -674,7 +679,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       userId: { type: "string" },
       credentialId: { type: "string" },
       publicKey: { type: "string" },
-      counter: { type: "integer" },
+      counter: { type: "integer", int64: true },
       transports: { type: "string", nullable: true },
       deviceType: { type: "string" },
       backedUp: { type: "boolean" },
@@ -759,7 +764,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       userId: { type: "string" },
       secret: { type: "string" },
       enabledAt: { type: "date", nullable: true },
-      lastStep: { type: "integer" },
+      lastStep: { type: "integer", int64: true },
       backupCodes: { type: "json" },
       secretVersion: { type: "integer" },
     },

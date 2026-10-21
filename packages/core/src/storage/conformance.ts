@@ -97,6 +97,12 @@ export interface ConformanceOptions {
    * memory, leaves it out.
    */
   oldStore?: () => Promise<ConformanceTarget>;
+  /**
+   * The statements of one `lockInOrder` inside a transaction, for
+   * `statementsSent`. MySQL sends 2: the read of the ids and the lock by id
+   * (ruling 2 of plan 12g). Default 1.
+   */
+  lockStatements?: number;
 }
 
 function user(id: string, email: string, at: Date): UserRow {
@@ -567,6 +573,26 @@ export function runAdapterConformance(
       const next = await db.findOne("passkey", [{ field: "id", op: "eq", value: "p1" }]);
       expect(next?.counter).toBe(8);
       expect(next?.backedUp).toBe(true);
+    });
+
+    it("keeps two values that differ only in case apart (plan 12g)", async () => {
+      // The engine lowers each address before a write, so the users test the
+      // storage rule, not the engine rule: storage compares bytes. A MySQL
+      // column with a case-blind collation would fail it.
+      await db.create("user", user("u1", "a@example.com", t0));
+      await db.create("user", user("u2", "A@example.com", t0));
+      await db.create("passkey", { ...passkey("p1", 1, t0), credentialId: "cred-AbC" });
+      await db.create("passkey", { ...passkey("p2", 1, t0), credentialId: "cred-abc" });
+      expect(await db.findMany("user", [])).toHaveLength(2);
+      expect(await db.findMany("passkey", [])).toHaveLength(2);
+      const byCredential = async (value: string) =>
+        (await db.findOne("passkey", [{ field: "credentialId", op: "eq", value }]))?.id;
+      expect(await byCredential("cred-AbC")).toBe("p1");
+      expect(await byCredential("cred-abc")).toBe("p2");
+      const byEmail = async (value: string) =>
+        (await db.findOne("user", [{ field: "email", op: "eq", value }]))?.id;
+      expect(await byEmail("a@example.com")).toBe("u1");
+      expect(await byEmail("A@example.com")).toBe("u2");
     });
 
     it("rolls back an update when the function throws", async () => {
@@ -1693,7 +1719,9 @@ export function runAdapterConformance(
           locked = r;
         });
         const holder = db.transaction(async (tx) => {
-          expect(await growth(() => tx.lockInOrder?.("user", all) ?? Promise.resolve())).toBe(1);
+          expect(await growth(() => tx.lockInOrder?.("user", all) ?? Promise.resolve())).toBe(
+            options.lockStatements ?? 1,
+          );
           locked();
           await new Promise((r) => setTimeout(r, 300));
           order.push("commit");

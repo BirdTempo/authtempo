@@ -1,13 +1,27 @@
 import { type FieldType, type ModelName, type Models, SCHEMA_VERSION, schema } from "../schema.js";
 import { type FindManyOptions, StorageError, type Where } from "./port.js";
 
+/**
+ * The facts of one SQL dialect. A statement reads these properties, never
+ * the name (plan 12g), so a new dialect cannot get the text of another one.
+ */
 export interface Dialect {
-  name: "sqlite" | "postgres";
+  name: "sqlite" | "postgres" | "mysql";
   /** 1-based parameter placeholder. */
   placeholder(i: number): string;
   /** "explicit" adds an IS NULL term so nulls sort last ascending and first descending. "native" already does. */
   nullsOrder: "explicit" | "native";
-  json: "text" | "jsonb";
+  json: "text" | "jsonb" | "json";
+  /** Writes a table or column name. SQLite and Postgres write the name as it is. */
+  quote(ident: string): string;
+  /** "inline" writes the checked limit into the text; "parameter" sends it as a parameter. */
+  limit: "parameter" | "inline";
+  /** "epoch-ms" stores a date as an integer of milliseconds. */
+  dates: "epoch-ms" | "native";
+  /** "integer" stores a boolean as 0 or 1. */
+  booleans: "integer" | "native";
+  /** The equal operator that also matches a null with a null. */
+  nullSafeEq: "IS" | "IS NOT DISTINCT FROM" | "<=>";
 }
 
 export const SQLITE: Dialect = {
@@ -15,6 +29,11 @@ export const SQLITE: Dialect = {
   placeholder: () => "?",
   nullsOrder: "explicit",
   json: "text",
+  quote: (s) => s,
+  limit: "parameter",
+  dates: "epoch-ms",
+  booleans: "integer",
+  nullSafeEq: "IS",
 };
 
 export const POSTGRES: Dialect = {
@@ -22,10 +41,68 @@ export const POSTGRES: Dialect = {
   placeholder: (i) => `$${i}`,
   nullsOrder: "native",
   json: "jsonb",
+  quote: (s) => s,
+  limit: "parameter",
+  dates: "native",
+  booleans: "native",
+  nullSafeEq: "IS NOT DISTINCT FROM",
+};
+
+/**
+ * MySQL 8.4 and later (plan 12g). MySQL sorts nulls first ascending, so the
+ * order is explicit. Each name is quoted, because `key`, `interval`, and
+ * `rank` are reserved words of MySQL. MySQL refuses `IS NOT DISTINCT FROM`.
+ */
+export const MYSQL: Dialect = {
+  name: "mysql",
+  placeholder: () => "?",
+  nullsOrder: "explicit",
+  json: "json",
+  quote: (s) => `\`${s}\``,
+  limit: "inline",
+  dates: "epoch-ms",
+  booleans: "integer",
+  nullSafeEq: "<=>",
 };
 
 export const META_TABLE = "ta_meta";
 export const SCHEMA_VERSION_KEY = "schema_version";
+
+/** One table that is not a model. `int64` is an integer of 64 bits. */
+export interface AuxTable {
+  name: string;
+  columns: readonly { name: string; kind: "text" | "int64" }[];
+  primaryKey: readonly string[];
+  indexes: readonly { name: string; columns: readonly string[] }[];
+}
+
+/**
+ * The tables that are not models. The limiter and the version gate own
+ * their statements; the DDL and the shape check read this list (plan 12g).
+ * The D1 and Postgres files of versions 1 and 3 make these columns.
+ */
+export const AUX_TABLES: readonly AuxTable[] = [
+  {
+    name: META_TABLE,
+    columns: [
+      { name: "key", kind: "text" },
+      { name: "value", kind: "text" },
+    ],
+    primaryKey: ["key"],
+    indexes: [],
+  },
+  {
+    name: "ta_limit",
+    columns: [
+      { name: "key", kind: "text" },
+      { name: "window_start", kind: "int64" },
+      { name: "count", kind: "int64" },
+      { name: "expires_at", kind: "int64" },
+    ],
+    primaryKey: ["key"],
+    indexes: [{ name: "ix_ta_limit__expires_at", columns: ["expires_at"] }],
+  },
+];
 
 const MODEL_NAMES = Object.keys(schema) as ModelName[];
 
@@ -164,11 +241,11 @@ export function encodeValue(
       return value;
     case "boolean":
       if (typeof value !== "boolean") throw invalid(model, field, "expected a boolean");
-      return d.name === "sqlite" ? (value ? 1 : 0) : value;
+      return d.booleans === "integer" ? (value ? 1 : 0) : value;
     case "date":
       if (!(value instanceof Date) || Number.isNaN(value.getTime()))
         throw invalid(model, field, "expected a valid Date");
-      return d.name === "sqlite" ? value.getTime() : value;
+      return d.dates === "epoch-ms" ? value.getTime() : value;
     case "json": {
       // Only plain objects and arrays. A Date, Map, or class instance does not
       // round-trip: JSON.stringify turns it into a string or an empty object.
@@ -188,10 +265,13 @@ function decodeValue(d: Dialect, type: FieldType, value: unknown): unknown {
     case "boolean":
       return typeof value === "number" ? value !== 0 : Boolean(value);
     case "date":
+      // A driver can answer a 64-bit integer as a string of digits (plan 12g).
+      if (typeof value === "string" && /^-?\d+$/.test(value)) return new Date(Number(value));
       return value instanceof Date ? value : new Date(value as string | number);
     case "json":
       // Text columns hold serialized JSON. A jsonb driver already parsed it, so a string is a real value.
-      return d.json === "text" && typeof value === "string" ? JSON.parse(value) : value;
+      // A MySQL driver parses a JSON column, or answers its text. Core stores only an object or an array.
+      return d.json !== "jsonb" && typeof value === "string" ? JSON.parse(value) : value;
     case "integer":
       return typeof value === "string" ? Number(value) : value;
     default:
@@ -209,11 +289,6 @@ export function decodeRow<M extends ModelName>(
     out[field] = decodeValue(d, fieldType(model, field), row[columnName(field)]);
   }
   return out as unknown as Models[M];
-}
-
-/** The equal operator that also matches a null with a null. */
-function nullSafeEq(d: Dialect): string {
-  return d.name === "sqlite" ? "IS" : "IS NOT DISTINCT FROM";
 }
 
 /**
@@ -260,7 +335,7 @@ function compileWhere<M extends ModelName>(
   // Validate every clause before we report "never matches", so a bad later clause still throws.
   let impossible = false;
   for (const w of where) {
-    const col = columnName(w.field);
+    const col = d.quote(columnName(w.field));
     const type = fieldType(model, w.field);
     // SQLite compares json as text, so key order decides a match. Postgres
     // compares jsonb by value. No engine call filters on json, so refuse it.
@@ -347,7 +422,7 @@ export function insertStatement<M extends ModelName>(
     return type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph;
   });
   return {
-    sql: `INSERT INTO ${TABLES[model]} (${fields.map(columnName).join(", ")}) VALUES (${values.join(", ")})`,
+    sql: `INSERT INTO ${d.quote(TABLES[model])} (${fields.map((f) => d.quote(columnName(f))).join(", ")}) VALUES (${values.join(", ")})`,
     params: p.values,
   };
 }
@@ -368,10 +443,10 @@ export function selectStatement<M extends ModelName>(
   const p = new Params(d);
   const w = compileWhere(d, model, where, p);
   if (w.impossible) return null;
-  let sql = `SELECT ${columnsOf(model).join(", ")} FROM ${TABLES[model]}${w.clause}`;
+  let sql = `SELECT ${columnsOf(model).map(d.quote).join(", ")} FROM ${d.quote(TABLES[model])}${w.clause}`;
   if (sorts.length > 0) {
     const terms = sorts.map((x) => {
-      const col = columnName(x.field);
+      const col = d.quote(columnName(x.field));
       const dir = x.dir === "asc" ? "ASC" : "DESC";
       return d.nullsOrder === "explicit"
         ? `${col} IS NULL${dir === "DESC" ? " DESC" : ""}, ${col} ${dir}`
@@ -379,7 +454,10 @@ export function selectStatement<M extends ModelName>(
     });
     sql += ` ORDER BY ${terms.join(", ")}`;
   }
-  if (opts.limit !== undefined) sql += ` LIMIT ${p.add(opts.limit)}`;
+  // MySQL: mysql2 sends a number parameter as a double, and LIMIT refuses it.
+  // The value is a checked non-negative integer, so inline text is safe.
+  if (opts.limit !== undefined)
+    sql += ` LIMIT ${d.limit === "inline" ? opts.limit : p.add(opts.limit)}`;
   return { sql, params: p.values };
 }
 
@@ -399,11 +477,14 @@ export function updateStatement<M extends ModelName>(
   const sets = keys.map((f) => {
     const type = fieldType(model, f);
     const ph = p.add(encodeValue(d, type, (data as Record<string, unknown>)[f], model, f));
-    return `${columnName(f)} = ${type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph}`;
+    return `${d.quote(columnName(f))} = ${type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph}`;
   });
   const w = compileWhere(d, model, where, p);
   if (w.impossible) return null;
-  return { sql: `UPDATE ${TABLES[model]} SET ${sets.join(", ")}${w.clause}`, params: p.values };
+  return {
+    sql: `UPDATE ${d.quote(TABLES[model])} SET ${sets.join(", ")}${w.clause}`,
+    params: p.values,
+  };
 }
 
 export function deleteStatement<M extends ModelName>(
@@ -416,7 +497,7 @@ export function deleteStatement<M extends ModelName>(
   const p = new Params(d);
   const w = compileWhere(d, model, where, p);
   if (w.impossible) return null;
-  return { sql: `DELETE FROM ${TABLES[model]}${w.clause}`, params: p.values };
+  return { sql: `DELETE FROM ${d.quote(TABLES[model])}${w.clause}`, params: p.values };
 }
 
 /**
@@ -506,7 +587,7 @@ export function whileNoChildRow(
   const params = [...s.params];
   const terms = children.map((c) => {
     params.push(userId);
-    return ` AND NOT EXISTS (SELECT 1 FROM ${c.table} WHERE ${c.column} = ${d.placeholder(params.length)})`;
+    return ` AND NOT EXISTS (SELECT 1 FROM ${d.quote(c.table)} WHERE ${d.quote(c.column)} = ${d.placeholder(params.length)})`;
   });
   return { sql: s.sql + terms.join(""), params };
 }
@@ -612,26 +693,32 @@ export function coreStatements(d: Dialect): SqlStatements {
       const p = new Params(d);
       const sets = fields.map((f) => {
         const c = columnName(f);
+        const q = d.quote(c);
         const type = fieldType(model, f);
         const ph = p.add(encodeValue(d, type, (data as Record<string, unknown>)[f], model, f));
         const written = type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph;
-        return `${c} = CASE WHEN ${c} ${nullSafeEq(d)} ${written} THEN ${p.add(row[c])} ELSE ${c} END`;
+        return `${q} = CASE WHEN ${q} ${d.nullSafeEq} ${written} THEN ${p.add(row[c])} ELSE ${q} END`;
       });
       return {
-        sql: `UPDATE ${TABLES[model]} SET ${sets.join(", ")} WHERE id = ${p.add(row.id)}`,
+        sql: `UPDATE ${d.quote(TABLES[model])} SET ${sets.join(", ")} WHERE ${d.quote("id")} = ${p.add(row.id)}`,
         params: p.values,
       };
     },
     reinsertRow(model, row) {
       const cols = Object.keys(row);
       return {
-        sql: `INSERT INTO ${TABLES[model]} (${cols.join(", ")}) VALUES (${cols.map((_, i) => d.placeholder(i + 1)).join(", ")})`,
+        sql: `INSERT INTO ${d.quote(TABLES[model])} (${cols.map(d.quote).join(", ")}) VALUES (${cols.map((_, i) => d.placeholder(i + 1)).join(", ")})`,
         params: cols.map((c) => row[c]),
       };
     },
     deleteReturning(model, where) {
       const s = deleteStatement(d, model, where);
-      return s && { sql: `${s.sql} RETURNING ${columnsOf(model).join(", ")}`, params: s.params };
+      return (
+        s && {
+          sql: `${s.sql} RETURNING ${columnsOf(model).map(d.quote).join(", ")}`,
+          params: s.params,
+        }
+      );
     },
   };
 }

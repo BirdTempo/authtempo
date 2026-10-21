@@ -1,0 +1,214 @@
+import { describe, expect, it } from "vitest";
+import { tokenUseKey } from "../src/engine/token-use.js";
+import { ipKey } from "../src/limiter/ip-key.js";
+import { limiterKey } from "../src/limiter/memory.js";
+import { type FieldType, type ModelName, schema } from "../src/schema.js";
+import {
+  auxColumnType,
+  columnType,
+  MYSQL_KEY_LIMIT_BYTES,
+  MYSQL_STRINGS,
+  mysqlKeyBytes,
+} from "../src/storage/ddl.js";
+import { AUX_TABLES, MYSQL, POSTGRES, SQLITE } from "../src/storage/sql.js";
+
+const MODELS = Object.keys(schema) as ModelName[];
+
+function fieldsOf(model: ModelName): [string, { type: FieldType; int64?: true }][] {
+  return Object.entries(schema[model].fields as Record<string, { type: FieldType; int64?: true }>);
+}
+
+/** Each key of `model` with its kind: the primary key, each unique key, and each index. */
+function keysOf(model: ModelName): { kind: "primary" | "unique" | "index"; fields: string[] }[] {
+  return [
+    { kind: "primary", fields: ["id"] },
+    ...schema[model].unique.map((f) => ({ kind: "unique" as const, fields: [...f] })),
+    ...schema[model].indexes.map((f) => ({ kind: "index" as const, fields: [...f] })),
+  ];
+}
+
+/** Every string field that a key or an index holds, as `<model>.<field>`. */
+function keyStrings(): Set<string> {
+  const out = new Set<string>();
+  for (const m of MODELS)
+    for (const k of keysOf(m))
+      for (const f of k.fields)
+        if (fieldsOf(m).find(([n]) => n === f)?.[1].type === "string") out.add(`${m}.${f}`);
+  return out;
+}
+
+/** The text of each source file of core, keyed by its path under `src/`. */
+const SOURCES = Object.entries(
+  import.meta.glob<string>("../src/**/*.ts", { query: "?raw", import: "default", eager: true }),
+).map(([path, text]) => [path.replace(/^\.\.\/src\//, ""), text] as const);
+
+/** The longest value of each part of a limiter key, by the expression that the site writes. */
+function longestPart(expr: string): string {
+  // The longest form that ipKey gives for an address it parses. A custom
+  // clientIp hook can give any string: the MySQL README names that limit.
+  if (/^ipKey\(/.test(expr))
+    return [ipKey("255.255.255.255"), ipKey("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")].reduce(
+      (a, b) => (a.length >= b.length ? a : b),
+    );
+  // A row id or a session id: 64 characters (the MySQL width of an id).
+  if (/(^|\.)(id|userId|sid)$/.test(expr)) return "i".repeat(64);
+  // normalizeEmail keeps at most 254 UTF-16 code units: 3 bytes each at most.
+  if (/(^|\.)(email|newEmail)$/.test(expr)) return "語".repeat(254);
+  // A hash in hex.
+  if (/CodeHash$/.test(expr)) return "f".repeat(64);
+  // The name of an operator secret: at most 32 characters (config.ts).
+  if (expr === "entry.name") return "n".repeat(32);
+  throw new Error(`no longest form for the key part \${${expr}}: give it a row in this test`);
+}
+
+/** The longest key that one `allow` call can build, from the text of its first argument. */
+function longestKey(file: string, text: string, arg: string): string {
+  if (arg.startsWith("`"))
+    return arg.slice(1, -1).replace(/\$\{([^}]*)\}/g, (_, e) => longestPart(e));
+  if (/^tokenUseKey\(/.test(arg)) return tokenUseKey("tk", "i".repeat(64));
+  // A name: the template that the same file assigns to it.
+  const assigned = new RegExp(`const ${arg} = (\`[^\`]*\`);`).exec(text)?.[1];
+  if (assigned === undefined) throw new Error(`${file}: no template for the key ${arg}`);
+  return longestKey(file, text, assigned);
+}
+
+describe("the column map (plan 12g)", () => {
+  it("maps each field type on each dialect", () => {
+    const sqlite: Record<FieldType, string> = {
+      string: "TEXT",
+      json: "TEXT",
+      boolean: "INTEGER",
+      integer: "INTEGER",
+      date: "INTEGER",
+    };
+    const postgres: Record<FieldType, string> = {
+      string: "text",
+      json: "jsonb",
+      boolean: "boolean",
+      integer: "integer",
+      date: "timestamp with time zone",
+    };
+    const mysql: Record<FieldType, string> = {
+      string: "TEXT",
+      json: "JSON",
+      boolean: "TINYINT(1)",
+      integer: "INT",
+      date: "BIGINT",
+    };
+    for (const m of MODELS)
+      for (const [f, def] of fieldsOf(m)) {
+        const name = `${m}.${f}`;
+        expect(columnType(SQLITE, m, f), name).toBe(sqlite[def.type]);
+        expect(columnType(POSTGRES, m, f), name).toBe(def.int64 ? "bigint" : postgres[def.type]);
+        const row = MYSQL_STRINGS[name];
+        expect(columnType(MYSQL, m, f), name).toBe(
+          def.int64
+            ? "BIGINT"
+            : row === undefined
+              ? mysql[def.type]
+              : `VARCHAR(${row.length}) CHARACTER SET ${row.charset} COLLATE ${row.charset === "ascii" ? "ascii_bin" : "utf8mb4_0900_bin"}`,
+        );
+      }
+    expect(columnType(MYSQL, "passkey", "credentialId")).toBe(
+      "VARCHAR(1364) CHARACTER SET ascii COLLATE ascii_bin",
+    );
+    expect(columnType(MYSQL, "user", "email")).toBe(
+      "VARCHAR(254) CHARACTER SET utf8mb4 COLLATE utf8mb4_0900_bin",
+    );
+  });
+
+  it("marks the 64-bit integers in the schema, not by field name", () => {
+    const int64 = MODELS.flatMap((m) =>
+      fieldsOf(m)
+        .filter(([, def]) => def.int64)
+        .map(([f]) => `${m}.${f}`),
+    );
+    expect(int64).toEqual(["passkey.counter", "totp.lastStep"]);
+    for (const m of MODELS)
+      for (const [f, def] of fieldsOf(m))
+        if (def.type === "integer")
+          expect(columnType(POSTGRES, m, f), `${m}.${f}`).toBe(
+            int64.includes(`${m}.${f}`) ? "bigint" : "integer",
+          );
+  });
+
+  it("gives each MySQL key string a row in MYSQL_STRINGS", () => {
+    const keyed = keyStrings();
+    for (const k of keyed) expect(MYSQL_STRINGS[k], k).toBeDefined();
+    // Every row names a string field that a key or an index holds.
+    for (const k of Object.keys(MYSQL_STRINGS)) expect(keyed.has(k), k).toBe(true);
+    expect(keyed.size).toBe(81);
+  });
+
+  it("keeps each MySQL key under the InnoDB limit", () => {
+    expect(MYSQL_KEY_LIMIT_BYTES).toBe(3072);
+    for (const m of MODELS)
+      for (const k of keysOf(m)) {
+        const name = `${m} ${k.kind} (${k.fields.join(", ")})`;
+        expect(mysqlKeyBytes(MYSQL, m, k.fields), name).toBeLessThanOrEqual(3072);
+        expect(k.fields.length, name).toBeLessThanOrEqual(16);
+      }
+    expect(mysqlKeyBytes(MYSQL, "identity", ["provider", "subject"])).toBe(64 * 4 + 255 * 4);
+    expect(mysqlKeyBytes(MYSQL, "verification", ["identifier"])).toBe(255 * 4);
+  });
+
+  it("never puts a prefix on a unique key", () => {
+    for (const m of MODELS)
+      for (const k of keysOf(m))
+        if (k.kind !== "index")
+          for (const f of k.fields)
+            expect(MYSQL_STRINGS[`${m}.${f}`]?.prefix, `${m}.${f}`).toBeUndefined();
+    expect(MYSQL_STRINGS["verification.identifier"]?.prefix).toBe(255);
+  });
+
+  it("lists the columns of the tables that are not models", () => {
+    expect(
+      AUX_TABLES.map((t) => [t.name, t.columns.map((c) => `${c.name} ${c.kind}`), t.primaryKey]),
+    ).toEqual([
+      ["ta_meta", ["key text", "value text"], ["key"]],
+      ["ta_limit", ["key text", "window_start int64", "count int64", "expires_at int64"], ["key"]],
+    ]);
+    expect(AUX_TABLES[1]?.indexes).toEqual([
+      { name: "ix_ta_limit__expires_at", columns: ["expires_at"] },
+    ]);
+    // `key` is a reserved word of MySQL, so the MySQL statements of the limiter and the gate quote it (Task 5).
+    expect(auxColumnType(MYSQL, "ta_limit", "key")).toBe("VARBINARY(3072)");
+    expect(auxColumnType(MYSQL, "ta_limit", "expires_at")).toBe("BIGINT");
+    expect(auxColumnType(MYSQL, "ta_meta", "key")).toBe(
+      "VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin",
+    );
+    expect(auxColumnType(MYSQL, "ta_meta", "value")).toBe("TEXT");
+    expect(auxColumnType(POSTGRES, "ta_limit", "count")).toBe("bigint");
+    expect(auxColumnType(SQLITE, "ta_limit", "key")).toBe("TEXT");
+  });
+
+  it("keeps the stored key of each limiter site within ta_limit.key on MySQL", () => {
+    // Ruling 3 of plan 12g: ta_limit.key is VARBINARY(3072). Each allow call
+    // of core is found in the source, so a new site with no longest form fails.
+    const sites: string[] = [];
+    let calls = 0;
+    for (const [file, text] of SOURCES) {
+      if (file.startsWith("limiter/")) continue;
+      calls += text.match(/\.allow\(/g)?.length ?? 0;
+      for (const m of text.matchAll(/\.allow\(\s*(`[^`]*`|tokenUseKey\([^)]*\)|\w+)\s*,/g)) {
+        const arg = m[1] ?? "";
+        const stored = limiterKey(longestKey(file, text, arg), {
+          seconds: Number.MAX_SAFE_INTEGER,
+          max: Number.MAX_SAFE_INTEGER,
+        });
+        const bytes = new TextEncoder().encode(stored).length;
+        expect(bytes, `${file} ${arg}`).toBeLessThanOrEqual(3072);
+        sites.push(`${file} ${arg}`);
+      }
+    }
+    // Each call has a key form that this test reads: a call it cannot read fails here.
+    expect(sites.length).toBe(calls);
+    // The count of the call sites at the 12k merge.
+    expect(sites.length).toBe(76);
+    expect(sites).toContain(`engine/slug-check.ts \`slug-check:user:\${userId}\``);
+    expect(sites).toContain("engine/token-use.ts tokenUseKey(kind, row.id)");
+    expect(sites).toContain(
+      `engine/oauth-credentials.ts \`oauth-credentials:client:\${client.id}\``,
+    );
+  });
+});

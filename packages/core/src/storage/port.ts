@@ -22,18 +22,32 @@ export interface FindManyOptions<M extends ModelName> {
   limit?: number;
 }
 
-export type StorageErrorCode =
-  | "unique_violation"
-  | "unknown_model"
-  | "unknown_field"
-  | "invalid_argument"
-  | "schema_mismatch"
+/**
+ * The codes of `StorageError`, as one list (plan 12g): the type derives from
+ * it, and the errors page of the site holds one heading per code.
+ */
+export const STORAGE_ERROR_CODES = [
+  "unique_violation",
+  "unknown_model",
+  "unknown_field",
+  "invalid_argument",
+  "schema_mismatch",
   /**
    * Thrown when a D1 rollback could not reverse every write. `cause` holds
    * `{ original, failures }`: the error that started the rollback and the
    * errors of the undo entries that failed.
    */
-  | "rollback_failed";
+  "rollback_failed",
+  /**
+   * The database or the driver handle has a setting that breaks the port's
+   * rules (plan 12g): a driver that reads integers as BigInt, a MySQL pool
+   * without FOUND_ROWS, a session without strict mode, a table without a
+   * binary collation. The message names the setting, never a value.
+   */
+  "config_mismatch",
+] as const;
+
+export type StorageErrorCode = (typeof STORAGE_ERROR_CODES)[number];
 
 export class StorageError extends Error {
   constructor(
@@ -125,6 +139,10 @@ export interface StorageAdapter {
    * two flows that delete the same rows in one statement each can wait on
    * each other. Postgres runs SELECT ... ORDER BY id FOR UPDATE. D1
    * and memory have no row lock and leave it out. It costs one statement.
+   * Update 2026-10-21 by plan 12g: InnoDB locks rows in the order of the
+   * index that it reads, not in the ORDER BY order. So the MySQL adapter
+   * reads the ids first and then locks them by id: two statements. The
+   * conformance option `lockStatements` holds that count.
    * An adapter on a database with row locks must have it (ruling 37):
    * without it the session deletes of two flows can deadlock. The
    * conformance kit checks it with the option `rowLocks: true`.

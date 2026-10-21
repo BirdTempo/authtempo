@@ -623,7 +623,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
         return c;
       });
       const p = new Params();
-      const eq = pg ? "IS NOT DISTINCT FROM" : "IS";
+      const eq = d.nullSafeEq;
       const sets = cols.map((c, i) => {
         const q = quoteRaw(c);
         return `${q} = CASE WHEN ${q} ${eq} ${p.add(written[i])} THEN ${p.add(row[c])} ELSE ${q} END`;

@@ -16,9 +16,16 @@ const FS_MODULE = "node:fs";
  * The adapter suite writes and reads rows of its own fresh store. `audit.ts`
  * is the one writer and the one reader. A call that is not in a file of
  * this list cannot touch the table, in any form of the name. The sweep is
- * not in the list, so no expiry removes a row.
+ * not in the list, so no expiry removes a row. `ddl.ts` names the model only
+ * in the keys of `MYSQL_STRINGS`, the MySQL column widths (plan 12g): it
+ * makes no storage call.
  */
-const NAMED_IN = ["engine/operator/audit.ts", "schema.ts", "storage/conformance.ts"];
+const NAMED_IN = [
+  "engine/operator/audit.ts",
+  "schema.ts",
+  "storage/conformance.ts",
+  "storage/ddl.ts",
+];
 
 describe("the audit model is append-only (plan 12f Task 4, spec 26 item 8)", () => {
   it("names the audit model only in the allowed files, and only a create and a read in the writer", async () => {

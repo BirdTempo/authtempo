@@ -288,6 +288,11 @@ export const EXEMPT_ENTRIES: readonly { pkg: string; entry: string; reason: stri
   },
   {
     pkg: "@authtempo/core",
+    entry: "./ddl",
+    reason: "the column map of each dialect, for the adapters and the CLI (plan 12g)",
+  },
+  {
+    pkg: "@authtempo/core",
     entry: "./testing",
     reason: "the soft authenticator and the test helpers",
   },

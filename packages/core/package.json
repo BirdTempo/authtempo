@@ -28,6 +28,10 @@
       "types": "./dist/storage/sql.d.ts",
       "default": "./dist/storage/sql.js"
     },
+    "./ddl": {
+      "types": "./dist/storage/ddl.d.ts",
+      "default": "./dist/storage/ddl.js"
+    },
     "./operator-secret": {
       "types": "./dist/operator-secret.d.ts",
       "default": "./dist/operator-secret.js"
