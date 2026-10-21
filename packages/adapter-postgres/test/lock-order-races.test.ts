@@ -4,6 +4,7 @@ import {
   type ModelName,
   type OrganizationHooks,
   type OrganizationsConfig,
+  type ResolvedSession,
   type StorageAdapter,
   type UserRow,
 } from "@authtempo/core";
@@ -188,12 +189,19 @@ async function sessionOf(auth: Auth, sent: MailMessage[], email: string): Promis
   return r.value.token;
 }
 
+/** The session of the `ts_` bearer `token`. The test fails when the bearer has no session. */
+async function sessionAt(auth: Auth, token: string): Promise<ResolvedSession> {
+  const session = await auth.api.getSession(token);
+  if (!session) throw new Error("no session");
+  return session;
+}
+
 /** The call's answer, or the text of what it threw, such as a Postgres deadlock. */
 function settle<T>(p: Promise<T>): Promise<T | string> {
   return p.catch((e: unknown) => `threw ${String(e)}`);
 }
 
-const rows = (m: ModelName) => createPostgresAdapter(db.sql).findMany(m, []);
+const rows = <M extends ModelName>(m: M) => createPostgresAdapter(db.sql).findMany(m, []);
 
 /**
  * A storage on the shared pool that logs each lock write in a transaction:
@@ -228,8 +236,7 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     });
     const a = await user("a");
     const token = await sessionOf(plain, sent, "a@example.com");
-    const session = await plain.api.getSession(token);
-    if (!session) throw new Error("no session");
+    const session = await sessionAt(plain, token);
     const organizationId = await organization(plain, a);
     const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
 
@@ -405,11 +412,9 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
     must(await plain.api.addTeamMember({ user: a, teamId, userId: a.id }));
     const token = await sessionOf(plain, sent, "a@example.com");
-    const first = await plain.api.getSession(token);
-    if (!first) throw new Error("no session");
+    const first = await sessionAt(plain, token);
     must(await plain.api.setActiveOrganization({ session: first, organizationId }));
-    const session = await plain.api.getSession(token);
-    if (!session) throw new Error("no session");
+    const session = await sessionAt(plain, token);
 
     const set = await one.api.setActiveTeam({ session, teamId });
 
