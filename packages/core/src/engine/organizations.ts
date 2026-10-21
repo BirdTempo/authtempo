@@ -1146,6 +1146,46 @@ export async function updateMemberRole(
   return ok(updated);
 }
 
+/**
+ * The writes of a member removal in the caller's transaction (ruling 25 N3
+ * of plan 12d). `removeMember` calls it after its before hook, and a SCIM
+ * deactivate calls it with no user caller. The caller holds the person's
+ * user row and sessions first, and with `revokeTokens` the organization
+ * lock, in the order of user-hold.ts. The role from the caller's read is in
+ * the where: when another request changed it since, zero rows match and
+ * nothing else is written. The person's team rows and active team go with
+ * the membership, with no team hook (plan 12k). The active organization is
+ * a choice, not a right, so it goes in the same write. With `revokeTokens`
+ * the organization tokens that the person created go too. The answer is the
+ * count of member rows deleted.
+ */
+export async function removeMemberIn(
+  tx: StorageAdapter,
+  member: MemberRow,
+  revokeTokens: boolean,
+): Promise<number> {
+  const n = await tx.delete("member", [
+    { field: "id", op: "eq", value: member.id },
+    { field: "role", op: "eq", value: member.role },
+  ]);
+  if (n === 0) return 0;
+  await dropMemberTeams(tx, member.organizationId, member.userId);
+  await tx.update(
+    "session",
+    [
+      { field: "userId", op: "eq", value: member.userId },
+      { field: "activeOrganizationId", op: "eq", value: member.organizationId },
+    ],
+    { activeOrganizationId: null },
+  );
+  if (revokeTokens)
+    await tx.delete("organizationToken", [
+      { field: "organizationId", op: "eq", value: member.organizationId },
+      { field: "createdById", op: "eq", value: member.userId },
+    ]);
+  return n;
+}
+
 /** The second right of `revokeTokens` (deviation 9 of plan 12k): a creator has no right of their own on a token. */
 const REVOKE_TOKENS: Statements = { apiToken: ["revoke"] };
 
@@ -1194,7 +1234,6 @@ export async function removeMember(
     ? input.user
     : await config.storage.findOne("user", [{ field: "id", op: "eq", value: input.userId }]);
   if (!memberUser) return fail("not_found");
-  const organizationId = input.organizationId;
   const hooks = config.hooks.organization;
   const via: RemoveVia = self ? "leave" : "remove";
   const event = {
@@ -1211,8 +1250,7 @@ export async function removeMember(
     by: input.user,
     via,
   };
-  // The role from the read is in the where: if another request changed it since, zero rows match.
-  // The active organization is a choice, not a right; it goes with the membership in the same write.
+  // The writes of the removal are removeMemberIn, after the before hook.
   const drop = async (storage: StorageAdapter) => {
     // The lock of the token create (ruling 32 of plan 12k). A create that holds it commits
     // first, and the token delete below sees its row. The user hold and the session locks run
@@ -1224,27 +1262,7 @@ export async function removeMember(
       hooks.beforeRemoveMember,
       event,
     );
-    const n = await storage.delete("member", [
-      { field: "id", op: "eq", value: target.member.id },
-      { field: "role", op: "eq", value: target.member.role },
-    ]);
-    if (n === 0) return 0;
-    // Plan 12k: the person's team rows and active team go with the membership, with no team hook.
-    await dropMemberTeams(storage, organizationId, target.member.userId);
-    await storage.update(
-      "session",
-      [
-        { field: "userId", op: "eq", value: target.member.userId },
-        { field: "activeOrganizationId", op: "eq", value: organizationId },
-      ],
-      { activeOrganizationId: null },
-    );
-    if (revokeTokens)
-      await storage.delete("organizationToken", [
-        { field: "organizationId", op: "eq", value: organizationId },
-        { field: "createdById", op: "eq", value: target.member.userId },
-      ]);
-    return n;
+    return removeMemberIn(storage, target.member, revokeTokens);
   };
   // A removal or a leave of the platform organization ends the member's
   // impersonations (ruling 42 I1).
