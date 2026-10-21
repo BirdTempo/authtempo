@@ -197,6 +197,7 @@ export {
   type AccountDeletePageInput,
   defaultAccountDeletePage,
 } from "./http/account-delete-page.js";
+export { isJsonRequest } from "./http/body.js";
 export { type ConfirmPageInput, defaultConfirmPage } from "./http/confirm-page.js";
 export { type ConsentPageInput, defaultConsentPage } from "./http/consent-page.js";
 export { DEFAULT_SESSION_COOKIE, LEGACY_SESSION_COOKIE } from "./http/cookies.js";
