@@ -21,7 +21,7 @@ sources:
 
 | Export | What it is |
 | --- | --- |
-| `createMysqlAdapter` | The storage port on MySQL, from a mysql2 pool. The first call runs the four checks at start. |
+| `createMysqlAdapter` | The storage port on MySQL, from a mysql2 pool. The first call runs the four checks at start. Its `ping` reads the schema version with no cache, for `GET /auth/ready`. |
 | `createMysqlAdapterOn` | The adapter with other statements, another error map, or other checks at start. |
 | `MysqlAdapterOptions` | The options of `createMysqlAdapterOn`. |
 | `toStorageError` | Maps a mysql2 error to a `StorageError`, or answers null. It copies no part of the driver message. |
@@ -33,6 +33,7 @@ sources:
 | `expectedMysqlShape` | The tables, columns, and indexes that the migrations make. |
 | `readMysqlShape` | Reads the live tables, columns, and indexes of a database. |
 | `mysqlStartChecks` | The four checks at start: the version, FOUND_ROWS, strict mode, and the collations. |
+| `mysqlSchemaVersionPing` | The `ping` of the adapter: the read of the schema version with no cache, each call. It throws `schema_mismatch` for a missing or old version. |
 
 ## Next
 

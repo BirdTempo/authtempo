@@ -24,7 +24,7 @@ sources:
 
 | Export | What it is |
 | --- | --- |
-| `createSqliteAdapter` | The storage port on SQLite, from a `SqliteDriver`. The first call checks the integer reads, then the schema version. |
+| `createSqliteAdapter` | The storage port on SQLite, from a `SqliteDriver`. The first call checks the integer reads, then the schema version. Its `ping` reads the schema version with no cache, for `GET /auth/ready`. |
 | `createSqliteLimiter` | The owned limiter on SQLite, from a `SqliteDriver`. It keeps its counts in `ta_limit`. |
 | `SqliteDriver` | One database through one driver. An entry of a driver makes it from the handle that the app opens. |
 | `applySqliteMigrations` | Applies each migration that `ta_migrations` lacks, and answers the names that ran. It is safe on every start. |
@@ -71,6 +71,7 @@ sources:
 | `D1AdapterOptions` | The statements, the error map, and the start check of `createD1AdapterOn`, with an optional statement count. |
 | `createD1Limiter` | The D1 limiter over a `D1Subset`. |
 | `schemaVersionCheckOn` | The check of `ta_meta.schema_version` over a `D1Subset`. |
+| `schemaVersionPing` | The `ping` of an adapter over a `D1Subset`: the read of `ta_meta.schema_version` with no cache, each call. It throws `schema_mismatch` for an old version. |
 | `toStorageError` | Maps a SQLite unique error to a `StorageError` with `unique_violation`, or answers null for another error. |
 
 ## Next
