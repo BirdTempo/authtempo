@@ -193,6 +193,14 @@ export async function passkeyRegistrationOptions(
   return ok(options);
 }
 
+/** The longest credential id of WebAuthn Level 3 (section 5.1, "at most 1023 bytes"). */
+const CREDENTIAL_ID_MAX_BYTES = 1023;
+
+/** The bytes that a base64url text without padding decodes to. */
+function base64UrlBytes(text: string): number {
+  return Math.floor((text.length * 3) / 4);
+}
+
 export async function verifyPasskeyRegistration(
   config: ResolvedConfig,
   input: { user: UserRow; response: unknown; name?: string | undefined },
@@ -213,6 +221,13 @@ export async function verifyPasskeyRegistration(
     });
   } catch (e) {
     config.observe.emit({ name: "passkey.registration_rejected", errorClass: e });
+    return fail("passkey_failed");
+  }
+  // WebAuthn Level 3 bounds a credential id to 1023 bytes, and the MySQL
+  // column holds its base64url form of 1364 characters (ruling 7 of plan 12g).
+  // An id over the bound answers like any other failed ceremony.
+  if (base64UrlBytes(registered.id) > CREDENTIAL_ID_MAX_BYTES) {
+    console.error("authtempo: passkey credential id over 1023 bytes");
     return fail("passkey_failed");
   }
   const now = config.clock.now();

@@ -492,7 +492,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
         model,
         sorts.map((s) => s.field),
       );
-      if (opts.limit !== undefined && (!Number.isInteger(opts.limit) || opts.limit < 0)) {
+      if (opts.limit !== undefined && (!Number.isSafeInteger(opts.limit) || opts.limit < 0)) {
         throw invalid(model, "limit", "expected a non-negative integer");
       }
       const p = new Params();

@@ -179,7 +179,7 @@ function adapterOn(
       sent.statements++;
       let rows = select(model, where);
       const limit = opts?.limit;
-      if (limit !== undefined && !(Number.isInteger(limit) && limit >= 0)) {
+      if (limit !== undefined && !(Number.isSafeInteger(limit) && limit >= 0)) {
         throw new StorageError("invalid_argument", model, ["limit"]);
       }
       const sorts =

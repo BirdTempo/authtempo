@@ -28,6 +28,10 @@ LinkedIn's `sub` is pairwise per client id, so an imported LinkedIn identity
 links only while the app keeps the LinkedIn client id that the old system
 used. Firebase and Cognito have no built-in LinkedIn provider.
 
+A social subject longer than 255 characters is dropped and listed as
+`identity:<provider>:subject_length`. Core's social sign-in never answers
+such a subject, and the MySQL column holds 255 characters.
+
 `--formats` is required, and it has no default. Give it the `formats` list
 of the app's `createLegacyPasswordHash`, comma-separated, or `none` for an app
 with no legacy seam. A hash in another format is refused and listed. The user

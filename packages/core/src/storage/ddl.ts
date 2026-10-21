@@ -61,7 +61,7 @@ export const MYSQL_STRINGS: Readonly<Record<string, MysqlString>> = {
   ),
   "identity.subject": utf8(
     255,
-    "the OIDC sub is at most 255 ASCII characters (SUBJECT_MAX, engine/social.ts); an importer writes an address; a generic OAuth2 subject has no stated bound",
+    "SUBJECT_MAX (engine/social.ts) bounds the subject of each provider kind, OIDC and generic OAuth2, to 255; the importer drops a longer one and writes an address",
   ),
   "session.id": ascii(64, ROW_ID),
   "session.tokenHash": ascii(64, HASH),
@@ -402,9 +402,9 @@ function tableStatements(d: Dialect, t: DdlTable): string[] {
 
 /**
  * The full DDL of `SCHEMA_VERSION` on `d` (plan 12g), one statement per
- * entry: each model in schema order with its columns in field order, then
- * its unique keys and its indexes with core's names, then `AUX_TABLES`, then
- * the version row. No comment and no `IF NOT EXISTS`, so two calls give the
+ * entry. Each model comes in schema order, with its columns in field order.
+ * Its unique keys and its indexes follow, with core's names. Then come
+ * `AUX_TABLES` and the version row. No comment and no `IF NOT EXISTS`, so two calls give the
  * same text. The shipped D1 and Postgres migrations stay records written by
  * hand; the shape check holds them equal to this text.
  */

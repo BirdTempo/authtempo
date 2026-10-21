@@ -409,10 +409,13 @@ export function runAdapterConformance(
       expect(rows.map((r) => [r.id, r.name])).toEqual([["u1", null]]);
     });
 
-    it("limit 0 returns nothing, and a limit that is not a non-negative integer throws", async () => {
+    it("limit 0 returns nothing, and a limit that is not a non-negative safe integer throws", async () => {
       await db.create("user", user("u1", "a@example.com", t0));
       expect(await db.findMany("user", [], { limit: 0 })).toEqual([]);
-      for (const limit of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      // The largest safe integer is a limit. One rule on every store (ruling 7 of plan 12g):
+      // MySQL inlines the limit, and 1e21 prints as "1e+21".
+      expect(await db.findMany("user", [], { limit: 9007199254740991 })).toHaveLength(1);
+      for (const limit of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 1e21, 9007199254740992]) {
         await expect(db.findMany("user", [], { limit })).rejects.toMatchObject({
           name: "StorageError",
           code: "invalid_argument",

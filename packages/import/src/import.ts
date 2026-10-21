@@ -50,6 +50,13 @@ const SOCIAL: ReadonlyMap<string, ((subject: string) => boolean) | null> = new M
   ["github", isGithubSubject],
   ["linkedin", null],
 ]);
+/**
+ * The longest subject that core's social sign-in answers (SUBJECT_MAX,
+ * core/src/engine/social.ts). A longer subject is dropped and listed as
+ * `identity:<provider>:subject_length`. Core never answers it, and the MySQL
+ * column holds 255 characters (ruling 7 of plan 12g).
+ */
+const SUBJECT_MAX = 255;
 const RANK: Record<ImportRole, number> = { member: 1, admin: 2, owner: 3 };
 /**
  * The skip for a record whose write meets a unique_violation on both
@@ -395,6 +402,10 @@ function userRows(
     const form = SOCIAL.get(i.provider);
     if (form && !form(i.subject)) {
       dropped.push(`identity:${i.provider}:subject_form`);
+      continue;
+    }
+    if (i.subject.length > SUBJECT_MAX) {
+      dropped.push(`identity:${i.provider}:subject_length`);
       continue;
     }
     if (identities.some((x) => x.provider === i.provider && x.subject === i.subject)) continue;

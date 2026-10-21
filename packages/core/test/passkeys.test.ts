@@ -64,6 +64,29 @@ describe("passkey registration", () => {
     expect(open[0]?.expiresAt.getTime()).toBe(auth.clock.now().getTime() + 5 * 60_000);
   });
 
+  it("keeps a credential id of 1023 bytes and refuses one of 1024 (ruling 7 of plan 12g)", async () => {
+    const auth = passkeyAuth();
+    const user = await auth.seedUser("ada@example.com");
+    const ceremony = async (bytes: number) => {
+      const soft = await SoftAuthenticator.create({
+        rpID: RP.rpID,
+        origin: ORIGIN,
+        credentialIdBytes: bytes,
+      });
+      const options = await passkeyRegistrationOptions(auth.config, { user });
+      if (!options.ok) throw new Error(options.code);
+      return verifyPasskeyRegistration(auth.config, {
+        user,
+        response: await soft.register(options.value.challenge, new TextEncoder().encode(user.id)),
+      });
+    };
+    expect((await ceremony(1023)).ok).toBe(true);
+    expect(await ceremony(1024)).toMatchObject({ ok: false, code: "passkey_failed" });
+    const rows = await auth.storage.findMany("passkey", []);
+    // 1023 bytes are 1364 base64url characters: the width of the MySQL column.
+    expect(rows.map((r) => r.credentialId.length)).toEqual([1364]);
+  });
+
   it("verifies, stores the passkey with its name, and consumes the challenge", async () => {
     const auth = passkeyAuth();
     const user = await auth.seedUser("ada@example.com");

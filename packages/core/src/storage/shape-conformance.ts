@@ -11,8 +11,9 @@ export interface ShapeSide {
 
 /**
  * One engine under the shape check (plan 12g). `shipped` builds a new
- * database with the adapter's own migration list (the runner, or its steps
- * without the lock on a fixture) and reads it back. `fromDdl` applies the
+ * database with the adapter's own migration list and reads it back. The
+ * list runs through the runner, or on a fixture through its steps without
+ * the lock. `fromDdl` applies the
  * statements to a new empty database and reads it back. `close` drops what
  * the two calls made. `dialect` gives the DDL text that `fromDdl` gets.
  */
@@ -30,7 +31,7 @@ const byName = <T extends { name: string }>(a: T, b: T) =>
 /**
  * The live shape with no `hasDefault`, with the tables sorted by name. The
  * engine writes every field on each insert, so a column default never
- * decides a stored value (deviation 2 of plan 12g); the order of creation
+ * decides a stored value (deviation 2 of plan 12g). The order of creation
  * does not count.
  */
 export function withoutDefaults(shape: LiveShape): ExpectedShape {
@@ -104,8 +105,8 @@ export function shapeDifferences(
 /**
  * The shape check of one engine (plan 12g, spec section 28 item 5). The
  * database that the shipped migrations build equals the database that
- * `schemaDdl` builds, the runner tables and the column defaults aside; it
- * equals the adapter's expected shape; and both sides record
+ * `schemaDdl` builds, the runner tables and the column defaults aside. It
+ * also equals the adapter's expected shape. Both sides record
  * `SCHEMA_VERSION`. A field added to the schema with no migration fails the
  * first test with its table and column.
  */

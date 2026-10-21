@@ -14,6 +14,8 @@ export interface SoftAuthenticatorOptions {
   backedUp?: boolean;
   /** Clears the UV flag when false, to test that a server requires it. Default true. */
   userVerified?: boolean;
+  /** The bytes of the credential id. Default 16. WebAuthn allows at most 1023. */
+  credentialIdBytes?: number;
 }
 
 export interface SoftRegistrationResponse {
@@ -70,7 +72,8 @@ export class SoftAuthenticator {
       "sign",
       "verify",
     ])) as CryptoKeyPair;
-    const id = crypto.getRandomValues(new Uint8Array(16));
+    const id = new Uint8Array(opts.credentialIdBytes ?? 16);
+    crypto.getRandomValues(id);
     return new SoftAuthenticator(opts, keys, id);
   }
 

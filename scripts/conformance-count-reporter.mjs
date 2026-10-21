@@ -1,6 +1,6 @@
 // The count of each conformance run (plan 12g, ruling 7). A vitest reporter.
-// A suite that silently does not run looks like a pass, so this reporter
-// prints the test count of each run and fails the run when an expected run
+// A suite that silently does not run looks like a pass. So this reporter
+// prints the test count of each run. It fails the run when an expected run
 // is missing or has no passed test. It also fails a run whose passed count is
 // below its test count: a skipped test is a test that did not run. A run is a
 // top-level describe whose name starts with one of PREFIXES, such as

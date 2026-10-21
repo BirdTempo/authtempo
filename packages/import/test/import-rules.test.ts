@@ -458,6 +458,31 @@ describe("importUsers: GitHub and LinkedIn identities (plan 9b2)", () => {
   });
 });
 
+describe("importUsers: the length of a social subject (ruling 7 of plan 12g)", () => {
+  it("keeps a subject of 255 characters and drops and lists one of 256", async () => {
+    const db = createMemoryAdapter();
+    const r = await importUsers(
+      db,
+      listSource([
+        user("a", {
+          identities: [
+            { provider: "google", subject: "g".repeat(255) },
+            { provider: "apple", subject: "p".repeat(256) },
+          ],
+        }),
+      ]),
+      { formats: LEGACY_FORMATS, now },
+    );
+    const a = await importId("user", "supabase", "a");
+    expect(
+      (await db.findMany("identity", [{ field: "userId", op: "eq", value: a }]))
+        .map((i) => `${i.provider}:${i.subject.length}`)
+        .sort(),
+    ).toEqual(["email:13", "google:255"]);
+    expect(r.dropped).toEqual([{ sourceId: "a", item: "identity:apple:subject_length" }]);
+  });
+});
+
 describe("importUsers: the repair mode (plan 9b2)", () => {
   /** A run on D1 that stopped after the user row of `u1` (an isolate that dies does not roll back, spec 6). */
   async function halfUser(db: StorageAdapter, verified = true) {
