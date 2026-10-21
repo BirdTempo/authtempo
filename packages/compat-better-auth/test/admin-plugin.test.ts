@@ -466,6 +466,17 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
     expect(
       await json(await a.call("/admin/set-role", { userId: anna.id, role: "user" }, a.op)),
     ).toMatchObject({ status: 403, body: { code: "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE" } });
+    // A ban and an unban answer { user } with the role user. So they must
+    // never act on a platform operator: each is refused, and anna keeps her role.
+    for (const path of ["/admin/ban-user", "/admin/unban-user"])
+      expect(await json(await a.call(path, { userId: anna.id }, a.op))).toEqual({
+        status: 403,
+        body: { code: "YOU_ARE_NOT_ALLOWED_TO_BAN_USERS", message: expect.any(String) },
+      });
+    expect((await json(await a.read(`/admin/get-user?id=${anna.id}`, a.op))).body).toMatchObject({
+      role: "admin",
+      banned: false,
+    });
     const revoked = await json(
       await a.call("/admin/set-role", { userId: bob.id, role: "user" }, a.op),
     );

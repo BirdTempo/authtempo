@@ -559,7 +559,9 @@ async function adminAnswer(
       const ban = banBodyOf(body, new Date());
       if (ban === null) return invalid();
       const res = await core("/operator/users/ban", ban);
-      // Core refuses an act on a platform operator, so the target's role is `user`.
+      // Core refuses a user actor's act on a platform operator (targetOf), and
+      // the shim always acts as a user. So the target's role is `user`, with no
+      // read of the role, which a ban of 501 sessions on D1 cannot afford.
       return res.ok ? userAfter(res, userId, USER_ROLE) : refusalOf(path, res);
     }
     case "/admin/unban-user": {
