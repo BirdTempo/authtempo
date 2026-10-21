@@ -44,20 +44,21 @@ const DEFAULT_INCLUDE: Include = { ip: "none", userAgent: "none", email: "none" 
  * The event recorder of plan 12h Task 12. It wraps the two observers that
  * `resolveConfig` makes, in every test file of core. A test file that mocks
  * the observer itself replaces this mock: observer.test.ts and
- * no-await-flush.test.ts write no record. The observer of the
- * product stays as it is: its `emit`, `scope`, `unscoped`, and `flush` run
- * unchanged, so the default output and the sinks get the same events.
+ * no-await-flush.test.ts write no record. The observer of the product stays
+ * as it is. Its `emit`, `scope`, `unscoped`, and `flush` run unchanged, so
+ * the default output and the sinks get the same events.
  *
- * Beside it, each emit goes to a second real `createObserver` with the
- * include, the hash secret, and the scrub list of the config, and the same
- * scope chain. It flushes at each emit to a sink that writes one line per
- * event in `.events/<pid>-<worker>.jsonl`, so no event waits for a flush of
- * the test. So a record is the event that a sink of that config gets: the
- * stamp, the scope, the fields after the kinds, the `rejected` list, the
- * `unscoped` mark, and the hashes. A config with no `observe` gets the
- * default include. Only the observer of the product drops an event, so the
- * recorder reads the `observe.dropped` events from the sink of the product.
- * The check run (`vitest.events.config.ts`) reads the lines.
+ * Beside it, each emit goes to a second real `createObserver` with the same
+ * scope chain. That observer has the include, the hash secret, and the
+ * scrub list of the config. It flushes at each emit to a sink that writes
+ * one line per event in `.events/<pid>-<worker>.jsonl`. So no event waits
+ * for a flush of the test. A record is the event that a sink of that config
+ * gets. It holds the stamp, the scope, the fields after the kinds, the
+ * `rejected` list, the `unscoped` mark, and the hashes. A config with no
+ * `observe` gets the default include. Only the observer of the product
+ * drops an event, so the recorder reads the `observe.dropped` events from
+ * the sink of the product. The check run (`vitest.events.config.ts`) reads
+ * the lines.
  */
 vi.mock("../../src/observe/observer.js", async (importOriginal) => {
   const m = await importOriginal<typeof import("../../src/observe/observer.js")>();
@@ -131,6 +132,34 @@ vi.mock("../../src/observe/observer.js", async (importOriginal) => {
         m.createDefaultObserver(...a),
         recorder(DEFAULT_INCLUDE, { hashSecret, secrets: a[0].secrets }),
       );
+    },
+  };
+});
+
+/**
+ * The credentials that core mints in the suite: each `randomToken` and each
+ * `randomDigits` value joins the deny list (ruling 29 of plan 12h). So each
+ * session token, `tk_` token, `to_` token, and email code is on it. A helper
+ * of a test need not read the value. A client
+ * id (`cl_`) is public, so it stays off the list. A test file that mocks
+ * this module itself replaces this mock: its mints are not recorded.
+ */
+vi.mock("../../src/primitives/crypto.js", async (importOriginal) => {
+  const m = await importOriginal<typeof import("../../src/primitives/crypto.js")>();
+  // CLIENT_ID_PREFIX of oauth-clients.ts. An import of that module here would load the
+  // engine before a test file sets its own mocks.
+  const CLIENT_ID_PREFIX = "cl_";
+  return {
+    ...m,
+    randomToken: (prefix: string) => {
+      const token = m.randomToken(prefix);
+      if (prefix !== CLIENT_ID_PREFIX) remember("credential", token);
+      return token;
+    },
+    randomDigits: (length: number) => {
+      const code = m.randomDigits(length);
+      remember("credential", code);
+      return code;
     },
   };
 });

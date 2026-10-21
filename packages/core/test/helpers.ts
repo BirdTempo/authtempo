@@ -16,7 +16,7 @@ const record = (): RecordHook | undefined =>
 
 /**
  * Puts a token, a code, or a password that a helper mints on the deny list
- * of the event check: no event of the suite may hold it. Answers the value.
+ * of the event check. No event of the suite may hold it. Answers the value.
  */
 export function recordCredential(value: string): string {
   record()?.("credential", value);
@@ -25,7 +25,8 @@ export function recordCredential(value: string): string {
 
 /**
  * Puts an email, an IP, or a user agent of a request on the address list of
- * the event check: no event may hold it under the default include. Answers the value.
+ * the event check. No event may hold it under the default include. Answers
+ * the value.
  */
 export function recordAddress(value: string): string {
   record()?.("address", value);
