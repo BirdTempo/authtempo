@@ -12,9 +12,10 @@ import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
 // The machine check of the one lock order of user-hold.ts (ruling 49 of
-// plan 12k). The order has six kinds of rows. They are the user row, the
-// session rows, the organization row, the team row, the member rows, and
-// the team member rows. A storage wrapper records each create, update, delete,
+// plan 12k, and ruling 50). The order has seven kinds of rows. They are the
+// user row, the session rows, the organization row, the team row, the
+// invitation rows, the member rows, and the team member rows. A storage
+// wrapper records each create, update, delete,
 // and lock read of these kinds in each transaction, in order. Each test runs
 // one flow of plan 12f or 12k that writes these kinds, most of them two kinds
 // or more. A kind may come again, but a kind never comes first after a later
@@ -32,16 +33,28 @@ const OPEN = { allow: async () => true };
  * The kinds of user-hold.ts, in the lock order. The team row comes before
  * the member rows. The organization delete deletes the team rows first. An
  * accept that raises a member takes `lockTeam` before its member update. No
- * flow takes a member row and then a team row.
+ * flow takes a member row and then a team row. The invitation rows come
+ * between (ruling 50). The accept consumes its invitation after `lockTeam`
+ * and before its member write. The organization delete deletes the
+ * invitations after the team rows and before the member rows.
  */
-const KINDS = ["user", "session", "organization", "team", "member", "team member"] as const;
+const KINDS = [
+  "user",
+  "session",
+  "organization",
+  "team",
+  "invitation",
+  "member",
+  "team member",
+] as const;
 const KIND_OF = {
   user: 0,
   session: 1,
   organization: 2,
   team: 3,
-  member: 4,
-  teamMember: 5,
+  invitation: 4,
+  member: 5,
+  teamMember: 6,
 } as const;
 const kindOf = (model: ModelName): number | undefined =>
   (KIND_OF as Partial<Record<ModelName, number>>)[model];
@@ -291,7 +304,8 @@ async function activate(w: World, s: Signed, organizationId: string, teamId: str
  *   has no impersonation. Bob and Cal are in the team Support of the
  *   platform organization, and their sessions act in it.
  * - Ada owns Acme with Oli, a second owner. Pat is a member. Pat and Oli
- *   are in the team Core, and their sessions act in it.
+ *   are in the team Core, and their sessions act in it. A pending
+ *   invitation of Vic names Core.
  * - Oli alone holds Oli Co. Its default team holds Oli, and a second
  *   session of Oli acts in it.
  */
@@ -346,6 +360,16 @@ async function scene(w: World) {
     must(await w.auth.api.addTeamMember({ user: ada.user, teamId: core, userId: s.user.id }));
   const patActive = await activate(w, pat, acme, core);
   const oliActive = await activate(w, oli, acme, core);
+  // A pending invitation that names Core: the team delete and the organization delete write it.
+  must(
+    await w.auth.api.inviteMember({
+      user: ada.user,
+      organizationId: acme,
+      email: "vic@example.com",
+      role: "member",
+      teamIds: [core],
+    }),
+  );
 
   const oliCo = must(
     await w.auth.api.createOrganization({ user: oli.user, slug: "oli-co", name: "Oli Co" }),
@@ -412,14 +436,21 @@ const TOUCHED: Record<string, string[]> = {
     "member",
     "team member",
   ],
-  "an organization delete": ["session", "organization", "team", "member", "team member"],
+  "an organization delete": [
+    "session",
+    "organization",
+    "team",
+    "invitation",
+    "member",
+    "team member",
+  ],
   "a team create": ["organization", "team"],
-  "a team delete": ["session", "team", "team member"],
+  "a team delete": ["session", "team", "invitation", "team member"],
   "a team member add": ["user", "team", "team member"],
   "a team member removal": ["session", "team", "team member"],
   "a team leave": ["session", "team", "team member"],
   "a set of the active team": ["session", "team"],
-  "an invitation accept with a team": ["user", "team", "member", "team member"],
+  "an invitation accept with a team": ["user", "team", "invitation", "member", "team member"],
   "an organization token create": ["organization"],
   "a role create": ["organization"],
   "a ban": ["user", "session"],
@@ -445,6 +476,7 @@ const TOUCHED: Record<string, string[]> = {
     "session",
     "organization",
     "team",
+    "invitation",
     "member",
     "team member",
   ],
@@ -452,6 +484,7 @@ const TOUCHED: Record<string, string[]> = {
     "user",
     "session",
     "organization",
+    "invitation",
     "member",
     "team member",
   ],
@@ -609,7 +642,13 @@ describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", 
     expect(
       await w.flow(name, () => w.auth.api.deleteTeam({ user: s.ada.user, teamId: s.core })),
     ).toMatchObject({ ok: true });
-    expect(w.kindsOf(name)).toEqual(["session", "organization", "team", "team member"]);
+    expect(w.kindsOf(name)).toEqual([
+      "session",
+      "organization",
+      "team",
+      "invitation",
+      "team member",
+    ]);
     expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
   }, 60_000);
 
