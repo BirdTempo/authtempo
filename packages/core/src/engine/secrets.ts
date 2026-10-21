@@ -3,6 +3,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { ModelName, Models } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
 import { rewrapKeyRow } from "./jwt.js";
+import { rewrapConnectionRow } from "./sso/connections.js";
 import { isLiveSetupWithCodes, rewrapTotpRow } from "./totp.js";
 
 /**
@@ -27,6 +28,11 @@ export interface SecretVersionCount {
   signingKeys: number;
   /** Live email codes: unspent, unexpired rows of a keyed purpose. */
   emailCodes: number;
+  /**
+   * OIDC client secrets of SSO connections sealed under this version (plan
+   * 12d, ruling 31). A SAML connection seals no secret and does not count.
+   */
+  ssoClientSecrets: number;
 }
 
 export interface SecretsStatus {
@@ -58,17 +64,26 @@ export interface SecretsRewrap {
 export const REWRAP_LIMIT = { default: 100, max: 1000 } as const;
 /**
  * The page of a status read. The storage port has no count, so status reads
- * every row of the four tables by pages of ids: one query per 1000 rows of
+ * every row of the five tables by pages of ids: one query per 1000 rows of
  * each table. The port sets no maximum limit (checked 2026-10-15), and a
  * page of 1000 is the most rows that `rewrap` reads in one call.
  */
 const PAGE = 1000;
 /** The purposes whose `valueHash` is a keyed hash (plan 9e). */
 const KEYED_PURPOSES = ["email-otp", "password-reset-otp"] as const;
-/** The sealed tables in the order of a pass. The cursor names the table and the last id read. */
-const SEALED = ["totp", "jwk"] as const;
+/**
+ * The sealed tables in the order of a pass. The cursor names the table and
+ * the last id read. Plan 12d adds the client secrets of the SSO connections.
+ */
+const SEALED = ["totp", "jwk", "ssoConnection"] as const;
 type Sealed = (typeof SEALED)[number];
-const CURSOR = /^(totp|jwk):(.+)$/;
+const CURSOR = /^(totp|jwk|ssoConnection):(.+)$/;
+/** The rows of a table that hold a sealed value: a SAML connection has no client secret. */
+const SEALED_ONLY: { readonly [M in Sealed]: Where<M>[] } = {
+  totp: [],
+  jwk: [],
+  ssoConnection: [{ field: "clientSecret", op: "ne", value: null }],
+};
 
 /** The sort by id. `id` is a field of every model (`BaseRow`), and the port's generic cannot see that. */
 function byId<M extends ModelName>(): Sort<M> {
@@ -110,6 +125,7 @@ export async function secretsStatus(config: ResolvedConfig): Promise<SecretsStat
         backupCodes: 0,
         signingKeys: 0,
         emailCodes: 0,
+        ssoClientSecrets: 0,
       };
       counts.set(version, c);
     }
@@ -124,6 +140,10 @@ export async function secretsStatus(config: ResolvedConfig): Promise<SecretsStat
   });
   await eachRow(storage, "jwk", [], (r) => {
     entry(r.secretVersion).signingKeys++;
+  });
+  // Ruling 31 of plan 12d: a version is not free while a client secret is sealed under it.
+  await eachRow(storage, "ssoConnection", SEALED_ONLY.ssoConnection, (r) => {
+    entry(r.secretVersion).ssoClientSecrets++;
   });
   const now = config.clock.now();
   const live: Where<"verification">[] = [
@@ -156,8 +176,9 @@ export async function secretsStatus(config: ResolvedConfig): Promise<SecretsStat
 
 /**
  * Reads up to `limit` sealed values under a configured old version, after
- * the cursor `after`, and reseals each under the current version: the TOTP
- * secrets first, then the keys. A row under a version that the config does
+ * the cursor `after`, and reseals each under the current version. The TOTP
+ * secrets come first, then the keys, then the client secrets of the SSO
+ * connections. A row under a version that the config does
  * not hold is never read, so a pass always ends; `status` lists it.
  */
 export async function rewrapSecrets(
@@ -206,7 +227,7 @@ export async function rewrapSecrets(
         else failedRow(model, row);
       }
       read = rows;
-    } else {
+    } else if (model === "jwk") {
       const rows = await storage.findMany(
         "jwk",
         [{ field: "secretVersion", op: "in", value: old }, ...after],
@@ -214,6 +235,21 @@ export async function rewrapSecrets(
       );
       for (const row of rows) {
         if (await rewrapKeyRow(config, row)) counts.resealed++;
+        else failedRow(model, row);
+      }
+      read = rows;
+    } else {
+      const rows = await storage.findMany(
+        "ssoConnection",
+        [
+          { field: "secretVersion", op: "in", value: old },
+          ...SEALED_ONLY.ssoConnection,
+          ...(after as Where<"ssoConnection">[]),
+        ],
+        opts,
+      );
+      for (const row of rows) {
+        if (await rewrapConnectionRow(config, row)) counts.resealed++;
         else failedRow(model, row);
       }
       read = rows;
@@ -225,11 +261,20 @@ export async function rewrapSecrets(
       break;
     }
   }
-  const left = async (model: Sealed) =>
+  const left = async <M extends Sealed>(model: M) =>
     (
-      await storage.findMany(model, [{ field: "secretVersion", op: "in", value: old }], {
-        limit: 1,
-      })
+      await storage.findMany(
+        model,
+        [
+          { field: "secretVersion" as Where<M>["field"], op: "in", value: old },
+          ...SEALED_ONLY[model],
+        ],
+        { limit: 1 },
+      )
     ).length > 0;
-  return ok({ ...counts, more: (await left("totp")) || (await left("jwk")), next });
+  return ok({
+    ...counts,
+    more: (await left("totp")) || (await left("jwk")) || (await left("ssoConnection")),
+    next,
+  });
 }

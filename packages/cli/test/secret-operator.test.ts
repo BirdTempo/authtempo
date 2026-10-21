@@ -5,6 +5,7 @@
 import { createHash } from "node:crypto";
 import {
   type Auth,
+  type AuthConfig,
   createAuth,
   createMemoryAdapter,
   createMemoryLimiter,
@@ -56,7 +57,7 @@ async function fixture() {
   const limiter = createMemoryLimiter(clock);
   const mails: MailMessage[] = [];
   const secretHash = createHash("sha256").update(SECRET, "utf8").digest("hex");
-  const on = (secrets: Secrets, operator = true): Auth =>
+  const on = (secrets: Secrets, operator = true, extra: Partial<AuthConfig> = {}): Auth =>
     createAuth({
       baseURL: BASE,
       trustedOrigins: ["https://app.example.com"],
@@ -72,6 +73,7 @@ async function fixture() {
       // The detailed sign-up answer, so that the confirm mail carries the link.
       password: { hash: FAST, uniformSignUp: false },
       ...(operator ? { operator: { secretHash } } : {}),
+      ...extra,
     });
   const bodies: unknown[] = [];
   const fetch = (auth: Auth) => async (url: string, init: RequestInit) => {
@@ -153,8 +155,8 @@ describe("authtempo secret status (plan 11c2)", () => {
     const { code, io } = await run(["status", BASE], f, auth);
     expect(code).toBe(0);
     expect(io.stdout).toEqual([
-      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0",
-      "version 1: old, configured, totpSecrets 1, backupCodes 0, signingKeys 1, emailCodes 0",
+      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0",
+      "version 1: old, configured, totpSecrets 1, backupCodes 0, signingKeys 1, emailCodes 0, ssoClientSecrets 0",
     ]);
     expect(io.requests.map((r) => `${r.method} ${r.url}`)).toEqual([`GET ${STATUS}`]);
     expect(io.requests[0]?.headers.get("authorization")).toBe(`Operator ${SECRET}`);
@@ -173,6 +175,7 @@ describe("authtempo secret status (plan 11c2)", () => {
           backupCodes: 0,
           signingKeys: 0,
           emailCodes: 0,
+          ssoClientSecrets: 0,
         },
         {
           version: 1,
@@ -182,6 +185,7 @@ describe("authtempo secret status (plan 11c2)", () => {
           backupCodes: 0,
           signingKeys: 1,
           emailCodes: 0,
+          ssoClientSecrets: 0,
         },
       ],
       exit: 0,
@@ -195,8 +199,8 @@ describe("authtempo secret status (plan 11c2)", () => {
     const { code, io } = await run(["status", BASE], f, auth);
     expect(code).toBe(1);
     expect(io.stdout).toEqual([
-      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0",
-      "version 1: old, not configured, totpSecrets 1, backupCodes 0, signingKeys 1, emailCodes 0",
+      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0",
+      "version 1: old, not configured, totpSecrets 1, backupCodes 0, signingKeys 1, emailCodes 0, ssoClientSecrets 0",
     ]);
     expect(io.stderr.at(-1)).toBe(
       "warning: version 1 is not in the config but has rows; add it back before you remove it (spec 22 item 9)",
@@ -204,6 +208,58 @@ describe("authtempo secret status (plan 11c2)", () => {
     const json = await run(["status", BASE, "--json"], f, auth);
     expect(json.code).toBe(1);
     expect(docOf(json.io.stdout)).toMatchObject({ exit: 1, stopped: null });
+  });
+
+  it("exits 1 when the only rows of a version that the config does not hold are SSO client secrets", async () => {
+    // Plan 12d ruling 31: a version is not free while a client secret is sealed under it.
+    const sso: Partial<AuthConfig> = {
+      organizations: {},
+      sso: { oidc: true, dns: [{ name: "none", txt: async () => [] }] },
+    };
+    const f = await fixture();
+    const v1 = f.on(ONE, true, sso);
+    const password = v1.api.password;
+    if (!password) throw new Error("no password api");
+    const up = await password.signUp({
+      email: "owner@acme.example",
+      password: PW,
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok || !("user" in up.value)) throw new Error("the sign-up gave no user");
+    const token = /token=([A-Za-z0-9_%-]+)/.exec(f.mails.at(-1)?.text ?? "")?.[1];
+    if (!token) throw new Error("no confirm mail");
+    const verified = await password.verifyEmail({
+      token: decodeURIComponent(token),
+      ip: null,
+      userAgent: null,
+    });
+    if (!verified.ok || !("user" in verified.value)) throw new Error("no verified user");
+    const org = await v1.api.createOrganization({
+      user: verified.value.user,
+      slug: "acme",
+      name: "Acme",
+    });
+    if (!org.ok) throw new Error(org.code);
+    const connection = await v1.api.sso?.connections.create({
+      actor: { kind: "app", name: "cli-test" },
+      organizationId: org.value.organization.id,
+      kind: "oidc",
+      label: "Acme",
+      issuer: "https://login.idp.example/acme",
+      clientId: "acme",
+      clientSecret: "acme-secret-0123456789",
+    });
+    expect(connection?.ok).toBe(true);
+    const { code, io } = await run(["status", BASE], f, f.on(ONLY_TWO, true, sso));
+    expect(code).toBe(1);
+    expect(io.stdout).toEqual([
+      "version 2: current, configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 0",
+      "version 1: old, not configured, totpSecrets 0, backupCodes 0, signingKeys 0, emailCodes 0, ssoClientSecrets 1",
+    ]);
+    expect(io.stderr.at(-1)).toBe(
+      "warning: version 1 is not in the config but has rows; add it back before you remove it (spec 22 item 9)",
+    );
   });
 
   it("stops when the answer is not a list of version counts", async () => {
@@ -257,6 +313,7 @@ describe("authtempo secret rewrap (plan 11c2)", () => {
       backupCodes: 0,
       signingKeys: 0,
       emailCodes: 0,
+      ssoClientSecrets: 0,
     });
   });
 

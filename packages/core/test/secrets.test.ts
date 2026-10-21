@@ -107,6 +107,7 @@ describe("api.secrets (plan 12b)", () => {
           backupCodes: 0,
           signingKeys: 0,
           emailCodes: 0,
+          ssoClientSecrets: 0,
         },
         {
           version: 1,
@@ -116,6 +117,7 @@ describe("api.secrets (plan 12b)", () => {
           backupCodes: 3,
           signingKeys: 0,
           emailCodes: 3,
+          ssoClientSecrets: 0,
         },
         {
           version: 9,
@@ -125,6 +127,7 @@ describe("api.secrets (plan 12b)", () => {
           backupCodes: 0,
           signingKeys: 0,
           emailCodes: 0,
+          ssoClientSecrets: 0,
         },
       ],
     });

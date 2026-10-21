@@ -567,6 +567,35 @@ export async function connectionSecret(
   return new TextDecoder().decode(plain);
 }
 
+/**
+ * Moves the client secret of one row to the current version (plan 12b
+ * rewrap, ruling 31 of plan 12d). It opens the value under the row's
+ * version and seals it again under the current one. One conditional
+ * update writes it only while the row still holds the value that was read.
+ * `updatedAt` stays, so a reseal is no change for the lock of an update.
+ * False: the value did not open, or a concurrent write changed it first.
+ */
+export async function rewrapConnectionRow(
+  config: ResolvedConfig,
+  row: SsoConnectionRow,
+): Promise<boolean> {
+  if (row.clientSecret === null) return false;
+  const plain = await connectionSecret(config, row);
+  if (plain === null) return false;
+  const n = await config.storage.update(
+    "ssoConnection",
+    [
+      { field: "id", op: "eq", value: row.id },
+      { field: "clientSecret", op: "eq", value: row.clientSecret },
+    ],
+    {
+      clientSecret: await sealSecret(config, row.id, plain),
+      secretVersion: config.keyring.current,
+    },
+  );
+  return n > 0;
+}
+
 /** The audit draft of one connection act. `data` names the changed keys, never a value. */
 function connectionDraft(
   actor: SsoActor,

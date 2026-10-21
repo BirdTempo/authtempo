@@ -2527,6 +2527,7 @@ async function rotationRun(storage: StorageAdapter): Promise<void> {
     backupCodes: setup.backupCodes.length - 1,
     signingKeys: 0,
     emailCodes: 0,
+    ssoClientSecrets: 0,
   });
   // Version 1 goes. The TOTP user and the JWT of version 1 still pass.
   const only2 = make([{ version: 2, value: S2 }]);

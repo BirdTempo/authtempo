@@ -10,7 +10,7 @@ import type { RouteContract } from "./types.js";
 /**
  * The body of a rewrap (plan 11c2): `limit`, a whole number, and `after`, the
  * cursor of the last answer. An empty body is `{}`. The engine refuses a
- * cursor that is not `totp:<id>` or `jwk:<id>`.
+ * cursor that is not `totp:<id>`, `jwk:<id>`, or `ssoConnection:<id>`.
  */
 export const rewrapBody = z.strictObject({
   limit: z.number().int().optional(),
@@ -39,6 +39,7 @@ const SecretVersionCountJson = z.strictObject({
   backupCodes: z.number().int(),
   signingKeys: z.number().int(),
   emailCodes: z.number().int(),
+  ssoClientSecrets: z.number().int(),
 });
 
 /** A user id or a cursor. A core id has 26 characters; the compat package keeps longer ids, up to 64. */

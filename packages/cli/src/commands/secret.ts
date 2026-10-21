@@ -116,7 +116,7 @@ function readTarget(
 
 type VersionCount = SecretStatusJson["versions"][number];
 
-/** The seven keys of one entry of the status answer, each with its type. */
+/** The eight keys of one entry of the status answer, each with its type. */
 const COUNT_KEYS = {
   version: "number",
   configured: "boolean",
@@ -125,6 +125,7 @@ const COUNT_KEYS = {
   backupCodes: "number",
   signingKeys: "number",
   emailCodes: "number",
+  ssoClientSecrets: "number",
 } as const;
 
 /** The entries of a status answer, or null when the body is not a list of version counts. */
@@ -148,14 +149,15 @@ function versionCounts(body: unknown): VersionCount[] | null {
       backupCodes: e.backupCodes as number,
       signingKeys: e.signingKeys as number,
       emailCodes: e.emailCodes as number,
+      ssoClientSecrets: e.ssoClientSecrets as number,
     });
   }
   return out;
 }
 
-/** True when a version has a row of any of the four counts. */
+/** True when a version has a row of any of the five counts. */
 const hasRows = (v: VersionCount) =>
-  v.totpSecrets + v.backupCodes + v.signingKeys + v.emailCodes > 0;
+  v.totpSecrets + v.backupCodes + v.signingKeys + v.emailCodes + v.ssoClientSecrets > 0;
 
 /**
  * `authtempo secret status <base url>` (plan 11c2, spec 19 item 17): the
@@ -189,7 +191,7 @@ async function runStatus(argv: string[], ctx: Ctx): Promise<number> {
   if (!json)
     for (const v of versions)
       ctx.out(
-        `version ${v.version}: ${v.current ? "current" : "old"}, ${v.configured ? "configured" : "not configured"}, totpSecrets ${v.totpSecrets}, backupCodes ${v.backupCodes}, signingKeys ${v.signingKeys}, emailCodes ${v.emailCodes}`,
+        `version ${v.version}: ${v.current ? "current" : "old"}, ${v.configured ? "configured" : "not configured"}, totpSecrets ${v.totpSecrets}, backupCodes ${v.backupCodes}, signingKeys ${v.signingKeys}, emailCodes ${v.emailCodes}, ssoClientSecrets ${v.ssoClientSecrets}`,
       );
   const orphans = versions.filter((v) => !v.configured && hasRows(v));
   for (const v of orphans)

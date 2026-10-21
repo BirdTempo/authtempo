@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveConfig } from "../../src/config.js";
 import { createOrganization, deleteOrganization } from "../../src/engine/organizations.js";
 import { createRole } from "../../src/engine/roles.js";
+import { rewrapSecrets, secretsStatus } from "../../src/engine/secrets.js";
 import {
   connectionSecret,
   createConnection,
@@ -215,6 +216,71 @@ describe("the SSO connections (plan 12d Task 3)", () => {
     expect(await connectionSecret(rotated, after)).toBe("the-new-secret-0123456789");
     // Version 1 alone no longer opens it.
     expect(await connectionSecret(w.config, after)).toBeNull();
+  });
+
+  it("counts a client secret under its version until the rewrap moves it (ruling 31)", async () => {
+    const w = connectionAuth();
+    const org = await seedOrganization(w);
+    const created = await oidcConnection(w, org);
+    // A SAML connection seals no secret, so it adds no count.
+    const idp = await createTestIdp({ alg: "ec" });
+    const saml = await createConnection(w.config, SSO_APP, {
+      organizationId: org,
+      kind: "saml",
+      label: "Acme Okta",
+      idpEntityId: idp.entityId,
+      ssoUrl: "https://idp.example/sso",
+      certificates: [idp.certificatePem],
+    });
+    expect(saml.ok).toBe(true);
+    const keyring = (secrets: { version: number; value: string }[]) =>
+      resolveConfig({
+        baseURL: BASE_URL,
+        secrets,
+        trustedOrigins: [],
+        storage: w.storage,
+        mail: { send: async () => {} },
+        clock: w.clock,
+        organizations: {},
+        sso: { oidc: true, dns: w.config.sso?.dns ? [...w.config.sso.dns] : [] },
+      });
+    const rotated = keyring([
+      { version: 2, value: V2 },
+      { version: 1, value: V1 },
+    ]);
+    const countOf = async (version: number) =>
+      (await secretsStatus(rotated)).versions.find((v) => v.version === version)?.ssoClientSecrets;
+    const second = await oidcConnection(w, org);
+    // Version 1 is not free: two client secrets are sealed under it.
+    expect([await countOf(2), await countOf(1)]).toEqual([0, 2]);
+    // A pass of one row leaves the other: `more` says so, and `next` names the cursor.
+    const first = await rewrapSecrets(rotated, { limit: 1 });
+    expect(first).toEqual({
+      ok: true,
+      value: {
+        resealed: 1,
+        failed: 0,
+        skipped: 0,
+        more: true,
+        next: `ssoConnection:${[created.id, second.id].sort()[0]}`,
+      },
+    });
+    expect([await countOf(2), await countOf(1)]).toEqual([1, 1]);
+    const pass = await rewrapSecrets(rotated, {
+      limit: 100,
+      ...(first.ok && first.value.next ? { after: first.value.next } : {}),
+    });
+    expect(pass).toEqual({
+      ok: true,
+      value: { resealed: 1, failed: 0, skipped: 0, more: false, next: null },
+    });
+    expect([await countOf(2), await countOf(1)]).toEqual([2, 0]);
+    // The reseal is no change for the lock of an update: updatedAt stays.
+    const row = await rowOf(w, created.id);
+    if (!row) throw new Error("no row");
+    expect([row.secretVersion, row.updatedAt]).toEqual([2, new Date(created.updatedAt)]);
+    // Version 1 leaves the config, and the secret still opens.
+    expect(await connectionSecret(keyring([{ version: 2, value: V2 }]), row)).toBe(SECRET);
   });
 
   it("refuses owner and the platform role as a default role and in the role map", async () => {
