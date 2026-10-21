@@ -129,6 +129,7 @@ Each event has these fields too:
 | `social.token_missing` | error | `provider: name` | `authtempo: social token answer has no token` |
 | `social.id_token_rejected` | error | `provider: name`, `errorClass: errorClass` | `authtempo: social id token rejected` |
 | `social.nonce_mismatch` | error | `provider: name` | `authtempo: social nonce mismatch` |
+| `social.claims_refused` | error | `provider: name` | `authtempo: social id token claims refused` |
 | `social.user_info_failed` | error | `provider: name`, `errorName: errorName` | `authtempo: social user info failed` |
 | `social.bad_subject` | error | `provider: name` | `authtempo: social user info has a bad subject` |
 | `oidc.discovery_failed` | error | `provider: name`, `errorClass: errorClass` | `authtempo: oidc discovery request failed` |

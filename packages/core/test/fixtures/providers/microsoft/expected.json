@@ -1,0 +1,8 @@
+{
+  "source": "claims.json has the payload claims of https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference and the optional claim xms_edov of https://learn.microsoft.com/en-us/entra/identity-platform/optional-claims-reference, both read 2026-10-22. The test adds aud, nonce, iat, and exp. The subject is Better Auth 1.7.2's accountSubject of microsoft: profile.oid (@better-auth/core 1.7.2 dist/social-providers/microsoft-entra-id.mjs).",
+  "subject": "00000000-0000-0000-66f3-3332eca7ea81",
+  "email": "abeli@microsoft.com",
+  "emailVerified": true,
+  "name": "Abe Lincoln",
+  "image": null
+}

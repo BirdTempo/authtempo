@@ -16,12 +16,12 @@ describe("sign in with GitHub and any provider", () => {
   });
 
   it("sends an OpenID Connect entry a nonce, and an OAuth 2.0 entry none", async () => {
-    expect((await startOf("microsoft")).searchParams.get("nonce")).not.toBeNull();
-    const discord = await startOf("discord");
+    expect((await startOf("entra")).searchParams.get("nonce")).not.toBeNull();
+    const discord = await startOf("discord-app");
     expect(`${discord.origin}${discord.pathname}`).toBe("https://discord.com/oauth2/authorize");
     expect(discord.searchParams.get("nonce")).toBeNull();
     expect(discord.searchParams.get("redirect_uri")).toBe(
-      "https://api.example.com/auth/social/discord/callback",
+      "https://api.example.com/auth/social/discord-app/callback",
     );
   });
 });

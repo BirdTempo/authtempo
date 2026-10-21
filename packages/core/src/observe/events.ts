@@ -557,6 +557,9 @@ export const EVENTS = {
   "social.nonce_mismatch": fault("error", "authtempo: social nonce mismatch", {
     provider: PROVIDER,
   }),
+  "social.claims_refused": fault("error", "authtempo: social id token claims refused", {
+    provider: PROVIDER,
+  }),
   "social.user_info_failed": fault("error", "authtempo: social user info failed", {
     provider: PROVIDER,
     errorName: ERROR_NAME,

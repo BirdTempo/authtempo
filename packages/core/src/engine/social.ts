@@ -609,12 +609,18 @@ async function idTokenProfile(
   user: string | undefined,
   now: Date,
 ): Promise<SocialProfile | null> {
+  // A provider whose issuer names the person's tenant gives it per token (plan 12i Task 13).
+  const issuer = provider.issuerOf ? provider.issuerOf(idToken) : provider.issuer;
+  if (issuer === null) {
+    config.observe.emit({ name: "social.claims_refused", provider: provider.name });
+    return null;
+  }
   let claims: Record<string, unknown>;
   try {
     claims = await config.jwt.verifyIdToken({
       token: idToken,
       jwksUrl: provider.jwksUrl,
-      issuer: provider.issuer,
+      issuer,
       audience: provider.clientId,
       now,
     });
@@ -629,6 +635,10 @@ async function idTokenProfile(
   const nonce = claims.nonce;
   if (typeof nonce !== "string" || !constantTimeEqual(await sha256Hex(nonce), nonceHash)) {
     config.observe.emit({ name: "social.nonce_mismatch", provider: provider.name });
+    return null;
+  }
+  if (provider.checkClaims && !provider.checkClaims(claims)) {
+    config.observe.emit({ name: "social.claims_refused", provider: provider.name });
     return null;
   }
   return provider.profile(claims, { user });

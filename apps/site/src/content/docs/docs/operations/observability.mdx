@@ -177,6 +177,7 @@ With no sink, core writes each line of this table with `console`, with the text 
 | `authtempo: social token answer has no token` | `social.token_missing` | Act when it repeats. The token answer of a provider held no token. |
 | `authtempo: social id token rejected` | `social.id_token_rejected` | Watch. The ID token of a provider did not verify. |
 | `authtempo: social nonce mismatch` | `social.nonce_mismatch` | Watch. The nonce of an ID token did not match the request. |
+| `authtempo: social id token claims refused` | `social.claims_refused` | Watch. An ID token failed the issuer or claim check of its provider, for example a token of another Entra ID tenant. |
 | `authtempo: social user info failed` | `social.user_info_failed` | Watch. The user info request to a provider failed. |
 | `authtempo: social user info has a bad subject` | `social.bad_subject` | Watch. The user info of a provider held a subject that core refuses. |
 | `authtempo: oidc discovery request failed` | `oidc.discovery_failed` | Act. The discovery request of an `oidc` provider failed. Check the issuer, or set `endpoints`. |

@@ -95,6 +95,9 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.apple` | `AppleConfig` | none | Apple sign-in. |
 | `social.github` | `GitHubConfig` | none | The GitHub preset, with the scope `read:user user:email`. |
 | `social.linkedin` | `LinkedInConfig` | none | The LinkedIn preset, on the user info endpoint, with the scope `openid profile email`. |
+| `social.microsoft` | `MicrosoftConfig` | none | The Microsoft Entra ID preset, with the scope `openid profile email`. The subject is `oid`. |
+| `social.discord` | `DiscordConfig` | none | The Discord preset, with the scope `identify email`. |
+| `social.gitlab` | `GitLabConfig` | none | The GitLab preset, with the scope `read_user`. A GitLab address is never verified. |
 | `social.oidc` | `OidcEntry` list | empty | OpenID Connect providers. |
 | `social.oauth2` | `OAuth2Entry` list | empty | OAuth 2.0 providers that issue no ID token. |
 | `social.fetch` | fetch | the global fetch | The fetch of every provider call. Tests inject one. |
@@ -108,7 +111,15 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.github.clientSecret` | string | required | The client secret of the GitHub OAuth app. |
 | `social.linkedin.clientId` | string | required | The client id of the LinkedIn app. |
 | `social.linkedin.clientSecret` | string | required | The client secret of the LinkedIn app. |
-| `social.oidc[].name` | string | required | `^[a-z][a-z0-9-]{0,31}$`, unique in both lists, not a preset, `email`, or `credential`. |
+| `social.microsoft.clientId` | string | required | The application (client) id of the Entra ID app registration. |
+| `social.microsoft.clientSecret` | string | required | The client secret of the app registration. |
+| `social.microsoft.tenant` | string | required | `common`, `organizations`, `consumers`, or a tenant GUID. A token must name its own tenant in `iss`. `organizations` refuses a personal account, and `consumers` takes only a personal account. An address is verified only with the optional claim `xms_edov: true`. |
+| `social.discord.clientId` | string | required | The client id of the Discord app. |
+| `social.discord.clientSecret` | string | required | The client secret of the Discord app. |
+| `social.gitlab.clientId` | string | required | The application id of the GitLab app. |
+| `social.gitlab.clientSecret` | string | required | The secret of the GitLab app. |
+| `social.gitlab.issuer` | string | `"https://gitlab.com"` | The `https:` origin of the GitLab instance, with no path and no trailing slash. No IP address, no local name, and not the host of `baseURL`. |
+| `social.oidc[].name` | string | required | `^[a-z][a-z0-9-]{0,31}$`, unique in both lists, not a preset, `email`, or `credential`. `slack`, `twitter`, and `facebook` are reserved for presets too. |
 | `social.oidc[].label` | string | required | The button text: 1 to 80 characters with no control character. |
 | `social.oidc[].issuer` | string | required | An `https:` URL with no query, fragment, or credentials. A path is allowed. |
 | `social.oidc[].clientId` | string | required | The client id at the provider. |

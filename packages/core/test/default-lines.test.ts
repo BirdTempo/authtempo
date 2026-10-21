@@ -416,6 +416,29 @@ describe("the scrub sources (plan 12h)", () => {
       { social: { linkedin: { clientId: "l", clientSecret: "li-row-linkedin-0123456789abc" } } },
     ],
     [
+      "the microsoft client secret",
+      "ms-row-microsoft-0123456789ab",
+      {
+        social: {
+          microsoft: {
+            clientId: "m",
+            clientSecret: "ms-row-microsoft-0123456789ab",
+            tenant: "common",
+          },
+        },
+      },
+    ],
+    [
+      "the discord client secret",
+      "dc-row-discord-0123456789abcd",
+      { social: { discord: { clientId: "d", clientSecret: "dc-row-discord-0123456789abcd" } } },
+    ],
+    [
+      "the gitlab client secret",
+      "gl-row-gitlab-0123456789abcde",
+      { social: { gitlab: { clientId: "gl", clientSecret: "gl-row-gitlab-0123456789abcde" } } },
+    ],
+    [
       "the apple private key",
       "apple-row-key-0123456789abcdef",
       {
@@ -482,6 +505,9 @@ describe("the scrub sources (plan 12h)", () => {
       google: { clientId: "g", clientSecret: "list-google-secret" },
       github: { clientId: "h", clientSecret: "list-github-secret" },
       linkedin: { clientId: "l", clientSecret: "list-linkedin-secret" },
+      microsoft: { clientId: "m", clientSecret: "list-microsoft-secret", tenant: "common" },
+      discord: { clientId: "d", clientSecret: "list-discord-secret" },
+      gitlab: { clientId: "gl", clientSecret: "list-gitlab-secret" },
       apple: { clientId: "a", teamId: "T", keyId: "K", privateKey: "list-apple-key" },
       oidc: [oidcEntry("one", "list-oidc-one"), oidcEntry("two", "list-oidc-two")],
       oauth2: [oauth2Entry("three", "list-oauth2-one"), oauth2Entry("four", "list-oauth2-two")],
@@ -495,9 +521,12 @@ describe("the scrub sources (plan 12h)", () => {
       "0123456789abcdef0123456789abcdef",
       "fedcba9876543210fedcba9876543210",
       "list-apple-key",
+      "list-discord-secret",
       "list-github-secret",
+      "list-gitlab-secret",
       "list-google-secret",
       "list-linkedin-secret",
+      "list-microsoft-secret",
       "list-oauth2-one",
       "list-oauth2-two",
       "list-oidc-one",

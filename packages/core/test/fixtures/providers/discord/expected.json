@@ -1,0 +1,8 @@
+{
+  "source": "user.json is the example user object of https://docs.discord.com/developers/resources/user, read 2026-10-22. The subject is Better Auth 1.7.2's accountSubject of discord: profile.id (@better-auth/core 1.7.2 dist/social-providers/discord.mjs).",
+  "subject": "80351110224678912",
+  "email": "nelly@discord.com",
+  "emailVerified": true,
+  "name": "Nelly",
+  "image": "https://cdn.discordapp.com/avatars/80351110224678912/8342729096ea3675442027381ff50dfe.png"
+}

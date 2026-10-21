@@ -12,7 +12,9 @@ export type SocialProviderName = string;
 export const PROVIDER_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
 
 /**
- * Names a list entry must not take. The presets own the first four. `email`
+ * Names a list entry must not take. The presets own the first ten: the six
+ * of plan 12i are reserved together, so no list entry takes a name of a
+ * later preset. `email`
  * is core's identity for a verified address: the engine finds an identity by
  * `(provider, subject)`, so a list provider named `email` could sign in as
  * the owner of any address that its user info answers as the subject.
@@ -24,6 +26,12 @@ export const RESERVED_PROVIDER_NAMES: ReadonlySet<string> = new Set([
   "apple",
   "github",
   "linkedin",
+  "microsoft",
+  "discord",
+  "gitlab",
+  "slack",
+  "twitter",
+  "facebook",
   "email",
   "credential",
 ]);
@@ -96,6 +104,18 @@ export interface OidcProvider extends ProviderBase {
   jwksUrl: string;
   /** Every issuer value the provider puts in `iss`. */
   issuer: string[];
+  /**
+   * The issuers of one token, from its payload before the verify, or null
+   * to refuse it (plan 12i Task 13). Set by a provider whose issuer names
+   * the person's own tenant. The engine then verifies against this list in
+   * place of `issuer`, so `checkClaims` must bind it to a verified claim.
+   */
+  issuerOf?(idToken: string): string[] | null;
+  /**
+   * A last check of the verified claims (plan 12i Task 13). False refuses
+   * the sign-in with `oauth_failed`, for example a token of another tenant.
+   */
+  checkClaims?(claims: Record<string, unknown>): boolean;
   profile(claims: Record<string, unknown>, extra: CallbackExtra): SocialProfile;
 }
 

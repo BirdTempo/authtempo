@@ -338,7 +338,9 @@ LinkedIn using OpenID Connect" to the LinkedIn app.
 Any other provider is a list entry. `social.oidc` takes OpenID Connect
 providers, and `social.oauth2` takes providers that issue no ID token. A
 `name` matches `^[a-z][a-z0-9-]{0,31}$`, is unique across both lists, and is
-not `google`, `apple`, `github`, `linkedin`, `email`, or `credential`. The
+not a preset name, `email`, or `credential`. The preset names are `google`,
+`apple`, `github`, `linkedin`, `microsoft`, `discord`, `gitlab`, `slack`,
+`twitter`, and `facebook`. The
 `label` is the button text on the sign-in page. An `oidc` entry reads
 `<issuer>/.well-known/openid-configuration` on its first start and keeps the
 endpoints for the life of the `createAuth` instance. The document's `issuer`
@@ -351,7 +353,7 @@ social: {
   github: { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET },
   oidc: [
     {
-      name: "microsoft",
+      name: "entra",
       label: "Continue with Microsoft",
       issuer: `https://login.microsoftonline.com/${env.ENTRA_TENANT_ID}/v2.0`,
       clientId: env.ENTRA_CLIENT_ID,
@@ -360,7 +362,7 @@ social: {
   ],
   oauth2: [
     {
-      name: "discord",
+      name: "discord-app",
       label: "Continue with Discord",
       authorizeUrl: "https://discord.com/oauth2/authorize",
       tokenUrl: "https://discord.com/api/oauth2/token",
@@ -391,7 +393,9 @@ social: {
 },
 ```
 
-The Microsoft and Discord entries are examples. Core does not test them.
+The Entra and Discord entries are examples. Core does not test them. The
+names `microsoft` and `discord` belong to the presets `social.microsoft` and
+`social.discord`.
 Check each endpoint and claim in the provider's documentation on the day you
 configure it. Microsoft Entra ID sends no `email_verified` claim by default,
 so an Entra sign-in never links to an existing account by its address.

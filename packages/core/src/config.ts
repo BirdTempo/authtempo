@@ -98,9 +98,17 @@ import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "./seams/password-hash.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
 import { type AppleConfig, appleProvider } from "./social/apple.js";
+import { type DiscordConfig, discordProvider } from "./social/discord.js";
 import { type GitHubConfig, githubProvider } from "./social/github.js";
+import { type GitLabConfig, gitlabProvider, isGitlabIssuer } from "./social/gitlab.js";
 import { type GoogleConfig, googleProvider } from "./social/google.js";
 import { type LinkedInConfig, linkedinProvider } from "./social/linkedin.js";
+import {
+  MICROSOFT_SHARED_TENANTS,
+  type MicrosoftConfig,
+  microsoftProvider,
+  TENANT_GUID_RE,
+} from "./social/microsoft.js";
 import { type OAuth2Entry, oauth2Provider } from "./social/oauth2.js";
 import { isIssuer, type OidcEntry, oidcProvider } from "./social/oidc.js";
 import {
@@ -292,6 +300,22 @@ export interface AuthConfig {
      * `openid profile email` (plan 9c). It ignores LinkedIn's ID token.
      */
     linkedin?: LinkedInConfig;
+    // The presets of plan 12i Task 13, in one block.
+    /**
+     * Microsoft Entra ID, an oidc preset with scope `openid profile email`
+     * (plan 12i). `tenant` is `common`, `organizations`, `consumers`, or a
+     * tenant GUID. An address is verified only with the optional claim
+     * `xms_edov: true`, so add that claim to the app registration.
+     */
+    microsoft?: MicrosoftConfig;
+    /** Discord, an oauth2 preset with scope `identify email` (plan 12i). */
+    discord?: DiscordConfig;
+    /**
+     * GitLab, an oauth2 preset with scope `read_user` (plan 12i). `issuer`
+     * is the https origin of the instance, default `https://gitlab.com`.
+     * A GitLab address is never verified.
+     */
+    gitlab?: GitLabConfig;
     /**
      * OpenID Connect providers (plan 9c). An entry with no `endpoints` reads
      * `<issuer>/.well-known/openid-configuration` on its first start and
@@ -1299,7 +1323,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     throw new ConfigError("basePath must not hold a segment that starts with :");
   }
   const clock = input.clock ?? systemClock;
-  const providers = socialProviders(input.social);
+  const providers = socialProviders(input.social, input.baseURL);
   // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
   // Every provider call goes through providerFetch: no redirect is followed
   // (plan 12b). The jose seam gets the same fetch, so the JWKS read has the
@@ -1530,6 +1554,9 @@ export function secretValues(keyring: Keyring, social: AuthConfig["social"]): Re
     social?.apple?.privateKey,
     social?.github?.clientSecret,
     social?.linkedin?.clientSecret,
+    social?.microsoft?.clientSecret,
+    social?.discord?.clientSecret,
+    social?.gitlab?.clientSecret,
     ...(social?.oidc ?? []).map((e) => e.clientSecret),
     ...(social?.oauth2 ?? []).map((e) => e.clientSecret),
   ];
@@ -2832,7 +2859,7 @@ function resolveCaptcha(
  * The configured providers: google, apple, then the list entries in order.
  * Refuses every entry that could break a flow rule (plan 9c).
  */
-function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
+function socialProviders(social: AuthConfig["social"], baseURL: string): ConfiguredProvider[] {
   const providers: ConfiguredProvider[] = [];
   if (social?.google) {
     requireFields("social.google", social.google, ["clientId", "clientSecret"]);
@@ -2850,13 +2877,35 @@ function socialProviders(social: AuthConfig["social"]): ConfiguredProvider[] {
     requireFields("social.linkedin", social.linkedin, ["clientId", "clientSecret"]);
     providers.push(linkedinProvider(social.linkedin));
   }
+  // The presets of plan 12i Task 13, in one block.
+  if (social?.microsoft) {
+    requireFields("social.microsoft", social.microsoft, ["clientId", "clientSecret", "tenant"]);
+    const tenant = social.microsoft.tenant.toLowerCase();
+    if (!MICROSOFT_SHARED_TENANTS.has(tenant) && !TENANT_GUID_RE.test(tenant))
+      throw new ConfigError(
+        "social.microsoft.tenant must be common, organizations, consumers, or a tenant GUID",
+      );
+    providers.push(microsoftProvider(social.microsoft));
+  }
+  if (social?.discord) {
+    requireFields("social.discord", social.discord, ["clientId", "clientSecret"]);
+    providers.push(discordProvider(social.discord));
+  }
+  if (social?.gitlab) {
+    requireFields("social.gitlab", social.gitlab, ["clientId", "clientSecret"]);
+    if (social.gitlab.issuer !== undefined && !isGitlabIssuer(social.gitlab.issuer, baseURL))
+      throw new ConfigError(
+        "social.gitlab.issuer must be an https origin with no path or trailing slash, on a public host that is not the host of baseURL",
+      );
+    providers.push(gitlabProvider(social.gitlab));
+  }
   const names = new Set<string>();
   const listName = (path: string, name: unknown) => {
     if (typeof name !== "string" || !PROVIDER_NAME_RE.test(name))
       throw new ConfigError(`${path}.name must match ${PROVIDER_NAME_RE.source}`);
     if (RESERVED_PROVIDER_NAMES.has(name))
       throw new ConfigError(
-        `${path}.name ${name} is reserved: google, apple, github, and linkedin are presets, and email and credential are identity kinds`,
+        `${path}.name ${name} is reserved: google, apple, github, linkedin, microsoft, discord, gitlab, slack, twitter, and facebook are presets, and email and credential are identity kinds`,
       );
     if (names.has(name)) throw new ConfigError(`${path}.name ${name} is given twice`);
     names.add(name);

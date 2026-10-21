@@ -346,9 +346,12 @@ export {
   type WebAuthnSeam,
 } from "./seams/webauthn.js";
 export type { AppleConfig } from "./social/apple.js";
+export type { DiscordConfig } from "./social/discord.js";
 export { type GitHubConfig, isGithubSubject } from "./social/github.js";
+export type { GitLabConfig } from "./social/gitlab.js";
 export type { GoogleConfig } from "./social/google.js";
 export type { LinkedInConfig } from "./social/linkedin.js";
+export type { MicrosoftConfig } from "./social/microsoft.js";
 export type { OAuth2Entry } from "./social/oauth2.js";
 export type { OidcEndpoints, OidcEntry } from "./social/oidc.js";
 export {
