@@ -308,7 +308,7 @@ describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
 
   it("keeps a used-up key at verify, where Better Auth deletes it, and deletes an expired key", async () => {
     // Final review of plan 12k, m2: Better Auth 1.7.5 deletes both rows at verify
-    // (dist/index.mjs:1635 and :1668).
+    // (dist/index.mjs:1636 and :1668).
     const { auth, person, database } = app({ references: "user", rateLimit: { enabled: false } });
     const ada = await person("ada@example.com");
     const used = await auth.api.createApiKey({

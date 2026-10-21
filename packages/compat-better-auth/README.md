@@ -1219,7 +1219,7 @@ and no refill (dist/index.mjs:1668). The shim keeps the row, and each verify
 answers `USAGE_EXCEEDED`. So a used-up key counts against core's cap of 50
 tokens per user, or 50 live tokens per organization, until its owner deletes
 it. Core deletes an expired key at verify, as Better Auth does
-(dist/index.mjs:1635). It answers `INVALID_API_KEY`, where Better Auth
+(dist/index.mjs:1636). It answers `INVALID_API_KEY`, where Better Auth
 answers `KEY_EXPIRED`. A create deletes the owner's expired rows before it
 counts. A test pins both rows.
 
