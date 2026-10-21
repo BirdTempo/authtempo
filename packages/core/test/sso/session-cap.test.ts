@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveSession, sessionCapHash } from "../../src/engine/sessions.js";
+import { sweepExpired } from "../../src/engine/sweep.js";
 import { verifyTwoFactor } from "../../src/engine/totp.js";
 import { codeNow, enrolled } from "../totp-helpers.js";
 import { orgWithSaml, samlSignIn, samlWorld } from "./saml-helpers.js";
@@ -51,6 +52,30 @@ describe("the session cap of a SAML sign-in (plan 12d Task 8)", () => {
     expect(stored?.lastSeenAt).toEqual(new Date("2026-01-08T00:00:00.001Z"));
     w.clock.advance(3 * DAY);
     expect(await resolveSession(w.config, r.token ?? "")).toBeNull();
+  });
+
+  it("lets no session at its cap refresh after the sweep deletes its cap row", async () => {
+    const w = samlWorld();
+    const { idp, connectionId } = await orgWithSaml(w);
+    const cap = new Date(w.clock.now().getTime() + 10 * DAY);
+    const capRows = () =>
+      w.storage.findMany("verification", [{ field: "purpose", op: "eq", value: "session-cap" }]);
+    // One session refreshes at the slide time; the other is not seen before the cap.
+    const seen = await samlSignIn(w, connectionId, idp, { sessionNotOnOrAfter: cap });
+    const unseen = await samlSignIn(w, connectionId, idp, { sessionNotOnOrAfter: cap });
+    expect(await capRows()).toHaveLength(2);
+    w.clock.advance(7 * DAY + 1);
+    // A sweep before the cap keeps both rows: their expiresAt is the cap.
+    await sweepExpired(w.config);
+    expect(await capRows()).toHaveLength(2);
+    expect((await resolveSession(w.config, seen.token ?? ""))?.session.expiresAt).toEqual(cap);
+    // One millisecond past the cap, the sweep deletes both rows, and each session is expired.
+    w.clock.advance(cap.getTime() - w.clock.now().getTime() + 1);
+    await sweepExpired(w.config);
+    expect(await capRows()).toEqual([]);
+    expect(await resolveSession(w.config, seen.token ?? "")).toBeNull();
+    expect(await resolveSession(w.config, unseen.token ?? "")).toBeNull();
+    expect(await w.storage.findMany("session", [])).toEqual([]);
   });
 
   it("slides a session with no cap to the full ttl", async () => {

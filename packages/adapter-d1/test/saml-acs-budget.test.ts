@@ -14,6 +14,12 @@ import { createD1Adapter } from "../src/index.js";
 const BASE = "https://api.example.com";
 const APP = { kind: "app", name: "saml-budget" } as const;
 const BIND = "__Secure-tempo_session_oauth=";
+const SESSION = "__Host-tempo_session=";
+const DAY = 86_400_000;
+
+/** The engine clock: the wall clock plus `shift`, so a test can reach a due refresh. */
+let shift = 0;
+const clock = { now: () => new Date(Date.now() + shift) };
 
 /** A view of `db` that counts each statement, and each statement of a batch. */
 function counting(db: D1Database) {
@@ -51,6 +57,7 @@ function make(db: D1Database, txt: Record<string, string[]>, mail: string[] = []
     trustedOrigins: [],
     storage: createD1Adapter(db),
     limiter: { allow: async () => true },
+    clock,
     mail: { send: async (m) => void mail.push(m.text) },
     organizations: {},
     sso: { saml: true, dns: [{ name: "a", txt: async (name) => txt[name] ?? [] }] },
@@ -76,6 +83,7 @@ async function requestIdOf(location: URL): Promise<string> {
 /** The organization acme with its verified domain and one SAML connection, on the binding. */
 async function world() {
   await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+  shift = 0;
   const txt: Record<string, string[]> = {};
   const mail: string[] = [];
   const auth = make(env.DB, txt, mail);
@@ -129,7 +137,7 @@ async function signIn(
     .getSetCookie()
     .find((x) => x.startsWith(BIND))
     ?.split(";")[0];
-  const now = new Date();
+  const now = clock.now();
   const xml = await w.idp.response({
     audience: `${BASE}/auth/sso/${id}/metadata`,
     recipient: `${BASE}/auth/sso/${id}/acs`,
@@ -155,19 +163,44 @@ async function signIn(
   );
   const at = new URL(res.headers.get("location") ?? "", BASE).searchParams;
   if (at.get("auth_error") !== null) throw new Error(at.get("auth_error") ?? "");
-  return c.n;
+  const cookie = res.headers
+    .getSetCookie()
+    .find((x) => x.startsWith(SESSION))
+    ?.split(";")[0];
+  return { n: c.n, cookie: cookie ?? "" };
 }
 
 describe("the queries of one SAML ACS post on D1 (plan 12d Task 8)", () => {
   it("stays inside 50 queries for a create, a known identity, and a capped session", async () => {
     const w = await world();
-    const created = await signIn(w);
-    const known = await signIn(w);
-    const capped = await signIn(w, new Date(Date.now() + 86_400_000));
+    const created = (await signIn(w)).n;
+    const known = (await signIn(w)).n;
+    const capped = (await signIn(w, new Date(Date.now() + DAY))).n;
     // Measured on the binding on 2026-10-22 (load 12.1): a just-in-time create 23, and a known
     // identity 15 after it. A capped session adds the create of its session-cap row (ruling 38
     // Q1 of plan 12d): 16.
     expect({ created, known, capped }).toEqual({ created: 23, known: 15, capped: 16 });
     for (const n of [created, known, capped]) expect(n).toBeLessThanOrEqual(50);
+  }, 120_000);
+
+  it("stays inside 50 queries for a due refresh of a capped session", async () => {
+    const w = await world();
+    // The IdP writes whole seconds.
+    const cap = new Date(Math.floor(clock.now().getTime() / 1000) * 1000 + 10 * DAY);
+    const { cookie } = await signIn(w, cap);
+    // The refresh is due after 7 days. It reads the session-cap row of ruling 44 of plan 12d.
+    shift = 7 * DAY + 1000;
+    const { db, c } = counting(env.DB);
+    const res = await make(db, w.txt).handle(
+      new Request(`${BASE}/auth/session`, { headers: { cookie } }),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { session: { expiresAt: string } };
+    expect(new Date(body.session.expiresAt)).toEqual(cap);
+    // The refresh renews the cookie.
+    expect(res.headers.getSetCookie().some((x) => x.startsWith(SESSION))).toBe(true);
+    // Measured on the binding on 2026-10-22 (load 15): 5, with the read of the cap row.
+    expect(c.n).toBe(5);
+    expect(c.n).toBeLessThanOrEqual(50);
   }, 120_000);
 });
