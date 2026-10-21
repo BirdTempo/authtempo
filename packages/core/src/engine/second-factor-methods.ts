@@ -374,7 +374,9 @@ export async function sendSecondFactorEmail(
         emailSentAt: now.toISOString(),
       },
       updatedAt: later(now, row.updatedAt),
-      // The version that keys `emailCodeHash` (plan 12b). The challenge row holds no other keyed value.
+      // The version that keys `emailCodeHash` (plan 12b). A sealed app payload
+      // names its own version in `sealedDataVersion` (plan 12i Task 19), so
+      // this write never moves it. No send reaches a social challenge today.
       secretVersion: config.keyring.current,
     },
   );

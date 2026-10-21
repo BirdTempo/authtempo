@@ -922,6 +922,9 @@ async function answerChallenge(
     return fail("rate_limited");
   // The app payload of a social sign-in (plan 12i Task 19), opened before
   // any proof spends a backup code. One that does not open fails closed.
+  // It opens under the version in `data`, not the row's: an email code send
+  // moves the row's version. No send reaches a social challenge today, so
+  // this is a guard for a later method rule.
   const sealed = challenge.data as { sealedData?: unknown; sealedDataVersion?: unknown } | null;
   const stateData = await openStateData(
     config,
@@ -1038,7 +1041,7 @@ async function answerChallenge(
       opened.value.user,
       via,
       undefined,
-      stateData.value,
+      stateData.value?.value ?? null,
     );
   }
   return opened;

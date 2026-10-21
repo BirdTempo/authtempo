@@ -13,7 +13,7 @@ import type { ImpersonationStops } from "./operator/audit.js";
 import { activeBan } from "./operator/ban-rule.js";
 import { ROUNDS } from "./rounds.js";
 import { endSessions, type PreparedSession, prepareSession, writeSession } from "./sessions.js";
-import { sealStateData, stateDataPlain } from "./state-data.js";
+import { type OpenedStateData, sealStateData } from "./state-data.js";
 import { holdUser } from "./user-hold.js";
 
 /**
@@ -445,7 +445,7 @@ export interface ChallengeInput extends ChallengeOrigin {
   /** The latest expiry of the session that the verify opens (plan 12d): a SAML `SessionNotOnOrAfter`. */
   notAfter?: Date | undefined;
   /** The app payload of a social sign-in (plan 12i Task 19), sealed into the row for the verify. */
-  stateData?: Record<string, unknown>;
+  stateData?: OpenedStateData;
 }
 
 /**
@@ -471,9 +471,7 @@ export async function writeChallenge(
   const id = newId(now);
   // Sealed under this row's id, with its version in `data`: the email code
   // send moves the row's `secretVersion` to the current one (plan 12i Task 19).
-  const payload = input.stateData
-    ? await sealStateData(config, stateDataPlain(input.stateData), id)
-    : null;
+  const payload = input.stateData ? await sealStateData(config, input.stateData.plain, id) : null;
   await storage.create("verification", {
     id,
     purpose: "two-factor",
@@ -593,7 +591,7 @@ export function gatedSteps(
     notAfter?: Date | undefined;
     /** The flow checked the user's address before the hold (`SessionOpen.sameAddress`). */
     sameAddress?: boolean;
-    stateData?: Record<string, unknown>;
+    stateData?: OpenedStateData;
   },
   now: Date,
 ): {

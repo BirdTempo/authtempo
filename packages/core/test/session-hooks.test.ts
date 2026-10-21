@@ -418,7 +418,7 @@ describe("session create hooks (plan 9d)", () => {
     // The verify also passes the state payload of a social sign-in (plan 12i Task 19).
     expect(
       read("totp.ts").match(
-        /sessionOpened\([^;]*?\bvia,?(?:\s*undefined,\s*stateData\.value,?)?\s*\)/g,
+        /sessionOpened\([^;]*?\bvia,?(?:\s*undefined,\s*stateData\.value\?\.value \?\? null,?)?\s*\)/g,
       ),
     ).toHaveLength(1);
     // The after hook too: each flow passes its via to sessionOpened after its commit.

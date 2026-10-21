@@ -155,6 +155,9 @@ function depthWithin(value: unknown, left: number): boolean {
 function stateDataBytes(config: ResolvedConfig, raw: string): Result<Uint8Array> {
   const rule = config.social.stateData;
   if (!rule) return fail("invalid_body");
+  // The bound before the decode: base64url of n bytes has ceil(4n / 3)
+  // characters, so a longer value cannot fit. A GET query has no schema.
+  if (raw.length > Math.ceil((rule.maxBytes * 4) / 3)) return fail("invalid_body");
   let bytes: Uint8Array;
   let value: unknown;
   try {
@@ -350,7 +353,7 @@ export async function completeSocial(
   const opened = await openStateData(config, data.sealedData, row.secretVersion, row.id);
   if (!opened.ok) return opened;
   // The payload goes to the two hook events only: never to a redirect, an answer, or a line.
-  const stateData = opened.value;
+  const stateData = opened.value?.value ?? null;
   if (input.error) return fail("oauth_denied");
   if (!input.code) return fail("oauth_failed");
   // A link checks its session before any network call (plan 12a).
@@ -410,8 +413,8 @@ export async function completeSocial(
       next,
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.social ?? false,
-      // A challenge carries the payload to `session.afterCreate` at its verify.
-      ...(stateData ? { stateData } : {}),
+      // A challenge carries the opened bytes to `session.afterCreate` at its verify.
+      ...(opened.value ? { stateData: opened.value } : {}),
     },
     now,
   );
