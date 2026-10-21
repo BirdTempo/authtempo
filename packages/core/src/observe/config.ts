@@ -1,4 +1,5 @@
 import { ConfigError } from "../config.js";
+import { isPlainObject } from "../config-paths.js";
 import type { ObserveConfig, ObserveSink } from "./port.js";
 
 /** The observe config after its checks, with each default applied. */
@@ -16,10 +17,6 @@ const INCLUDE_VALUES = {
   userAgent: ["none", "raw"],
   email: ["none", "hash"],
 } as const;
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function integerIn(value: unknown, path: string, min: number, max: number, fallback: number) {
   if (value === undefined) return fallback;
