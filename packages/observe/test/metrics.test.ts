@@ -28,7 +28,15 @@ const SOURCES: Readonly<Record<string, AuthEvent>> = {
     userId: IDS.userId,
   }),
   "limit.hit": built("limit.hit", "warn", { family: "magic-link:email" }),
-  sweep: built("sweep", "info", { sessions: 4, verifications: 0, durationMs: 250 }),
+  // Every count of the core row, as a real sweep emits them (plan 12h Task 6): sessions 4, the rest 0.
+  sweep: built("sweep", "info", {
+    ...Object.fromEntries(
+      Object.keys(EVENTS.sweep.fields)
+        .filter((k) => k !== "durationMs")
+        .map((k) => [k, k === "sessions" ? 4 : 0]),
+    ),
+    durationMs: 250,
+  }),
   "observe.dropped": built("observe.dropped", "warn", {
     buffer_full: 2,
     sink_timeout: 0,
