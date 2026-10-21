@@ -57,11 +57,12 @@ const metaRows = async (db: OpenSqlite) =>
   (await db.driver.db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).results;
 
 /**
- * The Better Auth tables on SQLite through one driver (plan 12g Task 8):
- * Better Auth 1.7.2's own SQLite schema with its seven foreign keys, the
- * compat migrations through `migrate()`, then the D1 mapping cases, core's
- * conformance suite, and the tests of the SQLite runner and readiness.
- * `open` opens a new memory database, as an app opens its file.
+ * The Better Auth tables on SQLite through one driver (plan 12g Task 8). The
+ * tables are Better Auth 1.7.2's own SQLite schema with its seven foreign
+ * keys. `migrate()` applies the compat migrations. Then the suite runs the D1
+ * mapping cases and core's conformance suite. It also runs the tests of the
+ * SQLite runner and of readiness. `open` opens a new memory database, as an
+ * app opens its file.
  */
 export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): Promise<void> {
   const main = withSchema(open, BETTER_AUTH_SQLITE);

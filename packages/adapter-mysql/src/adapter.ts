@@ -42,7 +42,7 @@ const LOCK_DEADLOCK = 1213;
 /**
  * The tries of one statement outside a transaction that InnoDB ends in a
  * deadlock (ruling 13 of plan 12g). The account delete met one such deadlock
- * beside a reset (2026-10-21). Three tries cover a second meeting. A fourth
+ * beside a reset (2026-10-21). Three tries cover a second meeting. A third
  * deadlock passes through, so a lock cycle never loops.
  */
 const STATEMENT_TRIES = 3;

@@ -1154,9 +1154,9 @@ const SQLITE_RECORD = "INSERT INTO ta_migrations (name, applied_at) VALUES (?, ?
  * Applies the compat migrations that the SQLite database does not hold yet,
  * each with its record in one write transaction (plan 12g). The compat
  * version stays in ta_meta, the rule of Postgres and D1, and the gate reads
- * it. ta_migrations is the record of the SQLite runner only, so two runners
- * at once apply each migration once: the second waits for the write lock and
- * then finds the name (plan 12g). A step also counts as done when ta_meta
+ * it. ta_migrations is the record of the SQLite runner only. With it, two
+ * runners at once apply each migration once. The second runner waits for the
+ * write lock and then finds the name (plan 12g). A step also counts as done when ta_meta
  * holds its version or a later one. The D1 flow and other tools write the
  * version and no record. The check of the version runs inside the write
  * transaction too, so a step that another runner applied meanwhile is skipped.
