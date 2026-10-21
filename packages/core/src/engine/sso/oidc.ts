@@ -82,8 +82,8 @@ interface Discovered {
 /**
  * The discovery results of this isolate, by connection id. A `Map` keeps
  * insert order, so its first key is the oldest entry. An entry holds the
- * issuer that it read: an update of the issuer in another isolate makes
- * the entry miss here, so no old endpoint serves a new issuer.
+ * issuer that it read. An update of the issuer in another isolate makes the
+ * entry miss here. So no old endpoint serves a new issuer.
  */
 const discovered = new Map<string, Discovered>();
 

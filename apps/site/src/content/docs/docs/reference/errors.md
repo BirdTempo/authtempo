@@ -560,7 +560,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="sso_failed"><code>sso_failed</code> 400</h3>
 
-- **Meaning:** An SSO sign-in failed at one step: the state, the binding cookie, the discovery document, the code exchange, the ID token, or the nonce. The log line `authtempo: sso failed` names the connection id and the step.
+- **Meaning:** An SSO sign-in failed at one step. The step is the state, the binding cookie, the discovery document, the code exchange, the ID token, or the nonce. The log line `authtempo: sso failed` names the connection id and the step.
 - **Do:** Start the sign-in again. If it fails again, check the issuer, the client id, and the client secret of the connection.
 
 | Routes |
@@ -569,7 +569,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="sso_not_configured"><code>sso_not_configured</code> 404</h3>
 
-- **Meaning:** No enabled connection can sign in the person: the connection does not exist, it is off, or its kind is off. The discovery found no connection for the address.
+- **Meaning:** No enabled connection can sign in the person. The connection does not exist, it is off, or its kind is off. The discovery found no connection for the address.
 - **Do:** Sign in another way, or ask the organization owner to route the domain to an enabled connection.
 
 | Routes |

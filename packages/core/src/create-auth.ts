@@ -919,13 +919,14 @@ const gates = new WeakMap<Auth, (request: Request) => Response | null>();
 
 /**
  * The 403 `origin_not_trusted` that `auth.handle` answers a `POST`, `PUT`,
- * `PATCH`, or `DELETE` before any handler, or null when the request passes:
- * the Origin rule and the Fetch Metadata rule, with the route exceptions of
- * core (plan 12d). `GET`, `HEAD`, and `OPTIONS` always pass. A path that core
- * does not serve gets both rules. A package that answers its own paths beside
- * `auth.handle` calls it first, so a cross-site post reaches none of them
- * (plan 12a fix wave, final review F1; the Better Auth shim). Throws a
- * TypeError for an object that `createAuth` did not make.
+ * `PATCH`, or `DELETE` before any handler, or null when the request passes.
+ * The gate applies the Origin rule and the Fetch Metadata rule, with the
+ * route exceptions of core (plan 12d). `GET`, `HEAD`, and `OPTIONS` always
+ * pass. A path that core does not serve gets both rules. A package that
+ * answers its own paths beside `auth.handle` calls it first. Then a
+ * cross-site request reaches none of those paths (plan 12a fix wave, final
+ * review F1; the Better Auth shim). Throws a TypeError for an object that
+ * `createAuth` did not make.
  */
 export function crossSiteRefusal(auth: Auth, request: Request): Response | null {
   const gate = gates.get(auth);

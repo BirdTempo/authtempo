@@ -70,9 +70,9 @@ function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
 }
 
 /**
- * The SSO routes (plan 12d): the sign-in of Task 4 (the discovery, the
- * start, and the callback of a connection), and the manager routes of the
- * domain proof and the connections (Tasks 2 and 3, spec 30 items 2 and 5).
+ * The SSO routes (plan 12d). Task 4 adds the sign-in: the discovery, and
+ * the start and the callback of a connection. Tasks 2 and 3 add the manager
+ * routes of the domain proof and the connections (spec 30 items 2 and 5).
  * They exist when `sso` is on. Each manager route takes a session, then
  * counts on `sso-manage:user:<userId>`, then reads its input, then runs the
  * manager guard for the organization of the act. A route with a domain or

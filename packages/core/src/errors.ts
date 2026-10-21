@@ -95,8 +95,8 @@ export const ERRORS = {
   // SSO manager guard needs a second factor of the owner.
   connection_limit: 409,
   second_factor_required: 403,
-  // plan 12d Task 4: an SSO sign-in failed at a named step, or the connection
-  // is gone, off, or of a kind that cannot sign in yet.
+  // plan 12d Task 4: an SSO sign-in failed at a named step. Or the connection
+  // is gone, is off, or is of a kind that cannot sign in yet.
   sso_failed: 400,
   sso_not_configured: 404,
 } as const;
