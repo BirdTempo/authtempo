@@ -321,7 +321,7 @@ export const EVENTS = {
   sign_up: act({ method: enumOf(Object.keys(USER_CREATE_VIA)) }),
   sign_out: act({ sessionId: OPTIONAL_ID }),
   // One event for each act, with the count of the rows that the deletes
-  // answered, and no read of each row (deviation 9 of plan 12h).
+  // answered. The count needs no read of each row (deviation 9 of plan 12h).
   "session.end": {
     level: "info",
     fields: { reason: enumOf(Object.keys(SESSION_END_REASONS)), count: COUNT },
@@ -809,7 +809,6 @@ const NO_EVENT_EXEMPT = {
   exempt:
     "No event of plan 12h names this act. The request event carries the answer, and the stored row is the record.",
 } as const;
-/** The reason of a point whose event plan 12h Task 5 adds (question q2 of plan 12h Task 6). */
 /**
  * The event of each hook point, or an exempt row with its reason (plan 12h
  * Task 6). A Record of every `HookName`, so a new point without a row fails

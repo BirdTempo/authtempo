@@ -5,8 +5,8 @@ import { otlpSink } from "../src/otlp.js";
 import { built } from "./events.js";
 
 /**
- * One source event for each row of `METRICS`. The names of plan 12h Tasks 6
- * and 7 have no row in `EVENTS` yet, so their fields are the ones of spec 31.
+ * One source event for each row of `METRICS`. The names of plan 12h Task 7
+ * have no row in `EVENTS` yet, so their fields are the ones of spec 31.
  * Each flow event carries the ids that its row holds, so a metric that
  * copies one shows here. The sign_in row holds the user and session ids
  * since Task 5.

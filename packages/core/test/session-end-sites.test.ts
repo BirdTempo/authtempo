@@ -14,9 +14,9 @@ import { sha256Hex } from "../src/primitives/crypto.js";
 import { OPERATOR_SECRETS, operatorFixture } from "./operator-helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
 
-// Plan 12h Task 5 with Task 6 (rulings 20 and 22): each end of sessions in
+// Plan 12h Task 5 with Task 6 (rulings 20 and 22). Each end of sessions in
 // an operator act, an organization write, and the sweep emits one
-// session.end with its exact count, with no session.afterEnd hook.
+// session.end with its exact count. The tests set no session.afterEnd hook.
 
 const TARGET = "ada@example.com";
 const APP = { kind: "app", name: "support-tool" } as const;
@@ -185,8 +185,8 @@ describe("the session.end count of each end site (plan 12h Task 5)", () => {
   });
 
   it("counts the pages of a ban that the sweep ends", async () => {
-    // 50 impersonation sessions cost 2 calls each, so the ban ends one page
-    // of them in its act and leaves the rest on a pending-end row.
+    // 50 impersonation sessions cost 2 calls each. So the ban ends one page
+    // of them in its act, and a pending-end row holds the rest.
     const w = await world({ limiter: { allow: async () => true } });
     for (let i = 0; i < 50; i++) await impersonate(w);
     const before = (await w.events()).length;

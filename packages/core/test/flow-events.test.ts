@@ -206,9 +206,9 @@ function sessionReads(storage: StorageAdapter): unknown[][] {
 const SECRET = "0123456789abcdef0123456789abcdef";
 
 /**
- * HMAC-SHA256 of the address under a key that HKDF-SHA256 derives from the
- * secret, with an empty salt and the email info of spec 31 item 8, cut to
- * 32 hex. Written here with Web Crypto, apart from the code it checks.
+ * HMAC-SHA256 of the address, cut to 32 hex. HKDF-SHA256 derives its key
+ * from the secret, with an empty salt and the email info of spec 31 item 8.
+ * Written here with Web Crypto, apart from the code it checks.
  */
 async function keyedEmailHash(secret: string, address: string): Promise<string> {
   const enc = new TextEncoder();
