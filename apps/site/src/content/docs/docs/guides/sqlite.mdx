@@ -26,7 +26,7 @@ import sample from "../../../../../samples/guides/sqlite-node.ts?raw";
 
 ## Steps
 
-1. Open the database with the driver of the app. Set a busy timeout on `node:sqlite`.
+1. Open the database with the driver of the app. Set a busy timeout on `node:sqlite` and on `bun:sqlite`.
 2. Wrap the handle with the entry of its driver, such as `nodeSqlite(db)`.
 3. Run `applySqliteMigrations(driver)` at each start, or run `authtempo migrate --target sqlite` before the start.
 4. Pass `createSqliteAdapter(driver)` and `createSqliteLimiter(driver)` to `createAuth`.
@@ -61,7 +61,7 @@ On `node:sqlite`, better-sqlite3, and `bun:sqlite`, a batch is `BEGIN IMMEDIATE`
 
 ## The busy timeout and the write lock
 
-- The default busy timeout of `node:sqlite` is 0 ms. A second process that writes to the same file then gets "database is locked" at once. Run `PRAGMA busy_timeout = 5000` after the open.
+- The default busy timeout of `node:sqlite` and of `bun:sqlite` is 0 ms. A second process that writes to the same file then gets "database is locked" at once. Run `PRAGMA busy_timeout = 5000` after the open.
 - better-sqlite3 waits 5000 ms by default.
 - A libSQL batch on a `file:` database fails at once with `SQLITE_BUSY` while another connection holds the write lock. The adapter passes that error through, as D1 does.
 - Over HTTP, the libSQL server makes a batch wait for the lock. The server ends a write transaction after 5 seconds.
@@ -82,6 +82,7 @@ For a libSQL host that is not a loopback address, use `https:` or `libsql:`, so 
 ## The database file
 
 - The file holds sealed secrets and password hashes. Create it with mode 0600, as the sample does.
+- `authtempo migrate --target sqlite --file <path>` makes a new file with mode 0600. A file that exists keeps its mode.
 - Keep the file outside the web root.
 - Treat a backup of the file as a secret.
 
@@ -96,9 +97,16 @@ The decode rules of core read integers as numbers. A handle that reads integers 
 
 ## Migrations
 
-The SQLite migrations are the D1 files of `@authtempo/adapter-d1`, copied into the package at build with a byte check. The runner records each name in `ta_migrations`. It runs each file and its record in one write transaction, so a second process waits and then skips the work.
+The SQLite migrations are the D1 files of `@authtempo/adapter-d1`, copied into the package at build with a byte check. The runner records each name in `ta_migrations`. It runs each file and its record in one write transaction, so no file runs twice.
 
-`authtempo migrate --target sqlite --file <path>` applies the same files from the command line. For a libSQL URL on a host that is not a loopback address, the command needs TLS. [authtempo migrate](/docs/reference/cli/migrate/#sqlite) gives the rules. `authtempo generate --dialect sqlite` prints the schema for an ORM that reads the tables.
+A second process that runs the migrations at the same time waits for the write lock. It then reads the record and skips the work. The wait on a file depends on the driver:
+
+- `node:sqlite`, `bun:sqlite`, and better-sqlite3: the busy timeout of the handle. At 0 ms, the second process fails at once with "database is locked".
+- libSQL on a `file:` database: the runner tries the step again for up to 10 seconds.
+
+When the wait ends with no lock, the driver error passes through. Run the migrations again.
+
+`authtempo migrate --target sqlite --file <path>` applies the same files from the command line, with a busy timeout of 5000 ms. For a libSQL URL on a host that is not a loopback address, the command needs TLS. [authtempo migrate](/docs/reference/cli/migrate/#sqlite) gives the rules. `authtempo generate --dialect sqlite` prints the schema for an ORM that reads the tables.
 
 ## If it fails
 

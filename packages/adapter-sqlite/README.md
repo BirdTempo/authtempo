@@ -90,11 +90,12 @@ import { libsql } from "@authtempo/adapter-sqlite/libsql";
 const driver = libsql(createClient({ url: env.LIBSQL_URL, authToken: env.LIBSQL_AUTH_TOKEN }));
 ```
 
-### The busy timeout of `node:sqlite`
+### The busy timeout of `node:sqlite` and `bun:sqlite`
 
-Open a `node:sqlite` database with a busy timeout. Its default timeout is
-0 ms. So a second process that writes to the same file gets "database is
-locked" at once (read 2026-10-21, Node 26.10.0). Run
+Open a `node:sqlite` or a `bun:sqlite` database with a busy timeout. The
+default timeout of each one is 0 ms. So a second process that writes to the
+same file gets "database is locked" at once (read 2026-10-21, Node 26.10.0;
+probe 2026-10-22, Bun 1.4.3, `SQLITE_BUSY` after 0 ms). Run
 `PRAGMA busy_timeout = 5000` after you open the database. On a Node version
 with the `timeout` option, you can pass `{ timeout: 5000 }` to
 `DatabaseSync` instead. better-sqlite3 sets a busy timeout of 5000 ms by
@@ -126,8 +127,12 @@ await applySqliteMigrations(driver);
 
 Or run `authtempo migrate --target sqlite` before the start. The runner
 records each name in `ta_migrations`. It runs each migration and its record
-in one write transaction, so a second process waits for the write lock and
-then skips the work.
+in one write transaction, so no migration runs twice. A second process
+waits for the write lock, then reads the record and skips the work. On
+`node:sqlite`, `bun:sqlite`, and better-sqlite3 it waits for the busy
+timeout of the handle: at 0 ms it fails at once with "database is locked".
+On a libSQL `file:` database the runner tries the step again for up to
+10 s. When the wait ends with no lock, the driver error passes through.
 
 The adapter reads `ta_meta.schema_version` once. If it is older than the
 core's `SCHEMA_VERSION` or missing, every operation throws `StorageError`
@@ -152,6 +157,8 @@ bundle imports no Node module.
 
 The database holds sealed secrets and password hashes. Create the file with
 mode 0600, outside the web root. Back it up as a secret.
+`authtempo migrate --target sqlite --file <path>` makes a new file with
+mode 0600. A file that exists keeps its mode.
 
 ## Settings the adapter refuses
 
