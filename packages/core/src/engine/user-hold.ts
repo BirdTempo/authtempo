@@ -40,9 +40,12 @@ import { ROUNDS } from "./rounds.js";
  *
  * A flow can write a kind again after a later kind: it holds those rows
  * from the first time. No flow writes a kind first after a later kind. The
- * test lock-order-kinds.test.ts of adapter-postgres checks each flow of
- * plans 12f and 12k. A create holds only its new row, so that check skips
- * it.
+ * test lock-order-kinds.test.ts of adapter-postgres checks the flows that
+ * write two kinds or more. Its source scan pins each transaction site of
+ * this folder to such a flow or to a reason. The check sees kinds, not row
+ * sets. A create holds only its new row, so the check skips it. The race
+ * tests team-delete-gap-race.test.ts and organization-delete-gap-race.test.ts
+ * of adapter-postgres cover the row-set gaps.
  *
  * The ban, the revoke of the platform role, `withRoleLoss`, and the account
  * delete lock the user's sessions with `holdImpersonations`, also with no

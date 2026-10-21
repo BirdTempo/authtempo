@@ -11,17 +11,25 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
-// The machine check of the one lock order of user-hold.ts (ruling 49 of
-// plan 12k, and ruling 50). The order has seven kinds of rows. They are the
-// user row, the session rows, the organization row, the team row, the
-// invitation rows, the member rows, and the team member rows. A storage
-// wrapper records each create, update, delete,
-// and lock read of these kinds in each transaction, in order. Each test runs
-// one flow of plan 12f or 12k that writes these kinds, most of them two kinds
-// or more. A kind may come again, but a kind never comes first after a later
-// kind. A new flow out of order fails here, with no race probe. Each state
-// comes from the flows: the routes, the magic link, the organization api,
-// and the operator api.
+// The machine check of the one lock order of user-hold.ts (rulings 49, 50,
+// and 51 of plan 12k). The order has seven kinds of rows. They are the user
+// row, the session rows, the organization row, the team row, the invitation
+// rows, the member rows, and the team member rows. A storage wrapper records
+// each create, update, delete, and lock read of these kinds in each
+// transaction, in order. Each test runs one flow that writes these kinds,
+// most of them two kinds or more. A kind may come again, but a kind never
+// comes first after a later kind. Each state comes from the flows: the
+// routes, the magic link, the organization api, and the operator api.
+//
+// A source scan finds each site of the engine that opens a transaction.
+// SITES pins each site to its flows in FLOWS, or to a reason. A new site
+// with no entry fails the scan. Each flow test compares the sites that the
+// flow opens with SITES.
+//
+// The check sees kinds, not row sets. All rows of one kind count as one
+// step. So a flow that locks some rows of a kind, and later writes other
+// rows of that kind, passes here. Two race tests cover the known row-set
+// gaps: team-delete-gap-race.test.ts and organization-delete-gap-race.test.ts.
 
 const API = "https://api.example.com";
 const APP = { kind: "app", name: "support-tool" } as const;
@@ -59,6 +67,86 @@ const KIND_OF = {
 const kindOf = (model: ModelName): number | undefined =>
   (KIND_OF as Partial<Record<ModelName, number>>)[model];
 
+// The package has no @types/node, so type the two calls of node:fs that
+// this file makes, as db.ts does for its one global.
+const FS: string = "node:fs";
+const { readdirSync, readFileSync } = (await import(FS)) as {
+  readdirSync(path: string): string[];
+  readFileSync(path: string, encoding: "utf8"): string;
+};
+/** The stack limit of V8, which the types of the package lack. */
+const V8 = Error as unknown as { stackTraceLimit: number };
+const CORE = decodeURIComponent(new URL("../../core/", import.meta.url).pathname);
+/** A call that opens a transaction: `.transaction(`, or `operatorAct(`, the one door of the operator acts. */
+const OPENS = /\.transaction\(|(?<![\w.])(?<!function )operatorAct\(/g;
+/** The site of `operatorAct` itself. Each call of it is a site of its own. */
+const DOOR = "operator/audit operatorAct";
+
+/** A site that opens a transaction: its file, its top-level function, and its line. */
+interface Site {
+  key: string;
+  file: string;
+  line: number;
+}
+
+/**
+ * The sites of the engine folder of core and of its operator folder, by
+ * file and top-level function. The scan has the form of hook-locks.test.ts
+ * of the site. `root` is `src` for the source, or `dist` for the build that the
+ * test runs. A function with two sites names the second one `#2`.
+ */
+function sitesIn(root: "src" | "dist"): Site[] {
+  const ext = root === "src" ? ".ts" : ".js";
+  const dir = `${CORE}${root}/engine/`;
+  const files = [
+    ...readdirSync(dir).filter((n) => n.endsWith(ext) && !n.endsWith(".d.ts")),
+    ...readdirSync(`${dir}operator/`)
+      .filter((n) => n.endsWith(ext) && !n.endsWith(".d.ts"))
+      .map((n) => `operator/${n}`),
+  ];
+  const out: Site[] = [];
+  for (const f of files) {
+    const file = f.slice(0, -ext.length);
+    let line = 1;
+    for (const text of readFileSync(`${dir}${f}`, "utf8").split(
+      /\n(?=(?:export )?(?:async )?function )/,
+    )) {
+      const name = /^(?:export )?(?:async )?function (\w+)/.exec(text)?.[1] ?? "(top)";
+      let n = 0;
+      for (const m of text.matchAll(OPENS)) {
+        n++;
+        const at = line + text.slice(0, m.index).split("\n").length - 1;
+        out.push({ key: `${file} ${name}${n > 1 ? ` #${n}` : ""}`, file, line: at });
+      }
+      line += text.split("\n").length;
+    }
+  }
+  return out;
+}
+
+const SITE_CACHE: Partial<Record<"src" | "dist", Site[]>> = {};
+const sites = (root: "src" | "dist"): Site[] => (SITE_CACHE[root] ??= sitesIn(root));
+
+/**
+ * The site of the engine that opens a transaction at this moment, from the
+ * stack: the first frame at a site. The scan skips the site in
+ * `operatorAct`: the call of `operatorAct` further down the stack is the
+ * site. The frames name the build or, through its source map, the source.
+ */
+function siteHere(): string {
+  const limit = V8.stackTraceLimit;
+  V8.stackTraceLimit = 100;
+  const stack = new Error().stack ?? "";
+  V8.stackTraceLimit = limit;
+  for (const m of stack.matchAll(/\/core\/(src|dist)\/engine\/([\w/-]+)\.[jt]s:(\d+):\d+/g)) {
+    const site = sites(m[1] as "src" | "dist").find(
+      (s) => s.file === m[2] && s.line === Number(m[3]),
+    );
+    if (site && site.key !== DOOR) return site.key;
+  }
+  return "no site of the engine";
+}
+
 /** One recorded statement of a transaction: its kind and its text, such as `delete member`. */
 interface Step {
   kind: number;
@@ -82,6 +170,8 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
   const sent: MailMessage[] = [];
   let current: string | null = null;
   const runs: { flow: string; steps: Step[] }[] = [];
+  /** The engine site of each transaction that a flow opens, nested ones too. */
+  const opened: { flow: string; site: string }[] = [];
   const note = (steps: Step[], model: ModelName, verb: string) => {
     const kind = kindOf(model);
     if (kind !== undefined) steps.push({ kind, text: `${verb} ${model}` });
@@ -105,17 +195,22 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
       note(steps, model, "lock");
       await tx.lockInOrder?.(model, where);
     }) as NonNullable<StorageAdapter["lockInOrder"]>,
-    transaction: ((fn: (inner: StorageAdapter) => Promise<unknown>) =>
-      tx.transaction((inner) => fn(wrap(inner, steps)))) as typeof tx.transaction,
+    transaction: ((fn: (inner: StorageAdapter) => Promise<unknown>) => {
+      if (current !== null) opened.push({ flow: current, site: siteHere() });
+      return tx.transaction((inner) => fn(wrap(inner, steps)));
+    }) as typeof tx.transaction,
   });
   const storage: StorageAdapter = {
     ...adapter,
-    transaction: ((fn: (tx: StorageAdapter) => Promise<unknown>) =>
-      adapter.transaction((tx) => {
+    transaction: ((fn: (tx: StorageAdapter) => Promise<unknown>) => {
+      // At the call, while the stack still holds the site of the engine.
+      if (current !== null) opened.push({ flow: current, site: siteHere() });
+      return adapter.transaction((tx) => {
         const steps: Step[] = [];
         if (current !== null) runs.push({ flow: current, steps });
         return fn(wrap(tx, steps));
-      })) as typeof adapter.transaction,
+      });
+    }) as typeof adapter.transaction,
   };
   const auth = createAuth({
     baseURL: API,
@@ -258,6 +353,10 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
     }
     return found;
   }
+  /** The engine sites that the transactions of `name` opened, sorted, each once. */
+  function sitesOf(name: string): string[] {
+    return [...new Set(opened.filter((o) => o.flow === name).map((o) => o.site))].sort();
+  }
   /** The steps of each transaction of `name`, for a failure message. */
   function stepsOf(name: string): string[][] {
     return runs.filter((r) => r.flow === name).map((r) => r.steps.map((x) => x.text));
@@ -271,8 +370,11 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
     flow,
     kindsOf,
     outOfOrder,
+    sitesOf,
     stepsOf,
     lastMail,
+    lastToken,
+    post,
   };
 }
 
@@ -494,6 +596,14 @@ const TOUCHED: Record<string, string[]> = {
   "an end of the sessions of a user": ["user", "session"],
   "an end of all sessions": ["session"],
   "a sign-in": ["user", "session"],
+  "an invitation accept that raises a member": ["user", "team", "invitation", "member"],
+  "a password set": ["user", "session"],
+  "a password change": ["user", "session"],
+  "a password reset": ["user", "session"],
+  "an email claim by a magic link": ["user", "session"],
+  "an email claim by the sign-up link": ["user", "session"],
+  "a second factor enable": ["user", "session"],
+  "an email change": ["user", "session"],
 };
 
 /** Each flow of plans 12f and 12k that writes a kind of user-hold.ts, most of them two kinds or more. */
@@ -624,7 +734,211 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     w.auth.api.operator.sessions.endUser({ actor: APP, userId: s.pat.user.id, ...reason }),
   "an end of all sessions": (w) => w.auth.api.operator.sessions.endAll({ actor: APP, ...reason }),
   "a sign-in": async (w) => ({ ok: true, value: await w.signIn("pat@example.com") }),
+  "an invitation accept that raises a member": async (w, s) => {
+    must(
+      await w.auth.api.inviteMember({
+        user: s.ada.user,
+        organizationId: s.acme,
+        email: "pat@example.com",
+        role: "admin",
+        teamIds: [s.core],
+      }),
+    );
+    const token = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(w.lastMail("pat@example.com"))?.[1];
+    if (token === undefined) throw new Error("no invitation");
+    return w.auth.api.acceptInvitation({ user: s.pat.user, token, ip: null });
+  },
+  "a password set": (w, s) =>
+    passwordApi(w).change({ session: s.pat, newPassword: PASSWORD, ip: null, userAgent: null }),
+  "a password change": (w, s) =>
+    passwordApi(w).change({
+      session: s.ada,
+      currentPassword: PASSWORD,
+      newPassword: "another horse battery",
+      ip: null,
+      userAgent: null,
+    }),
+  "a password reset": async (w) => {
+    must(await passwordApi(w).requestReset({ email: "pat@example.com", ip: null }));
+    return passwordApi(w).reset({
+      token: w.lastToken("pat@example.com"),
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+  },
+  "an email claim by a magic link": async (w) => {
+    must(
+      await passwordApi(w).signUp({
+        email: "una@example.com",
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      }),
+    );
+    return { ok: true, value: await w.signIn("una@example.com") };
+  },
+  "an email claim by the sign-up link": async (w) => {
+    must(
+      await passwordApi(w).signUp({
+        email: "una@example.com",
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      }),
+    );
+    return passwordApi(w).verifyEmail({
+      token: w.lastToken("una@example.com"),
+      ip: null,
+      userAgent: null,
+    });
+  },
+  "a second factor enable": async (w, s) => {
+    const cookie = `__Host-tempo_session=${s.pat.token}`;
+    expect((await w.post("/password/change", { newPassword: PASSWORD }, cookie)).status).toBe(200);
+    const setup = await w.post("/totp/setup", { password: PASSWORD }, cookie);
+    const { secret } = (await setup.json()) as { secret: string };
+    const code = await totpCode(base32Decode(secret), new Date());
+    const enabled = await w.post("/totp/enable", { code }, cookie);
+    return enabled.status === 200 ? { ok: true } : { ok: false, code: `${enabled.status}` };
+  },
+  "an email change": async (w, s) => {
+    must(await w.auth.api.user.changeEmail({ session: s.pat, newEmail: "pat2@example.com" }));
+    return w.auth.api.user.confirmEmailChange({
+      token: w.lastToken("pat2@example.com"),
+      ip: null,
+      userAgent: null,
+    });
+  },
 };
+
+/** The password api, which `createAuth` gives with `password` set. */
+function passwordApi(w: World) {
+  const api = w.auth.api.password;
+  if (!api) throw new Error("no password api");
+  return api;
+}
+
+/**
+ * Each site of the engine that opens a transaction, by file and top-level
+ * function. Its entry names the flows above that run it, or the reason it
+ * needs no flow.
+ * A site with a flow writes two kinds or more. Each test of a flow checks
+ * that the flow opens these sites and no others. A reason says which kinds
+ * the site writes. "One kind" and "no kind" sites cannot take two kinds
+ * out of order. A sign-in site holds the user in `openSession` and then
+ * creates the session, as "a sign-in" does. Its only other write is a
+ * delete of its own new session, or a step on its own new user row.
+ */
+const SITES: Record<string, readonly string[] | string> = {
+  "account-delete requestAccountDelete": "one kind: the user hold, then verification rows",
+  "account-delete runDelete": [
+    "an account delete with a solo and a shared organization",
+    "an account delete of an operator with an impersonation",
+  ],
+  "email-change applyChange": ["an email change"],
+  "handoff continueHandoff": "one kind: an update of the browser session, then a verification row",
+  "handoff redeemHandoff": "a sign-in by a handoff code",
+  "identities guardedRemove": "one kind: the compare-and-set of the user row, then identity rows",
+  "invitations inviteMember": [
+    "an invitation accept with a team",
+    "an invitation accept that raises a member",
+  ],
+  "invitations acceptInvitation": [
+    "an invitation accept with a team",
+    "an invitation accept that raises a member",
+  ],
+  "invitations setActiveOrganization": ["a set of the active organization"],
+  "oauth-client-store deleteClient": "no kind: oauth rows only",
+  "oauth-clients refreshCimdRow": "no kind: oauth rows only",
+  "oauth-grants revokeGrant": "no kind: oauth rows only",
+  "organization-tokens createOrganizationToken": ["an organization token create"],
+  "organizations ownerWrite": [
+    "an owner removal",
+    "an operator removal with an impersonation",
+    "an operator removal with no impersonation",
+    "an owner demotion",
+    "a role change that drops the platform role",
+  ],
+  "organizations createOrganization": ["an organization create with its default team"],
+  "organizations updateOrganization": "one kind: the organization row",
+  "organizations deleteOrganization": ["an organization delete"],
+  "organizations addMember": ["a member add"],
+  "organizations updateMemberRole": ["a role change"],
+  "organizations removeMember": [
+    "a member removal",
+    "a leave",
+    "a member removal with revokeTokens",
+  ],
+  "passkeys verifyPasskeyAuthentication": "a sign-in by a passkey",
+  "password insertSignUp": ["an email claim by a magic link", "an email claim by the sign-up link"],
+  "password insertUniform": "one kind: the create of a new user and its password row, no session",
+  "password passwordSignIn": "a sign-in by a password",
+  "password verifyPasswordEmail": ["an email claim by the sign-up link"],
+  "password applyReset": ["a password reset"],
+  "password changePassword": ["a password set", "a password change", "a second factor enable"],
+  "profile updateProfile": "one kind: the compare-and-set of the user row",
+  "roles createRole": ["a role create"],
+  "roles deleteRole": "no kind: reads of member and invitation rows, then the role row",
+  "second-factor-methods enableMethod":
+    "the user hold, then addMethod: the steps of enableTotp in a second factor enable",
+  "second-factor-methods disableMethod": "one kind: the user hold, then the factor rows",
+  "second-factor disableSecondFactor": "one kind: the user hold, then the factor rows",
+  "session-list revokeSession": "one kind: a session row",
+  "session-list revokeOtherSessions": "one kind: session rows",
+  "social completeLink": "one kind: an update of the session, then a new identity row",
+  "social resolveSocialUser":
+    "a sign-in by a provider: claimEmail, then the session, as in an email claim by a magic link",
+  "sweep sweepLinks": "no kind: oauth logout rows only",
+  "sweep sweepExpired": "one kind: ended session rows",
+  "teams createTeam": ["a team create"],
+  "teams updateTeam": "one kind: the team row",
+  "teams deleteTeam": ["a team delete"],
+  "teams addTeamMember": ["a team member add"],
+  "teams removeTeamMember": ["a team member removal", "a team leave"],
+  "teams setActiveTeam": ["a set of the active team"],
+  "tokens createApiToken": "one kind: the user hold, then token rows",
+  "totp enableTotp": ["a second factor enable"],
+  "totp disableTotpWithCode": "no kind: the factor rows only",
+  "totp twoFactorGate": "no kind: the password row and the challenge row",
+  "totp verifyTwoFactor": "a sign-in after the second factor challenge",
+  "users createOrFindInTransaction": ["a sign-in", "an email claim by a magic link"],
+  "operator/access-end endPendingRows": "one kind: the session rows of a pending end",
+  [DOOR]: "the door of the operator acts: each call of operatorAct is a site of its own",
+  "operator/ban banUser": ["a ban", "a ban of an operator with an impersonation"],
+  "operator/ban unbanUser": "one kind: the user row",
+  "operator/impersonation startImpersonation": ["an impersonation start"],
+  "operator/impersonation stopImpersonation": ["an impersonation stop"],
+  "operator/sessions endUserSessions": ["an end of the sessions of a user"],
+  "operator/sessions endAllSessions": ["an end of all sessions"],
+  "operator/second-factor disableFactorWithProof": "one kind: the user hold, then the factor rows",
+  "operator/platform-role grantPlatformRole": ["a platform role grant"],
+  "operator/platform-role revokePlatformRole": [
+    "a platform role revoke with an impersonation",
+    "a platform role revoke with no impersonation",
+  ],
+  "operator/platform-role createAdmin": ["an admin create"],
+};
+
+/** The sites that SITES pins to the flow `name`, sorted. */
+const pinnedTo = (name: string): string[] =>
+  Object.entries(SITES)
+    .filter(([, pin]) => typeof pin !== "string" && pin.includes(name))
+    .map(([key]) => key)
+    .sort();
+
+describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
+  it("each has a flow of FLOWS or a reason, and no entry is stale", () => {
+    const found = sites("src").map((s) => s.key);
+    expect(found.length).toBe(63);
+    expect([...found].sort()).toEqual(Object.keys(SITES).sort());
+    for (const [key, pin] of Object.entries(SITES))
+      if (typeof pin !== "string") {
+        expect(pin.length, key).toBeGreaterThan(0);
+        for (const name of pin) expect(Object.keys(FLOWS), key).toContain(name);
+      }
+  });
+});
 
 describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", () => {
   for (const [name, call] of Object.entries(FLOWS))
@@ -633,6 +947,8 @@ describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", 
       const s = await scene(w);
       const answer = await w.flow(name, () => call(w, s));
       expect(answer).toMatchObject({ ok: true });
+      // The flow opens the sites that SITES pins to it, and no others.
+      expect(w.sitesOf(name)).toEqual(pinnedTo(name));
       // The flow ran its writes, so the check below is not empty.
       expect(w.kindsOf(name)).toEqual(TOUCHED[name]);
       expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
@@ -652,6 +968,7 @@ describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", 
       "invitation",
       "team member",
     ]);
+    expect(w.sitesOf(name)).toEqual(["teams deleteTeam"]);
     expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
   }, 60_000);
 
