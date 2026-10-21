@@ -231,7 +231,7 @@ No kind is free text. A field that fails its kind is dropped, and its name goes 
 | `errorClass` | The class of a thrown value, else `Error`. |
 | `count` | An integer of 0 or more. |
 | `durationMs` | A time in milliseconds, an integer of 0 or more. |
-| `status` | An HTTP status. |
+| `status` | An integer of 0 or more, such as an HTTP status. Core does not check the range of an HTTP status. |
 | `hash` | 32 lowercase hex. |
 | `clientRef` | A `cl_` client id, or `cimd:` and the first 32 hex of the SHA-256 of a metadata document URL. |
 | `method` | An HTTP method token of RFC 9110, at most 32 characters. |

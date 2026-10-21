@@ -23,9 +23,9 @@ const COLLECTOR_ENV = {
   AUTH_SECRET: SECRET,
 };
 
-// The two Auth builders take the env of the host first, so their names do not
-// start with create: constructs.test.ts calls each create…Auth with the harness
-// alone. The tests below construct both with real values.
+// The two Auth builders take the env of the host first. Their names do not
+// start with create, because constructs.test.ts calls each create…Auth with the
+// harness alone. The tests below construct both with real values.
 describe("the observability samples", () => {
   afterEach(() => {
     vi.useRealTimers();

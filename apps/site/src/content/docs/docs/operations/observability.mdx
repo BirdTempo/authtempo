@@ -37,7 +37,7 @@ import test from "../../../../../samples/operations/observe.test.ts?raw";
 
 ## Pick a sink
 
-With no `observe` config, core writes each default line with `console`, and nothing leaves the app. With a sink, core writes no `console` line, and the sink gets every event. A sink has one call, `write(batch)`. The package `@authtempo/observe` has three sinks:
+With no `observe` config, core writes each default line with `console`, and nothing leaves the app. With a sink, core writes no `console` line, and the sink gets each event, with one exception. Core writes `secret.low_entropy` with `console` while `createAuth` reads the config, and no sink gets it. A sink has one call, `write(batch)`. The package `@authtempo/observe` has three sinks:
 
 | Sink | Where the events go | Use it for |
 | --- | --- | --- |
@@ -79,7 +79,11 @@ An app can write its own sink. It gets the events after the answer, and it owns 
 
 7. In a scheduled handler, call `api.sweepExpired()`. It flushes at its end, so the `sweep` event needs no other call.
 8. Set the alerts. Alert on each event of level `error`, on a rise of `limit.hit`, and on `observe.dropped` above 0.
-9. For a push alert on Workers, add a Tail Worker. It gets the logs of the API Worker and posts each error event.
+9. For a push alert on Workers, add a Tail Worker. It gets the logs of the API Worker and posts each error event. In the `wrangler.jsonc` of the API Worker, name the Tail Worker in `tail_consumers`. Without it, the Tail Worker gets no log.
+
+```jsonc
+"tail_consumers": [{ "service": "authtempo-alerts" }]
+```
 
 <Code code={tailWorker} lang="ts" title="A Tail Worker" />
 
@@ -120,6 +124,8 @@ The keyed hash is HMAC-SHA256 under a key that HKDF derives from the current app
 - Core replaces each secret value of the config with `***` in each string field of an event, before the buffer, with or without a sink. Each sink of `@authtempo/observe` scrubs again with its own `secrets` list.
 - The `method` field of the `request` event holds the method token of the request, `HEAD` too.
 - A redirect counts as a failure only when core marked it with an error code. A `next` value of a client that holds `auth_error` gives no failure.
+- `analyticsEngineSink` writes at most 200 data points in one flush, `AE_MAX_POINTS`. Analytics Engine takes at most 250 for each Worker invocation (Cloudflare limit, read 2026-10-21). The 50 others stay for the points of the app.
+- Over 200 chosen events in one batch, the sink writes the first 200 and throws. Core then counts each event of the batch in `sink_threw`.
 - Each OTLP post aborts after `timeoutMs`. Each OTLP sink makes a random `service.instance.id` at its first write, so each isolate writes its own metric stream.
 - An event is telemetry, and it can drop. The audit table of the operator tools is the record of an operator act.
 
@@ -129,7 +135,7 @@ The keyed hash is HMAC-SHA256 under a key that HKDF derives from the current app
 
 ## The default lines
 
-With no sink, core writes each line of this table with `console`, with the text and the arguments of each release before. A line holds an event name, a provider name, a row id, an HTTP status, or an error name. It never holds a token, a code, a cookie, an address, or an error message. The [Events](/docs/reference/events/) page lists the fields of each event. A site check holds this table to the code.
+With no sink, core writes each line of this table with `console`, with the text and the arguments of each release before. With a sink, core writes only the `secret.low_entropy` line, while `createAuth` reads the config. No sink gets that event. A line holds an event name, a provider name, a row id, an HTTP status, or an error name. It never holds a token, a code, a cookie, an address, or an error message. The [Events](/docs/reference/events/) page lists the fields of each event. A site check holds this table to the code.
 
 | Line | Event | What to do |
 | --- | --- | --- |
@@ -207,7 +213,8 @@ The rows that start with `authtempo compat:` come from the compatibility package
 ## If it fails
 
 - No event in a day of traffic: `handle` gets no `waitUntil`, or `observability.enabled` is `false`. On Node and Bun, the flush timer does not run.
-- `observe.dropped` above 0: raise `observe.buffer`, or the sink is slow.
+- `observe.dropped` with `buffer_full` above 0: the buffer filled before a flush. Raise `observe.buffer`, or on Node and Bun flush more often.
+- `sink_threw` counts with `analyticsEngineSink`: one batch held more than 200 chosen events. Give the sink a shorter `events` list. A larger `observe.buffer` makes the batch larger, not smaller.
 - `sink_timeout` counts: the collector does not answer in `observe.flushTimeoutMs`.
 - Many `authtempo: unhandled error` lines with a storage error: a migration is missing. [Upgrades](/docs/operations/upgrades/) tells how to apply it.
 - [`hook_failed`](/docs/reference/errors/#hook_failed) answers: read the `authtempo: before hook failed` line of the same time.

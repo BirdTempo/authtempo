@@ -51,14 +51,16 @@ curl -fsS https://api.example.com/auth/health
 On Node, a container probe calls the route from inside the container:
 
 ```text
-HEALTHCHECK --interval=30s CMD node -e "fetch('http://localhost:3000/auth/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+HEALTHCHECK --interval=30s CMD node -e "fetch('http://localhost:3000/auth/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
 ```
 
 On Bun, the same probe runs with `bun`:
 
 ```text
-HEALTHCHECK --interval=30s CMD bun -e "fetch('http://localhost:3000/auth/ready').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
+HEALTHCHECK --interval=30s CMD bun -e "fetch('http://localhost:3000/auth/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"
 ```
+
+With `observe.readiness: true`, a probe can call `/auth/ready` in place of `/auth/health`. Then the container is healthy only while the store answers. With readiness off, `/auth/ready` answers 404, and the container stays unhealthy.
 
 Use `GET`: a `HEAD` request to these routes answers 404.
 
