@@ -247,7 +247,9 @@ describe("the account delete beside a role loss on Postgres (ruling 65 of plan 1
     expect(left).toMatchObject({ ok: true });
     expect(deleted).toMatchObject({ ok: true });
     expect(await db.sql`SELECT 1 FROM ta_user WHERE id = ${ada.user.id}`).toHaveLength(0);
-    // A page of the impersonation sessions ends in each act, and the sweep ends the rest.
+    // Each act ends the page of impersonation sessions that fits its budget. That page can be
+    // empty: the statement count of the shared adapter also counts the other flow. The sweep
+    // ends the rest.
     await w.auth.api.sweepExpired();
     expect(await db.sql`SELECT 1 FROM ta_session WHERE actor_id IS NOT NULL`).toHaveLength(0);
     expect(await db.sql`SELECT 1 FROM ta_verification WHERE purpose = 'session-end'`).toHaveLength(
