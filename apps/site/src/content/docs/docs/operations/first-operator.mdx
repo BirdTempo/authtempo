@@ -68,7 +68,7 @@ Warning: the secret prints once. Core stores its SHA-256 only, so a lost secret 
 
 ## If it fails
 
-- [`not_found`](/docs/reference/errors/#not_found): the user tools or the platform keys are off, or no user has the id.
+- [`not_found`](/docs/reference/errors/#not_found): the user tools or the platform keys are off. `create-admin` takes an address and makes a missing user, so a missing user is no cause there. At step 9, no user has the id.
 - [`unauthorized`](/docs/reference/errors/#unauthorized): the secret is wrong, or its hash is not in `operator.secrets`.
 - [`operator_required`](/docs/reference/errors/#operator_required): the entry lacks the scope `users`.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): the 600 calls of this hour from this IP, or of this secret, are spent.
