@@ -38,6 +38,17 @@ export interface RouteContract {
     readonly optional?: true;
   };
   readonly answer: AnswerKind;
-  /** A second answer kind: a JSON body gets JSON, a form post gets a redirect. */
-  readonly alt?: AnswerKind;
+  /**
+   * The other answer kinds: a JSON body gets JSON, a form post gets a
+   * redirect. A list holds more than one kind. The SSO form gets a page or
+   * a redirect (plan 12d Task 4 fix M1).
+   */
+  readonly alt?: AnswerKind | readonly AnswerKind[];
+}
+
+/** Each answer kind of a route: `answer` first, then each kind of `alt`. */
+export function answerKinds(contract: RouteContract): readonly AnswerKind[] {
+  const alt = contract.alt;
+  if (alt === undefined) return [contract.answer];
+  return "kind" in alt ? [contract.answer, alt] : [contract.answer, ...alt];
 }

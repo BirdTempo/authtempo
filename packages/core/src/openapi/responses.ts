@@ -6,7 +6,7 @@ import {
   OAUTH_ERRORS,
 } from "../errors.js";
 import { DOCS_ORIGIN, type ErrorTable, errorAnchor } from "../http/anchors.js";
-import type { AnswerKind, RouteContract } from "../http/contract/types.js";
+import { type AnswerKind, answerKinds, type RouteContract } from "../http/contract/types.js";
 import { ROUTER_CODES, type RouteEntry } from "../http/route-list.js";
 
 /** The schema of an answer, as the document writes it: a converter that owns `components.schemas`. */
@@ -144,9 +144,7 @@ export function responsesOf(
   pageCodes: ReadonlySet<string> = new Set(),
 ): Record<string, OpenApiResponse> {
   const out: Record<string, OpenApiResponse> = {};
-  for (const kind of contract.alt === undefined
-    ? [contract.answer]
-    : [contract.answer, contract.alt]) {
+  for (const kind of answerKinds(contract)) {
     const [status, response] = answerOf(kind, schemaOf);
     const seen = out[status];
     out[status] =
@@ -157,7 +155,7 @@ export function responsesOf(
             content: { ...seen.content, ...response.content },
           };
   }
-  const redirect = [contract.answer, contract.alt].find((k) => k?.kind === "redirect");
+  const redirect = answerKinds(contract).find((k) => k.kind === "redirect");
   const byStatus = new Map<number, { code: string; table: ErrorTable }[]>();
   for (const { code, table, status } of codesOf(entry)) {
     const list = byStatus.get(status) ?? [];

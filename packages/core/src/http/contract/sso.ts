@@ -192,9 +192,9 @@ export const SSO_CONTRACT = {
   },
   "POST /sso/discover": {
     body: { schema: discoverBody, media: ["json", "form"], parsedBy: "zod" },
-    // JSON: the answer. A form: a 303 to the start, or to the error page of the app.
+    // JSON: the answer. A form: a page that goes on to the start, or a 302 to the error page of the app.
     answer: { kind: "json", schema: discoverAnswer },
-    alt: { kind: "redirect", param: "auth_error", status: 303 },
+    alt: [{ kind: "html" }, { kind: "redirect", param: "auth_error" }],
   },
   "GET /sso/:connectionId/start": {
     query: { schema: startQuery, parsedBy: "hand" },

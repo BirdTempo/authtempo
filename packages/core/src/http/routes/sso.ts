@@ -43,11 +43,13 @@ import {
   readCookie,
   sessionCookie,
 } from "../cookies.js";
+import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
 import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
 import { challengePageUrl, trustTokenOf } from "../session-answer.js";
+import { ssoContinuePage } from "../sso-continue-page.js";
 
 /**
  * The calls of one person to the SSO manager routes: 30 per 15 minutes.
@@ -155,12 +157,16 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
         // A form: the code goes to the error page of the app, as a social failure does.
         if (!r.ok) return redirect(authErrorUrl(config, r.code));
         if (!r.value.sso) return redirect(authErrorUrl(config, "sso_not_configured"));
-        // 303, so the browser follows with a GET.
+        // A page of this origin, not a 303: Chromium applies form-action to each
+        // redirect after the post, so the 302 of the start to the IdP would fail.
+        // A failure above goes to appURL, which is baseURL or a trusted origin.
         const next = body.value.next;
-        return redirect(
-          next === undefined ? r.value.start : `${r.value.start}?next=${encodeURIComponent(next)}`,
-          303,
-        );
+        const location =
+          next === undefined ? r.value.start : `${r.value.start}?next=${encodeURIComponent(next)}`;
+        return new Response(ssoContinuePage({ location, appName: config.appName }), {
+          status: 200,
+          headers: pageHeaders(config, noScriptPagePolicy(config)),
+        });
       },
     },
     {

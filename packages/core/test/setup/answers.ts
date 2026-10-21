@@ -45,6 +45,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   );
   const { ROUTE_CONTRACT } = await import("../../src/http/contract/index.js");
   const { ERROR_SCHEMAS } = await import("../../src/openapi/responses.js");
+  const { answerKinds } = await import("../../src/http/contract/types.js");
   const { routeKeyOf } = await import("../../src/http/route-key.js");
   const { ROUTER_CODES, ROUTES } = await import("../../src/http/route-list.js");
   type RouteContract = import("../../src/http/contract/types.js").RouteContract;
@@ -108,8 +109,8 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     return ENTRIES.has(key) ? key : null;
   }
 
-  function kinds(contract: RouteContract): AnswerKind[] {
-    return contract.alt ? [contract.answer, contract.alt] : [contract.answer];
+  function kinds(contract: RouteContract): readonly AnswerKind[] {
+    return answerKinds(contract);
   }
 
   /** Rule 1: the code is declared for the route, with the status of its table (a redirect has none). */

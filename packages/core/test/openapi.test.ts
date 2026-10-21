@@ -4,7 +4,7 @@ import { resolveConfig } from "../src/config.js";
 import { ERRORS, OAUTH_ERRORS } from "../src/errors.js";
 import { DOCS_ORIGIN, routeAnchor } from "../src/http/anchors.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
-import type { RouteContract } from "../src/http/contract/types.js";
+import { answerKinds, type RouteContract } from "../src/http/contract/types.js";
 import { routeKeyOf } from "../src/http/route-key.js";
 import { ROUTE_FEATURES, ROUTES, type RouteEntry, type RouteKey } from "../src/http/route-list.js";
 import { coreRoutes } from "../src/http/routes/index.js";
@@ -367,8 +367,8 @@ describe("openApiDocument (plan 11g)", () => {
     for (const { key, op } of operations(doc)) {
       const contract = contracts[key];
       if (contract === undefined) throw new Error(`no contract ${key}`);
-      for (const kind of [contract.answer, contract.alt]) {
-        if (kind?.kind !== "json") continue;
+      for (const kind of answerKinds(contract)) {
+        if (kind.kind !== "json") continue;
         const schema =
           op.responses[String(kind.status ?? 200)]?.content?.["application/json"]?.schema;
         expect(inline(schema), key).toEqual(own(kind.schema, "output"));
