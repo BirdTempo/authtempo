@@ -1,4 +1,5 @@
 import type { OperatorScope, ResolvedConfig, ResolvedOperatorSecret } from "../../config.js";
+import { limit } from "../../limiter/limit.js";
 import type { Observer } from "../../observe/observer.js";
 import { isOperatorSecret, OPERATOR_USERS_PER_IP } from "../../operator-secret.js";
 import { constantTimeEqual, sha256Hex } from "../../primitives/crypto.js";
@@ -236,7 +237,7 @@ export async function requireOperatorUser(
   if (!user.emailVerified) return refused(config.observe, route);
   if (!(await hasSecondFactor(config, user.id))) return refused(config.observe, route);
   if (!requireFresh(config, session).ok) return refused(config.observe, route);
-  if (!(await config.limiter.allow(`operator:user:${user.id}`, OPERATOR_PER_USER))) {
+  if (!(await limit(config, "operator:user", user.id, OPERATOR_PER_USER))) {
     config.observe.emit({ name: "operator.refused", actorKind: "user", code: "rate_limited" });
     return fail("rate_limited");
   }

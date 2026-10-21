@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import { organizationChange } from "../observe/events.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
@@ -89,7 +90,7 @@ export async function deleteAccount(
   if (!config.account.delete) return fail("not_found");
   const fresh = requireFresh(config, input.session.session);
   if (!fresh.ok) return fresh;
-  if (!(await config.limiter.allow(`user-delete:user:${input.session.user.id}`, DELETE_PER_USER)))
+  if (!(await limit(config, "user-delete:user", input.session.user.id, DELETE_PER_USER)))
     return fail("rate_limited");
   return runDelete(config, input, null);
 }
@@ -125,7 +126,7 @@ export async function requestAccountDelete(
   const fresh = requireFresh(config, input.session.session);
   if (!fresh.ok) return fresh;
   const userId = input.session.user.id;
-  if (!(await config.limiter.allow(`user-delete:user:${userId}`, DELETE_PER_USER)))
+  if (!(await limit(config, "user-delete:user", userId, DELETE_PER_USER)))
     return fail("rate_limited");
   // The rule runs again at the confirm: an owner can leave between the two.
   const plan = await organizationsOfDelete(config, config.storage, userId);
@@ -189,7 +190,7 @@ export async function confirmAccountDelete(
   if (!config.account.delete) return fail("not_found");
   if (typeof input.token !== "string" || !DELETE_TOKEN_RE.test(input.token))
     return fail("invalid_token");
-  if (!(await config.limiter.allow(`user-delete-confirm:ip:${ipKey(input.ip)}`, CONFIRM_PER_IP)))
+  if (!(await limit(config, "user-delete-confirm:ip", ipKey(input.ip), CONFIRM_PER_IP)))
     return fail("rate_limited");
   const valueHash = await sha256Hex(input.token);
   return runDelete(config, input, async (tx, user, now) => {

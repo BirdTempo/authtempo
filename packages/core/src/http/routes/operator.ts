@@ -17,6 +17,7 @@ import {
   sessionFromRequest,
 } from "../../engine/sessions.js";
 import { ipKey } from "../../limiter/ip-key.js";
+import { limit } from "../../limiter/limit.js";
 import type { Observer } from "../../observe/observer.js";
 import {
   OPERATOR_PER_IP,
@@ -267,7 +268,7 @@ function secretRoutes(config: ResolvedConfig): Route[] {
           path: "/operator/keys/rotate",
           key: "POST /operator/keys/rotate",
           async handler(ctx) {
-            if (!(await ctx.config.limiter.allow(`operator:ip:${ipKey(ctx.ip)}`, OPERATOR_PER_IP)))
+            if (!(await limit(ctx.config, "operator:ip", ipKey(ctx.ip), OPERATOR_PER_IP)))
               return json({ error: "rate_limited" }, 429);
             const refused = await operatorAuthorized(
               ctx.config,
@@ -290,10 +291,7 @@ function secretRoutes(config: ResolvedConfig): Route[] {
       key: "GET /operator/secrets/status",
       async handler(ctx) {
         if (
-          !(await ctx.config.limiter.allow(
-            `operator-secrets:ip:${ipKey(ctx.ip)}`,
-            OPERATOR_SECRETS_PER_IP,
-          ))
+          !(await limit(ctx.config, "operator-secrets:ip", ipKey(ctx.ip), OPERATOR_SECRETS_PER_IP))
         )
           return json({ error: "rate_limited" }, 429);
         const refused = await operatorAuthorized(
@@ -312,10 +310,7 @@ function secretRoutes(config: ResolvedConfig): Route[] {
       key: "POST /operator/secrets/rewrap",
       async handler(ctx) {
         if (
-          !(await ctx.config.limiter.allow(
-            `operator-secrets:ip:${ipKey(ctx.ip)}`,
-            OPERATOR_SECRETS_PER_IP,
-          ))
+          !(await limit(ctx.config, "operator-secrets:ip", ipKey(ctx.ip), OPERATOR_SECRETS_PER_IP))
         )
           return json({ error: "rate_limited" }, 429);
         const refused = await operatorAuthorized(
@@ -336,10 +331,7 @@ function secretRoutes(config: ResolvedConfig): Route[] {
       key: "GET /operator/info",
       async handler(ctx) {
         if (
-          !(await ctx.config.limiter.allow(
-            `operator-secrets:ip:${ipKey(ctx.ip)}`,
-            OPERATOR_SECRETS_PER_IP,
-          ))
+          !(await limit(ctx.config, "operator-secrets:ip", ipKey(ctx.ip), OPERATOR_SECRETS_PER_IP))
         )
           return json({ error: "rate_limited" }, 429);
         const refused = await operatorAuthorized(ctx.config, ctx, "GET /operator/info", null);
@@ -384,7 +376,7 @@ export async function readOperatorActor(
 ): Promise<Result<OperatorCaller>> {
   const request = ctx.request;
   if (OPERATOR_SCHEME.test(request.headers.get("authorization") ?? "")) {
-    if (!(await config.limiter.allow(`operator-users:ip:${ipKey(ctx.ip)}`, OPERATOR_USERS_PER_IP)))
+    if (!(await limit(config, "operator-users:ip", ipKey(ctx.ip), OPERATOR_USERS_PER_IP)))
       return fail("rate_limited");
     if (readSessionToken(config, request) !== null) {
       logUnauthorized(ctx.config.observe, route, "secret_and_session");
@@ -395,12 +387,7 @@ export async function readOperatorActor(
       logUnauthorized(ctx.config.observe, route, "secret_mismatch");
       return fail("unauthorized");
     }
-    if (
-      !(await config.limiter.allow(
-        `operator-users:secret:${entry.name}`,
-        OPERATOR_USERS_PER_SECRET,
-      ))
-    )
+    if (!(await limit(config, "operator-users:secret", entry.name, OPERATOR_USERS_PER_SECRET)))
       return fail("rate_limited");
     return ok({ actor: { kind: "secret", name: entry.name, scopes: entry.scopes }, renewed: null });
   }

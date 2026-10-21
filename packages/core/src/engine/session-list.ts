@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { limit } from "../limiter/limit.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow } from "../schema.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
@@ -34,7 +35,7 @@ export const REVOKE_PER_USER = { seconds: 900, max: 30 };
 
 /** The one key of both revoke flows, so the two cannot count apart. */
 function revokeAllowed(config: ResolvedConfig, userId: string): Promise<boolean> {
-  return config.limiter.allow(`session-revoke:user:${userId}`, REVOKE_PER_USER);
+  return limit(config, "session-revoke:user", userId, REVOKE_PER_USER);
 }
 
 /** One row of the list. Never the token or its hash. */

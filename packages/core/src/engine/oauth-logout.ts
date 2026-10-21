@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import type { Observer } from "../observe/observer.js";
 import { SESSION_JWT_TYPE } from "../primitives/credentials.js";
 import { constantTimeEqual, randomBase64Url } from "../primitives/crypto.js";
@@ -22,7 +23,7 @@ export const END_SESSION_PER_IP = { seconds: 900, max: 60 };
 
 /** True when the IP is past `END_SESSION_PER_IP` at the end-session route. */
 export const endSessionLimited = async (config: ResolvedConfig, ip: string | null) =>
-  !(await config.limiter.allow(`oauth-end-session:ip:${ipKey(ip)}`, END_SESSION_PER_IP));
+  !(await limit(config, "oauth-end-session:ip", ipKey(ip), END_SESSION_PER_IP));
 
 /**
  * What a valid `id_token_hint` names. `clientId` is its `aud`, and `client`

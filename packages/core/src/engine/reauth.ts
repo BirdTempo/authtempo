@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { limit } from "../limiter/limit.js";
 import type { ReauthEventMethod } from "../observe/events.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
@@ -51,11 +52,11 @@ export async function requestReauthCode(
   const otp = config.emailOtp;
   if (!otp) return fail("not_found");
   const { user } = input.session;
-  if (!(await config.limiter.allow(`reauth-mail:user:${user.id}`, REAUTH_MAIL_PER_USER)))
+  if (!(await limit(config, "reauth-mail:user", user.id, REAUTH_MAIL_PER_USER)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`otp:email:${user.email}`, REQUEST_PER_EMAIL)))
+  if (!(await limit(config, "otp:email", user.email, REQUEST_PER_EMAIL)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`otp:email-day:${user.email}`, MAILED_CODES_PER_EMAIL_DAY)))
+  if (!(await limit(config, "otp:email-day", user.email, MAILED_CODES_PER_EMAIL_DAY)))
     return fail("rate_limited");
   const code = await issueCode(config, otp, "reauth-otp", user.email, {});
   const message = config.account.mail({
@@ -108,8 +109,7 @@ export async function reauthenticate(
   // depends on the deployment only, so the limit counts no try for it.
   if ("emailCode" in input.proof && !config.emailOtp) return fail("not_found");
   if ("passkey" in input.proof && !config.passkey) return fail("not_found");
-  if (!(await config.limiter.allow(`reauth:user:${user.id}`, REAUTH_PER_USER)))
-    return fail("rate_limited");
+  if (!(await limit(config, "reauth:user", user.id, REAUTH_PER_USER))) return fail("rate_limited");
   const proof = input.proof;
   // A passkey is two factors (spec 8.15 item 2): core asks for user
   // verification, so it proves possession and the person. No factor code

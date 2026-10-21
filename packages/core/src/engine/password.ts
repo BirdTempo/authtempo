@@ -3,6 +3,7 @@ import type { MailMessage, ResolvedConfig } from "../config.js";
 import type { ErrorCode } from "../errors.js";
 import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -215,7 +216,7 @@ export async function passwordSignUp(
 ): Promise<Result<PasswordSignUpResult>> {
   const pw = config.password;
   if (!pw) return fail("not_found");
-  if (!(await config.limiter.allow(`password-sign-up:ip:${ipKey(input.ip)}`, SIGN_UP_PER_IP)))
+  if (!(await limit(config, "password-sign-up:ip", ipKey(input.ip), SIGN_UP_PER_IP)))
     return fail("rate_limited");
   // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   const captcha = await checkCaptcha(config, "password-sign-up", input.captchaToken, input.ip);
@@ -231,7 +232,7 @@ export async function passwordSignUp(
   if (refused) return fail(refused);
   // After the body checks, which answer the same for every address and send
   // no mail, and before the hash: only a sign-up that can mail counts.
-  if (!(await config.limiter.allow(`password-sign-up:email:${email}`, SIGN_UP_PER_EMAIL)))
+  if (!(await limit(config, "password-sign-up:email", email, SIGN_UP_PER_EMAIL)))
     return fail("rate_limited");
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
@@ -576,7 +577,7 @@ export async function resendPasswordVerification(
   // Before any limit key: both keys trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`password-resend:ip:${ipKey(input.ip)}`, RESEND_PER_IP)))
+  if (!(await limit(config, "password-resend:ip", ipKey(input.ip), RESEND_PER_IP)))
     return fail("rate_limited");
   // The email limit counts before the reads, so an unknown address spends
   // the same budget as a known one.
@@ -593,7 +594,7 @@ export async function resendPasswordVerification(
 
 /** The per-email limit of a new verify link: the resend route's key (plan 8b). */
 function allowResendMail(config: ResolvedConfig, email: string): Promise<boolean> {
-  return config.limiter.allow(`password-resend:email:${email}`, RESEND_PER_EMAIL);
+  return limit(config, "password-resend:email", email, RESEND_PER_EMAIL);
 }
 
 /** Deletes the pending `password-verify` rows of the address, then mails one new link. */
@@ -640,14 +641,14 @@ export async function passwordSignIn(
 ): Promise<Result<PasswordSignInResult>> {
   const pw = config.password;
   if (!pw) return fail("not_found");
-  if (!(await config.limiter.allow(`password:ip:${ipKey(input.ip)}`, SIGN_IN_PER_IP)))
+  if (!(await limit(config, "password:ip", ipKey(input.ip), SIGN_IN_PER_IP)))
     return fail("rate_limited");
   // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   const captcha = await checkCaptcha(config, "password-sign-in", input.captchaToken, input.ip);
   if (captcha) return captcha;
   // Before any lookup: the lookup and the email limit key trust a normalized address.
   const email = normalizeEmail(input.email);
-  if (email !== null && !(await config.limiter.allow(`password:email:${email}`, SIGN_IN_PER_EMAIL)))
+  if (email !== null && !(await limit(config, "password:email", email, SIGN_IN_PER_EMAIL)))
     return fail("rate_limited");
   // The length is the caller's own input, so this refusal tells nothing about an account. It bounds the CPU.
   if ([...input.password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
@@ -970,7 +971,7 @@ export async function requestPasswordReset(
   // Before any limit key and before the row: both trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`password-reset:ip:${ipKey(input.ip)}`, RESET_PER_IP)))
+  if (!(await limit(config, "password-reset:ip", ipKey(input.ip), RESET_PER_IP)))
     return fail("rate_limited");
   // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   const captcha = await checkCaptcha(
@@ -980,7 +981,7 @@ export async function requestPasswordReset(
     input.ip,
   );
   if (captcha) return captcha;
-  if (!(await config.limiter.allow(`password-reset:email:${email}`, RESET_PER_EMAIL)))
+  if (!(await limit(config, "password-reset:email", email, RESET_PER_EMAIL)))
     return fail("rate_limited");
   const now = config.clock.now();
   const token = randomToken(PASSWORD_RESET_PREFIX);
@@ -1052,7 +1053,7 @@ export async function resetPassword(
   // Before any read, the breach call, and the hash: each POST costs one
   // breach call and one hash at full cost. The limiter is the owned one,
   // so a refusal holds whatever a supplier does.
-  if (!(await config.limiter.allow(`password-reset-post:ip:${ipKey(input.ip)}`, RESET_POST_PER_IP)))
+  if (!(await limit(config, "password-reset-post:ip", ipKey(input.ip), RESET_POST_PER_IP)))
     return fail("rate_limited");
   const valueHash = await sha256Hex(input.token);
   const now = config.clock.now();
@@ -1488,7 +1489,7 @@ export async function changePassword(
     const fresh = requireFresh(config, session);
     if (!fresh.ok) return fresh;
   }
-  if (!(await config.limiter.allow(`password-change:user:${user.id}`, CHANGE_PER_USER)))
+  if (!(await limit(config, "password-change:user", user.id, CHANGE_PER_USER)))
     return fail("rate_limited");
   if (row) {
     const current = input.currentPassword;
@@ -1622,12 +1623,12 @@ export async function verifyPassword(
   input: PasswordReauth,
 ): Promise<Result<{ verified: true }>> {
   if (!config.password) return fail("not_found");
-  if (!(await config.limiter.allow(`password:ip:${ipKey(input.ip)}`, SIGN_IN_PER_IP)))
+  if (!(await limit(config, "password:ip", ipKey(input.ip), SIGN_IN_PER_IP)))
     return fail("rate_limited");
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
   ]);
-  if (user && !(await config.limiter.allow(`password:email:${user.email}`, SIGN_IN_PER_EMAIL)))
+  if (user && !(await limit(config, "password:email", user.email, SIGN_IN_PER_EMAIL)))
     return fail("rate_limited");
   return checkUserPassword(config, input.userId, input.password);
 }

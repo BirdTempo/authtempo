@@ -1,6 +1,7 @@
 import { can } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import { organizationChange } from "../observe/events.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
@@ -117,9 +118,9 @@ export async function inviteMember(
   if (teams.value !== null && !can(s.value.standing.granted, TEAM_MEMBER_ADD))
     return fail("forbidden_rank");
   // After the rank checks, so a stranger cannot spend an admin's budget.
-  if (!(await config.limiter.allow(`invite:user:${input.user.id}`, INVITE_USER_LIMIT)))
+  if (!(await limit(config, "invite:user", input.user.id, INVITE_USER_LIMIT)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`invite:email:${email}`, INVITE_EMAIL_LIMIT)))
+  if (!(await limit(config, "invite:email", email, INVITE_EMAIL_LIMIT)))
     return fail("rate_limited");
   const now = config.clock.now();
   const token = randomToken(INVITATION_PREFIX);
@@ -138,10 +139,10 @@ export async function inviteMember(
   };
   const hooks = config.hooks.organization;
   const organization = publicOrganization(s.value.organization);
-  const limit = o.limits.pendingInvitationsPerOrganization;
+  const pendingLimit = o.limits.pendingInvitationsPerOrganization;
   const written = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
-      if (limit !== null) {
+      if (pendingLimit !== null) {
         // The lock of the count (ruling 45 of plan 12k). A second invite waits here for this
         // commit, and then counts its row. A gone organization answers not_found.
         if (!(await lockOrganization(tx, s.value.organization))) return fail("not_found");
@@ -154,9 +155,9 @@ export async function inviteMember(
             { field: "expiresAt", op: "gt", value: now },
             { field: "email", op: "ne", value: email },
           ],
-          { limit },
+          { limit: pendingLimit },
         );
-        if (pending.length >= limit) return fail("invitation_limit");
+        if (pending.length >= pendingLimit) return fail("invitation_limit");
       }
       await runBefore(config.observe, "organization.beforeInvite", hooks.beforeInvite, {
         organization,
@@ -297,7 +298,7 @@ export async function acceptInvitation(
 ): Promise<Result<{ organization: OrganizationSummary; member: MemberSummary }>> {
   const o = config.organizations;
   if (!o) return fail("not_found");
-  if (!(await config.limiter.allow(`invitation-accept:ip:${ipKey(input.ip)}`, ACCEPT_LIMIT)))
+  if (!(await limit(config, "invitation-accept:ip", ipKey(input.ip), ACCEPT_LIMIT)))
     return fail("rate_limited");
   const live = await liveInvitation(config, input.token);
   if (!live.ok) return live;
@@ -313,7 +314,7 @@ export async function acceptInvitation(
   const hooks = config.hooks.organization;
   const organization = publicOrganization(organizationRow);
   const invitation = summary(inv);
-  const limit = o.limits.membersPerOrganization;
+  const memberLimit = o.limits.membersPerOrganization;
   const teamLimit = o.limits.membersPerTeam;
   const teamIds = o.teams ? (inv.teamIds ?? []) : [];
   let accepted: Accepted = null;
@@ -370,7 +371,7 @@ export async function acceptInvitation(
       )
         return lost();
       // The limit counts a new member row only: a raise of an existing member adds none.
-      if (!existing && limit !== null) {
+      if (!existing && memberLimit !== null) {
         // The lock of the count, after the user hold and before the team locks (ruling 45 of
         // plan 12k). A second add or accept waits here for this commit. A gone organization
         // makes the link dead.
@@ -378,9 +379,9 @@ export async function acceptInvitation(
         const held = await tx.findMany(
           "member",
           [{ field: "organizationId", op: "eq", value: inv.organizationId }],
-          { limit },
+          { limit: memberLimit },
         );
-        if (held.length >= limit) return "member_limit";
+        if (held.length >= memberLimit) return "member_limit";
       }
       // Plan 12k: the teams of the invitation that still exist. A missing team is skipped. A full
       // team answers before any write, so the invitation stays pending. The lock of each team row

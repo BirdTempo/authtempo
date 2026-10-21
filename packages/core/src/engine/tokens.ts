@@ -1,5 +1,6 @@
 import { isSubset, type Statements, statementFault } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
+import { limit } from "../limiter/limit.js";
 import type { LimitWindow } from "../limiter/port.js";
 import { API_TOKEN_PREFIX, ORGANIZATION_TOKEN_PREFIX } from "../primitives/credentials.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
@@ -228,7 +229,7 @@ export function expiryOf(days: number | null, now: Date): Date | null {
 
 /** One try of the token create limit of a user: 20 per hour for both token kinds. One limiter call. */
 export function spendTokenCreate(config: ResolvedConfig, userId: string): Promise<boolean> {
-  return config.limiter.allow(`token-create:user:${userId}`, CREATE_PER_USER);
+  return limit(config, "token-create:user", userId, CREATE_PER_USER);
 }
 
 /** True when `lastUsedAt` is due a write: at most once per hour (plan 8b). */

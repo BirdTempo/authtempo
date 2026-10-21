@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import type { LimitWindow } from "../limiter/port.js";
 import { hmacSha256Hex, randomToken, sha256Hex } from "../primitives/crypto.js";
 import type { DpopBinding } from "../primitives/dpop.js";
@@ -143,8 +144,14 @@ export async function pollLimited(
   ip: string | null,
 ): Promise<"rate_limited" | "slow_down" | null> {
   if (!pollOnCode(row, clientId)) return (await tokenLimited(config, ip)) ? "rate_limited" : null;
-  const key = `oauth-device-poll:code:${row.deviceCodeHash}`;
-  return (await config.limiter.allow(key, pollWindow(config, row))) ? null : "slow_down";
+  return (await limit(
+    config,
+    "oauth-device-poll:code",
+    row.deviceCodeHash,
+    pollWindow(config, row),
+  ))
+    ? null
+    : "slow_down";
 }
 
 /** The answer of RFC 8628 section 3.2. */
@@ -304,11 +311,16 @@ export async function decideDevice(
     ip: string | null;
   },
 ): Promise<DeviceStep> {
-  const { limiter } = config;
-  if (!(await limiter.allow(`oauth-device-verify:ip:${ipKey(input.ip)}`, DEVICE_VERIFY_PER_IP)))
+  if (!(await limit(config, "oauth-device-verify:ip", ipKey(input.ip), DEVICE_VERIFY_PER_IP)))
     return { kind: "error", error: "rate_limited" };
-  const sessionKey = `oauth-device-verify:session:${input.session.session.id}`;
-  if (!(await limiter.allow(sessionKey, DEVICE_VERIFY_PER_SESSION)))
+  if (
+    !(await limit(
+      config,
+      "oauth-device-verify:session",
+      input.session.session.id,
+      DEVICE_VERIFY_PER_SESSION,
+    ))
+  )
     return { kind: "error", error: "rate_limited" };
   if (input.decision !== null && input.decision !== "allow" && input.decision !== "deny")
     return { kind: "error", error: "invalid_request" };
@@ -316,9 +328,7 @@ export async function decideDevice(
   const row = userCode === null ? null : await findUserCode(config, userCode);
   if (userCode === null || row === null)
     return { kind: "code", userCode: userCode ?? "", error: "invalid_code" };
-  if (
-    !(await limiter.allow(`oauth-device-verify:code:${row.userCodeHash}`, DEVICE_VERIFY_PER_CODE))
-  )
+  if (!(await limit(config, "oauth-device-verify:code", row.userCodeHash, DEVICE_VERIFY_PER_CODE)))
     return { kind: "error", error: "rate_limited" };
   const { user } = input.session;
   // A grant would outlive a claim of the address (spec 8.7), as at the authorize step.

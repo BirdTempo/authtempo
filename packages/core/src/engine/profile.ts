@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { limit } from "../limiter/limit.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import type { Where } from "../storage/port.js";
@@ -65,7 +66,7 @@ export async function updateProfile(
     patch.image = input.image;
   }
   if (Object.keys(patch).length === 0) return fail("invalid_body");
-  if (!(await config.limiter.allow(`user-update:user:${user.id}`, UPDATE_PER_USER)))
+  if (!(await limit(config, "user-update:user", user.id, UPDATE_PER_USER)))
     return fail("rate_limited");
   const now = config.clock.now();
   const hooks = config.hooks.user;

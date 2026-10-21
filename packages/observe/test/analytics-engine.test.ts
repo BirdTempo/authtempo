@@ -27,9 +27,9 @@ const request = built("request", "info", {
 describe("analyticsEngineSink", () => {
   it("writes one data point for each chosen event", async () => {
     const d = dataset();
-    const chosen = ["request", "sign_in", "second_factor.challenge", "limit.hit", "sweep"].map(
-      (name) => built(name, "info"),
-    );
+    // Each event at the level of its row: limit.hit is a warn (plan 12h Task 7).
+    const names = ["request", "sign_in", "second_factor.challenge", "limit.hit", "sweep"] as const;
+    const chosen = names.map((name) => built(name, EVENTS[name].level));
     const other = built("error.internal", "error", { method: "POST", errorName: "TypeError" });
     await analyticsEngineSink(d).write([...chosen, other]);
     expect(d.points.map((p) => p.indexes)).toEqual([

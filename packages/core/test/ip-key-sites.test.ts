@@ -21,18 +21,32 @@ describe("the per-IP keys (plan 12b Task 16)", () => {
     const files = readdirSync(src, { recursive: true }).filter((file) => file.endsWith(".ts"));
     // The scan must read the sites: a list with no file finds no miss.
     expect(files).toContain("engine/magic-link.ts");
-    // The scan matches only a template key `:ip:${` on one line. A key joined
-    // with + or built in a variable escapes it. No such form exists today.
-    // A key `<flow>:ip:${…}` that does not start with ipKey( would count each
-    // IPv6 address of one /64 on its own.
-    const lines = files.flatMap((file) =>
-      readFileSync(new URL(file, src), "utf8")
-        .split("\n")
-        .map((line, i) => ({ at: `src/${file}:${i + 1}`, line })),
+    // A subject of a `<flow>:ip` family that does not start with ipKey( would
+    // count each IPv6 address of one /64 on its own. Since plan 12h Task 7,
+    // each key is `limit(config, "<flow>:ip", subject, window)`. The scan reads
+    // that call over line breaks. It also refuses a template key `:ip:${` on
+    // one line. A subject built in a variable escapes it; no such form exists today.
+    const texts = files.map((file) => ({
+      file: `src/${file}`,
+      text: readFileSync(new URL(file, src), "utf8"),
+    }));
+    const calls = texts.flatMap(({ file, text }) =>
+      [...text.matchAll(/\blimit\(\s*[\w.]+,\s*"[a-z][a-z-]*:ip",\s*([^,]*),/g)].map((m) => ({
+        at: `${file}:${text.slice(0, m.index).split("\n").length}`,
+        subject: m[1] ?? "",
+      })),
     );
-    const misses = lines.filter(({ line }) => /:ip:\$\{(?!ipKey\()/.test(line)).map(({ at }) => at);
+    const templates = texts.flatMap(({ file, text }) =>
+      text
+        .split("\n")
+        .map((line, i) => ({ at: `${file}:${i + 1}`, line }))
+        .filter(({ line }) => /:ip:\$\{(?!ipKey\()/.test(line)),
+    );
+    const misses = [
+      ...calls.filter(({ subject }) => !subject.startsWith("ipKey(")),
+      ...templates,
+    ].map(({ at }) => at);
     expect(misses).toEqual([]);
-    const sites = lines.filter(({ line }) => line.includes(":ip:${ipKey(")).length;
-    expect(sites).toBeGreaterThanOrEqual(MIN_SITES);
+    expect(calls.length).toBeGreaterThanOrEqual(MIN_SITES);
   });
 });

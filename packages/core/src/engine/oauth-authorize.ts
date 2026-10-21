@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import type { OAuthErrorCode } from "../errors.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { hasControlChar } from "../primitives/text.js";
@@ -398,7 +399,7 @@ async function codeRedirect(
 }
 
 const limited = async (config: ResolvedConfig, ip: string | null) =>
-  !(await config.limiter.allow(`oauth-authorize:ip:${ipKey(ip)}`, AUTHORIZE_PER_IP));
+  !(await limit(config, "oauth-authorize:ip", ipKey(ip), AUTHORIZE_PER_IP));
 
 /** A held request as read: its clear short id, its row, and its data. */
 interface HeldRequest {

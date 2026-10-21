@@ -1,4 +1,5 @@
 import { IMPERSONATION_TTL_MAX_MINUTES, type ResolvedConfig } from "../../config.js";
+import { limit } from "../../limiter/limit.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { SessionRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
@@ -80,12 +81,7 @@ export async function startImpersonation(
   const guard = await requireOperatorUser(config, input.operator, route);
   if (!guard.ok) return guard;
   const actor = guard.value;
-  if (
-    !(await config.limiter.allow(
-      `operator-impersonate:user:${actor.user.id}`,
-      IMPERSONATE_PER_USER,
-    ))
-  )
+  if (!(await limit(config, "operator-impersonate:user", actor.user.id, IMPERSONATE_PER_USER)))
     return fail("rate_limited");
   const reason = operatorReason(input.reason);
   if (!reason.ok) return reason;

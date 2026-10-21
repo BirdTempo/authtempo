@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { limit } from "../limiter/limit.js";
 import { fail, ok, type Result } from "../result.js";
 import type { IdentityRow, UserRow } from "../schema.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
@@ -185,8 +186,7 @@ export async function unlinkIdentity(
   const fresh = requireFresh(config, input.session.session);
   if (!fresh.ok) return fresh;
   const userId = input.session.user.id;
-  if (!(await config.limiter.allow(`unlink:user:${userId}`, UNLINK_PER_USER)))
-    return fail("rate_limited");
+  if (!(await limit(config, "unlink:user", userId, UNLINK_PER_USER))) return fail("rate_limited");
   const own: Where<"identity">[] = [
     { field: "id", op: "eq", value: input.id },
     { field: "userId", op: "eq", value: userId },

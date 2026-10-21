@@ -1,6 +1,7 @@
 import type { ResolvedConfig, ResolvedOAuth } from "../config.js";
 import type { OAuthErrorCode } from "../errors.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import type { Observer } from "../observe/observer.js";
 import { constantTimeEqual, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { FOREIGN_ALGS, keyFitsAlg } from "../primitives/foreign-jwk.js";
@@ -592,7 +593,7 @@ export async function registerClient(
   const oauth = config.oauth;
   if (!oauth?.dynamic) return oauthFail("invalid_request");
   // The limit comes first, so a guess of the initial access token counts too.
-  if (!(await config.limiter.allow(`oauth-register:ip:${ipKey(input.ip)}`, REGISTER_PER_IP)))
+  if (!(await limit(config, "oauth-register:ip", ipKey(input.ip), REGISTER_PER_IP)))
     return oauthFail("rate_limited");
   if (
     oauth.initialAccessTokenHash !== null &&

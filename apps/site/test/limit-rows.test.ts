@@ -36,7 +36,10 @@ function engineLimits(): Map<string, Limit> {
   const keys = new Map<string, Limit>();
   const used = new Set<string>();
   for (const src of sources) {
-    for (const m of src.matchAll(/allow\(\s*`([a-z-]+:[a-z]+):\$\{[^`]*`,\s*([A-Z_]+)\s*\)/g)) {
+    // The call form of plan 12h Task 7: limit(config, "<family>", subject, WINDOW).
+    for (const m of src.matchAll(
+      /\blimit\(\s*[\w.]+,\s*"([a-z-]+:[a-z]+)",\s*[^,]*,\s*([A-Z_]+),?\s*\)/g,
+    )) {
       const limit = constants.get(m[2] ?? "");
       if (!limit) continue;
       used.add(m[2] ?? "");

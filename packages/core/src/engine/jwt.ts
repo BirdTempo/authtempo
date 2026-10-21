@@ -1,4 +1,5 @@
 import type { ResolvedConfig, ResolvedJwtMint } from "../config.js";
+import { limit } from "../limiter/limit.js";
 import type { Observer } from "../observe/observer.js";
 import { SESSION_JWT_TYPE } from "../primitives/credentials.js";
 import { newId } from "../primitives/ids.js";
@@ -470,7 +471,7 @@ export async function checkSessionLive(
   if (bearer === null) return fail("unauthorized");
   const claims = await verifySessionJwt(config, bearer);
   if (!claims) return fail("unauthorized");
-  if (!(await config.limiter.allow(`token-live:session:${claims.sid}`, LIVE_PER_SESSION)))
+  if (!(await limit(config, "token-live:session", claims.sid, LIVE_PER_SESSION)))
     return fail("rate_limited");
   return ok({ live: await sessionLive(config, { sid: claims.sid }) });
 }

@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
@@ -83,7 +84,7 @@ export async function provePassword(
   userId: string,
   password: string,
 ): Promise<Result<true>> {
-  if (!(await config.limiter.allow(`totp-setup:user:${userId}`, SETUP_PER_USER)))
+  if (!(await limit(config, "totp-setup:user", userId, SETUP_PER_USER)))
     return fail("rate_limited");
   const proved = await checkUserPassword(config, userId, password);
   return proved.ok ? ok(true) : fail(proved.code);
@@ -277,12 +278,7 @@ export async function passkeyChallengeOptions(
   input: { challenge: string; ip: string | null },
 ): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
   if (!config.totp || !config.passkey) return fail("not_found");
-  if (
-    !(await config.limiter.allow(
-      `second-factor-passkey:ip:${ipKey(input.ip)}`,
-      PASSKEY_OPTIONS_PER_IP,
-    ))
-  )
+  if (!(await limit(config, "second-factor-passkey:ip", ipKey(input.ip), PASSKEY_OPTIONS_PER_IP)))
     return fail("rate_limited");
   const live = await liveChallenge(config, input.challenge, config.clock.now());
   if (!live.ok) return live;
@@ -355,9 +351,9 @@ export async function sendSecondFactorEmail(
     { field: "id", op: "eq", value: row.identifier },
   ]);
   if (!user) return fail("invalid_token");
-  if (!(await config.limiter.allow(`second-factor-email:user:${user.id}`, EMAIL_SENDS_PER_USER)))
+  if (!(await limit(config, "second-factor-email:user", user.id, EMAIL_SENDS_PER_USER)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`totp:email-day:${user.email}`, MAILED_CODES_PER_EMAIL_DAY)))
+  if (!(await limit(config, "totp:email-day", user.email, MAILED_CODES_PER_EMAIL_DAY)))
     return fail("rate_limited");
   const code = randomDigits(EMAIL_CODE_DIGITS);
   // One compare-and-set on the challenge row: a parallel send or a counted

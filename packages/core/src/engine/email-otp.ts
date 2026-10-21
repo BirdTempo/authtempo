@@ -1,6 +1,7 @@
 import { checkCaptcha } from "../captcha.js";
 import type { ResolvedConfig, ResolvedEmailOtp } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
@@ -166,7 +167,7 @@ async function requestCode(
   // Before any limit key and before the row: both trust a normalized address.
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sent: true });
-  if (!(await config.limiter.allow(`otp:ip:${ipKey(input.ip)}`, REQUEST_PER_IP)))
+  if (!(await limit(config, "otp:ip", ipKey(input.ip), REQUEST_PER_IP)))
     return fail("rate_limited");
   // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   // The reset code is a reset request.
@@ -177,9 +178,8 @@ async function requestCode(
     input.ip,
   );
   if (captcha) return captcha;
-  if (!(await config.limiter.allow(`otp:email:${email}`, REQUEST_PER_EMAIL)))
-    return fail("rate_limited");
-  if (!(await config.limiter.allow(`otp:email-day:${email}`, MAILED_CODES_PER_EMAIL_DAY)))
+  if (!(await limit(config, "otp:email", email, REQUEST_PER_EMAIL))) return fail("rate_limited");
+  if (!(await limit(config, "otp:email-day", email, MAILED_CODES_PER_EMAIL_DAY)))
     return fail("rate_limited");
   const code = await issueCode(config, otp, purpose, email, {});
   const build = purpose === "email-otp" ? otp.mail : otp.resetMail;
@@ -205,13 +205,10 @@ export async function verifyGate(
   config: ResolvedConfig,
   input: { email: string; ip: string | null },
 ): Promise<Result<string | null>> {
-  if (!(await config.limiter.allow(`otp-verify:ip:${ipKey(input.ip)}`, VERIFY_PER_IP)))
+  if (!(await limit(config, "otp-verify:ip", ipKey(input.ip), VERIFY_PER_IP)))
     return fail("rate_limited");
   const email = normalizeEmail(input.email);
-  if (
-    email !== null &&
-    !(await config.limiter.allow(`otp-verify:email:${email}`, VERIFY_PER_EMAIL))
-  )
+  if (email !== null && !(await limit(config, "otp-verify:email", email, VERIFY_PER_EMAIL)))
     return fail("rate_limited");
   return ok(email);
 }

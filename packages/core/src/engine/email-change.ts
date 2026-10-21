@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -126,9 +127,9 @@ export async function requestEmailChange(
   if (method !== "link" && method !== "code") return fail("invalid_body");
   const newEmail = typeof input.newEmail === "string" ? normalizeEmail(input.newEmail) : null;
   if (newEmail === null || newEmail === user.email) return fail("invalid_body");
-  if (!(await config.limiter.allow(`email-change:user:${user.id}`, CHANGE_PER_USER)))
+  if (!(await limit(config, "email-change:user", user.id, CHANGE_PER_USER)))
     return fail("rate_limited");
-  if (!(await config.limiter.allow(`email-change:email:${newEmail}`, CHANGE_PER_NEW_EMAIL)))
+  if (!(await limit(config, "email-change:email", newEmail, CHANGE_PER_NEW_EMAIL)))
     return fail("rate_limited");
   const now = config.clock.now();
   // One live request per user: the earlier links and codes stop working.
@@ -362,7 +363,7 @@ export async function confirmEmailChange(
 ): Promise<Result<{ user: PublicUser; next: string }>> {
   if (typeof input.token !== "string" || !EMAIL_CHANGE_TOKEN_RE.test(input.token))
     return fail("invalid_token");
-  if (!(await config.limiter.allow(`email-change-confirm:ip:${ipKey(input.ip)}`, CONFIRM_PER_IP)))
+  if (!(await limit(config, "email-change-confirm:ip", ipKey(input.ip), CONFIRM_PER_IP)))
     return fail("rate_limited");
   const valueHash = await sha256Hex(input.token);
   const row = await config.storage.findOne("verification", [

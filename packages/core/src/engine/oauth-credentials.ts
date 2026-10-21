@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { limit } from "../limiter/limit.js";
 import { ACCESS_TOKEN_TYPE } from "../primitives/credentials.js";
 import { randomBase64Url } from "../primitives/crypto.js";
 import type { DpopBinding } from "../primitives/dpop.js";
@@ -84,9 +85,7 @@ export async function credentialsGrant(
   const oauth = oauthOf(config);
   const { client, confidential } = input.client;
   if (!confidential || !holdsGrant(config, client, [])) return oauthFail("unauthorized_client");
-  if (
-    !(await config.limiter.allow(`oauth-credentials:client:${client.id}`, CREDENTIALS_PER_CLIENT))
-  )
+  if (!(await limit(config, "oauth-credentials:client", client.id, CREDENTIALS_PER_CLIENT)))
     return oauthFail("rate_limited");
   // oauth.defaultResource takes the place of an absent resource; else the 9g rule (ruling 52 of plan 12e).
   const resource = namedResource(input.resource) ?? oauth.defaultResource;

@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { limit } from "../limiter/limit.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
 import { normalizeSlug } from "./ranks.js";
@@ -14,7 +15,7 @@ export const SLUG_CHECK_PER_USER = { seconds: 60, max: 60 };
 
 /** Spends one slug read of the user. The call runs before the read, and false means `rate_limited`. */
 export function spendSlugRead(config: ResolvedConfig, userId: string): Promise<boolean> {
-  return config.limiter.allow(`slug-check:user:${userId}`, SLUG_CHECK_PER_USER);
+  return limit(config, "slug-check:user", userId, SLUG_CHECK_PER_USER);
 }
 
 /** The answer of a slug check. `available` is a hint, not a hold. */

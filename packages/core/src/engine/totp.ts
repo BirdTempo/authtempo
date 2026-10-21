@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import type { ChallengeEventMethod } from "../observe/events.js";
 import { openSealed, seal } from "../primitives/aead.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
@@ -99,8 +100,8 @@ const CODE_PER_USER_DAY = { seconds: 86_400, max: 30 };
  */
 async function codeCheckAllowed(config: ResolvedConfig, userId: string): Promise<boolean> {
   return (
-    (await config.limiter.allow(`totp-code:user:${userId}`, CODE_PER_USER)) &&
-    (await config.limiter.allow(`totp-code:user-day:${userId}`, CODE_PER_USER_DAY))
+    (await limit(config, "totp-code:user", userId, CODE_PER_USER)) &&
+    (await limit(config, "totp-code:user-day", userId, CODE_PER_USER_DAY))
   );
 }
 
@@ -320,7 +321,7 @@ export async function setupTotp(
 ): Promise<Result<TotpSetup>> {
   const totp = config.totp;
   if (!totp) return fail("not_found");
-  if (!(await config.limiter.allow(`totp-setup:user:${input.userId}`, SETUP_PER_USER)))
+  if (!(await limit(config, "totp-setup:user", input.userId, SETUP_PER_USER)))
     return fail("rate_limited");
   const proved = await checkUserPassword(config, input.userId, input.password);
   if (!proved.ok) return fail(proved.code);
@@ -879,7 +880,7 @@ async function answerChallenge(
 ): Promise<Result<TwoFactorSession>> {
   const totp = config.totp;
   if (!totp) return fail("not_found");
-  if (!(await config.limiter.allow(`totp-verify:ip:${ipKey(input.ip)}`, VERIFY_PER_IP)))
+  if (!(await limit(config, "totp-verify:ip", ipKey(input.ip), VERIFY_PER_IP)))
     return fail("rate_limited");
   if (!TWO_FACTOR_TOKEN_RE.test(input.challenge)) return fail("invalid_token");
   const proof = proofOf(input);

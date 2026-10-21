@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import { fromBase64Url, randomBase64Url, sha256Hex, toBase64Url } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
@@ -255,7 +256,7 @@ export async function passkeyAuthenticationOptions(
   input: { ip: string | null },
 ): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
-  if (!(await config.limiter.allow(`passkey-options:ip:${ipKey(input.ip)}`, OPTIONS_LIMIT))) {
+  if (!(await limit(config, "passkey-options:ip", ipKey(input.ip), OPTIONS_LIMIT))) {
     return fail("rate_limited");
   }
   const { bytes } = await issueChallenge(config, SIGN_IN, "authentication");
@@ -325,7 +326,7 @@ export async function verifyPasskeyAuthentication(
   input: { response: unknown; ip: string | null; userAgent: string | null },
 ): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>> {
   if (!config.passkey) return fail("not_found");
-  if (!(await config.limiter.allow(`passkey-verify:ip:${ipKey(input.ip)}`, VERIFY_LIMIT))) {
+  if (!(await limit(config, "passkey-verify:ip", ipKey(input.ip), VERIFY_LIMIT))) {
     return fail("rate_limited");
   }
   const challenge = challengeFromResponse(input.response);
@@ -362,7 +363,7 @@ export async function reauthPasskeyChallenge(
   input: { user: UserRow; ip: string | null },
 ): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
-  if (!(await config.limiter.allow(`passkey-options:ip:${ipKey(input.ip)}`, OPTIONS_LIMIT)))
+  if (!(await limit(config, "passkey-options:ip", ipKey(input.ip), OPTIONS_LIMIT)))
     return fail("rate_limited");
   const keys = await config.storage.findMany("passkey", [
     { field: "userId", op: "eq", value: input.user.id },
@@ -497,7 +498,7 @@ export async function renamePasskey(
 ): Promise<Result<{ passkey: PasskeySummary }>> {
   if (!config.passkey) return fail("not_found");
   if (!validPasskeyName(input.name)) return fail("invalid_body");
-  if (!(await config.limiter.allow(`passkey-rename:user:${input.user.id}`, RENAME_PER_USER)))
+  if (!(await limit(config, "passkey-rename:user", input.user.id, RENAME_PER_USER)))
     return fail("rate_limited");
   const own: Where<"passkey">[] = [
     { field: "id", op: "eq", value: input.id },

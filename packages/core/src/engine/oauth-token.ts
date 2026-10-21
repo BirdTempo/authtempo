@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import { ACCESS_TOKEN_TYPE, SESSION_JWT_TYPE } from "../primitives/credentials.js";
 import {
   constantTimeEqual,
@@ -147,7 +148,7 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
  * The route asks before the client auth, so a failed auth counts too.
  */
 export const tokenLimited = async (config: ResolvedConfig, ip: string | null) =>
-  !(await config.limiter.allow(`oauth-token:ip:${ipKey(ip)}`, TOKEN_PER_IP));
+  !(await limit(config, "oauth-token:ip", ipKey(ip), TOKEN_PER_IP));
 
 /**
  * The user, while it exists, its address is verified, and no ban is active

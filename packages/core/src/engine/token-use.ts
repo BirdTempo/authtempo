@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import { limit } from "../limiter/limit.js";
 import type { LimitWindow } from "../limiter/port.js";
 import { fail, ok, type Result } from "../result.js";
 import type { ApiTokenRow } from "../schema.js";
@@ -62,11 +63,6 @@ export function validQuota(q: TokenQuota): boolean {
   return inRange(q.refillAmount, 0, COUNT_MAX) && inRange(q.refillSeconds, 1, COUNT_MAX);
 }
 
-/** The limiter key of a token's window: `token-use:tk:<id>` or `token-use:to:<id>`. */
-export function tokenUseKey(kind: "tk" | "to", id: string): string {
-  return `token-use:${kind}:${id}`;
-}
-
 /** The window of a row, or null for a token with none. */
 export function windowOf(
   row: Pick<UseRow, "rateLimitSeconds" | "rateLimitMax">,
@@ -88,7 +84,8 @@ export function useWindow(
 ): Promise<boolean> {
   const window = windowOf(row);
   if (window === null) return Promise.resolve(true);
-  return config.limiter.allow(tokenUseKey(kind, row.id), window);
+  // The limiter key is `token-use:tk:<id>` or `token-use:to:<id>`.
+  return limit(config, kind === "tk" ? "token-use:tk" : "token-use:to", row.id, window);
 }
 
 /**

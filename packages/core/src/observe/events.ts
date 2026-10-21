@@ -41,6 +41,7 @@ import { SWEEP_KEYS } from "../engine/sweep-keys.js";
 import { ERRORS, OAUTH_ERRORS } from "../errors.js";
 import { ROUTES, type RouteKey } from "../http/route-list.js";
 import type { UnauthorizedReason } from "../http/routes/operator.js";
+import { LIMIT_FAMILIES } from "../limiter/limit.js";
 import { ENTROPY_WARN_BITS } from "../primitives/keyring.js";
 import { appErrorName, FIELD_KINDS, type FieldKind, REJECT } from "../redact.js";
 import type { SecondFactorMethod } from "../schema.js";
@@ -716,6 +717,9 @@ export const EVENTS = {
       code: { kind: "code" },
     },
   },
+  // A refusal of a limit (plan 12h Task 7). The family only: the subject of
+  // the key is an address, an IP, or a user id (spec 31 item 10).
+  "limit.hit": { level: "warn", fields: { family: enumOf(LIMIT_FAMILIES) } },
   sweep: { level: "info", fields: { ...SWEEP_COUNTS, durationMs: { kind: "durationMs" } } },
 } as const satisfies Readonly<Record<string, EventSpec>>;
 

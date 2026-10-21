@@ -30,10 +30,11 @@ describe("the OAuth provider guide", () => {
   });
 
   // Low L1: each client auth route counts on its own per-IP key first.
+  // The key is a family of limit() since plan 12h Task 7.
   it("names the per-IP key of each route that takes a client auth", () => {
-    expect(engine("oauth-token")).toContain("`oauth-token:ip:");
-    expect(engine("oauth-introspect")).toContain("`oauth-introspect:ip:");
-    expect(ROUTE).toContain("`oauth-device:ip:");
+    expect(engine("oauth-token")).toContain('"oauth-token:ip", ipKey(');
+    expect(engine("oauth-introspect")).toContain('"oauth-introspect:ip", ipKey(');
+    expect(ROUTE).toContain('"oauth-device:ip", ipKey(');
     expect(section("Confidential clients")).toContain(
       "The token and revoke routes count `oauth-token:ip`, introspection `oauth-introspect:ip`, and the device start `oauth-device:ip`.",
     );

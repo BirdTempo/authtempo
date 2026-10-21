@@ -71,6 +71,7 @@ import {
 } from "../../engine/sessions.js";
 import { INVALID_CLIENT_NO_HEADER, OAUTH_ERRORS, type OAuthErrorCode } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
+import { limit } from "../../limiter/limit.js";
 import { clientRef } from "../../redact.js";
 import type { OAuthClientRow } from "../../schema.js";
 import { revokeGrantBody } from "../contract/oauth.js";
@@ -255,8 +256,9 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
     client !== null &&
     client.authMethod === "none" &&
     redirectOrigins(client.redirectUris).has(origin);
-  const originChecked = async (ip: string | null) =>
-    config.limiter.allow(`oauth-token-origin:ip:${ipKey(ip)}`, ORIGIN_CHECK_PER_IP);
+  // The config of the request, so a limit.hit keeps the trace of its request (plan 12h Task 7).
+  const originChecked = async (scoped: ResolvedConfig, ip: string | null) =>
+    limit(scoped, "oauth-token-origin:ip", ipKey(ip), ORIGIN_CHECK_PER_IP);
   /**
    * A refusal of the token or the revoke route. RFC 6749 section 5.2: after
    * an `Authorization` header, `invalid_client` is 401 with the Basic
@@ -416,7 +418,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         // A preflight has no body, so the client rides in the query. Only a registered
         // client, read by its id: a preflight never fetches a metadata document.
         if (request.headers.get("access-control-request-method") !== "POST") return null;
-        if (!(await originChecked(ip)))
+        if (!(await originChecked(config, ip)))
           return json({ error: "rate_limited" }, OAUTH_ERRORS.rate_limited);
         const client = await registeredClient(config, url.searchParams.get("client_id") ?? "");
         if (!corsClient(client, origin)) return null;
@@ -443,7 +445,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         if (origin === null || originTrusted(ctx.config, origin))
           return grantAnswer(ctx.config, ctx.request, form, ctx.ip);
         // A foreign origin: the check runs before the grant, so a refused origin spends no code and no token.
-        if (!(await originChecked(ctx.ip)))
+        if (!(await originChecked(ctx.config, ctx.ip)))
           return json({ error: "rate_limited" }, OAUTH_ERRORS.rate_limited);
         // findClient, not registeredClient: its lastSeenAt write keeps a used client
         // from the sweep. A refused probe can make that write too, at most once
@@ -725,8 +727,7 @@ function deviceRoutes(
       async handler(ctx) {
         const form = await formParams(ctx.request);
         if (!form) return noCache(oauthJson(oauthFail("invalid_request")));
-        const limitKey = `oauth-device:ip:${ipKey(ctx.ip)}`;
-        if (!(await ctx.config.limiter.allow(limitKey, DEVICE_START_PER_IP)))
+        if (!(await limit(ctx.config, "oauth-device:ip", ipKey(ctx.ip), DEVICE_START_PER_IP)))
           return noCache(oauthJson(oauthFail("rate_limited")));
         const authed = await authenticateClient(ctx.config, ctx.request, form);
         if (!authed.ok) return noCache(clientRefused(ctx.request, authed));

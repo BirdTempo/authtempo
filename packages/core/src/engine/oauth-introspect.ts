@@ -1,5 +1,6 @@
 import type { ResolvedConfig, ResolvedOAuth } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import { limit } from "../limiter/limit.js";
 import { decodeJws } from "../primitives/jwk.js";
 import { issuerOf } from "./jwt.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
@@ -54,7 +55,7 @@ export const INTROSPECT_PER_IP = { seconds: 60, max: 600 };
 
 /** True when the IP is past `INTROSPECT_PER_IP` at the introspection route. */
 export const introspectLimited = async (config: ResolvedConfig, ip: string | null) =>
-  !(await config.limiter.allow(`oauth-introspect:ip:${ipKey(ip)}`, INTROSPECT_PER_IP));
+  !(await limit(config, "oauth-introspect:ip", ipKey(ip), INTROSPECT_PER_IP));
 
 type Active = Extract<IntrospectAnswer, { active: true }>;
 
@@ -174,8 +175,8 @@ export async function introspect(
 ): Promise<OAuthResult<IntrospectAnswer>> {
   const { caller } = input;
   if (!caller.confidential || !caller.client.introspect) return oauthFail("invalid_client");
-  const limit = `oauth-introspect:client:${caller.client.id}`;
-  if (!(await config.limiter.allow(limit, INTROSPECT_PER_CLIENT))) return oauthFail("rate_limited");
+  if (!(await limit(config, "oauth-introspect:client", caller.client.id, INTROSPECT_PER_CLIENT)))
+    return oauthFail("rate_limited");
   const token = input.token;
   if (token === null) return oauthFail("invalid_request");
   const visible = visibleResources(oauthOf(config), caller.client.id);
