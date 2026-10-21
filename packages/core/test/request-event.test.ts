@@ -248,6 +248,47 @@ describe("the request event (plan 12h Task 4)", () => {
     expect(event?.rejected).toBeUndefined();
   });
 
+  it("answers 500 with the trace header when a route returns immutable headers", async () => {
+    const batches: AuthEvent[][] = [];
+    const config = resolveConfig({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      observe: { sink: { write: (b) => void batches.push([...b]) } },
+    });
+    // Response.redirect answers immutable headers, so the set of the trace header throws.
+    const fixed = async () => Response.redirect(`${BASE_URL}/next`, 302);
+    const handle = createRouter(config, [
+      { method: "GET", path: "/stub", handler: fixed },
+      { method: "POST", path: "/stub", handler: fixed, preflight: fixed },
+    ]);
+    const res = await handle(get("/auth/stub"));
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "internal" });
+    const traceId = res.headers.get("x-authtempo-trace");
+    expect(traceId).toMatch(/^[0-9a-f]{32}$/);
+    // A preflight of a foreign origin that the route answers takes the same boundary.
+    const pre = await handle(
+      new Request(`${BASE_URL}/auth/stub`, {
+        method: "OPTIONS",
+        headers: { origin: "https://other.example" },
+      }),
+    );
+    expect(pre.status).toBe(500);
+    expect(pre.headers.get("x-authtempo-trace")).toMatch(/^[0-9a-f]{32}$/);
+    await config.observe.flush();
+    const events = batches.flat();
+    expect(events.map((e) => [e.name, e.method, e.status])).toEqual([
+      ["error.internal", "GET", undefined],
+      ["request", "GET", 500],
+      ["error.internal", "OPTIONS", undefined],
+      ["request", "OPTIONS", 500],
+    ]);
+    expect(events[1]).toMatchObject({ traceId, outcome: "server_error", code: "internal" });
+  });
+
   it("names an unmatched path, and the real method of a HEAD and a PUT", async () => {
     const s = observed();
     const res = await s.auth.handle(get("/auth/nope"));

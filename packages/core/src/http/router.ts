@@ -162,7 +162,8 @@ function eventCode(code: string | null): { code?: string } {
 /**
  * The answer with the trace header. Every route of core builds its own
  * Response, so the headers are mutable here, as `cors` and the cookie move
- * need them to be.
+ * need them to be. A Response with immutable headers makes the set throw, so
+ * each call runs inside an error boundary of the router (fix wave of plan 12h, Low 5).
  */
 function withTrace(res: Response, traceId: string): Response {
   res.headers.set(TRACE_HEADER, traceId);
@@ -298,7 +299,7 @@ export function createRouter(
         userAgent: request.headers.get("user-agent"),
       }),
     };
-    const res = withTrace(await answer(scoped, request, url, route), traceId);
+    const res = await answer(scoped, request, url, route, traceId);
     const { outcome, code } = outcomeOf(res);
     scoped.observe.emit({
       name: "request",
@@ -325,12 +326,13 @@ export function createRouter(
     return res;
   };
 
-  /** The answer of one request, before the trace header and the events. */
+  /** The answer of one request with the trace header, before the events. */
   async function answer(
     scoped: ResolvedConfig,
     request: Request,
     url: URL,
     route: Route | undefined,
+    traceId: string,
   ): Promise<Response> {
     const origin = request.headers.get("origin");
     const trusted = origin !== null && originTrusted(config, origin);
@@ -338,8 +340,11 @@ export function createRouter(
       // A browser on another origin asks before a credentialed request. Only
       // a trusted origin gets an answer it can use.
       if (!trusted)
-        return (origin !== null && (await foreign(scoped, request, origin))) || refused();
-      return cors(
+        return (
+          (origin !== null && (await foreign(scoped, request, origin, traceId))) ||
+          withTrace(refused(), traceId)
+        );
+      const preflight = cors(
         new Response(null, {
           status: 204,
           headers: {
@@ -351,16 +356,18 @@ export function createRouter(
         }),
         origin,
       );
+      return withTrace(preflight, traceId);
     }
     // The one error boundary of a request (plan 11g). A throw of the handler,
-    // of the cookie move, or of the CORS write answers `internal` with one log line.
+    // of the cookie move, of the CORS write, or of the trace header answers
+    // `internal` with one log line.
     try {
       const res = await moveLegacyCookie(
         scoped,
         request,
         await dispatch(scoped, request, url, route),
       );
-      return trusted ? cors(res, origin) : res;
+      return withTrace(trusted ? cors(res, origin) : res, traceId);
     } catch (e) {
       // The route key, never the raw path: a client chooses the path (ruling 1
       // point 3 of plan 12h). The app sets the error name, so the kind filters it (plan 9c).
@@ -371,7 +378,7 @@ export function createRouter(
         errorName: e,
       });
       const res = routerError("internal");
-      return trusted ? cors(res, origin) : res;
+      return withTrace(trusted ? cors(res, origin) : res, traceId);
     }
   }
 
@@ -384,18 +391,20 @@ export function createRouter(
     scoped: ResolvedConfig,
     request: Request,
     origin: string,
+    traceId: string,
   ): Promise<Response | null> {
     const url = new URL(request.url);
     const route = preflights.get(url.pathname);
     if (!route?.preflight) return null;
     try {
-      return await route.preflight({
+      const res = await route.preflight({
         request,
         url,
         origin,
         ip: config.clientIp(request),
         config: scoped,
       });
+      return res && withTrace(res, traceId);
     } catch (e) {
       scoped.observe.emit({
         name: "error.internal",
@@ -403,7 +412,7 @@ export function createRouter(
         route: route.key ?? "unmatched",
         errorName: e,
       });
-      return routerError("internal");
+      return withTrace(routerError("internal"), traceId);
     }
   }
 
