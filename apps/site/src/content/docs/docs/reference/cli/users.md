@@ -32,9 +32,9 @@ authtempo users list https://api.example.com
 | `authtempo users list` | Lists the users by id, one page or every page. | [authtempo users list](/docs/reference/cli/users-list/) |
 | `authtempo users search` | Finds users by an exact address, an exact id, or the start of an address. | [authtempo users search](/docs/reference/cli/users-search/) |
 | `authtempo users get` | Reads one user by id. | [authtempo users get](/docs/reference/cli/users-get/) |
-| `authtempo users ban` | Bans a user, and ends every session of the user. | [authtempo users ban](/docs/reference/cli/users-ban/) |
+| `authtempo users ban` | Bans a user. The act ends a page of the user's sessions, and the sweep ends the rest. | [authtempo users ban](/docs/reference/cli/users-ban/) |
 | `authtempo users unban` | Lifts the ban of a user. | [authtempo users unban](/docs/reference/cli/users-unban/) |
-| `authtempo users platform-role` | Grants or revokes the platform role. | [authtempo users platform-role](/docs/reference/cli/users-platform-role/) |
+| `authtempo users platform-role` | Grants or revokes the platform role. On a revoke, the act ends a page of the user's sessions, and the sweep ends the rest. | [authtempo users platform-role](/docs/reference/cli/users-platform-role/) |
 | `authtempo users second-factor-off` | Turns the second factor of a user off after a check of the identity. | [authtempo users second-factor-off](/docs/reference/cli/users-second-factor-off/) |
 
 `authtempo users` with no subcommand is a usage error. With `--json` it prints `{ exit, stopped }`.

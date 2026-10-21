@@ -28,6 +28,15 @@ export function writeStop(scope: string): string {
 export const FAMILY_END_EXIT =
   "The act ran, but the end of the OAuth refresh families failed. The command prints the audit row id and a warning. Run authtempo sessions end for the user.";
 
+/**
+ * What a ban and a revoke of the platform role do to the sessions (ruling 62
+ * m4). One text for the help and the pages: the act ends one page of the
+ * sessions inside its call budget, and the sweep ends the rest. Until then
+ * each door refuses a left session (ruling 44 of plan 12f).
+ */
+export const SESSION_PAGE_TEXT =
+  "The act ends a page of the user's sessions, and the sweep ends the rest.";
+
 /** The two lines of the parent help of a command with subcommands. */
 export const GROUP_EXITS: HelpText["exits"] = [
   { code: 0, says: "The command printed its help." },
@@ -187,8 +196,7 @@ export const USERS_GET_HELP: HelpText = {
 export const USERS_BAN_HELP: HelpText = {
   command: "users ban",
   page: "users-ban",
-  purpose:
-    "Ban a user. The ban ends every session, challenge, and OAuth grant of the user, and refuses each new sign-in.",
+  purpose: `Ban a user, and refuse each new sign-in. ${SESSION_PAGE_TEXT}`,
   usage: [
     `authtempo users ban <base url> <user id> --reason <text> [--until <date>] ${TOKEN} --yes`,
   ],
@@ -238,8 +246,7 @@ export const USERS_UNBAN_HELP: HelpText = {
 export const USERS_PLATFORM_ROLE_HELP: HelpText = {
   command: "users platform-role",
   page: "users-platform-role",
-  purpose:
-    "Grant or revoke the platform role of a user in the platform organization. A revoke ends every session of the user.",
+  purpose: `Grant or revoke the platform role of a user in the platform organization. On a revoke: ${SESSION_PAGE_TEXT}`,
   usage: [
     `authtempo users platform-role <base url> <user id> --grant | --revoke --reason <text> ${TOKEN} --yes`,
   ],
@@ -254,7 +261,7 @@ export const USERS_PLATFORM_ROLE_HELP: HelpText = {
       flag: "--grant",
       says: "Grant the role. The user needs a verified address and no active ban.",
     },
-    { flag: "--revoke", says: "Revoke the role, and end every session of the user." },
+    { flag: "--revoke", says: `Revoke the role. ${SESSION_PAGE_TEXT}` },
     REASON_FLAG,
     ...WRITE_FLAGS,
   ],

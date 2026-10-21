@@ -1,6 +1,6 @@
 ---
 title: authtempo users ban
-description: Ban a user of a deployment through the operator user tools. The ban ends every session of the user.
+description: Ban a user of a deployment through the operator user tools. The act ends a page of the user's sessions, and the sweep ends the rest.
 type: reference
 sources:
   - packages/cli/src/commands/users.ts
@@ -48,7 +48,7 @@ authtempo users ban https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3 --reason 
 | 1 | The act ran, but the end of the OAuth refresh families failed. The command prints the audit row id and a warning. Run authtempo sessions end for the user. |
 | 2 | A usage error, or a stop. A stop names its cause: no answer, the tools are off, a refused secret, no users scope, or the limit of 600 calls an hour. A refusal of the act stops too, with its cause. |
 
-The command asks one question that names the act and the user id: `Ban the user <user id>, and end every session of the user?` With `--yes` it asks nothing.
+The command asks one question that names the act and the user id: `Ban the user <user id>, and end the sessions of the user?` With `--yes` it asks nothing.
 On a success, stdout holds one line: `banned <user id>; audit row <id>`. The audit row id is the `id` of the row in `authtempo audit list`.
 
 An answer with `familyEndFailed: true` means that the ban committed, and the end of the OAuth refresh families after the commit failed. The command then prints the same line, and exits 1 with this line on stderr:
@@ -61,7 +61,7 @@ Run [`authtempo sessions end`](/docs/reference/cli/sessions-end/) for the user. 
 
 A refusal stops with exit 2 and names its cause. For example, the user is banned, a hook refused the act, or another change ran at the same time.
 
-The ban ends every session, challenge, handoff code, and OAuth refresh token and code of the user. An API token stays, and works again after an unban. A session JWT and an OAuth access token live to their `exp`.
+The act ends a page of the user's sessions, and the sweep ends the rest. Until then, each door refuses a left session. The act ends every challenge, handoff code, and OAuth refresh token and code of the user. An API token stays, and works again after an unban. A session JWT and an OAuth access token live to their `exp`.
 
 ## The JSON
 

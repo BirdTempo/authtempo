@@ -1,6 +1,6 @@
 ---
 title: authtempo users platform-role
-description: Grant or revoke the platform role of a user through the operator user tools. A revoke ends every session of the user.
+description: Grant or revoke the platform role of a user. On a revoke, the act ends a page of the user's sessions, and the sweep ends the rest.
 type: reference
 sources:
   - packages/cli/src/commands/users.ts
@@ -32,7 +32,7 @@ authtempo users platform-role https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3
 | `<base url>` | The origin of the API, with no path. |
 | `<user id>` | The id of the user. `authtempo users search` finds it by an address. |
 | `--grant` | Grant the role. The user needs a verified address and no active ban. |
-| `--revoke` | Revoke the role, and end every session of the user. |
+| `--revoke` | Revoke the role. The act ends a page of the user's sessions, and the sweep ends the rest. |
 | `--reason <text>` | The reason of the act, from 1 to 500 characters with no control character. The audit row holds it. |
 | `--token-env <NAME>` | The variable of the operator secret. The default is `AUTHTEMPO_OPERATOR_SECRET`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
 | `--token-file <path>` | The file of the operator secret. A dash reads stdin, and then the command needs `--yes`. [Secrets](/docs/reference/cli/#secrets) gives the rule. |
@@ -51,7 +51,7 @@ authtempo users platform-role https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3
 
 Give exactly one of `--grant` and `--revoke`.
 
-The command asks one question that names the act and the user id: `Grant the platform role to the user <user id>?`, or for a revoke, `Revoke the platform role of the user <user id>, and end every session of the user?` With `--yes` it asks nothing.
+The command asks one question that names the act and the user id: `Grant the platform role to the user <user id>?`, or for a revoke, `Revoke the platform role of the user <user id>, and end the sessions of the user?` With `--yes` it asks nothing.
 On a success, stdout holds one line: `granted the platform role to <user id>; audit row <id>`. The audit row id is the `id` of the row in `authtempo audit list`.
 
 A revoke that answers `familyEndFailed: true` prints its line, and exits 1 with the warning of [`authtempo users ban`](/docs/reference/cli/users-ban/). Run [`authtempo sessions end`](/docs/reference/cli/sessions-end/) for the user then.

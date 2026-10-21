@@ -274,7 +274,7 @@ async function runBan(argv: string[], ctx: Ctx): Promise<number> {
     command: "users ban",
     path: "/operator/users/ban",
     body: { reason, ...(values.until === undefined ? {} : { until: values.until }) },
-    question: `Ban the user ${userId}, and end every session of the user?`,
+    question: `Ban the user ${userId}, and end the sessions of the user?`,
     act: "ban",
     done: `banned ${userId}`,
     invalid: "--until must be a date and time with a zone, from 1 minute to 3650 days after now",
@@ -314,7 +314,7 @@ async function runPlatformRole(argv: string[], ctx: Ctx): Promise<number> {
     body: { grant, reason },
     question: grant
       ? `Grant the platform role to the user ${userId}?`
-      : `Revoke the platform role of the user ${userId}, and end every session of the user?`,
+      : `Revoke the platform role of the user ${userId}, and end the sessions of the user?`,
     act: grant ? "grant" : "revoke",
     done: grant
       ? `granted the platform role to ${userId}`
