@@ -53,6 +53,7 @@ import {
   sessionsEnded,
 } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
+import { openStateData } from "./state-data.js";
 import { holdUser } from "./user-hold.js";
 import { attemptsOf, countAttempt } from "./verification.js";
 
@@ -919,6 +920,16 @@ async function answerChallenge(
     !(await codeCheckAllowed(config, challenge.identifier))
   )
     return fail("rate_limited");
+  // The app payload of a social sign-in (plan 12i Task 19), opened before
+  // any proof spends a backup code. One that does not open fails closed.
+  const sealed = challenge.data as { sealedData?: unknown; sealedDataVersion?: unknown } | null;
+  const stateData = await openStateData(
+    config,
+    sealed?.sealedData,
+    typeof sealed?.sealedDataVersion === "number" ? sealed.sealedDataVersion : 0,
+    challenge.id,
+  );
+  if (!stateData.ok) return stateData;
   const miss = async (): Promise<Result<TwoFactorSession>> =>
     fail(
       await countAttempt(config.observe, config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now),
@@ -1021,7 +1032,14 @@ async function answerChallenge(
   // After the commit, as every flow does (plan 9d).
   if (opened.ok) {
     await touchTrust(config, trustId, now);
-    await sessionOpened(config, opened.value.session, opened.value.user, via);
+    await sessionOpened(
+      config,
+      opened.value.session,
+      opened.value.user,
+      via,
+      undefined,
+      stateData.value,
+    );
   }
   return opened;
 }

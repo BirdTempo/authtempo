@@ -3,20 +3,24 @@ import { type AuthConfig, resolveConfig } from "../src/config.js";
 import type { HooksConfig } from "../src/engine/hooks.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { completeSocial, startLink, startSocial } from "../src/engine/social.js";
+import { verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { socialRoutes } from "../src/http/routes/social.js";
 import { toBase64Url } from "../src/primitives/crypto.js";
 import type { SecretVersion } from "../src/primitives/keyring.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { APP_ORIGIN, BASE_URL, get } from "./helpers.js";
+import { FAST } from "./password-helpers.js";
 import {
   type FakeIdToken,
   fakeJwt,
   GOOGLE,
   googleClaims,
+  socialAuth,
   stateRow,
   tokenEndpoint,
 } from "./social-helpers.js";
+import { codeNow, EMAIL, enrolled } from "./totp-helpers.js";
 
 // Plan 12i Task 19: the app payload rides the state row sealed, and only
 // the two hook events see it in clear.
@@ -320,5 +324,71 @@ describe("the sealed state payload (plan 12i Task 19)", () => {
     // The untouched row still opens.
     expect((await complete(w, config, a)).ok).toBe(true);
     expect(w.seen.sessions).toEqual([{ via: "social", stateData: { plan: "pro" } }]);
+  });
+
+  it("carries the payload through a challenge to the session hook at the verify", async () => {
+    const tokens: Record<string, FakeIdToken> = {};
+    const seen: Seen = { sessions: [], links: [] };
+    const auth = socialAuth(
+      {
+        password: { hash: FAST },
+        social: { google: GOOGLE, fetch: tokenEndpoint("idtok-default").fetchFn, stateData: {} },
+        hooks: {
+          session: {
+            afterCreate: (e) => {
+              seen.sessions.push({
+                via: e.via,
+                ...(e.stateData ? { stateData: e.stateData } : {}),
+              });
+            },
+          },
+          identity: {
+            afterLink: (e) => {
+              seen.links.push({ via: e.via, ...(e.stateData ? { stateData: e.stateData } : {}) });
+            },
+          },
+        },
+      },
+      fakeJwt(tokens),
+    );
+    // A user with the second factor on, from real sign-ins.
+    const { secret } = await enrolled(auth);
+    seen.sessions.length = 0;
+    const started = await startSocial(auth.config, {
+      provider: "google",
+      next: "/home",
+      data: encoded(JSON.stringify(PRO)),
+      ip: null,
+    });
+    if (!started.ok) throw new Error(started.code);
+    const url = new URL(started.value.location);
+    tokens["idtok-default"] = googleClaims(url.searchParams.get("nonce") ?? "", { email: EMAIL });
+    const r = await completeSocial(auth.config, {
+      provider: "google",
+      state: url.searchParams.get("state"),
+      code: "c",
+      error: null,
+      bindToken: started.value.bindToken,
+      ip: null,
+      userAgent: null,
+    });
+    if (!r.ok || !("twoFactor" in r.value)) throw new Error("social answered no challenge");
+    // The callback links Google and gives the link hook the payload; no session opens yet.
+    expect(seen.links).toEqual([{ via: "sign_in", stateData: { plan: "pro" } }]);
+    expect(seen.sessions).toEqual([]);
+    const challenges = await auth.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "two-factor" },
+      { field: "consumedAt", op: "eq", value: null },
+    ]);
+    expect(challenges).toHaveLength(1);
+    expect(holdsPro(JSON.stringify(challenges))).toBe(false);
+    expect(challenges[0]?.data).toMatchObject({ sealedDataVersion: 1 });
+    const v = await verifyTwoFactor(auth.config, {
+      challenge: r.value.twoFactor.challenge,
+      code: await codeNow(auth, secret),
+      ip: null,
+    });
+    expect(v.ok).toBe(true);
+    expect(seen.sessions).toEqual([{ via: "social", stateData: { plan: "pro" } }]);
   });
 });

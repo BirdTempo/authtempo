@@ -415,7 +415,12 @@ describe("session create hooks (plan 9d)", () => {
     );
     // The SSO resolution (plan 12d Task 5).
     expect(read("sso/resolve.ts")).toContain('via: "sso"');
-    expect(read("totp.ts").match(/sessionOpened\([^;]*?\bvia,?\s*\)/g)).toHaveLength(1);
+    // The verify also passes the state payload of a social sign-in (plan 12i Task 19).
+    expect(
+      read("totp.ts").match(
+        /sessionOpened\([^;]*?\bvia,?(?:\s*undefined,\s*stateData\.value,?)?\s*\)/g,
+      ),
+    ).toHaveLength(1);
     // The after hook too: each flow passes its via to sessionOpened after its commit.
     // A social sign-in also passes its provider (plan 12h Task 5) and its
     // state payload (plan 12i Task 19).

@@ -4,7 +4,6 @@ import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
 import type { Observer } from "../observe/observer.js";
-import { openSealed, seal } from "../primitives/aead.js";
 import {
   constantTimeEqual,
   fromBase64Url,
@@ -14,7 +13,6 @@ import {
   sha256Hex,
 } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
-import { currentSecret, secretFor } from "../primitives/keyring.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose } from "../schema.js";
@@ -52,6 +50,7 @@ import {
   sessionsEnded,
 } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
+import { openStateData, sealStateData } from "./state-data.js";
 import {
   type BeforeResolveWrite,
   ClaimLostError,
@@ -136,8 +135,6 @@ interface StateData {
   sealedData?: string;
 }
 
-/** The `info` of the payload's key: one app secret gives one key per use. */
-const STATE_DATA_INFO = "authtempo oauth-state-data";
 /** The depth of the payload: the object itself is 1. */
 const STATE_DATA_MAX_DEPTH = 4;
 
@@ -171,28 +168,6 @@ function stateDataBytes(config: ResolvedConfig, raw: string): Result<Uint8Array>
     return fail("invalid_body");
   if (!depthWithin(value, STATE_DATA_MAX_DEPTH)) return fail("invalid_body");
   return ok(bytes);
-}
-
-/**
- * The payload of a consumed state row, or null when the row holds none.
- * A payload under a secret version that left the config, or one that does
- * not open under this row's id, answers `invalid_token`: the flow fails
- * closed, and the person starts again.
- */
-async function openStateData(
-  config: ResolvedConfig,
-  row: { id: string; secretVersion: number },
-  data: StateData,
-): Promise<Result<Record<string, unknown> | null>> {
-  const sealed = data.sealedData;
-  if (sealed === undefined) return ok(null);
-  if (typeof sealed !== "string") return fail("invalid_token");
-  const secret = secretFor(config.observe, config.keyring, row.secretVersion, row.id);
-  if (secret === null) return fail("invalid_token");
-  const plain = await openSealed(secret, STATE_DATA_INFO, sealed, row.id);
-  if (plain === null) return fail("invalid_token");
-  // The start checked the rule, and the seal proves that these are its bytes.
-  return ok(JSON.parse(new TextDecoder().decode(plain)) as Record<string, unknown>);
 }
 
 interface LinkTarget {
@@ -254,11 +229,7 @@ async function beginSocial(
     bindHash: await sha256Hex(bindToken),
     next: safeNext(input.next),
     ...(link ? { link } : {}),
-    ...(payload
-      ? {
-          sealedData: await seal(currentSecret(config.keyring), STATE_DATA_INFO, payload.value, id),
-        }
-      : {}),
+    ...(payload ? { sealedData: (await sealStateData(config, payload.value, id)).sealed } : {}),
   };
   await config.storage.create("verification", {
     id,
@@ -375,7 +346,8 @@ export async function completeSocial(
   if (!input.bindToken || !constantTimeEqual(await sha256Hex(input.bindToken), data.bindHash)) {
     return fail("invalid_token");
   }
-  const opened = await openStateData(config, row, data);
+  // The state row names the version that sealed it.
+  const opened = await openStateData(config, data.sealedData, row.secretVersion, row.id);
   if (!opened.ok) return opened;
   // The payload goes to the two hook events only: never to a redirect, an answer, or a line.
   const stateData = opened.value;
@@ -438,6 +410,8 @@ export async function completeSocial(
       next,
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.social ?? false,
+      // A challenge carries the payload to `session.afterCreate` at its verify.
+      ...(stateData ? { stateData } : {}),
     },
     now,
   );
