@@ -14,7 +14,7 @@ import { ERRORS } from "../src/errors.js";
 import { respond } from "../src/http/json.js";
 import * as core from "../src/index.js";
 import { fail, ok, type Result } from "../src/result.js";
-import { makeAuth } from "./helpers.js";
+import { DEFAULT_OBSERVE, makeAuth } from "./helpers.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -24,6 +24,7 @@ afterEach(() => {
 const refusedWith = (message: string) =>
   hookGuard(async (): Promise<Result<true>> => {
     await runBefore(
+      DEFAULT_OBSERVE,
       "organization.beforeCreate",
       () => {
         throw hookRefusal(message);
@@ -204,6 +205,7 @@ describe("the runners (plan 9d)", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const r = await hookGuard(async (): Promise<Result<true>> => {
       await runBefore(
+        DEFAULT_OBSERVE,
         "organization.beforeCreate",
         () => {
           throw new TypeError("row 42 of the tenant table");
@@ -221,6 +223,7 @@ describe("the runners (plan 9d)", () => {
   it("gives the hook a copy, so a change to the event changes nothing", async () => {
     const event = { organization: { name: "Acme", metadata: { plan: "free" } } };
     await runBefore(
+      DEFAULT_OBSERVE,
       "organization.beforeCreate",
       (e: typeof event) => {
         e.organization.name = "Changed";
@@ -232,16 +235,19 @@ describe("the runners (plan 9d)", () => {
   });
 
   it("answers the hook's value, and undefined with no hook", async () => {
-    expect(await runBefore("session.beforeCreate", () => ({ ip: null }), {})).toEqual({
+    expect(
+      await runBefore(DEFAULT_OBSERVE, "session.beforeCreate", () => ({ ip: null }), {}),
+    ).toEqual({
       ip: null,
     });
-    expect(await runBefore("session.beforeCreate", undefined, {})).toBeUndefined();
+    expect(await runBefore(DEFAULT_OBSERVE, "session.beforeCreate", undefined, {})).toBeUndefined();
   });
 
   it("logs an after hook throw with the hook name, the row id, and the error name, and never throws", async () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     await expect(
       runAfter(
+        DEFAULT_OBSERVE,
         "organization.afterCreate",
         async () => {
           throw new RangeError("tenant store down for acme");
@@ -264,11 +270,11 @@ describe("the runners (plan 9d)", () => {
     };
     expect(
       await hookGuard(async (): Promise<Result<true>> => {
-        await runBefore("organization.beforeCreate", leaky, {});
+        await runBefore(DEFAULT_OBSERVE, "organization.beforeCreate", leaky, {});
         return ok(true);
       }),
     ).toEqual({ ok: false, code: "hook_failed", status: 500 });
-    await runAfter("organization.afterCreate", leaky, {}, "ORG1");
+    await runAfter(DEFAULT_OBSERVE, "organization.afterCreate", leaky, {}, "ORG1");
     expect(log.mock.calls).toEqual([
       ["authtempo: before hook failed", "organization.beforeCreate", "Error"],
       ["authtempo: after hook failed", "organization.afterCreate", "ORG1", "Error"],
@@ -278,6 +284,7 @@ describe("the runners (plan 9d)", () => {
   it("answers hook_refused for a plain Error named HookRefusal, as from a second copy of the package (parked Minor 3)", async () => {
     const r = await hookGuard(async (): Promise<Result<true>> => {
       await runBefore(
+        DEFAULT_OBSERVE,
         "organization.beforeCreate",
         () => {
           const e = new Error("Other copy.");
@@ -297,12 +304,12 @@ describe("the runners (plan 9d)", () => {
     const event = { f: () => 1 };
     expect(
       await hookGuard(async (): Promise<Result<true>> => {
-        await runBefore("organization.beforeCreate", hook, event);
+        await runBefore(DEFAULT_OBSERVE, "organization.beforeCreate", hook, event);
         return ok(true);
       }),
     ).toEqual({ ok: false, code: "hook_failed", status: 500 });
     await expect(
-      runAfter("organization.afterCreate", hook, event, "ORG1"),
+      runAfter(DEFAULT_OBSERVE, "organization.afterCreate", hook, event, "ORG1"),
     ).resolves.toBeUndefined();
     expect(hook).not.toHaveBeenCalled();
     expect(log.mock.calls).toEqual([

@@ -1,13 +1,16 @@
 import type { ResolvedConfig } from "../config.js";
+import type { Observer } from "../observe/observer.js";
 import type { UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
 import {
   type IdentitySummary,
+  type PatchShapeRefusal,
   patchFields,
   runAfter,
   runBefore,
   stopWith,
   type UserCreateVia,
+  type UserPatchRefusal,
   type UserVerifyVia,
 } from "./hooks.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
@@ -33,8 +36,8 @@ export interface CreateSteps {
 }
 
 /** One line that says what was wrong, never a value: a value can be an address. */
-function refusePatch(what: string): never {
-  console.error("authtempo: user patch refused", what);
+function refusePatch(observe: Observer, what: PatchShapeRefusal | UserPatchRefusal): never {
+  observe.emit({ name: "user.patch_refused", what });
   return stopWith("hook_failed");
 }
 
@@ -43,21 +46,22 @@ function refusePatch(what: string): never {
  * `image` change, under the profile rules. Any other key or value stops the
  * flow with `hook_failed`.
  */
-export function patchedNewUser(user: UserRow, patch: unknown): UserRow {
-  const fields = patchFields(patch, refusePatch);
+export function patchedNewUser(observe: Observer, user: UserRow, patch: unknown): UserRow {
+  const refuse = (what: PatchShapeRefusal | UserPatchRefusal) => refusePatch(observe, what);
+  const fields = patchFields(patch, refuse);
   if (!fields) return user;
   for (const key of Object.keys(fields))
-    if (key !== "name" && key !== "image") return refusePatch("a field other than name and image");
+    if (key !== "name" && key !== "image") return refuse("a field other than name and image");
   const out: UserRow = { ...user };
   const { name, image } = fields;
   if (name !== undefined) {
     if (name !== null && (typeof name !== "string" || !validUserName(name)))
-      return refusePatch("a name that breaks the name rule");
+      return refuse("a name that breaks the name rule");
     out.name = name;
   }
   if (image !== undefined) {
     if (image !== null && (typeof image !== "string" || !validImageUrl(image)))
-      return refusePatch("an image that breaks the image rule");
+      return refuse("an image that breaks the image rule");
     out.image = image;
   }
   return out;
@@ -84,13 +88,16 @@ export function createSteps(
     },
     async user(tx, user) {
       if (options.signUpRule) await signUpRule(config, tx, user);
-      const answer = await runBefore("user.beforeCreate", hooks.user.beforeCreate, { user, via });
-      const patched = patchedNewUser(user, answer);
+      const answer = await runBefore(config.observe, "user.beforeCreate", hooks.user.beforeCreate, {
+        user,
+        via,
+      });
+      const patched = patchedNewUser(config.observe, user, answer);
       minted = patched.id;
       return patched;
     },
     async identity(user, identity) {
-      await runBefore("identity.beforeLink", hooks.identity.beforeLink, {
+      await runBefore(config.observe, "identity.beforeLink", hooks.identity.beforeLink, {
         user,
         identity,
         via: "sign_in",
@@ -99,9 +106,16 @@ export function createSteps(
     },
     async after(user) {
       if (minted === user.id)
-        await runAfter("user.afterCreate", hooks.user.afterCreate, { user, via }, user.id);
+        await runAfter(
+          config.observe,
+          "user.afterCreate",
+          hooks.user.afterCreate,
+          { user, via },
+          user.id,
+        );
       if (linked && linked.userId === user.id)
         await runAfter(
+          config.observe,
           "identity.afterLink",
           hooks.identity.afterLink,
           { user, identity: linked.identity, via: "sign_in" },
@@ -139,7 +153,7 @@ export interface VerifySteps {
 }
 
 export function verifySteps(
-  config: Pick<ResolvedConfig, "hooks"> & Partial<Pick<ResolvedConfig, "operator">>,
+  config: Pick<ResolvedConfig, "hooks" | "observe"> & Partial<Pick<ResolvedConfig, "operator">>,
   via: UserVerifyVia,
 ): VerifySteps {
   const hooks = config.hooks;
@@ -154,7 +168,7 @@ export function verifySteps(
       if (stops) stops.rows.length = 0;
     },
     async before(user) {
-      await runBefore("user.beforeVerify", hooks.user.beforeVerify, { user, via });
+      await runBefore(config.observe, "user.beforeVerify", hooks.user.beforeVerify, { user, via });
       checked = user.id;
     },
     claimed(userId) {
@@ -164,7 +178,13 @@ export function verifySteps(
     },
     async after(user) {
       if (claimed === user.id)
-        await runAfter("user.afterVerify", hooks.user.afterVerify, { user, via }, user.id);
+        await runAfter(
+          config.observe,
+          "user.afterVerify",
+          hooks.user.afterVerify,
+          { user, via },
+          user.id,
+        );
     },
   };
 }

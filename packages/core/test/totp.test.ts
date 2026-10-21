@@ -19,7 +19,7 @@ import { hmacSha256Hex } from "../src/primitives/crypto.js";
 import { currentSecret } from "../src/primitives/keyring.js";
 import { base32Decode, normalizeBackupCode, otpauthUri, totpCode } from "../src/primitives/totp.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { makeAuth } from "./helpers.js";
+import { DEFAULT_OBSERVE, makeAuth } from "./helpers.js";
 import { upSession } from "./password-helpers.js";
 import {
   codeNow,
@@ -622,7 +622,7 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
       updatedAt: now,
       secretVersion: 1,
     });
-    expect(await countAttempt(auth.storage, row, 5, now)).toBe("invalid_code");
+    expect(await countAttempt(DEFAULT_OBSERVE, auth.storage, row, 5, now)).toBe("invalid_code");
     expect(
       (await auth.storage.findOne("verification", [{ field: "id", op: "eq", value: "v1" }]))?.data,
     ).toEqual({ next: "/x", attempts: 1 });
@@ -646,7 +646,9 @@ describe("disable, backup codes, status, and devices (plan 9f)", () => {
       });
     await challenge("other");
     const capped = await challenge("capped");
-    expect(await countAttempt(auth.storage, capped, 5, now)).toBe("too_many_attempts");
+    expect(await countAttempt(DEFAULT_OBSERVE, auth.storage, capped, 5, now)).toBe(
+      "too_many_attempts",
+    );
     const rows = await auth.storage.findMany("verification", []);
     expect(rows.find((r) => r.id === "capped")?.consumedAt).toEqual(now);
     expect(rows.find((r) => r.id === "other")?.consumedAt).toBeNull();

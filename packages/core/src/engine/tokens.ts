@@ -308,7 +308,7 @@ export async function createApiToken(
   const made = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
       // The cap lock: a second create of the user waits here for this commit (ruling 43).
-      await holdUser(tx, user.id);
+      await holdUser(config.observe, tx, user.id);
       // The user's expired tokens go first, so they do not count against the cap.
       await tx.delete("apiToken", [
         { field: "userId", op: "eq", value: user.id },

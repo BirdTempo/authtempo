@@ -81,7 +81,7 @@ export async function effectiveIn(
   for (const row of rows) {
     const def = roleRowDef(o, row);
     if (def === null) {
-      console.warn(`authtempo: role row invalid ${row.id}`);
+      config.observe.emit({ name: "role.row_invalid", rowId: row.id });
       continue;
     }
     unnamed--;

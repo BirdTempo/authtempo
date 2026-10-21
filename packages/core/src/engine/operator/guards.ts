@@ -1,4 +1,5 @@
 import type { OperatorScope, ResolvedConfig, ResolvedOperatorSecret } from "../../config.js";
+import type { Observer } from "../../observe/observer.js";
 import { isOperatorSecret, OPERATOR_USERS_PER_IP } from "../../operator-secret.js";
 import { constantTimeEqual, sha256Hex } from "../../primitives/crypto.js";
 import { fail, ok, type Result } from "../../result.js";
@@ -191,8 +192,8 @@ async function hasSecondFactor(config: ResolvedConfig, userId: string): Promise<
 }
 
 /** One log line per refusal, with the route name and no user id, so a log reader sees the attempts. */
-function refused(route: string): Result<never> {
-  console.error("authtempo: operator guard refused", route);
+function refused(observe: Observer, route: string): Result<never> {
+  observe.emit({ name: "operator.guard_refused", route });
   return fail("operator_required");
 }
 
@@ -221,14 +222,15 @@ export async function requireOperatorUser(
   route = "api",
 ): Promise<Result<OperatorActor & { kind: "user" }>> {
   const { user, session } = resolved;
-  if (session.actorId !== null) return refused(route);
+  if (session.actorId !== null) return refused(config.observe, route);
   const member = await platformMember(config, user.id);
-  if (!member) return refused(route);
+  if (!member) return refused(config.observe, route);
   // The grant time of the role: a session from before it holds no operator power.
-  if (session.createdAt.getTime() < member.updatedAt.getTime()) return refused(route);
-  if (!user.emailVerified) return refused(route);
-  if (!(await hasSecondFactor(config, user.id))) return refused(route);
-  if (!requireFresh(config, session).ok) return refused(route);
+  if (session.createdAt.getTime() < member.updatedAt.getTime())
+    return refused(config.observe, route);
+  if (!user.emailVerified) return refused(config.observe, route);
+  if (!(await hasSecondFactor(config, user.id))) return refused(config.observe, route);
+  if (!requireFresh(config, session).ok) return refused(config.observe, route);
   if (!(await config.limiter.allow(`operator:user:${user.id}`, OPERATOR_PER_USER)))
     return fail("rate_limited");
   return ok({ kind: "user", user, session });

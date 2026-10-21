@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { readCookie, sessionCookie } from "../http/cookies.js";
+import type { Observer } from "../observe/observer.js";
 import {
   readBearer,
   readSessionToken,
@@ -11,11 +12,13 @@ import { newId } from "../primitives/ids.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import {
+  type PatchShapeRefusal,
   patchFields,
   runAfter,
   runBefore,
   type SessionDraft,
   type SessionEndReason,
+  type SessionPatchRefusal,
   type SessionVia,
   stopWith,
 } from "./hooks.js";
@@ -206,9 +209,19 @@ function nullableString(value: unknown): value is string | null {
   return typeof value === "string" || value === null;
 }
 
-/** One line that says what was wrong, never a value: a value can be an address or an agent string. */
-function refusePatch(what: string): never {
-  console.error("authtempo: session patch refused", what);
+/**
+ * One line that says what was wrong, never a value: a value can be an
+ * address or an agent string. A key outside the patch keys is named.
+ */
+function refusePatch(
+  observe: Observer,
+  what: PatchShapeRefusal | SessionPatchRefusal | { field: string },
+): never {
+  observe.emit(
+    typeof what === "string"
+      ? { name: "session.patch_refused", what }
+      : { name: "session.patch_refused", what: "field", field: what.field },
+  );
   return stopWith("hook_failed");
 }
 
@@ -225,22 +238,23 @@ async function patchedInput(
   patch: unknown,
 ): Promise<SessionInput> {
   const input: SessionInput = { userId: draft.userId, ip: draft.ip, userAgent: draft.userAgent };
-  const fields = patchFields(patch, refusePatch);
+  const refuse = (what: PatchShapeRefusal | SessionPatchRefusal | { field: string }) =>
+    refusePatch(config.observe, what);
+  const fields = patchFields(patch, refuse);
   if (!fields) return input;
-  for (const key of Object.keys(fields))
-    if (!PATCH_KEYS.has(key)) return refusePatch(`the field ${key}`);
+  for (const key of Object.keys(fields)) if (!PATCH_KEYS.has(key)) return refuse({ field: key });
   const { ip, userAgent, activeOrganizationId } = fields;
   if (ip !== undefined) {
-    if (!nullableString(ip)) return refusePatch("an ip that is not a string or null");
+    if (!nullableString(ip)) return refuse("an ip that is not a string or null");
     input.ip = ip;
   }
   if (userAgent !== undefined) {
-    if (!nullableString(userAgent)) return refusePatch("a userAgent that is not a string or null");
+    if (!nullableString(userAgent)) return refuse("a userAgent that is not a string or null");
     input.userAgent = userAgent;
   }
   if (activeOrganizationId !== undefined) {
     if (!nullableString(activeOrganizationId))
-      return refusePatch("an activeOrganizationId that is not a string or null");
+      return refuse("an activeOrganizationId that is not a string or null");
     if (activeOrganizationId !== null) {
       const member = config.organizations
         ? await storage.findOne("member", [
@@ -284,11 +298,16 @@ export async function prepareSession(
     userAgent: input.userAgent,
     activeOrganizationId: null,
   };
-  const patch = await runBefore("session.beforeCreate", config.hooks.session.beforeCreate, {
-    session: draft,
-    user: input.user,
-    via: input.via,
-  });
+  const patch = await runBefore(
+    config.observe,
+    "session.beforeCreate",
+    config.hooks.session.beforeCreate,
+    {
+      session: draft,
+      user: input.user,
+      via: input.via,
+    },
+  );
   const patched = await patchedInput(config, storage, draft, patch);
   const signedIn = input.signedInAt ? { ...patched, freshAt: input.signedInAt } : patched;
   const prepared = {
@@ -299,7 +318,7 @@ export async function prepareSession(
   // Not for an unverified user: a claim can verify that row during the
   // sign-in, and the sign-in must not write it (sessions-claim.test.ts,
   // re-review finding B). The read in `writeSession` still runs.
-  if (input.user.emailVerified) await holdUser(storage, input.user.id);
+  if (input.user.emailVerified) await holdUser(config.observe, storage, input.user.id);
   return prepared;
 }
 
@@ -350,6 +369,7 @@ export async function sessionOpened(
   via: SessionVia,
 ): Promise<void> {
   await runAfter(
+    config.observe,
     "session.afterCreate",
     config.hooks.session.afterCreate,
     { session, user, via },
@@ -459,13 +479,20 @@ export async function sessionsEnded(
 ): Promise<void> {
   for (const session of sessions ?? [])
     await runAfter(
+      config.observe,
       "session.afterEnd",
       config.hooks.session.afterEnd,
       { session, reason },
       session.id,
     );
   for (const audit of stops?.rows ?? [])
-    await runAfter("operator.afterAction", config.hooks.operator.afterAction, { audit }, audit.id);
+    await runAfter(
+      config.observe,
+      "operator.afterAction",
+      config.hooks.operator.afterAction,
+      { audit },
+      audit.id,
+    );
 }
 
 /**

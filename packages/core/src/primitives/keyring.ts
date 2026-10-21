@@ -1,3 +1,5 @@
+import type { Observer } from "../observe/observer.js";
+
 /**
  * The app secrets by version (plan 12b, spec 22). The first entry is the
  * current version: every new seal and every new keyed hash uses it. A read
@@ -52,22 +54,20 @@ export function currentSecret(keyring: Keyring): string {
   return value;
 }
 
-/** One line with the version and the row id. Never a value, a hash, or a code. */
-function unknownVersion(version: number, rowId: string): void {
-  console.error(
-    `authtempo: a stored value names secret version ${version}, which is not configured`,
-    rowId,
-  );
-}
-
 /**
  * The value of the version that a row names, or null with one log line. A
  * sealed value under a version that the config does not hold opens to
  * nothing, as a wrong secret does.
  */
-export function secretFor(keyring: Keyring, version: number, rowId: string): string | null {
+export function secretFor(
+  observe: Observer,
+  keyring: Keyring,
+  version: number,
+  rowId: string,
+): string | null {
   const value = keyring.valueOf(version);
-  if (value === null) unknownVersion(version, rowId);
+  // The version and the row id only. Never a value, a hash, or a code.
+  if (value === null) observe.emit({ name: "secret.unknown_version", version, rowId });
   return value;
 }
 
@@ -78,11 +78,12 @@ export function secretFor(keyring: Keyring, version: number, rowId: string): str
  * `known` is true, so the time tells nothing.
  */
 export function hashSecretFor(
+  observe: Observer,
   keyring: Keyring,
   version: number,
   rowId: string,
 ): { secret: string; known: boolean } {
-  const value = secretFor(keyring, version, rowId);
+  const value = secretFor(observe, keyring, version, rowId);
   return value === null
     ? { secret: currentSecret(keyring), known: false }
     : { secret: value, known: true };

@@ -1,7 +1,6 @@
 import type { ResolvedConfig } from "../../config.js";
 import { isIpLiteral } from "../../limiter/ip-key.js";
 import { isOperatorReason } from "../../operator-secret.js";
-import { appErrorName } from "../../primitives/app-error.js";
 import { newMonotonicId } from "../../primitives/ids.js";
 import { hasControlChar, removeRefusedChars } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
@@ -209,7 +208,7 @@ export async function operatorAct<T extends object>(
   if (!reason.ok) return reason;
   const ends: OperatorActEnds = { ended: endedList(config), families: familyEnds() };
   const done = await hookGuard(async () => {
-    await runBefore("operator.beforeAction", config.hooks.operator.beforeAction, {
+    await runBefore(config.observe, "operator.beforeAction", config.hooks.operator.beforeAction, {
       audit: draft,
     });
     return config.storage.transaction(async (tx) => {
@@ -232,11 +231,12 @@ export async function operatorAct<T extends object>(
   try {
     await steps.committed?.(value, ends);
   } catch (e) {
-    console.error("authtempo: operator step failed", row.id, appErrorName(e));
+    config.observe.emit({ name: "operator.step_failed", rowId: row.id, errorName: e });
   } finally {
     // endFamilies is a security step: it ends a refresh family that a race
     // wrote during the act. So it runs after any end of the step.
     await runAfter(
+      config.observe,
       "operator.afterAction",
       config.hooks.operator.afterAction,
       { audit: row },
@@ -246,7 +246,7 @@ export async function operatorAct<T extends object>(
       try {
         await endFamilies(config, ends.families);
       } catch (e) {
-        console.error("authtempo: operator family end failed", row.id, appErrorName(e));
+        config.observe.emit({ name: "operator.family_end_failed", rowId: row.id, errorName: e });
         familyEndFailed = true;
       }
     else await endFamilies(config, ends.families);

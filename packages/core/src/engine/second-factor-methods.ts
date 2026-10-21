@@ -121,7 +121,7 @@ export async function enableMethod(
   let added: AddedMethod;
   try {
     added = await config.storage.transaction(async (tx) => {
-      await holdUser(tx, session.user.id);
+      await holdUser(config.observe, tx, session.user.id);
       const a = await addMethod(
         tx,
         {
@@ -218,7 +218,7 @@ export async function disableMethod(
     // The hold of the user row first (user-hold.ts): the account delete
     // deletes the trusted devices before the factor row (plan 12f Task 9).
     const removed = await config.storage.transaction(async (tx) => {
-      await holdUser(tx, input.user.id);
+      await holdUser(config.observe, tx, input.user.id);
       return removeMethod(tx, input.user.id, input.method, now);
     });
     if (!removed) return fail("totp_not_enabled");
@@ -390,7 +390,7 @@ export async function acceptEmailCode(
 ): Promise<boolean> {
   const stored = (challenge.data as { emailCodeHash?: unknown } | null)?.emailCodeHash;
   // The row's version keys the HMAC (plan 12b); an unknown version matches nothing.
-  const key = hashSecretFor(config.keyring, challenge.secretVersion, challenge.id);
+  const key = hashSecretFor(config.observe, config.keyring, challenge.secretVersion, challenge.id);
   const candidate = await emailCodeHash(key.secret, challenge.id, code.replace(/\s/g, ""));
   const right = constantTimeEqual(candidate, typeof stored === "string" ? stored : NO_HASH);
   return typeof stored === "string" && right && key.known;

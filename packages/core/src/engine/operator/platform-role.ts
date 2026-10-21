@@ -121,6 +121,7 @@ async function memberChanged(
   const member = memberSummary(change.member, user);
   if (change.kind === "add")
     await runAfter(
+      config.observe,
       "organization.afterAddMember",
       hooks.afterAddMember,
       { organization, member, memberUser: user, by, via: "operator", invitation: null },
@@ -128,6 +129,7 @@ async function memberChanged(
     );
   else if (change.kind === "role")
     await runAfter(
+      config.observe,
       "organization.afterUpdateMemberRole",
       hooks.afterUpdateMemberRole,
       { organization, member, previousRole: change.previousRole, memberUser: user, by },
@@ -135,6 +137,7 @@ async function memberChanged(
     );
   else
     await runAfter(
+      config.observe,
       "organization.afterRemoveMember",
       hooks.afterRemoveMember,
       { organization, member, memberUser: user, by, via: "operator" },
@@ -169,13 +172,18 @@ async function addRolePart(
   if (member && holdsRolePart(member.role, p.role)) return ok(null);
   if (member) {
     const role = `${member.role},${p.role}`;
-    await runBefore("organization.beforeUpdateMemberRole", hooks.beforeUpdateMemberRole, {
-      organization,
-      member: memberSummary(member, user),
-      role,
-      memberUser: user,
-      by,
-    });
+    await runBefore(
+      config.observe,
+      "organization.beforeUpdateMemberRole",
+      hooks.beforeUpdateMemberRole,
+      {
+        organization,
+        member: memberSummary(member, user),
+        role,
+        memberUser: user,
+        by,
+      },
+    );
     return ok({
       kind: "role",
       member: { ...member, role, updatedAt: now },
@@ -199,7 +207,7 @@ async function addRolePart(
     createdAt: now,
     updatedAt: now,
   };
-  await runBefore("organization.beforeAddMember", hooks.beforeAddMember, {
+  await runBefore(config.observe, "organization.beforeAddMember", hooks.beforeAddMember, {
     organization,
     member: { userId: user.id, role: row.role },
     memberUser: user,
@@ -302,7 +310,7 @@ export async function grantPlatformRole(
         // Task 11). A change of the parts of a row needs no hold: a deleted
         // row matches zero rows.
         const added = change.value?.kind === "add";
-        if (added) await holdUser(tx, user.id);
+        if (added) await holdUser(config.observe, tx, user.id);
         const written = await writePart(tx, change.value);
         if (!written.ok) return written;
         if (added) await userStays(tx, user.id);
@@ -396,7 +404,7 @@ export async function revokePlatformRole(
       // The user row first (user-hold.ts). An impersonation start holds it
       // too (ruling 42 of plan 12f). So the start sees the role gone, or it
       // commits its start row before `endImpersonationsPage` reads.
-      await holdUser(tx, user.id);
+      await holdUser(config.observe, tx, user.id);
       meter.step(STEP_WORST.hold);
       // One read takes the locks of the user's sessions and of the
       // impersonation sessions that the user opened. It comes right after
@@ -442,19 +450,29 @@ export async function revokePlatformRole(
       // The role from the read is in the where: a parallel change matches zero rows.
       const write = async (storage: StorageAdapter) => {
         if (rest === "") {
-          await runBefore("organization.beforeRemoveMember", hooks.beforeRemoveMember, {
-            ...event,
-            via: "operator",
-          });
+          await runBefore(
+            config.observe,
+            "organization.beforeRemoveMember",
+            hooks.beforeRemoveMember,
+            {
+              ...event,
+              via: "operator",
+            },
+          );
           const n = await storage.delete("member", byRole);
           // The team rows go with the member row, with no team hook (ruling 16 of plan 12k).
           if (n > 0) await dropMemberTeams(storage, organization.id, user.id);
           return n;
         }
-        await runBefore("organization.beforeUpdateMemberRole", hooks.beforeUpdateMemberRole, {
-          ...event,
-          role: rest,
-        });
+        await runBefore(
+          config.observe,
+          "organization.beforeUpdateMemberRole",
+          hooks.beforeUpdateMemberRole,
+          {
+            ...event,
+            role: rest,
+          },
+        );
         return storage.update("member", byRole, { role: rest, updatedAt: now });
       };
       const losesOwner =
@@ -645,7 +663,7 @@ export async function createAdmin(
             createdAt: now,
             updatedAt: now,
           };
-          await runBefore("organization.beforeAddMember", hooks.beforeAddMember, {
+          await runBefore(config.observe, "organization.beforeAddMember", hooks.beforeAddMember, {
             organization: publicOrganization(organization),
             member: { userId: user.id, role: member.role },
             memberUser: user,
@@ -658,7 +676,7 @@ export async function createAdmin(
         // The hold of the user row comes before the member write, the lock
         // order of `user-hold.ts`. The account delete takes the user row and
         // then the member rows, so the other order can deadlock on Postgres.
-        if (existing) await holdUser(tx, user.id);
+        if (existing) await holdUser(config.observe, tx, user.id);
         if (!found) await tx.create("organization", organization);
         if (!existing) await tx.create("user", user);
         const written = await writePart(tx, change);

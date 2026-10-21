@@ -246,7 +246,7 @@ async function ownerWrite(
       async (t) => {
         // With a loss, withRoleLoss holds the same user and sessions first (the removed member).
         if (hold !== null && hold !== loss?.userId) {
-          await holdUser(t, hold);
+          await holdUser(config.observe, t, hold);
           await holdSessions(t, hold);
         }
         return ownerLock(t, o, organization, write, now);
@@ -330,7 +330,7 @@ async function withRoleLoss<T>(
 ): Promise<T> {
   if (!loss) return work(tx);
   const meter = meterOf(tx, loss.before);
-  await holdUser(tx, loss.userId);
+  await holdUser(loss.config.observe, tx, loss.userId);
   meter.step(STEP_WORST.hold);
   const hold = await holdImpersonations(tx, loss.config, loss.userId, now, true);
   // The audit read and the lock read.
@@ -401,7 +401,7 @@ export async function createOrganization(
         // First, in the lock order of user-hold.ts. A member row of a deleted user would count as
         // an owner (plan 12a Task 11). The hold also makes a second create of the user wait here,
         // so it counts the first one's member row (ruling 45 of plan 12k). It writes no new value.
-        await holdUser(tx, input.user.id);
+        await holdUser(config.observe, tx, input.user.id);
         // The count and the slug read run before any other write, so a refusal changes nothing.
         // perUser counts the user's member rows at any rank, as Better Auth's numeric limit does.
         if (limit !== null) {
@@ -415,11 +415,11 @@ export async function createOrganization(
         // A hook must not run for a taken slug. The unique key stays the guard for a race.
         if (await tx.findOne("organization", [{ field: "slug", op: "eq", value: slug }]))
           return fail("slug_taken");
-        await runBefore("organization.beforeCreate", hooks.beforeCreate, {
+        await runBefore(config.observe, "organization.beforeCreate", hooks.beforeCreate, {
           organization: summary,
           user: input.user,
         });
-        await runBefore("organization.beforeAddMember", hooks.beforeAddMember, {
+        await runBefore(config.observe, "organization.beforeAddMember", hooks.beforeAddMember, {
           organization: summary,
           member: { userId: input.user.id, role: member.role },
           memberUser: input.user,
@@ -444,6 +444,7 @@ export async function createOrganization(
   }
   // Better Auth's order: the member's after hook, then the organization's.
   await runAfter(
+    config.observe,
     "organization.afterAddMember",
     hooks.afterAddMember,
     {
@@ -457,6 +458,7 @@ export async function createOrganization(
     member.id,
   );
   await runAfter(
+    config.observe,
     "organization.afterCreate",
     hooks.afterCreate,
     { organization: summary, member: owner, user: input.user },
@@ -552,7 +554,7 @@ export async function updateOrganization(
           (await tx.findOne("organization", [{ field: "slug", op: "eq", value: newSlug }]))
         )
           return fail("slug_taken");
-        await runBefore("organization.beforeUpdate", hooks.beforeUpdate, {
+        await runBefore(config.observe, "organization.beforeUpdate", hooks.beforeUpdate, {
           organization: current,
           patch: data,
           member: callerMember,
@@ -572,6 +574,7 @@ export async function updateOrganization(
   }
   const stored = publicOrganization({ ...s.value.organization, ...data, updatedAt: now });
   await runAfter(
+    config.observe,
     "organization.afterUpdate",
     hooks.afterUpdate,
     { organization: stored, member: callerMember, user: input.user },
@@ -618,7 +621,7 @@ export async function deleteOrganization(
           if ((await tx.findMany("session", byOrganization)).some((x) => !ids.includes(x.id)))
             return ok(false);
         }
-        await runBefore("organization.beforeDelete", hooks.beforeDelete, {
+        await runBefore(config.observe, "organization.beforeDelete", hooks.beforeDelete, {
           organization,
           user: input.user,
         });
@@ -631,6 +634,7 @@ export async function deleteOrganization(
   if (!deleted.value) return fail("conflict");
   // The member and invitation rows go with the organization and fire no member hook, as in Better Auth.
   await runAfter(
+    config.observe,
     "organization.afterDelete",
     hooks.afterDelete,
     { organization, user: input.user },
@@ -863,7 +867,7 @@ export async function addMember(
         // The added user, then the organization row, in the lock order of user-hold.ts. A member
         // row of a deleted user would count as an owner (plan 12a Task 11). The hold writes no new
         // value, so a refusal below changes nothing.
-        await holdUser(tx, target.id);
+        await holdUser(config.observe, tx, target.id);
         // The lock of the count (ruling 45 of plan 12k). A second add or accept waits here for this
         // commit, and then counts its member row. A gone organization answers not_found.
         if (limit !== null && !(await lockOrganization(tx, s.value.organization)))
@@ -884,7 +888,7 @@ export async function addMember(
           );
           if (held.length >= limit) return fail("member_limit");
         }
-        await runBefore("organization.beforeAddMember", hooks.beforeAddMember, {
+        await runBefore(config.observe, "organization.beforeAddMember", hooks.beforeAddMember, {
           organization,
           member: { userId: target.id, role: input.role },
           memberUser: target,
@@ -912,6 +916,7 @@ export async function addMember(
     createdAt: now,
   };
   await runAfter(
+    config.observe,
     "organization.afterAddMember",
     hooks.afterAddMember,
     {
@@ -968,13 +973,18 @@ export async function updateMemberRole(
   // The before hook runs inside the write's transaction, after the owner lock when there is one.
   // The role from the read is in the where: if another request changed it since, zero rows match.
   const setRole = async (storage: StorageAdapter) => {
-    await runBefore("organization.beforeUpdateMemberRole", hooks.beforeUpdateMemberRole, {
-      organization,
-      member: current,
-      role: input.role,
-      memberUser: user,
-      by: input.user,
-    });
+    await runBefore(
+      config.observe,
+      "organization.beforeUpdateMemberRole",
+      hooks.beforeUpdateMemberRole,
+      {
+        organization,
+        member: current,
+        role: input.role,
+        memberUser: user,
+        by: input.user,
+      },
+    );
     return storage.update(
       "member",
       [
@@ -1005,6 +1015,7 @@ export async function updateMemberRole(
   await sessionsEnded(config, loss?.ended, "impersonation_end", loss?.stops ?? null);
   const updated: MemberSummary = { ...current, role: input.role };
   await runAfter(
+    config.observe,
     "organization.afterUpdateMemberRole",
     hooks.afterUpdateMemberRole,
     {
@@ -1091,7 +1102,12 @@ export async function removeMember(
     // first, and the token delete below sees its row. The user hold and the session locks run
     // before this lock, in the order of user-hold.ts. A gone organization answers conflict.
     if (revokeTokens && !(await lockOrganization(storage, s.value.organization))) return 0;
-    await runBefore("organization.beforeRemoveMember", hooks.beforeRemoveMember, event);
+    await runBefore(
+      config.observe,
+      "organization.beforeRemoveMember",
+      hooks.beforeRemoveMember,
+      event,
+    );
     const n = await storage.delete("member", [
       { field: "id", op: "eq", value: target.member.id },
       { field: "role", op: "eq", value: target.member.role },
@@ -1136,7 +1152,7 @@ export async function removeMember(
         now,
         async (t) => {
           if (!loss) {
-            await holdUser(t, target.member.userId);
+            await holdUser(config.observe, t, target.member.userId);
             // The sessions before the organization lock and the deletes (ruling 49 of plan 12k).
             await holdSessions(t, target.member.userId);
           }
@@ -1150,6 +1166,7 @@ export async function removeMember(
   if (!removed.ok) return removed;
   await sessionsEnded(config, loss?.ended, "impersonation_end", loss?.stops ?? null);
   await runAfter(
+    config.observe,
     "organization.afterRemoveMember",
     hooks.afterRemoveMember,
     event,

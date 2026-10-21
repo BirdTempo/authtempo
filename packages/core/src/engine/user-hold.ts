@@ -1,3 +1,4 @@
+import type { Observer } from "../observe/observer.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { stopWith } from "./hooks.js";
 import { ROUNDS } from "./rounds.js";
@@ -96,7 +97,11 @@ import { ROUNDS } from "./rounds.js";
  * found by `userStays`, the read after the insert. A stop here would answer
  * the same `conflict` on both stores, so the one check is that read.
  */
-export async function holdUser(storage: StorageAdapter, userId: string): Promise<void> {
+export async function holdUser(
+  observe: Observer,
+  storage: StorageAdapter,
+  userId: string,
+): Promise<void> {
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
   let row = await storage.findOne("user", byId);
   for (let round = 0; round < ROUNDS; round++) {
@@ -109,7 +114,7 @@ export async function holdUser(storage: StorageAdapter, userId: string): Promise
     // A parallel write moved the row first. Read it again.
     row = await storage.findOne("user", byId);
   }
-  console.error("authtempo: user hold gave up", userId);
+  observe.emit({ name: "user.hold_gave_up", userId });
   stopWith("conflict");
 }
 

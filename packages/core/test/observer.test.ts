@@ -111,7 +111,7 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
       "2026-01-01T00:00:01.000Z",
       "2026-01-01T00:00:02.000Z",
     ]);
-    expect(batch[0]).toMatchObject({ provider: "google", status: 500, level: "info" });
+    expect(batch[0]).toMatchObject({ provider: "google", status: 500, level: "error" });
     expect(batch[0]?.traceId).toMatch(/^[0-9a-f]{32}$/);
     expect(batch[0]?.spanId).toMatch(/^[0-9a-f]{16}$/);
     expect(o.stats().buffered).toBe(0);
@@ -304,7 +304,7 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
     const { batches, sink } = recording();
     const { o } = observer(sink);
     o.scope(SCOPE).emit({
-      name: "passkey.counter_moved",
+      name: "social.nonce_mismatch",
       ip: "198.51.100.9",
       ipHash: "f".repeat(32),
       userAgent: "curl/8.0",
@@ -313,7 +313,7 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
     });
     await o.flush();
     const [event] = batches[0] ?? [];
-    expect(event).toMatchObject({ name: "passkey.counter_moved", provider: "google" });
+    expect(event).toMatchObject({ name: "social.nonce_mismatch", provider: "google" });
     for (const key of ["ip", "ipHash", "userAgent", "email", "emailHash"])
       expect(event ?? {}).not.toHaveProperty(key);
     const text = JSON.stringify(batches);

@@ -1,7 +1,9 @@
 import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
+import type { Observer } from "../observe/observer.js";
 import { SESSION_JWT_TYPE } from "../primitives/credentials.js";
 import { constantTimeEqual, randomBase64Url } from "../primitives/crypto.js";
+import { clientRef } from "../redact.js";
 import type { OAuthClientRow, OAuthLogoutRow, SessionRow } from "../schema.js";
 import type { Meter } from "../storage/meter.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
@@ -329,7 +331,10 @@ async function claimRow(
     if ((await storage.delete("oauthLogout", byId)) !== 1)
       return { kind: "done", result: "skipped" };
     // The client id only: never the token, the user, or the session.
-    console.error("authtempo: a back-channel logout is dropped after 6 attempts", row.clientId);
+    config.observe.emit({
+      name: "oauth.logout_dropped_attempts",
+      clientRef: await clientRef(row.clientId),
+    });
     return { kind: "done", result: "dropped" };
   }
   let client = clients?.get(row.clientId);
@@ -375,11 +380,11 @@ async function postClaimed(
   await storage.delete("oauthLogout", byId);
   if (posted.kind === "sent") return "sent";
   // The client id and the status only: never the token, the user, or the session.
-  console.error(
-    "authtempo: a back-channel logout is dropped: the client refused it",
-    c.row.clientId,
-    posted.status,
-  );
+  config.observe.emit({
+    name: "oauth.logout_refused",
+    clientRef: await clientRef(c.row.clientId),
+    status: posted.status,
+  });
   return "dropped";
 }
 
@@ -398,6 +403,7 @@ async function deliverRow(
  * one deadline for all. Answers the rows sent or dropped.
  */
 async function inParallel<T>(
+  observe: Observer,
   items: readonly T[],
   each: (item: T, deadline: AbortSignal) => Promise<Delivery>,
 ): Promise<number> {
@@ -408,10 +414,7 @@ async function inParallel<T>(
     let n = 0;
     for (const r of results) {
       if (r.status === "rejected")
-        console.error(
-          "authtempo: a back-channel logout attempt failed",
-          r.reason instanceof Error ? r.reason.name : typeof r.reason,
-        );
+        observe.emit({ name: "oauth.logout_attempt_failed", errorClass: r.reason });
       else if (r.value === "sent" || r.value === "dropped") n++;
     }
     return n;
@@ -422,7 +425,7 @@ async function inParallel<T>(
 
 /** Delivers `rows` in parallel inside `LOGOUT_DELIVERY_MS`. Answers the rows sent or dropped. */
 const deliverRows = (config: ResolvedConfig, rows: OAuthLogoutRow[]) =>
-  inParallel(rows, (row, deadline) => deliverRow(config, row, deadline));
+  inParallel(config.observe, rows, (row, deadline) => deliverRow(config, row, deadline));
 
 /**
  * Delivers the due outbox rows of `userId`, at most `LOGOUT_REQUEST_MAX`.
@@ -442,10 +445,7 @@ export async function deliverLogouts(config: ResolvedConfig, userId: string): Pr
     );
     if (due.length > 0) await deliverRows(config, due);
   } catch (e) {
-    console.error(
-      "authtempo: the back-channel logout delivery failed",
-      e instanceof Error ? e.name : typeof e,
-    );
+    config.observe.emit({ name: "oauth.logout_delivery_failed", errorClass: e });
   }
 }
 
@@ -556,7 +556,7 @@ export async function deliverDueLogouts(
     if (ready.length === 0) continue;
     // The posts are calls that the storage counter does not see.
     meter.add(ready.length);
-    n += await inParallel(ready, (c, deadline) => postClaimed(config, c, deadline));
+    n += await inParallel(config.observe, ready, (c, deadline) => postClaimed(config, c, deadline));
     meter.step(ready.length);
   }
   return n;

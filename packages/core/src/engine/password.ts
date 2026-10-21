@@ -1341,7 +1341,7 @@ function applyReset(
     // commits first leaves the `email` identity of a gone user. That row
     // locks the address out of every mailbox sign-up. The hold also takes
     // the user row before the password row, the lock order of every reset.
-    if (gatedRow) await holdUser(tx, user.id);
+    if (gatedRow) await holdUser(config.observe, tx, user.id);
     if (minted) await tx.create("user", minted);
     // The new password row before any session delete. A password sign-in
     // in flight re-checks its row by id and by the hash it verified as its
@@ -1520,7 +1520,7 @@ export async function changePassword(
       // order of a reset (plan 12a Task 11). A first password of a deleted
       // user must not stay. Not for an unverified user: a claim may verify
       // that row now (sessions-claim.test.ts, re-review finding B).
-      if (user.emailVerified) await holdUser(tx, user.id);
+      if (user.emailVerified) await holdUser(config.observe, tx, user.id);
       if (row) {
         // Conditional on the hash this call verified, so two changes do not
         // both win. Zero rows throws, so the deletes above are undone.

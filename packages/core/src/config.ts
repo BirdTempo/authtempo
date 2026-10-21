@@ -60,6 +60,7 @@ import { defaultTotpPage, type TotpChallengePageInput } from "./http/totp-page.j
 import { createMemoryLimiter } from "./limiter/memory.js";
 import type { LimiterPort, LimitWindow } from "./limiter/port.js";
 import { type ResolvedObserve, resolveObserve } from "./observe/config.js";
+import { writeConstructionLine } from "./observe/default-output.js";
 import { createDefaultObserver, createObserver, type Observer } from "./observe/observer.js";
 import type { ObserveConfig } from "./observe/port.js";
 import { type Clock, systemClock } from "./primitives/clock.js";
@@ -79,6 +80,7 @@ import {
 } from "./primitives/keyring.js";
 import { isResourceUrl } from "./primitives/resource.js";
 import { hasControlChar } from "./primitives/text.js";
+import { secretParts } from "./redact.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "./seams/password-hash.js";
@@ -1354,7 +1356,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     ),
     observe: observeConfig
       ? createObserver(observeConfig, { clock, hashSecret: () => currentSecret(keyring) })
-      : createDefaultObserver(),
+      : createDefaultObserver({ clock, secrets: secretValues(keyring) }),
     observeConfig,
     configKeys: configKeyPaths(input),
   };
@@ -1415,12 +1417,20 @@ const SECRET_MIN_LENGTH = 32;
  * entropy rule refuses only the current value: a weak old version gets one
  * warning line, because a refusal would block the move away from it.
  */
+/** Each value of the keyring and the parts of it that a driver can print: the scrub list of the default output. */
+function secretValues(keyring: Keyring): ReadonlySet<string> {
+  const values = new Set<string>();
+  for (const version of keyring.versions)
+    for (const part of secretParts(keyring.valueOf(version) ?? "")) values.add(part);
+  return values;
+}
+
 function resolveSecrets(secret: unknown, secrets: unknown): Keyring {
   if (secret === undefined && secrets === undefined)
     throw new ConfigError("secret or secrets is required");
   if (secret !== undefined && typeof secret !== "string")
     throw new ConfigError("secret must be a string");
-  const entries: Array<SecretVersion & { path: string }> = [];
+  const entries: Array<SecretVersion & { path: string; index: number | null }> = [];
   if (secrets !== undefined) {
     if (!Array.isArray(secrets) || secrets.length < 1)
       throw new ConfigError("secrets must be a list of 1 or more { version, value } entries");
@@ -1442,7 +1452,7 @@ function resolveSecrets(secret: unknown, secrets: unknown): Keyring {
           `secrets[${i}].version must be an integer from 1 to ${SECRET_VERSION_MAX}`,
         );
       if (typeof value !== "string") throw new ConfigError(`secrets[${i}].value must be a string`);
-      entries.push({ version, value, path: `secrets[${i}]` });
+      entries.push({ version, value, path: `secrets[${i}]`, index: i });
     }
   }
   if (secret !== undefined) {
@@ -1451,7 +1461,7 @@ function resolveSecrets(secret: unknown, secrets: unknown): Keyring {
       throw new ConfigError(
         "secret and secrets version 1 hold different values; give the old secret once, as version 1",
       );
-    if (!one) entries.push({ version: 1, value: secret, path: "secret" });
+    if (!one) entries.push({ version: 1, value: secret, path: "secret", index: null });
   }
   const seen = new Set<number>();
   for (const e of entries) {
@@ -1475,8 +1485,9 @@ function resolveSecrets(secret: unknown, secrets: unknown): Keyring {
         `${e.path} has an estimated ${bits} bits of entropy; at least ${ENTROPY_REFUSE_BITS} are required. Make a new one with 32 random bytes, for example: openssl rand -base64 32`,
       );
     if (bits < ENTROPY_WARN_BITS)
-      console.warn(
-        `authtempo: ${e.path} has an estimated ${bits} bits of entropy; ${ENTROPY_WARN_BITS} or more is recommended`,
+      writeConstructionLine(
+        { name: "secret.low_entropy", bits, ...(e.index === null ? {} : { secretIndex: e.index }) },
+        new Set(entries.flatMap((x) => secretParts(x.value))),
       );
   }
   return createKeyring(entries.map(({ version, value }) => ({ version, value })));

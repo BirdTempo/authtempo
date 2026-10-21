@@ -1,6 +1,5 @@
 import type { MailMessage, ResolvedConfig } from "../config.js";
 import { isIpLiteral } from "../limiter/ip-key.js";
-import { appErrorName } from "../primitives/app-error.js";
 
 /**
  * The credential-change notices (plan 12a, spec 8.15; ASVS 5.0.0 6.3.7).
@@ -101,6 +100,6 @@ export async function sendNotice(
     // To the user's address, whatever the builder wrote.
     await config.mail.send({ ...message, to: input.email });
   } catch (e) {
-    console.error("authtempo: notice mail failed", input.event, appErrorName(e));
+    config.observe.emit({ name: "notice.mail_failed", event: input.event, errorName: e });
   }
 }

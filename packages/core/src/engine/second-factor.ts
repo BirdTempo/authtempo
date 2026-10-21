@@ -1,5 +1,6 @@
 import type { ResolvedConfig, ResolvedTotp } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
+import type { Observer } from "../observe/observer.js";
 import { constantTimeEqual, hmacSha256Hex, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
@@ -95,7 +96,7 @@ export async function spendBackupCode(
     if (!current) return null;
     // The row's version keys the compare (plan 12b). A spend writes the
     // codes only: the codes left keep the version that keyed them.
-    const key = hashSecretFor(config.keyring, current.secretVersion, current.id);
+    const key = hashSecretFor(config.observe, config.keyring, current.secretVersion, current.id);
     const candidate = await backupCodeHash(key.secret, current.id, typed);
     let found = -1;
     current.backupCodes.forEach((hash, i) => {
@@ -117,7 +118,7 @@ export async function spendBackupCode(
       { field: "id", op: "eq", value: current.id },
     ]);
   }
-  console.error("authtempo: backup code spend gave up", row.id);
+  config.observe.emit({ name: "backup_code.spend_gave_up", rowId: row.id });
   return null;
 }
 
@@ -156,7 +157,7 @@ export async function replaceBackupCodes(
       { field: "id", op: "eq", value: current.id },
     ]);
   }
-  console.error("authtempo: backup code replacement gave up", row.id);
+  config.observe.emit({ name: "backup_code.replace_gave_up", rowId: row.id });
   return fail("conflict");
 }
 
@@ -328,7 +329,7 @@ export async function removeMethod(
  * count of factor rows it deleted.
  */
 export function disableSecondFactor(config: ResolvedConfig, userId: string): Promise<number> {
-  return config.storage.transaction((tx) => disableSecondFactorIn(tx, userId));
+  return config.storage.transaction((tx) => disableSecondFactorIn(config.observe, tx, userId));
 }
 
 /**
@@ -340,8 +341,12 @@ export function disableSecondFactor(config: ResolvedConfig, userId: string): Pro
  * (plan 12f Task 9 review m1). The hold is one read and one update, then
  * four delete statements; the answer is the count of factor rows deleted.
  */
-export async function disableSecondFactorIn(tx: StorageAdapter, userId: string): Promise<number> {
-  await holdUser(tx, userId);
+export async function disableSecondFactorIn(
+  observe: Observer,
+  tx: StorageAdapter,
+  userId: string,
+): Promise<number> {
+  await holdUser(observe, tx, userId);
   await tx.delete("totp", [{ field: "userId", op: "eq", value: userId }]);
   const n = await tx.delete("secondFactor", [{ field: "userId", op: "eq", value: userId }]);
   await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: userId }]);

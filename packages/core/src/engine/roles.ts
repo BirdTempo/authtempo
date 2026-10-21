@@ -1,5 +1,6 @@
 import { isSubset, type Statements, statementFault, union } from "../access.js";
 import type { ResolvedConfig } from "../config.js";
+import type { Observer } from "../observe/observer.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { OrganizationRoleRow, UserRow } from "../schema.js";
@@ -41,10 +42,14 @@ function scope(config: ResolvedConfig): Scope | null {
 }
 
 /** The summary of a row with a good shape, or null after the one warn line of rule 7. */
-function summaryOf(o: ResolvedOrganizations, row: OrganizationRoleRow): RoleSummary | null {
+function summaryOf(
+  observe: Observer,
+  o: ResolvedOrganizations,
+  row: OrganizationRoleRow,
+): RoleSummary | null {
   const def = roleRowDef(o, row);
   if (def === null) {
-    console.warn(`authtempo: role row invalid ${row.id}`);
+    observe.emit({ name: "role.row_invalid", rowId: row.id });
     return null;
   }
   return {
@@ -137,7 +142,7 @@ export async function listRoles(
       limit: LIST_MAX,
     },
   );
-  return ok(rows.flatMap((row) => summaryOf(sc.o, row) ?? []));
+  return ok(rows.flatMap((row) => summaryOf(config.observe, sc.o, row) ?? []));
 }
 
 /** One stored role by name. Needs `ac:read`. An unknown name or a row with a bad shape answers `not_found`. */
@@ -151,7 +156,7 @@ export async function getRole(
   if (!s.ok) return s;
   if (!oneRoleName(input.name)) return fail("invalid_body");
   const row = await findRole(config, input.organizationId, input.name);
-  const summary = row ? summaryOf(sc.o, row) : null;
+  const summary = row ? summaryOf(config.observe, sc.o, row) : null;
   return summary ? ok(summary) : fail("not_found");
 }
 

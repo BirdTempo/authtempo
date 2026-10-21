@@ -178,12 +178,12 @@ export async function rewrapSecrets(
   // new setup changed it first. A later pass reads it again.
   const failedRow = (model: Sealed, row: { id: string; secretVersion: number }) => {
     counts.failed++;
-    console.error(
-      "authtempo: a sealed value did not move to the current secret; it did not open, or a concurrent write changed it first",
+    config.observe.emit({
+      name: "secrets.rewrap_failed",
       model,
-      row.id,
-      `version ${row.secretVersion}`,
-    );
+      rowId: row.id,
+      version: row.secretVersion,
+    });
   };
   const now = config.clock.now();
   const startTable = SEALED.find((t) => t === cursor?.[1]) ?? SEALED[0];

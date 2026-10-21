@@ -1,6 +1,8 @@
 import { type AuthConfig, type MailMessage, resolveConfig } from "../src/config.js";
 import { type VerifySteps, verifySteps } from "../src/engine/create-steps.js";
 import type { UserVerifyVia } from "../src/engine/hooks.js";
+import { createDefaultObserver } from "../src/observe/observer.js";
+import { systemClock } from "../src/primitives/clock.js";
 import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
@@ -107,7 +109,13 @@ export async function seedPlatform(auth: ReturnType<typeof makeAuth>) {
  */
 export function noVerifyHooks(via: UserVerifyVia): VerifySteps {
   return verifySteps(
-    { hooks: { organization: {}, session: {}, user: {}, identity: {}, operator: {} } },
+    {
+      hooks: { organization: {}, session: {}, user: {}, identity: {}, operator: {} },
+      observe: DEFAULT_OBSERVE,
+    },
     via,
   );
 }
+
+/** The observer of a config with no `observe`, for a test that calls an engine part directly: it writes the log lines of today (plan 12h). */
+export const DEFAULT_OBSERVE = createDefaultObserver({ clock: systemClock, secrets: new Set() });

@@ -1,7 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
-import { appErrorName } from "../primitives/app-error.js";
+import type { Observer } from "../observe/observer.js";
 import {
   constantTimeEqual,
   randomBase64Url,
@@ -123,7 +123,9 @@ async function resolveProvider(
   config: ResolvedConfig,
   entry: ConfiguredProvider,
 ): Promise<Provider | null> {
-  return entry.kind === "oidc-discovery" ? entry.resolve(config.social.fetch) : entry;
+  return entry.kind === "oidc-discovery"
+    ? entry.resolve(config.social.fetch, config.observe)
+    : entry;
 }
 
 function callbackUrl(config: ResolvedConfig, provider: { name: string }): string {
@@ -291,7 +293,7 @@ export async function completeSocial(
     provider.kind === "oidc"
       ? await idTokenProfile(config, provider, token, data.nonceHash, input.user ?? undefined, now)
       : await userinfoProfile(config, provider, token);
-  const bounded = profile ? boundProfile(profile, provider.name) : null;
+  const bounded = profile ? boundProfile(config.observe, profile, provider.name) : null;
   if (!bounded) return fail("oauth_failed");
   // A link (plan 12a): no session opens, and no sign-in gate applies.
   if (link)
@@ -429,7 +431,7 @@ async function completeLink(
   try {
     const linked = await hookGuard(() =>
       config.storage.transaction(async (tx): Promise<Result<true>> => {
-        await runBefore("identity.beforeLink", config.hooks.identity.beforeLink, {
+        await runBefore(config.observe, "identity.beforeLink", config.hooks.identity.beforeLink, {
           user,
           identity,
           via: "link",
@@ -465,6 +467,7 @@ async function completeLink(
     throw err;
   }
   await runAfter(
+    config.observe,
     "identity.afterLink",
     config.hooks.identity.afterLink,
     { user, identity, via: "link" },
@@ -497,11 +500,11 @@ async function exchangeCode(
   try {
     clientSecret = await provider.clientSecret({ jwt: config.jwt, now });
   } catch (e) {
-    console.error(
-      "authtempo: social client secret failed",
-      provider.name,
-      e instanceof Error ? e.name : typeof e,
-    );
+    config.observe.emit({
+      name: "social.client_secret_failed",
+      provider: provider.name,
+      errorClass: e,
+    });
     return null;
   }
   let res: Response;
@@ -520,15 +523,19 @@ async function exchangeCode(
       }),
     });
   } catch (e) {
-    console.error(
-      "authtempo: social token request failed",
-      provider.name,
-      e instanceof Error ? e.name : typeof e,
-    );
+    config.observe.emit({
+      name: "social.token_request_failed",
+      provider: provider.name,
+      errorClass: e,
+    });
     return null;
   }
   if (!res.ok) {
-    console.error("authtempo: social token endpoint answered", provider.name, res.status);
+    config.observe.emit({
+      name: "social.token_status",
+      provider: provider.name,
+      status: res.status,
+    });
     return null;
   }
   let body: unknown;
@@ -541,7 +548,7 @@ async function exchangeCode(
   const token = (body as Record<string, unknown> | null)?.[field];
   if (typeof token === "string" && token.length > 0) return token;
   // GitHub answers a bad code with 200 and an `error` field. Log no value of the body.
-  console.error("authtempo: social token answer has no token", provider.name);
+  config.observe.emit({ name: "social.token_missing", provider: provider.name });
   return null;
 }
 
@@ -564,16 +571,16 @@ async function idTokenProfile(
       now,
     });
   } catch (e) {
-    console.error(
-      "authtempo: social id token rejected",
-      provider.name,
-      e instanceof Error ? e.name : typeof e,
-    );
+    config.observe.emit({
+      name: "social.id_token_rejected",
+      provider: provider.name,
+      errorClass: e,
+    });
     return null;
   }
   const nonce = claims.nonce;
   if (typeof nonce !== "string" || !constantTimeEqual(await sha256Hex(nonce), nonceHash)) {
-    console.error("authtempo: social nonce mismatch", provider.name);
+    config.observe.emit({ name: "social.nonce_mismatch", provider: provider.name });
     return null;
   }
   return provider.profile(claims, { user });
@@ -617,7 +624,7 @@ async function userinfoProfile(
       image: stringClaim(a, "image"),
     };
   } catch (e) {
-    console.error("authtempo: social user info failed", provider.name, appErrorName(e));
+    config.observe.emit({ name: "social.user_info_failed", provider: provider.name, errorName: e });
     return null;
   }
 }
@@ -629,7 +636,11 @@ async function userinfoProfile(
  * person can still sign in. The image must be an `https:` URL, so a
  * `javascript:` or `data:` value never reaches the user row.
  */
-function boundProfile(profile: SocialProfile, providerName: string): SocialProfile | null {
+function boundProfile(
+  observe: Observer,
+  profile: SocialProfile,
+  providerName: string,
+): SocialProfile | null {
   const subject = profile.subject;
   if (
     subject.length < 1 ||
@@ -637,7 +648,7 @@ function boundProfile(profile: SocialProfile, providerName: string): SocialProfi
     hasControlChar(subject) ||
     subject.trim().length === 0
   ) {
-    console.error("authtempo: social user info has a bad subject", providerName);
+    observe.emit({ name: "social.bad_subject", provider: providerName });
     return null;
   }
   const { name, image } = profile;

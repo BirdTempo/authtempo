@@ -59,12 +59,15 @@ export type FieldKind =
   | "count"
   | "durationMs"
   | "status"
-  | "hash";
+  | "hash"
+  | "clientRef";
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
 const IDENTIFIER_RE = /^[A-Za-z_$][A-Za-z0-9_$]{0,63}$/;
 const HASH_RE = /^[0-9a-f]{32}$/;
+/** A `cl_` id as it is, or `cimd:` and 32 hex of a metadata document URL (spec 31 item 8). */
+const CLIENT_REF_RE = /^(cl_[A-Za-z0-9_-]{1,64}|cimd:[0-9a-f]{32})$/;
 /** The `typeof` names that `appErrorName` gives for a thrown value that is no Error. */
 const TYPEOF_NAMES = new Set([
   "bigint",
@@ -113,7 +116,20 @@ export const FIELD_KINDS: Readonly<Record<FieldKind, (value: unknown) => unknown
     durationMs: whole,
     status: whole,
     hash: matches(HASH_RE),
+    clientRef: matches(CLIENT_REF_RE),
   });
+
+/**
+ * The reference of a client in an event and a log line (spec 31 item 8): a
+ * `cl_` id as it is, else `cimd:` and the first 32 hex of the SHA-256 of the
+ * metadata document URL. An event never holds the URL.
+ */
+export async function clientRef(clientId: string): Promise<string> {
+  if (clientId.startsWith("cl_")) return clientId;
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(clientId));
+  const hex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+  return `cimd:${hex.slice(0, 32)}`;
+}
 
 /** The HKDF info of each opt-in keyed hash (spec 31 item 8). Task 2 reads them here. */
 export const KEYED_HASH_INFO = Object.freeze({

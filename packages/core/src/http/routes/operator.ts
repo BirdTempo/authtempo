@@ -17,6 +17,7 @@ import {
   sessionFromRequest,
 } from "../../engine/sessions.js";
 import { ipKey } from "../../limiter/ip-key.js";
+import type { Observer } from "../../observe/observer.js";
 import {
   OPERATOR_PER_IP,
   OPERATOR_SECRETS_PER_IP,
@@ -51,7 +52,7 @@ import type { Route, RouteContext } from "../router.js";
 import { unauthorized } from "../session-route.js";
 
 /** Why an operator route answers 401: the reason code of its log line. */
-type UnauthorizedReason =
+export type UnauthorizedReason =
   | "secret_mismatch"
   | "secret_and_session"
   | "secret_not_accepted"
@@ -62,8 +63,8 @@ type UnauthorizedReason =
  * guard refusals: the route and the reason code. The line holds no secret,
  * no header, no IP, and no address.
  */
-function logUnauthorized(route: string, reason: UnauthorizedReason): void {
-  console.error("authtempo: operator route unauthorized", route, reason);
+function logUnauthorized(observe: Observer, route: string, reason: UnauthorizedReason): void {
+  observe.emit({ name: "operator.route_unauthorized", route, reason });
 }
 
 /**
@@ -81,7 +82,7 @@ async function operatorAuthorized(
 ): Promise<Response | null> {
   const entry = await matchOperatorSecret(config, ctx.request);
   if (entry === null) {
-    logUnauthorized(route, "secret_mismatch");
+    logUnauthorized(ctx.config.observe, route, "secret_mismatch");
     return json({ error: "unauthorized" }, 401);
   }
   if (scope === null) return null;
@@ -150,8 +151,8 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
   const userAgent = (ctx: RouteContext) => ctx.request.headers.get("user-agent");
   const withSecret = (ctx: RouteContext) =>
     /^Operator\s/i.test(ctx.request.headers.get("authorization") ?? "");
-  const refuse = (route: string, reason: UnauthorizedReason) => {
-    logUnauthorized(route, reason);
+  const refuse = (ctx: RouteContext, route: string, reason: UnauthorizedReason) => {
+    logUnauthorized(ctx.config.observe, route, reason);
     return unauthorized();
   };
   return [
@@ -162,8 +163,10 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const operator = await sessionFromRequest(config, ctx.request);
         const token = readSessionToken(config, ctx.request);
-        if (withSecret(ctx)) return refuse("POST /operator/impersonate", "secret_not_accepted");
-        if (!operator || token === null) return refuse("POST /operator/impersonate", "no_session");
+        if (withSecret(ctx))
+          return refuse(ctx, "POST /operator/impersonate", "secret_not_accepted");
+        if (!operator || token === null)
+          return refuse(ctx, "POST /operator/impersonate", "no_session");
         const body = await readJson(ctx.request, impersonateBody);
         if (!body.ok) return respond(body);
         const r = await startImpersonation(
@@ -199,8 +202,8 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const resolved = await sessionFromRequest(config, ctx.request);
         if (withSecret(ctx))
-          return refuse("POST /operator/impersonate/stop", "secret_not_accepted");
-        if (!resolved) return refuse("POST /operator/impersonate/stop", "no_session");
+          return refuse(ctx, "POST /operator/impersonate/stop", "secret_not_accepted");
+        if (!resolved) return refuse(ctx, "POST /operator/impersonate/stop", "no_session");
         const body = await readStopBody(ctx.request);
         if (body === null) return json({ error: "invalid_body" }, 400);
         const r = await stopImpersonation(config, {
@@ -384,12 +387,12 @@ export async function readOperatorActor(
     if (!(await config.limiter.allow(`operator-users:ip:${ipKey(ctx.ip)}`, OPERATOR_USERS_PER_IP)))
       return fail("rate_limited");
     if (readSessionToken(config, request) !== null) {
-      logUnauthorized(route, "secret_and_session");
+      logUnauthorized(ctx.config.observe, route, "secret_and_session");
       return fail("unauthorized");
     }
     const entry = await matchOperatorSecret(config, request);
     if (entry === null) {
-      logUnauthorized(route, "secret_mismatch");
+      logUnauthorized(ctx.config.observe, route, "secret_mismatch");
       return fail("unauthorized");
     }
     if (
@@ -403,7 +406,7 @@ export async function readOperatorActor(
   }
   const resolved = await sessionFromRequest(config, request);
   if (!resolved) {
-    logUnauthorized(route, "no_session");
+    logUnauthorized(ctx.config.observe, route, "no_session");
     return fail("unauthorized");
   }
   const user = await requireOperatorUser(config, resolved, route);

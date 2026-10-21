@@ -196,7 +196,7 @@ export async function createTeam(
         );
         if (held.length >= limit) return fail("team_limit");
       }
-      await runBefore("organization.beforeCreateTeam", hooks.beforeCreateTeam, {
+      await runBefore(config.observe, "organization.beforeCreateTeam", hooks.beforeCreateTeam, {
         organization,
         team,
         user: input.user,
@@ -207,6 +207,7 @@ export async function createTeam(
   );
   if (!written.ok) return written;
   await runAfter(
+    config.observe,
     "organization.afterCreateTeam",
     hooks.afterCreateTeam,
     { organization, team, user: input.user },
@@ -231,7 +232,7 @@ export async function updateTeam(
   const hooks = config.hooks.organization;
   const written = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
-      await runBefore("organization.beforeUpdateTeam", hooks.beforeUpdateTeam, {
+      await runBefore(config.observe, "organization.beforeUpdateTeam", hooks.beforeUpdateTeam, {
         organization,
         team: publicTeam(team),
         patch: { name: input.name },
@@ -248,6 +249,7 @@ export async function updateTeam(
   if (!written.ok) return written;
   const stored = publicTeam({ ...team, name: input.name, updatedAt: now });
   await runAfter(
+    config.observe,
     "organization.afterUpdateTeam",
     hooks.afterUpdateTeam,
     { organization, team: stored, user: input.user },
@@ -325,7 +327,7 @@ export async function deleteTeam(
           if ((await tx.findMany("session", byTeam)).some((x) => !ids.includes(x.id)))
             return ok(false);
         }
-        await runBefore("organization.beforeDeleteTeam", hooks.beforeDeleteTeam, {
+        await runBefore(config.observe, "organization.beforeDeleteTeam", hooks.beforeDeleteTeam, {
           organization,
           team: summary,
           user: input.user,
@@ -360,6 +362,7 @@ export async function deleteTeam(
   // Each round lost to a set: the person tries again.
   if (!deleted.value) return fail("conflict");
   await runAfter(
+    config.observe,
     "organization.afterDeleteTeam",
     hooks.afterDeleteTeam,
     { organization, team: summary, user: input.user },
@@ -482,7 +485,7 @@ export async function addTeamMember(
       config.storage.transaction(async (tx): Promise<Result<true>> => {
         // The added user first, in the lock order of user-hold.ts, for the reason of the member
         // add (plan 12a Task 11). The hold writes no new value, so a refusal below changes nothing.
-        await holdUser(tx, input.userId);
+        await holdUser(config.observe, tx, input.userId);
         // Zero rows: a delete ran after the read. A zero-row update writes nothing.
         if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
         // The member row again, after the hold: a member removal holds the same user (ruling 43).
@@ -510,13 +513,18 @@ export async function addTeamMember(
           );
           if (held.length >= limit) return fail("team_member_limit");
         }
-        await runBefore("organization.beforeAddTeamMember", hooks.beforeAddTeamMember, {
-          organization,
-          team: summary,
-          teamMember: { teamId: team.id, userId: input.userId },
-          memberUser,
-          by: input.user,
-        });
+        await runBefore(
+          config.observe,
+          "organization.beforeAddTeamMember",
+          hooks.beforeAddTeamMember,
+          {
+            organization,
+            team: summary,
+            teamMember: { teamId: team.id, userId: input.userId },
+            memberUser,
+            by: input.user,
+          },
+        );
         await tx.create("teamMember", row);
         await userStays(tx, input.userId);
         return ok(true);
@@ -531,6 +539,7 @@ export async function addTeamMember(
   }
   const added = teamMemberSummary(row, memberUser);
   await runAfter(
+    config.observe,
     "organization.afterAddTeamMember",
     hooks.afterAddTeamMember,
     { organization, team: summary, teamMember: added, memberUser, by: input.user },
@@ -606,7 +615,12 @@ export async function removeTeamMember(
       // The lock of setActiveTeam: a set that holds it commits first, and the session update
       // below sees its active team (ruling 43). Zero rows: a delete ran after the read.
       if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
-      await runBefore("organization.beforeRemoveTeamMember", hooks.beforeRemoveTeamMember, event);
+      await runBefore(
+        config.observe,
+        "organization.beforeRemoveTeamMember",
+        hooks.beforeRemoveTeamMember,
+        event,
+      );
       if ((await tx.delete("teamMember", [{ field: "id", op: "eq", value: row.id }])) === 0)
         return fail("not_found");
       // An active team needs its membership, as setActiveTeam checks.
@@ -622,7 +636,13 @@ export async function removeTeamMember(
     }),
   );
   if (!removed.ok) return removed;
-  await runAfter("organization.afterRemoveTeamMember", hooks.afterRemoveTeamMember, event, row.id);
+  await runAfter(
+    config.observe,
+    "organization.afterRemoveTeamMember",
+    hooks.afterRemoveTeamMember,
+    event,
+    row.id,
+  );
   return ok({ ok: true });
 }
 

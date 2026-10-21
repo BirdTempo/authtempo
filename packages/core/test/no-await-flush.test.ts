@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAuth } from "../src/create-auth.js";
 import type { Observer } from "../src/observe/observer.js";
+import type { AuthEvent } from "../src/observe/port.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { APP_ORIGIN, BASE_URL, post } from "./helpers.js";
 
@@ -135,15 +136,16 @@ describe("no flow waits for a sink (plan 12h Task 2, Global Constraints)", () =>
     });
   });
 
-  it("keeps the answer when an unbound ctx.waitUntil throws, and logs one line", async () => {
+  it("keeps the answer when an unbound ctx.waitUntil throws, and the sink gets one fault event", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const batches: AuthEvent[][] = [];
     const auth = createAuth({
       baseURL: BASE_URL,
       secret: "0123456789abcdef0123456789abcdef",
       trustedOrigins: [APP_ORIGIN],
       storage: createMemoryAdapter(),
       mail: { send: async () => {} },
-      observe: { sink: { write: () => {} } },
+      observe: { sink: { write: (batch) => void batches.push([...batch]) } },
     });
     /** A host context whose method throws when it is called with no receiver, as on Workers. */
     class Context {
@@ -157,9 +159,12 @@ describe("no flow waits for a sink (plan 12h Task 2, Global Constraints)", () =>
     const res = await auth.handle(request, { waitUntil: ctx.waitUntil });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ sent: true });
-    expect(error.mock.calls).toEqual([
-      ["authtempo: waitUntil threw; the flush has no hook", "TypeError"],
-    ]);
+    // With a sink, core writes no console line (deviation 7 of plan 12h): the event goes to the sink.
+    expect(error).not.toHaveBeenCalled();
+    await auth.observe.flush();
+    const faults = batches.flat().filter((e) => e.name === "observe.wait_until_threw");
+    expect(faults).toHaveLength(1);
+    expect(faults[0]).toMatchObject({ level: "error", errorName: "TypeError" });
     error.mockRestore();
   });
 });

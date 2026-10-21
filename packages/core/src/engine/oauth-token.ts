@@ -312,11 +312,11 @@ async function issueTokens(config: ResolvedConfig, g: Grant): Promise<OAuthResul
       } catch (e) {
         // The row was never answered, so no client holds its token; the sweep
         // deletes it at its `expiresAt`. The answer stays `invalid_grant`.
-        console.error(
-          "authtempo: the delete of a refresh row in a revoked grant failed",
-          fresh.id,
-          e instanceof Error ? e.name : typeof e,
-        );
+        config.observe.emit({
+          name: "oauth.refresh_delete_failed",
+          rowId: fresh.id,
+          errorClass: e,
+        });
       }
       return oauthFail("invalid_grant");
     }

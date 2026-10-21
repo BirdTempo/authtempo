@@ -1,3 +1,4 @@
+import type { Observer } from "../observe/observer.js";
 import {
   isHttpsUrl,
   type OidcDiscovery,
@@ -79,9 +80,9 @@ export function oidcProvider(entry: OidcEntry): OidcProvider | OidcDiscovery {
   return {
     ...common,
     kind: "oidc-discovery",
-    async resolve(fetchFn) {
+    async resolve(fetchFn, observe) {
       if (kept) return kept;
-      const endpoints = await discover(entry.name, entry.issuer, fetchFn);
+      const endpoints = await discover(observe, entry.name, entry.issuer, fetchFn);
       if (endpoints) kept = build(endpoints);
       return kept;
     },
@@ -94,6 +95,7 @@ export function oidcProvider(entry: OidcEntry): OidcProvider | OidcDiscovery {
  * so a document from another tenant or another host is refused.
  */
 export async function discover(
+  observe: Observer,
   name: string,
   issuer: string,
   fetchFn: typeof fetch,
@@ -105,22 +107,18 @@ export async function discover(
       headers: { accept: "application/json" },
     });
   } catch (e) {
-    console.error(
-      "authtempo: oidc discovery request failed",
-      name,
-      e instanceof Error ? e.name : typeof e,
-    );
+    observe.emit({ name: "oidc.discovery_failed", provider: name, errorClass: e });
     return null;
   }
   if (!res.ok) {
-    console.error("authtempo: oidc discovery answered", name, res.status);
+    observe.emit({ name: "oidc.discovery_status", provider: name, status: res.status });
     return null;
   }
   let doc: unknown;
   try {
     doc = await res.json();
   } catch {
-    console.error("authtempo: oidc discovery is not JSON", name);
+    observe.emit({ name: "oidc.discovery_not_json", provider: name });
     return null;
   }
   const d = (typeof doc === "object" && doc !== null && !Array.isArray(doc) ? doc : {}) as Record<
@@ -128,14 +126,14 @@ export async function discover(
     unknown
   >;
   if (d.issuer !== issuer) {
-    console.error("authtempo: oidc discovery issuer mismatch", name);
+    observe.emit({ name: "oidc.issuer_mismatch", provider: name });
     return null;
   }
   const authorizeUrl = d.authorization_endpoint;
   const tokenUrl = d.token_endpoint;
   const jwksUrl = d.jwks_uri;
   if (!isHttpsUrl(authorizeUrl) || !isHttpsUrl(tokenUrl) || !isHttpsUrl(jwksUrl)) {
-    console.error("authtempo: oidc discovery lacks an endpoint", name);
+    observe.emit({ name: "oidc.endpoint_missing", provider: name });
     return null;
   }
   return { authorizeUrl, tokenUrl, jwksUrl };

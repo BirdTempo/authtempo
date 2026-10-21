@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../config.js";
+import type { Observer } from "../observe/observer.js";
 import { RETIRED_KEY_MS } from "../primitives/jwk.js";
 import type { VerificationRow } from "../schema.js";
 import { type Meter, meterOf } from "../storage/meter.js";
@@ -244,19 +245,27 @@ async function sweepLinks(
   return n;
 }
 
+/** The fault event of each last step: its log line names the step. */
+const SOFT_STEPS = {
+  link: "sweep.link_stopped",
+  outbox: "sweep.outbox_stopped",
+  "pending end": "sweep.pending_end_stopped",
+} as const;
+
 /**
  * The count of a last step, or 0 with one log line when the storage throws.
  * Each step stays inside its calls, but a storage error can still stop it.
  * The counts above stay, and the next sweep goes on.
  */
-async function softStep(name: string, step: Promise<number>): Promise<number> {
+async function softStep(
+  observe: Observer,
+  name: keyof typeof SOFT_STEPS,
+  step: Promise<number>,
+): Promise<number> {
   try {
     return await step;
   } catch (e) {
-    console.error(
-      `authtempo: the sweep ${name} step stopped`,
-      e instanceof Error ? e.name : typeof e,
-    );
+    observe.emit({ name: SOFT_STEPS[name], errorClass: e });
     return 0;
   }
 }
@@ -372,6 +381,7 @@ export async function sweepExpired(
   // one page for it (ruling 50 of plan 12f), so a backlog cannot hold it.
   const pending: VerificationRow[] = [];
   await softStep(
+    config.observe,
     "pending end",
     readPendingEnds(storage, meter, budget).then((rows) => pending.push(...rows)),
   );
@@ -384,10 +394,12 @@ export async function sweepExpired(
   // links of the sessions that ended become outbox rows, and the outbox
   // sends its due rows (plan 12e Task 16).
   const oauthSessionLinks = await softStep(
+    config.observe,
     "link",
     sweepLinks(storage, now, meter, budget - OUTBOX_SHARE),
   );
   const oauthLogouts = await softStep(
+    config.observe,
     "outbox",
     deliverDueLogouts(config, meter, budget - (pending.length > 0 ? PENDING_PAGE_RESERVE : 0)),
   );
@@ -395,6 +407,7 @@ export async function sweepExpired(
   // session: `bannedFor` for a ban, and the live role read of each operator
   // check for a revoke. So a logout, which reaches another party, comes first.
   const pendingSessions = await softStep(
+    config.observe,
     "pending end",
     endPendingRows(config, pending, meter, budget),
   );

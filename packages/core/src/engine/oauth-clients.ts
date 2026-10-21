@@ -1,14 +1,26 @@
 import type { ResolvedConfig, ResolvedOAuth } from "../config.js";
 import type { OAuthErrorCode } from "../errors.js";
 import { ipKey } from "../limiter/ip-key.js";
+import type { Observer } from "../observe/observer.js";
 import { constantTimeEqual, randomToken, sha256Hex } from "../primitives/crypto.js";
 import { FOREIGN_ALGS, keyFitsAlg } from "../primitives/foreign-jwk.js";
 import { HTTP_LOOPBACK, isIpLiteral, isLocalHost } from "../primitives/host.js";
 import { hasControlChar } from "../primitives/text.js";
+import { clientRef } from "../redact.js";
 import type { ClientAuthMethod, OAuthClientRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { newClientSecret } from "./oauth-client-secret.js";
 import { deleteFamilies, endFamilies, familyEnds } from "./oauth-family.js";
+import {
+  CIMD_MAX_BYTES,
+  CIMD_TYPES,
+  type CimdRule,
+  JWKS_MAX_BYTES,
+  JWKS_TYPES,
+  type MetadataMember,
+  notOfTypes,
+  overCap,
+} from "./oauth-refusals.js";
 import { BUILT_IN_SCOPES, type OAuthResult, oauthFail, oauthOk } from "./oauth-result.js";
 import { redirectSector } from "./oauth-subject.js";
 
@@ -31,8 +43,8 @@ const CL_KINDS: readonly OAuthClientRow["kind"][] = ["registered", "api"];
 const CLIENT_ID_RE = /^cl_[A-Za-z0-9_-]{43}$/;
 const REGISTER_PER_IP = { seconds: 3600, max: 10 };
 export const CIMD_TIMEOUT_MS = 10_000;
-/** -02 section 8.7 recommends 5 KB; 8 KB keeps a margin for a long jwks (plan 12e). */
-export const CIMD_MAX_BYTES = 8192;
+/** -02 section 8.7 recommends 5 KB; 8 KB keeps a margin for a long jwks (plan 12e). The value is in `oauth-refusals.ts`. */
+export { CIMD_MAX_BYTES };
 export const CIMD_CACHE_MS = 3_600_000;
 /** The documents one isolate keeps. The oldest goes first. */
 const CIMD_CACHE_MAX = 500;
@@ -90,18 +102,12 @@ const JWKS_CACHE_MS = 3_600_000;
  * soon, and a stranger's unknown kid cannot make core fetch on each request.
  */
 const JWKS_REREAD_MS = 30_000;
-/** The media type of a client metadata document (the CIMD draft). */
-const CIMD_TYPES: readonly string[] = ["application/json"];
 /**
  * The methods of a metadata document (-02 section 4.1): no method of a
  * shared secret, because a document cannot hold one. With `private_key_jwt`
  * the keys of the document make a confidential client.
  */
 const CIMD_AUTH_METHODS: readonly unknown[] = ["none", "private_key_jwt"];
-/** The read cap of a `jwks_uri` set: ten RSA keys with long members fit with a margin. */
-const JWKS_MAX_BYTES = 65_536;
-/** A key set may also come as the JWK Set type that RFC 7517 section 8.5 registers. */
-const JWKS_TYPES: readonly string[] = ["application/json", "application/jwk-set+json"];
 
 /**
  * The fields of schema version 11 for a public client with no secret (plan
@@ -322,7 +328,7 @@ function stringList(value: unknown, ok: (s: string) => boolean, max: number): st
 /** A read of client metadata: the fields and the members a document dropped, or the refusal and its member. */
 type MetadataRead =
   | { ok: true; fields: ClientFields; dropped: string[] }
-  | { ok: false; error: OAuthErrorCode; why: string };
+  | { ok: false; error: OAuthErrorCode; why: MetadataMember | CimdRule };
 
 /**
  * The grants of a document that core serves, in document order, once each,
@@ -372,8 +378,12 @@ function readClientMetadata(
   m: Record<string, unknown>,
   source: "register" | "create" | "cimd",
 ): MetadataRead {
-  const fail = (error: OAuthErrorCode, why: string): MetadataRead => ({ ok: false, error, why });
-  const meta = (why: string) => fail("invalid_client_metadata", why);
+  const fail = (error: OAuthErrorCode, why: MetadataMember | CimdRule): MetadataRead => ({
+    ok: false,
+    error,
+    why,
+  });
+  const meta = (why: MetadataMember | CimdRule) => fail("invalid_client_metadata", why);
   const oauth = config.oauth;
   if (!oauth) return fail("invalid_request", "oauth");
   const cimd = source === "cimd";
@@ -740,7 +750,7 @@ async function guardedJson(
   url: string,
   types: readonly string[],
   max: number,
-): Promise<{ doc: Record<string, unknown> } | { why: string }> {
+): Promise<{ doc: Record<string, unknown> } | { why: string; status?: number }> {
   if (!fetchFn) return { why: "no fetch" };
   const ctrl = new AbortController();
   // setTimeout, not AbortSignal.timeout: a test moves it with fake timers.
@@ -758,15 +768,15 @@ async function guardedJson(
     }
     if (res.status !== 200) {
       await res.body?.cancel().catch(() => {});
-      return { why: `status ${res.status}` };
+      return { why: "status", status: res.status };
     }
     const type = (res.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
     if (type === undefined || !types.includes(type)) {
       await res.body?.cancel().catch(() => {});
-      return { why: `not ${types.join(" or ")}` };
+      return { why: notOfTypes(types) };
     }
     const text = await readCapped(res, max, ctrl.signal);
-    if (text === null) return { why: `larger than ${max} bytes, not UTF-8, or not in time` };
+    if (text === null) return { why: overCap(max) };
     let doc: unknown;
     try {
       doc = JSON.parse(text);
@@ -786,7 +796,7 @@ async function guardedJson(
  * `client_secret_expires_at`, and no method of a secret. The third rule of
  * 4.1, public keys only, is `clientKey` in `readClientMetadata`.
  */
-function cimdCredentialRule(m: Record<string, unknown>): string | null {
+function cimdCredentialRule(m: Record<string, unknown>): CimdRule | null {
   if (m.client_secret !== undefined) return "client_secret is present (-02 section 4.1)";
   if (m.client_secret_expires_at !== undefined)
     return "client_secret_expires_at is present (-02 section 4.1)";
@@ -807,18 +817,22 @@ function cimdCredentialRule(m: Record<string, unknown>): string | null {
  * warning line with its name, never its value.
  */
 export async function fetchCimd(config: ResolvedConfig, url: string): Promise<ClientFields | null> {
-  const refuse = (why: string) => {
-    console.error("authtempo: client metadata document refused", why);
+  const refuse = (why: string, status?: number) => {
+    config.observe.emit({
+      name: "oauth.client_metadata_refused",
+      why,
+      ...(status === undefined ? {} : { status }),
+    });
     return null;
   };
   const got = await guardedJson(config.oauth?.fetch ?? null, url, CIMD_TYPES, CIMD_MAX_BYTES);
-  if ("why" in got) return refuse(got.why);
+  if ("why" in got) return refuse(got.why, got.status);
   const d = got.doc;
   if (d.client_id !== url) return refuse("client_id is not the document URL");
   const read = readClientMetadata(config, d, "cimd");
   if (!read.ok) return refuse(read.why);
   for (const member of read.dropped)
-    console.warn("authtempo: client metadata member dropped", member);
+    config.observe.emit({ name: "oauth.client_metadata_member_dropped", member });
   return read.fields;
 }
 
@@ -829,15 +843,20 @@ export async function fetchCimd(config: ResolvedConfig, url: string): Promise<Cl
  * is left out, so one odd key does not break the client.
  */
 async function fetchJwks(
+  observe: Observer,
   fetchFn: typeof fetch | null,
   url: string,
 ): Promise<Record<string, unknown>[] | null> {
-  const refuse = (why: string) => {
-    console.error("authtempo: client key set refused", why);
+  const refuse = (why: string, status?: number) => {
+    observe.emit({
+      name: "oauth.client_key_set_refused",
+      why,
+      ...(status === undefined ? {} : { status }),
+    });
     return null;
   };
   const got = await guardedJson(fetchFn, url, JWKS_TYPES, JWKS_MAX_BYTES);
-  if ("why" in got) return refuse(got.why);
+  if ("why" in got) return refuse(got.why, got.status);
   const raw = got.doc.keys;
   if (!Array.isArray(raw)) return refuse("no keys array");
   const keys = raw.filter(clientKey);
@@ -875,7 +894,7 @@ export async function fetchClientJwks(
     const known = want.kid === null || live.keys.some((k) => k.kid === want.kid);
     if (known || now - live.readAt < JWKS_REREAD_MS) return live.keys;
   }
-  const keys = await fetchJwks(oauth.fetch, url);
+  const keys = await fetchJwks(config.observe, oauth.fetch, url);
   if (keys) {
     keepJwks(oauth, url, { keys, until: now + JWKS_CACHE_MS, readAt: now });
     return keys;
@@ -974,12 +993,11 @@ async function refreshCimdRow(
   });
   await endFamilies(config, ends);
   if (done?.from)
-    console.error(
-      "authtempo: client metadata document dropped its client auth; refresh tokens and device codes revoked",
-      url,
-      done.from,
-      "none",
-    );
+    config.observe.emit({
+      name: "oauth.client_auth_dropped",
+      clientRef: await clientRef(url),
+      from: done.from,
+    });
   return done?.row ?? null;
 }
 

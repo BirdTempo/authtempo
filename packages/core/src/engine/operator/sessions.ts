@@ -172,7 +172,7 @@ export async function endUserSessions(
     async (tx, draft, ends) => {
       const meter = meterOf(tx, fixed);
       // The user row first: the lock order of every account write (user-hold.ts).
-      await holdUser(tx, userId);
+      await holdUser(config.observe, tx, userId);
       meter.step(STEP_WORST.hold);
       // A challenge first, as in endAllAccessPage: a verify spends its challenge as its last statement.
       await deleteTwoFactorChallenges(tx, userId);

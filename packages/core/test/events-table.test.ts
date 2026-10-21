@@ -1,0 +1,136 @@
+import { describe, expect, it } from "vitest";
+import { EVENTS, type EventSpec, validateEvent } from "../src/observe/events.js";
+import { FIELD_KINDS } from "../src/redact.js";
+
+/**
+ * From the grep of plan 12h Task 1 Step 1. A new line joins EVENTS and this list.
+ * The 61 texts of the start list at 24c7237f, and the 2 texts of the 12k merge
+ * read again at 91c26417: the waitUntil line of 12h Task 2 and the role row line
+ * of 12k. A text that one call builds for each value is one text for each value:
+ * the email code and second-factor counts, and the three sweep steps. A part
+ * that a field fills is written `<field>`.
+ */
+const START_LIST: readonly string[] = [
+  "authtempo: the captcha port threw",
+  "authtempo: the captcha did not answer",
+  "authtempo: <path> has an estimated <bits> bits of entropy; 120 or more is recommended",
+  "authtempo: account delete gave up",
+  "authtempo: user patch refused",
+  "authtempo: email change gave up",
+  "authtempo: hook event copy failed",
+  "authtempo: before hook failed",
+  "authtempo: after hook failed",
+  "authtempo: credential removal gave up",
+  "authtempo: a signing key reseal failed",
+  "authtempo: a signing key does not open under this secret; it retires",
+  "authtempo: jwtMint.claims answered a value that is not an object",
+  "authtempo: jwtMint.claims threw",
+  "authtempo: notice mail failed",
+  "authtempo: client metadata document refused",
+  "authtempo: client metadata member dropped",
+  "authtempo: client key set refused",
+  "authtempo: client metadata document dropped its client auth; refresh tokens and device codes revoked",
+  "authtempo: a back-channel logout is dropped after 6 attempts",
+  "authtempo: a back-channel logout is dropped: the client refused it",
+  "authtempo: a back-channel logout attempt failed",
+  "authtempo: the back-channel logout delivery failed",
+  "authtempo: the delete of a refresh row in a revoked grant failed",
+  "authtempo: operator step failed",
+  "authtempo: operator family end failed",
+  "authtempo: operator ban write gave up",
+  "authtempo: operator guard refused",
+  "authtempo: operator read",
+  "authtempo: passkey registration rejected",
+  "authtempo: passkey credential already registered",
+  "authtempo: passkey authentication rejected",
+  "authtempo: passkey counter moved",
+  "authtempo: profile update gave up",
+  "authtempo: backup code spend gave up",
+  "authtempo: backup code replacement gave up",
+  "authtempo: a sealed value did not move to the current secret; it did not open, or a concurrent write changed it first",
+  "authtempo: session patch refused",
+  "authtempo: social client secret failed",
+  "authtempo: social token request failed",
+  "authtempo: social token endpoint answered",
+  "authtempo: social token answer has no token",
+  "authtempo: social id token rejected",
+  "authtempo: social nonce mismatch",
+  "authtempo: social user info failed",
+  "authtempo: social user info has a bad subject",
+  "authtempo: the sweep link step stopped",
+  "authtempo: the sweep outbox step stopped",
+  "authtempo: the sweep pending end step stopped",
+  "authtempo: a TOTP secret reseal failed",
+  "authtempo: user hold gave up",
+  "authtempo: email code count gave up",
+  "authtempo: second-factor challenge count gave up",
+  "authtempo: unhandled error",
+  "authtempo: operator route unauthorized",
+  "authtempo: a stored value names secret version <version>, which is not configured",
+  "authtempo: oidc discovery request failed",
+  "authtempo: oidc discovery answered",
+  "authtempo: oidc discovery is not JSON",
+  "authtempo: oidc discovery issuer mismatch",
+  "authtempo: oidc discovery lacks an endpoint",
+  "authtempo: waitUntil threw; the flush has no hook",
+  "authtempo: role row invalid <rowId>",
+];
+
+/** Field names that can hold a secret, a credential, or free text (spec 31 item 8). */
+const FORBIDDEN = [
+  "token",
+  "secret",
+  "password",
+  "email",
+  "ip",
+  "userAgent",
+  "url",
+  "message",
+  "stack",
+  "body",
+  "next",
+  "key",
+  "cookie",
+  "header",
+];
+
+const ENTRIES = Object.entries(EVENTS) as [string, EventSpec][];
+
+describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
+  it("has one row for each line of the start list", () => {
+    const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
+    expect(START_LIST).toHaveLength(63);
+    expect(texts).toHaveLength(63);
+    expect(new Set(texts)).toEqual(new Set(START_LIST));
+  });
+
+  it("gives each field a kind and each enum a closed list", () => {
+    for (const [name, spec] of ENTRIES)
+      for (const [field, f] of Object.entries(spec.fields)) {
+        expect(Object.hasOwn(FIELD_KINDS, f.kind), `${name}.${field}`).toBe(true);
+        if (f.kind === "enum") expect(f.values?.length ?? 0, `${name}.${field}`).toBeGreaterThan(0);
+      }
+  });
+
+  it("names no field that can hold a secret, a credential, or free text", () => {
+    for (const [name, spec] of ENTRIES)
+      for (const [field, f] of Object.entries(spec.fields)) {
+        expect(FORBIDDEN, `${name}.${field}`).not.toContain(field);
+        if (field === "code") expect(f.kind, `${name}.${field}`).toBe("code");
+      }
+  });
+
+  it("validateEvent drops a bad field and names it, and keeps the event", () => {
+    expect(validateEvent("social.token_status", { provider: "Google", status: 500 })).toEqual({
+      fields: { status: 500 },
+      rejected: ["provider"],
+    });
+  });
+
+  it("validateEvent rejects an unknown field", () => {
+    expect(validateEvent("social.token_status", { provider: "google", extra: 1 })).toEqual({
+      fields: { provider: "google" },
+      rejected: ["extra"],
+    });
+  });
+});

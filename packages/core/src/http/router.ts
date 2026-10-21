@@ -2,7 +2,6 @@ import { CAPTCHA_HEADER } from "../captcha.js";
 import type { ResolvedConfig } from "../config.js";
 import { peekSession, sessionCapMs } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
-import { appErrorName } from "../primitives/app-error.js";
 import { clearSessionCookie, readCookie, sessionCookie } from "./cookies.js";
 import { impersonationRefusal } from "./impersonation-rules.js";
 import { json } from "./json.js";
@@ -226,17 +225,20 @@ export function createRouter(
     }
     // The one error boundary of a request (plan 11g). A throw of the handler,
     // of the cookie move, or of the CORS write answers `internal` with one log line.
+    const url = new URL(request.url);
+    const route = table.get(`${request.method} ${url.pathname}`);
     try {
-      const res = await moveLegacyCookie(config, request, await dispatch(request));
+      const res = await moveLegacyCookie(config, request, await dispatch(request, url, route));
       return trusted ? cors(res, origin) : res;
     } catch (e) {
-      console.error(
-        "authtempo: unhandled error",
-        request.method,
-        new URL(request.url).pathname,
-        // The app sets the name, so it can hold a code or a token (plan 9c).
-        appErrorName(e),
-      );
+      // The route key, never the raw path: a client chooses the path (ruling 1
+      // point 3 of plan 12h). The app sets the error name, so the kind filters it (plan 9c).
+      config.observe.emit({
+        name: "error.internal",
+        method: request.method,
+        route: route?.key ?? "unmatched",
+        errorName: e,
+      });
       const res = routerError("internal");
       return trusted ? cors(res, origin) : res;
     }
@@ -254,20 +256,17 @@ export function createRouter(
     try {
       return await route.preflight({ request, url, origin, ip: config.clientIp(request) });
     } catch (e) {
-      console.error(
-        "authtempo: unhandled error",
-        "OPTIONS",
-        route.path,
-        // The app sets the name, so it can hold a code or a token (plan 9c).
-        appErrorName(e),
-      );
+      config.observe.emit({
+        name: "error.internal",
+        method: "OPTIONS",
+        route: route.key ?? "unmatched",
+        errorName: e,
+      });
       return routerError("internal");
     }
   }
 
-  async function dispatch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    const route = table.get(`${request.method} ${url.pathname}`);
+  async function dispatch(request: Request, url: URL, route: Route | undefined): Promise<Response> {
     if (!route) return routerError("not_found");
     const refusal = gate(request);
     if (refusal) return refusal;

@@ -34,6 +34,8 @@ const ROUTER_REASON = "the router's code; router.test.ts proves the path for one
 const INTERNAL_ANSWERED: readonly RouteKey[] = [
   // An outbox write that throws: the session end stays undone (plan 12e Task 16).
   "GET /oauth/end-session",
+  // A store that is down at the session read: the router line of each error class (plan 12h Task 3).
+  "GET /session",
   // A family delete that throws after the end mark (ruling 43 of plan 12e).
   "POST /oauth/token",
   "POST /password/sign-up",

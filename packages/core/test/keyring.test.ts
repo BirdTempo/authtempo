@@ -9,6 +9,7 @@ import {
 } from "../src/primitives/keyring.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { TEST_SECRET } from "../src/testing/soft-authenticator.js";
+import { DEFAULT_OBSERVE } from "./helpers.js";
 
 const HEX_128 = "0123456789abcdef0123456789abcdef";
 // 43 characters of base64url from 32 random bytes (openssl rand -base64 32, then base64url).
@@ -64,7 +65,7 @@ describe("the keyring (plan 12b)", () => {
   it("answers null for a version that the config does not hold, with one log line that names the row only", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
     const k = createKeyring([{ version: 1, value: "one" }]);
-    expect(secretFor(k, 9, "row-1")).toBeNull();
+    expect(secretFor(DEFAULT_OBSERVE, k, 9, "row-1")).toBeNull();
     expect(log).toHaveBeenCalledTimes(1);
     expect(log.mock.calls[0]).toEqual([
       "authtempo: a stored value names secret version 9, which is not configured",
@@ -79,8 +80,8 @@ describe("the keyring (plan 12b)", () => {
       { version: 2, value: "two" },
       { version: 1, value: "one" },
     ]);
-    expect(hashSecretFor(k, 1, "r")).toEqual({ secret: "one", known: true });
-    expect(hashSecretFor(k, 7, "r")).toEqual({ secret: "two", known: false });
+    expect(hashSecretFor(DEFAULT_OBSERVE, k, 1, "r")).toEqual({ secret: "one", known: true });
+    expect(hashSecretFor(DEFAULT_OBSERVE, k, 7, "r")).toEqual({ secret: "two", known: false });
     expect(log).toHaveBeenCalledTimes(1);
   });
 });

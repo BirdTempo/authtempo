@@ -1,6 +1,5 @@
 import type { ResolvedConfig } from "./config.js";
 import { ERRORS } from "./errors.js";
-import { appErrorName } from "./primitives/app-error.js";
 import type { Result } from "./result.js";
 
 /**
@@ -106,12 +105,12 @@ export async function checkCaptcha(
   try {
     answer = await captcha.port.verify({ token, ip, flow });
   } catch (e) {
-    console.error("authtempo: the captcha port threw", flow, appErrorName(e));
+    config.observe.emit({ name: "captcha.port_threw", flow, errorName: e });
     answer = "unavailable";
   }
   if (answer === "pass") return null;
   if (answer === "fail") return refuse("captcha_failed");
   if (captcha.onUnavailable === "refuse") return refuse("captcha_unavailable");
-  console.error("authtempo: the captcha did not answer", flow);
+  config.observe.emit({ name: "captcha.no_answer", flow });
   return null;
 }

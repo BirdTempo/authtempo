@@ -229,7 +229,6 @@ import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
 import { createWellKnownHandler } from "./http/well-known.js";
 import type { HandleOptions, ObserveStats } from "./observe/port.js";
-import { appErrorName } from "./primitives/app-error.js";
 import type { PublicJwk } from "./primitives/jwk.js";
 import { fail, type Result } from "./result.js";
 import type { SessionRow, UserRow } from "./schema.js";
@@ -869,7 +868,7 @@ export function createAuth(input: AuthConfig): Auth {
         try {
           options.waitUntil(config.observe.flush());
         } catch (e) {
-          console.error("authtempo: waitUntil threw; the flush has no hook", appErrorName(e));
+          config.observe.emit({ name: "observe.wait_until_threw", errorName: e });
         }
       }
       return res;

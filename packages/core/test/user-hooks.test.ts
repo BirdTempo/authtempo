@@ -17,7 +17,7 @@ import type { Result } from "../src/result.js";
 import type { IdentityRow, UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { makeAuth, post, tokenFromMail } from "./helpers.js";
+import { DEFAULT_OBSERVE, makeAuth, post, tokenFromMail } from "./helpers.js";
 import { FAST, pwHandle } from "./password-helpers.js";
 import {
   type FakeIdToken,
@@ -487,20 +487,27 @@ describe("patchedNewUser (plan 12a)", () => {
   };
 
   it("keeps the row for no patch, and changes only name and image", () => {
-    expect(patchedNewUser(minted, undefined)).toEqual(minted);
-    expect(patchedNewUser(minted, null)).toEqual(minted);
-    expect(patchedNewUser(minted, {})).toEqual(minted);
-    expect(patchedNewUser(minted, { name: "Ada" })).toEqual({ ...minted, name: "Ada" });
-    expect(patchedNewUser(minted, { name: null, image: null })).toEqual({
+    expect(patchedNewUser(DEFAULT_OBSERVE, minted, undefined)).toEqual(minted);
+    expect(patchedNewUser(DEFAULT_OBSERVE, minted, null)).toEqual(minted);
+    expect(patchedNewUser(DEFAULT_OBSERVE, minted, {})).toEqual(minted);
+    expect(patchedNewUser(DEFAULT_OBSERVE, minted, { name: "Ada" })).toEqual({
+      ...minted,
+      name: "Ada",
+    });
+    expect(patchedNewUser(DEFAULT_OBSERVE, minted, { name: null, image: null })).toEqual({
       ...minted,
       name: null,
       image: null,
     });
-    expect(patchedNewUser(minted, { image: "https://img.example.com/a.png" })).toEqual({
+    expect(
+      patchedNewUser(DEFAULT_OBSERVE, minted, { image: "https://img.example.com/a.png" }),
+    ).toEqual({
       ...minted,
       image: "https://img.example.com/a.png",
     });
-    expect(patchedNewUser(minted, { name: "x".repeat(200) }).name).toHaveLength(200);
+    expect(patchedNewUser(DEFAULT_OBSERVE, minted, { name: "x".repeat(200) }).name).toHaveLength(
+      200,
+    );
   });
 
   it("stops with hook_failed and one line for a key outside UserCreatePatch or a bad value", () => {
@@ -523,7 +530,7 @@ describe("patchedNewUser (plan 12a)", () => {
       const log = vi.spyOn(console, "error").mockImplementation(() => {});
       let stop: unknown = null;
       try {
-        patchedNewUser(minted, patch);
+        patchedNewUser(DEFAULT_OBSERVE, minted, patch);
       } catch (e) {
         stop = e;
       }

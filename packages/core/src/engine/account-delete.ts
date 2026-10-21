@@ -137,7 +137,7 @@ export async function requestAccountDelete(
   // row, so the address read here is the one the link goes to.
   const held = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<UserRow>> => {
-      await holdUser(tx, userId);
+      await holdUser(config.observe, tx, userId);
       const user = await tx.findOne("user", [{ field: "id", op: "eq", value: userId }]);
       if (!user) return fail("not_found");
       // One live link per user: a new request ends the older ones.
@@ -252,7 +252,7 @@ async function runDelete(
         else seen = await tx.findOne("user", byId);
       }
       if (!user) {
-        console.error("authtempo: account delete gave up", userId);
+        config.observe.emit({ name: "account.delete_gave_up", userId });
         return fail("conflict");
       }
       if (spend) await spend(tx, user, now);
@@ -277,12 +277,19 @@ async function runDelete(
   await deliverLogouts(config, user.id);
   for (const organization of going)
     await runAfter(
+      config.observe,
       "organization.afterDelete",
       config.hooks.organization.afterDelete,
       { organization: publicOrganization(organization), user },
       organization.id,
     );
-  await runAfter("user.afterDelete", config.hooks.user.afterDelete, { user }, user.id);
+  await runAfter(
+    config.observe,
+    "user.afterDelete",
+    config.hooks.user.afterDelete,
+    { user },
+    user.id,
+  );
   // To the address of the row that the delete held, after the commit (plan 12a Task 6).
   await sendNotice(config, {
     event: "account_deleted",
@@ -339,11 +346,16 @@ export async function deleteAccountRows(
   if (!plan.ok) stopWith(plan.code);
   const { going, owned } = plan.value;
   for (const organization of going)
-    await runBefore("organization.beforeDelete", config.hooks.organization.beforeDelete, {
-      organization: publicOrganization(organization),
-      user,
-    });
-  await runBefore("user.beforeDelete", config.hooks.user.beforeDelete, {
+    await runBefore(
+      config.observe,
+      "organization.beforeDelete",
+      config.hooks.organization.beforeDelete,
+      {
+        organization: publicOrganization(organization),
+        user,
+      },
+    );
+  await runBefore(config.observe, "user.beforeDelete", config.hooks.user.beforeDelete, {
     user,
     organizations: going.map((x) => x.id),
   });

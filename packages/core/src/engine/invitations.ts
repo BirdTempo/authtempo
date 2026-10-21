@@ -157,7 +157,7 @@ export async function inviteMember(
         );
         if (pending.length >= limit) return fail("invitation_limit");
       }
-      await runBefore("organization.beforeInvite", hooks.beforeInvite, {
+      await runBefore(config.observe, "organization.beforeInvite", hooks.beforeInvite, {
         organization,
         invitation: { email, role: input.role },
         by: input.user,
@@ -175,6 +175,7 @@ export async function inviteMember(
   if (!written.ok) return written;
   // Right after the commit, before the mail: the row exists whatever the mail does.
   await runAfter(
+    config.observe,
     "organization.afterInvite",
     hooks.afterInvite,
     { organization, invitation: summary(row), by: input.user },
@@ -237,6 +238,7 @@ export async function revokeInvitation(
   if (!row) return fail("not_found");
   if ((await config.storage.delete("invitation", [...where])) === 0) return fail("not_found");
   await runAfter(
+    config.observe,
     "organization.afterRevokeInvitation",
     config.hooks.organization.afterRevokeInvitation,
     {
@@ -317,7 +319,7 @@ export async function acceptInvitation(
       // First, in the lock order of user-hold.ts: the user row, then the team rows (ruling 43).
       // A member row of a deleted user would count as an owner (plan 12a Task 11). The hold
       // writes no new value, so a refusal below changes nothing.
-      await holdUser(tx, input.user.id);
+      await holdUser(config.observe, tx, input.user.id);
       // An invitation carries its inviter's rank at the time of the invite. If the inviter was
       // removed or demoted since, the grant must die with their right; the check runs here because
       // a removal cannot find every pending invitation by rank.
@@ -407,7 +409,7 @@ export async function acceptInvitation(
       }
       // Before the consume, on every accept, as Better Auth's beforeAcceptInvitation.
       // A refusal throws, so the invitation stays pending.
-      await runBefore("organization.beforeAddMember", hooks.beforeAddMember, {
+      await runBefore(config.observe, "organization.beforeAddMember", hooks.beforeAddMember, {
         organization,
         member: { userId: input.user.id, role: inv.role },
         memberUser: input.user,
@@ -424,13 +426,18 @@ export async function acceptInvitation(
         raisedBy =
           (await tx.findOne("user", [{ field: "id", op: "eq", value: inv.inviterId }])) ??
           input.user;
-        await runBefore("organization.beforeUpdateMemberRole", hooks.beforeUpdateMemberRole, {
-          organization,
-          member: memberSummary(existing, input.user),
-          role: inv.role,
-          memberUser: input.user,
-          by: raisedBy,
-        });
+        await runBefore(
+          config.observe,
+          "organization.beforeUpdateMemberRole",
+          hooks.beforeUpdateMemberRole,
+          {
+            organization,
+            member: memberSummary(existing, input.user),
+            role: inv.role,
+            memberUser: input.user,
+            by: raisedBy,
+          },
+        );
       }
       // One conditional update consumes the token: two accepts race for one row and only one wins.
       const n = await tx.update(
@@ -500,6 +507,7 @@ export async function acceptInvitation(
   const member = memberSummary(accepted.row, input.user);
   if (accepted.raised)
     await runAfter(
+      config.observe,
       "organization.afterUpdateMemberRole",
       hooks.afterUpdateMemberRole,
       {
@@ -513,6 +521,7 @@ export async function acceptInvitation(
     );
   if (accepted.created)
     await runAfter(
+      config.observe,
       "organization.afterAddMember",
       hooks.afterAddMember,
       {
@@ -526,6 +535,7 @@ export async function acceptInvitation(
       member.id,
     );
   await runAfter(
+    config.observe,
     "organization.afterAcceptInvitation",
     hooks.afterAcceptInvitation,
     { organization, invitation, member, user: input.user },
@@ -559,6 +569,7 @@ export async function declineInvitation(
     ]);
     if (organization)
       await runAfter(
+        config.observe,
         "organization.afterDeclineInvitation",
         hook,
         {

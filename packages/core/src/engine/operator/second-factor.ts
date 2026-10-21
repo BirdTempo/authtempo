@@ -89,7 +89,8 @@ export async function disableFactorWithProof(
     config,
     drafted.value,
     async (tx) => {
-      if ((await disableSecondFactorIn(tx, target.value.id)) === 0) return fail("totp_not_enabled");
+      if ((await disableSecondFactorIn(config.observe, tx, target.value.id)) === 0)
+        return fail("totp_not_enabled");
       return ok({});
     },
     {

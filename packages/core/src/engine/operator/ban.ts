@@ -169,7 +169,7 @@ async function writeBanFields(
   for (let round = 0; round < ROUNDS; round++) {
     if (!previous) return fail("not_found");
     const patch = patchOf(previous);
-    await runBefore("user.beforeUpdate", config.hooks.user.beforeUpdate, {
+    await runBefore(config.observe, "user.beforeUpdate", config.hooks.user.beforeUpdate, {
       user: previous,
       patch,
       via,
@@ -183,7 +183,7 @@ async function writeBanFields(
     if (n === 1) return ok({ previous, user: { ...previous, ...patch, updatedAt } });
     previous = await tx.findOne("user", byId);
   }
-  console.error("authtempo: operator ban write gave up", userId);
+  config.observe.emit({ name: "operator.ban_write_gave_up", userId });
   return fail("conflict");
 }
 
@@ -194,6 +194,7 @@ async function userUpdated(
   via: UserUpdateVia,
 ): Promise<void> {
   await runAfter(
+    config.observe,
     "user.afterUpdate",
     config.hooks.user.afterUpdate,
     { user: value.user, previous: value.previous, via },

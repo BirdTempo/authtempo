@@ -4,8 +4,9 @@
  * as the mail port is.
  */
 
-/** The name of an event. Plan 12h Task 3 narrows it to the keys of `EVENTS`. */
-export type EventName = string;
+import type { EventName } from "./events.js";
+
+export type { EventName };
 
 /** One event as a sink gets it. No field holds a secret, a credential, or free text (spec 31 item 8). */
 export interface AuthEvent {

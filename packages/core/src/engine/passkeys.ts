@@ -211,10 +211,7 @@ export async function verifyPasskeyRegistration(
       expectedRPID: config.passkey.rpID,
     });
   } catch (e) {
-    console.error(
-      "authtempo: passkey registration rejected",
-      e instanceof Error ? e.name : typeof e,
-    );
+    config.observe.emit({ name: "passkey.registration_rejected", errorClass: e });
     return fail("passkey_failed");
   }
   const now = config.clock.now();
@@ -237,7 +234,7 @@ export async function verifyPasskeyRegistration(
     // The credential id is unique across users. A second registration of
     // the same authenticator answers like any other failed ceremony.
     if (e instanceof StorageError && e.code === "unique_violation" && e.model === "passkey") {
-      console.error("authtempo: passkey credential already registered");
+      config.observe.emit({ name: "passkey.already_registered" });
       return fail("passkey_failed");
     }
     throw e;
@@ -302,10 +299,7 @@ async function checkAssertion(
       },
     });
   } catch (e) {
-    console.error(
-      "authtempo: passkey authentication rejected",
-      e instanceof Error ? e.name : typeof e,
-    );
+    config.observe.emit({ name: "passkey.authentication_rejected", errorClass: e });
     return fail("passkey_failed");
   }
   const now = config.clock.now();
@@ -319,7 +313,7 @@ async function checkAssertion(
     { counter: verified.newCounter, backedUp: verified.backedUp, updatedAt: now },
   );
   if (moved !== 1) {
-    console.error("authtempo: passkey counter moved");
+    config.observe.emit({ name: "passkey.counter_moved" });
     return fail("passkey_failed");
   }
   return ok(passkey);

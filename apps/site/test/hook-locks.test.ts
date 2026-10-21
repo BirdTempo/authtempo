@@ -146,7 +146,8 @@ function lockScan(): string[] {
   };
   const out: string[] = [];
   for (const f of fns) {
-    for (const m of f.text.matchAll(/runBefore\(\s*"([a-z]+\.before[A-Za-z]+)"/g)) {
+    // The first argument is the observer (plan 12h Task 3), then the hook name.
+    for (const m of f.text.matchAll(/runBefore\(\s*[\w.]+,\s*"([a-z]+\.before[A-Za-z]+)"/g)) {
       const at = m.index;
       const found = locks(f, 0, at);
       for (const c of f.text.matchAll(/const (\w+) = async \([^)]*\)(?::[^=]+)? => \{/g)) {

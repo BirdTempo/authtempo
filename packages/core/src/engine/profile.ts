@@ -78,7 +78,7 @@ export async function updateProfile(
           if (!previous) return fail("unauthorized");
           // The hook runs before the write, so a stop leaves the row as it
           // was on every adapter, D1 too.
-          await runBefore("user.beforeUpdate", hooks.beforeUpdate, {
+          await runBefore(config.observe, "user.beforeUpdate", hooks.beforeUpdate, {
             user: previous,
             patch,
             via: "profile",
@@ -91,13 +91,14 @@ export async function updateProfile(
           if (n === 1) return ok({ previous, user: { ...previous, ...patch, updatedAt } });
           previous = await tx.findOne("user", byId);
         }
-        console.error("authtempo: profile update gave up", user.id);
+        config.observe.emit({ name: "profile.update_gave_up", userId: user.id });
         return fail("conflict");
       },
     ),
   );
   if (!written.ok) return written;
   await runAfter(
+    config.observe,
     "user.afterUpdate",
     hooks.afterUpdate,
     { user: written.value.user, previous: written.value.previous, via: "profile" },

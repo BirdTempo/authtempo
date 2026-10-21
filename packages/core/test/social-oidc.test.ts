@@ -6,7 +6,7 @@ import { socialRoutes } from "../src/http/routes/social.js";
 import type { JwtSeam, VerifyIdTokenInput } from "../src/seams/jwt.js";
 import { discover, discoveryUrl, type OidcEntry } from "../src/social/oidc.js";
 import { PROVIDER_TIMEOUT_MS } from "../src/social/provider.js";
-import { BASE_URL, get, makeAuth } from "./helpers.js";
+import { BASE_URL, DEFAULT_OBSERVE, get, makeAuth } from "./helpers.js";
 import { type FakeIdToken, fakeFetch, fakeJwt } from "./social-helpers.js";
 
 const ISSUER = "https://login.acme.example/tenant-1/v2.0";
@@ -332,17 +332,19 @@ describe("discover", () => {
     expect(discoveryUrl(ISSUER)).toBe(DOC_URL);
     const doc = { ...DOC, issuer: "https://tenant.acme.example/" };
     const f = fakeFetch(() => Response.json(doc));
-    expect(await discover("t", "https://tenant.acme.example/", f.fetchFn)).toEqual({
-      authorizeUrl: DOC.authorization_endpoint,
-      tokenUrl: DOC.token_endpoint,
-      jwksUrl: DOC.jwks_uri,
-    });
+    expect(await discover(DEFAULT_OBSERVE, "t", "https://tenant.acme.example/", f.fetchFn)).toEqual(
+      {
+        authorizeUrl: DOC.authorization_endpoint,
+        tokenUrl: DOC.token_endpoint,
+        jwksUrl: DOC.jwks_uri,
+      },
+    );
   });
 
   it("reads with the 10 s timeout", async () => {
     const timeout = vi.spyOn(AbortSignal, "timeout");
     const f = fakeFetch(() => Response.json(DOC));
-    await discover("entra", ISSUER, f.fetchFn);
+    await discover(DEFAULT_OBSERVE, "entra", ISSUER, f.fetchFn);
     expect(timeout).toHaveBeenCalledWith(PROVIDER_TIMEOUT_MS);
   });
 });

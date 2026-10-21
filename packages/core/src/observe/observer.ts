@@ -1,7 +1,9 @@
 import type { Clock } from "../primitives/clock.js";
 import { CONTROL, KEYED_HASH_INFO, keyedHashKey, keyedHashWith } from "../redact.js";
 import type { ResolvedObserve } from "./config.js";
-import type { AuthEvent, EventName, ObserveStats } from "./port.js";
+import { defaultOutput } from "./default-output.js";
+import { type EventInput, type EventName, specOf, validateEvent } from "./events.js";
+import type { AuthEvent, ObserveStats } from "./port.js";
 
 /** The request that an event belongs to. The router builds it (plan 12h Task 4). */
 export interface RequestScope {
@@ -18,7 +20,7 @@ export interface RequestScope {
  * calls the sink. `flush` sends the buffer to the sink, after the answer.
  */
 export interface Observer {
-  emit(event: { name: EventName } & Record<string, unknown>): void;
+  emit(event: EventInput): void;
   /** An observer that stamps the ids of one request and shares the buffer and the counts. */
   scope(scope: RequestScope): Observer;
   flush(): Promise<void>;
@@ -50,9 +52,36 @@ function hex(bytes: number): string {
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
 }
 
-/** The level of an event. Plan 12h Task 3 reads it from `EVENTS`. */
-function levelOf(name: EventName): AuthEvent["level"] {
-  return name === "observe.dropped" ? "warn" : "info";
+/** A new trace id and span id, for an event outside a request. */
+function freshIds() {
+  return { traceId: hex(16), spanId: hex(8), parentSpanId: null };
+}
+
+/** The stamp of an event: its name, its level from `EVENTS`, the time, and the ids of its scope. */
+function stamped(name: EventName, clock: Clock, scope: RequestScope | null): AuthEvent {
+  const ids = scope ?? freshIds();
+  return {
+    name,
+    level: specOf(name).level,
+    at: clock.now().toISOString(),
+    traceId: ids.traceId,
+    spanId: ids.spanId,
+    ...(ids.parentSpanId !== null ? { parentSpanId: ids.parentSpanId } : {}),
+    ...(scope ? { route: scope.route } : {}),
+  };
+}
+
+/**
+ * The fields of an input after the kinds, with the address fields left out:
+ * only the include rule writes an address. A rejected field is named in
+ * `rejected` (spec 31 item 7).
+ */
+function checkedFields(input: EventInput): Record<string, unknown> {
+  const passed: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input))
+    if (!ADDRESS_FIELDS.has(key)) passed[key] = value;
+  const { fields, rejected } = validateEvent(input.name, passed);
+  return rejected.length > 0 ? { ...fields, rejected } : fields;
 }
 
 function noDrops(): Dropped {
@@ -70,26 +99,13 @@ export function createObserver(
   let buffer: Held[] = [];
   let dropped = noDrops();
 
-  function stamp(name: EventName, scope: RequestScope | null): AuthEvent {
-    const ids = scope ?? { traceId: hex(16), spanId: hex(8), parentSpanId: null };
-    return {
-      name,
-      level: levelOf(name),
-      at: deps.clock.now().toISOString(),
-      traceId: ids.traceId,
-      spanId: ids.spanId,
-      ...(ids.parentSpanId !== null ? { parentSpanId: ids.parentSpanId } : {}),
-      ...(scope ? { route: scope.route } : {}),
-    };
-  }
+  const stamp = (name: EventName, scope: RequestScope | null) => stamped(name, deps.clock, scope);
 
-  function hold(input: { name: EventName } & Record<string, unknown>, scope: RequestScope | null) {
+  function hold(input: EventInput, scope: RequestScope | null) {
     const event = stamp(input.name, scope);
     const held: Held = { event };
-    for (const [key, value] of Object.entries(input)) {
-      if (key === "name" || ADDRESS_FIELDS.has(key) || Object.hasOwn(event, key)) continue;
-      event[key] = value;
-    }
+    for (const [key, value] of Object.entries(checkedFields(input)))
+      if (!Object.hasOwn(event, key)) event[key] = value;
     const { include } = config;
     if (scope?.ip) {
       if (include.ip === "raw") event.ip = scope.ip;
@@ -192,12 +208,22 @@ export function createObserver(
 }
 
 /**
- * The observer with no `observe` config: it sends nothing anywhere. Plan 12h
- * Task 3 replaces this with the default output.
+ * The observer with no `observe` config (owner decision 1 of 2026-10-14). It
+ * writes the line of a fault event at once through the default output,
+ * ignores every other event, keeps no buffer, and sends nothing anywhere.
  */
-export function createDefaultObserver(): Observer {
+export function createDefaultObserver(deps: {
+  clock: Clock;
+  secrets: ReadonlySet<string>;
+}): Observer {
   const observer: Observer = {
-    emit() {},
+    emit(input) {
+      if (!specOf(input.name).line) return;
+      defaultOutput(
+        { ...checkedFields(input), ...stamped(input.name, deps.clock, null) },
+        deps.secrets,
+      );
+    },
     scope: () => observer,
     flush: async () => {},
     stats: () => ({ buffered: 0, dropped: noDrops() }),

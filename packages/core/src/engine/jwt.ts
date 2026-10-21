@@ -1,5 +1,5 @@
 import type { ResolvedConfig, ResolvedJwtMint } from "../config.js";
-import { appErrorName } from "../primitives/app-error.js";
+import type { Observer } from "../observe/observer.js";
 import { SESSION_JWT_TYPE } from "../primitives/credentials.js";
 import { newId } from "../primitives/ids.js";
 import {
@@ -209,14 +209,14 @@ async function resealKey(
     );
     return n === 1;
   } catch (e) {
-    console.error("authtempo: a signing key reseal failed", row.id, appErrorName(e));
+    config.observe.emit({ name: "jwt.key_reseal_failed", kid: row.id, errorName: e });
     return false;
   }
 }
 
 /** `api.secrets.rewrap` for one key row, signing or retired (plan 12b): true when it moved to the current version. */
 export async function rewrapKeyRow(config: ResolvedConfig, row: JwkRow): Promise<boolean> {
-  const secret = secretFor(config.keyring, row.secretVersion, row.id);
+  const secret = secretFor(config.observe, config.keyring, row.secretVersion, row.id);
   const pkcs8 = secret === null ? null : await openPrivateKeyBytes(secret, row.id, row.privateKey);
   return pkcs8 ? resealKey(config, row, pkcs8) : false;
 }
@@ -235,7 +235,7 @@ export async function signToken(
   for (let attempt = 0; attempt < 2; attempt++) {
     const row = await signingKey(config, alg, ROTATE_DUE);
     // The version the row names, never a second try (plan 12b).
-    const secret = secretFor(config.keyring, row.secretVersion, row.id);
+    const secret = secretFor(config.observe, config.keyring, row.secretVersion, row.id);
     const pkcs8 =
       secret === null ? null : await openPrivateKeyBytes(secret, row.id, row.privateKey);
     const key = pkcs8 ? await importPrivateKey(pkcs8, alg) : null;
@@ -243,7 +243,7 @@ export async function signToken(
       await resealKey(config, row, pkcs8);
       return signJws({ alg, kid: row.id, typ, key, payload });
     }
-    console.error("authtempo: a signing key does not open under this secret; it retires", row.id);
+    config.observe.emit({ name: "jwt.key_unopened", kid: row.id });
     await retireKey(config, row);
   }
   throw new Error("authtempo: no signing key opens under this secret");
@@ -311,6 +311,7 @@ export async function rotateKey(config: ResolvedConfig): Promise<{ kid: string }
 
 /** The app's claims, or null after one log line: a throw, or a value that is not an object. */
 async function appClaims(
+  observe: Observer,
   mint: ResolvedJwtMint,
   user: Parameters<NonNullable<ResolvedJwtMint["claims"]>>[0],
   session: Parameters<NonNullable<ResolvedJwtMint["claims"]>>[1],
@@ -320,9 +321,9 @@ async function appClaims(
     const value: unknown = await mint.claims(user, session);
     if (typeof value === "object" && value !== null && !Array.isArray(value))
       return value as Record<string, unknown>;
-    console.error("authtempo: jwtMint.claims answered a value that is not an object");
+    observe.emit({ name: "jwt.claims_not_object" });
   } catch (e) {
-    console.error("authtempo: jwtMint.claims threw", e instanceof Error ? e.name : typeof e);
+    observe.emit({ name: "jwt.claims_threw", errorName: e });
   }
   return null;
 }
@@ -352,7 +353,7 @@ export async function mintSessionJwt(
   if (!user || bannedFor(user, session.createdAt)) return fail("unauthorized");
   // An impersonation session whose operator lost the right mints nothing (plan 12f Task 11 fix).
   if ((await impersonationLoss(config, session)) !== null) return fail("unauthorized");
-  const extra = await appClaims(mint, user, session);
+  const extra = await appClaims(config.observe, mint, user, session);
   if (extra === null) return fail("hook_failed");
   const own = Object.fromEntries(Object.entries(extra).filter(([k]) => !RESERVED_CLAIMS.has(k)));
   const iat = Math.floor(now.getTime() / 1000);

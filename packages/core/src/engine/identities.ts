@@ -121,7 +121,7 @@ export async function guardedRemove(
         // A parallel write landed first. No write of this call has run.
         seen = await tx.findOne("user", byId);
       }
-      console.error("authtempo: credential removal gave up", userId);
+      config.observe.emit({ name: "credential.removal_gave_up", userId });
       return fail("conflict");
     }),
   );
@@ -204,7 +204,7 @@ export async function unlinkIdentity(
     // unlink runs no hook. The recount after the delete stays the guard.
     const taken = signsIn(config, identity) ? 1 : 0;
     if ((await waysIn(config, tx, user)) - taken < 1) stopWith("last_credential");
-    await runBefore("identity.beforeUnlink", config.hooks.identity.beforeUnlink, {
+    await runBefore(config.observe, "identity.beforeUnlink", config.hooks.identity.beforeUnlink, {
       user,
       identity: summary,
     });
@@ -212,6 +212,7 @@ export async function unlinkIdentity(
   });
   if (!removed.ok) return removed;
   await runAfter(
+    config.observe,
     "identity.afterUnlink",
     config.hooks.identity.afterUnlink,
     { user: removed.value, identity: summary },

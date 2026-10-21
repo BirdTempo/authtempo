@@ -119,7 +119,7 @@ export async function startImpersonation(
       // through tx. A ban or a revoke that committed after the guard stops
       // the start here. One that starts later waits for this commit. Then
       // its `endImpersonationsPage` reads the start row.
-      await holdUser(tx, actor.user.id);
+      await holdUser(config.observe, tx, actor.user.id);
       const self = await tx.findOne("user", [{ field: "id", op: "eq", value: actor.user.id }]);
       if (!self || activeBan(self, now)) return fail("operator_required");
       if (!(await isPlatformOperator(config, self.id, tx))) return fail("operator_required");

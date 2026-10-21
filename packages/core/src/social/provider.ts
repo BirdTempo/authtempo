@@ -1,3 +1,4 @@
+import type { Observer } from "../observe/observer.js";
 import type { JwtSeam } from "../seams/jwt.js";
 
 /**
@@ -118,7 +119,7 @@ export type Provider = OidcProvider | OAuth2Provider;
  */
 export interface OidcDiscovery extends Omit<ProviderBase, "authorizeUrl" | "tokenUrl"> {
   kind: "oidc-discovery";
-  resolve(fetch: typeof globalThis.fetch): Promise<OidcProvider | null>;
+  resolve(fetch: typeof globalThis.fetch, observe: Observer): Promise<OidcProvider | null>;
 }
 
 /** What the config holds for one provider. */

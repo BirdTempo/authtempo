@@ -1,5 +1,5 @@
 import { ERRORS, type ErrorCode } from "../errors.js";
-import { appErrorName } from "../primitives/app-error.js";
+import type { Observer } from "../observe/observer.js";
 import { hasControlChar } from "../primitives/text.js";
 import type { Result } from "../result.js";
 import type { OperatorAuditRow, SessionRow, UserRow } from "../schema.js";
@@ -571,6 +571,33 @@ export class HookStop extends Error {
 }
 
 /**
+ * What `patchFields` refuses: the shape of a patch answer. The patch lines
+ * print one of these texts, and their event fields read these lists (plan 12h).
+ */
+export const PATCH_SHAPE_REFUSALS = [
+  "a value that is not an object",
+  "a value that cannot be read",
+  "a value that is not a plain object",
+] as const;
+export type PatchShapeRefusal = (typeof PATCH_SHAPE_REFUSALS)[number];
+
+/** What the session patch refuses after its shape. A key outside the patch keys prints `the field <key>`. */
+export const SESSION_PATCH_REFUSALS = [
+  "an ip that is not a string or null",
+  "a userAgent that is not a string or null",
+  "an activeOrganizationId that is not a string or null",
+] as const;
+export type SessionPatchRefusal = (typeof SESSION_PATCH_REFUSALS)[number];
+
+/** What the user patch of `user.beforeCreate` refuses after its shape. */
+export const USER_PATCH_REFUSALS = [
+  "a field other than name and image",
+  "a name that breaks the name rule",
+  "an image that breaks the image rule",
+] as const;
+export type UserPatchRefusal = (typeof USER_PATCH_REFUSALS)[number];
+
+/**
  * The own fields of a before hook's patch answer, or null for no patch
  * (`undefined` or `null`). The session patch and the user patch read the
  * answer here only. The answer is the app's object, so a getter or a proxy
@@ -581,7 +608,7 @@ export class HookStop extends Error {
  */
 export function patchFields(
   patch: unknown,
-  refuse: (what: string) => never,
+  refuse: (what: PatchShapeRefusal) => never,
 ): Record<string, unknown> | null {
   if (patch === undefined || patch === null) return null;
   if (typeof patch !== "object") return refuse("a value that is not an object");
@@ -620,11 +647,11 @@ function isRefusal(e: unknown): e is Error {
  * clone failure is a core fault, not the app's: it has its own log line, so
  * that it never reads as a hook failure (parked Minor 4).
  */
-function eventCopy<E>(name: HookName, event: E): { copy: E } | null {
+function eventCopy<E>(observe: Observer, name: HookName, event: E): { copy: E } | null {
   try {
     return { copy: structuredClone(event) };
   } catch (e) {
-    console.error("authtempo: hook event copy failed", name, appErrorName(e));
+    observe.emit({ name: "hook.copy_failed", hook: name, errorName: e });
     return null;
   }
 }
@@ -637,12 +664,13 @@ function eventCopy<E>(name: HookName, event: E): { copy: E } | null {
  * refusal is matched before the filter, by its class or its name.
  */
 export async function runBefore<E>(
+  observe: Observer,
   name: HookName,
   hook: ((e: E) => unknown) | undefined,
   event: E,
 ): Promise<unknown> {
   if (!hook) return undefined;
-  const copied = eventCopy(name, event);
+  const copied = eventCopy(observe, name, event);
   if (!copied) throw new HookStop({ ok: false, code: "hook_failed", status: ERRORS.hook_failed });
   try {
     return await hook(copied.copy);
@@ -654,7 +682,7 @@ export async function runBefore<E>(
         status: ERRORS.hook_refused,
         message: publicHookMessage(e.message),
       });
-    console.error("authtempo: before hook failed", name, appErrorName(e));
+    observe.emit({ name: "hook.before_failed", hook: name, errorName: e });
     throw new HookStop({ ok: false, code: "hook_failed", status: ERRORS.hook_failed });
   }
 }
@@ -665,18 +693,19 @@ export async function runBefore<E>(
  * filtered error name, and the flow goes on (owner decision 1a, 2026-10-13).
  */
 export async function runAfter<E>(
+  observe: Observer,
   name: HookName,
   hook: ((e: E) => unknown) | undefined,
   event: E,
   rowId: string,
 ): Promise<void> {
   if (!hook) return;
-  const copied = eventCopy(name, event);
+  const copied = eventCopy(observe, name, event);
   if (!copied) return;
   try {
     await hook(copied.copy);
   } catch (e) {
-    console.error("authtempo: after hook failed", name, rowId, appErrorName(e));
+    observe.emit({ name: "hook.after_failed", hook: name, rowId, errorName: e });
   }
 }
 

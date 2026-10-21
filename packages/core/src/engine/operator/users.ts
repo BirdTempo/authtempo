@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import type { Observer } from "../../observe/observer.js";
 import { hasControlChar } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { UserRow } from "../../schema.js";
@@ -92,9 +93,9 @@ function readGuard(config: ResolvedConfig, actor: OperatorActor): Result<true> {
  * address and no query value (ASVS 5.0.0 16.2.5). A read writes no audit
  * row (spec 26 item 4).
  */
-function logRead(actor: OperatorActor, fn: string): void {
+function logRead(observe: Observer, actor: OperatorActor, fn: string): void {
   const actorId = actor.kind === "user" ? actor.user.id : actor.name;
-  console.error("authtempo: operator read", actor.kind, actorId, fn);
+  observe.emit({ name: "operator.read", actor: actor.kind, actorId, fn });
 }
 
 /**
@@ -175,7 +176,7 @@ export async function listUsers(
   if (!guard.ok) return guard;
   const limit = pageLimit(input.limit);
   if (limit === null || !idInput(input.after)) return fail("invalid_body");
-  logRead(input.actor, "listUsers");
+  logRead(config.observe, input.actor, "listUsers");
   const rows = await config.storage.findMany(
     "user",
     input.after === undefined ? [] : [{ field: "id", op: "gt", value: input.after }],
@@ -245,7 +246,7 @@ export async function searchUsers(
       if (!idInput(input.id)) return fail("invalid_body");
       where = { field: "id", op: "eq", value: input.id };
     }
-    logRead(input.actor, "searchUsers");
+    logRead(config.observe, input.actor, "searchUsers");
     const row = await config.storage.findOne("user", [where]);
     return ok({ users: row ? await operatorUsers(config, [row]) : [], next: null });
   }
@@ -254,7 +255,7 @@ export async function searchUsers(
     typeof input.emailPrefix === "string" ? normalizeEmailPrefix(input.emailPrefix) : null;
   // `normalizeEmailPrefix` refuses a prefix longer than the longest address (254).
   if (prefix === null || prefix.length < PREFIX_MIN) return fail("invalid_body");
-  logRead(input.actor, "searchUsers");
+  logRead(config.observe, input.actor, "searchUsers");
   const where: Where<"user">[] = [{ field: "email", op: "startsWith", value: prefix }];
   if (input.after !== undefined) {
     const last = await config.storage.findOne("user", [
@@ -285,7 +286,7 @@ export async function getUser(
   const guard = readGuard(config, input.actor);
   if (!guard.ok) return guard;
   if (input.userId === undefined || !idInput(input.userId)) return fail("invalid_body");
-  logRead(input.actor, "getUser");
+  logRead(config.observe, input.actor, "getUser");
   const row = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
   ]);

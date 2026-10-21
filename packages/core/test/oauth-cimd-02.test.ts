@@ -617,8 +617,12 @@ describe("a document that changes its method (ruling 25 of plan 12e)", () => {
     expect(
       await b.storage.findOne("oauthClient", [{ field: "id", op: "eq", value: url }]),
     ).toMatchObject({ authMethod: "none" });
-    expect(log.mock.calls).toEqual([[DROP_LOG, url, "private_key_jwt", "none"]]);
+    // The client reference, never the document URL (ruling 1 point 2 of plan 12h).
+    expect(log.mock.calls).toEqual([
+      [DROP_LOG, "cimd:31c67c351206ab0ec26c672384aa30a2", "private_key_jwt", "none"],
+    ]);
     expect(JSON.stringify(log.mock.calls)).not.toContain(token);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(url);
   });
 
   it("deletes the device codes of a document that drops from private_key_jwt to none (ruling 48)", async () => {

@@ -2,7 +2,6 @@ import type { ResolvedConfig } from "../config.js";
 import { safeNext } from "../http/safe-next.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { openSealed, seal } from "../primitives/aead.js";
-import { appErrorName } from "../primitives/app-error.js";
 import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { currentSecret, secretFor } from "../primitives/keyring.js";
@@ -151,7 +150,7 @@ export function isLiveSetupWithCodes(row: TotpRow, now: Date): boolean {
 
 /** The secret under the version its row names (plan 12b), or null: another version, another user, or a changed byte. */
 function openSecret(config: ResolvedConfig, row: TotpRow): Promise<Uint8Array | null> {
-  const secret = secretFor(config.keyring, row.secretVersion, row.id);
+  const secret = secretFor(config.observe, config.keyring, row.secretVersion, row.id);
   return secret === null
     ? Promise.resolve(null)
     : openSealed(secret, SEAL_INFO, row.secret, row.userId);
@@ -193,7 +192,7 @@ async function resealSecret(
     );
     return n === 1;
   } catch (e) {
-    console.error("authtempo: a TOTP secret reseal failed", row.id, appErrorName(e));
+    config.observe.emit({ name: "totp.reseal_failed", rowId: row.id, errorName: e });
     return false;
   }
 }
@@ -439,7 +438,7 @@ export async function enableTotp(
     done = await config.storage.transaction(async (tx): Promise<Result<{ first: boolean }>> => {
       // The hold of the user row first (user-hold.ts): the account delete
       // ends the sessions before it deletes the totp row (plan 12f Task 9).
-      await holdUser(tx, user.id);
+      await holdUser(config.observe, tx, user.id);
       // The confirm and the replay guard in one statement, as `acceptCode`.
       const n = await tx.update(
         "totp",
@@ -837,7 +836,9 @@ export async function verifyTwoFactor(
   )
     return fail("rate_limited");
   const miss = async (): Promise<Result<TwoFactorSession>> =>
-    fail(await countAttempt(config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now));
+    fail(
+      await countAttempt(config.observe, config.storage, challenge, CHALLENGE_MAX_ATTEMPTS, now),
+    );
   // The trust row of the trusted button, for its `lastSeenAt` after the commit.
   let trustId: string | null = null;
   let backupCodesLeft = factor.backupCodes.length;

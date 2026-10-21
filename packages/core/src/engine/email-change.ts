@@ -246,7 +246,7 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
           if (await tx.findOne("user", [{ field: "email", op: "eq", value: data.newEmail }]))
             return fail("email_taken");
           // Before the write, so a stop leaves both rows as they were on every adapter, D1 too.
-          await runBefore("user.beforeUpdate", config.hooks.user.beforeUpdate, {
+          await runBefore(config.observe, "user.beforeUpdate", config.hooks.user.beforeUpdate, {
             user: previous,
             patch: { email: data.newEmail },
             via: "email_change",
@@ -298,7 +298,7 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
           // A parallel write landed first. Read the row again.
           previous = await tx.findOne("user", byId);
         }
-        console.error("authtempo: email change gave up", move.row.identifier);
+        config.observe.emit({ name: "email_change.gave_up", userId: move.row.identifier });
         return fail("conflict");
       }),
     );
@@ -332,6 +332,7 @@ async function finish(
   userAgent: string | null,
 ): Promise<void> {
   await runAfter(
+    config.observe,
     "user.afterUpdate",
     config.hooks.user.afterUpdate,
     { user: applied.user, previous: applied.previous, via: "email_change" },

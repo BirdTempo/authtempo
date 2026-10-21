@@ -1,3 +1,4 @@
+import type { Observer } from "../observe/observer.js";
 import { sha256Hex } from "../primitives/crypto.js";
 import { fail, ok, type Result } from "../result.js";
 import type { VerificationPurpose, VerificationRow } from "../schema.js";
@@ -79,6 +80,7 @@ export function attemptsOf(row: VerificationRow): number {
  * The storage conformance suite pins `eq` on a date on every adapter.
  */
 export async function countAttempt(
+  observe: Observer,
   storage: StorageAdapter,
   row: VerificationRow,
   max: number,
@@ -131,8 +133,10 @@ export async function countAttempt(
     current = await storage.findOne("verification", [{ field: "id", op: "eq", value: current.id }]);
   }
   if (!current || current.consumedAt !== null) return settled(current);
-  const kind = row.purpose === "two-factor" ? "second-factor challenge" : "email code";
-  console.error(`authtempo: ${kind} count gave up`, row.id);
+  observe.emit({
+    name: row.purpose === "two-factor" ? "second_factor.count_gave_up" : "email_code.count_gave_up",
+    rowId: row.id,
+  });
   return "invalid_code";
 }
 
