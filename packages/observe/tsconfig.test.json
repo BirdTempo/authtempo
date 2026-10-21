@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    // The base config adds DOM. workers-types declares the same globals and conflicts with it.
+    "lib": ["ES2023"],
+    "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
+  },
+  // proof/index.ts is here only so that this typecheck covers it. The bundle
+  // proof bundles it; vitest does not run it.
+  "include": ["src", "test", "proof/index.ts"]
+}

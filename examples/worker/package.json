@@ -19,6 +19,7 @@
     "@authtempo/handoff": "workspace:*",
     "@authtempo/import": "workspace:*",
     "@authtempo/legacy-hashes": "workspace:*",
+    "@authtempo/observe": "workspace:*",
     "@authtempo/verify": "workspace:*"
   },
   "devDependencies": {

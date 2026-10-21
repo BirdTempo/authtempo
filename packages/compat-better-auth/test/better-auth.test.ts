@@ -693,3 +693,30 @@ describe("api refuses the arguments core cannot keep (M-3)", () => {
     ).resolves.toMatchObject({ redirect: false });
   });
 });
+
+describe("the handler options (plan 12h ruling 3 q5)", () => {
+  it("starts one flush after the answer on a core route and on a shim route, and keeps the answer when waitUntil throws", async () => {
+    const { auth } = app();
+    const flush = vi.spyOn(auth.tempo.observe, "flush");
+    const held: Promise<unknown>[] = [];
+    const options = { waitUntil: (p: Promise<unknown>) => void held.push(p) };
+    // GET /health is a route of core; get-session is a path that the shim answers itself.
+    const health = await auth.handler(new Request(`${BASE}/api/auth/health`), options);
+    expect(health.status).toBe(200);
+    expect([held.length, flush.mock.calls.length]).toEqual([1, 1]);
+    const session = await auth.handler(new Request(`${BASE}/api/auth/get-session`), options);
+    expect(session.status).toBe(200);
+    expect([held.length, flush.mock.calls.length]).toEqual([2, 2]);
+    await Promise.all(held);
+    // With no options the handler starts no flush: the host flushes when it has no waitUntil.
+    await auth.handler(new Request(`${BASE}/api/auth/health`));
+    expect(flush.mock.calls.length).toBe(2);
+    const unbound = {
+      waitUntil: () => {
+        throw new TypeError("Illegal invocation");
+      },
+    };
+    const kept = await auth.handler(new Request(`${BASE}/api/auth/health`), unbound);
+    expect(kept.status).toBe(200);
+  });
+});

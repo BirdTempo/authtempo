@@ -838,6 +838,9 @@ importers:
       '@authtempo/legacy-hashes':
         specifier: workspace:*
         version: link:../../packages/legacy-hashes
+      '@authtempo/observe':
+        specifier: workspace:*
+        version: link:../../packages/observe
       '@authtempo/verify':
         specifier: workspace:*
         version: link:../../packages/verify
@@ -869,6 +872,9 @@ importers:
       '@authtempo/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@authtempo/observe':
+        specifier: workspace:*
+        version: link:../../packages/observe
     devDependencies:
       '@authtempo/client':
         specifier: workspace:*
@@ -897,6 +903,9 @@ importers:
       '@authtempo/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@authtempo/observe':
+        specifier: workspace:*
+        version: link:../../packages/observe
       postgres:
         specifier: 3.4.9
         version: 3.4.9
@@ -1342,6 +1351,27 @@ importers:
       vitest:
         specifier: 5.0.3
         version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.1)(yaml@2.9.1))
+
+  packages/observe:
+    devDependencies:
+      '@authtempo/core':
+        specifier: workspace:*
+        version: link:../core
+      '@cloudflare/vitest-plugin':
+        specifier: 1.4.0
+        version: 1.4.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)(vitest@5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1)))
+      '@cloudflare/workers-types':
+        specifier: 5.20261007.1
+        version: 5.20261007.1
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+      vitest:
+        specifier: 5.0.3
+        version: 5.0.3(@types/node@24.19.1)(happy-dom@20.14.6)(vite@8.3.3(@types/node@24.19.1)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))
+      wrangler:
+        specifier: 4.148.0
+        version: 4.148.0(@cloudflare/workers-types@5.20261007.1)(@types/node@24.19.1)
 
   packages/react:
     dependencies:

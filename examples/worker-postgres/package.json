@@ -12,6 +12,7 @@
   "dependencies": {
     "@authtempo/adapter-postgres": "workspace:*",
     "@authtempo/core": "workspace:*",
+    "@authtempo/observe": "workspace:*",
     "postgres": "3.4.9"
   },
   "devDependencies": {

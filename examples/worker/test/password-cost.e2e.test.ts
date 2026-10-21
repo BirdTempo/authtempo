@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { createExecutionContext, env } from "cloudflare:test";
 import { expect, it, vi } from "vitest";
 
 const BASE = "https://example.test";
@@ -23,6 +23,7 @@ it("stores a hash at 100000 iterations when TEST_MODE is unset", async () => {
       body: JSON.stringify({ email: "cost@example.com", password: "correct horse battery" }),
     }),
     prodEnv,
+    createExecutionContext(),
   );
   expect(up.status).toBe(200);
   expect(await up.json()).toEqual({ sent: true });

@@ -9,6 +9,7 @@ import {
 } from "@authtempo/core";
 import { readBearer, readSessionToken, sessionCookieNames } from "@authtempo/core/credentials";
 import { createLegacyPasswordHash } from "@authtempo/legacy-hashes";
+import { workersLogsSink } from "@authtempo/observe/workers-logs";
 import {
   createVerifier,
   insufficientScopeResponse,
@@ -133,20 +134,13 @@ export function exampleConfig(env: Env): AuthConfig {
     // TEST_MODE only (plan 9d): the hooks the end-to-end test proves on D1. They write
     // app_tenant, a table of the test setup, so a deploy without the table sets none.
     ...(env.TEST_MODE === "1" ? { hooks: exampleHooks(env.DB) } : {}),
-    // A local test run only (plan 12h Task 9): the readiness route for the CLI check `ready`.
-    // The sink writes each event as one JSON line, so a fault line still reaches the log.
-    ...(readinessMode(env) === null
-      ? {}
-      : {
-          observe: {
-            readiness: true,
-            sink: {
-              write(batch) {
-                for (const event of batch) console.log(JSON.stringify(event));
-              },
-            },
-          },
-        }),
+    // The events of core go to Workers Logs, one JSON object each (plan 12h Task 10).
+    // wrangler.jsonc turns the logs on. With a sink, core writes no console line of its own.
+    observe: {
+      sink: workersLogsSink(),
+      // A local test run only (plan 12h Task 9): the readiness route for the CLI check `ready`.
+      ...(readinessMode(env) === null ? {} : { readiness: true }),
+    },
     // Password sign-in. The default PBKDF2 seam costs 100000 iterations per
     // hash. That needs more CPU than Workers Free allows, so a deployment needs
     // Workers Paid. In TEST_MODE only, use 1000 iterations so the end-to-end
@@ -249,13 +243,16 @@ export function exampleWorker(
   }
 
   return {
-    async fetch(request: Request, env: Env): Promise<Response> {
+    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       const url = new URL(request.url);
       const a = authOf(env);
+      // Bound on purpose: an unbound ctx.waitUntil throws Illegal invocation
+      // (Cloudflare Workers best practices, read 2026-10-14).
+      const options = { waitUntil: (p: Promise<unknown>) => ctx.waitUntil(p) };
       if (before) await before(env, a);
       // RFC 8414 and RFC 9728 put the metadata at the origin root (plan 9g).
       if (url.pathname.startsWith("/.well-known/")) return a.wellKnown(request);
-      if (url.pathname.startsWith("/auth/")) return a.handle(request);
+      if (url.pathname.startsWith("/auth/")) return a.handle(request, options);
       if (url.pathname === "/me") {
         const s = await a.session(request);
         if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
@@ -332,7 +329,7 @@ export function exampleWorker(
         return Response.json({ code: lastCodes.get(url.searchParams.get("email") ?? "") ?? null });
       }
       // The Better Auth compatibility instance (plan 9) on BA_DB. Core's routes above do not change.
-      if (url.pathname.startsWith("/api/auth/")) return getCompat(env).handler(request);
+      if (url.pathname.startsWith("/api/auth/")) return getCompat(env).handler(request, options);
       if (url.pathname === "/compat/me") {
         const s = await getCompat(env).api.getSession({ headers: request.headers });
         if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });

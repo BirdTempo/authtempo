@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@authtempo/adapter-d1": "workspace:*",
-    "@authtempo/core": "workspace:*"
+    "@authtempo/core": "workspace:*",
+    "@authtempo/observe": "workspace:*"
   },
   "devDependencies": {
     "@authtempo/client": "workspace:*",

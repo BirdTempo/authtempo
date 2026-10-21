@@ -22,7 +22,7 @@ describe("the TEST_READINESS gate of the example (plan 12h Task 9)", () => {
     for (const base of REMOTE_BASES) {
       it(`ignores TEST_READINESS ${mode} when BASE_URL is ${base}`, async () => {
         const config = exampleConfig(withReadiness(base, mode));
-        expect("observe" in config).toBe(false);
+        expect(config.observe?.readiness).toBeUndefined();
         // The storage is over env.DB: its ping reads the schema version there.
         await expect(config.storage.ping?.()).resolves.toBeUndefined();
       });

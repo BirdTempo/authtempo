@@ -23,6 +23,19 @@
       "migrations_dir": "node_modules/@authtempo/adapter-d1/migrations"
     }
   ],
+  // Workers Logs keeps the events of the Workers Logs sink of
+  // @authtempo/observe (plan 12h). A default is not a promise, so this block
+  // states it. Read 2026-10-14 at developers.cloudflare.com/workers/
+  // observability/logs/workers-logs/: Free 200,000 log events a day and 3 days
+  // of retention; Paid 20 million a month, then $0.60 a million, and 7 days;
+  // from 2026-12-01 Workers Logs moves to Cloudflare Observability pricing.
+  "observability": {
+    "enabled": true,
+    // 1 keeps every request. A rate below 1 drops whole requests, and with
+    // them the sign-in events of those requests (OWASP ASVS 5.0.0 16.3.1).
+    // Lower it only with the OTLP sink as the record of security events.
+    "head_sampling_rate": 1
+  },
   // The sweep deletes expired links, codes, and sessions. Without a trigger
   // they stay in D1 forever.
   "triggers": { "crons": ["17 * * * *"] }

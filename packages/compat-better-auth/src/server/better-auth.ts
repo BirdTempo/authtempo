@@ -1,4 +1,10 @@
-import { type Auth, ConfigError, createAuth, crossSiteRefusal } from "@authtempo/core";
+import {
+  type Auth,
+  ConfigError,
+  createAuth,
+  crossSiteRefusal,
+  type HandleOptions,
+} from "@authtempo/core";
 import { BetterAuthCompatError } from "../compat-error.js";
 import { BETTER_AUTH_CODES, messageOf, passwordPolicyCode } from "../errors.js";
 import type { BetterAuthInstance, BetterAuthOptions } from "../types.js";
@@ -71,8 +77,14 @@ export async function withFreshCode(res: Response): Promise<Response> {
   );
 }
 
-/** Serves core's routes under basePath, with the behavior of the bearer, expo, and magicLink plugins. */
-export function createHandler(auth: Auth, mapped: Mapped): (request: Request) => Promise<Response> {
+/**
+ * Serves core's routes under basePath, with the behavior of the bearer, expo,
+ * and magicLink plugins. With `{ waitUntil }`, the events flush after the answer.
+ */
+export function createHandler(
+  auth: Auth,
+  mapped: Mapped,
+): (request: Request, options?: HandleOptions) => Promise<Response> {
   const { basePath, plugins } = mapped;
   // Core's own change routes follow Better Auth's option (plan 12a), as the
   // magic link does. The email code paths reach them through auth.handle.
@@ -82,7 +94,7 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
   const magicLinkPath = `${basePath}/magic-link/`;
   // Core's /tokens and /organizations/tokens routes pass through since plan
   // 12k Task 12: both token models keep core's own tables here.
-  return async (request) => {
+  const serve = async (request: Request): Promise<Response> => {
     const { pathname } = new URL(request.url);
     // Core answers 404 outside basePath: one source for that rule (Task 7 ruling).
     // Core always mounts the magic link routes. Better Auth serves them only with the plugin.
@@ -137,6 +149,23 @@ export function createHandler(auth: Auth, mapped: Mapped): (request: Request) =>
     out.headers.set("set-auth-token", token);
     out.headers.append("access-control-expose-headers", "set-auth-token");
     return out;
+  };
+  // The host gives waitUntil to this entry only (plan 12h ruling 3 q5). The
+  // inner auth.handle calls are parts of one request and pass nothing, so the
+  // flush starts once, after the answer, as auth.handle starts it.
+  return async (request, options) => {
+    const res = await serve(request);
+    if (options?.waitUntil) {
+      // The flush has started when a throwing waitUntil returns: the answer stays,
+      // and the events reach the sink while the isolate lives.
+      const flush = auth.observe.flush();
+      try {
+        options.waitUntil(flush);
+      } catch {
+        // An unbound ctx.waitUntil throws Illegal invocation. The answer is kept.
+      }
+    }
+    return res;
   };
 }
 

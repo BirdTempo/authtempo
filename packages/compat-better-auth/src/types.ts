@@ -1,5 +1,11 @@
 import type { BrowserWebAuthn } from "@authtempo/client";
-import type { Auth, LimiterPort, PasswordHashSeam, StorageAdapter } from "@authtempo/core";
+import type {
+  Auth,
+  HandleOptions,
+  LimiterPort,
+  PasswordHashSeam,
+  StorageAdapter,
+} from "@authtempo/core";
 import type { ExpoCryptoLike, ExpoWebBrowserLike } from "@authtempo/handoff/expo";
 import type { AccessControl, Role } from "./access.js";
 
@@ -1090,7 +1096,11 @@ export interface AdminUserList {
 }
 
 export interface BetterAuthInstance<O extends BetterAuthOptions = BetterAuthOptions> {
-  handler(request: Request): Promise<Response>;
+  /**
+   * Serves the routes. On Workers pass `{ waitUntil: (p) => ctx.waitUntil(p) }`:
+   * the events of `observe` then flush after the answer (plan 12h).
+   */
+  handler(request: Request, options?: HandleOptions): Promise<Response>;
   api: CompatServerApi<HasTwoFactor<O>, RequiresVerification<O>> &
     (HasApiKey<O> extends true ? ApiKeyServerApi : unknown);
   /** Type-only, as in Better Auth: `Auth["$Infer"]["Session"]["user"]`. The runtime value is an empty object. */

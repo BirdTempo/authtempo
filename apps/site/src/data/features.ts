@@ -313,6 +313,11 @@ export const PACKAGE_FEATURES: Readonly<Record<string, PackageFeature>> = {
     line: "The Next.js binding of authtempo, for the App Router.",
     guide: "/docs/reference/next/",
   },
+  observe: {
+    title: "Observe",
+    line: "The owned sinks of the authtempo event port: Workers Logs and Analytics Engine.",
+    guide: "/docs/operations/observability/",
+  },
   react: {
     title: "React",
     line: "The React binding of authtempo, for React DOM and React Native.",

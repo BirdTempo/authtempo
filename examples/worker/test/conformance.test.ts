@@ -1,4 +1,4 @@
-import { env, SELF } from "cloudflare:test";
+import { createExecutionContext, env, SELF } from "cloudflare:test";
 import {
   createAuth,
   createMemoryAdapter,
@@ -48,7 +48,11 @@ describe("the conformance mode of the example Worker (plan 12e Task 17)", () => 
   it("runs the real conformance entry: no seed and no answer off the mode, a dropped failed seed, then RS256 and the seeded user", async () => {
     const LOCAL_ENV = { ...env, BASE_URL: LOCAL, TEST_MODE: "0" } as unknown as Env;
     const ask = (path: string, extra: Partial<Env>, init?: RequestInit) =>
-      conformanceWorker.fetch(new Request(`${LOCAL}${path}`, init), { ...LOCAL_ENV, ...extra });
+      conformanceWorker.fetch(
+        new Request(`${LOCAL}${path}`, init),
+        { ...LOCAL_ENV, ...extra },
+        createExecutionContext(),
+      );
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       await expect(

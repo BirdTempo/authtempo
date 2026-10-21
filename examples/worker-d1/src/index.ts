@@ -1,5 +1,6 @@
 import { createD1Adapter, createD1Limiter } from "@authtempo/adapter-d1";
 import { type Auth, createAuth, type MailPort } from "@authtempo/core";
+import { workersLogsSink } from "@authtempo/observe/workers-logs";
 
 /** The bindings and vars of wrangler.jsonc, and the secret of `wrangler secret put AUTH_SECRET`. */
 export interface Env {
@@ -34,13 +35,20 @@ export function createWorker(mailPort: MailPort) {
       // The default limiter counts per isolate, and is for tests only.
       limiter: createD1Limiter(env.DB),
       mail: mailPort,
+      // Each event of core goes to Workers Logs as one JSON object. wrangler.jsonc
+      // turns the logs on. With a sink, core writes no console line of its own.
+      observe: { sink: workersLogsSink() },
     }));
 
   return {
-    async fetch(request: Request, env: Env): Promise<Response> {
+    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
       const url = new URL(request.url);
       const a = getAuth(env);
-      if (url.pathname.startsWith("/auth/")) return a.handle(request);
+      // The events flush after the answer. Bound on purpose: an unbound
+      // ctx.waitUntil throws Illegal invocation (Cloudflare Workers best
+      // practices, read 2026-10-14).
+      if (url.pathname.startsWith("/auth/"))
+        return a.handle(request, { waitUntil: (p) => ctx.waitUntil(p) });
       if (url.pathname === "/me") {
         const s = await a.session(request);
         if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });

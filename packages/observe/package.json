@@ -1,0 +1,36 @@
+{
+  "name": "@authtempo/observe",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The owned sinks of the authtempo event port: Workers Logs and Analytics Engine.",
+  "exports": {
+    "./workers-logs": {
+      "types": "./dist/workers-logs.d.ts",
+      "default": "./dist/workers-logs.js"
+    },
+    "./analytics-engine": {
+      "types": "./dist/analytics-engine.d.ts",
+      "default": "./dist/analytics-engine.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "node ../../scripts/clean-dist.mjs && tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "vitest run && vitest run --config vitest.pool.config.ts && node proof/bundle-no-node.mjs"
+  },
+  "peerDependencies": {
+    "@authtempo/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@authtempo/core": "workspace:*",
+    "@cloudflare/vitest-plugin": "1.4.0",
+    "@cloudflare/workers-types": "5.20261007.1",
+    "typescript": "7.0.2",
+    "vitest": "5.0.3",
+    "wrangler": "4.148.0"
+  }
+}

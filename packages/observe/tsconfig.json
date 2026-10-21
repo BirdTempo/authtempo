@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    // The sinks run on Workers and import no Node.js module. With no Node
+    // types, a Node.js global is a type error.
+    "types": []
+  },
+  "include": ["src"]
+}

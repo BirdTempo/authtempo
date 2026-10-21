@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { createExecutionContext, env } from "cloudflare:test";
 import { createClient } from "@authtempo/client";
 import type { MailMessage } from "@authtempo/core";
 import { expect, it } from "vitest";
@@ -26,6 +26,7 @@ it("signs a person in with @authtempo/client on D1 and reads the session", async
         ...(init?.body !== undefined ? { body: init.body } : {}),
       }),
       env,
+      createExecutionContext(),
     );
     const set = res.headers.get("set-cookie")?.split(";")[0];
     if (set?.includes("=")) cookie = set;

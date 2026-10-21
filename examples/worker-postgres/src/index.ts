@@ -1,5 +1,6 @@
 import { createPostgresAdapter, createPostgresLimiter } from "@authtempo/adapter-postgres";
 import { createAuth, type MailPort } from "@authtempo/core";
+import { workersLogsSink } from "@authtempo/observe/workers-logs";
 import postgres from "postgres";
 
 /** The bindings and vars of wrangler.jsonc, and the secret of `wrangler secret put AUTH_SECRET`. */
@@ -41,9 +42,16 @@ export function createWorker(mailPort: MailPort) {
           // The owned limiter counts in Postgres, so every isolate shares one count.
           limiter: createPostgresLimiter(sql),
           mail: mailPort,
+          // Each event of core goes to Workers Logs as one JSON object. wrangler.jsonc
+          // turns the logs on. With a sink, core writes no console line of its own.
+          observe: { sink: workersLogsSink() },
         });
         const url = new URL(request.url);
-        if (url.pathname.startsWith("/auth/")) return await auth.handle(request);
+        // The events flush after the answer. Bound on purpose: an unbound
+        // ctx.waitUntil throws Illegal invocation (Cloudflare Workers best
+        // practices, read 2026-10-14).
+        if (url.pathname.startsWith("/auth/"))
+          return await auth.handle(request, { waitUntil: (p) => ctx.waitUntil(p) });
         if (url.pathname === "/me") {
           const s = await auth.session(request);
           if (!s) return Response.json({ error: "unauthorized" }, { status: 401 });
@@ -76,6 +84,8 @@ export function createWorker(mailPort: MailPort) {
         storage: createPostgresAdapter(sql),
         limiter: createPostgresLimiter(sql),
         mail: mailPort,
+        // The sweep flushes its own events before it answers.
+        observe: { sink: workersLogsSink() },
       });
       ctx.waitUntil(auth.api.sweepExpired().finally(() => sql.end({ timeout: 5 })));
     },

@@ -28,8 +28,9 @@ import { execFileSync } from "node:child_process";
 // Plan 11g adds packages/core/vitest.answers.config.ts (44, Task 5).
 // Plan 11b adds apps/demo (45, Task 8), then apps/demo/vitest.node.config.ts (46,
 // Task 10).
+// Plan 12h adds packages/observe/vitest.config.ts and vitest.pool.config.ts (48, Task 10).
 // Raise this number when a package adds a vitest config.
-const MINIMUM = 46;
+const MINIMUM = 48;
 
 const listed = execFileSync("tsc", ["-p", "tsconfig.configs.json", "--listFilesOnly"], {
   encoding: "utf8",
