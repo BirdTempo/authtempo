@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from "@authtempo/core";
 import {
   runAdapterConformance,
   runRefreshRaceConformance,
@@ -13,8 +14,10 @@ import {
   createSqliteLimiter,
   expectedSqliteShape,
   readSqliteShape,
+  SQLITE_MIGRATIONS,
   type SqliteDriver,
 } from "../../src/index.js";
+import { runSqliteMigrations } from "../../src/migrations.js";
 
 /** One database that a run opened, and how to close it. */
 export interface OpenedDriver {
@@ -99,8 +102,28 @@ export function runSqliteSuites(
     return { adapter: createSqliteAdapter(d.driver), close: async () => d.close() };
   }
 
+  /**
+   * A new database with the migrations before the one of SCHEMA_VERSION
+   * (plan 12h Task 8): an app has such a database before it runs the new
+   * file. One server holds one database, so a shared run leaves it out.
+   */
+  async function oldStore() {
+    const cut = SQLITE_MIGRATIONS.findIndex((m) =>
+      m.name.startsWith(`${String(SCHEMA_VERSION).padStart(4, "0")}_`),
+    );
+    if (cut < 1) throw new Error(`no migration file of version ${SCHEMA_VERSION}`);
+    const d = await open();
+    await runSqliteMigrations(d.driver, SQLITE_MIGRATIONS.slice(0, cut));
+    return { adapter: createSqliteAdapter(d.driver), close: async () => d.close() };
+  }
+
   // SQLite sends an update in a transaction as 2 statements: the read for the undo and the write.
-  runAdapterConformance(run, storageTarget, { updateInTransaction: 2 });
+  // The adapter must have its ping (ruling 26 of the 12g lane).
+  runAdapterConformance(run, storageTarget, {
+    updateInTransaction: 2,
+    ping: true,
+    ...(shared ? {} : { oldStore }),
+  });
   runSecretRotationConformance(run, storageTarget);
   runRefreshRaceConformance(run, storageTarget);
 

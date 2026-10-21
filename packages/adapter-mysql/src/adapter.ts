@@ -13,6 +13,12 @@ export interface MysqlAdapterOptions {
   /** The start checks, run once per adapter: the version, FOUND_ROWS, strict mode, the collations. */
   ready(): Promise<void>;
   /**
+   * The version read of `ready` with no cache, each call: the adapter's
+   * `ping` (plan 12h Task 8). It counts its own query in `sent`. Leave it
+   * out, and the adapter has no `ping`.
+   */
+  ping?(): Promise<void>;
+  /**
    * The count of statements, shared with the start checks, so that
    * `statementsSent` and `readyStatements` hold their queries too. A new
    * count starts at zero when this is left out.
@@ -96,7 +102,7 @@ const countOf = (res: RowDataPacket[] | ResultSetHeader): number =>
   Array.isArray(res) ? 0 : res.affectedRows;
 
 function adapterOn(ctx: Ctx): StorageAdapter {
-  return {
+  const self: StorageAdapter = {
     async create(model, data) {
       await ctx.ready();
       assertModel(model);
@@ -177,6 +183,8 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       await query(ctx, { sql: `${lock.sql} FOR UPDATE`, params: lock.params });
     },
   };
+  if (ctx.ping) self.ping = ctx.ping;
+  return self;
 }
 
 /**

@@ -3,5 +3,5 @@
 export { createD1AdapterOn, type D1AdapterOptions } from "./adapter.js";
 export { toStorageError } from "./errors.js";
 export { createD1Limiter } from "./limiter.js";
-export { schemaVersionCheckOn } from "./schema-version.js";
+export { schemaVersionCheckOn, schemaVersionPing } from "./schema-version.js";
 export type { D1Subset, D1SubsetResult, D1SubsetStatement } from "./seam.js";

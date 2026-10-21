@@ -1,5 +1,11 @@
 import { StorageError } from "@authtempo/core";
-import { META_TABLE, MYSQL, SCHEMA_VERSION_KEY, schemaVersionGate } from "@authtempo/core/sql";
+import {
+  assertSchemaValue,
+  META_TABLE,
+  MYSQL,
+  SCHEMA_VERSION_KEY,
+  schemaVersionGate,
+} from "@authtempo/core/sql";
 import type { Pool, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 
 /** MySQL error 1146, "Table doesn't exist": the migrations never ran. */
@@ -25,6 +31,23 @@ const key = MYSQL.quote("key");
 const value = MYSQL.quote("value");
 
 /**
+ * One read of the stored schema version. Only error 1146 reads as no
+ * version, so an outage never reads as "run the migrations".
+ */
+async function readVersion(pool: Pool): Promise<string | null> {
+  try {
+    const [rows] = await pool.execute<RowDataPacket[]>(
+      `SELECT ${value} FROM ${meta} WHERE ${key} = ?`,
+      [SCHEMA_VERSION_KEY],
+    );
+    return (rows[0]?.value as string | undefined) ?? null;
+  } catch (e) {
+    if ((e as { errno?: unknown } | null)?.errno === NO_SUCH_TABLE) return null;
+    throw e;
+  }
+}
+
+/**
  * The four checks at start of the MySQL adapter (plan 12g, Task 5). It runs
  * them once, keeps a pass, and does not keep a failure, as the version gate
  * does. Each message names the setting, never a value.
@@ -48,16 +71,7 @@ export function mysqlStartChecks(
   };
   const version = schemaVersionGate(async () => {
     count();
-    try {
-      const [rows] = await pool.execute<RowDataPacket[]>(
-        `SELECT ${value} FROM ${meta} WHERE ${key} = ?`,
-        [SCHEMA_VERSION_KEY],
-      );
-      return (rows[0]?.value as string | undefined) ?? null;
-    } catch (e) {
-      if ((e as { errno?: unknown } | null)?.errno === NO_SUCH_TABLE) return null;
-      throw e;
-    }
+    return readVersion(pool);
   });
   let checked: Promise<void> | null = null;
   return () => {
@@ -98,5 +112,20 @@ export function mysqlStartChecks(
       }
     })();
     return checked;
+  };
+}
+
+/**
+ * The `ping` of the adapter (plan 12h Task 8, ruling 26 of the 12g lane):
+ * the version read of the checks with no cache, each call. It never sets
+ * the gate of the checks. Its query counts in `statementsSent` only.
+ */
+export function mysqlSchemaVersionPing(
+  pool: Pool,
+  sent: { statements: number } = { statements: 0 },
+): () => Promise<void> {
+  return async () => {
+    sent.statements++;
+    assertSchemaValue(await readVersion(pool));
   };
 }

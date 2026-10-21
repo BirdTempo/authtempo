@@ -53,9 +53,21 @@ export function runMysqlSuites(server: MysqlServer): void {
     return { adapter: createMysqlAdapter(db.pool), close: () => db.close() };
   };
 
+  /**
+   * A database with no migration: the ping must throw schema_mismatch there
+   * (plan 12h Task 8). MySQL ships one migration file at SCHEMA_VERSION, so
+   * no MySQL store holds an older version; an app that never migrated has
+   * this one.
+   */
+  const oldStore = async () => {
+    const db = await freshDatabase(server, { migrate: false });
+    return { adapter: createMysqlAdapter(db.pool), close: () => db.close() };
+  };
+
   // MySQL has row locks, so the adapter must have lockInOrder (ruling 37 of
-  // plan 12f). Its lock is two statements: the ids, then the lock by id.
-  runAdapterConformance(name, target, { rowLocks: true, lockStatements: 2 });
+  // plan 12f). Its lock is two statements: the ids, then the lock by id. The
+  // adapter must have its ping (ruling 26 of the 12g lane).
+  runAdapterConformance(name, target, { rowLocks: true, lockStatements: 2, ping: true, oldStore });
 
   runLimiterConformance(name, async () => {
     const db = await supply.take();

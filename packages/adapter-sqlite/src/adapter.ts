@@ -3,6 +3,7 @@ import {
   createD1Limiter,
   type D1Subset,
   schemaVersionCheckOn,
+  schemaVersionPing,
   toStorageError,
 } from "@authtempo/adapter-d1/seam";
 import type { Clock, LimiterPort, StorageAdapter } from "@authtempo/core";
@@ -24,7 +25,9 @@ export interface SqliteDriver {
  * every driver runs the D1 undo log with its two limits (spec 6). Before the
  * first call, the adapter checks that the handle reads integers as numbers,
  * then checks the schema version. Both queries count in `statementsSent` and
- * in `readyStatements` (2 on a pass).
+ * in `readyStatements` (2 on a pass). `ping` reads the schema version with
+ * no cache, each call, as on D1 (ruling 26 of the 12g lane, plan 12h Task 8).
+ * Its one query counts in `statementsSent` only.
  */
 export function createSqliteAdapter(driver: SqliteDriver): StorageAdapter {
   const sent = { statements: 0, ready: 0 };
@@ -37,6 +40,7 @@ export function createSqliteAdapter(driver: SqliteDriver): StorageAdapter {
       await probe();
       await version();
     },
+    ping: schemaVersionPing(driver.db, sent),
     sent,
   });
 }

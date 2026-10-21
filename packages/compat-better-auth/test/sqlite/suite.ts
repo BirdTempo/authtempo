@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { SqliteDriver } from "@authtempo/adapter-sqlite";
+import { SCHEMA_VERSION } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { betterAuthSchemaStorage } from "../../src/storage/index.js";
 import type { SqliteVariant } from "../../src/storage/migration.js";
@@ -74,11 +75,28 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
     });
   const firstRun = await compat().migrate();
 
+  /**
+   * A new database with Better Auth's tables and the shipped compat files
+   * before the one of SCHEMA_VERSION, as the D1 flow leaves it (plan 12h
+   * Task 8). An app has such a database before it applies the new file.
+   */
+  const oldStore = async () => {
+    const cut = ALL_NAMES.findIndex((n) => n.endsWith(`_schema_v${SCHEMA_VERSION}`));
+    if (cut < 1) throw new Error(`no compat migration file of version ${SCHEMA_VERSION}`);
+    const old = withSchema(open, BETTER_AUTH_SQLITE);
+    for (const name of ALL_NAMES.slice(0, cut)) old.exec(shippedD1(name));
+    const s = betterAuthSchemaStorage({ dialect: "sqlite", driver: old.driver });
+    return { adapter: s.storage, close: async () => old.close() };
+  };
+
   mappingCases(
     { conformance: `compat sqlite ${kind}`, mapping: `the Better Auth mapping on SQLite, ${kind}` },
     {},
     main.driver.db,
     () => compat().storage,
+    // The D1 ping over the seam (ruling 26 of the 12g lane): the 2 version
+    // reads, the index list, and the read of the one unique index.
+    { pingStatements: 4, oldStore, ping: true },
   );
 
   describe(`the Better Auth storage on SQLite, ${kind}`, () => {

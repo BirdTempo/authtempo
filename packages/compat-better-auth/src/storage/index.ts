@@ -89,7 +89,8 @@ export function betterAuthSchemaStorage(
   if (options.dialect === "sqlite") {
     // The D1 code over the SQLite seam of plan 12g: the same statements, the
     // same undo log, the same readiness check. Before the check, the handle
-    // must read integers as numbers, as on the core SQLite adapter.
+    // must read integers as numbers, as on the core SQLite adapter. The ping
+    // is the D1 ping over the seam (ruling 26 of the 12g lane).
     const { driver } = options;
     const variant = options.variant ?? "1.7";
     const st = compatStatements("sqlite", names);
@@ -107,6 +108,7 @@ export function betterAuthSchemaStorage(
           await probe();
           await compatReady();
         },
+        ping: d1CompatPing(driver.db, names, sent),
         sent,
       }),
       limiter: createD1LimiterOnSeam(driver.db),
