@@ -55,7 +55,12 @@ export function everyFeature(): ResolvedConfig {
   return resolveConfig({
     ...base,
     social: SOCIAL,
-    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] },
+    passkey: {
+      rpID: "api.example.com",
+      rpName: "Example",
+      origins: [BASE],
+      relatedOrigins: true,
+    },
     handoff: { schemes: ["example://"] },
     organizations: {
       platformRole: "owner",

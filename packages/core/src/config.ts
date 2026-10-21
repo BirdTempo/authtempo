@@ -90,6 +90,7 @@ import {
   SECRET_VERSION_MAX,
   type SecretVersion,
 } from "./primitives/keyring.js";
+import { PASSKEY_HINTS, type PasskeyHint } from "./primitives/passkey-hints.js";
 import { isResourceUrl } from "./primitives/resource.js";
 import { hasControlChar } from "./primitives/text.js";
 import { secretParts } from "./redact.js";
@@ -341,10 +342,10 @@ export interface AuthConfig {
   jwt?: JwtSeam;
   /**
    * Passkeys are on when set. `rpID` is the registrable domain the
-   * credentials bind to; every origin must be on that domain. Exact
-   * origins, no path.
+   * credentials bind to; every origin must be on that domain, unless
+   * `relatedOrigins` is on (plan 12i). Exact origins, no path.
    */
-  passkey?: { rpID: string; rpName: string; origins: string[] };
+  passkey?: PasskeyConfig;
   /** The WebAuthn ceremonies. Default: @simplewebauthn/server. Tests inject a fake. */
   webauthn?: WebAuthnSeam;
   /**
@@ -457,6 +458,53 @@ export interface AuthConfig {
    * each event, and the flush of `auth.observe` sends the batch after the answer.
    */
   observe?: ObserveConfig;
+}
+
+/**
+ * The passkey config (plans 4 and 12i). WebAuthn Level 3 (read 2026-10-14)
+ * adds related origins and hints.
+ */
+export interface PasskeyConfig {
+  rpID: string;
+  rpName: string;
+  origins: string[];
+  /**
+   * Default false. With true, `auth.wellKnown` answers
+   * `GET /.well-known/webauthn` on the `rpID` host with `{ origins }`, and
+   * `origins` may hold origins outside the domain tree of `rpID`. A client
+   * must support at least five registrable origin labels (WebAuthn Level 3).
+   * Core cannot count labels without the Public Suffix List, so it counts
+   * origins: at most five outside `rpID`.
+   */
+  relatedOrigins?: boolean;
+  /**
+   * The hints of each ceremony, in order of preference: `security-key`,
+   * `client-device`, or `hybrid`. Default: none. A `hints` field of an
+   * options request replaces the list for that ceremony.
+   */
+  hints?: { register?: PasskeyHint[]; signIn?: PasskeyHint[] };
+}
+
+export interface ResolvedPasskey {
+  rpID: string;
+  rpName: string;
+  origins: string[];
+  relatedOrigins: boolean;
+  hints: { register: PasskeyHint[]; signIn: PasskeyHint[] };
+}
+
+/** The origins that a client must accept from a related origins document (WebAuthn Level 3). */
+const RELATED_ORIGINS_MAX = 5;
+
+/** A hint list of the config: each value a WebAuthn hint, each value once. */
+function passkeyHints(path: string, list: readonly string[] | undefined): PasskeyHint[] {
+  if (list === undefined) return [];
+  const known: readonly string[] = PASSKEY_HINTS;
+  for (const h of list)
+    if (!known.includes(h))
+      throw new ConfigError(`${path} has ${h}; a hint is one of ${PASSKEY_HINTS.join(", ")}`);
+  if (new Set(list).size !== list.length) throw new ConfigError(`${path} has a value twice`);
+  return [...list] as PasskeyHint[];
 }
 
 export interface PasswordConfig {
@@ -1017,7 +1065,7 @@ export interface ResolvedConfig {
   };
   social: { providers: ConfiguredProvider[]; fetch: typeof fetch };
   jwt: JwtSeam;
-  passkey: { rpID: string; rpName: string; origins: string[] } | null;
+  passkey: ResolvedPasskey | null;
   webauthn: WebAuthnSeam;
   handoff: {
     schemes: string[];
@@ -1336,6 +1384,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     requireFields("passkey", input.passkey, ["rpID", "rpName"]);
     if (input.passkey.origins.length === 0)
       throw new ConfigError("passkey.origins must not be empty");
+    let outside = 0;
     for (const o of input.passkey.origins) {
       let u: URL;
       try {
@@ -1348,7 +1397,11 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       const host = u.hostname;
       const rp = input.passkey.rpID;
       if (host !== rp && !host.endsWith(`.${rp}`)) {
-        throw new ConfigError(`passkey.origins host ${host} is not on rpID ${rp}`);
+        // A related origin (plan 12i): the browser checks it against the
+        // document of `rpID`. Without the document, the origin cannot pass.
+        if (input.passkey.relatedOrigins !== true)
+          throw new ConfigError(`passkey.origins host ${host} is not on rpID ${rp}`);
+        outside++;
       }
       // The router answers 403 to a post from an origin that is not trusted, so an
       // origin the passkey config accepts but the router refuses is a silent break.
@@ -1358,10 +1411,19 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         );
       }
     }
+    if (outside > RELATED_ORIGINS_MAX)
+      throw new ConfigError(
+        `relatedOrigins: at most five origins outside ${input.passkey.rpID}, the minimum a client must support (WebAuthn Level 3)`,
+      );
     passkey = {
       rpID: input.passkey.rpID,
       rpName: input.passkey.rpName,
       origins: [...input.passkey.origins],
+      relatedOrigins: input.passkey.relatedOrigins === true,
+      hints: {
+        register: passkeyHints("passkey.hints.register", input.passkey.hints?.register),
+        signIn: passkeyHints("passkey.hints.signIn", input.passkey.hints?.signIn),
+      },
     };
   }
   let password: ResolvedConfig["password"] = null;

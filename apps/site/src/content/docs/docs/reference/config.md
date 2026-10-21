@@ -146,6 +146,10 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `passkey.rpID` | string | required | The registrable domain that the passkeys bind to. |
 | `passkey.rpName` | string | required | The name that the device shows. Not empty. |
 | `passkey.origins` | string list | required | Exact origins on `rpID`, not empty. Each must be `baseURL` or in `trustedOrigins`. |
+| `passkey.relatedOrigins` | boolean | `false` | With `true`, `auth.wellKnown` serves `/.well-known/webauthn` on the `rpID` host, and `origins` may hold at most five origins outside `rpID` (WebAuthn Level 3). |
+| `passkey.hints` | object | none | The hints of each ceremony. |
+| `passkey.hints.register` | hint list | none | `security-key`, `client-device`, or `hybrid`, each once, in order of preference, for the registration. |
+| `passkey.hints.signIn` | hint list | none | The same, for the sign-in. |
 
 ## Handoff
 

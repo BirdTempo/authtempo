@@ -6,6 +6,7 @@ import {
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
   renamePasskey,
+  signalInputs,
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
 } from "../../engine/passkeys.js";
@@ -18,12 +19,14 @@ import {
 import {
   authenticateVerifyBody,
   deleteBody,
+  optionsBody,
   registerVerifyBody,
   renameBody,
 } from "../contract/passkeys.js";
 import { sessionCookie } from "../cookies.js";
-import { json, readJson, respond } from "../json.js";
+import { json, readJson, readOptionalJson, respond } from "../json.js";
 import type { Route, RouteContext } from "../router.js";
+import { relatedOriginsAnswer, WEBAUTHN_PATH } from "../well-known.js";
 
 export function passkeyRoutes(config: ResolvedConfig): Route[] {
   if (!config.passkey) return [];
@@ -54,8 +57,15 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         // The engine takes a user, so the rule is here, before any write.
         const fresh = requireFresh(ctx.config, s.session);
         if (!fresh.ok) return send(respond(fresh), s.renewed);
+        const body = await readOptionalJson(ctx.request, optionsBody);
+        if (!body.ok) return send(respond(body), s.renewed);
         return send(
-          respond(await passkeyRegistrationOptions(ctx.config, { user: s.user })),
+          respond(
+            await passkeyRegistrationOptions(ctx.config, {
+              user: s.user,
+              hints: body.value.hints,
+            }),
+          ),
           s.renewed,
         );
       },
@@ -82,7 +92,11 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
       path: "/passkey/authenticate/options",
       key: "POST /passkey/authenticate/options",
       async handler(ctx) {
-        return respond(await passkeyAuthenticationOptions(ctx.config, { ip: ctx.ip }));
+        const body = await readOptionalJson(ctx.request, optionsBody);
+        if (!body.ok) return respond(body);
+        return respond(
+          await passkeyAuthenticationOptions(ctx.config, { ip: ctx.ip, hints: body.value.hints }),
+        );
       },
     },
     {
@@ -121,7 +135,9 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         const s = await withSession(ctx);
         if (!s) return unauthorized();
         const r = await listPasskeys(ctx.config, { user: s.user });
-        return send(r.ok ? json({ passkeys: r.value }) : respond(r), s.renewed);
+        const signal = signalInputs(ctx.config, s.user);
+        if (!r.ok || !signal.ok) return send(respond(r.ok ? signal : r), s.renewed);
+        return send(json({ passkeys: r.value, ...signal.value }), s.renewed);
       },
     },
     {
@@ -159,5 +175,19 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
         );
       },
     },
+    // The related origins document (plan 12i). The browser reads it at the
+    // origin root of the rpID host, through auth.wellKnown; this route serves
+    // it when core is mounted there. Another host answers not_found.
+    ...(config.passkey.relatedOrigins
+      ? [
+          {
+            method: "GET",
+            path: WEBAUTHN_PATH,
+            key: "GET /.well-known/webauthn",
+            handler: async (ctx: RouteContext) =>
+              relatedOriginsAnswer(ctx.config, ctx.request) ?? json({ error: "not_found" }, 404),
+          } satisfies Route,
+        ]
+      : []),
   ];
 }

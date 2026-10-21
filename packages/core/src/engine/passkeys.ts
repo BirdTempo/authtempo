@@ -4,6 +4,7 @@ import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
 import { fromBase64Url, randomBase64Url, sha256Hex, toBase64Url } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
+import type { PasskeyHint } from "../primitives/passkey-hints.js";
 import { fail, ok, type Result } from "../result.js";
 import type { PasskeyRow, SessionRow, UserRow } from "../schema.js";
 import type {
@@ -83,6 +84,24 @@ function summary(row: PasskeyRow): PasskeySummary {
     backedUp: row.backedUp,
     createdAt: row.createdAt,
   };
+}
+
+/**
+ * The user handle of a passkey: the bytes of the user id (plan 4). The
+ * registration options carry them, and `GET /passkeys` answers their
+ * base64url form for `signalAllAcceptedCredentials` (plan 12i).
+ */
+function userHandleOf(userId: string): Uint8Array {
+  return new TextEncoder().encode(userId);
+}
+
+/**
+ * The options with the hints of the ceremony (WebAuthn Level 3, plan 12i).
+ * The hints of the request replace the config's list. No hint leaves the
+ * library's own value, which is no key or an empty list.
+ */
+function withHints<T extends object>(options: T, hints: readonly PasskeyHint[]): T {
+  return hints.length === 0 ? options : { ...options, hints: [...hints] };
 }
 
 /** Writes the challenge row and returns the challenge bytes and their base64url form. `extra` joins `data`. */
@@ -172,7 +191,7 @@ async function consumeChallenge(
 
 export async function passkeyRegistrationOptions(
   config: ResolvedConfig,
-  input: { user: UserRow },
+  input: { user: UserRow; hints?: PasskeyHint[] | undefined },
 ): Promise<Result<PublicKeyCredentialCreationOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
   if (!input.user.emailVerified) return fail("email_unverified");
@@ -183,7 +202,7 @@ export async function passkeyRegistrationOptions(
   const options = await config.webauthn.registrationOptions({
     rpID: config.passkey.rpID,
     rpName: config.passkey.rpName,
-    userID: new TextEncoder().encode(input.user.id),
+    userID: userHandleOf(input.user.id),
     userName: input.user.email,
     userDisplayName: input.user.name ?? input.user.email,
     challenge: bytes,
@@ -192,7 +211,7 @@ export async function passkeyRegistrationOptions(
       transports: p.transports ? p.transports.split(",") : null,
     })),
   });
-  return ok(options);
+  return ok(withHints(options, input.hints ?? config.passkey.hints.register));
 }
 
 /** The bytes that a base64url text without padding decodes to. */
@@ -267,24 +286,29 @@ export async function verifyPasskeyRegistration(
 
 export async function passkeyAuthenticationOptions(
   config: ResolvedConfig,
-  input: { ip: string | null },
+  input: { ip: string | null; hints?: PasskeyHint[] | undefined },
 ): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
   if (!(await limit(config, "passkey-options:ip", ipKey(input.ip), OPTIONS_LIMIT))) {
     return fail("rate_limited");
   }
   const { bytes } = await issueChallenge(config, SIGN_IN, "authentication");
-  return ok(
-    await config.webauthn.authenticationOptions({ rpID: config.passkey.rpID, challenge: bytes }),
-  );
+  const options = await config.webauthn.authenticationOptions({
+    rpID: config.passkey.rpID,
+    challenge: bytes,
+  });
+  return ok(withHints(options, input.hints ?? config.passkey.hints.signIn));
 }
 
 /**
  * The assertion check of a sign-in and of the second factor (plan 12c): the
  * credential, the seam, and the counter compare-and-set. With `userId`, the
- * credential must be one of that user's passkeys. An unknown credential, a
- * credential of another user, and a bad signature answer the same code. The
- * caller has consumed the challenge row first.
+ * credential must be one of that user's passkeys. A credential with no row
+ * answers `passkey_unknown`, so the client can call `signalUnknownCredential`
+ * (WebAuthn Level 3, plan 12i, spec 32 item 3). Only the holder of the
+ * credential learns it: the id is random, and the person's own
+ * authenticator gives it. A credential of another user and a bad signature
+ * answer `passkey_failed`. The caller has consumed the challenge row first.
  */
 async function checkAssertion(
   config: ResolvedConfig,
@@ -299,7 +323,8 @@ async function checkAssertion(
   const passkey = await config.storage.findOne("passkey", [
     { field: "credentialId", op: "eq", value: credentialId },
   ]);
-  if (!passkey || (userId !== null && passkey.userId !== userId)) return fail("passkey_failed");
+  if (!passkey) return fail("passkey_unknown");
+  if (userId !== null && passkey.userId !== userId) return fail("passkey_failed");
   let verified: Awaited<ReturnType<typeof config.webauthn.verifyAuthentication>>;
   try {
     verified = await config.webauthn.verifyAuthentication({
@@ -483,6 +508,18 @@ export async function checkSignInAssertionOf(
   const consumed = await consumeChallenge(config, challenge, SIGN_IN, "authentication");
   if (!consumed.ok) return false;
   return (await checkAssertion(config, input.response, challenge, input.userId)).ok;
+}
+
+/**
+ * The inputs of `signalAllAcceptedCredentials` for the user (WebAuthn Level
+ * 3, plan 12i): the RP ID and the base64url user handle.
+ */
+export function signalInputs(
+  config: ResolvedConfig,
+  user: UserRow,
+): Result<{ rpId: string; userHandle: string }> {
+  if (!config.passkey) return fail("not_found");
+  return ok({ rpId: config.passkey.rpID, userHandle: toBase64Url(userHandleOf(user.id)) });
 }
 
 export async function listPasskeys(

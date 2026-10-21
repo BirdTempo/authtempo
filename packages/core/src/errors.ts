@@ -109,6 +109,8 @@ export const ERRORS = {
   account_disabled: 403,
   // plan 12d ruling 25 N2: the connection's default role is gone from the organization.
   role_not_found: 409,
+  // plan 12i: an assertion of a credential with no row, for signalUnknownCredential (spec 32 item 3)
+  passkey_unknown: 400,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

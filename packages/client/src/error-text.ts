@@ -98,6 +98,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   sso_not_provisioned: "Ask your organization to give you access first.",
   account_disabled: "Your organization turned off this account.",
   role_not_found: "The organization no longer has the role of this sign-in.",
+  passkey_unknown: "This site does not know this passkey. Use another passkey or another method.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

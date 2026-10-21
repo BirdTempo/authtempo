@@ -370,10 +370,13 @@ describe("passkey config", () => {
         origins: ["https://example.com", "https://app.example.com:8443"],
       },
     });
+    // Plan 12i Task 9: related origins are off, and no ceremony has a hint, by default.
     expect(c.passkey).toEqual({
       rpID: "example.com",
       rpName: "Example",
       origins: ["https://example.com", "https://app.example.com:8443"],
+      relatedOrigins: false,
+      hints: { register: [], signIn: [] },
     });
   });
   it("accepts the baseURL or a trusted origin and refuses any other passkey origin", () => {

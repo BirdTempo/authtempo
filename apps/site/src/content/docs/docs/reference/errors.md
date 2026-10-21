@@ -90,6 +90,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | [`POST /passkey/register/verify`](/docs/reference/routes/#post-passkey-register-verify), [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify), [`POST /reauth`](/docs/reference/routes/#post-reauth). |
 
+<h3 id="passkey_unknown"><code>passkey_unknown</code> 400</h3>
+
+- **Meaning:** The sign-in assertion names a credential that this site does not store. The passkey was deleted, or it belongs to another site.
+- **Do:** Call `PublicKeyCredential.signalUnknownCredential` with `rpId` and the credential id, so the device can remove the passkey. Then offer another method.
+
+| Routes |
+| --- |
+| [`POST /passkey/authenticate/verify`](/docs/reference/routes/#post-passkey-authenticate-verify). |
+
 <h3 id="email_unverified"><code>email_unverified</code> 403</h3>
 
 - **Meaning:** The flow needs a verified address, and the user has none.

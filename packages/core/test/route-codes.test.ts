@@ -1041,7 +1041,8 @@ describe("the codes of one route (plan 11g)", () => {
     });
   });
 
-  it("the passkey ceremonies answer passkey_failed to an assertion that no authenticator signed, and token_expired after five minutes", async () => {
+  // Plan 12i Task 9: the sign-in answers passkey_unknown, because no row holds the id `cred-1`.
+  it("the passkey ceremonies answer passkey_failed and passkey_unknown to an assertion that no authenticator signed, and token_expired after five minutes", async () => {
     const w = world();
     const me = await verifiedSession(w.auth, "ada@example.com");
     const cookie = w.cookie(me.token);
@@ -1062,7 +1063,7 @@ describe("the codes of one route (plan 11g)", () => {
     const signIn = await challengeOfOptions("POST /passkey/authenticate/options", {});
     expect(
       await call(w, "POST /passkey/authenticate/verify", {}, { response: ceremonyOf(signIn) }),
-    ).toEqual({ status: 400, code: "passkey_failed" });
+    ).toEqual({ status: 400, code: "passkey_unknown" });
     const staleRegister = await challengeOfOptions("POST /passkey/register/options", cookie);
     const staleSignIn = await challengeOfOptions("POST /passkey/authenticate/options", {});
     w.auth.clock.advance(6 * 60_000);

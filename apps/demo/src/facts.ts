@@ -39,6 +39,7 @@ export const DEMO_EXEMPT = {
   // Ruling 33 of the lane: the owner may move it later.
   openapi: "A machine document of the routes, not a sign-in method; the docs serve it.",
   readiness: "A probe for a host, not a sign-in method.",
+  passkeyRelatedOrigins: "The demo has one origin, so it has no related origin to list.",
 } as const satisfies Partial<Record<RouteFeature, string>>;
 
 /**

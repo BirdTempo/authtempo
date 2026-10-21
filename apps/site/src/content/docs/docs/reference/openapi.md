@@ -66,6 +66,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `magicLink` | always on | on |
 | `social` | `social` | off |
 | `passkey` | `passkey` | off |
+| `passkeyRelatedOrigins` | `passkey.relatedOrigins` | off |
 | `password` | `password` | off |
 | `totp` | `totp` | off |
 | `emailOtp` | `emailOtp` | on |

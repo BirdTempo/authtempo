@@ -49,6 +49,8 @@ const INTERNAL_ANSWERED: readonly RouteKey[] = [
 /** The routes on which a test causes not_found: a feature that is off, or an id that names no row. */
 const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "GET /.well-known/openid-configuration",
+  // A request to a host other than the RP ID (plan 12i Task 9).
+  "GET /.well-known/webauthn",
   "GET /handoff/start",
   "GET /jwks",
   "GET /oauth/device",

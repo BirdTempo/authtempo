@@ -38,6 +38,28 @@ export async function readJson<T>(request: Request, schema: z.ZodType<T>): Promi
   return parsed.success ? ok(parsed.data) : fail("invalid_body");
 }
 
+/**
+ * The body of a route whose contract marks the body `optional`: an empty
+ * body reads as `{}`, so a caller of the route before the body existed
+ * keeps working (plan 12i).
+ */
+export async function readOptionalJson<T>(
+  request: Request,
+  schema: z.ZodType<T>,
+): Promise<Result<T>> {
+  const text = await request.text();
+  let raw: unknown = {};
+  if (text !== "") {
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return fail("invalid_body");
+    }
+  }
+  const parsed = schema.safeParse(raw);
+  return parsed.success ? ok(parsed.data) : fail("invalid_body");
+}
+
 export function respond<T>(result: Result<T>, headers: Record<string, string> = {}): Response {
   if (result.ok) return json(result.value, 200, headers);
   const body: { error: string; message?: string; detail?: string } = { error: result.code };

@@ -22,8 +22,9 @@ export interface Feature {
  * adds `health`, the 24th, and `readiness`, the 25th. Plan 12d adds `sso`,
  * `operatorSso`, and `scim`. Plan 12d Task 13 points `sso` to the SSO guide,
  * `operatorSso` to the override section of that guide, and `scim` to the
- * SCIM guide. A Record over the union fails the site's typecheck when core
- * adds a member, so a new feature cannot
+ * SCIM guide. Plan 12i adds `passkeyRelatedOrigins`, the 29th. A Record over
+ * the union fails the site's typecheck when core adds a member, so a new
+ * feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
  * icons, and decision 3 keeps the list). `account` takes `verify`: its first
@@ -86,6 +87,12 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "Register a passkey, and sign in with a discoverable passkey.",
     icon: "passkey",
     guide: "/docs/guides/passkeys/",
+  },
+  passkeyRelatedOrigins: {
+    title: "Passkey related origins",
+    line: "Use one passkey on related sites, with the document of WebAuthn Level 3.",
+    icon: "passkey",
+    guide: "/docs/guides/passkeys/#related-origins",
   },
   password: {
     title: "Passwords",

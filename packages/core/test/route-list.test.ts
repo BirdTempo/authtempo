@@ -32,7 +32,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   identities: ["account"],
   "magic-link": ["magicLink"],
   social: ["social"],
-  passkeys: ["passkey"],
+  passkeys: ["passkey", "passkeyRelatedOrigins"],
   password: ["password"],
   totp: ["totp"],
   "second-factor": ["totp"],
@@ -71,7 +71,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
     // Plan 12d Task 10 adds the six routes of the SCIM Users.
     // Plan 12d Task 11 adds the six routes of the SCIM Groups.
-    expect(listed.length).toBe(186);
+    // Plan 12i Task 9 adds GET /.well-known/webauthn.
+    expect(listed.length).toBe(187);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -118,6 +119,20 @@ describe("ROUTES (plan 11a)", () => {
       name: "passkey",
       delta: { passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] } },
       features: ["passkey"],
+    },
+    // Plan 12i Task 9: the related origins document needs its own key.
+    {
+      name: "passkey related origins",
+      start: { passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] } },
+      delta: {
+        passkey: {
+          rpID: "api.example.com",
+          rpName: "Example",
+          origins: [BASE],
+          relatedOrigins: true,
+        },
+      },
+      features: ["passkeyRelatedOrigins"],
     },
     { name: "password", delta: { password: {} }, features: ["password", "totp", "emailOtpReset"] },
     {

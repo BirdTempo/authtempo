@@ -1,6 +1,6 @@
 ---
 title: Well-known documents
-description: The metadata documents that auth.wellKnown serves at the origin root for the OAuth provider.
+description: The metadata documents that auth.wellKnown serves at the origin root for the OAuth provider and for passkey related origins.
 type: reference
 sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.13
@@ -8,15 +8,17 @@ sources:
   - packages/core/README.md "OAuth 2.1 and OIDC provider"
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 17"
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 9"
 ---
 
 **For:** a developer who runs the OAuth provider, or a client that reads its metadata.
 
-**What it does:** `auth.wellKnown(request)` serves three documents at the origin root. Mount it for each path that starts with `/.well-known/`.
+**What it does:** `auth.wellKnown(request)` serves the OAuth documents and the passkey related origins document at the origin root. Mount it for each path that starts with `/.well-known/`.
 
 ## Before you start
 
-- Set `oauth` in the config. While `oauth` is off, every path answers 404. [OAuth provider](/docs/reference/config/#oauth-provider) lists its keys.
+- Set `oauth` in the config. While `oauth` is off, every OAuth path answers 404. [OAuth provider](/docs/reference/config/#oauth-provider) lists its keys.
+- For the related origins document, set `passkey.relatedOrigins: true`. [Passkeys](/docs/reference/config/#passkeys) lists its keys.
 
 ## The documents
 
@@ -72,6 +74,13 @@ Each member states what the code does under the config, no more and no less. Eac
 - A registration may ask only for what this document names, and it refuses the rest. It also refuses `client_credentials`, which only `api.oauth.clients` gives.
 
 The document of a protected resource holds `resource`, `authorization_servers` (the issuer), `scopes_supported`, `bearer_methods_supported` (`["header"]`), and `dpop_signing_alg_values_supported` (`oauth.dpop.algs`).
+
+## The related origins document
+
+- `GET /.well-known/webauthn` answers `{ origins }`, the list `passkey.origins` (WebAuthn Level 3).
+- Only a request to the `rpID` host gets it, and only with `passkey.relatedOrigins: true`. Any other host answers 404.
+- The answer has `content-type: application/json`, `cache-control: public, max-age=300`, and `access-control-allow-origin: *`.
+- The ceremonies check each origin against `passkey.origins` again. The document tells the browser which origins may use the RP ID.
 
 ## Next
 

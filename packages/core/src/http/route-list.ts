@@ -9,7 +9,8 @@ import type { ErrorCode, OAuthErrorCode, ScimType } from "../errors.js";
  * configured social provider; Apple's callback is the one POST callback.
  * `ROUTE_FEATURES` (plan 11g) lists every feature once; the OpenAPI document
  * reads it, and the route list test holds it to the entries. Plan 12h adds
- * `health` and `readiness`, the probes of a host.
+ * `health` and `readiness`, the probes of a host. Plan 12i adds
+ * `passkeyRelatedOrigins`, the document of WebAuthn Level 3.
  */
 export const ROUTE_FEATURES = [
   "session",
@@ -18,6 +19,7 @@ export const ROUTE_FEATURES = [
   "magicLink",
   "social",
   "passkey",
+  "passkeyRelatedOrigins",
   "password",
   "totp",
   "emailOtp",
@@ -81,6 +83,7 @@ export interface RouteEntry {
    * needs `observe.readiness: true`. `sso` (plan 12d) needs `organizations`
    * and `sso`. `operatorSso` (plan 12d) needs `operator` and `sso`. `scim`
    * (plan 12d) needs `organizations` and `scim`.
+   * `passkeyRelatedOrigins` (plan 12i) needs `passkey` with `relatedOrigins: true`.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -445,7 +448,13 @@ export const ROUTES = Object.freeze([
     path: "/passkey/register/options",
     feature: "passkey",
     auth: ["session"],
-    codes: ["unauthorized", "session_not_fresh", "email_unverified", "impersonation_session"],
+    codes: [
+      "unauthorized",
+      "session_not_fresh",
+      "invalid_body",
+      "email_unverified",
+      "impersonation_session",
+    ],
     oauthCodes: [],
   },
   {
@@ -469,7 +478,7 @@ export const ROUTES = Object.freeze([
     path: "/passkey/authenticate/options",
     feature: "passkey",
     auth: ["none"],
-    codes: ["rate_limited"],
+    codes: ["invalid_body", "rate_limited"],
     oauthCodes: [],
   },
   {
@@ -483,6 +492,7 @@ export const ROUTES = Object.freeze([
       "invalid_token",
       "token_expired",
       "passkey_failed",
+      "passkey_unknown",
       "hook_refused",
       "hook_failed",
       "conflict",
@@ -2485,6 +2495,15 @@ export const ROUTES = Object.freeze([
     codes: [],
     oauthCodes: [],
     scimTypes: [],
+  },
+  // Plan 12i Task 9: the related origins document of WebAuthn Level 3.
+  {
+    method: "GET",
+    path: "/.well-known/webauthn",
+    feature: "passkeyRelatedOrigins",
+    auth: ["none"],
+    codes: [],
+    oauthCodes: [],
   },
   {
     method: "GET",

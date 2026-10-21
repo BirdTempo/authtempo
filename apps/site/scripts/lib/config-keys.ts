@@ -161,7 +161,16 @@ export const CONFIG_KEYS = {
     authorizeParams: true,
     userinfo: true,
   } satisfies Keys<OAuth2Entry>,
-  passkey: { rpID: true, rpName: true, origins: true } satisfies Keys<Part<"passkey">>,
+  passkey: {
+    rpID: true,
+    rpName: true,
+    origins: true,
+    relatedOrigins: true,
+    hints: true,
+  } satisfies Keys<Part<"passkey">>,
+  "passkey.hints": { register: true, signIn: true } satisfies Keys<
+    NonNullable<Part<"passkey">["hints"]>
+  >,
   handoff: {
     schemes: true,
     devRedirectPattern: true,

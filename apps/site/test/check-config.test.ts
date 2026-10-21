@@ -6,7 +6,7 @@ const table = (keys: string[]) =>
   `<table><thead><tr><th>Key</th></tr></thead><tbody>${keys.map((k) => `<tr><td><code>${k}</code></td><td>x</td></tr>`).join("")}</tbody></table>`;
 
 describe("checkConfig", () => {
-  it("lists 208 keys, the nested ones by their path", () => {
+  it("lists 212 keys, the nested ones by their path", () => {
     const keys = configKeyPaths();
     // Plan 12e adds oauth.registration.initialAccessTokenHash, oauth.introspection,
     // oauth.dpop, oauth.dpop.algs, oauth.dpop.windowSeconds, oauth.signInURL,
@@ -26,9 +26,11 @@ describe("checkConfig", () => {
     // Plan 12d Task 9b adds scim, scim.groups, and scim.defaultRole.
     // Plan 12d Task 5 adds totp.gate.sso and hooks.sso. Task 10 adds hooks.scim.
     // Plan 12i Task 13 adds social.microsoft, social.discord, social.gitlab, and their eight keys.
-    expect(keys.length).toBe(223);
+    // Plan 12i Task 9 adds passkey.relatedOrigins, passkey.hints, and its two keys.
+    expect(keys.length).toBe(227);
     expect(keys).toContain("social.microsoft.tenant");
     expect(keys).toContain("social.gitlab.issuer");
+    expect(keys).toContain("passkey.hints.signIn");
     expect(keys).toContain("observe.include.email");
     expect(keys).toContain("hooks.operator");
     expect(keys).toContain("operator.secrets[].scopes");

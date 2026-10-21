@@ -25,6 +25,26 @@ export const PUBLIC_METADATA_HEADERS: Record<string, string> = {
 const AS_PATH = "/.well-known/oauth-authorization-server";
 const OIDC_PATH = "/.well-known/openid-configuration";
 const PRM_PATH = "/.well-known/oauth-protected-resource";
+export const WEBAUTHN_PATH = "/.well-known/webauthn";
+
+/**
+ * The related origins document of WebAuthn Level 3 (read 2026-10-14, plan
+ * 12i), or null when this request gets none. The client fetches
+ * `https://<rpId>/.well-known/webauthn`, so only a request to the `rpID`
+ * host gets it, and only with `passkey.relatedOrigins` on. "The content type
+ * MUST be application/json", so the type has no parameter. The ceremonies
+ * check each origin against `passkey.origins` again: the document is the
+ * browser's input, not core's.
+ */
+export function relatedOriginsAnswer(config: ResolvedConfig, request: Request): Response | null {
+  const rp = config.passkey;
+  if (!rp?.relatedOrigins) return null;
+  if (new URL(request.url).hostname !== rp.rpID) return null;
+  return json({ origins: [...rp.origins] }, 200, {
+    ...PUBLIC_METADATA_HEADERS,
+    "content-type": "application/json",
+  });
+}
 
 /**
  * RFC 8414 section 2 and OIDC Discovery 1.0 section 3 (both read 2026-10-20).
@@ -133,9 +153,11 @@ export function createWellKnownHandler(
   config: ResolvedConfig,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
-    if (!config.oauth) return json({ error: "not_found" }, 404);
     const url = new URL(request.url);
     const path = url.pathname;
+    if (path === WEBAUTHN_PATH && request.method === "GET")
+      return relatedOriginsAnswer(config, request) ?? json({ error: "not_found" }, 404);
+    if (!config.oauth) return json({ error: "not_found" }, 404);
     let body: Record<string, unknown> | null = null;
     if (
       path === AS_PATH ||

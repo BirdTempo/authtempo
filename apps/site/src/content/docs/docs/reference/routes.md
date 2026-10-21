@@ -293,9 +293,9 @@ These routes exist when the config sets `passkey`.
 | Field | Value |
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified |
-| Input | None |
-| Answer | The creation options JSON for `navigator.credentials.create` |
-| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`email_unverified`](/docs/reference/errors/#email_unverified), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Input | JSON `{ hints? }`. The body is optional. `hints` lists `security-key`, `client-device`, or `hybrid`, each once, and replaces `passkey.hints.register` for this ceremony |
+| Answer | The creation options JSON for `navigator.credentials.create`, with `hints` |
+| Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-passkey-register-verify"><code>POST /passkey/register/verify</code></h3>
 
@@ -311,9 +311,9 @@ These routes exist when the config sets `passkey`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | None. The route reads no body |
-| Answer | The request options JSON for `navigator.credentials.get` |
-| Errors | [`rate_limited`](/docs/reference/errors/#rate_limited) |
+| Input | JSON `{ hints? }`. The body is optional. `hints` lists `security-key`, `client-device`, or `hybrid`, each once, and replaces `passkey.hints.signIn` for this ceremony |
+| Answer | The request options JSON for `navigator.credentials.get`, with `hints` when the ceremony has some |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-passkey-authenticate-verify"><code>POST /passkey/authenticate/verify</code></h3>
 
@@ -321,8 +321,8 @@ These routes exist when the config sets `passkey`.
 | --- | --- |
 | Needs | Nothing |
 | Input | JSON `{ response }` |
-| Answer | `{ user, session }` with the session cookie |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
+| Answer | `{ user, session }` with the session cookie. A credential with no row answers `passkey_unknown`, so the app can call `PublicKeyCredential.signalUnknownCredential` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`passkey_unknown`](/docs/reference/errors/#passkey_unknown), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
 <h3 id="get-passkeys"><code>GET /passkeys</code></h3>
 
@@ -330,7 +330,7 @@ These routes exist when the config sets `passkey`.
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token |
 | Input | None |
-| Answer | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }] }` |
+| Answer | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, createdAt }], rpId, userHandle }`. `rpId` and `userHandle` (base64url of the user id bytes) are the inputs of `PublicKeyCredential.signalAllAcceptedCredentials` |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 <h3 id="post-passkeys-delete"><code>POST /passkeys/delete</code></h3>
@@ -1821,6 +1821,19 @@ Core does not serve these SCIM operations. Each answers 501 with the detail "not
 | Input | None |
 | Answer | 501 with the SCIM error message |
 | Errors | None |
+
+## Passkey related origins
+
+This route exists when the config sets `passkey` with `relatedOrigins: true`.
+
+<h3 id="get-well-known-webauthn"><code>GET /.well-known/webauthn</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | None |
+| Answer | `{ origins }`, the list `passkey.origins`, with `content-type: application/json` and `cache-control: public, max-age=300`. Only a request to the `rpID` host gets it. The browser reads it at the origin root, so mount [`auth.wellKnown`](/docs/reference/well-known/) there |
+| Errors | None. Another host answers `not_found` |
 
 ## OpenAPI document
 

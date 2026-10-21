@@ -334,7 +334,8 @@ describe("passkey authentication", () => {
     expect(await auth.storage.findMany("session", [])).toHaveLength(1);
   });
 
-  it("answers passkey_failed for an unknown credential and for a signature from another key", async () => {
+  // Plan 12i Task 9 (spec 32 item 3): a credential with no row answers passkey_unknown.
+  it("answers passkey_unknown for an unknown credential and passkey_failed for a signature from another key", async () => {
     const auth = passkeyAuth();
     const user = await auth.seedUser("ada@example.com");
     const { soft } = await registered(auth, user);
@@ -347,7 +348,7 @@ describe("passkey authentication", () => {
         ip: null,
         userAgent: null,
       }),
-    ).toMatchObject({ ok: false, code: "passkey_failed" });
+    ).toMatchObject({ ok: false, code: "passkey_unknown" });
     const o2 = await passkeyAuthenticationOptions(auth.config, { ip: null });
     if (!o2.ok) throw new Error(o2.code);
     const forged = await stranger.authenticate(o2.value.challenge);

@@ -27,6 +27,7 @@ export type {
   OperatorSecretEntry,
   OrganizationLimits,
   OrganizationsConfig,
+  PasskeyConfig,
   PasswordConfig,
   ResolvedEmailOtp,
   ScimConfig,
@@ -283,6 +284,7 @@ export {
 export { newId } from "./primitives/ids.js";
 export type { JwsAlg, PublicJwk } from "./primitives/jwk.js";
 export type { Keyring, SecretVersion } from "./primitives/keyring.js";
+export { PASSKEY_HINTS, type PasskeyHint } from "./primitives/passkey-hints.js";
 export type { Result } from "./result.js";
 export {
   type ApiTokenRow,

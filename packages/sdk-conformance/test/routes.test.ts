@@ -67,6 +67,12 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     reason: "the same document as the authorization server metadata",
   },
   {
+    method: "GET",
+    path: "/.well-known/webauthn",
+    reason:
+      "the browser reads the related origins document at the RP ID host (WebAuthn Level 3); no SDK call needs it (plan 12i)",
+  },
+  {
     method: "POST",
     path: "/operator/keys/rotate",
     reason: "the keys rotate command of the CLI calls it (plan 11c)",

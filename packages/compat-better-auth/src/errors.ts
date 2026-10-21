@@ -163,6 +163,9 @@ export const BETTER_AUTH_CODES = {
   sso_not_provisioned: "SSO_NOT_PROVISIONED",
   account_disabled: "ACCOUNT_DISABLED",
   role_not_found: "ROLE_NOT_FOUND",
+  // Plan 12i deviation 10: @better-auth/passkey 1.7.2's name for a sign-in by a
+  // credential with no row (dist/index.mjs:470, read 2026-10-22). The status stays core's.
+  passkey_unknown: "PASSKEY_NOT_FOUND",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

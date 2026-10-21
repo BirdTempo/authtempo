@@ -282,6 +282,7 @@ import { createWellKnownHandler } from "./http/well-known.js";
 import { unscopedOf } from "./observe/observer.js";
 import type { HandleOptions, ObserveStats } from "./observe/port.js";
 import type { PublicJwk } from "./primitives/jwk.js";
+import type { PasskeyHint } from "./primitives/passkey-hints.js";
 import { fail, type Result } from "./result.js";
 import type { ScimScope, SessionRow, UserRow } from "./schema.js";
 import type {
@@ -759,16 +760,20 @@ export interface AuthApi {
     Result<{ token: string; next: string; user: UserRow } | SignInChallenge | SocialLinked>
   >;
   /** Applies no fresh rule: call `api.session.requireFresh` first (plan 12a). */
+  /** `hints` replaces `passkey.hints.register` for this ceremony (plan 12i). */
   passkeyRegistrationOptions(input: {
     user: UserRow;
+    hints?: PasskeyHint[] | undefined;
   }): Promise<Result<PublicKeyCredentialCreationOptionsJSON>>;
   verifyPasskeyRegistration(input: {
     user: UserRow;
     response: unknown;
     name?: string | undefined;
   }): Promise<Result<PasskeySummary>>;
+  /** `hints` replaces `passkey.hints.signIn` for this ceremony (plan 12i). */
   passkeyAuthenticationOptions(input: {
     ip: string | null;
+    hints?: PasskeyHint[] | undefined;
   }): Promise<Result<PublicKeyCredentialRequestOptionsJSON>>;
   verifyPasskeyAuthentication(input: {
     response: unknown;
@@ -1050,6 +1055,9 @@ export interface Auth {
    * OIDC Discovery for this issuer, and RFC 9728 for each `oauth.resources`
    * entry. Mount it for the paths that start with `/.well-known/`. 404 for
    * any other path and while `oauth` is off; 405 for a method other than GET.
+   * With `passkey.relatedOrigins` on, it also answers the related origins
+   * document of WebAuthn Level 3 at `/.well-known/webauthn` on the `rpID`
+   * host (plan 12i).
    */
   wellKnown(request: Request): Promise<Response>;
   /** The same operations, in-process. */
