@@ -7,6 +7,7 @@ sources:
   - packages/core/src/errors.ts
   - packages/core/README.md "Organizations"
   - packages/core/src/http/impersonation-rules.ts
+  - docs/superpowers/plans/2026-10-14-12h-observability.md
 ---
 
 **For:** a developer who reads an error answer of authtempo and must act on it.
@@ -555,6 +556,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | Routes |
 | --- |
 | [`POST /organizations/teams/delete`](/docs/reference/routes/#post-organizations-teams-delete). |
+
+<h3 id="not_ready"><code>not_ready</code> 503</h3>
+
+- **Meaning:** The store gave no answer to the readiness check. The body also carries `reason`: `storage` when the store threw, `schema` when the stored schema version is older than the adapter. It names no host, no database, no version, and no error name.
+- **Do:** For `schema`, run the migrations of your adapter. For `storage`, check the database and its binding. The route keeps one result for 10 seconds, so call it again after that time.
+
+| Routes |
+| --- |
+| [`GET /ready`](/docs/reference/routes/#get-ready), when the config sets `observe.readiness: true`. |
 
 ## OAuth codes
 

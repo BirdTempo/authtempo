@@ -44,12 +44,13 @@ describe("the demo lists and the routes of core", () => {
         else served++;
       }
       expect(missing).toEqual([]);
-      // Count what ran: the routes of the twelve demo features, less the Apple callback.
+      // Count what ran: the routes of the thirteen demo features, less the Apple callback.
       // Plan 12k Task 3 added two organizations routes: has-permission and permissions.
       // Plan 12k Task 6 added one organizations route: check-slug.
       // Plan 12k Task 7 added one tokens route: update.
       // Plan 12k Task 8 added five organizations routes: the organization tokens.
-      expect(served).toBe(86);
+      // Plan 12h adds GET /health, so 86 became 87.
+      expect(served).toBe(87);
     },
     LONG_TEST_MS,
   );
@@ -68,14 +69,15 @@ describe("the demo lists and the routes of core", () => {
         checked++;
       }
       expect(served).toEqual([]);
-      // Count what ran: the routes of the nine exempt features. Plan 12e added
+      // Count what ran: the routes of the twelve exempt features. Plan 12e added
       // three oauth routes (GET and POST /oauth/end-session, POST /oauth/introspect)
       // and the three routes of oauthDevice, so 24 became 30. Plan 12f adds the
       // eleven routes of operatorUsers and the two routes of
       // operatorImpersonation, so 30 became 43. Plan 12k Task 4 adds the five
       // routes of dynamicRoles, so 43 became 48. Plan 12k Task 5 adds the nine
-      // routes of teams, so 48 became 57.
-      expect(checked).toBe(57);
+      // routes of teams, so 48 became 57. Plan 12h adds GET /ready of
+      // readiness, so 57 became 58.
+      expect(checked).toBe(58);
     },
     LONG_TEST_MS,
   );

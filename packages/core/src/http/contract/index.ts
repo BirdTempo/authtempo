@@ -2,6 +2,7 @@ import type { z } from "zod";
 import type { RouteKey } from "../route-list.js";
 import { EMAIL_OTP_CONTRACT } from "./email-otp.js";
 import { HANDOFF_CONTRACT } from "./handoff.js";
+import { HEALTH_CONTRACT } from "./health.js";
 import { IDENTITIES_CONTRACT } from "./identities.js";
 import { JWT_CONTRACT } from "./jwt.js";
 import { MAGIC_LINK_CONTRACT } from "./magic-link.js";
@@ -49,6 +50,7 @@ export const ROUTE_CONTRACT = {
   ...JWT_CONTRACT,
   ...OPERATOR_CONTRACT,
   ...OAUTH_CONTRACT,
+  ...HEALTH_CONTRACT,
   ...OPENAPI_CONTRACT,
 } as const satisfies Record<RouteKey, RouteContract>;
 

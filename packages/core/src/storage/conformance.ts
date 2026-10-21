@@ -39,6 +39,12 @@ export { runRefreshRaceConformance } from "./refresh-race-conformance.js";
 export interface ConformanceTarget {
   adapter: StorageAdapter;
   close(): Promise<void>;
+  /**
+   * Optional. Ends the connection of the adapter, as a database that stops:
+   * the next call of the adapter throws. `close` still cleans up after it.
+   * The suite holds `ping` to a fresh read with it (plan 12h Task 8).
+   */
+  stop?(): Promise<void>;
 }
 
 /**
@@ -71,6 +77,19 @@ export interface ConformanceOptions {
    * D1 sends 2: the read of the rows for the undo and the write. Default 1.
    */
   updateInTransaction?: number;
+  /**
+   * The statements of one `ping`, for `statementsSent` (plan 12h Task 8).
+   * The D1 storage of the Better Auth tables also reads the indexes of the
+   * account table, so it sends more. Default 1.
+   */
+  pingStatements?: number;
+  /**
+   * Opens a store whose migrations stop at the version before
+   * `SCHEMA_VERSION`, as an app has it before it runs the new migration
+   * (plan 12h Task 8). With it, the suite holds `ping` to `schema_mismatch`
+   * there. An adapter with no schema version, such as memory, leaves it out.
+   */
+  oldStore?: () => Promise<ConformanceTarget>;
 }
 
 function user(id: string, email: string, at: Date): UserRow {
@@ -1613,6 +1632,37 @@ export function runAdapterConformance(
         const first = await db.readyStatements();
         expect(Number.isInteger(first) && first >= 0).toBe(true);
         expect(await growth(async () => expect(await db.readyStatements?.()).toBe(first))).toBe(0);
+      });
+
+      it("ping answers for a ready store and throws schema_mismatch for an old one", async () => {
+        if (!db.ping) return;
+        // The cached check passes first. A ping that reads that cache sends no statement.
+        await db.findOne("user", [{ field: "id", op: "eq", value: "none" }]);
+        const ready = await db.readyStatements?.();
+        expect(await growth(() => db.ping?.() ?? Promise.resolve())).toBe(
+          options.pingStatements ?? 1,
+        );
+        expect(await growth(() => db.ping?.() ?? Promise.resolve())).toBe(
+          options.pingStatements ?? 1,
+        );
+        // The ping leaves the cached check alone.
+        expect(await db.readyStatements?.()).toBe(ready);
+        if (options.oldStore) {
+          const old = await options.oldStore();
+          try {
+            await expect(old.adapter.ping?.()).rejects.toMatchObject({
+              name: "StorageError",
+              code: "schema_mismatch",
+            });
+          } finally {
+            await old.close();
+          }
+        }
+        // The cached check passed above. After the database stops, a ping reads again, so it throws.
+        if (target.stop) {
+          await target.stop();
+          await expect(db.ping?.()).rejects.toThrow();
+        }
       });
 
       it("has lockInOrder on a database with row locks", () => {

@@ -25,6 +25,12 @@ export interface D1AdapterOptions {
   /** The schema version check, run once per adapter. */
   ready(): Promise<void>;
   /**
+   * The check of `ready` with no cache, each call: the adapter's `ping`
+   * (plan 12h Task 8). It counts its own queries in `sent`. Leave it out,
+   * and the adapter has no `ping`.
+   */
+  ping?(): Promise<void>;
+  /**
    * The count of `statementsSent`, shared with each transaction (ruling 35
    * of plan 12f). Pass the same object to the schema check, so its queries
    * count too. With `ready`, the check also counts its own queries there,
@@ -200,6 +206,7 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       return ctx.sent.statements;
     },
   };
+  if (ctx.ping) self.ping = ctx.ping;
   if (ctx.sent.ready !== undefined) {
     const counts = ctx.sent;
     self.readyStatements = async () => {

@@ -140,4 +140,13 @@ export interface StorageAdapter {
    * adapter that leaves it out counts as 1.
    */
   readyStatements?(): Promise<number>;
+  /**
+   * Optional. Reads the stored schema version with no cache, each call, and
+   * throws `schema_mismatch` for an old one (plan 12h Task 8, spec 31 item
+   * 12). `GET /ready` calls it. It never sets or reads the cached check of
+   * the adapter, so `readyStatements` stays the same. Its statements count
+   * in `statementsSent`. An adapter with no `ping` gets one read of a user
+   * row by an id that no row holds.
+   */
+  ping?(): Promise<void>;
 }

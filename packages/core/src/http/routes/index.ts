@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { healthRoutes } from "../health.js";
 import type { Route } from "../router.js";
 import { emailOtpRoutes } from "./email-otp.js";
 import { handoffRoutes } from "./handoff.js";
@@ -21,7 +22,10 @@ import { tokenRoutes } from "./tokens.js";
 import { totpRoutes } from "./totp.js";
 import { userRoutes } from "./user.js";
 
-/** The name of one route module file under `src/http/routes/` (plan 11g). */
+/**
+ * The name of one route module file under `src/http/routes/` (plan 11g).
+ * `health` is `src/http/health.ts` (plan 12h Task 8).
+ */
 export type RouteModule =
   | "sessions"
   | "reauth"
@@ -42,7 +46,8 @@ export type RouteModule =
   | "jwt"
   | "operator"
   | "oauth"
-  | "openapi";
+  | "openapi"
+  | "health";
 
 /**
  * Every route of a config, by module, in the router's order (plan 11g). The
@@ -71,6 +76,7 @@ export function coreRouteModules(
     { module: "jwt", routes: jwtRoutes(config) },
     { module: "operator", routes: operatorRoutes(config) },
     { module: "oauth", routes: oauthRoutes(config) },
+    { module: "health", routes: healthRoutes(config) },
   ];
   // The thunk reads the final list at the first request, so the document lists this route too.
   list.push({

@@ -83,6 +83,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   operator_self: "You cannot do this action on your own account.",
   impersonation_refused: "You cannot act as this user.",
   impersonation_session: "You cannot do this while you act as another user.",
+  not_ready: "The service is not ready. Try again later.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

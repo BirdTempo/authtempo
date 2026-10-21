@@ -67,6 +67,7 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "GET /organizations/teams/mine",
   "GET /password/reset",
   "GET /password/verify",
+  "GET /ready",
   "GET /social/:provider/callback",
   "GET /social/:provider/start",
   "GET /token",

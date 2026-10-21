@@ -5,7 +5,9 @@ import type { CompatDatabase } from "../types.js";
 import {
   applyBetterAuthCompatMigrations,
   compatMigrationSql,
+  d1CompatPing,
   d1CompatReady,
+  postgresCompatPing,
   postgresCompatReady,
   type SqliteVariant,
 } from "./migration.js";
@@ -75,6 +77,7 @@ export function betterAuthSchemaStorage(
         statements: st,
         toStorageError: st.toStorageError,
         ready: d1CompatReady(options.db, names, sent),
+        ping: d1CompatPing(options.db, names, sent),
         sent,
       }),
       limiter: createD1Limiter(db),
@@ -96,6 +99,7 @@ export function betterAuthSchemaStorage(
       statements: st,
       toStorageError: st.toStorageError,
       ready: postgresCompatReady(sql),
+      ping: postgresCompatPing(sql),
     }),
     limiter: createPostgresLimiter(sql),
     migrationSql: () => compatMigrationSql("postgres", names),

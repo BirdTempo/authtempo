@@ -1,5 +1,5 @@
-import { env } from "cloudflare:test";
-import { type ModelName, schema } from "@authtempo/core";
+import { applyD1Migrations, env } from "cloudflare:test";
+import { type ModelName, SCHEMA_VERSION, schema } from "@authtempo/core";
 import { runAdapterConformance } from "@authtempo/core/conformance";
 import { columnsOf, type LiveShape, TABLES } from "@authtempo/core/sql";
 import { describe, expect, it } from "vitest";
@@ -9,6 +9,19 @@ async function truncateAll(): Promise<void> {
   await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
 }
 
+/**
+ * The staged database with the migrations before the one of SCHEMA_VERSION,
+ * as an app has it before it applies the new file (plan 12h Task 8).
+ */
+async function oldStore() {
+  const cut = env.TEST_MIGRATIONS.findIndex((m) =>
+    m.name.startsWith(`${String(SCHEMA_VERSION).padStart(4, "0")}_`),
+  );
+  if (cut < 1) throw new Error(`no migration file of version ${SCHEMA_VERSION}`);
+  await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS.slice(0, cut));
+  return { adapter: createD1Adapter(env.STAGED), close: async () => {} };
+}
+
 // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
 runAdapterConformance(
   "d1",
@@ -16,7 +29,7 @@ runAdapterConformance(
     await truncateAll();
     return { adapter: createD1Adapter(env.DB), close: truncateAll };
   },
-  { updateInTransaction: 2 },
+  { updateInTransaction: 2, oldStore },
 );
 
 /** The live shape of the test database, read with the two exported SQL texts. */

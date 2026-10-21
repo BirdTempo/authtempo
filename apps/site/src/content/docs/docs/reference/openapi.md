@@ -8,6 +8,7 @@ sources:
   - packages/core/src/openapi/features.ts
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 25
   - docs/superpowers/plans/2026-10-14-11g-openapi.md
+  - docs/superpowers/plans/2026-10-14-12h-observability.md
 ---
 
 **For:** a developer who loads the API into a tool or a code generator.
@@ -81,12 +82,14 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `oauthRegistration` | `oauth.registration.dynamic` | off |
 | `oauthDevice` | `oauth.device` | off |
 | `openapi` | `openapi` | off |
+| `health` | always on | on |
+| `readiness` | `observe.readiness` | off |
 
 ## The error shape
 
 | Schema | Shape | Used by |
 | --- | --- | --- |
-| `Error` | `{ error, message? }`. `message` is present only on `hook_refused` | A code of `ERRORS` |
+| `Error` | `{ error, message?, reason? }`. `message` is present only on `hook_refused`, and `reason` only on `not_ready` | A code of `ERRORS` |
 | `OAuthError` | `{ error }` | A code of `OAUTH_ERRORS` |
 
 Each operation has one response for each status of its codes, with an `enum` of those codes. Each code links its anchor on [Error codes](/docs/reference/errors/). Every operation also has two codes of the router, `not_found` and `internal`. Each POST also has `origin_not_trusted`, except Apple's form post callback, which takes a cross-site form.

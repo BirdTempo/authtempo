@@ -102,7 +102,8 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
       return { adapter: db(), close: truncate };
     },
     // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
-    { updateInTransaction: 2 },
+    // A ping sends the 2 version reads, the index list, and the read of the one unique index (plan 12h).
+    { updateInTransaction: 2, pingStatements: 4 },
   );
 
   describe(`the Better Auth mapping on D1, ${label}`, () => {

@@ -11,6 +11,11 @@ export interface PostgresAdapterOptions {
   toStorageError(model: ModelName, err: unknown): StorageError | null;
   /** The schema version check, run once per adapter. */
   ready(): Promise<void>;
+  /**
+   * The check of `ready` with no cache, each call: the adapter's `ping`
+   * (plan 12h Task 8). Leave it out, and the adapter has no `ping`.
+   */
+  ping?(): Promise<void>;
 }
 
 interface Ctx extends PostgresAdapterOptions {
@@ -30,7 +35,7 @@ async function query(ctx: Ctx, s: Statement): Promise<{ rows: Row[]; count: numb
 }
 
 function adapterOn(ctx: Ctx): StorageAdapter {
-  return {
+  const self: StorageAdapter = {
     async create(model, data) {
       await ctx.ready();
       assertModel(model);
@@ -97,6 +102,14 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       await query(ctx, { sql: `${s.sql} FOR UPDATE`, params: s.params });
     },
   };
+  const ping = ctx.ping;
+  if (ping)
+    self.ping = async () => {
+      // A port call, so it counts in `statementsSent` as each other call does.
+      ctx.sent.statements++;
+      await ping();
+    };
+  return self;
 }
 
 /** `begin` reserves one connection, runs fn, commits on resolve, rolls back and rethrows on throw. */

@@ -38,6 +38,11 @@ describe("error texts and docs links (plan 11d)", () => {
     expect(errorText("operator_self")).toBe("You cannot do this action on your own account.");
   });
 
+  it("tells that the service is not ready, with no cause (plan 12h)", () => {
+    expect(errorText("not_ready")).toBe("The service is not ready. Try again later.");
+    expect(errorDocsURL("not_ready")).toBe(`${DOCS_ORIGIN}/docs/reference/errors/#not_ready`);
+  });
+
   it("links a core code to its anchor, an OAuth code to its prefixed anchor, and an SDK code to its page", () => {
     expect(errorDocsURL("invalid_token")).toBe(
       `${DOCS_ORIGIN}/docs/reference/errors/#invalid_token`,

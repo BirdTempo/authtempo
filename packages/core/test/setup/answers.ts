@@ -31,6 +31,9 @@ const FS_MODULE = "node:fs";
  * 5. A route that takes `dpopAccessToken` answers `invalid_dpop_proof` as a
  *    401 with a `DPoP error="invalid_dpop_proof"` challenge (plan 12e,
  *    ruling 31; RFC 7235 section 3.1 asks a challenge of each 401).
+ * 6. A JSON error body holds only the keys of its table's error schema in
+ *    the OpenAPI document (plan 12h Task 8). So the body of a 503 `not_ready`
+ *    cannot gain a key, such as the name of the error, with no sign.
  * An answer for a path of no route has the key `null` and the verdict `ok`.
  */
 vi.mock("../../src/http/router.js", async (importOriginal) => {
@@ -41,6 +44,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
     "../../src/errors.js"
   );
   const { ROUTE_CONTRACT } = await import("../../src/http/contract/index.js");
+  const { ERROR_SCHEMAS } = await import("../../src/openapi/responses.js");
   const { AUTH_ERROR_PARAM } = await import("../../src/http/redirect.js");
   const { routeKeyOf } = await import("../../src/http/route-key.js");
   const { ROUTER_CODES, ROUTES } = await import("../../src/http/route-list.js");
@@ -202,8 +206,17 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
       !/(^|,\s*)DPoP error="invalid_dpop_proof"/.test(challenge ?? "")
     )
       return { ...base, verdict: "an invalid_dpop_proof 401 carries no DPoP error challenge" };
-    if (code !== null)
+    if (code !== null) {
+      // Rule 6: the keys of the error schema of the code's table, and no other key.
+      const oauth = (ENTRIES.get(key)?.oauthCodes as readonly string[] | undefined)?.includes(code);
+      const allowedKeys = Object.keys(
+        (oauth ? ERROR_SCHEMAS.OAuthError : ERROR_SCHEMAS.Error).properties,
+      );
+      const extra = Object.keys(body as object).filter((k) => !allowedKeys.includes(k));
+      if (extra.length > 0)
+        return { ...base, verdict: `the error body has the keys ${extra.join(", ")} of no schema` };
       return { ...base, verdict: codeVerdict(key as RouteKey, code, status, false) };
+    }
     if (status >= 400) return { ...base, verdict: `a ${status} ${type} answer carries no code` };
     if (type === "application/json") return { ...base, ...jsonVerdict(contract, status, body) };
     if (type === "text/html") {

@@ -85,7 +85,8 @@ describe("openApiDocument (plan 11g)", () => {
     expect(new Set(keys).size).toBe(keys.length);
     expect([...keys].sort()).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
     // Plan 12k Task 8 adds the five organization token routes.
-    expect(keys.length).toBe(144);
+    // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
+    expect(keys.length).toBe(146);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(":provider", "{provider}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -398,8 +399,9 @@ describe("openApiDocument (plan 11g)", () => {
       } else expect(params, key).toEqual([]);
     }
     // Plan 12f adds 11 JSON answers, 7 bodies, and 4 queries of the operator
-    // routes, then 2 answers and 2 bodies of the impersonation.
-    expect([answers, bodies, queries]).toEqual([120, 88, 26]);
+    // routes, then 2 answers and 2 bodies of the impersonation. Plan 12h
+    // adds the 2 answers of GET /health and GET /ready.
+    expect([answers, bodies, queries]).toEqual([122, 88, 26]);
   });
 
   it("takes the request_id form of the authorize query", () => {

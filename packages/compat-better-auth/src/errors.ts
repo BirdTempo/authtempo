@@ -141,6 +141,8 @@ export const BETTER_AUTH_CODES = {
   token_retired: "TOKEN_RETIRED",
   // Plan 12k Task 8. authtempo's own name: Better Auth has no cap of organization tokens.
   organization_token_limit: "ORGANIZATION_TOKEN_LIMIT",
+  // Plan 12h. A name of our own: Better Auth 1.7 has no readiness route.
+  not_ready: "NOT_READY",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

@@ -202,6 +202,8 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "GET /.well-known/oauth-authorization-server": NO_SESSION,
   "GET /.well-known/openid-configuration": NO_SESSION,
   "GET /openapi.json": NO_SESSION,
+  "GET /health": NO_SESSION,
+  "GET /ready": NO_SESSION,
 };
 
 /**

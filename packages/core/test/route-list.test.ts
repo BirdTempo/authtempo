@@ -46,6 +46,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   operator: ["operator", "operatorUsers", "operatorImpersonation"],
   oauth: ["oauth", "oauthRegistration", "oauthDevice"],
   openapi: ["openapi"],
+  health: ["health", "readiness"],
 };
 
 describe("ROUTES (plan 11a)", () => {
@@ -60,7 +61,8 @@ describe("ROUTES (plan 11a)", () => {
     expect(served).toEqual([...listed].sort());
     expect(new Set(listed).size).toBe(listed.length);
     // Plan 12k Task 8 adds the five organization token routes.
-    expect(listed.length).toBe(144);
+    // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
+    expect(listed.length).toBe(146);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -73,6 +75,7 @@ describe("ROUTES (plan 11a)", () => {
       "emailOtp",
       "tokens",
       "jwtMint",
+      "health",
     ]);
     const listed = ROUTES.filter((r) => always.has(r.feature)).map((r) => `${r.method} ${r.path}`);
     expect(served).toEqual(listed.sort());
@@ -230,6 +233,17 @@ describe("ROUTES (plan 11a)", () => {
       features: ["operatorImpersonation"],
     },
     { name: "openapi", delta: { openapi: true }, features: ["openapi"] },
+    // Plan 12h Task 8: a sink with no readiness adds no route; readiness adds GET /ready.
+    {
+      name: "observe with a sink",
+      delta: { observe: { sink: { write: () => {} } } },
+      features: [],
+    },
+    {
+      name: "readiness",
+      delta: { observe: { sink: { write: () => {} }, readiness: true } },
+      features: ["readiness"],
+    },
   ];
 
   it.each(deltas)(

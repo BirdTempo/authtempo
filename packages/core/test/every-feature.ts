@@ -82,5 +82,7 @@ export function everyFeature(): ResolvedConfig {
       impersonation: {},
     },
     openapi: true,
+    // The readiness route of plan 12h needs a sink; this one keeps nothing.
+    observe: { sink: { write: () => {} }, readiness: true },
   });
 }

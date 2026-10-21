@@ -779,8 +779,9 @@ describe("the demo page (plan 11b Task 12)", () => {
       expect({ f, body: textOf(body) }).toEqual({ f, body: FEATURES[f].title });
       expect({ f, link: body.includes(`href="/features/#${f}"`) }).toEqual({ f, link: true });
     }
-    // The twelve features of ruling 33, typed here, so a lost member fails this test too.
-    expect(items).toHaveLength(12);
+    // The twelve features of ruling 33, and health of plan 12h (every deployment
+    // serves it), typed here, so a lost member fails this test too.
+    expect(items).toHaveLength(13);
 
     const off = section("What the demo does not show");
     const rows = [
@@ -790,9 +791,9 @@ describe("the demo page (plan 11b Task 12)", () => {
     expect(exempt.map((m) => / id="off-([^"]+)"/.exec(m[1] ?? "")?.[1])).toEqual(
       Object.keys(DEMO_EXEMPT),
     );
-    // The 11 exempt features, typed here (plan 12e adds oauthDevice, plan 12f
-    // operatorUsers and operatorImpersonation, plan 12k dynamicRoles and teams), so a lost member fails this test too.
-    expect(exempt).toHaveLength(11);
+    // The 12 exempt features, typed here (plan 12e adds oauthDevice, plan 12f
+    // operatorUsers and operatorImpersonation, plan 12k dynamicRoles and teams, plan 12h readiness), so a lost member fails this test too.
+    expect(exempt).toHaveLength(12);
     for (const m of exempt) {
       const f = (/ id="off-([^"]+)"/.exec(m[1] ?? "")?.[1] ?? "") as keyof typeof DEMO_EXEMPT;
       expect({ f, dt: textOf(m[2] ?? ""), dd: textOf(m[3] ?? "") }).toEqual({

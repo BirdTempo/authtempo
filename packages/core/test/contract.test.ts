@@ -709,7 +709,8 @@ describe("the route contract (plan 11g)", () => {
     const keys = Object.keys(ROUTE_CONTRACT).sort();
     expect(keys).toEqual(ROUTES.map((r) => `${r.method} ${r.path}`).sort());
     // Plan 12k Task 8 adds the five organization token routes.
-    expect(keys.length).toBe(144);
+    // Plan 12h Task 8 adds GET /health and GET /ready, so 144 became 146.
+    expect(keys.length).toBe(146);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -720,7 +721,8 @@ describe("the route contract (plan 11g)", () => {
         expect(CONTRACT[route.key], `${route.key} has no contract`).toBeDefined();
         mounted.add(route.key);
       }
-    expect(modules.length).toBe(20);
+    // Plan 12h Task 8 adds the module of http/health.ts, so 20 became 21.
+    expect(modules.length).toBe(21);
     expect([...mounted].sort()).toEqual(keys);
   });
 

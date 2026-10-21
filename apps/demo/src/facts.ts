@@ -15,6 +15,8 @@ export const DEMO_FEATURES = [
   "emailOtpReset",
   "organizations",
   "tokens",
+  // Plan 12h: the health route is in every deployment of core, so the demo serves it.
+  "health",
 ] as const satisfies readonly RouteFeature[];
 
 /** Off in the demo, each with its reason. A new feature of core fails the coverage test until it is in one list. */
@@ -31,6 +33,7 @@ export const DEMO_EXEMPT = {
   teams: "An organization tool, not a sign-in method.",
   // Ruling 33 of the lane: the owner may move it later.
   openapi: "A machine document of the routes, not a sign-in method; the docs serve it.",
+  readiness: "A probe for a host, not a sign-in method.",
 } as const satisfies Partial<Record<RouteFeature, string>>;
 
 /**

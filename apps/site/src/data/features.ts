@@ -18,9 +18,10 @@ export interface Feature {
  * One row per member of RouteFeature. It had 17 at 0ef9665. Plan 11g adds
  * `openapi`, the 18th, and plan 12e adds `oauthDevice`, the 19th. Plan 12f
  * adds `operatorUsers`, the 20th, and `operatorImpersonation`, the 21st.
- * Plan 12k adds `dynamicRoles`, the 22nd, and `teams`, the 23rd. A Record
- * over the union fails the site's typecheck when core adds a member, so a
- * new feature cannot
+ * Plan 12k adds `dynamicRoles`, the 22nd, and `teams`, the 23rd. Plan 12h
+ * adds `health`, the 24th, and `readiness`, the 25th. A Record over the
+ * union fails the site's typecheck when core adds a member, so a new
+ * feature cannot
  * ship without its row. Each line restates the description of its guide.
  * The sprite has no symbol for `account` or `accountDelete` (spec 8 names 16
  * icons, and decision 3 keeps the list). `account` takes `verify`: its first
@@ -43,7 +44,9 @@ export interface Feature {
  * `oauthRegistration`, and `oauthDevice` point to the section of their guide
  * that holds them.
  * `openapi` has no guide: its
- * reference page documents the route and the document.
+ * reference page documents the route and the document. The guide of
+ * `health` and `readiness` is the section of the routes page that shows
+ * their two routes.
  */
 export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
   session: {
@@ -183,6 +186,18 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "An OpenAPI 3.1 document of the routes, with their schemes and errors.",
     icon: "routes",
     guide: "/docs/reference/openapi/",
+  },
+  health: {
+    title: "Health check",
+    line: "A route that answers ok with no storage read, for the probe of a host.",
+    icon: "routes",
+    guide: "/docs/reference/routes/#health-and-readiness",
+  },
+  readiness: {
+    title: "Readiness check",
+    line: "A route that answers ready only when the store and its schema answer.",
+    icon: "routes",
+    guide: "/docs/reference/routes/#health-and-readiness",
   },
 };
 

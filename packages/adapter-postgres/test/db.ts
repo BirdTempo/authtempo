@@ -1,3 +1,4 @@
+import { SCHEMA_VERSION } from "@authtempo/core";
 import postgres, { type Sql } from "postgres";
 import { MIGRATIONS } from "../src/migrations.js";
 
@@ -57,14 +58,34 @@ function client(schemaName: string): Sql {
  * Fails loudly when Postgres is not reachable: run `docker compose up -d`.
  * `max: 4` so a write outside an open transaction has a connection.
  */
-export async function freshDatabase(): Promise<{ sql: Sql; close(): Promise<void> }> {
+export async function freshDatabase(): Promise<{
+  sql: Sql;
+  close(): Promise<void>;
+  stop(): Promise<void>;
+}> {
   const name = await createSchema();
   const sql = client(name);
   await migrateWithoutLock(sql);
+  let stopped = false;
   return {
     sql,
     async close() {
+      if (stopped) {
+        // The client has ended, so an admin client drops the schema.
+        const admin = postgres(PG_URL, { max: 1, onnotice: () => {} });
+        try {
+          await admin.unsafe(`DROP SCHEMA ${name} CASCADE`);
+        } finally {
+          await admin.end({ timeout: 5 });
+        }
+        return;
+      }
       await sql.unsafe(`DROP SCHEMA ${name} CASCADE`);
+      await sql.end({ timeout: 5 });
+    },
+    /** Ends the client, as a database that stops: the next query throws (plan 12h Task 8). */
+    async stop() {
+      stopped = true;
       await sql.end({ timeout: 5 });
     },
   };
@@ -117,4 +138,19 @@ export async function freshSchema(): Promise<{ a: Sql; b: Sql; close(): Promise<
       await Promise.all([a.end({ timeout: 5 }), b.end({ timeout: 5 })]);
     },
   };
+}
+
+/**
+ * A fresh schema with the migrations before the one of `SCHEMA_VERSION`, as
+ * an app has it before it runs the new migration (plan 12h Task 8). The
+ * files run as the runner runs them, with no record in `ta_migrations`.
+ */
+export async function oldDatabase(): Promise<{ sql: Sql; close(): Promise<void> }> {
+  const cut = MIGRATIONS.findIndex((m) =>
+    m.name.startsWith(`${String(SCHEMA_VERSION).padStart(4, "0")}_`),
+  );
+  if (cut < 1) throw new Error(`no migration of version ${SCHEMA_VERSION}`);
+  const db = await freshSchema();
+  for (const m of MIGRATIONS.slice(0, cut)) await db.a.unsafe(m.sql);
+  return { sql: db.a, close: () => db.close() };
 }

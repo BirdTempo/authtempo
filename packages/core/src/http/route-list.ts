@@ -8,7 +8,8 @@ import type { ErrorCode, OAuthErrorCode } from "../errors.js";
  * route files. A path is relative to `basePath`. `:provider` stands for each
  * configured social provider; Apple's callback is the one POST callback.
  * `ROUTE_FEATURES` (plan 11g) lists every feature once; the OpenAPI document
- * reads it, and the route list test holds it to the entries.
+ * reads it, and the route list test holds it to the entries. Plan 12h adds
+ * `health` and `readiness`, the probes of a host.
  */
 export const ROUTE_FEATURES = [
   "session",
@@ -34,6 +35,8 @@ export const ROUTE_FEATURES = [
   "oauthRegistration",
   "oauthDevice",
   "openapi",
+  "health",
+  "readiness",
 ] as const;
 export type RouteFeature = (typeof ROUTE_FEATURES)[number];
 
@@ -70,6 +73,8 @@ export interface RouteEntry {
    * false` turns it off. `openapi` (plan 11g) needs `openapi: true`.
    * `dynamicRoles` (plan 12k) needs `organizations` with `dynamicRoles`.
    * `teams` (plan 12k) needs `organizations` with `teams`.
+   * `health` (plan 12h) is in every deployment. `readiness` (plan 12h)
+   * needs `observe.readiness: true`.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -1940,6 +1945,23 @@ export const ROUTES = Object.freeze([
     feature: "openapi",
     auth: ["none"],
     codes: [],
+    oauthCodes: [],
+  },
+  // Plan 12h Task 8 (spec 31 item 12): the probes of a host. No limiter, no session.
+  {
+    method: "GET",
+    path: "/health",
+    feature: "health",
+    auth: ["none"],
+    codes: [],
+    oauthCodes: [],
+  },
+  {
+    method: "GET",
+    path: "/ready",
+    feature: "readiness",
+    auth: ["none"],
+    codes: ["not_ready"],
     oauthCodes: [],
   },
 ] as const satisfies readonly RouteEntry[]);

@@ -1,5 +1,10 @@
 import { StorageError } from "@authtempo/core";
-import { META_TABLE, SCHEMA_VERSION_KEY, schemaVersionGate } from "@authtempo/core/sql";
+import {
+  assertSchemaValue,
+  META_TABLE,
+  SCHEMA_VERSION_KEY,
+  schemaVersionGate,
+} from "@authtempo/core/sql";
 import type { Sql } from "postgres";
 import { ISSUERS } from "./mapping.js";
 import { type BaseTable, BETTER_AUTH_TABLES, type BetterAuthTable, type Names } from "./names.js";
@@ -1135,6 +1140,14 @@ export async function applyBetterAuthCompatMigrations(sql: Sql, names: Names): P
   return applied;
 }
 
+/** The check of one stored mapping version: an older, missing, or non-integer value throws schema_mismatch. */
+function assertCompatValue(value: string | null): void {
+  const found = value === null ? Number.NaN : Number(value);
+  if (!Number.isInteger(found) || found < COMPAT_SCHEMA_VERSION) {
+    throw new StorageError("schema_mismatch", "meta", [`${COMPAT_META_KEY}:${value ?? "none"}`]);
+  }
+}
+
 /** Core's schema version gate, then the mapping version. A failed check is not kept. */
 export function compatVersionGate(
   readSchema: () => Promise<string | null>,
@@ -1146,13 +1159,7 @@ export function compatVersionGate(
     checked ??= (async () => {
       try {
         await core();
-        const value = await Promise.resolve().then(readCompat);
-        const found = value === null ? Number.NaN : Number(value);
-        if (!Number.isInteger(found) || found < COMPAT_SCHEMA_VERSION) {
-          throw new StorageError("schema_mismatch", "meta", [
-            `${COMPAT_META_KEY}:${value ?? "none"}`,
-          ]);
-        }
+        assertCompatValue(await Promise.resolve().then(readCompat));
       } catch (e) {
         checked = null;
         throw e;
@@ -1162,23 +1169,47 @@ export function compatVersionGate(
   };
 }
 
-/** Only an undefined table (42P01) reads as "no version"; any other error passes through. */
-export function postgresCompatReady(sql: Sql): () => Promise<void> {
-  const read = async (key: string) => {
-    try {
-      const rows = await sql.unsafe<{ value: string }[]>(
-        `SELECT value FROM ${META_TABLE} WHERE key = $1`,
-        [key],
-      );
-      return rows[0]?.value ?? null;
-    } catch (e) {
-      if ((e as { code?: unknown } | null)?.code === "42P01") return null;
-      throw e;
-    }
+/**
+ * The two version checks of the gate above with no cache, each call: the
+ * `ping` of the storage (plan 12h Task 8). It never sets the gate.
+ */
+export function compatVersionCheck(
+  readSchema: () => Promise<string | null>,
+  readCompat: () => Promise<string | null>,
+): () => Promise<void> {
+  return async () => {
+    assertSchemaValue(await readSchema());
+    assertCompatValue(await readCompat());
   };
+}
+
+/** One read of a meta row on Postgres. Only an undefined table (42P01) reads as "no version"; any other error passes through. */
+async function postgresMetaValue(sql: Sql, key: string): Promise<string | null> {
+  try {
+    const rows = await sql.unsafe<{ value: string }[]>(
+      `SELECT value FROM ${META_TABLE} WHERE key = $1`,
+      [key],
+    );
+    return rows[0]?.value ?? null;
+  } catch (e) {
+    if ((e as { code?: unknown } | null)?.code === "42P01") return null;
+    throw e;
+  }
+}
+
+/** The ready check on Postgres: core's version, then the mapping version. */
+export function postgresCompatReady(sql: Sql): () => Promise<void> {
   return compatVersionGate(
-    () => read(SCHEMA_VERSION_KEY),
-    () => read(COMPAT_META_KEY),
+    () => postgresMetaValue(sql, SCHEMA_VERSION_KEY),
+    () => postgresMetaValue(sql, COMPAT_META_KEY),
+  );
+}
+
+/** The `ping` on Postgres (plan 12h Task 8): the same reads with no cache. */
+export function postgresCompatPing(sql: Sql): () => Promise<void> {
+  return compatVersionCheck(
+    () => postgresMetaValue(sql, SCHEMA_VERSION_KEY),
+    () => postgresMetaValue(sql, COMPAT_META_KEY),
   );
 }
 
@@ -1190,26 +1221,11 @@ interface D1Readable {
 }
 
 /**
- * Only "no such table" reads as "no version"; any other D1 error passes
- * through. The 1.7 file adds no (issuer, accountId) index: it trusts
- * Better Auth's own. So the check also needs a unique, non-partial index on
- * exactly these two columns, by any name. Without it two OAuth callbacks
- * for one subject both insert, and two users own one identity. The check
- * runs once per storage; a failed check is not kept. Each query counts in
- * `sent`, the count of `statementsSent` of the storage. It counts in the
- * `readyStatements` of the storage too (ruling 37 of plan 12f). The check
- * sends 2 version reads, the index list, and one read per unique index.
+ * The reads of the D1 checks. `count` runs once for each query. Only "no
+ * such table" reads as "no version"; any other D1 error passes through.
  */
-export function d1CompatReady(
-  db: unknown,
-  names: Names,
-  sent: { statements: number; ready?: number } = { statements: 0 },
-): () => Promise<void> {
+function d1Reads(db: unknown, names: Names, count: () => void) {
   const d1 = db as D1Readable;
-  const count = () => {
-    sent.statements++;
-    if (sent.ready !== undefined) sent.ready++;
-  };
   const read = async (key: string) => {
     count();
     try {
@@ -1223,10 +1239,6 @@ export function d1CompatReady(
       throw e;
     }
   };
-  const version = compatVersionGate(
-    () => read(SCHEMA_VERSION_KEY),
-    () => read(COMPAT_META_KEY),
-  );
   // SQLite matches names without case, so the compare does too.
   const want = [names.rawColumn("account", "issuer"), names.rawColumn("account", "accountId")]
     .map((c) => c.toLowerCase())
@@ -1248,21 +1260,73 @@ export function d1CompatReady(
     }
     return false;
   };
+  return { read, hasIssuerKey };
+}
+
+/** The refusal of a D1 account table with no unique index on (issuer, accountId). */
+function noIssuerKey(names: Names): StorageError {
+  const e = new StorageError("schema_mismatch", "identity", ["provider", "subject"]);
+  e.message = `${e.message}: no unique index on ${names.rawTable("account")} (${names.rawColumn("account", "issuer")}, ${names.rawColumn("account", "accountId")})`;
+  return e;
+}
+
+/**
+ * The 1.7 file adds no (issuer, accountId) index: it trusts Better Auth's
+ * own. So the check also needs a unique, non-partial index on exactly these
+ * two columns, by any name. Without it two OAuth callbacks for one subject
+ * both insert, and two users own one identity. The check runs once per
+ * storage; a failed check is not kept. Each query counts in `sent`, the
+ * count of `statementsSent` of the storage. It counts in the
+ * `readyStatements` of the storage too (ruling 37 of plan 12f). The check
+ * sends 2 version reads, the index list, and one read per unique index.
+ */
+export function d1CompatReady(
+  db: unknown,
+  names: Names,
+  sent: { statements: number; ready?: number } = { statements: 0 },
+): () => Promise<void> {
+  const { read, hasIssuerKey } = d1Reads(db, names, () => {
+    sent.statements++;
+    if (sent.ready !== undefined) sent.ready++;
+  });
+  const version = compatVersionGate(
+    () => read(SCHEMA_VERSION_KEY),
+    () => read(COMPAT_META_KEY),
+  );
   let checked: Promise<void> | null = null;
   return () => {
     checked ??= (async () => {
       try {
         await version();
-        if (!(await hasIssuerKey())) {
-          const e = new StorageError("schema_mismatch", "identity", ["provider", "subject"]);
-          e.message = `${e.message}: no unique index on ${names.rawTable("account")} (${names.rawColumn("account", "issuer")}, ${names.rawColumn("account", "accountId")})`;
-          throw e;
-        }
+        if (!(await hasIssuerKey())) throw noIssuerKey(names);
       } catch (e) {
         checked = null;
         throw e;
       }
     })();
     return checked;
+  };
+}
+
+/**
+ * The `ping` of the D1 storage (plan 12h Task 8): the checks of
+ * `d1CompatReady` with no cache, each call. It never sets that gate. Its
+ * queries count in `statementsSent` only, not in `readyStatements`.
+ */
+export function d1CompatPing(
+  db: unknown,
+  names: Names,
+  sent: { statements: number } = { statements: 0 },
+): () => Promise<void> {
+  const { read, hasIssuerKey } = d1Reads(db, names, () => {
+    sent.statements++;
+  });
+  const version = compatVersionCheck(
+    () => read(SCHEMA_VERSION_KEY),
+    () => read(COMPAT_META_KEY),
+  );
+  return async () => {
+    await version();
+    if (!(await hasIssuerKey())) throw noIssuerKey(names);
   };
 }

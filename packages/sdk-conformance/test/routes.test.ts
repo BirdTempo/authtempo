@@ -179,6 +179,16 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     path: "/openapi.json",
     reason: "a code generator or an API tool reads the document; no SDK call needs it (plan 11g)",
   },
+  {
+    method: "GET",
+    path: "/health",
+    reason: "the probe of a host or a load balancer calls it; no SDK call needs it (plan 12h)",
+  },
+  {
+    method: "GET",
+    path: "/ready",
+    reason: "the probe of a host or a load balancer calls it; no SDK call needs it (plan 12h)",
+  },
 ];
 
 const TABLES = {

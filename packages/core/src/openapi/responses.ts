@@ -19,6 +19,12 @@ export const ERROR_SCHEMAS = {
     properties: {
       error: { type: "string" },
       message: { type: "string", description: "The app's text. Present only on `hook_refused`." },
+      // Plan 12h Task 8 (spec 31 item 12): a fixed string, never the text of the cause.
+      reason: {
+        type: "string",
+        enum: ["storage", "schema"],
+        description: "What is not ready. Present only on `not_ready`.",
+      },
     },
     required: ["error"],
     additionalProperties: false,

@@ -9,6 +9,8 @@ sources:
   - docs/superpowers/plans/2026-10-14-11g-openapi.md
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md
   - packages/core/src/http/impersonation-rules.ts
+  - docs/superpowers/plans/2026-10-14-12h-observability.md
+  - packages/core/src/http/health.ts
 ---
 
 **For:** a developer who calls the routes of core, or checks what a route answers.
@@ -23,7 +25,7 @@ sources:
 
 - A route that a config key turns off answers 404 `not_found`.
 - A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.
-- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`.
+- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, and `not_ready` also carries `reason`.
 - An unhandled error answers 500 [`internal`](/docs/reference/errors/#internal) and writes one log line.
 - An `OPTIONS` preflight from a trusted origin answers 204 with the CORS headers. A preflight from another origin answers 403, except where a route states its own rule.
 - Every answer to a trusted origin carries the CORS headers with credentials.
@@ -1412,6 +1414,28 @@ This route exists when the config sets `openapi: true`.
 | Input | None |
 | Answer | The OpenAPI 3.1 document of the routes that the config turns on |
 | Errors | None |
+
+## Health and readiness
+
+`GET /health` exists in every deployment. `GET /ready` exists when the config sets `observe.readiness: true`. Neither route counts on a limiter, and an impersonation session can call both.
+
+<h3 id="get-health"><code>GET /health</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | None |
+| Answer | `{ status: "ok" }` with `cache-control: no-store`. It reads no storage, so it answers while the store is down |
+| Errors | None |
+
+<h3 id="get-ready"><code>GET /ready</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | None |
+| Answer | `{ status: "ready" }` when the store answers. It calls `storage.ping()`, which reads the schema version with no cache; an adapter with no `ping` gets one read of a user row. One result holds for 10 seconds for each `Auth` instance |
+| Errors | [`not_ready`](/docs/reference/errors/#not_ready) 503 with `reason`: `storage` when the store throws, `schema` for an old schema version. The body names no host, no database, no version, and no error name |
 
 ## Next
 

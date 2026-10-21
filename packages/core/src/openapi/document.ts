@@ -34,7 +34,7 @@ const RULES = [
   "",
   "- A route that a config key turns off answers 404 `not_found`.",
   "- A POST with an `Origin` header that is not `baseURL` and not in `trustedOrigins` answers 403 `origin_not_trusted`. Two routes are exceptions: Apple's form post callback, and the token endpoint, which states its own rule.",
-  '- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`.',
+  '- A failure answers `{ "error": "<code>" }` with the status of the code. `hook_refused` also carries `message`, and `not_ready` also carries `reason`.',
   "- An unhandled error answers 500 `internal` and writes one log line.",
   "- An `OPTIONS` preflight from a trusted origin answers 204 with the CORS headers. A preflight from another origin answers 403, except where a route states its own rule.",
   "- Every answer to a trusted origin carries the CORS headers with credentials.",

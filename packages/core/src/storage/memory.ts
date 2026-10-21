@@ -270,6 +270,10 @@ function adapterOn(
     statementsSent() {
       return sent.statements;
     },
+    async ping() {
+      // Memory has no schema version: the store is ready while the process runs.
+      sent.statements++;
+    },
   };
 }
 

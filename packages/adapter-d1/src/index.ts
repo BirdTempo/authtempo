@@ -2,7 +2,7 @@ import type { StorageAdapter } from "@authtempo/core";
 import { coreStatements, SQLITE } from "@authtempo/core/sql";
 import { createD1AdapterOn } from "./adapter.js";
 import { toStorageError } from "./errors.js";
-import { schemaVersionCheck } from "./schema-version.js";
+import { schemaVersionCheck, schemaVersionPing } from "./schema-version.js";
 
 /** Where wrangler finds this package's migrations: set `migrations_dir` to this path in wrangler.jsonc. */
 export const D1_MIGRATIONS_DIR = "node_modules/@authtempo/adapter-d1/migrations";
@@ -15,6 +15,7 @@ export function createD1Adapter(db: D1Database): StorageAdapter {
     statements: coreStatements(SQLITE),
     toStorageError,
     ready: schemaVersionCheck(db, sent),
+    ping: schemaVersionPing(db, sent),
     sent,
   });
 }

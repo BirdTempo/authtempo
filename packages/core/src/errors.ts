@@ -82,6 +82,8 @@ export const ERRORS = {
   operator_self: 409,
   impersonation_refused: 403,
   impersonation_session: 403,
+  // plan 12h: the readiness route (spec 31 item 12)
+  not_ready: 503,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

@@ -460,6 +460,8 @@ describe("betterAuth", () => {
       too_many_attempts: "TOO_MANY_ATTEMPTS",
       totp_enabled: "TOTP_ALREADY_ENABLED",
       totp_not_enabled: "TOTP_NOT_ENABLED",
+      // Plan 12h: the readiness route. Better Auth 1.7 has no such route, so the name is our own.
+      not_ready: "NOT_READY",
     });
     expect([
       passwordPolicyCode("1234567", 8),

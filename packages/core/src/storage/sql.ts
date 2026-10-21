@@ -420,11 +420,23 @@ export function deleteStatement<M extends ModelName>(
 }
 
 /**
+ * The check of one stored schema version: `value` is the stored version, or
+ * null when the meta table or row is missing. An older, missing, or
+ * non-integer version throws schema_mismatch. A newer version is accepted: a
+ * later migration must stay compatible with this adapter until the adapter is
+ * updated. The gate below and each adapter's `ping` call it (plan 12h Task 8).
+ */
+export function assertSchemaValue(value: string | null): void {
+  const found = value === null ? Number.NaN : Number(value);
+  if (!Number.isInteger(found) || found < SCHEMA_VERSION) {
+    throw new StorageError("schema_mismatch", "meta", [value ?? "none"]);
+  }
+}
+
+/**
  * The schema version gate. It calls `read` once and keeps the result. `read`
  * returns the stored version, or null when the meta table or row is missing.
- * An older, missing, or non-integer version throws schema_mismatch. A newer
- * version is accepted: a later migration must stay compatible with this
- * adapter until the adapter is updated. A failed check is not kept, so the
+ * `assertSchemaValue` checks it. A failed check is not kept, so the
  * next call reads again. An error that `read` throws passes through unchanged,
  * so an outage never looks like "run the migrations".
  */
@@ -435,11 +447,7 @@ export function schemaVersionGate(read: () => Promise<string | null>): () => Pro
       try {
         // Start `read` after this promise is stored, so a read that throws at
         // once still resets the gate below.
-        const value = await Promise.resolve().then(read);
-        const found = value === null ? Number.NaN : Number(value);
-        if (!Number.isInteger(found) || found < SCHEMA_VERSION) {
-          throw new StorageError("schema_mismatch", "meta", [value ?? "none"]);
-        }
+        assertSchemaValue(await Promise.resolve().then(read));
       } catch (e) {
         checked = null;
         throw e;

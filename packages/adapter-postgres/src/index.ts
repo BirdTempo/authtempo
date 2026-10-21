@@ -3,13 +3,14 @@ import { coreStatements, POSTGRES } from "@authtempo/core/sql";
 import type { Sql } from "postgres";
 import { createPostgresAdapterOn } from "./adapter.js";
 import { toStorageError } from "./errors.js";
-import { schemaVersionCheck } from "./schema-version.js";
+import { schemaVersionCheck, schemaVersionPing } from "./schema-version.js";
 
 export function createPostgresAdapter(sql: Sql): StorageAdapter {
   return createPostgresAdapterOn(sql, {
     statements: coreStatements(POSTGRES),
     toStorageError,
     ready: schemaVersionCheck(sql),
+    ping: schemaVersionPing(sql),
   });
 }
 
