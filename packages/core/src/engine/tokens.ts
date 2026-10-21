@@ -8,6 +8,7 @@ import { JWS_RE } from "../primitives/jwk.js";
 import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { ApiTokenRow, UserRow } from "../schema.js";
+import { hookGuard } from "./hooks.js";
 import type { OAuthClientAccess } from "./oauth-credentials.js";
 import { readDpopToken, resourceProofHolds } from "./oauth-dpop.js";
 import {
@@ -38,6 +39,7 @@ import {
   validWindow,
   windowOf,
 } from "./token-use.js";
+import { holdUser, userStays } from "./user-hold.js";
 
 // Moved to primitives/credentials.ts (plan 11d); still exported here.
 export { API_TOKEN_PREFIX, ORGANIZATION_TOKEN_PREFIX };
@@ -239,6 +241,14 @@ export function lastUsedDue(lastUsedAt: Date | null, now: Date): boolean {
  * time it leaves the server; the row holds its SHA-256. The caller's session
  * is the route's check: core's token routes take a session only, so a token
  * never mints a token.
+ *
+ * The cap is a limit that the product sells (ruling 43 of plan 12k). So the
+ * delete of the expired rows, the count, and the create run in one
+ * transaction after the hold of the user row (`holdUser`), as the
+ * organization token cap runs after its organization lock. On Postgres a
+ * second create of the user waits for the first commit and counts again.
+ * D1 runs no isolated transaction, so there two creates at once can pass at
+ * 49; the per-user limit of creates bounds that overshoot.
  */
 export async function createApiToken(
   config: ResolvedConfig,
@@ -273,21 +283,8 @@ export async function createApiToken(
     }
   }
   const now = config.clock.now();
-  // The user's expired tokens go first, so they do not count against the cap.
-  await config.storage.delete("apiToken", [
-    { field: "userId", op: "eq", value: user.id },
-    { field: "expiresAt", op: "lte", value: now },
-  ]);
-  // A count, then a create, not one statement: two creates at once can both
-  // pass at 49 and make 51. The per-user limit above bounds the overshoot.
-  const held = await config.storage.findMany(
-    "apiToken",
-    [{ field: "userId", op: "eq", value: user.id }],
-    { limit: API_TOKEN_CAP },
-  );
-  if (held.length >= API_TOKEN_CAP) return fail("token_limit");
   const token = randomToken(API_TOKEN_PREFIX);
-  const row = await config.storage.create("apiToken", {
+  const row: ApiTokenRow = {
     id: newId(now),
     userId: user.id,
     name: input.name,
@@ -307,7 +304,27 @@ export async function createApiToken(
     retiredAt: null,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+  const made = await hookGuard(() =>
+    config.storage.transaction(async (tx): Promise<Result<true>> => {
+      // The cap lock: a second create of the user waits here for this commit (ruling 43).
+      await holdUser(tx, user.id);
+      // The user's expired tokens go first, so they do not count against the cap.
+      await tx.delete("apiToken", [
+        { field: "userId", op: "eq", value: user.id },
+        { field: "expiresAt", op: "lte", value: now },
+      ]);
+      const held = await tx.findMany("apiToken", [{ field: "userId", op: "eq", value: user.id }], {
+        limit: API_TOKEN_CAP,
+      });
+      if (held.length >= API_TOKEN_CAP) return fail("token_limit");
+      await tx.create("apiToken", row);
+      // An account delete that took the user first: the token must not stay.
+      await userStays(tx, user.id);
+      return ok(true);
+    }),
+  );
+  if (!made.ok) return made;
   return ok({ token, apiToken: publicApiToken(row) });
 }
 

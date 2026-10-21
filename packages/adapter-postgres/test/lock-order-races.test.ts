@@ -99,6 +99,27 @@ function afterRead(
   return { ...base, transaction: (fn) => base.transaction((tx) => fn(wrap(tx))) };
 }
 
+/**
+ * A storage on the shared pool that runs `fire` once, after the first
+ * findMany of `model`, in a transaction or outside one.
+ */
+function afterAnyRead(model: ModelName, fire: () => Promise<void>): StorageAdapter {
+  let armed = true;
+  const wrap = (s: StorageAdapter): StorageAdapter => ({
+    ...s,
+    async findMany(m, where, options) {
+      const r = await s.findMany(m, where, options);
+      if (m === model && armed) {
+        armed = false;
+        await fire();
+      }
+      return r;
+    },
+    transaction: (fn) => s.transaction((tx) => fn(wrap(tx))),
+  });
+  return wrap(createPostgresAdapter(db.sql));
+}
+
 /** A promise that resolves at the first call of `reach`. */
 function gate() {
   let reach = () => {};
@@ -434,5 +455,28 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     expect(await rows("organization")).toEqual([]);
     expect(await rows("team")).toEqual([]);
     expect(await rows("teamMember")).toEqual([]);
+  });
+  it("of two user token creates at 49 tokens, one answers token_limit (L4)", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let second: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), {}, sent);
+    const two = instance(watch("user", g.reach), {}, sent);
+    const one = instance(
+      afterAnyRead("apiToken", async () => {
+        second = two.api.tokens.create({ user: a, name: "web" });
+        await Promise.race([g.at, second]);
+      }),
+      {},
+      sent,
+    );
+    const a = await user("a");
+    for (let i = 0; i < 49; i++) must(await plain.api.tokens.create({ user: a, name: "ci" }));
+
+    const first = await one.api.tokens.create({ user: a, name: "core" });
+
+    expect(first).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: false, code: "token_limit" });
+    expect(await rows("apiToken")).toHaveLength(50);
   });
 });

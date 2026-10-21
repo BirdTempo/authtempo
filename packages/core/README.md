@@ -875,7 +875,10 @@ return res;
   gone, `caller` answers null, and the token stays in the list.
 - A user holds at most 50 tokens (`token_limit`). Create is limited to 20
   per user per hour. An expired token goes at its next use and at the
-  sweep, and it does not count against the cap.
+  sweep, and it does not count against the cap. The count runs in one
+  transaction after a hold of the user row, so on Postgres two parallel
+  creates never pass 50. D1 has no isolated transaction: there two creates
+  at 49 can both pass, and the create limit bounds that overshoot.
 - `lastUsedAt` is written at most once per hour.
 - A `tk_` value counts only in the `Authorization` header, never in a
   cookie. A CLI passes `token: () => "tk_…"` to `createClient`.
