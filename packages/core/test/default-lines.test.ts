@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type AuthConfig, resolveConfig } from "../src/config.js";
+import { type AuthConfig, resolveConfig, secretValues } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { deleteAccount } from "../src/engine/account-delete.js";
 import { confirmEmailChange, requestEmailChange } from "../src/engine/email-change.js";
@@ -331,6 +331,171 @@ describe("the router line (plan 11g)", () => {
       route: "GET /session",
       errorName: "TypeError",
     });
+  });
+});
+
+/** A second keyring value: 32 characters, as the old version of a rotation. */
+const OLD_SECRET = "fedcba9876543210fedcba9876543210";
+
+/** An OpenID Connect entry with `clientSecret`, at the issuer of `name`. */
+function oidcEntry(name: string, clientSecret: string) {
+  return {
+    name,
+    label: name,
+    issuer: `https://id.${name}.example`,
+    clientId: `${name}-id`,
+    clientSecret,
+    endpoints: {
+      authorizeUrl: `https://id.${name}.example/authorize`,
+      tokenUrl: `https://id.${name}.example/token`,
+      jwksUrl: `https://id.${name}.example/jwks`,
+    },
+  };
+}
+
+/** An OAuth 2.0 entry with `clientSecret`, at the host of `name`. */
+function oauth2Entry(name: string, clientSecret: string): OAuth2Entry {
+  return {
+    name,
+    label: name,
+    authorizeUrl: `https://${name}.example/authorize`,
+    tokenUrl: `https://${name}.example/token`,
+    clientId: `${name}-id`,
+    clientSecret,
+    scope: "email",
+    userinfo: async () => ({
+      subject: "1",
+      email: null,
+      emailVerified: false,
+      name: null,
+      image: null,
+    }),
+  };
+}
+
+describe("the scrub sources (plan 12h)", () => {
+  /**
+   * One row for each secret source of the config. The secret of the row is
+   * the method token of a request, so the event carries it unless the scrub
+   * list holds that source. The oidc and oauth2 rows put the secret in the
+   * second entry, so a scrub of the first entry alone fails. The config reads
+   * the Apple private key only at a sign-in, so a token value is a key it takes.
+   */
+  const ROWS: Array<[string, string, Partial<AuthConfig>]> = [
+    ["the current keyring value", SECRET, {}],
+    [
+      "an old keyring value",
+      OLD_SECRET,
+      {
+        secrets: [
+          { version: 1, value: OLD_SECRET },
+          { version: 2, value: SECRET },
+        ],
+      },
+    ],
+    [
+      "the google client secret",
+      "GOCSPX-row-google-0123456789",
+      { social: { google: { clientId: "g", clientSecret: "GOCSPX-row-google-0123456789" } } },
+    ],
+    [
+      "the github client secret",
+      "gh-row-github-0123456789abcdef",
+      { social: { github: { clientId: "h", clientSecret: "gh-row-github-0123456789abcdef" } } },
+    ],
+    [
+      "the linkedin client secret",
+      "li-row-linkedin-0123456789abc",
+      { social: { linkedin: { clientId: "l", clientSecret: "li-row-linkedin-0123456789abc" } } },
+    ],
+    [
+      "the apple private key",
+      "apple-row-key-0123456789abcdef",
+      {
+        social: {
+          apple: {
+            clientId: "a",
+            teamId: "T",
+            keyId: "K",
+            privateKey: "apple-row-key-0123456789abcdef",
+          },
+        },
+      },
+    ],
+    [
+      "the client secret of the second oidc entry",
+      "oidc-row-second-0123456789ab",
+      {
+        social: {
+          oidc: [
+            oidcEntry("one", "oidc-row-first-0123456789abc"),
+            oidcEntry("two", "oidc-row-second-0123456789ab"),
+          ],
+        },
+      },
+    ],
+    [
+      "the client secret of the second oauth2 entry",
+      "oauth2-row-second-0123456789",
+      {
+        social: {
+          oauth2: [
+            oauth2Entry("three", "oauth2-row-first-01234567890"),
+            oauth2Entry("four", "oauth2-row-second-0123456789"),
+          ],
+        },
+      },
+    ],
+  ];
+
+  it.each(ROWS)("scrubs %s from each event and from the line", async (_source, secret, extra) => {
+    const log = errors();
+    const quiet = createAuth(input({ storage: downStore(new TypeError("db down")), ...extra }));
+    expect((await quiet.handle(legacyRead(secret))).status).toBe(500);
+    expect(log.mock.calls).toEqual([
+      ["authtempo: unhandled error", "***", "unmatched", "TypeError"],
+    ]);
+    const { sink, events } = recording();
+    const auth = createAuth(
+      input({ storage: downStore(new TypeError("db down")), ...extra, observe: { sink } }),
+    );
+    expect((await auth.handle(legacyRead(secret))).status).toBe(500);
+    await auth.observe.flush();
+    const written = events();
+    expect(written.map((e) => [e.name, e.method])).toEqual([
+      ["error.internal", "***"],
+      ["request", "***"],
+    ]);
+    expect(JSON.stringify(written)).not.toContain(secret);
+  });
+
+  it("holds the scrub list to each source of the config", () => {
+    // The event recorder of the suite reads secretValues as its deny list, so only this literal list can catch a lost source.
+    const social: AuthConfig["social"] = {
+      google: { clientId: "g", clientSecret: "list-google-secret" },
+      github: { clientId: "h", clientSecret: "list-github-secret" },
+      linkedin: { clientId: "l", clientSecret: "list-linkedin-secret" },
+      apple: { clientId: "a", teamId: "T", keyId: "K", privateKey: "list-apple-key" },
+      oidc: [oidcEntry("one", "list-oidc-one"), oidcEntry("two", "list-oidc-two")],
+      oauth2: [oauth2Entry("three", "list-oauth2-one"), oauth2Entry("four", "list-oauth2-two")],
+    };
+    const secrets = [
+      { version: 1, value: OLD_SECRET },
+      { version: 2, value: SECRET },
+    ];
+    const { keyring } = resolveConfig(input({ secrets, social }));
+    expect([...secretValues(keyring, social)].sort()).toEqual([
+      "0123456789abcdef0123456789abcdef",
+      "fedcba9876543210fedcba9876543210",
+      "list-apple-key",
+      "list-github-secret",
+      "list-google-secret",
+      "list-linkedin-secret",
+      "list-oauth2-one",
+      "list-oauth2-two",
+      "list-oidc-one",
+      "list-oidc-two",
+    ]);
   });
 });
 
