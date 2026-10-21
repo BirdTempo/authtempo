@@ -4,7 +4,7 @@ import {
   createPbkdf2PasswordHash,
   systemClock,
 } from "@authtempo/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createAccessControl, defaultStatements } from "../src/access.js";
 import { apiKey, BETTER_AUTH_API_KEY_VERSION } from "../src/api-key.js";
 import { apiKeyClient } from "../src/client/api-key.js";
@@ -69,8 +69,9 @@ function options(keys: ApiKeyOptions, database: CompatDatabase = memory()): Bett
 /** A shim app with passwords, so a test signs people up as an app does. */
 function app(keys: ApiKeyOptions) {
   const mails: { email: string; token: string }[] = [];
+  const database = memory();
   const auth = betterAuth({
-    ...options(keys),
+    ...options(keys, database),
     emailAndPassword: { enabled: true, sendResetPassword: async () => {} },
     emailVerification: {
       sendVerificationEmail: async (d) => void mails.push({ email: d.user.email, token: d.token }),
@@ -101,7 +102,7 @@ function app(keys: ApiKeyOptions) {
     if (caller?.kind !== "session") throw new Error(`no session caller for ${email}`);
     return { token, user: caller.user };
   };
-  return { auth, person };
+  return { auth, person, database };
 }
 
 describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
@@ -271,6 +272,47 @@ describe("the api-key shim (spec 29 item 20, plan 12k Task 12)", () => {
     await expect(
       auth.api.createApiKey({ body: { name: "ci", remaining: 5 }, headers: signedIn }),
     ).rejects.toMatchObject({ body: { code: "SERVER_ONLY_PROPERTY" } });
+  });
+
+  it("keeps a used-up key at verify, where Better Auth deletes it, and deletes an expired key", async () => {
+    // Final review of plan 12k, m2: Better Auth 1.7.5 deletes both rows at verify
+    // (dist/index.mjs:1635 and :1668).
+    const { auth, person, database } = app({ references: "user", rateLimit: { enabled: false } });
+    const ada = await person("ada@example.com");
+    const used = await auth.api.createApiKey({
+      body: { name: "used", userId: ada.user.id, remaining: 1 },
+    });
+    const old = await auth.api.createApiKey({
+      body: { name: "old", userId: ada.user.id, expiresIn: 86_400 },
+    });
+    expect((await auth.api.verifyApiKey({ body: { key: used.key } })).valid).toBe(true);
+    expect((await auth.api.verifyApiKey({ body: { key: used.key } })).error?.code).toBe(
+      "USAGE_EXCEEDED",
+    );
+    const rows = async () =>
+      (
+        await database.storage.findMany("apiToken", [
+          { field: "userId", op: "eq", value: ada.user.id },
+        ])
+      )
+        .map((r) => ({ name: r.name, remaining: r.remaining }))
+        .sort((a, b) => (a.name < b.name ? -1 : 1));
+    // The used-up row stays, so it counts against core's cap of 50 tokens per user.
+    expect(await rows()).toEqual([
+      { name: "old", remaining: null },
+      { name: "used", remaining: 0 },
+    ]);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 2 * 86_400_000);
+      expect((await auth.api.verifyApiKey({ body: { key: old.key } })).error?.code).toBe(
+        "INVALID_API_KEY",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+    // Core deletes an expired row at the resolve, as Better Auth does.
+    expect(await rows()).toEqual([{ name: "used", remaining: 0 }]);
   });
 
   it("serves core's /tokens routes in the shim", async () => {
