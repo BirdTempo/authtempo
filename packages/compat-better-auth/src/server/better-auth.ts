@@ -115,10 +115,10 @@ export function createHandler(
       headers.set("origin", expoOrigin);
       req = new Request(request, { headers });
     }
-    // Core's Origin and Fetch Metadata rules for every POST, before any shim
-    // route: the account, email OTP, and two-factor paths answer in the shim,
-    // so core's router alone would not see them (plan 12a fix wave, final
-    // review F1). After the expo-origin step, so a native app's scheme counts.
+    // Core's Origin and Fetch Metadata rules for every POST, PUT, PATCH, and
+    // DELETE, before any shim route (plan 12d). The account, email OTP, and
+    // two-factor paths answer in the shim, so core's router alone would not
+    // see them (plan 12a fix wave, final review F1). After the expo-origin step, so a native app's scheme counts.
     // In Better Auth's shape on every path (the lead's ruling): Better Auth
     // 1.7.2 has one origin check, so both of core's rules answer INVALID_ORIGIN.
     const refusal = crossSiteRefusal(auth, req);
