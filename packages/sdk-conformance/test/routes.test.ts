@@ -141,6 +141,83 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
       "an operator tool: the users second-factor-off command of the CLI calls it (plan 12f); the client SDK has no operator call",
   },
   {
+    method: "GET",
+    path: "/sso/domains",
+    reason:
+      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/add",
+    reason:
+      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/verify",
+    reason:
+      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/update",
+    reason:
+      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/domains/delete",
+    reason:
+      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
+  },
+  {
+    method: "GET",
+    path: "/sso/connections",
+    reason:
+      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/connections/create",
+    reason:
+      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/connections/update",
+    reason:
+      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/connections/delete",
+    reason:
+      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
+  },
+  {
+    method: "POST",
+    path: "/sso/discover",
+    reason:
+      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
+  },
+  {
+    method: "GET",
+    path: "/sso/:connectionId/start",
+    reason:
+      "the browser opens it from the sign-in page of core to start an SSO sign-in (plan 12d Task 4b)",
+  },
+  {
+    method: "GET",
+    path: "/sso/:connectionId/callback",
+    reason: "the identity provider sends the browser back to it (plan 12d Task 4b)",
+  },
+  {
+    method: "POST",
+    path: "/operator/sso/enforce-off",
+    reason:
+      "an operator override: a platform operator turns off SSO enforce for a domain with the operator secret (plan 12d Task 2b); no SDK calls it",
+  },
+  {
     method: "POST",
     path: "/operator/users/create-admin",
     reason:
