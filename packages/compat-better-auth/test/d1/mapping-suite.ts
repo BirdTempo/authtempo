@@ -1,5 +1,5 @@
-import { env } from "cloudflare:test";
-import { type ModelName, schema } from "@authtempo/core";
+import { applyD1Migrations, env } from "cloudflare:test";
+import { type ModelName, SCHEMA_VERSION, schema } from "@authtempo/core";
 import { runAdapterConformance } from "@authtempo/core/conformance";
 import { columnName, TABLES, uniqueIndexName } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -12,6 +12,8 @@ import {
   snake,
   TABLE_FIELDS,
 } from "../../src/storage/names.js";
+import { BETTER_AUTH_SQLITE } from "../fixtures.js";
+import { statementsOf } from "./sql.js";
 
 export const at = new Date("2026-10-10T00:00:00.000Z");
 export const eq = <F extends string>(field: F, value: unknown) => ({
@@ -50,6 +52,26 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">) {
     );
   };
   return { n, T, C, truncate };
+}
+
+/**
+ * The STAGED database with Better Auth's own SQLite tables and the shipped
+ * compat files before the one of SCHEMA_VERSION, as an app has it before it
+ * applies the new file (plan 12h Task 8). It uses the default names in
+ * each suite. The tables are made once for each test file.
+ */
+async function oldStore() {
+  const cut = env.COMPAT_MIGRATIONS.findIndex((m) => m.name.includes(`_schema_v${SCHEMA_VERSION}`));
+  if (cut < 1) throw new Error(`no compat migration file of version ${SCHEMA_VERSION}`);
+  const made = await env.STAGED.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'user'",
+  ).first("name");
+  if (made === null) {
+    await env.STAGED.batch(statementsOf(BETTER_AUTH_SQLITE).map((s) => env.STAGED.prepare(s)));
+  }
+  await applyD1Migrations(env.STAGED, env.COMPAT_MIGRATIONS.slice(0, cut));
+  const s = betterAuthSchemaStorage({ dialect: "d1", db: env.STAGED });
+  return { adapter: s.storage, close: async () => {} };
 }
 
 /** Core's unique indexes and indexes of one model, with core's names and column order. */
@@ -103,7 +125,7 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
     },
     // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
     // A ping sends the 2 version reads, the index list, and the read of the one unique index (plan 12h).
-    { updateInTransaction: 2, pingStatements: 4 },
+    { updateInTransaction: 2, pingStatements: 4, oldStore },
   );
 
   describe(`the Better Auth mapping on D1, ${label}`, () => {

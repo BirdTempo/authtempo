@@ -19,7 +19,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { betterAuth } from "../src/server/better-auth.js";
 import { betterAuthSchemaStorage } from "../src/storage/index.js";
 import { type AnyModelMap, issuerFor, MAPPING } from "../src/storage/mapping.js";
-import { COMPAT_MIGRATION_NAMES, compatMigrationSql } from "../src/storage/migration.js";
+import {
+  COMPAT_MIGRATION_NAMES,
+  compatMigrationSql,
+  compatPostgresSteps,
+} from "../src/storage/migration.js";
 import { resolveNames, TABLE_FIELDS } from "../src/storage/names.js";
 import { compatStatements } from "../src/storage/statements.js";
 import { BETTER_AUTH_PG, CONSUMER_I_PG } from "./fixtures.js";
@@ -45,15 +49,32 @@ function expectedIndexes(model: ModelName) {
 const VECTOR_HASH =
   "8b963491c29137940a209e5a26de719e:b4ce8a3b919a25198f84eebbede27d1cd0fda32747c6489f0997b993a16de0a2381351c5595013552488269e72aa6507da171fac50e68ce5ff7173ff58b554d3";
 
+/**
+ * A store of `tables` with the compat migrations before the one of
+ * SCHEMA_VERSION, as an app has it before it runs the new file (plan 12h
+ * Task 8). The cut comes from the runner's own list.
+ */
+function oldStore(tables: string, naming: { casing?: "snake" } = {}) {
+  return async () => {
+    const pg = await freshBetterAuthSchema(tables);
+    const list = compatPostgresSteps(resolveNames(naming));
+    const cut = list.findIndex((m) => m.name.endsWith(`_v${SCHEMA_VERSION}`));
+    if (cut < 1) throw new Error(`no compat migration of version ${SCHEMA_VERSION}`);
+    for (const m of list.slice(0, cut)) await pg.sql.unsafe(m.text);
+    const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql, ...naming });
+    return { adapter: s.storage, close: () => pg.close() };
+  };
+}
+
 runAdapterConformance(
   "Better Auth tables on postgres, camelCase (Better Auth's own SQL)",
   async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql });
     await migrateWithoutLock(pg.sql, s.names);
-    return { adapter: s.storage, close: () => pg.close() };
+    return { adapter: s.storage, close: () => pg.close(), stop: () => pg.stop() };
   },
-  { rowLocks: true },
+  { rowLocks: true, oldStore: oldStore(BETTER_AUTH_PG) },
 );
 
 runAdapterConformance(
@@ -62,9 +83,12 @@ runAdapterConformance(
     const pg = await freshBetterAuthSchema(CONSUMER_I_PG);
     const s = betterAuthSchemaStorage({ dialect: "postgres", sql: pg.sql, casing: "snake" });
     await migrateWithoutLock(pg.sql, s.names);
-    return { adapter: s.storage, close: () => pg.close() };
+    return { adapter: s.storage, close: () => pg.close(), stop: () => pg.stop() };
   },
-  { rowLocks: true },
+  {
+    rowLocks: true,
+    oldStore: oldStore(CONSUMER_I_PG, { casing: "snake" }),
+  },
 );
 
 /** Rows as Better Auth 1.7 writes them, inserted before the migration, on the fixture with its foreign keys. */

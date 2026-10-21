@@ -19,6 +19,14 @@
       // A placeholder: the Workers test pool runs D1 locally and never reads it.
       "database_id": "authtempo-compat-test",
       "migrations_dir": "migrations/d1"
+    },
+    {
+      // Plan 12h Task 8: the store of the ping row of the conformance suite,
+      // with the compat migrations before the one of SCHEMA_VERSION. No
+      // migrations_dir: the suite applies the files itself.
+      "binding": "STAGED",
+      "database_name": "authtempo-compat-test-staged",
+      "database_id": "authtempo-compat-test-staged"
     }
   ]
 }

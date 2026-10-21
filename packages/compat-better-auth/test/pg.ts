@@ -15,7 +15,7 @@ export const PG_URL = env.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost
  */
 export async function freshBetterAuthSchema(
   tables: string,
-): Promise<{ sql: Sql; close(): Promise<void> }> {
+): Promise<{ sql: Sql; close(): Promise<void>; stop(): Promise<void> }> {
   const name = `c_${crypto.randomUUID().replaceAll("-", "")}`;
   const admin = postgres(PG_URL, { max: 1, onnotice: () => {} });
   try {
@@ -29,10 +29,26 @@ export async function freshBetterAuthSchema(
   }
   const sql = postgres(PG_URL, { max: 4, onnotice: () => {}, connection: { search_path: name } });
   await sql.unsafe(tables);
+  let stopped = false;
   return {
     sql,
     async close() {
+      if (stopped) {
+        // The client has ended, so an admin client drops the schema.
+        const admin = postgres(PG_URL, { max: 1, onnotice: () => {} });
+        try {
+          await admin.unsafe(`DROP SCHEMA ${name} CASCADE`);
+        } finally {
+          await admin.end({ timeout: 5 });
+        }
+        return;
+      }
       await sql.unsafe(`DROP SCHEMA ${name} CASCADE`);
+      await sql.end({ timeout: 5 });
+    },
+    /** Ends the client, as a database that stops: the next query throws (plan 12h Task 8). */
+    async stop() {
+      stopped = true;
       await sql.end({ timeout: 5 });
     },
   };

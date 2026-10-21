@@ -1093,7 +1093,9 @@ if (POSTGRES_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
 /**
  * The steps of the compat runner on Postgres, in order: the version that
  * each writes, its name, and its text for these names. The test fixtures
- * run the same list without the lock (ruling 53 of plan 12k).
+ * run the same list without the lock (ruling 53 of plan 12k). A test
+ * applies the first ones alone to make a store from before a version
+ * (plan 12h Task 8).
  */
 export function compatPostgresSteps(
   names: Names,
