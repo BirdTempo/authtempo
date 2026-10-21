@@ -226,8 +226,8 @@ describe("the column map (plan 12g)", () => {
     );
     // 25 characters of prefix, the 46 of a cl_ id, and two separators with
     // the two 16-digit window values.
-    expect(
-      longest.get('engine/oauth-credentials.ts "oauth-credentials:client" client.id'),
-    ).toBe(105);
+    expect(longest.get('engine/oauth-credentials.ts "oauth-credentials:client" client.id')).toBe(
+      105,
+    );
   });
 });
