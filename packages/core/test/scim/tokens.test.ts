@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAuth } from "../../src/create-auth.js";
 import { createOrganization, deleteOrganization } from "../../src/engine/organizations.js";
 import { createScimToken, listScimTokens, revokeScimToken } from "../../src/engine/scim/tokens.js";
+import { sessionFromRequest } from "../../src/engine/sessions.js";
+import { authenticateRequest, callerFromRequest } from "../../src/engine/tokens.js";
 import { createRouter, type Route } from "../../src/http/router.js";
 import { scimJson, scimRoute } from "../../src/http/routes/scim.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
@@ -267,6 +269,21 @@ describe("the SCIM tokens (plan 12d Task 9)", () => {
     await scim(w, token, "GET", "/ServiceProviderConfig");
     expect(writes()).toBe(2);
     expect(await lastUsed()).toEqual(w.clock.now());
+  });
+
+  it("refuses a SCIM token at the caller reads of the app (auth.caller, auth.authenticate, auth.session)", async () => {
+    const w = await scimAuth();
+    const { token } = await scimToken(w);
+    // The owner of the organization holds a live session, so a read that took the token would find one.
+    const request = new Request(`${BASE_URL}/api/notes`, {
+      headers: { authorization: `Bearer ${token}`, "cf-connecting-ip": SCIM_IP },
+    });
+    expect(await authenticateRequest(w.config, request)).toMatchObject({
+      ok: false,
+      code: "unauthorized",
+    });
+    expect(await callerFromRequest(w.config, request)).toBeNull();
+    expect(await sessionFromRequest(w.config, request)).toBeNull();
   });
 
   it("deletes the tokens with the organization and with the account (ruling 30)", async () => {

@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { createOrganization } from "../src/engine/organizations.js";
+import { createScimToken } from "../src/engine/scim/tokens.js";
 import { createSession } from "../src/engine/sessions.js";
 import { ROUTE_CONTRACT } from "../src/http/contract/index.js";
 import type { RouteContract } from "../src/http/contract/types.js";
@@ -103,6 +105,13 @@ function world() {
   }
   const cookie = (token: string) => ({ cookie: `${config.cookieName}=${token}` });
   return { config, handle, session, cookie };
+}
+
+/** The verified user of a session token, by the session row. */
+async function userOf(w: ReturnType<typeof world>, email: string) {
+  const user = await w.config.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  if (!user) throw new Error(`no user ${email}`);
+  return user;
 }
 
 /** The answers of the routes in `keys` with the same headers, by key. */
@@ -220,5 +229,34 @@ describe("the auth probe (plan 11g)", () => {
     const expected: Record<string, Answer> = {};
     for (const key of tokenOnly) expected[key] = { status: 401, code: "unauthorized" };
     expect(await probe(w, tokenOnly, cookie)).toEqual(expected);
+  });
+  it("answers an sk_ bearer on every route outside /scim/v2 as a request with no credential (plan 12d)", async () => {
+    const w = world();
+    // A live SCIM token of an organization whose owner holds a live session.
+    await w.session("owner@acme.example");
+    const owner = await userOf(w, "owner@acme.example");
+    const org = await createOrganization(w.config, { user: owner, slug: "acme", name: "Acme" });
+    if (!org.ok) throw new Error(org.code);
+    const made = await createScimToken(
+      w.config,
+      { kind: "app", name: "probe" },
+      { organizationId: org.value.organization.id, name: "directory" },
+    );
+    if (!made.ok) throw new Error(made.code);
+    const others = keys.filter((key) => !key.includes(" /scim/v2/"));
+    expect(others.length).toBe(keys.length - 10);
+    // A route of client auth answers any Authorization header with a 401 and no header with a
+    // 400 (ruling 19 of plan 12e). There, the live token answers as a token that names no row.
+    const unknown = { authorization: `Bearer sk_${"C".repeat(43)}` };
+    const withToken: Record<string, Answer> = {};
+    const expected: Record<string, Answer> = {};
+    for (const key of others) {
+      withToken[key] = await answerOf(
+        await w.handle(requestOf(key, { authorization: `Bearer ${made.value.token}` })),
+      );
+      const basic = authOf(key).includes("clientSecretBasic");
+      expected[key] = await answerOf(await w.handle(requestOf(key, basic ? unknown : {})));
+    }
+    expect(withToken).toEqual(expected);
   });
 });
