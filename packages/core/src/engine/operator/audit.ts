@@ -2,7 +2,7 @@ import type { ResolvedConfig } from "../../config.js";
 import { isOperatorReason } from "../../operator-secret.js";
 import { appErrorName } from "../../primitives/app-error.js";
 import { newMonotonicId } from "../../primitives/ids.js";
-import { hasControlChar, removeControlChars } from "../../primitives/text.js";
+import { hasControlChar, removeRefusedChars } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import type { OperatorAction, OperatorAuditRow, SessionRow, UserRow } from "../../schema.js";
 import type { StorageAdapter } from "../../storage/port.js";
@@ -82,9 +82,9 @@ export type AuditActor = OperatorActor | { kind: "user"; user: Pick<UserRow, "id
 /**
  * The draft of one act. The actor is named by the secret's name, the user
  * id, or the app's name, never by a secret. An app name outside the rule of
- * `checkActor` answers `invalid_body`. The user agent loses each control
- * character and is cut to `USER_AGENT_MAX` code points, so the cut splits
- * no character.
+ * `checkActor` answers `invalid_body`. The user agent loses each character
+ * of `hasRefusedChar` and is cut to `USER_AGENT_MAX` code points, so the
+ * cut splits no character.
  */
 export function auditDraft(
   actor: AuditActor,
@@ -103,7 +103,7 @@ export function auditDraft(
   const userAgent =
     input.userAgent === null
       ? null
-      : Array.from(removeControlChars(input.userAgent)).slice(0, USER_AGENT_MAX).join("");
+      : Array.from(removeRefusedChars(input.userAgent)).slice(0, USER_AGENT_MAX).join("");
   return ok({
     actorKind: actor.kind,
     actorId,

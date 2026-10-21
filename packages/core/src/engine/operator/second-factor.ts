@@ -1,6 +1,6 @@
 import type { ResolvedConfig } from "../../config.js";
 import { PROOF_MAX_AGE_MS, PROOF_METHODS, REFERENCE_MAX } from "../../operator-secret.js";
-import { hasControlChar, hasLoneSurrogate } from "../../primitives/text.js";
+import { hasRefusedChar } from "../../primitives/text.js";
 import { fail, ok, type Result } from "../../result.js";
 import { sendNotice } from "../notices.js";
 import { disableSecondFactorIn } from "../second-factor.js";
@@ -16,7 +16,7 @@ export type ProofMethod = (typeof PROOF_METHODS)[number];
 /** The proof of an identity check, as the operator gives it. */
 export interface FactorProof {
   method: ProofMethod;
-  /** The ticket or case id of the check, 1 to 200 characters with no control character and no lone surrogate. */
+  /** The ticket or case id of the check, 1 to 200 characters with no character of `hasRefusedChar`. */
   reference: string;
   /** An ISO date and time with a zone, from 7 days before now to now. */
   checkedAt: string;
@@ -41,8 +41,7 @@ function proofOf(raw: unknown, now: Date): Result<FactorProof> {
   const { method, reference, checkedAt } = raw as Record<string, unknown>;
   if (!PROOF_METHODS.some((m) => m === method)) return fail("invalid_body");
   if (typeof reference !== "string" || reference.length === 0) return fail("invalid_body");
-  if (reference.length > REFERENCE_MAX || hasControlChar(reference)) return fail("invalid_body");
-  if (hasLoneSurrogate(reference)) return fail("invalid_body");
+  if (reference.length > REFERENCE_MAX || hasRefusedChar(reference)) return fail("invalid_body");
   const at = isoDateTime(checkedAt);
   if (!at) return fail("invalid_body");
   if (at.getTime() > now.getTime()) return fail("invalid_body");

@@ -172,6 +172,10 @@ describe("the disable of the second factor with a proof (plan 12f Task 9)", () =
       // column, and memory and D1 keep it (plan 12f Task 9 review m2).
       { ...good, reference: "CASE-\ud800" },
       { ...good, reference: "\udc00CASE" },
+      // The class of the user name (final review m5 of plan 12f): a bidi control and a separator.
+      { ...good, reference: "CASE-\u202e4821" },
+      { ...good, reference: "CASE\u20284821" },
+      { ...good, reference: "CASE\u00854821" },
       { ...good, reference: 4821 },
       // Hour 24 does not exist. `Date` reads it as 00:00 of the next day,
       // which is inside the window here.

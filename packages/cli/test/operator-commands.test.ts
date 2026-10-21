@@ -208,11 +208,23 @@ describe("the operator commands (plan 12f Task 12)", () => {
   it("refuses a reason that core refuses, before any request", async () => {
     const f = fixture();
     const id = await signUp(f, "ada@example.com");
-    for (const reason of ["", "a".repeat(501), "a\nb", "a\u0000b", "a\u007fb", "a\ud800b"]) {
+    // The bidi control, the C1 control, and the separator are the class of the user name (ruling 62 m5).
+    for (const reason of [
+      "",
+      "a".repeat(501),
+      "a\nb",
+      "a\u0000b",
+      "a\u007fb",
+      "a\ud800b",
+      "a\u202eb",
+      "a\u200fb",
+      "a\u0085b",
+      "a\u2028b",
+    ]) {
       const r = await run(["users", "ban", BASE, id, "--reason", reason, "--yes"], f);
       expect(r.code, JSON.stringify(reason)).toBe(2);
       expect(r.io.stderr[0]).toBe(
-        "--reason is 1 to 500 characters with no control character and no lone surrogate",
+        "--reason is 1 to 500 characters with no control, format, or separator character and no lone surrogate",
       );
     }
     expect(f.paths).toEqual([]);
@@ -226,6 +238,9 @@ describe("the operator commands (plan 12f Task 12)", () => {
       "a\tb",
       "a\u0085b",
       "\ud800",
+      "a\u202eb",
+      "a\u2028b",
+      "a\u200cb",
     ]) {
       const core = await f.auth.api.operator.users.ban({
         actor: { kind: "app", name: "test" },

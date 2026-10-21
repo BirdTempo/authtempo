@@ -67,7 +67,7 @@ export const END_ALL_MAX = 1000;
  */
 export function reasonProblem(reason: string): string | null {
   if (isOperatorReason(reason)) return null;
-  return `--reason is 1 to ${REASON_MAX} characters with no control character and no lone surrogate`;
+  return `--reason is 1 to ${REASON_MAX} characters with no control, format, or separator character and no lone surrogate`;
 }
 
 /** The reason of a write, or a usage error. Each write needs one: core writes it in the audit row. */

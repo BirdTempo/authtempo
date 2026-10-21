@@ -1,4 +1,4 @@
-import { hasControlChar, hasLoneSurrogate } from "./primitives/text.js";
+import { hasRefusedChar } from "./primitives/text.js";
 
 /**
  * The form of the operator secret (plan 11c): 32 to 512 visible ASCII
@@ -62,16 +62,13 @@ export const REASON_MAX = 500;
 
 /**
  * True when a reason passes the rule of spec 26 item 5: 1 to `REASON_MAX`
- * UTF-16 code units, no control character, and no lone surrogate. The
- * engine (`operatorReason`) and the CLI check with this one function.
+ * UTF-16 code units, with no character of `hasRefusedChar`. That is the
+ * class of the user name: no control, format, or separator character, and
+ * no lone surrogate (plan 12f, final review m5). The engine
+ * (`operatorReason`) and the CLI check with this one function.
  */
 export function isOperatorReason(value: string): boolean {
-  return (
-    value.length > 0 &&
-    value.length <= REASON_MAX &&
-    !hasControlChar(value) &&
-    !hasLoneSurrogate(value)
-  );
+  return value.length > 0 && value.length <= REASON_MAX && !hasRefusedChar(value);
 }
 
 /** How the operator proved the identity of the person (spec 26 item 5). */

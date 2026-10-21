@@ -1,5 +1,6 @@
 import type { ResolvedConfig } from "../config.js";
 import { newId } from "../primitives/ids.js";
+import { hasRefusedChar } from "../primitives/text.js";
 import type { SessionRow, UserRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import type { CreateSteps, VerifySteps } from "./create-steps.js";
@@ -10,26 +11,15 @@ const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]+\.[^\s@]+$/;
 const USER_NAME_MAX = 200;
 
 /**
- * The characters that a user name must not hold (plan 12a Task 7, review L4).
- * Other people see the name, for example in a member list. A control
- * character (C0, DEL, C1) or a line or paragraph separator can break a line
- * or a header. A format character, such as a bidi override or a zero-width
- * space, can make one name read as another. A lone surrogate is not text.
- * The zero-width non-joiner (U+200C) and joiner (U+200D) pass: Persian names
- * and joined emoji carry them (the lead's ruling, 2026-10-15).
- */
-const NAME_REFUSED = /[\p{Cc}\p{Cs}\p{Zl}\p{Zp}]|(?![\u200c\u200d])\p{Cf}/u;
-
-/**
  * The rule of a name that other people or other devices show: a string of 1
- * to `max` UTF-16 code units, with no character of NAME_REFUSED. The user
+ * to `max` UTF-16 code units, with no character of `hasRefusedChar`. The user
  * name and the passkey name (plan 12a Task 19) apply it, so one character
  * rule holds for both.
  */
 export function validShownName(name: string, max: number): boolean {
   // A JS caller can pass any value; an array has a length and reads as text (review L1).
   if (typeof name !== "string") return false;
-  return name.length >= 1 && name.length <= max && !NAME_REFUSED.test(name);
+  return name.length >= 1 && name.length <= max && !hasRefusedChar(name);
 }
 
 /**

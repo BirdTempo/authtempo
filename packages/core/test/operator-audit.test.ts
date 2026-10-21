@@ -14,6 +14,8 @@ import {
 } from "../src/engine/operator/audit.js";
 import { matchOperatorSecret, type OperatorActor } from "../src/engine/operator/guards.js";
 import { operatorApi } from "../src/engine/operator/index.js";
+import { validShownName } from "../src/engine/users.js";
+import { isOperatorReason } from "../src/operator-secret.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import { hasControlChar } from "../src/primitives/text.js";
 import { fail, ok } from "../src/result.js";
@@ -300,9 +302,54 @@ describe("the operator audit row (plan 12f Task 4)", () => {
     for (const raw of ["Spam \ud800", "\udfffSpam"])
       expect(operatorReason(raw)).toEqual({ ok: false, code: "invalid_body", status: 400 });
     expect(operatorReason("Spam \ud83d\udce7")).toEqual({ ok: true, value: "Spam \ud83d\udce7" });
+    // The class of the user name (final review m5 of plan 12f): a bidi control, a C1 control,
+    // a line or paragraph separator, and a zero-width space. The two joiners pass.
+    for (const raw of [
+      "Spam \u202e",
+      "Spam \u200f",
+      "Spam \u0085",
+      "a\u2028b",
+      "a\u2029b",
+      "a\u200bb",
+    ])
+      expect(operatorReason(raw), JSON.stringify(raw)).toEqual({
+        ok: false,
+        code: "invalid_body",
+        status: 400,
+      });
+    for (const raw of [
+      "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645",
+      "\ud83d\udc68\u200d\ud83d\udcbb",
+    ])
+      expect(operatorReason(raw)).toEqual({ ok: true, value: raw });
     expect(operatorReason("x".repeat(500))).toEqual({ ok: true, value: "x".repeat(500) });
     // No trim: the reason is kept as the operator wrote it.
     expect(operatorReason(" Spam. ")).toEqual({ ok: true, value: " Spam. " });
+  });
+
+  it("holds the reason to the one class of the user name", () => {
+    const samples = [
+      "Ada",
+      "a\tb",
+      "a\u0085b",
+      "a\u202eb",
+      "a\u200cb",
+      "a\u2029b",
+      "\ud800",
+      "\ufeffa",
+    ];
+    for (const s of samples)
+      expect(isOperatorReason(s), JSON.stringify(s)).toBe(validShownName(s, REASON_MAX));
+    expect(samples.map((s) => isOperatorReason(s))).toEqual([
+      true,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+    ]);
   });
 
   it("refuses an act whose reason fails operatorReason before beforeAction: 400, no change, no row (spec 26 item 5)", async () => {
@@ -337,7 +384,8 @@ describe("the operator audit row (plan 12f Task 4)", () => {
     });
     const { user } = await verifiedSession(auth, TARGET);
     const actor = await secretActor(auth, CI_SECRET);
-    const agent = `Mozilla/5.0\r\n${"a".repeat(587)}`;
+    // A bidi control, a C1 control, and a line separator go with the CR and LF (final review m5).
+    const agent = `Mozilla/5.0\r\n\u202e\u0085\u2028${"a".repeat(584)}`;
     expect(agent).toHaveLength(600);
     const draft = draftOf(actor, {
       action: "ban",
