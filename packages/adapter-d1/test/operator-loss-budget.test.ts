@@ -379,4 +379,51 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
     expect([r.queries, inAct, sweeps]).toEqual(REMOVE_COUNTS);
     expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
   });
+
+  it("keeps the own session of a removed operator through a later revoke (ruling 65 of plan 12f)", async () => {
+    const sent: MailMessage[] = [];
+    const extra = await on();
+    const { setup, first, bobId } = await fortyImpersonations(sent, extra);
+    const platform = await env.DB.prepare("SELECT id FROM ta_organization WHERE slug = ?")
+      .bind("platform-co")
+      .first<{ id: string }>();
+    const r = await invoke(
+      sent,
+      "/organizations/members/remove",
+      asUser(first),
+      { organizationId: platform?.id, userId: bobId },
+      extra,
+    );
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    // The removal leaves impersonation sessions, so it writes a pending-end row with targets.
+    const rows = await env.DB.prepare(
+      "SELECT data FROM ta_verification WHERE purpose = 'session-end' AND identifier = ?",
+    )
+      .bind(bobId)
+      .all<{ data: string }>();
+    expect(rows.results.map((row) => Array.isArray(JSON.parse(row.data).targets))).toEqual([true]);
+    const ownCount = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM ta_session WHERE user_id = ? AND actor_id IS NULL",
+        )
+          .bind(bobId)
+          .first<{ n: number }>()
+      )?.n;
+    expect(await ownCount()).toBe(1);
+    const leftBefore = await impersonations();
+    endings.length = 0;
+    // The ex-operator holds no platform role: the revoke changes nothing.
+    const rv = await setup.api.operator.platformRole.revoke({
+      actor: APP,
+      userId: bobId,
+      reason: "Left the support team",
+      ip: null,
+      userAgent: null,
+    });
+    expect(rv.ok).toBe(true);
+    expect(await ownCount()).toBe(1);
+    expect(endings).toEqual([]);
+    expect(await impersonations()).toBe(leftBefore);
+  });
 });

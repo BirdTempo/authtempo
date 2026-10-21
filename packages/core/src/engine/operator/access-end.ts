@@ -251,13 +251,18 @@ async function writePendingEnd(
   });
 }
 
-/** True when a pending-end row of the user exists: a revoke after a revoke reads it (ruling 45). */
+/**
+ * True when a pending-end row of the user's own sessions exists: a revoke
+ * after a revoke reads it (ruling 45). Only a ban or a revoke writes such
+ * a row. A row with `data.targets` names the impersonation sessions of a
+ * role loss, so it does not count (ruling 65 of plan 12f).
+ */
 export async function hasPendingEnd(tx: StorageAdapter, userId: string): Promise<boolean> {
-  const row = await tx.findOne("verification", [
+  const rows = await tx.findMany("verification", [
     { field: "purpose", op: "eq", value: "session-end" },
     { field: "identifier", op: "eq", value: userId },
   ]);
-  return row !== null;
+  return rows.some((row) => row.data?.targets === undefined);
 }
 
 /** The pending-end rows of one sweep, oldest first. */
