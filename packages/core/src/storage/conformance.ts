@@ -91,9 +91,10 @@ export interface ConformanceOptions {
   pingStatements?: number;
   /**
    * Opens a store whose migrations stop at the version before
-   * `SCHEMA_VERSION`, as an app has it before it runs the new migration
-   * (plan 12h Task 8). With it, the suite holds `ping` to `schema_mismatch`
-   * there. An adapter with no schema version, such as memory, leaves it out.
+   * `SCHEMA_VERSION` (plan 12h Task 8). An app has such a store before it
+   * runs the new migration. With it, the suite holds `ping` to
+   * `schema_mismatch` there. An adapter with no schema version, such as
+   * memory, leaves it out.
    */
   oldStore?: () => Promise<ConformanceTarget>;
 }

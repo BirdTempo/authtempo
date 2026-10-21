@@ -51,8 +51,8 @@ const VECTOR_HASH =
 
 /**
  * A store of `tables` with the compat migrations before the one of
- * SCHEMA_VERSION, as an app has it before it runs the new file (plan 12h
- * Task 8). The cut comes from the runner's own list.
+ * SCHEMA_VERSION (plan 12h Task 8). An app has such a store before it runs
+ * the new file. The cut comes from the runner's own list.
  */
 function oldStore(tables: string, naming: { casing?: "snake" } = {}) {
   return async () => {

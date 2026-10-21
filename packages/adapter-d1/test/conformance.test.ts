@@ -10,8 +10,9 @@ async function truncateAll(): Promise<void> {
 }
 
 /**
- * The staged database with the migrations before the one of SCHEMA_VERSION,
- * as an app has it before it applies the new file (plan 12h Task 8).
+ * The staged database with the migrations before the one of SCHEMA_VERSION
+ * (plan 12h Task 8). An app has such a database before it applies the new
+ * file.
  */
 async function oldStore() {
   const cut = env.TEST_MIGRATIONS.findIndex((m) =>

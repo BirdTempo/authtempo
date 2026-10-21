@@ -55,10 +55,11 @@ export function sqlNames(naming: Omit<NamingOptions, "pgSchema">) {
 }
 
 /**
- * The STAGED database with Better Auth's own SQLite tables and the shipped
- * compat files before the one of SCHEMA_VERSION, as an app has it before it
- * applies the new file (plan 12h Task 8). It uses the default names in
- * each suite. The tables are made once for each test file.
+ * The STAGED database of plan 12h Task 8, with Better Auth's own SQLite
+ * tables. It holds the shipped compat files before the one of
+ * SCHEMA_VERSION. An app has such a database before it applies the new
+ * file. It uses the default names in each suite. The tables are made once
+ * for each test file.
  */
 async function oldStore() {
   const cut = env.COMPAT_MIGRATIONS.findIndex((m) => m.name.includes(`_schema_v${SCHEMA_VERSION}`));

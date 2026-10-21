@@ -141,9 +141,10 @@ export async function freshSchema(): Promise<{ a: Sql; b: Sql; close(): Promise<
 }
 
 /**
- * A fresh schema with the migrations before the one of `SCHEMA_VERSION`, as
- * an app has it before it runs the new migration (plan 12h Task 8). The
- * files run as the runner runs them, with no record in `ta_migrations`.
+ * A fresh schema with the migrations before the one of `SCHEMA_VERSION`
+ * (plan 12h Task 8). An app has such a schema before it runs the new
+ * migration. The files run as the runner runs them, with no record in
+ * `ta_migrations`.
  */
 export async function oldDatabase(): Promise<{ sql: Sql; close(): Promise<void> }> {
   const cut = MIGRATIONS.findIndex((m) =>
