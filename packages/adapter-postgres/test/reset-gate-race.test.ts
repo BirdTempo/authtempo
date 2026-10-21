@@ -18,6 +18,23 @@ const ROUNDS = 5;
 const PASSKEY_ROUNDS = 20;
 // The change against a reset: the plan 12c final review met a 500 in the first round of 30.
 const CHANGE_ROUNDS = 30;
+/**
+ * The time limit of each test of this file (fix wave of plan 12h, item 11).
+ * Each round makes a user, its passkeys or its factor, and then the race, so
+ * one test sends up to 220 requests. That is CPU work, and no lock wait is
+ * long. Measured on 2026-10-22 with the probe of the fix wave: two parallel
+ * deletes took 2.2 and 2.8 s alone, at a one-minute load of 13 to 17. With
+ * 18 busy CPU loops, the test took 6.1 and 7.3 s at a load of 18 to 21. Its
+ * rounds took 9.1 to 12.3 s in sum at a load of 29 to 44. The longest delete
+ * pair of a round took 246 ms. So the default of 15 s failed in full runs at
+ * a load of 23 to 35 (2026-10-21 and 2026-10-22), and 60 s is the bound.
+ *
+ * A test that times out still runs, and the DROP SCHEMA of `afterEach` meets
+ * its open queries. Postgres then reports "deadlock detected" for the DROP
+ * SCHEMA (server log, 2026-10-21 15:19 UTC). That deadlock follows the time-out.
+ * It is no deadlock of core.
+ */
+const RACE_TEST_MS = 60_000;
 
 let db: Awaited<ReturnType<typeof freshDatabase>>;
 beforeEach(async () => {
@@ -137,7 +154,7 @@ async function methods(userId: string): Promise<string[] | null> {
   return (typeof raw === "string" ? JSON.parse(raw) : raw) as string[];
 }
 
-describe("the reset gate on Postgres (plan 12c)", () => {
+describe("the reset gate on Postgres (plan 12c)", { timeout: RACE_TEST_MS }, () => {
   it("two parallel resets leave one live challenge and no session", async () => {
     const r = race();
     const email = "resets@example.com";
@@ -223,7 +240,7 @@ describe("the reset gate on Postgres (plan 12c)", () => {
   });
 });
 
-describe("the first enable on Postgres (plan 12c)", () => {
+describe("the first enable on Postgres (plan 12c)", { timeout: RACE_TEST_MS }, () => {
   it("two parallel first enables of two methods leave one row that holds each winner", async () => {
     const r = race();
     for (let round = 0; round < ROUNDS; round++) {
@@ -257,7 +274,7 @@ describe("the first enable on Postgres (plan 12c)", () => {
 // Review Focus 4 of plan 12c on Postgres (the Task 6 review, M2). Under READ
 // COMMITTED a passkey delete and a passkey enable each read rows that the
 // other changes. The factor row hold and the passkey row hold put them in order.
-describe("the passkey method on Postgres (plan 12c)", () => {
+describe("the passkey method on Postgres (plan 12c)", { timeout: RACE_TEST_MS }, () => {
   it("two parallel deletes of the last two passkeys leave one passkey", async () => {
     const r = race();
     for (let round = 0; round < PASSKEY_ROUNDS; round++) {
