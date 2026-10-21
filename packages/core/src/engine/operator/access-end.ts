@@ -159,13 +159,14 @@ export async function endAllAccessPage(
  * `budget` calls of `meter` (rulings 31, 44, and 63 of plan 12f). Every loss
  * of the platform role calls it in its transaction. The losses are the ban,
  * the revoke, and the account delete. A removal, a leave, or a role change
- * of the platform member row is a loss too. One read by the `userId` index takes the sessions,
- * and a page ends them with their stop rows (`endSessionPage`). The page
- * keeps `keep` calls for the steps of the caller after it, and one call for
- * the pending-end row. The rows that do not fit stay with a pending-end row
- * that names the operator and the targets, and the sweep ends them. Until
- * then the door of each session read refuses them (`impersonationLoss`).
- * The answer is true when rows stay.
+ * of the platform member row is a loss too. One read by the `userId` index
+ * takes the sessions, and a page ends them with their stop rows
+ * (`endSessionPage`). The page keeps `keep` calls for the steps of the
+ * caller after it, and one call for the pending-end row. The rows that do
+ * not fit stay with a pending-end row that names the operator and the
+ * targets, and the sweep ends them. Until then the door of each session
+ * read refuses them (`impersonationLoss`). The answer is true when rows
+ * stay.
  */
 export async function endImpersonationsPage(
   tx: StorageAdapter,
