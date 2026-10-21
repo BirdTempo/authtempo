@@ -263,11 +263,13 @@ const BAN_COUNTS: Record<string, [number, number, number[]]> = {
   "secret 60": [50, 31, [48, 24]],
   "user 60": [49, 22, [48, 33]],
 };
+// The revoke ends 3 sessions fewer in the act since ruling 16 of plan 12k: it deletes the team
+// rows of the member row it deletes, and so the sweep and a retry end more.
 const REVOKE_COUNTS: Record<string, [number, number, number, number, number[]]> = {
-  "secret 45": [50, 43, 24, 21, [21]],
-  "user 45": [50, 49, 24, 19, [26]],
-  "secret 60": [50, 50, 24, 28, [32]],
-  "user 60": [50, 49, 24, 19, [41]],
+  "secret 45": [50, 46, 21, 24, [21]],
+  "user 45": [50, 49, 21, 19, [29]],
+  "secret 60": [50, 50, 21, 28, [35]],
+  "user 60": [50, 49, 21, 19, [44]],
 };
 
 const asSecret = { authorization: `Operator ${SECRET}` };
