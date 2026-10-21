@@ -4,7 +4,7 @@ import { applyPostgresMigrations, MIGRATIONS } from "../src/migrations.js";
 import { freshSchema } from "./db.js";
 
 describe("postgres migration runner", () => {
-  it("lets two runners start at once on one empty schema: one applies, one skips", async () => {
+  it("lets two runners start at once on one empty schema: each migration runs once", async () => {
     const db = await freshSchema();
     try {
       const results = await Promise.allSettled([
@@ -12,10 +12,12 @@ describe("postgres migration runner", () => {
         applyPostgresMigrations(db.b),
       ]);
       expect(results.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
-      const lists = results.map((r) => (r.status === "fulfilled" ? r.value : null));
+      const lists = results.map((r) => (r.status === "fulfilled" ? r.value : []));
       const names = MIGRATIONS.map((m) => m.name);
-      expect(lists.filter((l) => l?.length === names.length)).toEqual([names]);
-      expect(lists.filter((l) => l?.length === 0)).toHaveLength(1);
+      // The lock is per migration, so the two runners can share the list:
+      // after a commit of one, the other can take the next migration. The
+      // promise is that each migration runs once and neither runner fails.
+      expect([...(lists[0] ?? []), ...(lists[1] ?? [])].sort()).toEqual(names);
       const rows = await db.a.unsafe<{ name: string }[]>("SELECT name FROM ta_migrations");
       expect(rows.map((r) => r.name)).toEqual(names);
     } finally {
