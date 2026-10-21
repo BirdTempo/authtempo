@@ -4,7 +4,13 @@ import { workersLogsSink } from "../src/workers-logs.js";
 import { built } from "./events.js";
 import { largestEvent } from "./largest.js";
 
-const request = built("request", "info", { route: "POST /password/sign-in", status: 200 });
+const request = built("request", "info", {
+  route: "POST /password/sign-in",
+  method: "POST",
+  status: 200,
+  outcome: "ok",
+  durationMs: 42,
+});
 const dropped = built("observe.dropped", "warn", {
   buffer_full: 3,
   sink_timeout: 0,

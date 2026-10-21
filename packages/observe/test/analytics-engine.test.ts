@@ -14,8 +14,14 @@ const signIn = built("sign_in", "info", {
   route: "POST /password/sign-in",
   outcome: "success",
   method: "password",
-  durationMs: 42,
+});
+// The request event carries the duration and the status (plan 12h Task 4).
+const request = built("request", "info", {
+  route: "POST /password/sign-in",
+  method: "POST",
   status: 200,
+  outcome: "ok",
+  durationMs: 42,
 });
 
 describe("analyticsEngineSink", () => {
@@ -110,9 +116,12 @@ describe("analyticsEngineSink", () => {
           null,
           "4bf92f3577b34da6a3ce929d0e0e4736",
         ],
-        doubles: [1, 42, 200],
+        doubles: [1, 0, 0],
       },
     ]);
+    const timed = dataset();
+    await analyticsEngineSink(timed).write([request]);
+    expect(timed.points[0]?.doubles).toEqual([1, 42, 200]);
     const bare = dataset();
     await analyticsEngineSink(bare).write([built("sweep", "info")]);
     expect(bare.points[0]?.doubles).toEqual([1, 0, 0]);

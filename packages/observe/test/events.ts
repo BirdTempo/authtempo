@@ -4,8 +4,8 @@ import { type AuthEvent, EVENTS, type EventName, validateEvent } from "@authtemp
  * An event as the observer passes it to a sink, built by hand. A name of
  * `EVENTS` passes its fields through the validator of core first, and a
  * rejected field stops the test: a fixture never holds a state that core
- * cannot reach. A name that a later task of plan 12h adds (request, sign_in)
- * has no row yet, so its fields are the ones of spec 31.
+ * cannot reach. The scope stamps `route` on each event, so `route` skips the
+ * validator unless the kind names it as its own field (plan 12h Task 4).
  */
 export function built(
   name: string,
@@ -14,7 +14,10 @@ export function built(
 ): AuthEvent {
   if (Object.hasOwn(EVENTS, name)) {
     const known = name as EventName;
-    const { rejected } = validateEvent(known, fields);
+    const checked = Object.hasOwn(EVENTS[known].fields, "route")
+      ? fields
+      : Object.fromEntries(Object.entries(fields).filter(([key]) => key !== "route"));
+    const { rejected } = validateEvent(known, checked);
     if (rejected.length > 0) throw new Error(`${name} rejects ${rejected.join(", ")}`);
     if (EVENTS[known].level !== level)
       throw new Error(`${name} has the level ${EVENTS[known].level}`);
