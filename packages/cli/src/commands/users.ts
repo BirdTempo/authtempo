@@ -377,8 +377,8 @@ export const usersCommand: Command = {
 
 /**
  * The run of a command with subcommands: the first word chooses one. With
- * no word, or a flag first, the parser of the command's own flags runs, so
- * an unknown flag gets its usage error; then the run names the subcommands.
+ * no word, or a flag first, the parser of the command's own flags runs. So
+ * an unknown flag gets its usage error. Then the run names the subcommands.
  */
 export async function runGroup(
   name: string,

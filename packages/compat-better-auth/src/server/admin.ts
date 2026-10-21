@@ -468,8 +468,8 @@ async function adminAnswer(
     );
   /**
    * The user row after an act, in Better Auth's shape with `role`. Core's
-   * `familyEndFailed: true` passes through (ruling 62 m2): the act ran, but
-   * the end of the OAuth refresh families failed, so the caller must end
+   * `familyEndFailed: true` passes through (ruling 62 m2). The act ran, but
+   * the end of the OAuth refresh families failed. So the caller must end
    * the user's sessions again.
    */
   const userAfter = async (res: Response, userId: string, role: string) => {
@@ -548,8 +548,8 @@ async function adminAnswer(
       res,
     );
   }
-  // A write that is not JSON gets core's answer: a text/plain post with a
-  // JSON text, or a post with no type, never acts (ruling 62 m1).
+  // A write that is not JSON gets core's answer (ruling 62 m1). A text/plain
+  // post with a JSON text, or a post with no type, never acts.
   if (!isJsonRequest(request)) return invalid();
   const body = await objectOf(request);
   const userId = userIdOf(body);

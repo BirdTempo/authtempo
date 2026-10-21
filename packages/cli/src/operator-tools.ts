@@ -165,8 +165,8 @@ export interface ToolCall {
  * One call of a route of the user, session, and audit tools, with the 600
  * calls of an hour in its 429 text. A 404 of a command with a user id has
  * two causes: no user has the id, or the tools are off. One read of the
- * user list tells which (it costs one more call): a 404 there means the
- * tools are off, and any other answer means the route exists.
+ * user list tells which, for one more call. A 404 there means that the
+ * tools are off. Any other answer means that the route exists.
  */
 export async function toolCall(
   ctx: Ctx,
@@ -422,8 +422,8 @@ export function auditIdOf(body: unknown, request: string): string {
 
 /**
  * The lines of a table: one header line, then one line per row. Each
- * column is as wide as its widest cell, with two spaces between columns,
- * so a person reads the columns and a script splits on spaces. Only the
+ * column is as wide as its widest cell, with two spaces between columns.
+ * So a person reads the columns, and a script splits on spaces. Only the
  * last column can hold a space.
  */
 export function tableLines(
@@ -441,7 +441,7 @@ export function tableLines(
 
 /**
  * The warning of a ban or a revoke that answers `familyEndFailed: true`
- * (ruling 37 of plan 12f): the act committed, and the end of the OAuth
+ * (ruling 37 of plan 12f). The act committed, and the end of the OAuth
  * refresh families after the commit failed. `sessions end` reads the
  * refresh tokens of the user again, and ends each family. The runbooks
  * quote it, and a site test holds them to it (ruling 62 m7).

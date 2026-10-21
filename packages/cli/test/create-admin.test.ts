@@ -1,6 +1,6 @@
 // `authtempo create-admin` (plan 12f Task 12, spec 26 item 11). The command
 // runs against a fresh core handle. The new operator gets power only through
-// the flows of the product: a magic link proves the mailbox, a reset link
+// the flows of the product. A magic link proves the mailbox, a reset link
 // sets a password, and the enable flow turns TOTP on.
 import { createHash } from "node:crypto";
 import {

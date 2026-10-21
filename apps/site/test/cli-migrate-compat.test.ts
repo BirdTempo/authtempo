@@ -42,8 +42,8 @@ function sqlite(prefix: string, names: Names): string | null {
 }
 
 /**
- * The shipped compat files whose text depends on the naming: the text for
- * other table and column names differs from the text for the default names.
+ * The shipped compat files whose text depends on the naming. For other
+ * table and column names, their text differs from the text for the default names.
  * The list comes from the package, so a new file of this kind fails the test
  * until both pages name it.
  */

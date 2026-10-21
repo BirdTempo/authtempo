@@ -123,8 +123,8 @@ export interface ExampleWorker {
  * its own. The Worker holds a secret of this run only, and the operator info
  * route must accept it. Another Worker on the port refuses it, and the start
  * fails with that name. With `operatorUsers`, the Worker holds the secret
- * as the named secret "live" with the scopes users and sessions, and the
- * user tools of plan 12f are on.
+ * as the named secret "live" with the scopes users and sessions. The user
+ * tools of plan 12f are then on.
  */
 export async function startExampleWorker(
   options: { operatorUsers?: boolean } = {},

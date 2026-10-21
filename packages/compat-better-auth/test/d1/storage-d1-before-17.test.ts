@@ -6,13 +6,13 @@ import { execD1 } from "./schema.js";
 import { before17 } from "./sql.js";
 
 // The second D1 flavor as it ships (plan 9h, index line 187). Until plan 9h
-// no D1 suite applied the files of migrations/d1-before-1.7/: the snake
+// no D1 suite applied the files of migrations/d1-before-1.7/. The snake
 // suite runs the before-1.7 text of migrationSql and the string DDL of
-// 0002 to 0005, and the migration-file test ties the file texts to that DDL.
+// 0002 to 0005. The migration-file test ties the file texts to that DDL.
 // Here: Better Auth's own SQLite SQL with its seven foreign keys, made into
-// tables from before 1.7 (no account.issuer and no index on it), then the
-// nine shipped files through applyD1Migrations, then core's conformance
-// suite and the D1 mapping tests.
+// tables from before 1.7 (no account.issuer and no index on it). Then the
+// nine shipped files run through applyD1Migrations. Then core's conformance
+// suite and the D1 mapping tests run.
 await execD1(before17(BETTER_AUTH_SQLITE));
 await applyD1Migrations(env.DB, env.COMPAT_MIGRATIONS_BEFORE_17);
 

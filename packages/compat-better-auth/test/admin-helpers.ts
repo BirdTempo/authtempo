@@ -130,8 +130,8 @@ const ERA = "2026-09-01T00:00:00.000Z";
  * compat migrations (ruling 62 M1). The columns are those of Better Auth
  * 1.7.2's admin schema (dist/plugins/admin/schema.mjs, read 2026-10-21):
  * user role, banned, banReason, banExpires, and session impersonatedBy.
- * Three users with a password, as Better Auth writes them: ann is banned
- * with no end, bob's ban ended on 2026-09-02, and cy was never banned.
+ * Three users with a password, as Better Auth writes them. The user ann is
+ * banned with no end, bob's ban ended on 2026-09-02, and cy was never banned.
  */
 export function betterAuthBans(dialect: "postgres" | "sqlite"): string {
   const pg = dialect === "postgres";

@@ -98,23 +98,23 @@ On D1 the command runs the project's own wrangler from
 `wrangler.json`, or `--config`) in the current folder and takes the one D1
 database, or the one that `--database` names. With `--tables core` (the
 default), the binding's `migrations_dir` must hold every file of
-`@authtempo/adapter-d1` with the same text: another folder stops the run
+`@authtempo/adapter-d1` with the same text. Another folder stops the run
 and names both folders, because wrangler would apply the wrong files and
 report success. With `--tables compat`, the command copies each file of the
-compatibility package (`migrations/d1/`, or `migrations/d1-before-1.7/` with
-`--before-1.7`) into the app's `migrations_dir` under the app's next
-number, then applies. It reads `compat_better_auth` of `ta_meta` first,
+compatibility package into the app's `migrations_dir` under the app's next
+number, then applies. The files are those of `migrations/d1/`, or of
+`migrations/d1-before-1.7/` with `--before-1.7`. It reads `compat_better_auth` of `ta_meta` first,
 and copies no compat file at or below that version. A file whose text the
 folder holds is not copied again. A copy above that version with another
 text stops the run with exit 2 before any write, and the line names the
 file. The copied files hold Better Auth's default table and column names.
 The shipped 0001, 0006, 0007, and 0009 fail on other names with `no such
-table`. An app with other names writes its own nine files: 0001 from
-`storage.migrationSql()` (or `storage.migrationSql("before-1.7")` for
-tables from before 1.7), 0002 to 0005 as shipped, 0006 from
-`compatMigration0006Sql("sqlite", storage.names)`, 0007 from
-`compatMigration0007Sql("sqlite", storage.names)`, 0008 as shipped, and
-0009 from `compatMigration0009Sql("sqlite", storage.names)`. It applies
+table`. An app with other names writes its own nine files. Its 0001 comes from
+`storage.migrationSql()`, or from `storage.migrationSql("before-1.7")` for
+tables from before 1.7. Its 0002 to 0005 and 0008 are as shipped. Its 0006 comes
+from `compatMigration0006Sql("sqlite", storage.names)`, 0007 from
+`compatMigration0007Sql("sqlite", storage.names)`, and 0009 from
+`compatMigration0009Sql("sqlite", storage.names)`. It applies
 them with `wrangler d1 migrations apply <database>` before this command.
 Then the compat version is 9, and the command copies nothing. Without `--remote`, the run is on
 the local database of `wrangler dev`. wrangler records each applied file in
@@ -269,7 +269,7 @@ only, as for `keys rotate`.
   JSON document with `--json`. `--all` follows `next` until it is null,
   with pages of 100 rows, up to `--max-calls` (100 by default, then exit 1
   and a warning). A `next` that does not move, or a stop after the first
-  page, stops with exit 2, and the command prints the rows read before it.
+  page, stops with exit 2. The command then prints the rows read before it.
 - `users ban|unban|platform-role|second-factor-off`, `sessions end|end-all`,
   and `create-admin` need `--reason` (1 to 500 characters with no control
   character, checked before any request). With no terminal, or with

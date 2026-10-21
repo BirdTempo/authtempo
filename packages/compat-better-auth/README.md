@@ -988,11 +988,26 @@ consumer-i (small edits):
 consumerc (follow-ups first): `hooks` (the leave guard of `leave.ts` moves into `organizationHooks.beforeRemoveMember`, which core runs on a leave); `beforeCreateOrganization` writes the studio with `organization.id` and returns nothing, because a `{ data }` that changes the id stops the write (on Postgres with `max: 1`, on a second connection; see "Hooks"); custom roles, `ac`, and dynamic access control; the Apple config as `teamId`, `keyId`, `privateKey`; the session-end paths in `session-end.ts` (or `databaseHooks.session.create.after` and core's `afterEnd`); the `getSchema()` test; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 The factory refuses exactly these: `hooks`, `plugins[expo]`, `plugins[organization].ac`, `plugins[organization].dynamicAccessControl`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `socialProviders.apple.clientSecret`, `socialProviders.apple`.
 
-consumerd (follow-ups first): `authtempo.platformOrganization` for the admin plugin (see "The admin plugin"), anonymous sign-in, teams, `hooks` (wrap the handler; see "Request hooks"), `$context` and `getOrgAdapter`, the rate limit storage. `freshAge: 600` and `deferSessionRefresh: true` run unchanged since plan 12a: core's window is 10 minutes, and the shim's client posts the deferred refresh. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e, and the tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` instead. With snake-case names, the column is `ta_purpose`. The row holds a keyed hash, never the code.
+consumerd (follow-ups first): the list after the refusals.
 The factory refuses exactly these: `baseURL`, `hooks`, `plugins[admin]`, `plugins[anonymous]`, `plugins[organization].ac`, `plugins[organization].disableOrganizationDeletion`, `plugins[organization].roles`, `plugins[organization].teams`, `plugins[passkey].origin`, `rateLimit.customStorage`, `secret`.
 
-consumerb (follow-ups first): API keys (the api-key mapping, a later plan; see the plan index), the OAuth 2.1 provider through `mcp` and `cimd`, and `jwt` and JWKS (refused since plan 9g; see "JWT and the OAuth provider"), `authtempo.platformOrganization` for the admin plugin (see "The admin plugin"), `defaultCookieAttributes.secure`, the `.well-known` routes; `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
+The follow-ups of consumerd:
+- `authtempo.platformOrganization` for the admin plugin (see "The admin plugin").
+- Anonymous sign-in, teams, `$context`, `getOrgAdapter`, and the rate limit storage.
+- `hooks`: wrap the handler (see "Request hooks").
+
+`freshAge: 600` and `deferSessionRefresh: true` run unchanged since plan 12a: core's window is 10 minutes, and the shim's client posts the deferred refresh. `membershipLimit: 50` and `organizationLimit: 3` run unchanged since plan 9d. The `emailOTP` options (`otpLength: 6`, `expiresIn: 600`, `allowedAttempts: 5`, `storeOTP: "hashed"`) run unchanged since plan 9e. The tests that post `/email-otp/send-verification-otp` and `/sign-in/email-otp` keep their paths. The test that reads the verification row by `sign-in-otp-<email>` reads `identifier = <email>` and `"taPurpose" = 'email-otp'` instead. With snake-case names, the column is `ta_purpose`. The row holds a keyed hash, never the code.
+
+consumerb (follow-ups first): the list after the refusals.
 The factory refuses exactly these: `advanced.defaultCookieAttributes.secure`, `emailAndPassword.sendResetPassword`, `emailVerification.expiresIn`, `plugins[admin]`, `plugins[api-key]`, `plugins[cimd]`, `plugins[jwt]`, `plugins[mcp]`, `plugins[organization].ac`, `plugins[organization].roles`, `plugins[organization].sendInvitationEmail`, `plugins[passkey].origin`.
+
+The follow-ups of consumerb:
+- API keys: the api-key mapping, a later plan (see the plan index).
+- The OAuth 2.1 provider through `mcp` and `cimd`.
+- `jwt` and JWKS, refused since plan 9g (see "JWT and the OAuth provider").
+- `authtempo.platformOrganization` for the admin plugin (see "The admin plugin").
+- `defaultCookieAttributes.secure` and the `.well-known` routes.
+- `advanced.ipAddress.ipAddressHeaders` (or `disableIpTracking: true`) before `toNodeHandler` or `toNextJsHandler` accepts the instance.
 
 ## JWT and the OAuth provider
 

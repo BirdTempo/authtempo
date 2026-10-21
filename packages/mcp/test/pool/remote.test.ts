@@ -380,10 +380,10 @@ describe("the remote Worker", () => {
   });
 
   // The local binding counts in fixed windows of the period, aligned to the
-  // wall clock: epoch = Math.floor(Date.now() / (period * 1e3)) in
+  // wall clock. The rule is epoch = Math.floor(Date.now() / (period * 1e3)) in
   // miniflare 5.20261006.1-alpha, dist/src/workers/ratelimit/ratelimit-object.worker.js
   // line 46 (read 2026-10-21). A window edge between call 1 and call 61 sets the
-  // count to 0, and call 61 gets 200 (the full run of 2026-10-21 00:28 crossed 00:30:00).
+  // count to 0. Call 61 then gets 200 (the full run of 2026-10-21 00:28 crossed 00:30:00).
   // The binding takes no clock from the test. So the test starts the calls
   // early in a window: with less than 10 s left, it waits for the next window.
   // The 61 calls take about 15 ms. The epoch check names a crossing before the 429 check.

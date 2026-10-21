@@ -128,8 +128,8 @@ describe("the live runs (spec 19)", () => {
   });
 });
 
-// The user tools of plan 12f on a second Worker: a named secret with the scopes
-// users and sessions, and OPERATOR_USERS "1" (plan 12f Task 12).
+// The user tools of plan 12f on a second Worker (plan 12f Task 12). It has a
+// named secret with the scopes users and sessions, and OPERATOR_USERS "1".
 describe("the live runs of the operator user tools (plan 12f)", () => {
   let tools: ExampleWorker | null = null;
   beforeAll(async () => {

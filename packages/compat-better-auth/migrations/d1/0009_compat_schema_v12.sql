@@ -10,9 +10,9 @@ ALTER TABLE "user" ADD COLUMN "taBanUntil" TEXT;
 ALTER TABLE "session" ADD COLUMN "taActorId" TEXT;
 -- Copy each ban of Better Auth's admin plugin (banned, banReason, banExpires)
 -- into core's columns, so the cutover unbans no user (ruling 62 M1). An app
--- without the admin plugin has none of these columns: each read is a
+-- without the admin plugin has none of these columns. So each read is a
 -- subquery on "user" inside a subquery on a one-row table with a column of
--- the same name, and SQL looks up a name in the nearest query first. So a
+-- the same name. SQL looks up a name in the nearest query first. So a
 -- missing column reads the fallback: not banned, and null. taBannedAt takes
 -- updatedAt, because Better Auth keeps no ban time. A row with taBannedAt
 -- is skipped, so a second run changes nothing.

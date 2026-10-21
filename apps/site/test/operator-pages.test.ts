@@ -13,8 +13,8 @@ import { DOCS } from "../scripts/lib/paths.ts";
 // The operator pages of plan 12f Task 14 against the codes of the routes
 // that their flows call. Each check holds the linked codes of a section
 // equal to the codes of its flow, both ways. A code that a route declares
-// and a page does not link fails, and so does a link to a code that the
-// flow cannot answer.
+// and a page does not link fails. A link to a code that the flow cannot
+// answer fails too.
 
 /** The text of a `## ` section of a page, from its heading to the next one. */
 function section(page: string, heading: string): string {
@@ -62,7 +62,7 @@ function expectLinks(page: string, text: string, codes: Iterable<string>) {
 
 /**
  * The codes of the routes that `pick` takes, as a call with an operator
- * secret meets them: the codes that only a request with a session gets
+ * secret meets them. The codes that only a request with a session gets
  * are out. Each runbook is a run of the CLI, which sends a secret only.
  */
 function secretCodesOf(pick: (route: RouteEntry) => boolean): Set<string> {

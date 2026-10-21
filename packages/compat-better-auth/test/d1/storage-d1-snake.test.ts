@@ -22,11 +22,11 @@ import { before17, renamed } from "./sql.js";
 // table names. Built from Better Auth's own SQLite SQL with its seven foreign
 // keys, renamed (plan 9b: every suite here creates each parent row first).
 // The migration is the before-1.7 text for these names, from
-// migrationSql("before-1.7"), then 0002 to 0005, which are the same for every naming,
-// then 0006, which names the verification table and its column (plan 12b),
-// then 0007, which names the session table and its column (plan 12a),
-// then 0008, which names ta_ tables only (plan 12e),
-// then 0009, which names the user and session tables and their columns (plan 12f).
+// migrationSql("before-1.7"). Then 0002 to 0005 run, which are the same for every naming.
+// Then 0006 runs, which names the verification table and its column (plan 12b).
+// Then 0007 runs, which names the session table and its column (plan 12a).
+// Then 0008 runs, which names ta_ tables only (plan 12e).
+// Then 0009 runs, which names the user and session tables and their columns (plan 12f).
 const naming = {
   casing: "snake",
   tables: {

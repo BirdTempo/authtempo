@@ -30,9 +30,9 @@ export const FAMILY_END_EXIT =
 
 /**
  * What a ban and a revoke of the platform role do to the sessions (ruling 62
- * m4). One text for the help and the pages: the act ends one page of the
- * sessions inside its call budget, and the sweep ends the rest. Until then
- * each door refuses a left session (ruling 44 of plan 12f).
+ * m4). The help and the pages take this one text. The act ends one page of
+ * the sessions inside its call budget, and the sweep ends the rest. Until
+ * then each door refuses a left session (ruling 44 of plan 12f).
  */
 export const SESSION_PAGE_TEXT =
   "The act ends a page of the user's sessions, and the sweep ends the rest.";

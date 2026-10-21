@@ -29,10 +29,10 @@ const LIST_OPTIONS = {
 } as const;
 
 /**
- * `authtempo audit list <base url>` (plan 12f Task 12, spec 26 item 8):
- * the audit rows by id, one page, or with `--all` every page until `next`
- * is null, up to `--max-calls`. A row names a secret by its name, never by
- * the secret.
+ * `authtempo audit list <base url>` (plan 12f Task 12, spec 26 item 8).
+ * It prints the audit rows by id, one page. With `--all` it reads every
+ * page until `next` is null, up to `--max-calls`. A row names a secret by
+ * its name, never by the secret.
  */
 async function runList(argv: string[], ctx: Ctx): Promise<number> {
   const { values, positionals } = parseOrUsage(
