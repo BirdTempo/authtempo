@@ -19,7 +19,7 @@ import {
 import { effectiveIn, grantCheck, type Standing, touchCheck } from "./permissions.js";
 import { RULE_STATEMENTS, rankOf, roleAllowedIn } from "./ranks.js";
 import { publicSession, type ResolvedSession } from "./sessions.js";
-import { lockTeam, TEAM_MEMBER_ADD } from "./teams.js";
+import { lockOrganization, lockTeam, TEAM_MEMBER_ADD } from "./teams.js";
 import { holdUser, userStays } from "./user-hold.js";
 import { normalizeEmail } from "./users.js";
 
@@ -363,6 +363,10 @@ export async function acceptInvitation(
         return lost();
       // The limit counts a new member row only: a raise of an existing member adds none.
       if (!existing && limit !== null) {
+        // The lock of the count, after the user hold and before the team locks (ruling 45 of
+        // plan 12k). A second add or accept waits here for this commit. A gone organization
+        // makes the link dead.
+        if (!(await lockOrganization(tx, organizationRow))) return null;
         const held = await tx.findMany(
           "member",
           [{ field: "organizationId", op: "eq", value: inv.organizationId }],

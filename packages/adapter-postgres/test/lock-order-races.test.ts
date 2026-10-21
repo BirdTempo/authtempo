@@ -581,6 +581,71 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     expect((await rows("organization")).map((x) => x.slug)).toEqual(["acme"]);
   });
 
+  it("of two member adds at membersPerOrganization 2, one answers member_limit (ruling 45)", async () => {
+    const sent: MailMessage[] = [];
+    const config = { limits: { membersPerOrganization: 2 } };
+    const g = gate();
+    let second: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), config, sent);
+    const two = instance(watch("organization", g.reach), config, sent);
+    const one = instance(createPostgresAdapter(db.sql), config, sent, {
+      beforeAddMember: async () => {
+        second = settle(
+          two.api.addMember({ user: a, organizationId, userId: c.id, role: "member" }),
+        );
+        await Promise.race([g.at, second]);
+      },
+    });
+    const a = await user("a");
+    const b = await user("b");
+    const c = await user("c");
+    const organizationId = await organization(plain, a);
+
+    const first = await settle(
+      one.api.addMember({ user: a, organizationId, userId: b.id, role: "member" }),
+    );
+
+    expect(first).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: false, code: "member_limit" });
+    expect((await rows("member")).map((m) => m.userId).sort()).toEqual(["a", "b"]);
+  });
+
+  it("of an accept and a member add at membersPerOrganization 2, one answers member_limit (ruling 45)", async () => {
+    const sent: MailMessage[] = [];
+    const config = { limits: { membersPerOrganization: 2 } };
+    const g = gate();
+    let second: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), config, sent);
+    const two = instance(watch("organization", g.reach), config, sent);
+    const one = instance(createPostgresAdapter(db.sql), config, sent, {
+      beforeAddMember: async () => {
+        second = settle(
+          two.api.addMember({ user: a, organizationId, userId: c.id, role: "member" }),
+        );
+        await Promise.race([g.at, second]);
+      },
+    });
+    const a = await user("a");
+    const c = await user("c");
+    const d = await user("d");
+    const organizationId = await organization(plain, a);
+    must(
+      await plain.api.inviteMember({
+        user: a,
+        organizationId,
+        email: "d@example.com",
+        role: "member",
+      }),
+    );
+    const token = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(sent.at(-1)?.text ?? "")?.[1] ?? "";
+
+    const accepted = await settle(one.api.acceptInvitation({ user: d, token, ip: null }));
+
+    expect(accepted).toMatchObject({ ok: true });
+    expect(await second).toMatchObject({ ok: false, code: "member_limit" });
+    expect((await rows("member")).map((m) => m.userId).sort()).toEqual(["a", "d"]);
+  });
+
   it("of two user token creates at 49 tokens, one answers token_limit (L4)", async () => {
     const sent: MailMessage[] = [];
     const g = gate();

@@ -597,7 +597,8 @@ export async function deleteOrganization(
  *
  * The order closes the gaps of the flows in flight. The organization row
  * goes first (ruling 43 of plan 12k). A token create, a team create, and a
- * role create hold that row (`lockOrganization`). On Postgres such a flow
+ * role create hold that row (`lockOrganization`). So do a member add and an
+ * accept under `membersPerOrganization` (ruling 45). On Postgres such a flow
  * commits first, and the deletes below see its rows. A flow that starts
  * later finds no organization. The team rows go next, before the team
  * member rows. A team member add or an accept holds its team row until its
@@ -810,6 +811,14 @@ export async function addMember(
   try {
     const written = await hookGuard(() =>
       config.storage.transaction(async (tx): Promise<Result<true>> => {
+        // The added user, then the organization row, in the lock order of user-hold.ts. A member
+        // row of a deleted user would count as an owner (plan 12a Task 11). The hold writes no new
+        // value, so a refusal below changes nothing.
+        await holdUser(tx, target.id);
+        // The lock of the count (ruling 45 of plan 12k). A second add or accept waits here for this
+        // commit, and then counts its member row. A gone organization answers not_found.
+        if (limit !== null && !(await lockOrganization(tx, s.value.organization)))
+          return fail("not_found");
         // A no-op add runs no hook. The unique key stays the guard for a race.
         if (
           await tx.findOne("member", [
@@ -834,8 +843,6 @@ export async function addMember(
           via: "add",
           invitation: null,
         });
-        // The added user, for the reason of the create (plan 12a Task 11).
-        await holdUser(tx, target.id);
         await tx.create("member", member);
         await userStays(tx, target.id);
         return ok(true);

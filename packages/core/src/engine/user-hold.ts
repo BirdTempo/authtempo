@@ -47,7 +47,9 @@ import { ROUNDS } from "./rounds.js";
  * account delete do (ruling 44). The user token
  * create holds the user row before its count of the cap, and takes no
  * other lock. The organization create holds the user row before its count of
- * `perUser` (ruling 45).
+ * `perUser` (ruling 45). The member add holds the added user, then takes the
+ * organization lock before its count of `membersPerOrganization`. The
+ * accept takes that lock after its user hold and before its team locks.
  *
  * No row returns: a sign-up writes its user later, and a deleted user is
  * found by `userStays`, the read after the insert. A stop here would answer
