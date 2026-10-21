@@ -9,7 +9,7 @@ import { type LiveShape, META_TABLE, MYSQL, SCHEMA_VERSION_KEY } from "@authtemp
 import mysql, { type Pool, type RowDataPacket } from "mysql2/promise";
 import { Stop } from "../errors.js";
 import { describeUrl } from "../output.js";
-import { requireTransport, urlSecrets } from "../transport.js";
+import { requireMysqlTransport, urlSecrets } from "../transport.js";
 import { storageCode } from "./postgres.js";
 
 /** MySQL error 1146, "Table doesn't exist": the migrations never ran. */
@@ -26,6 +26,15 @@ export const MYSQL_CORE_MIGRATIONS: readonly string[] = MYSQL_MIGRATIONS.map((m)
  * prints as it is.
  */
 const LOCK_HELD = "authtempo migrations: the MySQL lock ";
+
+/**
+ * The URL query keys that the CLI passes to mysql2. mysql2 3.24.5 prints
+ * an unknown key on stderr with console.error, past the scrub list
+ * (lib/connection_config.js:88-96, read 2026-10-21). Other keys of mysql2,
+ * such as `debug`, `charset`, or `dateStrings`, print packets or change the values that
+ * the adapter reads. So the seam refuses each other key before `createPool`.
+ */
+const URL_KEYS = new Set(["ssl", "connectTimeout"]);
 
 /** The step count of each migration of the adapter that this CLI bundles. */
 const STEPS = new Map(MYSQL_MIGRATIONS.map((m) => [m.name, m.statements.length]));
@@ -59,7 +68,7 @@ export interface MysqlSeam {
 }
 
 /**
- * Opens a pool of one connection on `url`, after `requireTransport`. The
+ * Opens a pool of one connection on `url`, after `requireMysqlTransport`. The
  * URL's password goes to `addSecret` before the first line. Every driver
  * error leaves as `storage: <code> at <host:port/name>`: the code is mysql2's
  * `code`, such as `ER_ACCESS_DENIED_ERROR`, and never its message, which
@@ -67,7 +76,14 @@ export interface MysqlSeam {
  */
 export function openMysql(url: string, addSecret: (value: string) => void): MysqlSeam {
   for (const s of urlSecrets(url)) addSecret(s);
-  requireTransport(url, "mysql");
+  requireMysqlTransport(url);
+  // requireMysqlTransport parsed the URL, so this parse cannot throw. The
+  // message names no key: a mistyped key can hold a secret.
+  for (const key of new URL(url).searchParams.keys())
+    if (!URL_KEYS.has(key))
+      throw new Stop(
+        `the connection string of mysql has a query key that the CLI does not take; it takes ${[...URL_KEYS].join(", ")}`,
+      );
   const where = describeUrl(url);
   const fail = (e: unknown): never => {
     if (e instanceof Stop) throw e;

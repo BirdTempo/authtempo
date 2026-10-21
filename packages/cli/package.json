@@ -43,6 +43,7 @@
     "@authtempo/import": "workspace:*",
     "@authtempo/legacy-hashes": "workspace:*",
     "@libsql/client": "0.18.0",
+    "@libsql/core": "0.18.0",
     "mysql2": "3.24.5",
     "postgres": "3.4.9"
   },

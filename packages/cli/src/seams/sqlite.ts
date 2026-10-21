@@ -11,7 +11,7 @@ import type { StorageAdapter } from "@authtempo/core";
 import { type LiveShape, META_TABLE, SCHEMA_VERSION_KEY } from "@authtempo/core/sql";
 import { Stop } from "../errors.js";
 import { describeUrl } from "../output.js";
-import { requireTransport, urlSecrets } from "../transport.js";
+import { type LibsqlTarget, requireLibsqlTransport, urlSecrets } from "../transport.js";
 import { COMPAT_META_KEY } from "./postgres.js";
 
 /** The table where `applySqliteMigrations` records each applied migration (adapter-sqlite src/migrations.ts). */
@@ -48,6 +48,33 @@ function codeOf(e: unknown): string {
 const isNoSuchTable = (e: unknown) => /no such table/.test(String((e as Error | null)?.message));
 
 /**
+ * The parser of a libSQL URL as `@libsql/client` 0.18.0 reads it.
+ * `createClient` of Node calls `expandConfig(config, true)` of
+ * `@libsql/core`, which reads the URL with `parseUri` (lib-esm/node.js,
+ * config.js, and uri.js, read 2026-10-21). So the transport rule judges the
+ * scheme, the TLS flag, and the host that the driver connects to. A URL that
+ * the driver refuses stops with its code, never its message, which quotes
+ * the URL. The seam loads `@libsql/core` only for a URL.
+ */
+export async function libsqlParser(): Promise<(url: string) => LibsqlTarget> {
+  const { expandConfig } = await import("@libsql/core/config");
+  const { parseUri } = await import("@libsql/core/uri");
+  return (url) => {
+    try {
+      const c = expandConfig({ url }, true);
+      return {
+        scheme: c.scheme,
+        tls: c.tls,
+        host: c.authority?.host ?? null,
+        queryKeys: (parseUri(url).query?.pairs ?? []).map((p) => p.key),
+      };
+    } catch (e) {
+      throw new Stop(`the libSQL URL is not valid: ${codeOf(e)}`);
+    }
+  };
+}
+
+/**
  * The SQLite seam of the CLI (plan 12g Task 6): the one module that names
  * `node:sqlite` and `@libsql/client`. It has the members of `PostgresSeam`
  * that `migrate` and `check` call, and the live shape read. Plan 12g Task 8b
@@ -78,9 +105,9 @@ export interface SqliteSeam {
 /**
  * Opens the database of `source`. A file opens through `node:sqlite` (Node
  * 22.13 and later), which makes the file when it is missing, unless
- * `readOnly` is set (`check`). A URL first
- * passes `requireTransport`, then opens through `@libsql/client`, which this
- * seam loads only for a URL. `addSecret` gets the URL's password and token
+ * `readOnly` is set (`check`, and a dry run of `migrate`). A URL first
+ * passes `requireLibsqlTransport`, then opens through `@libsql/client`. The
+ * seam loads both libSQL packages only for a URL. `addSecret` gets the URL's password and token
  * values before the first line. Every driver error leaves as `storage: <code>
  * at <where>`.
  */
@@ -112,7 +139,7 @@ export async function openSqlite(
     for (const s of urlSecrets(source.url)) addSecret(s);
     if (source.authToken !== null) addSecret(source.authToken);
     where = describeUrl(source.url);
-    requireTransport(source.url, "libsql");
+    requireLibsqlTransport(source.url, await libsqlParser());
     const { createClient } = await import("@libsql/client");
     const { libsql } = await import("@authtempo/adapter-sqlite/libsql");
     let client: ReturnType<typeof createClient>;

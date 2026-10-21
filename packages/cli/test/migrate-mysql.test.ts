@@ -1,3 +1,5 @@
+import { MYSQL_MIGRATIONS } from "@authtempo/adapter-mysql";
+import mysql, { type RowDataPacket } from "mysql2/promise";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { CheckId, CheckReport } from "../src/checks.js";
 import { main } from "../src/main.js";
@@ -97,6 +99,44 @@ describe.each(MYSQL_SERVERS)(
       expect(await db.query(`SHOW TABLES FROM \`${db.name}\``)).toEqual([]);
     });
 
+    it("counts a migration with part of its steps recorded as pending, and resumes it", async () => {
+      // The runner records each step after it runs (adapter-mysql
+      // migrateSteps). A run killed after step `half` leaves this state.
+      const steps = MYSQL_MIGRATIONS[0]?.statements ?? [];
+      const half = Math.floor(steps.length / 2);
+      expect(half).toBeGreaterThan(0);
+      const conn = await mysql.createConnection({ uri: db.url });
+      try {
+        await conn.query(
+          "CREATE TABLE IF NOT EXISTS `ta_migrations` (`name` VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, `step` INT NOT NULL, `applied_at` BIGINT NOT NULL, PRIMARY KEY (`name`, `step`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_bin",
+        );
+        for (const [i, sql] of steps.slice(0, half).entries()) {
+          await conn.query(sql);
+          await conn.execute(
+            "INSERT INTO `ta_migrations` (`name`, `step`, `applied_at`) VALUES (?, ?, ?)",
+            ["0001_schema_v13", i + 1, Date.now()],
+          );
+        }
+      } finally {
+        await conn.end();
+      }
+      const dry = migrate(["--dry-run", "--json"]);
+      expect(dry.status, dry.stderr).toBe(0);
+      expect(JSON.parse(dry.stdout)).toMatchObject({ before: null, pending: CORE, applied: [] });
+      const r = migrate(["--json"]);
+      expect(r.status, r.stderr).toBe(0);
+      expect(JSON.parse(r.stdout)).toMatchObject({
+        before: null,
+        after: 13,
+        pending: CORE,
+        applied: CORE,
+      });
+      const rows = (await db.query(
+        `SELECT COUNT(*) AS n FROM \`${db.name}\`.\`ta_migrations\``,
+      )) as RowDataPacket[];
+      expect(Number(rows[0]?.n)).toBe(steps.length);
+    });
+
     it("check reports schema_shape on MySQL", async () => {
       expect(migrate([]).status).toBe(0);
       const io = fakeIo({ env: { MYSQL_URL: db.url }, fetch: deployment(healthy()) });
@@ -136,8 +176,20 @@ describe("authtempo migrate --target mysql with no TLS (plan 12g Review Focus 5)
     expect(r.stdout).toBe("");
     const lines = linesOf(r.stderr);
     expect(lines).toEqual([
-      'stopped: db.example.com:3306/app is not a loopback host, and the URL asks for no TLS with certificate checks; add ?ssl={"rejectUnauthorized":true}',
+      'stopped: db.example.com:3306/app is not a loopback host, and the URL asks for no TLS with certificate and host name checks; add ?ssl={"rejectUnauthorized":true,"verifyIdentity":true}',
     ]);
     for (const line of lines) expect(line).not.toContain("s3cr3t");
+  });
+
+  it("refuses a query key that the CLI does not take, before mysql2 reads it", () => {
+    // mysql2 prints an unknown key with console.error, past the scrub list.
+    const r = runBin(["migrate", "--target", "mysql", "--url-env", "DB"], {
+      env: { DB: "mysql://u:s3cr3t@127.0.0.1:9/app?s3cr3tkey=1" },
+    });
+    expect(r.status).toBe(2);
+    expect(r.stdout).toBe("");
+    expect(linesOf(r.stderr)).toEqual([
+      "stopped: the connection string of mysql has a query key that the CLI does not take; it takes ssl, connectTimeout",
+    ]);
   });
 });

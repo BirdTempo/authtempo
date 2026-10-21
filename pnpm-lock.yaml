@@ -1113,6 +1113,9 @@ importers:
       '@libsql/client':
         specifier: 0.18.0
         version: 0.18.0
+      '@libsql/core':
+        specifier: 0.18.0
+        version: 0.18.0
       mysql2:
         specifier: 3.24.5
         version: 3.24.5(@types/node@24.19.1)

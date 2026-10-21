@@ -80,12 +80,15 @@ The third line creates or updates the tables in a SQLite file. The fourth line l
 - Give one of `--file`, `--url-env`, or `--url-file`. Two of them, or none, is a usage error.
 - `--file` opens the file through `node:sqlite` (Node.js 22.13 and later). The command waits up to 5 seconds for the write lock of another process.
 - A URL opens a libSQL server through `@libsql/client`. A host that is not a loopback address needs `https:`, `wss:`, or `libsql:` with TLS. A plain `http:` URL to such a host stops the run with exit 2, before any connection.
+- The command reads the URL with the parser of `@libsql/client`, so it judges the host that the driver connects to. A URL with a backslash, or with a query key more than once, stops the run with exit 2.
+- `--dry-run` on a missing file makes no file. It lists every migration as pending.
 - `applySqliteMigrations` applies the files, which are the D1 files of `@authtempo/adapter-d1`. Each file and its record in `ta_migrations` run in one write transaction.
 - A driver error prints as `storage: <code> at <file>`, or at the host and the name of the URL. The command never prints the message of the driver, the token, or the query of the URL.
 
 ## MySQL
 
-- MySQL 8.4 and later. A host that is not a loopback address needs `?ssl={"rejectUnauthorized":true}` in the URL. Without it, the run stops with exit 2, before any connection.
+- MySQL 8.4 and later. A host that is not a loopback address needs `?ssl={"rejectUnauthorized":true,"verifyIdentity":true}` in the URL. Without it, the run stops with exit 2, before any connection. Without `verifyIdentity`, mysql2 checks the certificate chain but not the host name.
+- The URL takes the query keys `ssl` and `connectTimeout` only. Another key, or a key more than once, stops the run with exit 2, before any connection.
 - `applyMysqlMigrations` applies the migrations. Its named lock makes two runs at once safe.
 - The command uses one connection, and ends it before it exits.
 - A driver error prints as `storage: <code> at <host:port/name>`, such as `storage: ER_ACCESS_DENIED_ERROR at db.example.com:3306/app`. The command never prints the message of the driver, which names the user.
