@@ -1269,7 +1269,10 @@ max below 1, or a share below 1. An organization key gets its creator from
 `revokeTokens: true` revokes these keys too, though the owner never made
 them. A moved key acts, so it counts against core's cap of 50
 live tokens per owner. An owner with more moved keys can create no new key
-until they revoke some.
+until they revoke some. A moved key gets a new id, core's token id, so its `apikey`
+id no longer finds it. `ta_moved_token` maps each `apikey` id (`source_id`)
+to its token id (`token_id`). Change each app row that holds an old key id
+by that map.
 
 Each step is a runbook line, with what breaks without it:
 
