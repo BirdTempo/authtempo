@@ -8,7 +8,7 @@ import {
   requireScope,
 } from "../../engine/operator/guards.js";
 import { startImpersonation, stopImpersonation } from "../../engine/operator/impersonation.js";
-import { operatorApi } from "../../engine/operator/index.js";
+import { type OperatorApi, operatorApi } from "../../engine/operator/index.js";
 import { rewrapSecrets, secretsStatus } from "../../engine/secrets.js";
 import {
   renewedSessionCookie,
@@ -451,7 +451,6 @@ function under<K extends string, V>(key: K, r: Result<V>): Result<Record<K, V>> 
  */
 function toolRoutes(config: ResolvedConfig): Route[] {
   if (!config.operator?.users) return [];
-  const api = operatorApi(config);
   const send = (res: Response, renewed: string | null) => {
     if (renewed) res.headers.append("set-cookie", renewed);
     return res;
@@ -459,7 +458,7 @@ function toolRoutes(config: ResolvedConfig): Route[] {
   const read = <T, V, P extends RoutePath<"GET">>(
     path: P,
     schema: z.ZodType<T>,
-    run: (actor: OperatorActor, query: T) => Promise<Result<V>>,
+    run: (api: OperatorApi, actor: OperatorActor, query: T) => Promise<Result<V>>,
   ): Route => ({
     method: "GET",
     path,
@@ -469,13 +468,16 @@ function toolRoutes(config: ResolvedConfig): Route[] {
       if (!caller.ok) return respond(caller);
       const query = readQuery(ctx.url, schema);
       if (!query.ok) return send(respond(query), caller.value.renewed);
-      return send(respond(await run(caller.value.actor, query.value)), caller.value.renewed);
+      // The api of the request scope, so each event keeps the trace (ruling 20 of plan 12h).
+      const api = operatorApi(ctx.config);
+      return send(respond(await run(api, caller.value.actor, query.value)), caller.value.renewed);
     },
   });
   const write = <T, V, P extends RoutePath<"POST">>(
     path: P,
     schema: z.ZodType<T>,
     run: (
+      api: OperatorApi,
       actor: OperatorActor,
       body: T,
       meta: { ip: string | null; userAgent: string | null },
@@ -494,18 +496,22 @@ function toolRoutes(config: ResolvedConfig): Route[] {
         : fail("invalid_body");
       if (!body.ok) return send(respond(body), caller.value.renewed);
       const meta = { ip: ctx.ip, userAgent: ctx.request.headers.get("user-agent") };
-      return send(respond(await run(caller.value.actor, body.value, meta)), caller.value.renewed);
+      const api = operatorApi(ctx.config);
+      return send(
+        respond(await run(api, caller.value.actor, body.value, meta)),
+        caller.value.renewed,
+      );
     },
   });
   return [
-    read("/operator/users", usersQuery, (actor, q) =>
+    read("/operator/users", usersQuery, (api, actor, q) =>
       api.users.list({
         actor,
         ...(q.after === undefined ? {} : { after: q.after }),
         ...limitOf(q.limit),
       }),
     ),
-    read("/operator/users/search", searchQuery, (actor, q) =>
+    read("/operator/users/search", searchQuery, (api, actor, q) =>
       api.users.search({
         actor,
         ...(q.email === undefined ? {} : { email: q.email }),
@@ -515,10 +521,10 @@ function toolRoutes(config: ResolvedConfig): Route[] {
         ...limitOf(q.limit),
       }),
     ),
-    read("/operator/users/get", userQuery, async (actor, q) =>
+    read("/operator/users/get", userQuery, async (api, actor, q) =>
       under("user", await api.users.get({ actor, userId: q.userId })),
     ),
-    write("/operator/users/ban", banBody, (actor, b, meta) =>
+    write("/operator/users/ban", banBody, (api, actor, b, meta) =>
       api.users.ban({
         actor,
         userId: b.userId,
@@ -527,10 +533,10 @@ function toolRoutes(config: ResolvedConfig): Route[] {
         ...meta,
       }),
     ),
-    write("/operator/users/unban", userReasonBody, (actor, b, meta) =>
+    write("/operator/users/unban", userReasonBody, (api, actor, b, meta) =>
       api.users.unban({ actor, userId: b.userId, reason: b.reason, ...meta }),
     ),
-    write("/operator/users/platform-role", platformRoleBody, (actor, b, meta) =>
+    write("/operator/users/platform-role", platformRoleBody, (api, actor, b, meta) =>
       (b.grant ? api.platformRole.grant : api.platformRole.revoke)({
         actor,
         userId: b.userId,
@@ -538,7 +544,7 @@ function toolRoutes(config: ResolvedConfig): Route[] {
         ...meta,
       }),
     ),
-    write("/operator/users/second-factor/disable", factorDisableBody, (actor, b, meta) =>
+    write("/operator/users/second-factor/disable", factorDisableBody, (api, actor, b, meta) =>
       api.secondFactor.disable({
         actor,
         userId: b.userId,
@@ -548,7 +554,7 @@ function toolRoutes(config: ResolvedConfig): Route[] {
       }),
     ),
     // A secret actor only: the engine answers operator_required to a user actor.
-    write("/operator/users/create-admin", createAdminBody, (actor, b, meta) =>
+    write("/operator/users/create-admin", createAdminBody, (api, actor, b, meta) =>
       api.createAdmin({
         actor,
         email: b.email,
@@ -557,10 +563,10 @@ function toolRoutes(config: ResolvedConfig): Route[] {
         ...meta,
       }),
     ),
-    write("/operator/sessions/end-user", userReasonBody, (actor, b, meta) =>
+    write("/operator/sessions/end-user", userReasonBody, (api, actor, b, meta) =>
       api.sessions.endUser({ actor, userId: b.userId, reason: b.reason, ...meta }),
     ),
-    write("/operator/sessions/end-all", endAllBody, (actor, b, meta) =>
+    write("/operator/sessions/end-all", endAllBody, (api, actor, b, meta) =>
       api.sessions.endAll({
         actor,
         reason: b.reason,
@@ -568,7 +574,7 @@ function toolRoutes(config: ResolvedConfig): Route[] {
         ...meta,
       }),
     ),
-    read("/operator/audit", auditQuery, (actor, q) =>
+    read("/operator/audit", auditQuery, (api, actor, q) =>
       api.audit.list({
         actor,
         ...(q.targetUserId === undefined ? {} : { targetUserId: q.targetUserId }),

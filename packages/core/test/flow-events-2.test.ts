@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
+import { deleteAccount } from "../src/engine/account-delete.js";
 import {
   acceptInvitation,
   declineInvitation,
@@ -12,6 +13,7 @@ import { createClient } from "../src/engine/oauth-client-store.js";
 import { revokeGrant } from "../src/engine/oauth-grants.js";
 import { banUser } from "../src/engine/operator/ban.js";
 import { requireOperatorUser } from "../src/engine/operator/guards.js";
+import { grantPlatformRole, revokePlatformRole } from "../src/engine/operator/platform-role.js";
 import {
   createOrganizationToken,
   revokeOrganizationToken,
@@ -36,10 +38,11 @@ import {
   updateTeam,
 } from "../src/engine/teams.js";
 import type { AuthEvent } from "../src/observe/port.js";
+import { sha256Hex } from "../src/primitives/crypto.js";
 import { newId } from "../src/primitives/ids.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import type { UserRow } from "../src/schema.js";
-import { BASE_URL, makeAuth, post } from "./helpers.js";
+import { BASE_URL, makeAuth, post, seedPlatform } from "./helpers.js";
 import {
   authorized,
   codeFor,
@@ -51,8 +54,9 @@ import {
   signedIn,
   tokenPost,
 } from "./oauth-helpers.js";
-import { OPERATOR_SECRETS, operatorAuth, secretActor } from "./operator-helpers.js";
-import { verifiedSession } from "./totp-helpers.js";
+import { OPERATOR_SECRETS, operatorAuth, operatorHeader, secretActor } from "./operator-helpers.js";
+import { FAST } from "./password-helpers.js";
+import { totpAuth, verifiedSession } from "./totp-helpers.js";
 
 /** A sink that keeps each batch. `all()` flushes the observer of `flush` and answers every event so far. */
 function recorder() {
@@ -492,6 +496,44 @@ describe("the organization events (plan 12h Task 6)", () => {
     expect(changes.every((c) => c.rejected === undefined)).toBe(true);
   });
 
+  it("emits organization.change for each organization that an account delete takes", async () => {
+    const r = recorder();
+    const auth = totpAuth({ organizations: {}, observe: { sink: r.sink } });
+    const me = await verifiedSession(auth, "ada@example.com");
+    const solo = await orgOf(auth, me.user, "solo");
+    expect(await deleteAccount(auth.config, { session: me, ip: null, userAgent: null })).toEqual({
+      ok: true,
+      value: { ok: true },
+    });
+    const changes = named(await r.events(() => auth.config.observe.flush()), "organization.change");
+    // The create gives addMember and create; the delete gives delete.
+    expect(changes.map(own).slice(2)).toEqual([
+      { name: "organization.change", action: "delete", organizationId: solo.id },
+    ]);
+  });
+
+  it("emits organization.change on a grant and a revoke of the platform role", async () => {
+    const r = recorder();
+    const auth = await operatorAuth({ observe: { sink: r.sink } });
+    const { platformOrg } = await seedPlatform(auth);
+    const target = await verifiedSession(auth, "target@example.com");
+    const actor = await secretActor(auth, OPERATOR_SECRETS.support);
+    const act = {
+      actor,
+      userId: target.user.id,
+      reason: "Support case 9",
+      ip: null,
+      userAgent: null,
+    };
+    expect((await grantPlatformRole(auth.config, act)).ok).toBe(true);
+    expect((await revokePlatformRole(auth.config, act)).ok).toBe(true);
+    const changes = named(await r.events(() => auth.config.observe.flush()), "organization.change");
+    expect(changes.map(own)).toEqual([
+      { name: "organization.change", action: "addMember", organizationId: platformOrg.id },
+      { name: "organization.change", action: "removeMember", organizationId: platformOrg.id },
+    ]);
+  });
+
   it("emits organization.role_change on a role create, update, and delete", async () => {
     const { auth, events } = orgWorld();
     const owner = await seed(auth, "owner@example.com");
@@ -568,6 +610,65 @@ describe("the operator events (plan 12h Task 6)", () => {
       { name: "operator.refused", action: "ban", actorKind: "secret", code: "hook_refused" },
     ]);
     expect(await auth.storage.findMany("operatorAudit", [])).toHaveLength(1);
+  });
+
+  it("gives the operator events of a route the trace of its request", async () => {
+    const batches: AuthEvent[][] = [];
+    let refuse = false;
+    const base = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: ["https://app.example.com"],
+      storage: base.storage,
+      mail: { send: async () => {} },
+      clock: base.clock,
+      limiter: base.config.limiter,
+      operator: {
+        secrets: [
+          {
+            name: "support",
+            secretHash: await sha256Hex(OPERATOR_SECRETS.support),
+            scopes: ["users"],
+          },
+        ],
+        users: true,
+      },
+      hooks: {
+        operator: {
+          beforeAction: () => {
+            if (refuse) throw Object.assign(new Error("no"), { name: "HookRefusal" });
+          },
+        },
+      },
+      observe: { sink: { write: (b) => void batches.push([...b]) } },
+    });
+    const ban = async (userId: string) => {
+      const res = await auth.handle(
+        post(
+          "/auth/operator/users/ban",
+          { userId, reason: "Support case 4711" },
+          operatorHeader(OPERATOR_SECRETS.support),
+        ),
+      );
+      return { status: res.status, trace: res.headers.get("x-authtempo-trace") };
+    };
+    const ada = await seed(base, "ada@example.com");
+    const bob = await seed(base, "bob@example.com");
+    const done = await ban(ada.id);
+    refuse = true;
+    const refused = await ban(bob.id);
+    expect([done.status, refused.status]).toEqual([200, 403]);
+    await auth.observe.flush();
+    const events = batches.flat();
+    const [action] = named(events, "operator.action");
+    const [refusal] = named(events, "operator.refused");
+    expect(action?.traceId).toBe(done.trace);
+    expect(action?.route).toBe("POST /operator/users/ban");
+    expect(refusal?.traceId).toBe(refused.trace);
+    expect(refusal?.route).toBe("POST /operator/users/ban");
+    expect(done.trace).not.toBe(refused.trace);
+    for (const e of [action, refusal]) expect(e?.rejected).toBeUndefined();
   });
 
   it("emits operator.refused when the operator guard refuses a user", async () => {
