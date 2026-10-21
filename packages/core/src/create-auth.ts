@@ -229,6 +229,7 @@ import { createPostGate, createRouter } from "./http/router.js";
 import { coreRoutes } from "./http/routes/index.js";
 import { createWellKnownHandler } from "./http/well-known.js";
 import type { HandleOptions, ObserveStats } from "./observe/port.js";
+import { appErrorName } from "./primitives/app-error.js";
 import type { PublicJwk } from "./primitives/jwk.js";
 import { fail, type Result } from "./result.js";
 import type { SessionRow, UserRow } from "./schema.js";
@@ -861,9 +862,16 @@ export function createAuth(input: AuthConfig): Auth {
     // (owner decision 4 of 2026-10-14). The flush swaps the buffer and yields
     // once. The keys, the hashes, and the sink run after that yield. On
     // Workers pass `(p) => ctx.waitUntil(p)`: an unbound `ctx.waitUntil` throws.
+    // A hook that throws never loses the answer: the route already ran.
     async handle(request, options) {
       const res = await route(request);
-      options?.waitUntil?.(config.observe.flush());
+      if (options?.waitUntil) {
+        try {
+          options.waitUntil(config.observe.flush());
+        } catch (e) {
+          console.error("authtempo: waitUntil threw; the flush has no hook", appErrorName(e));
+        }
+      }
       return res;
     },
     observe: { flush: () => config.observe.flush(), stats: () => config.observe.stats() },

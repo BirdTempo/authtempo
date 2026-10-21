@@ -76,4 +76,32 @@ describe("no flow waits for a sink (plan 12h Task 2, Global Constraints)", () =>
     expect(await plain.json()).toEqual(await withHook.json());
     expect(waitUntil).toHaveBeenCalledTimes(1);
   });
+
+  it("keeps the answer when an unbound ctx.waitUntil throws, and logs one line", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      observe: { sink: { write: () => {} } },
+    });
+    /** A host context whose method throws when it is called with no receiver, as on Workers. */
+    class Context {
+      waitUntil(promise: Promise<unknown>): void {
+        if (!(this instanceof Context)) throw new TypeError("Illegal invocation");
+        void promise;
+      }
+    }
+    const ctx = new Context();
+    const request = post("/auth/magic-link/request", { email: "ada@example.com" });
+    const res = await auth.handle(request, { waitUntil: ctx.waitUntil });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ sent: true });
+    expect(error.mock.calls).toEqual([
+      ["authtempo: waitUntil threw; the flush has no hook", "TypeError"],
+    ]);
+    error.mockRestore();
+  });
 });
