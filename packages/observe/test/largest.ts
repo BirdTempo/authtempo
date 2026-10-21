@@ -20,6 +20,8 @@ const LONGEST: Readonly<Record<FieldKind, unknown>> = {
   status: Number.MAX_SAFE_INTEGER,
   hash: "f".repeat(32),
   clientRef: `cl_${"x".repeat(64)}`,
+  // The method kind of plan 12h ruling 12: an RFC 9110 token of at most 32 characters.
+  method: "M".repeat(32),
 };
 
 /**
