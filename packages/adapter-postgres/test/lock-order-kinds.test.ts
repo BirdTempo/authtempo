@@ -957,8 +957,10 @@ const SITES: Record<string, readonly string[] | string> = {
   // The domain proof of plan 12d. Its rows are of no kind of user-hold.ts.
   "sso/domains addDomain": "one kind: the lock of the organization row, then domain rows",
   "sso/domains verifyDomainWith": "no kind: the claim of the domain row, then its audit row",
+  // Ruling 34 of plan 12d: the connection row comes before the domain rows in the three
+  // sites of a domain and a connection. sso-connection-domain-race.test.ts races them.
   "sso/domains updateDomain":
-    "no kind: reads of the domain and the connection, then the domain row",
+    "no kind: a read of the domain, the lock of the connection row, then the domain row",
   "sso/domains deleteDomain": "no kind: the domain row, then its audit row",
   "sso/domains enforceOff": "no kind: the domain row through operatorAct",
   "sso/domains loseDomain": "no kind: the loss of the claim of the domain row, then its audit row",
@@ -966,7 +968,7 @@ const SITES: Record<string, readonly string[] | string> = {
   "sso/connections createConnection":
     "one kind: the lock of the organization row, then reads of role rows and connections, then the connection row",
   "sso/connections updateConnection":
-    "no kind: reads of role rows and domains, then the connection row, then its audit row",
+    "no kind: reads of role rows, the connection row, reads of domains, then its audit row",
   "sso/connections deleteConnection":
     "no kind: the connection row, then the domain rows routed to it, then its audit row",
 };

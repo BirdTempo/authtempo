@@ -445,17 +445,11 @@ export async function updateDomain(
   const updated = await config.storage.transaction(async (tx): Promise<Result<Updated>> => {
     const held = await tx.findOne("ssoDomain", [{ field: "id", op: "eq", value: input.id }]);
     if (!held) return fail("not_found");
-    // The connection must be of the domain's own organization. Else one organization would
-    // sign in the staff of another.
-    if (
-      typeof changes.connectionId === "string" &&
-      !(await tx.findOne("ssoConnection", [
-        { field: "id", op: "eq", value: changes.connectionId },
-        { field: "organizationId", op: "eq", value: held.organizationId },
-      ]))
-    )
-      return fail("not_found");
     const row: SsoDomainRow = { ...held, ...changes, updatedAt: now };
+    // The connection must be of the domain's own organization. Else one organization would
+    // sign in the staff of another. The lock of its row comes before the domain row, so
+    // a parallel delete or disable of the connection waits, or this update reads its result.
+    if (row.connectionId !== null && !(await lockConnection(tx, row))) return fail("not_found");
     if (row.enforce && !(await enforceable(tx, row))) return ENFORCE_REFUSED;
     const n = await tx.update(
       "ssoDomain",
@@ -492,6 +486,29 @@ const ENFORCE_REFUSED: Result<never> = {
   status: ERRORS.invalid_body,
   message: "enforce needs a verified domain routed to an enabled connection",
 };
+
+/**
+ * Locks the connection row that `row` routes to, in the caller's
+ * transaction, and answers false when no such connection of the domain's
+ * organization exists. The update writes `organizationId` with its own
+ * value, so no field changes: the form of `lockOrganization` (ruling 34 of
+ * plan 12d). On Postgres a parallel `deleteConnection` or `updateConnection`
+ * waits at this lock, and so does this update at theirs. The order is the
+ * connection row, then the domain rows, in all three. Without the lock, an
+ * enforced domain could route to a deleted or disabled connection.
+ */
+async function lockConnection(tx: StorageAdapter, row: SsoDomainRow): Promise<boolean> {
+  if (row.connectionId === null) return false;
+  const n = await tx.update(
+    "ssoConnection",
+    [
+      { field: "id", op: "eq", value: row.connectionId },
+      { field: "organizationId", op: "eq", value: row.organizationId },
+    ],
+    { organizationId: row.organizationId },
+  );
+  return n === 1;
+}
 
 /** True when the row is verified and routed to an enabled connection of its organization. */
 async function enforceable(tx: StorageAdapter, row: SsoDomainRow): Promise<boolean> {

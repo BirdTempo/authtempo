@@ -742,7 +742,8 @@ export async function connectionOrganization(
  * domain with no way in through SSO would lock its staff out, so the owner
  * turns `enforce` off first. One transaction checks the roles. It writes
  * the row only when its `updatedAt` is the one read, else `conflict`. Then
- * it writes one `sso_connection_update` audit row with the changed keys.
+ * it checks the enforced domains, and it writes one `sso_connection_update`
+ * audit row with the changed keys.
  */
 export async function updateConnection(
   config: ResolvedConfig,
@@ -781,8 +782,8 @@ export async function updateConnection(
     changes.secretVersion = config.keyring.current;
   }
   const row: SsoConnectionRow = { ...held, ...changes };
-  const updated = await config.storage.transaction(
-    async (tx): Promise<Result<OperatorAuditRow>> => {
+  const updated = await config.storage
+    .transaction(async (tx): Promise<Result<OperatorAuditRow>> => {
       if (f.defaultRole !== undefined || f.scimRoles !== undefined) {
         const fault = await roleFault(
           config,
@@ -791,18 +792,6 @@ export async function updateConnection(
           rolesOf(row.defaultRole, row.scimRoles),
         );
         if (fault) return fault;
-      }
-      if (f.enabled === false) {
-        const enforced = await tx.findMany(
-          "ssoDomain",
-          [
-            { field: "connectionId", op: "eq", value: held.id },
-            { field: "enforce", op: "eq", value: true },
-          ],
-          { limit: 1 },
-        );
-        if (enforced.length > 0)
-          return refuse("enabled false needs enforce off on each domain routed to the connection");
       }
       const n = await tx.update(
         "ssoConnection",
@@ -813,14 +802,40 @@ export async function updateConnection(
         changes,
       );
       if (n === 0) return fail("conflict");
+      // The row write comes first: it holds the lock that `updateDomain` takes (ruling 34 of
+      // plan 12d). A parallel enforce waits for this commit, or this read sees its commit.
+      if (f.enabled === false) {
+        const enforced = await tx.findMany(
+          "ssoDomain",
+          [
+            { field: "connectionId", op: "eq", value: held.id },
+            { field: "enforce", op: "eq", value: true },
+          ],
+          { limit: 1 },
+        );
+        // The throw undoes the row write.
+        if (enforced.length > 0) throw new EnforcedDomainError();
+      }
       const draft = connectionDraft(actor, "sso_connection_update", held, f.changed, meta);
       if (!draft.ok) return draft;
       return ok(await writeAuditIn(tx, draft.value, now));
-    },
-  );
+    })
+    .catch((e: unknown): Result<never> => {
+      if (e instanceof EnforcedDomainError)
+        return refuse("enabled false needs enforce off on each domain routed to the connection");
+      throw e;
+    });
   if (!updated.ok) return updated;
   await afterAudit(config, updated.value);
   return ok(publicConnection(config, row));
+}
+
+/** Thrown inside the transaction of an update when `enabled: false` meets an enforced domain. The throw undoes the row write. */
+class EnforcedDomainError extends Error {
+  constructor() {
+    super("authtempo: an enforced domain routes to the connection");
+    this.name = "EnforcedDomainError";
+  }
 }
 
 /**
