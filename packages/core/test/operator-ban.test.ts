@@ -926,8 +926,8 @@ describe("the ban (plan 12f Task 6)", () => {
     expect(before).toContain(s.session.id);
     const endedBefore = w.ended.length;
     const updatesBefore = w.updates.length;
-    // Another request writes the user row before each compare of the act, so each
-    // compare on updatedAt matches 0 rows (the form of the profile test).
+    // Another request writes the user row before each compare of the act. So each
+    // compare on updatedAt matches 0 rows, in the form of the profile test.
     let rounds = 0;
     const storage = w.storage as StorageAdapter;
     const transaction = storage.transaction.bind(storage);

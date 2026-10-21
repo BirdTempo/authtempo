@@ -157,9 +157,9 @@ export async function endAllAccessPage(
 /**
  * Ends the impersonation sessions that the operator of `hold` opened, inside
  * `budget` calls of `meter` (rulings 31, 44, and 63 of plan 12f). Every loss
- * of the platform role calls it in its transaction: the ban, the revoke,
- * the account delete, and a removal, a leave, or a role change of the
- * platform member row. One read by the `userId` index takes the sessions,
+ * of the platform role calls it in its transaction. The losses are the ban,
+ * the revoke, and the account delete. A removal, a leave, or a role change
+ * of the platform member row is a loss too. One read by the `userId` index takes the sessions,
  * and a page ends them with their stop rows (`endSessionPage`). The page
  * keeps `keep` calls for the steps of the caller after it, and one call for
  * the pending-end row. The rows that do not fit stay with a pending-end row

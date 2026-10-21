@@ -14,7 +14,7 @@ import { createD1Adapter, createD1Limiter } from "../src/index.js";
 // sessions that the operator opened. D1 Free allows 50 queries per
 // invocation (D1 limits page updated 21 April 2026, read 2026-10-21). This
 // test counts each statement that reaches the D1 binding through
-// `auth.handle`, the D1 limiter on the same view, so the route, the act,
+// `auth.handle`, and the D1 limiter on the same view. So the route, the act,
 // and the steps after the commit all count. Each sweep is one invocation
 // too, and counts the same way.
 

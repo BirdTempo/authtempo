@@ -302,8 +302,8 @@ describe("the operator audit row (plan 12f Task 4)", () => {
     for (const raw of ["Spam \ud800", "\udfffSpam"])
       expect(operatorReason(raw)).toEqual({ ok: false, code: "invalid_body", status: 400 });
     expect(operatorReason("Spam \ud83d\udce7")).toEqual({ ok: true, value: "Spam \ud83d\udce7" });
-    // The class of the user name (final review m5 of plan 12f): a bidi control, a C1 control,
-    // a line or paragraph separator, and a zero-width space. The two joiners pass.
+    // The class of the user name (final review m5 of plan 12f). It refuses a bidi control,
+    // a C1 control, a line or paragraph separator, and a zero-width space. The two joiners pass.
     for (const raw of [
       "Spam \u202e",
       "Spam \u200f",

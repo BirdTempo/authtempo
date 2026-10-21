@@ -372,8 +372,8 @@ export async function deleteAccountRows(
     now,
     proof.stops,
   );
-  // A page of them inside the call budget of the invocation, and the rest
-  // on a pending-end row for the sweep (ruling 63 of plan 12f).
+  // A page of them ends inside the call budget of the invocation (ruling 63
+  // of plan 12f). The rest stay on a pending-end row for the sweep.
   await endImpersonationsPage(
     tx,
     config,

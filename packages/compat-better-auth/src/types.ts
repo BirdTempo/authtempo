@@ -795,7 +795,10 @@ export interface AdminActAnswer {
   familyEndFailed?: true;
 }
 
-/** The list-users answer: `total` only on a first page that ends the list, `next` on a page that does not end it (rulings 53 and 62). */
+/**
+ * The list-users answer (rulings 53 and 62). `total` comes only on a first
+ * page that ends the list. `next` comes on a page that does not end it.
+ */
 export interface AdminUserList {
   users: AdminUser[];
   total?: number;
