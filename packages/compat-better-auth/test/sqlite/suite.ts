@@ -185,6 +185,23 @@ export async function sqliteCompatSuite(kind: string, open: () => OpenSqlite): P
           { key: "compat_better_auth", value: "10" },
           { key: "schema_version", value: "13" },
         ]);
+        // The two 0010 variants make other team tables (12g fix wave, ledger
+        // line 49). "before-1.7" makes them in the 1.4.21 form, then adds
+        // memberCount with a default and a named unique index. "1.7" makes
+        // the 1.7 form, with no default and no such index.
+        const memberCount = await old.driver.db
+          .prepare(
+            `SELECT type, "notnull" AS nn, dflt_value AS d FROM pragma_table_info('team') WHERE name = 'memberCount'`,
+          )
+          .first();
+        expect(memberCount).toEqual({ type: "INTEGER", nn: 1, d: "0" });
+        expect(
+          await old.driver.db
+            .prepare(
+              "SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = 'ux_team_member__membership_key'",
+            )
+            .first("tbl_name"),
+        ).toBe("teamMember");
         await expect(s.storage.findOne("user", [eq("id", "x")])).resolves.toBeNull();
       } finally {
         old.close();
