@@ -93,6 +93,17 @@ Version 13 comes from the `0013_schema_v13` migration in both adapters, and from
 | `organizationToken` | `ta_organization_token` | table | A token that an organization owns, unique on `token_hash`. It has no `user_id`, so the account delete keeps it (plan 12k). |
 | `movedToken` | `ta_moved_token` | table | One key of another system that a move made a core token: `source`, `sourceId`, and `tokenId`, unique on (`source`, `source_id`). A later move skips a recorded key, so a revoke of its token stays a revoke. The record stays after the revoke (plan 12k). |
 
+Version 14 comes from the `0014_schema_v14` migration in both adapters, and from `0011_compat_schema_v14` in the compatibility package (plan 12d). It adds six tables and changes no table of version 13.
+
+| Field | Column | Type | What it holds |
+| --- | --- | --- | --- |
+| `ssoConnection` | `ta_sso_connection` | table | One OIDC or SAML connection of one organization, with an index on `organization_id`. The client secret is sealed with the keyring (plan 12d). |
+| `ssoDomain` | `ta_sso_domain` | table | One email domain that one organization claims by a DNS proof, unique on (`organization_id`, `domain`) and on `claimed_domain`. The unique index on `claimed_domain` gives one domain at most one claim. Many pending rows can hold a null `claimed_domain` (plan 12d). |
+| `scimToken` | `ta_scim_token` | table | A SCIM bearer token of one organization, unique on `token_hash`. It has no `user_id`, so the account delete keeps it (plan 12d). |
+| `scimUser` | `ta_scim_user` | table | The SCIM view of one user in one organization, unique on (`organization_id`, `user_id`) and on (`organization_id`, `user_name_key`). It has a `user_id`, so the account delete removes it (plan 12d). |
+| `scimGroup` | `ta_scim_group` | table | A SCIM group of one organization, unique on (`organization_id`, `display_name_key`) (plan 12d). |
+| `scimGroupMember` | `ta_scim_group_member` | table | One member of one SCIM group, unique on (`group_id`, `scim_user_id`) (plan 12d). |
+
 The counts are `integer` on Postgres, as every count of core is, except the passkey `counter` and the TOTP `lastStep`.
 
 The table prefix `ta_` and the advisory lock names keep the old product name tempo-auth for compatibility. A change needs a migration.
@@ -194,17 +205,6 @@ psql "$DATABASE_URL" -c "SELECT s.user_id FROM ta_second_factor s JOIN ta_totp t
 - The compatibility migration `0005_compat_schema_v8` has the same window and the same checks.
 
 ## The Better Auth tables
-
-Version 14 comes from the `0014_schema_v14` migration in both adapters, and from `0011_compat_schema_v14` in the compatibility package (plan 12d). It adds six tables and changes no table of version 13.
-
-| Field | Column | Type | What it holds |
-| --- | --- | --- | --- |
-| `ssoConnection` | `ta_sso_connection` | table | One OIDC or SAML connection of one organization, with an index on `organization_id`. The client secret is sealed with the keyring (plan 12d). |
-| `ssoDomain` | `ta_sso_domain` | table | One email domain that one organization claims by a DNS proof, unique on (`organization_id`, `domain`) and on `claimed_domain`. A null `claimed_domain` is no claim, so one domain has at most one claim (plan 12d). |
-| `scimToken` | `ta_scim_token` | table | A SCIM bearer token of one organization, unique on `token_hash`. It has no `user_id`, so the account delete keeps it (plan 12d). |
-| `scimUser` | `ta_scim_user` | table | The SCIM view of one user in one organization, unique on (`organization_id`, `user_id`) and on (`organization_id`, `user_name_key`). It has a `user_id`, so the account delete removes it (plan 12d). |
-| `scimGroup` | `ta_scim_group` | table | A SCIM group of one organization, unique on (`organization_id`, `display_name_key`) (plan 12d). |
-| `scimGroupMember` | `ta_scim_group_member` | table | One member of one SCIM group, unique on (`group_id`, `scim_user_id`) (plan 12d). |
 
 The compatibility package keeps the tables of Better Auth 1.7. It adds columns to them, and some tables of core beside them.
 
