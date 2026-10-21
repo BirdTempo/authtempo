@@ -1,6 +1,6 @@
 import { schemaDdl } from "@authtempo/core/ddl";
 import { MYSQL } from "@authtempo/core/sql";
-import type { RowDataPacket } from "mysql2/promise";
+import mysql, { type RowDataPacket } from "mysql2/promise";
 import { afterEach, describe, expect, it } from "vitest";
 import { statements as baseline } from "../src/migrations/0001_schema_v13.js";
 import {
@@ -131,6 +131,37 @@ for (const server of MYSQL_SERVERS) {
         /failed with 1062, and its object is not/,
       );
       expect(await version(db)).toBe("12");
+    });
+
+    it("stops with the step when the user cannot make a temporary table", async () => {
+      db = await freshDatabase(server, { migrate: false });
+      await stopAfter(db, 2);
+      // A user with the privileges of the steps, without CREATE TEMPORARY TABLES.
+      const user = `ta_nt_${crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
+      await db.pool.query(`CREATE USER '${user}'@'%' IDENTIFIED BY 'nt'`);
+      const u = new URL(server.url);
+      const pool = mysql.createPool({
+        host: u.hostname,
+        port: Number(u.port),
+        user,
+        password: "nt",
+        database: db.name,
+        connectionLimit: 1,
+      });
+      try {
+        await db.pool.query(
+          `GRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX ON \`${db.name}\`.* TO '${user}'@'%'`,
+        );
+        const stopped = await applyMysqlMigrations(pool).catch((e: unknown) => e);
+        expect(String((stopped as Error).message)).toMatch(
+          /^authtempo migrations: step 2 of 0001_schema_v13 failed with 1050, and the check of its object failed with 1044\. No later step ran\. The check needs the CREATE TEMPORARY TABLES privilege/,
+        );
+        expect((stopped as Error).cause).toMatchObject({ errno: 1044 });
+        expect(await recorded(db)).toEqual(ALL_STEPS.slice(0, 1));
+      } finally {
+        await pool.end();
+        await db.pool.query(`DROP USER IF EXISTS '${user}'@'%'`);
+      }
     });
 
     it("checks a column and an index step by its live table", async () => {

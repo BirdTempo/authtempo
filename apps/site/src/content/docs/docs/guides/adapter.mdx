@@ -41,7 +41,7 @@ import test from "../../../../../samples/guides/adapter-conformance.test.ts?raw"
 - `startsWith` matches the exact text of a non-empty prefix on a string field, with case, as `eq` does. It has no wildcard and never matches null.
 - Send the prefix as a parameter. Compare `substr(column, 1, n)`, where n is the count of code points. Do not use `LIKE`: SQLite's `LIKE` ignores the case of ASCII letters. No index serves the clause, so it reads the whole table.
 - Throw `invalid_argument` for a `startsWith` prefix that is empty or not a string, or for a field that is not a string. Throw it also for a prefix with a lone surrogate or with NUL.
-- Throw `invalid_argument` for a string with NUL in any `where` value, also in an `in` list.
+- Throw `invalid_argument` for a string with NUL or with a lone surrogate in any `where` value, on every op, also in an `in` list. The conformance suite tries both in each op.
 - `update` and `delete` take a `where` and answer the count of rows. An empty `where` on them is an error.
 - An empty `in` list matches nothing. Two null values never conflict on a unique key.
 - `sort` takes one key or a list of keys, each with its own direction.

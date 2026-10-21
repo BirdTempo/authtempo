@@ -139,7 +139,15 @@ export async function migrateSteps(conn: Connection, run: RunStep = runStep): Pr
       try {
         await run(conn, sql);
       } catch (e) {
-        if (!(await stepMade(conn, sql, e))) {
+        // The check makes a TEMPORARY copy, so a user without the CREATE
+        // TEMPORARY TABLES privilege fails it with 1044. Say which step stopped.
+        const made = await stepMade(conn, sql, e).catch((check: unknown) => {
+          throw new Error(
+            `authtempo migrations: step ${step} of ${m.name} failed with ${String(errnoOf(e))}, and the check of its object failed with ${String(errnoOf(check))}. No later step ran. The check needs the CREATE TEMPORARY TABLES privilege on the database.`,
+            { cause: check },
+          );
+        });
+        if (!made) {
           if (!EXISTS_ERRORS.has(errnoOf(e) as number)) throw e;
           throw new Error(
             `authtempo migrations: step ${step} of ${m.name} failed with ${String(errnoOf(e))}, and its object is not the one the step makes. No later step ran. Compare the table with the step text in MYSQL_MIGRATIONS, and correct it by hand.`,

@@ -73,7 +73,10 @@ version. A step and its record are two statements. After a stop between the
 two, the next run finds the object of the step. The runner then runs the step
 again on a temporary copy of its table and compares the two. When they are
 equal, it records the step and goes on. Otherwise it stops with the step and
-the error, and no later step runs. The runner takes the named lock
+the error, and no later step runs. The copy needs the `CREATE TEMPORARY
+TABLES` privilege on the database, beside the privileges of the steps.
+Without it, the check fails with MySQL error 1044, and the runner stops with
+the step and that error. The runner takes the named lock
 `authtempo_migrations` for 60 s, on one connection. A MySQL named lock
 belongs to the server, so two databases on one server share it.
 

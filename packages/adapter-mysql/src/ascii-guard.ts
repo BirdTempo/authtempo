@@ -1,5 +1,6 @@
 import { type ModelName, StorageError, type Where } from "@authtempo/core";
 import { MYSQL_STRINGS } from "@authtempo/core/ddl";
+import { whereTextFault } from "@authtempo/core/sql";
 
 /**
  * The rule of an ascii column on MySQL (plan 12g, Task 5). Read on 8.4.11
@@ -80,12 +81,11 @@ function rangeClause<M extends ModelName>(w: Where<M>, s: string, length: number
 }
 
 /**
- * True for a where value that core refuses with invalid_argument: a string
- * with a NUL or a lone surrogate (assertWhereText of core/src/storage/sql.ts).
+ * True for a where value that core refuses with invalid_argument. The rule
+ * is the one of core (`whereTextFault`), so the two cannot differ.
  */
 function coreRefuses(v: unknown): boolean {
-  const values = Array.isArray(v) ? v : [v];
-  return values.some((x) => typeof x === "string" && (x.includes("\u0000") || /\p{Cs}/u.test(x)));
+  return whereTextFault(v) !== null;
 }
 
 /**

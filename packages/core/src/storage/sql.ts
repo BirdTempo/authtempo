@@ -221,12 +221,23 @@ const NUL_ESCAPE = /(?<!\\)(?:\\\\)*\\u0000/;
  * list is checked item by item.
  */
 export function assertWhereText(model: ModelName, field: string, value: unknown): void {
+  const fault = whereTextFault(value);
+  if (fault !== null) throw invalid(model, field, `a where value holds ${fault}`);
+}
+
+/**
+ * The fault of a where value under the text rule of `assertWhereText`, or
+ * null when the value passes. An adapter that rewrites a where value calls
+ * it, so its rule and the rule of core cannot differ.
+ */
+export function whereTextFault(value: unknown): "a NUL character" | "a lone surrogate" | null {
   const values = Array.isArray(value) ? value : [value];
   for (const v of values) {
     if (typeof v !== "string") continue;
-    if (v.includes("\u0000")) throw invalid(model, field, "a where value holds a NUL character");
-    if (/\p{Cs}/u.test(v)) throw invalid(model, field, "a where value holds a lone surrogate");
+    if (v.includes("\u0000")) return "a NUL character";
+    if (/\p{Cs}/u.test(v)) return "a lone surrogate";
   }
+  return null;
 }
 
 function isPlainJson(value: unknown): boolean {
