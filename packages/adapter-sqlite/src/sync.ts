@@ -14,32 +14,34 @@ export interface SyncHandle {
 }
 
 /**
- * The count of changed rows of one statement is the growth of
- * `total_changes()`. One count works for a write, a write with RETURNING, and
- * a read on each driver. No core table has a trigger, so the count is the
- * statement's own.
+ * The count of changed rows of one statement, as D1 gives it. `changes()`
+ * counts only the rows of the statement itself, not the rows of a trigger or
+ * of an ON DELETE CASCADE. But `changes()` keeps the count of the last write
+ * after a read. So the step reads it only when `total_changes()` grew, and
+ * answers 0 for a read or a write that changed no row.
  */
 function step(h: SyncHandle, sql: string, values: readonly unknown[]): D1SubsetResult {
-  const before = changesSoFar(h);
+  const before = Number(h.all("SELECT total_changes() AS t", [])[0]?.t ?? 0);
   // A driver row can have a null prototype (node:sqlite). The seam answers plain objects.
   const results = h.all(sql, values).map((r) => ({ ...r }));
-  return { results, meta: { changes: changesSoFar(h) - before } };
-}
-
-function changesSoFar(h: SyncHandle): number {
-  return Number(h.all("SELECT total_changes() AS n", [])[0]?.n ?? 0);
+  const after = h.all("SELECT total_changes() AS t, changes() AS c", [])[0];
+  const changes = Number(after?.t ?? 0) > before ? Number(after?.c ?? 0) : 0;
+  return { results, meta: { changes } };
 }
 
 /**
  * Runs `fn` in one BEGIN IMMEDIATE transaction, in one synchronous block, so
  * no other call of this process runs inside it. A throw rolls back and passes
- * through.
+ * through. COMMIT is inside the try: a COMMIT can fail with SQLITE_BUSY while
+ * another connection holds a read lock. SQLite then keeps the transaction
+ * open, and without the ROLLBACK each later write of the handle stays in it.
  */
 function inTransaction<T>(h: SyncHandle, fn: () => T): T {
   h.exec("BEGIN IMMEDIATE");
-  let result: T;
   try {
-    result = fn();
+    const result = fn();
+    h.exec("COMMIT");
+    return result;
   } catch (e) {
     try {
       h.exec("ROLLBACK");
@@ -48,8 +50,6 @@ function inTransaction<T>(h: SyncHandle, fn: () => T): T {
     }
     throw e;
   }
-  h.exec("COMMIT");
-  return result;
 }
 
 class SyncStatement implements D1SubsetStatement {

@@ -14,8 +14,8 @@ function isBusy(e: unknown): boolean {
 
 /**
  * Runs `fn` again while it throws SQLITE_BUSY, for at most `capMs`. At the cap
- * the last driver error passes through unchanged, as a busy write does on D1:
- * the error map turns only a unique failure into a StorageError.
+ * the last driver error passes through unchanged, as a busy write does on D1.
+ * The error map turns only a unique failure into a StorageError.
  */
 export async function retryBusy<T>(
   fn: () => Promise<T>,
