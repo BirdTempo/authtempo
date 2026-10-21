@@ -39,7 +39,8 @@ import { ROUNDS } from "./rounds.js";
  * of `ownerWrite` or of `revokeTokens`. So a removal and a team member add or
  * an accept of that person run one at a time.
  * The role create takes the organization lock before its count, and no
- * user hold.
+ * user hold. The team member removal takes the team lock, as
+ * `setActiveTeam` does, and no user hold.
  *
  * No row returns: a sign-up writes its user later, and a deleted user is
  * found by `userStays`, the read after the insert. A stop here would answer

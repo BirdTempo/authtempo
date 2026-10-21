@@ -508,7 +508,9 @@ export async function addTeamMember(
  * Removes a person from a team. The removal of another person needs
  * `member:delete` and passes the touch rule on that person (spec 29 item 5).
  * A member leaves a team with membership only. The person's sessions that
- * act in the team lose their active team.
+ * act in the team lose their active team. The transaction takes the lock
+ * of the team row first, as `setActiveTeam` does. So a set in flight
+ * commits first, and this removal then clears its active team.
  */
 export async function removeTeamMember(
   config: ResolvedConfig,
@@ -559,6 +561,9 @@ export async function removeTeamMember(
   };
   const removed = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<true>> => {
+      // The lock of setActiveTeam: a set that holds it commits first, and the session update
+      // below sees its active team (ruling 43). Zero rows: a delete ran after the read.
+      if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
       await runBefore("organization.beforeRemoveTeamMember", hooks.beforeRemoveTeamMember, event);
       if ((await tx.delete("teamMember", [{ field: "id", op: "eq", value: row.id }])) === 0)
         return fail("not_found");

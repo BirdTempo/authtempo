@@ -347,4 +347,38 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     expect(await second).toMatchObject({ ok: false, code: "role_limit" });
     expect((await rows("organizationRole")).map((r) => r.name)).toEqual(["core"]);
   });
+  it("holds a team leave during setActiveTeam, so the leave clears the active team (m4)", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let removal: Promise<unknown> | null = null;
+    const plain = instance(createPostgresAdapter(db.sql), { teams: {} }, sent);
+    const two = instance(watch("team", g.reach), { teams: {} }, sent);
+    const one = instance(
+      afterRead("teamMember", "findOne", async () => {
+        removal = two.api.removeTeamMember({ user: a, teamId, userId: a.id });
+        await Promise.race([g.at, removal]);
+      }),
+      { teams: {} },
+      sent,
+    );
+    const a = await user("a");
+    const organizationId = await organization(plain, a);
+    const teamId = must(await plain.api.createTeam({ user: a, organizationId, name: "Core" })).id;
+    must(await plain.api.addTeamMember({ user: a, teamId, userId: a.id }));
+    const token = await sessionOf(plain, sent, "a@example.com");
+    const first = await plain.api.getSession(token);
+    if (!first) throw new Error("no session");
+    must(await plain.api.setActiveOrganization({ session: first, organizationId }));
+    const session = await plain.api.getSession(token);
+    if (!session) throw new Error("no session");
+
+    const set = await one.api.setActiveTeam({ session, teamId });
+
+    expect(set).toMatchObject({ ok: true });
+    expect(await removal).toEqual({ ok: true, value: { ok: true } });
+    expect(await rows("teamMember")).toEqual([]);
+    expect((await rows("session")).map((x) => [x.activeOrganizationId, x.activeTeamId])).toEqual([
+      [organizationId, null],
+    ]);
+  });
 });
