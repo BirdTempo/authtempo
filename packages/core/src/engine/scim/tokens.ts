@@ -40,8 +40,8 @@ export const SCIM_TOKENS_LIVE_MAX = 2;
 /**
  * The most rows of one list: 100. An organization holds at most 2 live
  * tokens, and the sweep deletes each expired row. A token lives one day at
- * least, so 100 rows need about 49 days with no sweep. Past the bound the
- * list holds the newest rows, so the live tokens of a rollover stay in it.
+ * least, so 100 rows need about 49 days with no sweep. The list reads the
+ * live tokens first, so each live token stays in it past the bound.
  */
 export const SCIM_TOKENS_LIST_MAX = 100;
 /**
@@ -197,8 +197,10 @@ export async function createScimToken(
 }
 
 /**
- * The newest `SCIM_TOKENS_LIST_MAX` tokens of an organization, oldest first.
- * An organization that does not exist answers `not_found`.
+ * The tokens of an organization, at most `SCIM_TOKENS_LIST_MAX`, oldest
+ * first. The live tokens come first, then the newest expired rows fill the
+ * rest. A token with no expiry thus stays in the list after many expired
+ * rows. An organization that does not exist answers `not_found`.
  */
 export async function listScimTokens(
   config: ResolvedConfig,
@@ -211,12 +213,30 @@ export async function listScimTokens(
     { field: "id", op: "eq", value: input.organizationId },
   ]);
   if (!organization) return fail("not_found");
-  const rows = await config.storage.findMany(
+  const now = config.clock.now();
+  // The port has no OR: the same two live reads as createScimToken.
+  const at = { field: "organizationId", op: "eq", value: organization.id } as const;
+  const live = [
+    ...(await config.storage.findMany(
+      "scimToken",
+      [at, { field: "expiresAt", op: "eq", value: null }],
+      { limit: SCIM_TOKENS_LIVE_MAX },
+    )),
+    ...(await config.storage.findMany(
+      "scimToken",
+      [at, { field: "expiresAt", op: "gt", value: now }],
+      {
+        limit: SCIM_TOKENS_LIVE_MAX,
+      },
+    )),
+  ].slice(0, SCIM_TOKENS_LIVE_MAX);
+  const expired = await config.storage.findMany(
     "scimToken",
-    [{ field: "organizationId", op: "eq", value: organization.id }],
-    { sort: { field: "id", dir: "desc" }, limit: SCIM_TOKENS_LIST_MAX },
+    [at, { field: "expiresAt", op: "lte", value: now }],
+    { sort: { field: "id", dir: "desc" }, limit: SCIM_TOKENS_LIST_MAX - live.length },
   );
-  return ok(rows.reverse().map(publicScimToken));
+  const rows = [...live, ...expired].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return ok(rows.map(publicScimToken));
 }
 
 /** The organization of a token, or null when no row has the id. A route reads it for the manager guard. */

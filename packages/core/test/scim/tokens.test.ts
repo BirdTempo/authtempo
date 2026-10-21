@@ -340,6 +340,32 @@ describe("the SCIM tokens (plan 12d Task 9)", () => {
     expect((await sweepExpired(w.config)).scimTokens).toBe(0);
   });
 
+  it("keeps a live token with no expiry in the list after 100 newer one-day tokens", async () => {
+    const w = await scimAuth();
+    const held = await createScimToken(w.config, SCIM_APP, { organizationId: w.org, name: "held" });
+    if (!held.ok) throw new Error(held.code);
+    // One second later, so the held token has the oldest id.
+    w.clock.advance(1_000);
+    // Each one-day token expires before the next create, so the held token and one more stay live.
+    const ids: string[] = [];
+    for (let n = 0; n < 100; n++) {
+      if (n > 0) w.clock.advance(DAY_MS);
+      const made = await createScimToken(w.config, SCIM_APP, {
+        organizationId: w.org,
+        name: `day-${n}`,
+        expiresInDays: 1,
+      });
+      if (!made.ok) throw new Error(made.code);
+      ids.push(made.value.id);
+    }
+    expect(await w.storage.findMany("scimToken", [])).toHaveLength(101);
+    const listed = await listScimTokens(w.config, SCIM_APP, { organizationId: w.org });
+    if (!listed.ok) throw new Error(listed.code);
+    // The held token, then the newest 99 one-day tokens: 100 rows, oldest first.
+    expect(listed.value).toHaveLength(100);
+    expect(listed.value.map((t) => t.id)).toEqual([held.value.id, ...ids.slice(1)]);
+  });
+
   it("refuses a SCIM token at the caller reads of the app (auth.caller, auth.authenticate, auth.session)", async () => {
     const w = await scimAuth();
     const { token } = await scimToken(w);
