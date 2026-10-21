@@ -14,6 +14,8 @@ describe("the redaction source (plan 12h Task 1, spec 31 item 9)", () => {
       { text: "u:pw12 and pw12", secrets: new Set(["pw12", "u:pw12"]), out: "*** and ***" },
       // One secret twice in a line, with no overlap: each one goes.
       { text: "s3cret s3cret", secrets: new Set(["s3cret"]), out: "*** ***" },
+      // An empty secret, such as an unset config value, changes nothing.
+      { text: "abc s3cret", secrets: new Set(["", "s3cret"]), out: "abc ***" },
     ];
     for (const { text, secrets, out } of rows) expect(scrub(text, secrets), text).toBe(out);
   });

@@ -23,10 +23,14 @@ export function secretParts(value: string): string[] {
   return [...new Set(parts)].filter((p) => p.length >= 4);
 }
 
-/** Replaces each secret in a line with ***, the longest first. */
+/**
+ * Replaces each secret in a line with ***, the longest first. An empty secret
+ * is skipped: a split on it writes *** between each character.
+ */
 export function scrub(text: string, secrets: ReadonlySet<string>): string {
   let out = text;
-  for (const s of [...secrets].sort((a, b) => b.length - a.length)) out = out.split(s).join("***");
+  for (const s of [...secrets].sort((a, b) => b.length - a.length))
+    if (s !== "") out = out.split(s).join("***");
   return out;
 }
 
