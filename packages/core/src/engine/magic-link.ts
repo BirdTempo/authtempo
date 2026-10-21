@@ -9,7 +9,7 @@ import type { UserRow } from "../schema.js";
 import { createSteps, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
-import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
+import { challengeOpened, endedList, sessionOpened, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { consumeVerification } from "./verification.js";
 
@@ -139,8 +139,11 @@ export async function verifyMagicLink(
   // After the commit, before the session hook and before a challenge answer (plan 12a).
   await verified.after(user);
   await made.after(user);
-  await sessionsEnded(config, ended, "claim", verified.stops);
-  if (after.kind === "challenge") return ok({ ...after.pending, next, user });
+  await sessionsEnded(config, ended, "claim", verified.stops, verified.endedCount());
+  if (after.kind === "challenge") {
+    challengeOpened(config, user, "magic_link");
+    return ok({ ...after.pending, next, user });
+  }
   await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, after.session, user, "magic_link");
   return ok({ token: after.token, next, user });

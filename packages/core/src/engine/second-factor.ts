@@ -203,6 +203,8 @@ export interface AddedMethod {
   /** False when the method was on already and nothing was written (plan 12a: no notice then). */
   changed: boolean;
   row: SecondFactorRow;
+  /** The count of the other sessions that the first method ended (plan 12h Task 5). */
+  ended: number;
 }
 
 /**
@@ -248,7 +250,7 @@ export async function addMethod(
       updatedAt: now,
       secretVersion: input.first.secretVersion,
     });
-    await endSessions(
+    const n = await endSessions(
       tx,
       [
         { field: "userId", op: "eq", value: input.userId },
@@ -260,13 +262,13 @@ export async function addMethod(
     );
     await tx.delete("trustedDevice", [{ field: "userId", op: "eq", value: input.userId }]);
     await deleteTwoFactorChallenges(tx, input.userId);
-    return { first: true, changed: true, row };
+    return { first: true, changed: true, row, ended: n };
   }
   for (let round = 0; round < ROUNDS; round++) {
     // A parallel disable of the last method deleted the row: the person retries.
     if (!current) throw new FactorRaceError();
     if (current.methods.includes(input.method))
-      return { first: false, changed: false, row: current };
+      return { first: false, changed: false, row: current, ended: 0 };
     const methods = [...current.methods, input.method];
     const updatedAt = later(now, current.updatedAt);
     const n = await tx.update(
@@ -277,7 +279,8 @@ export async function addMethod(
       ],
       { methods, updatedAt },
     );
-    if (n === 1) return { first: false, changed: true, row: { ...current, methods, updatedAt } };
+    if (n === 1)
+      return { first: false, changed: true, row: { ...current, methods, updatedAt }, ended: 0 };
     current = await factorRow(tx, input.userId);
   }
   throw new FactorRaceError();

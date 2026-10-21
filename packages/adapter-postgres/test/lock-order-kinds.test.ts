@@ -901,7 +901,8 @@ const SITES: Record<string, readonly string[] | string> = {
   "totp enableTotp": ["a second factor enable"],
   "totp disableTotpWithCode": "no kind: the factor rows only",
   "totp twoFactorGate": "no kind: the password row and the challenge row",
-  "totp verifyTwoFactor": "a sign-in after the second factor challenge",
+  // The body of verifyTwoFactor, which emits the challenge event around it (plan 12h Task 5).
+  "totp answerChallenge": "a sign-in after the second factor challenge",
   "users createOrFindInTransaction": ["a sign-in", "an email claim by a magic link"],
   "operator/access-end endPendingRows": "one kind: the session rows of a pending end",
   [DOOR]: "the door of the operator acts: each call of operatorAct is a site of its own",

@@ -162,9 +162,16 @@ export async function enableMethod(
     throw err;
   }
   if (added.first) {
-    await sessionsEnded(config, ended, "two_factor", stops);
+    await sessionsEnded(config, ended, "two_factor", stops, added.ended);
     await deliverLogouts(config, session.user.id);
   }
+  if (added.changed)
+    config.observe.emit({
+      name: "second_factor.enable",
+      method,
+      outcome: "success",
+      userId: session.user.id,
+    });
   // After the commit (plan 12a). The one enable of the passkey and the email
   // method, so each enable sends one notice. A method that was on already
   // changed nothing, so it sends none.
@@ -226,6 +233,12 @@ export async function disableMethod(
     if (err instanceof FactorRaceError) return fail("conflict");
     throw err;
   }
+  config.observe.emit({
+    name: "second_factor.disable",
+    method: input.method,
+    outcome: "success",
+    userId: input.user.id,
+  });
   // After the commit (plan 12a).
   await sendNotice(config, {
     event: "factor_disabled",

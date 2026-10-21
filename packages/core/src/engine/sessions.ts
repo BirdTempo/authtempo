@@ -361,13 +361,28 @@ export async function openSession(
   return writeSession(config, await prepareSession(config, input, storage), storage);
 }
 
-/** `session.afterCreate` for a sign-in that committed (plan 9d). */
+/**
+ * `session.afterCreate` for a sign-in that committed (plan 9d), and the
+ * event `sign_in` with the outcome success (plan 12h Task 5). A social
+ * sign-in names its provider.
+ */
 export async function sessionOpened(
   config: ResolvedConfig,
   session: SessionRow,
   user: UserRow,
   via: SessionVia,
+  provider?: string,
 ): Promise<void> {
+  config.observe.emit({
+    name: "sign_in",
+    method: via,
+    ...(provider === undefined ? {} : { provider }),
+    outcome: "success",
+    userId: user.id,
+    sessionId: session.id,
+    // For the opt-in hash only: the observer never writes a raw address (spec 31 item 8).
+    email: user.email,
+  });
   await runAfter(
     config.observe,
     "session.afterCreate",
@@ -375,6 +390,25 @@ export async function sessionOpened(
     { session, user, via },
     session.id,
   );
+}
+
+/**
+ * The event `sign_in` of a sign-in that committed a second-factor challenge
+ * in place of a session (plan 12h Task 5). `via` is the first factor. No
+ * session exists yet, so the event has no `sessionId`.
+ */
+export function challengeOpened(
+  config: ResolvedConfig,
+  user: Pick<UserRow, "id" | "email">,
+  via: SessionVia,
+): void {
+  config.observe.emit({
+    name: "sign_in",
+    method: via,
+    outcome: "second_factor_required",
+    userId: user.id,
+    email: user.email,
+  });
 }
 
 /**
@@ -470,13 +504,21 @@ export function endedList(config: ResolvedConfig): SessionRow[] | undefined {
  * them (plan 9d). No list: no hook listens. Then `operator.afterAction`
  * once per stop row of the flow (ruling 43 of plan 12f), as for the row of
  * an operator act.
+ *
+ * First the one event `session.end` of the act, with `count`: the rows
+ * that the deletes answered (plan 12h Task 5). With no `count`, the count
+ * is the length of the list. With neither, the count is not known, and no
+ * event goes. A count of 0 ended nothing, so no event goes then either.
  */
 export async function sessionsEnded(
   config: ResolvedConfig,
   sessions: readonly SessionRow[] | undefined,
   reason: SessionEndReason,
   stops: ImpersonationStops | null,
+  count?: number,
 ): Promise<void> {
+  const n = count ?? sessions?.length ?? 0;
+  if (n > 0) config.observe.emit({ name: "session.end", reason, count: n });
   for (const session of sessions ?? [])
     await runAfter(
       config.observe,
@@ -564,7 +606,7 @@ export async function resolveSession(
     // An expiry writes no stop row (spec 26 item 9).
     const n = await endSessionById(config.storage, session, now, null);
     // One row: this call ended it. Zero: another call or the sweep did, and the sweep fires no hook.
-    if (n === 1) await sessionsEnded(config, [session], "expired", null);
+    if (n === 1) await sessionsEnded(config, [session], "expired", null, n);
     return null;
   }
   const user = await config.storage.findOne("user", [
@@ -576,7 +618,7 @@ export async function resolveSession(
     // As for an expired row: the links go to the outbox, and the sweep delivers them.
     const stops = impersonationStops(config, "ban");
     const n = await endSessionById(config.storage, session, now, stops);
-    if (n === 1) await sessionsEnded(config, [session], "banned", stops);
+    if (n === 1) await sessionsEnded(config, [session], "banned", stops, n);
     return null;
   }
   // The door of the operator of an impersonation session (the plan 12f Task 11 fix).
@@ -585,7 +627,7 @@ export async function resolveSession(
     if (!write) return null;
     const stops = impersonationStops(config, lost);
     const n = await endSessionById(config.storage, session, now, stops);
-    if (n === 1) await sessionsEnded(config, [session], "impersonation_end", stops);
+    if (n === 1) await sessionsEnded(config, [session], "impersonation_end", stops, n);
     return null;
   }
   const sinceSeen = now.getTime() - session.lastSeenAt.getTime();
@@ -628,7 +670,13 @@ export async function destroySession(
   const stops = impersonationStops(config, "sign_out");
   const n = await endSessionById(config.storage, session, config.clock.now(), stops);
   if (n !== 1) return null;
-  await sessionsEnded(config, [session], "sign_out", stops);
+  config.observe.emit({
+    name: "sign_out",
+    outcome: "success",
+    userId: session.userId,
+    sessionId: session.id,
+  });
+  await sessionsEnded(config, [session], "sign_out", stops, n);
   return session;
 }
 

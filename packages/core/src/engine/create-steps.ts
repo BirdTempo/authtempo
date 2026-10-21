@@ -105,7 +105,15 @@ export function createSteps(
       linked = { userId: user.id, identity };
     },
     async after(user) {
-      if (minted === user.id)
+      if (minted === user.id) {
+        // The event of the act, beside its after hook (plan 12h Task 5).
+        config.observe.emit({
+          name: "sign_up",
+          method: via,
+          outcome: "success",
+          userId: user.id,
+          email: user.email,
+        });
         await runAfter(
           config.observe,
           "user.afterCreate",
@@ -113,6 +121,7 @@ export function createSteps(
           { user, via },
           user.id,
         );
+      }
       if (linked && linked.userId === user.id)
         await runAfter(
           config.observe,
@@ -142,8 +151,12 @@ export interface VerifySteps {
    * in this attempt, so a test of each path finds a flow that skipped it.
    */
   claimed(userId: string): void;
-  /** Fires `afterVerify` once, when this attempt claimed `user`. */
+  /** Fires `afterVerify` and the event `email.verify` once, when this attempt claimed `user`. */
   after(user: UserRow): Promise<void>;
+  /** Called by `claimEmail` with the count of the sessions that the claim deleted. */
+  sessionsEnded(n: number): void;
+  /** The count of the sessions that this attempt's claim deleted (plan 12h Task 5). */
+  endedCount(): number;
   /**
    * The stop rows of the impersonation sessions that the claim ends (ruling
    * 43 of plan 12f), or null while the tool is off. `begin` empties it, so
@@ -159,12 +172,14 @@ export function verifySteps(
   const hooks = config.hooks;
   let checked: string | null = null;
   let claimed: string | null = null;
+  let ended = 0;
   const stops = impersonationStops(config, "claim");
   return {
     stops,
     begin() {
       checked = null;
       claimed = null;
+      ended = 0;
       if (stops) stops.rows.length = 0;
     },
     async before(user) {
@@ -177,14 +192,25 @@ export function verifySteps(
       claimed = userId;
     },
     async after(user) {
-      if (claimed === user.id)
-        await runAfter(
-          config.observe,
-          "user.afterVerify",
-          hooks.user.afterVerify,
-          { user, via },
-          user.id,
-        );
+      if (claimed !== user.id) return;
+      config.observe.emit({
+        name: "email.verify",
+        method: via,
+        outcome: "success",
+        userId: user.id,
+        email: user.email,
+      });
+      await runAfter(
+        config.observe,
+        "user.afterVerify",
+        hooks.user.afterVerify,
+        { user, via },
+        user.id,
+      );
     },
+    sessionsEnded(n) {
+      ended = n;
+    },
+    endedCount: () => ended,
   };
 }

@@ -206,7 +206,8 @@ const SITES: Site[] = [
   },
   {
     file: "engine/totp.ts",
-    fn: "verifyTwoFactor",
+    // The body of verifyTwoFactor, which emits the challenge event around it (plan 12h Task 5).
+    fn: "answerChallenge",
     call: 'delete("session"',
     count: 1,
     kind: "undo",

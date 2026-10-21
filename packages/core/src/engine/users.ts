@@ -187,12 +187,15 @@ export async function claimEmail(
   // With an `afterEnd` hook, each row by id; with none, one statement (plan 9h).
   // The last delete is by user id, so a session that another request adds
   // after the read goes too.
-  await endSessions(
-    tx,
-    [{ field: "userId", op: "eq", value: userId }],
-    ended ?? null,
-    now,
-    verified.stops,
+  // The count goes to the event `session.end` of the claim (plan 12h Task 5).
+  verified.sessionsEnded(
+    await endSessions(
+      tx,
+      [{ field: "userId", op: "eq", value: userId }],
+      ended ?? null,
+      now,
+      verified.stops,
+    ),
   );
   // A claimant's passkeys would keep the account open after the claim.
   // Registration already needs a verified email; this closes any other path.

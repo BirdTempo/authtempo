@@ -412,8 +412,11 @@ describe("session create hooks (plan 9d)", () => {
     expect(read("totp.ts")).toContain("openSession(config, { user, ip, userAgent, via }, tx)");
     expect(read("totp.ts").match(/sessionOpened\([^;]*?\bvia,?\s*\)/g)).toHaveLength(1);
     // The after hook too: each flow passes its via to sessionOpened after its commit.
+    // A social sign-in also passes its provider (plan 12h Task 5).
     const opened = (file: string, via: string) =>
-      read(file).match(new RegExp(`sessionOpened\\([^;]*?"${via}",?\\s*\\)`, "g"))?.length ?? 0;
+      read(file).match(
+        new RegExp(`sessionOpened\\([^;]*?"${via}"(?:, provider\\.name)?,?\\s*\\)`, "g"),
+      )?.length ?? 0;
     expect({
       magicLink: opened("magic-link.ts", "magic_link"),
       social: opened("social.ts", "social"),

@@ -30,6 +30,7 @@ import { hookGuard, type IdentitySummary, runAfter, runBefore, stopWith } from "
 import { sendNotice } from "./notices.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
 import {
+  challengeOpened,
   endedList,
   type ResolvedSession,
   sessionIsLive,
@@ -350,10 +351,13 @@ export async function completeSocial(
   // After the commit, before the session hook and before a challenge answer (plan 12a).
   await verified.after(user);
   await made.after(user);
-  await sessionsEnded(config, ended, "claim", verified.stops);
-  if (after.kind === "challenge") return ok({ ...after.pending, next, user });
+  await sessionsEnded(config, ended, "claim", verified.stops, verified.endedCount());
+  if (after.kind === "challenge") {
+    challengeOpened(config, user, "social");
+    return ok({ ...after.pending, next, user });
+  }
   await touchTrust(config, steps.trustId(), now);
-  await sessionOpened(config, after.session, user, "social");
+  await sessionOpened(config, after.session, user, "social", provider.name);
   return ok({ token: after.token, next, user });
 }
 

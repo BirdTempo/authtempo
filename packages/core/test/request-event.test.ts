@@ -349,7 +349,8 @@ describe("the request event (plan 12h Task 4)", () => {
     const res = await s.auth.handle(post("/auth/password/sign-in", body));
     expect(res.status).toBe(200);
     const events = (await s.events()).slice(before);
-    expect(events.map((e) => e.name).sort()).toEqual(["hook.after_failed", "request"]);
+    // The sign_in event of the commit (Task 5) has the same scope.
+    expect(events.map((e) => e.name).sort()).toEqual(["hook.after_failed", "request", "sign_in"]);
     for (const e of events) {
       expect(e.traceId, e.name).toBe(res.headers.get("x-authtempo-trace"));
       expect(e.route, e.name).toBe("POST /password/sign-in");

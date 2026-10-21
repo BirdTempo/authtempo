@@ -80,6 +80,26 @@ export type SessionEndReason =
   // platform role from its operator. Or a session read finds its operator
   // banned, deleted, or without the platform role.
   | "impersonation_end";
+/**
+ * Each value of `SessionEndReason`, for the `reason` field of the event
+ * `session.end` (plan 12h Task 5). A Record, so a new reason fails the
+ * compile until it has a row here.
+ */
+export const SESSION_END_REASONS = {
+  sign_out: true,
+  password_reset: true,
+  password_change: true,
+  claim: true,
+  expired: true,
+  two_factor: true,
+  revoked: true,
+  email_change: true,
+  account_deleted: true,
+  oidc_logout: true,
+  banned: true,
+  operator: true,
+  impersonation_end: true,
+} as const satisfies Record<SessionEndReason, true>;
 
 /** The member a before hook sees: no row exists yet. */
 export interface ProposedMember {
@@ -322,6 +342,17 @@ export interface SessionHooks {
  * exists, so it creates no user.
  */
 export type UserCreateVia = Exclude<SessionVia, "impersonation"> | "password_reset" | "operator";
+/** Each value of `UserCreateVia`, for the event `sign_up` (plan 12h Task 5). */
+export const USER_CREATE_VIA = {
+  password: true,
+  magic_link: true,
+  social: true,
+  passkey: true,
+  handoff: true,
+  email_otp: true,
+  password_reset: true,
+  operator: true,
+} as const satisfies Record<UserCreateVia, true>;
 /** The profile update, the change of address (plan 12a), or an operator's ban and unban (plan 12f). */
 export type UserUpdateVia = "profile" | "email_change" | "ban" | "unban";
 /**
@@ -335,6 +366,14 @@ export type UserVerifyVia =
   | "email_otp"
   | "social"
   | "password_reset";
+/** Each value of `UserVerifyVia`, for the event `email.verify` (plan 12h Task 5). */
+export const USER_VERIFY_VIA = {
+  password_verify: true,
+  magic_link: true,
+  email_otp: true,
+  social: true,
+  password_reset: true,
+} as const satisfies Record<UserVerifyVia, true>;
 /**
  * How an identity came (plan 12a). `sign_in` is a social sign-in that
  * creates a user or links a verified equal address. `link` is the link of

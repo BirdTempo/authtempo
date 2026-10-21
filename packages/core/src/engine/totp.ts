@@ -403,6 +403,12 @@ class StaleSetupCodesError extends Error {
   }
 }
 
+/** What the enable commits: the first method, and the count of the sessions that it ended. */
+interface Enabled {
+  first: boolean;
+  ended: number;
+}
+
 /**
  * Confirms the setup with a code of the window (plan 9f) and turns the TOTP
  * method on (plan 12c). As the first method, the factor row takes the totp
@@ -433,9 +439,9 @@ export async function enableTotp(
   if (step === null) return fail("invalid_code");
   const ended = endedList(config);
   const stops = impersonationStops(config, "user_end");
-  let done: Result<{ first: boolean }>;
+  let done: Result<Enabled>;
   try {
-    done = await config.storage.transaction(async (tx): Promise<Result<{ first: boolean }>> => {
+    done = await config.storage.transaction(async (tx): Promise<Result<Enabled>> => {
       // The hold of the user row first (user-hold.ts): the account delete
       // ends the sessions before it deletes the totp row (plan 12f Task 9).
       await holdUser(config.observe, tx, user.id);
@@ -470,7 +476,7 @@ export async function enableTotp(
         stops,
       );
       if (!added.first && row.backupCodes.length > 0) throw new StaleSetupCodesError();
-      return ok({ first: added.first });
+      return ok({ first: added.first, ended: added.ended });
     });
   } catch (err) {
     // The setup ran while another method was on, so it made no backup codes,
@@ -495,9 +501,15 @@ export async function enableTotp(
   }
   if (!done.ok) return done;
   if (done.value.first) {
-    await sessionsEnded(config, ended, "two_factor", stops);
+    await sessionsEnded(config, ended, "two_factor", stops, done.value.ended);
     await deliverLogouts(config, input.session.user.id);
   }
+  config.observe.emit({
+    name: "second_factor.enable",
+    method: "totp",
+    outcome: "success",
+    userId: user.id,
+  });
   // After the commit (plan 12a), for the first method and for a later one.
   await sendNotice(config, {
     event: "factor_enabled",
@@ -519,10 +531,22 @@ export async function disableTotp(
   input: { userId: string },
 ): Promise<Result<{ ok: true }>> {
   if (!config.totp) return fail("not_found");
+  // An act with no route: the engine emits its refusal too (plan 12h Task 5).
+  const refused = (): Result<{ ok: true }> => {
+    config.observe.emit({
+      name: "second_factor.disable",
+      outcome: "failure",
+      code: "totp_not_enabled",
+      userId: input.userId,
+    });
+    return fail("totp_not_enabled");
+  };
   // Read first: with the factor off the answer is `totp_not_enabled` and
   // nothing is written, so a setup in progress stays.
-  if (!(await factorRow(config.storage, input.userId))) return fail("totp_not_enabled");
-  if ((await disableSecondFactor(config, input.userId)) === 0) return fail("totp_not_enabled");
+  if (!(await factorRow(config.storage, input.userId))) return refused();
+  if ((await disableSecondFactor(config, input.userId)) === 0) return refused();
+  // Every method goes, so the event names no method.
+  config.observe.emit({ name: "second_factor.disable", outcome: "success", userId: input.userId });
   // After the commit (plan 12a). The input has the user id only, so the
   // address comes from the row as it is now.
   const user = await config.storage.findOne("user", [
@@ -565,6 +589,12 @@ export async function disableTotpWithCode(
     if (err instanceof FactorRaceError) return fail("conflict");
     throw err;
   }
+  config.observe.emit({
+    name: "second_factor.disable",
+    method: "totp",
+    outcome: "success",
+    userId: input.user.id,
+  });
   // After the commit (plan 12a).
   await sendNotice(config, {
     event: "factor_disabled",
@@ -575,7 +605,10 @@ export async function disableTotpWithCode(
   return ok({ ok: true });
 }
 
-/** The in-process regeneration, with no code (plan 9f). */
+/**
+ * The in-process regeneration, with no code (plan 9f). An act with no
+ * route: the engine emits its refusal too (plan 12h Task 5).
+ */
 export async function regenerateBackupCodes(
   config: ResolvedConfig,
   input: { userId: string },
@@ -583,8 +616,23 @@ export async function regenerateBackupCodes(
   const totp = config.totp;
   if (!totp) return fail("not_found");
   const factor = await factorRow(config.storage, input.userId);
-  if (!factor) return fail("totp_not_enabled");
-  return replaceBackupCodes(config, totp, factor, config.clock.now());
+  const replaced = factor
+    ? await replaceBackupCodes(config, totp, factor, config.clock.now())
+    : fail("totp_not_enabled");
+  if (!replaced.ok)
+    config.observe.emit({
+      name: "backup_codes.regenerate",
+      outcome: "failure",
+      code: replaced.code,
+      userId: input.userId,
+    });
+  else regenerated(config, input.userId);
+  return replaced;
+}
+
+/** The event of a regeneration that committed. */
+function regenerated(config: ResolvedConfig, userId: string): void {
+  config.observe.emit({ name: "backup_codes.regenerate", outcome: "success", userId });
 }
 
 /** The route's regeneration: a current code or a backup code. */
@@ -602,7 +650,9 @@ export async function regenerateBackupCodesWithCode(
   // Read again: a backup code that proved the call was spent from this row.
   const current = await factorRow(config.storage, input.user.id);
   if (!current) return fail("totp_not_enabled");
-  return replaceBackupCodes(config, totp, current, now);
+  const replaced = await replaceBackupCodes(config, totp, current, now);
+  if (replaced.ok) regenerated(config, input.user.id);
+  return replaced;
 }
 
 /** The factor's state. It never answers the secret, the URI, or a code. */
@@ -792,6 +842,37 @@ export async function twoFactorGate(
  * rows here means that delete ran, and the verify deletes its own session.
  */
 export async function verifyTwoFactor(
+  config: ResolvedConfig,
+  input: TwoFactorVerify,
+): Promise<Result<TwoFactorSession>> {
+  const answer = await answerChallenge(config, input);
+  // The engine reports each answer of a challenge: the challenge routes are
+  // no rows of SIGN_IN_ROUTES (ruling 1 point 15 of plan 12h). No factor
+  // config: no challenge exists, so no event goes.
+  if (config.totp) {
+    const proof = proofOf(input);
+    config.observe.emit({
+      name: "second_factor.challenge",
+      ...(proof ? { method: CHALLENGE_EVENT_METHOD[proof.method] } : {}),
+      ...(answer.ok
+        ? { outcome: "success", userId: answer.value.user.id }
+        : { outcome: "failure", code: answer.code }),
+    });
+  }
+  return answer;
+}
+
+/** The name of each proof in the event `second_factor.challenge`. */
+const CHALLENGE_EVENT_METHOD: Readonly<Record<Proof["method"], string>> = {
+  totp: "totp",
+  backup: "backup_code",
+  email: "email",
+  passkey: "passkey",
+  trusted: "trusted_device",
+};
+
+/** The body of `verifyTwoFactor`, with no event. */
+async function answerChallenge(
   config: ResolvedConfig,
   input: TwoFactorVerify,
 ): Promise<Result<TwoFactorSession>> {

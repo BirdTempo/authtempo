@@ -115,7 +115,7 @@ export async function reauthenticate(
   // follows it, whatever second-factor methods the user has on.
   if ("passkey" in proof) {
     const proved = await provePasskeyOf(config, { userId: user.id, response: proof.passkey });
-    return proved.ok ? markFresh(config, session.id) : proved;
+    return proved.ok ? reauthenticated(config, user.id, session.id, "passkey") : proved;
   }
   const factorOn = await secondFactorOn(config, user.id);
   // Before any check, so a missing code costs no guess. ASVS 7.5.1 asks for
@@ -134,5 +134,22 @@ export async function reauthenticate(
     const factor = await proveUserFactor(config, user.id, proof.code);
     if (!factor.ok) return factor;
   }
-  return markFresh(config, session.id);
+  return reauthenticated(
+    config,
+    user.id,
+    session.id,
+    "password" in proof ? "password" : "email_otp",
+  );
+}
+
+/** Marks the session fresh, then emits the event `reauth` of the first proof (plan 12h Task 5). */
+async function reauthenticated(
+  config: ResolvedConfig,
+  userId: string,
+  sessionId: string,
+  method: "password" | "email_otp" | "passkey",
+): Promise<Result<{ freshUntil: Date }>> {
+  const fresh = await markFresh(config, sessionId);
+  if (fresh.ok) config.observe.emit({ name: "reauth", method, outcome: "success", userId });
+  return fresh;
 }

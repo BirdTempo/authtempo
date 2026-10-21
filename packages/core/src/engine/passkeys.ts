@@ -240,6 +240,7 @@ export async function verifyPasskeyRegistration(
     throw e;
   }
   // After the write (plan 12a). The create is one statement, with no transaction.
+  config.observe.emit({ name: "passkey.register", outcome: "success", userId: input.user.id });
   await sendNotice(config, {
     event: "passkey_added",
     email: input.user.email,
@@ -586,6 +587,7 @@ export async function deletePasskey(
     throw err;
   }
   if (!removed.ok) return removed;
+  config.observe.emit({ name: "passkey.delete", outcome: "success", userId: input.user.id });
   // After the commit (plan 12a). A refused delete sends no notice. The
   // address is the one of the row that the guard held.
   await sendNotice(config, {

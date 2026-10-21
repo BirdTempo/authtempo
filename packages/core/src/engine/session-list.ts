@@ -123,7 +123,7 @@ export async function revokeSession(
     : await endSessionById(config.storage, row, now, null);
   // Zero rows: another call ended the row first and fired its event.
   if (n !== 1) return fail("not_found");
-  await sessionsEnded(config, [row], "revoked", stops);
+  await sessionsEnded(config, [row], "revoked", stops, n);
   await deliverLogouts(config, user.id);
   return ok({ current: row.id === input.session.session.id });
 }
@@ -266,7 +266,7 @@ export async function revokeOtherSessions(
     await deleteEndedSessions(tx, config, user.id, now);
     return endOtherSessions(tx, user.id, session.id, ended ?? null, now, stops);
   });
-  await sessionsEnded(config, ended, "revoked", stops);
+  await sessionsEnded(config, ended, "revoked", stops, n);
   await deliverLogouts(config, user.id);
   return ok({ ended: n });
 }

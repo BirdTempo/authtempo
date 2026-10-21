@@ -11,7 +11,7 @@ import { createSteps, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
 import { gatedSteps, type TwoFactorPending, touchTrust } from "./second-factor.js";
-import { endedList, sessionOpened, sessionsEnded } from "./sessions.js";
+import { challengeOpened, endedList, sessionOpened, sessionsEnded } from "./sessions.js";
 import { findOrCreateUserByEmail, normalizeEmail } from "./users.js";
 import { attemptsOf, countAttempt, MAILED_CODES_PER_EMAIL_DAY } from "./verification.js";
 
@@ -362,8 +362,11 @@ export async function verifyEmailOtp(
   // After the commit, before the session hook and before a challenge answer (plan 12a).
   await verified.after(user);
   await made.after(user);
-  await sessionsEnded(config, ended, "claim", verified.stops);
-  if (after.kind === "challenge") return ok(after.pending);
+  await sessionsEnded(config, ended, "claim", verified.stops, verified.endedCount());
+  if (after.kind === "challenge") {
+    challengeOpened(config, user, "email_otp");
+    return ok(after.pending);
+  }
   await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, after.session, user, "email_otp");
   return ok({ token: after.token, user, session: after.session });

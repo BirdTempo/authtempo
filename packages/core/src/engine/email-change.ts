@@ -203,6 +203,8 @@ export async function requestEmailChange(
 interface Applied {
   previous: UserRow;
   user: UserRow;
+  /** The count of the other sessions that the move ended (plan 12h Task 5). */
+  ended: number;
 }
 
 interface Move {
@@ -281,7 +283,7 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
               { field: "purpose", op: "eq", value: "account-delete" },
               { field: "identifier", op: "eq", value: previous.id },
             ]);
-            await endOtherAccess(
+            const ended = await endOtherAccess(
               tx,
               previous.id,
               move.keep,
@@ -293,6 +295,7 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
             return ok({
               previous,
               user: { ...previous, email: data.newEmail, emailVerified: true, updatedAt },
+              ended,
             });
           }
           // A parallel write landed first. Read the row again.
@@ -338,7 +341,7 @@ async function finish(
     { user: applied.user, previous: applied.previous, via: "email_change" },
     applied.user.id,
   );
-  await sessionsEnded(config, move.ended, "email_change", move.stops);
+  await sessionsEnded(config, move.ended, "email_change", move.stops, applied.ended);
   await deliverLogouts(config, applied.user.id);
   await sendNotice(config, {
     event: "email_changed",

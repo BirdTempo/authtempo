@@ -340,8 +340,9 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
         const inner = observe ? made[0] : undefined;
         const times: number[] = [];
         let most = 0;
-        // The router emits one request event for each answer (Task 4): the sign-up's here.
-        let emitted = 1;
+        // The router emits one request event for each answer (Task 4). The
+        // sign-up also emits sign_up and sign_in (Task 5).
+        let emitted = 3;
         const flushes: Promise<void>[] = [];
         for (let i = 0; i < 20 + signIns; i++) {
           // The limits of the sign-in count per window: each sign-in starts a new one.
@@ -360,7 +361,8 @@ describe("the observer (plan 12h Task 2, spec 31 items 3 and 4)", () => {
           );
           const took = performance.now() - start;
           expect(res.status).toBe(200);
-          emitted += 1;
+          // The request event and the sign_in event (Task 5).
+          emitted += 2;
           if (i >= 20) times.push(took);
           if (inner) flushes.push(h.auth.observe.flush());
         }

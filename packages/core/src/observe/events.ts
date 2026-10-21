@@ -12,12 +12,15 @@ import {
   OPERATOR_HOOK_POINTS,
   ORGANIZATION_HOOK_POINTS,
   PATCH_SHAPE_REFUSALS,
+  SESSION_END_REASONS,
   SESSION_HOOK_POINTS,
   SESSION_PATCH_REFUSALS,
   SESSION_VIA,
   type SessionVia,
+  USER_CREATE_VIA,
   USER_HOOK_POINTS,
   USER_PATCH_REFUSALS,
+  USER_VERIFY_VIA,
 } from "../engine/hooks.js";
 import { ALL_GRANT_TYPES } from "../engine/oauth-grant-types.js";
 import {
@@ -40,6 +43,7 @@ import { ROUTES, type RouteKey } from "../http/route-list.js";
 import type { UnauthorizedReason } from "../http/routes/operator.js";
 import { ENTROPY_WARN_BITS } from "../primitives/keyring.js";
 import { appErrorName, FIELD_KINDS, type FieldKind, REJECT } from "../redact.js";
+import type { SecondFactorMethod } from "../schema.js";
 import type { AuthEvent } from "./port.js";
 
 export interface FieldSpec {
@@ -238,6 +242,45 @@ const SWEEP_COUNTS = Object.fromEntries(Object.keys(SWEEP_KEYS).map((k) => [k, C
   typeof COUNT
 >;
 
+// The flow events of sign-in, sign-up, sign-out, and the factors (plan 12h Task 5).
+
+const OPTIONAL_ID = { kind: "id", optional: true } as const;
+
+/** The methods of a second factor. A Record, so a new `SecondFactorMethod` fails the compile. */
+const FACTOR_METHOD: Readonly<Record<SecondFactorMethod, true>> = {
+  totp: true,
+  passkey: true,
+  email: true,
+};
+const FACTOR_METHODS: readonly string[] = Object.keys(FACTOR_METHOD);
+/** A challenge also passes with a backup code or a trusted device token. */
+const CHALLENGE_METHODS: readonly string[] = [...FACTOR_METHODS, "backup_code", "trusted_device"];
+/** The first proof of a re-authentication, by the `SessionVia` name of its flow. */
+const REAUTH_METHODS = [
+  "password",
+  "email_otp",
+  "passkey",
+] as const satisfies readonly SessionVia[];
+
+/**
+ * The row of a flow event: the fields of the act, then `outcome`, an
+ * optional `code`, and the optional `userId` (plan 12h Task 5).
+ */
+function act<const F extends Readonly<Record<string, FieldSpec>>>(
+  fields: F,
+  level: "info" | "warn" = "info",
+) {
+  return {
+    level,
+    fields: {
+      ...fields,
+      outcome: ACT_OUTCOME,
+      code: ACT_CODE,
+      userId: OPTIONAL_ID,
+    },
+  } as const;
+}
+
 /**
  * The events. The fault events (those with `line`) are one row for each
  * text of the log lines of core. The texts are the start list of plan 12h
@@ -266,8 +309,45 @@ export const EVENTS = {
       provider: { kind: "name", optional: true },
       outcome: enumOf(["success", "failure", "second_factor_required"]),
       code: { kind: "code", optional: true },
+      // The engine rows only: the router knows no user (plan 12h Task 5).
+      userId: OPTIONAL_ID,
+      sessionId: OPTIONAL_ID,
     },
   },
+  // The flow events of plan 12h Task 5. A success emits after the commit,
+  // beside the after hook of the act. A refusal of an act with a route is in
+  // the request event. The engine emits a refusal only for an act with no
+  // route, and for the second factor challenge (ruling 1 point 15).
+  sign_up: act({ method: enumOf(Object.keys(USER_CREATE_VIA)) }),
+  sign_out: act({ sessionId: OPTIONAL_ID }),
+  // One event for each act, with the count of the rows that the deletes
+  // answered, and no read of each row (deviation 9 of plan 12h).
+  "session.end": {
+    level: "info",
+    fields: { reason: enumOf(Object.keys(SESSION_END_REASONS)), count: COUNT },
+  },
+  "second_factor.challenge": act({
+    method: { kind: "enum", values: CHALLENGE_METHODS, optional: true },
+  }),
+  "second_factor.enable": act({ method: enumOf(FACTOR_METHODS) }),
+  // A warn: an act that lowers the guard of an account. The in-process
+  // disable turns every method off, so it names no method.
+  "second_factor.disable": act(
+    { method: { kind: "enum", values: FACTOR_METHODS, optional: true } },
+    "warn",
+  ),
+  "backup_codes.regenerate": act({}),
+  "passkey.register": act({}),
+  "passkey.delete": act({}),
+  // No user id: the request answers the same for an address with no account.
+  "password.reset_request": {
+    level: "info",
+    fields: { outcome: ACT_OUTCOME, code: { kind: "code", optional: true } },
+  },
+  "password.reset": act({}),
+  "password.change": act({}),
+  "email.verify": act({ method: enumOf(Object.keys(USER_VERIFY_VIA)) }),
+  reauth: act({ method: enumOf(REAUTH_METHODS) }),
   "observe.dropped": {
     level: "warn",
     fields: { buffer_full: COUNT, sink_timeout: COUNT, sink_threw: COUNT },

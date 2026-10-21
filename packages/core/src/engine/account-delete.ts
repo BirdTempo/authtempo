@@ -237,11 +237,14 @@ async function runDelete(
   const stops = impersonationStops(config, "account_delete");
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: userId }];
   const before = DELETE_CALLS_BEFORE + ((await config.storage.readyStatements?.()) ?? 1);
+  // The count of the user's sessions that the delete ended (plan 12h Task 5).
+  const counted = { sessions: 0 };
   const done = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<Deleted>> => {
       const meter = meterOf(tx, before);
       if (ended) ended.length = 0;
       if (stops) stops.rows.length = 0;
+      counted.sessions = 0;
       let seen = await tx.findOne("user", byId);
       let user: UserRow | null = null;
       for (let round = 0; round < ROUNDS && !user; round++) {
@@ -262,6 +265,7 @@ async function runDelete(
         ended: ended ?? null,
         stops,
         meter,
+        counted,
       });
       return ok({ user, going });
     }),
@@ -273,7 +277,7 @@ async function runDelete(
     { field: "identifier", op: "in", value: [user.id, user.email] },
     { field: "purpose", op: "ne", value: "session-end" },
   ]);
-  await sessionsEnded(config, ended, "account_deleted", stops);
+  await sessionsEnded(config, ended, "account_deleted", stops, counted.sessions);
   // Every outbox row of the user, the older ones too: the delete made them due.
   await deliverLogouts(config, user.id);
   for (const organization of going) {
@@ -336,6 +340,8 @@ export async function deleteAccountRows(
     ended: SessionRow[] | null;
     stops: ImpersonationStops | null;
     meter: Meter;
+    /** Takes the count of the user's sessions that `endSessions` answered. */
+    counted: { sessions: number };
   },
 ): Promise<OrganizationRow[]> {
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: user.id }];
@@ -387,7 +393,7 @@ export async function deleteAccountRows(
   // The user's sessions and the impersonation sessions that the user opened
   // as an operator go together (ruling 42 of plan 12f). The lock read of
   // `hold` came first.
-  await endSessions(
+  proof.counted.sessions = await endSessions(
     tx,
     [{ field: "userId", op: "eq", value: user.id }],
     proof.ended,
