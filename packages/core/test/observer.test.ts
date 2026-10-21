@@ -69,7 +69,11 @@ function median(values: number[]): number {
 
 /** The env of the review run of Review Focus 3. vitest runs in Node; core's typecheck has no Node types. */
 const env = (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env;
-/** The 10 % bound runs only in the review run, with the load beside it (ruling 1, point 16). */
+/**
+ * The 10 % bound runs only with AUTHTEMPO_OBSERVE_TIMING=1 (ruling 1 point 16, ruling 3).
+ * The default suite holds the logic: a median bound fails by chance on a loaded machine.
+ * Task 15 runs the bound once on a quiet machine and records the number with its conditions.
+ */
 const TIMING_RUN = env?.AUTHTEMPO_OBSERVE_TIMING === "1";
 
 afterEach(() => {

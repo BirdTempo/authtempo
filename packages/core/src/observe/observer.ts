@@ -1,5 +1,5 @@
 import type { Clock } from "../primitives/clock.js";
-import { CONTROL, keyedHash } from "../redact.js";
+import { CONTROL, KEYED_HASH_INFO, keyedHash } from "../redact.js";
 import type { ResolvedObserve } from "./config.js";
 import type { AuthEvent, EventName, ObserveStats } from "./port.js";
 
@@ -25,9 +25,6 @@ export interface Observer {
   stats(): ObserveStats;
 }
 
-/** The info strings of the two keyed hashes (spec 31 item 8). A new info gives new hashes. */
-const IP_INFO = "authtempo observe ip v1";
-const EMAIL_INFO = "authtempo observe email v1";
 /** A raw user agent is cut to this length (spec 31 item 8). */
 const USER_AGENT_MAX = 256;
 /** Fields that only the include rule writes. A flow cannot pass them through. */
@@ -108,9 +105,10 @@ export function createObserver(
 
   async function finish(held: Held, secret: () => string): Promise<AuthEvent> {
     const { event } = held;
-    if (held.ip !== undefined) event.ipHash = await keyedHash(secret(), IP_INFO, held.ip);
+    if (held.ip !== undefined)
+      event.ipHash = await keyedHash(secret(), KEYED_HASH_INFO.ip, held.ip);
     if (held.email !== undefined)
-      event.emailHash = await keyedHash(secret(), EMAIL_INFO, held.email);
+      event.emailHash = await keyedHash(secret(), KEYED_HASH_INFO.email, held.email);
     return event;
   }
 
