@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { type AuthConfig, resolveConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/handoff.js";
@@ -912,6 +912,60 @@ describe("the ban (plan 12f Task 6)", () => {
     storage.transaction = transaction;
     expect((answer as Response | null)?.status).toBe(200);
     expect(introspected).toEqual({ active: false });
+  });
+
+  it("answers conflict after 5 lost rounds, writes no ban field and no audit row, keeps the sessions, and logs the user id", async () => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const w = await world();
+    const s = await signedIn(w);
+    const sessionIds = async () =>
+      (await w.storage.findMany("session", [{ field: "userId", op: "eq", value: s.user.id }])).map(
+        (r) => r.id,
+      );
+    const before = await sessionIds();
+    expect(before).toContain(s.session.id);
+    const endedBefore = w.ended.length;
+    const updatesBefore = w.updates.length;
+    // Another request writes the user row before each compare of the act, so each
+    // compare on updatedAt matches 0 rows (the form of the profile test).
+    let rounds = 0;
+    const storage = w.storage as StorageAdapter;
+    const transaction = storage.transaction.bind(storage);
+    storage.transaction = (fn) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          update: async (model, where, patch) => {
+            if (model === "user" && where.some((c) => c.field === "updatedAt")) {
+              rounds++;
+              const row = await storage.findOne("user", [
+                { field: "id", op: "eq", value: s.user.id },
+              ]);
+              if (!row) throw new Error("no user");
+              await storage.update("user", [{ field: "id", op: "eq", value: s.user.id }], {
+                name: `Other ${rounds}`,
+                updatedAt: new Date(row.updatedAt.getTime() + 1),
+              });
+            }
+            return tx.update(model, where, patch);
+          },
+        }),
+      );
+    const answer = await ban(w, s.user.id);
+    storage.transaction = transaction;
+    const logged = [...log.mock.calls];
+    log.mockRestore();
+    expect(answer).toEqual({ ok: false, code: "conflict", status: 409 });
+    expect(rounds).toBe(5);
+    expect(logged).toEqual([["authtempo: operator ban write gave up", s.user.id]]);
+    expect(
+      await w.storage.findOne("user", [{ field: "id", op: "eq", value: s.user.id }]),
+    ).toMatchObject({ name: "Other 5", bannedAt: null, banReason: null, banUntil: null });
+    expect(await w.storage.findMany("operatorAudit", [])).toEqual([]);
+    expect(await sessionIds()).toEqual(before);
+    expect(w.ended.slice(endedBefore)).toEqual([]);
+    expect(w.updates.slice(updatesBefore)).toEqual(Array(5).fill("before:ban:open"));
+    expect(await resolveSession(w.config, s.token)).not.toBeNull();
   });
 
   it("answers not_found while the user tools are off", async () => {
