@@ -99,9 +99,10 @@ export const ERRORS = {
   // is gone, is off, or is of a kind that cannot sign in yet.
   sso_failed: 400,
   sso_not_configured: 404,
-  // plan 12d Task 5: only SSO signs in an address of an enforced domain; the
-  // address is outside the verified domains of the connection's organization;
-  // the connection creates no user (jit off); SCIM deactivated the user.
+  // plan 12d Task 5, in order. Only SSO signs in an address of an enforced
+  // domain. The address is outside the verified domains of the connection's
+  // organization. The connection creates no user (jit off). SCIM deactivated
+  // the user.
   sso_required: 403,
   sso_domain_mismatch: 403,
   sso_not_provisioned: 403,

@@ -246,8 +246,8 @@ describe("the OIDC sign-in of an SSO connection (plan 12d Task 4)", () => {
         issuer: issuerOf("acme"),
         claims: { sub: "a-1", nonce: s.nonce },
       };
-    // One millisecond before the end the state passes, and the flow reaches the resolution of
-    // Task 5: the token holds no address, so the answer is email_required.
+    // One millisecond before the end, the state passes. The flow reaches the resolution of
+    // Task 5. The token holds no address, so the answer is email_required.
     w.clock.advance(10 * 60_000 - 1);
     const passed = await callback(
       w,

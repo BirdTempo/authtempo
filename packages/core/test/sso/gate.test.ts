@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
 import type { SessionVia } from "../../src/engine/hooks.js";
 import { resolveSession } from "../../src/engine/sessions.js";
@@ -9,9 +9,11 @@ import { codeNow, enrolled } from "../totp-helpers.js";
 import { SSO_APP, seedOrganization, verifiedDomain } from "./helpers.js";
 import { oidcConnection, type SsoWorld, ssoSignIn, ssoSignInWorld } from "./sign-in-helpers.js";
 
+let info: MockInstance<typeof console.info>;
+
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.spyOn(console, "info").mockImplementation(() => {});
+  info = vi.spyOn(console, "info").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -56,6 +58,12 @@ describe("the second factor of an SSO sign-in (plan 12d Task 5)", () => {
     const acr = await signIn(w, acrList, { acr: "phr" });
     expect(acr.challenge).toBeNull();
     expect((await resolveSession(w.config, acr.token ?? ""))?.user.email).toBe(ADA);
+    // One log line for each pass by the IdP: the connection id and the key of its list.
+    const line = "authtempo: sso second factor by the idp";
+    expect(info.mock.calls.filter((c) => c[0] === line)).toEqual([
+      [line, amrList, "amr"],
+      [line, acrList, "acr"],
+    ]);
   });
 
   it("opens a session with totp.gate.sso false", async () => {

@@ -85,9 +85,10 @@ export interface SsoAnswer {
 let codes = 0;
 
 /**
- * One SSO sign-in through the routes of Task 4: the start, the fake IdP's
- * ID token with the start's nonce and `claims`, and the callback with the
- * binding cookie. `cookie` adds a request cookie, such as a trust cookie.
+ * One SSO sign-in through the routes of Task 4. It calls the start. The fake
+ * IdP's ID token holds the start's nonce and `claims`. Then it calls the
+ * callback with the binding cookie. `cookie` adds a request cookie, such as
+ * a trust cookie.
  */
 export async function ssoSignIn(
   w: SsoWorld,
