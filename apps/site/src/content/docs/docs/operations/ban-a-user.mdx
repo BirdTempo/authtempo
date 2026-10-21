@@ -39,8 +39,9 @@ Do the steps in this order. Each step names what breaks when you skip it.
    - A server that checks the signature alone accepts the JWT until its `exp`.
 6. Tell each resource server that reads an OAuth access token to call the introspection route.
    - Introspection answers `active: false` for a token of a banned user. The signature alone does not show the ban.
-7. Run `authtempo audit list <base url> --user <user id>`. The last row has the action `ban`.
+7. Run `authtempo audit list <base url> --user <user id>`. Find the row whose `ID` is the audit row id of step 2. It has the action `ban`.
    - The row is the record of the act. Without the check, you do not see a refused act.
+   - Find the row by its id, not by its place. The rows of one act share a millisecond, and rows that two isolates write in one millisecond have no defined order.
 
 ## What ends at once
 
