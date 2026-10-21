@@ -157,7 +157,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
 
   /**
    * The answer of one request. `carried` is the code that a redirect carries
-   * to the app or to the OAuth client, by the rule of the router
+   * to the app or to the OAuth client. The rule of the router gives it
    * (`redirectCode`, ruling 16 of plan 12h).
    */
   async function judge(

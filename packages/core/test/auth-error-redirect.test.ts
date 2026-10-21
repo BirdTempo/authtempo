@@ -16,6 +16,20 @@ const BUILDS = [
   /searchParams\.(set|append)\(\s*(AUTH_ERROR_PARAM|["']auth_error["'])/,
 ];
 
+/**
+ * The files that may name the parameter with no mark. `redirect.ts` builds
+ * it. `routes.ts` exports the name. The contracts and the OpenAPI text only
+ * describe the answer and build no URL.
+ */
+const MAY_NAME = (file: string) =>
+  file === "http/redirect.ts" ||
+  file === "routes.ts" ||
+  file.startsWith("http/contract/") ||
+  file.startsWith("openapi/");
+
+/** A code line that names the parameter in any form, an object key too. */
+const NAMES = /auth_error|AUTH_ERROR_PARAM/;
+
 /** A line of a comment: the scan reads code only. */
 const isComment = (line: string) => /^\s*(\*|\/\*|\/\/)/.test(line);
 
@@ -27,6 +41,7 @@ describe("the auth error redirect (ruling 19 of plan 12h)", () => {
     // The scan must read the routes: a list with no file finds no miss.
     expect(files).toContain("http/routes/magic-link.ts");
     const found: string[] = [];
+    const named: string[] = [];
     let users = 0;
     for (const file of files) {
       const text = readFileSync(new URL(file, src), "utf8");
@@ -34,11 +49,14 @@ describe("the auth error redirect (ruling 19 of plan 12h)", () => {
       text.split("\n").forEach((line, i) => {
         if (isComment(line)) return;
         if (BUILDS.some((re) => re.test(line))) found.push(`${file}:${i + 1}: ${line.trim()}`);
+        if (!MAY_NAME(file) && NAMES.test(line)) named.push(`${file}:${i + 1}: ${line.trim()}`);
       });
     }
     // The one place that builds the URL, beside its mark.
     expect(found).toHaveLength(1);
     expect(found[0]).toMatch(/^http\/redirect\.ts:\d+: const res = redirect\(/);
+    // No other file names the parameter, so a URLSearchParams object cannot build it.
+    expect(named).toEqual([]);
     // The 13 call sites of plan 12h sit in 7 route files: a scan that reads them finds each.
     expect(users).toBeGreaterThanOrEqual(7);
   });

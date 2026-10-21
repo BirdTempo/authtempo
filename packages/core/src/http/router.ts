@@ -123,7 +123,7 @@ function cors(res: Response, origin: string): Response {
 /**
  * The error code of a redirect, or null: the mark of `authErrorRedirect` or
  * `errorRedirect`. The router reads no parameter of the Location. A client
- * chooses a sign-in `next`, and `safeNext` keeps its query, so a Location
+ * chooses a sign-in `next`, and `safeNext` keeps its query. So a Location
  * can hold `auth_error` or `error` with no failure (rulings 16 and 19 of plan
  * 12h). The answer recorder of the tests reads the same rule.
  */
