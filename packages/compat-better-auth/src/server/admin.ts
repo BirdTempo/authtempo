@@ -471,15 +471,17 @@ async function adminAnswer(
     const page = (await res.json()) as { users: OperatorUser[]; next: string | null };
     const users = await usersOf(mapped, page.users, platformRole);
     const limit = target.query.limit === undefined ? undefined : Number(target.query.limit);
-    // Core gives no total (a count scans the table on D1). The total is
-    // exact when this page ends the list; else `next` names the next page.
-    return withHeaders(
-      page.next === null
-        ? { users, total: users.length, limit, offset: 0 }
-        : { users, limit, offset: 0, next: page.next },
-      200,
-      res,
-    );
+    // Core gives no total (a count scans the table on D1). The length of a
+    // page is the total only on a first page (no `after`) that ends the
+    // list (ruling 62 M2). A later page that ends the list gives no total
+    // and no `next`; any other page names the next page.
+    const answer =
+      page.next !== null
+        ? { users, limit, offset: 0, next: page.next }
+        : target.query.after === undefined
+          ? { users, total: users.length, limit, offset: 0 }
+          : { users, limit, offset: 0 };
+    return withHeaders(answer, 200, res);
   }
   if (path === "/admin/get-user") {
     const id = url.searchParams.get("id");

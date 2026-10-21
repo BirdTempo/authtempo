@@ -630,7 +630,7 @@ core's guard decides (plan 12f Task 10):
 
 | Call | Core's route | Answer |
 | --- | --- | --- |
-| `GET /admin/list-users` | `GET /operator/users` or `/operator/users/search` | `{ users, total, limit, offset }` when the page ends the list. Else `{ users, limit, offset, next }`: pass `after=<next>` for the next page. |
+| `GET /admin/list-users` | `GET /operator/users` or `/operator/users/search` | `{ users, total, limit, offset }` on a first page that ends the list. A page that does not end it answers `{ users, limit, offset, next }`: pass `after=<next>` for the next page. A later page that ends the list answers `{ users, limit, offset }`. |
 | `GET /admin/get-user?id=` | `GET /operator/users/get` | The user. |
 | `POST /admin/ban-user` | `POST /operator/users/ban` | `{ user }`. `banExpiresIn` is in seconds, from 60 seconds to 3650 days. |
 | `POST /admin/unban-user` | `POST /operator/users/unban` | `{ user }`. |
@@ -685,7 +685,7 @@ because core has no permission statements.
 
 The deviations from Better Auth (ruling 53 of plan 12f):
 
-- `/admin/list-users` answers `total` only when the page ends the list. An
+- `/admin/list-users` answers `total` only on a first page that ends the list. An
   `offset` above 0 is refused, because core pages by a cursor.
 - `/admin/revoke-user-sessions` ends one page per call. While sessions
   stay, it answers `{ success: false, more: true, ended }`.

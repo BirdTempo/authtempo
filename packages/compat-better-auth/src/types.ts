@@ -785,7 +785,7 @@ export interface AdminListUsersQuery {
   after?: string;
 }
 
-/** The list-users answer: `total` only when the page ends the list, else `next` (ruling 53 of plan 12f). */
+/** The list-users answer: `total` only on a first page that ends the list, `next` on a page that does not end it (rulings 53 and 62). */
 export interface AdminUserList {
   users: AdminUser[];
   total?: number;

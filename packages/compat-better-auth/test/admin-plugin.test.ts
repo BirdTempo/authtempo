@@ -395,7 +395,10 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
       await a.read(`/admin/list-users?limit=2&after=${first.body.next}`, a.op),
     );
     expect(second.body.users).toHaveLength(2);
-    expect(second.body.total).toBe(2);
+    // The last page of four users: its length is no total, and no next page follows (ruling 62 M2).
+    expect(second.body.total).toBeUndefined();
+    expect(second.body.next).toBeUndefined();
+    expect(second.body).toMatchObject({ limit: 2, offset: 0 });
     const everyone = [...first.body.users, ...second.body.users];
     expect(everyone.find((u: { email: string }) => u.email === OPERATOR).role).toBe("admin");
     // An exact id through filterField.
