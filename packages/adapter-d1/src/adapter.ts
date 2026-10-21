@@ -87,17 +87,6 @@ async function rethrowAfterUndo(
   throw new StorageError("rollback_failed", model, fields, { cause: { original, failures } });
 }
 
-/**
- * True when the decoded row holds each value of `data`. JSON text compares a
- * Date by its ISO string. A difference in key order of a JSON value answers
- * false, and the undo entry then stays.
- */
-function holdsValues(row: object, data: object): boolean {
-  return Object.entries(data).every(
-    ([f, v]) => JSON.stringify((row as Record<string, unknown>)[f]) === JSON.stringify(v),
-  );
-}
-
 function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
   const st = ctx.statements;
   const self: StorageAdapter = {
@@ -161,14 +150,8 @@ function adapterOn(db: D1Database, ctx: Ctx): StorageAdapter {
       } catch (e) {
         throw ctx.toStorageError(model, e) ?? e;
       }
-      // A write of the values a row already holds changes nothing, so it gets
-      // no undo entry. The user hold and the row locks write `updatedAt` back
-      // to its own value. The undo of such a hold wrote the old value over a
-      // later write of another request, such as a profile write in a before
-      // hook (ruling 46 of plan 12k).
       for (const row of results[0]?.results ?? [])
-        if (!holdsValues(st.decode(model, row), data))
-          ctx.undo.push({ model, op: "update", ...st.restoreRow(model, row, data) });
+        ctx.undo.push({ model, op: "update", ...st.restoreRow(model, row, data) });
       return results[1]?.meta.changes ?? 0;
     },
     async delete(model, where) {

@@ -194,6 +194,36 @@ export function d1MappingSuite(label: string, naming: Omit<NamingOptions, "pgSch
       expect((await s.findOne("user", [eq("id", "u1")]))?.emailVerified).toBe(true);
     });
 
+    it("keeps a later write of another request over a hold that wrote the same value (ruling 46 of plan 12k)", async () => {
+      const s = db();
+      await s.create("user", {
+        id: "u1",
+        email: "a@example.com",
+        emailVerified: true,
+        name: null,
+        image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
+        createdAt: at,
+        updatedAt: at,
+      });
+      const later = new Date("2026-10-10T00:00:00.001Z");
+      await expect(
+        s.transaction(async (tx) => {
+          // The user hold: updatedAt back to its own value.
+          await tx.update("user", [eq("id", "u1")], { updatedAt: at });
+          // Another request, outside this transaction: a profile write in a before hook.
+          await s.update("user", [eq("id", "u1")], { name: "Ada", updatedAt: later });
+          throw new Error("boom");
+        }),
+      ).rejects.toThrow("boom");
+      expect(await s.findOne("user", [eq("id", "u1")])).toMatchObject({
+        name: "Ada",
+        updatedAt: new Date("2026-10-10T00:00:00.001Z"),
+      });
+    });
+
     it("keeps a user created verified when another request adds a session inside the open transaction (plan 8b)", async () => {
       const s = db();
       await expect(

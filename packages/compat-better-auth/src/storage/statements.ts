@@ -603,9 +603,16 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       // Core's rule (`SqlStatements.restoreRow`): only the columns the update
       // set, the column of each field of `data` and each `updateExtras`
       // column, so a claim's change to another column stays (final review M-1).
+      // The write back runs only while each column holds the value the update
+      // wrote, so a later write of another request stays (ruling 46 of plan 12k).
+      const extras = map.updateExtras?.(data as Row) ?? {};
       const set = [
         ...Object.keys(data).map((f) => map.fields[f]?.column ?? f),
-        ...Object.keys(map.updateExtras?.(data as Row) ?? {}),
+        ...Object.keys(extras),
+      ];
+      const written = [
+        ...Object.keys(data).map((f) => encode(model, f, (data as Row)[f])),
+        ...Object.values(extras),
       ];
       const cols = set.map((f) => {
         const c = Object.keys(row).find((k) => k !== idKey && fieldOfRaw(t, k) === f);
@@ -613,9 +620,16 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
         if (c === undefined) throw new StorageError("schema_mismatch", model, [f]);
         return c;
       });
+      const p = new Params();
+      const sets = cols.map((c) => `${quoteRaw(c)} = ${p.add(row[c])}`);
+      const eq = pg ? "IS NOT DISTINCT FROM" : "IS";
+      const where = [
+        `${column(model, "id")} = ${p.add(row[idKey])}`,
+        ...cols.map((c, i) => `${quoteRaw(c)} ${eq} ${p.add(written[i])}`),
+      ];
       return {
-        sql: `UPDATE ${table(model)} SET ${cols.map((c, i) => `${quoteRaw(c)} = ${d.placeholder(i + 1)}`).join(", ")} WHERE ${column(model, "id")} = ${d.placeholder(cols.length + 1)}`,
-        params: [...cols.map((c) => row[c]), row[idKey]],
+        sql: `UPDATE ${table(model)} SET ${sets.join(", ")} WHERE ${where.join(" AND ")}`,
+        params: p.values,
       };
     },
     reinsertRow(model, row) {

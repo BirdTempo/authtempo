@@ -211,6 +211,11 @@ export function decodeRow<M extends ModelName>(
   return out as unknown as Models[M];
 }
 
+/** The equal operator that also matches a null with a null. */
+function nullSafeEq(d: Dialect): string {
+  return d.name === "sqlite" ? "IS" : "IS NOT DISTINCT FROM";
+}
+
 /**
  * The json parameter is serialized text. `::text::jsonb` makes the server type
  * the parameter as text, so the driver sends the string unchanged and the
@@ -537,6 +542,12 @@ export interface SqlStatements {
    * `emailVerified`), and the undo must keep that change. A statement for
    * another table set must keep the same rule. Plan 9 final review M-1
    * (R-1), 2026-10-10.
+   *
+   * The write back runs only while each of those columns still holds the
+   * value the update wrote. The user hold and the row locks write a value
+   * back to itself. Another request can then write the row inside the open
+   * transaction, such as a profile write in a before hook. A refusal must
+   * keep that write (ruling 46 of plan 12k). The compare is null-safe.
    */
   restoreRow<M extends ModelName>(
     model: M,
@@ -583,13 +594,24 @@ export function coreStatements(d: Dialect): SqlStatements {
     },
     restoreRow(model, row, data) {
       // Only the columns the update set, through the same field-to-column
-      // map as `updateStatement`, by id. See the interface comment.
+      // map as `updateStatement`, by id, and only while each holds the value
+      // the update wrote. See the interface comment.
       const fields = Object.keys(data);
       assertFields(model, fields);
       const cols = fields.map(columnName);
+      const p = new Params(d);
+      const sets = cols.map((c) => `${c} = ${p.add(row[c])}`);
+      const where = [
+        `id = ${p.add(row.id)}`,
+        ...fields.map((f, i) => {
+          const type = fieldType(model, f);
+          const ph = p.add(encodeValue(d, type, (data as Record<string, unknown>)[f], model, f));
+          return `${cols[i]} ${nullSafeEq(d)} ${type === "json" && d.json === "jsonb" ? jsonbCast(ph) : ph}`;
+        }),
+      ];
       return {
-        sql: `UPDATE ${TABLES[model]} SET ${cols.map((c, i) => `${c} = ${d.placeholder(i + 1)}`).join(", ")} WHERE id = ${d.placeholder(cols.length + 1)}`,
-        params: [...cols.map((c) => row[c]), row.id],
+        sql: `UPDATE ${TABLES[model]} SET ${sets.join(", ")} WHERE ${where.join(" AND ")}`,
+        params: p.values,
       };
     },
     reinsertRow(model, row) {
