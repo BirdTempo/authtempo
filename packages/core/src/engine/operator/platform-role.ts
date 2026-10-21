@@ -15,6 +15,7 @@ import {
 } from "../organizations.js";
 import { holdsRolePart, type ResolvedOrganizations, rankOf } from "../ranks.js";
 import { sessionsEnded } from "../sessions.js";
+import { dropMemberTeams } from "../teams.js";
 import { holdUser, userStays } from "../user-hold.js";
 import { normalizeEmail, validUserName } from "../users.js";
 import {
@@ -362,7 +363,7 @@ export async function revokePlatformRole(
     config.storage,
     input.actor,
     undefined,
-    fixed + REVOKE_WRITE_WORST + ACCESS_END_LEAST,
+    fixed + REVOKE_WRITE_WORST + DROP_TEAMS_WORST + ACCESS_END_LEAST,
   );
   if (!budget.ok) return budget;
   const target = await targetOf(config, input);
@@ -445,7 +446,10 @@ export async function revokePlatformRole(
             ...event,
             via: "operator",
           });
-          return storage.delete("member", byRole);
+          const n = await storage.delete("member", byRole);
+          // The team rows go with the member row, with no team hook (ruling 16 of plan 12k).
+          if (n > 0) await dropMemberTeams(storage, organization.id, user.id);
+          return n;
         }
         await runBefore("organization.beforeUpdateMemberRole", hooks.beforeUpdateMemberRole, {
           ...event,
@@ -460,7 +464,7 @@ export async function revokePlatformRole(
         const locked = await ownerLock(tx, o, organization, write, now);
         if (!locked.ok) return locked;
       } else if ((await write(tx)) === 0) return fail("conflict");
-      meter.step(losesOwner ? REVOKE_WRITE_WORST : 2);
+      meter.step((losesOwner ? REVOKE_WRITE_WORST : 2) + (rest === "" ? DROP_TEAMS_WORST : 0));
       // The impersonation sessions first, inside the budget (rulings 31 and 44).
       await endImpersonationsPage(
         tx,
@@ -517,6 +521,13 @@ export async function revokePlatformRole(
  * reads the owners again.
  */
 const REVOKE_WRITE_WORST = 6;
+
+/**
+ * The worst case of `dropMemberTeams` in D1 statements, for an adapter with
+ * no `statementsSent`: the delete of the team rows and the update of the
+ * sessions, each with the read for the undo (ruling 16 of plan 12k).
+ */
+const DROP_TEAMS_WORST = 4;
 
 /**
  * Creates the first operator (spec 26 items 5 and 11). A secret or the app

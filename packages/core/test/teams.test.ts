@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { OrganizationsConfig } from "../src/config.js";
+import type { AuthConfig, OrganizationsConfig } from "../src/config.js";
 import { createAuth } from "../src/create-auth.js";
 import { ORGANIZATION_HOOK_POINTS, type OrganizationHooks } from "../src/engine/hooks.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
@@ -12,7 +12,11 @@ const P = "/auth/organizations/teams";
 const t0 = new Date("2026-01-01T00:00:00.000Z");
 const T0 = "2026-01-01T00:00:00.000Z";
 
-function world(organizations: OrganizationsConfig = { teams: {} }, hooks?: OrganizationHooks) {
+function world(
+  organizations: OrganizationsConfig = { teams: {} },
+  hooks?: OrganizationHooks,
+  extra: Partial<AuthConfig> = {},
+) {
   let now = t0;
   const clock = {
     now: () => now,
@@ -36,6 +40,7 @@ function world(organizations: OrganizationsConfig = { teams: {} }, hooks?: Organ
     limiter: createMemoryLimiter(clock),
     organizations,
     ...(hooks && { hooks: { organization: hooks } }),
+    ...extra,
   });
   const user = (email: string): Promise<UserRow> =>
     storage.create("user", {
@@ -842,5 +847,98 @@ describe("teams (plan 12k Task 5)", () => {
       status: 200,
       body: { session: { activeTeamId: null } },
     });
+  });
+});
+
+describe("teams and the operator tools of plan 12f (ruling 16 of plan 12k)", () => {
+  const app = { kind: "app", name: "support-tool" } as const;
+  const net = { ip: null, userAgent: null };
+  /** Teams, the platform organization, and the operator tools, with each team hook counted. */
+  function platformWorld(calls: string[]) {
+    const hooks = Object.fromEntries(
+      Object.keys(ORGANIZATION_HOOK_POINTS)
+        .filter((p) => /Team/.test(p))
+        .map((p) => [
+          p,
+          () => {
+            calls.push(p);
+          },
+        ]),
+    ) as OrganizationHooks;
+    return world(
+      { teams: { defaultTeam: true }, platformRole: "admin", platformOrganization: "platform-co" },
+      hooks,
+      {
+        operator: { users: true },
+      },
+    );
+  }
+
+  it("deletes the team rows of the platform organization when a revoke deletes the member row, with no team hook", async () => {
+    const calls: string[] = [];
+    const w = platformWorld(calls);
+    // A verified user, so the operator may create a team in the platform organization.
+    const rootUser = await w.user("root@example.com");
+    mustOk(
+      await w.auth.api.operator.createAdmin({
+        actor: app,
+        email: "root@example.com",
+        reason: "First operator",
+        ...net,
+      }),
+    );
+    const bob = await w.user("bob@example.com");
+    mustOk(
+      await w.auth.api.operator.platformRole.grant({
+        actor: app,
+        userId: bob.id,
+        reason: "Second operator",
+        ...net,
+      }),
+    );
+    const platform = await w.storage.findOne("organization", [
+      { field: "slug", op: "eq", value: "platform-co" },
+    ]);
+    if (!platform) throw new Error("no platform organization");
+    const team = mustOk(
+      await w.auth.api.createTeam({ user: rootUser, organizationId: platform.id, name: "Support" }),
+    );
+    mustOk(await w.auth.api.addTeamMember({ user: rootUser, teamId: team.id, userId: bob.id }));
+    const bobTeams = () =>
+      w.storage.findMany("teamMember", [{ field: "userId", op: "eq", value: bob.id }]);
+    expect(await bobTeams()).toHaveLength(1);
+    calls.length = 0;
+    mustOk(
+      await w.auth.api.operator.platformRole.revoke({
+        actor: app,
+        userId: bob.id,
+        reason: "Left the team",
+        ...net,
+      }),
+    );
+    // The member row went, and its team rows with it; a cascade fires no team hook.
+    expect(
+      await w.storage.findMany("member", [{ field: "userId", op: "eq", value: bob.id }]),
+    ).toEqual([]);
+    expect(await bobTeams()).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  it("makes no default team in the platform organization of createAdmin", async () => {
+    const w = platformWorld([]);
+    mustOk(
+      await w.auth.api.operator.createAdmin({
+        actor: app,
+        email: "root@example.com",
+        reason: "First operator",
+        ...net,
+      }),
+    );
+    // The platform organization is not an app organization (ruling 16).
+    expect(await w.storage.findMany("team", [])).toEqual([]);
+    // The same config gives an app organization its default team.
+    const ada = await w.user("ada@example.com");
+    mustOk(await w.auth.api.createOrganization({ user: ada, slug: "acme", name: "Acme" }));
+    expect(await w.storage.findMany("team", [])).toHaveLength(1);
   });
 });

@@ -58,6 +58,8 @@ A team has no role. Every right comes from the organization role. A team member 
 ### The cascades
 
 - A member removal and a leave delete the person's team rows in the same write. The person's sessions lose their active team.
+- A revoke of the platform role that deletes the member row deletes the person's team rows of the platform organization too, with no team hook. A revoke that keeps other role parts keeps them.
+- `createAdmin` makes no default team: the platform organization is not an app organization.
 - A team delete deletes its team rows. Each session in the team loses its active team, and each pending invitation loses the team.
 - An organization delete deletes its teams.
 - An accept adds the person to each team of the invitation's `teamIds` that still exists.
