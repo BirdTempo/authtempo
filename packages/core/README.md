@@ -1210,7 +1210,7 @@ const auth = createAuth({
 | Flow | Before hooks | Rows locked before the hook |
 | --- | --- | --- |
 | Organization create | `organization.beforeCreate`, `organization.beforeAddMember` | the creator's user row |
-| Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row; in an SSO sign-in that claims the address, also the sessions that the claim ends |
+| Member add | `organization.beforeAddMember` | the added user's row; with `membersPerOrganization`, the organization row; in an SSO sign-in, none, because the hook runs before any lock and the first write |
 | Invitation accept | `organization.beforeAddMember`, `organization.beforeUpdateMemberRole` | the accepting user's row; for a new member with `membersPerOrganization`, the organization row; each team row of the invitation |
 | Invite | `organization.beforeInvite` | with `pendingInvitationsPerOrganization`, the organization row |
 | Member removal or leave | `organization.beforeRemoveMember` | the person's user row and sessions; for an owner or with `revokeTokens`, the organization row; for a loss of the platform role, the sessions of each impersonation that the person opened |
