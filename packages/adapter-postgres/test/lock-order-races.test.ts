@@ -71,6 +71,34 @@ function onMemberRead(userId: string, fire: () => Promise<void>): StorageAdapter
   } as StorageAdapter;
 }
 
+/** A storage on the shared pool that runs `fire` once, after the first `op` read of `model` in a transaction. */
+function afterRead(
+  model: ModelName,
+  op: "findOne" | "findMany",
+  fire: () => Promise<void>,
+): StorageAdapter {
+  let armed = true;
+  const base = createPostgresAdapter(db.sql);
+  const wrap = (tx: StorageAdapter): StorageAdapter =>
+    ({
+      ...tx,
+      async [op](m: ModelName, ...rest: unknown[]) {
+        const r = await (tx[op] as (m: ModelName, ...rest: unknown[]) => Promise<unknown>)(
+          m,
+          ...rest,
+        );
+        if (m === model && armed) {
+          armed = false;
+          await fire();
+        }
+        return r;
+      },
+      transaction: (fn: (t: StorageAdapter) => Promise<unknown>) =>
+        tx.transaction((inner) => fn(wrap(inner))),
+    }) as StorageAdapter;
+  return { ...base, transaction: (fn) => base.transaction((tx) => fn(wrap(tx))) };
+}
+
 /** A promise that resolves at the first call of `reach`. */
 function gate() {
   let reach = () => {};
@@ -284,5 +312,39 @@ describe("the lock order on Postgres (ruling 43 of plan 12k)", () => {
     expect(await removal).toEqual({ ok: true, value: { ok: true } });
     expect((await rows("member")).map((m) => m.userId)).toEqual(["a"]);
     expect(await rows("teamMember")).toEqual([]);
+  });
+  it("of two role creates at maxPerOrganization 1, one answers role_limit (m1)", async () => {
+    const sent: MailMessage[] = [];
+    const g = gate();
+    let second: Promise<unknown> | null = null;
+    const config = { dynamicRoles: { maxPerOrganization: 1 } };
+    const plain = instance(createPostgresAdapter(db.sql), config, sent);
+    const two = instance(watch("organization", g.reach), config, sent);
+    const one = instance(
+      afterRead("organizationRole", "findMany", async () => {
+        second = two.api.createRole({
+          user: a,
+          organizationId,
+          name: "web",
+          permissions: { member: ["read"] },
+        });
+        await Promise.race([g.at, second]);
+      }),
+      config,
+      sent,
+    );
+    const a = await user("a");
+    const organizationId = await organization(plain, a);
+
+    const first = await one.api.createRole({
+      user: a,
+      organizationId,
+      name: "core",
+      permissions: { member: ["read"] },
+    });
+
+    expect(first).toMatchObject({ ok: true, value: { name: "core" } });
+    expect(await second).toMatchObject({ ok: false, code: "role_limit" });
+    expect((await rows("organizationRole")).map((r) => r.name)).toEqual(["core"]);
   });
 });

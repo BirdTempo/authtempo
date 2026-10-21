@@ -120,7 +120,8 @@ export async function lockTeam(
  * read, so a stamp of a team write would give it a false `conflict`.
  *
  * The organization token create and a member removal with `revokeTokens`
- * take the same lock (ruling 32 of plan 12k).
+ * take the same lock (ruling 32 of plan 12k), and so does the role create
+ * before its count of `maxPerOrganization` (ruling 43).
  */
 export async function lockOrganization(
   tx: StorageAdapter,

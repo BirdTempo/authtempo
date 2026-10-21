@@ -7,6 +7,7 @@ import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { standing } from "./organizations.js";
 import { grantCheck, roleRowDef, type Standing } from "./permissions.js";
 import { type ResolvedOrganizations, ROLE_RE } from "./ranks.js";
+import { lockOrganization } from "./teams.js";
 
 /**
  * Dynamic roles (plan 12k, spec 29 item 6). An organization stores its own
@@ -189,8 +190,11 @@ async function heldInside(
 /**
  * Stores a role. Needs `ac:create`. Rules 1 to 3 check the name, the rank,
  * and the permissions. Rule 8: the cap counts the rows inside the
- * transaction, before the write. D1 transactions are not isolated (spec
- * 8.6), so two creates at one moment can both pass the count.
+ * transaction, after the lock of the organization row (`lockOrganization`)
+ * and before the write. On Postgres a second create waits at the lock and
+ * then counts the committed rows (ruling 43). D1 transactions are not
+ * isolated (spec 8.6), so on D1 two creates at one moment can both pass the
+ * count.
  *
  * A part that a member or a pending invitation holds answers `role_in_use`.
  * Such a part comes from a grant made while dynamic roles were off, or from
@@ -226,6 +230,8 @@ export async function createRole(
   };
   try {
     const written = await config.storage.transaction(async (tx): Promise<Result<true>> => {
+      // False: the organization went after the standing read.
+      if (!(await lockOrganization(tx, s.value.organization))) return fail("not_found");
       // The unique key stays the guard for a race.
       if (
         await tx.findOne("organizationRole", [
