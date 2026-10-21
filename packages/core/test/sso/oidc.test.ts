@@ -1,5 +1,6 @@
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { completeSocial, startSocial } from "../../src/engine/social.js";
 import { createConnection, updateConnection } from "../../src/engine/sso/connections.js";
 import { completeSsoOidc, SSO_DISCOVERY_MAX, startSso } from "../../src/engine/sso/oidc.js";
 import type { SsoProfile } from "../../src/engine/sso/resolve.js";
@@ -8,7 +9,7 @@ import { createJoseJwtSeam } from "../../src/seams/jwt.js";
 import type { OidcEndpoints } from "../../src/social/oidc.js";
 import { createTestIdp } from "../../src/testing/saml-idp.js";
 import { BASE_URL, get, LONG_TEST_MS } from "../helpers.js";
-import { type FakeIdToken, fakeFetch, fakeJwt, type TokenCall } from "../social-helpers.js";
+import { type FakeIdToken, fakeFetch, fakeJwt, GOOGLE, type TokenCall } from "../social-helpers.js";
 import { SSO_APP, seedOrganization, ssoAuth } from "./helpers.js";
 
 let errors: { mock: { calls: unknown[][] } };
@@ -537,6 +538,103 @@ describe("the byte caps of the IdP answers of a connection (review m2 of plan 12
     }
     // 65537 bytes fail at the ID token; 65536 bytes reach the resolution of Task 5.
     expect(steps).toEqual(["id_token", "resolve"]);
+  });
+});
+
+/** The JWKS URL of Google, which the SSO connection of acme also names. */
+const GOOGLE_JWKS = "https://www.googleapis.com/oauth2/v3/certs";
+
+/**
+ * A world with Google, the jose seam that the config builds, and one RS256
+ * key. The social fetch answers a small key set. `sso.fetch` answers the
+ * same key padded to 65537 bytes, past the SSO cap, at the same URL.
+ */
+async function sharedJwksWorld() {
+  const { publicKey, privateKey } = await generateKeyPair("RS256", { extractable: true });
+  const jwk = { ...(await exportJWK(publicKey)), kid: "k1", alg: "RS256", use: "sig" };
+  const code: { social: string } = { social: "" };
+  const social = fakeFetch((call: TokenCall) => {
+    if (call.url === GOOGLE_JWKS) return Response.json({ keys: [jwk] });
+    return Response.json({ id_token: code.social, access_token: "at", token_type: "Bearer" });
+  });
+  const idp = fakeFetch((call: TokenCall) => {
+    if (call.url === GOOGLE_JWKS) return Response.json(padTo({ keys: [jwk] }, 65_537));
+    return Response.json({ id_token: call.form.code, token_type: "Bearer" });
+  });
+  const w = ssoAuth({
+    social: { google: GOOGLE, fetch: social.fetchFn },
+    sso: { oidc: true, fetch: idp.fetchFn },
+  });
+  const now = Math.floor(w.clock.now().getTime() / 1000);
+  const sign = (claims: Record<string, unknown>, issuer: string, audience: string) =>
+    new SignJWT(claims)
+      .setProtectedHeader({ alg: "RS256", kid: "k1" })
+      .setIssuer(issuer)
+      .setAudience(audience)
+      .setIssuedAt(now)
+      .setExpirationTime(now + 300)
+      .sign(privateKey);
+  /** A Google sign-in to its end; true when it opens a session. */
+  const google = async () => {
+    const s = await startSocial(w.config, { provider: "google", next: "/home", ip: "1.1.1.1" });
+    if (!s.ok) throw new Error(s.code);
+    const url = new URL(s.value.location);
+    const nonce = url.searchParams.get("nonce") ?? "";
+    code.social = await sign(
+      { sub: "g-1", email: "ada@example.com", email_verified: true, nonce },
+      "https://accounts.google.com",
+      GOOGLE.clientId,
+    );
+    const done = await completeSocial(w.config, {
+      provider: "google",
+      state: url.searchParams.get("state") ?? "",
+      code: "c",
+      error: null,
+      bindToken: s.value.bindToken,
+      ip: null,
+      userAgent: null,
+    });
+    return done.ok && "token" in done.value;
+  };
+  const unused: Pick<World, "tokens" | "docs" | "tokenExtra"> = {
+    tokens: {},
+    docs: {},
+    tokenExtra: {},
+  };
+  return { ...w, ...unused, calls: idp.calls, socialCalls: social.calls, sign, google };
+}
+
+describe("the key sets of the JWKS reads of a connection (review of plan 12d Task 4b)", () => {
+  it("keeps two key sets for a social provider and a connection on one JWKS URL", async () => {
+    const w = await sharedJwksWorld();
+    const org = await seedOrganization(w, "acme");
+    const id = await connection(w, org, "acme", { ...endpointsOf("acme"), jwksUrl: GOOGLE_JWKS });
+    expect(await w.google()).toBe(true);
+    // The key set of Google holds the key now. The SSO read must not use it.
+    const s = await start(w, id);
+    const token = await w.sign({ sub: "a-1", nonce: s.nonce }, issuerOf("acme"), "acme-client");
+    expect(authError(await callback(w, id, { code: token, state: s.state }, s.bind))).toBe(
+      "sso_failed",
+    );
+    // The SSO read went through sso.fetch, and its cap refused the 65537 bytes.
+    expect(stepsOf(id)).toEqual(["id_token"]);
+    expect(w.calls.filter((c) => c.url === GOOGLE_JWKS)).toHaveLength(1);
+    // Google keeps its own set: a second sign-in reads no JWKS again.
+    expect(await w.google()).toBe(true);
+    expect(w.socialCalls.filter((c) => c.url === GOOGLE_JWKS)).toHaveLength(1);
+  });
+
+  it("makes one JWKS read for two sign-ins on one connection", async () => {
+    const w = await joseWorld();
+    const { a } = await twoConnections(w);
+    for (let i = 0; i < 2; i++) {
+      const s = await start(w, a);
+      const code = await w.sign(s.nonce);
+      expect(authError(await callback(w, a, { code, state: s.state }, s.bind))).toBe("sso_failed");
+    }
+    // Both reach the resolution of Task 5, so both ID tokens pass the key set.
+    expect(stepsOf(a)).toEqual(["resolve", "resolve"]);
+    expect(w.calls.filter((c) => c.url === endpointsOf("acme").jwksUrl)).toHaveLength(1);
   });
 });
 

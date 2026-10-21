@@ -157,9 +157,10 @@ describe("the discovery at sign-in (plan 12d Task 4)", () => {
     );
     const html = await page.text();
     const start = `/auth/sso/${cb}/start?next=${encodeURIComponent(next)}`;
-    const escaped = start.replaceAll("&", "&amp;");
-    expect(html).toContain(`<meta http-equiv="refresh" content="0; url=${escaped}">`);
-    expect(html).toContain(`<a href="${escaped}">Continue</a>`);
+    // The start holds no character to escape: `next` is URL-encoded. The unit test of the page covers the escape.
+    expect(start).not.toMatch(/[&<>"']/);
+    expect(html).toContain(`<meta http-equiv="refresh" content="0; url=${start}">`);
+    expect(html).toContain(`<a href="${start}">Continue</a>`);
     expect(html).not.toContain("<script");
     // The page goes on with a GET, a navigation that is not a form post. The start then sends the browser to the IdP.
     const go = await w.handle(get(start));
