@@ -223,7 +223,8 @@ describe("the table of locks over a before hook", () => {
         "Invitation accept",
         "acceptInvitation organization.beforeUpdateMemberRole: holdUser, lockOrganization, lockTeam",
       ],
-      ["Member add", "addMember organization.beforeAddMember: holdUser, lockOrganization"],
+      // The member add of ruling 25 N3 of plan 12d: addMember and the SSO sign-in call it.
+      ["Member add", "addMemberIn organization.beforeAddMember: holdUser, lockOrganization"],
       ["Team member add", "addTeamMember organization.beforeAddTeamMember: holdUser, lockTeam"],
       ["Organization create", "createOrganization organization.beforeAddMember: holdUser"],
       ["Organization create", "createOrganization organization.beforeCreate: holdUser"],

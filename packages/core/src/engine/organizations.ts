@@ -10,6 +10,7 @@ import { meterOf } from "../storage/meter.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import {
   hookGuard,
+  type MemberVia,
   type OrganizationPatch,
   type RemoveVia,
   runAfter,
@@ -911,48 +912,18 @@ export async function addMember(
     createdAt: now,
     updatedAt: now,
   };
-  const hooks = config.hooks.organization;
   const organization = publicOrganization(s.value.organization);
-  const limit = o.limits.membersPerOrganization;
   try {
     const written = await hookGuard(() =>
-      config.storage.transaction(async (tx): Promise<Result<true>> => {
-        // The added user, then the organization row, in the lock order of user-hold.ts. A member
-        // row of a deleted user would count as an owner (plan 12a Task 11). The hold writes no new
-        // value, so a refusal below changes nothing.
-        await holdUser(config.observe, tx, target.id);
-        // The lock of the count (ruling 45 of plan 12k). A second add or accept waits here for this
-        // commit, and then counts its member row. A gone organization answers not_found.
-        if (limit !== null && !(await lockOrganization(tx, s.value.organization)))
-          return fail("not_found");
-        // A no-op add runs no hook. The unique key stays the guard for a race.
-        if (
-          await tx.findOne("member", [
-            { field: "organizationId", op: "eq", value: input.organizationId },
-            { field: "userId", op: "eq", value: target.id },
-          ])
-        )
-          return fail("already_member");
-        if (limit !== null) {
-          const held = await tx.findMany(
-            "member",
-            [{ field: "organizationId", op: "eq", value: input.organizationId }],
-            { limit },
-          );
-          if (held.length >= limit) return fail("member_limit");
-        }
-        await runBefore(config.observe, "organization.beforeAddMember", hooks.beforeAddMember, {
-          organization,
-          member: { userId: target.id, role: input.role },
-          memberUser: target,
+      config.storage.transaction((tx) =>
+        addMemberIn(config, tx, o, {
+          organization: s.value.organization,
+          member,
+          user: target,
           by: input.user,
           via: "add",
-          invitation: null,
-        });
-        await tx.create("member", member);
-        await userStays(tx, target.id);
-        return ok(true);
-      }),
+        }),
+      ),
     );
     if (!written.ok) return written;
   } catch (err) {
@@ -971,7 +942,7 @@ export async function addMember(
   await runAfter(
     config.observe,
     "organization.afterAddMember",
-    hooks.afterAddMember,
+    config.hooks.organization.afterAddMember,
     {
       organization,
       member: added,
@@ -984,6 +955,70 @@ export async function addMember(
   );
   config.observe.emit(organizationChange("afterAddMember", organization.id));
   return ok(added);
+}
+
+/**
+ * The member add in the caller's transaction (ruling 25 N3 of plan 12d).
+ * `addMember` calls it after its standing check, and an SSO sign-in calls it
+ * with no user caller (`by` null). It holds the added user, then, with
+ * `membersPerOrganization`, the organization row before its count: the lock
+ * order of user-hold.ts. Then the before hook and the row. A member row
+ * that exists answers `already_member` and writes nothing. The caller runs
+ * `afterAddMember` after its commit, and maps a `unique_violation`.
+ */
+export async function addMemberIn(
+  config: ResolvedConfig,
+  tx: StorageAdapter,
+  o: ResolvedOrganizations,
+  input: {
+    organization: OrganizationRow;
+    member: MemberRow;
+    user: UserRow;
+    by: UserRow | null;
+    via: MemberVia;
+  },
+): Promise<Result<true>> {
+  const { member, user } = input;
+  const limit = o.limits.membersPerOrganization;
+  // The added user, then the organization row, in the lock order of user-hold.ts. A member
+  // row of a deleted user would count as an owner (plan 12a Task 11). The hold writes no new
+  // value, so a refusal below changes nothing.
+  await holdUser(config.observe, tx, user.id);
+  // The lock of the count (ruling 45 of plan 12k). A second add or accept waits here for this
+  // commit, and then counts its member row. A gone organization answers not_found.
+  if (limit !== null && !(await lockOrganization(tx, input.organization))) return fail("not_found");
+  // A no-op add runs no hook. The unique key stays the guard for a race.
+  if (
+    await tx.findOne("member", [
+      { field: "organizationId", op: "eq", value: member.organizationId },
+      { field: "userId", op: "eq", value: user.id },
+    ])
+  )
+    return fail("already_member");
+  if (limit !== null) {
+    const held = await tx.findMany(
+      "member",
+      [{ field: "organizationId", op: "eq", value: member.organizationId }],
+      { limit },
+    );
+    if (held.length >= limit) return fail("member_limit");
+  }
+  await runBefore(
+    config.observe,
+    "organization.beforeAddMember",
+    config.hooks.organization.beforeAddMember,
+    {
+      organization: publicOrganization(input.organization),
+      member: { userId: user.id, role: member.role },
+      memberUser: user,
+      by: input.by,
+      via: input.via,
+      invitation: null,
+    },
+  );
+  await tx.create("member", member);
+  await userStays(tx, user.id);
+  return ok(true);
 }
 
 export async function updateMemberRole(
