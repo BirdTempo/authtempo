@@ -50,20 +50,40 @@ import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
 import { unauthorized } from "../session-route.js";
 
+/** Why an operator route answers 401: the reason code of its log line. */
+type UnauthorizedReason =
+  | "secret_mismatch"
+  | "secret_and_session"
+  | "secret_not_accepted"
+  | "no_session";
+
+/**
+ * One log line per 401 of an operator route (spec 9), in the form of the
+ * guard refusals: the route and the reason code. The line holds no secret,
+ * no header, no IP, and no address.
+ */
+function logUnauthorized(route: string, reason: UnauthorizedReason): void {
+  console.error("authtempo: operator route unauthorized", route, reason);
+}
+
 /**
  * The one check of the operator secret, for every operator route of 11c
  * and 11c2: `matchOperatorSecret` plus a scope test (plan 12f). Null when
  * the secret matches an entry with `scope`; `scope` null needs a match
- * only. No match answers 401; a match with no scope answers 403
- * `operator_required`.
+ * only. No match answers 401 and writes one log line; a match with no
+ * scope answers 403 `operator_required`.
  */
 async function operatorAuthorized(
   config: ResolvedConfig,
   ctx: RouteContext,
+  route: string,
   scope: OperatorScope | null,
 ): Promise<Response | null> {
   const entry = await matchOperatorSecret(config, ctx.request);
-  if (entry === null) return json({ error: "unauthorized" }, 401);
+  if (entry === null) {
+    logUnauthorized(route, "secret_mismatch");
+    return json({ error: "unauthorized" }, 401);
+  }
   if (scope === null) return null;
   const allowed = requireScope({ kind: "secret", name: entry.name, scopes: entry.scopes }, scope);
   return allowed.ok ? null : json({ error: allowed.code }, allowed.status);
@@ -121,7 +141,7 @@ function secondsUntil(config: ResolvedConfig, at: Date): number {
  * new session. A bearer caller gets the token in the body and no cookie.
  * The stop ends the session and clears the actor cookie. It sets the
  * session cookie back to the operator's token while that session lives,
- * else it clears the session cookie.
+ * else it clears the session cookie. Each 401 writes one log line (spec 9).
  */
 function impersonationRoutes(config: ResolvedConfig): Route[] {
   if (!config.operator?.impersonation) return [];
@@ -130,6 +150,10 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
   const userAgent = (ctx: RouteContext) => ctx.request.headers.get("user-agent");
   const withSecret = (ctx: RouteContext) =>
     /^Operator\s/i.test(ctx.request.headers.get("authorization") ?? "");
+  const refuse = (route: string, reason: UnauthorizedReason) => {
+    logUnauthorized(route, reason);
+    return unauthorized();
+  };
   return [
     {
       method: "POST",
@@ -138,7 +162,8 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const operator = await sessionFromRequest(config, ctx.request);
         const token = readSessionToken(config, ctx.request);
-        if (!operator || token === null || withSecret(ctx)) return unauthorized();
+        if (withSecret(ctx)) return refuse("POST /operator/impersonate", "secret_not_accepted");
+        if (!operator || token === null) return refuse("POST /operator/impersonate", "no_session");
         const body = await readJson(ctx.request, impersonateBody);
         if (!body.ok) return respond(body);
         const r = await startImpersonation(
@@ -173,7 +198,9 @@ function impersonationRoutes(config: ResolvedConfig): Route[] {
       key: "POST /operator/impersonate/stop",
       async handler(ctx) {
         const resolved = await sessionFromRequest(config, ctx.request);
-        if (!resolved || withSecret(ctx)) return unauthorized();
+        if (withSecret(ctx))
+          return refuse("POST /operator/impersonate/stop", "secret_not_accepted");
+        if (!resolved) return refuse("POST /operator/impersonate/stop", "no_session");
         const body = await readStopBody(ctx.request);
         if (body === null) return json({ error: "invalid_body" }, 400);
         const r = await stopImpersonation(config, {
@@ -239,7 +266,12 @@ function secretRoutes(config: ResolvedConfig): Route[] {
           async handler(ctx) {
             if (!(await config.limiter.allow(`operator:ip:${ipKey(ctx.ip)}`, OPERATOR_PER_IP)))
               return json({ error: "rate_limited" }, 429);
-            const refused = await operatorAuthorized(config, ctx, "keys");
+            const refused = await operatorAuthorized(
+              config,
+              ctx,
+              "POST /operator/keys/rotate",
+              "keys",
+            );
             if (refused) return refused;
             // The answer `{ kid }` names the new signing key; the old key verifies for 24 hours and signs nothing.
             return json(await rotateKey(config));
@@ -261,7 +293,12 @@ function secretRoutes(config: ResolvedConfig): Route[] {
           ))
         )
           return json({ error: "rate_limited" }, 429);
-        const refused = await operatorAuthorized(config, ctx, "secrets");
+        const refused = await operatorAuthorized(
+          config,
+          ctx,
+          "GET /operator/secrets/status",
+          "secrets",
+        );
         if (refused) return refused;
         return json(await secretsStatus(config));
       },
@@ -278,7 +315,12 @@ function secretRoutes(config: ResolvedConfig): Route[] {
           ))
         )
           return json({ error: "rate_limited" }, 429);
-        const refused = await operatorAuthorized(config, ctx, "secrets");
+        const refused = await operatorAuthorized(
+          config,
+          ctx,
+          "POST /operator/secrets/rewrap",
+          "secrets",
+        );
         if (refused) return refused;
         const body = await readRewrapBody(ctx.request);
         if (body === null) return json({ error: "invalid_body" }, 400);
@@ -297,7 +339,7 @@ function secretRoutes(config: ResolvedConfig): Route[] {
           ))
         )
           return json({ error: "rate_limited" }, 429);
-        const refused = await operatorAuthorized(config, ctx, null);
+        const refused = await operatorAuthorized(config, ctx, "GET /operator/info", null);
         if (refused) return refused;
         return json({
           core: VERSION,
@@ -330,6 +372,7 @@ export interface OperatorCaller {
  * scheme needs a session, else 401, and then `requireOperatorUser`, which
  * counts on `operator:user:<userId>`. A user actor exists only through that
  * guard. The scope check of a secret is the engine's, at each entry.
+ * Each 401 writes one log line (spec 9).
  */
 export async function readOperatorActor(
   config: ResolvedConfig,
@@ -340,9 +383,15 @@ export async function readOperatorActor(
   if (OPERATOR_SCHEME.test(request.headers.get("authorization") ?? "")) {
     if (!(await config.limiter.allow(`operator-users:ip:${ipKey(ctx.ip)}`, OPERATOR_USERS_PER_IP)))
       return fail("rate_limited");
-    if (readSessionToken(config, request) !== null) return fail("unauthorized");
+    if (readSessionToken(config, request) !== null) {
+      logUnauthorized(route, "secret_and_session");
+      return fail("unauthorized");
+    }
     const entry = await matchOperatorSecret(config, request);
-    if (entry === null) return fail("unauthorized");
+    if (entry === null) {
+      logUnauthorized(route, "secret_mismatch");
+      return fail("unauthorized");
+    }
     if (
       !(await config.limiter.allow(
         `operator-users:secret:${entry.name}`,
@@ -353,7 +402,10 @@ export async function readOperatorActor(
     return ok({ actor: { kind: "secret", name: entry.name, scopes: entry.scopes }, renewed: null });
   }
   const resolved = await sessionFromRequest(config, request);
-  if (!resolved) return fail("unauthorized");
+  if (!resolved) {
+    logUnauthorized(route, "no_session");
+    return fail("unauthorized");
+  }
   const user = await requireOperatorUser(config, resolved, route);
   if (!user.ok) return user;
   return ok({ actor: user.value, renewed: renewedSessionCookie(config, request, resolved) });
