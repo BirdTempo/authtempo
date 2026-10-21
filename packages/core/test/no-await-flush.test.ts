@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createAuth } from "../src/create-auth.js";
+import type { Observer } from "../src/observe/observer.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import { APP_ORIGIN, BASE_URL, post } from "./helpers.js";
 
@@ -16,6 +17,20 @@ interface WalkFs {
   readFileSync(file: URL, encoding: "utf8"): string;
 }
 const FS_MODULE = "node:fs";
+
+/** Each observer that `createAuth` makes, so a test can put an event in the buffer of a real Auth. */
+const made = vi.hoisted(() => [] as Observer[]);
+vi.mock("../src/observe/observer.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../src/observe/observer.js")>();
+  return {
+    ...real,
+    createObserver: (...args: Parameters<typeof real.createObserver>) => {
+      const observer = real.createObserver(...args);
+      made.push(observer);
+      return observer;
+    },
+  };
+});
 
 const SRC = new URL("../src/", import.meta.url);
 /** The two files that may name the flush: the observer that has it, and the Auth that hands it out. */
@@ -75,6 +90,49 @@ describe("no flow waits for a sink (plan 12h Task 2, Global Constraints)", () =>
     expect(plain.status).toBe(withHook.status);
     expect(await plain.json()).toEqual(await withHook.json());
     expect(waitUntil).toHaveBeenCalledTimes(1);
+  });
+
+  it("handle answers while the sink has not settled", async () => {
+    let release = () => {};
+    const write = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    made.length = 0;
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      observe: { sink: { write }, flushTimeoutMs: 10_000 },
+    });
+    expect(made).toHaveLength(1);
+    made[0]?.emit({ name: "passkey.counter_moved" });
+    expect(auth.observe.stats().buffered).toBe(1);
+    const hooked: Promise<unknown>[] = [];
+    const answered = auth.handle(post("/auth/magic-link/request", { email: "ada@example.com" }), {
+      waitUntil: (p) => void hooked.push(p),
+    });
+    // A handle that waits for the flush waits for this sink: 10 s, far past the bound.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<"late">((resolve) => {
+      timer = setTimeout(() => resolve("late"), 1000);
+    });
+    const first = await Promise.race([answered.then(() => "answered" as const), late]);
+    clearTimeout(timer);
+    expect(first).toBe("answered");
+    expect((await answered).status).toBe(200);
+    expect(hooked).toHaveLength(1);
+    release();
+    await Promise.all(hooked);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(auth.observe.stats()).toEqual({
+      buffered: 0,
+      dropped: { buffer_full: 0, sink_timeout: 0, sink_threw: 0 },
+    });
   });
 
   it("keeps the answer when an unbound ctx.waitUntil throws, and logs one line", async () => {
