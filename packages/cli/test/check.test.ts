@@ -257,6 +257,36 @@ describe("authtempo check (spec 19)", () => {
       ],
       ["no health route", (r) => r.delete("GET /auth/health"), "ready", "health_missing"],
       [
+        "a health route of 200 with another status",
+        (r) => r.set("GET /auth/health", () => Response.json({ status: "down" })),
+        "ready",
+        "health_missing",
+      ],
+      [
+        "a health route of 200 with a text body",
+        (r) => r.set("GET /auth/health", () => new Response("ok")),
+        "ready",
+        "health_missing",
+      ],
+      [
+        "a readiness route of 200 with another status",
+        (r) => r.set("GET /auth/ready", () => Response.json({ status: "up" })),
+        "ready",
+        "not_ready",
+      ],
+      [
+        "a readiness route of 500",
+        (r) => r.set("GET /auth/ready", () => new Response("error", { status: 500 })),
+        "ready",
+        "not_ready",
+      ],
+      [
+        "a readiness route of 200 with a body that is not JSON",
+        (r) => r.set("GET /auth/ready", () => new Response("{ready")),
+        "ready",
+        "not_ready",
+      ],
+      [
         "a readiness route of 503",
         (r) =>
           r.set("GET /auth/ready", () =>
