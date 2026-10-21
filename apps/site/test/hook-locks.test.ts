@@ -39,17 +39,25 @@ interface Fn {
 }
 
 /**
- * The top-level functions of the engine folder of core and of its operator
- * folder, where the flows of plan 12f are. A function starts at a line that
- * opens `function` or `async function`, with or without `export`.
+ * The folders of the engine that hold flows: the operator folder of plan
+ * 12f, and the SSO and SCIM folders of plan 12d.
+ */
+const SUBFOLDERS = ["operator", "sso", "scim"] as const;
+
+/**
+ * The top-level functions of the engine folder of core and of its
+ * SUBFOLDERS. A function starts at a line that opens `function` or
+ * `async function`, with or without `export`.
  */
 function functions(): Fn[] {
   const out: Fn[] = [];
   const files = [
     ...readdirSync(ENGINE).filter((n) => n.endsWith(".ts")),
-    ...readdirSync(`${ENGINE}operator/`)
-      .filter((n) => n.endsWith(".ts"))
-      .map((n) => `operator/${n}`),
+    ...SUBFOLDERS.flatMap((d) =>
+      readdirSync(`${ENGINE}${d}/`)
+        .filter((n) => n.endsWith(".ts"))
+        .map((n) => `${d}/${n}`),
+    ),
   ];
   for (const f of files) {
     const src = readFileSync(`${ENGINE}${f}`, "utf8");
@@ -91,7 +99,7 @@ const CALL = /(?<![\w.])(?<!function )(\w+)\(/g;
  * The scan reads text, not the control flow. A lock on another branch
  * before the hook counts, so a listed lock can miss some paths. The scan
  * misses these locks:
- * - a lock outside the engine folder and its operator folder;
+ * - a lock outside the engine folder and its SUBFOLDERS;
  * - a lock in an arrow function bound to a top-level `const`, or in a class
  *   method;
  * - a call through a variable or an object field;

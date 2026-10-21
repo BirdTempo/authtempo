@@ -90,19 +90,29 @@ interface Site {
 }
 
 /**
- * The sites of the engine folder of core and of its operator folder, by
- * file and top-level function. The scan has the form of hook-locks.test.ts
- * of the site. `root` is `src` for the source, or `dist` for the build that the
+ * The folders of the engine that hold flows: the operator folder of plan
+ * 12f, and the SSO and SCIM folders of plan 12d. hook-locks.test.ts of the
+ * site scans the same folders.
+ */
+const SUBFOLDERS = ["operator", "sso", "scim"] as const;
+
+/**
+ * The sites of the engine folder of core and of its SUBFOLDERS, by file and
+ * top-level function. The scan has the form of hook-locks.test.ts of the
+ * site. `root` is `src` for the source, or `dist` for the build that the
  * test runs. A function with two sites names the second one `#2`.
  */
 function sitesIn(root: "src" | "dist"): Site[] {
   const ext = root === "src" ? ".ts" : ".js";
   const dir = `${CORE}${root}/engine/`;
+  const code = (n: string): boolean => n.endsWith(ext) && !n.endsWith(".d.ts");
   const files = [
-    ...readdirSync(dir).filter((n) => n.endsWith(ext) && !n.endsWith(".d.ts")),
-    ...readdirSync(`${dir}operator/`)
-      .filter((n) => n.endsWith(ext) && !n.endsWith(".d.ts"))
-      .map((n) => `operator/${n}`),
+    ...readdirSync(dir).filter(code),
+    ...SUBFOLDERS.flatMap((d) =>
+      readdirSync(`${dir}${d}/`)
+        .filter(code)
+        .map((n) => `${d}/${n}`),
+    ),
   ];
   const out: Site[] = [];
   for (const f of files) {
