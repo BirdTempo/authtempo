@@ -132,6 +132,21 @@ export async function impersonationLoss(
 }
 
 /**
+ * The record of a SCIM deactivate (ruling 56 of plan 12d). When the sweep
+ * has ended the work of a pending-end row of reason `revoked`, the row
+ * becomes this record. It is not a work list: the doors read it
+ * (`revokedFor`), and the sweep step of the pending-end rows does not. It
+ * holds `{ reason, before }`. Some sessions or OAuth families of the user
+ * started at or before `before`, and no act or sweep named them. The doors
+ * still refuse each of them. An example is a family that a code exchange
+ * committed after the token delete of the act. The record lives
+ * `recordLife`, and the expiry step of the sweep deletes it then. There is
+ * at most one row per act per user: one pending-end row, which becomes one
+ * record.
+ */
+export const ACCESS_END_RECORD = "session-end-record";
+
+/**
  * True when a SCIM deactivate ended the access of the user after this
  * session began (ruling 50 of plan 12d). The deactivate ends a page of the
  * sessions in its transaction. The rest stay on a pending-end row of
@@ -140,6 +155,11 @@ export async function impersonationLoss(
  * The refresh grant passes the start of a family (`familyRevoked`, ruling
  * 55). A row with `targets` names the impersonation sessions of an operator, so
  * it does not count.
+ *
+ * The record of the act counts too (`ACCESS_END_RECORD`, ruling 56). The
+ * sweep keeps it after its work, until `before` plus the longest life of a
+ * session and a family. So a session or a family that started at or before
+ * `before`, and that no act or sweep ended, is refused while it can live.
  *
  * The cost: when sessions stay, the deactivate sets `user.updatedAt` to a
  * time at or after the row. A session that began after the last write of
@@ -155,7 +175,7 @@ export async function revokedFor(
   const began = session.createdAt.getTime();
   if (began > user.updatedAt.getTime()) return false;
   const rows = await config.storage.findMany("verification", [
-    { field: "purpose", op: "eq", value: "session-end" },
+    { field: "purpose", op: "in", value: ["session-end", ACCESS_END_RECORD] },
     { field: "identifier", op: "eq", value: user.id },
   ]);
   return rows.some(

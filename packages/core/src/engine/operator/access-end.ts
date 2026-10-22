@@ -17,6 +17,7 @@ import {
   type OperatorActEnds,
   type StopCause,
 } from "./audit.js";
+import { ACCESS_END_RECORD } from "./guards.js";
 import type { ImpersonationHold } from "./impersonation.js";
 import { END_ALL_LIMIT, endSessionPage, FAMILY_CALLS, STEP_WORST } from "./sessions.js";
 
@@ -64,11 +65,45 @@ function pendingReason(value: unknown): PendingEndReason {
 
 /**
  * The life of a pending-end row: 3650 days, far past the life of any
- * session. The sweep deletes the row when its work is done, so the row
- * never expires before that. The first sweep step deletes the expired
- * verification rows, so a short life could drop a row with work left.
+ * session. The sweep ends its work first, so the row never expires before
+ * that. The first sweep step deletes the expired verification rows, so a
+ * short life could drop a row with work left.
  */
 export const PENDING_END_MS = 3650 * 86_400_000;
+
+const DAY_MS = 86_400_000;
+const MINUTE_MS = 60_000;
+
+/**
+ * The margin of a record past the longest life. It covers the clock of an
+ * instance that runs ahead and a write in flight at the act. One day is
+ * far past both: a clock that runs a day ahead breaks the expiry of every
+ * row.
+ */
+const RECORD_MARGIN_MS = DAY_MS;
+
+/**
+ * The life of a record after its `before`: the longest life of anything
+ * that started at or before it, from the config. A session lives
+ * `session.ttlDays` after its last refresh, and the door refuses a refresh
+ * after the act. A refresh family that the door refuses at each refresh
+ * lives as long as its newest token: `oauth.refreshTtlDays` from its write.
+ * A code or a device code from before the act can make that token until it
+ * expires, so its life comes on top. Then the margin.
+ */
+export function recordLife(config: ResolvedConfig): number {
+  const session = config.session.ttlDays * DAY_MS;
+  const oauth = config.oauth;
+  const family = oauth
+    ? oauth.refreshTtlDays * DAY_MS +
+      Math.max(oauth.codeTtlMinutes, oauth.device?.codeTtlMinutes ?? 0) * MINUTE_MS
+    : 0;
+  return Math.max(session, family) + RECORD_MARGIN_MS;
+}
+
+/** True when a pending-end row becomes a record after its work: the own sessions of a SCIM deactivate. */
+const keepsRecord = (row: VerificationRow) =>
+  row.data?.reason === "revoked" && row.data.targets === undefined;
 
 /**
  * The calls of the last steps of `endAllAccessPage`. They are the handoff
@@ -132,12 +167,14 @@ export async function endAllAccessPage(
   const tokens = await tx.findMany("oauthToken", tokenWhere, { sort: { field: "id", dir: "asc" } });
   meter.step(1);
   const families = [...new Set(tokens.map((t) => t.familyId))];
+  // The newest sessions first, so the read holds the newest session of the user
+  // for `before`, also past the page (ruling 56 of plan 12d). The page takes them by id.
   const read = await tx.findMany("session", byUser, {
-    sort: { field: "id", dir: "asc" },
+    sort: { field: "createdAt", dir: "desc" },
     limit: END_ALL_LIMIT.default + 1,
   });
   meter.step(1);
-  const rows = read.slice(0, END_ALL_LIMIT.default);
+  const rows = read.slice(0, END_ALL_LIMIT.default).sort((a, b) => (a.id < b.id ? -1 : 1));
   // The calls of the page and of the families: the last steps stay out.
   const room = budget - meter.used - TAIL_CALLS;
   // The families first, after the read of endFamilies; a page of the least size stays for the sessions.
@@ -173,7 +210,7 @@ export async function endAllAccessPage(
   let before: Date | null = null;
   let late = 0;
   if (left) {
-    // The newest row that the act read: a row of a clock that runs ahead stays covered (ruling 55).
+    // The newest session and family of the user: a row of a clock that runs ahead stays covered (ruling 55).
     const newest = Math.max(
       ...read.map((r) => r.createdAt.getTime()),
       ...tokens.map((t) => Math.max(t.createdAt.getTime(), familyStart(t).getTime())),
@@ -351,8 +388,10 @@ export async function readPendingEnds(
  * sessions from before `data.before` (`endSessionPage`, with the locks by
  * id). It deletes the row when no such session stays. `session.afterEnd`
  * fires after the commit, with the reason of the row. Then the families
- * that the row names end (`endPendingFamilies`). A row that does not fit
- * waits for the next sweep. The answer is the count of ended sessions.
+ * that the row names end (`endPendingFamilies`). A row of a SCIM
+ * deactivate is not deleted: it becomes the record of the act
+ * (`ACCESS_END_RECORD`). A row that does not fit waits for the next sweep.
+ * The answer is the count of ended sessions.
  */
 export async function endPendingRows(
   config: ResolvedConfig,
@@ -391,8 +430,9 @@ export async function endPendingRows(
           ? await endSessionPage(tx, config, rows, ended ?? null, now, pageBudget, where, stops)
           : { deleted: 0, stopped: false, used: 1 };
       const finished = !page.stopped && read.length <= rows.length;
-      // A row that names families stays until they end, after this commit.
-      const drop = finished && families.length === 0;
+      // A row that names families stays until they end, after this commit. A
+      // record row stays too: endPendingFamilies writes the record.
+      const drop = finished && families.length === 0 && !keepsRecord(row);
       if (drop) await tx.delete("verification", [{ field: "id", op: "eq", value: row.id }]);
       return { page, finished, drop };
     });
@@ -410,8 +450,10 @@ export async function endPendingRows(
  * calls of `meter` (ruling 55 of plan 12d). Each family ends with its mark
  * (`revokeFamily`, 2 calls), outside a transaction, so the mark commits
  * before the delete. One call stays for the row: its delete when no family
- * stays, else an update to the families that stay. The answer is true when
- * the row is gone.
+ * stays, else an update to the families that stay. A row of a SCIM
+ * deactivate with no family left becomes its record (ruling 56): one
+ * update, as the delete is one call. The answer is true when the work of
+ * the row is done.
  */
 async function endPendingFamilies(
   config: ResolvedConfig,
@@ -428,7 +470,14 @@ async function endPendingFamilies(
     meter.step(FAMILY_CALLS);
   }
   const rest = families.slice(end.length);
-  if (rest.length === 0) await config.storage.delete("verification", byId);
+  if (rest.length === 0 && keepsRecord(row)) {
+    const before = new Date(String(row.data?.before));
+    await config.storage.update("verification", byId, {
+      purpose: ACCESS_END_RECORD,
+      expiresAt: new Date(before.getTime() + recordLife(config)),
+      data: { reason: "revoked", before: before.toISOString() },
+    });
+  } else if (rest.length === 0) await config.storage.delete("verification", byId);
   else if (end.length > 0)
     await config.storage.update("verification", byId, { data: { ...row.data, families: rest } });
   if (rest.length === 0 || end.length > 0) meter.step(1);

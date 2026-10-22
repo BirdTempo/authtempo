@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
 import { createAuth } from "../../src/create-auth.js";
 import { mintSessionJwt, sessionLive } from "../../src/engine/jwt.js";
+import { createClient } from "../../src/engine/oauth-client-store.js";
 import {
   addMember,
   createOrganization,
@@ -16,11 +17,14 @@ import { createApiToken } from "../../src/engine/tokens.js";
 import { randomBase64Url, sha256Hex } from "../../src/primitives/crypto.js";
 import type { ScimScope } from "../../src/schema.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
+import { LONG_TEST_MS } from "../helpers.js";
 import {
   authorized,
+  basicHeader,
   exchange,
   type Handle,
   pkce,
+  REDIRECT,
   RESOURCE,
   registered,
   SCOPES,
@@ -814,7 +818,7 @@ describe("the session door of a SCIM deactivate (ruling 50 of plan 12d)", () => 
   const live = (w: World, userId: string) =>
     w.storage.findMany("session", [{ field: "userId", op: "eq", value: userId }]);
 
-  /** The reads of the pending-end rows through the engine storage. */
+  /** The reads of the pending-end rows and the records through the engine storage (ruling 56). */
   function pendingReads(w: World) {
     const spy = vi.spyOn(w.storage, "findMany");
     return () =>
@@ -822,7 +826,10 @@ describe("the session door of a SCIM deactivate (ruling 50 of plan 12d)", () => 
         ([model, where]) =>
           model === "verification" &&
           (where as { field: string; value: unknown }[]).some(
-            (c) => c.field === "purpose" && c.value === "session-end",
+            (c) =>
+              c.field === "purpose" &&
+              (c.value === "session-end" ||
+                (Array.isArray(c.value) && c.value.includes("session-end"))),
           ),
       ).length;
   }
@@ -1129,6 +1136,250 @@ describe("the OAuth families and the clock of a SCIM deactivate (ruling 55 of pl
   });
 });
 
+describe("the record of a SCIM deactivate and the door of each family (ruling 56 of plan 12d)", () => {
+  const MINUTE = 60_000;
+  const DAY = 86_400_000;
+  const OFF = patch({ op: "replace", path: "active", value: false });
+  const SCOPE = "mcp:read offline_access";
+
+  /** The world with OAuth, a session.afterEnd hook (the worst page), and Ada as a SCIM User. */
+  async function oauthWorld() {
+    const w = await world({
+      oauth: {
+        resources: [RESOURCE],
+        scopes: SCOPES,
+        registration: { cimd: false, dynamic: true },
+      },
+      hooks: { session: { afterEnd: () => {} } },
+    });
+    const token = await tokenOf(w, w.organizationId);
+    await signUpAndVerify(w, ADA);
+    const user = await userAt(w, ADA);
+    if (!user) throw new Error("no user");
+    const id = await created(w, token, ADA);
+    const h = { auth: { handle: w.handle }, config: w.config, storage: w.storage, clock: w.clock };
+    const s = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+    const cookie = `__Host-tempo_session=${s.token}`;
+    return { w, h: h as unknown as Handle, token, user, id, cookie };
+  }
+
+  /** `n` OAuth families of the user through the code flow of a public client: each refresh token. */
+  async function families(h: Handle, cookie: string, clientId: string, n: number) {
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const p = await pkce();
+      const { code } = await authorized(h, cookie, {
+        clientId,
+        challenge: p.challenge,
+        scope: SCOPE,
+      });
+      const res = await h.auth.handle(exchange(code, clientId, p.verifier));
+      if (res.status !== 200) throw new Error(`token answered ${res.status}`);
+      out.push(((await res.json()) as { refresh_token: string }).refresh_token);
+    }
+    return out;
+  }
+
+  const refresh = async (h: Handle, refreshToken: string, clientId: string) =>
+    (
+      await h.auth.handle(
+        tokenPost({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: clientId,
+        }),
+      )
+    ).status;
+
+  const rowsOf = (w: World, purpose: string, userId: string) =>
+    w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: purpose },
+      { field: "identifier", op: "eq", value: userId },
+    ]);
+
+  /** Every sweep until no pending-end row of the user stays. */
+  async function sweepAll(w: World, userId: string) {
+    for (let i = 0; i < 10 && (await rowsOf(w, "session-end", userId)).length > 0; i++)
+      await sweepExpired(w.config);
+    expect(await rowsOf(w, "session-end", userId)).toEqual([]);
+  }
+
+  /** The refresh row of a refresh token. */
+  const rowOf = async (w: World, refreshToken: string) =>
+    w.storage.findOne("oauthToken", [
+      { field: "tokenHash", op: "eq", value: await sha256Hex(refreshToken) },
+    ]);
+
+  it("refuses after every sweep a family that an exchange committed after the token delete", async () => {
+    const { w, h, token, user, id, cookie } = await oauthWorld();
+    w.clock.advance(MINUTE);
+    const clientId = await registered(h);
+    await families(h, cookie, clientId, 20);
+    // The code of one more grant, made before the act.
+    const p = await pkce();
+    const { code } = await authorized(h, cookie, {
+      clientId,
+      challenge: p.challenge,
+      scope: SCOPE,
+    });
+    w.clock.advance(MINUTE);
+    // On Postgres an exchange can commit its refresh row after the token delete of the
+    // act began. Then the delete does not see the row (rereview of ruling 55). The fixture
+    // runs that exchange while the transaction is open, right after its token delete.
+    let answer: Response | null = null;
+    const storage = w.storage;
+    const transaction = storage.transaction.bind(storage);
+    storage.transaction = (fn) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          delete: async (model, where) => {
+            const n = await tx.delete(model, where);
+            if (model === "oauthToken" && answer === null)
+              answer = await h.auth.handle(exchange(code, clientId, p.verifier));
+            return n;
+          },
+        }),
+      );
+    const off = await scim(w, token, "PATCH", `/Users/${id}`, OFF);
+    storage.transaction = transaction;
+    expect(off.status).toBe(200);
+    const exchanged = answer as Response | null;
+    if (!exchanged) throw new Error("the exchange did not run");
+    expect(exchanged.status).toBe(200);
+    const raced = ((await exchanged.json()) as { refresh_token: string }).refresh_token;
+    const family = (await rowOf(w, raced))?.familyId;
+    const [row] = await rowsOf(w, "session-end", user.id);
+    // The row names the families that the act read and did not end, not this one.
+    expect(row?.data?.families).not.toContain(family);
+    await sweepAll(w, user.id);
+    const records = await rowsOf(w, "session-end-record", user.id);
+    expect(records.map((r) => r.data)).toEqual([{ reason: "revoked", before: row?.data?.before }]);
+    // The record refuses the family, and the refusal ends it.
+    expect(await refresh(h, raced, clientId)).toBe(400);
+    expect(await rowOf(w, raced)).toBeNull();
+  });
+
+  it("keeps the record until before plus the longest life, and the sweep deletes it then", async () => {
+    const { w, token, user, id } = await oauthWorld();
+    w.clock.advance(MINUTE);
+    for (let i = 0; i < 40; i++)
+      await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+    w.clock.advance(MINUTE);
+    expect((await scim(w, token, "PATCH", `/Users/${id}`, OFF)).status).toBe(200);
+    await sweepAll(w, user.id);
+    const [record, ...more] = await rowsOf(w, "session-end-record", user.id);
+    expect(more).toEqual([]);
+    const before = new Date(String(record?.data?.before)).getTime();
+    // The longest life: a refresh token of 30 days from a code of 5 minutes, then one day.
+    expect((record?.expiresAt.getTime() ?? 0) - before).toBe(31 * DAY + 5 * MINUTE);
+    w.clock.advance(before + 31 * DAY - w.clock.now().getTime());
+    await sweepExpired(w.config);
+    expect(await rowsOf(w, "session-end-record", user.id)).toHaveLength(1);
+    w.clock.advance(6 * MINUTE);
+    await sweepExpired(w.config);
+    expect(await rowsOf(w, "session-end-record", user.id)).toEqual([]);
+  });
+
+  it(
+    "covers the newest session of a user with 521 sessions and one from a clock 2 s ahead",
+    async () => {
+      const { w, token, user, id } = await oauthWorld();
+      w.clock.advance(MINUTE);
+      for (let i = 0; i < 520; i++)
+        await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+      // An instance whose clock runs 2 s ahead writes one more session.
+      w.clock.advance(2000);
+      const ahead = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+      w.clock.advance(-2000);
+      expect((await scim(w, token, "PATCH", `/Users/${id}`, OFF)).status).toBe(200);
+      // The page did not end it: it waits for the sweep.
+      expect(
+        await w.storage.findOne("session", [{ field: "id", op: "eq", value: ahead.session.id }]),
+      ).not.toBeNull();
+      expect(await resolveSession(w.config, ahead.token, "read-only")).toBeNull();
+      expect(await sessionLive(w.config, { sid: ahead.session.id })).toBe(false);
+    },
+    LONG_TEST_MS,
+  );
+
+  it("answers inactive at introspection for a race row of a family on the pending-end row", async () => {
+    const { w, h, token, user, id, cookie } = await oauthWorld();
+    w.clock.advance(MINUTE);
+    await families(h, cookie, await registered(h), 20);
+    // A confidential client that introspects its own refresh tokens makes the last family.
+    // A later clock gives its rows the last ids, so the act reads its family last.
+    w.clock.advance(1000);
+    const made = await createClient(w.config, {
+      name: "Notes server",
+      authMethod: "client_secret_basic",
+      redirectUris: [REDIRECT],
+      introspect: true,
+    });
+    if (!made.ok || !made.value.clientSecret) throw new Error("the create failed");
+    const auth = basicHeader(made.value.client.id, made.value.clientSecret);
+    const p = await pkce();
+    const { code } = await authorized(h, cookie, {
+      clientId: made.value.client.id,
+      challenge: p.challenge,
+      scope: SCOPE,
+    });
+    const res = await h.auth.handle(
+      tokenPost(
+        {
+          grant_type: "authorization_code",
+          code,
+          code_verifier: p.verifier,
+          redirect_uri: REDIRECT,
+          resource: RESOURCE,
+        },
+        { authorization: auth },
+      ),
+    );
+    expect(res.status).toBe(200);
+    const last = await rowOf(w, ((await res.json()) as { refresh_token: string }).refresh_token);
+    if (!last) throw new Error("no refresh row");
+    w.clock.advance(MINUTE);
+    // A refresh in flight on Postgres writes its new row after the token delete of the act.
+    const race = `or_${randomBase64Url(32)}`;
+    const storage = w.storage;
+    const transaction = storage.transaction.bind(storage);
+    storage.transaction = (fn) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          delete: async (model, where) => {
+            const n = await tx.delete(model, where);
+            if (model === "oauthToken")
+              await storage.create("oauthToken", {
+                ...last,
+                id: `${last.id.slice(0, 10)}${"Z".repeat(16)}`,
+                tokenHash: await sha256Hex(race),
+                usedAt: null,
+                parentId: last.id,
+                createdAt: w.clock.now(),
+                updatedAt: w.clock.now(),
+              });
+            return n;
+          },
+        }),
+      );
+    const off = await scim(w, token, "PATCH", `/Users/${id}`, OFF);
+    storage.transaction = transaction;
+    expect(off.status).toBe(200);
+    const [row] = await rowsOf(w, "session-end", user.id);
+    expect(row?.data?.families).toContain(last.familyId);
+    const introspected = await h.auth.handle(
+      new Request(`${new URL(RESOURCE).origin}/auth/oauth/introspect`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", authorization: auth },
+        body: new URLSearchParams({ token: race }).toString(),
+      }),
+    );
+    expect([introspected.status, await introspected.json()]).toEqual([200, { active: false }]);
+  });
+});
+
 describe("the Entra ID manager PATCH (ruling 55 of plan 12d)", () => {
   const SAMPLE_ID = "00aa00aa-bb11-cc22-dd33-44ee44ee44ee";
   const ref = `https://example.com/scim/Users/${SAMPLE_ID}`;
@@ -1154,6 +1405,22 @@ describe("the Entra ID manager PATCH (ruling 55 of plan 12d)", () => {
       ]);
       expect(r.body.manager).toBeUndefined();
     });
+
+  it("refuses a list of two manager objects with invalidValue (ruling 56)", async () => {
+    const w = await world();
+    const token = await tokenOf(w, w.organizationId);
+    const id = await created(w, token, ADA);
+    const two = [
+      { $ref: ref, value: SAMPLE_ID },
+      { $ref: ref, value: SAMPLE_ID },
+    ];
+    for (const path of ["manager", `${ENTERPRISE_URN}:manager`]) {
+      const r = await read(
+        await scim(w, token, "PATCH", `/Users/${id}`, patch({ op: "Add", path, value: two })),
+      );
+      expect([r.status, r.body.scimType]).toEqual([400, "invalidValue"]);
+    }
+  });
 });
 
 describe("the PATCH forms of an unknown attribute (ruling 50 of plan 12d)", () => {

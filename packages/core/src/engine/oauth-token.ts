@@ -158,7 +158,8 @@ export const tokenLimited = async (config: ResolvedConfig, ip: string | null) =>
  * tokens. With it, the call also refuses a row from before the end of the
  * last ban (`bannedFor`, ruling 29). The ban deleted every such row, so it is a row
  * that a race wrote beside the ban. It gives no token after the unban or
- * the end either.
+ * the end either. The refresh grant and introspection pass the start of
+ * the family (ruling 56 of plan 12d).
  */
 export async function liveUser(
   config: ResolvedConfig,
@@ -177,7 +178,12 @@ export async function liveUser(
  * that fit its budget. A pending-end row names the rest until the sweep,
  * and this door refuses them, as `revokedFor` refuses a session. It reads
  * the start of the family, so a race row of an old family is refused too.
- * The refresh grant and introspection read it.
+ * The refresh grant and introspection read it. After the sweep the record
+ * of the act refuses such a family (ruling 56).
+ *
+ * The cost: a family that began after the last write of the user reads
+ * nothing more, +0 D1 queries. A family that began at or before that write
+ * reads the rows once, +1 D1 query per refresh and per introspection.
  */
 export function familyRevoked(
   config: ResolvedConfig,
@@ -606,7 +612,9 @@ export async function refreshGrant(
   const askedResource = namedResource(input.resource);
   if (askedResource !== null && askedResource !== row.resource) return oauthFail("invalid_target");
   // The auth read the client: a CIMD document that did not answer refused this refresh there, and the family stays.
-  const user = await liveUser(config, row.userId);
+  // The ban rule takes the start of the family (ruling 56 of plan 12d). So a race row of a
+  // family from before the ban stays refused after the unban.
+  const user = await liveUser(config, row.userId, familyStart(row));
   if (!user || (await familyRevoked(config, user, row))) return reuse(config, row);
   const spent =
     row.usedAt !== null

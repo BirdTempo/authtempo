@@ -140,9 +140,20 @@ export type VerificationPurpose =
    * `targets` names the user's own sessions: only a ban or a revoke writes
    * one. A row with `targets` names the impersonation sessions that the user
    * opened on those users as an operator. The row lives 3650 days. The sweep
-   * deletes it when no session from before `before` stays.
+   * deletes it when no session from before `before` stays. A row of a SCIM
+   * deactivate (reason `revoked`) becomes a `session-end-record` instead.
    */
   | "session-end"
+  /**
+   * The record of a SCIM deactivate (ruling 56 of plan 12d): a
+   * `session-end` row of reason `revoked` after the sweep ended its work.
+   * The data is { reason, before }. The session door and the refresh grant
+   * read it, so a session or an OAuth family that started at or before
+   * `before` stays refused. The expiresAt is `before` plus `recordLife`,
+   * and the sweep deletes the row then. One act writes at most one row per
+   * user.
+   */
+  | "session-end-record"
   /**
    * One SAML AuthnRequest that core sent (plan 12d). The ACS spends it
    * once, so one Response opens at most one session.

@@ -1003,3 +1003,89 @@ describe("the pending-end row of a ban and a clock that runs ahead (ruling 55 of
     ).toEqual([]);
   });
 });
+
+describe("the OAuth families of a ban after an unban (ruling 56 of plan 12d)", () => {
+  it("refuses a race row of a family on the ban row after the unban, at introspection and the refresh grant", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    // A confidential client that introspects its own refresh tokens.
+    const made = await w.auth.api.oauth?.clients.create({
+      name: "Notes server",
+      authMethod: "client_secret_basic",
+      redirectUris: [REDIRECT],
+      introspect: true,
+    });
+    if (!made?.ok || !made.value.clientSecret) throw new Error("the create failed");
+    const rs = { clientId: made.value.client.id, secret: made.value.clientSecret };
+    const auth = { authorization: basicHeader(rs.clientId, rs.secret) };
+    // 20 families: more than the ban ends in its call, so its row names the rest.
+    for (let i = 0; i < 20; i++) {
+      const p = await pkce();
+      const { code } = await authorized(w, s.cookie, {
+        clientId: rs.clientId,
+        challenge: p.challenge,
+        scope: "mcp:read offline_access",
+      });
+      const res = await w.auth.handle(
+        tokenPost(
+          {
+            grant_type: "authorization_code",
+            code,
+            code_verifier: p.verifier,
+            redirect_uri: REDIRECT,
+            resource: RESOURCE,
+          },
+          auth,
+        ),
+      );
+      expect(res.status).toBe(200);
+    }
+    const rows = await w.storage.findMany(
+      "oauthToken",
+      [{ field: "userId", op: "eq", value: s.user.id }],
+      { sort: { field: "id", dir: "asc" } },
+    );
+    const last = rows.at(-1);
+    if (!last) throw new Error("no refresh row");
+    w.clock.advance(MINUTE_MS);
+    // A refresh in flight on Postgres writes its new row after the token delete of the ban.
+    const race = `or_${randomBase64Url(32)}`;
+    const storage = w.storage as StorageAdapter;
+    const transaction = storage.transaction.bind(storage);
+    storage.transaction = (fn) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          delete: async (model, where) => {
+            const n = await tx.delete(model, where);
+            if (model === "oauthToken")
+              await storage.create("oauthToken", {
+                ...last,
+                id: `${last.id.slice(0, 10)}${"Z".repeat(16)}`,
+                tokenHash: await sha256Hex(race),
+                usedAt: null,
+                parentId: last.id,
+                createdAt: w.clock.now(),
+                updatedAt: w.clock.now(),
+              });
+            return n;
+          },
+        }),
+      );
+    expect((await ban(w, s.user.id)).ok).toBe(true);
+    storage.transaction = transaction;
+    const [row] = await w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "session-end" },
+      { field: "identifier", op: "eq", value: s.user.id },
+    ]);
+    expect(row?.data?.families).toContain(last.familyId);
+    // The unban comes before the sweep.
+    w.clock.advance(MINUTE_MS);
+    expect((await unban(w, s.user.id)).ok).toBe(true);
+    expect(await introspect(w, rs, race)).toEqual({ active: false });
+    const res = await w.auth.handle(
+      tokenPost({ grant_type: "refresh_token", refresh_token: race }, auth),
+    );
+    expect(res.status).toBe(400);
+  });
+});

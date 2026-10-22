@@ -4,6 +4,7 @@ import { limit } from "../limiter/limit.js";
 import { decodeJws } from "../primitives/jwk.js";
 import { issuerOf } from "./jwt.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
+import { familyStart } from "./oauth-family.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { subjectFor } from "./oauth-subject.js";
 import {
@@ -133,7 +134,8 @@ async function refreshAnswer(
   if (row.usedAt !== null || row.expiresAt.getTime() <= config.clock.now().getTime()) return null;
   const served = servedGrantScopes(config, row.scopes);
   if (!served) return null;
-  const user = await liveUser(config, row.userId);
+  // The ban rule and the deactivate door take the start of the family (rulings 55 and 56 of plan 12d).
+  const user = await liveUser(config, row.userId, familyStart(row));
   if (!user || (await familyRevoked(config, user, row))) return null;
   return {
     active: true,

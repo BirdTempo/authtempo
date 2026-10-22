@@ -475,3 +475,109 @@ const FAMILY_COUNTS: Record<number, [number, number, number, number[]]> = {
   7: [50, 1, 5, [48, 42]],
   20: [50, 1, 5, [48, 50, 41]],
 };
+
+/** One refresh on a counting view of the binding: its status, queries, and reads of ta_verification. */
+async function countedRefresh(clientId: string, refreshToken: string) {
+  const { db, c } = counting(env.DB);
+  const res = await make(db, true, OAUTH).handle(
+    tokenRequest({ grant_type: "refresh_token", refresh_token: refreshToken, client_id: clientId }),
+  );
+  const pending = c.sql.filter((q) => /purpose"?\s+IN/i.test(q)).length;
+  return { status: res.status, queries: c.n, pending };
+}
+
+/**
+ * Writes a refresh row of a race: a copy of `row` with a new id, token, and
+ * family. On Postgres such a row commits after the token delete of the act
+ * began (core test/scim/users.test.ts writes it inside the transaction). D1
+ * sends the act as one batch, so the row comes after it here. The door reads
+ * the same rows, so the count is the count of the door. Answers the token.
+ */
+async function raceRow(row: Record<string, unknown>, mark: string, familyId: unknown) {
+  const token = `or_${base64Url(crypto.getRandomValues(new Uint8Array(32)).buffer)}`;
+  const copy: Record<string, unknown> = {
+    ...row,
+    id: `${String(row.id).slice(0, 10)}${mark.repeat(16)}`,
+    token_hash: await sha256Hex(token),
+    family_id: familyId,
+    used_at: null,
+    parent_id: null,
+  };
+  const keys = Object.keys(copy);
+  await env.DB.prepare(
+    `INSERT INTO ta_oauth_token (${keys.join(", ")}) VALUES (${keys.map(() => "?").join(", ")})`,
+  )
+    .bind(...keys.map((k) => copy[k]))
+    .run();
+  return token;
+}
+
+describe("the family door of a SCIM deactivate on D1 (ruling 56 of plan 12d)", () => {
+  it("refuses a family that the act did not delete, on the pending-end row and on the record", async () => {
+    const setup = make(env.DB, false, OAUTH);
+    const { token } = await acme(setup);
+    const { token: first } = await signIn(setup, ADA);
+    for (let i = 1; i < 40; i++) await signIn(setup, ADA);
+    const create = await counted(token, "POST", "/Users", { schemas: [USER_URN], userName: ADA });
+    expect(create.status).toBe(201);
+    const id = String(create.body.id);
+    const { clientId, tokens } = await families(setup, first, 20);
+    const last = await env.DB.prepare(
+      "SELECT * FROM ta_oauth_token WHERE user_id = (SELECT id FROM ta_user WHERE email = ?) ORDER BY id DESC LIMIT 1",
+    )
+      .bind(ADA)
+      .first<Record<string, unknown>>();
+    if (!last) throw new Error("no refresh row");
+    // A family that began after the last write of its user reads no row.
+    const fresh = await countedRefresh(clientId, tokens[0] ?? "");
+    expect(fresh.status).toBe(200);
+    const off = await make(env.DB, false, OAUTH).handle(
+      new Request(`${API}/auth/scim/v2/Users/${id}`, {
+        method: "PATCH",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/scim+json" },
+        body: JSON.stringify({
+          schemas: [PATCH_URN],
+          Operations: [{ op: "replace", path: "active", value: false }],
+        }),
+      }),
+    );
+    expect(off.status).toBe(200);
+    // A race row of a family that the pending-end row names: the act did not delete it.
+    const row = await env.DB.prepare(
+      "SELECT data FROM ta_verification WHERE purpose = 'session-end'",
+    ).first<{ data: string }>();
+    expect(JSON.parse(row?.data ?? "{}").families).toContain(last.family_id);
+    const named = await countedRefresh(clientId, await raceRow(last, "Z", last.family_id));
+    while ((await pendingRows()) > 0) {
+      await make(env.DB, false, OAUTH).api.sweepExpired();
+    }
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM ta_verification WHERE purpose = 'session-end-record'",
+      ).first("n"),
+    ).toBe(1);
+    // After every sweep, a race row of a family that no row names: the record refuses it.
+    const family = `${String(last.family_id).slice(0, 10)}${"Y".repeat(16)}`;
+    const record = await countedRefresh(clientId, await raceRow(last, "Y", family));
+    expect([fresh, named, record].map((r) => [r.status, r.queries, r.pending])).toEqual(
+      DOOR_COUNTS,
+    );
+    for (const r of [fresh, named, record]) expect(r.queries).toBeLessThanOrEqual(50);
+  }, 120_000);
+});
+
+/**
+ * The refresh grant on the binding, 2026-10-22 (ruling 56 of plan 12d): the
+ * status, the queries, and the reads of the pending-end rows and records.
+ * A family that began after the last write of its user reads no row: 11
+ * queries with the new tokens (`fresh`). A family from before that write
+ * reads the rows once, +1 query (`familyRevoked`). The refused refresh then
+ * ends the family with its mark and its delete, in 9 queries in all. That
+ * holds for a family on the pending-end row (`named`) and for a family that
+ * only the record covers after every sweep (`record`).
+ */
+const DOOR_COUNTS = [
+  [200, 11, 0],
+  [400, 9, 1],
+  [400, 9, 1],
+];
