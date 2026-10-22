@@ -3,16 +3,22 @@ import type { ResolvedConfig } from "../config.js";
 import { organizationChange } from "../observe/events.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
-import type { TeamMemberRow, TeamRow, UserRow } from "../schema.js";
-import { findManyIn } from "../storage/batch.js";
+import type { OrganizationRow, TeamMemberRow, TeamRow, UserRow } from "../schema.js";
+import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
-import { hookGuard, runAfter, runBefore } from "./hooks.js";
-import { publicOrganization, standing, validOrganizationName, verified } from "./organizations.js";
+import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
+import {
+  type OrganizationSummary,
+  publicOrganization,
+  standing,
+  validOrganizationName,
+  verified,
+} from "./organizations.js";
 import { effectiveIn, type Standing, touchCheck } from "./permissions.js";
 import type { ResolvedOrganizations } from "./ranks.js";
 import { ROUNDS } from "./rounds.js";
 import { type PublicSession, publicSession, type ResolvedSession } from "./sessions.js";
-import { holdUser, userStays } from "./user-hold.js";
+import { holdUsers, usersStay } from "./user-hold.js";
 
 /**
  * Teams (plan 12k, spec 29 item 7). A team is a named group of members of
@@ -183,39 +189,64 @@ export async function createTeam(
   };
   const team = publicTeam(row);
   const organization = publicOrganization(s.value.organization);
-  const hooks = config.hooks.organization;
-  const limit = sc.o.limits.teamsPerOrganization;
   const written = await hookGuard(() =>
-    config.storage.transaction(async (tx): Promise<Result<true>> => {
-      // Also with no limit: a team of an organization that a delete removes must not stay.
-      if (!(await lockOrganization(tx, s.value.organization))) return fail("not_found");
-      if (limit !== null) {
-        const held = await tx.findMany(
-          "team",
-          [{ field: "organizationId", op: "eq", value: input.organizationId }],
-          { limit },
-        );
-        if (held.length >= limit) return fail("team_limit");
-      }
-      await runBefore(config.observe, "organization.beforeCreateTeam", hooks.beforeCreateTeam, {
-        organization,
-        team,
-        user: input.user,
-      });
-      await tx.create("team", row);
-      return ok(true);
-    }),
+    config.storage.transaction((tx) =>
+      createTeamIn(config, tx, { organization: s.value.organization, row, by: input.user }),
+    ),
   );
   if (!written.ok) return written;
   await runAfter(
     config.observe,
     "organization.afterCreateTeam",
-    hooks.afterCreateTeam,
+    config.hooks.organization.afterCreateTeam,
     { organization, team, user: input.user },
     row.id,
   );
   config.observe.emit(organizationChange("afterCreateTeam", organization.id));
   return ok(team);
+}
+
+/**
+ * The team create in the caller's transaction (ruling 25 N3 of plan 12d).
+ * `createTeam` calls it after its standing check, and a SCIM group create
+ * calls it with no user caller (`by` null). It takes the organization lock,
+ * counts `teamsPerOrganization`, runs `beforeCreateTeam`, and writes the
+ * row. The caller runs `afterCreateTeam` after its commit.
+ *
+ * With `by` null no team hook runs: the SCIM group write is the act, and a
+ * cascade fires no team hook either. `hooks.scim.afterChange` reports it.
+ */
+export async function createTeamIn(
+  config: ResolvedConfig,
+  tx: StorageAdapter,
+  input: { organization: OrganizationRow; row: TeamRow; by: UserRow | null },
+): Promise<Result<true>> {
+  const sc = scope(config);
+  if (!sc) return fail("not_found");
+  // Also with no limit: a team of an organization that a delete removes must not stay.
+  if (!(await lockOrganization(tx, input.organization))) return fail("not_found");
+  const limit = sc.o.limits.teamsPerOrganization;
+  if (limit !== null) {
+    const held = await tx.findMany(
+      "team",
+      [{ field: "organizationId", op: "eq", value: input.row.organizationId }],
+      { limit },
+    );
+    if (held.length >= limit) return fail("team_limit");
+  }
+  if (input.by)
+    await runBefore(
+      config.observe,
+      "organization.beforeCreateTeam",
+      config.hooks.organization.beforeCreateTeam,
+      {
+        organization: publicOrganization(input.organization),
+        team: publicTeam(input.row),
+        user: input.by,
+      },
+    );
+  await tx.create("team", input.row);
+  return ok(true);
 }
 
 /** Renames a team. Needs `team:update`. */
@@ -231,34 +262,59 @@ export async function updateTeam(
   if (!validOrganizationName(input.name)) return fail("invalid_body");
   const { team, organization } = t.value;
   const now = config.clock.now();
-  const hooks = config.hooks.organization;
   const written = await hookGuard(() =>
-    config.storage.transaction(async (tx): Promise<Result<true>> => {
-      await runBefore(config.observe, "organization.beforeUpdateTeam", hooks.beforeUpdateTeam, {
-        organization,
-        team: publicTeam(team),
-        patch: { name: input.name },
-        user: input.user,
-      });
-      const n = await tx.update("team", [{ field: "id", op: "eq", value: team.id }], {
-        name: input.name,
-        updatedAt: now,
-      });
-      // Zero rows: a delete ran after the read. A zero-row update writes nothing.
-      return n === 0 ? fail("not_found") : ok(true);
-    }),
+    config.storage.transaction((tx) =>
+      renameTeamIn(config, tx, { organization, team, name: input.name, by: input.user, now }),
+    ),
   );
   if (!written.ok) return written;
   const stored = publicTeam({ ...team, name: input.name, updatedAt: now });
   await runAfter(
     config.observe,
     "organization.afterUpdateTeam",
-    hooks.afterUpdateTeam,
+    config.hooks.organization.afterUpdateTeam,
     { organization, team: stored, user: input.user },
     team.id,
   );
   config.observe.emit(organizationChange("afterUpdateTeam", organization.id));
   return ok(stored);
+}
+
+/**
+ * The team rename in the caller's transaction (ruling 25 N3 of plan 12d).
+ * `updateTeam` calls it after its checks, and a SCIM group rename calls it
+ * with `by` null. Then no team hook runs, as `createTeamIn` says. The
+ * caller checks the name rule first.
+ */
+export async function renameTeamIn(
+  config: ResolvedConfig,
+  tx: StorageAdapter,
+  input: {
+    organization: OrganizationSummary;
+    team: TeamRow;
+    name: string;
+    by: UserRow | null;
+    now: Date;
+  },
+): Promise<Result<true>> {
+  if (input.by)
+    await runBefore(
+      config.observe,
+      "organization.beforeUpdateTeam",
+      config.hooks.organization.beforeUpdateTeam,
+      {
+        organization: input.organization,
+        team: publicTeam(input.team),
+        patch: { name: input.name },
+        user: input.by,
+      },
+    );
+  const n = await tx.update("team", [{ field: "id", op: "eq", value: input.team.id }], {
+    name: input.name,
+    updatedAt: input.now,
+  });
+  // Zero rows: a delete ran after the read. A zero-row update writes nothing.
+  return n === 0 ? fail("not_found") : ok(true);
 }
 
 /**
@@ -295,71 +351,19 @@ export async function deleteTeam(
   config: ResolvedConfig,
   input: { user: UserRow; teamId: string },
 ): Promise<Result<{ ok: true }>> {
-  const sc = scope(config);
-  if (!sc) return fail("not_found");
+  if (!scope(config)) return fail("not_found");
   const v = verified(input.user);
   if (!v.ok) return v;
   const t = await teamStanding(config, input.user, input.teamId, { team: ["delete"] });
   if (!t.ok) return t;
   const { team, organization } = t.value;
-  const summary = publicTeam(team);
-  const hooks = config.hooks.organization;
-  const byTeam: Where<"session">[] = [{ field: "activeTeamId", op: "eq", value: team.id }];
   // ok(false): a set moved a session into the team after the lock read. The next round locks it.
   let deleted: Result<boolean> = ok(false);
   for (let round = 0; round < ROUNDS && deleted.ok && !deleted.value; round++)
     deleted = await hookGuard(() =>
-      config.storage.transaction(async (tx): Promise<Result<boolean>> => {
-        // With row locks, the ids of the sessions that act in the team, and their locks.
-        const locks = tx.lockInOrder !== undefined;
-        const ids = locks ? (await tx.findMany("session", byTeam)).map((x) => x.id) : [];
-        await tx.lockInOrder?.("session", [{ field: "id", op: "in", value: ids }]);
-        if (sc.keepLastTeam) {
-          if (!(await lockOrganization(tx, organization))) return fail("not_found");
-          const held = await tx.findMany(
-            "team",
-            [{ field: "organizationId", op: "eq", value: team.organizationId }],
-            { limit: 2 },
-          );
-          if (held.length <= 1) return fail("last_team");
-        }
-        if (locks) {
-          // After the team lock, no set moves a session into the team. A session that a set
-          // moved in after the read above has no lock here, so this round writes nothing.
-          if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
-          if ((await tx.findMany("session", byTeam)).some((x) => !ids.includes(x.id)))
-            return ok(false);
-        }
-        await runBefore(config.observe, "organization.beforeDeleteTeam", hooks.beforeDeleteTeam, {
-          organization,
-          team: summary,
-          user: input.user,
-        });
-        if ((await tx.delete("team", [{ field: "id", op: "eq", value: team.id }])) === 0)
-          return fail("not_found");
-        // The invitations come after the team row and before the team member rows, in the order
-        // of user-hold.ts (ruling 50 of plan 12k).
-        const pending = await tx.findMany("invitation", [
-          { field: "organizationId", op: "eq", value: team.organizationId },
-          { field: "acceptedAt", op: "eq", value: null },
-        ]);
-        for (const invitation of pending) {
-          const teamIds = invitation.teamIds ?? [];
-          if (!teamIds.includes(team.id)) continue;
-          const rest = teamIds.filter((id) => id !== team.id);
-          await tx.update(
-            "invitation",
-            [
-              { field: "id", op: "eq", value: invitation.id },
-              { field: "acceptedAt", op: "eq", value: null },
-            ],
-            { teamIds: rest.length > 0 ? rest : null },
-          );
-        }
-        await tx.delete("teamMember", [{ field: "teamId", op: "eq", value: team.id }]);
-        await tx.update("session", byTeam, { activeTeamId: null });
-        return ok(true);
-      }),
+      config.storage.transaction((tx) =>
+        deleteTeamIn(config, tx, { organization, team, by: input.user }),
+      ),
     );
   if (!deleted.ok) return deleted;
   // Each round lost to a set: the person tries again.
@@ -367,12 +371,95 @@ export async function deleteTeam(
   await runAfter(
     config.observe,
     "organization.afterDeleteTeam",
-    hooks.afterDeleteTeam,
-    { organization, team: summary, user: input.user },
+    config.hooks.organization.afterDeleteTeam,
+    { organization, team: publicTeam(team), user: input.user },
     team.id,
   );
   config.observe.emit(organizationChange("afterDeleteTeam", organization.id));
   return ok({ ok: true });
+}
+
+/**
+ * One round of the team delete in the caller's transaction (ruling 25 N3 of
+ * plan 12d), with the locks and the cascade of `deleteTeam`. `deleteTeam`
+ * runs the rounds, and so does a SCIM group delete, with `by` null. Then no
+ * team hook runs, as `createTeamIn` says. The answer `ok(false)` means that
+ * a set moved a session into the team after the lock read: the caller
+ * writes nothing and runs the next round.
+ *
+ * `members` runs the caller's member writes in their step of the lock order
+ * of user-hold.ts: after the invitations and before the team member rows.
+ * A SCIM group delete changes the roles of the group's members there.
+ */
+export async function deleteTeamIn(
+  config: ResolvedConfig,
+  tx: StorageAdapter,
+  input: {
+    organization: OrganizationSummary;
+    team: TeamRow;
+    by: UserRow | null;
+    members?: (tx: StorageAdapter) => Promise<void>;
+  },
+): Promise<Result<boolean>> {
+  const sc = scope(config);
+  if (!sc) return fail("not_found");
+  const { team, organization } = input;
+  const byTeam: Where<"session">[] = [{ field: "activeTeamId", op: "eq", value: team.id }];
+  // With row locks, the ids of the sessions that act in the team, and their locks.
+  const locks = tx.lockInOrder !== undefined;
+  const ids = locks ? (await tx.findMany("session", byTeam)).map((x) => x.id) : [];
+  await tx.lockInOrder?.("session", [{ field: "id", op: "in", value: ids }]);
+  if (sc.keepLastTeam) {
+    if (!(await lockOrganization(tx, organization))) return fail("not_found");
+    const held = await tx.findMany(
+      "team",
+      [{ field: "organizationId", op: "eq", value: team.organizationId }],
+      { limit: 2 },
+    );
+    if (held.length <= 1) return fail("last_team");
+  }
+  if (locks) {
+    // After the team lock, no set moves a session into the team. A session that a set
+    // moved in after the read above has no lock here, so this round writes nothing.
+    if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
+    if ((await tx.findMany("session", byTeam)).some((x) => !ids.includes(x.id))) return ok(false);
+  }
+  if (input.by)
+    await runBefore(
+      config.observe,
+      "organization.beforeDeleteTeam",
+      config.hooks.organization.beforeDeleteTeam,
+      {
+        organization,
+        team: publicTeam(team),
+        user: input.by,
+      },
+    );
+  if ((await tx.delete("team", [{ field: "id", op: "eq", value: team.id }])) === 0)
+    return fail("not_found");
+  // The invitations come after the team row and before the team member rows, in the order
+  // of user-hold.ts (ruling 50 of plan 12k).
+  const pending = await tx.findMany("invitation", [
+    { field: "organizationId", op: "eq", value: team.organizationId },
+    { field: "acceptedAt", op: "eq", value: null },
+  ]);
+  for (const invitation of pending) {
+    const teamIds = invitation.teamIds ?? [];
+    if (!teamIds.includes(team.id)) continue;
+    const rest = teamIds.filter((id) => id !== team.id);
+    await tx.update(
+      "invitation",
+      [
+        { field: "id", op: "eq", value: invitation.id },
+        { field: "acceptedAt", op: "eq", value: null },
+      ],
+      { teamIds: rest.length > 0 ? rest : null },
+    );
+  }
+  await input.members?.(tx);
+  await tx.delete("teamMember", [{ field: "teamId", op: "eq", value: team.id }]);
+  await tx.update("session", byTeam, { activeTeamId: null });
+  return ok(true);
 }
 
 /**
@@ -448,8 +535,7 @@ export async function addTeamMember(
   config: ResolvedConfig,
   input: { user: UserRow; teamId: string; userId: string },
 ): Promise<Result<TeamMemberSummary>> {
-  const sc = scope(config);
-  if (!sc) return fail("not_found");
+  if (!scope(config)) return fail("not_found");
   const v = verified(input.user);
   if (!v.ok) return v;
   const t = await teamStanding(config, input.user, input.teamId, TEAM_MEMBER_ADD);
@@ -473,84 +559,154 @@ export async function addTeamMember(
   ]);
   if (!memberUser) return fail("not_found");
   const now = config.clock.now();
-  const row: TeamMemberRow = {
-    id: newId(now),
-    teamId: team.id,
-    organizationId: team.organizationId,
-    userId: input.userId,
-    createdAt: now,
-    updatedAt: now,
-  };
-  const hooks = config.hooks.organization;
-  const summary = publicTeam(team);
-  const limit = sc.o.limits.membersPerTeam;
+  let row: TeamMemberRow | undefined;
   try {
     const written = await hookGuard(() =>
-      config.storage.transaction(async (tx): Promise<Result<true>> => {
-        // The added user first, in the lock order of user-hold.ts, for the reason of the member
-        // add (plan 12a Task 11). The hold writes no new value, so a refusal below changes nothing.
-        await holdUser(config.observe, tx, input.userId);
-        // Zero rows: a delete ran after the read. A zero-row update writes nothing.
-        if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
-        // The member row again, after the hold: a member removal holds the same user (ruling 43).
-        // So the removal commits before this read, or it waits for this commit.
-        if (
-          !(await tx.findOne("member", [
-            { field: "organizationId", op: "eq", value: team.organizationId },
-            { field: "userId", op: "eq", value: input.userId },
-          ]))
-        )
-          return fail("not_found");
-        // A no-op add runs no hook. The unique key stays the guard for a race.
-        if (
-          await tx.findOne("teamMember", [
-            { field: "teamId", op: "eq", value: team.id },
-            { field: "userId", op: "eq", value: input.userId },
-          ])
-        )
-          return fail("already_member");
-        if (limit !== null) {
-          const held = await tx.findMany(
-            "teamMember",
-            [{ field: "teamId", op: "eq", value: team.id }],
-            { limit },
-          );
-          if (held.length >= limit) return fail("team_member_limit");
-        }
-        await runBefore(
-          config.observe,
-          "organization.beforeAddTeamMember",
-          hooks.beforeAddTeamMember,
-          {
-            organization,
-            team: summary,
-            teamMember: { teamId: team.id, userId: input.userId },
-            memberUser,
-            by: input.user,
-          },
-        );
-        await tx.create("teamMember", row);
-        await userStays(tx, input.userId);
-        return ok(true);
-      }),
+      config.storage.transaction((tx) =>
+        addTeamMembersIn(config, tx, {
+          organization,
+          team,
+          userIds: [memberUser.id],
+          hooks: { by: input.user, users: new Map([[memberUser.id, memberUser]]) },
+          now,
+          strict: true,
+        }),
+      ),
     );
     if (!written.ok) return written;
+    row = written.value[0];
   } catch (err) {
     // Caught outside the transaction: inside, Postgres has already aborted it.
     if (err instanceof StorageError && err.code === "unique_violation")
       return fail("already_member");
     throw err;
   }
+  if (!row) return fail("not_found");
+  const summary = publicTeam(team);
   const added = teamMemberSummary(row, memberUser);
   await runAfter(
     config.observe,
     "organization.afterAddTeamMember",
-    hooks.afterAddTeamMember,
+    config.hooks.organization.afterAddTeamMember,
     { organization, team: summary, teamMember: added, memberUser, by: input.user },
     row.id,
   );
   config.observe.emit(organizationChange("afterAddTeamMember", organization.id));
   return ok(added);
+}
+
+/**
+ * The team member add in the caller's transaction (ruling 25 N3 of plan
+ * 12d), for one person or many. `addTeamMember` calls it after its standing
+ * and touch checks, and a SCIM group write calls it with `by` null. The
+ * steps keep the order of `addTeamMember`: the hold of the added users,
+ * the team lock, the member rows again, the team rows that exist, the
+ * count of `membersPerTeam`, the before hooks, the rows, and the read
+ * after the inserts. The hold comes before the team lock, in the lock order
+ * of user-hold.ts (ruling 43 of plan 12k).
+ *
+ * With `strict` (one person, `addTeamMember`), a person with no member row
+ * answers `not_found` and a person in the team answers `already_member`.
+ * Without it (a SCIM group write), each such person is skipped. `hooks`
+ * holds the user caller and the user row of each person; with `hooks` null
+ * no team hook runs, as `createTeamIn` says. With `teamLocked`, the caller
+ * took `lockTeam` earlier in the transaction, and the add does not take it
+ * again. The answer is the new rows. The caller runs `afterAddTeamMember`
+ * after its commit.
+ *
+ * Cost: one statement of the hold per 50 persons on Postgres and none on
+ * D1, the team lock, one read per 50 persons of the member rows and of the
+ * team rows, the count, one create per new row, and one read per 50 of the
+ * users. A SCIM write reads no user with the hold of `holdUser`: on D1 that
+ * hold costs three statements per person.
+ */
+export async function addTeamMembersIn(
+  config: ResolvedConfig,
+  tx: StorageAdapter,
+  input: {
+    organization: OrganizationSummary;
+    team: TeamRow;
+    userIds: readonly string[];
+    hooks: { by: UserRow; users: ReadonlyMap<string, UserRow> } | null;
+    now: Date;
+    strict: boolean;
+    teamLocked?: boolean;
+  },
+): Promise<Result<TeamMemberRow[]>> {
+  const sc = scope(config);
+  if (!sc) return fail("not_found");
+  const { team, now } = input;
+  const ids = [...new Set(input.userIds)];
+  if (ids.length === 0) return ok([]);
+  // The added users first, in the lock order of user-hold.ts, for the reason of the member
+  // add (plan 12a Task 11). The hold writes no new value, so a refusal below changes nothing.
+  await holdUsers(tx, ids);
+  // Zero rows: a delete ran after the read. A zero-row update writes nothing.
+  if (!input.teamLocked && !(await lockTeam(tx, team.id, team.organizationId)))
+    return fail("not_found");
+  // The member rows again, after the hold: a member removal holds the same user (ruling 43).
+  // So the removal commits before this read, or it waits for this commit.
+  const members = new Set(
+    (
+      await findManyIn(tx, "member", "userId", ids, [
+        { field: "organizationId", op: "eq", value: team.organizationId },
+      ])
+    ).map((m) => m.userId),
+  );
+  if (input.strict && ids.some((id) => !members.has(id))) return fail("not_found");
+  // A no-op add runs no hook. The unique key stays the guard for a race.
+  const inTeam = new Set(
+    (
+      await findManyIn(tx, "teamMember", "userId", ids, [
+        { field: "teamId", op: "eq", value: team.id },
+      ])
+    ).map((r) => r.userId),
+  );
+  if (input.strict && ids.some((id) => inTeam.has(id))) return fail("already_member");
+  const adding = ids.filter((id) => members.has(id) && !inTeam.has(id));
+  if (adding.length === 0) return ok([]);
+  const limit = sc.o.limits.membersPerTeam;
+  if (limit !== null) {
+    const held = await tx.findMany("teamMember", [{ field: "teamId", op: "eq", value: team.id }], {
+      limit,
+    });
+    if (held.length + adding.length > limit) return fail("team_member_limit");
+  }
+  const rows = adding.map(
+    (userId): TeamMemberRow => ({
+      id: newId(now),
+      teamId: team.id,
+      organizationId: team.organizationId,
+      userId,
+      createdAt: now,
+      updatedAt: now,
+    }),
+  );
+  const hooks = input.hooks;
+  if (hooks)
+    for (const userId of adding) {
+      const memberUser = hooks.users.get(userId);
+      // The user caller reads each person before the transaction.
+      if (!memberUser) return fail("not_found");
+      await runBefore(
+        config.observe,
+        "organization.beforeAddTeamMember",
+        config.hooks.organization.beforeAddTeamMember,
+        {
+          organization: input.organization,
+          team: publicTeam(team),
+          teamMember: { teamId: team.id, userId },
+          memberUser,
+          by: hooks.by,
+        },
+      );
+    }
+  for (const row of rows) await tx.create("teamMember", row);
+  await usersStay(
+    tx,
+    rows.map((r) => r.userId),
+  );
+  return ok(rows);
 }
 
 /**
@@ -605,8 +761,7 @@ export async function removeTeamMember(
     ? input.user
     : await config.storage.findOne("user", [{ field: "id", op: "eq", value: input.userId }]);
   if (!memberUser) return fail("not_found");
-  const hooks = config.hooks.organization;
-  const event = {
+  const event: TeamMemberEvent = {
     organization,
     team: publicTeam(team),
     teamMember: teamMemberSummary(row, memberUser),
@@ -614,42 +769,99 @@ export async function removeTeamMember(
     by: input.user,
   };
   const removed = await hookGuard(() =>
-    config.storage.transaction(async (tx): Promise<Result<true>> => {
-      // The session locks come before the team row, in the order of user-hold.ts (ruling 48).
-      await tx.lockInOrder?.("session", [{ field: "userId", op: "eq", value: input.userId }]);
-      // The lock of setActiveTeam: a set that holds it commits first, and the session update
-      // below sees its active team (ruling 43). Zero rows: a delete ran after the read.
-      if (!(await lockTeam(tx, team.id, team.organizationId))) return fail("not_found");
-      await runBefore(
-        config.observe,
-        "organization.beforeRemoveTeamMember",
-        hooks.beforeRemoveTeamMember,
-        event,
-      );
-      if ((await tx.delete("teamMember", [{ field: "id", op: "eq", value: row.id }])) === 0)
-        return fail("not_found");
-      // An active team needs its membership, as setActiveTeam checks.
-      await tx.update(
-        "session",
-        [
-          { field: "userId", op: "eq", value: input.userId },
-          { field: "activeTeamId", op: "eq", value: team.id },
-        ],
-        { activeTeamId: null },
-      );
-      return ok(true);
-    }),
+    config.storage.transaction((tx) =>
+      removeTeamMembersIn(config, tx, {
+        team,
+        userIds: [input.userId],
+        events: [event],
+        strict: true,
+      }),
+    ),
   );
   if (!removed.ok) return removed;
   await runAfter(
     config.observe,
     "organization.afterRemoveTeamMember",
-    hooks.afterRemoveTeamMember,
+    config.hooks.organization.afterRemoveTeamMember,
     event,
     row.id,
   );
   config.observe.emit(organizationChange("afterRemoveTeamMember", event.organization.id));
   return ok({ ok: true });
+}
+
+/** The event of a team member hook of a user caller. */
+export interface TeamMemberEvent {
+  organization: OrganizationSummary;
+  team: TeamSummary;
+  teamMember: TeamMemberSummary;
+  memberUser: UserRow;
+  by: UserRow;
+}
+
+/**
+ * The team member removal in the caller's transaction (ruling 25 N3 of
+ * plan 12d), for one person or many. `removeTeamMember` calls it after its
+ * checks, and a SCIM group write calls it with no events. The steps keep
+ * the order of `removeTeamMember`: the locks of the persons' sessions, the
+ * team lock, the before hook of each event, the team rows, and the active
+ * team of the sessions. With `strict`, a person with no team row answers
+ * `not_found`, and no row changes. An empty `events` runs no team hook, as
+ * `createTeamIn` says. `teamLocked` is the flag of `addTeamMembersIn`. The
+ * caller runs `afterRemoveTeamMember` after its commit.
+ *
+ * Cost: per 50 persons, one session lock statement on Postgres (none on
+ * D1), one delete, and one session update. Then the team lock once.
+ */
+export async function removeTeamMembersIn(
+  config: ResolvedConfig,
+  tx: StorageAdapter,
+  input: {
+    team: TeamRow;
+    userIds: readonly string[];
+    events: readonly TeamMemberEvent[];
+    strict: boolean;
+    teamLocked?: boolean;
+  },
+): Promise<Result<true>> {
+  const { team } = input;
+  const ids = [...new Set(input.userIds)].sort();
+  if (ids.length === 0) return ok(true);
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK) chunks.push(ids.slice(i, i + IN_CHUNK));
+  // The session locks come before the team row, in the order of user-hold.ts (ruling 48).
+  for (const chunk of chunks)
+    await tx.lockInOrder?.("session", [{ field: "userId", op: "in", value: chunk }]);
+  // The lock of setActiveTeam: a set that holds it commits first, and the session update
+  // below sees its active team (ruling 43). Zero rows: a delete ran after the read.
+  if (!input.teamLocked && !(await lockTeam(tx, team.id, team.organizationId)))
+    return fail("not_found");
+  for (const event of input.events)
+    await runBefore(
+      config.observe,
+      "organization.beforeRemoveTeamMember",
+      config.hooks.organization.beforeRemoveTeamMember,
+      event,
+    );
+  let removed = 0;
+  for (const chunk of chunks)
+    removed += await tx.delete("teamMember", [
+      { field: "teamId", op: "eq", value: team.id },
+      { field: "userId", op: "in", value: chunk },
+    ]);
+  // Fewer rows: a removal ran after the read. Each team row that a delete wrote goes back.
+  if (input.strict && removed < ids.length) stopWith("not_found");
+  // An active team needs its membership, as setActiveTeam checks.
+  for (const chunk of chunks)
+    await tx.update(
+      "session",
+      [
+        { field: "userId", op: "in", value: chunk },
+        { field: "activeTeamId", op: "eq", value: team.id },
+      ],
+      { activeTeamId: null },
+    );
+  return ok(true);
 }
 
 /**

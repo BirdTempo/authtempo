@@ -69,9 +69,10 @@ function functions(): Fn[] {
   return out;
 }
 
-const DIRECT_NAMES = new Set(["holdUser", "lockOrganization", "lockTeam"]);
+// holdUsers is the batch hold of ruling 25 N3 of plan 12d: lockInOrder of the user rows.
+const DIRECT_NAMES = new Set(["holdUser", "holdUsers", "lockOrganization", "lockTeam"]);
 /** A direct call of a lock function. */
-const DIRECT = /(?<!function )\b(holdUser|lockOrganization|lockTeam)\(/g;
+const DIRECT = /(?<!function )\b(holdUser|holdUsers|lockOrganization|lockTeam)\(/g;
 /**
  * A compare-and-set write: an update whose where holds `updatedAt` with
  * `eq`, or the `unchanged(...)` where of profile.ts. The write fails when
@@ -85,7 +86,7 @@ const CALL = /(?<![\w.])(?<!function )(\w+)\(/g;
 /**
  * The lock scan. It finds a lock before a before hook in three forms:
  *
- * 1. A direct call of `holdUser`, `lockOrganization`, or `lockTeam`, or a
+ * 1. A direct call of `holdUser`, `holdUsers`, `lockOrganization`, or `lockTeam`, or a
  *    compare-and-set write (CAS above), earlier in the same function text.
  * 2. A call of a lock helper earlier in the same function text. A lock
  *    helper is a function that holds form 1 or calls another lock helper.
@@ -230,17 +231,19 @@ describe("the table of locks over a before hook", () => {
         "Member add",
         "addMemberIn organization.beforeAddMember: holdUser, lockOrganization, joinWrite > scimCreateUser > holdUser, joinWrite > writeChange > holdUser, joinWrite > writeChange > lockOrganization",
       ],
-      ["Team member add", "addTeamMember organization.beforeAddTeamMember: holdUser, lockTeam"],
+      // The team writes of ruling 25 N3 of plan 12d: the user-caller functions call the
+      // tx-level forms after their checks, and take no lock before the call.
+      ["Team member add", "addTeamMembersIn organization.beforeAddTeamMember: holdUsers, lockTeam"],
       ["Organization create", "createOrganization organization.beforeAddMember: holdUser"],
       ["Organization create", "createOrganization organization.beforeCreate: holdUser"],
-      ["Team create", "createTeam organization.beforeCreateTeam: lockOrganization"],
+      ["Team create", "createTeamIn organization.beforeCreateTeam: lockOrganization"],
       [
         "Account delete",
         "deleteAccountRows organization.beforeDelete: runDelete > user compare-and-set",
       ],
       ["Account delete", "deleteAccountRows user.beforeDelete: runDelete > user compare-and-set"],
       ["Organization delete", "deleteOrganization organization.beforeDelete: lockOrganization"],
-      ["Team delete", "deleteTeam organization.beforeDeleteTeam: lockOrganization, lockTeam"],
+      ["Team delete", "deleteTeamIn organization.beforeDeleteTeam: lockOrganization, lockTeam"],
       ["Invite", "inviteMember organization.beforeInvite: lockOrganization"],
       [
         "Impersonation start",
@@ -250,7 +253,7 @@ describe("the table of locks over a before hook", () => {
         "Member removal or leave",
         "removeMember organization.beforeRemoveMember: lockOrganization, ownerWrite, withRoleLoss, holdUser",
       ],
-      ["Team member removal", "removeTeamMember organization.beforeRemoveTeamMember: lockTeam"],
+      ["Team member removal", "removeTeamMembersIn organization.beforeRemoveTeamMember: lockTeam"],
       [
         "Platform role revoke",
         "revokePlatformRole organization.beforeRemoveMember: holdUser, ownerLock",

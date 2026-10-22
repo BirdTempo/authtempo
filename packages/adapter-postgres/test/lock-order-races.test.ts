@@ -243,6 +243,8 @@ function lockLog(log: string[]): StorageAdapter {
     ...tx,
     lockInOrder: (async (m, where) => {
       if (m === "session") log.push("sessions");
+      // The batch hold of the team member add (holdUsers, ruling 53 of plan 12d) locks by id.
+      if (m === "user") log.push("user");
       await tx.lockInOrder?.(m, where);
     }) as NonNullable<StorageAdapter["lockInOrder"]>,
     update(m, where, data) {
