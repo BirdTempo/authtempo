@@ -1,5 +1,18 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  // The addresses of the test servers of the worktree's slot. Turbo runs in
+  // strict env mode, so a variable not listed here never reaches a test, and
+  // the helper then stops with "not set". scripts/test-servers.mjs run sets
+  // them. apps/site/test/test-ports.test.ts holds this list to the variables
+  // that the helpers read and to scripts/test-ports.mjs.
+  "globalPassThroughEnv": [
+    "AUTHTEMPO_LIBSQL_CLI_URL",
+    "AUTHTEMPO_LIBSQL_COMPAT_URL",
+    "AUTHTEMPO_LIBSQL_URL",
+    "AUTHTEMPO_MYSQL84_URL",
+    "AUTHTEMPO_MYSQL97_URL",
+    "TEMPO_AUTH_PG_URL"
+  ],
   "tasks": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
     // The site build reads the root package.json, SECURITY.md, and LICENSE

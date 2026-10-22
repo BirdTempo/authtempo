@@ -6,6 +6,16 @@ import { createClient } from "@libsql/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { assertFreshBuild, linesOf, PKG, runBin } from "./support/bin.js";
 
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = process.env[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
+
 // `authtempo migrate --target sqlite --tables compat` (plan 12g Task 8b). The
 // file opens through node:sqlite, the driver of the CLI seam for a file. A URL
 // opens the libSQL server authtempo-libsql-cli-compat of docker-compose.yml,
@@ -25,8 +35,8 @@ const COMPAT = [
   "0010_compat_schema_v13",
 ];
 
-/** The libSQL server of this file. migrate-sqlite.test.ts empties the server on 8090 at the same time. */
-const LIBSQL_URL = process.env.AUTHTEMPO_LIBSQL_COMPAT_URL ?? "http://127.0.0.1:8091";
+/** The libSQL server of this file. migrate-sqlite.test.ts empties its own server at the same time. */
+const LIBSQL_URL = serverUrl("AUTHTEMPO_LIBSQL_COMPAT_URL");
 
 const COMPAT_PKG = join(PKG, "../compat-better-auth");
 /** Better Auth 1.7.2's own SQLite schema, as its CLI writes it. */
@@ -219,7 +229,7 @@ describe("authtempo migrate --target sqlite --tables compat (plan 12g Task 8b)",
 
   it("migrates the Better Auth tables of a libSQL server from a URL", async () => {
     // The server is this file's own, so the test empties it first. It fails, never
-    // skips, when the server is down: run docker compose up -d libsql-cli-compat.
+    // skips, when the server is down: run node scripts/test-servers.mjs up.
     const client = createClient({ url: LIBSQL_URL });
     try {
       try {
@@ -235,7 +245,7 @@ describe("authtempo migrate --target sqlite --tables compat (plan 12g Task 8b)",
         );
       } catch (e) {
         throw new Error(
-          `the CLI libSQL compat test needs the server at ${LIBSQL_URL}: ${(e as Error).message}. Run: docker compose up -d libsql-cli-compat`,
+          `the CLI libSQL compat test needs the server at ${LIBSQL_URL}: ${(e as Error).message}. Run: node scripts/test-servers.mjs up`,
         );
       }
       await client.executeMultiple(BETTER_AUTH);

@@ -24,7 +24,10 @@ import { assertFreshBuild, ESC, linesOf, runBin } from "./support/bin.js";
 import { d1Project, removeScaffolds } from "./support/d1-project.js";
 import { OPERATOR_SECRET } from "./support/example-worker.js";
 import { fakeIo } from "./support/fake-io.js";
-import { freshDatabase } from "./support/pg.js";
+import { freshDatabase, WRONG_PASSWORD_URL } from "./support/pg.js";
+
+/** The port of the Postgres of this slot. No line of the CLI may name it. */
+const PG_PORT = new URL(WRONG_PASSWORD_URL).port;
 
 const BASE = "https://api.example.com";
 const INFO = `${BASE}/auth/operator/info`;
@@ -219,7 +222,7 @@ describe("authtempo info (plan 11c2)", () => {
   it("holds no secret value on any line, also when the driver echoes it", async () => {
     const env = {
       AUTH_SECRET: "probe-secret-77",
-      DATABASE_URL: "postgres://tempo:wrong-pass-5@localhost:5439/none",
+      DATABASE_URL: WRONG_PASSWORD_URL,
       AUTHTEMPO_OPERATOR_SECRET: OPERATOR_SECRET,
     };
     const io = fakeIo({ env });
@@ -241,7 +244,7 @@ describe("authtempo info (plan 11c2)", () => {
       "tempo:wrong-pass-5",
       OPERATOR_SECRET,
       "localhost",
-      "5439",
+      PG_PORT,
     ];
     for (const line of [...io.stdout, ...io.stderr])
       for (const s of never) expect(line, s).not.toContain(s);
@@ -278,7 +281,7 @@ describe("authtempo info (plan 11c2)", () => {
       expect(io.stderr).toEqual(["reading the postgres database"]);
       for (const line of [...io.stdout, ...io.stderr]) {
         expect(line).not.toContain("localhost");
-        expect(line).not.toContain("5439");
+        expect(line).not.toContain(PG_PORT);
       }
 
       const human = fakeIo({ env: { DATABASE_URL: db.url } });
@@ -480,7 +483,7 @@ describe("authtempo info (plan 11c2)", () => {
 
   it("reads the operator secret before any part, so a missing secret costs no connection", async () => {
     const io = fakeIo({
-      env: { DATABASE_URL: "postgres://tempo:wrong-pass-5@localhost:5439/none" },
+      env: { DATABASE_URL: WRONG_PASSWORD_URL },
     });
     expect(await main(["info", BASE, "--target", "postgres"], io)).toBe(2);
     expect(io.stdout).toEqual([]);

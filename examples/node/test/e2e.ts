@@ -8,6 +8,16 @@ import postgres from "postgres";
 import { createApp, type Serve } from "../src/app.ts";
 
 const runtime = "Bun" in globalThis ? "bun" : "node";
+
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = process.env[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
 const version = runtime === "bun" ? Bun.version : process.versions.node;
 const serve: Serve =
   runtime === "bun"
@@ -31,8 +41,7 @@ async function freePort(): Promise<number> {
 }
 const PORT = await freePort();
 const BASE = `http://127.0.0.1:${PORT}`;
-const ADMIN_URL =
-  process.env.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost:5439/tempo_auth";
+const ADMIN_URL = serverUrl("TEMPO_AUTH_PG_URL");
 const DB = `ex_${runtime}_${crypto.randomUUID().replaceAll("-", "")}`;
 const DB_URL = ADMIN_URL.replace(/\/[^/]+$/, `/${DB}`);
 
@@ -122,7 +131,7 @@ try {
   );
 } catch (e) {
   failures.push(
-    `${e instanceof Error ? e.message : String(e)}; is Postgres up (docker compose up -d)?`,
+    `${e instanceof Error ? e.message : String(e)}; is Postgres up (node scripts/test-servers.mjs up)?`,
   );
 } finally {
   await server?.close();

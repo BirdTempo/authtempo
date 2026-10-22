@@ -16,3 +16,5 @@ packages/core/.events/
 # wrangler dev secrets for local runs. Never commit them.
 .dev.vars
 *.env
+# The test server addresses of this worktree. scripts/test-servers.mjs up writes it; *.env above covers it too.
+.test-servers.env

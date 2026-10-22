@@ -6,9 +6,19 @@ import { describe, expect, it } from "vitest";
 import { call, harness, signIn } from "../support/harness.ts";
 import { authOnMysql, remotePool } from "./mysql-node.ts";
 
-// The MySQL 8.4 server of docker-compose.yml. The test fails, never skips,
-// when the server does not answer: docker compose up -d mysql84.
-const SERVER = process.env.AUTHTEMPO_MYSQL84_URL ?? "mysql://root:tempo@127.0.0.1:3384/";
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = process.env[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
+
+// The MySQL 8.4 server of the slot of this worktree. The test fails, never
+// skips, when the server does not answer: node scripts/test-servers.mjs up.
+const SERVER = serverUrl("AUTHTEMPO_MYSQL84_URL");
 
 /** A test database is site_<ms>_<hex>. A killed run leaves one, so a database older than this goes. */
 const STALE_MS = 60 * 60 * 1000;
@@ -19,7 +29,7 @@ async function connectServer(): Promise<Awaited<ReturnType<typeof createConnecti
     return await createConnection({ uri: SERVER });
   } catch (e) {
     throw new Error(
-      `the MySQL guide test needs MySQL 8.4 at ${new URL(SERVER).host}: ${(e as Error).message}. Run: docker compose up -d mysql84`,
+      `the MySQL guide test needs MySQL 8.4 at ${new URL(SERVER).host}: ${(e as Error).message}. Run: node scripts/test-servers.mjs up`,
     );
   }
 }

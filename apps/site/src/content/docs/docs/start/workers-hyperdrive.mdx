@@ -38,7 +38,7 @@ The command `authtempo init my-app --stack workers-postgres` writes the files of
 1. Copy the folder `examples/worker-postgres` of the repo to `examples/my-app`.
 2. In `examples/my-app/package.json`, change `name` to `my-app`.
 3. Run `pnpm install` at the root of the repo.
-4. Start the local Postgres with `docker compose up -d` at the root of the repo. It listens on port 5439.
+4. Start the local Postgres with `docker compose up -d postgres` at the root of the repo. The `localConnectionString` of `wrangler.jsonc` names its address.
 5. Read `wrangler.jsonc`. It keeps `nodejs_compat` on, because the driver opens a socket through Node.js APIs.
 
 <Code code={config} lang="jsonc" title="examples/my-app/wrangler.jsonc" />

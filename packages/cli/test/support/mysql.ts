@@ -1,14 +1,24 @@
 import mysql, { type RowDataPacket } from "mysql2/promise";
 
-/** The two MySQL servers of docker-compose.yml (owner decision 2 of plan 12g). */
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = process.env[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
+
+/** The two MySQL servers of the slot of this worktree (owner decision 2 of plan 12g). */
 export const MYSQL_SERVERS = [
   {
     version: "8.4",
-    url: process.env.AUTHTEMPO_MYSQL84_URL ?? "mysql://root:tempo@127.0.0.1:3384/",
+    url: serverUrl("AUTHTEMPO_MYSQL84_URL"),
   },
   {
     version: "9.7",
-    url: process.env.AUTHTEMPO_MYSQL97_URL ?? "mysql://root:tempo@127.0.0.1:3397/",
+    url: serverUrl("AUTHTEMPO_MYSQL97_URL"),
   },
 ] as const;
 
@@ -27,7 +37,7 @@ async function admin<T>(server: MysqlServer, run: (c: mysql.Connection) => Promi
     });
   } catch (e) {
     throw new Error(
-      `the CLI MySQL tests need MySQL ${server.version} at ${server.url}: ${(e as Error).message}. Run: docker compose up -d mysql84 mysql97`,
+      `the CLI MySQL tests need MySQL ${server.version} at ${server.url}: ${(e as Error).message}. Run: node scripts/test-servers.mjs up`,
     );
   }
   try {

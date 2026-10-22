@@ -19,6 +19,16 @@ import { assertFreshBuild, linesOf, PKG, runBin } from "./support/bin.js";
 import { BASE, deployment, healthy } from "./support/deployment.js";
 import { fakeIo } from "./support/fake-io.js";
 
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = process.env[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
+
 // `authtempo migrate --target sqlite` and `check --target sqlite` (plan 12g
 // Task 6). A file opens through node:sqlite; a URL opens the libSQL server
 // authtempo-libsql-cli of docker-compose.yml, which only this file uses.
@@ -41,7 +51,7 @@ const CORE = [
 ];
 
 /** The CLI's own libSQL server (ruling 1 of plan 12g, map point 15). */
-const LIBSQL_URL = process.env.AUTHTEMPO_LIBSQL_CLI_URL ?? "http://127.0.0.1:8090";
+const LIBSQL_URL = serverUrl("AUTHTEMPO_LIBSQL_CLI_URL");
 
 let dir: string;
 let file: string;
@@ -184,7 +194,7 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
 
   it("takes a libSQL URL from an environment variable and its token from a file", async () => {
     // The server is the CLI's own, so the test empties it first. It fails, never
-    // skips, when the server is down: run docker compose up -d libsql-cli.
+    // skips, when the server is down: run node scripts/test-servers.mjs up.
     const client = createClient({ url: LIBSQL_URL });
     try {
       const rs = await client.execute(
@@ -193,7 +203,7 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
       for (const row of rs.rows) await client.execute(`DROP TABLE "${String(row.name)}"`);
     } catch (e) {
       throw new Error(
-        `the CLI libSQL test needs the server at ${LIBSQL_URL}: ${(e as Error).message}. Run: docker compose up -d libsql-cli`,
+        `the CLI libSQL test needs the server at ${LIBSQL_URL}: ${(e as Error).message}. Run: node scripts/test-servers.mjs up`,
       );
     }
     const token = "libsql-token-canary-0123456789";

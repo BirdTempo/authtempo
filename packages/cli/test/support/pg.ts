@@ -1,8 +1,23 @@
 import { MIGRATIONS } from "@authtempo/adapter-postgres";
 import postgres, { type Sql } from "postgres";
 
-export const ADMIN_URL =
-  process.env.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost:5439/tempo_auth";
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = process.env[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
+
+export const ADMIN_URL = serverUrl("TEMPO_AUTH_PG_URL");
+
+/** The host and port of the Postgres of this slot, as a driver error and the CLI name them. */
+export const PG_HOST = new URL(ADMIN_URL).host;
+
+/** A URL of the Postgres of this slot with a wrong password: the server answers 28P01. */
+export const WRONG_PASSWORD_URL = `postgres://tempo:wrong-pass-5@${PG_HOST}/none`;
 
 /** The name prefix of each CLI test database. The sweep of a normal run acts on it only. */
 export const PREFIX = "cli_";
@@ -180,7 +195,7 @@ export async function dropLiveDatabases(): Promise<void> {
  * not enough. The first call drops the stale databases of killed runs.
  * `id` names the database of a sweep test, and `prefix` and `url` keep a
  * sweep test apart from the databases of other runs. Fails loudly when
- * Postgres is not reachable: run `docker compose up -d`.
+ * Postgres is not reachable: run `node scripts/test-servers.mjs up`.
  */
 export async function freshDatabase(
   opts: { id?: string; prefix?: string; url?: string } = {},
@@ -205,7 +220,7 @@ export async function freshDatabase(
     await admin.unsafe(`CREATE DATABASE ${name}`);
   } catch (e) {
     throw new Error(
-      `the CLI tests need Postgres at ${adminUrl}: ${message(e)}. Run: docker compose up -d`,
+      `the CLI tests need Postgres at ${adminUrl}: ${message(e)}. Run: node scripts/test-servers.mjs up`,
     );
   } finally {
     await admin.end({ timeout: 5 });
