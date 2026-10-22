@@ -7,6 +7,14 @@ import {
   serviceProviderConfig,
 } from "../../engine/scim/discovery.js";
 import {
+  scimCreateGroup,
+  scimDeleteGroup,
+  scimGetGroup,
+  scimListGroups,
+  scimPatchGroup,
+  scimReplaceGroup,
+} from "../../engine/scim/groups.js";
+import {
   authenticateScim,
   createScimToken,
   listScimTokens,
@@ -288,6 +296,46 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       "scim.users.write",
       false,
       (ctx, c) => scimDeleteUser(config, c, ctx.params.id ?? "", ifMatch(ctx)),
+    ),
+    // The Groups of plan 12d Task 11. A PATCH answers 204 unless the query asks for
+    // attributes (Behavior 4), so the route hands the URL on.
+    users("GET", "/scim/v2/Groups", "GET /scim/v2/Groups", "scim.groups.read", false, (ctx, c) =>
+      scimListGroups(config, c, ctx.url),
+    ),
+    users("POST", "/scim/v2/Groups", "POST /scim/v2/Groups", "scim.groups.write", true, (_, c, b) =>
+      scimCreateGroup(config, c, b),
+    ),
+    users(
+      "GET",
+      "/scim/v2/Groups/:id",
+      "GET /scim/v2/Groups/:id",
+      "scim.groups.read",
+      false,
+      (ctx, c) => scimGetGroup(config, c, ctx.params.id ?? "", ctx.url),
+    ),
+    users(
+      "PUT",
+      "/scim/v2/Groups/:id",
+      "PUT /scim/v2/Groups/:id",
+      "scim.groups.write",
+      true,
+      (ctx, c, b) => scimReplaceGroup(config, c, ctx.params.id ?? "", b, ifMatch(ctx)),
+    ),
+    users(
+      "PATCH",
+      "/scim/v2/Groups/:id",
+      "PATCH /scim/v2/Groups/:id",
+      "scim.groups.write",
+      true,
+      (ctx, c, b) => scimPatchGroup(config, c, ctx.params.id ?? "", b, ifMatch(ctx), ctx.url),
+    ),
+    users(
+      "DELETE",
+      "/scim/v2/Groups/:id",
+      "DELETE /scim/v2/Groups/:id",
+      "scim.groups.write",
+      false,
+      (ctx, c) => scimDeleteGroup(config, c, ctx.params.id ?? "", ifMatch(ctx)),
     ),
     // The refusals of the design's 9.5, and the two resource searches. Without the two,
     // a search of a directory meets a 404 that does not say "not supported".

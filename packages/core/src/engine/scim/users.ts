@@ -39,6 +39,7 @@ import {
   auditDraft,
   impersonationStops,
   type OperatorAuditDraft,
+  SSO_AUDIT_REASON,
   writeAuditIn,
 } from "../operator/audit.js";
 import { writesPlatformRole } from "../operator/guards.js";
@@ -63,7 +64,7 @@ import {
   validUserName,
 } from "../users.js";
 import { scimBase } from "./discovery.js";
-import { asciiLower, parseScimFilter } from "./filter.js";
+import { asciiLower, parseScimFilter, scimKey } from "./filter.js";
 import {
   type AttrFacts,
   type AttrRule,
@@ -74,6 +75,7 @@ import {
   parsePatch,
   USER_RULES,
 } from "./patch.js";
+import { scimRoleOf } from "./roles.js";
 import { type AttributeNotation, pageParams, selectAttributes } from "./select.js";
 import type { ScimCaller } from "./tokens.js";
 
@@ -111,7 +113,7 @@ export type ScimUserCaller = ScimCaller | ScimAppCaller;
 export const SCIM_ROUTE_CALLS_BEFORE = 3;
 
 /** The SCIM error of an answer, in the shape of RFC 7644 section 3.12. */
-function scimFail(status: number, detail: string, scimType?: ScimType): ScimResult {
+export function scimFail(status: number, detail: string, scimType?: ScimType): ScimResult {
   return {
     status,
     body: {
@@ -124,38 +126,29 @@ function scimFail(status: number, detail: string, scimType?: ScimType): ScimResu
 }
 
 /** A lost race on the version of the row: the conditional update matched no row. */
-class VersionLost extends Error {
+export class VersionLost extends Error {
   constructor() {
     super("authtempo: the SCIM version moved");
     this.name = "VersionLost";
   }
 }
 
-/**
- * The key form of a text that SCIM compares with no case: NFKC, then lower
- * case. RFC 7643 sections 4.1.1 and 4.2 make `userName` and `displayName`
- * case-insensitive.
- */
-export function scimKey(text: string): string {
-  return text.normalize("NFKC").toLowerCase();
-}
-
 /** The detail of the address rule (Behavior 2). */
 const ADDRESS_RULE = "the address is not in a verified domain of this organization";
 
 /** The weak ETag of a version (RFC 7644 section 3.14). */
-function etagOf(version: number): string {
+export function etagOf(version: number): string {
   return `W/"${version}"`;
 }
 
 /** True when `If-Match` names the version: its weak ETag, or `*`. */
-function matches(ifMatch: string | null, version: number): boolean {
+export function matches(ifMatch: string | null, version: number): boolean {
   if (ifMatch === null) return true;
   const sent = ifMatch.trim();
   return sent === "*" || sent === etagOf(version);
 }
 
-function isObject(v: unknown): v is Record<string, unknown> {
+export function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
@@ -164,9 +157,9 @@ const LONE_SURROGATE_RE = /\p{Cs}/u;
 const badText = (s: string): boolean => s.includes("\u0000") || LONE_SURROGATE_RE.test(s);
 
 /** A refusal of a resource body. */
-type Refused = { ok: false; answer: ScimResult };
+export type Refused = { ok: false; answer: ScimResult };
 
-function refused(detail: string, scimType: ScimType): Refused {
+export function refused(detail: string, scimType: ScimType): Refused {
   return { ok: false, answer: scimFail(400, detail, scimType) };
 }
 
@@ -198,7 +191,7 @@ function simpleValue(value: unknown, facts: AttrFacts, name: string): unknown | 
   return value;
 }
 
-function isRefused(v: unknown): v is Refused {
+export function isRefused(v: unknown): v is Refused {
   return isObject(v) && v.ok === false && "answer" in v;
 }
 
@@ -285,7 +278,7 @@ function enterpriseValue(value: unknown): Record<string, unknown> | undefined | 
 }
 
 /** A text of a column: no control character, at most `max` characters. */
-function columnText(value: unknown, name: string, max: number): string | Refused {
+export function columnText(value: unknown, name: string, max: number): string | Refused {
   if (typeof value !== "string" || value.length === 0 || value.length > max)
     return refused(`${name} takes a text of 1 to ${max} characters`, "invalidValue");
   if (hasControlChar(value) || badText(value))
@@ -635,19 +628,28 @@ async function rowOf(
 
 const NOT_FOUND = (): ScimResult => scimFail(404, "no User of this organization has the id");
 
-/** The audit draft of a SCIM write: the token by its name, or the app by its name. */
-function draftOf(
+/** The audit actions of a SCIM write of a User or a Group. */
+export type ScimWriteAction =
+  | "scim_user_create"
+  | "scim_user_update"
+  | "scim_user_deactivate"
+  | "scim_user_delete"
+  | "scim_group_create"
+  | "scim_group_update"
+  | "scim_group_delete";
+
+/**
+ * The audit draft of a SCIM write: the token by its name, or the app by its
+ * name. The reason is the fixed text of the action (`SSO_AUDIT_REASON`). A
+ * group write names no user.
+ */
+export function draftOf(
   caller: ScimUserCaller,
-  action: "scim_user_create" | "scim_user_update" | "scim_user_deactivate" | "scim_user_delete",
-  targetUserId: string,
+  action: ScimWriteAction,
+  targetUserId: string | null,
   data: Record<string, unknown>,
 ): OperatorAuditDraft {
-  const reason = {
-    scim_user_create: "a directory created a user",
-    scim_user_update: "a directory changed a user",
-    scim_user_deactivate: "a directory deactivated a user",
-    scim_user_delete: "a directory deleted a user",
-  }[action];
+  const reason = SSO_AUDIT_REASON[action];
   if ("actor" in caller) {
     const d = auditDraft(caller.actor, {
       action,
@@ -673,7 +675,7 @@ function draftOf(
 }
 
 /** The meter of one SCIM call: the calls before it, and the ready check of the storage. */
-async function meterFor(config: ResolvedConfig, caller: ScimUserCaller): Promise<Meter> {
+export async function meterFor(config: ResolvedConfig, caller: ScimUserCaller): Promise<Meter> {
   const ready = (await config.storage.readyStatements?.()) ?? 1;
   return meterOf(config.storage, ("actor" in caller ? 0 : SCIM_ROUTE_CALLS_BEFORE) + ready);
 }
@@ -703,7 +705,7 @@ async function fillName(tx: StorageAdapter, user: UserRow, doc: UserDoc, now: Da
 }
 
 /** A refusal of a hook or a rule of core, as a SCIM error: the status of the code, and the code. */
-function failAnswer(r: { status: number; code: string; message?: string }): ScimResult {
+export function failAnswer(r: { status: number; code: string; message?: string }): ScimResult {
   return scimFail(r.status, r.message ?? r.code);
 }
 
@@ -745,7 +747,9 @@ interface Join {
  * The checks of a member add (Behavior 3 and 6), before the first lock and
  * the first write. A row that exists stays, and the answer is null. Then
  * the member limit and `organization.beforeAddMember` with `via: "scim"`.
- * The role is `scim.defaultRole`; Task 11 reads it from the groups.
+ * A create gives `scim.defaultRole`: a new User is in no group. A
+ * reactivate (`scimUserId`) gives the role of the User's groups by the role
+ * map (plan 12d Task 11 Behavior 2, ruling 53 P7). It gives back no team.
  */
 async function joinChecks(
   config: ResolvedConfig,
@@ -753,6 +757,7 @@ async function joinChecks(
   organizationId: string,
   user: UserRow,
   now: Date,
+  scimUserId: string | null,
 ): Promise<Join | null> {
   const o = config.organizations;
   if (!o || !config.scim) stopWith("not_found");
@@ -766,7 +771,10 @@ async function joinChecks(
     id: newId(now),
     organizationId,
     userId: user.id,
-    role: config.scim.defaultRole,
+    role:
+      scimUserId === null
+        ? config.scim.defaultRole
+        : await scimRoleOf(config, tx, organizationId, scimUserId),
     createdAt: now,
     updatedAt: now,
   };
@@ -868,7 +876,7 @@ export async function scimCreateUser(
     const before = async (tx: StorageAdapter, user: UserRow) => {
       join = null;
       // A user with no member row before the create gets one, unless the User is inactive.
-      if (doc.active) join = await joinChecks(config, tx, caller.organizationId, user, now);
+      if (doc.active) join = await joinChecks(config, tx, caller.organizationId, user, now, null);
     };
     // After the claim or the create: the locks, the member row, the scimUser row, the audit row.
     const after = async (tx: StorageAdapter, user: UserRow) => {
@@ -1233,7 +1241,7 @@ async function writeChange(
           config.hooks.organization.beforeRemoveMember,
           removeEvent,
         );
-      if (reactivate) join = await joinChecks(config, tx, caller.organizationId, user, now);
+      if (reactivate) join = await joinChecks(config, tx, caller.organizationId, user, now, row.id);
       // The lock order of user-hold.ts: the user row, the sessions, the organization row, the member rows.
       await holdUser(tx, user.id);
       if (deactivate || change.kind === "delete") await holdSessions(tx, user.id);

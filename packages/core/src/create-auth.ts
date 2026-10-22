@@ -146,6 +146,14 @@ import {
   updateRole,
 } from "./engine/roles.js";
 import {
+  scimCreateGroup,
+  scimDeleteGroup,
+  scimGetGroup,
+  scimListGroups,
+  scimPatchGroup,
+  scimReplaceGroup,
+} from "./engine/scim/groups.js";
+import {
   createScimToken,
   listScimTokens,
   revokeScimToken,
@@ -201,6 +209,7 @@ import {
   deleteConnection,
   listConnections,
   type SsoConnectionSummary,
+  setRoleMap,
   updateConnection,
 } from "./engine/sso/connections.js";
 import {
@@ -468,6 +477,60 @@ export interface ScimApi {
       ifMatch?: string;
     }): Promise<ScimResult>;
   };
+  /**
+   * The SCIM Groups of one organization (plan 12d Task 11), with the rules
+   * of the routes: the member caps, the role map, the teams, the version,
+   * and the audit rows with the app as the actor. A `patch` answers 204
+   * with no body unless its `url` asks for `attributes`.
+   */
+  groups: {
+    create(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      body: unknown;
+    }): Promise<ScimResult>;
+    get(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      url?: URL;
+    }): Promise<ScimResult>;
+    list(input: { actor: SsoAppActor; organizationId: string; url?: URL }): Promise<ScimResult>;
+    replace(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      body: unknown;
+      ifMatch?: string;
+    }): Promise<ScimResult>;
+    patch(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      body: unknown;
+      ifMatch?: string;
+      url?: URL;
+    }): Promise<ScimResult>;
+    delete(input: {
+      actor: SsoAppActor;
+      organizationId: string;
+      id: string;
+      ifMatch?: string;
+    }): Promise<ScimResult>;
+  };
+  /**
+   * Sets the role map of an organization: `{ [group displayName]: role }`
+   * (plan 12d Task 11 Behavior 2). It is the `scimRoles` of the enabled
+   * connection that the organization created first, with the role rule of
+   * a connection update: never `owner`, never the platform role. Null
+   * clears it. No role changes at once: each member gets the role of the
+   * map at the next change of its groups, or at a rename of a group.
+   */
+  setRoleMap(input: {
+    actor: SsoAppActor;
+    organizationId: string;
+    map: Record<string, string> | null;
+  }): Promise<Result<SsoConnectionSummary>>;
 }
 
 export interface OAuthApi {
@@ -1269,6 +1332,24 @@ export function createAuth(input: AuthConfig): Auth {
                 patch: (i) => scimPatchUser(config, scimApp(i), i.id, i.body, i.ifMatch ?? null),
                 delete: (i) => scimDeleteUser(config, scimApp(i), i.id, i.ifMatch ?? null),
               },
+              groups: {
+                create: (i) => scimCreateGroup(config, scimApp(i), i.body),
+                get: (i) => scimGetGroup(config, scimApp(i), i.id, i.url ?? SCIM_NO_QUERY),
+                list: (i) => scimListGroups(config, scimApp(i), i.url ?? SCIM_NO_QUERY),
+                replace: (i) =>
+                  scimReplaceGroup(config, scimApp(i), i.id, i.body, i.ifMatch ?? null),
+                patch: (i) =>
+                  scimPatchGroup(
+                    config,
+                    scimApp(i),
+                    i.id,
+                    i.body,
+                    i.ifMatch ?? null,
+                    i.url ?? SCIM_NO_QUERY,
+                  ),
+                delete: (i) => scimDeleteGroup(config, scimApp(i), i.id, i.ifMatch ?? null),
+              },
+              setRoleMap: appCall(({ actor, ...i }) => setRoleMap(config, actor, i)),
             } satisfies ScimApi,
           }
         : {}),

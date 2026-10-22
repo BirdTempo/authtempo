@@ -70,7 +70,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
     // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
     // Plan 12d Task 10 adds the six routes of the SCIM Users.
-    expect(listed.length).toBe(180);
+    // Plan 12d Task 11 adds the six routes of the SCIM Groups.
+    expect(listed.length).toBe(186);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -393,7 +394,8 @@ describe("the entry fields and the module tie (plan 11g)", () => {
       .map((r) => `${r.method} ${r.path}`);
     expect(typed).toEqual(scim);
     // Plan 12d Task 10 adds the six routes of the SCIM Users.
-    expect(scim).toHaveLength(16);
+    // Plan 12d Task 11 adds the six routes of the SCIM Groups.
+    expect(scim).toHaveLength(22);
     for (const r of listed)
       if (r.path.startsWith("/scim/v2/")) expect(r.auth, r.path).toEqual(["scimToken"]);
   });

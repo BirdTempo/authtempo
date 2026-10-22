@@ -1,0 +1,378 @@
+import { env } from "cloudflare:test";
+import { type AuthConfig, createAuth, type MailMessage } from "@authtempo/core";
+import { TABLES } from "@authtempo/core/sql";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createD1Adapter, createD1Limiter } from "../src/index.js";
+
+// The queries of the SCIM Groups routes on the D1 binding (plan 12d Task
+// 11, ruling 25 N4, ruling 53 P4). D1 Free allows 50 queries per
+// invocation (D1 limits page updated 21 April 2026, read 2026-10-21). Each
+// request runs as the worker-d1 setup serves it: the D1 limiter and the D1
+// adapter on one counting view of the binding.
+//
+// The worst setup: `scim.groups: "both"`, so each group has a team; a role
+// map with a dynamic role; the member role hooks, which read the users; and
+// `membersPerTeam`, which adds the count. The caps of groups.ts come from
+// these counts: PATCH_MEMBERS_MAX for the members of one write, and
+// GROUP_ROLE_USERS_MAX for the role recompute of a rename or a delete.
+
+const API = "https://api.example.com";
+const APP = { kind: "app", name: "budget" } as const;
+const USER_URN = "urn:ietf:params:scim:schemas:core:2.0:User";
+const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";
+const PATCH_URN = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
+
+/** PATCH_MEMBERS_MAX and GROUP_ROLE_USERS_MAX of groups.ts, typed here. */
+const PATCH_CAP = 9;
+const ROLE_CAP = 250;
+
+/** A view of `db` that counts each statement, and each statement of a batch. */
+function counting(db: D1Database) {
+  const c = { n: 0 };
+  const hit = (b: PropertyKey) => b === "run" || b === "all" || b === "first" || b === "raw";
+  const wrap = (s: D1PreparedStatement): D1PreparedStatement =>
+    new Proxy(s, {
+      get(a, b) {
+        if (b === "bind") return (...v: unknown[]) => wrap(a.bind(...v));
+        if (hit(b)) c.n++;
+        const x = Reflect.get(a, b);
+        return typeof x === "function" ? x.bind(a) : x;
+      },
+    });
+  const counted = new Proxy(db, {
+    get(t, k) {
+      if (k === "prepare") return (sql: string) => wrap(t.prepare(sql));
+      if (k === "batch")
+        return (st: D1PreparedStatement[]) => {
+          c.n += st.length;
+          return t.batch(st);
+        };
+      const x = Reflect.get(t, k);
+      return typeof x === "function" ? x.bind(t) : x;
+    },
+  });
+  return { db: counted as D1Database, c };
+}
+
+const sent: MailMessage[] = [];
+const txt: Record<string, string[]> = {};
+const roleHooks: string[] = [];
+
+/** The engine on `db`. `limited` serves it with the D1 limiter, as worker-d1 does. */
+function make(db: D1Database, limited: boolean, extra: Partial<AuthConfig> = {}) {
+  return createAuth({
+    baseURL: API,
+    secret: "0123456789abcdef0123456789abcdef",
+    trustedOrigins: [],
+    storage: createD1Adapter(db),
+    limiter: limited ? createD1Limiter(db) : { allow: async () => true },
+    mail: { send: async (m) => void sent.push(m) },
+    organizations: {
+      teams: {},
+      dynamicRoles: { maxPerOrganization: 5 },
+      limits: { membersPerTeam: 1000 },
+    },
+    sso: {
+      oidc: true,
+      dns: [{ name: "a", txt: async (name) => txt[name] ?? [] }],
+      fetch: async () => Response.json({}),
+    },
+    scim: { groups: "both" },
+    // The role hooks make the recompute read the users of each role change.
+    hooks: {
+      organization: {
+        beforeUpdateMemberRole: (e) => void roleHooks.push(e.role),
+        afterUpdateMemberRole: () => {},
+      },
+    },
+    ...extra,
+  });
+}
+
+beforeEach(async () => {
+  await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+  sent.length = 0;
+  roleHooks.length = 0;
+});
+
+/** A magic link sign-in of `email` on `auth`: the user. */
+async function signIn(auth: ReturnType<typeof make>, email: string) {
+  await auth.api.requestMagicLink({ email, ip: null });
+  const text = sent.filter((m) => m.to === email).at(-1)?.text ?? "";
+  const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+  const r = await auth.api.verifyMagicLink({ token, ip: null, userAgent: null });
+  if (!r.ok || !("token" in r.value)) throw new Error("no session");
+  return r.value.user;
+}
+
+/**
+ * The organization `acme`: its verified domain, an OIDC connection, the
+ * dynamic role `web`, the role map, and a SCIM token.
+ */
+async function acme(auth: ReturnType<typeof make>) {
+  const owner = await signIn(auth, "owner@acme.example");
+  const made = await auth.api.createOrganization({ user: owner, slug: "acme", name: "Acme" });
+  if (!made.ok) throw new Error(made.code);
+  const organizationId = made.value.organization.id;
+  const sso = auth.api.sso;
+  const scim = auth.api.scim;
+  if (!sso || !scim) throw new Error("no sso or scim api");
+  const domain = await sso.domains.add({ actor: APP, organizationId, domain: "acme.example" });
+  if (!domain.ok || domain.value.record === null) throw new Error("no domain");
+  txt[domain.value.record.name] = [domain.value.record.value];
+  if (!(await sso.domains.verify({ actor: APP, id: domain.value.id })).ok)
+    throw new Error("no proof");
+  const connection = await sso.connections.create({
+    actor: APP,
+    organizationId,
+    kind: "oidc",
+    label: "Acme IdP",
+    issuer: "https://login.acme-idp.example",
+    clientId: "acme-client",
+    clientSecret: "acme-secret-0123456789",
+    endpoints: {
+      authorizeUrl: "https://login.acme-idp.example/authorize",
+      tokenUrl: "https://login.acme-idp.example/token",
+      jwksUrl: "https://login.acme-idp.example/keys",
+    },
+  });
+  if (!connection.ok) throw new Error(connection.code);
+  const role = await auth.api.createRole({
+    user: owner,
+    organizationId,
+    name: "web",
+    permissions: { member: ["read"] },
+  });
+  if (!role.ok) throw new Error(role.code);
+  const map = await scim.setRoleMap({
+    actor: APP,
+    organizationId,
+    map: { Admins: "admin", Web: "web" },
+  });
+  if (!map.ok) throw new Error(map.code);
+  const token = await scim.tokens.create({ actor: APP, organizationId, name: "directory" });
+  if (!token.ok) throw new Error(token.code);
+  return { organizationId, token: token.value.token };
+}
+
+/**
+ * One SCIM request: its status, body, and queries. With `worst`, the token
+ * was last used two minutes before, as after a pause of the directory. Then
+ * the route also writes `lastUsedAt`, the worst case of its steps.
+ */
+async function call(token: string, method: string, path: string, body?: unknown, worst = false) {
+  if (worst)
+    await env.DB.prepare("UPDATE ta_scim_token SET last_used_at = last_used_at - 120000").run();
+  const { db: view, c } = counting(env.DB);
+  const res = await make(view, true).handle(
+    new Request(`${API}/auth/scim/v2${path}`, {
+      method,
+      headers: {
+        authorization: `Bearer ${token}`,
+        ...(body === undefined ? {} : { "content-type": "application/scim+json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }),
+  );
+  const text = await res.text();
+  return {
+    status: res.status,
+    body: (text === "" ? null : JSON.parse(text)) as Record<string, unknown>,
+    queries: c.n,
+  };
+}
+
+/** `n` SCIM Users of acme: their ids. */
+async function users(token: string, n: number, from = 0) {
+  const ids: string[] = [];
+  for (let i = from; i < from + n; i++) {
+    const r = await call(token, "POST", "/Users", {
+      schemas: [USER_URN],
+      userName: `u${i}@acme.example`,
+    });
+    if (r.status !== 201) throw new Error(`user ${i}: ${r.status} ${JSON.stringify(r.body)}`);
+    ids.push(String(r.body.id));
+  }
+  return ids;
+}
+
+const members = (ids: readonly string[]) => ids.map((value) => ({ value }));
+const patch = (...ops: Record<string, unknown>[]) => ({ schemas: [PATCH_URN], Operations: ops });
+const count = async (sql: string) => Number(await env.DB.prepare(sql).first("n"));
+
+describe("the SCIM Groups on D1 (plan 12d Task 11, ruling 25 N4)", () => {
+  it("keeps each route at the member cap inside 50 queries", async () => {
+    const setup = make(env.DB, false);
+    const { token } = await acme(setup);
+    const ids = await users(token, 3 * PATCH_CAP + 1);
+    const first = ids.slice(0, PATCH_CAP);
+    const second = ids.slice(PATCH_CAP, 2 * PATCH_CAP);
+    const third = ids.slice(2 * PATCH_CAP, 3 * PATCH_CAP);
+    const spare = ids[3 * PATCH_CAP] ?? "";
+    // The create of a mapped group with a team and the most members of one write.
+    const create = await call(
+      token,
+      "POST",
+      "/Groups",
+      { schemas: [GROUP_URN], displayName: "Admins", members: members(first) },
+      true,
+    );
+    expect(create.status).toBe(201);
+    const id = String(create.body.id);
+    expect(await count("SELECT count(*) AS n FROM ta_team_member")).toBe(PATCH_CAP);
+    // One past the cap: refused before any write.
+    const over = await call(
+      token,
+      "PATCH",
+      `/Groups/${id}`,
+      patch({ op: "add", path: "members", value: members([...second, spare]) }),
+      true,
+    );
+    expect([over.status, over.body.scimType]).toEqual([400, "invalidValue"]);
+    // The worst PATCH: adds and a removal, so two role changes and both team writes.
+    const mixed = await call(
+      token,
+      "PATCH",
+      `/Groups/${id}`,
+      patch(
+        { op: "add", path: "members", value: members(second.slice(0, PATCH_CAP - 1)) },
+        { op: "remove", path: `members[value eq "${first[0]}"]` },
+      ),
+      true,
+    );
+    expect(mixed.status, JSON.stringify(mixed.body)).toBe(204);
+    const adds = await call(
+      token,
+      "PATCH",
+      `/Groups/${id}`,
+      patch({ op: "add", path: "members", value: members(third) }),
+      true,
+    );
+    expect(adds.status).toBe(204);
+    const get = await call(token, "GET", `/Groups/${id}`, undefined, true);
+    const list = await call(token, "GET", "/Groups?excludedAttributes=members", undefined, true);
+    const check = await call(
+      token,
+      "GET",
+      `/Groups?filter=${encodeURIComponent(`id eq "${id}" and members[value eq "${third[0]}"]`)}&excludedAttributes=members`,
+      undefined,
+      true,
+    );
+    expect(check.body.totalResults).toBe(1);
+    const counts = {
+      create: create.queries,
+      over: over.queries,
+      mixed: mixed.queries,
+      adds: adds.queries,
+      get: get.queries,
+      list: list.queries,
+      check: check.queries,
+    };
+    // Measured on the binding; see the ledger of plan 12d Task 11.
+    expect(counts).toEqual(MEASURED_CAP);
+    for (const n of Object.values(counts)) expect(n).toBeLessThanOrEqual(50);
+  }, 120_000);
+
+  it("keeps the rename and the delete of a mapped group at the role cap inside 50 queries", async () => {
+    const setup = make(env.DB, false);
+    const { token } = await acme(setup);
+    const ids = await users(token, ROLE_CAP);
+    const made = await call(token, "POST", "/Groups", {
+      schemas: [GROUP_URN],
+      displayName: "Admins",
+      members: members(ids.slice(0, PATCH_CAP)),
+    });
+    const id = String(made.body.id);
+    for (let i = PATCH_CAP; i < ROLE_CAP; i += PATCH_CAP) {
+      const r = await call(
+        token,
+        "PATCH",
+        `/Groups/${id}`,
+        patch({ op: "add", path: "members", value: members(ids.slice(i, i + PATCH_CAP)) }),
+      );
+      expect(r.status).toBe(204);
+    }
+    expect(await count("SELECT count(*) AS n FROM ta_member WHERE role = 'admin'")).toBe(ROLE_CAP);
+    // A rename out of the map: each member falls back to the default role.
+    const rename = await call(
+      token,
+      "PATCH",
+      `/Groups/${id}`,
+      patch({ op: "replace", path: "displayName", value: "Former" }),
+      true,
+    );
+    expect(rename.status).toBe(204);
+    expect(await count("SELECT count(*) AS n FROM ta_member WHERE role = 'member'")).toBe(ROLE_CAP);
+    // A rename into the map: each member gets the role again.
+    const back = await call(
+      token,
+      "PATCH",
+      `/Groups/${id}`,
+      patch({ op: "replace", path: "displayName", value: "Admins" }),
+      true,
+    );
+    expect(back.status).toBe(204);
+    const gone = await call(token, "DELETE", `/Groups/${id}`, undefined, true);
+    expect(gone.status).toBe(204);
+    expect(await count("SELECT count(*) AS n FROM ta_member WHERE role = 'member'")).toBe(ROLE_CAP);
+    expect(await count("SELECT count(*) AS n FROM ta_team")).toBe(0);
+    const counts = { rename: rename.queries, back: back.queries, delete: gone.queries };
+    expect(counts).toEqual(MEASURED_ROLES);
+    for (const n of Object.values(counts)) expect(n).toBeLessThanOrEqual(50);
+  }, 300_000);
+
+  it("keeps the reactivate of a User in mapped groups inside 50 queries", async () => {
+    const setup = make(env.DB, false);
+    const { token } = await acme(setup);
+    const [ada] = await users(token, 1);
+    for (const name of ["Admins", "Web"]) {
+      const r = await call(token, "POST", "/Groups", {
+        schemas: [GROUP_URN],
+        displayName: name,
+        members: members([ada ?? ""]),
+      });
+      expect(r.status).toBe(201);
+    }
+    const off = await call(
+      token,
+      "PATCH",
+      `/Users/${ada}`,
+      patch({ op: "replace", path: "active", value: false }),
+    );
+    expect(off.status).toBe(200);
+    const on = await call(
+      token,
+      "PATCH",
+      `/Users/${ada}`,
+      patch({ op: "replace", path: "active", value: true }),
+      true,
+    );
+    expect(on.status).toBe(200);
+    expect(await count("SELECT count(*) AS n FROM ta_member WHERE role = 'admin'")).toBe(1);
+    // A reactivate gives back the role, not the teams (ruling 53 P7).
+    expect(await count("SELECT count(*) AS n FROM ta_team_member")).toBe(0);
+    expect({ reactivate: on.queries }).toEqual(MEASURED_REACTIVATE);
+    expect(on.queries).toBeLessThanOrEqual(50);
+  }, 120_000);
+});
+
+/**
+ * The counts of the run on the binding, 2026-10-22, with the token write of
+ * `lastUsedAt` in each call (the worst route step). `mixed` is the worst
+ * write at PATCH_MEMBERS_MAX: 8 adds and 1 removal of a mapped group with a
+ * team, so two role changes, a team member removal, and the team member
+ * adds. The tenth value (`over`) answers 400 after 6 queries, before any
+ * write. `back` is the worst write at GROUP_ROLE_USERS_MAX: a rename into
+ * the map gives each of 250 members the mapped role.
+ */
+const MEASURED_CAP = {
+  create: 42,
+  over: 6,
+  mixed: 49,
+  adds: 45,
+  get: 6,
+  list: 5,
+  check: 6,
+};
+const MEASURED_ROLES = { rename: 41, back: 46, delete: 44 };
+const MEASURED_REACTIVATE = { reactivate: 28 };

@@ -347,6 +347,42 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
       "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 10)",
   },
   {
+    method: "GET",
+    path: "/scim/v2/Groups",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "POST",
+    path: "/scim/v2/Groups",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "GET",
+    path: "/scim/v2/Groups/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "PUT",
+    path: "/scim/v2/Groups/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "PATCH",
+    path: "/scim/v2/Groups/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
+    method: "DELETE",
+    path: "/scim/v2/Groups/:id",
+    reason:
+      "an IdP provisioning client calls it with a SCIM token; no SDK of an app calls the SCIM server (plan 12d Task 11)",
+  },
+  {
     method: "POST",
     path: "/scim/v2/Bulk",
     reason:

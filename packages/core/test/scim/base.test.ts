@@ -29,7 +29,10 @@ describe("the SCIM base (plan 12d Task 9)", () => {
     expect(await read(await scim(w, token, "GET", "/ServiceProviderConfig"))).toEqual([
       200,
       {
-        schemas: ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
+        schemas: [
+          "urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig",
+          "urn:authtempo:params:scim:schemas:extension:limits:2.0",
+        ],
         patch: { supported: true },
         bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
         filter: { supported: true, maxResults: 100 },
@@ -44,6 +47,12 @@ describe("the SCIM base (plan 12d Task 9)", () => {
             primary: true,
           },
         ],
+        // The member caps of a Group write, from the D1 budget (plan 12d Task 11).
+        "urn:authtempo:params:scim:schemas:extension:limits:2.0": {
+          groupMembersMax: 10_000,
+          membersPerRequestMax: 9,
+          roleRecomputeMax: 250,
+        },
         meta: {
           resourceType: "ServiceProviderConfig",
           location: `${SCIM_BASE}/ServiceProviderConfig`,

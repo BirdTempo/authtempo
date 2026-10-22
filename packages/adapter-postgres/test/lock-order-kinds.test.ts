@@ -259,8 +259,8 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
         return Response.json({ id_token: code, token_type: "Bearer" });
       },
     },
-    // Plan 12d Task 10: the SCIM Users of Acme.
-    scim: {},
+    // Plan 12d Task 10: the SCIM Users of Acme. Task 11: each Group has a team and a role.
+    scim: { groups: "both" },
     jwt: {
       verifyIdToken: async (input) => {
         const claims = idTokens[input.token];
@@ -563,6 +563,8 @@ async function scene(w: World) {
 
   const scim = w.auth.api.scim;
   if (!scim) throw new Error("no scim api");
+  // The role map of plan 12d Task 11: a member of the group Directory gets admin.
+  must(await scim.setRoleMap({ actor: APP, organizationId: acme, map: { Directory: "admin" } }));
   const scimToken = must(
     await scim.tokens.create({ actor: APP, organizationId: acme, name: "directory" }),
   ).token;
@@ -588,6 +590,9 @@ async function scene(w: World) {
 type Scene = Awaited<ReturnType<typeof scene>>;
 
 const reason = { reason: "Ticket 2", ip: null, userAgent: null } as const;
+
+/** The kinds of a SCIM group flow of plan 12d Task 11, with the create of its group. */
+const GROUP_KINDS = ["user", "session", "organization", "team", "member", "team member"];
 
 /** The kinds that each flow touches on the scene, so a flow that stops its writes fails here. */
 const TOUCHED: Record<string, string[]> = {
@@ -711,6 +716,13 @@ const TOUCHED: Record<string, string[]> = {
   "a SCIM deactivate": ["user", "session", "organization", "team", "member", "team member"],
   "a SCIM reactivate": ["user", "session", "organization", "member", "team member"],
   "a SCIM delete": ["user", "session", "organization", "member", "team member"],
+  // Plan 12d Task 11: each group flow first creates the group of Uma in the flow, so the
+  // kinds of the create (the claim, the team create, the role) show in each of them.
+  "a SCIM group create": GROUP_KINDS,
+  "a SCIM group member removal": GROUP_KINDS,
+  "a SCIM group member add": GROUP_KINDS,
+  "a SCIM group rename": GROUP_KINDS,
+  "a SCIM group delete": GROUP_KINDS,
 };
 
 /** One SCIM request of Acme's directory, and its answer as a Result. */
@@ -727,7 +739,11 @@ async function scimCall(w: World, s: Scene, method: string, path: string, body?:
   );
   const text = await res.text();
   return res.ok
-    ? { ok: true as const, value: text === "" ? null : (JSON.parse(text) as { id: string }) }
+    ? {
+        ok: true as const,
+        value:
+          text === "" ? null : (JSON.parse(text) as { id: string; members?: { value: string }[] }),
+      }
     : { ok: false as const, code: `${res.status} ${text}` };
 }
 
@@ -737,6 +753,24 @@ async function scimUma(w: World, s: Scene) {
     schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
     userName: "uma@example.org",
   });
+}
+
+/**
+ * The Group `Directory` of Acme with Uma in it (plan 12d Task 11): its id.
+ * The role map of the scene gives Uma admin, and she joins the team of the
+ * group.
+ */
+async function scimDirectory(w: World, s: Scene): Promise<string> {
+  const uma = must(await scimUma(w, s))?.id ?? "";
+  return (
+    must(
+      await scimCall(w, s, "POST", "/Groups", {
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+        displayName: "Directory",
+        members: [{ value: uma }],
+      }),
+    )?.id ?? ""
+  );
 }
 
 /** A PatchOp body of one operation. */
@@ -953,6 +987,54 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     const id = must(await scimUma(w, s))?.id ?? "";
     return scimCall(w, s, "DELETE", `/Users/${id}`);
   },
+  // Plan 12d Task 11: the group writes hold the added users, then the organization or
+  // the team row, then the member rows of the role recompute, then the team member rows.
+  "a SCIM group create": (w, s) => scimDirectory(w, s).then((id) => ({ ok: id !== "" })),
+  "a SCIM group member removal": async (w, s) => {
+    const id = await scimDirectory(w, s);
+    const uma = must(await scimCall(w, s, "GET", `/Groups/${id}`))?.members?.[0]?.value;
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Groups/${id}`,
+      scimPatch({ op: "remove", path: `members[value eq "${uma}"]` }),
+    );
+  },
+  "a SCIM group member add": async (w, s) => {
+    const id = await scimDirectory(w, s);
+    const uma = must(await scimCall(w, s, "GET", `/Groups/${id}`))?.members?.[0]?.value;
+    must(
+      await scimCall(
+        w,
+        s,
+        "PATCH",
+        `/Groups/${id}`,
+        scimPatch({ op: "remove", path: `members[value eq "${uma}"]` }),
+      ),
+    );
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Groups/${id}`,
+      scimPatch({ op: "add", path: "members", value: [{ value: uma }] }),
+    );
+  },
+  "a SCIM group rename": async (w, s) => {
+    const id = await scimDirectory(w, s);
+    return scimCall(
+      w,
+      s,
+      "PATCH",
+      `/Groups/${id}`,
+      scimPatch({ op: "replace", path: "displayName", value: "Former" }),
+    );
+  },
+  "a SCIM group delete": async (w, s) => {
+    const id = await scimDirectory(w, s);
+    return scimCall(w, s, "DELETE", `/Groups/${id}`);
+  },
   "an invitation accept that raises a member": async (w, s) => {
     must(
       await w.auth.api.inviteMember({
@@ -1134,6 +1216,11 @@ const SITES: Record<string, readonly string[] | string> = {
     "a SCIM deactivate",
     "a SCIM reactivate",
     "a SCIM delete",
+    "a SCIM group create",
+    "a SCIM group member removal",
+    "a SCIM group member add",
+    "a SCIM group rename",
+    "a SCIM group delete",
   ],
   "operator/access-end endPendingRows": "one kind: the session rows of a pending end",
   [DOOR]: "the door of the operator acts: each call of operatorAct is a site of its own",
@@ -1182,6 +1269,16 @@ const SITES: Record<string, readonly string[] | string> = {
     "a SCIM reactivate",
     "a SCIM delete",
   ],
+  // The SCIM Groups of plan 12d Task 11: the group row, the user hold, the sessions of
+  // the persons who leave the team, the organization or team row, the member rows of
+  // the role recompute, the team member rows, then the audit row.
+  "scim/groups writeGroup": [
+    "a SCIM group create",
+    "a SCIM group member removal",
+    "a SCIM group member add",
+    "a SCIM group rename",
+    "a SCIM group delete",
+  ],
 };
 
 /** The sites that SITES pins to the flow `name`, sorted. */
@@ -1196,8 +1293,8 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     const found = sites("src").map((s) => s.key);
     // Plan 12d Task 2b adds the six sites of sso/domains.ts, and Task 3 the
     // three of sso/connections.ts. Task 9b adds the two of scim/tokens.ts.
-    // Task 10 adds the one of scim/users.ts.
-    expect(found.length).toBe(75);
+    // Task 10 adds the one of scim/users.ts, and Task 11 the one of scim/groups.ts.
+    expect(found.length).toBe(76);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {

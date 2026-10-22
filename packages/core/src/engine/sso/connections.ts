@@ -912,3 +912,53 @@ export async function listConnections(
   );
   return ok(rows.map((row) => publicConnection(config, row)));
 }
+
+/**
+ * The connection whose `scimRoles` is the role map of an organization (plan
+ * 12d Task 11 Behavior 2): the enabled connection that the organization
+ * created first. Null when it has none: then no group gives a role. One
+ * read. `storage` is the handle to read through, inside a transaction the
+ * transaction handle.
+ */
+export async function roleMapConnection(
+  storage: StorageAdapter,
+  organizationId: string,
+): Promise<SsoConnectionRow | null> {
+  const rows = await storage.findMany(
+    "ssoConnection",
+    [
+      { field: "organizationId", op: "eq", value: organizationId },
+      { field: "enabled", op: "eq", value: true },
+    ],
+    {
+      sort: [
+        { field: "createdAt", dir: "asc" },
+        { field: "id", dir: "asc" },
+      ],
+      limit: 1,
+    },
+  );
+  return rows[0] ?? null;
+}
+
+/**
+ * Sets the SCIM role map of an organization (`api.scim.setRoleMap`, plan
+ * 12d Task 11 Behavior 2). The map lives on the connection of
+ * `roleMapConnection`, so the write is the update of that connection: the
+ * role rule of Task 3 (never `owner`, never the platform role) and one
+ * `sso_connection_update` audit row. Null clears the map. An organization
+ * with no enabled connection answers `not_found`. A new map changes no role
+ * by itself: the next member change of a group, or a rename, reads it.
+ */
+export async function setRoleMap(
+  config: ResolvedConfig,
+  actor: SsoActor,
+  input: { organizationId: string; map: Record<string, string> | null },
+): Promise<Result<SsoConnectionSummary>> {
+  const sso = ssoOn(config);
+  if (!sso.ok) return sso;
+  if (!config.scim) return fail("not_found");
+  const row = await roleMapConnection(config.storage, input.organizationId);
+  if (!row) return fail("not_found");
+  return updateConnection(config, actor, { id: row.id, scimRoles: input.map });
+}

@@ -15,6 +15,15 @@ export type ScimFilter =
   | { attr: FilterAttr; value: string }
   | { attr: "id"; value: string; member: string };
 
+/**
+ * The key form of a text that SCIM compares with no case: NFKC, then lower
+ * case. RFC 7643 sections 4.1.1 and 4.2 make `userName` and `displayName`
+ * case-insensitive.
+ */
+export function scimKey(text: string): string {
+  return text.normalize("NFKC").toLowerCase();
+}
+
 /** The longest filter text that core reads. An address is at most 254 characters, so 1024 leaves room for an external id. */
 export const SCIM_FILTER_MAX = 1024;
 

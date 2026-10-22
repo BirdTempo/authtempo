@@ -263,9 +263,21 @@ export async function updateTeam(
   const { team, organization } = t.value;
   const now = config.clock.now();
   const written = await hookGuard(() =>
-    config.storage.transaction((tx) =>
-      renameTeamIn(config, tx, { organization, team, name: input.name, by: input.user, now }),
-    ),
+    config.storage.transaction(async (tx) => {
+      // The hook comes before the write and takes no lock, so renameTeamIn holds no hook.
+      await runBefore(
+        config.observe,
+        "organization.beforeUpdateTeam",
+        config.hooks.organization.beforeUpdateTeam,
+        {
+          organization,
+          team: publicTeam(team),
+          patch: { name: input.name },
+          user: input.user,
+        },
+      );
+      return renameTeamIn(tx, { team, name: input.name, now });
+    }),
   );
   if (!written.ok) return written;
   const stored = publicTeam({ ...team, name: input.name, updatedAt: now });
@@ -282,33 +294,15 @@ export async function updateTeam(
 
 /**
  * The team rename in the caller's transaction (ruling 25 N3 of plan 12d).
- * `updateTeam` calls it after its checks, and a SCIM group rename calls it
- * with `by` null. Then no team hook runs, as `createTeamIn` says. The
- * caller checks the name rule first.
+ * `updateTeam` calls it after its checks and its `beforeUpdateTeam`, which
+ * takes no lock. A SCIM group rename calls it with no user caller, so no
+ * team hook runs, as `createTeamIn` says. The caller checks the name rule
+ * first.
  */
 export async function renameTeamIn(
-  config: ResolvedConfig,
   tx: StorageAdapter,
-  input: {
-    organization: OrganizationSummary;
-    team: TeamRow;
-    name: string;
-    by: UserRow | null;
-    now: Date;
-  },
+  input: { team: TeamRow; name: string; now: Date },
 ): Promise<Result<true>> {
-  if (input.by)
-    await runBefore(
-      config.observe,
-      "organization.beforeUpdateTeam",
-      config.hooks.organization.beforeUpdateTeam,
-      {
-        organization: input.organization,
-        team: publicTeam(input.team),
-        patch: { name: input.name },
-        user: input.by,
-      },
-    );
   const n = await tx.update("team", [{ field: "id", op: "eq", value: input.team.id }], {
     name: input.name,
     updatedAt: input.now,

@@ -192,7 +192,7 @@ describe("the table of locks over a before hook", () => {
     expect(page).toEqual(readme);
   });
 
-  it("names the fifteen flows", () => {
+  it("names the sixteen flows", () => {
     expect(readme.map((r) => r.split("|")[1]?.trim())).toEqual([
       "Organization create",
       "Member add",
@@ -205,6 +205,7 @@ describe("the table of locks over a before hook", () => {
       "Team delete",
       "Team member add",
       "Team member removal",
+      "SCIM group write",
       "Identity unlink",
       "Account delete",
       "Platform role revoke",
@@ -233,10 +234,18 @@ describe("the table of locks over a before hook", () => {
       ],
       // The team writes of ruling 25 N3 of plan 12d: the user-caller functions call the
       // tx-level forms after their checks, and take no lock before the call.
-      ["Team member add", "addTeamMembersIn organization.beforeAddTeamMember: holdUsers, lockTeam"],
+      // A SCIM group write (plan 12d Task 11) calls the team functions with no user caller,
+      // and then they run no team hook (ruling 54). So its writeGroup paths hold no hook.
+      [
+        "Team member add",
+        "addTeamMembersIn organization.beforeAddTeamMember: holdUsers, lockTeam, writeGroup > holdUsers, writeGroup > lockTeam",
+      ],
       ["Organization create", "createOrganization organization.beforeAddMember: holdUser"],
       ["Organization create", "createOrganization organization.beforeCreate: holdUser"],
-      ["Team create", "createTeamIn organization.beforeCreateTeam: lockOrganization"],
+      [
+        "Team create",
+        "createTeamIn organization.beforeCreateTeam: lockOrganization, writeGroup > holdUsers",
+      ],
       [
         "Account delete",
         "deleteAccountRows organization.beforeDelete: runDelete > user compare-and-set",
@@ -249,11 +258,19 @@ describe("the table of locks over a before hook", () => {
         "Impersonation start",
         "prepareSession session.beforeCreate: openSession > startImpersonation > holdUser",
       ],
+      // The role recompute of a SCIM group write runs the role hook with by null after its locks.
+      [
+        "SCIM group write",
+        "recompute organization.beforeUpdateMemberRole: writeMembers > writeGroup > holdUsers, writeMembers > writeGroup > lockTeam",
+      ],
       [
         "Member removal or leave",
         "removeMember organization.beforeRemoveMember: lockOrganization, ownerWrite, withRoleLoss, holdUser",
       ],
-      ["Team member removal", "removeTeamMembersIn organization.beforeRemoveTeamMember: lockTeam"],
+      [
+        "Team member removal",
+        "removeTeamMembersIn organization.beforeRemoveTeamMember: lockTeam, writeGroup > holdUsers, writeGroup > lockTeam",
+      ],
       [
         "Platform role revoke",
         "revokePlatformRole organization.beforeRemoveMember: holdUser, ownerLock",

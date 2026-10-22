@@ -248,7 +248,8 @@ describe("the auth probe (plan 11g)", () => {
     if (!made.ok) throw new Error(made.code);
     const others = keys.filter((key) => !key.includes(" /scim/v2/"));
     // Plan 12d Task 10 adds the six routes of the SCIM Users to the ten of Task 9b.
-    expect(others.length).toBe(keys.length - 16);
+    // Plan 12d Task 11 adds the six routes of the SCIM Groups.
+    expect(others.length).toBe(keys.length - 22);
     // A route of client auth answers any Authorization header with a 401 and no header with a
     // 400 (ruling 19 of plan 12e). There, the live token answers as a token that names no row.
     const unknown = { authorization: `Bearer sk_${"C".repeat(43)}` };

@@ -776,7 +776,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12d Task 9b adds the three SCIM token routes and ten routes of /scim/v2.
     // Plan 12d Task 8 adds the SAML ACS and the SP metadata.
     // Plan 12d Task 10 adds the six routes of the SCIM Users.
-    expect(keys.length).toBe(180);
+    // Plan 12d Task 11 adds the six routes of the SCIM Groups.
+    expect(keys.length).toBe(186);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());

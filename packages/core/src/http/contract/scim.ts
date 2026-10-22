@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { NS_AUTHTEMPO_SCIM_LIMITS } from "../../engine/scim/discovery.js";
 import {
   type AttrRule,
   ENTERPRISE_RULES,
@@ -64,6 +65,11 @@ const ServiceProviderConfigJson = z.strictObject({
       primary: z.boolean(),
     }),
   ),
+  [NS_AUTHTEMPO_SCIM_LIMITS]: z.strictObject({
+    groupMembersMax: z.number(),
+    membersPerRequestMax: z.number(),
+    roleRecomputeMax: z.number(),
+  }),
   meta,
 });
 
@@ -189,6 +195,31 @@ const UserJson = z.strictObject({
  */
 const UserSelectedJson = UserJson.partial().required({ schemas: true, id: true, meta: true });
 
+/**
+ * A Group of RFC 7643 section 4.2, as `toScimGroup` writes it (plan 12d
+ * Task 11). Each member holds `value`, `$ref`, and `type` (ruling 53 P6),
+ * and no `display`.
+ */
+const GroupJson = z.strictObject({
+  schemas: z.array(z.string()),
+  id: z.string(),
+  externalId: z.string().optional(),
+  displayName: z.string(),
+  members: z
+    .array(z.strictObject({ value: z.string(), $ref: z.string(), type: z.literal("User") }))
+    .optional(),
+  meta: z.strictObject({
+    resourceType: z.string(),
+    created: z.iso.datetime(),
+    lastModified: z.iso.datetime(),
+    location: z.string(),
+    version: z.string(),
+  }),
+});
+
+/** The Group answer after `attributes` or `excludedAttributes`, as for a User. */
+const GroupSelectedJson = GroupJson.partial().required({ schemas: true, id: true, meta: true });
+
 /** The refusals of the design's 9.5: the route answers only the SCIM error, with 501. */
 const NOT_SUPPORTED = { answer: { kind: "scim", schema: null } } as const;
 
@@ -220,6 +251,13 @@ export const SCIM_CONTRACT = {
   "PATCH /scim/v2/Users/:id": { answer: { kind: "scim", schema: UserJson } },
   // A delete answers 204 with no body (RFC 7644 section 3.6).
   "DELETE /scim/v2/Users/:id": { answer: { kind: "scim", schema: z.null() } },
+  "GET /scim/v2/Groups": { answer: { kind: "scim", schema: listOf(GroupSelectedJson) } },
+  "POST /scim/v2/Groups": { answer: { kind: "scim", schema: GroupJson } },
+  "GET /scim/v2/Groups/:id": { answer: { kind: "scim", schema: GroupSelectedJson } },
+  "PUT /scim/v2/Groups/:id": { answer: { kind: "scim", schema: GroupJson } },
+  // A PATCH answers 204 with no body, or the Group when the query asks for attributes.
+  "PATCH /scim/v2/Groups/:id": { answer: { kind: "scim", schema: GroupSelectedJson } },
+  "DELETE /scim/v2/Groups/:id": { answer: { kind: "scim", schema: z.null() } },
   "POST /scim/v2/Bulk": NOT_SUPPORTED,
   "GET /scim/v2/Me": NOT_SUPPORTED,
   "POST /scim/v2/.search": NOT_SUPPORTED,

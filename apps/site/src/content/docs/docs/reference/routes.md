@@ -1580,7 +1580,7 @@ The three token routes run the steps of the SSO manager routes: a session, the c
 
 The routes under `/scim/v2` take an `sk_` bearer token as `Authorization: Bearer <token>`, and no session. The organization of each call is the organization of the token, never a value of the path or the body. Each answer is `application/scim+json` with `cache-control: no-store`. A failure is the SCIM error message of RFC 7644 section 3.12, `{ schemas, status, scimType?, detail }`, never a code of the errors page.
 
-A missing, wrong, expired, or revoked token answers 401 with `WWW-Authenticate: Bearer realm="scim"`. Each such failure counts on `scim-auth:ip:<ip>`, 60 per 15 minutes, and a refused count answers 429. A valid token never counts on that key. It counts on `scim:token:<id>`, 1200 per 10 minutes, and a refused count answers 429. A token without the scope of a route answers 403. Plan 12d Task 11 adds the Groups routes.
+A missing, wrong, expired, or revoked token answers 401 with `WWW-Authenticate: Bearer realm="scim"`. Each such failure counts on `scim-auth:ip:<ip>`, 60 per 15 minutes, and a refused count answers 429. A valid token never counts on that key. It counts on `scim:token:<id>`, 1200 per 10 minutes, and a refused count answers 429. A token without the scope of a route answers 403.
 
 <h3 id="get-scim-v2-serviceproviderconfig"><code>GET /scim/v2/ServiceProviderConfig</code></h3>
 
@@ -1588,7 +1588,7 @@ A missing, wrong, expired, or revoked token answers 401 with `WWW-Authenticate: 
 | --- | --- |
 | Needs | An `sk_` bearer token. Any scope of the token passes |
 | Input | None |
-| Answer | The ServiceProviderConfig of RFC 7643 section 5: PATCH, filters with at most 100 results, and ETags are on; bulk, sort, and the password change are off. The one scheme is `oauthbearertoken` |
+| Answer | The ServiceProviderConfig of RFC 7643 section 5: PATCH, filters with at most 100 results, and ETags are on; bulk, sort, and the password change are off. The one scheme is `oauthbearertoken`. The extension `urn:authtempo:params:scim:schemas:extension:limits:2.0` states the member caps of the Groups: `groupMembersMax` 10000, `membersPerRequestMax` 9, and `roleRecomputeMax` 250 |
 | Errors | None |
 
 <h3 id="get-scim-v2-resourcetypes"><code>GET /scim/v2/ResourceTypes</code></h3>
@@ -1691,6 +1691,72 @@ In a PATCH, Entra ID sends the manager as a list of one object. The path is `man
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
 | Input | None. `If-Match` may name the version |
 | Answer | 204 with no body. The deactivate runs first, and the core user stays |
+| Errors | None |
+
+The Groups routes (plan 12d Task 11) serve the groups of the token's organization. A member of a group is a User of the same organization. A group id, an id of another organization, an unknown id, or a `type` other than `User` answers 400 `invalidValue`. Core serves no nested group. Each member in an answer holds `value`, `$ref`, and `type`.
+
+The caps come from the D1 Free budget of 50 queries per request. One request changes at most 9 members of a group: the values of an add or a remove, and the members that a replace or a PUT adds or takes away. A group holds at most 10000 members. A rename or a delete of a mapped group computes the role of each member again, and refuses a group of more than 250 members. Each refusal is 400 `invalidValue`, and nothing changes.
+
+Okta sends up to 1000 members in one group PATCH, and an Okta app of the App Integration Wizard sends a PUT with every member. Such a request answers 400 when it changes more than 9 members. Ask Okta support for a smaller batch size, or push smaller groups. Entra ID sends one member in each operation.
+
+The role map gives a role to each member of a mapped group: `scimRoles` of the connection, set by `POST /sso/connections/update` or `api.scim.setRoleMap`. The map of an organization is the map of its enabled connection that it created first. A member gets the highest-ranked role of its mapped groups, else `scim.defaultRole`. SCIM never gives or takes the owner role or the platform role. A mapped role that the organization no longer has answers 409 with the detail `role_not_found`, and nothing changes.
+
+A change of the role map changes no role at once. A member gets the role of the new map at the next change of its groups, or at a rename of a mapped group. A reactivated User gets back the role of its groups, and not the teams. The teams come back at the next member change of each group.
+
+With `scim.groups` set to `teams` or `both`, each group has one team of the organization. A group create creates the team, a rename renames it, a delete deletes it, and a member change is a team member change. These team writes run no team hook. An app that watches the team hooks must also watch `hooks.scim.afterChange`, which reports each group write after its commit. With `keepLastTeam`, the delete of the group of the last team answers 409.
+
+<h3 id="get-scim-v2-groups"><code>GET /scim/v2/Groups</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.read` |
+| Input | None. The query may hold `filter`, `startIndex`, `count`, `attributes`, or `excludedAttributes`. The filter is one `eq` of `displayName`, `externalId`, or `id`, or the member check of Entra ID: `id eq "<group>" and members[value eq "<user>"]` |
+| Answer | A ListResponse of the Groups of the organization, by `id`, at most 100 per page. `excludedAttributes=members` reads no member row |
+| Errors | None |
+
+<h3 id="post-scim-v2-groups"><code>POST /scim/v2/Groups</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
+| Input | None. The body is a Group of RFC 7643 section 4.2. `displayName` is required, 1 to 255 characters, and unique in the organization with no case |
+| Answer | 201 with the Group, `Location`, and `ETag`. A second group with the same `displayName` answers 409 `uniqueness` |
+| Errors | None |
+
+<h3 id="get-scim-v2-groups-id"><code>GET /scim/v2/Groups/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.read` |
+| Input | None. The query may hold `attributes` or `excludedAttributes` |
+| Answer | The Group, with `ETag`. An id of another organization answers 404 |
+| Errors | None |
+
+<h3 id="put-scim-v2-groups-id"><code>PUT /scim/v2/Groups/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
+| Input | None. The body is a Group, and `If-Match` may name the version |
+| Answer | The Group. A PUT replaces the name, the `externalId`, and the whole member list |
+| Errors | None |
+
+<h3 id="patch-scim-v2-groups-id"><code>PATCH /scim/v2/Groups/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
+| Input | None. The body is a PatchOp message: `add` and `remove` of `members`, and `replace` of `displayName`, `externalId`, or `members`. A `remove` takes the path `members[value eq "<id>"]` or a list of values. `If-Match` may name the version |
+| Answer | 204 with no body, as RFC 7644 section 3.5.2 allows. With `attributes` in the query, 200 with the Group. The operations apply together, or none applies. A remove by a filter that matches no member answers 400 `noTarget` |
+| Errors | None |
+
+<h3 id="delete-scim-v2-groups-id"><code>DELETE /scim/v2/Groups/:id</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
+| Input | None. `If-Match` may name the version |
+| Answer | 204 with no body. The member rows and the team of the group go, and each member of a mapped group gets its role again. The Users stay |
 | Errors | None |
 
 Core does not serve these SCIM operations. Each answers 501 with the detail "not supported by this server", after the token check.

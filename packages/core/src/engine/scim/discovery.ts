@@ -6,6 +6,7 @@
  */
 
 import type { ResolvedConfig } from "../../config.js";
+import { GROUP_MEMBERS_MAX, GROUP_ROLE_USERS_MAX, PATCH_MEMBERS_MAX } from "./limits.js";
 import {
   type AttrFacts,
   type AttrRule,
@@ -23,6 +24,12 @@ export const NS_SCIM_SERVICE_PROVIDER_CONFIG =
 export const NS_SCIM_RESOURCE_TYPE = "urn:ietf:params:scim:schemas:core:2.0:ResourceType";
 export const NS_SCIM_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:Schema";
 export const NS_SCIM_LIST = "urn:ietf:params:scim:api:messages:2.0:ListResponse";
+/**
+ * The extension of the ServiceProviderConfig that states the member caps of
+ * the Groups (ruling 53 P4 of plan 12d). RFC 7643 section 5 has no field
+ * for them, so core names its own extension and lists it in `schemas`.
+ */
+export const NS_AUTHTEMPO_SCIM_LIMITS = "urn:authtempo:params:scim:schemas:extension:limits:2.0";
 
 /** The base URL of the SCIM server: `<baseURL><basePath>/scim/v2`. */
 export function scimBase(config: ResolvedConfig): string {
@@ -32,11 +39,12 @@ export function scimBase(config: ResolvedConfig): string {
 /**
  * The ServiceProviderConfig (RFC 7643 section 5). Core serves PATCH, a
  * filter subset, and ETags; it has no bulk, no sort, and no password
- * change. `filter.maxResults` is the page bound of `pageParams`.
+ * change. `filter.maxResults` is the page bound of `pageParams`. The
+ * limits extension states the member caps of a Group write.
  */
 export function serviceProviderConfig(config: ResolvedConfig): Record<string, unknown> {
   return {
-    schemas: [NS_SCIM_SERVICE_PROVIDER_CONFIG],
+    schemas: [NS_SCIM_SERVICE_PROVIDER_CONFIG, NS_AUTHTEMPO_SCIM_LIMITS],
     patch: { supported: true },
     bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
     filter: { supported: true, maxResults: SCIM_PAGE_MAX },
@@ -51,6 +59,11 @@ export function serviceProviderConfig(config: ResolvedConfig): Record<string, un
         primary: true,
       },
     ],
+    [NS_AUTHTEMPO_SCIM_LIMITS]: {
+      groupMembersMax: GROUP_MEMBERS_MAX,
+      membersPerRequestMax: PATCH_MEMBERS_MAX,
+      roleRecomputeMax: GROUP_ROLE_USERS_MAX,
+    },
     meta: {
       resourceType: "ServiceProviderConfig",
       location: `${scimBase(config)}/ServiceProviderConfig`,
