@@ -48,13 +48,17 @@ describe("the worst ban page of the admin plugin on D1 (ruling 60 L6)", () => {
     expect(((await ban.json()) as { user: { banned: boolean } }).user.banned).toBe(true);
     // The reviewer's probe P4 counted 48 for 500, 501, and 700 sessions.
     // Ruling 60 L2 adds 1: the factor read for the user's twoFactorEnabled.
+    // Ruling 51 of plan 12d raises OPERATOR_CALLS_BEFORE.user from 10 to 11 for the
+    // session-cap read of a due refresh with sso.saml on. A chunk of the page costs 2
+    // calls (the link read and the delete), so the page ends one chunk of 50 fewer:
+    // 47 queries and 101 sessions left (run of 2026-10-22).
     expect(count.queries).toBeLessThanOrEqual(50);
-    expect(count.queries).toBe(49);
+    expect(count.queries).toBe(47);
     const left = await env.DB.prepare(`SELECT COUNT(*) AS n FROM "session" WHERE "userId" = ?`)
       .bind(ann.id)
       .first<{ n: number }>();
     // The sessions past the budget stay for the sweep, and core's ban rule
     // refuses each of them at every door until then.
-    expect(left?.n).toBe(51);
+    expect(left?.n).toBe(101);
   });
 });
