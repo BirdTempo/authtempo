@@ -1242,8 +1242,19 @@ async function writeChange(
           removeEvent,
         );
       if (reactivate) join = await joinChecks(config, tx, caller.organizationId, user, now, row.id);
-      // The lock order of user-hold.ts: the user row, the sessions, the organization row, the member rows.
+      // The lock order of user-hold.ts: the user row, the sessions, the organization row, the
+      // member rows, the scimGroupMember rows.
       await holdUser(tx, user.id);
+      // The role of a reactivate comes from the groups again, after the hold (ruling 59 M2 of
+      // plan 12d). A group write holds each user whose role it computes, so it committed
+      // before this read, or it waits for this commit and then reads the new member row.
+      // The before hook saw the role of the first read: a group write in between answers 409.
+      const first = join as Join | null;
+      if (
+        first &&
+        (await scimRoleOf(config, tx, caller.organizationId, row.id)) !== first.member.role
+      )
+        stopWith("conflict");
       if (deactivate || change.kind === "delete") await holdSessions(tx, user.id);
       const versioned = [
         { field: "id" as const, op: "eq" as const, value: row.id },
@@ -1258,14 +1269,24 @@ async function writeChange(
               updatedAt: later(now, row.updatedAt),
             });
       if (n === 0) throw new VersionLost();
-      if (change.kind === "delete")
-        await tx.delete("scimGroupMember", [{ field: "scimUserId", op: "eq", value: row.id }]);
+      // The scimGroupMember rows of a delete come after the member row, as in a group write
+      // (ruling 59 M1 of plan 12d). The other order formed a deadlock on Postgres.
+      const dropGroups = async () => {
+        if (change.kind === "delete")
+          await tx.delete("scimGroupMember", [{ field: "scimUserId", op: "eq", value: row.id }]);
+      };
+      if (!deactivate) await dropGroups();
       if (move && doc) await moveAddress(tx, user, doc.address, now);
       if (doc) await fillName(tx, { ...user, email: doc.address }, doc, now);
       if (deactivate) {
         // The lock of the token create (ruling 32 of plan 12k): a create that holds it
         // commits first, and the token delete sees its row.
         if (!(await lockOrganization(tx, organization))) stopWith("not_found");
+        // The member row lock comes before the scimGroupMember rows. It costs one statement on
+        // Postgres; D1 and memory have no row lock.
+        if (removes && member)
+          await tx.lockInOrder?.("member", [{ field: "id", op: "eq", value: member.id }]);
+        await dropGroups();
         if (removes && member && (await removeMemberIn(tx, member, true)) === 0)
           stopWith("conflict");
         if (claimed) {

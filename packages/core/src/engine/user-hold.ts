@@ -28,17 +28,28 @@ import { ROUNDS } from "./rounds.js";
  *
  * One lock order holds for every flow (rulings 49 and 50 of plan 12k). It
  * joins the order of plan 12f (final review L1) and the order of ruling 43
- * of plan 12k. The order has seven kinds of rows:
+ * of plan 12k. The order has nine kinds of rows:
  *
- * 1. this user row (`holdUser`);
- * 2. the session rows: `holdSessions`, or `holdImpersonations`, the one
+ * 1. the scimGroup row of a SCIM group write (plan 12d Task 11);
+ * 2. this user row (`holdUser`);
+ * 3. the session rows: `holdSessions`, or `holdImpersonations`, the one
  *    read that locks the sessions of the user and of each impersonation
  *    target;
- * 3. the organization row: the stamp of `ownerLock`, or `lockOrganization`;
- * 4. the team row: `lockTeam`, or its delete;
- * 5. the invitation rows;
- * 6. the member rows;
- * 7. the team member rows.
+ * 4. the organization row: the stamp of `ownerLock`, or `lockOrganization`;
+ * 5. the team row: `lockTeam`, or its delete;
+ * 6. the invitation rows;
+ * 7. the member rows;
+ * 8. the scimGroupMember rows;
+ * 9. the team member rows.
+ *
+ * Only a SCIM group write takes a scimGroup row, so it orders two writes of
+ * one group. A group write and a SCIM User delete take the member rows
+ * before the scimGroupMember rows (ruling 59 M1 of plan 12d): the other
+ * order formed a deadlock on Postgres. One known gap of kinds: the account
+ * delete deletes the scimGroupMember rows of its user after the team member
+ * rows of its solo organizations. Those team member rows name the user
+ * alone, and a group write that adds, removes, or computes the role of the
+ * user holds the user row first, as the account delete does.
  *
  * A flow can write a kind again after a later kind: it holds those rows
  * from the first time. No flow writes a kind first after a later kind. The

@@ -1220,7 +1220,7 @@ const auth = createAuth({
 | Team delete | `organization.beforeDeleteTeam` | the sessions that act in the team; with `keepLastTeam`, the organization row; on Postgres, the team row |
 | Team member add | `organization.beforeAddTeamMember` | the added user's row and the team row |
 | Team member removal | `organization.beforeRemoveTeamMember` | the sessions of the person and the team row |
-| SCIM group write | `organization.beforeUpdateMemberRole` | the users of the added members; the sessions of the persons who leave the group's team; the organization row of a team create, or the team row; on Postgres, the member rows of each role change |
+| SCIM group write | `organization.beforeUpdateMemberRole` | the scimGroup row, first; the users of the added and removed members, and of each member whose role the write computes; the sessions of the persons who leave the group's team; the organization row of a team create, or the team row; on Postgres, the member rows of each role change |
 | Identity unlink | `identity.beforeUnlink` | the user's row |
 | Account delete | `organization.beforeDelete`, `user.beforeDelete` | the user's row and sessions; when the user opened an impersonation, the sessions of each impersonation that the user opened |
 | Platform role revoke | `organization.beforeRemoveMember`, `organization.beforeUpdateMemberRole` | the user's row and the sessions of the user and of each impersonation that the user opened; for an owner, the organization row |

@@ -1701,7 +1701,7 @@ Okta sends up to 1000 members in one group PATCH, and an Okta app of the App Int
 
 The role map gives a role to each member of a mapped group: `scimRoles` of the connection, set by `POST /sso/connections/update` or `api.scim.setRoleMap`. The map of an organization is the map of its enabled connection that it created first. A member gets the highest-ranked role of its mapped groups, else `scim.defaultRole`. SCIM never gives or takes the owner role or the platform role. A mapped role that the organization no longer has answers 409 with the detail `role_not_found`, and nothing changes.
 
-A change of the role map changes no role at once. A member gets the role of the new map at the next change of its groups, or at a rename of a mapped group. A reactivated User gets back the role of its groups, and not the teams. The teams come back at the next member change of each group.
+A change of the role map changes no role at once. A member gets the role of the new map at the next change of its groups, or at a rename of a mapped group. A reactivated User gets back the role of its groups, and not the teams. A group write that changes the groups of the User during its reactivate makes the reactivate answer 409, and the directory sends it again. The teams come back at the next member change of each group.
 
 With `scim.groups` set to `teams` or `both`, each group has one team of the organization. A group create creates the team, a rename renames it, a delete deletes it, and a member change is a team member change. These team writes run no team hook. An app that watches the team hooks must also watch `hooks.scim.afterChange`, which reports each group write after its commit. With `keepLastTeam`, the delete of the group of the last team answers 409.
 
@@ -1711,7 +1711,7 @@ With `scim.groups` set to `teams` or `both`, each group has one team of the orga
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.groups.read` |
 | Input | None. The query may hold `filter`, `startIndex`, `count`, `attributes`, or `excludedAttributes`. The filter is one `eq` of `displayName`, `externalId`, or `id`, or the member check of Entra ID: `id eq "<group>" and members[value eq "<user>"]` |
-| Answer | A ListResponse of the Groups of the organization, by `id`, at most 100 per page. `excludedAttributes=members` reads no member row |
+| Answer | A ListResponse of the Groups of the organization, by `id`, at most 100 per page. `excludedAttributes=members` reads no member row, as Entra ID asks. A page with members holds at most 10000 member rows, as one group does. It ends before the first group that does not fit whole, and `itemsPerPage` gives the count of groups on the page. Ask the next page from `startIndex` plus `itemsPerPage`. On D1 such a page costs 6 queries (measured 2026-10-22) |
 | Errors | None |
 
 <h3 id="post-scim-v2-groups"><code>POST /scim/v2/Groups</code></h3>
@@ -1747,7 +1747,7 @@ With `scim.groups` set to `teams` or `both`, each group has one team of the orga
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
 | Input | None. The body is a PatchOp message: `add` and `remove` of `members`, and `replace` of `displayName`, `externalId`, or `members`. A `remove` takes the path `members[value eq "<id>"]` or a list of values. `If-Match` may name the version |
-| Answer | 204 with no body, as RFC 7644 section 3.5.2 allows. With `attributes` in the query, 200 with the Group. The operations apply together, or none applies. A remove by a filter that matches no member answers 400 `noTarget` |
+| Answer | 204 with no body, as RFC 7644 section 3.5.2 allows. With `attributes` in the query, 200 with the Group. The operations apply together, or none applies. A PATCH that changes nothing writes nothing: no new version and no audit row. So a remove of a User that is not a member, by the filter path or by a list of values, answers as a removal does. A directory sends a removal again after a time-out, and an error marks its push as failed |
 | Errors | None |
 
 <h3 id="delete-scim-v2-groups-id"><code>DELETE /scim/v2/Groups/:id</code></h3>

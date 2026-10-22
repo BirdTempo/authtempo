@@ -3,13 +3,22 @@ import type { AuthConfig } from "../../src/config.js";
 import { deleteAccount } from "../../src/engine/account-delete.js";
 import { addMember, removeMember } from "../../src/engine/organizations.js";
 import { createRole, deleteRole } from "../../src/engine/roles.js";
+import { scimPatchGroup } from "../../src/engine/scim/groups.js";
 import { createScimToken } from "../../src/engine/scim/tokens.js";
+import { scimDeleteUser } from "../../src/engine/scim/users.js";
 import { createSession, resolveSession } from "../../src/engine/sessions.js";
-import { setRoleMap } from "../../src/engine/sso/connections.js";
+import { setRoleMap, updateConnection } from "../../src/engine/sso/connections.js";
 import type { ScimScope } from "../../src/schema.js";
+import type { StorageAdapter } from "../../src/storage/port.js";
+import { seedPlatform } from "../helpers.js";
 import { FAST } from "../password-helpers.js";
-import { seedOrganization, verifiedDomain } from "../sso/helpers.js";
-import { acmeWithSso, type SsoWorld, ssoSignInWorld } from "../sso/sign-in-helpers.js";
+import { SSO_APP, seedOrganization, verifiedDomain } from "../sso/helpers.js";
+import {
+  acmeWithSso,
+  oidcConnection,
+  type SsoWorld,
+  ssoSignInWorld,
+} from "../sso/sign-in-helpers.js";
 import { SCIM_APP, scim } from "./helpers.js";
 
 const USER_URN = "urn:ietf:params:scim:schemas:core:2.0:User";
@@ -337,18 +346,46 @@ describe("the SCIM Groups (plan 12d Task 11)", () => {
     expect((shown.body.members as { value: string }[]).map((m) => m.value)).toEqual(
       [ada, bob].sort(),
     );
-    // A remove by a filter that matches no member has no target (RFC 7644 section 3.12).
-    const gone = await userOf(w, "cal");
-    const none = await read(
+  });
+
+  it("answers a remove of a non-member as a removal, and writes nothing (ruling 57 item 5)", async () => {
+    const changes: string[] = [];
+    const w = await world("both", {
+      hooks: { scim: { afterChange: (e) => void changes.push(e.action) } },
+    });
+    await setMap(w, { Admins: "admin" });
+    const ada = await userOf(w, "ada");
+    const cal = await userOf(w, "cal");
+    const group = await groupOf(w, "Admins", [ada]);
+    const before = await counts(w);
+    const version = async () =>
+      (await read(await scim(w, w.token, "GET", `/Groups/${group}`))).body.meta;
+    const meta = await version();
+    changes.length = 0;
+    // An IdP sends a removal again after a time-out: by the filter path, or by a list of values.
+    for (const body of [
+      patch({ op: "remove", path: `members[value eq "${cal}"]` }),
+      patch({ op: "remove", path: "members", value: [{ value: cal }] }),
+    ]) {
+      const res = await scim(w, w.token, "PATCH", `/Groups/${group}`, body);
+      expect([res.status, await res.text()]).toEqual([204, ""]);
+    }
+    const shown = await read(
       await scim(
         w,
         w.token,
         "PATCH",
-        `/Groups/${group}`,
-        patch({ op: "remove", path: `members[value eq "${gone}"]` }),
+        `/Groups/${group}?attributes=members`,
+        patch({ op: "remove", path: `members[value eq "${cal}"]` }),
       ),
     );
-    expect([none.status, none.body.scimType]).toEqual([400, "noTarget"]);
+    expect(shown.status).toBe(200);
+    expect((shown.body.members as { value: string }[]).map((m) => m.value)).toEqual([ada]);
+    // No new version, no audit row, no hook.
+    expect(await version()).toEqual(meta);
+    expect(await counts(w)).toEqual(before);
+    expect(changes).toEqual([]);
+    expect(await roleOf(w, ada)).toBe("admin");
   });
 
   it("keeps the PATCH atomic and the member caps", async () => {
@@ -620,6 +657,261 @@ describe("the teams of the SCIM Groups (plan 12d Task 11 Behavior 3)", () => {
     expect(r.status).toBe(204);
     expect(await w.storage.findMany("teamMember", [])).toHaveLength(1);
   });
+});
+
+describe("the review fixes of the SCIM Groups (ruling 59 of plan 12d)", () => {
+  it("stops a group add of a User that a SCIM delete took after the reads (m1)", async () => {
+    const w = await world();
+    const ada = await userOf(w, "ada");
+    const group = await groupOf(w, "Staff");
+    const caller = { organizationId: w.organizationId, actor: SCIM_APP };
+    const inner = w.config.storage;
+    let armed = true;
+    let deleted = -1;
+    // The SCIM delete of ada ends after the reads of the group write and before its
+    // transaction. No foreign key ties a scimGroupMember row to its scimUser row, so
+    // the read after the inserts is the one check.
+    const storage = new Proxy(inner, {
+      get(t, p) {
+        if (p === "transaction")
+          return async (fn: (tx: StorageAdapter) => Promise<unknown>) => {
+            if (armed) {
+              armed = false;
+              deleted = (await scimDeleteUser(w.config, caller, ada, null)).status;
+            }
+            return t.transaction(fn);
+          };
+        const v = Reflect.get(t, p);
+        return typeof v === "function" ? v.bind(t) : v;
+      },
+    }) as StorageAdapter;
+    const r = await scimPatchGroup(
+      { ...w.config, storage },
+      caller,
+      group,
+      patch({ op: "add", path: "members", value: [{ value: ada }] }),
+      null,
+    );
+    expect(deleted).toBe(204);
+    expect(r.status).toBe(409);
+    expect(await inner.findMany("scimGroupMember", [])).toEqual([]);
+  });
+
+  it("keeps the platform role of a member in a mapped group (m2)", async () => {
+    // The platform role ranks below the owner here, so the owner rule does not keep it.
+    const w = ssoSignInWorld({
+      password: { hash: FAST, uniformSignUp: false, requireVerified: false },
+      organizations: {
+        ...ORGANIZATIONS,
+        ranks: { viewer: 1, member: 2, operator: 2, admin: 3, owner: 4 },
+      },
+      scim: { groups: "roles" },
+    });
+    const { root, platformOrg } = await seedPlatform(w);
+    await verifiedDomain(w, platformOrg.id, "platform-co.example");
+    await oidcConnection(w, platformOrg.id, "platform");
+    const token = await tokenOf(w, platformOrg.id);
+    const op = await w.seedUser("op@platform-co.example");
+    const added = await addMember(w.config, {
+      user: root,
+      organizationId: platformOrg.id,
+      userId: op.id,
+      role: "operator",
+    });
+    if (!added.ok) throw new Error(added.code);
+    const made = await read(
+      await scim(w, token, "POST", "/Users", {
+        schemas: [USER_URN],
+        userName: "op@platform-co.example",
+      }),
+    );
+    expect(made.status).toBe(201);
+    const map = await setRoleMap(w.config, SCIM_APP, {
+      organizationId: platformOrg.id,
+      map: { Admins: "admin" },
+    });
+    expect(map.ok).toBe(true);
+    const group = await read(
+      await scim(w, token, "POST", "/Groups", {
+        schemas: [GROUP_URN],
+        displayName: "Admins",
+        members: [{ value: String(made.body.id) }],
+      }),
+    );
+    expect(group.status).toBe(201);
+    const member = await w.storage.findOne("member", [
+      { field: "organizationId", op: "eq", value: platformOrg.id },
+      { field: "userId", op: "eq", value: op.id },
+    ]);
+    expect(member?.role).toBe("operator");
+  });
+
+  it("reads the role map of the enabled connection that the organization made first (m2)", async () => {
+    const w = await world();
+    w.clock.advance(1000);
+    const later = await oidcConnection(w, w.organizationId, "beta");
+    const mapped = await updateConnection(w.config, SSO_APP, {
+      id: later,
+      scimRoles: { Admins: "viewer" },
+    });
+    expect(mapped.ok).toBe(true);
+    // The map of the first connection: setRoleMap writes it there.
+    await setMap(w, { Admins: "admin" });
+    const ada = await userOf(w, "ada");
+    const group = await groupOf(w, "Admins", [ada]);
+    expect(await roleOf(w, ada)).toBe("admin");
+    // With the first connection off, the map of the later one applies at the next member change.
+    const off = await updateConnection(w.config, SSO_APP, { id: w.connectionId, enabled: false });
+    expect(off.ok).toBe(true);
+    const bob = await userOf(w, "bob");
+    const res = await scim(
+      w,
+      w.token,
+      "PATCH",
+      `/Groups/${group}`,
+      patch({ op: "add", path: "members", value: [{ value: bob }] }),
+    );
+    expect(res.status).toBe(204);
+    // A new map applies to the members whose roles a write computes (ruling 53 P8).
+    expect([await roleOf(w, ada), await roleOf(w, bob)]).toEqual(["admin", "viewer"]);
+  });
+
+  it("answers 409 last_team to the delete of the group of the last team (m2)", async () => {
+    const w = await world("teams", {
+      organizations: { ...ORGANIZATIONS, teams: { keepLastTeam: true } },
+    });
+    const ada = await userOf(w, "ada");
+    const group = await groupOf(w, "Core", [ada]);
+    const before = await counts(w);
+    const r = await read(await scim(w, w.token, "DELETE", `/Groups/${group}`));
+    expect([r.status, r.body.detail]).toEqual([409, "last_team"]);
+    expect(await counts(w)).toEqual(before);
+  });
+
+  it("counts every added person against membersPerTeam (m2)", async () => {
+    const w = await world("teams", {
+      organizations: { ...ORGANIZATIONS, limits: { membersPerTeam: 2 } },
+    });
+    const ada = await userOf(w, "ada");
+    const bob = await userOf(w, "bob");
+    const cal = await userOf(w, "cal");
+    const group = await groupOf(w, "Core", [ada]);
+    const before = await counts(w);
+    const r = await read(
+      await scim(
+        w,
+        w.token,
+        "PATCH",
+        `/Groups/${group}`,
+        patch({ op: "add", path: "members", value: [{ value: bob }, { value: cal }] }),
+      ),
+    );
+    expect([r.status, r.body.detail]).toEqual([409, "team_member_limit"]);
+    expect(await counts(w)).toEqual(before);
+  });
+
+  it("answers 400 invalidValue to the delete of a mapped group past 250 members (l1)", async () => {
+    const w = await world();
+    const ids: string[] = [];
+    for (let i = 0; i < 251; i++) ids.push(await userOf(w, `u${i}`));
+    const group = await groupOf(w, "Admins");
+    for (let i = 0; i < ids.length; i += 9) {
+      const r = await scim(
+        w,
+        w.token,
+        "PATCH",
+        `/Groups/${group}`,
+        patch({
+          op: "add",
+          path: "members",
+          value: ids.slice(i, i + 9).map((value) => ({ value })),
+        }),
+      );
+      expect(r.status).toBe(204);
+    }
+    // The map comes last: a rename or a delete now computes 251 roles.
+    await setMap(w, { Admins: "admin" });
+    const before = await counts(w);
+    const r = await read(await scim(w, w.token, "DELETE", `/Groups/${group}`));
+    expect([r.status, r.body.scimType]).toEqual([400, "invalidValue"]);
+    expect(await counts(w)).toEqual(before);
+  }, 60_000);
+
+  it("ends a list page with members before 10000 member rows (Info)", async () => {
+    const w = await world();
+    const a = await groupOf(w, "Alpha");
+    const b = await groupOf(w, "Beta");
+    const c = await groupOf(w, "Gamma");
+    // 5001 Users in both Alpha and Beta, and one in Gamma: 10003 member rows. The rows
+    // come through storage, as 556 PATCH requests of 9 members each would write them.
+    const now = w.clock.now();
+    for (let i = 0; i < 5001; i++) {
+      const user = await w.seedUser(`m${i}@acme.example`);
+      await w.storage.create("member", {
+        id: `mb-${i}`,
+        organizationId: w.organizationId,
+        userId: user.id,
+        role: "member",
+        createdAt: now,
+        updatedAt: now,
+      });
+      const su = await w.storage.create("scimUser", {
+        id: `su-${String(i).padStart(5, "0")}`,
+        organizationId: w.organizationId,
+        userId: user.id,
+        userName: `m${i}@acme.example`,
+        userNameKey: `m${i}@acme.example`,
+        externalId: null,
+        active: true,
+        displayName: null,
+        data: {},
+        version: 1,
+        createdAt: now,
+        updatedAt: now,
+      });
+      for (const g of i === 0 ? [a, b, c] : [a, b])
+        await w.storage.create("scimGroupMember", {
+          id: `gm-${g}-${i}`,
+          groupId: g,
+          scimUserId: su.id,
+          createdAt: now,
+          updatedAt: now,
+        });
+    }
+    const page = async (query: string) => {
+      const r = await read(await scim(w, w.token, "GET", `/Groups?${query}`));
+      const list = r.body.Resources as { id: string; members?: unknown[] }[];
+      return {
+        total: r.body.totalResults,
+        items: Number(r.body.itemsPerPage),
+        groups: list.map((g) => [g.id, g.members?.length ?? 0]),
+      };
+    };
+    // The page order is by id. Each page holds whole groups, at most 10000 member rows.
+    const order = [a, b, c].sort().map((id) => [id, id === c ? 1 : 5001] as const);
+    const fits = (from: number) => {
+      const out: (readonly [string, number])[] = [];
+      let rows = 0;
+      for (const g of order.slice(from)) {
+        if (out.length > 0 && rows + g[1] > 10000) break;
+        out.push(g);
+        rows += g[1];
+      }
+      return out;
+    };
+    // In each order, the first page ends before the third group.
+    const first = await page("startIndex=1&count=100");
+    expect(first).toEqual({ total: 3, items: fits(0).length, groups: fits(0) });
+    expect(first.items).toBeLessThan(3);
+    const next = first.items + 1;
+    expect(await page(`startIndex=${next}&count=100`)).toEqual({
+      total: 3,
+      items: fits(next - 1).length,
+      groups: fits(next - 1),
+    });
+    // Without members, a page holds every group.
+    expect(await page("excludedAttributes=members")).toMatchObject({ total: 3, items: 3 });
+  }, 120_000);
 });
 
 /** A User of the organization `other`, with its own verified domain: its id. */

@@ -2435,7 +2435,9 @@ export const ROUTES = Object.freeze([
     auth: ["scimToken"],
     codes: [],
     oauthCodes: [],
-    scimTypes: [],
+    // A delete of a mapped group past GROUP_ROLE_USERS_MAX members, or one whose role
+    // change does not fit the budget, answers 400 invalidValue.
+    scimTypes: ["invalidValue"],
   },
   {
     // The refusals of the design's 9.5: 501 with the SCIM error message.

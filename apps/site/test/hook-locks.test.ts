@@ -252,16 +252,20 @@ describe("the table of locks over a before hook", () => {
       ],
       ["Account delete", "deleteAccountRows user.beforeDelete: runDelete > user compare-and-set"],
       ["Organization delete", "deleteOrganization organization.beforeDelete: lockOrganization"],
-      ["Team delete", "deleteTeamIn organization.beforeDeleteTeam: lockOrganization, lockTeam"],
+      // A SCIM group delete holds the users of a mapped group first (ruling 59 M2 of plan 12d).
+      [
+        "Team delete",
+        "deleteTeamIn organization.beforeDeleteTeam: lockOrganization, lockTeam, writeGroup > holdUsers",
+      ],
       ["Invite", "inviteMember organization.beforeInvite: lockOrganization"],
+      // The role plan of a SCIM group write runs the role hook with by null after its locks.
+      [
+        "SCIM group write",
+        "planRoles organization.beforeUpdateMemberRole: writeMembers > writeGroup > holdUsers, writeMembers > writeGroup > lockTeam",
+      ],
       [
         "Impersonation start",
         "prepareSession session.beforeCreate: openSession > startImpersonation > holdUser",
-      ],
-      // The role recompute of a SCIM group write runs the role hook with by null after its locks.
-      [
-        "SCIM group write",
-        "recompute organization.beforeUpdateMemberRole: writeMembers > writeGroup > holdUsers, writeMembers > writeGroup > lockTeam",
       ],
       [
         "Member removal or leave",

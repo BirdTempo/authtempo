@@ -287,8 +287,9 @@ export function applyGroupPatch(
         // Plan 12d Task 9a i3: the filter path serves a remove only.
         if (op.op !== "remove")
           return refused("add and replace take the path members and a list", "invalidPath");
-        if (!members.delete(path.filter.value))
-          return refused("no member of the group matches the filter", "noTarget");
+        // A remove of a non-member changes nothing (ruling 57 item 5 of plan 12d): an IdP
+        // sends a removal again after a time-out, and an error marks its push failed.
+        members.delete(path.filter.value);
         continue;
       }
       const list = memberValues(op.value);
@@ -342,38 +343,47 @@ interface Recompute {
   rows: readonly ScimUserRow[];
 }
 
+/** The role changes of one write, grouped by the role pair, before the updates. */
+interface RolePlan {
+  changes: RoleChange[];
+  pairs: RoleChange[][];
+}
+
 /**
  * Computes the role of each member of `r` again, in the write's transaction
- * (Behavior 2). The member rows lock first, by `id` on Postgres, and the
- * group rows that the write changed come after, so a parallel write of
- * another group for the same person waits and then reads this commit. A
- * member with the owner rank keeps the role, so the last-owner rule of spec
- * 8.6 holds. So does a member with the platform role: its loss is the role
- * loss of the member routes (question Q2 of Task 10). A user with no member
- * row, such as an inactive one, gets no row back. The updates go per role
- * change, in chunks of 50 members, each with the role it read. The meter
- * holds the whole request: when the updates and `tail` do not fit the
- * budget, nothing is written.
+ * (Behavior 2), before the write of the scimGroupMember rows. The member
+ * rows are locked, by `id` on Postgres, so a parallel write of another
+ * group for the same person waits and then reads this commit. The
+ * scimGroupMember rows of the group are the ones the write leaves: `after`,
+ * the new member set. A member with the owner rank keeps the role, so the
+ * last-owner rule of spec 8.6 holds. So does a member with the platform
+ * role: its loss is the role loss of the member routes (question Q2 of Task
+ * 10). A user with no member row, such as an inactive one, gets no row
+ * back. The meter holds the whole request: when the updates and `tail` do
+ * not fit the budget, the write stops here. Only the group row and the team
+ * writes come before, so the undo of the refusal on D1 stays small (ruling
+ * 59 of plan 12d).
  */
-async function recompute(
+async function planRoles(
   config: ResolvedConfig,
   tx: StorageAdapter,
   organization: OrganizationRow,
   r: Recompute,
+  group: { id: string; after: ReadonlySet<string> },
   meter: Meter,
   tail: number,
-  now: Date,
-): Promise<RoleChange[]> {
+): Promise<RolePlan> {
   const o = config.organizations;
-  if (!o) return [];
+  const none: RolePlan = { changes: [], pairs: [] };
+  if (!o) return none;
   const byScimUser = new Map(r.rows.map((x) => [x.userId, x.id]));
   const userIds = [...byScimUser.keys()];
-  if (userIds.length === 0) return [];
+  if (userIds.length === 0) return none;
   const org = { field: "organizationId" as const, op: "eq" as const, value: organization.id };
   const members = await findManyIn(tx, "member", "userId", userIds, [org]);
   const groups = await mappedGroups(tx, organization.id, r.facts);
   const names = new Map(groups.map((g) => [g.id, g.displayName]));
-  const of =
+  const read =
     groups.length === 0
       ? []
       : await findManyIn(
@@ -383,6 +393,13 @@ async function recompute(
           r.rows.map((x) => x.id),
         );
   meter.step(3 * Math.ceil(userIds.length / IN_CHUNK) + 1);
+  // The rows as the write leaves them: the rows of this group are its new member set.
+  const of = [
+    ...read.filter((m) => m.groupId !== group.id),
+    ...r.rows
+      .filter((x) => group.after.has(x.id))
+      .map((x) => ({ groupId: group.id, scimUserId: x.id })),
+  ];
   const changes: RoleChange[] = [];
   for (const member of members) {
     if (isOwner(o, rankOf(o.ranks, member.role))) continue;
@@ -397,14 +414,15 @@ async function recompute(
     if (r.facts.gone.has(role)) stopWith("role_not_found");
     changes.push({ member, role, user: null });
   }
-  if (changes.length === 0) return changes;
+  if (changes.length === 0) return none;
   // One update per role change and chunk of 50 members: two statements each on D1.
-  const pairs = new Map<string, RoleChange[]>();
+  const byPair = new Map<string, RoleChange[]>();
   for (const c of changes) {
     const key = `${c.member.role}\u0000${c.role}`;
-    pairs.set(key, [...(pairs.get(key) ?? []), c]);
+    byPair.set(key, [...(byPair.get(key) ?? []), c]);
   }
-  const updates = [...pairs.values()].reduce((n, l) => n + Math.ceil(l.length / IN_CHUNK), 0);
+  const pairs = [...byPair.values()];
+  const updates = pairs.reduce((n, l) => n + Math.ceil(l.length / IN_CHUNK), 0);
   const hooks = config.hooks.organization;
   const hooked =
     hooks.beforeUpdateMemberRole !== undefined || hooks.afterUpdateMemberRole !== undefined;
@@ -434,7 +452,22 @@ async function recompute(
         });
     }
   }
-  for (const list of pairs.values())
+  return { changes, pairs };
+}
+
+/**
+ * The role updates of a plan, per role change, in chunks of 50 members,
+ * each with the role it read. Fewer rows: a role changed after the read,
+ * and the write stops.
+ */
+async function applyRoles(
+  tx: StorageAdapter,
+  plan: RolePlan,
+  meter: Meter,
+  now: Date,
+): Promise<RoleChange[]> {
+  let updates = 0;
+  for (const list of plan.pairs)
     for (let i = 0; i < list.length; i += IN_CHUNK) {
       const chunk = list.slice(i, i + IN_CHUNK);
       const first = chunk[0];
@@ -447,11 +480,12 @@ async function recompute(
         ],
         { role: first.role, updatedAt: now },
       );
+      updates++;
       // Fewer rows: a role changed after the read. The throw undoes each write.
       if (n < chunk.length) stopWith("conflict");
     }
   meter.step(2 * updates);
-  return changes;
+  return plan.changes;
 }
 
 /** The summary of a member row for a role hook. */
@@ -500,10 +534,12 @@ async function afterChange(
   );
 }
 
-/** The member rows of one group write, and the role recompute after them. */
+/** The member rows of one group write, and the role recompute with them. */
 interface MemberStep {
   groupId: string;
   organization: OrganizationRow;
+  /** The member set that the write leaves: empty for a delete. */
+  after: ReadonlySet<string>;
   added: readonly string[];
   removed: readonly string[];
   recompute: Recompute | null;
@@ -513,9 +549,11 @@ interface MemberStep {
 /**
  * The member step of a group write, in the step of the member rows of
  * user-hold.ts: the locks of the member rows of the role recompute, the
- * scimGroupMember rows, the read after the inserts, and the recompute. A
- * delete removes every scimGroupMember row of the group. The answer is the
- * role changes, for the after hooks.
+ * role plan with its budget check, the scimGroupMember rows, the read after
+ * the inserts, and the role updates. The scimGroupMember rows come after
+ * the member rows, in each flow that writes both (ruling 59 M1 of plan
+ * 12d). A delete removes every scimGroupMember row of the group. The answer
+ * is the role changes, for the after hooks.
  */
 async function writeMembers(
   config: ResolvedConfig,
@@ -535,6 +573,18 @@ async function writeMembers(
         { field: "userId", op: "in", value: ids.slice(i, i + IN_CHUNK) },
       ]);
   }
+  const plan =
+    r === null
+      ? null
+      : await planRoles(
+          config,
+          t,
+          m.organization,
+          r,
+          { id: m.groupId, after: m.after },
+          meter,
+          tail,
+        );
   if (all) await t.delete("scimGroupMember", [{ field: "groupId", op: "eq", value: m.groupId }]);
   else {
     for (let i = 0; i < m.removed.length; i += IN_CHUNK)
@@ -558,27 +608,51 @@ async function writeMembers(
     )
       stopWith("conflict");
   }
-  return r === null ? [] : recompute(config, t, m.organization, r, meter, tail, m.now);
+  return plan === null ? [] : applyRoles(t, plan, meter, m.now);
 }
 
 /**
- * The calls of the transaction that come after the role updates, at the
- * worst (Behavior 2). Per 50 persons who leave the team: the session lock
+ * The calls of the transaction that the meter does not see, at the worst
+ * (Behavior 2). Where the storage has row locks (`locks`): one hold per 50
+ * users of `holds`. The scimGroupMember rows: `rows` calls (`rowCalls`).
+ * Per 50 persons who leave the team: the session lock
  * on Postgres or the undo read on D1, the team member delete, and the
  * session update. Per 50 persons who join it: the hold where the storage
- * has row locks (`locks`), the reads of the member rows and the team rows,
- * and the read after the inserts; then the count and one create per person. A team delete: the
- * team member delete and the session update with its undo read on D1.
- * Then the audit row.
+ * has row locks, the reads of the member rows and the team rows, and the
+ * read after the inserts; then the count and one create per person. A team
+ * delete: the team member delete and the session update with its undo read
+ * on D1. Then the audit row.
  */
-function tailOf(adds: number, removes: number, teamDelete: boolean, locks: boolean): number {
+function tailOf(
+  adds: number,
+  removes: number,
+  teamDelete: boolean,
+  locks: boolean,
+  holds: number,
+  rows: number,
+): number {
   const chunks = (n: number) => Math.ceil(n / IN_CHUNK);
   return (
+    (locks ? chunks(holds) : 0) +
+    rows +
     (removes > 0 ? 3 * chunks(removes) : 0) +
     (adds > 0 ? (locks ? 4 : 3) * chunks(adds) + 1 + adds : 0) +
     (teamDelete ? 3 : 0) +
     1
   );
+}
+
+/**
+ * The calls of the scimGroupMember rows of a write: one delete for a group
+ * delete. Else one delete per 50 removed members, one create per added
+ * member, and one read after the creates per 50 of them. A D1 run of
+ * ruling 59 of plan 12d found these calls outside the meter: a write of 51
+ * queries passed the budget check.
+ */
+function rowCalls(kind: Write["kind"], added: number, removed: number): number {
+  const chunks = (n: number) => Math.ceil(n / IN_CHUNK);
+  if (kind === "delete") return 1;
+  return chunks(removed) + added + chunks(added);
 }
 
 /**
@@ -674,8 +748,6 @@ async function writeGroup(
       const x = users.get(id);
       return x ? [x] : [];
     });
-  // The users of the added members: the write holds them, as an account delete holds its user.
-  const holds = rowsOf(added).map((x) => x.userId);
   // Behavior 2: a user with active false holds no member row, so it joins no team either.
   const joins = rowsOf(added)
     .filter((x) => x.active)
@@ -684,11 +756,18 @@ async function writeGroup(
   const teamOf = newTeam ?? team;
   const r: Recompute | null =
     facts !== null && again.length > 0 ? { facts, rows: rowsOf(again) } : null;
+  // The users whose role or team the write changes: the added and removed members, and
+  // each member of the role recompute. The write holds them, as an account delete holds
+  // its user. A reactivate holds its user before it reads the groups, so the two run one
+  // at a time (ruling 59 M2 of plan 12d). A delete reads no User of a removed member.
+  const holds = [...new Set(rowsOf([...added, ...removed, ...again]).map((x) => x.userId))];
   const tail = tailOf(
     teamOf ? joins.length : 0,
     teamOf && write.kind !== "delete" ? leaves.length : 0,
     write.kind === "delete" && team !== null,
     storage.lockInOrder !== undefined,
+    holds.length,
+    rowCalls(write.kind, added.length, removed.length),
   );
   const changedList = changedNames(write, added.length, removed.length);
   const action =
@@ -741,8 +820,18 @@ async function writeGroup(
         } else if (write.kind === "delete") {
           if ((await tx.delete("scimGroup", versioned)) === 0) throw new VersionLost();
         }
+        // The users first, after the group row, in the lock order of user-hold.ts.
+        if (holds.length > 0) await holdUsers(tx, holds);
         // The member rows, the group rows, and the roles: in the step of the member rows.
-        const step: MemberStep = { groupId, organization, added, removed, recompute: r, now };
+        const step: MemberStep = {
+          groupId,
+          organization,
+          after,
+          added,
+          removed,
+          recompute: r,
+          now,
+        };
         const members = async (t: StorageAdapter) => {
           changes = await writeMembers(config, t, write.kind === "delete", step, meter, tail);
         };
@@ -760,8 +849,7 @@ async function writeGroup(
             if (!gone.ok) await members(tx);
           } else await members(tx);
         } else {
-          // The users of the added members, then the sessions of those who leave the team.
-          if (holds.length > 0) await holdUsers(tx, holds);
+          // The sessions of those who leave the team.
           if (team && leaves.length > 0)
             for (let i = 0; i < leaves.length; i += IN_CHUNK)
               await tx.lockInOrder?.("session", [
@@ -967,11 +1055,46 @@ export async function scimGetGroup(
 }
 
 /**
+ * The member rows of a list page, at most GROUP_MEMBERS_MAX of them, so a
+ * page reads no more rows than one group (ruling 59 of plan 12d). The rows
+ * come by group id, as the page does, one read per 50 groups. The page ends
+ * before the first group that does not fit whole. The first group always
+ * fits: it holds at most GROUP_MEMBERS_MAX members.
+ */
+async function pageMembers(
+  storage: StorageAdapter,
+  slice: readonly ScimGroupRow[],
+): Promise<{ groups: ScimGroupRow[]; rows: { groupId: string; scimUserId: string }[] }> {
+  const rows: { groupId: string; scimUserId: string }[] = [];
+  let cut: string | null = null;
+  for (let i = 0; i < slice.length && cut === null; i += IN_CHUNK) {
+    const read = await storage.findMany(
+      "scimGroupMember",
+      [{ field: "groupId", op: "in", value: slice.slice(i, i + IN_CHUNK).map((g) => g.id) }],
+      {
+        sort: [
+          { field: "groupId", dir: "asc" },
+          { field: "id", dir: "asc" },
+        ],
+        limit: GROUP_MEMBERS_MAX + 1 - rows.length,
+      },
+    );
+    rows.push(...read);
+    if (rows.length > GROUP_MEMBERS_MAX) cut = rows.at(-1)?.groupId ?? null;
+  }
+  if (cut === null) return { groups: [...slice], rows };
+  const end = slice.findIndex((g) => g.id === cut);
+  return { groups: slice.slice(0, end), rows: rows.filter((m) => m.groupId !== cut) };
+}
+
+/**
  * Lists the Groups of the caller's organization (Behavior 5), by `id`,
  * with the filter of Task 9 Behavior 6 and its paging. The one member
  * check of Entra ID (`id eq "<g>" and members[value eq "<u>"]`) answers the
  * group when the user is a member, else no group. `excludedAttributes=members`
- * reads no member row.
+ * reads no member row. A page with members holds at most GROUP_MEMBERS_MAX
+ * member rows: it ends early, and `itemsPerPage` says how many groups it
+ * holds (RFC 7644 section 3.4.2.4 lets a page hold fewer than `count`).
  */
 export async function scimListGroups(
   config: ResolvedConfig,
@@ -1007,16 +1130,14 @@ export async function scimListGroups(
       if (!hit) rows = [];
     }
   }
-  const slice = rows.slice(page.startIndex - 1, page.startIndex - 1 + page.count);
+  let slice = rows.slice(page.startIndex - 1, page.startIndex - 1 + page.count);
   const members = new Map<string, string[]>();
-  if (wantsMembers(url))
-    for (const m of await findManyIn(
-      storage,
-      "scimGroupMember",
-      "groupId",
-      slice.map((g) => g.id),
-    ))
+  if (wantsMembers(url)) {
+    const read = await pageMembers(storage, slice);
+    slice = read.groups;
+    for (const m of read.rows)
       members.set(m.groupId, [...(members.get(m.groupId) ?? []), m.scimUserId]);
+  }
   const resources: Record<string, unknown>[] = [];
   for (const row of slice) {
     const picked = selectAttributes(
@@ -1091,7 +1212,20 @@ export async function scimPatchGroup(
         parsed.ops,
       );
       if (!applied.ok) return applied.answer;
-      return { kind: "update", row, before, next: applied.doc };
+      const next = applied.doc;
+      // A PATCH that changes nothing writes nothing: no new version, no audit row, and no
+      // hook. So a remove of a non-member, which an IdP sends again after a time-out,
+      // answers as a removal does (ruling 57 item 5 of plan 12d).
+      if (
+        next.displayName === row.displayName &&
+        next.externalId === row.externalId &&
+        next.members.size === before.size &&
+        [...next.members].every((m) => before.has(m))
+      )
+        return url.searchParams.has("attributes")
+          ? oneAnswer(config, row, [...before], 200, url)
+          : { status: 204, body: null };
+      return { kind: "update", row, before, next };
     },
     url,
   );

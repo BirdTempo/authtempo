@@ -12,9 +12,10 @@ import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
 // The machine check of the one lock order of user-hold.ts (rulings 49, 50,
-// and 51 of plan 12k). The order has seven kinds of rows. They are the user
-// row, the session rows, the organization row, the team row, the invitation
-// rows, the member rows, and the team member rows. A storage wrapper records
+// and 51 of plan 12k). The order has nine kinds of rows. They are the
+// scimGroup row, the user row, the session rows, the organization row, the
+// team row, the invitation rows, the member rows, the scimGroupMember rows,
+// and the team member rows (ruling 59 M1 of plan 12d). A storage wrapper records
 // each create, update, delete, and lock read of these kinds in each
 // transaction, in order. Each test runs one flow that writes these kinds,
 // most of them two kinds or more. A kind may come again, but a kind never
@@ -44,25 +45,33 @@ const OPEN = { allow: async () => true };
  * flow takes a member row and then a team row. The invitation rows come
  * between (ruling 50). The accept consumes its invitation after `lockTeam`
  * and before its member write. The organization delete deletes the
- * invitations after the team rows and before the member rows.
+ * invitations after the team rows and before the member rows. A SCIM group
+ * write takes its scimGroup row first. The scimGroupMember rows come after
+ * the member rows: a SCIM group remove and a SCIM User delete of one person
+ * took them in the two orders and formed a deadlock (ruling 59 M1 of plan
+ * 12d).
  */
 const KINDS = [
+  "SCIM group",
   "user",
   "session",
   "organization",
   "team",
   "invitation",
   "member",
+  "SCIM group member",
   "team member",
 ] as const;
 const KIND_OF = {
-  user: 0,
-  session: 1,
-  organization: 2,
-  team: 3,
-  invitation: 4,
-  member: 5,
-  teamMember: 6,
+  scimGroup: 0,
+  user: 1,
+  session: 2,
+  organization: 3,
+  team: 4,
+  invitation: 5,
+  member: 6,
+  scimGroupMember: 7,
+  teamMember: 8,
 } as const;
 const kindOf = (model: ModelName): number | undefined =>
   (KIND_OF as Partial<Record<ModelName, number>>)[model];
@@ -592,7 +601,16 @@ type Scene = Awaited<ReturnType<typeof scene>>;
 const reason = { reason: "Ticket 2", ip: null, userAgent: null } as const;
 
 /** The kinds of a SCIM group flow of plan 12d Task 11, with the create of its group. */
-const GROUP_KINDS = ["user", "session", "organization", "team", "member", "team member"];
+const GROUP_KINDS = [
+  "SCIM group",
+  "user",
+  "session",
+  "organization",
+  "team",
+  "member",
+  "SCIM group member",
+  "team member",
+];
 
 /** The kinds that each flow touches on the scene, so a flow that stops its writes fails here. */
 const TOUCHED: Record<string, string[]> = {
@@ -715,7 +733,15 @@ const TOUCHED: Record<string, string[]> = {
   // The team member add of the setup takes the team row.
   "a SCIM deactivate": ["user", "session", "organization", "team", "member", "team member"],
   "a SCIM reactivate": ["user", "session", "organization", "member", "team member"],
-  "a SCIM delete": ["user", "session", "organization", "member", "team member"],
+  // The member row lock, then the scimGroupMember rows, then the member delete (ruling 59 M1).
+  "a SCIM delete": [
+    "user",
+    "session",
+    "organization",
+    "member",
+    "SCIM group member",
+    "team member",
+  ],
   // Plan 12d Task 11: each group flow first creates the group of Uma in the flow, so the
   // kinds of the create (the claim, the team create, the role) show in each of them.
   "a SCIM group create": GROUP_KINDS,
@@ -987,8 +1013,9 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     const id = must(await scimUma(w, s))?.id ?? "";
     return scimCall(w, s, "DELETE", `/Users/${id}`);
   },
-  // Plan 12d Task 11: the group writes hold the added users, then the organization or
-  // the team row, then the member rows of the role recompute, then the team member rows.
+  // Plan 12d Task 11: the group writes take the group row, hold the users whose role or
+  // team they change, then the organization or the team row, then the member rows of the
+  // role recompute, then the scimGroupMember rows, then the team member rows.
   "a SCIM group create": (w, s) => scimDirectory(w, s).then((id) => ({ ok: id !== "" })),
   "a SCIM group member removal": async (w, s) => {
     const id = await scimDirectory(w, s);
@@ -1271,7 +1298,7 @@ const SITES: Record<string, readonly string[] | string> = {
   ],
   // The SCIM Groups of plan 12d Task 11: the group row, the user hold, the sessions of
   // the persons who leave the team, the organization or team row, the member rows of
-  // the role recompute, the team member rows, then the audit row.
+  // the role recompute, the scimGroupMember rows, the team member rows, then the audit row.
   "scim/groups writeGroup": [
     "a SCIM group create",
     "a SCIM group member removal",
