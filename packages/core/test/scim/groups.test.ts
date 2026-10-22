@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 /** The organization config of the SSO worlds, with teams and dynamic roles on. */
-const ORGANIZATIONS: AuthConfig["organizations"] = {
+const ORGANIZATIONS: NonNullable<AuthConfig["organizations"]> = {
   platformRole: "operator",
   platformOrganization: "platform-co",
   ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
