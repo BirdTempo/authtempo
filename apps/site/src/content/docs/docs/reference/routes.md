@@ -1633,7 +1633,9 @@ Core ignores an attribute that the User schema does not know. It stores nothing 
 
 A schema URN in `schemas` other than the core User and the enterprise extension answers 400 `invalidSyntax`. A custom extension in the attribute map of Entra ID or Okta sends such a URN. To fix it, remove the custom mapping in the directory, or ask for the extension.
 
-A deactivate ends the sessions that fit its call budget. The other sessions stay until the sweep, but each session read, JWT mint, and `sessionLive` call refuses them at once.
+A deactivate ends the sessions that fit its call budget. The other sessions stay until the sweep, but each session read, JWT mint, and `sessionLive` call refuses them at once. A deactivate also ends the OAuth refresh tokens of the user. The families that do not fit the budget stay on the pending-end row, and the sweep ends them. Until then the refresh grant refuses each of them.
+
+In a PATCH, Entra ID sends the manager as a list of one object. The path is `manager` or the path of the enterprise extension. Core reads that object as the `manager` of the enterprise extension.
 
 <h3 id="get-scim-v2-users"><code>GET /scim/v2/Users</code></h3>
 
@@ -1668,7 +1670,7 @@ A deactivate ends the sessions that fit its call budget. The other sessions stay
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
 | Input | None. The body is a User, and `If-Match` may name the version |
-| Answer | The User. `active: false` removes the member row, and ends the access of a user whose address the organization's domain claims |
+| Answer | The User. `active: false` removes the member row, and ends the access of a user whose address the organization's domain claims. A PUT replaces the whole User (RFC 7644 section 3.5.1). A body with no `active` reads as `active: true`, so it reactivates a deactivated user |
 | Errors | None |
 
 <h3 id="patch-scim-v2-users-id"><code>PATCH /scim/v2/Users/:id</code></h3>
