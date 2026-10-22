@@ -76,6 +76,7 @@ function engine(
   sent: MailMessage[],
   limiter: AuthConfig["limiter"] = OPEN,
   impersonation = false,
+  saml = false,
 ) {
   const storage = createD1Adapter(db);
   const input: AuthConfig = {
@@ -100,6 +101,8 @@ function engine(
     },
     operator: impersonation ? { users: true, impersonation: {} } : { users: true },
     hooks: { session: { afterEnd: () => {} } },
+    // With sso.saml on, a due refresh reads the session-cap row (ruling 44 of plan 12d).
+    ...(saml ? { sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] } } : {}),
   };
   return { auth: createAuth(input), storage, input };
 }
@@ -282,44 +285,62 @@ describe("the operator session calls on D1 (plan 12f Task 7)", () => {
     expect(await stopRows()).toBe(3);
   });
 
+  /**
+   * The whole user-actor calls on the binding, run of 2026-10-22 (the
+   * rebase of plan 12d Task 10 onto Task 8): the sessions the page ended,
+   * the queries, and the counter of the adapter. With `sso.saml` on, the due
+   * refresh reads the session-cap row (ruling 44 of plan 12d), so 11 calls
+   * come before the act. `OPERATOR_CALLS_BEFORE.user` is 11 for it, so a
+   * page ends 1 session fewer with saml on or off.
+   */
+  const USER_ACTOR_COUNTS: Record<string, [number, number, number]> = {
+    "endAll off": [34, 47, 45],
+    "endAll on": [34, 48, 46],
+    "endUser off": [18, 40, 38],
+    "endUser on": [18, 41, 39],
+  };
+
   for (const call of ["endAll", "endUser"] as const)
-    it(`a whole user-actor ${call} sends 50 queries or fewer: the route limiter, the session, the guard, and the act`, async () => {
-      const sent: MailMessage[] = [];
-      const setup = engine(env.DB, sent).auth;
-      const token = await platformOperator(setup, sent);
-      const { userId } = await signIns(setup, sent, "ada@example.com", 60);
-      // Past the slide of 6 hours, inside the 1440 fresh minutes of the sign-in.
-      current = new Date(current.getTime() + 7 * 60 * 60 * 1000);
-      const { db, count } = counting(env.DB);
-      const invocation = engine(db, sent, createD1Limiter(db, clock));
-      const route = createD1Limiter(db, clock);
-      // The limiter of the route, as each operator route runs first.
-      expect(await route.allow("operator-users:ip:203.0.113.9", { seconds: 3600, max: 600 })).toBe(
-        true,
-      );
-      const resolved = await invocation.auth.api.getSession(token);
-      if (!resolved) throw new Error("the session ended");
-      const actor = await requireOperatorUser(resolveConfig(invocation.input), resolved);
-      if (!actor.ok) throw new Error(actor.code);
-      const before = count.queries;
-      const input = { actor: actor.value, reason: "Breach", ip: null, userAgent: null };
-      const done =
-        call === "endAll"
-          ? await invocation.auth.api.operator.sessions.endAll(input)
-          : await invocation.auth.api.operator.sessions.endUser({ ...input, userId });
-      if (!done.ok) throw new Error(done.code);
-      // The route limiter, the schema check, the session, the user, the pending-end
-      // read of ruling 50 of plan 12d, the refresh, the platform organization, the
-      // member, the factor, and the guard limiter: 10.
-      expect(before).toBe(10);
-      expect(done.value.more).toBe(true);
-      // The whole invocation on the binding, and the counter of the adapter, which
-      // leaves out the 2 limiter queries: they go to the binding, not through the adapter.
-      expect([done.value.ended, count.queries, invocation.storage.statementsSent?.()]).toEqual(
+    for (const saml of [false, true])
+      it(`a whole user-actor ${call} with sso.saml ${saml ? "on" : "off"} sends 50 queries or fewer: the route limiter, the session, the guard, and the act`, async () => {
+        const sent: MailMessage[] = [];
+        const setup = engine(env.DB, sent, OPEN, false, saml).auth;
+        const token = await platformOperator(setup, sent);
+        const { userId } = await signIns(setup, sent, "ada@example.com", 60);
+        // Past the slide of 6 hours, inside the 1440 fresh minutes of the sign-in.
+        current = new Date(current.getTime() + 7 * 60 * 60 * 1000);
+        const { db, count } = counting(env.DB);
+        const invocation = engine(db, sent, createD1Limiter(db, clock), false, saml);
+        const route = createD1Limiter(db, clock);
+        // The limiter of the route, as each operator route runs first.
+        expect(
+          await route.allow("operator-users:ip:203.0.113.9", { seconds: 3600, max: 600 }),
+        ).toBe(true);
+        const resolved = await invocation.auth.api.getSession(token);
+        if (!resolved) throw new Error("the session ended");
+        const actor = await requireOperatorUser(resolveConfig(invocation.input), resolved);
+        if (!actor.ok) throw new Error(actor.code);
+        const before = count.queries;
+        const input = { actor: actor.value, reason: "Breach", ip: null, userAgent: null };
+        const done =
+          call === "endAll"
+            ? await invocation.auth.api.operator.sessions.endAll(input)
+            : await invocation.auth.api.operator.sessions.endUser({ ...input, userId });
+        if (!done.ok) throw new Error(done.code);
+        // The route limiter, the schema check, the session, the user, the pending-end
+        // read of ruling 50 of plan 12d, the refresh, the platform organization, the
+        // member, the factor, and the guard limiter: 10. With sso.saml on, the
+        // session-cap read of the refresh too: 11.
+        expect(before).toBe(saml ? 11 : 10);
+        expect(done.value.more).toBe(true);
+        // The whole invocation on the binding, and the counter of the adapter, which
+        // leaves out the 2 limiter queries: they go to the binding, not through the adapter.
         // The work keeps 1 call for the session read of the router's
         // impersonation step (plan 12f Task 11), which this direct call skips.
-        // Since ruling 50 of plan 12d the calls before are 10, so a page ends 1 fewer.
-        call === "endAll" ? [35, 48, 46] : [19, 41, 39],
-      );
-    });
+        expect([done.value.ended, count.queries, invocation.storage.statementsSent?.()]).toEqual(
+          USER_ACTOR_COUNTS[`${call} ${saml ? "on" : "off"}`],
+        );
+        // With the session read of the router's step, the route call stays inside 50.
+        expect(count.queries + 1).toBeLessThanOrEqual(50);
+      });
 });

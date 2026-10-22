@@ -261,9 +261,13 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * 2026-10-22 gives the delete 47 queries, 1 session, and sweeps of 47, 47,
  * and 48. The removal sends 50 queries with the one more read, and its
  * page still ends 11.
+ * The rebase of plan 12d Task 10 onto Task 8 raises `MEMBER_WRITE_CALLS_BEFORE`
+ * from 10 to 12 for the due refresh and its session-cap read. The run of
+ * 2026-10-22 gives the removal 48 queries, 10 sessions, and sweeps of 47, 47,
+ * and 28. `DELETE_CALLS_BEFORE` goes from 7 to 8; the delete counts stay.
  */
 const DELETE_COUNTS: [number, number, number[]] = [47, 1, [47, 47, 48]];
-const REMOVE_COUNTS: [number, number, number[]] = [50, 11, [47, 47, 26]];
+const REMOVE_COUNTS: [number, number, number[]] = [48, 10, [47, 47, 28]];
 
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });
 
@@ -402,10 +406,12 @@ async function auditorPart(setup: Auth, byToken: string, email: string) {
  * and the role change 52. Ruling 50 of plan 12d adds the pending-end read
  * of `revokedFor` to the session read (run of 2026-10-22): the removal reads
  * it and sends 50 queries, and the role change keeps 1 more call and ends 1
- * session fewer.
+ * session fewer. `MEMBER_WRITE_CALLS_BEFORE` at 12 (the rebase of plan 12d
+ * Task 10 onto Task 8, run of 2026-10-22) keeps 2 more calls, so each page
+ * ends 1 session fewer.
  */
-const DYNAMIC_REMOVE_COUNTS: [number, number, number[]] = [50, 10, [47, 47, 30]];
-const DYNAMIC_ROLE_COUNTS: [number, number, number[]] = [49, 11, [47, 47, 28]];
+const DYNAMIC_REMOVE_COUNTS: [number, number, number[]] = [48, 9, [47, 47, 32]];
+const DYNAMIC_ROLE_COUNTS: [number, number, number[]] = [47, 10, [47, 47, 30]];
 
 describe("the losses of an operator outside the operator acts on D1 (ruling 63 of plan 12f)", () => {
   beforeEach(async () => {
@@ -483,6 +489,69 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
       .first<{ n: number }>();
     expect(own?.n).toBe(1);
     expect([r.queries, inAct, sweeps]).toEqual(REMOVE_COUNTS);
+    expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+  });
+
+  /**
+   * The worst session read before the act: a due refresh that reads the
+   * session-cap row with `sso.saml` on (ruling 44 of plan 12d). The slide
+   * is 72 minutes, so the caller's session is due 80 minutes after the last
+   * impersonation start, while each impersonation (240 minutes) still lives.
+   * Run of 2026-10-22 (the rebase of plan 12d Task 10 onto Task 8): with
+   * `MEMBER_WRITE_CALLS_BEFORE` at 10 the removal sent 52 queries; at 12 it
+   * sends 50 and its page ends 10. The delete sends 49 with
+   * `DELETE_CALLS_BEFORE` at 7 or 8. It ends the own session only: the
+   * budget left for the page is below the 3 calls of its least page, so
+   * the sweep ends the 40.
+   */
+  const dueWithSaml = async () =>
+    ({
+      ...(await on()),
+      session: { slidingRefreshDays: 0.05 },
+      sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
+    }) satisfies Partial<AuthConfig>;
+  const DUE_DELETE_COUNTS: [number, number, number[]] = [49, 1, [48, 48, 48, 25]];
+  const DUE_REMOVE_COUNTS: [number, number, number[]] = [50, 10, [48, 48, 31]];
+
+  it("deletes an operator with a due refresh and sso.saml on in 50 queries, and the sweep ends the rest", async () => {
+    const sent: MailMessage[] = [];
+    const extra = await dueWithSaml();
+    const { bobToken, bobId } = await fortyImpersonations(sent, extra);
+    current = new Date(current.getTime() + 80 * 60_000);
+    const r = await invoke(sent, "/user/delete", asUser(bobToken), {}, extra);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(await env.DB.prepare("SELECT id FROM ta_user WHERE id = ?").bind(bobId).first()).toBe(
+      null,
+    );
+    const inAct = endings.length;
+    const sweeps = await sweepAll(sent, extra);
+    expect(await impersonations()).toBe(0);
+    expect(await stopCauses()).toEqual(Array(40).fill("account_delete"));
+    expect([r.queries, inAct, sweeps]).toEqual(DUE_DELETE_COUNTS);
+    expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+  });
+
+  it("removes the platform member row of an operator with a due refresh and sso.saml on in 50 queries", async () => {
+    const sent: MailMessage[] = [];
+    const extra = await dueWithSaml();
+    const { first, bobId } = await fortyImpersonations(sent, extra);
+    current = new Date(current.getTime() + 80 * 60_000);
+    const platform = await env.DB.prepare("SELECT id FROM ta_organization WHERE slug = ?")
+      .bind("platform-co")
+      .first<{ id: string }>();
+    const r = await invoke(
+      sent,
+      "/organizations/members/remove",
+      asUser(first),
+      { organizationId: platform?.id, userId: bobId },
+      extra,
+    );
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const inAct = endings.length;
+    const sweeps = await sweepAll(sent, extra);
+    expect(await impersonations()).toBe(0);
+    expect(await stopCauses()).toEqual(Array(40).fill("role_loss"));
+    expect([r.queries, inAct, sweeps]).toEqual(DUE_REMOVE_COUNTS);
     expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
   });
 

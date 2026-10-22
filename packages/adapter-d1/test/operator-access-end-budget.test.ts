@@ -259,19 +259,22 @@ async function auditOf(userId: string): Promise<string[]> {
 // delete of the organization tokens. The acts do not change.
 // Since ruling 50 of plan 12d (run of 2026-10-22), the session read of a user actor keeps 1
 // more call for the pending-end read of `revokedFor`, so its act ends 1 session fewer.
+// Since the rebase of plan 12d Task 10 onto Task 8 (run of 2026-10-22), it keeps 1 more call
+// for the session-cap read of a due refresh with sso.saml on, so its act ends 1 session fewer.
 const BAN_COUNTS: Record<string, [number, number, number[]]> = {
   "secret 45": [50, 31, [36]],
-  "user 45": [49, 21, [46]],
+  "user 45": [48, 20, [47]],
   "secret 60": [50, 31, [48, 24]],
-  "user 60": [49, 21, [48, 34]],
+  "user 60": [48, 20, [48, 35]],
 };
 // The revoke ends 3 sessions fewer in the act since ruling 16 of plan 12k: it deletes the team
-// rows of the member row it deletes, and so the sweep and a retry end more.
+// rows of the member row it deletes, and so the sweep and a retry end more. The retry of a
+// user ends 1 session fewer since the rebase of plan 12d Task 10 onto Task 8 (run of 2026-10-22).
 const REVOKE_COUNTS: Record<string, [number, number, number, number, number[]]> = {
   "secret 45": [50, 46, 21, 24, [21]],
-  "user 45": [50, 49, 21, 18, [30]],
+  "user 45": [50, 48, 21, 17, [31]],
   "secret 60": [50, 50, 21, 28, [35]],
-  "user 60": [50, 49, 21, 18, [45]],
+  "user 60": [50, 48, 21, 17, [46]],
 };
 
 const asSecret = { authorization: `Operator ${SECRET}` };

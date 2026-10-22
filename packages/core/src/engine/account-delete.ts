@@ -48,13 +48,21 @@ export const DELETE_TOKEN_RE = /^ad_[A-Za-z0-9_-]{43}$/;
 /**
  * The calls of a delete invocation before its transaction, at the worst
  * (ruling 63 of plan 12f). Through the route: the impersonation step of
- * the router, the route limiter, `resolveSession` (4, with the pending-end
- * read of ruling 50 of plan 12d), and the limiter of
- * the delete or of the confirm. The ready check of the storage comes on
- * top. The D1 test `operator-loss-budget.test.ts` counts the whole
- * invocation on the binding.
+ * the router, the route limiter, `resolveSession` (5), and the limiter of
+ * the delete or of the confirm. The session read of 5 is the worst caller
+ * session: the session, the user, the pending-end read of ruling 50 of
+ * plan 12d, the session-cap read of a due refresh with `sso.saml` on
+ * (ruling 44 of plan 12d), and the refresh (ruling 51 of plan 12d). The
+ * ready check of the storage comes on top. The D1 test
+ * `operator-loss-budget.test.ts` counts the whole invocation on the
+ * binding. A page of impersonation sessions needs 3 calls at the least.
+ * So only a scene that leaves the page 2 calls at 8 shows the step from 7.
+ * The run of 2026-10-22, with a due refresh and `sso.saml` on, gave the
+ * page -1, 1, or 3 calls in four scenes: a direct delete or a confirm,
+ * with a `session.afterEnd` hook or without. Each count was the same at 7
+ * and at 8. So the value is the sum of the list above, not a measured step.
  */
-const DELETE_CALLS_BEFORE = 7;
+const DELETE_CALLS_BEFORE = 8;
 
 /**
  * The read of the user's scimUser rows and the delete of their

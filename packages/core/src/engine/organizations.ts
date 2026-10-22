@@ -276,16 +276,19 @@ interface RoleLoss {
 /**
  * The fixed calls of a member write before its transaction, at the worst
  * (ruling 63 of plan 12f). Through the route: the impersonation step of
- * the router, the route limiter, and `resolveSession` (4, with the
- * pending-end read of ruling 50 of plan 12d). Then the
+ * the router, the route limiter, and `resolveSession` (5, with the
+ * pending-end read of ruling 50 and the session-cap read of ruling 44 of
+ * plan 12d). Then the
  * standing of the caller (3): the organization, and the organization and
  * member row of `membership`. Then the target's `membership` (2), and its
  * user (1). The reads of the role rows (plan 12k) and the ready check of
  * the storage come on top. `roleLossOf` takes the count of the role reads
  * that ran. The D1 test `operator-loss-budget.test.ts` counts the whole
- * invocation on the binding.
+ * invocation on the binding. At 10, a removal with a due refresh sent 51
+ * queries, and 52 with `sso.saml` on (run of 2026-10-22). So 10 left out
+ * the refresh and the session-cap read, and 12 holds them.
  */
-const MEMBER_WRITE_CALLS_BEFORE = 10;
+const MEMBER_WRITE_CALLS_BEFORE = 12;
 
 /** The worst case of the member write in `withRoleLoss`: the owner lock, the write, and the recount. */
 const MEMBER_WRITE_WORST = 5;
