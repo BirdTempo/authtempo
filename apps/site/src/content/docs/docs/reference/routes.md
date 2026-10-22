@@ -1695,7 +1695,7 @@ In a PATCH, Entra ID sends the manager as a list of one object. The path is `man
 
 The Groups routes (plan 12d Task 11) serve the groups of the token's organization. A member of a group is a User of the same organization. A group id, an id of another organization, an unknown id, or a `type` other than `User` answers 400 `invalidValue`. Core serves no nested group. Each member in an answer holds `value`, `$ref`, and `type`.
 
-The caps come from the D1 Free budget of 50 queries per request. One request changes at most 9 members of a group: the values of an add or a remove, and the members that a replace or a PUT adds or takes away. A group holds at most 10000 members. A rename or a delete of a mapped group computes the role of each member again, and refuses a group of more than 250 members. Each refusal is 400 `invalidValue`, and nothing changes.
+The caps come from the D1 Free budget of 50 queries per request. One request changes at most 9 members of a group. The count holds the values of an add or a remove, and the members that a replace or a PUT adds or takes away. A group holds at most 10000 members. A rename or a delete of a mapped group computes the role of each member again, and refuses a group of more than 250 members. Each refusal is 400 `invalidValue`, and nothing changes.
 
 Okta sends up to 1000 members in one group PATCH, and an Okta app of the App Integration Wizard sends a PUT with every member. Such a request answers 400 when it changes more than 9 members. Ask Okta support for a smaller batch size, or push smaller groups. Entra ID sends one member in each operation.
 
