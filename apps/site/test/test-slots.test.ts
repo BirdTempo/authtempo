@@ -1,16 +1,19 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   addRun,
+  checkSlot0,
   claimSlot,
   dropRow,
   goneRows,
   MAX_ACTIVE_SETS,
+  tablePath as machineTablePath,
   projectOf,
   reapRows,
+  registerMain,
   removeRun,
   type SlotTable,
   withTable,
@@ -18,7 +21,7 @@ import {
 import { SITE } from "../scripts/lib/paths.ts";
 
 // The slot table of the test servers (plan test-servers-per-worktree, Task 2).
-// Every worktree of the repo shares one table in the git common directory.
+// Every clone and every worktree on the machine shares one table.
 
 const temp = mkdtempSync(join(tmpdir(), "authtempo-slots-"));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
@@ -30,16 +33,25 @@ const MAIN = "/repo/main";
 const HOUR = 60 * 60 * 1000;
 const NOW = Date.parse("2026-10-22T12:00:00Z");
 const empty = (): SlotTable => ({ version: 1, rows: [] });
-const claim = (t: SlotTable, worktree: string, now = NOW, services = ["postgres"]) =>
-  claimSlot(t, { worktree, main: MAIN, services, now });
+/** A claim of a linked worktree, or of a main worktree with `isMain`. */
+const claim = (
+  t: SlotTable,
+  worktree: string,
+  now = NOW,
+  services = ["postgres"],
+  isMain = worktree === MAIN,
+) => claimSlot(t, { worktree, isMain, services, now });
+/** register-main in the main worktree MAIN. */
+const register = (t: SlotTable, now = NOW) =>
+  registerMain(t, { worktree: MAIN, isMain: true, now });
 const alive = (pid: number) => pid === process.pid;
 
 /** Runs the claim fixture in its own process and answers the slot it prints. */
-function claimInProcess(table: string, worktree: string): Promise<string> {
+function claimInProcess(table: string, worktree: string, ...rest: string[]): Promise<string> {
   return new Promise((done, fail) => {
     const child = spawn(
       process.execPath,
-      [`${SITE}test/fixtures/test-slots-claim.mjs`, table, worktree],
+      [`${SITE}test/fixtures/test-slots-claim.mjs`, table, worktree, ...rest],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
     let out = "";
@@ -68,11 +80,52 @@ describe("the slot table of the test servers", () => {
     expect(rows.length).toBe(2);
   });
 
-  it("gives slot 0 to the main worktree and slot 1 to the first other worktree", () => {
+  it("gives slot 0 only to the registered main worktree, and slot 1 up to any other path", () => {
     const t = empty();
+    expect(register(t).slot).toBe(0);
     expect(claim(t, MAIN).slot).toBe(0);
     expect(claim(t, "/repo/lane-a").slot).toBe(1);
-    expect(claim(t, "/repo/lane-b").slot).toBe(2);
+    // A second clone is the main worktree of its own repo.
+    expect(claim(t, "/clone-2/main", NOW, ["postgres"], true).slot).toBe(2);
+    expect(claim(t, "/repo/lane-b").slot).toBe(3);
+  });
+
+  it("never gives slot 0 to a git-init copy, also when no main is registered", () => {
+    const t = empty();
+    // A git-init copy is the main worktree of its own repo.
+    expect(claim(t, "/scratch/copy", NOW, ["postgres"], true).slot).toBe(1);
+    register(t);
+    expect(claim(t, "/scratch/copy-2", NOW, ["postgres"], true).slot).toBe(2);
+  });
+
+  it("gives slot 0 to one path only, and never to a linked worktree", () => {
+    const t = empty();
+    expect(() => registerMain(t, { worktree: "/repo/lane-a", isMain: false, now: NOW })).toThrow(
+      "/repo/lane-a is a linked worktree: slot 0 is for a main worktree",
+    );
+    register(t);
+    expect(() => registerMain(t, { worktree: "/clone-2/main", isMain: true, now: NOW })).toThrow(
+      "slot 0 belongs to /repo/main. Only one path holds slot 0",
+    );
+    claim(t, "/clone-3/main", NOW, ["postgres"], true);
+    expect(t.rows.filter((r) => r.slot === 0).map((r) => r.worktree)).toEqual([MAIN]);
+  });
+
+  it("refuses a hand-written slot 0 row of a linked worktree", () => {
+    // A person can edit the table by hand; this row sends a lane to the servers of main.
+    const t: SlotTable = {
+      version: 1,
+      rows: [{ worktree: "/repo/lane-a", slot: 0, lastUse: NOW, services: ["postgres"], runs: [] }],
+    };
+    const refusal =
+      "the slot table gives slot 0 to /repo/lane-a, which is a linked worktree. " +
+      "Slot 0 is the running set of main only. Remove the row from the table";
+    expect(() => claim(t, "/repo/lane-a")).toThrow(refusal);
+    expect(() => checkSlot0(t.rows[0] as SlotTable["rows"][number], false)).toThrow(refusal);
+  });
+
+  it("keeps one table for the machine, in the cache folder of the user", () => {
+    expect(machineTablePath("/Users/x")).toBe("/Users/x/.cache/authtempo/test-slots.json");
   });
 
   it("keeps the slot of a worktree and adds the services of a second claim", () => {
@@ -91,7 +144,7 @@ describe("the slot table of the test servers", () => {
 
   it("frees the slot of a removed worktree", () => {
     const t = empty();
-    claim(t, MAIN);
+    register(t);
     claim(t, "/repo/lane-a");
     claim(t, "/repo/lane-b");
     // git worktree remove of lane-a: the list no longer shows it.
@@ -103,7 +156,7 @@ describe("the slot table of the test servers", () => {
 
   it("never reaps slot 0, also when it is idle for hours", () => {
     const t = empty();
-    claim(t, MAIN, NOW - 5 * HOUR);
+    register(t, NOW - 5 * HOUR);
     claim(t, "/repo/lane-a", NOW - 5 * HOUR);
     claim(t, "/repo/lane-b", NOW - 60_000);
     const reaped = reapRows(t, {
@@ -133,7 +186,7 @@ describe("the slot table of the test servers", () => {
   it("refuses a set above the cap and names the idle sets that reap can remove", () => {
     expect(MAX_ACTIVE_SETS).toBe(8);
     const t = empty();
-    claim(t, MAIN, NOW - 5 * HOUR);
+    register(t, NOW - 5 * HOUR);
     for (let i = 1; i <= 8; i++) claim(t, `/repo/lane-${i}`, i <= 2 ? NOW - 2 * HOUR : NOW);
     expect(() => claim(t, "/repo/lane-9")).toThrow(
       "8 test server sets are up, the cap. Run node scripts/test-servers.mjs reap to remove " +
@@ -178,5 +231,37 @@ describe("the slot table of the test servers", () => {
       `the slot table ${table} is locked by pid ${process.pid}`,
     );
     rmSync(`${table}.lock`, { recursive: true });
+  });
+
+  it("takes over a dead lock once when two waiters read the same dead pid", async () => {
+    const table = tablePath();
+    const gateB = join(temp, `gate-b-${n}`);
+    const gateA = join(temp, `gate-a-${n}`);
+    mkdirSync(gateB);
+    mkdirSync(gateA);
+    // A passes its gate at once; the gate only marks when A holds the lock.
+    writeFileSync(join(gateA, "go"), "");
+    const dead = spawnSync(process.execPath, ["-e", "process.stdout.write(String(process.pid))"], {
+      encoding: "utf8",
+    }).stdout;
+    mkdirSync(`${table}.lock`);
+    writeFileSync(`${table}.lock/pid`, dead);
+    const until = (file: string) =>
+      expect.poll(() => existsSync(file), { timeout: 10_000, interval: 20 }).toBe(true);
+    // Waiter B reads the dead pid, then stops at its gate before its takeover.
+    const b = claimInProcess(table, "/repo/lane-b", "0", gateB);
+    await until(join(gateB, "stale"));
+    // Waiter A takes over the dead lock and holds it.
+    const a = claimInProcess(table, "/repo/lane-a", "1500", gateA);
+    await until(join(gateA, "held"));
+    // B now meets the live lock of A where it read a dead pid.
+    writeFileSync(join(gateB, "go"), "");
+    const slots = await Promise.all([a, b]);
+    expect(slots).toEqual(["1", "2"]);
+    const rows = (JSON.parse(readFileSync(table, "utf8")) as SlotTable).rows;
+    expect(rows.map((r) => [r.worktree, r.slot])).toEqual([
+      ["/repo/lane-a", 1],
+      ["/repo/lane-b", 2],
+    ]);
   });
 });
