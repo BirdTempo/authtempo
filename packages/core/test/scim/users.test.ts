@@ -1143,12 +1143,13 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
   const SCOPE = "mcp:read offline_access";
 
   /** The world with OAuth, a session.afterEnd hook (the worst page), and Ada as a SCIM User. */
-  async function oauthWorld() {
+  async function oauthWorld(refreshTtlDays?: number) {
     const w = await world({
       oauth: {
         resources: [RESOURCE],
         scopes: SCOPES,
         registration: { cimd: false, dynamic: true },
+        ...(refreshTtlDays === undefined ? {} : { refreshTtlDays }),
       },
       hooks: { session: { afterEnd: () => {} } },
     });
@@ -1210,19 +1211,28 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
       { field: "tokenHash", op: "eq", value: await sha256Hex(refreshToken) },
     ]);
 
-  it("refuses after every sweep a family that an exchange committed after the token delete", async () => {
-    const { w, h, token, user, id, cookie } = await oauthWorld();
+  /**
+   * The deactivate of Ada with 20 families, while an exchange of one more
+   * code commits its refresh row after the token delete of the act. With
+   * `ahead`, an instance whose clock runs `ahead` ms ahead runs the
+   * authorize and the exchange. The answer is the refresh token of the
+   * exchange and the pending-end row.
+   */
+  async function racedDeactivate(t: Awaited<ReturnType<typeof oauthWorld>>, ahead = 0) {
+    const { w, h, token, user, id, cookie } = t;
     w.clock.advance(MINUTE);
     const clientId = await registered(h);
     await families(h, cookie, clientId, 20);
+    w.clock.advance(MINUTE);
     // The code of one more grant, made before the act.
     const p = await pkce();
+    w.clock.advance(ahead);
     const { code } = await authorized(h, cookie, {
       clientId,
       challenge: p.challenge,
       scope: SCOPE,
     });
-    w.clock.advance(MINUTE);
+    w.clock.advance(-ahead);
     // On Postgres an exchange can commit its refresh row after the token delete of the
     // act began. Then the delete does not see the row (rereview of ruling 55). The fixture
     // runs that exchange while the transaction is open, right after its token delete.
@@ -1235,8 +1245,11 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
           ...tx,
           delete: async (model, where) => {
             const n = await tx.delete(model, where);
-            if (model === "oauthToken" && answer === null)
+            if (model === "oauthToken" && answer === null) {
+              w.clock.advance(ahead);
               answer = await h.auth.handle(exchange(code, clientId, p.verifier));
+              w.clock.advance(-ahead);
+            }
             return n;
           },
         }),
@@ -1248,13 +1261,21 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
     if (!exchanged) throw new Error("the exchange did not run");
     expect(exchanged.status).toBe(200);
     const raced = ((await exchanged.json()) as { refresh_token: string }).refresh_token;
-    const family = (await rowOf(w, raced))?.familyId;
     const [row] = await rowsOf(w, "session-end", user.id);
+    if (!row) throw new Error("no pending-end row");
+    return { clientId, raced, row };
+  }
+
+  it("refuses after every sweep a family that an exchange committed after the token delete", async () => {
+    const t = await oauthWorld();
+    const { w, h, user } = t;
+    const { clientId, raced, row } = await racedDeactivate(t);
+    const family = (await rowOf(w, raced))?.familyId;
     // The row names the families that the act read and did not end, not this one.
-    expect(row?.data?.families).not.toContain(family);
+    expect(row.data?.families).not.toContain(family);
     await sweepAll(w, user.id);
     const records = await rowsOf(w, "session-end-record", user.id);
-    expect(records.map((r) => r.data)).toEqual([{ reason: "revoked", before: row?.data?.before }]);
+    expect(records.map((r) => r.data)).toEqual([{ reason: "revoked", before: row.data?.before }]);
     // The record refuses the family, and the refusal ends it.
     expect(await refresh(h, raced, clientId)).toBe(400);
     expect(await rowOf(w, raced)).toBeNull();
@@ -1279,6 +1300,39 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
     w.clock.advance(6 * MINUTE);
     await sweepExpired(w.config);
     expect(await rowsOf(w, "session-end-record", user.id)).toEqual([]);
+  });
+
+  it("keeps the record life of the act config when a deploy lowers it before the sweep", async () => {
+    const t = await oauthWorld(90);
+    const { w, h, user } = t;
+    const { clientId, raced, row } = await racedDeactivate(t);
+    const before = new Date(String(row.data?.before)).getTime();
+    // A deploy lowers refreshTtlDays to 7, and the sweep runs a day after the act.
+    (w.config.oauth as { refreshTtlDays: number }).refreshTtlDays = 7;
+    w.clock.advance(DAY);
+    await sweepAll(w, user.id);
+    const [record] = await rowsOf(w, "session-end-record", user.id);
+    // The life counts from before, not from the clock of the sweep: 90 days, 5 minutes, one day.
+    expect((record?.expiresAt.getTime() ?? 0) - before).toBe(91 * DAY + 5 * MINUTE);
+    // On day 32 the family of the act config still lives, and the record still refuses it.
+    w.clock.advance(before + 32 * DAY - w.clock.now().getTime());
+    await sweepExpired(w.config);
+    expect(await rowsOf(w, "session-end-record", user.id)).toHaveLength(1);
+    expect(await refresh(h, raced, clientId)).toBe(400);
+  });
+
+  it("refuses after every sweep a family that an instance 2 s ahead authorized and exchanged after the act", async () => {
+    const t = await oauthWorld();
+    const { w, h, user } = t;
+    // The act reads no row of that instance: the family starts after the act on its clock.
+    const { clientId, raced, row } = await racedDeactivate(t, 2000);
+    const family = await rowOf(w, raced);
+    expect(new Date(String(row.data?.before)).getTime()).toBeGreaterThanOrEqual(
+      family?.createdAt.getTime() ?? Number.POSITIVE_INFINITY,
+    );
+    await sweepAll(w, user.id);
+    expect(await rowsOf(w, "session-end-record", user.id)).toHaveLength(1);
+    expect(await refresh(h, raced, clientId)).toBe(400);
   });
 
   it(

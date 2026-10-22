@@ -316,8 +316,9 @@ describe("the ban and the revoke on D1 (rulings 44 and 45 of plan 12f)", () => {
     if (!granted.ok) throw new Error(granted.code);
     const old = await list(left);
     expect([old.status, await old.json()]).toEqual([403, { error: "operator_required" }]);
-    // A sign-in after the re-grant acts.
-    current = new Date(current.getTime() + 1);
+    // A sign-in after the re-grant acts. It comes past the skew bound of the revoke
+    // (ACCESS_END_SKEW_MS of core, 5 s): the sweep ends a sign-in inside it (ruling 58 of plan 12d).
+    current = new Date(current.getTime() + 5_001);
     const fresh = await signIns(setup, sent, "bob@example.com", 1);
     expect((await list(fresh.token)).status).toBe(200);
     // The sweep still ends the left sessions, and keeps the new one.

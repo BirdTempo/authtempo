@@ -83,6 +83,19 @@ const MINUTE_MS = 60_000;
 const RECORD_MARGIN_MS = DAY_MS;
 
 /**
+ * The skew bound of `before` (ruling 58 of plan 12d): `before` is at least
+ * the clock of the act plus 5 s. Another instance can write a session or a
+ * family with a clock that runs ahead, also after the act read its rows.
+ * Serverless hosts keep their clocks by NTP, which holds them well under
+ * one second apart. On Workers the clock of a request is the time of its
+ * last I/O, so it lags and never leads (Cloudflare docs, read 2026-10-22).
+ * 5 s covers such skew with margin. The cost: a session or a family that
+ * starts in the 5 s after the act is refused too, as one from before it.
+ * A longer bound refuses more such sign-ins, so the bound stays short.
+ */
+export const ACCESS_END_SKEW_MS = 5_000;
+
+/**
  * The life of a record after its `before`: the longest life of anything
  * that started at or before it, from the config. A session lives
  * `session.ttlDays` after its last refresh, and the door refuses a refresh
@@ -102,8 +115,21 @@ export function recordLife(config: ResolvedConfig): number {
 }
 
 /** True when a pending-end row becomes a record after its work: the own sessions of a SCIM deactivate. */
-const keepsRecord = (row: VerificationRow) =>
-  row.data?.reason === "revoked" && row.data.targets === undefined;
+const recordOf = (reason: unknown, targets: unknown) =>
+  reason === "revoked" && targets === undefined;
+const keepsRecord = (row: VerificationRow) => recordOf(row.data?.reason, row.data?.targets);
+
+/**
+ * The life of the record of a row: the later of the life from the config
+ * of the act, which the row stores, and the life from the config of the
+ * sweep (ruling 58 of plan 12d). A deploy between the act and the sweep
+ * can lower `oauth.refreshTtlDays`. A family of the act still lives the
+ * life of the act config, so the record must too.
+ */
+function recordLifeOf(config: ResolvedConfig, row: VerificationRow): number {
+  const stored = Number(row.data?.recordLife);
+  return Math.max(Number.isFinite(stored) ? stored : 0, recordLife(config));
+}
 
 /**
  * The calls of the last steps of `endAllAccessPage`. They are the handoff
@@ -293,9 +319,11 @@ function impersonationWhere(operatorId: string, targets: readonly string[]): Whe
 /**
  * The pending-end row of a user, in the act's transaction: a verification
  * row with the purpose `session-end`. `data.before` is the later of the
- * clock and `newest`, the newest `createdAt` that the act read (ruling 55
- * of plan 12d). So the sweep and each door cover a row of an instance whose
- * clock runs ahead, and never a sign-in after the act. With `targets`, the
+ * clock plus `ACCESS_END_SKEW_MS` and `newest`, the newest `createdAt` that
+ * the act read (rulings 55 and 58 of plan 12d). So the sweep and each door
+ * cover a row of an instance whose clock runs ahead. A sign-in in the skew
+ * bound after the act is covered too. A row that becomes a record holds
+ * `data.recordLife`, the record life from the config of the act. With `targets`, the
  * row names the impersonation sessions that the user opened as an
  * operator. These are the sessions of those users whose `actorId` is the
  * user. With
@@ -312,8 +340,10 @@ async function writePendingEnd(
   names: { targets?: readonly string[]; families?: readonly string[] },
 ): Promise<Date> {
   const now = config.clock.now();
-  // An act that read no row has no newest time: the clock alone.
-  const before = Number.isFinite(newest) ? later(now, new Date(newest)) : now;
+  // The clock plus the skew bound covers a row of an instance whose clock runs ahead,
+  // also one that it writes after the read (ruling 58). An act that read no row has no newest time.
+  const bound = new Date(now.getTime() + ACCESS_END_SKEW_MS);
+  const before = Number.isFinite(newest) ? later(bound, new Date(newest)) : bound;
   const id = newId(now);
   await tx.create("verification", {
     id,
@@ -330,6 +360,8 @@ async function writePendingEnd(
       ...(names.families === undefined || names.families.length === 0
         ? {}
         : { families: [...names.families] }),
+      // The record life from the config of the act (ruling 58).
+      ...(recordOf(reason, names.targets) ? { recordLife: recordLife(config) } : {}),
     },
     secretVersion: config.keyring.current,
     createdAt: now,
@@ -474,7 +506,7 @@ async function endPendingFamilies(
     const before = new Date(String(row.data?.before));
     await config.storage.update("verification", byId, {
       purpose: ACCESS_END_RECORD,
-      expiresAt: new Date(before.getTime() + recordLife(config)),
+      expiresAt: new Date(before.getTime() + recordLifeOf(config, row)),
       data: { reason: "revoked", before: before.toISOString() },
     });
   } else if (rest.length === 0) await config.storage.delete("verification", byId);
