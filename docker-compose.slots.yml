@@ -1,0 +1,132 @@
+# The test servers of slots 1 and up: one set for each worktree that runs
+# tests. Only scripts/test-servers.mjs runs this file, with the project
+# authtempo-s<slot> and the ports of scripts/test-ports.mjs. Never run it by
+# hand with the default project.
+#
+# Each service extends its service in docker-compose.yml, so the images and
+# their digests stay in one file. docker-compose.yml stays the file of slot 0
+# (the running set of main) with no edit: a change of its container_name,
+# command, or tmpfs lines makes compose recreate a running slot 0 container.
+#
+# container_name goes (!reset), because a fixed name blocks a second set:
+# compose names each container <project>-<service>-1. The ports come from the
+# script (!override replaces the list of the base file). The data lives on
+# tmpfs, so down leaves no volume and no data behind. The label
+# authtempo.worktree names the worktree that owns the set; the script
+# refuses to start or remove a set whose label names another worktree.
+#
+# The memory limits (review M2, 2026-10-22). A tmpfs with no size can grow to
+# half of the memory of Docker. A leak of test databases in one set can then
+# make the OOM killer stop a container of another set or project. So each
+# tmpfs has a size and each service has mem_limit, with memswap_limit equal,
+# so no swap goes past the limit. The data of a tmpfs counts in the memory
+# of its container, so mem_limit is the tmpfs size plus the server. A full
+# tmpfs gives "no space left" to the test that writes, not an OOM kill.
+# Each service shows its peaks, its limits, and the room. The peaks come from
+# five full test and typecheck runs on slot 1, 2026-10-22 21:42 to 22:00 CST.
+# docker stats and df sampled every 5 s, at a load of 7 to 26. The sum of the
+# limits of one set is 3 GiB. Take one set at its limits and 7 sets at their
+# peaks (1.3 GiB). Add slot 0 (1.5 GiB) and the other projects (0.2 GiB).
+# The sum is 13.8 GiB of the 15.66 GiB of Docker.
+services:
+  postgres:
+    extends: { file: docker-compose.yml, service: postgres }
+    container_name: !reset null
+    labels:
+      authtempo.worktree: "${AUTHTEMPO_WORKTREE:?run scripts/test-servers.mjs up}"
+    # peak 547 MiB in all, 356 MiB of it on tmpfs: 1.9 and 2.2 times room.
+    mem_limit: 1g
+    memswap_limit: 1g
+    ports: !override
+      - "${AUTHTEMPO_PORT_POSTGRES:?run scripts/test-servers.mjs up}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data:size=768m
+  libsql:
+    extends: { file: docker-compose.yml, service: libsql }
+    container_name: !reset null
+    labels:
+      authtempo.worktree: "${AUTHTEMPO_WORKTREE:?run scripts/test-servers.mjs up}"
+    # peak 70 MiB in all, 58 MiB of it on tmpfs: 3.7 and 3.3 times room.
+    mem_limit: 256m
+    memswap_limit: 256m
+    ports: !override
+      - "${AUTHTEMPO_PORT_LIBSQL:?run scripts/test-servers.mjs up}:8080"
+    tmpfs:
+      - /var/lib/sqld:size=192m
+  libsql-cli:
+    extends: { file: docker-compose.yml, service: libsql-cli }
+    container_name: !reset null
+    labels:
+      authtempo.worktree: "${AUTHTEMPO_WORKTREE:?run scripts/test-servers.mjs up}"
+    # peak 10 MiB in all, 2 MiB of it on tmpfs.
+    mem_limit: 128m
+    memswap_limit: 128m
+    ports: !override
+      - "${AUTHTEMPO_PORT_LIBSQL_CLI:?run scripts/test-servers.mjs up}:8080"
+    tmpfs:
+      - /var/lib/sqld:size=64m
+  libsql-cli-compat:
+    extends: { file: docker-compose.yml, service: libsql-cli-compat }
+    container_name: !reset null
+    labels:
+      authtempo.worktree: "${AUTHTEMPO_WORKTREE:?run scripts/test-servers.mjs up}"
+    # peak 13 MiB in all, 2 MiB of it on tmpfs.
+    mem_limit: 128m
+    memswap_limit: 128m
+    ports: !override
+      - "${AUTHTEMPO_PORT_LIBSQL_CLI_COMPAT:?run scripts/test-servers.mjs up}:8080"
+    tmpfs:
+      - /var/lib/sqld:size=64m
+  # The MySQL memory settings (design section 5). The data lives on tmpfs, so
+  # the files of the server count as memory too. A 64M buffer pool and no
+  # performance schema cut the server itself. The redo log of 8M (the least,
+  # default 100M) and a log buffer of 4M (default 64M) cut the tmpfs data
+  # from 209M to 117M. Measured by docker stats on 2026-10-22 21:04 CST, idle,
+  # one-minute load 2.9: 254 MiB for each server. The two settings of the
+  # design alone gave 406 MiB, and the slot 0 servers on a volume use 620 and
+  # 562 MiB. In a full test and typecheck run (2026-10-22 21:13 CST, load 33)
+  # the peaks were 433 MiB (8.4) and 372 MiB (9.7), with the test databases.
+  #
+  # The redo log is 32M (review m4). A small redo log makes InnoDB stall
+  # writes and log MY-014084 "Threads are unable to reserve space in redo
+  # log". One full run each, 2026-10-22 21:42 to 21:53 CST, load 10 to 26:
+  # warnings in the run (8.4/9.7), peak memory (8.4/9.7), run time.
+  #   8M: 7/4 (review), 433/372 MiB.   16M: 4/2, 440/380 MiB, 2m23s.
+  #   32M: 2/2, 443/382 MiB, 2m18s.    64M: 2/0, 475/413 MiB, 2m18s.
+  #   128M: 1/1, 536/482 MiB, 2m21s.
+  # No size up to 128M gave a run with no warning, and the run time did not
+  # change. 32M halves the count of 16M for 16 MiB a server.
+  mysql84:
+    extends: { file: docker-compose.yml, service: mysql84 }
+    container_name: !reset null
+    labels:
+      authtempo.worktree: "${AUTHTEMPO_WORKTREE:?run scripts/test-servers.mjs up}"
+    # peak 443 MiB in all, 168 MiB of it on tmpfs (32M redo log): 1.7 and 2.3 times room.
+    mem_limit: 768m
+    memswap_limit: 768m
+    command:
+      - --innodb-buffer-pool-size=64M
+      - --performance-schema=OFF
+      - --innodb-redo-log-capacity=32M
+      - --innodb-log-buffer-size=4M
+    ports: !override
+      - "${AUTHTEMPO_PORT_MYSQL84:?run scripts/test-servers.mjs up}:3306"
+    tmpfs:
+      - /var/lib/mysql:size=384m
+  mysql97:
+    extends: { file: docker-compose.yml, service: mysql97 }
+    container_name: !reset null
+    labels:
+      authtempo.worktree: "${AUTHTEMPO_WORKTREE:?run scripts/test-servers.mjs up}"
+    # peak 382 MiB in all, 161 MiB of it on tmpfs (32M redo log): 2.0 and 2.4 times room.
+    mem_limit: 768m
+    memswap_limit: 768m
+    command:
+      - --innodb-buffer-pool-size=64M
+      - --performance-schema=OFF
+      - --innodb-redo-log-capacity=32M
+      - --innodb-log-buffer-size=4M
+    ports: !override
+      - "${AUTHTEMPO_PORT_MYSQL97:?run scripts/test-servers.mjs up}:3306"
+    tmpfs:
+      - /var/lib/mysql:size=384m

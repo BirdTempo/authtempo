@@ -8,8 +8,17 @@ import worker, { createWorker, type Env } from "../src/index";
 const processEnv = (
   globalThis as unknown as { process: { env: Record<string, string | undefined> } }
 ).process.env;
-const ADMIN_URL =
-  processEnv.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost:5439/tempo_auth";
+
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = processEnv[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
+const ADMIN_URL = serverUrl("TEMPO_AUTH_PG_URL");
 const DB = `ex_${crypto.randomUUID().replaceAll("-", "")}`;
 const DB_URL = ADMIN_URL.replace(/\/[^/]+$/, `/${DB}`);
 const BASE = "https://example.test";
@@ -35,7 +44,9 @@ beforeAll(async () => {
     // A refused connection arrives as an AggregateError with an empty message,
     // so name the error code when there is one.
     const why = (e as { code?: string }).code ?? (e as Error).message;
-    throw new Error(`this test needs Postgres at ${ADMIN_URL}: ${why}. Run: docker compose up -d`);
+    throw new Error(
+      `this test needs Postgres at ${ADMIN_URL}: ${why}. Run: node scripts/test-servers.mjs up`,
+    );
   } finally {
     await admin.end({ timeout: 5 });
   }

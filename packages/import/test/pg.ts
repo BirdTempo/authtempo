@@ -1,10 +1,19 @@
 import { MIGRATIONS } from "@authtempo/adapter-postgres";
 import postgres, { type Sql } from "postgres";
 
-export const PG_URL =
-  process.env.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost:5439/tempo_auth";
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = process.env[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
 
-/** A fresh, empty Postgres schema on its own client. Fails loudly when Postgres is not reachable: run `docker compose up -d`. */
+export const PG_URL = serverUrl("TEMPO_AUTH_PG_URL");
+
+/** A fresh, empty Postgres schema on its own client. Fails loudly when Postgres is not reachable: run `node scripts/test-servers.mjs up`. */
 export async function freshSchema(): Promise<{ sql: Sql; close(): Promise<void> }> {
   const name = `i_${crypto.randomUUID().replaceAll("-", "")}`;
   const admin = postgres(PG_URL, { max: 1, onnotice: () => {} });
@@ -12,7 +21,7 @@ export async function freshSchema(): Promise<{ sql: Sql; close(): Promise<void> 
     await admin.unsafe(`CREATE SCHEMA ${name}`);
   } catch (e) {
     throw new Error(
-      `import tests need a database at ${PG_URL}: ${(e as Error).message}. Run: docker compose up -d`,
+      `import tests need a database at ${PG_URL}: ${(e as Error).message}. Run: node scripts/test-servers.mjs up`,
     );
   } finally {
     await admin.end({ timeout: 5 });

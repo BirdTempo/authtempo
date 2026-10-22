@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { IMPORT_JSON_KEYS } from "@authtempo/cli";
 import { PROVIDERS } from "@authtempo/cli/program";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { freshDatabase } from "../../cli/test/support/pg.js";
+import { freshDatabase, PG_HOST, WRONG_PASSWORD_URL } from "../../cli/test/support/pg.js";
 import { FIXTURE_EXPORTS } from "../../import/src/testing.js";
 import * as READERS from "../../import/test/fixtures/readers.js";
 import { SUPABASE_FIXTURE_CREATED } from "../../import/test/fixtures/supabase-counts.js";
@@ -491,7 +491,7 @@ describe("the plan store and the input rules", () => {
         JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
         call,
       ],
-      { env: { DATABASE_URL: "postgres://tempo:wrong-pass-5@localhost:5439/none" } },
+      { env: { DATABASE_URL: WRONG_PASSWORD_URL } },
     );
     const answer = run.stdout
       .split("\n")
@@ -502,7 +502,7 @@ describe("the plan store and the input rules", () => {
     expect(result.isError, run.stdout).toBe(true);
     const structured = (result.structuredContent ?? {}) as Record<string, unknown>;
     expect(String(structured.stopped)).toMatch(
-      /^storage: \S+ at localhost:5439\/none; nothing was written$/,
+      new RegExp(`^storage: \\S+ at ${PG_HOST}/none; nothing was written$`),
     );
     expect(structured.plan_id).toBeNull();
     expect(run.stdout).not.toContain("wrong-pass-5");

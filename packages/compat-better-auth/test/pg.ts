@@ -6,12 +6,22 @@ import type { Names } from "../src/storage/names.js";
 const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } })
   .process.env;
 
-export const PG_URL = env.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost:5439/tempo_auth";
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = env[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
+
+export const PG_URL = serverUrl("TEMPO_AUTH_PG_URL");
 
 /**
  * A fresh Postgres schema with `tables` (a fixture's SQL) applied and no
  * compat migration, on its own client. Fails loudly when Postgres is not
- * reachable: run `docker compose up -d`.
+ * reachable: run `node scripts/test-servers.mjs up`.
  */
 export async function freshBetterAuthSchema(
   tables: string,
@@ -22,7 +32,7 @@ export async function freshBetterAuthSchema(
     await admin.unsafe(`CREATE SCHEMA ${name}`);
   } catch (e) {
     throw new Error(
-      `compat tests need a database at ${PG_URL}: ${(e as Error).message}. Run: docker compose up -d`,
+      `compat tests need a database at ${PG_URL}: ${(e as Error).message}. Run: node scripts/test-servers.mjs up`,
     );
   } finally {
     await admin.end({ timeout: 5 });

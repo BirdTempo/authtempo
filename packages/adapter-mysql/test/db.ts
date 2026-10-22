@@ -1,20 +1,30 @@
 import mysql, { type Pool, type PoolOptions, type RowDataPacket } from "mysql2/promise";
 import { migrateSteps } from "../src/migrations.js";
 
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = process.env[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
+
 export interface MysqlServer {
   version: "8.4" | "9.7";
   url: string;
 }
 
-/** The two servers of docker-compose.yml (owner decision 2 of plan 12g). */
+/** The two MySQL servers of the slot of this worktree (owner decision 2 of plan 12g). */
 export const MYSQL_SERVERS: readonly MysqlServer[] = [
   {
     version: "8.4",
-    url: process.env.AUTHTEMPO_MYSQL84_URL ?? "mysql://root:tempo@127.0.0.1:3384/",
+    url: serverUrl("AUTHTEMPO_MYSQL84_URL"),
   },
   {
     version: "9.7",
-    url: process.env.AUTHTEMPO_MYSQL97_URL ?? "mysql://root:tempo@127.0.0.1:3397/",
+    url: serverUrl("AUTHTEMPO_MYSQL97_URL"),
   },
 ];
 
@@ -38,7 +48,7 @@ async function admin<T>(server: MysqlServer, run: (c: mysql.Connection) => Promi
     conn = await mysql.createConnection(serverOptions(server.url));
   } catch (e) {
     throw new Error(
-      `authtempo mysql tests need MySQL ${server.version} at ${server.url}: ${(e as Error).message}. Run: docker compose up -d mysql84 mysql97`,
+      `authtempo mysql tests need MySQL ${server.version} at ${server.url}: ${(e as Error).message}. Run: node scripts/test-servers.mjs up`,
     );
   }
   try {

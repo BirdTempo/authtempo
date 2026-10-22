@@ -6,7 +6,17 @@ import { MIGRATIONS } from "../src/migrations.js";
 const env = (globalThis as unknown as { process: { env: Record<string, string | undefined> } })
   .process.env;
 
-export const PG_URL = env.TEMPO_AUTH_PG_URL ?? "postgres://tempo:tempo@localhost:5439/tempo_auth";
+/** The address of a test server: `node scripts/test-servers.mjs up` writes it, and `pnpm test` passes it. */
+function serverUrl(name: string): string {
+  const url = env[name];
+  if (url === undefined || url === "")
+    throw new Error(
+      `${name} is not set. Run: node scripts/test-servers.mjs up (pnpm test runs it for you)`,
+    );
+  return url;
+}
+
+export const PG_URL = serverUrl("TEMPO_AUTH_PG_URL");
 
 async function createSchema(): Promise<string> {
   const name = `t_${crypto.randomUUID().replaceAll("-", "")}`;
@@ -15,7 +25,7 @@ async function createSchema(): Promise<string> {
     await admin.unsafe(`CREATE SCHEMA ${name}`);
   } catch (e) {
     throw new Error(
-      `authtempo postgres tests need a database at ${PG_URL}: ${(e as Error).message}. Run: docker compose up -d`,
+      `authtempo postgres tests need a database at ${PG_URL}: ${(e as Error).message}. Run: node scripts/test-servers.mjs up`,
     );
   } finally {
     await admin.end({ timeout: 5 });
@@ -55,7 +65,7 @@ function client(schemaName: string): Sql {
 
 /**
  * A fresh schema per call, with the migrations applied, on its own client.
- * Fails loudly when Postgres is not reachable: run `docker compose up -d`.
+ * Fails loudly when Postgres is not reachable: run `node scripts/test-servers.mjs up`.
  * `max: 4` so a write outside an open transaction has a connection.
  */
 export async function freshDatabase(): Promise<{

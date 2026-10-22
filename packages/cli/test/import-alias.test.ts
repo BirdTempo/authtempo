@@ -318,7 +318,7 @@ describe("authtempo-import", () => {
   it("prints one stopped line and writes the report on a storage error", async () => {
     const t = io(FILES);
     t.value.openStorage = async () => {
-      throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:5439"), {
+      throw Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:9"), {
         code: "ECONNREFUSED",
       });
     };

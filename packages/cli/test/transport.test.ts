@@ -103,9 +103,9 @@ describe("the transport rule (plan 12g Task 6)", () => {
       "wss://db.example.com",
       "libsql://db.example.com",
       "libsql://db.example.com?tls=1",
-      "http://127.0.0.1:8089",
-      "http://localhost:8089",
-      "ws://[::1]:8089",
+      "http://127.0.0.1:8080",
+      "http://localhost:8080",
+      "ws://[::1]:8080",
     ])
       expect(() => libsql(url), url).not.toThrow();
     expect(stopOf(() => libsql("file:./auth.db"))).toBe(
@@ -131,7 +131,7 @@ describe("the transport rule (plan 12g Task 6)", () => {
     expect(stopOf(() => libsql("ws://127.0.0.1\\@evil.example/"))).toBe(
       "the libSQL URL has a backslash; remove it",
     );
-    expect(stopOf(() => libsql("ws://127.0.0.1:8090\\@localhost:9/"))).toBe(
+    expect(stopOf(() => libsql("ws://127.0.0.1:8080\\@localhost:9/"))).toBe(
       "the libSQL URL has a backslash; remove it",
     );
     expect(parse("ws://127.0.0.1\\@evil.example/")).toMatchObject({
@@ -153,7 +153,7 @@ describe("the transport rule (plan 12g Task 6)", () => {
     expect(
       stopOf(() =>
         requireLibsqlTransport(
-          "http://127.0.0.1:8089",
+          "http://127.0.0.1:8080",
           as({ scheme: "http", tls: false, host: "evil.example" }),
         ),
       ),
