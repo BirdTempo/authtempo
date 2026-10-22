@@ -39,7 +39,7 @@ The D1 and Postgres adapters ship an owned limiter on the `ta_limit` table. The 
 | --- | --- |
 | `pnpm install` | Install. pnpm 12.8.1, Node 22 or newer. |
 | `docker compose up -d` | In the main worktree only: start the test servers of slot 0. A linked worktree uses its own set (see Test servers). |
-| `pnpm test` | Start the test servers of this worktree, then run every package's tests through Turborepo. The cache is off for tests. |
+| `pnpm test` | Start the test servers of this worktree, then run every package's tests through Turborepo. The cache is off for tests. `pnpm test --filter=<pkg>` runs one package. |
 | `pnpm typecheck` | `tsc --noEmit` in every package. |
 | `pnpm typecheck:configs` | `tsc` on every `vitest*.config.ts` (one root task). |
 | `pnpm lint` | Biome. |
@@ -51,20 +51,40 @@ The adapter, CLI, import, compat, and example tests need Postgres, three libSQL 
 
 | Command | What it does |
 | --- | --- |
+| `node scripts/test-servers.mjs register-main` | Give slot 0 to this main worktree. Run it once on the machine, in the main worktree of the running `docker compose` set. |
 | `node scripts/test-servers.mjs up` | Take the slot of this worktree, start its servers, wait for each, and write `.test-servers.env`. `--only postgres,mysql84` starts a subset. |
 | `node scripts/test-servers.mjs run -- <command>` | Run `up`, then the command with the server variables. `pnpm test` uses it. |
-| `node scripts/test-servers.mjs env` | Print the variables of this worktree's set. |
+| `node scripts/test-servers.mjs env` | Print the variables of this worktree's set, with `AUTHTEMPO_TEST_SLOT` and `AUTHTEMPO_TEST_PG_CONTAINER`. |
 | `node scripts/test-servers.mjs down` | Remove the containers and the data of this worktree's set. |
 | `node scripts/test-servers.mjs status` | List every slot, its worktree, its services, its memory, and its last use. |
 | `node scripts/test-servers.mjs reap` | Remove the sets of removed worktrees and the sets idle for more than 30 minutes. |
 
-- Run a filtered test through `run`, for example `node scripts/test-servers.mjs run -- pnpm turbo run test --filter=@authtempo/cli --force`. Turbo passes only the variables that `turbo.json` lists in `globalPassThroughEnv`.
-- A test helper reads its server from its variable. When the variable is not set, the helper stops with a message that names `test-servers.mjs up`.
-- `scripts/test-ports.mjs` is the one source of the ports. A site test fails on a test port in any other file.
-- The main worktree is slot 0. It uses the six running containers of `docker-compose.yml`, and the script never starts, stops, or removes them. `down` and `reap` refuse slot 0.
-- A linked worktree takes slot 1 or higher, the project `authtempo-s<slot>`, and the compose file `docker-compose.slots.yml`. Its data lives on tmpfs, so `down` leaves nothing behind.
+### How to run the tests
+
+- Run every command from the root of the worktree. The script reads the worktree from the folder where it runs.
+- A filtered run: `pnpm test --filter=@authtempo/cli`. Do not put `--` before the filter. pnpm passes the `--` on, and turbo then gives the filter to the test scripts and runs every package. `run` refuses this command.
+- A run with turbo flags or other tasks: `node scripts/test-servers.mjs run -- pnpm turbo run test typecheck --filter=@authtempo/cli --force`.
+- A run with a subset of the servers: `node scripts/test-servers.mjs run --only postgres -- pnpm turbo run test --filter=@authtempo/import --force`. `pnpm test` always starts all six.
+- A direct `pnpm turbo run test` or `vitest run` gets no server variables. Each test helper that needs a server then stops with a message that names `test-servers.mjs up`.
+- Turbo passes only the variables that `turbo.json` lists in `globalPassThroughEnv`.
+- Run `node scripts/test-servers.mjs down` in a linked worktree when its work ends. Else `reap` removes the set after 30 minutes with no use.
+
+### Slots
+
+- The slot table is one file for the machine: `~/.cache/authtempo/test-slots.json`, keyed by the real path of each worktree. Every clone and every worktree on the machine shares it, because the compose projects and the ports are global on the machine.
+- Slot 0 is the one main worktree that `register-main` names. It uses the six running containers of `docker-compose.yml`, and the script never starts, stops, or removes them. `down` refuses slot 0, and `reap` skips it.
+- Every other path takes slot 1 or higher: a linked worktree, a second clone, and a git-init copy. A slot 0 row of a linked worktree is refused. Until `register-main` runs, the main worktree also takes slot 1 or higher.
+- A worktree of slot 1 or higher has the project `authtempo-s<slot>` and the compose file `docker-compose.slots.yml`. Each container has the label `authtempo.worktree`. The script refuses to start or remove a set whose containers name another worktree.
+- Its data lives on tmpfs with a size limit, and each container has a memory limit. So `down` leaves nothing behind, and a leak in one set cannot take the memory of Docker.
 - At most 8 sets of slot 1 or higher run at one time: one for each agent lane. `up` refuses a ninth set and names the idle sets that `reap` can remove.
-- The slot table is `authtempo-test-slots.json` in the git common directory. `git worktree remove` frees the slot at the next `up` or `reap`.
+- `git worktree remove` frees the slot at the next `up` or `reap`.
+- `scripts/test-ports.mjs` is the one source of the ports. A site test fails on a test port in any other file.
+
+### Rules for agent lanes
+
+- Never stop, restart, or remove a set of another worktree. A worktree may reset its own set with `down` and `up`.
+- Never run `docker compose down` by hand in a worktree. The slot 0 containers belong to compose projects of old lane worktrees, so a hand `down` there removes them.
+- Evidence of a run comes from the worktree under test: `cd <worktree> && node scripts/test-servers.mjs run -- pnpm turbo run test typecheck typecheck:configs --force --continue`. A Postgres sample reads the container that `node scripts/test-servers.mjs env` prints as `AUTHTEMPO_TEST_PG_CONTAINER`.
 
 ## Rules that the code enforces
 
