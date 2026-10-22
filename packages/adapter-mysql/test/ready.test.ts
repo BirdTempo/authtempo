@@ -61,5 +61,24 @@ describe.each(MYSQL_SERVERS.map((s) => [s.version, s] as const))(
         body: { error: "not_ready", reason: "storage" },
       });
     });
+
+    it("keeps no failed start check: the next ping checks again", async () => {
+      // One connection, so the SET below reaches the session of the next ping.
+      const db = await freshDatabase(server, {
+        connectionLimit: 1,
+        onConnect: "SET SESSION sql_mode = ''",
+      });
+      try {
+        const storage = createMysqlAdapter(db.pool);
+        await expect(storage.ping?.()).rejects.toMatchObject({
+          code: "config_mismatch",
+          fields: ["sql_mode"],
+        });
+        await db.pool.query("SET SESSION sql_mode = 'STRICT_TRANS_TABLES'");
+        await expect(storage.ping?.()).resolves.toBeUndefined();
+      } finally {
+        await db.close();
+      }
+    });
   },
 );
