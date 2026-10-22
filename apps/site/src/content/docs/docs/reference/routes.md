@@ -1633,9 +1633,11 @@ Core ignores an attribute that the User schema does not know. It stores nothing 
 
 A schema URN in `schemas` other than the core User and the enterprise extension answers 400 `invalidSyntax`. A custom extension in the attribute map of Entra ID or Okta sends such a URN. To fix it, remove the custom mapping in the directory, or ask for the extension.
 
-A deactivate ends the sessions that fit its call budget. The other sessions stay until the sweep, but each session read, JWT mint, and `sessionLive` call refuses them at once. A deactivate also ends the OAuth refresh tokens of the user. The families that do not fit the budget stay on the pending-end row, and the sweep ends them. Until then the refresh grant refuses each of them.
+A deactivate ends the sessions that fit its call budget. The other sessions stay until the sweep, but each session read, JWT mint, and `sessionLive` call refuses them at once. A deactivate also ends the OAuth refresh tokens of the user. The families that do not fit the budget stay on the pending-end row, and the sweep ends them. Until then the refresh grant and introspection refuse each of them.
 
-In a PATCH, Entra ID sends the manager as a list of one object. The path is `manager` or the path of the enterprise extension. Core reads that object as the `manager` of the enterprise extension.
+After its work, the sweep keeps the pending-end row of a deactivate as the record of the act. Each door still refuses a session or a refresh family of the user that began before the deactivate. This holds also for one that no act or sweep ended. The record lives as long as such a session or family can live. That is the longer of `session.ttlDays` and `oauth.refreshTtlDays` plus the code life, and one day more. Then the sweep deletes it. One deactivate keeps at most one such row per user.
+
+In a PATCH, Entra ID sends the manager as a list of one object. The path is `manager` or the path of the enterprise extension. Core reads that object as the `manager` of the enterprise extension. A list of two or more objects answers 400 `invalidValue`.
 
 <h3 id="get-scim-v2-users"><code>GET /scim/v2/Users</code></h3>
 
