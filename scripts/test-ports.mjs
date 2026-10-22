@@ -61,6 +61,13 @@ export const SERVICES = [
 ];
 
 /**
+ * The end of the message of a test helper whose variable is not set. A package
+ * cannot import scripts/, so each helper holds its own copy of serverUrl.
+ * apps/site/test/test-ports.test.ts ties each copy to this text.
+ */
+export const MISSING_HINT = "Run: node scripts/test-servers.mjs up (pnpm test runs it for you)";
+
+/**
  * The ports of the set that docker-compose.yml runs for the main worktree.
  * They came before this table, and docs and habits name them, so slot 0 keeps them.
  * @type {Readonly<Record<string, number>>}

@@ -5,6 +5,7 @@ import {
   envFileText,
   envOf,
   MAX_SLOT,
+  MISSING_HINT,
   portOf,
   SERVICES,
   SLOT_0,
@@ -155,6 +156,75 @@ describe("the machine checks of the test servers", () => {
     ]);
     // The exempt line of wrangler.jsonc is one line, not the whole file.
     expect(portLines([{ file: "examples/worker-postgres/wrangler.jsonc", text }]).length).toBe(3);
+  });
+
+  it("ties each copy of serverUrl and its message to scripts/test-ports.mjs", () => {
+    // One fact in many files: each helper copies serverUrl, because a package
+    // cannot import scripts/. This scan keeps each copy equal to the one text.
+    const canonical = [
+      "function serverUrl(name: string): string {",
+      "  const url = ENV[name];",
+      '  if (url === undefined || url === "")',
+      "    throw new Error(",
+      `      \`\${name} is not set. ${MISSING_HINT}\`,`,
+      "    );",
+      "  return url;",
+      "}",
+    ].join("\n");
+    const names = SERVICES.map((s) => s.envVar);
+    const helpers: string[] = [];
+    for (const file of SOURCES) {
+      if (file.startsWith("scripts/") || file === "apps/site/test/test-ports.test.ts") continue;
+      const text = readFileSync(`${REPO}${file}`, "utf8");
+      if (!names.some((name) => text.includes(name))) continue;
+      helpers.push(file);
+      const start = text.indexOf("function serverUrl(");
+      const copy = start === -1 ? "" : text.slice(start, text.indexOf("\n}\n", start) + 2);
+      // The helpers read the process env as process.env, or by a local name where the package has no Node types.
+      expect(
+        copy.replace(
+          /^ {2}const url = (process\.env|env|processEnv)\[name\];$/m,
+          "  const url = ENV[name];",
+        ),
+        file,
+      ).toBe(canonical);
+      for (const m of text.matchAll(/\b(?:TEMPO_AUTH|AUTHTEMPO)_[A-Z0-9_]+_URL\b/g))
+        expect(
+          text.slice(Math.max(0, (m.index ?? 0) - 11), (m.index ?? 0) + m[0].length + 2),
+          file,
+        ).toBe(`serverUrl("${m[0]}")`);
+    }
+    // 13 helpers on 2026-10-22. A new helper adds itself here after a review of its copy.
+    expect(helpers.length).toBe(13);
+  });
+
+  it("reads no server address from the process env of a test helper outside serverUrl", () => {
+    // A test helper: a file in a test folder, a test file, or a sample of the site.
+    const helper = /(^|\/)(test|samples)\/|\.test\.[cm]?[jt]sx?$/;
+    // A literal read: process.env.X, process.env["X"], or processEnv.X. A read
+    // through another alias is a known limit of a text scan.
+    const literal =
+      /\b(?:process\.env|processEnv)(?:\.([A-Za-z_][A-Za-z0-9_]*)|\["([A-Za-z_][A-Za-z0-9_]*)"\])/g;
+    const dynamic = /\b(?:process\.env|processEnv|env)\[(?!")/;
+    const hits: string[] = [];
+    for (const file of SOURCES.filter(
+      (f) => helper.test(f) && f !== "apps/site/test/test-ports.test.ts",
+    ))
+      readFileSync(`${REPO}${file}`, "utf8")
+        .split("\n")
+        .forEach((line, i) => {
+          for (const m of line.matchAll(literal)) {
+            const name = m[1] ?? m[2] ?? "";
+            if (/URL|URI|DSN|DATABASE|HOST|PORT/.test(name) || line.includes("://"))
+              hits.push(`${file}:${i + 1}: ${name}`);
+          }
+          if (
+            dynamic.test(line) &&
+            !/^ {2}const url = (process\.env|env|processEnv)\[name\];$/.test(line)
+          )
+            hits.push(`${file}:${i + 1}: ${line.trim()}`);
+        });
+    expect(hits).toEqual([]);
   });
 
   it("passes each variable that a helper reads to the tests and writes it to the env file", () => {
