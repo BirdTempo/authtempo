@@ -137,7 +137,8 @@ export async function impersonationLoss(
  * sessions in its transaction. The rest stay on a pending-end row of
  * reason `revoked` until the sweep. Each door refuses them here, after
  * `bannedFor`: `resolveSession`, the session JWT mint, and `sessionLive`.
- * A row with `targets` names the impersonation sessions of an operator, so
+ * The refresh grant passes the start of a family (`familyRevoked`, ruling
+ * 55). A row with `targets` names the impersonation sessions of an operator, so
  * it does not count.
  *
  * The cost: when sessions stay, the deactivate sets `user.updatedAt` to a

@@ -17,6 +17,7 @@ import {
   resolveSession,
   writeSession,
 } from "../src/engine/sessions.js";
+import { sweepExpired } from "../src/engine/sweep.js";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
 import { ACCESS_TOKEN_TYPE } from "../src/primitives/credentials.js";
 import { randomBase64Url, sha256Base64Url, sha256Hex } from "../src/primitives/crypto.js";
@@ -975,5 +976,30 @@ describe("the ban (plan 12f Task 6)", () => {
     const off = { ok: false, code: "not_found", status: 404 };
     expect(await operatorApi(auth.config).users.ban(input)).toEqual(off);
     expect(await operatorApi(auth.config).users.unban(input)).toEqual(off);
+  });
+});
+
+describe("the pending-end row of a ban and a clock that runs ahead (ruling 55 of plan 12d)", () => {
+  it("ends in the sweep a session that an instance 2 s ahead wrote before the ban", async () => {
+    const w = await world();
+    const s = await signedIn(w);
+    for (let i = 0; i < 60; i++)
+      await createSession(w.config, { userId: s.user.id, ip: null, userAgent: null });
+    // An instance whose clock runs 2 s ahead writes one more session.
+    w.clock.advance(2000);
+    const ahead = await createSession(w.config, { userId: s.user.id, ip: null, userAgent: null });
+    w.clock.advance(-2000);
+    expect((await ban(w, s.user.id)).ok).toBe(true);
+    // The act ends a page; the session from ahead sorts last and waits for the sweep.
+    expect(
+      await w.storage.findOne("session", [{ field: "id", op: "eq", value: ahead.session.id }]),
+    ).not.toBeNull();
+    const pending = () =>
+      w.storage.findMany("verification", [{ field: "purpose", op: "eq", value: "session-end" }]);
+    for (let i = 0; i < 5 && (await pending()).length > 0; i++) await sweepExpired(w.config);
+    expect(await pending()).toEqual([]);
+    expect(
+      await w.storage.findMany("session", [{ field: "userId", op: "eq", value: s.user.id }]),
+    ).toEqual([]);
   });
 });

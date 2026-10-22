@@ -25,11 +25,12 @@ import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { clientAccessOf, type OAuthClientAccess } from "./oauth-credentials.js";
-import { familyEnded, revokeFamily } from "./oauth-family.js";
+import { familyEnded, familyStart, revokeFamily } from "./oauth-family.js";
 import { linkIdToken } from "./oauth-logout.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
 import { sidFor, subjectFor, userOfSubject } from "./oauth-subject.js";
 import { activeBan, bannedFor } from "./operator/ban-rule.js";
+import { revokedFor } from "./operator/guards.js";
 import { consumeVerification } from "./verification.js";
 
 /**
@@ -168,6 +169,22 @@ export async function liveUser(
   if (!user?.emailVerified || activeBan(user, config.clock.now())) return null;
   if (issuedAt && bannedFor(user, issuedAt)) return null;
   return user;
+}
+
+/**
+ * True when a SCIM deactivate ended the access of the user after the family
+ * of `row` began (ruling 55 of plan 12d). The deactivate ends the families
+ * that fit its budget. A pending-end row names the rest until the sweep,
+ * and this door refuses them, as `revokedFor` refuses a session. It reads
+ * the start of the family, so a race row of an old family is refused too.
+ * The refresh grant and introspection read it.
+ */
+export function familyRevoked(
+  config: ResolvedConfig,
+  user: UserRow,
+  row: Pick<OAuthTokenRow, "familyId" | "createdAt">,
+): Promise<boolean> {
+  return revokedFor(config, user, { createdAt: familyStart(row) });
 }
 
 /**
@@ -590,7 +607,7 @@ export async function refreshGrant(
   if (askedResource !== null && askedResource !== row.resource) return oauthFail("invalid_target");
   // The auth read the client: a CIMD document that did not answer refused this refresh there, and the family stays.
   const user = await liveUser(config, row.userId);
-  if (!user) return reuse(config, row);
+  if (!user || (await familyRevoked(config, user, row))) return reuse(config, row);
   const spent =
     row.usedAt !== null
       ? await spendChild(config, row, now)

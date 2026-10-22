@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import { sha256Hex } from "../primitives/crypto.js";
-import { newId } from "../primitives/ids.js";
+import { idTime, newId } from "../primitives/ids.js";
+import type { OAuthTokenRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { oauthOf } from "./oauth-result.js";
 
@@ -25,6 +26,19 @@ export async function familyEnded(config: ResolvedConfig, familyId: string): Pro
       { field: "purpose", op: "eq", value: FAMILY_END },
     ])) !== null
   );
+}
+
+/**
+ * The start of the family of a refresh row: the time of its family id, or
+ * the time of the row when that is earlier. The family id is the id of the
+ * code row or of the device row of the grant, a ULID of `newId`. So each row
+ * of one family, a race row too, has the start of the grant. A family id of
+ * another form gives the time of the row.
+ */
+export function familyStart(row: Pick<OAuthTokenRow, "familyId" | "createdAt">): Date {
+  const grant = idTime(row.familyId);
+  const own = row.createdAt.getTime();
+  return new Date(grant === null ? own : Math.min(grant, own));
 }
 
 /**

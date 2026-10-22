@@ -1283,12 +1283,13 @@ async function writeChange(
             "revoked",
             stops,
           );
-          // The door of the sessions that stay (`revokedFor`, ruling 50 of plan 12d)
-          // reads the pending-end rows only for a session from before this write.
-          // The clock reads after the row, so the time is at or after its `before`.
-          if (page.left) {
+          // The door of the sessions and families that stay (`revokedFor`, ruling 50
+          // of plan 12d) reads the pending-end rows only for one from before this
+          // write. The time is at or after the `before` of the row (ruling 55).
+          if (page.left && page.before) {
+            const at = Math.max(config.clock.now().getTime(), page.before.getTime());
             await tx.update("user", [{ field: "id", op: "eq", value: user.id }], {
-              updatedAt: later(config.clock.now(), user.updatedAt),
+              updatedAt: later(new Date(at), user.updatedAt),
             });
             meter.step(2);
           }

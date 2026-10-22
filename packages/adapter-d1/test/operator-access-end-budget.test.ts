@@ -580,3 +580,152 @@ describe("the ban and the revoke on D1 (rulings 44 and 45 of plan 12f)", () => {
         expect(Math.max(first.queries, retry.queries, ...sweeps)).toBeLessThanOrEqual(50);
       });
 });
+
+const APP_ORIGIN = "https://app.example.com";
+const REDIRECT = "https://client.example.com/callback";
+
+/** The OAuth provider, so a user can hold refresh families (ruling 55 of plan 12d). */
+const OAUTH: Partial<AuthConfig> = {
+  trustedOrigins: [APP_ORIGIN],
+  oauth: {
+    resources: [`${BASE}/mcp`],
+    scopes: { "mcp:read": "Read" },
+    registration: { cimd: false, dynamic: true },
+  },
+};
+
+const base64Url = (bytes: ArrayBuffer) =>
+  btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+
+const tokenRequest = (body: Record<string, string>) =>
+  new Request(`${BASE}/auth/oauth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(body).toString(),
+  });
+
+/** `n` refresh families of the session of `token` through the code flow: the client and each refresh token. */
+async function families(auth: Auth, token: string, n: number) {
+  const reg = await auth.handle(
+    new Request(`${BASE}/auth/oauth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: APP_ORIGIN },
+      body: JSON.stringify({ redirect_uris: [REDIRECT] }),
+    }),
+  );
+  if (reg.status !== 201) throw new Error(`register answered ${reg.status}`);
+  const clientId = ((await reg.json()) as { client_id: string }).client_id;
+  const cookie = `__Host-tempo_session=${token}`;
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)).buffer);
+    const challenge = base64Url(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+    );
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: REDIRECT,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      scope: "mcp:read offline_access",
+      resource: `${BASE}/mcp`,
+      state: "st-1",
+    });
+    const page = await auth.handle(
+      new Request(`${BASE}/auth/oauth/authorize?${query}`, { headers: { cookie } }),
+    );
+    let location = page.headers.get("location");
+    if (page.status === 200) {
+      const id = /name="request_id" value="(oq_[A-Za-z0-9_-]{43})"/.exec(await page.text())?.[1];
+      const done = await auth.handle(
+        new Request(`${BASE}/auth/oauth/authorize`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE, cookie },
+          body: new URLSearchParams({ request_id: id ?? "", decision: "allow" }).toString(),
+        }),
+      );
+      location = done.headers.get("location");
+    }
+    const code = new URL(location ?? "").searchParams.get("code");
+    if (!code) throw new Error("no code");
+    const res = await auth.handle(
+      tokenRequest({
+        grant_type: "authorization_code",
+        code,
+        code_verifier: verifier,
+        client_id: clientId,
+        redirect_uri: REDIRECT,
+        resource: `${BASE}/mcp`,
+      }),
+    );
+    if (res.status !== 200) throw new Error(`token answered ${res.status}`);
+    out.push(((await res.json()) as { refresh_token: string }).refresh_token);
+  }
+  return { clientId, tokens: out };
+}
+
+/** The end marks of the refresh families: one per family that ended. */
+async function familyMarks(): Promise<number> {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM ta_verification WHERE purpose = 'oauth-family-end'",
+  ).first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/**
+ * The counts of a secret ban of a user with 45 sessions, a hook, and k OAuth
+ * refresh families, on the binding, 2026-10-22: the queries of the act, the
+ * sessions it ended, the families it ended with their marks, and the queries
+ * of each sweep (ruling 55 of plan 12d).
+ */
+const BAN_FAMILY_COUNTS: Record<number, [number, number, number, number[]]> = {
+  0: [50, 31, 0, [36]],
+  7: [50, 17, 7, [48, 23]],
+  20: [50, 1, 15, [48, 49]],
+};
+
+describe("the OAuth families of a ban on D1 (ruling 55 of plan 12d)", () => {
+  beforeEach(async () => {
+    await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+    endings.length = 0;
+  });
+
+  for (const k of [0, 7, 20])
+    it(`bans a user with 45 sessions and ${k} families in 50 queries, and refuses each family at once`, async () => {
+      const sent: MailMessage[] = [];
+      const { auth: setup } = await engine(env.DB, sent, undefined, OAUTH);
+      const { userId, tokens: signed } = await signIns(setup, sent, "ada@example.com", 45);
+      const { clientId, tokens } = await families(setup, signed[0] ?? "", k);
+      endings.length = 0;
+      const r = await invoke(
+        sent,
+        "/operator/users/ban",
+        asSecret,
+        { userId, reason: REASON },
+        OAUTH,
+      );
+      expect([r.status, Object.keys(r.body)], JSON.stringify(r.body)).toEqual([200, ["auditId"]]);
+      const inAct = endings.length;
+      const marked = await familyMarks();
+      // Each family is refused at once, before any sweep.
+      const statuses: number[] = [];
+      for (const t of tokens)
+        statuses.push(
+          (
+            await setup.handle(
+              tokenRequest({ grant_type: "refresh_token", refresh_token: t, client_id: clientId }),
+            )
+          ).status,
+        );
+      expect(statuses).toEqual(Array(k).fill(400));
+      const sweeps = await sweepAll(sent, OAUTH);
+      expect(await sessionsOf(userId)).toBe(0);
+      expect(await familyMarks()).toBe(k);
+      expect([r.queries, inAct, marked, sweeps]).toEqual(BAN_FAMILY_COUNTS[k]);
+      expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+    });
+});

@@ -291,3 +291,187 @@ const MEASURED = {
   list: 5,
   delete: 13,
 };
+
+const APP_ORIGIN = "https://app.example.com";
+const REDIRECT = "https://client.example.com/callback";
+
+/** The OAuth provider, so a user can hold refresh families (ruling 55 of plan 12d). */
+const OAUTH: Partial<AuthConfig> = {
+  trustedOrigins: [APP_ORIGIN],
+  oauth: {
+    resources: [`${API}/mcp`],
+    scopes: { "mcp:read": "Read" },
+    registration: { cimd: false, dynamic: true },
+  },
+};
+
+const base64Url = (bytes: ArrayBuffer) =>
+  btoa(String.fromCharCode(...new Uint8Array(bytes)))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+
+/** `n` refresh families of the session of `token` through the code flow: the client and each refresh token. */
+async function families(auth: ReturnType<typeof make>, token: string, n: number) {
+  const reg = await auth.handle(
+    new Request(`${API}/auth/oauth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: APP_ORIGIN },
+      body: JSON.stringify({ redirect_uris: [REDIRECT] }),
+    }),
+  );
+  if (reg.status !== 201) throw new Error(`register answered ${reg.status}`);
+  const clientId = ((await reg.json()) as { client_id: string }).client_id;
+  const cookie = `__Host-tempo_session=${token}`;
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) {
+    const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)).buffer);
+    const challenge = base64Url(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+    );
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: REDIRECT,
+      code_challenge: challenge,
+      code_challenge_method: "S256",
+      scope: "mcp:read offline_access",
+      resource: `${API}/mcp`,
+      state: "st-1",
+    });
+    const page = await auth.handle(
+      new Request(`${API}/auth/oauth/authorize?${query}`, { headers: { cookie } }),
+    );
+    let location = page.headers.get("location");
+    if (page.status === 200) {
+      const id = /name="request_id" value="(oq_[A-Za-z0-9_-]{43})"/.exec(await page.text())?.[1];
+      const done = await auth.handle(
+        new Request(`${API}/auth/oauth/authorize`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            origin: API,
+            cookie,
+          },
+          body: new URLSearchParams({ request_id: id ?? "", decision: "allow" }).toString(),
+        }),
+      );
+      location = done.headers.get("location");
+    }
+    const code = new URL(location ?? "").searchParams.get("code");
+    if (!code) throw new Error("no code");
+    const res = await auth.handle(
+      tokenRequest({
+        grant_type: "authorization_code",
+        code,
+        code_verifier: verifier,
+        client_id: clientId,
+        redirect_uri: REDIRECT,
+        resource: `${API}/mcp`,
+      }),
+    );
+    if (res.status !== 200) throw new Error(`token answered ${res.status}`);
+    out.push(((await res.json()) as { refresh_token: string }).refresh_token);
+  }
+  return { clientId, tokens: out };
+}
+
+const tokenRequest = (body: Record<string, string>) =>
+  new Request(`${API}/auth/oauth/token`, {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams(body).toString(),
+  });
+
+/** The refresh of each token: each status. */
+async function refreshes(auth: ReturnType<typeof make>, clientId: string, tokens: string[]) {
+  const out: number[] = [];
+  for (const t of tokens)
+    out.push(
+      (
+        await auth.handle(
+          tokenRequest({ grant_type: "refresh_token", refresh_token: t, client_id: clientId }),
+        )
+      ).status,
+    );
+  return out;
+}
+
+const pendingRows = async () =>
+  Number(
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM ta_verification WHERE purpose = 'session-end'",
+    ).first("n"),
+  );
+
+/** The end marks of the refresh families: one per family that ended. */
+const familyMarks = async () =>
+  Number(
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM ta_verification WHERE purpose = 'oauth-family-end'",
+    ).first("n"),
+  );
+
+describe("the OAuth families of a SCIM deactivate on D1 (ruling 55 of plan 12d)", () => {
+  for (const k of [0, 7, 20])
+    it(`deactivates a user with 40 sessions and ${k} families in 50 queries, and refuses each family at once`, async () => {
+      const setup = make(env.DB, false, OAUTH);
+      const { token } = await acme(setup);
+      const { token: first } = await signIn(setup, ADA);
+      for (let i = 1; i < 40; i++) await signIn(setup, ADA);
+      const create = await counted(token, "POST", "/Users", { schemas: [USER_URN], userName: ADA });
+      expect(create.status).toBe(201);
+      const id = String(create.body.id);
+      const { clientId, tokens } = await families(setup, first, k);
+      const { db, c } = counting(env.DB);
+      const res = await make(db, true, OAUTH).handle(
+        new Request(`${API}/auth/scim/v2/Users/${id}`, {
+          method: "PATCH",
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": "application/scim+json",
+          },
+          body: JSON.stringify({
+            schemas: [PATCH_URN],
+            Operations: [{ op: "replace", path: "active", value: false }],
+          }),
+        }),
+      );
+      expect(res.status).toBe(200);
+      const off = c.n;
+      const ended = 40 - (await sessions());
+      const marked = await familyMarks();
+      // Each family is refused at once, before any sweep.
+      expect(await refreshes(make(env.DB, false, OAUTH), clientId, tokens)).toEqual(
+        Array(k).fill(400),
+      );
+      const sweeps: number[] = [];
+      while ((await pendingRows()) > 0) {
+        const { db: sdb, c: sc } = counting(env.DB);
+        await make(sdb, true, OAUTH).api.sweepExpired();
+        sweeps.push(sc.n);
+        if (sweeps.length > 10) throw new Error("the sweep makes no progress");
+      }
+      expect(await sessions()).toBe(0);
+      // Every family has its end mark after the sweep.
+      expect(await familyMarks()).toBe(k);
+      // Measured on the binding on 2026-10-22; see the ledger of plan 12d Task 10.
+      expect([off, ended, marked, sweeps]).toEqual(FAMILY_COUNTS[k]);
+      for (const n of [off, ...sweeps]) expect(n).toBeLessThanOrEqual(50);
+    }, 120_000);
+});
+
+/**
+ * The counts of the deactivate of a user with 40 sessions, a session.afterEnd
+ * hook, and k OAuth refresh families, on the binding, 2026-10-22: the
+ * queries of the deactivate, the sessions it ended, the families it ended
+ * with their marks, and the queries of each sweep (ruling 55 of plan 12d).
+ * The families come first in the budget, and a page of one session stays.
+ * The pending-end row names the families that do not fit, and the sweep
+ * ends them with 2 queries each.
+ */
+const FAMILY_COUNTS: Record<number, [number, number, number, number[]]> = {
+  0: [50, 11, 0, [48, 28]],
+  7: [50, 1, 5, [48, 42]],
+  20: [50, 1, 5, [48, 50, 41]],
+};

@@ -11,9 +11,21 @@ import { passwordSignUp } from "../../src/engine/password.js";
 import { updateProfile } from "../../src/engine/profile.js";
 import { createScimToken } from "../../src/engine/scim/tokens.js";
 import { createSession, resolveSession } from "../../src/engine/sessions.js";
+import { sweepExpired } from "../../src/engine/sweep.js";
 import { createApiToken } from "../../src/engine/tokens.js";
+import { randomBase64Url, sha256Hex } from "../../src/primitives/crypto.js";
 import type { ScimScope } from "../../src/schema.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
+import {
+  authorized,
+  exchange,
+  type Handle,
+  pkce,
+  RESOURCE,
+  registered,
+  SCOPES,
+  tokenPost,
+} from "../oauth-helpers.js";
 import { FAST, signUpAndVerify } from "../password-helpers.js";
 import { acmeWithSso, type SsoWorld, ssoSignIn, ssoSignInWorld } from "../sso/sign-in-helpers.js";
 import { SCIM_APP, scim } from "./helpers.js";
@@ -935,6 +947,213 @@ describe("the session door of a SCIM deactivate (ruling 50 of plan 12d)", () => 
       ]),
     ).toHaveLength(1);
   });
+});
+
+describe("the OAuth families and the clock of a SCIM deactivate (ruling 55 of plan 12d)", () => {
+  const MINUTE = 60_000;
+  const OFF = patch({ op: "replace", path: "active", value: false });
+
+  /** The world with OAuth, a session.afterEnd hook (the worst page), and Ada as a SCIM User. */
+  async function oauthWorld() {
+    const w = await world({
+      oauth: {
+        resources: [RESOURCE],
+        scopes: SCOPES,
+        registration: { cimd: false, dynamic: true },
+      },
+      hooks: { session: { afterEnd: () => {} } },
+    });
+    const token = await tokenOf(w, w.organizationId);
+    await signUpAndVerify(w, ADA);
+    const user = await userAt(w, ADA);
+    if (!user) throw new Error("no user");
+    const id = await created(w, token, ADA);
+    const h = { auth: { handle: w.handle }, config: w.config, storage: w.storage, clock: w.clock };
+    return { w, h: h as unknown as Handle, token, user, id };
+  }
+
+  /**
+   * `n` OAuth families of the user through the code flow: each refresh token
+   * and the client. With `ahead`, an instance whose clock runs `ahead` ms
+   * ahead makes the families.
+   */
+  async function families(h: Handle, userId: string, n: number, ahead = 0) {
+    const s = await createSession(h.config, { userId, ip: null, userAgent: null });
+    const cookie = `__Host-tempo_session=${s.token}`;
+    const clientId = await registered(h);
+    h.clock.advance(ahead);
+    const out: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const p = await pkce();
+      const { code } = await authorized(h, cookie, {
+        clientId,
+        challenge: p.challenge,
+        scope: "mcp:read offline_access",
+      });
+      const res = await h.auth.handle(exchange(code, clientId, p.verifier));
+      if (res.status !== 200) throw new Error(`token answered ${res.status}`);
+      out.push(((await res.json()) as { refresh_token: string }).refresh_token);
+    }
+    h.clock.advance(-ahead);
+    return { clientId, tokens: out };
+  }
+
+  const refresh = async (h: Handle, refreshToken: string, clientId: string) =>
+    (
+      await h.auth.handle(
+        tokenPost({
+          grant_type: "refresh_token",
+          refresh_token: refreshToken,
+          client_id: clientId,
+        }),
+      )
+    ).status;
+
+  const pendingOf = (w: World, userId: string) =>
+    w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "session-end" },
+      { field: "identifier", op: "eq", value: userId },
+    ]);
+
+  const marks = async (w: World, familyIds: readonly string[]) => {
+    let n = 0;
+    for (const id of familyIds)
+      if (
+        await w.storage.findOne("verification", [
+          { field: "valueHash", op: "eq", value: await sha256Hex(`oauth-family-end:${id}`) },
+        ])
+      )
+        n++;
+    return n;
+  };
+
+  it("ends the families that fit, names the rest on the pending-end row, and the sweep ends them", async () => {
+    const { w, h, token, user, id } = await oauthWorld();
+    w.clock.advance(MINUTE);
+    const { clientId, tokens } = await families(h, user.id, 20);
+    const rows = await w.storage.findMany("oauthToken", [
+      { field: "userId", op: "eq", value: user.id },
+    ]);
+    const all = [...new Set(rows.map((r) => r.familyId))];
+    expect(all).toHaveLength(20);
+    w.clock.advance(MINUTE);
+    const off = await scim(w, token, "PATCH", `/Users/${id}`, OFF);
+    expect(off.status).toBe(200);
+    const [row, ...more] = await pendingOf(w, user.id);
+    expect(more).toEqual([]);
+    const named = (row?.data?.families ?? []) as string[];
+    // The act ends the families that fit its budget; the row names the rest.
+    expect(named.length).toBeGreaterThan(0);
+    expect(named.length).toBeLessThan(20);
+    expect(await marks(w, all)).toBe(20 - named.length);
+    // Each family is refused at once, before any sweep.
+    for (const t of tokens) expect(await refresh(h, t, clientId)).toBe(400);
+    for (let i = 0; i < 5 && (await pendingOf(w, user.id)).length > 0; i++)
+      await sweepExpired(w.config);
+    expect(await pendingOf(w, user.id)).toEqual([]);
+    expect(await marks(w, all)).toBe(20);
+  });
+
+  it("refuses a race row of a family that waits on the pending-end row, at the refresh grant", async () => {
+    const { w, h, token, user, id } = await oauthWorld();
+    w.clock.advance(MINUTE);
+    // An instance whose clock runs 2 s ahead makes the families.
+    const { clientId } = await families(h, user.id, 20, 2000);
+    const rows = await w.storage.findMany(
+      "oauthToken",
+      [{ field: "userId", op: "eq", value: user.id }],
+      { sort: { field: "id", dir: "asc" } },
+    );
+    const last = rows.at(-1);
+    if (!last) throw new Error("no refresh row");
+    // A refresh in flight on Postgres: its new row commits after the delete of the act
+    // began, so the delete does not see it (oauth-family.ts). The fixture writes that row
+    // with the form of writeRefresh while the transaction is open, after its delete. The
+    // refresh runs on an instance whose clock runs 3 s ahead, so the row is newer than the act.
+    const race = `or_${randomBase64Url(32)}`;
+    const storage = w.storage;
+    const transaction = storage.transaction.bind(storage);
+    storage.transaction = (fn) =>
+      transaction((tx) =>
+        fn({
+          ...tx,
+          delete: async (model, where) => {
+            const n = await tx.delete(model, where);
+            if (model === "oauthToken")
+              await storage.create("oauthToken", {
+                ...last,
+                id: `${last.id.slice(0, 10)}${"Z".repeat(16)}`,
+                tokenHash: await sha256Hex(race),
+                usedAt: null,
+                parentId: last.id,
+                createdAt: new Date(w.clock.now().getTime() + 3000),
+                updatedAt: new Date(w.clock.now().getTime() + 3000),
+              });
+            return n;
+          },
+        }),
+      );
+    const off = await scim(w, token, "PATCH", `/Users/${id}`, OFF);
+    storage.transaction = transaction;
+    expect(off.status).toBe(200);
+    const [row] = await pendingOf(w, user.id);
+    // The family of the race row is one that the act did not end.
+    expect(row?.data?.families).toContain(last.familyId);
+    expect(await refresh(h, race, clientId)).toBe(400);
+    // The refusal ends the family with its mark, as a reuse does.
+    expect(await marks(w, [last.familyId])).toBe(1);
+  });
+
+  it("covers a session from a clock 2 s ahead at the door and in the sweep", async () => {
+    const { w, token, user, id } = await oauthWorld();
+    w.clock.advance(MINUTE);
+    for (let i = 0; i < 40; i++)
+      await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+    // An instance whose clock runs 2 s ahead writes one more session.
+    w.clock.advance(2000);
+    const ahead = await createSession(w.config, { userId: user.id, ip: null, userAgent: null });
+    w.clock.advance(-2000);
+    const off = await scim(w, token, "PATCH", `/Users/${id}`, OFF);
+    expect(off.status).toBe(200);
+    expect(
+      await w.storage.findOne("session", [{ field: "id", op: "eq", value: ahead.session.id }]),
+    ).not.toBeNull();
+    expect(await resolveSession(w.config, ahead.token, "read-only")).toBeNull();
+    expect(await sessionLive(w.config, { sid: ahead.session.id })).toBe(false);
+    for (let i = 0; i < 5 && (await pendingOf(w, user.id)).length > 0; i++)
+      await sweepExpired(w.config);
+    expect(await pendingOf(w, user.id)).toEqual([]);
+    expect(
+      await w.storage.findMany("session", [{ field: "userId", op: "eq", value: user.id }]),
+    ).toEqual([]);
+  });
+});
+
+describe("the Entra ID manager PATCH (ruling 55 of plan 12d)", () => {
+  const SAMPLE_ID = "00aa00aa-bb11-cc22-dd33-44ee44ee44ee";
+  const ref = `https://example.com/scim/Users/${SAMPLE_ID}`;
+
+  for (const path of ["manager", `${ENTERPRISE_URN}:manager`])
+    it(`takes the list of one manager object at the path ${path}`, async () => {
+      const w = await world();
+      const token = await tokenOf(w, w.organizationId);
+      const id = await created(w, token, ADA);
+      const r = await read(
+        await scim(
+          w,
+          token,
+          "PATCH",
+          `/Users/${id}`,
+          patch({ op: "Add", path, value: [{ $ref: ref, value: SAMPLE_ID }] }),
+        ),
+      );
+      expect([r.status, r.body[ENTERPRISE_URN], r.body.schemas]).toEqual([
+        200,
+        { manager: { value: SAMPLE_ID, $ref: ref } },
+        [USER_URN, ENTERPRISE_URN],
+      ]);
+      expect(r.body.manager).toBeUndefined();
+    });
 });
 
 describe("the PATCH forms of an unknown attribute (ruling 50 of plan 12d)", () => {

@@ -2,11 +2,13 @@ import type { ResolvedConfig } from "../../config.js";
 import { sha256Hex } from "../../primitives/crypto.js";
 import { newId } from "../../primitives/ids.js";
 import type { SessionRow, VerificationRow } from "../../schema.js";
+import { IN_CHUNK } from "../../storage/batch.js";
 import type { Meter } from "../../storage/meter.js";
 import type { StorageAdapter, Where } from "../../storage/port.js";
 import type { SessionEndReason } from "../hooks.js";
+import { familyStart, revokeFamily } from "../oauth-family.js";
 import { deleteOAuthCodes } from "../oauth-grants.js";
-import { deleteTwoFactorChallenges } from "../second-factor.js";
+import { deleteTwoFactorChallenges, later } from "../second-factor.js";
 import { deleteHandoffCodes } from "../session-list.js";
 import { deleteEndedSessions, endedList, sessionsEnded } from "../sessions.js";
 import {
@@ -95,14 +97,18 @@ export const ACCESS_END_LEAST = STEP_WORST.expired + 3 + TAIL_CALLS + 1;
  * Then come the handoff codes, then the OAuth refresh tokens and codes.
  * The API tokens stay (spec 26 item 6).
  *
- * The refresh tokens all go in the act. The read of the tokens comes
- * first, so the page keeps the calls of `endFamilies` after the commit:
- * one read, and 2 calls per family. The page gets the calls that stay.
- * When sessions stay, the act writes one pending-end row, and the sweep
- * ends them. With no session left, a last delete takes a session that a
+ * One delete takes every refresh token of the user. The families count
+ * inside the budget (ruling 55 of plan 12d): `endFamilies` after the commit
+ * costs one read and 2 calls per family. The families that fit come first,
+ * and a page of the least size stays for the sessions. The page gets the
+ * calls that stay. When sessions or families stay, the act writes one
+ * pending-end row that names the families, and the sweep ends them. Until
+ * then the refresh grant refuses such a family (`revokedFor` of the start
+ * of the family). With nothing left, a last delete takes a session that a
  * sign-in wrote after the read, with no hook (plan 9d).
  *
- * The answer is the count of ended sessions, and `left` when sessions stay.
+ * The answer is the count of ended sessions, `left` when sessions or
+ * families stay, and the `before` of the pending-end row, or null.
  */
 export async function endAllAccessPage(
   tx: StorageAdapter,
@@ -114,7 +120,7 @@ export async function endAllAccessPage(
   budget: number,
   reason: PendingEndReason,
   stops: ImpersonationStops | null,
-): Promise<{ ended: number; left: boolean }> {
+): Promise<{ ended: number; left: boolean; before: Date | null }> {
   const byUser: Where<"session">[] = [{ field: "userId", op: "eq", value: userId }];
   // The locks of every session of the user first, then the ended rows with no hook (plan 12a review L3).
   await deleteEndedSessions(tx, config, userId, now);
@@ -125,16 +131,30 @@ export async function endAllAccessPage(
   const tokenWhere: Where<"oauthToken">[] = [{ field: "userId", op: "eq", value: userId }];
   const tokens = await tx.findMany("oauthToken", tokenWhere, { sort: { field: "id", dir: "asc" } });
   meter.step(1);
-  const families = new Set(tokens.map((t) => t.familyId));
-  const afterCommit = 1 + FAMILY_CALLS * families.size;
+  const families = [...new Set(tokens.map((t) => t.familyId))];
   const read = await tx.findMany("session", byUser, {
     sort: { field: "id", dir: "asc" },
     limit: END_ALL_LIMIT.default + 1,
   });
   meter.step(1);
   const rows = read.slice(0, END_ALL_LIMIT.default);
+  // The calls of the page and of the families: the last steps stay out.
+  const room = budget - meter.used - TAIL_CALLS;
+  // The families first, after the read of endFamilies; a page of the least size stays for the sessions.
+  const fit = Math.floor((room - 1 - (rows.length > 0 ? PAGE_LEAST - 1 : 0)) / FAMILY_CALLS);
+  const take = families.slice(0, Math.max(0, Math.min(fit, IN_CHUNK)));
+  const rest = families.slice(take.length);
+  // With every family taken, the read after the commit takes the whole user, so it also
+  // finds a family that a parallel exchange wrote. Else it reads the taken families only.
+  const scope: Where<"oauthToken">[] | null =
+    rest.length === 0
+      ? tokenWhere
+      : take.length > 0
+        ? [...tokenWhere, { field: "familyId", op: "in", value: take }]
+        : null;
+  const afterCommit = scope === null ? 0 : 1 + FAMILY_CALLS * take.length;
   // The page counts its read again, so it gets 1 more.
-  const pageBudget = budget - meter.used + 1 - TAIL_CALLS - afterCommit;
+  const pageBudget = room + 1 - afterCommit;
   // No lock of its own: deleteEndedSessions took the locks of every session of the user.
   const page =
     rows.length > 0 && pageBudget >= PAGE_LEAST
@@ -143,19 +163,29 @@ export async function endAllAccessPage(
   meter.step(page.used - 1);
   await deleteHandoffCodes(tx, userId);
   meter.step(1);
-  for (const id of families) ends.families.ids.add(id);
-  ends.families.scopes.push(tokenWhere);
+  for (const id of take) ends.families.ids.add(id);
+  if (scope) ends.families.scopes.push(scope);
   await tx.delete("oauthToken", tokenWhere);
   meter.step(1);
   await deleteOAuthCodes(tx, userId);
   meter.step(2);
-  const left = page.stopped || read.length > rows.length;
+  const left = page.stopped || read.length > rows.length || rest.length > 0;
+  let before: Date | null = null;
   let late = 0;
-  if (left) await writePendingEnd(tx, config, userId, reason);
+  if (left) {
+    // The newest row that the act read: a row of a clock that runs ahead stays covered (ruling 55).
+    const newest = Math.max(
+      ...read.map((r) => r.createdAt.getTime()),
+      ...tokens.map((t) => Math.max(t.createdAt.getTime(), familyStart(t).getTime())),
+    );
+    before = await writePendingEnd(tx, config, userId, reason, newest, {
+      families: rest,
+    });
+  }
   // A sign-in that commits after the read loses its row here, with no hook (plan 9d).
   else late = await tx.delete("session", byUser);
   meter.step(1);
-  return { ended: page.deleted + late, left };
+  return { ended: page.deleted + late, left, before };
 }
 
 /**
@@ -203,7 +233,10 @@ export async function endImpersonationsPage(
   meter.step(page.used - 1);
   const left = page.stopped || read.length > rows.length;
   if (left) {
-    await writePendingEnd(tx, config, hold.operatorId, reason, hold.targets);
+    const newest = Math.max(...read.map((r) => r.createdAt.getTime()));
+    await writePendingEnd(tx, config, hold.operatorId, reason, newest, {
+      targets: hold.targets,
+    });
     meter.step(1);
   }
   return { ended: page.deleted, left };
@@ -222,21 +255,28 @@ function impersonationWhere(operatorId: string, targets: readonly string[]): Whe
 
 /**
  * The pending-end row of a user, in the act's transaction: a verification
- * row with the purpose `session-end`. `data.before` is the time of the
- * write, so the sweep ends only the sessions from before the act, never a
- * sign-in after it. With `targets`, the row names the impersonation
- * sessions that the user opened as an operator: the sessions of those
- * users whose `actorId` is the user. The sweep never reads the audit
- * table, so the row holds the ids.
+ * row with the purpose `session-end`. `data.before` is the later of the
+ * clock and `newest`, the newest `createdAt` that the act read (ruling 55
+ * of plan 12d). So the sweep and each door cover a row of an instance whose
+ * clock runs ahead, and never a sign-in after the act. With `targets`, the
+ * row names the impersonation sessions that the user opened as an
+ * operator. These are the sessions of those users whose `actorId` is the
+ * user. With
+ * `families`, it names the OAuth families that the act did not end. The
+ * sweep never reads the audit table, so the row holds the ids. The answer
+ * is `data.before`.
  */
 async function writePendingEnd(
   tx: StorageAdapter,
   config: ResolvedConfig,
   userId: string,
   reason: PendingEndReason,
-  targets?: readonly string[],
-): Promise<void> {
+  newest: number,
+  names: { targets?: readonly string[]; families?: readonly string[] },
+): Promise<Date> {
   const now = config.clock.now();
+  // An act that read no row has no newest time: the clock alone.
+  const before = Number.isFinite(newest) ? later(now, new Date(newest)) : now;
   const id = newId(now);
   await tx.create("verification", {
     id,
@@ -246,14 +286,19 @@ async function writePendingEnd(
     valueHash: await sha256Hex(`session-end:${id}`),
     expiresAt: new Date(now.getTime() + PENDING_END_MS),
     consumedAt: null,
-    data:
-      targets === undefined
-        ? { reason, before: now.toISOString() }
-        : { reason, before: now.toISOString(), targets: [...targets] },
+    data: {
+      reason,
+      before: before.toISOString(),
+      ...(names.targets === undefined ? {} : { targets: [...names.targets] }),
+      ...(names.families === undefined || names.families.length === 0
+        ? {}
+        : { families: [...names.families] }),
+    },
     secretVersion: config.keyring.current,
     createdAt: now,
     updatedAt: now,
   });
+  return before;
 }
 
 /**
@@ -305,8 +350,9 @@ export async function readPendingEnds(
  * of `meter`. For each row, one transaction ends a page of the user's
  * sessions from before `data.before` (`endSessionPage`, with the locks by
  * id). It deletes the row when no such session stays. `session.afterEnd`
- * fires after the commit, with the reason of the row. A row that does not
- * fit waits for the next sweep. The answer is the count of ended sessions.
+ * fires after the commit, with the reason of the row. Then the families
+ * that the row names end (`endPendingFamilies`). A row that does not fit
+ * waits for the next sweep. The answer is the count of ended sessions.
  */
 export async function endPendingRows(
   config: ResolvedConfig,
@@ -321,6 +367,7 @@ export async function endPendingRows(
     const before = new Date(String(row.data?.before));
     const reason = pendingReason(row.data?.reason);
     const targets = row.data?.targets;
+    const families = Array.isArray(row.data?.families) ? row.data.families.map(String) : [];
     const where: Where<"session">[] = [
       ...(Array.isArray(targets)
         ? impersonationWhere(row.identifier, targets.map(String))
@@ -344,13 +391,46 @@ export async function endPendingRows(
           ? await endSessionPage(tx, config, rows, ended ?? null, now, pageBudget, where, stops)
           : { deleted: 0, stopped: false, used: 1 };
       const finished = !page.stopped && read.length <= rows.length;
-      if (finished) await tx.delete("verification", [{ field: "id", op: "eq", value: row.id }]);
-      return { page, finished };
+      // A row that names families stays until they end, after this commit.
+      const drop = finished && families.length === 0;
+      if (drop) await tx.delete("verification", [{ field: "id", op: "eq", value: row.id }]);
+      return { page, finished, drop };
     });
-    meter.step(done.page.used + (done.finished ? 1 : 0));
+    meter.step(done.page.used + (done.drop ? 1 : 0));
     n += done.page.deleted;
     await sessionsEnded(config, ended, reason, stops, done.page.deleted);
     if (!done.finished) break;
+    if (!done.drop && !(await endPendingFamilies(config, row, families, meter, limit))) break;
   }
   return n;
+}
+
+/**
+ * Ends the OAuth families that a pending-end row names, inside `limit`
+ * calls of `meter` (ruling 55 of plan 12d). Each family ends with its mark
+ * (`revokeFamily`, 2 calls), outside a transaction, so the mark commits
+ * before the delete. One call stays for the row: its delete when no family
+ * stays, else an update to the families that stay. The answer is true when
+ * the row is gone.
+ */
+async function endPendingFamilies(
+  config: ResolvedConfig,
+  row: VerificationRow,
+  families: readonly string[],
+  meter: Meter,
+  limit: number,
+): Promise<boolean> {
+  const byId: Where<"verification">[] = [{ field: "id", op: "eq", value: row.id }];
+  const fit = Math.max(0, Math.floor((limit - meter.used - 1) / FAMILY_CALLS));
+  const end = families.slice(0, fit);
+  for (const id of end) {
+    await revokeFamily(config, id);
+    meter.step(FAMILY_CALLS);
+  }
+  const rest = families.slice(end.length);
+  if (rest.length === 0) await config.storage.delete("verification", byId);
+  else if (end.length > 0)
+    await config.storage.update("verification", byId, { data: { ...row.data, families: rest } });
+  if (rest.length === 0 || end.length > 0) meter.step(1);
+  return rest.length === 0;
 }

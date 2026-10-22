@@ -347,6 +347,25 @@ describe("the stop rows of the impersonation (ruling 43 of plan 12f)", () => {
     expect(new Set(all.map((s) => (s.data as { cause: string }).cause))).toEqual(new Set(["ban"]));
   });
 
+  it("ends in the sweep an impersonation that an instance 2 s ahead opened before the ban (ruling 55 of plan 12d)", async () => {
+    const w = await world({
+      hooks: { session: { afterEnd: () => {} } },
+      limiter: { allow: async () => true },
+    });
+    for (let i = 0; i < 50; i++) await impersonate(w);
+    // An instance whose clock runs 2 s ahead opens one more.
+    w.auth.clock.advance(2000);
+    const ahead = await impersonate(w);
+    w.auth.clock.advance(-2000);
+    expect((await operatorApi(w.auth.config).users.ban(input(w.operator.user.id))).ok).toBe(true);
+    const live = () =>
+      w.auth.storage.findMany("session", [{ field: "actorId", op: "ne", value: null }]);
+    // The act ends a page; the one from ahead sorts last and waits for the sweep.
+    expect((await live()).map((r) => r.id)).toContain(ahead.sessionId);
+    for (let i = 0; i < 10 && (await live()).length > 0; i++) await sweepExpired(w.auth.config);
+    expect(await live()).toEqual([]);
+  });
+
   it("writes revoke at a revoke of the platform role", async () => {
     const w = await world();
     const { sessionId } = await impersonate(w);

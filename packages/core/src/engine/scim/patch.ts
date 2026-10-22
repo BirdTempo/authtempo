@@ -277,6 +277,7 @@ function rulesOf(resource: "User" | "Group"): ReadonlyMap<string, AttrRule> {
 }
 
 const ENTERPRISE_PREFIX = `${asciiLower(NS_SCIM_ENTERPRISE)}:`;
+const MANAGER = "manager";
 const BODY_KEYS = new Set(["schemas", "Operations"]);
 const OP_KEYS = new Set(["op", "path", "value"]);
 
@@ -305,8 +306,14 @@ type Target = { ok: true; path: PatchPath; boolean: boolean };
 function readPath(path: string, resource: "User" | "Group"): Target | Refusal {
   const bad = refuse("invalidPath", "the path is not one that this server reads");
   if (path.length === 0 || path.length > PATCH_PATH_MAX) return bad;
-  if (resource === "User" && asciiLower(path).startsWith(ENTERPRISE_PREFIX)) {
-    const rule = ENTERPRISE_RULES.get(asciiLower(path.slice(ENTERPRISE_PREFIX.length)));
+  // Entra ID sends the bare path `manager` (ruling 55 of plan 12d). The core
+  // User has no such attribute, so it names the manager of the extension.
+  const enterprise =
+    resource === "User" && asciiLower(path) === MANAGER
+      ? `${ENTERPRISE_PREFIX}${MANAGER}`
+      : asciiLower(path);
+  if (resource === "User" && enterprise.startsWith(ENTERPRISE_PREFIX)) {
+    const rule = ENTERPRISE_RULES.get(enterprise.slice(ENTERPRISE_PREFIX.length));
     if (rule === undefined) return bad;
     return {
       ok: true,
@@ -378,7 +385,18 @@ function target(
 ): PatchOp | Refusal {
   const t = readPath(path, resource);
   if (!t.ok) return t;
-  if (op === "remove" || !t.boolean) return { op, path: t.path, value };
+  // The PATCH sample of "Develop a SCIM endpoint" (Microsoft Learn, read
+  // 2026-10-22) sends the manager as a list of one object. RFC 7643 section
+  // 4.3 makes manager one complex value, so core reads that one object.
+  const one =
+    t.path.attr === `${NS_SCIM_ENTERPRISE}:${MANAGER}` &&
+    t.path.sub === null &&
+    Array.isArray(value) &&
+    value.length === 1 &&
+    isObject(value[0])
+      ? value[0]
+      : value;
+  if (op === "remove" || !t.boolean) return { op, path: t.path, value: one };
   const flagValue = readBoolean(value);
   if (flagValue === null) return refuse("invalidValue", "a boolean attribute takes true or false");
   return { op, path: t.path, value: flagValue };
