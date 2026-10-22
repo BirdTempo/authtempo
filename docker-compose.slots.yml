@@ -48,7 +48,8 @@ services:
   # from 209M to 117M. Measured by docker stats on 2026-10-22 21:04 CST, idle,
   # one-minute load 2.9: 254 MiB for each server. The two settings of the
   # design alone gave 406 MiB, and the slot 0 servers on a volume use 620 and
-  # 562 MiB.
+  # 562 MiB. In a full test and typecheck run (2026-10-22 21:13 CST, load 33)
+  # the peaks were 433 MiB (8.4) and 372 MiB (9.7), with the test databases.
   mysql84:
     extends: { file: docker-compose.yml, service: mysql84 }
     container_name: !reset null

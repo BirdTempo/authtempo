@@ -11,9 +11,11 @@ export const TABLE_FILE = "authtempo-test-slots.json";
 
 /**
  * The cap of sets of slots 1 and up. The lead runs at most 8 agents, so at
- * most 8 worktrees run tests at one time (design, 2026-10-22). A tuned set
- * needs about 0.8 GB, so 8 sets and the slot 0 set (1.4 GB) fit in the
- * 15.7 GB of Docker. Raise it only with the agent limit and a new memory count.
+ * most 8 worktrees run tests at one time (design, 2026-10-22). One set used
+ * 0.6 GB idle and 1.4 GB at the peak of a full test and typecheck run
+ * (docker stats, 2026-10-22 21:13 CST, load 33). So 8 sets at their peak and
+ * the slot 0 set (1.4 GB) fit in the 15.7 GB of Docker. Raise the cap only
+ * with the agent limit and a new memory count.
  */
 export const MAX_ACTIVE_SETS = 8;
 
