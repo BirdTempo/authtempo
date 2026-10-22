@@ -272,6 +272,51 @@ describe("the test-servers command", () => {
     expect(rowsOf(home)).toEqual([[LANE, 1]]);
   });
 
+  it("refuses up when a container of its slot names another worktree", () => {
+    const home = newHome();
+    // A second table, or a hand edit, gave slot 1 to another clone, which runs its set now.
+    // A real listener on the port gives another refusal, so this test fails loudly, never falsely.
+    const run = serversWith(
+      { FAKE_DOCKER_PS: "authtempo-s1-libsql-1\t/elsewhere/clone\n" },
+      home,
+      LANE,
+      "up",
+      "--only",
+      "libsql",
+    );
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain(
+      `the container authtempo-s1-libsql-1 of authtempo-s1 belongs to /elsewhere/clone, not ${LANE}.`,
+    );
+    expect(run.docker).toMatch(/ ps -a --filter label=com\.docker\.compose\.project=authtempo-s1 /);
+    expect(run.docker).not.toMatch(/^\w+ compose /m);
+  });
+
+  it("refuses up when a port of its slot is held by a container of another worktree", async () => {
+    const home = newHome();
+    const port = portOf(1, "libsql-cli-compat");
+    // The project matches, and only the label names another worktree.
+    const server = await listen(port);
+    try {
+      const run = serversWith(
+        { FAKE_DOCKER_PS: "authtempo-s1-libsql-cli-compat-1\tauthtempo-s1\t/elsewhere/clone\n" },
+        home,
+        LANE,
+        "up",
+        "--only",
+        "libsql-cli-compat",
+      );
+      expect(run.status).toBe(2);
+      expect(run.stderr).toContain(
+        `port ${port} is taken by the container authtempo-s1-libsql-cli-compat-1. `,
+      );
+      expect(run.docker).toMatch(new RegExp(` ps --filter publish=${port} `));
+      expect(run.docker).not.toMatch(/^\w+ compose /m);
+    } finally {
+      await new Promise((done) => server?.close(done) ?? done(null));
+    }
+  });
+
   it("removes the set of a removed worktree after it frees the lock", () => {
     const home = newHome();
     const gone = join(temp, `gone-${n}`);
