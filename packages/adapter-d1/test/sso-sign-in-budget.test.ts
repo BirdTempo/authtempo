@@ -159,7 +159,18 @@ async function callback(w: World, code: string) {
     }),
   );
   const at = new URL(res.headers.get("location") ?? "", BASE).searchParams;
-  return { n: c.n, sql: c.sql, error: at.get("auth_error"), challenge: at.get("challenge") };
+  const token = res.headers
+    .getSetCookie()
+    .find((x) => x.startsWith("__Host-tempo_session="))
+    ?.split(";")[0]
+    ?.split("=")[1];
+  return {
+    n: c.n,
+    sql: c.sql,
+    error: at.get("auth_error"),
+    challenge: at.get("challenge"),
+    token: token ? decodeURIComponent(token) : null,
+  };
 }
 
 /**
@@ -238,6 +249,32 @@ describe("the queries of one SSO callback on D1 (plan 12d Task 5)", () => {
       factor: [21, 11],
     });
     for (const n of [...created, ...claimed, ...factor]) expect(n).toBeLessThanOrEqual(50);
+  }, 120_000);
+});
+
+describe("the refusal of a known identity whose user left the domain on D1 (12d fix wave M1)", () => {
+  it("reads the current address of the user and stays inside 50 queries", async () => {
+    const w = await world();
+    const first = await callback(w, "code-1");
+    if (first.error !== null || first.token === null) throw new Error("no first sign-in");
+    const session = await w.auth.api.getSession(first.token);
+    if (!session) throw new Error("no session");
+    // Ada moves the account address out of the domain by the normal email change.
+    const sent = await w.auth.api.user.changeEmail({ session, newEmail: "ada@personal.example" });
+    if (!sent.ok) throw new Error(sent.code);
+    const link = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(w.mail.at(-1) ?? "")?.[1] ?? "");
+    const moved = await w.auth.api.user.confirmEmailChange({
+      token: link,
+      ip: null,
+      userAgent: null,
+    });
+    if (!moved.ok) throw new Error(moved.code);
+    const again = await callback(w, "code-2");
+    expect([again.error, again.token]).toEqual(["sso_domain_mismatch", null]);
+    // Measured on the binding on 2026-10-24 (load 4.2): 8 queries. The refusal comes
+    // before the first write of the resolution.
+    expect(again.n).toBe(8);
+    expect(again.n).toBeLessThanOrEqual(50);
   }, 120_000);
 });
 
