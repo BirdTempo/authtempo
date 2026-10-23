@@ -70,6 +70,7 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 - A claim fires the verify hook points only. The `email` identity, the social fill of the name and the image, the sweep, and the importer fire no user or identity hook.
 - `user.beforeUpdate` can run more than once for one change, with `via: "profile"` and with `via: "email_change"`.
 - A parallel write that lands first makes core read the user row again. Then `user.beforeUpdate` runs again on the new row. Write the hook so that a second call does no harm.
+- A SCIM deactivate or delete that a group write races reads the member row again. Then `organization.beforeRemoveMember` runs again with the new role, up to 5 times.
 - `identity.beforeLink` with `via: "link"` runs inside the transaction of the link, before the identity write.
 - It can run twice for one identity, when two link states of one user race. The second write then fails.
 - `identity.beforeUnlink` runs inside the transaction, after core counts the ways in and locks the user row, and before the first delete. It has no `via`.
