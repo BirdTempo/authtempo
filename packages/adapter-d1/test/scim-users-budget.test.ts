@@ -268,13 +268,14 @@ describe("the SCIM Users on D1 (plan 12d Task 10, ruling 25 N1)", () => {
  * The counts of the run on the binding, 2026-10-24: the queries of each
  * route, the sessions that the deactivate ended in its call, and the queries
  * of each sweep. The deactivate takes 49 of the budget of 50: its page ends
- * 9 of the 40 sessions, one statement per session with the hook. It keeps 2
+ * 10 of the 40 sessions, one statement per session with the hook. It keeps 2
  * statements for the write of `user.updatedAt` (the undo read and the
  * update), 1 for the audit row (ruling 50 of plan 12d), and 1 for the second
  * group read of the answer, which a user in no group does not make (ruling
  * 63 M1). The read of the member row under the user hold costs 1 more
- * (ruling 63 M2). One session read ends one more session, and the two sweeps
- * end the other 30.
+ * (ruling 63 M2). The organization tokens go in one delete, not two (ruling
+ * 66), so the page ends one more session. One session read ends one more
+ * session, and the two sweeps end the other 29.
  *
  * `doors` holds the queries and the pending-end reads of each door. A session
  * from after the last write of its user reads 3 queries and no pending-end
@@ -286,7 +287,7 @@ const MEASURED = {
   create: 20,
   update: 16,
   deactivate: 49,
-  ended: 9,
+  ended: 10,
   doors: {
     fresh: [3, 0],
     older: [4, 1],
@@ -294,7 +295,7 @@ const MEASURED = {
     mint: [4, 1],
     read: [6, 1],
   },
-  sweeps: [48, 29],
+  sweeps: [48, 28],
   get: 5,
   list: 5,
   delete: 13,
@@ -479,9 +480,9 @@ describe("the OAuth families of a SCIM deactivate on D1 (ruling 55 of plan 12d)"
  * ends them with 2 queries each.
  */
 const FAMILY_COUNTS: Record<number, [number, number, number, number[]]> = {
-  0: [49, 9, 0, [48, 30]],
-  7: [49, 1, 4, [48, 44]],
-  20: [49, 1, 4, [48, 50, 43]],
+  0: [49, 10, 0, [48, 29]],
+  7: [49, 2, 4, [48, 43]],
+  20: [49, 2, 4, [48, 49, 43]],
 };
 
 const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";
@@ -544,10 +545,10 @@ describe("the deactivate of a User in groups on D1 (ruling 63 M1 of plan 12d)", 
  * keeps a call for that read (ruling 63 M1 of plan 12d).
  */
 const GROUPED_COUNTS: Record<string, [number, number, number]> = {
-  "1/0": [50, 9, 0],
-  "1/20": [50, 1, 4],
-  "2/0": [50, 9, 0],
-  "2/20": [50, 1, 4],
+  "1/0": [50, 10, 0],
+  "1/20": [50, 2, 4],
+  "2/0": [50, 10, 0],
+  "2/20": [50, 2, 4],
 };
 
 /** One refresh on a counting view of the binding: its status, queries, and reads of ta_verification. */
@@ -697,20 +698,41 @@ const adaRole = async () =>
       .first<{ role: string }>()
   )?.role ?? null;
 
-describe("a deactivate that races a mapped group write on D1 (ruling 63 M2 of plan 12d)", () => {
+/** The user row of ada. */
+const adaUser = () =>
+  env.DB.prepare("SELECT id FROM ta_user WHERE email = ?").bind(ADA).first<{ id: string }>();
+
+/** The challenges and handoff codes of a user. */
+const codesOf = async (userId: string) =>
+  Number(
+    await env.DB.prepare(
+      "SELECT count(*) AS n FROM ta_verification WHERE identifier = ? AND purpose IN ('two-factor', 'handoff-code')",
+    )
+      .bind(userId)
+      .first("n"),
+  );
+
+/** The role map, the OAuth provider, and the JWT mint: every door of a race test. */
+const RACED: Partial<AuthConfig> = { ...OAUTH, ...MAPPED, ...MINT };
+
+describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and 66 of plan 12d)", () => {
   // A group write changes ada's role before each of the first `races` member reads under
   // the user hold. The before hook of that round saw the old role, so the round runs again.
   // At `delete`, the group write comes after that read, before the member delete: D1 has no
-  // lock, so the delete matches no row.
-  const cases: [string, number][] = [
-    ["findOne", 1],
-    ["findOne", 2],
-    ["findOne", 3],
-    ["delete", 1],
+  // lock, so the delete matches no row. A round that does not fit the budget is small: it
+  // ends no session and no family, and its pending-end row covers them all (ruling 66).
+  const cases: [string, number, "PATCH" | "DELETE"][] = [
+    ["findOne", 1, "PATCH"],
+    ["findOne", 2, "PATCH"],
+    ["findOne", 3, "PATCH"],
+    ["findOne", 3, "DELETE"],
+    ["delete", 1, "PATCH"],
+    ["delete", 1, "DELETE"],
+    ["findOne", 4, "PATCH"],
   ];
-  for (const [at, races] of cases)
-    it(`answers inside 50 queries when ${races} group writes race the deactivate at ${at}`, async () => {
-      const setup = make(env.DB, false, MAPPED);
+  for (const [at, races, method] of cases)
+    it(`answers a ${method} inside 50 queries when ${races} group writes race it at ${at}`, async () => {
+      const setup = make(env.DB, false, RACED);
       const { organizationId, token } = await acme(setup);
       const sso = setup.api.sso;
       const scim = setup.api.scim;
@@ -732,7 +754,8 @@ describe("a deactivate that races a mapped group write on D1 (ruling 63 M2 of pl
       if (!connection.ok) throw new Error(connection.code);
       const map = await scim.setRoleMap({ actor: APP, organizationId, map: { Admins: "admin" } });
       if (!map.ok) throw new Error(map.code);
-      for (let i = 0; i < 40; i++) await signIn(setup, ADA);
+      const tokens: string[] = [];
+      for (let i = 0; i < 40; i++) tokens.push((await signIn(setup, ADA)).token);
       const create = await scimOn(setup, token, "POST", "/Users", {
         schemas: [USER_URN],
         userName: ADA,
@@ -747,6 +770,24 @@ describe("a deactivate that races a mapped group write on D1 (ruling 63 M2 of pl
       expect(group.status).toBe(201);
       expect(await adaRole()).toBe("admin");
       const gid = String(group.body.id);
+      const fams = await families(setup, tokens[0] ?? "", 3);
+      // A challenge and a handoff code of ada: each one can make a session after the act.
+      const userId = String((await adaUser())?.id);
+      for (const purpose of ["two-factor", "handoff-code"] as const) {
+        const made = new Date();
+        await createD1Adapter(env.DB).create("verification", {
+          id: `${purpose}-of-ada`,
+          purpose,
+          identifier: userId,
+          valueHash: await sha256Hex(purpose),
+          expiresAt: new Date(made.getTime() + 600_000),
+          consumedAt: null,
+          data: null,
+          secretVersion: 1,
+          createdAt: made,
+          updatedAt: made,
+        });
+      }
       let lost = 0;
       const { db, c } = counting(env.DB);
       const base = createD1Adapter(db);
@@ -758,7 +799,7 @@ describe("a deactivate that races a mapped group write on D1 (ruling 63 M2 of pl
           (await adaRole()) === "admin"
             ? { op: "remove", path: `members[value eq "${id}"]` }
             : { op: "add", path: "members", value: [{ value: id }] };
-        const r = await scimOn(make(env.DB, false, MAPPED), token, "PATCH", `/Groups/${gid}`, {
+        const r = await scimOn(make(env.DB, false, RACED), token, "PATCH", `/Groups/${gid}`, {
           schemas: [PATCH_URN],
           Operations: [op],
         });
@@ -787,35 +828,70 @@ describe("a deactivate that races a mapped group write on D1 (ruling 63 M2 of pl
         },
       }) as StorageAdapter;
       const res = await scimOn(
-        make(db, true, { ...MAPPED, storage: tapped }),
+        make(db, true, { ...RACED, storage: tapped }),
         token,
-        "PATCH",
+        method,
         `/Users/${id}`,
-        { schemas: [PATCH_URN], Operations: [{ op: "replace", path: "active", value: false }] },
+        method === "DELETE"
+          ? undefined
+          : { schemas: [PATCH_URN], Operations: [{ op: "replace", path: "active", value: false }] },
       );
       const queries = c.n;
       const ended = 40 - (await sessions());
+      const marked = await familyMarks();
       const role = await adaRole();
+      // Every family that the act did not end is named on its pending-end row, for the sweep.
+      const rows = await env.DB.prepare(
+        "SELECT data FROM ta_verification WHERE purpose = 'session-end'",
+      ).all<{ data: string }>();
+      const named = rows.results.flatMap((r) => JSON.parse(r.data).families ?? []).length;
+      expect(marked + named).toBe(res.status === 409 ? 0 : 3);
+      // Each session and each family is refused at once, before any sweep, unless the
+      // answer is 409: then nothing changed.
+      const after = make(env.DB, false, RACED);
+      const live: boolean[] = [];
+      for (const t of tokens) live.push((await after.api.getSession(t)) !== null);
+      const refreshed = await refreshes(after, fams.clientId, fams.tokens);
+      const done = res.status !== 409;
+      expect(live).toEqual(Array(40).fill(!done));
+      expect(refreshed).toEqual(Array(3).fill(done ? 400 : 200));
+      expect(await codesOf(userId)).toBe(done ? 0 : 2);
+      // The sweep ends the sessions and the families that stay, each family with its mark.
+      if (done) {
+        for (let i = 0; (await pendingRows()) > 0; i++) {
+          if (i > 10) throw new Error("the sweep makes no progress");
+          await make(env.DB, false, RACED).api.sweepExpired();
+        }
+        expect([await sessions(), await familyMarks()]).toEqual([0, 3]);
+      }
       // Measured on the binding on 2026-10-24; see the ledger of plan 12d Task 11.
-      expect([res.status, queries, lost, ended, role]).toEqual(RACE_COUNTS[`${at}/${races}`]);
+      expect([res.status, queries, lost, ended, marked, role]).toEqual(
+        RACE_COUNTS[`${method} ${at}/${races}`],
+      );
       expect(queries).toBeLessThanOrEqual(50);
     }, 120_000);
 });
 
 /**
- * The deactivate of a user in a mapped group, with 40 sessions and a
- * session.afterEnd hook, when a group write changes the role before the
- * member read under the user hold, on the binding, 2026-10-24: the status,
- * the queries, the lost rounds, the ended sessions, and the role that
- * stays. After one lost round, the next round removes the member. A lost
- * round costs 5 queries, so after two the next round does not fit the
- * budget. Then the deactivate answers 409 and changes nothing (ruling 63 M2
- * of plan 12d). A round lost at the member delete costs more, with its
- * undo, so the next round does not fit after one.
+ * A deprovision of a user in a mapped group, with 40 sessions, a
+ * session.afterEnd hook, and 3 OAuth refresh families, when a group write
+ * changes the role before the member read under the user hold, on the
+ * binding, 2026-10-24: the status, the queries, the lost rounds, the ended
+ * sessions, the families ended with their marks, and the role that stays.
+ * A lost round costs 5 queries. After one, a full round fits and ends a
+ * page. After two or three, the next round is small (ruling 66 of plan
+ * 12d): it ends no session and no family, and its pending-end row covers
+ * them all, so each door refuses them at once. A PATCH lost at the member
+ * delete costs more, with its undo, so a small round follows; a DELETE
+ * reads less first, so a full round still fits. After four lost rounds no
+ * round fits, and the answer is 409 with no change.
  */
-const RACE_COUNTS: Record<string, [number, number, number, number, string | null]> = {
-  "findOne/1": [200, 49, 1, 4, null],
-  "findOne/2": [409, 18, 2, 0, "admin"],
-  "findOne/3": [409, 18, 2, 0, "admin"],
-  "delete/1": [409, 21, 1, 0, "member"],
+const RACE_COUNTS: Record<string, [number, number, number, number, number, string | null]> = {
+  "PATCH findOne/1": [200, 49, 1, 1, 2, null],
+  "PATCH findOne/2": [200, 44, 2, 0, 0, null],
+  "PATCH findOne/3": [200, 48, 3, 0, 0, null],
+  "DELETE findOne/3": [204, 47, 3, 0, 0, null],
+  "PATCH delete/1": [200, 46, 1, 0, 0, null],
+  "DELETE delete/1": [204, 48, 1, 4, 3, null],
+  "PATCH findOne/4": [409, 28, 4, 0, 0, "admin"],
 };

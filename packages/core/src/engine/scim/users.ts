@@ -34,7 +34,7 @@ import { createSteps, verifySteps } from "../create-steps.js";
 import { OLD_ADDRESS_PROOFS } from "../email-change.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "../hooks.js";
 import { endFamilies, familyEnds } from "../oauth-family.js";
-import { endAllAccessPage } from "../operator/access-end.js";
+import { endAllAccessPage, markAllAccessEnd } from "../operator/access-end.js";
 import {
   auditDraft,
   impersonationStops,
@@ -150,18 +150,29 @@ class LostRound extends Error {
 
 /**
  * The calls of a deprovision round from its transaction to its answer,
- * when the page ends no session and no family: the user hold, the writes,
- * the fixed calls of the page, the user write, the audit row, and the steps
- * after the commit. A new round starts only while the meter has room for
+ * when the page ends no session: the user hold, the writes, the fixed
+ * calls of the page, the user write, the audit row, and the steps after
+ * the commit. A new full round starts only while the meter has room for
  * them (ruling 63 M2 of plan 12d). Measured on the D1 binding, 2026-10-24:
- * a deactivate of a user in a mapped group with 40 sessions and a
- * session.afterEnd hook. A round that began at 19 calls of the meter ended
- * the request at 50 queries, and one that began at 24 ended it at 54. The
- * meter starts one call above the binding there, because the route skipped
- * its `lastUsedAt` write. So the worst tail is 51 - 19 = 32. The teams mode
- * gave the same counts. A lost round costs 5 calls there.
+ * a deactivate of a user in a mapped group with 40 sessions, 3 OAuth
+ * refresh families, and a session.afterEnd hook. A round that began at 19
+ * calls of the meter ended the request at 50 queries. The meter starts one
+ * call above the binding there, because the route skipped its `lastUsedAt`
+ * write. So the worst tail is 51 - 19 = 32. With no family it was 31. A
+ * lost round costs 5 calls there.
  */
 const ROUND_TAIL = 32;
+
+/**
+ * The calls of a small round from its transaction to its answer (ruling 66
+ * of plan 12d): as `ROUND_TAIL`, with `markAllAccessEnd` in place of the
+ * page. Measured as `ROUND_TAIL`, 2026-10-24: a small round that began at
+ * 19 calls of the meter ended the request at 44 queries, with the user in
+ * the group. So the tail is 45 - 19 = 26. Two lost rounds at the member
+ * read and one small round fit the budget of 50, and so do three. A fourth
+ * lost round leaves no room.
+ */
+const SMALL_TAIL = 26;
 
 /** The detail of the address rule (Behavior 2). */
 const ADDRESS_RULE = "the address is not in a verified domain of this organization";
@@ -1264,7 +1275,7 @@ async function writeChange(
         : "scim_user_update";
   let join: Join | null = null;
   let joined: MemberRow | null = null;
-  const run = (p: ReturnType<typeof planOf>) =>
+  const run = (p: ReturnType<typeof planOf>, small: boolean) =>
     hookGuard(() =>
       storage.transaction(async (tx) => {
         join = null;
@@ -1338,8 +1349,9 @@ async function writeChange(
             await tx.lockInOrder?.("member", [{ field: "id", op: "eq", value: member.id }]);
           await dropGroups();
           // D1 has no lock, so a group write can still land after the read above. The
-          // round then runs again too, with a new read of the member row.
-          if (removes && member && (await removeMemberIn(tx, member, true)) === 0)
+          // round then runs again too, with a new read of the member row. With a claim,
+          // the delete of the organization tokens below takes them, so it runs once.
+          if (removes && member && (await removeMemberIn(tx, member, !claimed)) === 0)
             throw new LostRound(undefined);
           if (claimed) {
             // A deprovisioned person loses every credential (ruling 25 N1 of plan
@@ -1354,18 +1366,24 @@ async function writeChange(
             // stay: the user write below (2 on D1: the undo read and the update), the
             // audit row, and the second group read of the answer. On the D1 binding, a
             // user in a group made 51 queries with 3 kept, and 50 with 4 (ruling 63 M1
-            // of plan 12d, measured 2026-10-24).
-            const page = await endAllAccessPage(
-              tx,
-              config,
-              user.id,
-              ends,
-              now,
-              meter,
-              OPERATOR_CALL_BUDGET - 4,
-              "revoked",
-              stops,
-            );
+            // of plan 12d, measured 2026-10-24). A small round ends no session and no
+            // family here: its pending-end row covers them all (ruling 66 of plan 12d).
+            const page = small
+              ? {
+                  left: true,
+                  before: await markAllAccessEnd(tx, config, user.id, meter, "revoked"),
+                }
+              : await endAllAccessPage(
+                  tx,
+                  config,
+                  user.id,
+                  ends,
+                  now,
+                  meter,
+                  OPERATOR_CALL_BUDGET - 4,
+                  "revoked",
+                  stops,
+                );
             // The door of the sessions and families that stay (`revokedFor`, ruling 50
             // of plan 12d) reads the pending-end rows only for one from before this
             // write. The time is at or after the `before` of the row (ruling 55).
@@ -1396,12 +1414,19 @@ async function writeChange(
       throw err;
     });
   // A lost round runs again with the member row of its read, as a group write does with
-  // its lost round, up to `ROUNDS` rounds. A round that does not fit the call budget
-  // stops first. Only then the answer is 409, and nothing changes.
+  // its lost round, up to `ROUNDS` rounds. A new round that does not fit the call budget
+  // is a small round (ruling 66 of plan 12d): it writes the deprovision with no session
+  // page, and its pending-end row covers every session and family of the user. So the
+  // doors refuse them at once. The answer is 409, with nothing written, only when every
+  // round is lost, or when the meter has no room for one more small round.
   let written: Awaited<ReturnType<typeof run>> | null = null;
-  for (let round = 0; round < ROUNDS && written === null; round++)
+  let small = false;
+  for (let round = 0; round < ROUNDS && written === null; round++) {
+    // D1 stops a request at its 51st query, in the middle of the writes. So a round that
+    // does not fit even in the small form does not start, and the answer is 409.
+    if (small && meter.used + SMALL_TAIL > OPERATOR_CALL_BUDGET) break;
     try {
-      written = await run(plan);
+      written = await run(plan, small);
     } catch (err) {
       if (!(err instanceof LostRound)) throw err;
       let next = err.member;
@@ -1410,8 +1435,9 @@ async function writeChange(
         meter.step(1);
       }
       plan = planOf(next);
-      if (meter.used + ROUND_TAIL > OPERATOR_CALL_BUDGET) break;
+      small = meter.used + ROUND_TAIL > OPERATOR_CALL_BUDGET;
     }
+  }
   if (written === null)
     return scimFail(409, "a group write changed the member row in each round; send it again");
   if (written.ok === "stop") return written.answer;

@@ -252,6 +252,57 @@ export async function endAllAccessPage(
 }
 
 /**
+ * The calls of `markAllAccessEnd`: the challenges, the read of the refresh
+ * tokens, the read of the newest session, the handoff codes, and the
+ * pending-end row.
+ */
+export const ACCESS_MARK_CALLS = 5;
+
+/**
+ * The small form of `endAllAccessPage` (ruling 66 of plan 12d), in the
+ * act's transaction, in `ACCESS_MARK_CALLS` calls of `meter`. It ends no
+ * session and no family. It writes one pending-end row that covers every
+ * session and names every family of the user. So the doors refuse them at
+ * once (`revokedFor`, `familyRevoked`), and the sweep ends them. A raced
+ * SCIM deprovision uses it when a full round does not fit the budget.
+ *
+ * The challenges and the handoff codes go, as in the full form: each one
+ * can make a session after the act, which the row does not cover. The
+ * OAuth codes stay. A family from a code of before the act starts at the
+ * code (`familyStart`), so the row covers it too. The answer is the
+ * `before` of the row.
+ */
+export async function markAllAccessEnd(
+  tx: StorageAdapter,
+  config: ResolvedConfig,
+  userId: string,
+  meter: Meter,
+  reason: PendingEndReason,
+): Promise<Date> {
+  await deleteTwoFactorChallenges(tx, userId);
+  const tokens = await tx.findMany("oauthToken", [{ field: "userId", op: "eq", value: userId }]);
+  // The newest session only, for `before` (ruling 56 of plan 12d): the row covers the rest.
+  const newest = await tx.findMany("session", [{ field: "userId", op: "eq", value: userId }], {
+    sort: { field: "createdAt", dir: "desc" },
+    limit: 1,
+  });
+  await deleteHandoffCodes(tx, userId);
+  const before = await writePendingEnd(
+    tx,
+    config,
+    userId,
+    reason,
+    Math.max(
+      ...newest.map((r) => r.createdAt.getTime()),
+      ...tokens.map((t) => Math.max(t.createdAt.getTime(), familyStart(t).getTime())),
+    ),
+    { families: [...new Set(tokens.map((t) => t.familyId))] },
+  );
+  meter.step(ACCESS_MARK_CALLS);
+  return before;
+}
+
+/**
  * Ends the impersonation sessions that the operator of `hold` opened, inside
  * `budget` calls of `meter` (rulings 31, 44, and 63 of plan 12f). Every loss
  * of the platform role calls it in its transaction. The losses are the ban,
