@@ -19,7 +19,7 @@ import { buildQuery, type OidcProvider, stringClaim } from "../../social/provide
 import type { SignInChallenge } from "../second-factor.js";
 import { exchangeProviderCode, OAUTH_STATE_PREFIX, type SocialComplete } from "../social.js";
 import { validImageUrl, validUserName } from "../users.js";
-import { connectionSecret } from "./connections.js";
+import { connectionSecret, type OidcStored, tokenAuthOf } from "./connections.js";
 import { kindOn } from "./discover.js";
 import { resolveSsoUser, type SsoProfile, type SsoSignedIn } from "./resolve.js";
 import { startSaml } from "./saml-sp.js";
@@ -79,14 +79,6 @@ export type SsoOidcComplete = Omit<SocialComplete, "provider" | "user" | "sessio
 /** A test seam (plan 12d Task 4): it reads the profile before the resolution. Core passes none. */
 export interface SsoOidcSeam {
   onProfile?: (profile: SsoProfile) => void;
-}
-
-/** The stored `config` of an OIDC row. Core writes it (Task 3), and the kind names the form. */
-interface OidcStored {
-  issuer: string;
-  clientId: string;
-  scope: string;
-  endpoints: OidcEndpoints | null;
 }
 
 /** One discovery result, with the issuer that it is for. */
@@ -418,6 +410,7 @@ export async function completeSsoOidc(
     now,
     ssoCallbackUrl(config, id),
     cappedFetch(sso.fetch, SSO_TOKEN_BODY_MAX),
+    tokenAuthOf(connection.config as unknown as OidcStored),
   );
   if (token === null) return no("exchange");
   let claims: Record<string, unknown>;

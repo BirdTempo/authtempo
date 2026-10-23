@@ -101,12 +101,20 @@ describe("the connection routes (plan 12d Task 3)", () => {
       w,
       "POST",
       "/sso/connections/create",
-      oidcBody(w.org),
+      { ...oidcBody(w.org), tokenEndpointAuthMethod: "client_secret_basic" },
       w.owner.token,
     );
     expect(s1).toBe(200);
-    const o = oidc.connection as { id: string; saml?: unknown; oidc: { endpoints: unknown } };
-    expect([o.saml, o.oidc.endpoints]).toEqual([undefined, null]);
+    const o = oidc.connection as {
+      id: string;
+      saml?: unknown;
+      oidc: { endpoints: unknown; tokenEndpointAuthMethod: string };
+    };
+    expect([o.saml, o.oidc.endpoints, o.oidc.tokenEndpointAuthMethod]).toEqual([
+      undefined,
+      null,
+      "client_secret_basic",
+    ]);
     // A new millisecond: an id orders the rows by their time.
     w.auth.clock.advance(1000);
     const [s2, saml] = await send(
@@ -207,6 +215,7 @@ describe("the connection routes (plan 12d Task 3)", () => {
     ]);
     for (const [path, body] of [
       ["/sso/connections/update", { id, more: 1 }],
+      ["/sso/connections/update", { id, tokenEndpointAuthMethod: "private_key_jwt" }],
       ["/sso/connections/delete", { id, more: 1 }],
     ] as const)
       expect(await send(w, "POST", path, body, w.owner.token), path).toEqual([

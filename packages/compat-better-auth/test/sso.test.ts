@@ -295,10 +295,6 @@ describe("the sso plugin (plan 12d Task 14)", () => {
       [{ overrideUserInfo: true }, "overrideUserInfo"],
       [{ additional: "x" }, "additional"],
       [
-        { oidcConfig: { ...OIDC, tokenEndpointAuthentication: "client_secret_basic" } },
-        "oidcConfig.tokenEndpointAuthentication",
-      ],
-      [
         {
           oidcConfig: {
             ...OIDC,
@@ -1147,6 +1143,36 @@ describe("the sso plugin (plan 12d Task 14)", () => {
     );
     const rows = await app.database.storage.findMany("ssoConnection", []);
     expect(rows.map((r) => r.label).sort()).toEqual(["Evil SSO", "acme"]);
+  });
+
+  it("keeps the token endpoint method of a provider (12d fix wave item 18)", async () => {
+    const app = await owned();
+    const reg = await app.register({
+      providerId: "acme-oidc",
+      issuer: "https://idp.acme.example",
+      domain: "acme.example",
+      oidcConfig: { ...OIDC, tokenEndpointAuthentication: "client_secret_basic" },
+    });
+    expect(reg.status).toBe(200);
+    const method = async () => (await connectionsOf(app))[0]?.oidc?.tokenEndpointAuthMethod;
+    expect(await method()).toBe("client_secret_basic");
+    const read = async () =>
+      (
+        (await (
+          await app.read("/sso/get-provider?providerId=acme-oidc", app.owner.cookie)
+        ).json()) as { oidcConfig: { tokenEndpointAuthentication: string } }
+      ).oidcConfig.tokenEndpointAuthentication;
+    expect(await read()).toBe("client_secret_basic");
+    const moved = await app.call(
+      "/sso/update-provider",
+      {
+        providerId: "acme-oidc",
+        oidcConfig: { tokenEndpointAuthentication: "client_secret_post" },
+      },
+      app.owner.cookie,
+    );
+    expect(moved.status).toBe(200);
+    expect([await method(), await read()]).toEqual(["client_secret_post", "client_secret_post"]);
   });
 
   it("serves authClient.sso and signIn.sso through the shim's paths", async () => {

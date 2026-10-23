@@ -16,6 +16,7 @@ import { hasControlChar } from "../primitives/text.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose } from "../schema.js";
 import {
+  basicAuthorization,
   buildQuery,
   type ConfiguredProvider,
   type OAuth2Provider,
@@ -24,6 +25,7 @@ import {
   type Provider,
   type SocialProfile,
   stringClaim,
+  type TokenEndpointAuthMethod,
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
@@ -522,7 +524,10 @@ async function completeLink(
  * `redirectUri` is the callback of the start: a social provider's, or an
  * SSO connection's (plan 12d deviation 6). One exchange serves both.
  * `fetchFn` is `social.fetch` for a social provider and `sso.fetch` for a
- * connection (plan 12d Task 4).
+ * connection (plan 12d Task 4). `method` is `client_secret_post` for a
+ * social provider. An SSO connection names its own (12d fix wave item 18).
+ * With `client_secret_basic` the body holds no client id and no secret:
+ * RFC 6749 section 2.3 allows one method per request.
  */
 export async function exchangeProviderCode(
   config: ResolvedConfig,
@@ -532,6 +537,7 @@ export async function exchangeProviderCode(
   now: Date,
   redirectUri: string,
   fetchFn: typeof fetch = config.social.fetch,
+  method: TokenEndpointAuthMethod = "client_secret_post",
 ): Promise<string | null> {
   let clientSecret: string;
   try {
@@ -544,18 +550,23 @@ export async function exchangeProviderCode(
     });
     return null;
   }
+  const basic = method === "client_secret_basic";
+  const headers: Record<string, string> = {
+    "content-type": "application/x-www-form-urlencoded",
+    accept: "application/json",
+  };
+  if (basic) headers.authorization = basicAuthorization(provider.clientId, clientSecret);
   let res: Response;
   try {
     res = await fetchFn(provider.tokenUrl, {
       signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+      headers,
       body: buildQuery({
         grant_type: "authorization_code",
         code,
         redirect_uri: redirectUri,
-        client_id: provider.clientId,
-        client_secret: clientSecret,
+        ...(basic ? {} : { client_id: provider.clientId, client_secret: clientSecret }),
         code_verifier: verifier,
       }),
     });

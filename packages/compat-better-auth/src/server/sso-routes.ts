@@ -113,14 +113,16 @@ function oidcFields(
           };
         break;
       case "tokenEndpointAuthentication":
-        if (v !== "client_secret_post")
+        // Core's connection sends the secret by either method (12d fix wave item 18).
+        if (v !== "client_secret_post" && v !== "client_secret_basic")
           return {
             ok: false,
             refusal: unsupported(
               path,
-              "core sends the client secret in the token request body (client_secret_post); set the IdP client to it",
+              "core sends the client secret as client_secret_post or client_secret_basic only",
             ),
           };
+        out.tokenEndpointAuthMethod = v;
         break;
       case "overrideUserInfo":
         if (v !== false)
@@ -503,7 +505,7 @@ const lastFour = (id: string) => (id.length <= 4 ? id : id.slice(-4));
 /**
  * One provider in Better Auth's answer shape (index-sM6JWXeV.d.mts:794).
  * The fields that core does not keep answer core's fixed behavior: PKCE,
- * client_secret_post, signed assertions, and the persistent NameID.
+ * signed assertions, and the persistent NameID.
  */
 function providerOf(
   mapped: Mapped,
@@ -531,7 +533,7 @@ function providerOf(
           userInfoEndpoint: undefined,
           jwksEndpoint: oidc.endpoints?.jwksUrl,
           scopes: oidc.scope.split(" "),
-          tokenEndpointAuthentication: "client_secret_post",
+          tokenEndpointAuthentication: oidc.tokenEndpointAuthMethod,
         }
       : undefined,
     samlConfig: saml

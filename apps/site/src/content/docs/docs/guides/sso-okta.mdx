@@ -32,13 +32,18 @@ Pick one kind. OIDC needs fewer values.
 3. Under "Grant type", keep "Authorization code".
 4. Under "Assignments", pick the people or groups that may sign in.
 5. Save. Copy the "Client ID".
-6. Under "Client authentication", select "Client secret", and copy the secret. Set the method of the secret to `client_secret_post`: the field `token_endpoint_auth_method` of the app in the Okta Apps API.
+6. Under "Client authentication", select "Client secret", and copy the secret. Okta sends it by the method `client_secret_basic`, unless you change the field `token_endpoint_auth_method` of the app in the Okta Apps API.
 7. Create the connection with the Okta domain and the values of steps 5 and 6, as `oktaOidc` below does.
 8. In "Sign-in redirect URIs", enter `<baseURL><basePath>/sso/<connectionId>/callback`.
 
 The issuer is the org authorization server: `https://<your Okta domain>`. Core reads its discovery document at `/.well-known/openid-configuration`.
 
-Core sends the client secret in the body of the token request, the method `client_secret_post`. Core does not yet send it as HTTP Basic, the method `client_secret_basic`. Okta gives a new app `client_secret_basic`, and then refuses the token request of each sign-in. So set `client_secret_post` in step 6.
+Core sends the client secret by the method of the connection, `tokenEndpointAuthMethod`. Both methods work with Okta:
+
+- `client_secret_basic`: the secret goes in the HTTP Basic header of the token request. Okta gives a new app this method, so `oktaOidc` below sets it.
+- `client_secret_post`: the secret goes in the body of the token request. It is the default of a connection. Pass it to `oktaOidc` for an app that you set to this method.
+
+The method of the connection must be the method of the app. Else Okta refuses the token request of each sign-in, and the sign-in answers [`sso_failed`](/docs/reference/errors/#sso_failed).
 
 ### SAML
 
@@ -72,7 +77,7 @@ Under "Show Advanced Settings", the "Assertion Signature" must be signed. Pick a
 
 ## If it fails
 
-- [`sso_failed`](/docs/reference/errors/#sso_failed): the log line names the step. `exchange` means a failed token request. `audience` means a wrong "Audience URI (SP Entity ID)". `destination` or `subject_confirmation` means a wrong "Single sign-on URL". `address` means no attribute `email`. `subject` means a `NameID` that is not persistent.
+- [`sso_failed`](/docs/reference/errors/#sso_failed): the log line names the step. `exchange` means a failed token request, for example by a method that the app does not take. `audience` means a wrong "Audience URI (SP Entity ID)". `destination` or `subject_confirmation` means a wrong "Single sign-on URL". `address` means no attribute `email`. `subject` means a `NameID` that is not persistent.
 - [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch): the attribute `email` holds an address outside the verified domains.
 - [`email_required`](/docs/reference/errors/#email_required): the ID token of an OIDC sign-in holds no address.
 - [`sso_not_configured`](/docs/reference/errors/#sso_not_configured): the connection is off, or the config does not turn its kind on.

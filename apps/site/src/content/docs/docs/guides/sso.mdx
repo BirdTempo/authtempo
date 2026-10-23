@@ -90,7 +90,7 @@ When the provider is down, nobody of an enforced domain can sign in. A platform 
 
 ### The provider calls
 
-`sso.fetch` carries each call to the provider: the discovery, the token request, and the read of the key set. Core caps the size of each answer and follows no redirect. Each issuer and endpoint host must be public: no IP literal, no local name, and not the host of `baseURL`. The DNS presets take the fetch that you give them.
+`sso.fetch` carries each call to the provider: the discovery, the token request, and the read of the key set. The token request sends the client secret by the `tokenEndpointAuthMethod` of the connection: `client_secret_post` (the default) or `client_secret_basic`. Core caps the size of each answer and follows no redirect. Each issuer and endpoint host must be public: no IP literal, no local name, and not the host of `baseURL`. The DNS presets take the fetch that you give them.
 
 ### SAML
 

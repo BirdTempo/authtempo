@@ -54,10 +54,12 @@ describe("the connection of each provider", () => {
       googleOidc({ organizationId, clientId: "client-3", clientSecret: "secret-3" }),
     ];
     const issuers: string[] = [];
+    const methods: string[] = [];
     for (const input of inputs) {
       const made = await sso.connections.create({ actor: APP, ...input });
       if (!made.ok) throw new Error(`${made.code} ${made.message ?? ""}`);
       issuers.push(made.value.oidc?.issuer ?? "");
+      methods.push(made.value.oidc?.tokenEndpointAuthMethod ?? "");
       // No answer holds the client secret.
       expect(JSON.stringify(made.value)).not.toContain("secret-");
     }
@@ -66,6 +68,8 @@ describe("the connection of each provider", () => {
       "https://acme.okta.com",
       "https://accounts.google.com",
     ]);
+    // Okta's default method is HTTP Basic; Entra ID and Google take the default of a connection.
+    expect(methods).toEqual(["client_secret_post", "client_secret_basic", "client_secret_post"]);
   });
 
   it("takes the SAML values of Entra ID, Okta, and Google, and answers the values for the provider", async () => {

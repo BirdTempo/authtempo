@@ -292,7 +292,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | --- | --- | --- | --- |
 | `sso` | object | off | Turns on the domain routes. See [Enterprise SSO](/docs/reference/routes/#enterprise-sso). |
 | `sso.dns` | list | required | One DNS resolver or more, each an object with a `name` string and a `txt` function. Core has no default resolver: pick the presets `dohCloudflare` and `dohGoogle` with your fetch, or pass your own. Every resolver must give the value of a proof. Two resolvers: one resolver that is wrong or compromised must not give a domain to an organization. |
-| `sso.oidc` | `true` | off | Turns on the OIDC connections (plan 12d Task 3). |
+| `sso.oidc` | `true` | off | Turns on the OIDC connections (plan 12d Task 3). Each connection names how its token request sends the client secret, `tokenEndpointAuthMethod`: see [create a connection](/docs/reference/routes/#post-sso-connections-create). |
 | `sso.saml` | `true` or object | off | Turns on the SAML connections (plan 12d Task 8). |
 | `sso.saml.clockSkewSeconds` | number | 120 | A whole number from 0 to 300. |
 | `sso.fetch` | function | `fetch` | The fetch of the calls to the sign-in provider of a connection. Core follows no redirect. Core reads the discovery document, the token answer, and the JWKS with a cap of 65536 bytes each. A larger answer fails the sign-in with `sso_failed`. |

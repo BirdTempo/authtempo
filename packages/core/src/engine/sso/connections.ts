@@ -9,7 +9,7 @@ import { fail, ok, type Result } from "../../result.js";
 import { readCertificate } from "../../saml/der.js";
 import type { OperatorAuditRow, SsoConnectionRow, SsoMfaList } from "../../schema.js";
 import { DEFAULT_OIDC_SCOPE, isIssuer, type OidcEndpoints } from "../../social/oidc.js";
-import { isHttpsUrl } from "../../social/provider.js";
+import { isHttpsUrl, type TokenEndpointAuthMethod } from "../../social/provider.js";
 import { findManyIn } from "../../storage/batch.js";
 import type { StorageAdapter } from "../../storage/port.js";
 import { writeAuditIn } from "../operator/audit.js";
@@ -17,6 +17,7 @@ import { isOwner } from "../organizations.js";
 import { roleRowDef } from "../permissions.js";
 import { holdsRolePart, ROLE_RE, rankOf } from "../ranks.js";
 import { lockOrganization } from "../teams.js";
+import { kindOn as kindIsOn } from "./discover.js";
 import { afterAudit, type SsoActMeta } from "./domains.js";
 import { type SsoActor, ssoDraft } from "./guard.js";
 import { dropDiscovery } from "./oidc.js";
@@ -63,7 +64,16 @@ const COMMON_KEYS = [
   "mfa",
   "scimRoles",
 ] as const;
-const OIDC_KEYS = ["issuer", "clientId", "clientSecret", "scope", "endpoints"] as const;
+const OIDC_KEYS = [
+  "issuer",
+  "clientId",
+  "clientSecret",
+  "scope",
+  "endpoints",
+  "tokenEndpointAuthMethod",
+] as const;
+/** The token endpoint methods of a connection. A new connection takes the first. */
+const TOKEN_AUTH_METHODS = ["client_secret_post", "client_secret_basic"] as const;
 const SAML_KEYS = [
   "idpMetadata",
   "idpEntityId",
@@ -95,6 +105,7 @@ export interface ConnectionFields {
   clientSecret?: string | undefined;
   scope?: string | undefined;
   endpoints?: OidcEndpoints | null | undefined;
+  tokenEndpointAuthMethod?: TokenEndpointAuthMethod | undefined;
   idpMetadata?: string | undefined;
   idpEntityId?: string | undefined;
   ssoUrl?: string | undefined;
@@ -120,6 +131,7 @@ export type ConnectionInput = {
       clientSecret: string;
       scope?: string;
       endpoints?: OidcEndpoints | null;
+      tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
     }
   | ({
       kind: "saml";
@@ -128,12 +140,23 @@ export type ConnectionInput = {
     } & ({ idpMetadata: string } | { idpEntityId: string; ssoUrl: string; certificates: string[] }))
 );
 
-/** The stored `config` of an OIDC connection. Never a secret. */
-interface OidcStored {
+/** The stored `config` of an OIDC connection. Never a secret. Core writes it, and the kind names the form. */
+export interface OidcStored {
   issuer: string;
   clientId: string;
   scope: string;
   endpoints: OidcEndpoints | null;
+  /**
+   * How the token request sends the client secret (12d fix wave item 18).
+   * A row from before that fix has no key, and it reads as
+   * `client_secret_post`, the only method then.
+   */
+  tokenEndpointAuthMethod?: TokenEndpointAuthMethod;
+}
+
+/** The token endpoint method of a stored OIDC config. */
+export function tokenAuthOf(c: OidcStored): TokenEndpointAuthMethod {
+  return c.tokenEndpointAuthMethod ?? "client_secret_post";
 }
 
 /** The stored `config` of a SAML connection: the PEM texts of the certificates, which are public. */
@@ -157,7 +180,7 @@ export interface SsoConnectionSummary {
   /** Every key of the list, an empty list for a key with no value. */
   mfa: Required<SsoMfaList> | null;
   scimRoles: Record<string, string> | null;
-  oidc?: OidcStored;
+  oidc?: Required<OidcStored>;
   saml?: {
     idpEntityId: string;
     ssoUrl: string;
@@ -214,7 +237,13 @@ export function publicConnection(
     const c = row.config as unknown as OidcStored;
     return {
       ...base,
-      oidc: { issuer: c.issuer, clientId: c.clientId, scope: c.scope, endpoints: c.endpoints },
+      oidc: {
+        issuer: c.issuer,
+        clientId: c.clientId,
+        scope: c.scope,
+        endpoints: c.endpoints,
+        tokenEndpointAuthMethod: tokenAuthOf(c),
+      },
     };
   }
   const c = row.config as unknown as SamlStored;
@@ -275,7 +304,7 @@ function ssoOn(config: ResolvedConfig): Result<ResolvedSso> {
 
 /** `not_found` while the kind is off: `sso.oidc` for OIDC, `sso.saml` for SAML. */
 function kindOn(sso: ResolvedSso, kind: "oidc" | "saml"): Result<true> {
-  return (kind === "oidc" ? sso.oidc : sso.saml !== null) ? ok(true) : fail("not_found");
+  return kindIsOn(sso, kind) ? ok(true) : fail("not_found");
 }
 
 /** The checked fields of one input. Each key is set only when the input sets it. */
@@ -440,6 +469,12 @@ function checkFields(
       if (!isText(v.scope, 1, SCOPE_MAX) || !v.scope.split(" ").includes("openid"))
         return refuse("scope must hold openid, with one space between the scopes");
       out.oidc.scope = v.scope;
+    }
+    if (v.tokenEndpointAuthMethod !== undefined) {
+      const method = TOKEN_AUTH_METHODS.find((m) => m === v.tokenEndpointAuthMethod);
+      if (method === undefined)
+        return refuse("tokenEndpointAuthMethod must be client_secret_post or client_secret_basic");
+      out.oidc.tokenEndpointAuthMethod = method;
     }
     return ok(out);
   }
@@ -670,6 +705,7 @@ export async function createConnection(
       clientId,
       scope: f.oidc.scope ?? DEFAULT_OIDC_SCOPE,
       endpoints: f.oidc.endpoints ?? null,
+      tokenEndpointAuthMethod: f.oidc.tokenEndpointAuthMethod ?? TOKEN_AUTH_METHODS[0],
     };
     clientSecret = await sealSecret(config, id, f.clientSecret);
   } else {

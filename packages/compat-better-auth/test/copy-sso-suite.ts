@@ -115,7 +115,8 @@ export function copySsoSuite(name: string, setup: () => Promise<CopyDatabase>) {
         for (const c of once.counts) if (c !== null) expect(c).toBeLessThanOrEqual(50);
         // What changes in core is in the answer, never silent.
         const reasons = once.changed.map((c) => c.reason.split(":")[0]);
-        expect(reasons.filter((r) => r === "tokenEndpointAuthentication")).toHaveLength(2);
+        // Core keeps client_secret_basic (12d fix wave item 18), so the two basic rows change nothing.
+        expect(reasons.filter((r) => r === "tokenEndpointAuthentication")).toHaveLength(0);
         expect(reasons.filter((r) => r === "redirectURI")).toHaveLength(2);
         expect(reasons.filter((r) => r === "samlConfig")).toHaveLength(1);
         expect(reasons.filter((r) => r === "domain")).toHaveLength(1);
@@ -127,6 +128,12 @@ export function copySsoSuite(name: string, setup: () => Promise<CopyDatabase>) {
           ["beta-oidc", "oidc"],
           ["gamma-saml", "saml"],
         ]);
+        // Each OIDC row of the fixture holds client_secret_basic, and the copy keeps it.
+        expect(
+          connections
+            .filter((c) => c.kind === "oidc")
+            .map((c) => (c.config as { tokenEndpointAuthMethod?: string }).tokenEndpointAuthMethod),
+        ).toEqual(["client_secret_basic", "client_secret_basic"]);
         // No copied connection holds a clear client secret: core sealed each one.
         const text = JSON.stringify(connections);
         expect(text).not.toContain("acme-secret-value");

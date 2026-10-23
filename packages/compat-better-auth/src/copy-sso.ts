@@ -199,16 +199,9 @@ export async function copyBetterAuthSso(
     };
     if (oidc) {
       // Better Auth keeps the issuer in the config too, and fills two defaults at the register.
-      const { issuer, tokenEndpointAuthentication, userInfoEndpoint, overrideUserInfo, ...rest } =
-        oidc;
+      // tokenEndpointAuthentication stays in rest: core keeps either method (12d fix wave item 18).
+      const { issuer, userInfoEndpoint, overrideUserInfo, ...rest } = oidc;
       if (typeof issuer === "string") body.issuer = issuer;
-      if (tokenEndpointAuthentication === "client_secret_basic")
-        change(
-          id,
-          "tokenEndpointAuthentication: core sends client_secret_post; set the IdP client to it",
-        );
-      else if (tokenEndpointAuthentication !== undefined)
-        rest.tokenEndpointAuthentication = tokenEndpointAuthentication;
       if (userInfoEndpoint !== undefined)
         change(
           id,

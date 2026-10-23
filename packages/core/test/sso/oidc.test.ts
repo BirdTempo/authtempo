@@ -448,6 +448,67 @@ describe("the OIDC sign-in of an SSO connection (plan 12d Task 4)", () => {
     expect(authError(over.res)).toBe("rate_limited");
     expect(authError((await start(w, a, "198.51.100.10")).res)).toBeNull();
   });
+
+  it("sends the client secret by the method of the connection (fix wave item 18)", async () => {
+    const w = oidcWorld();
+    const organizationId = await seedOrganization(w, "acme");
+    const made = await createConnection(w.config, SSO_APP, {
+      organizationId,
+      kind: "oidc",
+      label: "acme IdP",
+      issuer: issuerOf("acme"),
+      clientId: "acme client:1",
+      clientSecret: "s3cr:t+\u00fc \u00e9*",
+      endpoints: endpointsOf("acme"),
+      tokenEndpointAuthMethod: "client_secret_basic",
+    });
+    if (!made.ok) throw new Error(made.code);
+    expect(made.value.oidc?.tokenEndpointAuthMethod).toBe("client_secret_basic");
+    const id = made.value.id;
+    const exchange = async (code: string) => {
+      const s = await start(w, id);
+      await callback(w, id, { code, state: s.state }, s.bind);
+      const call = w.calls.findLast((c) => c.url === endpointsOf("acme").tokenUrl);
+      if (!call) throw new Error("no token request");
+      return call;
+    };
+    // RFC 6749 section 2.3.1: each half is form-encoded, then the pair is Basic.
+    const basic = await exchange("code-basic");
+    expect(basic.headers.authorization).toBe(
+      "Basic YWNtZStjbGllbnQlM0ExOnMzY3IlM0F0JTJCJUMzJUJDKyVDMyVBOSo=",
+    );
+    // Section 2.3: one method per request, so the body holds no client credential.
+    expect(Object.keys(basic.form).sort()).toEqual(
+      ["code", "code_verifier", "grant_type", "redirect_uri"].sort(),
+    );
+    expect(basic.form.code).toBe("code-basic");
+    const post = await updateConnection(w.config, SSO_APP, {
+      id,
+      tokenEndpointAuthMethod: "client_secret_post",
+    });
+    expect(post.ok && post.value.oidc?.tokenEndpointAuthMethod).toBe("client_secret_post");
+    const inBody = await exchange("code-post");
+    expect(inBody.headers.authorization).toBeUndefined();
+    expect([inBody.form.client_id, inBody.form.client_secret]).toEqual([
+      "acme client:1",
+      "s3cr:t+\u00fc \u00e9*",
+    ]);
+    // A new connection takes client_secret_post; another value is refused.
+    const other = await createConnection(w.config, SSO_APP, {
+      organizationId,
+      kind: "oidc",
+      label: "acme two",
+      issuer: issuerOf("acme"),
+      clientId: "acme-two",
+      clientSecret: "acme-secret-0123456789",
+    });
+    expect(other.ok && other.value.oidc?.tokenEndpointAuthMethod).toBe("client_secret_post");
+    const bad = await updateConnection(w.config, SSO_APP, {
+      id,
+      tokenEndpointAuthMethod: "private_key_jwt" as never,
+    });
+    expect(bad).toMatchObject({ ok: false, code: "invalid_body" });
+  });
 });
 
 /** A `pad` string that makes the JSON text of `{ ...value, pad }` exactly `bytes` long. */

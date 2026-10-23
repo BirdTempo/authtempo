@@ -1423,7 +1423,7 @@ message names the field and the reason. A field of the wrong form answers
 
 These provider fields are refused:
 
-- `tokenEndpointAuthentication` other than `client_secret_post`: core sends the secret in the body. `private_key_jwt` and its key fields are refused too.
+- `tokenEndpointAuthentication` other than `client_secret_post` and `client_secret_basic`. Core keeps each of the two as the `tokenEndpointAuthMethod` of the connection. `private_key_jwt` and its key fields are refused.
 - `pkce: false`, `userInfoEndpoint`, `overrideUserInfo: true`, and `allowIdpInitiated`.
 - A `discoveryEndpoint` other than the issuer's.
 - A mapping other than core's claims, and `emailVerified` and `extraFields` of each mapping.
@@ -1528,8 +1528,8 @@ each client secret, and each SCIM user passes the address rule.
 - A SAML provider with an `identifierFormat` other than the persistent NameID is not copied. `skipped` holds the reason. Core never changes its format: set the persistent NameID at the directory, then register it again.
 - A SCIM user is copied when its address is in a verified domain of the organization. Else `skipped` holds core's SCIM error. Verify the domains first.
 - A group is copied with no member, and each member is added by a SCIM PATCH. So a group of any size fits the budget.
-- `changed` lists what the owner must do. It names the new `redirectURI` at the IdP and the SP metadata of a SAML connection. It names a `client_secret_basic` client, which core sends as `client_secret_post`. It names a domain to verify again.
-- Before the switch, confirm that the directory client of each `client_secret_basic` provider accepts `client_secret_post`. Core sends the secret in the body only. A client that takes the basic form only fails each sign-in after the switch.
+- `changed` lists what the owner must do. It names the new `redirectURI` at the IdP and the SP metadata of a SAML connection. It names a domain to verify again.
+- A provider keeps its `tokenEndpointAuthentication`: core sends the secret of a `client_secret_basic` provider as HTTP Basic, and of a `client_secret_post` provider in the body.
 - A second run copies nothing twice. A connection that holds the `providerId` as its label is `present`. So is a SCIM user with the same `externalId` or `userName`. So is a group with the same `externalId` or `displayName`.
 - No token is copied. A static credential stays in the `scim` options. Create a core SCIM token for a managed connection.
 

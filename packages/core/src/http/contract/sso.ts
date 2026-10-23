@@ -74,6 +74,7 @@ const connectionFields = {
     .strictObject({ authorizeUrl: text, tokenUrl: text, jwksUrl: text })
     .nullable()
     .optional(),
+  tokenEndpointAuthMethod: z.enum(["client_secret_post", "client_secret_basic"]).optional(),
   idpMetadata: z.string().max(200_000).optional(),
   idpEntityId: text.optional(),
   ssoUrl: text.optional(),
@@ -122,6 +123,7 @@ export const ConnectionJson = z.strictObject({
       endpoints: z
         .strictObject({ authorizeUrl: z.string(), tokenUrl: z.string(), jwksUrl: z.string() })
         .nullable(),
+      tokenEndpointAuthMethod: z.enum(["client_secret_post", "client_secret_basic"]),
     })
     .optional(),
   saml: z
