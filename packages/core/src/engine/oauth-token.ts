@@ -179,11 +179,15 @@ export async function liveUser(
  * and this door refuses them, as `revokedFor` refuses a session. It reads
  * the start of the family, so a race row of an old family is refused too.
  * The refresh grant and introspection read it. After the sweep the record
- * of the act refuses such a family (ruling 56).
+ * of the act refuses such a family (ruling 56). The code exchange and the
+ * device poll read it too, with the code or the device row as the start of
+ * the family (ruling 69): the small round of a raced deprovision deletes
+ * neither.
  *
  * The cost: a family that began after the last write of the user reads
  * nothing more, +0 D1 queries. A family that began at or before that write
- * reads the rows once, +1 D1 query per refresh and per introspection.
+ * reads the rows once, +1 D1 query per refresh, per introspection, per
+ * code exchange, and per device poll that gets this far.
  */
 export function familyRevoked(
   config: ResolvedConfig,
@@ -433,6 +437,10 @@ export async function exchangeCode(
   // The code row's time: a code that an authorize wrote beside the ban gives nothing (ruling 29).
   const user = await liveUser(config, data.userId, consumed.value.createdAt);
   if (!user) return oauthFail("invalid_grant");
+  // The family of the code starts at the code. A SCIM deprovision that ended the access of
+  // the user after it gives nothing (ruling 69 of plan 12d): its small round keeps the codes.
+  const code = { familyId: consumed.value.id, createdAt: consumed.value.createdAt };
+  if (await familyRevoked(config, user, code)) return oauthFail("invalid_grant");
   // Every code comes from a consent that covers its scopes. A grant revoke
   // after the authorize step deletes the consent, and the code gives nothing.
   if (!(await consentCovers(config, user.id, client.id, data.scopes)))

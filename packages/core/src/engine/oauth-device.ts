@@ -14,7 +14,13 @@ import { authTimeOf, consentCovers, grantConsent } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { DEVICE_GRANT } from "./oauth-clients.js";
 import { type OAuthResult, oauthFail, oauthOf, oauthOk } from "./oauth-result.js";
-import { issueDeviceTokens, liveUser, type TokenAnswer, tokenLimited } from "./oauth-token.js";
+import {
+  familyRevoked,
+  issueDeviceTokens,
+  liveUser,
+  type TokenAnswer,
+  tokenLimited,
+} from "./oauth-token.js";
 import type { ResolvedSession } from "./sessions.js";
 
 /**
@@ -416,6 +422,10 @@ export async function pollDevice(
   // either, also with an approval after the unban: the device starts again.
   const user = await liveUser(config, row.userId, row.createdAt);
   if (!user) return oauthFail("invalid_grant");
+  // The family of the device starts at its row. A SCIM deprovision that ended the access of
+  // the user after it gives nothing (ruling 69 of plan 12d): its small round keeps the row.
+  if (await familyRevoked(config, user, { familyId: row.id, createdAt: row.createdAt }))
+    return oauthFail("invalid_grant");
   // A grant revoke after the approval deletes the consent, and the row gives nothing.
   if (!(await consentCovers(config, user.id, client.id, row.scopes)))
     return oauthFail("invalid_grant");

@@ -304,15 +304,15 @@ const MEASURED = {
 const APP_ORIGIN = "https://app.example.com";
 const REDIRECT = "https://client.example.com/callback";
 
-/** The OAuth provider, so a user can hold refresh families (ruling 55 of plan 12d). */
-const OAUTH: Partial<AuthConfig> = {
-  trustedOrigins: [APP_ORIGIN],
-  oauth: {
-    resources: [`${API}/mcp`],
-    scopes: { "mcp:read": "Read" },
-    registration: { cimd: false, dynamic: true },
-  },
+/** The options of the OAuth provider. */
+const OAUTH_OPTIONS = {
+  resources: [`${API}/mcp`],
+  scopes: { "mcp:read": "Read" },
+  registration: { cimd: false, dynamic: true },
 };
+
+/** The OAuth provider, so a user can hold refresh families (ruling 55 of plan 12d). */
+const OAUTH: Partial<AuthConfig> = { trustedOrigins: [APP_ORIGIN], oauth: OAUTH_OPTIONS };
 
 const base64Url = (bytes: ArrayBuffer) =>
   btoa(String.fromCharCode(...new Uint8Array(bytes)))
@@ -385,8 +385,8 @@ async function families(auth: ReturnType<typeof make>, token: string, n: number)
   return { clientId, tokens: out };
 }
 
-const tokenRequest = (body: Record<string, string>) =>
-  new Request(`${API}/auth/oauth/token`, {
+const tokenRequest = (body: Record<string, string>, path = "/token") =>
+  new Request(`${API}/auth/oauth${path}`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams(body).toString(),
@@ -688,15 +688,21 @@ async function scimOn(
   };
 }
 
-/** The role of ada's member row, or null. */
-const adaRole = async () =>
+/** The role of the member row of a user, or null. */
+const roleOf = async (userId: string) =>
   (
-    await env.DB.prepare(
-      "SELECT m.role FROM ta_member m JOIN ta_user u ON u.id = m.user_id WHERE u.email = ?",
-    )
-      .bind(ADA)
+    await env.DB.prepare("SELECT role FROM ta_member WHERE user_id = ?")
+      .bind(userId)
       .first<{ role: string }>()
   )?.role ?? null;
+
+/** The sessions of a user, by id: an address move keeps them. */
+const sessionsOf = async (userId: string) =>
+  Number(
+    await env.DB.prepare("SELECT count(*) AS n FROM ta_session WHERE user_id = ?")
+      .bind(userId)
+      .first("n"),
+  );
 
 /** The user row of ada. */
 const adaUser = () =>
@@ -712,8 +718,107 @@ const codesOf = async (userId: string) =>
       .first("n"),
   );
 
-/** The role map, the OAuth provider, and the JWT mint: every door of a race test. */
-const RACED: Partial<AuthConfig> = { ...OAUTH, ...MAPPED, ...MINT };
+/** The role map, the OAuth provider with the device grant, and the JWT mint: every door of a race test. */
+const RACED: Partial<AuthConfig> = {
+  ...OAUTH,
+  oauth: { ...OAUTH_OPTIONS, device: {} },
+  ...MAPPED,
+  ...MINT,
+};
+
+const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
+
+/**
+ * An OAuth code that is not yet exchanged, and an approved device row that
+ * no poll spent yet, of the session of `token` (ruling 69 of plan 12d):
+ * the requests that would give each its tokens.
+ */
+async function waitingGrants(auth: ReturnType<typeof make>, token: string) {
+  const reg = await auth.handle(
+    new Request(`${API}/auth/oauth/register`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: APP_ORIGIN },
+      body: JSON.stringify({
+        redirect_uris: [REDIRECT],
+        grant_types: ["authorization_code", "refresh_token", DEVICE_GRANT],
+      }),
+    }),
+  );
+  if (reg.status !== 201) throw new Error(`register answered ${reg.status}`);
+  const clientId = ((await reg.json()) as { client_id: string }).client_id;
+  const cookie = `__Host-tempo_session=${token}`;
+  const verifier = base64Url(crypto.getRandomValues(new Uint8Array(32)).buffer);
+  const challenge = base64Url(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+  );
+  const query = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    redirect_uri: REDIRECT,
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    scope: "mcp:read offline_access",
+    resource: `${API}/mcp`,
+    state: "st-1",
+  });
+  const page = await auth.handle(
+    new Request(`${API}/auth/oauth/authorize?${query}`, { headers: { cookie } }),
+  );
+  let location = page.headers.get("location");
+  if (page.status === 200) {
+    const id = /name="request_id" value="(oq_[A-Za-z0-9_-]{43})"/.exec(await page.text())?.[1];
+    const done = await auth.handle(
+      new Request(`${API}/auth/oauth/authorize`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", origin: API, cookie },
+        body: new URLSearchParams({ request_id: id ?? "", decision: "allow" }).toString(),
+      }),
+    );
+    location = done.headers.get("location");
+  }
+  const code = new URL(location ?? "").searchParams.get("code");
+  if (!code) throw new Error("no code");
+  const started = await auth.handle(
+    tokenRequest(
+      { client_id: clientId, scope: "mcp:read", resource: `${API}/mcp` },
+      "/device_authorization",
+    ),
+  );
+  if (started.status !== 200) throw new Error(`device_authorization answered ${started.status}`);
+  const { device_code, user_code } = (await started.json()) as {
+    device_code: string;
+    user_code: string;
+  };
+  const approved = await auth.handle(
+    new Request(`${API}/auth/oauth/device`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: API, cookie },
+      body: new URLSearchParams({ user_code, decision: "allow" }).toString(),
+    }),
+  );
+  if (!(await approved.text()).includes("The device is connected.")) throw new Error("no approval");
+  return {
+    exchange: () =>
+      tokenRequest({
+        grant_type: "authorization_code",
+        code,
+        code_verifier: verifier,
+        client_id: clientId,
+        redirect_uri: REDIRECT,
+        resource: `${API}/mcp`,
+      }),
+    poll: () => tokenRequest({ grant_type: DEVICE_GRANT, device_code, client_id: clientId }),
+  };
+}
+
+/** One token request on a counting view of the binding: its status, queries, and pending-end reads. */
+async function countedToken(request: Request) {
+  const { db, c } = counting(env.DB);
+  const res = await make(db, true, RACED).handle(request);
+  await res.text();
+  const pending = c.sql.filter((q) => /FROM\s+"?ta_verification/i.test(q) && /purpose/i.test(q));
+  return [res.status, c.n, pending.filter((q) => /IN\s*\(/i.test(q)).length];
+}
 
 describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and 66 of plan 12d)", () => {
   // A group write changes ada's role before each of the first `races` member reads under
@@ -721,17 +826,44 @@ describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and
   // At `delete`, the group write comes after that read, before the member delete: D1 has no
   // lock, so the delete matches no row. A round that does not fit the budget is small: it
   // ends no session and no family, and its pending-end row covers them all (ruling 66).
-  const cases: [string, number, "PATCH" | "DELETE"][] = [
-    ["findOne", 1, "PATCH"],
-    ["findOne", 2, "PATCH"],
-    ["findOne", 3, "PATCH"],
-    ["findOne", 3, "DELETE"],
-    ["delete", 1, "PATCH"],
-    ["delete", 1, "DELETE"],
-    ["findOne", 4, "PATCH"],
+  // A PATCH with `move` also moves the address, and with `name` it fills the empty name of
+  // the user too. With `fill` it fills the name only. Each round then runs more calls
+  // (ruling 69 of plan 12d).
+  const cases: [string, number, "PATCH" | "DELETE", "" | "move" | "name" | "fill"][] = [
+    ["findOne", 1, "PATCH", ""],
+    ["findOne", 2, "PATCH", ""],
+    ["findOne", 3, "PATCH", ""],
+    ["findOne", 3, "DELETE", ""],
+    ["delete", 1, "PATCH", ""],
+    ["delete", 1, "DELETE", ""],
+    ["findOne", 4, "PATCH", ""],
+    ["findOne", 1, "PATCH", "move"],
+    ["findOne", 2, "PATCH", "move"],
+    ["findOne", 1, "PATCH", "name"],
+    ["findOne", 2, "PATCH", "name"],
+    ["findOne", 4, "DELETE", ""],
+    ["delete", 2, "PATCH", ""],
+    ["delete", 1, "PATCH", "move"],
+    ["findOne", 2, "PATCH", "fill"],
+    ["findOne", 3, "PATCH", "fill"],
   ];
-  for (const [at, races, method] of cases)
-    it(`answers a ${method} inside 50 queries when ${races} group writes race it at ${at}`, async () => {
+  const opsOf = {
+    "": [],
+    move: [{ op: "replace", path: "userName", value: "ada.new@acme.example" }],
+    name: [
+      { op: "replace", path: "userName", value: "ada.new@acme.example" },
+      { op: "replace", path: "displayName", value: "Ada Lovelace" },
+    ],
+    fill: [{ op: "replace", path: "displayName", value: "Ada Lovelace" }],
+  };
+  const withOps = {
+    fill: " with a name fill",
+    "": "",
+    move: " with an address move",
+    name: " with an address move and a name fill",
+  };
+  for (const [at, races, method, ops] of cases)
+    it(`answers a ${method}${withOps[ops]} inside 50 queries when ${races} group writes race it at ${at}`, async () => {
       const setup = make(env.DB, false, RACED);
       const { organizationId, token } = await acme(setup);
       const sso = setup.api.sso;
@@ -768,11 +900,13 @@ describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and
         members: [{ value: id }],
       });
       expect(group.status).toBe(201);
-      expect(await adaRole()).toBe("admin");
+      const userId = String((await adaUser())?.id);
+      expect(await roleOf(userId)).toBe("admin");
       const gid = String(group.body.id);
       const fams = await families(setup, tokens[0] ?? "", 3);
+      // A code and a device row from before the act, which a small round keeps (ruling 69).
+      const waiting = await waitingGrants(setup, tokens[0] ?? "");
       // A challenge and a handoff code of ada: each one can make a session after the act.
-      const userId = String((await adaUser())?.id);
       for (const purpose of ["two-factor", "handoff-code"] as const) {
         const made = new Date();
         await createD1Adapter(env.DB).create("verification", {
@@ -796,7 +930,7 @@ describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and
       const race = async () => {
         lost++;
         const op =
-          (await adaRole()) === "admin"
+          (await roleOf(userId)) === "admin"
             ? { op: "remove", path: `members[value eq "${id}"]` }
             : { op: "add", path: "members", value: [{ value: id }] };
         const r = await scimOn(make(env.DB, false, RACED), token, "PATCH", `/Groups/${gid}`, {
@@ -834,12 +968,16 @@ describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and
         `/Users/${id}`,
         method === "DELETE"
           ? undefined
-          : { schemas: [PATCH_URN], Operations: [{ op: "replace", path: "active", value: false }] },
+          : {
+              schemas: [PATCH_URN],
+              Operations: [{ op: "replace", path: "active", value: false }, ...opsOf[ops]],
+            },
       );
       const queries = c.n;
-      const ended = 40 - (await sessions());
+      const key = `${method}${ops ? ` ${ops}` : ""} ${at}/${races}`;
+      const ended = 40 - (await sessionsOf(userId));
       const marked = await familyMarks();
-      const role = await adaRole();
+      const role = await roleOf(userId);
       // Every family that the act did not end is named on its pending-end row, for the sweep.
       const rows = await env.DB.prepare(
         "SELECT data FROM ta_verification WHERE purpose = 'session-end'",
@@ -856,18 +994,21 @@ describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and
       expect(live).toEqual(Array(40).fill(!done));
       expect(refreshed).toEqual(Array(3).fill(done ? 400 : 200));
       expect(await codesOf(userId)).toBe(done ? 0 : 2);
+      // The code and the device row from before the act give no token after it (ruling 69).
+      const grants = [await countedToken(waiting.exchange()), await countedToken(waiting.poll())];
+      expect(grants.map((g) => g[0])).toEqual(done ? [400, 400] : [200, 200]);
+      for (const g of grants) expect(g[1]).toBeLessThanOrEqual(50);
+      expect(grants).toEqual(GRANT_COUNTS[key]);
       // The sweep ends the sessions and the families that stay, each family with its mark.
       if (done) {
         for (let i = 0; (await pendingRows()) > 0; i++) {
           if (i > 10) throw new Error("the sweep makes no progress");
           await make(env.DB, false, RACED).api.sweepExpired();
         }
-        expect([await sessions(), await familyMarks()]).toEqual([0, 3]);
+        expect([await sessionsOf(userId), await familyMarks()]).toEqual([0, 3]);
       }
       // Measured on the binding on 2026-10-24; see the ledger of plan 12d Task 11.
-      expect([res.status, queries, lost, ended, marked, role]).toEqual(
-        RACE_COUNTS[`${method} ${at}/${races}`],
-      );
+      expect([res.status, queries, lost, ended, marked, role]).toEqual(RACE_COUNTS[key]);
       expect(queries).toBeLessThanOrEqual(50);
     }, 120_000);
 });
@@ -882,9 +1023,26 @@ describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and
  * page. After two or three, the next round is small (ruling 66 of plan
  * 12d): it ends no session and no family, and its pending-end row covers
  * them all, so each door refuses them at once. A PATCH lost at the member
- * delete costs more, with its undo, so a small round follows; a DELETE
- * reads less first, so a full round still fits. After four lost rounds no
- * round fits, and the answer is 409 with no change.
+ * delete costs more, with its undo, so a small round follows. After four
+ * lost rounds no round fits, and the answer is 409 with no change.
+ *
+ * An address move adds `MOVE_CALLS` 7 to each guard, and a name fill
+ * `NAME_CALLS` 2 (ruling 69 of plan 12d). So after one lost round at the
+ * member read a move runs a small round. After two, no small round fits,
+ * and the answer is 409. A move with a name fill answers 409 after one lost
+ * round, so its case of two races loses one round only. A name fill alone
+ * answers 409 after three. At the member delete, a deactivate with no move
+ * answers 409 after two lost rounds, and a move after one. A DELETE answers
+ * 409 after four at the member read. In a 409 the role is the one of the
+ * last group write: member when it took the admin role. The deprovision
+ * wrote nothing. The move of a deactivate runs after its member delete, so
+ * a round lost there undoes no move. With the move first, that case made
+ * 71 queries: its undo wrote back 40 proofs of the old address.
+ *
+ * A DELETE at `delete` drops the scimGroupMember rows of the User first,
+ * and D1 commits each statement at once. So the group write that the test
+ * runs there changes no role: `lost` counts that write, but no round is
+ * lost, and a full round ends a page.
  */
 const RACE_COUNTS: Record<string, [number, number, number, number, number, string | null]> = {
   "PATCH findOne/1": [200, 49, 1, 1, 2, null],
@@ -894,4 +1052,55 @@ const RACE_COUNTS: Record<string, [number, number, number, number, number, strin
   "PATCH delete/1": [200, 46, 1, 0, 0, null],
   "DELETE delete/1": [204, 48, 1, 4, 3, null],
   "PATCH findOne/4": [409, 28, 4, 0, 0, "admin"],
+  "PATCH move findOne/1": [200, 46, 1, 0, 0, null],
+  "PATCH move findOne/2": [409, 21, 2, 0, 0, "admin"],
+  "PATCH name findOne/1": [409, 16, 1, 0, 0, "member"],
+  "PATCH name findOne/2": [409, 16, 1, 0, 0, "member"],
+  "DELETE findOne/4": [409, 28, 4, 0, 0, "admin"],
+  "PATCH delete/2": [409, 34, 2, 0, 0, "admin"],
+  "PATCH move delete/1": [409, 24, 1, 0, 0, "member"],
+  "PATCH fill findOne/2": [200, 46, 2, 0, 0, null],
+  "PATCH fill findOne/3": [409, 23, 3, 0, 0, "member"],
+};
+
+/**
+ * The code exchange and the device poll of a code and a device row from
+ * before the act, after it, on the binding, 2026-10-24 (ruling 69 of plan
+ * 12d): the status, the queries, and the reads of the pending-end rows. A
+ * full round deletes both, so each answers 400 in 5 queries with no read.
+ * A small round keeps both. The door then reads the pending-end rows once
+ * (`familyRevoked`, +1 query) and refuses: the exchange in 7 queries, the
+ * poll in 9. After a 409 each gives its tokens: the exchange in 12 queries,
+ * the poll in 11, and neither reads the rows, as each started after the
+ * last write of the user.
+ */
+const REFUSED_SMALL = [
+  [400, 7, 1],
+  [400, 9, 1],
+];
+const REFUSED_FULL = [
+  [400, 5, 0],
+  [400, 5, 0],
+];
+const GRANTED = [
+  [200, 12, 0],
+  [200, 11, 0],
+];
+const GRANT_COUNTS: Record<string, number[][]> = {
+  "PATCH findOne/1": REFUSED_FULL,
+  "PATCH findOne/2": REFUSED_SMALL,
+  "PATCH findOne/3": REFUSED_SMALL,
+  "DELETE findOne/3": REFUSED_SMALL,
+  "PATCH delete/1": REFUSED_SMALL,
+  "DELETE delete/1": REFUSED_FULL,
+  "PATCH findOne/4": GRANTED,
+  "PATCH move findOne/1": REFUSED_SMALL,
+  "PATCH move findOne/2": GRANTED,
+  "PATCH name findOne/1": GRANTED,
+  "PATCH name findOne/2": GRANTED,
+  "DELETE findOne/4": GRANTED,
+  "PATCH delete/2": GRANTED,
+  "PATCH move delete/1": GRANTED,
+  "PATCH fill findOne/2": REFUSED_SMALL,
+  "PATCH fill findOne/3": GRANTED,
 };

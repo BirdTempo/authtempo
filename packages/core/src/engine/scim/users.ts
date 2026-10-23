@@ -150,7 +150,8 @@ class LostRound extends Error {
 
 /**
  * The calls of a deprovision round from its transaction to its answer,
- * when the page ends no session: the user hold, the writes, the fixed
+ * when the page ends no session, with no address move and no name fill
+ * (`MOVE_CALLS`, `NAME_CALLS`): the user hold, the writes, the fixed
  * calls of the page, the user write, the audit row, and the steps after
  * the commit. A new full round starts only while the meter has room for
  * them (ruling 63 M2 of plan 12d). Measured on the D1 binding, 2026-10-24:
@@ -170,9 +171,29 @@ const ROUND_TAIL = 32;
  * 19 calls of the meter ended the request at 44 queries, with the user in
  * the group. So the tail is 45 - 19 = 26. Two lost rounds at the member
  * read and one small round fit the budget of 50, and so do three. A fourth
- * lost round leaves no room.
+ * lost round leaves no room. With a name fill a third lost round leaves no
+ * room, with an address move a second, and with both the first.
  */
 const SMALL_TAIL = 26;
+
+/**
+ * The calls that an address move adds to a round, full or small (ruling 69
+ * of plan 12d). `ROUND_TAIL` and `SMALL_TAIL` hold none. On the D1 binding,
+ * 2026-10-24, a PATCH of active false and userName ran 5 more calls in its
+ * round: the user and the `email` identity updates (2 each on D1, the undo
+ * read and the update) and the delete of the old proofs. With no identity
+ * of the old address, `ensureEmailIdentity` adds a read and a create. So
+ * the worst case is 7. With 5, such a round can end the request at query
+ * 51 on D1 Free, in the middle of its writes.
+ */
+const MOVE_CALLS = 7;
+
+/**
+ * The calls that a name fill adds to a round (ruling 69 of plan 12d): the
+ * update of the user, 2 on D1 (the undo read and the update). Measured as
+ * `MOVE_CALLS`, with a displayName that fills an empty name.
+ */
+const NAME_CALLS = 2;
 
 /** The detail of the address rule (Behavior 2). */
 const ADDRESS_RULE = "the address is not in a verified domain of this organization";
@@ -1210,6 +1231,9 @@ async function writeChange(
   const deactivate = row.active && !active;
   const reactivate = !row.active && active;
   const move = doc !== null && doc.address !== user.email;
+  // The calls that the address move and the name fill add to each round (ruling 69 of plan 12d).
+  const fills = doc !== null && user.name === null && nameFrom(doc) !== null;
+  const extra = (move ? MOVE_CALLS : 0) + (fills ? NAME_CALLS : 0);
   if (move) {
     const refusal = await addressMove(config, caller, user, doc.address);
     if (refusal) return refusal;
@@ -1336,9 +1360,18 @@ async function writeChange(
           if (change.kind === "delete")
             await tx.delete("scimGroupMember", [{ field: "scimUserId", op: "eq", value: row.id }]);
         };
-        if (!deactivate) await dropGroups();
-        if (move && doc) await moveAddress(tx, user, doc.address, now);
-        if (doc) await fillName(tx, { ...user, email: doc.address }, doc, now);
+        // The address move and the name fill. A deactivate runs them after its member delete
+        // (ruling 69 of plan 12d), so a member delete that lost its round undoes no move. That
+        // undo creates again each proof of the old address that the move deleted: one query
+        // each on D1, with no bound.
+        const writeUser = async () => {
+          if (move && doc) await moveAddress(tx, user, doc.address, now);
+          if (doc) await fillName(tx, { ...user, email: doc.address }, doc, now);
+        };
+        if (!deactivate) {
+          await dropGroups();
+          await writeUser();
+        }
         if (deactivate) {
           // The lock of the token create (ruling 32 of plan 12k): a create that holds it
           // commits first, and the token delete sees its row.
@@ -1353,6 +1386,7 @@ async function writeChange(
           // the delete of the organization tokens below takes them, so it runs once.
           if (removes && member && (await removeMemberIn(tx, member, !claimed)) === 0)
             throw new LostRound(undefined);
+          await writeUser();
           if (claimed) {
             // A deprovisioned person loses every credential (ruling 25 N1 of plan
             // 12d): the API tokens and the organization tokens that the person made.
@@ -1418,13 +1452,14 @@ async function writeChange(
   // is a small round (ruling 66 of plan 12d): it writes the deprovision with no session
   // page, and its pending-end row covers every session and family of the user. So the
   // doors refuse them at once. The answer is 409, with nothing written, only when every
-  // round is lost, or when the meter has no room for one more small round.
+  // round is lost, or when the meter has no room for one more small round. Each guard
+  // counts the calls of an address move and a name fill of the round (`extra`).
   let written: Awaited<ReturnType<typeof run>> | null = null;
   let small = false;
   for (let round = 0; round < ROUNDS && written === null; round++) {
     // D1 stops a request at its 51st query, in the middle of the writes. So a round that
     // does not fit even in the small form does not start, and the answer is 409.
-    if (small && meter.used + SMALL_TAIL > OPERATOR_CALL_BUDGET) break;
+    if (small && meter.used + SMALL_TAIL + extra > OPERATOR_CALL_BUDGET) break;
     try {
       written = await run(plan, small);
     } catch (err) {
@@ -1435,7 +1470,7 @@ async function writeChange(
         meter.step(1);
       }
       plan = planOf(next);
-      small = meter.used + ROUND_TAIL > OPERATOR_CALL_BUDGET;
+      small = meter.used + ROUND_TAIL + extra > OPERATOR_CALL_BUDGET;
     }
   }
   if (written === null)

@@ -3,20 +3,26 @@ import type { AuthConfig } from "../../src/config.js";
 import { createAuth } from "../../src/create-auth.js";
 import { mintSessionJwt, sessionLive } from "../../src/engine/jwt.js";
 import { createClient } from "../../src/engine/oauth-client-store.js";
+import { markAllAccessEnd } from "../../src/engine/operator/access-end.js";
+import { revokedFor } from "../../src/engine/operator/guards.js";
+import { createOrganizationToken } from "../../src/engine/organization-tokens.js";
 import {
   addMember,
   createOrganization,
   deleteOrganization,
+  updateMemberRole,
 } from "../../src/engine/organizations.js";
 import { passwordSignUp } from "../../src/engine/password.js";
 import { updateProfile } from "../../src/engine/profile.js";
 import { createScimToken } from "../../src/engine/scim/tokens.js";
 import { createSession, resolveSession } from "../../src/engine/sessions.js";
+import { deleteDomain } from "../../src/engine/sso/domains.js";
 import { sweepExpired } from "../../src/engine/sweep.js";
 import { createApiToken } from "../../src/engine/tokens.js";
 import { randomBase64Url, sha256Hex } from "../../src/primitives/crypto.js";
 import type { ScimScope } from "../../src/schema.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
+import { meterOf } from "../../src/storage/meter.js";
 import { LONG_TEST_MS } from "../helpers.js";
 import {
   authorized,
@@ -1517,5 +1523,91 @@ describe("the PATCH forms of an unknown attribute (ruling 50 of plan 12d)", () =
     ]);
     const after = await w.storage.findOne("scimUser", [{ field: "id", op: "eq", value: id }]);
     expect(after?.version).toBe(row?.version);
+  });
+});
+
+describe("the credentials and the small round of a SCIM deprovision (ruling 69 of plan 12d)", () => {
+  const OFF = patch({ op: "replace", path: "active", value: false });
+
+  /** Ada as an admin of acme, and a token that she made there: the token id. */
+  async function adaWithToken(w: World, token: string) {
+    await signUpAndVerify(w, ADA);
+    const ada = await userAt(w, ADA);
+    const owner = await userAt(w, "owner@acme.example");
+    if (!ada || !owner) throw new Error("no user");
+    const id = await created(w, token, ADA);
+    const role = await updateMemberRole(w.config, {
+      user: owner,
+      organizationId: w.organizationId,
+      userId: ada.id,
+      role: "admin",
+    });
+    if (!role.ok) throw new Error(role.code);
+    const made = await createOrganizationToken(w.config, {
+      user: ada,
+      organizationId: w.organizationId,
+      name: "ci",
+      permissions: {},
+      expiresInDays: null,
+    });
+    if (!made.ok) throw new Error(made.code);
+    const kept = await createOrganizationToken(w.config, {
+      user: owner,
+      organizationId: w.organizationId,
+      name: "deploy",
+      permissions: {},
+      expiresInDays: null,
+    });
+    if (!kept.ok) throw new Error(kept.code);
+    return { ada, id, mine: made.value.apiToken.id, kept: kept.value.apiToken.id };
+  }
+
+  const tokenIds = async (w: World) =>
+    (
+      await w.storage.findMany("organizationToken", [
+        { field: "organizationId", op: "eq", value: w.organizationId },
+      ])
+    ).map((t) => t.id);
+
+  it("deletes the organization tokens that a claimed person made, at a deactivate", async () => {
+    const w = await world();
+    const token = await tokenOf(w, w.organizationId);
+    const { id, mine, kept } = await adaWithToken(w, token);
+    expect((await tokenIds(w)).sort()).toEqual([mine, kept].sort());
+    const off = await scim(w, token, "PATCH", `/Users/${id}`, OFF);
+    expect(off.status).toBe(200);
+    // The token of the owner stays: only the rows that the person made go.
+    expect(await tokenIds(w)).toEqual([kept]);
+  });
+
+  it("deletes the organization tokens that a person made, when no domain of the organization claims the address", async () => {
+    const w = await world();
+    const token = await tokenOf(w, w.organizationId);
+    const { id, mine, kept } = await adaWithToken(w, token);
+    // With no claim, the deactivate removes the member row only, with its tokens.
+    const gone = await deleteDomain(w.config, SCIM_APP, { id: w.domainId });
+    if (!gone.ok) throw new Error(gone.code);
+    expect((await tokenIds(w)).sort()).toEqual([mine, kept].sort());
+    const off = await scim(w, token, "PATCH", `/Users/${id}`, OFF);
+    expect(off.status).toBe(200);
+    expect(await tokenIds(w)).toEqual([kept]);
+  });
+
+  it("covers the newest session in the before of a small round, also from a clock 30 s ahead", async () => {
+    const w = await world();
+    await signUpAndVerify(w, ADA);
+    const ada = await userAt(w, ADA);
+    if (!ada) throw new Error("no user");
+    // An instance whose clock runs 30 s ahead writes a session: past the 5 s bound of the act.
+    w.clock.advance(30_000);
+    const ahead = await createSession(w.config, { userId: ada.id, ip: null, userAgent: null });
+    w.clock.advance(-30_000);
+    const before = await w.storage.transaction((tx) =>
+      markAllAccessEnd(tx, w.config, ada.id, meterOf(w.storage, 0), "revoked"),
+    );
+    expect(before.getTime()).toBeGreaterThanOrEqual(ahead.session.createdAt.getTime());
+    // The door reads the row for a session from before the user mark of the act.
+    const marked = { id: ada.id, updatedAt: before };
+    expect(await revokedFor(w.config, marked, ahead.session)).toBe(true);
   });
 });

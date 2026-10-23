@@ -268,9 +268,11 @@ export const ACCESS_MARK_CALLS = 5;
  *
  * The challenges and the handoff codes go, as in the full form: each one
  * can make a session after the act, which the row does not cover. The
- * OAuth codes stay. A family from a code of before the act starts at the
- * code (`familyStart`), so the row covers it too. The answer is the
- * `before` of the row.
+ * OAuth codes and the approved device rows stay. The code exchange and the
+ * device poll refuse one that started at or before `before` (ruling 69 of
+ * plan 12d), and a family of such a code starts at the code
+ * (`familyStart`), so the row covers it too. The answer is the `before`
+ * of the row.
  */
 export async function markAllAccessEnd(
   tx: StorageAdapter,
