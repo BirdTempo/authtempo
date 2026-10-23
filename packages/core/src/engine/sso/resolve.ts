@@ -157,7 +157,9 @@ async function joinWrite(
 }
 
 /**
- * The steps before the resolution's first write. A user that SCIM
+ * The steps before the resolution's first write. A user whose current
+ * address is not in a verified domain of the organization answers
+ * `sso_domain_mismatch` (final review of plan 12d, M1). A user that SCIM
  * deactivated in this organization answers `account_disabled` (Behavior 7).
  * Then `hooks.sso.beforeSignIn` (Behavior 2), with the user, or null for a
  * create. No lock comes before them, so a throw leaves nothing.
@@ -166,10 +168,21 @@ async function beforeSignIn(
   config: ResolvedConfig,
   tx: StorageAdapter,
   event: { connection: SsoConnectionSummary; profile: SsoProfile },
+  email: string,
   user: UserRow,
   created: boolean,
 ): Promise<void> {
   if (!created) {
+    // A known identity names its user, and the user can change the address
+    // after the link. The domain proof gives the IdP trust only for an
+    // address in the domain, so the user's own address must be in it too.
+    // The profile address passed the same check, so an equal address reads
+    // nothing more.
+    if (
+      user.email !== email &&
+      !(await inOrganizationDomains(tx, event.connection.organizationId, user.email))
+    )
+      stopWith("sso_domain_mismatch");
     const row = await tx.findOne("scimUser", [
       { field: "organizationId", op: "eq", value: event.connection.organizationId },
       { field: "userId", op: "eq", value: user.id },
@@ -190,7 +203,8 @@ async function beforeSignIn(
  * 1. The address must be in a verified domain of the connection's
  *    organization, else `sso_domain_mismatch`, before any write.
  * 2. `hooks.sso.beforeSignIn` runs before the first write.
- * 3. A known identity signs in its user.
+ * 3. A known identity signs in its user, only while a verified domain of
+ *    the organization claims the user's current address.
  * 4. A user at the address gets the identity; an unverified one is claimed.
  * 5. No user: a just-in-time create under the sign-up rule, or
  *    `sso_not_provisioned` with `jit` off.
@@ -261,7 +275,7 @@ export async function resolveSsoUser(
       async (tx, user, created) => {
         // A retry reads again, so the newer reads win.
         join = null;
-        await beforeSignIn(config, tx, { connection: summary, profile }, user, created);
+        await beforeSignIn(config, tx, { connection: summary, profile }, email, user, created);
         // Before the gate: the session step holds the user row, a write.
         join = await joinChecks(config, tx, connection, user, now);
         await gate.before(tx, user);

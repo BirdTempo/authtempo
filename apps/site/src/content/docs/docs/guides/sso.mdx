@@ -49,7 +49,9 @@ An app with no owner page calls the same steps through `auth.api.sso`, with the 
 
 ### The trust of a verified domain
 
-A verified domain of an organization can sign in as any existing user at that domain. A proof of a domain is the same trust as a mailed link: the owner of the domain controls its mail. Core never reads `email_verified` of the provider. The address of each sign-in must be in a verified domain of the connection's organization, else [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch).
+A verified domain of an organization can sign in as any existing user whose current address is in that domain. A proof of a domain is the same trust as a mailed link: the owner of the domain controls its mail. Core never reads `email_verified` of the provider. The address of each sign-in must be in a verified domain of the connection's organization, else [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch).
+
+The same rule holds for the user that an identity names. A user can change the account address after the first SSO sign-in. When the new address is outside the verified domains of the organization, the identity answers `sso_domain_mismatch` and opens no session. The address that the provider sends does not change this.
 
 ### The domain proof
 
@@ -69,7 +71,7 @@ An owner of the organization manages its domains, connections, and SCIM tokens. 
 - `start` is an absolute URL on the origin of `baseURL`, with `next` as its query. Send the browser there as it is, also when the app is on another origin.
 - `client.sso.signIn({ connectionId })` sends the browser to the start of a connection. An app button may name a connection.
 - The sign-in page of core has a "Sign in with SSO" form that posts the address to the discovery.
-- A known identity signs in its user. A user at the address gets the identity of the connection.
+- A known identity signs in its user, while the user's current address is in a verified domain of the organization. A user at the address gets the identity of the connection.
 - A new address gets a new user with a verified address and no password, when `jit` is on. With `jit: false`, the sign-in answers [`sso_not_provisioned`](/docs/reference/errors/#sso_not_provisioned), so only SCIM creates users.
 - The person gets a member row with the connection's `defaultRole`. Core never gives `owner` or the platform role.
 - `hooks.sso.beforeSignIn` may refuse a sign-in before the first write, for example for a contractor domain.

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { confirmEmailChange, requestEmailChange } from "../../src/engine/email-change.js";
 import { hookRefusal } from "../../src/engine/hooks.js";
 import { requestMagicLink, verifyMagicLink } from "../../src/engine/magic-link.js";
 import { passwordSignUp } from "../../src/engine/password.js";
@@ -129,6 +130,38 @@ describe("the SSO resolution (plan 12d Task 5)", () => {
     expect(await identitiesOf(w, one?.user.id ?? "")).toEqual(
       ["email", `sso:${connectionId}`].sort(),
     );
+  });
+
+  it("refuses a known identity whose user's address left the domain (final review M1)", async () => {
+    const w = ssoSignInWorld();
+    const { connectionId } = await acmeWithSso(w);
+    const first = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
+    const me = await resolveSession(w.config, first.token ?? "");
+    if (!me) throw new Error("no session");
+    // The user moves the account address by the normal email change.
+    const move = async (to: string) => {
+      const session = await resolveSession(w.config, first.token ?? "");
+      if (!session) throw new Error("no session");
+      expect((await requestEmailChange(w.config, { session, newEmail: to })).ok).toBe(true);
+      const token = tokenFromMail(w.mail.findLast((m) => m.to === to)?.text ?? "");
+      expect((await confirmEmailChange(w.config, { token, ip: null, userAgent: null })).ok).toBe(
+        true,
+      );
+    };
+    await move("ada@personal.example");
+    const before = await counts(w);
+    // The IdP sends the old subject with an address of the domain.
+    for (const email of [ADA, "anyone@acme.example"]) {
+      const r = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email });
+      expect(r.error).toBe("sso_domain_mismatch");
+      expect(r.token).toBeNull();
+    }
+    expect(await counts(w)).toEqual(before);
+    expect((await userAt(w, "ada@personal.example"))?.id).toBe(me.user.id);
+    // The check reads the current address: back in the domain, the identity signs in again.
+    await move("ada.l@acme.example");
+    const back = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
+    expect((await resolveSession(w.config, back.token ?? ""))?.user.id).toBe(me.user.id);
   });
 
   it("links a verified user at the address", async () => {

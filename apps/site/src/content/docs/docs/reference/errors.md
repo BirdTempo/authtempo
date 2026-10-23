@@ -587,8 +587,8 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="sso_domain_mismatch"><code>sso_domain_mismatch</code> 403</h3>
 
-- **Meaning:** The provider of the connection gave an address that no verified domain of the connection's organization claims. Core never reads the `email_verified` of the provider: only the organization's DNS proof makes an address true.
-- **Do:** Ask the organization owner to verify the domain of the address, or to fix the address at the provider.
+- **Meaning:** The provider of the connection gave an address that no verified domain of the connection's organization claims. Or the identity of the sign-in names a user whose current address no such domain claims. Core never reads the `email_verified` of the provider: only the organization's DNS proof makes an address true.
+- **Do:** Ask the organization owner to verify the domain of the address, or to fix the address at the provider. A user who moved the account address out of the domain signs in another way.
 
 | Routes |
 | --- |
