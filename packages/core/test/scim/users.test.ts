@@ -492,18 +492,41 @@ describe("the SCIM Users (plan 12d Task 10)", () => {
     expect((await userAt(w, ADA))?.email).toBe(ADA);
   });
 
-  it("refuses a password attribute", async () => {
+  it("ignores a password in a create and a replace, and refuses it in a PATCH (Task 12 P2)", async () => {
     const w = await world();
     const token = await tokenOf(w, w.organizationId);
+    // Okta sends a password in each create, also with password sync off (its
+    // SCIM 2.0 protocol reference, read 2026-10-22T14:47:54Z).
     const r = await read(
-      await scim(w, token, "POST", "/Users", userBody(ADA, { password: "s3cret-value" })),
+      await scim(w, token, "POST", "/Users", userBody(ADA, { password: "1mz050nq" })),
     );
-    expect([r.status, r.body.scimType, r.body.detail]).toEqual([
-      400,
-      "invalidValue",
-      "password is not supported",
-    ]);
-    expect(await userAt(w, ADA)).toBeNull();
+    expect([r.status, r.body.password]).toEqual([201, undefined]);
+    const id = String(r.body.id);
+    const user = await userAt(w, ADA);
+    expect(
+      await w.storage.findMany("password", [{ field: "userId", op: "eq", value: user?.id ?? "" }]),
+    ).toEqual([]);
+    const row = await w.storage.findOne("scimUser", [{ field: "id", op: "eq", value: id }]);
+    expect(JSON.stringify(row?.data)).not.toContain("1mz050nq");
+    const put = await read(
+      await scim(w, token, "PUT", `/Users/${id}`, userBody(ADA, { password: "1mz050nq" })),
+    );
+    expect([put.status, put.body.password]).toEqual([200, undefined]);
+    // A PATCH of the password is a password change: changePassword.supported is false.
+    for (const op of [
+      { op: "replace", path: "password", value: "1mz050nq" },
+      { op: "replace", value: { password: "1mz050nq" } },
+    ]) {
+      const p = await read(await scim(w, token, "PATCH", `/Users/${id}`, patch(op)));
+      expect([p.status, p.body.scimType, p.body.detail]).toEqual([
+        400,
+        "invalidValue",
+        "operation 0: password is not supported",
+      ]);
+    }
+    expect(
+      await w.storage.findMany("password", [{ field: "userId", op: "eq", value: user?.id ?? "" }]),
+    ).toEqual([]);
   });
 
   it("ignores the attributes that the schema does not know in an Okta body (ruling 45)", async () => {
@@ -512,7 +535,7 @@ describe("the SCIM Users (plan 12d Task 10)", () => {
     const address = "test.user@acme.example";
     // The create of the Okta SCIM 2.0 protocol reference (developer.okta.com,
     // read 2026-10-22), at an address of the verified domain. Its password is
-    // left out: this server refuses a password (Behavior 1). An Okta custom
+    // left out here; the test of Task 12 P2 sends it. An Okta custom
     // attribute goes to the namespace of its mapping: the core User at the
     // top, or the enterprise extension.
     const okta = {

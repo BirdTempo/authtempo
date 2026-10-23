@@ -365,9 +365,9 @@ const USER_KEY = asciiLower(NS_SCIM_USER);
 /**
  * Reads a User resource of a POST or a PUT body, or the result of a PATCH
  * (Behavior 1). `schemas` holds the core User URN, and the enterprise URN
- * at most; another URN in `schemas` answers `invalidSyntax`. `password`
- * answers `invalidValue`. `id`, `meta`, and `groups` are ignored (RFC 7643
- * section 2.2). An attribute that the schema does not know is ignored: core
+ * at most; another URN in `schemas` answers `invalidSyntax`. `password` is
+ * ignored (plan 12d Task 12 P2). `id`, `meta`, and `groups` are ignored (RFC
+ * 7643 section 2.2). An attribute that the schema does not know is ignored: core
  * stores nothing of it and answers the resource as stored (ruling 45 of plan
  * 12d). RFC 7644 section 3.1 reads a request "in the context of its own
  * schema", and RFC 7643 section 2 lets the server decide which attributes it
@@ -404,7 +404,12 @@ export function readUser(body: unknown): { ok: true; doc: UserDoc } | Refused {
     const rule = USER_RULES.get(lower);
     // An unknown attribute, or a URN key that `schemas` does not name, is ignored.
     if (rule === undefined) continue;
-    if (rule.name === "password") return refused("password is not supported", "invalidValue");
+    // Okta sends a password in each create, also with password sync off, and
+    // calls it a placeholder (its SCIM 2.0 protocol reference, read
+    // 2026-10-22). changePassword.supported is false, so core stores nothing
+    // of it (plan 12d Task 12 P2). A PATCH of the password still answers
+    // `invalidValue` in the parser.
+    if (rule.name === "password") continue;
     if (rule.name === "id" || rule.name === "meta" || rule.name === "groups") continue;
     if (rule.name === "userName") {
       userName = value;
@@ -507,13 +512,18 @@ export function applyPatch(
         doc.schemas = [...schemas, NS_SCIM_ENTERPRISE];
     }
     key = keyIn(container, key);
-    const multi = USER_RULES.get(asciiLower(key))?.facts?.multiValued === true;
+    const facts = container === doc ? USER_RULES.get(asciiLower(key))?.facts : undefined;
+    const multi = facts?.multiValued === true;
     const current = container[key];
     if (path.filter === null && path.sub === null) {
+      // RFC 7644 section 3.5.2.2: the remove of a required attribute answers mutability.
+      if (op.op === "remove" && facts?.required === true)
+        return refused(`${path.attr} is required`, "mutability");
       if (op.op === "remove") delete container[key];
       else if (multi) {
         const added = Array.isArray(op.value) ? op.value : [op.value];
         container[key] = op.op === "add" && Array.isArray(current) ? [...current, ...added] : added;
+        onePrimary(container[key] as unknown[], added);
       } else if (isObject(current) && isObject(op.value))
         container[key] = { ...current, ...op.value };
       else container[key] = op.value;
@@ -551,6 +561,7 @@ export function applyPatch(
             : op.value
           : { [path.filter.attr]: path.filter.value, [path.sub]: op.value };
       container[key] = [...list, added];
+      onePrimary(container[key] as unknown[], [added]);
       continue;
     }
     for (const i of hits) {
@@ -562,8 +573,34 @@ export function applyPatch(
       else item[keyIn(item, path.sub)] = op.value;
     }
     container[key] = list;
+    onePrimary(
+      list,
+      hits.map((i) => list[i]),
+    );
   }
   return { ok: true, value: doc };
+}
+
+/** True for a primary value of true, or the text "True" that Entra ID sends (ruling 23 of plan 12d). */
+function isPrimary(item: unknown): boolean {
+  if (!isObject(item)) return false;
+  const v = item[keyIn(item, "primary")];
+  return v === true || v === "True";
+}
+
+/**
+ * RFC 7644 section 3.5.2: a PATCH that sets the primary of a value to true
+ * sets the primary of every other value of the list to false. `written`
+ * holds the values that the operation wrote. When none of them is primary,
+ * nothing changes. Two primary values in `written` stay, and the read of the
+ * result refuses them (RFC 7643 section 2.4).
+ */
+function onePrimary(list: unknown[], written: readonly unknown[]): void {
+  if (!written.some(isPrimary)) return;
+  for (const item of list) {
+    if (written.includes(item) || !isObject(item) || !isPrimary(item)) continue;
+    item[keyIn(item, "primary")] = false;
+  }
 }
 
 /** The groups of a user, read-only (Behavior 1): the scimGroup rows of its scimGroupMember rows. */

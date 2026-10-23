@@ -132,6 +132,12 @@ export const FILE_HOST_EXCEPTIONS: readonly FileHostException[] = [
     reason:
       "the DNS resolver presets of the domain proof (plan 12d, ruling 15). Core has no default resolver. An app turns a preset on in its own sso.dns, and a core test fails when another file calls one",
   },
+  {
+    path: "packages/core/src/engine/scim/groups.ts",
+    hosts: ["schemas.microsoft.com"],
+    reason:
+      "the schema URN that Entra ID sends beside the core Group URN in a group create (plan 12d, ruling 60). The read compares it as a name, and core never fetches it",
+  },
 ];
 
 /** True when `path` is the file of `exception`, also with a prefix before the repository path. */

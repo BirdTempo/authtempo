@@ -264,6 +264,7 @@ describe("the data of the home page (plan 11b1)", () => {
       ["packages/core/src/saml/xml.ts", ["www.w3.org"]],
       ["packages/core/src/saml/dsig.ts", ["www.w3.org"]],
       ["packages/core/src/engine/sso/dns.ts", ["cloudflare-dns.com", "dns.google"]],
+      ["packages/core/src/engine/scim/groups.ts", ["schemas.microsoft.com"]],
     ]);
     expect(unusedFileHostExceptions(realCore())).toEqual([]);
     for (const e of FILE_HOST_EXCEPTIONS)

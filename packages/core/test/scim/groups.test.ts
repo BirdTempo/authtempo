@@ -931,3 +931,36 @@ async function acmeWithSsoOf(w: World, slug: string) {
   await verifiedDomain(w, organizationId, `${slug}.example`);
   return { organizationId };
 }
+
+describe("the provider shapes of the SCIM Groups (plan 12d Task 12)", () => {
+  const ADSCIM = "http://schemas.microsoft.com/2006/11/ResourceManagement/ADSCIM/2.0/Group";
+
+  it("accepts the Microsoft group URN of the Entra group create, and no other URN", async () => {
+    const w = await world();
+    // The Create Group request of "Develop and plan provisioning for a SCIM
+    // endpoint" (Microsoft Learn, read 2026-10-22T14:47:53Z).
+    const entra = await read(
+      await scim(w, w.token, "POST", "/Groups", {
+        schemas: [GROUP_URN, ADSCIM],
+        externalId: "8aa1a0c0-c4c3-4bc0-b4a5-2ef676900159",
+        displayName: "displayName",
+        meta: { resourceType: "Group" },
+      }),
+    );
+    expect([entra.status, entra.body.schemas, entra.body.displayName]).toEqual([
+      201,
+      [GROUP_URN],
+      "displayName",
+    ]);
+    for (const schemas of [[GROUP_URN, "urn:example:custom:2.0:Group"], [ADSCIM]]) {
+      const r = await read(
+        await scim(w, w.token, "POST", "/Groups", { schemas, displayName: "Other" }),
+      );
+      expect([r.status, r.body.scimType], JSON.stringify(schemas)).toEqual([400, "invalidSyntax"]);
+    }
+    const rows = await w.storage.findMany("scimGroup", [
+      { field: "organizationId", op: "eq", value: w.organizationId },
+    ]);
+    expect(rows.map((g) => g.displayName)).toEqual(["displayName"]);
+  });
+});

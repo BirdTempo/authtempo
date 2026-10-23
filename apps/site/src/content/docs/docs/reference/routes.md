@@ -1665,7 +1665,7 @@ Then nothing changes, so the person keeps access. The directory then marks the p
 | Field | Value |
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
-| Input | None. The body is a User of RFC 7643 section 4.1, with the enterprise extension at most. A `password` answers 400 |
+| Input | None. The body is a User of RFC 7643 section 4.1, with the enterprise extension at most. Core ignores a `password`: it stores, logs, and answers nothing of it. Okta sends a placeholder password in each create |
 | Answer | 201 with the User, `Location`, and `ETag`. The user at the address gets a member row with `scim.defaultRole`, or a new user comes with a verified address and no password |
 | Errors | None |
 
@@ -1683,7 +1683,7 @@ Then nothing changes, so the person keeps access. The directory then marks the p
 | Field | Value |
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
-| Input | None. The body is a User, and `If-Match` may name the version |
+| Input | None. The body is a User, and `If-Match` may name the version. Core ignores a `password`, as in a create |
 | Answer | The User. `active: false` removes the member row, and ends the access of a user whose address the organization's domain claims. A PUT replaces the whole User (RFC 7644 section 3.5.1). A body with no `active` reads as `active: true`, so it reactivates a deactivated user. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then |
 | Errors | None |
 
@@ -1692,8 +1692,8 @@ Then nothing changes, so the person keeps access. The directory then marks the p
 | Field | Value |
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
-| Input | None. The body is a PatchOp message of RFC 7644 section 3.5.2, and `If-Match` may name the version |
-| Answer | The User. The operations apply together, or none applies. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then |
+| Input | None. The body is a PatchOp message of RFC 7644 section 3.5.2, and `If-Match` may name the version. A change of `password` answers 400 `invalidValue`, because the password change is off. A remove of `userName` answers 400 `mutability` |
+| Answer | The User. The operations apply together, or none applies. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then. When an operation writes a value with `primary` true, each other value of that attribute gets `primary` false |
 | Errors | None |
 
 <h3 id="delete-scim-v2-users-id"><code>DELETE /scim/v2/Users/:id</code></h3>
@@ -1731,7 +1731,7 @@ With `scim.groups` set to `teams` or `both`, each group has one team of the orga
 | Field | Value |
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
-| Input | None. The body is a Group of RFC 7643 section 4.2. `displayName` is required, 1 to 255 characters, and unique in the organization with no case |
+| Input | None. The body is a Group of RFC 7643 section 4.2. `displayName` is required, 1 to 255 characters, and unique in the organization with no case. `schemas` holds the core Group URN. Entra ID also sends `http://schemas.microsoft.com/2006/11/ResourceManagement/ADSCIM/2.0/Group`, and core reads nothing of it. Another URN answers 400 `invalidSyntax` |
 | Answer | 201 with the Group, `Location`, and `ETag`. A second group with the same `displayName` answers 409 `uniqueness` |
 | Errors | None |
 
@@ -1758,7 +1758,7 @@ With `scim.groups` set to `teams` or `both`, each group has one team of the orga
 | Field | Value |
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
-| Input | None. The body is a PatchOp message: `add` and `remove` of `members`, and `replace` of `displayName`, `externalId`, or `members`. A `remove` takes the path `members[value eq "<id>"]` or a list of values. `If-Match` may name the version |
+| Input | None. The body is a PatchOp message: `add` and `remove` of `members`, and `replace` of `displayName`, `externalId`, or `members`. A `remove` takes the path `members[value eq "<id>"]` or a list of values. A `remove` of `displayName` answers 400 `mutability`. `If-Match` may name the version |
 | Answer | 204 with no body, as RFC 7644 section 3.5.2 allows. With `attributes` in the query, 200 with the Group. The operations apply together, or none applies. A PATCH that changes nothing writes nothing: no new version and no audit row. So a remove of a User that is not a member, by the filter path or by a list of values, answers as a removal does. A directory sends a removal again after a time-out, and an error marks its push as failed |
 | Errors | None |
 

@@ -132,6 +132,16 @@ export function toScimGroup(
 }
 
 const GROUP_KEY = asciiLower(NS_SCIM_GROUP);
+/**
+ * Entra ID names this URN beside the core Group URN in each group create
+ * ("Develop and plan provisioning for a SCIM endpoint", Microsoft Learn, read
+ * 2026-10-22). No Schema document defines it, and the body holds no key of
+ * it. So core accepts it beside the core URN and reads nothing of it (plan
+ * 12d Task 12 P1). Any other URN still answers `invalidSyntax`.
+ */
+const ENTRA_GROUP_KEY = asciiLower(
+  "http://schemas.microsoft.com/2006/11/ResourceManagement/ADSCIM/2.0/Group",
+);
 
 /** The top-level names of a Group for `attributes`, with the sub-attributes of `members`. */
 const KNOWN: ReadonlySet<string> = new Set([
@@ -213,19 +223,24 @@ function memberValues(value: unknown): string[] | Refused {
 
 /**
  * Reads a Group of a POST or a PUT body (Behavior 1). `schemas` holds the
- * core Group URN alone. `displayName` is required. `id` and `meta` are
- * ignored (RFC 7643 section 2.2), and so is an attribute that the schema
- * does not know, as for a User (ruling 45 of plan 12d).
+ * core Group URN, and the Entra URN of `ENTRA_GROUP_KEY` at most.
+ * `displayName` is required. `id` and `meta` are ignored (RFC 7643 section
+ * 2.2), and so is an attribute that the schema does not know, as for a User
+ * (ruling 45 of plan 12d).
  */
 export function readGroup(body: unknown): { ok: true; doc: GroupDoc } | Refused {
   if (!isObject(body)) return refused("the body is not a Group resource", "invalidSyntax");
   const schemas = body.schemas;
   if (
     !Array.isArray(schemas) ||
-    schemas.length === 0 ||
-    !schemas.every((s) => typeof s === "string" && asciiLower(s) === GROUP_KEY)
+    !schemas.every((s) => typeof s === "string") ||
+    !schemas.some((s) => asciiLower(s) === GROUP_KEY) ||
+    !schemas.every((s) => asciiLower(s) === GROUP_KEY || asciiLower(s) === ENTRA_GROUP_KEY)
   )
-    return refused("schemas must hold the core Group URN alone", "invalidSyntax");
+    return refused(
+      "schemas must hold the core Group URN, and the Entra ID group URN at most",
+      "invalidSyntax",
+    );
   let displayName: unknown;
   let externalId: string | null = null;
   let members: string[] = [];
@@ -269,7 +284,8 @@ export function applyGroupPatch(
     const path = op.path;
     if (path === null) return refused("each operation needs a path", "invalidPath");
     if (path.attr === "displayName") {
-      if (op.op === "remove") return refused("displayName is required", "invalidValue");
+      // RFC 7644 section 3.5.2.2: the remove of a required attribute answers mutability.
+      if (op.op === "remove") return refused("displayName is required", "mutability");
       const text = columnText(op.value, "displayName", DISPLAY_NAME_MAX);
       if (typeof text !== "string") return text;
       displayName = text;
