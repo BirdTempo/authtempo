@@ -989,28 +989,10 @@ const SIGN_IN_REFUSED: Record<string, string> = {
 };
 
 /**
- * The connection that a verified domain claims for `email`, for a SAML
- * connection only. Core's discovery answers no SAML connection (ruling 61
- * F6, a core defect of the 12d final fix wave). Until that fix the shim
- * reads the claim itself, the most specific domain first, as core's
- * `claimingDomain` does. Remove this when core's discovery serves SAML.
+ * `POST /sign-in/sso`: the start path of the connection that the body
+ * names. An email or a domain asks core's discovery, which serves an OIDC
+ * and a SAML connection (ruling 61 F6, fixed in core by the 12d fix wave).
  */
-async function samlConnectionOf(mapped: Mapped, email: string): Promise<string | null> {
-  const domain = email.slice(email.lastIndexOf("@") + 1).toLowerCase();
-  const labels = domain.split(".");
-  const names = labels.slice(0, -1).map((_, i) => labels.slice(i).join("."));
-  if (names.length === 0) return null;
-  const rows = await mapped.config.storage.findMany("ssoDomain", [
-    { field: "claimedDomain", op: "in", value: names },
-  ]);
-  for (const name of names) {
-    const row = rows.find((r) => r.claimedDomain === name);
-    if (row && (name === domain || row.includeSubdomains)) return row.connectionId;
-  }
-  return null;
-}
-
-/** `POST /sign-in/sso`: the start path of the connection that the body names (ruling 61 F6). */
 async function signInSso(mapped: Mapped, request: Request, calls: Calls): Promise<Response> {
   const body = await jsonBody(request);
   if (!body) return calls.fail(invalid("body", "expected a JSON object"));
@@ -1038,12 +1020,12 @@ async function signInSso(mapped: Mapped, request: Request, calls: Calls): Promis
     connectionId = (await connectionRow(mapped, providerId))?.id ?? null;
   else if (typeof email === "string" || typeof domain === "string") {
     const address = typeof email === "string" ? email : `sso@${domain}`;
-    // Core's discovery first: its limiter counts each ask.
+    // Core's discovery alone: its limiter counts each ask, and it names no
+    // disabled connection and no connection of a kind that is off.
     const found = await calls.core("/sso/discover", { email: address });
     if (!found.ok) return calls.refusal(found);
     const r = (await found.json()) as { sso: boolean; connectionId?: string };
-    connectionId =
-      (r.sso ? r.connectionId : undefined) ?? (await samlConnectionOf(mapped, address));
+    connectionId = r.sso ? (r.connectionId ?? null) : null;
   } else if (typeof organizationSlug === "string") {
     const org = await storage.findOne("organization", [
       { field: "slug", op: "eq", value: organizationSlug },

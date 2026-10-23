@@ -4,6 +4,7 @@ import { updateDomain } from "../../src/engine/sso/domains.js";
 import { signInPageResponse } from "../../src/http/sign-in-response.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "../helpers.js";
 import { SSO_APP, seedOrganization, ssoAuth, verifiedDomain } from "./helpers.js";
+import { orgWithSaml, samlWorld } from "./saml-helpers.js";
 
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
@@ -48,9 +49,12 @@ async function routed(
   if (!r.ok) throw new Error(r.code);
 }
 
-/** Organization A holds `acme.example` with its subdomains; B holds `eu.acme.example`. */
-async function world() {
-  const w = ssoAuth({ sso: { oidc: true } });
+/**
+ * Organization A holds `acme.example` with its subdomains; B holds
+ * `eu.acme.example`. `appURL` puts the app on its own origin.
+ */
+async function world(appURL?: string) {
+  const w = ssoAuth({ sso: { oidc: true }, ...(appURL === undefined ? {} : { appURL }) });
   const a = await seedOrganization(w, "acme");
   const b = await seedOrganization(w, "globex");
   const ca = await connection(w, a, "acme");
@@ -133,10 +137,10 @@ describe("the discovery at sign-in (plan 12d Task 4)", () => {
   });
 
   it("answers the start on the baseURL origin when the app is on another origin, with next", async () => {
-    const { w, cb } = await world();
-    // The test config is a split origin: baseURL is the api origin, and the app is a trusted origin.
+    const { w, cb } = await world(APP_ORIGIN);
+    // A split origin: baseURL is the api origin, and appURL is the app origin.
     expect(w.config.baseURL).toBe(BASE_URL);
-    expect(APP_ORIGIN).not.toBe(BASE_URL);
+    expect(w.config.appURL).toBe(APP_ORIGIN);
     const next = "/dashboard?tab=sso";
     const res = await w.handle(
       post("/auth/sso/discover", { email: "x@eu.acme.example", next }, { origin: APP_ORIGIN }),
@@ -158,6 +162,49 @@ describe("the discovery at sign-in (plan 12d Task 4)", () => {
       { field: "purpose", op: "eq", value: "oauth-state" },
     ]);
     expect((state?.data as { next?: string } | undefined)?.next).toBe(next);
+  });
+
+  it("encodes next whole in the start of a JSON discovery on a split origin", async () => {
+    const { w, cb } = await world(APP_ORIGIN);
+    expect(w.config.appURL).toBe(APP_ORIGIN);
+    // A next with "?", "&", a second next key, "#", a space, and "%": each must stay in the one value.
+    const next = "/reports?a=1&next=/x#part 2%";
+    const res = await w.handle(
+      post("/auth/sso/discover", { email: "x@eu.acme.example", next }, { origin: APP_ORIGIN }),
+    );
+    const answer = (await res.json()) as { start: string };
+    expect(answer.start).toBe(
+      `${BASE_URL}/auth/sso/${cb}/start?next=%2Freports%3Fa%3D1%26next%3D%2Fx%23part%202%25`,
+    );
+    expect(await w.handle(new Request(answer.start))).toHaveProperty("status", 302);
+    const state = await w.config.storage.findOne("verification", [
+      { field: "purpose", op: "eq", value: "oauth-state" },
+    ]);
+    expect((state?.data as { next?: string } | undefined)?.next).toBe(next);
+  });
+
+  it("routes an address to a SAML connection, and the start sends an AuthnRequest", async () => {
+    const w = samlWorld({ appURL: APP_ORIGIN });
+    const { organizationId, connectionId } = await orgWithSaml(w);
+    const domain = await w.config.storage.findOne("ssoDomain", [
+      { field: "organizationId", op: "eq", value: organizationId },
+    ]);
+    if (!domain) throw new Error("no domain");
+    const routedTo = await updateDomain(w.config, SSO_APP, { id: domain.id, connectionId });
+    if (!routedTo.ok) throw new Error(routedTo.code);
+    const res = await w.handle(
+      post("/auth/sso/discover", { email: "kim@acme.example", next: "/" }),
+    );
+    expect(await res.json()).toEqual({
+      sso: true,
+      connectionId,
+      start: `${BASE_URL}/auth/sso/${connectionId}/start?next=%2F`,
+    });
+    const go = await w.handle(new Request(`${BASE_URL}/auth/sso/${connectionId}/start?next=%2F`));
+    expect(go.status).toBe(302);
+    const to = new URL(go.headers.get("location") ?? "");
+    expect(to.origin + to.pathname).toBe("https://idp.example/sso");
+    expect(to.searchParams.get("SAMLRequest")).not.toBeNull();
   });
 
   it("answers the same for an address with and without a user", async () => {

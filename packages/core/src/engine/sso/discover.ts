@@ -1,4 +1,4 @@
-import type { ResolvedConfig } from "../../config.js";
+import type { ResolvedConfig, ResolvedSso } from "../../config.js";
 import { ipKey } from "../../limiter/ip-key.js";
 import { fail, ok, type Result } from "../../result.js";
 import { normalizeEmail } from "../users.js";
@@ -6,6 +6,15 @@ import { claimingDomain } from "./domains.js";
 
 /** `sso-discover:ip`: 30 per 15 minutes (spec 30 item 23). */
 const DISCOVER_LIMIT = { seconds: 15 * 60, max: 30 };
+
+/**
+ * True when the config turns the kind of the connection on (`sso.oidc`,
+ * `sso.saml`). A connection of a kind that is off signs in no one. The
+ * start and the discovery read this one rule.
+ */
+export function kindOn(sso: ResolvedSso, kind: "oidc" | "saml"): boolean {
+  return kind === "oidc" ? sso.oidc : sso.saml !== null;
+}
 
 /** The start path of a connection, under `basePath`. */
 export function ssoStartPath(config: ResolvedConfig, connectionId: string): string {
@@ -50,8 +59,7 @@ export async function discoverSso(
   const row = await config.storage.findOne("ssoConnection", [
     { field: "id", op: "eq", value: domain.connectionId },
   ]);
-  // Task 8 of plan 12d adds the SAML start. Until then a SAML row is no way in.
-  if (!row?.enabled || row.kind !== "oidc" || !sso.oidc) return ok({ sso: false });
+  if (!row?.enabled || !kindOn(sso, row.kind)) return ok({ sso: false });
   return ok({
     sso: true,
     connectionId: row.id,

@@ -1182,8 +1182,8 @@ page gives each route with its errors.
 - `enforce: true` on a domain refuses every other first factor of its
   addresses with `sso_required`. The operator turns it off with
   `POST /operator/sso/enforce-off` and a reason.
-- The discovery answers `{ sso: false }` for a domain routed to a SAML
-  connection. A fix of the final fix wave of plan 12d closes that gap.
+- The discovery names an OIDC or a SAML connection, when the config turns
+  its kind on.
 - SCIM 2.0 lives under `<basePath>/scim/v2`. An organization holds at
   most 2 live `sk_` tokens. A SCIM create needs an address in a verified
   domain of the token's organization. A deactivate ends the person's

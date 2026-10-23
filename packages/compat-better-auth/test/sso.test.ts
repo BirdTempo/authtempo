@@ -635,7 +635,7 @@ describe("the sso plugin (plan 12d Task 14)", () => {
     expect(acs.status).toBe(302);
     expect(acs.headers.get("location")).toContain("sso_failed");
 
-    // A SAML connection by its domain: the shim reads the claim until core's discovery serves SAML (ruling 61 F6).
+    // A SAML connection by its domain: core's discovery names it (ruling 61 F6).
     const samlProof = (await (
       await app.call(
         "/sso/request-domain-verification",
@@ -654,6 +654,21 @@ describe("the sso plugin (plan 12d Task 14)", () => {
         200,
         { url: samlStart, redirect: true },
       ]);
+    }
+    // The claim still names the connection when it is disabled, but core's discovery
+    // answers no. The shim takes the connectionId of that answer only.
+    const off = await app.auth.tempo.api.sso?.connections.update({
+      actor: { kind: "app", name: "test" },
+      id: samlConn?.id ?? "",
+      enabled: false,
+    });
+    expect(off?.ok).toBe(true);
+    expect((await domainsOf(app)).find((d) => d.domain === "beta.example")?.connectionId).toBe(
+      samlConn?.id,
+    );
+    for (const key of [{ email: "cy@beta.example" }, { domain: "beta.example" }]) {
+      const res = await app.call("/sign-in/sso", { ...key, callbackURL: "/" });
+      expect(res.status, JSON.stringify(key)).toBe(404);
     }
 
     // A new domain is added, pending, and routed; the old one goes, as Better Auth clears the proof.

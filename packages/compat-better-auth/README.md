@@ -1465,8 +1465,9 @@ that URL at the IdP: the register answers it as `redirectURI`.
 with `callbackURL`. It answers `{ url, redirect: true }`, where `url` is
 core's start path with `next`. `errorCallbackURL`, `newUserCallbackURL`,
 `scopes`, `loginHint`, `additionalParams`, and `requestSignUp` answer
-`NOT_SUPPORTED`. Core's discovery answers no SAML connection yet. Until its
-fix, the shim reads the domain claim itself for a SAML connection.
+`NOT_SUPPORTED`. An `email` or a `domain` asks core's discovery, which
+names an OIDC or a SAML connection. The shim takes the connection of that
+answer only, so a disabled connection answers 404.
 
 ### The domain proof
 

@@ -20,6 +20,7 @@ import type { SignInChallenge } from "../second-factor.js";
 import { exchangeProviderCode, OAUTH_STATE_PREFIX, type SocialComplete } from "../social.js";
 import { validImageUrl, validUserName } from "../users.js";
 import { connectionSecret } from "./connections.js";
+import { kindOn } from "./discover.js";
 import { resolveSsoUser, type SsoProfile, type SsoSignedIn } from "./resolve.js";
 import { startSaml } from "./saml-sp.js";
 
@@ -257,7 +258,7 @@ async function liveConnection(
   ]);
   if (!row?.enabled) return fail("sso_not_configured");
   // A kind that is off signs in no one (`sso.oidc`, `sso.saml`).
-  if (row.kind === "oidc" ? !sso.oidc : sso.saml === null) return fail("sso_not_configured");
+  if (!kindOn(sso, row.kind)) return fail("sso_not_configured");
   return ok({ sso, row });
 }
 

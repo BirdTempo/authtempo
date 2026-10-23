@@ -76,8 +76,6 @@ An owner of the organization manages its domains, connections, and SCIM tokens. 
 - The person gets a member row with the connection's `defaultRole`. Core never gives `owner` or the platform role.
 - `hooks.sso.beforeSignIn` may refuse a sign-in before the first write, for example for a contractor domain.
 
-The discovery does not yet find a SAML connection: it answers `{ sso: false }` for a domain routed to one. A fix of plan 12d's final fix wave changes that. Until then, start a SAML sign-in from a button with `client.sso.signIn({ connectionId })`, or from the start path in the `detail` of [`sso_required`](/docs/reference/errors/#sso_required).
-
 ### The second factor
 
 The second factor gate applies to an SSO sign-in, by `totp.gate.sso` (on by default). A connection may name a pass list in `mfa`: `amr`, `acr`, and `authnContext`. When the provider asserts one listed value, the provider did the second factor, and the gate passes. An `amr` value of the ID token, an equal `acr`, or an equal SAML `AuthnContextClassRef` passes. With no list, a person with a second factor gets the challenge.
