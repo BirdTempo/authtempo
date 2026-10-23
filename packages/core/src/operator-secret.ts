@@ -54,6 +54,16 @@ export const OPERATOR_USERS_PER_IP = { seconds: 3600, max: 600 };
 export const OPERATOR_USERS_PER_SECRET = { seconds: 3600, max: 600 };
 
 /**
+ * The limit of the account delete route of each actor (plan 12f2 Task 5):
+ * 100 calls per hour on `operator-delete:actor:<kind>:<id>`. A delete
+ * cannot be undone, so the count bounds what a leaked secret or a stolen
+ * operator session destroys before the owner revokes it. Every call of the
+ * route counts after the actor read, before the body and the scope check.
+ * The app in process counts on no key: it is the app's own code.
+ */
+export const OPERATOR_DELETE_PER_ACTOR = { seconds: 3600, max: 100 };
+
+/**
  * The longest reason of an operator act, in UTF-16 code units (spec 26
  * item 5). A reason is a short note for a later reader of the audit row,
  * not a document. The engine and the CLI read this one value.

@@ -99,9 +99,11 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /operator/sessions/end-user",
   "POST /operator/users/ban",
   "POST /operator/users/create-admin",
+  "POST /operator/users/delete",
   "POST /operator/users/platform-role",
   "POST /operator/users/second-factor/disable",
   "POST /operator/users/unban",
+  "POST /operator/users/update",
   "POST /organizations/create",
   "POST /organizations/delete",
   "POST /organizations/invitations/revoke",
@@ -212,9 +214,11 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /operator/sessions/end-user",
   "POST /operator/users/ban",
   "POST /operator/users/create-admin",
+  "POST /operator/users/delete",
   "POST /operator/users/platform-role",
   "POST /operator/users/second-factor/disable",
   "POST /operator/users/unban",
+  "POST /operator/users/update",
   "POST /organizations/active",
   "POST /organizations/check-slug",
   "POST /organizations/create",
@@ -463,6 +467,21 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "an organization or a user that a parallel act writes between the read and the transaction; operator-create-admin.test.ts proves the engine path",
     ["POST /operator/users/create-admin"],
   ),
+  ...rows(
+    "conflict",
+    "five lost rounds of the compare-and-set of the user row; operator-update-delete.test.ts proves the engine path",
+    ["POST /operator/users/update"],
+  ),
+  ...rows(
+    "conflict",
+    "five lost rounds of the user hold (lockUser); the operator delete races of account-races.test.ts of adapter-postgres and adapter-mysql let the loser answer it",
+    ["POST /operator/users/delete"],
+  ),
+  ...rows(
+    "delete_too_large",
+    "only a store with a per-invocation query limit (D1) refuses on size; operator-delete-budget.test.ts of adapter-d1 proves the edge, and operator-update-delete.test.ts the engine path",
+    ["POST /operator/users/delete"],
+  ),
 
   // A code that only a race, or a state that no flow reaches, answers.
   ...rows(
@@ -616,6 +635,13 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
         "every ban writes its reason, so no flow leaves a ban with none; the field is nullable because the user row allows it; operator-ban.test.ts proves the ban fields",
     }),
   ),
+  {
+    key: "POST /operator/users/update",
+    field: "user.ban.reason",
+    form: "null",
+    reason:
+      "every ban writes its reason, so no flow leaves a ban with none; the field is nullable because the user row allows it; operator-ban.test.ts proves the ban fields",
+  },
   {
     key: "GET /operator/users/get",
     field: "user.ban.reason",

@@ -10,6 +10,7 @@ sources:
   - packages/core/src/http/impersonation-rules.ts
   - docs/superpowers/plans/2026-10-14-12h-observability.md
   - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
 ---
 
 **For:** a developer who reads an error answer of authtempo and must act on it.
@@ -539,7 +540,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
+| [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm), and the operator delete [`POST /operator/users/delete`](/docs/reference/routes/#post-operator-users-delete). |
 
 <h3 id="delete_too_large"><code>delete_too_large</code> 409</h3>
 
@@ -566,7 +567,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /operator/keys/rotate`](/docs/reference/routes/#post-operator-keys-rotate) needs the scope `keys`. [`GET /operator/secrets/status`](/docs/reference/routes/#get-operator-secrets-status) and [`POST /operator/secrets/rewrap`](/docs/reference/routes/#post-operator-secrets-rewrap) need the scope `secrets`. The operator user tools need the scope `users`, `sessions`, or `audit`, or a platform operator who passes the guard. These routes are [`GET /operator/users`](/docs/reference/routes/#get-operator-users), [`GET /operator/users/search`](/docs/reference/routes/#get-operator-users-search), [`GET /operator/users/get`](/docs/reference/routes/#get-operator-users-get), [`POST /operator/users/ban`](/docs/reference/routes/#post-operator-users-ban), [`POST /operator/users/unban`](/docs/reference/routes/#post-operator-users-unban), [`POST /operator/users/platform-role`](/docs/reference/routes/#post-operator-users-platform-role), [`POST /operator/users/second-factor/disable`](/docs/reference/routes/#post-operator-users-second-factor-disable), [`POST /operator/sessions/end-user`](/docs/reference/routes/#post-operator-sessions-end-user), [`POST /operator/sessions/end-all`](/docs/reference/routes/#post-operator-sessions-end-all), and [`GET /operator/audit`](/docs/reference/routes/#get-operator-audit). [`POST /operator/users/create-admin`](/docs/reference/routes/#post-operator-users-create-admin) takes a secret only. |
+| [`POST /operator/keys/rotate`](/docs/reference/routes/#post-operator-keys-rotate) needs the scope `keys`. [`GET /operator/secrets/status`](/docs/reference/routes/#get-operator-secrets-status) and [`POST /operator/secrets/rewrap`](/docs/reference/routes/#post-operator-secrets-rewrap) need the scope `secrets`. The operator user tools need the scope `users`, `sessions`, or `audit`, or a platform operator who passes the guard. These routes are [`GET /operator/users`](/docs/reference/routes/#get-operator-users), [`GET /operator/users/search`](/docs/reference/routes/#get-operator-users-search), [`GET /operator/users/get`](/docs/reference/routes/#get-operator-users-get), [`POST /operator/users/ban`](/docs/reference/routes/#post-operator-users-ban), [`POST /operator/users/unban`](/docs/reference/routes/#post-operator-users-unban), [`POST /operator/users/platform-role`](/docs/reference/routes/#post-operator-users-platform-role), [`POST /operator/users/second-factor/disable`](/docs/reference/routes/#post-operator-users-second-factor-disable), [`POST /operator/users/update`](/docs/reference/routes/#post-operator-users-update), [`POST /operator/sessions/end-user`](/docs/reference/routes/#post-operator-sessions-end-user), [`POST /operator/sessions/end-all`](/docs/reference/routes/#post-operator-sessions-end-all), and [`GET /operator/audit`](/docs/reference/routes/#get-operator-audit). [`POST /operator/users/delete`](/docs/reference/routes/#post-operator-users-delete) needs the scope `delete`. [`POST /operator/users/create-admin`](/docs/reference/routes/#post-operator-users-create-admin) takes a secret only. |
 
 <h3 id="operator_self"><code>operator_self</code> 409</h3>
 
@@ -575,7 +576,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 | Routes |
 | --- |
-| [`POST /operator/users/ban`](/docs/reference/routes/#post-operator-users-ban), [`POST /operator/users/unban`](/docs/reference/routes/#post-operator-users-unban), [`POST /operator/users/platform-role`](/docs/reference/routes/#post-operator-users-platform-role), [`POST /operator/users/second-factor/disable`](/docs/reference/routes/#post-operator-users-second-factor-disable), and [`POST /operator/sessions/end-user`](/docs/reference/routes/#post-operator-sessions-end-user), for a platform operator who names their own user. |
+| [`POST /operator/users/ban`](/docs/reference/routes/#post-operator-users-ban), [`POST /operator/users/unban`](/docs/reference/routes/#post-operator-users-unban), [`POST /operator/users/platform-role`](/docs/reference/routes/#post-operator-users-platform-role), [`POST /operator/users/second-factor/disable`](/docs/reference/routes/#post-operator-users-second-factor-disable), [`POST /operator/users/update`](/docs/reference/routes/#post-operator-users-update), [`POST /operator/users/delete`](/docs/reference/routes/#post-operator-users-delete), and [`POST /operator/sessions/end-user`](/docs/reference/routes/#post-operator-sessions-end-user), for a platform operator who names their own user. |
 
 <h3 id="impersonation_refused"><code>impersonation_refused</code> 403</h3>
 

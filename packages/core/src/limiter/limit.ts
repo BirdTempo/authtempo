@@ -78,6 +78,8 @@ export const LIMIT_FAMILIES = Object.freeze([
   "operator-users:secret",
   "operator:user",
   "operator-impersonate:user",
+  // A delete cannot be undone: the count bounds what a leaked credential destroys (plan 12f2).
+  "operator-delete:actor",
   "oauth-register:ip",
   "oauth-authorize:ip",
   "oauth-token:ip",

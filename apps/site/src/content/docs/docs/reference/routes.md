@@ -12,6 +12,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12h-observability.md
   - packages/core/src/http/health.ts
   - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
 ---
 
 **For:** a developer who calls the routes of core, or checks what a route answers.
@@ -1356,6 +1357,24 @@ These routes exist when the config sets `operator.users` (plan 12f). A secret ca
 | Input | JSON { email, name?, reason }. `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D |
 | Answer | `{ userId, created, auditId }`. It creates the platform organization when absent, the user when no user holds the address (not verified, no password), and the member row. The new operator has no power before a proof of the mailbox and a second factor |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`account_banned`](/docs/reference/errors/#account_banned), [`member_limit`](/docs/reference/errors/#member_limit), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-operator-users-update"><code>POST /operator/users/update</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `users`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session |
+| Input | JSON { userId, name?, image?, reason }. At least one of `name` and `image`. Null clears a field. A name and an image follow the rules of [`POST /user/update`](#post-user-update). `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D. Any other key, such as `password`, `email`, or `emailVerified`, answers `invalid_body` |
+| Answer | `{ user, auditId }`: the user as `GET /operator/users` gives it. The audit row names the changed fields, never a value. The act sends no mail. A user id that names no user answers 404 `not_found` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+
+<h3 id="post-operator-users-delete"><code>POST /operator/users/delete</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | The operator secret; or a session cookie, or a `ts_` bearer token. A secret needs the scope `delete`. A session needs the operator user guard: the platform role, a verified address, a second factor, and a fresh session. Each call of an actor counts on `operator-delete:actor:<kind>:<id>`, 100 per hour, before the body and the scope check |
+| Input | JSON { userId, reason }. `reason` is 1 to 500 UTF-16 code units with no control character, line or paragraph separator, lone surrogate, or format character except U+200C and U+200D |
+| Answer | `{ organizations, auditId }`: the ids of the solo organizations that went with the account. The delete ends every session, and mails the notice `account_deleted` with no IP. The last owner of an organization with other members answers `sole_owner`. On D1, a delete that cannot fit 50 queries answers `delete_too_large`. A refusal changes nothing. A user id that names no user answers 404 `not_found` |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`operator_required`](/docs/reference/errors/#operator_required), [`rate_limited`](/docs/reference/errors/#rate_limited), [`operator_self`](/docs/reference/errors/#operator_self), [`sole_owner`](/docs/reference/errors/#sole_owner), [`delete_too_large`](/docs/reference/errors/#delete_too_large), [`conflict`](/docs/reference/errors/#conflict), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
 
 <h3 id="post-operator-sessions-end-user"><code>POST /operator/sessions/end-user</code></h3>
 

@@ -49,8 +49,8 @@ export interface OperatorCall {
 export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit";
 
 /**
- * The text of each refusal code that a write of plan 12f can answer to a
- * secret caller, by its cause. `operator_required` and `invalid_body` have
+ * The text of each refusal code that a write of plans 12f and 12f2 can
+ * answer to a secret caller, by its cause. `operator_required` and `invalid_body` have
  * their own texts in `operatorCall`; 401, 404, and 429 have theirs by
  * status. The codes of `USER_ACTOR_CODES` are not here: core answers them
  * to a request with a session only, and the CLI always calls with a
@@ -66,6 +66,10 @@ export const REFUSALS: Readonly<Record<string, string>> = {
   totp_not_enabled: "the user has no second factor on",
   hook_refused: "a hook of the deployment refused the act (hooks.operator.beforeAction)",
   hook_failed: "a hook of the deployment failed; read the log of the deployment",
+  sole_owner:
+    "the user is the last owner of an organization with other members, or of the platform organization; make another member an owner first",
+  delete_too_large:
+    "the account holds too many organizations to delete in one call on D1; delete the organizations that the user alone holds first",
 };
 
 /** The parsed values of the four operator flags of `OPERATOR_FLAGS`. */

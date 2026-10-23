@@ -176,6 +176,18 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
   },
   {
     method: "POST",
+    path: "/operator/users/update",
+    reason:
+      "an operator tool: the CLI and the compat admin path call it in plan 12f2 Tasks 6 and 7; the client SDK has no operator call",
+  },
+  {
+    method: "POST",
+    path: "/operator/users/delete",
+    reason:
+      "an operator tool: the CLI and the compat admin path call it in plan 12f2 Tasks 6 and 7; the client SDK has no operator call",
+  },
+  {
+    method: "POST",
     path: "/operator/sessions/end-user",
     reason:
       "an operator tool: the sessions end command of the CLI calls it (plan 12f); the client SDK has no operator call",

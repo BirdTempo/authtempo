@@ -51,6 +51,9 @@ const TOOL_ROUTES = [
   { key: "GET /operator/audit", scope: "audit" },
 ] as const;
 
+/** The routes of plan 12f2 Task 5 under the same feature: operator-user-routes.test.ts covers them. */
+const PLAN_12F2_ROUTES = ["POST /operator/users/update", "POST /operator/users/delete"];
+
 type ToolKey = (typeof TOOL_ROUTES)[number]["key"];
 type WriteKey = Extract<ToolKey, `POST ${string}`>;
 const WRITES = TOOL_ROUTES.map((r) => r.key).filter((k): k is WriteKey => k.startsWith("POST "));
@@ -213,7 +216,7 @@ describe("the operator routes (plan 12f Task 10)", () => {
   it("lists the 12f routes in ROUTES with the feature operatorUsers and both credential forms", () => {
     const tagged = ROUTES.filter((r) => r.feature === "operatorUsers");
     expect(tagged.map((r) => `${r.method} ${r.path}`).sort()).toEqual(
-      TOOL_ROUTES.map((r) => r.key).sort(),
+      [...TOOL_ROUTES.map((r) => r.key), ...PLAN_12F2_ROUTES].sort(),
     );
     for (const r of tagged)
       expect(r.auth, `${r.method} ${r.path}`).toEqual(["operator", "session"]);

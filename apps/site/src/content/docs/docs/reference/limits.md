@@ -12,6 +12,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
   - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 4"
   - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 20"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 5"
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.
@@ -102,6 +103,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `operator-users:secret:<name>` | 1 hour | 600 | Every call of one operator secret to the user, session, and audit routes, after the secret matches, from any IP. `OPERATOR_USERS_PER_SECRET` |
 | `operator:user:<userId>` | 1 hour | 600 | Every call of a platform operator, after the operator user guard passes |
 | `operator-impersonate:user:<userId>` | 1 hour | 20 | Impersonation starts of one platform operator |
+| `operator-delete:actor:<kind>:<id>` | 1 hour | 100 | Every call of one actor to the operator delete route, before the body and the scope check. The subject is `secret:<name>` or `user:<userId>`. A delete cannot be undone, so the count bounds what a leaked credential destroys. `OPERATOR_DELETE_PER_ACTOR` |
 | `oauth-register:ip:<ip>` | 1 hour | 10 | OAuth client registration |
 | `oauth-authorize:ip:<ip>` | 15 minutes | 60 | OAuth authorize, and each `GET /oauth/device` with no session. The count runs before a request is held for the sign-in |
 | `oauth-token:ip:<ip>` | 15 minutes | 60 | OAuth token and revoke. A device poll counts here unless it names a known code and the client of that code. A failed client auth of any poll counts here too |

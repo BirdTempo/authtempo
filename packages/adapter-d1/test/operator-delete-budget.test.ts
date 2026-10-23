@@ -7,7 +7,7 @@ import {
 } from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
-import { createD1Adapter } from "../src/index.js";
+import { createD1Adapter, createD1Limiter } from "../src/index.js";
 
 // The operator update and the operator delete on real D1 (ruling 1 of plan
 // 12f2, items B1 and B2). D1 Free allows 50 queries per invocation (D1
@@ -16,9 +16,11 @@ import { createD1Adapter } from "../src/index.js";
 // limits page updated 12 October 2026, read 2026-10-21). The view of the
 // binding refuses query 51 as D1 Free does.
 //
-// The operator routes come in plan 12f2 Task 5. Until then each test calls
-// `auth.api` and adds the calls of the route before the act by hand
-// (`ROUTE_BEFORE`). The ready check runs in the act, on the counting view.
+// The tests of `auth.api` add the calls of the route before the act by
+// hand (`ROUTE_BEFORE`). The ready check runs in the act, on the counting
+// view. Since plan 12f2 Task 5 the last tests call the operator routes
+// through `auth.handle` with the D1 limiter on the same view, so each
+// limiter statement counts as D1 counts it.
 
 const BASE = "https://api.example.com";
 const APP_ORIGIN = "https://app.example.com";
@@ -27,6 +29,8 @@ const APP = { kind: "app", name: "support-tool" } as const;
 const ERASURE = { kind: "secret", name: "erasure", scopes: ["users", "delete"] } as const;
 const SUPPORT = { kind: "secret", name: "support", scopes: ["users"] } as const;
 const REASON = { reason: "Ticket 4521", ip: null, userAgent: null };
+/** The reason of a route body. */
+const ROUTE_REASON = { reason: "Ticket 4521" };
 
 /**
  * The calls of the route of a secret before the act: the limiter per IP
@@ -103,17 +107,22 @@ async function sha256Hex(text: string): Promise<string> {
 /**
  * The engine on `db`: the OAuth provider with back-channel logout, a
  * `session.afterEnd` hook, the platform organization, and the user tools
- * with impersonation. Each call makes a new adapter: one invocation. The
- * limiter allows all: the route limiters count in `ROUTE_BEFORE`.
+ * with impersonation. Each call makes a new adapter: one invocation. By
+ * default the limiter allows all: the route limiters count in
+ * `ROUTE_BEFORE`. A route test passes the D1 limiter on `db`.
  */
-async function engine(db: D1Database, sent: MailMessage[]) {
+async function engine(
+  db: D1Database,
+  sent: MailMessage[],
+  limiter: AuthConfig["limiter"] = { allow: async () => true },
+) {
   const input: AuthConfig = {
     baseURL: BASE,
     secret: "0123456789abcdef0123456789abcdef",
     trustedOrigins: [APP_ORIGIN],
     storage: createD1Adapter(db),
     clock,
-    limiter: { allow: async () => true },
+    limiter,
     mail: {
       send: async (m) => {
         sent.push(m);
@@ -296,10 +305,14 @@ async function platformOperator(auth: Auth, sent: MailMessage[], email: string) 
   return token;
 }
 
-/** One invocation of the act on a counting view with a cap of 50: its answer, queries, mails, and posts. */
-async function act<T>(sent: MailMessage[], call: (auth: Auth) => Promise<T>) {
+/**
+ * One invocation of the act on a counting view with a cap of 50: its
+ * answer, queries, mails, and posts. With `limited` the D1 limiter runs on
+ * the same view, so its statements count.
+ */
+async function act<T>(sent: MailMessage[], call: (auth: Auth) => Promise<T>, limited = false) {
   const { db, count } = counting(env.DB, 50);
-  const auth = await engine(db, sent);
+  const auth = await engine(db, sent, limited ? createD1Limiter(db, clock) : undefined);
   const mails = sent.length;
   const before = posts.length;
   const answer = await call(auth);
@@ -660,5 +673,112 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     expect([r.refused, r.mails, r.posts]).toEqual([0, 0, 0]);
     // Measured 2026-10-22: the act with the route before it. The worst is 31 (updateUser).
     expect(ROUTE_BEFORE + r.queries).toBe(13);
+  }, 120_000);
+
+  /**
+   * One invocation of a route through `auth.handle`, with the D1 limiter on
+   * the counting view: the status, the body, and the whole count, with each
+   * mail and each post.
+   */
+  async function route(sent: MailMessage[], path: string, body: unknown, headers: HeadersInit) {
+    return act(
+      sent,
+      async (auth) => {
+        const res = await auth.handle(
+          new Request(`${BASE}/auth${path}`, {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              "cf-connecting-ip": "203.0.113.9",
+              ...Object.fromEntries(new Headers(headers)),
+            },
+            body: JSON.stringify(body),
+          }),
+        );
+        return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+      },
+      true,
+    );
+  }
+
+  /**
+   * The counts of the routes on the binding on 2026-10-24 (plan 12f2 Task
+   * 5): each whole invocation with the router, the D1 limiter, the act,
+   * and the mail. The secret delete meets 50 as the act of the load does.
+   * The platform operator meets 48: the route before the act costs 8, not
+   * the 10 that the budget keeps, so the page ends no session and the sweep
+   * ends all. The update by a secret, then by a platform operator.
+   */
+  const ROUTE_COUNTS = {
+    secretDelete: { act: 50, inAct: 6 },
+    userDelete: { act: 48, inAct: 0 },
+    update: [13, 20],
+  };
+
+  const SECRET_HEADER = { authorization: "Operator operator-erasure-0123456789abcdef-0123" };
+  const UPDATE_HEADER = { authorization: "Operator operator-support-0123456789abcdef-0123" };
+  const cookieOf = (token: string) => ({
+    cookie: `__Host-tempo_session=${token}`,
+    origin: APP_ORIGIN,
+  });
+
+  it(`deletes through the route by a secret a user with 60 sessions, 10 client links, and ${SOLO_FITS} solo organization in 50 calls (plan 12f2 Task 5)`, async () => {
+    const sent: MailMessage[] = [];
+    const { userId, organizations } = await loaded(sent, SOLO_FITS);
+    const r = await route(
+      sent,
+      "/operator/users/delete",
+      { userId, ...ROUTE_REASON },
+      SECRET_HEADER,
+    );
+    expect(r.answer).toEqual({ status: 200, body: { organizations, auditId: expect.any(String) } });
+    expect(r.refused).toBe(0);
+    expect([r.mails, r.posts]).toEqual([1, 0]);
+    const calls = r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    expect({ act: calls, inAct: endings.length }).toEqual(ROUTE_COUNTS.secretDelete);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+  }, 300_000);
+
+  it(`deletes through the route as a platform operator a user with 60 sessions and ${USER_SOLO_FITS} solo organization in 50 calls (plan 12f2 Task 5)`, async () => {
+    const sent: MailMessage[] = [];
+    const { setup, userId, organizations } = await loaded(sent, USER_SOLO_FITS);
+    const token = await platformOperator(setup, sent, "op@example.com");
+    endings.length = 0;
+    const r = await route(
+      sent,
+      "/operator/users/delete",
+      { userId, ...ROUTE_REASON },
+      cookieOf(token),
+    );
+    expect(r.answer).toEqual({ status: 200, body: { organizations, auditId: expect.any(String) } });
+    expect(r.refused).toBe(0);
+    expect([r.mails, r.posts]).toEqual([1, 0]);
+    const calls = r.queries + r.mails + r.posts;
+    expect(calls).toBeLessThanOrEqual(50);
+    expect({ act: calls, inAct: endings.length }).toEqual(ROUTE_COUNTS.userDelete);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+  }, 300_000);
+
+  it("updates a name through the route by a secret and as a platform operator in 50 calls (plan 12f2 Task 5)", async () => {
+    const sent: MailMessage[] = [];
+    const setup = await engine(env.DB, sent);
+    const { userId } = await signIns(setup, sent, "ada@example.com", 1);
+    const token = await platformOperator(setup, sent, "op@example.com");
+    const counts: number[] = [];
+    for (const headers of [UPDATE_HEADER, cookieOf(token)]) {
+      const r = await route(
+        sent,
+        "/operator/users/update",
+        { userId, name: "Ada", ...ROUTE_REASON },
+        headers,
+      );
+      expect(r.answer).toMatchObject({ status: 200, body: { user: { id: userId, name: "Ada" } } });
+      expect([r.refused, r.mails, r.posts]).toEqual([0, 0, 0]);
+      counts.push(r.queries);
+      current = new Date(current.getTime() + 1);
+    }
+    for (const c of counts) expect(c).toBeLessThanOrEqual(50);
+    expect(counts).toEqual(ROUTE_COUNTS.update);
   }, 120_000);
 });

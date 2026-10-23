@@ -23,7 +23,8 @@ const count = (text: string) => text.split(RULE).length - 1;
 const COPIES: [string, number][] = [
   [`${DOCS}docs/reference/api.md`, 2],
   // Plan 12d Task 2b adds the override of enforce: 9 became 10.
-  [`${DOCS}docs/reference/routes.md`, 10],
+  // Plan 12f2 Task 5 adds the rows of the operator update and delete: 10 became 12.
+  [`${DOCS}docs/reference/routes.md`, 12],
   [`${DOCS}docs/guides/operator-tools.mdx`, 1],
   [`${DOCS}docs/concepts/threat-model.md`, 1],
   ...[

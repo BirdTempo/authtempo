@@ -84,7 +84,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12i Task 10 adds the nonce and the sign-in of the ID-token route.
     // Plan 12i Task 20 adds POST /password/verify/code.
     // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
-    expect(listed.length).toBe(204);
+    // Plan 12f2 Task 5 adds POST /operator/users/update and /delete.
+    expect(listed.length).toBe(206);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
