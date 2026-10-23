@@ -213,6 +213,10 @@ describe("the operator update (plan 12f2 Task 4)", () => {
         status: 403,
       });
     }
+    // The delete refuses inside its transaction, after its lock (ruling 5 of
+    // plan 12f2, L1): the lock write goes back, and no audit row stays.
+    expect(await userOf(w, w.root.id)).toEqual(w.root);
+    expect(await auditRows(w, "user_delete")).toEqual([]);
     // A secret acts on a platform operator.
     expect(
       (await w.api.update({ actor: w.support, userId: w.root.id, ...asked, ...REASON })).ok,
@@ -551,8 +555,10 @@ describe("the operator delete (plan 12f2 Task 4)", () => {
     const solo = await soloOrganization(w, ada.user, "ada-solo");
     // Another request reads through the same adapter while the delete reads
     // the member rows. The meter of the adapter counts its 30 statements too
-    // (ruling 4 of plan 12f2).
+    // (ruling 4 of plan 12f2). The size check runs only on a store with a
+    // per-invocation query limit (ruling 5), so this memory store claims one.
     const storage = w.auth.storage as StorageAdapter;
+    storage.queryLimitPerInvocation = true;
     const transaction = storage.transaction.bind(storage);
     storage.transaction = (fn) =>
       transaction((tx) =>
@@ -573,11 +579,13 @@ describe("the operator delete (plan 12f2 Task 4)", () => {
     expect(await userOf(w, ada.user.id)).toBeNull();
   });
 
-  it("refuses a delete that cannot fit its budget with delete_too_large, and changes nothing", async () => {
+  it("refuses a delete that cannot fit its budget with delete_too_large on a store with a per-invocation query limit, and changes nothing", async () => {
     const w = await world();
     const ada = await verifiedSession(w.auth, ADA);
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) ids.push((await soloOrganization(w, ada.user, `solo-${i}`)).id);
+    // D1 claims the limit (ruling 5 of plan 12f2). This memory store claims it too.
+    (w.auth.storage as StorageAdapter).queryLimitPerInvocation = true;
     expect(await w.api.delete({ actor: w.erasure, userId: ada.user.id, ...REASON })).toEqual({
       ok: false,
       code: "delete_too_large",
@@ -591,5 +599,22 @@ describe("the operator delete (plan 12f2 Task 4)", () => {
     expect(await resolveSession(w.auth.config, ada.token)).not.toBeNull();
     expect(await auditRows(w, "user_delete")).toEqual([]);
     expect(w.notices).toEqual([]);
+  });
+
+  it("never refuses on size on memory, a store with no per-invocation query limit (ruling 5 of plan 12f2)", async () => {
+    const w = await world();
+    const ada = await verifiedSession(w.auth, ADA);
+    const ids: string[] = [];
+    for (let i = 0; i < 6; i++) ids.push((await soloOrganization(w, ada.user, `solo-${i}`)).id);
+    expect(w.auth.storage.queryLimitPerInvocation).toBeUndefined();
+    // A user actor has the smallest budget: 6 solo organizations pass it by far.
+    expect(await w.api.delete({ actor: w.asOperator, userId: ada.user.id, ...REASON })).toEqual({
+      ok: true,
+      value: { organizations: expect.any(Array), auditId: expect.any(String) },
+    });
+    expect(await userOf(w, ada.user.id)).toBeNull();
+    expect(
+      await w.auth.storage.findMany("organization", [{ field: "id", op: "in", value: ids }]),
+    ).toEqual([]);
   });
 });

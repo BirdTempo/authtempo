@@ -35,6 +35,15 @@ const REASON = { reason: "Ticket 4521", ip: null, userAgent: null };
  */
 const ROUTE_BEFORE = 3;
 
+/**
+ * The calls of the route of a platform operator (a user actor) before the
+ * act: `OPERATOR_CALLS_BEFORE.user` (9: the impersonation step of the
+ * router, the route limiter, `resolveSession`, and the guard) and the
+ * per-actor limiter of plan 12f2 Task 5 (1). The D1 test
+ * operator-sessions-budget.test.ts counts the 9 on the binding.
+ */
+const USER_ROUTE_BEFORE = 10;
+
 /** The key that gives the statement of the binding under a counting view. */
 const RAW = Symbol("raw");
 
@@ -336,8 +345,11 @@ async function sweepAll(sent: MailMessage[]) {
  * Each sign-in and each link gets its own millisecond: with one time for
  * all, the order of the rows changed the sweep counts from run to run.
  */
-const LOAD_COUNTS = { act: 50, inAct: 5, sweeps: [48, 48, 48, 48, 29] };
-const OPERATOR_COUNTS = { act: 50, inAct: 5, sweeps: [48, 48, 37] };
+// Ruling 5 of plan 12f2 (2026-10-24) took the target read out of the
+// delete. The load act then ends 6 sessions, was 5, and its last sweep is
+// 28, was 29. The operator act makes 49, was 50: a page ends whole sessions.
+const LOAD_COUNTS = { act: 50, inAct: 6, sweeps: [48, 48, 48, 48, 28] };
+const OPERATOR_COUNTS = { act: 49, inAct: 5, sweeps: [48, 48, 37] };
 
 /**
  * The most solo organizations that the operator delete of the load takes
@@ -349,10 +361,33 @@ const SOLO_FITS = 1;
 /**
  * The most memberships in organizations of other users that the delete of
  * the load with `SOLO_FITS` solo organization takes. Each costs 2 reads of
- * the organization rule. At this count the least work meets the budget
- * exactly (ruling 4 of plan 12f2, measured on the binding on 2026-10-24).
+ * the organization rule. At this count the least work fits the budget
+ * (ruling 4 of plan 12f2, measured on the binding on 2026-10-24). With no
+ * `targetOf` (ruling 5) it is 44 of 45; a membership costs 2, so the next
+ * one passes the budget. The user actor holds the exact edge.
  */
 const EDGE_MEMBERSHIPS = 3;
+
+/**
+ * The most solo organizations that the operator delete of the load takes
+ * for a user actor, measured on the binding on 2026-10-24 (ruling 5 of
+ * plan 12f2). Its work budget is 38 calls: 50, less 11 before the act and
+ * the audit row. The delete reads its target in the lock and in the
+ * organization rule, with no `targetOf`. So 1 solo organization meets the
+ * budget exactly: 7 calls before the size check and 31 of least work.
+ */
+const USER_SOLO_FITS = 1;
+
+/**
+ * The counts of the user-actor deletes on the binding on 2026-10-24, by
+ * solo organizations: the act with the route before it, and the sessions
+ * that it ended. At the edge the page gets its least: the read and the
+ * pending-end row, and the sweep ends the rest.
+ */
+const USER_COUNTS = [
+  { solos: 0, act: 50, inAct: 11 },
+  { solos: 1, act: 50, inAct: 0 },
+];
 
 describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => {
   beforeEach(async () => {
@@ -548,6 +583,69 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     expect({ act: calls, inAct, sweeps: sweeps.map((s) => s.queries + s.posts) }).toEqual(
       OPERATOR_COUNTS,
     );
+  }, 300_000);
+
+  /** A platform operator in the world of `setup`, as the actor of a delete. */
+  async function userActor(setup: Auth, sent: MailMessage[]) {
+    const token = await platformOperator(setup, sent, "op@example.com");
+    const resolved = await setup.api.getSession(token);
+    if (!resolved) throw new Error("no session");
+    endings.length = 0;
+    return { kind: "user", user: resolved.user, session: resolved.session } as const;
+  }
+
+  for (const { solos } of USER_COUNTS)
+    it(`deletes as a platform operator a user with 60 sessions and ${solos} solo organizations in 50 calls (ruling 5 of plan 12f2)`, async () => {
+      const sent: MailMessage[] = [];
+      const { setup, userId, tokens, organizations } = await loaded(sent, solos);
+      const actor = await userActor(setup, sent);
+      const r = await act(sent, (auth) =>
+        auth.api.operator.users.delete({ actor, userId, ...REASON }),
+      );
+      expect(r.answer).toEqual({ ok: true, value: { organizations, auditId: expect.any(String) } });
+      expect(r.refused).toBe(0);
+      expect([r.mails, r.posts]).toEqual([1, 0]);
+      const calls = USER_ROUTE_BEFORE + r.queries + r.mails + r.posts;
+      expect(calls).toBeLessThanOrEqual(50);
+      expect(await rows("ta_user", `id = '${userId}'`)).toBe(0);
+      for (const token of tokens) expect(await setup.api.getSession(token)).toBeNull();
+      expect({ solos, act: calls, inAct: endings.length }).toEqual(
+        USER_COUNTS.find((c) => c.solos === solos),
+      );
+    }, 300_000);
+
+  it(`refuses as a platform operator ${USER_SOLO_FITS + 1} solo organizations with delete_too_large in 50 calls, and changes nothing`, async () => {
+    const sent: MailMessage[] = [];
+    const { setup, userId, tokens, organizations } = await loaded(sent, USER_SOLO_FITS + 1);
+    const actor = await userActor(setup, sent);
+    const r = await act(sent, (auth) =>
+      auth.api.operator.users.delete({ actor, userId, ...REASON }),
+    );
+    expect(r.answer).toEqual({ ok: false, code: "delete_too_large", status: 409 });
+    expect(r.refused).toBe(0);
+    expect(USER_ROUTE_BEFORE + r.queries + r.mails + r.posts).toBeLessThanOrEqual(50);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(1);
+    expect(await rows("ta_session", `user_id = '${userId}'`)).toBe(60);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(organizations.length);
+    expect(await rows("ta_operator_audit", "action = 'user_delete'")).toBe(0);
+    expect(endings).toEqual([]);
+    expect(await setup.api.getSession(tokens.at(-1) ?? "")).not.toBeNull();
+  }, 300_000);
+
+  it(`refuses as a platform operator ${USER_SOLO_FITS} solo organization and 1 membership: the edge is exact`, async () => {
+    const sent: MailMessage[] = [];
+    const { setup, userId } = await loaded(sent, USER_SOLO_FITS);
+    await memberships(setup, sent, userId, 1);
+    const actor = await userActor(setup, sent);
+    const r = await act(sent, (auth) =>
+      auth.api.operator.users.delete({ actor, userId, ...REASON }),
+    );
+    // The membership adds 2 reads of the organization rule: 40 of 38.
+    expect(r.answer).toEqual({ ok: false, code: "delete_too_large", status: 409 });
+    expect(r.refused).toBe(0);
+    expect(await rows("ta_user", `id = '${userId}'`)).toBe(1);
+    expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(USER_SOLO_FITS + 1);
+    expect(endings).toEqual([]);
   }, 300_000);
 
   it("updates a name in 50 calls", async () => {

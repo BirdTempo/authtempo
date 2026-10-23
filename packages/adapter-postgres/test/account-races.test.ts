@@ -2164,4 +2164,74 @@ describe("the operator delete races on Postgres (plan 12f2 Task 4)", () => {
       expect(members.map((m) => m.user_id)).toEqual([ada.user.id]);
     }
   }, 60_000);
+
+  /** A platform operator through `createAdmin` and a sign-in, as the actor of an act. */
+  async function platformOperator(w: ReturnType<typeof operatorWorld>, email: string) {
+    const made = await w.auth.api.operator.createAdmin({
+      actor: APP,
+      email,
+      reason: "First operator",
+      ip: null,
+      userAgent: null,
+    });
+    if (!made.ok) throw new Error(made.code);
+    const s = await w.signIn(email);
+    return { kind: "user", user: s.user, session: s.session } as const;
+  }
+
+  it("a platform operator deletes a user with 3 solo organizations: Postgres has no per-invocation query limit, so no size check (ruling 5 of plan 12f2)", async () => {
+    const w = operatorWorld();
+    const actor = await platformOperator(w, "op@example.com");
+    const ada = await w.signIn("ada@example.com");
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const made = await w.auth.api.createOrganization({
+        user: ada.user,
+        slug: `solo-${i}`,
+        name: "Solo",
+      });
+      if (!made.ok) throw new Error(made.code);
+      ids.push(made.value.organization.id);
+    }
+    // On D1 a user actor fits 1 solo organization; 2 answer delete_too_large.
+    const deleted = await w.auth.api.operator.users.delete({
+      actor,
+      userId: ada.user.id,
+      ...REASON,
+    });
+    expect(deleted).toEqual({
+      ok: true,
+      value: { organizations: ids, auditId: expect.any(String) },
+    });
+    await w.auth.api.sweepExpired();
+    expect(await rowsOf(ada.user.id)).toBe(0);
+  }, 60_000);
+
+  it("a platform operator deletes a user beside a grant of the platform role, a delay sweep: never both, and no platform operator goes (ruling 5 of plan 12f2, L1)", async () => {
+    const w = operatorWorld();
+    const actor = await platformOperator(w, "op@example.com");
+    // The grant reads its target before its transaction, so the delete starts
+    // 0 to 11 ms after it. The two transactions then overlap in some rounds.
+    for (let round = 0; round < 12; round++) {
+      const target = await w.signIn(`target-${round}@example.com`);
+      const [granted, deleted] = await Promise.all([
+        w.auth.api.operator.platformRole.grant({ actor: APP, userId: target.user.id, ...REASON }),
+        (async () => {
+          await new Promise((r) => setTimeout(r, round));
+          return w.auth.api.operator.users.delete({ actor, userId: target.user.id, ...REASON });
+        })(),
+      ]);
+      // Both hold the user row: the later one waits, then reads the rows again.
+      expect([granted.ok, deleted.ok]).not.toEqual([true, true]);
+      if (deleted.ok) {
+        if (!granted.ok) expect(["not_found", "conflict"]).toContain(granted.code);
+        await w.auth.api.sweepExpired();
+        expect(await rowsOf(target.user.id)).toBe(0);
+      } else {
+        expect(deleted).toEqual({ ok: false, code: "operator_required", status: 403 });
+        expect(granted.ok).toBe(true);
+        expect(await w.auth.api.getSession(target.token)).not.toBeNull();
+      }
+    }
+  }, 60_000);
 });

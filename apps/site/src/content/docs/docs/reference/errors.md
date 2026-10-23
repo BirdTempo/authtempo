@@ -543,7 +543,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="delete_too_large"><code>delete_too_large</code> 409</h3>
 
-- **Meaning:** The delete does not fit one request, so it changes nothing. An account delete answers it when the account is the only member of more than 50 organizations. An organization delete answers it when the organization has more than 500 SCIM Groups. The operator delete of an account also answers it when its least work cannot fit its call budget of 50 storage calls (plan 12f2).
+- **Meaning:** The delete does not fit one request, so it changes nothing. An account delete answers it when the account is the only member of more than 50 organizations. An organization delete answers it when the organization has more than 500 SCIM Groups. The operator delete of an account answers it for the same count of organizations. On D1, which allows 50 queries per invocation on Workers Free, it also answers it when its least work cannot fit that budget (plan 12f2). A store tells such a limit with `queryLimitPerInvocation`; Postgres, MySQL, SQLite, and memory have none.
 - **Do:** For an account, delete those organizations with [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete) first. For an organization, let the directory delete some groups first. Then send the delete again.
 
 | Routes |

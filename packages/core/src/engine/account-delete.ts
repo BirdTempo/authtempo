@@ -400,6 +400,7 @@ async function runDelete(
         counted,
         budget: OPERATOR_CALL_BUDGET,
         refuseAfter: null,
+        refusePlatform: false,
       });
       return ok({ user, going });
     }),
@@ -530,11 +531,17 @@ export async function deleteAccountRows(
     /** The calls of `meter` that the invocation may make. */
     budget: number;
     /**
-     * Null: no size check (the self delete). A number: the calls of `meter`
+     * Null: no size check (the self delete, and the operator delete on a
+     * store with no per-invocation query limit). A number: the calls of `meter`
      * that the caller made before this call, at the worst. Then a delete
      * whose least work passes `budget` answers `delete_too_large`.
      */
     refuseAfter: number | null;
+    /**
+     * True for a user actor: a target who holds the platform role answers
+     * `operator_required` (`organizationsOfDelete`, ruling 5 of plan 12f2).
+     */
+    refusePlatform: boolean;
   },
 ): Promise<OrganizationRow[]> {
   const byId: Where<"user">[] = [{ field: "id", op: "eq", value: user.id }];
@@ -549,7 +556,7 @@ export async function deleteAccountRows(
   // lock, in the order of user-hold.ts (ruling 65 of plan 12f).
   const hold = await holdImpersonations(tx, config, user.id, now, true);
   const counted = readCounted(tx);
-  const plan = await organizationsOfDelete(config, counted.storage, user.id);
+  const plan = await organizationsOfDelete(config, counted.storage, user.id, proof.refusePlatform);
   if (!plan.ok) stopWith(plan.code);
   const { going, owned } = plan.value;
   // The least calls after this point, at the worst: the owner lock (a batch

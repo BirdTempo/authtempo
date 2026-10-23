@@ -155,6 +155,14 @@ export interface StorageAdapter {
    */
   statementsSent?(): number;
   /**
+   * Optional. True when the database caps the queries of one invocation.
+   * D1 allows 50 queries per invocation on Workers Free (D1 limits page
+   * updated 21 April 2026, read 2026-10-21). Only on such a store does the
+   * operator delete answer `delete_too_large` (ruling 5 of plan 12f2).
+   * Postgres, MySQL, SQLite, and memory have no such cap and leave it out.
+   */
+  queryLimitPerInvocation?: boolean;
+  /**
    * Optional. Inside a transaction, takes the row locks of the rows that
    * `where` matches, by `id` ascending (ruling 36 of plan 12f). The caller
    * then writes them. One DELETE locks rows in the order of its scan. So

@@ -20,7 +20,7 @@ import {
 } from "./hooks.js";
 import { endImpersonationsPage } from "./operator/access-end.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
-import { writesPlatformRole } from "./operator/guards.js";
+import { holdsPlatformRole, writesPlatformRole } from "./operator/guards.js";
 import { holdImpersonations } from "./operator/impersonation.js";
 import { OPERATOR_CALL_BUDGET, STEP_WORST } from "./operator/sessions.js";
 import {
@@ -840,11 +840,21 @@ export interface AccountOrganizations {
  * So its last owner answers `sole_owner`, also as its only member. Any other
  * membership goes with no check. It reads through `storage`, the delete's
  * transaction, after the lock of the user row.
+ *
+ * With `refusePlatform`, a user who holds the platform role answers
+ * `operator_required` before any other answer (ruling 5 of plan 12f2,
+ * L1). A user actor does not delete a platform operator. The rule reads
+ * the member rows and the organizations anyway, so the check costs no
+ * call. It reads them after the user hold. A grant that adds the member
+ * row holds the user row too, so the two run one at a time on Postgres
+ * and MySQL. D1 has no lock: a grant that lands after this read and
+ * before the member delete loses its row with the account.
  */
 export async function organizationsOfDelete(
   config: ResolvedConfig,
   storage: StorageAdapter,
   userId: string,
+  refusePlatform = false,
 ): Promise<Result<AccountOrganizations>> {
   const plan: AccountOrganizations = { going: [], owned: [] };
   const o = on(config);
@@ -864,6 +874,17 @@ export async function organizationsOfDelete(
       )
     ).map((x) => [x.id, x]),
   );
+  if (
+    refusePlatform &&
+    mine.some((m) => {
+      const organization = organizations.get(m.organizationId);
+      return (
+        organization?.slug === o.platformOrganization &&
+        holdsPlatformRole(config, organization.id, m)
+      );
+    })
+  )
+    return fail("operator_required");
   const all = await findManyIn(storage, "member", "organizationId", [...organizations.keys()]);
   for (const m of mine) {
     const organization = organizations.get(m.organizationId);

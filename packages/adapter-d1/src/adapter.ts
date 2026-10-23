@@ -60,6 +60,13 @@ export interface D1AdapterOptions {
    * bind as one JSON list (ruling 84) does not read it.
    */
   boundParams?: number;
+  /**
+   * True on a D1 binding: D1 Free allows 50 queries per invocation, so the
+   * operator delete refuses a delete that cannot fit them (ruling 5 of plan
+   * 12f2). The SQLite adapter runs this code over a local database with no
+   * such limit, and leaves it out.
+   */
+  queryLimitPerInvocation?: boolean;
 }
 
 interface Ctx extends D1AdapterOptions {
@@ -285,6 +292,7 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
       return ctx.sent.statements;
     },
   };
+  if (ctx.queryLimitPerInvocation) self.queryLimitPerInvocation = true;
   if (ctx.ping) self.ping = ctx.ping;
   if (ctx.sent.ready !== undefined) {
     const counts = ctx.sent;

@@ -18,7 +18,7 @@ import { SESSIONS_PAGE_LEAST } from "./access-end.js";
 import { auditDraft, impersonationStops, operatorAct, operatorReason } from "./audit.js";
 import { reasonOf, targetOf } from "./ban.js";
 import { type OperatorActor, requireScope } from "./guards.js";
-import { OPERATOR_CALLS_BEFORE, TARGET_CALLS, workBudget } from "./sessions.js";
+import { OPERATOR_CALLS_BEFORE, workBudget } from "./sessions.js";
 import { type OperatorUser, operatorUsers } from "./users.js";
 
 /**
@@ -54,9 +54,11 @@ export interface OperatorDeleteUser {
 const ACT_LIMIT_CALLS = 1;
 
 /**
- * The least work of a delete after `targetOf`, in storage calls at the
- * worst. The lock of the user row is a read and an update, a batch of 2 on
- * D1. `holdImpersonations` is the audit read and the lock read. The
+ * The least work of a delete, in storage calls at the worst. The delete
+ * has no `targetOf`: the lock of the user row reads the target, and the
+ * organization rule reads its platform role (ruling 5 of plan 12f2). The
+ * lock of the user row is a read and an update, a batch of 2 on D1.
+ * `holdImpersonations` is the audit read and the lock read. The
  * organization rule reads the member rows once. Then the user delete, the
  * deletes of the invitations and the member rows, the least page of the
  * own sessions, and `DELETE_KEEP`.
@@ -193,13 +195,20 @@ async function lockUser(
  * no `account.deleteConfirm`, and no fresh rule of the target.
  *
  * In one transaction with the audit row: the lock of the user row, then
- * `deleteAccountRows`, the one list of the rows of a delete. A solo
- * organization goes with the account. The last owner of an organization
- * with other members answers `sole_owner`. A delete whose least work
- * cannot fit the budget answers `delete_too_large` (ruling 1 of plan 12f2,
- * Q3). Each refusal writes nothing and leaves no audit row. The sessions
- * end in pages, and the sweep ends the rest with `account_deleted`. The
- * audit `data` is `{ organizations }`, and the row keeps no address.
+ * `deleteAccountRows`, the one list of the rows of a delete. A missing
+ * user answers `not_found` at the lock. For a user actor, a target who
+ * holds the platform role answers `operator_required` from the
+ * organization rule, after the lock (ruling 5 of plan 12f2, L1). A read
+ * before the transaction would miss a grant that commits in between. A
+ * solo organization goes with the account. The last owner of an
+ * organization with other members answers `sole_owner`. On a store with a
+ * per-invocation query limit (D1), a delete whose least work cannot fit
+ * the budget answers `delete_too_large` (ruling 1 of plan 12f2, Q3, and
+ * ruling 5). Postgres, MySQL, SQLite, and memory have no such limit, so
+ * they never refuse on size. Each refusal writes nothing and leaves no
+ * audit row. The sessions end in pages, and the sweep ends the rest with
+ * `account_deleted`. The audit `data` is `{ organizations }`, and the row
+ * keeps no address.
  *
  * After the commit come the steps of `accountDeleted`, with no IP and no
  * user agent in the notice (12f deviation 13) and no back-channel logout:
@@ -207,7 +216,8 @@ async function lockUser(
  *
  * The budget counts the whole invocation (ruling 1 of plan 12f2, B2): the
  * calls before the act of `OPERATOR_CALLS_BEFORE`, the per-actor limiter
- * of the route, the ready check, `TARGET_CALLS`, the work, and the audit row.
+ * of the route, the ready check, the work, and the audit row. With no
+ * `targetOf`, a user actor fits one solo organization on D1 (ruling 5).
  */
 export async function deleteUser(
   config: ResolvedConfig,
@@ -218,15 +228,16 @@ export async function deleteUser(
   if (!scoped.ok) return scoped;
   const reason = operatorReason(input.reason);
   if (!reason.ok) return reason;
-  const fixed = TARGET_CALLS[input.actor.kind];
+  if (typeof input.userId !== "string") return fail("invalid_body");
+  if (input.actor.kind === "user" && input.actor.user.id === input.userId)
+    return fail("operator_self");
   const before =
     OPERATOR_CALLS_BEFORE[input.actor.kind] +
     ACT_LIMIT_CALLS +
     ((await config.storage.readyStatements?.()) ?? 1);
-  const budget = await workBudget(config.storage, input.actor, before, fixed + DELETE_LEAST);
+  const budget = await workBudget(config.storage, input.actor, before, DELETE_LEAST);
   if (!budget.ok) return budget;
-  const target = await targetOf(config, input);
-  if (!target.ok) return target;
+  const sized = config.storage.queryLimitPerInvocation === true;
   const drafted = auditDraft(input.actor, {
     action: "user_delete",
     targetUserId: input.userId,
@@ -244,7 +255,8 @@ export async function deleteUser(
     config,
     drafted.value,
     async (tx, draft, ends): Promise<Result<DeletedAccount>> => {
-      const meter = meterOf(tx, fixed);
+      // No storage call of the act comes before its transaction.
+      const meter = meterOf(tx, 0);
       if (stops) stops.rows.length = 0;
       counted.sessions = 0;
       const locked = await lockUser(config, tx, input.userId, now);
@@ -257,7 +269,8 @@ export async function deleteUser(
         meter,
         counted,
         budget: budget.value,
-        refuseAfter: fixed + locked.value.calls,
+        refuseAfter: sized ? locked.value.calls : null,
+        refusePlatform: input.actor.kind === "user",
       });
       // The row is the last write of the act, so it can hold the ids.
       draft.data = { organizations: going.map((o) => o.id) };

@@ -84,7 +84,29 @@ function world() {
     if (!asked.ok) throw new Error(asked.code);
     return { me, token: tokenOf(target) };
   }
-  return { auth, other, race, moving };
+  /** A sign-in by a magic link: the session of the address. */
+  async function signIn(email: string) {
+    await auth.api.requestMagicLink({ email, ip: null });
+    const r = await auth.api.verifyMagicLink({ token: tokenOf(email), ip: null, userAgent: null });
+    if (!r.ok || !("token" in r.value)) throw new Error("no session");
+    const s = await auth.api.getSession(r.value.token);
+    if (!s) throw new Error("no session");
+    return { ...s, token: r.value.token };
+  }
+  /** A platform operator through `createAdmin` and a sign-in, as the actor of an act. */
+  async function platformOperator(email: string) {
+    const made = await auth.api.operator.createAdmin({
+      actor: APP,
+      email,
+      reason: "First operator",
+      ip: null,
+      userAgent: null,
+    });
+    if (!made.ok) throw new Error(made.code);
+    const s = await signIn(email);
+    return { kind: "user", user: s.user, session: s.session } as const;
+  }
+  return { auth, other, race, moving, signIn, platformOperator };
 }
 
 /** The rows that name the user in the user, identity, session, and member tables. */
@@ -141,5 +163,40 @@ describe("the operator delete beside a change of address on D1 (plan 12f2 Task 4
     // The confirm reads the user again after its write, or its undo takes its rows.
     if (!moved.ok) expect(["invalid_token", "token_expired", "conflict"]).toContain(moved.code);
     expect(await rowsOf(me.user.id)).toBe(0);
+  });
+});
+
+describe("the operator delete beside a grant of the platform role on D1 (ruling 5 of plan 12f2, L1)", () => {
+  beforeEach(async () => {
+    await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+  });
+
+  it("a grant inside the delete's transaction, after its lock: a user actor gets operator_required, and nothing goes", async () => {
+    const w = world();
+    const actor = await w.platformOperator("op@example.com");
+    const target = await w.signIn("ada@example.com");
+    let granted: Awaited<ReturnType<typeof w.auth.api.operator.platformRole.grant>> | null = null;
+    w.race.interleave = async () => {
+      granted = await w.other.api.operator.platformRole.grant({
+        actor: APP,
+        userId: target.user.id,
+        ...REASON,
+      });
+    };
+    const deleted = await w.auth.api.operator.users.delete({
+      actor,
+      userId: target.user.id,
+      ...REASON,
+    });
+    expect(w.race.interleave).toBeNull();
+    expect(granted).toMatchObject({ ok: true });
+    // The delete reads the platform role after its lock, so it sees the grant.
+    expect(deleted).toEqual({ ok: false, code: "operator_required", status: 403 });
+    expect(await rowsOf(target.user.id)).toBeGreaterThan(0);
+    const audit = await env.DB.prepare(
+      "SELECT count(*) AS n FROM ta_operator_audit WHERE action = 'user_delete'",
+    ).first("n");
+    expect(Number(audit)).toBe(0);
+    expect(await w.auth.api.getSession(target.token)).not.toBeNull();
   });
 });

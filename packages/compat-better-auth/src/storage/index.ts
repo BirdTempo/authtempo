@@ -144,6 +144,8 @@ export function betterAuthSchemaStorage(
         ready: d1CompatReady(options.db, names, sent),
         ping: d1CompatPing(options.db, names, sent),
         sent,
+        // A D1 binding: 50 queries per invocation on Workers Free (ruling 5 of plan 12f2).
+        queryLimitPerInvocation: true,
       }),
       limiter: createD1Limiter(db),
       migrationSql: (variant?: SqliteVariant) => compatMigrationSql("sqlite", names, variant),
