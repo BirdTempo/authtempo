@@ -1186,6 +1186,21 @@ async function changeUser(
 }
 
 /**
+ * The refusal of a move or a reactivate of a person whose current address
+ * no verified domain of the organization claims (M2 of the final review of
+ * plan 12d, ruling 74). The person moved the account to an address of their
+ * own, so the directory no longer owns it: it cannot move the address back
+ * into the domain, and it cannot give the member row back. The answer is
+ * the one of the address rule of a person in another organization.
+ */
+const LEFT_DOMAIN = () =>
+  scimFail(
+    400,
+    "no verified domain of the organization claims the current address of the user, so the directory cannot change it",
+    "mutability",
+  );
+
+/**
  * The organization owns the address of its own staff, not of a person who
  * also uses the app in other organizations (Behavior 5).
  */
@@ -1271,10 +1286,20 @@ async function writeChange(
   const active = doc?.active ?? false;
   const deactivate = row.active && !active;
   const reactivate = !row.active && active;
-  const move = doc !== null && doc.address !== user.email;
+  // A move is a new address from the directory. An address that the person changed stays when
+  // the directory sends the address it sent before (ruling 74 M2 of plan 12d).
+  const move =
+    doc !== null && doc.address !== user.email && doc.address !== addressOf(row.userName, row.data);
   // The calls that the address move and the name fill add to each round (ruling 69 of plan 12d).
   const fills = doc !== null && user.name === null && nameFrom(doc) !== null;
   const extra = (move ? MOVE_CALLS : 0) + (fills ? NAME_CALLS : 0);
+  // The domain claim of the current address, before a move: one read for the deprovision
+  // and for the rule of a move and a reactivate (ruling 74 M2 of plan 12d).
+  const claimed =
+    deactivate || move || reactivate
+      ? (await claimingDomain(storage, user.email))?.organizationId === caller.organizationId
+      : false;
+  if ((move || reactivate) && !claimed) return LEFT_DOMAIN();
   if (move) {
     const refusal = await addressMove(config, caller, user, doc.address);
     if (refusal) return refusal;
@@ -1285,11 +1310,8 @@ async function writeChange(
     { field: "userId", op: "eq", value: user.id },
   ];
   const member = await storage.findOne("member", byPerson);
-  // The address that the domain claim reads is the one before a move.
-  const claimed = deactivate
-    ? (await claimingDomain(storage, user.email))?.organizationId === caller.organizationId
-    : false;
-  meter.step(deactivate ? 3 : 1);
+  // The claim read counts in the 3 of a deactivate, as before ruling 74.
+  meter.step(deactivate ? 3 : move || reactivate ? 2 : 1);
   const now = config.clock.now();
   const memberUser = user;
   // The member removal of one round, from the member row that its before hook sees.
