@@ -17,7 +17,7 @@ export function kindOn(sso: ResolvedSso, kind: "oidc" | "saml"): boolean {
 }
 
 /** The start path of a connection, under `basePath`. */
-export function ssoStartPath(config: ResolvedConfig, connectionId: string): string {
+function ssoStartPath(config: ResolvedConfig, connectionId: string): string {
   return `${config.basePath}/sso/${connectionId}/start`;
 }
 

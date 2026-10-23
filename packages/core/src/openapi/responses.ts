@@ -27,7 +27,8 @@ export const ERROR_SCHEMAS = {
       },
       detail: {
         type: "string",
-        description: "The SSO start path of the address. Present only on `sso_required`.",
+        description:
+          "The SSO start URL of the address, absolute, on the origin of `baseURL`. Present only on `sso_required`.",
       },
     },
     required: ["error"],

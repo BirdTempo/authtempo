@@ -82,7 +82,7 @@ The second factor gate applies to an SSO sign-in, by `totp.gate.sso` (on by defa
 
 ### The enforce flag
 
-With `enforce: true` on a domain, only SSO signs in an address of that domain. A password, a magic link, an email code, a social provider, and a passkey each answer [`sso_required`](/docs/reference/errors/#sso_required), with the start path in `detail`. A magic link request, an email code request, and a password reset request give their normal answer and send no mail. `enforce` needs a verified domain routed to an enabled connection.
+With `enforce: true` on a domain, only SSO signs in an address of that domain. A password, a magic link, an email code, a social provider, and a passkey each answer [`sso_required`](/docs/reference/errors/#sso_required), with the start URL in `detail`. It is an absolute URL on the origin of `baseURL`, as the discovery answers it, so send the browser there as it is. A magic link request, an email code request, and a password reset request give their normal answer and send no mail. `enforce` needs a verified domain routed to an enabled connection.
 
 ### The operator's override
 
@@ -124,7 +124,7 @@ Core accepts one narrow profile and refuses any construct outside it.
 - [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch): the address is outside the verified domains of the organization.
 - [`sso_not_provisioned`](/docs/reference/errors/#sso_not_provisioned): `jit` is off, and SCIM did not create the person.
 - [`account_disabled`](/docs/reference/errors/#account_disabled): the directory deactivated the person.
-- [`sso_required`](/docs/reference/errors/#sso_required): the domain enforces SSO. Use the start path in `detail`.
+- [`sso_required`](/docs/reference/errors/#sso_required): the domain enforces SSO. Send the browser to the start URL in `detail`.
 - [`email_required`](/docs/reference/errors/#email_required): the provider sent no address.
 - [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person said no at the provider.
 - [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): `signUp` does not let the address become a user, so `jit` creates no user.

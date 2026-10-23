@@ -10,7 +10,7 @@ import {
 import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../../src/engine/password.js";
 import { updateDomain } from "../../src/engine/sso/domains.js";
 import { SoftAuthenticator } from "../../src/testing/soft-authenticator.js";
-import { get, makeAuth, post, tokenFromMail } from "../helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "../helpers.js";
 import { FAST, signUpAndVerify } from "../password-helpers.js";
 import { GOOGLE, tokenEndpoint } from "../social-helpers.js";
 import { codeNow, enrolled } from "../totp-helpers.js";
@@ -233,7 +233,7 @@ async function scene(door: Door, enforce: boolean) {
     userAgent: null,
   });
   if (!routed.ok) throw new Error(routed.code);
-  return { w, call, start: `/auth/sso/${connectionId}/start` };
+  return { w, call, start: `${BASE_URL}/auth/sso/${connectionId}/start` };
 }
 
 const NEW_PASSWORD = "a brand new horse battery";
@@ -262,6 +262,31 @@ describe("the enforcement of a domain (plan 12d Task 5)", () => {
       expect(await res.json()).toEqual({ error: "sso_required", detail: start });
     } else expect(await answerOf(res)).toEqual({ status: 302, code: "sso_required" });
     expect(await newSessions(w, before)).toBe(0);
+  });
+
+  it("answers the start on the baseURL origin when the app is on another origin", async () => {
+    const w = world({ appURL: APP_ORIGIN });
+    expect([w.config.baseURL, w.config.appURL]).toEqual([BASE_URL, APP_ORIGIN]);
+    const { connectionId, domainId } = await acmeWithSso(w);
+    await signUpAndVerify(w, ADA, PASSWORD);
+    const routed = await updateDomain(w.config, SSO_APP, {
+      id: domainId,
+      connectionId,
+      enforce: true,
+      ip: null,
+      userAgent: null,
+    });
+    if (!routed.ok) throw new Error(routed.code);
+    const res = await w.handle(
+      post("/auth/password/sign-in", { email: ADA, password: PASSWORD }, { origin: APP_ORIGIN }),
+    );
+    expect(res.status).toBe(403);
+    const { detail } = (await res.json()) as { detail: string };
+    expect(detail).toBe(`https://api.example.com/auth/sso/${connectionId}/start`);
+    // The app sends the browser to the detail as it is: the start goes to the IdP.
+    const go = await w.handle(new Request(detail));
+    expect(go.status).toBe(302);
+    expect(new URL(go.headers.get("location") ?? "").origin).toBe("https://login.acme-idp.example");
   });
 
   it("sends nothing from a request of an enforced address", async () => {

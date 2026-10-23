@@ -2,13 +2,15 @@ import type { ResolvedConfig } from "../../config.js";
 import { ERRORS } from "../../errors.js";
 import type { Result } from "../../result.js";
 import type { StorageAdapter } from "../../storage/port.js";
-import { ssoStartPath } from "./discover.js";
+import { ssoStartUrl } from "./discover.js";
 import { claimingDomain } from "./domains.js";
 
 /**
  * The enforcement of a domain (plan 12d Task 5 Behavior 10, spec 30 item
- * 12). The start path of SSO when a verified domain with `enforce` claims
- * the address, else null. `email` is a normalized address. With `sso` off
+ * 12). The start URL of SSO when a verified domain with `enforce` claims
+ * the address, else null. The URL is absolute, on the origin of `baseURL`,
+ * as the discovery answers it: an app on another origin sends the browser
+ * there as it is. `email` is a normalized address. With `sso` off
  * the answer is null and nothing is read. Else it is one indexed read of
  * `claimingDomain`. An enforced domain always routes to an enabled
  * connection: `updateDomain` and `updateConnection` keep that rule
@@ -23,13 +25,13 @@ export async function ssoRequiredFor(
   if (!config.sso) return null;
   const domain = await claimingDomain(storage, email);
   if (!domain?.enforce || domain.connectionId === null) return null;
-  return { start: ssoStartPath(config, domain.connectionId) };
+  return { start: ssoStartUrl(config, domain.connectionId, undefined) };
 }
 
 /** A failure of `Result`: the form that a `HookStop` carries out of a transaction. */
 export type SsoRequired = Extract<Result<never>, { ok: false }>;
 
-/** The answer of a first factor of an enforced address: 403 `sso_required` with the start path in `detail`. */
+/** The answer of a first factor of an enforced address: 403 `sso_required` with the start URL in `detail`. */
 export function ssoRequired(start: string): SsoRequired {
   return { ok: false, code: "sso_required", status: ERRORS.sso_required, detail: start };
 }

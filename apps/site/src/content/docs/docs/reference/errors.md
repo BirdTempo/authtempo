@@ -578,7 +578,7 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="sso_required"><code>sso_required</code> 403</h3>
 
-- **Meaning:** The address is in a verified domain whose owner turned `enforce` on, so only SSO signs it in. The body holds `detail`, the SSO start path. A social callback carries the code in the `auth_error` query parameter of the redirect.
+- **Meaning:** The address is in a verified domain whose owner turned `enforce` on, so only SSO signs it in. The body holds `detail`, the SSO start URL: an absolute URL on the origin of `baseURL`. A social callback carries the code in the `auth_error` query parameter of the redirect.
 - **Do:** Send the person to `detail` to sign in through the organization's provider. The magic link, email code, and reset requests of such an address send no mail and answer as usual. A link, a code, or a second factor challenge from before `enforce` went on opens no session either.
 
 | Routes |
