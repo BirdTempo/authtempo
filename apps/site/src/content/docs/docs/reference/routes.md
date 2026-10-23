@@ -1639,7 +1639,17 @@ After its work, the sweep keeps the pending-end row of a deactivate as the recor
 
 In a PATCH, Entra ID sends the manager as a list of one object. The path is `manager` or the path of the enterprise extension. Core reads that object as the `manager` of the enterprise extension. A list of two or more objects answers 400 `invalidValue`.
 
-A write of a mapped group can change the role of a person while a deactivate or a delete of that person runs. The deactivate then reads the member row again under its user hold. When the role changed, the deactivate runs again with its before hooks. It runs at most 5 rounds. A new round that does not fit the D1 Free budget of 50 queries is a small round. A small round removes the member row and ends no session in the request. It writes one pending-end row that covers every session and OAuth refresh family of the person. Each door refuses them at once, and the sweep ends them. So, apart from the 409 below, the deprovision always ends access at once. A test on D1 deactivated a person with 40 sessions, 3 families, and a `session.afterEnd` hook. After 3 lost rounds, it answered in 48 queries (measured 2026-10-24). The answer is 409 only when every round is lost, or when 4 lost rounds leave no room for a small round on D1. D1 stops a request at its 51st query, so core does not start that round. Then nothing changes, so the person keeps access. The directory then marks the push as failed. Okta needs an admin to retry a failed deprovision task (Okta docs, read 2026-10-22).
+A write of a mapped group can change the role of a person while a deactivate or a delete of that person runs. The deactivate then reads the member row again under its user hold. When the role changed, the deactivate runs again with its before hooks. It runs at most 5 rounds. A new round that does not fit the D1 Free budget of 50 queries is a small round. A small round removes the member row and ends no session in the request. It writes one pending-end row that covers every session and OAuth refresh family of the person. Each door refuses them at once, and the sweep ends them. The code exchange and the device poll also refuse an OAuth code or an approved device from before the deprovision. So, apart from the 409 below, the deprovision always ends access at once. A test on D1 deactivated a person with 40 sessions, 3 families, and a `session.afterEnd` hook. After 3 lost rounds, it answered in 48 queries (measured 2026-10-24).
+
+The answer is 409 only when every round is lost, or when no small round fits the D1 Free budget. D1 stops a request at its 51st query, so core does not start that round. An address move and a name fill each add calls to a round, so they leave less room. A round is lost at the member read when a group write changes the role before the deactivate reads the member row again. It is lost at the member delete when the group write comes between that read and the delete. On D1, these cases answer 409 (measured 2026-10-24):
+
+- A deactivate with no address move and no name fill: 4 lost rounds at the member read, or 2 at the member delete.
+- A deactivate that also gives a name to a user with no name: 3 lost rounds at the member read.
+- A deactivate that also moves the address: 2 lost rounds at the member read, or 1 at the member delete.
+- A deactivate that moves the address and gives a name: 1 lost round.
+- A delete: 4 lost rounds at the member read.
+
+Then nothing changes, so the person keeps access. The directory then marks the push as failed. Okta needs an admin to retry a failed deprovision task (Okta docs, read 2026-10-22).
 
 <h3 id="get-scim-v2-users"><code>GET /scim/v2/Users</code></h3>
 
@@ -1674,7 +1684,7 @@ A write of a mapped group can change the role of a person while a deactivate or 
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
 | Input | None. The body is a User, and `If-Match` may name the version |
-| Answer | The User. `active: false` removes the member row, and ends the access of a user whose address the organization's domain claims. A PUT replaces the whole User (RFC 7644 section 3.5.1). A body with no `active` reads as `active: true`, so it reactivates a deactivated user. A deactivate answers 409 only when group writes race each round, or 4 rounds on D1. Then nothing changes. The paragraph on these races above says what the directory does then |
+| Answer | The User. `active: false` removes the member row, and ends the access of a user whose address the organization's domain claims. A PUT replaces the whole User (RFC 7644 section 3.5.1). A body with no `active` reads as `active: true`, so it reactivates a deactivated user. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then |
 | Errors | None |
 
 <h3 id="patch-scim-v2-users-id"><code>PATCH /scim/v2/Users/:id</code></h3>
@@ -1683,7 +1693,7 @@ A write of a mapped group can change the role of a person while a deactivate or 
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
 | Input | None. The body is a PatchOp message of RFC 7644 section 3.5.2, and `If-Match` may name the version |
-| Answer | The User. The operations apply together, or none applies. A deactivate answers 409 only when group writes race each round, or 4 rounds on D1. Then nothing changes. The paragraph on these races above says what the directory does then |
+| Answer | The User. The operations apply together, or none applies. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then |
 | Errors | None |
 
 <h3 id="delete-scim-v2-users-id"><code>DELETE /scim/v2/Users/:id</code></h3>
@@ -1692,7 +1702,7 @@ A write of a mapped group can change the role of a person while a deactivate or 
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
 | Input | None. `If-Match` may name the version |
-| Answer | 204 with no body. The deactivate runs first, and the core user stays. A delete answers 409 only when group writes race each round, or 4 rounds on D1. Then nothing changes. The paragraph on these races above says what the directory does then |
+| Answer | 204 with no body. The deactivate runs first, and the core user stays. A delete answers 409 only when group writes race each round, or after 4 lost rounds on D1. Then nothing changes. The paragraphs on these races above say what the directory does then |
 | Errors | None |
 
 The Groups routes (plan 12d Task 11) serve the groups of the token's organization. A member of a group is a User of the same organization. A group id, an id of another organization, an unknown id, or a `type` other than `User` answers 400 `invalidValue`. Core serves no nested group. Each member in an answer holds `value`, `$ref`, and `type`.
