@@ -308,6 +308,13 @@ export async function grantPlatformRole(
       config,
       drafted.value,
       async (tx) => {
+        // The user row first, in the order of user-hold.ts, before the read
+        // of the member row (ruling 6 of plan 12f2). The operator delete
+        // holds the same row before it reads the platform role. So a grant
+        // that adds the part to an existing row waits for the delete, or the
+        // delete waits and sees the part. A new row holds it against the
+        // account delete too (plan 12a Task 11).
+        await holdUser(config.observe, tx, user.id);
         const member = await memberOf(tx, organization.id, user.id);
         const change = await addRolePart(
           config,
@@ -317,11 +324,7 @@ export async function grantPlatformRole(
           now,
         );
         if (!change.ok) return change;
-        // A new row holds the user row against the account delete (plan 12a
-        // Task 11). A change of the parts of a row needs no hold: a deleted
-        // row matches zero rows.
         const added = change.value?.kind === "add";
-        if (added) await holdUser(config.observe, tx, user.id);
         const written = await writePart(tx, change.value);
         if (!written.ok) return written;
         if (added) await userStays(tx, user.id);

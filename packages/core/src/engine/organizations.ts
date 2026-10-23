@@ -845,10 +845,11 @@ export interface AccountOrganizations {
  * `operator_required` before any other answer (ruling 5 of plan 12f2,
  * L1). A user actor does not delete a platform operator. The rule reads
  * the member rows and the organizations anyway, so the check costs no
- * call. It reads them after the user hold. A grant that adds the member
- * row holds the user row too, so the two run one at a time on Postgres
- * and MySQL. D1 has no lock: a grant that lands after this read and
- * before the member delete loses its row with the account.
+ * call. It reads them after the user hold. The grant and a role change
+ * that add the platform role part hold the user row first too (ruling 6
+ * of plan 12f2), so the two run one at a time on Postgres and MySQL. D1
+ * has no lock: a grant that lands after this read and before the member
+ * delete loses its row with the account.
  */
 export async function organizationsOfDelete(
   config: ResolvedConfig,
@@ -1215,13 +1216,31 @@ export async function updateMemberRole(
     target.member,
     s.value.reads + g.value.reads + targetStanding.reads,
   );
+  // A change that adds the platform role part holds the member's user row
+  // first, in the order of user-hold.ts (ruling 6 of plan 12f2). The
+  // operator delete holds the same row before it reads the platform role,
+  // so the two run one at a time on Postgres and MySQL.
+  const gain =
+    writesPlatformRole(config, s.value.organization, input.role) &&
+    !writesPlatformRole(config, s.value.organization, target.member.role)
+      ? input.userId
+      : null;
   const written = await hookGuard(async (): Promise<Result<true>> => {
     // The demotion can remove an owner: count, lock, and write in one transaction.
     if (isOwner(o, target.rank) && !isOwner(o, g.value.rank))
-      return ownerWrite(config, o, s.value.organization, setRole, loss);
+      return ownerWrite(config, o, s.value.organization, setRole, loss, gain);
     // A zero-row update writes nothing, so the commit changes nothing.
     const n = await config.storage.transaction((tx) =>
-      withRoleLoss(tx, loss, now, setRole, (rows) => rows > 0),
+      withRoleLoss(
+        tx,
+        loss,
+        now,
+        async (t) => {
+          if (gain !== null) await holdUser(config.observe, t, gain);
+          return setRole(t);
+        },
+        (rows) => rows > 0,
+      ),
     );
     return n === 0 ? fail("conflict") : ok(true);
   });

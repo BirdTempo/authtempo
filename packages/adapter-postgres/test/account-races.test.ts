@@ -2044,8 +2044,12 @@ describe("the operator delete races on Postgres (plan 12f2 Task 4)", () => {
   const APP = { kind: "app", name: "support-tool" } as const;
   const REASON = { reason: "Ticket 4521", ip: null, userAgent: null };
 
-  /** The world of plan 12a with organizations and the operator user tools. The app acts. */
-  function operatorWorld() {
+  /**
+   * The world of plan 12a with organizations and the operator user tools. The
+   * app acts. `beforeDelete` runs in the transaction of the account delete,
+   * after its read of the member rows and before its member delete.
+   */
+  function operatorWorld(beforeDelete?: () => Promise<void>) {
     const sent: MailMessage[] = [];
     const auth = createAuth({
       baseURL: BASE,
@@ -2064,6 +2068,7 @@ describe("the operator delete races on Postgres (plan 12f2 Task 4)", () => {
         ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
       },
       operator: { users: true },
+      ...(beforeDelete ? { hooks: { user: { beforeDelete } } } : {}),
     });
     const tokenOf = (m: MailMessage | undefined) => {
       const token = /token=([A-Za-z0-9_%-]+)/.exec(m?.text ?? "")?.[1];
@@ -2234,4 +2239,57 @@ describe("the operator delete races on Postgres (plan 12f2 Task 4)", () => {
       }
     }
   }, 60_000);
+
+  for (const write of ["a grant of the platform role", "a role change"] as const)
+    it(`a platform operator deletes a member of the platform organization while ${write} adds the role part to its row: the write waits on the user row, so no platform operator goes (ruling 6 of plan 12f2)`, async () => {
+      let during: (() => Promise<void>) | null = null;
+      const w = operatorWorld(async () => {
+        await during?.();
+      });
+      const actor = await platformOperator(w, "op@example.com");
+      const rows = await db.sql<
+        { id: string }[]
+      >`SELECT id FROM ta_organization WHERE slug = 'platform-co'`;
+      const organizationId = rows[0]?.id ?? "";
+      const target = await w.signIn("member@example.com");
+      const added = await w.auth.api.addMember({
+        user: actor.user,
+        organizationId,
+        userId: target.user.id,
+        role: "member",
+      });
+      expect(added.ok).toBe(true);
+      let racer: Promise<{ ok: boolean }> | null = null;
+      // The delete read the member row with no role part. The write starts
+      // now. With no hold of the user row it commits in the pause, and then
+      // the delete removes a platform operator.
+      during = async () => {
+        during = null;
+        racer =
+          write === "a role change"
+            ? w.auth.api.updateMemberRole({
+                user: actor.user,
+                organizationId,
+                userId: target.user.id,
+                role: "member,operator",
+              })
+            : w.auth.api.operator.platformRole.grant({
+                actor: APP,
+                userId: target.user.id,
+                ...REASON,
+              });
+        await Promise.race([racer, new Promise((r) => setTimeout(r, HOLD_MS))]);
+      };
+      const deleted = await w.auth.api.operator.users.delete({
+        actor,
+        userId: target.user.id,
+        ...REASON,
+      });
+      expect(deleted).toMatchObject({ ok: true });
+      expect(racer).not.toBeNull();
+      // The write waited for the commit of the delete, then matched no row.
+      expect(await racer).toMatchObject({ ok: false, code: "conflict" });
+      await w.auth.api.sweepExpired();
+      expect(await rowsOf(target.user.id)).toBe(0);
+    }, 60_000);
 });

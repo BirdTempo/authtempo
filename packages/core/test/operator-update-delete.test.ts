@@ -466,6 +466,41 @@ describe("the operator delete (plan 12f2 Task 4)", () => {
     expect((await auditRows(w, "user_delete")).map((r) => r.targetUserId)).toEqual([op]);
   });
 
+  it("answers operator_required, not sole_owner, to a user actor on a platform operator who is the last owner of the platform organization", async () => {
+    // The operator rank is below the owner rank, so root alone owns the platform organization.
+    const w = await world({
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, admin: 3, operator: 4, owner: 5 },
+      },
+    });
+    // The platform check comes before the rank rule (ruling 6 of plan 12f2).
+    expect(await w.api.delete({ actor: w.asOperator, userId: w.root.id, ...REASON })).toEqual({
+      ok: false,
+      code: "operator_required",
+      status: 403,
+    });
+    // A secret meets the rank rule: root is the last owner.
+    expect(await w.api.delete({ actor: w.erasure, userId: w.root.id, ...REASON })).toEqual({
+      ok: false,
+      code: "sole_owner",
+      status: 409,
+    });
+    expect(await userOf(w, w.root.id)).not.toBeNull();
+    expect(await auditRows(w, "user_delete")).toEqual([]);
+  });
+
+  it("answers invalid_body to a userId that is not a string", async () => {
+    const w = await world();
+    for (const userId of [42, null, undefined, { id: w.root.id }, [w.root.id]])
+      expect(
+        await w.api.delete({ actor: w.erasure, userId: userId as unknown as string, ...REASON }),
+      ).toEqual({ ok: false, code: "invalid_body", status: 400 });
+    expect(await userOf(w, w.root.id)).not.toBeNull();
+    expect(await auditRows(w, "user_delete")).toEqual([]);
+  });
+
   it("deletes without account.delete and without a fresh session of the target", async () => {
     const w = await world({ account: { delete: false } });
     const ada = await verifiedSession(w.auth, ADA);

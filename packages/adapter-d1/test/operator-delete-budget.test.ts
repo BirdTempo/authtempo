@@ -643,6 +643,7 @@ describe("the operator delete on D1 in 50 calls (ruling 1 of plan 12f2)", () => 
     // The membership adds 2 reads of the organization rule: 40 of 38.
     expect(r.answer).toEqual({ ok: false, code: "delete_too_large", status: 409 });
     expect(r.refused).toBe(0);
+    expect(USER_ROUTE_BEFORE + r.queries + r.mails + r.posts).toBeLessThanOrEqual(50);
     expect(await rows("ta_user", `id = '${userId}'`)).toBe(1);
     expect(await rows("ta_member", `user_id = '${userId}'`)).toBe(USER_SOLO_FITS + 1);
     expect(endings).toEqual([]);

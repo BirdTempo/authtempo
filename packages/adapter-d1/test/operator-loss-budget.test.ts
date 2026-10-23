@@ -1009,3 +1009,94 @@ describe("the account delete of a solo organization's owner through the route on
       expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
     });
 });
+
+/**
+ * The counts of the writes that add the platform role part, on the binding
+ * on 2026-10-24 (ruling 6 of plan 12f2): the grant by a secret and by a
+ * user to a member of the platform organization, the same grant to a user
+ * with no member row, and the role change that adds the part. Each now
+ * holds the target's user row first, so the operator delete and the write
+ * run one at a time on Postgres and MySQL. The hold costs 3 queries on D1.
+ * Before it the grant to a member made 9 and 17, and the role change 13.
+ * The grant to a new row held the user before, so its counts stay.
+ */
+const GAIN_COUNTS: Record<string, number> = {
+  "secret member": 12,
+  "user member": 20,
+  "secret new": 12,
+  "user new": 20,
+  "role change": 16,
+};
+
+describe("the writes that add the platform role part on D1 (ruling 6 of plan 12f2)", () => {
+  beforeEach(async () => {
+    await env.DB.batch(Object.values(TABLES).map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
+    endings.length = 0;
+  });
+
+  /** A platform operator, and a user with 3 sessions, a member of the platform organization when `member`. */
+  async function gainScene(sent: MailMessage[], member: boolean) {
+    const { auth: setup } = await engine(env.DB, sent);
+    const first = await platformOperator(setup, sent);
+    const { userId } = await signIns(setup, sent, "ada@example.com", 3);
+    const platform = await env.DB.prepare("SELECT id FROM ta_organization WHERE slug = ?")
+      .bind("platform-co")
+      .first<{ id: string }>();
+    const organizationId = platform?.id ?? "";
+    if (member) {
+      const by = await setup.api.getSession(first);
+      if (!by) throw new Error("no session");
+      const added = await setup.api.addMember({
+        user: by.user,
+        organizationId,
+        userId,
+        role: "member",
+      });
+      if (!added.ok) throw new Error(added.code);
+    }
+    // Past the slide of 6 hours, inside the 1440 fresh minutes: the worst case of the session read.
+    current = new Date(current.getTime() + 7 * 60 * 60 * 1000);
+    return { first, userId, organizationId };
+  }
+
+  /** The role of the user's member row of the platform organization. */
+  const roleOf = async (organizationId: string, userId: string) =>
+    (
+      await env.DB.prepare("SELECT role FROM ta_member WHERE organization_id = ? AND user_id = ?")
+        .bind(organizationId, userId)
+        .first<{ role: string }>()
+    )?.role;
+
+  for (const target of ["member", "new"] as const)
+    for (const actor of ["secret", "user"] as const)
+      it(`a ${actor} grants the platform role to a ${target === "member" ? "member of the platform organization" : "user with no member row"} in 50 queries or fewer`, async () => {
+        const sent: MailMessage[] = [];
+        const { first, userId, organizationId } = await gainScene(sent, target === "member");
+        const r = await invoke(
+          sent,
+          "/operator/users/platform-role",
+          actor === "secret" ? asSecret : asUser(first),
+          { userId, grant: true, reason: "Change of the support team" },
+        );
+        expect(r.status, JSON.stringify(r.body)).toBe(200);
+        expect(await roleOf(organizationId, userId)).toBe(
+          target === "member" ? "member,operator" : "operator",
+        );
+        expect(r.queries).toBe(GAIN_COUNTS[`${actor} ${target}`]);
+        expect(r.queries).toBeLessThanOrEqual(50);
+      });
+
+  it("adds the platform role part through a role change in 50 queries or fewer", async () => {
+    const sent: MailMessage[] = [];
+    const { first, userId, organizationId } = await gainScene(sent, true);
+    const r = await invoke(sent, "/organizations/members/role", asUser(first), {
+      organizationId,
+      userId,
+      role: "member,operator",
+    });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(await roleOf(organizationId, userId)).toBe("member,operator");
+    expect(r.queries).toBe(GAIN_COUNTS["role change"]);
+    expect(r.queries).toBeLessThanOrEqual(50);
+  });
+});

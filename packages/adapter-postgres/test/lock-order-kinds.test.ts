@@ -1513,6 +1513,46 @@ describe("the lock order of user-hold.ts in each flow (ruling 49 of plan 12k)", 
     expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
   }, 60_000);
 
+  // A write that adds the platform role part to an existing member row holds
+  // the user row first, as the operator delete does (ruling 6 of plan 12f2).
+  // Tia joins the platform organization with no part before the flow.
+  const GAINS: [string, string, (w: World, s: Scene, tia: string) => Promise<unknown>][] = [
+    [
+      "a platform role grant to a member of the platform organization",
+      "operator/platform-role grantPlatformRole",
+      (w, _s, tia) =>
+        w.auth.api.operator.platformRole.grant({ actor: APP, userId: tia, ...reason }),
+    ],
+    [
+      "a role change that adds the platform role",
+      "organizations updateMemberRole",
+      (w, s, tia) =>
+        w.auth.api.updateMemberRole({
+          user: s.ada.user,
+          organizationId: s.platform,
+          userId: tia,
+          role: "member,operator",
+        }),
+    ],
+  ];
+  for (const [name, site, call] of GAINS)
+    it(`${name} takes the user row first, in the order of user-hold.ts`, async () => {
+      const w = world();
+      const s = await scene(w);
+      must(
+        await w.auth.api.addMember({
+          user: s.ada.user,
+          organizationId: s.platform,
+          userId: s.tia.user.id,
+          role: "member",
+        }),
+      );
+      expect(await w.flow(name, () => call(w, s, s.tia.user.id))).toMatchObject({ ok: true });
+      expect(w.sitesOf(name)).toEqual([site]);
+      expect(w.kindsOf(name)).toEqual(["user", "member"]);
+      expect(w.outOfOrder(name), JSON.stringify(w.stepsOf(name))).toEqual([]);
+    }, 60_000);
+
   it("names each step out of order, and lets a kind come again", async () => {
     const w = world();
     const name = "a probe out of order";
