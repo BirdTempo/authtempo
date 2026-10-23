@@ -578,6 +578,8 @@ export function createApi(
     impersonateUser: ({ body, headers }) =>
       admin("POST", "/admin/impersonate-user", { headers, body }),
     stopImpersonating: ({ headers }) => admin("POST", "/admin/stop-impersonating", { headers }),
+    adminUpdateUser: ({ body, headers }) => admin("POST", "/admin/update-user", { headers, body }),
+    removeUser: ({ body, headers }) => admin("POST", "/admin/remove-user", { headers, body }),
     signInAnonymous: (input) =>
       additions("POST", "/sign-in/anonymous", { headers: input?.headers }),
     deleteAnonymousUser: ({ headers }) =>

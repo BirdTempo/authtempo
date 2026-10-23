@@ -1388,6 +1388,16 @@ export interface CompatServerApi<TF extends boolean = false, RV extends boolean 
     headers: Headers;
   }): Promise<{ session: AdminSession | null; user: AdminUser | null }>;
   /**
+   * Plan 12f2. `data` takes `name` and `image` only; any other key throws.
+   * It answers the user itself, as Better Auth 1.7.7 does.
+   */
+  adminUpdateUser(input: {
+    body: { userId: string; data: { name?: string | null; image?: string | null } };
+    headers: Headers;
+  }): Promise<AdminUser>;
+  /** Plan 12f2. Core's operator delete: the account and its solo organizations go. */
+  removeUser(input: { body: { userId: string }; headers: Headers }): Promise<{ success: true }>;
+  /**
    * The calls of the sign-in plugins (plan 12i Task 16). Each runs the
    * handler's steps of its path with the caller's headers. Without the
    * plugin, each throws 404. A server caller has no cookie jar: a sign-in
@@ -2161,11 +2171,16 @@ export interface AdminClientCalls {
   stopImpersonating(): Promise<
     CompatClientResult<{ session: AdminSession | null; user: AdminUser | null }>
   >;
+  /** Plan 12f2. `data` takes `name` and `image` only. It answers the user itself. */
+  updateUser(input: {
+    userId: string;
+    data: { name?: string | null; image?: string | null };
+  }): Promise<CompatClientResult<AdminUser>>;
+  /** Plan 12f2. Core's operator delete. */
+  removeUser(input: { userId: string }): Promise<CompatClientResult<{ success: true }>>;
   createUser: AdminNotSupported;
-  updateUser: AdminNotSupported;
   listUserSessions: AdminNotSupported;
   revokeUserSession: AdminNotSupported;
-  removeUser: AdminNotSupported;
   setUserPassword: AdminNotSupported;
   hasPermission: AdminNotSupported;
   /**

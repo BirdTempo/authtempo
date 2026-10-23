@@ -199,10 +199,8 @@ describe("the admin calls that core does not serve (plan 12f)", () => {
       "/admin/create-user",
       "/admin/has-permission",
       "/admin/list-user-sessions",
-      "/admin/remove-user",
       "/admin/revoke-user-session",
       "/admin/set-user-password",
-      "/admin/update-user",
     ]);
     for (const path of Object.keys(ADMIN_NOT_SUPPORTED)) {
       const res = await on.handler(post(path, { userId: "u1", newPassword: "x".repeat(12) }));
@@ -218,9 +216,9 @@ describe("the admin calls that core does not serve (plan 12f)", () => {
         status: 404,
       });
     }
-    const remove = await on.handler(post("/admin/remove-user", { userId: "u1" }));
-    expect(((await remove.json()) as { message: string }).message).toContain(
-      "an operator bans, and the person resets the password or deletes the account",
+    const password = await on.handler(post("/admin/set-user-password", { userId: "u1" }));
+    expect(((await password.json()) as { message: string }).message).toContain(
+      "the person resets it through the reset link",
     );
   });
 
@@ -816,6 +814,12 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
         "/admin/impersonate-user",
         () => a.call("/admin/impersonate-user", { userId: ann.id }, a.op),
       ],
+      // Plan 12f2 Task 7.
+      [
+        "/admin/update-user",
+        () => a.call("/admin/update-user", { userId: ann.id, data: { name: "Ann" } }, a.op),
+      ],
+      ["/admin/remove-user", () => a.call("/admin/remove-user", { userId: ann.id }, a.op)],
     ];
     expect(calls.map(([p]) => p).sort()).toEqual(Object.keys(ADMIN_FORBIDDEN).sort());
     const codes: Record<string, unknown> = {};
@@ -831,6 +835,8 @@ describe("the admin calls on core's operator routes (plan 12f Task 10)", () => {
       "/admin/set-role": [403, "YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE"],
       "/admin/revoke-user-sessions": [403, "YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS"],
       "/admin/impersonate-user": [403, "YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS"],
+      "/admin/update-user": [403, "YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS"],
+      "/admin/remove-user": [403, "YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS"],
     });
     expect(await a.audit(ann.id)).toEqual([]);
   });
@@ -1222,10 +1228,8 @@ describe("the admin calls of the client (ruling 60 m1)", () => {
     ]);
     const unmapped = {
       "/admin/create-user": admin.createUser,
-      "/admin/update-user": admin.updateUser,
       "/admin/list-user-sessions": admin.listUserSessions,
       "/admin/revoke-user-session": admin.revokeUserSession,
-      "/admin/remove-user": admin.removeUser,
       "/admin/set-user-password": admin.setUserPassword,
       "/admin/has-permission": admin.hasPermission,
     };

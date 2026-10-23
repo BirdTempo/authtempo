@@ -398,7 +398,7 @@ function reviveDates(key: string, value: unknown): unknown {
   return ADMIN_DATE_KEYS.has(key) && typeof value === "string" ? new Date(value) : value;
 }
 
-/** The admin calls that answer NOT_SUPPORTED: every call of the type but the mapped eight. */
+/** The admin calls that answer NOT_SUPPORTED: every call of the type but the mapped ten. */
 type AdminUnmapped = Exclude<
   keyof AdminClientCalls,
   | "listUsers"
@@ -409,6 +409,8 @@ type AdminUnmapped = Exclude<
   | "revokeUserSessions"
   | "impersonateUser"
   | "stopImpersonating"
+  | "updateUser"
+  | "removeUser"
   | "checkRolePermission"
 >;
 
@@ -1751,6 +1753,8 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
       unbanUser: (input) => shim("/admin/unban-user", input, "POST", true),
       setRole: (input) => shim("/admin/set-role", input, "POST", true),
       revokeUserSessions: (input) => shim("/admin/revoke-user-sessions", input),
+      updateUser: (input) => shim("/admin/update-user", input, "POST", true),
+      removeUser: (input) => shim("/admin/remove-user", input),
       // Better Auth's client reads the session again after both (client.mjs atomListeners).
       async impersonateUser(input) {
         const r = await shim<{ session: AdminSession; user: AdminUser }>(

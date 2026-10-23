@@ -645,12 +645,27 @@ The options:
 | `allowImpersonatingAdmins` | `false` only: core never lets an operator impersonate a platform operator. |
 | `defaultBanReason`, `defaultBanExpiresIn`, `bannedUserMessage`, `adminUserIds`, `schema`, `ac`, `roles` | Refused. Each refusal names spec section 26. |
 
-Seven calls that core does not serve answer `NOT_SUPPORTED` (501) with a
+Five calls that core does not serve answer `NOT_SUPPORTED` (501) with a
 line that names spec section 26. They are `/admin/set-user-password`,
-`/admin/remove-user`, `/admin/create-user`, `/admin/update-user`,
-`/admin/list-user-sessions`, `/admin/revoke-user-session`, and
-`/admin/has-permission`. In place of a password set or a remove, an operator
-bans, and the person resets the password or deletes the account.
+`/admin/create-user`, `/admin/list-user-sessions`,
+`/admin/revoke-user-session`, and `/admin/has-permission`. No operator sets a
+password (plan 12f2): a password that an operator knows signs in outside an
+impersonation. The person resets the password through the reset link. The
+refusal comes before any read, so its answer is the same for every user id.
+
+`/admin/update-user` takes `data.name` and `data.image` only, as core's
+operator update does (plan 12f2). An empty name clears the name, as `null`
+does. Each other key of `data` is refused before any read, and nothing is
+written. The shim never drops a key in silence:
+
+| Key of `data` | Answer |
+| --- | --- |
+| None | 400 `NO_DATA_TO_UPDATE`, Better Auth's code. |
+| `password` | 400 `PASSWORD_CANNOT_BE_UPDATED_VIA_UPDATE_USER`, Better Auth's code. The line names spec section 26 and the reset link. |
+| `email`, `emailVerified` | 400 `FIELD_NOT_ALLOWED`. The person changes the address and proves it (spec section 8.15 item 5). |
+| `role` | 400 `FIELD_NOT_ALLOWED`. Use `/admin/set-role`. |
+| `banned`, `banReason`, `banExpires` | 400 `FIELD_NOT_ALLOWED`. Use `/admin/ban-user` and `/admin/unban-user`. |
+| Any other key | 400 `FIELD_NOT_ALLOWED`, with a line that names the key and spec section 26. |
 
 `/admin/list-users` takes one search. `searchValue` needs `searchField`
 `email` (the default) and `searchOperator` `starts_with`: core searches the
@@ -681,14 +696,20 @@ core's guard decides (plan 12f Task 10):
 | `POST /admin/revoke-user-sessions` | `POST /operator/sessions/end-user` | `{ success: true }`. While sessions stay, `{ success: false, more: true, ended }`: call again. |
 | `POST /admin/impersonate-user` | `POST /operator/impersonate` | `{ session, user }` of the new session. The session cookie holds its token, and core's actor cookie keeps the operator's token. A bearer caller gets the token in `session.token` and no cookie. |
 | `POST /admin/stop-impersonating` | `POST /operator/impersonate/stop` | `{ session, user }` of the operator's own session, which the session cookie holds again. With no actor cookie, or when the operator's session ended, `{ session: null, user: null }`. |
+| `POST /admin/update-user` | `POST /operator/users/update` | The user itself, as Better Auth answers it, not `{ user }`. Core writes the change and its audit row `user_update` in one transaction. |
+| `POST /admin/remove-user` | `POST /operator/users/delete` | `{ success: true }`. Core deletes the account and each organization that the user alone holds, and writes the audit row `user_delete`. |
 
 `auth.api` has Better Auth's server calls of these paths: `listUsers`,
 `getUser`, `banUser`, `unbanUser`, `setRole`, `revokeUserSessions`,
-`impersonateUser`, and `stopImpersonating`. Each takes Better Auth's
+`impersonateUser`, `stopImpersonating`, `adminUpdateUser`, and `removeUser`. Each takes Better Auth's
 `query` or `body` and the caller's `headers`, and runs the steps of its
 path. So it answers what the path answers, with dates as `Date` values. A
 refusal throws `APIError` with the status and the code of the path. Without
-`admin()`, each call throws 404.
+`admin()`, each call throws 404. A server call with no request headers has
+no session, so it answers 401 `UNAUTHORIZED`, as the path does. The shim
+makes no app actor: an app actor would delete an account with no person and
+no second factor (ruling 1 B9 of plan 12f2). Server code that acts as the
+app calls `auth.tempo.api.operator` with its own actor.
 
 Each user in an answer has Better Auth's admin fields. `role` is the
 platform role or `user`. `banned`, `banReason`, and `banExpires` show a
@@ -702,11 +723,13 @@ no operator secret.
 
 | Core's refusal | Answer |
 | --- | --- |
-| `operator_required` (the guard, or a target that is a platform operator) | 403 with the code of the path: `YOU_ARE_NOT_ALLOWED_TO_LIST_USERS`, `YOU_ARE_NOT_ALLOWED_TO_GET_USER`, `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS` (ban and unban), `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`, `YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS`, or `YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS`. |
+| `operator_required` (the guard, or a target that is a platform operator) | 403 with the code of the path: `YOU_ARE_NOT_ALLOWED_TO_LIST_USERS`, `YOU_ARE_NOT_ALLOWED_TO_GET_USER`, `YOU_ARE_NOT_ALLOWED_TO_BAN_USERS` (ban and unban), `YOU_ARE_NOT_ALLOWED_TO_CHANGE_USERS_ROLE`, `YOU_ARE_NOT_ALLOWED_TO_REVOKE_USERS_SESSIONS`, `YOU_ARE_NOT_ALLOWED_TO_IMPERSONATE_USERS`, `YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS`, or `YOU_ARE_NOT_ALLOWED_TO_DELETE_USERS`. |
 | `impersonation_refused` (the operator, a platform operator, a banned user, or an absent user) | 403 `YOU_CANNOT_IMPERSONATE_ADMINS`. |
 | `impersonation_session` (an impersonation session starts another one) | 403 `FORBIDDEN`. |
 | `not_found` on a stop (the session impersonates nobody) | 400 with Better Auth's message `You are not impersonating anyone`. |
-| `operator_self` | 409 `YOU_CANNOT_BAN_YOURSELF` on a ban, else 409 `FORBIDDEN`. |
+| `operator_self` | 409 `YOU_CANNOT_BAN_YOURSELF` on a ban, 409 `YOU_CANNOT_REMOVE_YOURSELF` on a remove, else 409 `FORBIDDEN`. |
+| `sole_owner` (a remove of the last owner of an organization with other members) | 409 `SOLE_OWNER`. Hand the organization over first. |
+| `delete_too_large` (a remove on D1 whose least work does not fit the query limit of one invocation) | 409 `DELETE_TOO_LARGE`. Delete or hand over the user's solo organizations first. |
 | `not_found` | 404 `USER_NOT_FOUND`. |
 | `unauthorized` (no session) | 401 `UNAUTHORIZED`. |
 
@@ -751,6 +774,14 @@ The deviations from Better Auth (ruling 53 of plan 12f):
 - `/admin/stop-impersonating` answers `{ session: null, user: null }` when
   no operator session comes back. Better Auth answers 500 there, and its
   impersonation session stays. Core ends the impersonation session first.
+- `/admin/update-user` takes `name` and `image` only. Better Auth also sets
+  the address, the role, the ban fields, and any added field. The
+  update of the caller's own user answers 409 `FORBIDDEN`.
+- `/admin/remove-user` of the caller answers `YOU_CANNOT_REMOVE_YOURSELF`
+  with status 409. Better Auth answers 400.
+- `/admin/remove-user` deletes the user's solo organizations with the
+  account, and refuses the last owner of an organization with other members
+  (`SOLE_OWNER`). Better Auth keeps every organization.
 
 On D1, an act reads the user row once after core's route, for `{ user }`.
 With `twoFactor()`, it also reads the factor row once.
@@ -759,6 +790,9 @@ A ban of a user with 501 sessions sends 49: core ends one page of sessions
 in the budget, and the sweep ends the rest.
 An impersonation start sends 33 queries and a stop 19, each with the
 shim's read of the session for `{ session, user }`.
+A remove adds no query to core's delete route: it answers
+`{ success: true }` with no read. An update reads the user row once after
+core's route, and the factor row once with `twoFactor()`.
 
 Better Auth requires a reason nowhere, and core writes an audit row with a
 reason for each act. A ban takes `banReason` as its reason. Every other call,
