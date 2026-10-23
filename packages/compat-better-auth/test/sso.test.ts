@@ -5,7 +5,7 @@ import { ssoClient } from "../src/client/plugins.js";
 import { organization } from "../src/plugins.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { compatHooks } from "../src/server/hooks.js";
-import { mapOptions } from "../src/server/map-options.js";
+import { betterAuthRecord, mapOptions } from "../src/server/map-options.js";
 import { sso } from "../src/sso.js";
 import type { BetterAuthOptions, CompatDatabase, SsoOptions } from "../src/types.js";
 import { BASE, memory, SECRET, ssoApp } from "./sso-helpers.js";
@@ -972,6 +972,168 @@ describe("the sso plugin (plan 12d Task 14)", () => {
       vi.useRealTimers();
     }
   });
+  it("gives no Better Auth record for a label with a dot (review M1)", async () => {
+    const record = betterAuthRecord("better-auth-token");
+    const row = { domain: "acme.example", challenge: "tok" };
+    expect(record(row, "acme")?.name).toBe("_better-auth-token-acme.acme.example");
+    // The name of a dotted label sits in the zone of sub.acme.example, which another owner may hold.
+    for (const label of ["x.sub", "x.", ".x", "a b", ""])
+      expect(record(row, label), label).toBeNull();
+    const app = await owned({ domainVerification: { enabled: true } });
+    const made = (await (
+      await app.register({
+        providerId: "acme",
+        issuer: "https://idp.acme.example",
+        domain: "acme.example",
+        oidcConfig: OIDC,
+      })
+    ).json()) as { domainVerificationToken: string };
+    app.dns.set("_better-auth-token-acme.acme.example", [made.domainVerificationToken]);
+    expect(
+      (await app.call("/sso/verify-domain", { providerId: "acme" }, app.owner.cookie)).status,
+    ).toBe(204);
+    // Core's own route, outside the shim, takes a dot in a label.
+    const [connection] = await connectionsOf(app);
+    const relabel = await app.auth.tempo.handle(
+      new Request(`${BASE}/api/auth/sso/connections/update`, {
+        method: "POST",
+        headers: { origin: BASE, "content-type": "application/json", cookie: app.owner.cookie },
+        body: JSON.stringify({ id: connection?.id, label: "x.sub" }),
+      }),
+    );
+    expect(relabel.status).toBe(200);
+    // Only the zone of sub.acme.example answers: the recheck does not count it.
+    app.dns.clear();
+    app.dns.set("_better-auth-token-x.sub.acme.example", [made.domainVerificationToken]);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(Date.now() + 31 * 24 * 60 * 60 * 1000);
+      app.a.calls.length = 0;
+      await app.auth.tempo.api.sweepExpired();
+      expect(app.a.calls).toEqual(["_authtempo-challenge.acme.example"]);
+      const row = await app.database.storage.findOne("ssoDomain", [
+        { field: "domain", op: "eq", value: "acme.example" },
+      ]);
+      expect(row).toMatchObject({ claimedDomain: "acme.example", failures: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("builds the record from one read of the label inside the verify (review M1)", async () => {
+    const base = memory();
+    // A label change lands after the shim's read of the label, before core's read.
+    let between: null | (() => Promise<void>) = null;
+    const storage = new Proxy(base.storage, {
+      get(target, key, receiver) {
+        const v = Reflect.get(target, key, receiver);
+        if (key === "findOne")
+          return async (model: string, ...rest: unknown[]) => {
+            if (model === "ssoConnection" && between) {
+              const go = between;
+              between = null;
+              await go();
+            }
+            return (v as (...a: unknown[]) => unknown).call(target, model, ...rest);
+          };
+        return typeof v === "function" ? v.bind(target) : v;
+      },
+    });
+    const app = await owned({ domainVerification: { enabled: true } }, { ...base, storage });
+    const made = (await (
+      await app.register({
+        providerId: "p1",
+        issuer: "https://idp.acme.example",
+        domain: "victim.example",
+        oidcConfig: OIDC,
+      })
+    ).json()) as { domainVerificationToken: string };
+    const [connection] = await connectionsOf(app);
+    // Only the zone of sub.victim.example answers, and no record sits at the apex.
+    app.dns.set("_better-auth-token-x.sub.victim.example", [made.domainVerificationToken]);
+    let relabelled = 0;
+    between = async () => {
+      const r = await app.auth.tempo.handle(
+        new Request(`${BASE}/api/auth/sso/connections/update`, {
+          method: "POST",
+          headers: { origin: BASE, "content-type": "application/json", cookie: app.owner.cookie },
+          body: JSON.stringify({ id: connection?.id, label: "x.sub" }),
+        }),
+      );
+      relabelled = r.status;
+    };
+    const res = await app.call("/sso/verify-domain", { providerId: "p1" }, app.owner.cookie);
+    expect([relabelled, res.status]).toEqual([200, 502]);
+    const row = await base.storage.findOne("ssoDomain", [
+      { field: "domain", op: "eq", value: "victim.example" },
+    ]);
+    expect(row?.claimedDomain).toBeNull();
+  });
+
+  it("keeps a providerId out of reach of core's label routes (review M2)", async () => {
+    const app = await owned({ domainVerification: { enabled: true } });
+    expect(
+      (
+        await app.register({
+          providerId: "acme",
+          issuer: "https://idp.acme.example",
+          domain: "acme.example",
+          oidcConfig: OIDC,
+        })
+      ).status,
+    ).toBe(200);
+    const mal = await app.manager("mal@evil.example");
+    const evil = await app.organizationOf(mal, "evil");
+    const create = (label: string) =>
+      app.call(
+        "/sso/connections/create",
+        {
+          organizationId: evil,
+          kind: "oidc",
+          label,
+          issuer: "https://idp.evil.example",
+          clientId: "evil",
+          clientSecret: "evil-secret-0123456789",
+        },
+        mal.cookie,
+      );
+    // A manager of another organization cannot take the providerId through core's route.
+    for (const label of ["acme", "evil-sso"]) {
+      const res = await create(label);
+      expect([res.status, ((await res.json()) as { error: string }).error], label).toEqual([
+        400,
+        "invalid_body",
+      ]);
+    }
+    const own = await create("Evil SSO");
+    expect(own.status).toBe(200);
+    const { connection: evilConnection } = (await own.json()) as { connection: { id: string } };
+    const update = (id: string | undefined, label: string, cookie: string) =>
+      app.call("/sso/connections/update", { id, label }, cookie);
+    expect((await update(evilConnection.id, "acme", mal.cookie)).status).toBe(400);
+    // The owner's own provider keeps its label too: register and update-provider own it.
+    const [acme] = (await connectionsOf(app)).filter((c) => c.label === "acme");
+    expect((await update(acme?.id, "Acme Corp", app.owner.cookie)).status).toBe(400);
+    // A body that is not a JSON object is refused unread.
+    const raw = await app.auth.handler(
+      new Request(`${BASE}/api/auth/sso/connections/create`, {
+        method: "POST",
+        headers: { origin: BASE, "content-type": "application/json", cookie: mal.cookie },
+        body: "[1]",
+      }),
+    );
+    expect(raw.status).toBe(400);
+    // The paths of acme still find its one row.
+    expect((await app.call("/sign-in/sso", { providerId: "acme", callbackURL: "/" })).status).toBe(
+      200,
+    );
+    expect((await app.read("/sso/get-provider?providerId=acme", app.owner.cookie)).status).toBe(
+      200,
+    );
+    const rows = await app.database.storage.findMany("ssoConnection", []);
+    expect(rows.map((r) => r.label).sort()).toEqual(["Evil SSO", "acme"]);
+  });
+
   it("serves authClient.sso and signIn.sso through the shim's paths", async () => {
     const app = await owned({ domainVerification: { enabled: true } });
     const client = createAuthClient({

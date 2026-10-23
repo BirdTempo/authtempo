@@ -1412,6 +1412,7 @@ message names the field and the reason. A field of the wrong form answers
 `VALIDATION_ERROR` (400). The fields map so:
 
 - `providerId` is the connection's label: letters, digits, `_`, and `-`. `_<prefix>-<providerId>` must fit one DNS label of 63 characters.
+- Only the shim writes a label of this form. Through the shim's handler, core's `POST /sso/connections/create` and `POST /sso/connections/update` refuse such a label with `invalid_body` (400). An update also refuses a new label on a connection that holds one. Else a manager of another organization could take a providerId, and its paths would answer 404. Give a connection that core's routes make a label with another character, such as a space.
 - `issuer`, `oidcConfig.clientId`, `clientSecret`, and `scopes` map to the connection's `issuer`, `clientId`, `clientSecret` (sealed with the keyring), and `scope`.
 - `authorizationEndpoint`, `tokenEndpoint`, and `jwksEndpoint` come together, or none of them, and core reads the discovery document.
 - `samlConfig.entryPoint`, `cert` (or `idpMetadata.cert`), `idpMetadata.entityID`, and `idpMetadata.metadata` map to `ssoUrl`, `certificates`, `idpEntityId`, and `idpMetadata`. Pass the metadata XML or the other three, not both.
@@ -1475,6 +1476,11 @@ fix, the shim reads the domain claim itself for a SAML connection.
 - Better Auth's record, `_<prefix>-<providerId>.<domain>` with the value `_<prefix>-<providerId>=<token>` or the token alone. The shim's `verify-domain` reads it.
 - Core's record, `_authtempo-challenge.<domain>` with `authtempo-domain=<token>`. Core's own routes read it.
 
+The verify and the recheck read the connection's label once, and build
+Better Auth's record from that read. A label outside the providerId form
+gives no record. Core also takes a record name of one DNS label under the
+domain only. So the owner of a subdomain never proves the parent domain.
+
 The 30-day recheck asks for core's record, then for Better Auth's. A domain
 keeps its claim while either record holds on every resolver. Three failed
 rechecks that span 72 hours lose the claim.
@@ -1517,9 +1523,11 @@ worst cost does not fit. The writes go through `tempo.api.sso` and
 each client secret, and each SCIM user passes the address rule.
 
 - A provider is copied with its domain, routed to the connection. A verified Better Auth domain is pending in core: verify it again, and the published Better Auth record proves it.
+- A SAML provider with an `identifierFormat` other than the persistent NameID is not copied. `skipped` holds the reason. Core never changes its format: set the persistent NameID at the directory, then register it again.
 - A SCIM user is copied when its address is in a verified domain of the organization. Else `skipped` holds core's SCIM error. Verify the domains first.
 - A group is copied with no member, and each member is added by a SCIM PATCH. So a group of any size fits the budget.
 - `changed` lists what the owner must do. It names the new `redirectURI` at the IdP and the SP metadata of a SAML connection. It names a `client_secret_basic` client, which core sends as `client_secret_post`. It names a domain to verify again.
+- Before the switch, confirm that the directory client of each `client_secret_basic` provider accepts `client_secret_post`. Core sends the secret in the body only. A client that takes the basic form only fails each sign-in after the switch.
 - A second run copies nothing twice. A connection that holds the `providerId` as its label is `present`. So is a SCIM user with the same `externalId` or `userName`. So is a group with the same `externalId` or `displayName`.
 - No token is copied. A static credential stays in the `scim` options. Create a core SCIM token for a managed connection.
 

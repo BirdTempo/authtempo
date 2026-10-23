@@ -146,6 +146,31 @@ describe("the scim plugin (plan 12d Task 14)", () => {
     expect(res.status).toBe(401);
   });
 
+  it("holds a shim caller to the limit of its credential (review m3)", async () => {
+    const database = memory();
+    const setup = ssoApp(database, [sso({ domainVerification: { enabled: true } })]);
+    const owner = await setup.person("ann@acme.example");
+    const organizationId = await setup.organizationOf(owner, "acme");
+    const app = ssoApp(database, [
+      sso({ domainVerification: { enabled: true } }),
+      scim({ connections: [connection(organizationId)] }),
+    ]);
+    const users = () =>
+      app.auth.handler(
+        new Request(`${BASE}/api/auth/scim/v2/Users`, {
+          headers: { authorization: `Bearer ${TOKEN}` },
+        }),
+      );
+    expect((await users()).status).toBe(200);
+    // The other calls of the window, on the key of the credential: core's SCIM_PER_TOKEN.
+    const key = "scim:token:acme-directory:entra-1";
+    const limit = { seconds: 600, max: 1200 };
+    let spent = 1;
+    while (await database.limiter.allow(key, limit)) spent++;
+    expect(spent).toBe(limit.max);
+    expect((await users()).status).toBe(429);
+  });
+
   it("refuses each scim option with no core feature", () => {
     const base = { connections: [connection("org-1")] };
     const rows: [ScimOptions, string][] = [

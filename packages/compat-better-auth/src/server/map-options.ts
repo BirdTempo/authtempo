@@ -383,16 +383,25 @@ function pluginConfig(options: BetterAuthOptions): PluginConfig {
 }
 
 /**
+ * A providerId: letters, digits, `_`, and `-`, so it sits in one DNS label
+ * of the record and in one path segment. Better Auth refuses a record
+ * identifier over 63 characters (DNS_LABEL_MAX_LENGTH, dist/index.mjs:2584).
+ */
+export const PROVIDER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
  * Better Auth's record of a domain proof (@better-auth/sso 1.7.2
  * dist/index.mjs:2522 and :2593 to :2604, read 2026-10-22). Its name is
  * `_<prefix>-<providerId>.<domain>`. Its value is `<identifier>=<token>` or
  * the token alone. The token is core's current challenge of the row. The
  * providerId is the label of the domain's connection (ruling 61 P5). A
- * domain with no connection has no Better Auth record.
+ * domain with no connection has no Better Auth record. A label outside
+ * `PROVIDER_ID_RE` has none either: a dot in it would put the record in the
+ * zone of a subdomain, whose owner could then prove the parent domain.
  */
 export function betterAuthRecord(tokenPrefix: string): DomainRecordOf {
   return (row, label) => {
-    if (label === null) return null;
+    if (label === null || !PROVIDER_ID_RE.test(label)) return null;
     const identifier = verificationIdentifier(tokenPrefix, label);
     return {
       name: `${identifier}.${row.domain}`,

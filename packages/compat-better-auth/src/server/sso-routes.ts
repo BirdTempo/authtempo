@@ -4,7 +4,7 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { BETTER_AUTH_CODES, messageOf } from "../errors.js";
 import { equalHex, toHex } from "../hash.js";
 import type { Mapped } from "./map-options.js";
-import { verificationIdentifier } from "./map-options.js";
+import { PROVIDER_ID_RE, verificationIdentifier } from "./map-options.js";
 
 // The paths of @better-auth/sso and @better-auth/scim 1.7.2 on core's SSO
 // and SCIM routes (plan 12d Task 14, ruling 61 P1, P4, P5, P7, F6). Each
@@ -29,12 +29,6 @@ const SHA1 = /sha1$/;
  * test pins the two forms against a domain that core adds.
  */
 const CORE_VALUE_PREFIX = "authtempo-domain=";
-/**
- * A providerId: letters, digits, `_`, and `-`, so it sits in one DNS label
- * of the record and in one path segment. Better Auth refuses a record
- * identifier over 63 characters (DNS_LABEL_MAX_LENGTH, dist/index.mjs:2584).
- */
-const PROVIDER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const DNS_LABEL_MAX = 63;
 /** The organizations of one caller that `GET /sso/providers` reads. */
 const PROVIDER_ORGANIZATIONS_MAX = 100;
@@ -647,7 +641,12 @@ const NOT_FOUND: Refusal = {
   message: "No SSO provider has this providerId",
 };
 
-/** The connection whose label is `providerId`, read by the label (ruling 61 P5). */
+/**
+ * The connection whose label is `providerId`, read by the label (ruling 61
+ * P5). Only the shim writes a label of the providerId form: register and
+ * the copy write it, and `coreLabelRefusal` keeps core's label routes off
+ * it. So this read finds only rows that the shim made.
+ */
 async function connectionRow(mapped: Mapped, providerId: string) {
   if (!PROVIDER_ID_RE.test(providerId)) return null;
   const rows = await mapped.config.storage.findMany(
@@ -1111,6 +1110,39 @@ export async function ssoAcsRoute(
   return auth.handle(new Request(`${mapped.origin}${mapped.basePath}/sso/${row.id}/acs`, request));
 }
 
+/**
+ * Core's refusal of a call to its own connection create or update through
+ * the shim, when the call would touch a providerId (review of plan 12d Task
+ * 14, M2). Else a manager of another organization could make a connection
+ * with the label "acme". Then the lookup by providerId finds two rows, and
+ * each Better Auth path of acme answers 404. A create or an update refuses a
+ * new label of the providerId form, and an update refuses any new label on a
+ * row that holds one. A body that is not a JSON object is refused too, so
+ * no form of body passes unread. Null for every other request.
+ */
+async function coreLabelRefusal(
+  mapped: Mapped,
+  request: Request,
+  path: string,
+): Promise<Response | null> {
+  if (path !== "/sso/connections/create" && path !== "/sso/connections/update") return null;
+  const refuse = (message: string) =>
+    Response.json({ error: "invalid_body", message }, { status: 400 });
+  const body = await jsonBody(request);
+  if (!body) return refuse("expected a JSON object");
+  if (body.label === undefined) return null;
+  const why =
+    "a label of the providerId form belongs to /sso/register and /sso/update-provider in a Better Auth app";
+  if (typeof body.label === "string" && PROVIDER_ID_RE.test(body.label)) return refuse(why);
+  if (path === "/sso/connections/update" && typeof body.id === "string") {
+    const row = await mapped.config.storage.findOne("ssoConnection", [
+      { field: "id", op: "eq", value: body.id },
+    ]);
+    if (row && PROVIDER_ID_RE.test(row.label)) return refuse(why);
+  }
+  return null;
+}
+
 /** The shim's answer to a Better Auth SSO path. Null for every other request. */
 export async function ssoRoute(
   auth: Auth,
@@ -1126,6 +1158,10 @@ export async function ssoRoute(
   if (why !== null) return calls.fail(unsupported(path, why));
   const get = request.method === "GET";
   const post = request.method === "POST";
+  if (post) {
+    const refusal = await coreLabelRefusal(mapped, request, path);
+    if (refusal) return refusal;
+  }
   if (post && path === "/sso/register") return register(auth, mapped, request, calls);
   if (get && path === "/sso/providers") return listProviders(auth, mapped, request, calls);
   if (get && path === "/sso/get-provider") {
