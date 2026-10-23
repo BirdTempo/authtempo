@@ -730,16 +730,24 @@ function ownExpect(row: Pick<SsoDomainRow, "domain" | "challenge">): {
 }
 
 /**
+ * The ASCII dot and the three dots that IDNA (UTS #46) maps to it: U+3002,
+ * U+FF0E, and U+FF61. A resolver that maps the name reads each as a label
+ * break.
+ */
+const LABEL_DOTS = /[.\u3002\uff0e\uff61]/;
+
+/**
  * True when `name` is one DNS label under `domain`. A name deeper down sits
  * in a zone that the owner of a subdomain may hold, so it proves nothing
- * about the domain (review of plan 12d Task 14, M1).
+ * about the domain (review of plan 12d Task 14, M1). A dot of another
+ * script counts as a dot (12d fix wave item 14).
  */
 function childOf(name: string, domain: string): boolean {
   const suffix = `.${domain.toLowerCase()}`;
   const lower = name.toLowerCase();
   if (!lower.endsWith(suffix)) return false;
   const head = lower.slice(0, -suffix.length);
-  return head !== "" && !head.includes(".");
+  return head !== "" && !LABEL_DOTS.test(head);
 }
 
 /**

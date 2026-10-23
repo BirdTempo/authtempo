@@ -147,6 +147,28 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     expect(row).toMatchObject({ claimedDomain: "acme.example", failures: 1 });
   });
 
+  it("refuses a compat record name with a dot of another script (fix wave item 14)", async () => {
+    const { w, id, connectionId } = await recordWorld();
+    // IDNA maps U+3002, U+FF0E, and U+FF61 to a dot, so each one puts the record a zone deeper.
+    for (const dot of ["\u3002", "\uff0e", "\uff61"]) {
+      const r = await updateConnection(w.config, SSO_APP, {
+        id: connectionId,
+        label: `x${dot}sub`,
+      });
+      if (!r.ok) throw new Error(r.code);
+      const row = await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: id }]);
+      for (const name of [`_ba-x${dot}sub.acme.example`, "_ba-x.sub.acme.example"]) {
+        w.answers.a[name] = [row?.challenge ?? ""];
+        w.answers.b[name] = [row?.challenge ?? ""];
+      }
+      expect(await verifyDomainWith(w.config, SSO_APP, { id }, "compat")).toMatchObject({
+        ok: false,
+        code: "domain_unverified",
+      });
+      expect(w.a.calls, JSON.stringify(dot)).toEqual([]);
+    }
+  });
+
   it("keeps a claim that the compat record proved at the recheck (ruling 61 F4)", async () => {
     const { w, id, own, ba } = await recordWorld();
     w.answers.a[ba.name] = [ba.value];

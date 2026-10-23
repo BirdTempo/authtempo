@@ -1413,6 +1413,7 @@ message names the field and the reason. A field of the wrong form answers
 
 - `providerId` is the connection's label: letters, digits, `_`, and `-`. `_<prefix>-<providerId>` must fit one DNS label of 63 characters.
 - Only the shim writes a label of this form. Through the shim's handler, core's `POST /sso/connections/create` and `POST /sso/connections/update` refuse such a label with `invalid_body` (400). An update also refuses a new label on a connection that holds one. Else a manager of another organization could take a providerId, and its paths would answer 404. Give a connection that core's routes make a label with another character, such as a space.
+- A call of `auth.tempo.api.sso` does not go through the shim's handler, so nothing refuses its label. Never give `connections.create` or `connections.update` of that api a label of the providerId form. The shim's paths read such a label as a providerId. A second row with the label of a shim provider makes the paths of that provider answer 404.
 - `issuer`, `oidcConfig.clientId`, `clientSecret`, and `scopes` map to the connection's `issuer`, `clientId`, `clientSecret` (sealed with the keyring), and `scope`.
 - `authorizationEndpoint`, `tokenEndpoint`, and `jwksEndpoint` come together, or none of them, and core reads the discovery document.
 - `samlConfig.entryPoint`, `cert` (or `idpMetadata.cert`), `idpMetadata.entityID`, and `idpMetadata.metadata` map to `ssoUrl`, `certificates`, `idpEntityId`, and `idpMetadata`. Pass the metadata XML or the other three, not both.
