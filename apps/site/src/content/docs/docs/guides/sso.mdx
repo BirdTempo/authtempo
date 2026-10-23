@@ -65,7 +65,8 @@ An owner of the organization manages its domains, connections, and SCIM tokens. 
 
 ### The sign-in
 
-- `client.sso.discover({ email })` answers the start path of an address, or `{ sso: false }`. It reads no user, so it tells nothing about a person.
+- `client.sso.discover({ email, next })` answers the `connectionId` of an address and its `start`, or `{ sso: false }`. It reads no user, so it tells nothing about a person.
+- `start` is an absolute URL on the origin of `baseURL`, with `next` as its query. Send the browser there as it is, also when the app is on another origin.
 - `client.sso.signIn({ connectionId })` sends the browser to the start of a connection. An app button may name a connection.
 - The sign-in page of core has a "Sign in with SSO" form that posts the address to the discovery.
 - A known identity signs in its user. A user at the address gets the identity of the connection.
@@ -98,7 +99,7 @@ Core accepts one narrow profile and refuses any construct outside it.
 - The sign-in starts at core. Core refuses an unsolicited Response.
 - The Assertion must be signed with RSA-SHA256 or ECDSA-SHA256, and a SHA-256 digest. Core refuses SHA-1.
 - A connection holds one or two certificates, so a provider can roll its key over. Core reads no key from the document.
-- The subject is a persistent `NameID`, or the attribute that `subjectAttribute` names. Core refuses a transient `NameID`.
+- The subject is the attribute that `subjectAttribute` names. With no `subjectAttribute`, core asks for the persistent `NameID` and refuses a transient one.
 - The address comes from the attribute of `attributes.email`, by default `email`. A `NameID` of the email address format also gives it.
 - Core does not sign its AuthnRequest. It refuses an encrypted assertion, and it serves no SAML single sign-out.
 - `SessionNotOnOrAfter` caps the session, also through each sliding refresh.
@@ -107,8 +108,12 @@ Core accepts one narrow profile and refuses any construct outside it.
 ## If it fails
 
 - [`domain_unverified`](/docs/reference/errors/#domain_unverified): a resolver did not give the value. Wait for the DNS change, then verify again.
+- [`token_expired`](/docs/reference/errors/#token_expired): the pending domain is older than 7 days. Add the domain again for a new record.
 - [`domain_taken`](/docs/reference/errors/#domain_taken): another organization holds the domain.
 - [`domain_limit`](/docs/reference/errors/#domain_limit) and [`connection_limit`](/docs/reference/errors/#connection_limit): the organization holds `sso.limits` domains or connections.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the call to a manager route has no session.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the body or the query does not match the route.
+- [`conflict`](/docs/reference/errors/#conflict): a write at the same time changed the domain, the connection, or the member. Read the row again, and retry.
 - [`second_factor_required`](/docs/reference/errors/#second_factor_required): the owner has no second factor.
 - [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): prove it again, then call once more.
 - [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the caller is not an owner of the organization.
@@ -122,7 +127,12 @@ Core accepts one narrow profile and refuses any construct outside it.
 - [`sso_required`](/docs/reference/errors/#sso_required): the domain enforces SSO. Use the start path in `detail`.
 - [`email_required`](/docs/reference/errors/#email_required): the provider sent no address.
 - [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person said no at the provider.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): `signUp` does not let the address become a user, so `jit` creates no user.
+- [`member_limit`](/docs/reference/errors/#member_limit): the organization holds its maximum of members, so the person gets no member row.
+- [`role_not_found`](/docs/reference/errors/#role_not_found): the `defaultRole` of the connection names a role that is gone. Update the connection.
+- [`account_banned`](/docs/reference/errors/#account_banned): an operator banned the user.
 - [`hook_refused`](/docs/reference/errors/#hook_refused): `hooks.sso.beforeSignIn` refused the sign-in.
+- [`hook_failed`](/docs/reference/errors/#hook_failed): a hook threw. Read the log line of the hook.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): see the SSO keys of [Limits](/docs/reference/limits/).
 
 ## Next

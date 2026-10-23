@@ -114,9 +114,12 @@ To fix a custom extension URN, remove the custom mapping in the directory, or as
 ## If it fails
 
 - [`token_limit`](/docs/reference/errors/#token_limit): the organization holds 2 live tokens. Revoke one first.
+- [`unauthorized`](/docs/reference/errors/#unauthorized): the call to a token route has no session.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the body or the query does not match the route.
 - [`second_factor_required`](/docs/reference/errors/#second_factor_required): the owner has no second factor.
 - [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): prove it again, then call once more.
 - [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the caller is not an owner of the organization.
+- [`operator_required`](/docs/reference/errors/#operator_required): a platform operator failed the operator guard.
 - [`impersonation_session`](/docs/reference/errors/#impersonation_session): an impersonation session cannot create or revoke a token.
 - [`account_disabled`](/docs/reference/errors/#account_disabled): the directory deactivated the person.
 - [`rate_limited`](/docs/reference/errors/#rate_limited): see the SCIM keys of [Limits](/docs/reference/limits/).

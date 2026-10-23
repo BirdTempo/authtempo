@@ -53,7 +53,7 @@ The secret has a life of at most 24 months. Before it ends, make a new one and u
 10. Give the claim the name `email`, and the email address of the person as its source.
 11. Assign the people of the customer to the app, and select "Test".
 
-Core asks for the persistent `NameID` format in each request. Entra ID honors the format of the request, so you change nothing in "Name identifier value".
+Core asks for the persistent `NameID` format when the connection has no `subjectAttribute`. Then core refuses a transient `NameID`. Entra ID honors the format of the request, so you change nothing in "Name identifier value".
 
 <Code code={sample} lang="ts" title="The connection input of Entra ID" />
 
