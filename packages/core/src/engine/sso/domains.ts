@@ -1,3 +1,4 @@
+import { domainRecordFor } from "../../compat-seams.js";
 import type { ResolvedConfig } from "../../config.js";
 import { ERRORS } from "../../errors.js";
 import { randomBase64Url } from "../../primitives/crypto.js";
@@ -327,7 +328,7 @@ export async function verifyDomain(
   actor: SsoActor,
   input: { id: string } & SsoActMeta,
 ): Promise<Result<SsoDomainSummary>> {
-  return verifyDomainWith(config, actor, input, null);
+  return verifyDomainWith(config, actor, input, "own");
 }
 
 /**
@@ -336,7 +337,11 @@ export async function verifyDomain(
  * resolver. A pending row past `expiresAt` answers `token_expired`. A
  * verified row answers as it is. Then every resolver of `sso.dns` must give
  * one of `expect.values` at `expect.name` (`everyPortGives`), else
- * `domain_unverified`. `expect` null is the row's own record. On success
+ * `domain_unverified`. `record` "own" is the row's own record. "compat" is
+ * the record of the compat package of this config (`withDomainRecord`, plan
+ * 12d Task 14). It comes from the row's current challenge and the label of
+ * its connection. So a row with a new challenge never proves itself by an
+ * old record. A config with no such record answers `domain_unverified`. On success
  * one transaction claims the domain with a conditional update where
  * `claimedDomain` is null, and writes the `sso_domain_verify` audit row.
  * The unique key on `claimedDomain` gives a domain to one organization: the
@@ -347,7 +352,7 @@ export async function verifyDomainWith(
   config: ResolvedConfig,
   actor: SsoActor,
   input: { id: string } & SsoActMeta,
-  expect: { name: string; values: readonly string[] } | null,
+  record: "own" | "compat",
 ): Promise<Result<SsoDomainSummary>> {
   const sso = ssoOn(config);
   if (!sso.ok) return sso;
@@ -366,7 +371,8 @@ export async function verifyDomainWith(
   const now = config.clock.now();
   if (row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime())
     return fail("token_expired");
-  if (!(await everyPortGives(sso.value.dns, row.domain, expect ?? ownExpect(row))))
+  const expect = record === "own" ? ownExpect(row) : await compatExpect(config, row);
+  if (expect === null || !(await everyPortGives(sso.value.dns, row.domain, expect)))
     return fail("domain_unverified");
   const draft = ssoDraft(actor, "sso_domain_verify", {
     targetUserId: null,
@@ -629,7 +635,8 @@ const RECHECK_ROW_WRITES = 3;
  * `RECHECK_BATCH` rows with `verifiedAt` set and `checkedAt` at or before
  * `now - RECHECK_AFTER_MS`. A row with a retry due comes first, then the
  * oldest check, so a backlog of first rechecks holds no failing domain.
- * Each row asks every resolver for its own record, as the verify does. A
+ * Each row asks every resolver for its own record, as the verify does, and
+ * then for the compat package's record when the config has one. A
  * pass moves `checkedAt` to now and clears the failures. A failure adds one
  * to `failures`, sets `firstFailureAt` when it was null, and sets
  * `checkedAt` so that the next try comes one day later. At `LOSS_FAILURES`
@@ -650,7 +657,9 @@ export async function recheckDomains(
 ): Promise<number> {
   const sso = config.sso;
   if (!sso) return 0;
-  const perRow = sso.dns.length + RECHECK_ROW_WRITES;
+  // A compat record is a second try: one read of the connection and each resolver again.
+  const compat = domainRecordFor(config) !== null;
+  const perRow = (compat ? 2 * sso.dns.length + 1 : sso.dns.length) + RECHECK_ROW_WRITES;
   const meter = budget?.meter;
   // The read and the worst cost of the first row must fit.
   if (budget && budget.meter.used + 1 + perRow > budget.limit) return 0;
@@ -678,7 +687,7 @@ export async function recheckDomains(
   for (const row of rows) {
     if (budget && budget.meter.used + perRow > budget.limit) break;
     checked++;
-    const passed = await everyPortGives(sso.dns, row.domain, ownExpect(row), meter);
+    const passed = await rowProven(config, sso.dns, row, meter);
     const held = [
       { field: "id", op: "eq", value: row.id },
       { field: "claimedDomain", op: "eq", value: row.claimedDomain },
@@ -711,10 +720,54 @@ export async function recheckDomains(
   return checked;
 }
 
-/** The record that a recheck asks for: the row's own name and value. */
-function ownExpect(row: SsoDomainRow): { name: string; values: readonly string[] } {
+/** The row's own record: its name and value. */
+function ownExpect(row: Pick<SsoDomainRow, "domain" | "challenge">): {
+  name: string;
+  values: readonly string[];
+} {
   const own = recordOf(row);
   return { name: own.name, values: [own.value] };
+}
+
+/**
+ * The record of the compat package for the row, or null when the config
+ * has none or the function gives none. A row with a connection reads the
+ * connection's label: the compat package of Better Auth holds its
+ * providerId there (ruling 61 P5).
+ */
+async function compatExpect(
+  config: ResolvedConfig,
+  row: SsoDomainRow,
+  meter?: Meter,
+): Promise<{ name: string; values: readonly string[] } | null> {
+  const record = domainRecordFor(config);
+  if (record === null) return null;
+  let label: string | null = null;
+  if (row.connectionId !== null) {
+    const connection = await config.storage.findOne("ssoConnection", [
+      { field: "id", op: "eq", value: row.connectionId },
+    ]);
+    meter?.step(1);
+    label = connection?.label ?? null;
+  }
+  return record(row, label);
+}
+
+/**
+ * The recheck of one row (ruling 61 F4): its own record, else the record
+ * of the compat package when the config has one. So a domain that the
+ * compat package proved keeps its claim. A domain that core's own route
+ * proved keeps it too.
+ */
+async function rowProven(
+  config: ResolvedConfig,
+  ports: readonly DnsTxtPort[],
+  row: SsoDomainRow,
+  meter?: Meter,
+): Promise<boolean> {
+  if (await everyPortGives(ports, row.domain, ownExpect(row), meter)) return true;
+  const compat = await compatExpect(config, row, meter);
+  return compat !== null && (await everyPortGives(ports, row.domain, compat, meter));
 }
 
 /**

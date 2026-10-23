@@ -1,3 +1,4 @@
+import { scimCallerOf } from "../../compat-seams.js";
 import type { ResolvedConfig } from "../../config.js";
 import { ERRORS } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
@@ -290,7 +291,8 @@ const BEARER_RE = /^Bearer ([^ ]+)$/i;
  * once on `scim-auth:ip:<ip>` and answers 401, or 429 when that count is
  * refused. A pass counts on `scim:token:<id>` and never on the IP key; a
  * refused count answers 429. `lastUsedAt` moves by one conditional update,
- * only when it is null or older than 60 seconds.
+ * only when it is null or older than 60 seconds. A caller that
+ * `scimRequestAs` set skips the token steps and counts on its own key.
  */
 export async function authenticateScim(
   config: ResolvedConfig,
@@ -303,6 +305,12 @@ export async function authenticateScim(
       ? 401
       : 429,
   });
+  // A caller that a compat package checked (plan 12d Task 14): the limit of its credential, no row.
+  const checked = scimCallerOf(request);
+  if (checked !== null)
+    return (await config.limiter.allow(`scim:token:${checked.tokenId}`, SCIM_PER_TOKEN))
+      ? { ok: true, caller: checked }
+      : { ok: false, status: 429 };
   const token = BEARER_RE.exec(request.headers.get("authorization") ?? "")?.[1];
   if (token === undefined || !SCIM_TOKEN_RE.test(token)) return failed();
   const row = await config.storage.findOne("scimToken", [

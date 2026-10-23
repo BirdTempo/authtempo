@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { isRecordVerify } from "../../compat-seams.js";
 import type { ResolvedConfig } from "../../config.js";
 import type { SignInChallenge } from "../../engine/second-factor.js";
 import {
@@ -20,7 +21,7 @@ import {
   domainOrganization,
   listDomains,
   updateDomain,
-  verifyDomain,
+  verifyDomainWith,
 } from "../../engine/sso/domains.js";
 import { requireSsoManager, type SsoActor } from "../../engine/sso/guard.js";
 import { completeSsoOidc, startSso } from "../../engine/sso/oidc.js";
@@ -327,7 +328,14 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       "/sso/domains/verify",
       domainIdBody,
       byId,
-      (actor, b, ctx) => verifyDomain(config, actor, { ...b, ...meta(ctx) }),
+      // A request that verifyDomainByRecord marked asks for the compat package's record (plan 12d Task 14).
+      (actor, b, ctx) =>
+        verifyDomainWith(
+          config,
+          actor,
+          { ...b, ...meta(ctx) },
+          isRecordVerify(ctx.request) ? "compat" : "own",
+        ),
       (domain) => json({ domain }),
     ),
     post(

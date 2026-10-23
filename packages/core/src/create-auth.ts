@@ -1,5 +1,13 @@
 import type { Statements } from "./access.js";
-import { type AuthConfig, resolveConfig } from "./config.js";
+import {
+  carryDomainRecord,
+  type DomainRecordOf,
+  domainRecordFor,
+  markRecordVerify,
+  setConfigDomainRecord,
+  setScimCaller,
+} from "./compat-seams.js";
+import { type AuthConfig, type ResolvedConfig, resolveConfig } from "./config.js";
 import {
   type AccountDelete,
   confirmAccountDelete,
@@ -157,6 +165,7 @@ import {
   createScimToken,
   listScimTokens,
   revokeScimToken,
+  SCIM_SCOPES,
   type ScimTokenSummary,
 } from "./engine/scim/tokens.js";
 import {
@@ -1083,6 +1092,84 @@ export function crossSiteRefusal(auth: Auth, request: Request): Response | null 
   return gate(request);
 }
 
+/** The resolved config of each Auth, for the compat seams. A WeakMap keeps it off the Auth type. */
+const configs = new WeakMap<Auth, ResolvedConfig>();
+
+/**
+ * Gives `config` the record of a domain proof of a compat package (plan 12d
+ * Task 14, ruling 61 F4). Call it before `createAuth(config)`. The verify of
+ * `verifyDomainByRecord` asks for this record, and the 30-day recheck asks
+ * for it when the row's own record fails. So a domain that the compat
+ * package proved keeps its claim. Answers `config`.
+ */
+export function withDomainRecord<C extends AuthConfig>(config: C, record: DomainRecordOf): C {
+  setConfigDomainRecord(config, record);
+  return config;
+}
+
+/**
+ * Runs `POST <basePath>/sso/domains/verify` with the record of
+ * `withDomainRecord` in place of core's own record (plan 12d Task 14). Every
+ * other step is the route's: the session, the limiter, the manager guard,
+ * the claim, and the audit row. Throws a TypeError for another path, an
+ * Auth that `createAuth` did not make, or a config with no such record.
+ */
+export function verifyDomainByRecord(auth: Auth, request: Request): Promise<Response> {
+  const config = configs.get(auth);
+  if (!config) throw new TypeError("verifyDomainByRecord takes an Auth from createAuth");
+  if (domainRecordFor(config) === null)
+    throw new TypeError("verifyDomainByRecord takes an Auth whose config has withDomainRecord");
+  if (
+    request.method !== "POST" ||
+    new URL(request.url).pathname !== `${auth.basePath}/sso/domains/verify`
+  )
+    throw new TypeError("verifyDomainByRecord takes a POST to <basePath>/sso/domains/verify");
+  markRecordVerify(request);
+  return auth.handle(request);
+}
+
+/** A SCIM caller that a compat package checked itself: one credential of one organization. */
+export interface CheckedScimCaller {
+  /** The key of the credential's limit and the actor name of its audit rows: 1 to 128 characters. */
+  id: string;
+  organizationId: string;
+  scopes: readonly ScimScope[];
+}
+
+/**
+ * Runs a `<basePath>/scim/v2` route with `caller` in place of the check of
+ * a SCIM token (plan 12d Task 14). The compat package of Better Auth checks
+ * the SHA-256 of a credential of its config, then calls this. The scope of
+ * the route, the limit of the credential (`scim:token:<id>`), the body, and
+ * the audit rows stay core's. Throws a TypeError for another path, a bad
+ * caller, or an Auth that `createAuth` did not make.
+ */
+export function scimRequestAs(
+  auth: Auth,
+  request: Request,
+  caller: CheckedScimCaller,
+): Promise<Response> {
+  if (!configs.has(auth)) throw new TypeError("scimRequestAs takes an Auth from createAuth");
+  if (!new URL(request.url).pathname.startsWith(`${auth.basePath}/scim/v2/`))
+    throw new TypeError("scimRequestAs takes a request under <basePath>/scim/v2/");
+  if (
+    typeof caller.id !== "string" ||
+    caller.id.length < 1 ||
+    caller.id.length > 128 ||
+    typeof caller.organizationId !== "string" ||
+    caller.organizationId.length < 1 ||
+    !caller.scopes.every((s) => SCIM_SCOPES.includes(s))
+  )
+    throw new TypeError("scimRequestAs takes an id of 1 to 128 characters and SCIM scopes");
+  setScimCaller(request, {
+    tokenId: caller.id,
+    tokenName: caller.id,
+    organizationId: caller.organizationId,
+    scopes: new Set(caller.scopes),
+  });
+  return auth.handle(request);
+}
+
 /** One SSO call of the app: the name rule of the app actor first, as each operator entry checks it. */
 function appCall<I extends { actor: SsoAppActor }, R>(
   run: (input: I) => Promise<Result<R>>,
@@ -1108,6 +1195,8 @@ const SCIM_NO_QUERY = new URL("https://scim.invalid/");
 
 export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
+  // The record of a compat package (withDomainRecord) reaches the routes and the sweep.
+  carryDomainRecord(input, config);
   // The route modules get a config whose observer marks each event unscoped.
   // A handler emits through ctx.config, the scope of its request (plan 12h).
   const routes = coreRoutes({ ...config, observe: unscopedOf(config.observe) });
@@ -1373,5 +1462,6 @@ export function createAuth(input: AuthConfig): Auth {
     errors: ERRORS,
   };
   gates.set(auth, gate);
+  configs.set(auth, config);
   return auth;
 }
