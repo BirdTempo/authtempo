@@ -9,7 +9,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { createServer, type Server } from "node:net";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -25,6 +25,11 @@ import { REPO } from "../scripts/lib/paths.ts";
 // set. The fake writes each call to a log, after "held" or "free" for the
 // lock of the slot table. A compose down passes, and every other compose
 // call fails. A ps call prints FAKE_DOCKER_PS.
+//
+// A fake lsof is first on the PATH too. It shows a listener only on a port
+// of FAKE_LSOF_PORTS. A real set on this machine can hold a port of a slot
+// that the fake table gives. The real lsof then made the port check refuse
+// first, and that refusal hid the refusal that the test reads.
 
 const SCRIPT = `${REPO}scripts/test-servers.mjs`;
 const temp = realpathSync(mkdtempSync(join(tmpdir(), "authtempo-servers-")));
@@ -48,6 +53,23 @@ writeFileSync(
   ].join("\n"),
 );
 chmodSync(join(BIN, "docker"), 0o755);
+writeFileSync(
+  join(BIN, "lsof"),
+  [
+    "#!/bin/sh",
+    'for a in "$@"; do',
+    '  case "$a" in',
+    '    -iTCP:*) port=$(printf %s "$a" | cut -d: -f2) ;;',
+    "  esac",
+    "done",
+    'case ",$FAKE_LSOF_PORTS," in',
+    '  *",$port,"*) printf "p4242\\ncfake-listener\\n"; exit 0 ;;',
+    "esac",
+    "exit 1",
+    "",
+  ].join("\n"),
+);
+chmodSync(join(BIN, "lsof"), 0o755);
 
 const git = (cwd: string, ...args: string[]) => {
   const run = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -99,6 +121,7 @@ function serversWith(env: Record<string, string>, home: string, cwd: string, ...
       PATH: `${BIN}:${process.env.PATH ?? ""}`,
       FAKE_DOCKER_LOG: log,
       FAKE_DOCKER_PS: "",
+      FAKE_LSOF_PORTS: "",
       ...env,
     },
   });
@@ -110,15 +133,6 @@ const rowsOf = (home: string) =>
     r.worktree,
     r.slot,
   ]);
-
-/** Listens on `port`; answers null when another process holds it already. */
-async function listen(port: number): Promise<Server | null> {
-  const server = createServer();
-  return new Promise((done) => {
-    server.once("error", () => done(null));
-    server.listen(port, "127.0.0.1", () => done(server));
-  });
-}
 
 describe("the test-servers command", () => {
   it("refuses down in the registered main worktree, because slot 0 is the running set of main", () => {
@@ -238,19 +252,22 @@ describe("the test-servers command", () => {
     expect(existsSync(tablePath(home))).toBe(false);
   });
 
-  it("stops up on a taken port before any compose call", async () => {
+  it("stops up on a taken port before any compose call", () => {
     const home = newHome();
     const port = portOf(1, "libsql-cli-compat");
-    // A set of slot 1 on this machine can hold the port already; up stops on it all the same.
-    const server = await listen(port);
-    try {
-      const run = servers(home, LANE, "up", "--only", "libsql-cli-compat");
-      expect(run.status).toBe(2);
-      expect(run.stderr).toMatch(new RegExp(`^test-servers: port ${port} is taken by `));
-      expect(run.docker).not.toMatch(/^\w+ compose /m);
-    } finally {
-      await new Promise((done) => server?.close(done) ?? done(null));
-    }
+    const run = serversWith(
+      { FAKE_LSOF_PORTS: String(port) },
+      home,
+      LANE,
+      "up",
+      "--only",
+      "libsql-cli-compat",
+    );
+    expect(run.status).toBe(2);
+    expect(run.stderr).toMatch(
+      new RegExp(`^test-servers: port ${port} is taken by fake-listener \\(pid 4242\\)\\. `),
+    );
+    expect(run.docker).not.toMatch(/^\w+ compose /m);
   });
 
   it("refuses to remove a set whose containers name another worktree", () => {
@@ -275,7 +292,7 @@ describe("the test-servers command", () => {
   it("refuses up when a container of its slot names another worktree", () => {
     const home = newHome();
     // A second table, or a hand edit, gave slot 1 to another clone, which runs its set now.
-    // A real listener on the port gives another refusal, so this test fails loudly, never falsely.
+    // The fake lsof shows no listener, so the port check passes and the owner check refuses.
     const run = serversWith(
       { FAKE_DOCKER_PS: "authtempo-s1-libsql-1\t/elsewhere/clone\n" },
       home,
@@ -292,29 +309,27 @@ describe("the test-servers command", () => {
     expect(run.docker).not.toMatch(/^\w+ compose /m);
   });
 
-  it("refuses up when a port of its slot is held by a container of another worktree", async () => {
+  it("refuses up when a port of its slot is held by a container of another worktree", () => {
     const home = newHome();
     const port = portOf(1, "libsql-cli-compat");
     // The project matches, and only the label names another worktree.
-    const server = await listen(port);
-    try {
-      const run = serversWith(
-        { FAKE_DOCKER_PS: "authtempo-s1-libsql-cli-compat-1\tauthtempo-s1\t/elsewhere/clone\n" },
-        home,
-        LANE,
-        "up",
-        "--only",
-        "libsql-cli-compat",
-      );
-      expect(run.status).toBe(2);
-      expect(run.stderr).toContain(
-        `port ${port} is taken by the container authtempo-s1-libsql-cli-compat-1. `,
-      );
-      expect(run.docker).toMatch(new RegExp(` ps --filter publish=${port} `));
-      expect(run.docker).not.toMatch(/^\w+ compose /m);
-    } finally {
-      await new Promise((done) => server?.close(done) ?? done(null));
-    }
+    const run = serversWith(
+      {
+        FAKE_LSOF_PORTS: String(port),
+        FAKE_DOCKER_PS: "authtempo-s1-libsql-cli-compat-1\tauthtempo-s1\t/elsewhere/clone\n",
+      },
+      home,
+      LANE,
+      "up",
+      "--only",
+      "libsql-cli-compat",
+    );
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain(
+      `port ${port} is taken by the container authtempo-s1-libsql-cli-compat-1. `,
+    );
+    expect(run.docker).toMatch(new RegExp(` ps --filter publish=${port} `));
+    expect(run.docker).not.toMatch(/^\w+ compose /m);
   });
 
   it("removes the set of a removed worktree after it frees the lock", () => {
