@@ -66,8 +66,11 @@ function tapped(tap: (method: string, model: string) => Promise<void>): StorageA
   }) as StorageAdapter;
 }
 
-/** The engine with organizations, an OIDC connection, and SCIM, on `storage`. */
-function world(storage: StorageAdapter) {
+/**
+ * The engine with organizations, an OIDC connection, and SCIM, on `storage`.
+ * `removed` gets the role of each member that the before hook of a removal sees.
+ */
+function world(storage: StorageAdapter, removed: string[] = []) {
   const sent: MailMessage[] = [];
   const txt: Record<string, string[]> = {};
   const auth = createAuth({
@@ -85,6 +88,9 @@ function world(storage: StorageAdapter) {
       fetch: async () => Response.json({}),
     },
     scim: { groups: "roles" },
+    hooks: {
+      organization: { beforeRemoveMember: (e) => void removed.push(e.member.role) },
+    },
   });
   const must = <T>(r: { ok: true; value: T } | { ok: false; code: string }): T => {
     if (!r.ok) throw new Error(r.code);
@@ -214,7 +220,8 @@ describe("the SCIM Groups on Postgres (ruling 59 of plan 12d)", () => {
       if (armed && method === "delete" && model === "scimGroupMember") dropped.fire();
     });
     const g = world(forGroup);
-    const u = world(forUser);
+    const removed: string[] = [];
+    const u = world(forUser, removed);
     const { token } = await g.acme();
     const { ada, group } = await adminsWithAda(g, token);
     armed = true;
@@ -231,13 +238,55 @@ describe("the SCIM Groups on Postgres (ruling 59 of plan 12d)", () => {
       })(),
     ]);
     // No deadlock (500). The group write changed ada's role after the delete read the
-    // member row, so the delete answers 409, and the directory sends it again.
-    expect(answers.map((a) => a.status)).toEqual([204, 409]);
-    expect(await adaRole()).toBe("member");
-    expect((await u.scim(token, "DELETE", `/Users/${ada}`)).status).toBe(204);
+    // member row. The delete reads it again under its user hold, and its round runs again
+    // with its before hook, so the directory gets no 409 (ruling 63 M2 of plan 12d).
+    expect(answers.map((a) => a.status)).toEqual([204, 204]);
+    expect(removed).toEqual(["admin", "member"]);
     expect(await count("ta_scim_user")).toBe(0);
     expect(await count("ta_scim_group_member")).toBe(0);
     expect(await adaRole()).toBeNull();
+  }, 60_000);
+
+  it("deactivates a User whose role a mapped group remove changes before the hold (ruling 63 M2)", async () => {
+    // The group remove stops after its member row lock. The deactivate reads the member
+    // row, then waits on the user hold of the group write, which commits a new role.
+    let armed = false;
+    const locked = signal();
+    const forGroup = tapped(async (method, model) => {
+      if (armed && method === "lockInOrder" && model === "member") {
+        locked.fire();
+        await within(new Promise(() => {}));
+      }
+    });
+    const g = world(forGroup);
+    const removed: string[] = [];
+    const u = world(createPostgresAdapter(db.sql), removed);
+    const { token } = await g.acme();
+    const { ada, group } = await adminsWithAda(g, token);
+    armed = true;
+    const answers = await Promise.all([
+      g.scim(
+        token,
+        "PATCH",
+        `/Groups/${group}`,
+        patch({ op: "remove", path: "members", value: [{ value: ada }] }),
+      ),
+      (async () => {
+        await within(locked.fired);
+        return u.scim(
+          token,
+          "PATCH",
+          `/Users/${ada}`,
+          patch({ op: "replace", path: "active", value: false }),
+        );
+      })(),
+    ]);
+    // The round runs again with the new role, so the person loses access now, not after an
+    // admin retries the push of the IdP.
+    expect(answers.map((a) => a.status)).toEqual([204, 200]);
+    expect(removed).toEqual(["admin", "member"]);
+    expect(await adaRole()).toBeNull();
+    expect(await count("ta_scim_user", "active = FALSE")).toBe(1);
   }, 60_000);
 
   it("gives the role of the new groups when a removal commits between the reactivate's read and its hold (M2)", async () => {

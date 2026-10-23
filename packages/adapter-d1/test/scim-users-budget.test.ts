@@ -1,5 +1,10 @@
 import { env } from "cloudflare:test";
-import { type AuthConfig, createAuth, type MailMessage } from "@authtempo/core";
+import {
+  type AuthConfig,
+  createAuth,
+  type MailMessage,
+  type StorageAdapter,
+} from "@authtempo/core";
 import { TABLES } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createD1Adapter, createD1Limiter } from "../src/index.js";
@@ -252,7 +257,7 @@ describe("the SCIM Users on D1 (plan 12d Task 10, ruling 25 N1)", () => {
       list: list.queries,
       delete: gone.queries,
     };
-    // Measured on the binding on 2026-10-22; see the ledger of plan 12d Task 10.
+    // Measured on the binding on 2026-10-24; see the ledger of plan 12d Task 11.
     expect(counts).toEqual(MEASURED);
     const routes = [create, update, off, get, list, gone, fresh, older, live, mint, read];
     for (const n of routes.map((r) => r.queries).concat(sweeps)) expect(n).toBeLessThanOrEqual(50);
@@ -260,13 +265,16 @@ describe("the SCIM Users on D1 (plan 12d Task 10, ruling 25 N1)", () => {
 });
 
 /**
- * The counts of the run on the binding, 2026-10-22: the queries of each
+ * The counts of the run on the binding, 2026-10-24: the queries of each
  * route, the sessions that the deactivate ended in its call, and the queries
- * of each sweep. The deactivate takes the whole budget of 50: its page ends
- * 11 of the 40 sessions, one statement per session with the hook. It keeps 2
+ * of each sweep. The deactivate takes 49 of the budget of 50: its page ends
+ * 9 of the 40 sessions, one statement per session with the hook. It keeps 2
  * statements for the write of `user.updatedAt` (the undo read and the
- * update) and 1 for the audit row (ruling 50 of plan 12d). One session read
- * ends one more session, and the two sweeps end the other 28.
+ * update), 1 for the audit row (ruling 50 of plan 12d), and 1 for the second
+ * group read of the answer, which a user in no group does not make (ruling
+ * 63 M1). The read of the member row under the user hold costs 1 more
+ * (ruling 63 M2). One session read ends one more session, and the two sweeps
+ * end the other 30.
  *
  * `doors` holds the queries and the pending-end reads of each door. A session
  * from after the last write of its user reads 3 queries and no pending-end
@@ -277,8 +285,8 @@ describe("the SCIM Users on D1 (plan 12d Task 10, ruling 25 N1)", () => {
 const MEASURED = {
   create: 20,
   update: 16,
-  deactivate: 50,
-  ended: 11,
+  deactivate: 49,
+  ended: 9,
   doors: {
     fresh: [3, 0],
     older: [4, 1],
@@ -286,7 +294,7 @@ const MEASURED = {
     mint: [4, 1],
     read: [6, 1],
   },
-  sweeps: [48, 27],
+  sweeps: [48, 29],
   get: 5,
   list: 5,
   delete: 13,
@@ -455,7 +463,7 @@ describe("the OAuth families of a SCIM deactivate on D1 (ruling 55 of plan 12d)"
       expect(await sessions()).toBe(0);
       // Every family has its end mark after the sweep.
       expect(await familyMarks()).toBe(k);
-      // Measured on the binding on 2026-10-22; see the ledger of plan 12d Task 10.
+      // Measured on the binding on 2026-10-24; see the ledger of plan 12d Task 11.
       expect([off, ended, marked, sweeps]).toEqual(FAMILY_COUNTS[k]);
       for (const n of [off, ...sweeps]) expect(n).toBeLessThanOrEqual(50);
     }, 120_000);
@@ -463,7 +471,7 @@ describe("the OAuth families of a SCIM deactivate on D1 (ruling 55 of plan 12d)"
 
 /**
  * The counts of the deactivate of a user with 40 sessions, a session.afterEnd
- * hook, and k OAuth refresh families, on the binding, 2026-10-22: the
+ * hook, and k OAuth refresh families, on the binding, 2026-10-24: the
  * queries of the deactivate, the sessions it ended, the families it ended
  * with their marks, and the queries of each sweep (ruling 55 of plan 12d).
  * The families come first in the budget, and a page of one session stays.
@@ -471,9 +479,75 @@ describe("the OAuth families of a SCIM deactivate on D1 (ruling 55 of plan 12d)"
  * ends them with 2 queries each.
  */
 const FAMILY_COUNTS: Record<number, [number, number, number, number[]]> = {
-  0: [50, 11, 0, [48, 28]],
-  7: [50, 1, 5, [48, 42]],
-  20: [50, 1, 5, [48, 50, 41]],
+  0: [49, 9, 0, [48, 30]],
+  7: [49, 1, 4, [48, 44]],
+  20: [49, 1, 4, [48, 50, 43]],
+};
+
+const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";
+
+describe("the deactivate of a User in groups on D1 (ruling 63 M1 of plan 12d)", () => {
+  for (const g of [1, 2])
+    for (const k of [0, 20])
+      it(`deactivates a user in ${g} groups with 40 sessions and ${k} families in 50 queries`, async () => {
+        const setup = make(env.DB, false, OAUTH);
+        const { token } = await acme(setup);
+        const { token: first } = await signIn(setup, ADA);
+        for (let i = 1; i < 40; i++) await signIn(setup, ADA);
+        const create = await counted(token, "POST", "/Users", {
+          schemas: [USER_URN],
+          userName: ADA,
+        });
+        expect(create.status).toBe(201);
+        const id = String(create.body.id);
+        for (let i = 0; i < g; i++) {
+          const group = await counted(token, "POST", "/Groups", {
+            schemas: [GROUP_URN],
+            displayName: `Group ${i}`,
+            members: [{ value: id }],
+          });
+          expect(group.status).toBe(201);
+        }
+        await families(setup, first, k);
+        const { db, c } = counting(env.DB);
+        const res = await make(db, true, OAUTH).handle(
+          new Request(`${API}/auth/scim/v2/Users/${id}`, {
+            method: "PATCH",
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/scim+json",
+            },
+            body: JSON.stringify({
+              schemas: [PATCH_URN],
+              Operations: [{ op: "replace", path: "active", value: false }],
+            }),
+          }),
+        );
+        expect(res.status).toBe(200);
+        // The answer reads the groups after the commit, inside the budget.
+        const body = (await res.json()) as { groups?: unknown[] };
+        expect(body.groups?.length).toBe(g);
+        const off = c.n;
+        const ended = 40 - (await sessions());
+        // Measured on the binding on 2026-10-24; see the ledger of plan 12d Task 11.
+        expect([off, ended, await familyMarks()]).toEqual(GROUPED_COUNTS[`${g}/${k}`]);
+        expect(off).toBeLessThanOrEqual(50);
+      }, 120_000);
+});
+
+/**
+ * The counts of the deactivate of a user in g groups, with 40 sessions, a
+ * session.afterEnd hook, and k OAuth refresh families, on the binding,
+ * 2026-10-24: the queries, the sessions that the deactivate ended, and the
+ * families that it ended with their marks. The answer reads the
+ * scimGroupMember rows and the scimGroup rows after the commit. The page
+ * keeps a call for that read (ruling 63 M1 of plan 12d).
+ */
+const GROUPED_COUNTS: Record<string, [number, number, number]> = {
+  "1/0": [50, 9, 0],
+  "1/20": [50, 1, 4],
+  "2/0": [50, 9, 0],
+  "2/20": [50, 1, 4],
 };
 
 /** One refresh on a counting view of the binding: its status, queries, and reads of ta_verification. */
@@ -581,3 +655,167 @@ const DOOR_COUNTS = [
   [400, 9, 1],
   [400, 9, 1],
 ];
+
+/** An OIDC connection, so the role map applies (ruling 63 M2 of plan 12d). */
+const MAPPED: Partial<AuthConfig> = {
+  sso: {
+    oidc: true,
+    dns: [{ name: "a", txt: async (name) => txt[name] ?? [] }],
+    fetch: async () => Response.json({}),
+  },
+};
+
+/** One SCIM request on `auth`: its status and body. */
+async function scimOn(
+  auth: ReturnType<typeof make>,
+  token: string,
+  method: string,
+  path: string,
+  body: unknown,
+) {
+  const res = await auth.handle(
+    new Request(`${API}/auth/scim/v2${path}`, {
+      method,
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/scim+json" },
+      body: JSON.stringify(body),
+    }),
+  );
+  const text = await res.text();
+  return {
+    status: res.status,
+    body: (text === "" ? null : JSON.parse(text)) as Record<string, unknown>,
+  };
+}
+
+/** The role of ada's member row, or null. */
+const adaRole = async () =>
+  (
+    await env.DB.prepare(
+      "SELECT m.role FROM ta_member m JOIN ta_user u ON u.id = m.user_id WHERE u.email = ?",
+    )
+      .bind(ADA)
+      .first<{ role: string }>()
+  )?.role ?? null;
+
+describe("a deactivate that races a mapped group write on D1 (ruling 63 M2 of plan 12d)", () => {
+  // A group write changes ada's role before each of the first `races` member reads under
+  // the user hold. The before hook of that round saw the old role, so the round runs again.
+  // At `delete`, the group write comes after that read, before the member delete: D1 has no
+  // lock, so the delete matches no row.
+  const cases: [string, number][] = [
+    ["findOne", 1],
+    ["findOne", 2],
+    ["findOne", 3],
+    ["delete", 1],
+  ];
+  for (const [at, races] of cases)
+    it(`answers inside 50 queries when ${races} group writes race the deactivate at ${at}`, async () => {
+      const setup = make(env.DB, false, MAPPED);
+      const { organizationId, token } = await acme(setup);
+      const sso = setup.api.sso;
+      const scim = setup.api.scim;
+      if (!sso || !scim) throw new Error("no sso or scim api");
+      const connection = await sso.connections.create({
+        actor: APP,
+        organizationId,
+        kind: "oidc",
+        label: "Acme IdP",
+        issuer: "https://login.acme-idp.example",
+        clientId: "acme-client",
+        clientSecret: "acme-secret-0123456789",
+        endpoints: {
+          authorizeUrl: "https://login.acme-idp.example/authorize",
+          tokenUrl: "https://login.acme-idp.example/token",
+          jwksUrl: "https://login.acme-idp.example/keys",
+        },
+      });
+      if (!connection.ok) throw new Error(connection.code);
+      const map = await scim.setRoleMap({ actor: APP, organizationId, map: { Admins: "admin" } });
+      if (!map.ok) throw new Error(map.code);
+      for (let i = 0; i < 40; i++) await signIn(setup, ADA);
+      const create = await scimOn(setup, token, "POST", "/Users", {
+        schemas: [USER_URN],
+        userName: ADA,
+      });
+      expect(create.status).toBe(201);
+      const id = String(create.body.id);
+      const group = await scimOn(setup, token, "POST", "/Groups", {
+        schemas: [GROUP_URN],
+        displayName: "Admins",
+        members: [{ value: id }],
+      });
+      expect(group.status).toBe(201);
+      expect(await adaRole()).toBe("admin");
+      const gid = String(group.body.id);
+      let lost = 0;
+      const { db, c } = counting(env.DB);
+      const base = createD1Adapter(db);
+      // The group write runs on the binding itself, so its queries do not count. It runs
+      // before each member read under the user hold, so that read sees a new role.
+      const race = async () => {
+        lost++;
+        const op =
+          (await adaRole()) === "admin"
+            ? { op: "remove", path: `members[value eq "${id}"]` }
+            : { op: "add", path: "members", value: [{ value: id }] };
+        const r = await scimOn(make(env.DB, false, MAPPED), token, "PATCH", `/Groups/${gid}`, {
+          schemas: [PATCH_URN],
+          Operations: [op],
+        });
+        if (r.status !== 204) throw new Error(`the group write answered ${r.status}`);
+      };
+      const member = (args: unknown[]) => args[0] === "member" && lost < races;
+      const inTx = (tx: StorageAdapter): StorageAdapter =>
+        new Proxy(tx, {
+          get(t, k) {
+            const v = Reflect.get(t, k);
+            if (typeof v !== "function") return v;
+            if (k !== at) return v.bind(t);
+            return async (...args: unknown[]) => {
+              if (member(args)) await race();
+              return v.apply(t, args);
+            };
+          },
+        });
+      const tapped = new Proxy(base, {
+        get(t, k) {
+          if (k === "transaction")
+            return <R>(fn: (tx: StorageAdapter) => Promise<R>) =>
+              t.transaction((tx) => fn(inTx(tx)));
+          const v = Reflect.get(t, k);
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      }) as StorageAdapter;
+      const res = await scimOn(
+        make(db, true, { ...MAPPED, storage: tapped }),
+        token,
+        "PATCH",
+        `/Users/${id}`,
+        { schemas: [PATCH_URN], Operations: [{ op: "replace", path: "active", value: false }] },
+      );
+      const queries = c.n;
+      const ended = 40 - (await sessions());
+      const role = await adaRole();
+      // Measured on the binding on 2026-10-24; see the ledger of plan 12d Task 11.
+      expect([res.status, queries, lost, ended, role]).toEqual(RACE_COUNTS[`${at}/${races}`]);
+      expect(queries).toBeLessThanOrEqual(50);
+    }, 120_000);
+});
+
+/**
+ * The deactivate of a user in a mapped group, with 40 sessions and a
+ * session.afterEnd hook, when a group write changes the role before the
+ * member read under the user hold, on the binding, 2026-10-24: the status,
+ * the queries, the lost rounds, the ended sessions, and the role that
+ * stays. After one lost round, the next round removes the member. A lost
+ * round costs 5 queries, so after two the next round does not fit the
+ * budget. Then the deactivate answers 409 and changes nothing (ruling 63 M2
+ * of plan 12d). A round lost at the member delete costs more, with its
+ * undo, so the next round does not fit after one.
+ */
+const RACE_COUNTS: Record<string, [number, number, number, number, string | null]> = {
+  "findOne/1": [200, 49, 1, 4, null],
+  "findOne/2": [409, 18, 2, 0, "admin"],
+  "findOne/3": [409, 18, 2, 0, "admin"],
+  "delete/1": [409, 21, 1, 0, "member"],
+};

@@ -29,7 +29,7 @@ import type {
 } from "../../schema.js";
 import { findManyIn } from "../../storage/batch.js";
 import { type Meter, meterOf } from "../../storage/meter.js";
-import { type StorageAdapter, StorageError } from "../../storage/port.js";
+import { type StorageAdapter, StorageError, type Where } from "../../storage/port.js";
 import { createSteps, verifySteps } from "../create-steps.js";
 import { OLD_ADDRESS_PROOFS } from "../email-change.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "../hooks.js";
@@ -52,6 +52,7 @@ import {
   removeMemberIn,
 } from "../organizations.js";
 import { isOwner, rankOf } from "../ranks.js";
+import { ROUNDS } from "../rounds.js";
 import { later } from "../second-factor.js";
 import { sessionsEnded } from "../sessions.js";
 import { afterAudit, claimingDomain, inOrganizationDomains } from "../sso/domains.js";
@@ -132,6 +133,35 @@ export class VersionLost extends Error {
     this.name = "VersionLost";
   }
 }
+
+/**
+ * A deprovision lost its round to a group write: the member row changed
+ * after the read that its before hook saw. `member` is the row of the read
+ * under the user hold, or undefined when the member delete matched no row.
+ * The round runs again, as a group write does with its own lost round
+ * (ruling 63 M2 of plan 12d).
+ */
+class LostRound extends Error {
+  constructor(readonly member: MemberRow | null | undefined) {
+    super("authtempo: the member removal of the SCIM deprovision lost its round");
+    this.name = "LostRound";
+  }
+}
+
+/**
+ * The calls of a deprovision round from its transaction to its answer,
+ * when the page ends no session and no family: the user hold, the writes,
+ * the fixed calls of the page, the user write, the audit row, and the steps
+ * after the commit. A new round starts only while the meter has room for
+ * them (ruling 63 M2 of plan 12d). Measured on the D1 binding, 2026-10-24:
+ * a deactivate of a user in a mapped group with 40 sessions and a
+ * session.afterEnd hook. A round that began at 19 calls of the meter ended
+ * the request at 50 queries, and one that began at 24 ended it at 54. The
+ * meter starts one call above the binding there, because the route skipped
+ * its `lastUsedAt` write. So the worst tail is 51 - 19 = 32. The teams mode
+ * gave the same counts. A lost round costs 5 calls there.
+ */
+const ROUND_TAIL = 32;
 
 /** The detail of the address rule (Behavior 2). */
 const ADDRESS_RULE = "the address is not in a verified domain of this organization";
@@ -1174,48 +1204,57 @@ async function writeChange(
     if (refusal) return refusal;
     meter.step(3);
   }
-  const member = await storage.findOne("member", [
+  const byPerson: Where<"member">[] = [
     { field: "organizationId", op: "eq", value: caller.organizationId },
     { field: "userId", op: "eq", value: user.id },
-  ]);
+  ];
+  const member = await storage.findOne("member", byPerson);
   // The address that the domain claim reads is the one before a move.
   const claimed = deactivate
     ? (await claimingDomain(storage, user.email))?.organizationId === caller.organizationId
     : false;
   meter.step(deactivate ? 3 : 1);
-  // SCIM never removes an owner, so the last-owner rule of spec 8.6 holds. A
-  // member row with the platform role stays too: its loss is the role loss of
-  // the member routes (question Q2 of plan 12d Task 10).
-  const kept =
-    member !== null &&
-    (isOwner(o, rankOf(o.ranks, member.role)) ||
-      writesPlatformRole(config, organization, member.role));
-  const removes = deactivate && member !== null && !kept;
-  if (deactivate && kept) console.info("authtempo: scim kept the member row of an owner", row.id);
   const now = config.clock.now();
-  const ends = {
-    ended: config.hooks.session.afterEnd ? ([] as SessionRow[]) : undefined,
-    families: familyEnds(),
-  };
-  const stops = impersonationStops(config, "deprovision");
   const memberUser = user;
-  const removeEvent =
-    member === null
-      ? null
-      : {
-          organization: publicOrganization(organization),
-          member: {
-            id: member.id,
-            userId: user.id,
-            role: member.role,
-            email: user.email,
-            name: user.name,
-            createdAt: member.createdAt,
-          },
-          memberUser,
-          by: null,
-          via: "scim" as const,
-        };
+  // The member removal of one round, from the member row that its before hook sees.
+  const planOf = (m: MemberRow | null) => {
+    // SCIM never removes an owner, so the last-owner rule of spec 8.6 holds. A
+    // member row with the platform role stays too: its loss is the role loss of
+    // the member routes (question Q2 of plan 12d Task 10).
+    const kept =
+      m !== null &&
+      (isOwner(o, rankOf(o.ranks, m.role)) || writesPlatformRole(config, organization, m.role));
+    return {
+      member: m,
+      kept,
+      removes: deactivate && m !== null && !kept,
+      removeEvent:
+        m === null
+          ? null
+          : {
+              organization: publicOrganization(organization),
+              member: {
+                id: m.id,
+                userId: user.id,
+                role: m.role,
+                email: user.email,
+                name: user.name,
+                createdAt: m.createdAt,
+              },
+              memberUser,
+              by: null,
+              via: "scim" as const,
+            },
+      ends: {
+        ended: config.hooks.session.afterEnd ? ([] as SessionRow[]) : undefined,
+        families: familyEnds(),
+      },
+      stops: impersonationStops(config, "deprovision"),
+    };
+  };
+  let plan = planOf(member);
+  if (deactivate && plan.kept)
+    console.info("authtempo: scim kept the member row of an owner", row.id);
   const names = doc === null ? [] : changedNames(row, doc);
   const action =
     change.kind === "delete"
@@ -1225,132 +1264,166 @@ async function writeChange(
         : "scim_user_update";
   let join: Join | null = null;
   let joined: MemberRow | null = null;
-  const written = await hookGuard(() =>
-    storage.transaction(async (tx) => {
-      join = null;
-      // The before hooks first: no lock and no write comes before them.
-      if (move && doc)
-        await runBefore("user.beforeUpdate", config.hooks.user.beforeUpdate, {
-          user,
-          patch: { email: doc.address },
-          via: "scim",
-        });
-      if (removes && removeEvent)
-        await runBefore(
-          "organization.beforeRemoveMember",
-          config.hooks.organization.beforeRemoveMember,
-          removeEvent,
-        );
-      if (reactivate) join = await joinChecks(config, tx, caller.organizationId, user, now, row.id);
-      // The lock order of user-hold.ts: the user row, the sessions, the organization row, the
-      // member rows, the scimGroupMember rows.
-      await holdUser(tx, user.id);
-      // The role of a reactivate comes from the groups again, after the hold (ruling 59 M2 of
-      // plan 12d). A group write holds each user whose role it computes, so it committed
-      // before this read, or it waits for this commit and then reads the new member row.
-      // The before hook saw the role of the first read: a group write in between answers 409.
-      const first = join as Join | null;
-      if (
-        first &&
-        (await scimRoleOf(config, tx, caller.organizationId, row.id)) !== first.member.role
-      )
-        stopWith("conflict");
-      if (deactivate || change.kind === "delete") await holdSessions(tx, user.id);
-      const versioned = [
-        { field: "id" as const, op: "eq" as const, value: row.id },
-        { field: "version" as const, op: "eq" as const, value: row.version },
-      ];
-      const n =
-        change.kind === "delete"
-          ? await tx.delete("scimUser", versioned)
-          : await tx.update("scimUser", versioned, {
-              ...columns(change.doc),
-              version: row.version + 1,
-              updatedAt: later(now, row.updatedAt),
-            });
-      if (n === 0) throw new VersionLost();
-      // The scimGroupMember rows of a delete come after the member row, as in a group write
-      // (ruling 59 M1 of plan 12d). The other order formed a deadlock on Postgres.
-      const dropGroups = async () => {
-        if (change.kind === "delete")
-          await tx.delete("scimGroupMember", [{ field: "scimUserId", op: "eq", value: row.id }]);
-      };
-      if (!deactivate) await dropGroups();
-      if (move && doc) await moveAddress(tx, user, doc.address, now);
-      if (doc) await fillName(tx, { ...user, email: doc.address }, doc, now);
-      if (deactivate) {
-        // The lock of the token create (ruling 32 of plan 12k): a create that holds it
-        // commits first, and the token delete sees its row.
-        if (!(await lockOrganization(tx, organization))) stopWith("not_found");
-        // The member row lock comes before the scimGroupMember rows. It costs one statement on
-        // Postgres; D1 and memory have no row lock.
-        if (removes && member)
-          await tx.lockInOrder?.("member", [{ field: "id", op: "eq", value: member.id }]);
-        await dropGroups();
-        if (removes && member && (await removeMemberIn(tx, member, true)) === 0)
-          stopWith("conflict");
-        if (claimed) {
-          // A deprovisioned person loses every credential (ruling 25 N1 of plan
-          // 12d): the API tokens and the organization tokens that the person made.
-          await tx.delete("apiToken", [{ field: "userId", op: "eq", value: user.id }]);
-          await tx.delete("organizationToken", [
-            { field: "organizationId", op: "eq", value: caller.organizationId },
-            { field: "createdById", op: "eq", value: user.id },
-          ]);
-          // The sessions, challenges, handoff codes, and OAuth tokens, inside the
-          // call budget. The sessions that do not fit stay for the sweep. Three calls
-          // stay: the user write below (2 on D1: the undo read and the update) and
-          // the audit row.
-          const page = await endAllAccessPage(
-            tx,
-            config,
-            user.id,
-            ends,
-            now,
-            meter,
-            OPERATOR_CALL_BUDGET - 3,
-            "revoked",
-            stops,
+  const run = (p: ReturnType<typeof planOf>) =>
+    hookGuard(() =>
+      storage.transaction(async (tx) => {
+        join = null;
+        const { member, removes, removeEvent, ends, stops } = p;
+        // The before hooks first: no lock and no write comes before them.
+        if (move && doc)
+          await runBefore("user.beforeUpdate", config.hooks.user.beforeUpdate, {
+            user,
+            patch: { email: doc.address },
+            via: "scim",
+          });
+        if (removes && removeEvent)
+          await runBefore(
+            "organization.beforeRemoveMember",
+            config.hooks.organization.beforeRemoveMember,
+            removeEvent,
           );
-          // The door of the sessions and families that stay (`revokedFor`, ruling 50
-          // of plan 12d) reads the pending-end rows only for one from before this
-          // write. The time is at or after the `before` of the row (ruling 55).
-          if (page.left && page.before) {
-            const at = Math.max(config.clock.now().getTime(), page.before.getTime());
-            await tx.update("user", [{ field: "id", op: "eq", value: user.id }], {
-              updatedAt: later(new Date(at), user.updatedAt),
-            });
-            meter.step(2);
+        if (reactivate)
+          join = await joinChecks(config, tx, caller.organizationId, user, now, row.id);
+        // The lock order of user-hold.ts: the user row, the sessions, the organization row, the
+        // member rows, the scimGroupMember rows.
+        await holdUser(tx, user.id);
+        // The role of a reactivate comes from the groups again, after the hold (ruling 59 M2 of
+        // plan 12d). A group write holds each user whose role it computes, so it committed
+        // before this read, or it waits for this commit and then reads the new member row.
+        // The before hook saw the role of the first read: a group write in between answers 409.
+        const first = join as Join | null;
+        if (
+          first &&
+          (await scimRoleOf(config, tx, caller.organizationId, row.id)) !== first.member.role
+        )
+          stopWith("conflict");
+        // The member row of a removal, again after the hold (ruling 63 M2 of plan 12d). A
+        // group write that changed the role in between leaves a before hook that saw the
+        // old role, so the round runs again with the new row, and the directory gets no 409.
+        if (removes && member) {
+          const live = await tx.findOne("member", byPerson);
+          meter.step(1);
+          if (live?.id !== member.id || live.role !== member.role) throw new LostRound(live);
+        }
+        if (deactivate || change.kind === "delete") await holdSessions(tx, user.id);
+        const versioned = [
+          { field: "id" as const, op: "eq" as const, value: row.id },
+          { field: "version" as const, op: "eq" as const, value: row.version },
+        ];
+        const n =
+          change.kind === "delete"
+            ? await tx.delete("scimUser", versioned)
+            : await tx.update("scimUser", versioned, {
+                ...columns(change.doc),
+                version: row.version + 1,
+                updatedAt: later(now, row.updatedAt),
+              });
+        if (n === 0) throw new VersionLost();
+        // The scimGroupMember rows of a delete come after the member row, as in a group write
+        // (ruling 59 M1 of plan 12d). The other order formed a deadlock on Postgres.
+        const dropGroups = async () => {
+          if (change.kind === "delete")
+            await tx.delete("scimGroupMember", [{ field: "scimUserId", op: "eq", value: row.id }]);
+        };
+        if (!deactivate) await dropGroups();
+        if (move && doc) await moveAddress(tx, user, doc.address, now);
+        if (doc) await fillName(tx, { ...user, email: doc.address }, doc, now);
+        if (deactivate) {
+          // The lock of the token create (ruling 32 of plan 12k): a create that holds it
+          // commits first, and the token delete sees its row.
+          if (!(await lockOrganization(tx, organization))) stopWith("not_found");
+          // The member row lock comes before the scimGroupMember rows. It costs one statement on
+          // Postgres; D1 and memory have no row lock.
+          if (removes && member)
+            await tx.lockInOrder?.("member", [{ field: "id", op: "eq", value: member.id }]);
+          await dropGroups();
+          // D1 has no lock, so a group write can still land after the read above. The
+          // round then runs again too, with a new read of the member row.
+          if (removes && member && (await removeMemberIn(tx, member, true)) === 0)
+            throw new LostRound(undefined);
+          if (claimed) {
+            // A deprovisioned person loses every credential (ruling 25 N1 of plan
+            // 12d): the API tokens and the organization tokens that the person made.
+            await tx.delete("apiToken", [{ field: "userId", op: "eq", value: user.id }]);
+            await tx.delete("organizationToken", [
+              { field: "organizationId", op: "eq", value: caller.organizationId },
+              { field: "createdById", op: "eq", value: user.id },
+            ]);
+            // The sessions, challenges, handoff codes, and OAuth tokens, inside the
+            // call budget. The sessions that do not fit stay for the sweep. Four calls
+            // stay: the user write below (2 on D1: the undo read and the update), the
+            // audit row, and the second group read of the answer. On the D1 binding, a
+            // user in a group made 51 queries with 3 kept, and 50 with 4 (ruling 63 M1
+            // of plan 12d, measured 2026-10-24).
+            const page = await endAllAccessPage(
+              tx,
+              config,
+              user.id,
+              ends,
+              now,
+              meter,
+              OPERATOR_CALL_BUDGET - 4,
+              "revoked",
+              stops,
+            );
+            // The door of the sessions and families that stay (`revokedFor`, ruling 50
+            // of plan 12d) reads the pending-end rows only for one from before this
+            // write. The time is at or after the `before` of the row (ruling 55).
+            if (page.left && page.before) {
+              const at = Math.max(config.clock.now().getTime(), page.before.getTime());
+              await tx.update("user", [{ field: "id", op: "eq", value: user.id }], {
+                updatedAt: later(new Date(at), user.updatedAt),
+              });
+              meter.step(2);
+            }
           }
         }
+        const j = join as Join | null;
+        if (j) joined = await joinWrite(config, tx, j, user);
+        const data: Record<string, unknown> = {
+          organizationId: caller.organizationId,
+          scimUserId: row.id,
+        };
+        if (names.length > 0) data.changed = names;
+        return {
+          ok: true as const,
+          value: await writeAuditIn(tx, draftOf(caller, action, user.id, data), now),
+        };
+      }),
+    ).catch((err: unknown) => {
+      const answer = uniqueAnswer(err);
+      if (answer) return { ok: "stop" as const, answer };
+      throw err;
+    });
+  // A lost round runs again with the member row of its read, as a group write does with
+  // its lost round, up to `ROUNDS` rounds. A round that does not fit the call budget
+  // stops first. Only then the answer is 409, and nothing changes.
+  let written: Awaited<ReturnType<typeof run>> | null = null;
+  for (let round = 0; round < ROUNDS && written === null; round++)
+    try {
+      written = await run(plan);
+    } catch (err) {
+      if (!(err instanceof LostRound)) throw err;
+      let next = err.member;
+      if (next === undefined) {
+        next = await storage.findOne("member", byPerson);
+        meter.step(1);
       }
-      const j = join as Join | null;
-      if (j) joined = await joinWrite(config, tx, j, user);
-      const data: Record<string, unknown> = {
-        organizationId: caller.organizationId,
-        scimUserId: row.id,
-      };
-      if (names.length > 0) data.changed = names;
-      return {
-        ok: true as const,
-        value: await writeAuditIn(tx, draftOf(caller, action, user.id, data), now),
-      };
-    }),
-  ).catch((err: unknown) => {
-    const answer = uniqueAnswer(err);
-    if (answer) return { ok: "stop" as const, answer };
-    throw err;
-  });
+      plan = planOf(next);
+      if (meter.used + ROUND_TAIL > OPERATOR_CALL_BUDGET) break;
+    }
+  if (written === null)
+    return scimFail(409, "a group write changed the member row in each round; send it again");
   if (written.ok === "stop") return written.answer;
   if (!written.ok) return failAnswer(written);
-  await sessionsEnded(config, ends.ended, "revoked", stops);
-  await endFamilies(config, ends.families);
-  if (removes && removeEvent && member)
+  await sessionsEnded(config, plan.ends.ended, "revoked", plan.stops);
+  await endFamilies(config, plan.ends.families);
+  if (plan.removes && plan.removeEvent && plan.member)
     await runAfter(
       "organization.afterRemoveMember",
       config.hooks.organization.afterRemoveMember,
-      removeEvent,
-      member.id,
+      plan.removeEvent,
+      plan.member.id,
     );
   const j = join as Join | null;
   const added = joined as MemberRow | null;
