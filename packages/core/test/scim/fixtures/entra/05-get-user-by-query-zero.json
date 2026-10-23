@@ -1,0 +1,6 @@
+{
+  "method": "GET",
+  "path": "/Users?filter=userName eq \"non-existent user\"",
+  "headers": {},
+  "body": null
+}

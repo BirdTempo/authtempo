@@ -1,0 +1,6 @@
+{
+  "method": "GET",
+  "path": "/Groups?excludedAttributes=members&filter=displayName eq \"displayName\"",
+  "headers": {},
+  "body": null
+}

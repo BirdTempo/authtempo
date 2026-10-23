@@ -1,0 +1,8 @@
+{
+  "method": "GET",
+  "path": "/Users/23a35c27-23d3-4c03-b4c5-6443c09e7173",
+  "headers": {
+    "User-Agent": "Okta SCIM Client 1.0.0"
+  },
+  "body": null
+}

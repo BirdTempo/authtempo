@@ -1,0 +1,15 @@
+{
+  "method": "PATCH",
+  "path": "/Users/5171a35d82074e068ce2",
+  "headers": {},
+  "body": {
+    "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+    "Operations": [
+      {
+        "op": "Replace",
+        "path": "userName",
+        "value": "5b50642d-79fc-4410-9e90-4c077cdd1a59@testuser.com"
+      }
+    ]
+  }
+}

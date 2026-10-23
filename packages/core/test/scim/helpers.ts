@@ -83,3 +83,71 @@ export function scim(
     }),
   );
 }
+
+/** One request of a provider page (plan 12d Task 12): the files of `fixtures/<provider>/`. */
+export interface ProviderRequest {
+  method: string;
+  path: string | null;
+  headers: Record<string, string>;
+  body: unknown;
+}
+
+/**
+ * Core's typecheck has no Node types, because core runs on Workers; vitest
+ * runs in Node. A specifier in a constant keeps the import out of the
+ * typecheck (as access.test.ts does).
+ */
+interface FixtureFs {
+  readFileSync(file: URL, encoding: "utf8"): string;
+}
+const FS_MODULE = "node:fs";
+
+/** The answer of one replayed request, with the file name for the message of each assertion. */
+export interface Replayed {
+  file: string;
+  status: number;
+  headers: Headers;
+  body: Record<string, unknown>;
+}
+
+/**
+ * Sends one request of `fixtures/<provider>/<name>.json` through the routes
+ * with `token`. Each key of `ids` (an id of the page) becomes its value (an
+ * id that the server answered), in the path and in the body. A file with no
+ * path takes `path`. The header names go in lower case, so the content
+ * type of the file and of `scim` do not both go.
+ */
+export async function replay(
+  w: { handle: (request: Request) => Promise<Response> },
+  token: string,
+  provider: "entra" | "okta",
+  name: string,
+  ids: Record<string, string> = {},
+  path?: string,
+): Promise<Replayed> {
+  const file = `${provider}/${name}.json`;
+  const { readFileSync }: FixtureFs = await import(/* @vite-ignore */ FS_MODULE);
+  let text = readFileSync(new URL(`./fixtures/${file}`, import.meta.url), "utf8");
+  for (const [from, to] of Object.entries(ids)) text = text.split(from).join(to);
+  const request = JSON.parse(text) as ProviderRequest;
+  const target = request.path ?? path;
+  if (target === undefined) throw new Error(`${file} has no path, and the test gives none`);
+  const headers = Object.fromEntries(
+    Object.entries(request.headers).map(([k, v]) => [k.toLowerCase(), v]),
+  );
+  const res = await scim(
+    w,
+    token,
+    request.method,
+    target,
+    request.body === null ? undefined : request.body,
+    headers,
+  );
+  const body = await res.text();
+  return {
+    file,
+    status: res.status,
+    headers: res.headers,
+    body: (body === "" ? null : JSON.parse(body)) as Record<string, unknown>,
+  };
+}

@@ -1,0 +1,12 @@
+{
+  "method": "POST",
+  "path": "/Groups",
+  "headers": {
+    "User-Agent": "Okta SCIM Client 1.0.0"
+  },
+  "body": {
+    "schemas": ["urn:ietf:params:scim:schemas:core:2.0:Group"],
+    "displayName": "Test SCIMv2",
+    "members": []
+  }
+}
