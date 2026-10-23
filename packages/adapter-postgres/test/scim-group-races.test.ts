@@ -139,7 +139,7 @@ function world(storage: StorageAdapter, removed: string[] = []) {
     const token = must(
       await api().scim.tokens.create({ actor: APP, organizationId, name: "directory" }),
     ).token;
-    return { organizationId, token };
+    return { organizationId, token, owner: owner.user };
   }
   /** One SCIM request with the bearer `token`: its status and its body. */
   async function scim(token: string, method: string, path: string, body?: unknown) {
@@ -159,7 +159,7 @@ function world(storage: StorageAdapter, removed: string[] = []) {
       body: (text === "" ? null : JSON.parse(text)) as Record<string, unknown>,
     };
   }
-  return { acme, scim };
+  return { acme, scim, auth };
 }
 
 const patch = (...ops: Record<string, unknown>[]) => ({ schemas: [PATCH_URN], Operations: ops });
@@ -380,5 +380,81 @@ describe("the SCIM Groups on Postgres (ruling 59 of plan 12d)", () => {
     ]);
     expect(answers.map((a) => a.status)).toEqual([200, 204]);
     expect(await adaRole()).toBe("member");
+  }, 60_000);
+});
+
+describe("the SCIM rows and the organization delete on Postgres (ruling 74 of plan 12d)", () => {
+  it("runs a SCIM deactivate and an organization delete with no deadlock (M3)", async () => {
+    // The deactivate stops after its scimUser update, before its organization lock, until
+    // the organization delete waits on a lock of the deactivate. The delete took the
+    // organization row before the scimUser rows, and the two formed a cycle.
+    let armed = false;
+    const held = signal();
+    const forUser = tapped(async (method, model) => {
+      if (armed && method === "update" && model === "scimUser") {
+        held.fire();
+        await within(new Promise(() => {}));
+      }
+    });
+    const u = world(forUser);
+    const o = world(tapped(async () => {}));
+    const { token, organizationId, owner } = await u.acme();
+    const ada = String(
+      (await u.scim(token, "POST", "/Users", { schemas: [USER_URN], userName: "ada@acme.example" }))
+        .body.id,
+    );
+    armed = true;
+    const [off, gone] = await Promise.allSettled([
+      u.scim(
+        token,
+        "PATCH",
+        `/Users/${ada}`,
+        patch({ op: "replace", path: "active", value: false }),
+      ),
+      held.fired.then(() => o.auth.api.deleteOrganization({ user: owner, organizationId })),
+    ]);
+    expect(off).toMatchObject({ status: "fulfilled", value: { status: 200 } });
+    expect(gone).toMatchObject({ status: "fulfilled", value: { ok: true } });
+    expect(await count("ta_organization")).toBe(0);
+    expect(await count("ta_scim_user")).toBe(0);
+    expect(await adaRole()).toBeNull();
+  }, 60_000);
+
+  it("deletes the scimGroup and scimGroupMember rows after a group write that holds its group row (P9)", async () => {
+    // The member add stops after its scimGroup update, until the organization delete
+    // waits on a lock of the add. A delete that took the group rows after the member rows
+    // formed a cycle with the member lock of the add.
+    let armed = false;
+    const held = signal();
+    const forGroup = tapped(async (method, model) => {
+      if (armed && method === "update" && model === "scimGroup") {
+        held.fire();
+        await within(new Promise(() => {}));
+      }
+    });
+    const g = world(forGroup);
+    const o = world(tapped(async () => {}));
+    const { token, organizationId, owner } = await g.acme();
+    const { group } = await adminsWithAda(g, token);
+    const bob = String(
+      (await g.scim(token, "POST", "/Users", { schemas: [USER_URN], userName: "bob@acme.example" }))
+        .body.id,
+    );
+    armed = true;
+    const [added, gone] = await Promise.allSettled([
+      g.scim(
+        token,
+        "PATCH",
+        `/Groups/${group}`,
+        patch({ op: "add", path: "members", value: [{ value: bob }] }),
+      ),
+      held.fired.then(() => o.auth.api.deleteOrganization({ user: owner, organizationId })),
+    ]);
+    expect(added).toMatchObject({ status: "fulfilled", value: { status: 204 } });
+    expect(gone).toMatchObject({ status: "fulfilled", value: { ok: true } });
+    expect(await count("ta_organization")).toBe(0);
+    expect(await count("ta_scim_group")).toBe(0);
+    expect(await count("ta_scim_group_member")).toBe(0);
+    expect(await count("ta_member")).toBe(0);
   }, 60_000);
 });

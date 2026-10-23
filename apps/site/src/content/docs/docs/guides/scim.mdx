@@ -75,7 +75,9 @@ With `scim.groups` set to `teams` or `both`, each group has one team. A group cr
 - A delete runs the deactivate, then deletes the SCIM record. The account stays: only the person deletes an account.
 - With `enforce` off, a deprovisioned person can still sign in by their own methods. A deactivated person who signs in through the connection gets [`account_disabled`](/docs/reference/errors/#account_disabled).
 
-A group write can race a deactivate. Core then runs the deactivate again, up to 5 rounds. On D1 Free, a few races in one request can still answer 409, and the person keeps access until the directory sends it again. The [routes page](/docs/reference/routes/#scim) lists each such case.
+A group write can race a deactivate. Core then runs the deactivate again, up to 5 rounds. On D1 Free, a few races in one request can still answer 409, and the person keeps access until the directory sends it again. For example, a delete answers 409 after 4 lost rounds at the member read, or after 2 at the member delete. The [routes page](/docs/reference/routes/#scim) lists each such case.
+
+A person can move the account to an address of their own. When no verified domain of the organization claims the current address, a change of the address and a reactivate answer 400 `mutability`. So the directory cannot take the account back into the domain. A deactivate and a delete still run.
 
 ### What core refuses
 

@@ -72,6 +72,16 @@ const DELETE_CALLS_BEFORE = 8;
  */
 const SCIM_GROUP_CALLS = 2;
 
+/**
+ * The most SCIM Groups of the solo organizations of one account delete
+ * (ruling 74 of plan 12d): none. On the D1 binding, with the D1 limiter, a
+ * delete of a solo organization sent 49 queries with the group read, and 51
+ * with the two deletes of one group (2026-10-24). So a solo organization
+ * with SCIM Groups answers delete_too_large, and nothing is written. The
+ * person deletes the organization first: that delete takes the groups.
+ */
+const ACCOUNT_DELETE_GROUPS = 0;
+
 /** The models that `deleteAccountRows` deletes by `userId` after the sessions. */
 const LAST_MODELS = USER_CHILD_MODELS.filter(
   (m) => m !== "session" && m !== "member" && m !== "oauthLogout",
@@ -197,7 +207,7 @@ export async function requestAccountDelete(
  * The confirm of a mailed delete (plan 12a Task 20). It needs a session of
  * the user who asked. The session need not be fresh: the request checked
  * that. In one transaction: the lock of the user row, the spend of the link
- * by one conditional update, then `deleteAccountRows`. The update matches
+ * by one conditional delete, then `deleteAccountRows`. The delete matches
  * the hash, the user, no spend, and a live expiry. So a spent, expired, or
  * unknown link, and the link of another user, answer `invalid_token`.
  */
@@ -212,17 +222,16 @@ export async function confirmAccountDelete(
     return fail("rate_limited");
   const valueHash = await sha256Hex(input.token);
   return runDelete(config, input, async (tx, user, now) => {
-    const spent = await tx.update(
-      "verification",
-      [
-        { field: "valueHash", op: "eq", value: valueHash },
-        { field: "purpose", op: "eq", value: "account-delete" },
-        { field: "identifier", op: "eq", value: user.id },
-        { field: "consumedAt", op: "eq", value: null },
-        { field: "expiresAt", op: "gt", value: now },
-      ],
-      { consumedAt: now, updatedAt: now },
-    );
+    // The spend deletes the link row (ruling 52 item 2 of plan 12d). An update costs 2
+    // statements on D1, the undo read and the update; a delete costs 1. The rows of the
+    // user go after the commit anyway, and an undo writes the row back.
+    const spent = await tx.delete("verification", [
+      { field: "valueHash", op: "eq", value: valueHash },
+      { field: "purpose", op: "eq", value: "account-delete" },
+      { field: "identifier", op: "eq", value: user.id },
+      { field: "consumedAt", op: "eq", value: null },
+      { field: "expiresAt", op: "gt", value: now },
+    ]);
     // The lock wrote, so the refusal throws to undo it.
     if (spent !== 1) stopWith("invalid_token");
   });
@@ -388,6 +397,13 @@ export async function deleteAccountRows(
   const plan = await organizationsOfDelete(config, tx, user.id);
   if (!plan.ok) stopWith(plan.code);
   const { going, owned } = plan.value;
+  // The scimUser rows come after the sessions and before the owner locks (ruling 74 M3 of
+  // plan 12d): the user's own rows, and the rows of each solo organization.
+  await tx.lockInOrder?.("scimUser", [{ field: "userId", op: "eq", value: user.id }]);
+  if (going.length > 0)
+    await tx.lockInOrder?.("scimUser", [
+      { field: "organizationId", op: "in", value: going.map((x) => x.id).sort() },
+    ]);
   for (const organization of going)
     await runBefore(
       config.observe,
@@ -421,6 +437,7 @@ export async function deleteAccountRows(
     tx,
     going.map((x) => x.id),
     user.id,
+    ACCOUNT_DELETE_GROUPS,
   );
   // The invitations come before the member rows, in the order of user-hold.ts
   // (ruling 50 of plan 12k).

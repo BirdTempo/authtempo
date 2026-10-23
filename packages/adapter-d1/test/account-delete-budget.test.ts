@@ -109,7 +109,9 @@ describe("the account delete of solo organizations on D1 (rulings 29 and 30 of p
     // each count, and the delete of the scimUser rows of the solo organizations:
     // 31, 47, 47, 47 on 2026-10-22. The user has no scimUser row here, so no
     // scimGroupMember delete runs.
-    expect(runs.map((r) => r.queries)).toEqual([31, 47, 47, 47]);
+    // Ruling 74 of plan 12d adds the read of the SCIM Groups of the solo
+    // organizations: 31, 48, 48, 48 on 2026-10-24.
+    expect(runs.map((r) => r.queries)).toEqual([31, 48, 48, 48]);
     for (const r of runs) expect([r.queries <= 50, r.left]).toEqual([true, 0]);
   }, 120_000);
 

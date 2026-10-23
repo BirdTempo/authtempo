@@ -12,10 +12,11 @@ import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
 // The machine check of the one lock order of user-hold.ts (rulings 49, 50,
-// and 51 of plan 12k). The order has nine kinds of rows. They are the
-// scimGroup row, the user row, the session rows, the organization row, the
-// team row, the invitation rows, the member rows, the scimGroupMember rows,
-// and the team member rows (ruling 59 M1 of plan 12d). A storage wrapper records
+// and 51 of plan 12k). The order has ten kinds of rows. They are the
+// scimGroup row, the user row, the session rows, the scimUser rows, the
+// organization row, the team row, the invitation rows, the member rows, the
+// scimGroupMember rows, and the team member rows (ruling 59 M1 and ruling 74
+// M3 of plan 12d). A storage wrapper records
 // each create, update, delete, and lock read of these kinds in each
 // transaction, in order. Each test runs one flow that writes these kinds,
 // most of them two kinds or more. A kind may come again, but a kind never
@@ -49,12 +50,15 @@ const OPEN = { allow: async () => true };
  * write takes its scimGroup row first. The scimGroupMember rows come after
  * the member rows: a SCIM group remove and a SCIM User delete of one person
  * took them in the two orders and formed a deadlock (ruling 59 M1 of plan
- * 12d).
+ * 12d). The scimUser rows come before the organization row: a SCIM
+ * deactivate and an organization delete took them in the two orders and
+ * formed a deadlock (ruling 74 M3 of plan 12d).
  */
 const KINDS = [
   "SCIM group",
   "user",
   "session",
+  "SCIM user",
   "organization",
   "team",
   "invitation",
@@ -66,12 +70,13 @@ const KIND_OF = {
   scimGroup: 0,
   user: 1,
   session: 2,
-  organization: 3,
-  team: 4,
-  invitation: 5,
-  member: 6,
-  scimGroupMember: 7,
-  teamMember: 8,
+  scimUser: 3,
+  organization: 4,
+  team: 5,
+  invitation: 6,
+  member: 7,
+  scimGroupMember: 8,
+  teamMember: 9,
 } as const;
 const kindOf = (model: ModelName): number | undefined =>
   (KIND_OF as Partial<Record<ModelName, number>>)[model];
@@ -605,6 +610,7 @@ const GROUP_KINDS = [
   "SCIM group",
   "user",
   "session",
+  "SCIM user",
   "organization",
   "team",
   "member",
@@ -649,8 +655,12 @@ const TOUCHED: Record<string, string[]> = {
     "member",
     "team member",
   ],
+  // Ruling 74 of plan 12d: the lock of the scimGroup rows first, and of the scimUser rows
+  // before the organization row.
   "an organization delete": [
+    "SCIM group",
     "session",
+    "SCIM user",
     "organization",
     "team",
     "invitation",
@@ -688,6 +698,7 @@ const TOUCHED: Record<string, string[]> = {
   "an account delete with a solo and a shared organization": [
     "user",
     "session",
+    "SCIM user",
     "organization",
     "team",
     "invitation",
@@ -697,6 +708,7 @@ const TOUCHED: Record<string, string[]> = {
   "an account delete of an operator with an impersonation": [
     "user",
     "session",
+    "SCIM user",
     "organization",
     "invitation",
     "member",
@@ -706,6 +718,7 @@ const TOUCHED: Record<string, string[]> = {
   "an account delete with two solo organizations": [
     "user",
     "session",
+    "SCIM user",
     "organization",
     "team",
     "invitation",
@@ -728,15 +741,24 @@ const TOUCHED: Record<string, string[]> = {
   // Plan 12d Task 5: the claim of Uma, then her member row of Acme, then her session.
   "an SSO sign-in that claims a user": ["user", "session", "member"],
   // Plan 12d Task 10: the SCIM create claims Uma and adds her member row.
-  "a SCIM create that claims a user": ["user", "session", "member"],
-  "a SCIM update": ["user", "session", "member"],
+  "a SCIM create that claims a user": ["user", "session", "SCIM user", "member"],
+  "a SCIM update": ["user", "session", "SCIM user", "member"],
   // The team member add of the setup takes the team row.
-  "a SCIM deactivate": ["user", "session", "organization", "team", "member", "team member"],
-  "a SCIM reactivate": ["user", "session", "organization", "member", "team member"],
+  "a SCIM deactivate": [
+    "user",
+    "session",
+    "SCIM user",
+    "organization",
+    "team",
+    "member",
+    "team member",
+  ],
+  "a SCIM reactivate": ["user", "session", "SCIM user", "organization", "member", "team member"],
   // The member row lock, then the scimGroupMember rows, then the member delete (ruling 59 M1).
   "a SCIM delete": [
     "user",
     "session",
+    "SCIM user",
     "organization",
     "member",
     "SCIM group member",

@@ -28,23 +28,30 @@ import { ROUNDS } from "./rounds.js";
  *
  * One lock order holds for every flow (rulings 49 and 50 of plan 12k). It
  * joins the order of plan 12f (final review L1) and the order of ruling 43
- * of plan 12k. The order has nine kinds of rows:
+ * of plan 12k. The order has ten kinds of rows:
  *
  * 1. the scimGroup row of a SCIM group write (plan 12d Task 11);
  * 2. this user row (`holdUser`);
  * 3. the session rows: `holdSessions`, or `holdImpersonations`, the one
  *    read that locks the sessions of the user and of each impersonation
  *    target;
- * 4. the organization row: the stamp of `ownerLock`, or `lockOrganization`;
- * 5. the team row: `lockTeam`, or its delete;
- * 6. the invitation rows;
- * 7. the member rows;
- * 8. the scimGroupMember rows;
- * 9. the team member rows.
+ * 4. the scimUser rows (ruling 74 M3 of plan 12d);
+ * 5. the organization row: the stamp of `ownerLock`, or `lockOrganization`;
+ * 6. the team row: `lockTeam`, or its delete;
+ * 7. the invitation rows;
+ * 8. the member rows;
+ * 9. the scimGroupMember rows;
+ * 10. the team member rows.
  *
- * Only a SCIM group write takes a scimGroup row, so it orders two writes of
- * one group. A group write and a SCIM User delete take the member rows
- * before the scimGroupMember rows (ruling 59 M1 of plan 12d): the other
+ * A SCIM group write takes its scimGroup row first, so it orders two
+ * writes of one group. The organization delete and the account delete lock
+ * the scimGroup rows of their organizations first, and delete them later
+ * (ruling 74 of plan 12d). A SCIM User write holds the user and the
+ * sessions, then its scimUser row, then the organization lock of a
+ * deprovision. So the organization delete and the account delete lock the
+ * scimUser rows before the organization row: the other order formed a
+ * deadlock on Postgres. A group write and a SCIM User delete take the member
+ * rows before the scimGroupMember rows (ruling 59 M1 of plan 12d): the other
  * order formed a deadlock on Postgres. One known gap of kinds: the account
  * delete deletes the scimGroupMember rows of its user after the team member
  * rows of its solo organizations. Those team member rows name the user

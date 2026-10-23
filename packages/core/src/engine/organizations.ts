@@ -625,8 +625,13 @@ export async function deleteOrganization(
         // user-hold.ts (rulings 49 and 50 of plan 12k). With row locks, the ids are read
         // first and locked by id. The delete clears their active organization last.
         const locks = tx.lockInOrder !== undefined;
+        // The scimGroup rows come first, in the order of user-hold.ts (ruling 74 of plan 12d).
+        // A SCIM group write holds its group row before every other lock.
+        await tx.lockInOrder?.("scimGroup", [{ field: "organizationId", op: "eq", value: id }]);
         const ids = locks ? (await tx.findMany("session", byOrganization)).map((x) => x.id) : [];
         await tx.lockInOrder?.("session", [{ field: "id", op: "in", value: ids }]);
+        // The scimUser rows come before the organization row (ruling 74 M3 of plan 12d).
+        await tx.lockInOrder?.("scimUser", [{ field: "organizationId", op: "eq", value: id }]);
         if (locks) {
           // After the organization lock, no set moves a session into the organization: a set
           // takes the same lock. A session that a set moved in after the read above has no
@@ -691,8 +696,16 @@ export async function deleteOrganizationRows(
   id: string,
   alone: string | null = null,
 ): Promise<void> {
-  await deleteOrganizationsRows(tx, [id], alone);
+  await deleteOrganizationsRows(tx, [id], alone, ORGANIZATION_DELETE_GROUPS);
 }
+
+/**
+ * The most SCIM Groups that one organization delete removes (ruling 74 of
+ * plan 12d): ten deletes of IN_CHUNK group ids. On the D1 binding the route
+ * sent 23 queries with 50 groups, 20 of them with no group (2026-10-24). So
+ * ten deletes fit the 50 queries of D1 Free with room for a due refresh.
+ */
+export const ORGANIZATION_DELETE_GROUPS = 10 * IN_CHUNK;
 
 /**
  * `deleteOrganizationRows` for many organizations at once (ruling 30 of
@@ -706,12 +719,28 @@ export async function deleteOrganizationRows(
 export async function deleteOrganizationsRows(
   tx: StorageAdapter,
   ids: readonly string[],
-  alone: string | null = null,
+  alone: string | null,
+  groupsMax: number,
 ): Promise<void> {
   if (ids.length === 0) return;
   if (ids.length > IN_CHUNK) throw new StorageError("invalid_argument", "organization", ["id"]);
   const list = [...ids].sort();
   const byOrganization: Where<"member">[] = [{ field: "organizationId", op: "in", value: list }];
+  // Ruling 74 of plan 12d (P9 of ruling 53): the SCIM Groups go with their organizations. A
+  // scimGroupMember row names its group, not the organization, so one read takes the group
+  // ids, before any write. One delete binds at most IN_CHUNK ids on D1, and the caller gives
+  // the count of groups that its call budget holds (`groupsMax`). More groups answer
+  // delete_too_large. The caller locked the scimGroup rows first, in the order of user-hold.ts.
+  const groups = (
+    await tx.findMany("scimGroup", [{ field: "organizationId", op: "in", value: list }], {
+      limit: groupsMax + 1,
+    })
+  ).map((g) => g.id);
+  if (groups.length > groupsMax) stopWith("delete_too_large");
+  // The scimUser rows come before the organization row (ruling 74 M3): a SCIM deactivate holds
+  // its scimUser row and then takes the organization lock. On Postgres this lock costs one
+  // statement; D1 has no row lock.
+  await tx.lockInOrder?.("scimUser", [{ field: "organizationId", op: "in", value: list }]);
   await tx.lockInOrder?.("organization", [{ field: "id", op: "in", value: list }]);
   await tx.delete("organization", [{ field: "id", op: "in", value: list }]);
   // Plan 12d (ruling 28): the SSO and SCIM rows go in the step of the
@@ -738,6 +767,13 @@ export async function deleteOrganizationsRows(
     stopWith("conflict");
   // The members go before their team rows, in the order of a member removal (ruling 44).
   await tx.delete("member", byOrganization);
+  // The scimGroupMember rows come after the member rows, as in a group write (ruling 59 M1).
+  for (let i = 0; i < groups.length; i += IN_CHUNK)
+    await tx.delete("scimGroupMember", [
+      { field: "groupId", op: "in", value: groups.slice(i, i + IN_CHUNK) },
+    ]);
+  if (groups.length > 0)
+    await tx.delete("scimGroup", [{ field: "organizationId", op: "in", value: list }]);
   await tx.delete("teamMember", [{ field: "organizationId", op: "in", value: list }]);
   // A session that points at a deleted organization would make every later rank check read a missing row.
   // Its active team is a team of that organization, so it goes in the same write.

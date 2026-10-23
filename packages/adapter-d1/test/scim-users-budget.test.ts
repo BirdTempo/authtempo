@@ -836,6 +836,7 @@ describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and
     ["findOne", 3, "DELETE", ""],
     ["delete", 1, "PATCH", ""],
     ["delete", 1, "DELETE", ""],
+    ["delete", 2, "DELETE", ""],
     ["findOne", 4, "PATCH", ""],
     ["findOne", 1, "PATCH", "move"],
     ["findOne", 2, "PATCH", "move"],
@@ -1042,7 +1043,12 @@ describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and
  * A DELETE at `delete` drops the scimGroupMember rows of the User first,
  * and D1 commits each statement at once. So the group write that the test
  * runs there changes no role: `lost` counts that write, but no round is
- * lost, and a full round ends a page.
+ * lost, and a full round ends a page. With 2 races the second write never
+ * comes, so the answer is the one of 1 race (ruling 74 item 15, measured
+ * 2026-10-24). A write of another mapped group can still change the role
+ * there. Then a DELETE meets the guard of the PATCH at `delete/2`: after
+ * 2 lost rounds at the member delete, no small round fits, and the answer
+ * is 409. The routes page states that case.
  */
 const RACE_COUNTS: Record<string, [number, number, number, number, number, string | null]> = {
   "PATCH findOne/1": [200, 49, 1, 1, 2, null],
@@ -1051,6 +1057,7 @@ const RACE_COUNTS: Record<string, [number, number, number, number, number, strin
   "DELETE findOne/3": [204, 47, 3, 0, 0, null],
   "PATCH delete/1": [200, 46, 1, 0, 0, null],
   "DELETE delete/1": [204, 48, 1, 4, 3, null],
+  "DELETE delete/2": [204, 48, 1, 4, 3, null],
   "PATCH findOne/4": [409, 28, 4, 0, 0, "admin"],
   "PATCH move findOne/1": [200, 46, 1, 0, 0, null],
   "PATCH move findOne/2": [409, 21, 2, 0, 0, "admin"],
@@ -1093,6 +1100,7 @@ const GRANT_COUNTS: Record<string, number[][]> = {
   "DELETE findOne/3": REFUSED_SMALL,
   "PATCH delete/1": REFUSED_SMALL,
   "DELETE delete/1": REFUSED_FULL,
+  "DELETE delete/2": REFUSED_FULL,
   "PATCH findOne/4": GRANTED,
   "PATCH move findOne/1": REFUSED_SMALL,
   "PATCH move findOne/2": GRANTED,

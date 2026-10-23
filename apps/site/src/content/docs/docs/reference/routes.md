@@ -191,7 +191,7 @@ These routes serve a settings page (plan 12a). They exist in every deployment un
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and `account.delete` is on (the default) |
 | Input | JSON `{}`. Any field answers `invalid_body` |
-| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted |
+| Answer | `{ ok: true }`. The session cookie is cleared. The user and every row that names it go. An organization where the user is the only member goes too, and a notice goes to the address. Such an organization with a SCIM Group answers `delete_too_large`: delete the organization first. With `account.deleteConfirm` on, the answer is `{ sent: true }`: a link goes to the address, and nothing is deleted |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`hook_refused`](/docs/reference/errors/#hook_refused), [`sole_owner`](/docs/reference/errors/#sole_owner), [`conflict`](/docs/reference/errors/#conflict), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_failed`](/docs/reference/errors/#hook_failed), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large) |
 
 <h3 id="get-user-delete-confirm"><code>GET /user/delete/confirm</code></h3>
@@ -688,8 +688,8 @@ These routes exist when the config sets `organizations`. A write that runs an or
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token. The user has the rank `owner` |
 | Input | JSON `{ organizationId }` |
-| Answer | `{ ok: true }`. On Postgres, a set of the active organization at the same moment makes a round of the delete start again. After 5 such rounds it answers `conflict` |
-| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session) |
+| Answer | `{ ok: true }`. On Postgres, a set of the active organization at the same moment makes a round of the delete start again. After 5 such rounds it answers `conflict`. The SCIM Groups of the organization go too. An organization with more than 500 SCIM Groups answers `delete_too_large`, and nothing changes |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`slug_reserved`](/docs/reference/errors/#slug_reserved), [`forbidden_rank`](/docs/reference/errors/#forbidden_rank), [`email_unverified`](/docs/reference/errors/#email_unverified), [`unauthorized`](/docs/reference/errors/#unauthorized), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`delete_too_large`](/docs/reference/errors/#delete_too_large) |
 
 <h3 id="get-organizations-members"><code>GET /organizations/members</code></h3>
 
@@ -1647,9 +1647,11 @@ The answer is 409 only when every round is lost, or when no small round fits the
 - A deactivate that also gives a name to a user with no name: 3 lost rounds at the member read.
 - A deactivate that also moves the address: 2 lost rounds at the member read, or 1 at the member delete.
 - A deactivate that moves the address and gives a name: 1 lost round.
-- A delete: 4 lost rounds at the member read.
+- A delete: 4 lost rounds at the member read, or 2 at the member delete.
 
 Then nothing changes, so the person keeps access. The directory then marks the push as failed. Okta needs an admin to retry a failed deprovision task (Okta docs, read 2026-10-22).
+
+A person can change the address of the account, for example to a personal address. The directory owns the address only while a verified domain of the organization claims it. When no such domain claims the current address, a PUT or a PATCH that changes the address answers 400 `mutability`. A reactivate answers the same, so the member row does not come back. Nothing changes then. A write that sends the address it sent before keeps the address that the person chose. A deactivate and a delete still run.
 
 <h3 id="get-scim-v2-users"><code>GET /scim/v2/Users</code></h3>
 
@@ -1684,7 +1686,7 @@ Then nothing changes, so the person keeps access. The directory then marks the p
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
 | Input | None. The body is a User, and `If-Match` may name the version. Core ignores a `password`, as in a create |
-| Answer | The User. `active: false` removes the member row, and ends the access of a user whose address the organization's domain claims. A PUT replaces the whole User (RFC 7644 section 3.5.1). A body with no `active` reads as `active: true`, so it reactivates a deactivated user. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then |
+| Answer | The User. `active: false` removes the member row, and ends the access of a user whose address the organization's domain claims. A PUT replaces the whole User (RFC 7644 section 3.5.1). A body with no `active` reads as `active: true`, so it reactivates a deactivated user. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then. A new address or a reactivate of a user whose current address no verified domain of the organization claims answers 400 `mutability` |
 | Errors | None |
 
 <h3 id="patch-scim-v2-users-id"><code>PATCH /scim/v2/Users/:id</code></h3>
@@ -1693,7 +1695,7 @@ Then nothing changes, so the person keeps access. The directory then marks the p
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
 | Input | None. The body is a PatchOp message of RFC 7644 section 3.5.2, and `If-Match` may name the version. A change of `password` answers 400 `invalidValue`, because the password change is off. A remove of `userName`, or a replace of it with null, answers 400 `mutability` |
-| Answer | The User. The operations apply together, or none applies. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then. When an operation writes a value with `primary` true, each other value of that attribute gets `primary` false |
+| Answer | The User. The operations apply together, or none applies. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then. When an operation writes a value with `primary` true, each other value of that attribute gets `primary` false. A new address or a reactivate of a user whose current address no verified domain of the organization claims answers 400 `mutability` |
 | Errors | None |
 
 <h3 id="delete-scim-v2-users-id"><code>DELETE /scim/v2/Users/:id</code></h3>
@@ -1702,7 +1704,7 @@ Then nothing changes, so the person keeps access. The directory then marks the p
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
 | Input | None. `If-Match` may name the version |
-| Answer | 204 with no body. The deactivate runs first, and the core user stays. A delete answers 409 only when group writes race each round, or after 4 lost rounds on D1. Then nothing changes. The paragraphs on these races above say what the directory does then |
+| Answer | 204 with no body. The deactivate runs first, and the core user stays. A delete answers 409 only when group writes race each round, or on D1 after 4 lost rounds at the member read or 2 at the member delete. Then nothing changes. The paragraphs on these races above say what the directory does then |
 | Errors | None |
 
 The Groups routes (plan 12d Task 11) serve the groups of the token's organization. A member of a group is a User of the same organization. A group id, an id of another organization, an unknown id, or a `type` other than `User` answers 400 `invalidValue`. Core serves no nested group. Each member in an answer holds `value`, `$ref`, and `type`.

@@ -497,9 +497,10 @@ const MEASURED_ROLES = { rename: 41, back: 46, delete: 44 };
  * Measured again on 2026-10-22 for ruling 59 of plan 12d, one test file
  * alone, at a load of 6 to 12. The reactivate reads the role of its
  * groups again after its user hold (M2): 4 queries more than the 28 of
- * Task 11.
+ * Task 11. Ruling 74 M2 adds the read of the domain claim of the current
+ * address: 33 on 2026-10-24.
  */
-const MEASURED_REACTIVATE = { reactivate: 32 };
+const MEASURED_REACTIVATE = { reactivate: 33 };
 /**
  * The refusal of a write whose role change does not fit (ruling 59 of plan
  * 12d). The check comes before the scimGroupMember writes, so the undo
@@ -510,3 +511,100 @@ const MEASURED_REACTIVATE = { reactivate: 32 };
 const MEASURED_TOO_LARGE = { refused: 20 };
 /** Two list pages with members, each of whole groups, at most 10000 member rows. */
 const MEASURED_LIST = { first: 6, next: 6 };
+
+describe("the SCIM Groups of an organization delete on D1 (ruling 74 of plan 12d)", () => {
+  it("deletes an organization with 500 groups and their member rows inside 50 queries", async () => {
+    const setup = make(env.DB, false);
+    const { organizationId, token } = await acme(setup);
+    const [ada] = await users(token, 1);
+    for (let i = 0; i < GROUPS; i++) {
+      const r = await call(token, "POST", "/Groups", {
+        schemas: [GROUP_URN],
+        displayName: `Group ${i}`,
+        members: members([ada ?? ""]),
+      });
+      expect(r.status).toBe(201);
+    }
+    expect(await count("SELECT count(*) AS n FROM ta_scim_group_member")).toBe(GROUPS);
+    // The owner's session, from a magic link of the setup engine.
+    await setup.api.requestMagicLink({ email: "owner@acme.example", ip: null });
+    const text = sent.filter((m) => m.to === "owner@acme.example").at(-1)?.text ?? "";
+    const link = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+    const signed = await setup.api.verifyMagicLink({ token: link, ip: null, userAgent: null });
+    if (!signed.ok || !("token" in signed.value)) throw new Error("no session");
+    const { db: view, c } = counting(env.DB);
+    const res = await make(view, true).handle(
+      new Request(`${API}/auth/organizations/delete`, {
+        method: "POST",
+        headers: {
+          cookie: `__Host-tempo_session=${signed.value.token}`,
+          "content-type": "application/json",
+          origin: API,
+        },
+        body: JSON.stringify({ organizationId }),
+      }),
+    );
+    expect(res.status, await res.text()).toBe(200);
+    for (const table of [
+      "ta_organization",
+      "ta_scim_group",
+      "ta_scim_group_member",
+      "ta_scim_user",
+    ])
+      expect(await count(`SELECT count(*) AS n FROM ${table}`), table).toBe(0);
+    expect({ delete: c.n }).toEqual(MEASURED_ORGANIZATION_DELETE);
+    expect(c.n).toBeLessThanOrEqual(50);
+  }, 300_000);
+
+  it("refuses the account delete of the sole member of an organization with a group inside 50 queries", async () => {
+    const setup = make(env.DB, false);
+    const { token } = await acme(setup);
+    const [ada] = await users(token, 1);
+    for (let i = 0; i < 1; i++) {
+      const r = await call(token, "POST", "/Groups", {
+        schemas: [GROUP_URN],
+        displayName: `Group ${i}`,
+        members: members([ada ?? ""]),
+      });
+      expect(r.status).toBe(201);
+    }
+    // The deactivate removes ada's member row, so the owner is the only member.
+    const off = await call(
+      token,
+      "PATCH",
+      `/Users/${ada}`,
+      patch({ op: "replace", path: "active", value: false }),
+    );
+    expect(off.status).toBe(200);
+    await setup.api.requestMagicLink({ email: "owner@acme.example", ip: null });
+    const text = sent.filter((m) => m.to === "owner@acme.example").at(-1)?.text ?? "";
+    const link = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+    const signed = await setup.api.verifyMagicLink({ token: link, ip: null, userAgent: null });
+    if (!signed.ok || !("token" in signed.value)) throw new Error("no session");
+    const session = await setup.api.getSession(signed.value.token);
+    if (!session) throw new Error("no session");
+    const { db: view, c } = counting(env.DB);
+    const done = await make(view, true).api.user.delete({ session, ip: null, userAgent: null });
+    expect(done).toMatchObject({ ok: false, code: "delete_too_large" });
+    for (const table of ["ta_organization", "ta_scim_group", "ta_scim_group_member"])
+      expect(await count(`SELECT count(*) AS n FROM ${table}`), table).toBe(1);
+    expect(await count("SELECT count(*) AS n FROM ta_user")).toBe(2);
+    expect({ accountDelete: c.n }).toEqual(MEASURED_ACCOUNT_DELETE);
+    expect(c.n).toBeLessThanOrEqual(50);
+  }, 300_000);
+});
+
+/**
+ * The organization delete with 100 SCIM Groups (ruling 74 of plan 12d).
+ * The group read, the scimGroupMember delete, and the scimGroup delete add
+ * 3 queries to the delete. The count does not grow with the groups: one
+ * delete binds the 100 ids.
+ */
+const MEASURED_ORGANIZATION_DELETE = { delete: 32 };
+/**
+ * The refusal of an account delete whose solo organization has a SCIM
+ * Group (ruling 74 of plan 12d). The group read comes after the first
+ * deletes, so the undo of the transaction counts too.
+ */
+const MEASURED_ACCOUNT_DELETE = { accountDelete: 14 };
+const GROUPS = 500;

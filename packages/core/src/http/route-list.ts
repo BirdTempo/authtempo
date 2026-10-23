@@ -1038,6 +1038,7 @@ export const ROUTES = Object.freeze([
       "hook_failed",
       "conflict",
       "impersonation_session",
+      "delete_too_large",
     ],
     oauthCodes: [],
   },

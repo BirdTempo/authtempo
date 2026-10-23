@@ -461,12 +461,12 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 
 <h3 id="delete_too_large"><code>delete_too_large</code> 409</h3>
 
-- **Meaning:** The account is the only member of more than 50 organizations. One account delete removes at most 50 of them, so the delete changes nothing.
-- **Do:** Delete some of the organizations with [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete), then delete the account again.
+- **Meaning:** The delete does not fit one request, so it changes nothing. An account delete answers it when the account is the only member of more than 50 organizations. It also answers it when such an organization has a SCIM Group. An organization delete answers it when the organization has more than 500 SCIM Groups.
+- **Do:** For an account, delete those organizations with [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete) first. For an organization, let the directory delete some groups first. Then send the delete again.
 
 | Routes |
 | --- |
-| [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm). |
+| [`POST /user/delete`](/docs/reference/routes/#post-user-delete), [`POST /user/delete/confirm`](/docs/reference/routes/#post-user-delete-confirm), [`POST /organizations/delete`](/docs/reference/routes/#post-organizations-delete). |
 
 <h3 id="account_banned"><code>account_banned</code> 403</h3>
 

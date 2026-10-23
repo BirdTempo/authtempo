@@ -531,6 +531,38 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
     expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
   });
 
+  /**
+   * The confirm of a mailed delete in the same scene (ruling 52 item 2 of
+   * plan 12d). With the spend as an update, the confirm sent 51 queries:
+   * the spend cost 2 on D1, so no page fit, and the fixed part alone passed
+   * 50. The spend is a delete now, 1 statement. Measured on 2026-10-24.
+   */
+  const DUE_CONFIRM_COUNTS: [number, number] = [50, 1];
+
+  it("confirms a mailed delete of an operator with a due refresh and sso.saml on in 50 queries", async () => {
+    const sent: MailMessage[] = [];
+    const extra = {
+      ...(await dueWithSaml()),
+      account: { deleteConfirm: { ttlMinutes: 1440 } },
+    } satisfies Partial<AuthConfig>;
+    const { bobToken, bobId } = await fortyImpersonations(sent, extra);
+    const asked = await invoke(sent, "/user/delete", asUser(bobToken), {}, extra);
+    expect(asked.status, JSON.stringify(asked.body)).toBe(200);
+    const text = sent.filter((m) => m.text.includes("/user/delete/confirm")).at(-1)?.text ?? "";
+    const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+    current = new Date(current.getTime() + 80 * 60_000);
+    const r = await invoke(sent, "/user/delete/confirm", asUser(bobToken), { token }, extra);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(await env.DB.prepare("SELECT id FROM ta_user WHERE id = ?").bind(bobId).first()).toBe(
+      null,
+    );
+    const inAct = endings.length;
+    await sweepAll(sent, extra);
+    expect(await impersonations()).toBe(0);
+    expect([r.queries, inAct]).toEqual(DUE_CONFIRM_COUNTS);
+    expect(r.queries).toBeLessThanOrEqual(50);
+  });
+
   it("removes the platform member row of an operator with a due refresh and sso.saml on in 50 queries", async () => {
     const sent: MailMessage[] = [];
     const extra = await dueWithSaml();
