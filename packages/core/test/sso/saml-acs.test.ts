@@ -445,6 +445,47 @@ describe("the SAML ACS (plan 12d Task 8)", () => {
     expect(stepsOf(connectionId)).toEqual(["parse", "form"]);
   });
 
+  it("refuses a Content-Length over SAML_FORM_MAX before it reads the body", async () => {
+    const w = samlWorld();
+    const { connectionId } = await orgWithSaml(w);
+    // A small form that passes the form step: its SAMLResponse fails the parse.
+    const post = async (length: number) => {
+      const start = await samlStart(w, connectionId);
+      const form = new URLSearchParams({ SAMLResponse: "PA==", RelayState: start.relayState });
+      let canceled = false;
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          c.enqueue(new TextEncoder().encode(form.toString()));
+          c.close();
+        },
+        cancel() {
+          canceled = true;
+        },
+      });
+      const res = await w.handle(
+        new Request(`https://api.example.com/auth/sso/${connectionId}/acs`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "content-length": String(length),
+            origin: IDP_ORIGIN,
+            "sec-fetch-site": "cross-site",
+            cookie: `__Secure-tempo_session_oauth=${start.bind}`,
+          },
+          body,
+          duplex: "half",
+        } as RequestInit),
+      );
+      return { status: res.status, canceled };
+    };
+    // A declared length at the cap reads the body: the parse refuses it.
+    expect(await post(1_081_519)).toEqual({ status: 302, canceled: false });
+    expect(stepsOf(connectionId)).toEqual(["parse"]);
+    // One byte more: the step form, and the body is canceled unread.
+    expect(await post(1_081_520)).toEqual({ status: 302, canceled: true });
+    expect(stepsOf(connectionId)).toEqual(["parse", "form"]);
+  });
+
   it("lets no unsigned or forged body spend, change, or tell a request row", async () => {
     const w = samlWorld();
     const { idp, connectionId } = await orgWithSaml(w);

@@ -265,6 +265,8 @@ export async function completeSaml(
   const c = samlConfig(connection);
   const xml = strictBase64(encoded, XML_SPACE);
   if (xml === null) return no("form");
+  // A second guard: parseXml refuses the same size at the step parse. This
+  // check costs nothing, and it stops a large text before the parse starts.
   if (xml.length > XML_LIMITS.bytes) return no("parse");
   const skewMs = sso.saml.clockSkewSeconds * 1000;
   const checked = await checkResponse(xml, {
@@ -285,6 +287,8 @@ export async function completeSaml(
     [
       { field: "id", op: "eq", value: row.id },
       { field: "consumedAt", op: "eq", value: null },
+      // A second guard: the read above refused an expired row with the same
+      // now, and no write changes expiresAt. So no test reaches this term.
       { field: "expiresAt", op: "gt", value: now },
     ],
     { consumedAt: now, updatedAt: now },
