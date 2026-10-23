@@ -41,6 +41,47 @@ services:
       - "${AUTHTEMPO_PORT_POSTGRES:?run scripts/test-servers.mjs up}:5432"
     tmpfs:
       - /var/lib/postgresql/data:size=768m
+    # The Postgres space settings (2026-10-24, slot 2, load 11 to 35). The
+    # defaults let the tmpfs fill: an earlier run got "no space" and the
+    # server stopped. Two causes, read by du of pg_wal and base every 2 s.
+    # 1. pg_wal: max_wal_size is 1GB by default, more than the tmpfs. Postgres
+    #    keeps old WAL files for reuse up to that size, even after a
+    #    checkpoint. One run of adapter-postgres and compat-better-auth took
+    #    pg_wal from 16 to 448 MiB, and the tmpfs to 641 of 768 MiB.
+    #    wal_level minimal and no WAL senders cut the WAL, because no replica
+    #    reads it. A max_wal_size of 64MB and a checkpoint every 30 s keep
+    #    pg_wal at 64 to 80 MiB. A checkpoint on tmpfs costs little.
+    # 2. base: the tests make and drop many tables, so the catalogs of
+    #    tempo_auth (pg_attribute, pg_depend, pg_class) fill with dead rows.
+    #    Autovacuum wakes once a minute by default and ran 3 times in 4 runs,
+    #    so base grew by about 80 MiB a run. A wake every 5 s with no cost
+    #    delay lets the next run use the space again.
+    # Measures, four runs of the two packages in a row on a new set: the
+    # tmpfs held 132, 138, 139, and 139 MiB after each run, peak 203 MiB.
+    # Breaks: no WAL settings gave a peak of 537 MiB in one run (pg_wal 448).
+    # No autovacuum settings gave 240 and 334 MiB after two runs.
+    command:
+      - postgres
+      - -c
+      - wal_level=minimal
+      - -c
+      - max_wal_senders=0
+      - -c
+      - max_wal_size=64MB
+      - -c
+      - min_wal_size=32MB
+      - -c
+      - checkpoint_timeout=30s
+      - -c
+      - autovacuum_naptime=5s
+      - -c
+      - autovacuum_vacuum_cost_delay=0
+    # The database of the set. pg_isready with no -d asks for the database
+    # tempo, which does not exist. The server then logs a FATAL line at every
+    # check, each 5 s. The test is set here, because a change of
+    # docker-compose.yml makes compose recreate the running slot 0 server.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tempo -d tempo_auth"]
   libsql:
     extends: { file: docker-compose.yml, service: libsql }
     container_name: !reset null
