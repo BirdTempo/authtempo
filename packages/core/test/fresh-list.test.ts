@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import readme from "../../client/README.md?raw";
 import callsSource from "../../client/src/calls.ts?raw";
 import { createSession } from "../src/engine/sessions.js";
+import { createConnection } from "../src/engine/sso/connections.js";
 import { ROUTES } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { BASE, SOCIAL } from "./every-feature.js";
 import { makeAuth, post } from "./helpers.js";
+import { SCIM_APP, scimAuth, scimToken } from "./scim/helpers.js";
 
 // The code's fresh rule against the client README's list of the calls that can
 // answer session_not_fresh (plan 12a fix wave). The site's fresh-calls test ties
@@ -117,6 +119,64 @@ async function probe(): Promise<Map<string, { status: number; error: string | un
   return out;
 }
 
+/**
+ * Each SSO and SCIM owner POST route's answer to a stale session (plan 12d
+ * Task 13). The manager guard checks the owner and the second factor before
+ * the fresh rule, so the caller is an owner with a factor, as `scimAuth`
+ * makes one. Each id names a row that exists, so the guard finds its
+ * organization. A stale session changes nothing.
+ */
+async function ownerProbe(): Promise<Map<string, { status: number; error: string | undefined }>> {
+  const w = await scimAuth({ sso: { oidc: true } });
+  const owner = await w.storage.findOne("user", [
+    { field: "email", op: "eq", value: "owner@acme.example" },
+  ]);
+  if (!owner) throw new Error("no owner");
+  const connection = await createConnection(w.config, SCIM_APP, {
+    organizationId: w.org,
+    kind: "oidc",
+    label: "Acme",
+    issuer: "https://login.acme.example",
+    clientId: "client",
+    clientSecret: "secret",
+  });
+  if (!connection.ok) throw new Error("no connection");
+  const token = await scimToken(w);
+  const bodies: Readonly<Record<string, unknown>> = {
+    "/sso/domains/add": { organizationId: w.org, domain: "two.example" },
+    "/sso/domains/verify": { id: w.domainId },
+    "/sso/domains/update": { id: w.domainId },
+    "/sso/domains/delete": { id: w.domainId },
+    "/sso/connections/create": { organizationId: w.org, kind: "oidc", label: "Two" },
+    "/sso/connections/update": { id: connection.value.id },
+    "/sso/connections/delete": { id: connection.value.id },
+    "/scim/tokens/create": { organizationId: w.org, name: "next" },
+    "/scim/tokens/revoke": { id: token.id },
+  };
+  const out = new Map<string, { status: number; error: string | undefined }>();
+  for (const route of ROUTES.filter(
+    (r) =>
+      r.method === "POST" &&
+      (r.feature === "sso" || r.feature === "scim") &&
+      (r.auth as readonly string[]).includes("session"),
+  )) {
+    const { token: session } = await createSession(w.config, {
+      userId: owner.id,
+      ip: null,
+      userAgent: null,
+    });
+    w.clock.advance(2 * DAY);
+    const res = await w.handle(
+      post(`/auth${route.path}`, bodies[route.path] ?? {}, {
+        cookie: `__Host-tempo_session=${session}`,
+      }),
+    );
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    out.set(route.path, { status: res.status, error: body.error });
+  }
+  return out;
+}
+
 /** The client's call table: each operation's POST path. */
 function clientCalls(): { operation: string; path: string }[] {
   return [
@@ -144,8 +204,25 @@ describe("the routes that answer session_not_fresh and the client README list", 
     expect(parsed).toEqual([]);
   });
 
+  it("probes each SSO and SCIM owner POST route of plan 12d up to its fresh rule", async () => {
+    const answers = await ownerProbe();
+    expect([...answers.keys()].sort()).toEqual([
+      "/scim/tokens/create",
+      "/scim/tokens/revoke",
+      "/sso/connections/create",
+      "/sso/connections/delete",
+      "/sso/connections/update",
+      "/sso/domains/add",
+      "/sso/domains/delete",
+      "/sso/domains/update",
+      "/sso/domains/verify",
+    ]);
+    for (const [path, a] of answers)
+      expect({ path, ...a }).toEqual({ path, status: 403, error: "session_not_fresh" });
+  });
+
   it("are the same: each listed call reaches a fresh route, and each fresh route is a listed call's", async () => {
-    const answers = await probe();
+    const answers = new Map([...(await probe()), ...(await ownerProbe())]);
     const fresh = [...answers]
       .filter(([, a]) => a.status === 403 && a.error === "session_not_fresh")
       .map(([p]) => p)
@@ -153,8 +230,9 @@ describe("the routes that answer session_not_fresh and the client README list", 
     const calls = clientCalls();
     const listed = readmeList();
     // Plan 12k Task 7 adds tokens.update; Task 8 adds the two organization token
-    // calls and organizations.members.remove.
-    expect(listed).toHaveLength(23);
+    // calls and organizations.members.remove. Plan 12d Task 13 adds sso.domains,
+    // sso.connections, and scim.tokens.
+    expect(listed).toHaveLength(26);
     const ops = (name: string) =>
       calls.filter((c) => c.operation === name || c.operation.startsWith(`${name}.`));
     // A listed call with no fresh route: the README promises a rule that the code lacks.

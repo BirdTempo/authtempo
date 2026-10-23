@@ -47,6 +47,7 @@ import test from "../../../../../samples/guides/account-settings.test.ts?raw";
 - The calls of the other guides can answer it too: `passkey.register`, `passkeys.delete`, `tokens.create`, and `tokens.update`.
 - The three role writes can answer it: `organizations.roles.create`, `organizations.roles.update`, and `organizations.roles.delete`.
 - The organization calls can answer it: `organizations.tokens.create`, `organizations.tokens.update`, and `organizations.members.remove` with `revokeTokens: true`.
+- Each call of `sso.domains`, `sso.connections`, and `scim.tokens` can answer it, for an owner of an organization.
 - `password.change` can answer it while the second factor is on, and for a first password.
 - The second factor calls can answer it: `totp.enable`, `totp.disable`, `totp.regenerateBackupCodes`, `secondFactor.passkey.enable`, `secondFactor.email.enable`, and `secondFactor.disable`.
 - `withFresh` runs the change. On `session_not_fresh` it runs your re-authentication, then the change once more.

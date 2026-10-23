@@ -288,6 +288,49 @@ export const CLIENT_CALLS = [
   // A POST, not a navigation: the start needs the session. client.identities.link
   // puts the provider's name in the template, then navigates to the answer's URL.
   { operation: "identities.link", method: "POST", path: "/social/:provider/link" },
+  // Plan 12d: enterprise SSO and the SCIM tokens. The session routes need a
+  // fresh session of an owner with a second factor. The directory, not the
+  // client, calls the SCIM protocol routes under /scim/v2.
+  { operation: "sso.discover", method: "POST", path: "/sso/discover" },
+  // A browser navigation, not a fetch: client.sso builds its URL from this row.
+  { operation: "sso.start", method: "GET", path: "/sso/:connectionId/start" },
+  { operation: "sso.domains.list", method: "GET", path: "/sso/domains", select: "domains" },
+  { operation: "sso.domains.add", method: "POST", path: "/sso/domains/add", select: "domain" },
+  {
+    operation: "sso.domains.verify",
+    method: "POST",
+    path: "/sso/domains/verify",
+    select: "domain",
+  },
+  {
+    operation: "sso.domains.update",
+    method: "POST",
+    path: "/sso/domains/update",
+    select: "domain",
+  },
+  { operation: "sso.domains.delete", method: "POST", path: "/sso/domains/delete" },
+  {
+    operation: "sso.connections.list",
+    method: "GET",
+    path: "/sso/connections",
+    select: "connections",
+  },
+  {
+    operation: "sso.connections.create",
+    method: "POST",
+    path: "/sso/connections/create",
+    select: "connection",
+  },
+  {
+    operation: "sso.connections.update",
+    method: "POST",
+    path: "/sso/connections/update",
+    select: "connection",
+  },
+  { operation: "sso.connections.delete", method: "POST", path: "/sso/connections/delete" },
+  { operation: "scim.tokens.list", method: "GET", path: "/scim/tokens", select: "tokens" },
+  { operation: "scim.tokens.create", method: "POST", path: "/scim/tokens/create" },
+  { operation: "scim.tokens.revoke", method: "POST", path: "/scim/tokens/revoke" },
 ] as const satisfies readonly ClientCall[];
 
 /** The name of one row of `CLIENT_CALLS`. */

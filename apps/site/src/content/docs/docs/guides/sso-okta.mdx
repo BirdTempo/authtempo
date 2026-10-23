@@ -1,0 +1,97 @@
+---
+title: SSO with Okta
+description: Connect the Okta org of an organization to core by OIDC or by SAML, with the values to copy each way.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 30
+  - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
+  - packages/core/README.md "Enterprise SSO and SCIM"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import sample from "../../../../../samples/guides/sso-okta.ts?raw";
+import test from "../../../../../samples/guides/sso-providers.test.ts?raw";
+
+**For:** an app developer, or the Okta admin of a customer, who connects the customer's Okta org to an organization.
+
+**What it does:** this page gives the steps in the Okta Admin Console for an OIDC connection and for a SAML connection. Each field name is the name on the Okta pages that the last table lists, with the date of each read.
+
+## Before you start
+
+- A verified domain of the organization, by the steps of [Enterprise SSO](/docs/guides/sso/).
+- An Okta admin of the customer who may create app integrations ([Okta help](https://help.okta.com/en-us/content/topics/apps/apps_app_integration_wizard_oidc.htm)).
+
+## Steps
+
+Pick one kind. OIDC needs fewer values.
+
+### OIDC
+
+1. In the Admin Console, go to "Applications and Resources" > "Applications".
+2. Select "Create App Integration", then "OIDC - OpenID Connect", then "Web Application".
+3. Under "Grant type", keep "Authorization Code".
+4. Under "Assignments", pick the people or groups that may sign in.
+5. Save. Copy the "Client ID".
+6. Under "Client authentication", select "Client secret", and copy the secret.
+7. Create the connection with the Okta domain and the values of steps 5 and 6, as `oktaOidc` below does.
+8. In "Sign-in redirect URIs", enter `<baseURL><basePath>/sso/<connectionId>/callback`.
+
+The issuer is the org authorization server: `https://<your Okta domain>`. Core reads its discovery document at `/.well-known/openid-configuration`.
+
+Core sends the client secret in the body of the token request. If the token request of a sign-in fails, check that the app integration accepts the secret in the body.
+
+### SAML
+
+1. Go to "Applications and Resources" > "Applications" > "Create App Integration".
+2. Select "Classic experience", then "SAML 2.0" as the sign-in method.
+3. Enter a name, then go on to the SAML settings.
+4. Enter a temporary https URL in "Single sign-on URL" and "Audience URI (SP Entity ID)".
+5. Set "Name ID format" to the persistent format.
+6. Under "Attribute Statements", add the name `email`, the format "Basic", and the email address as the value.
+7. Finish the integration. On the "Sign On" tab, open "View SAML setup instructions".
+8. Create the connection with the sign-in URL, the issuer, and the certificate there, as `oktaSaml` below does.
+9. Enter the `acsUrl` of the connection in "Single sign-on URL".
+10. Keep "Use this for Recipient URL and Destination URL" selected.
+11. Enter the `spEntityId` of the connection in "Audience URI (SP Entity ID)".
+12. Assign the people of the customer to the app.
+
+Core asks for the persistent `NameID` format in each request. Okta needs the "Name ID format" to match the format of a request that names one.
+
+Under "Show Advanced Settings", the "Assertion Signature" must be signed. Pick an RSA SHA-256 "Signature Algorithm" and the SHA-256 "Digest Algorithm". Core refuses SHA-1.
+
+<Code code={sample} lang="ts" title="The connection input of Okta" />
+
+<Code code={test} lang="ts" title="The connection of each provider as a test" />
+
+## How it behaves
+
+- Core verifies the Assertion with the certificate of the connection, never with a key of the document.
+- A connection holds one or two certificates. When Okta makes a new certificate, add it to `certificates`, activate it in Okta, then remove the old one.
+- Each address must be in a verified domain of the organization. A person of the Okta org with another address gets [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch).
+- Core refuses an encrypted assertion. Leave "Assertion Encryption" off.
+
+## If it fails
+
+- [`sso_failed`](/docs/reference/errors/#sso_failed): the log line names the step. `exchange` means a failed token request. `audience` means a wrong "Audience URI (SP Entity ID)". `destination` or `subject_confirmation` means a wrong "Single sign-on URL". `address` means no attribute `email`. `subject` means a `NameID` that is not persistent.
+- [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch): the attribute `email` holds an address outside the verified domains.
+- [`email_required`](/docs/reference/errors/#email_required): the ID token of an OIDC sign-in holds no address.
+- [`sso_not_configured`](/docs/reference/errors/#sso_not_configured): the connection is off, or the config does not turn its kind on.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the connection create refused a value. The message names the field.
+
+## The Okta pages
+
+None of these pages shows a date of change.
+
+| Page | Read (UTC) |
+| --- | --- |
+| [Create OIDC app integrations](https://help.okta.com/en-us/content/topics/apps/apps_app_integration_wizard_oidc.htm) | 2026-10-23 20:58 |
+| [Authorization servers](https://developer.okta.com/docs/concepts/auth-servers/) | 2026-10-23 20:59 |
+| [Create SAML app integrations](https://help.okta.com/en-us/content/topics/apps/apps_app_integration_wizard_saml.htm) | 2026-10-23 20:58 |
+| [SAML field reference](https://help.okta.com/en-us/content/topics/apps/aiw-saml-reference.htm) | 2026-10-23 20:59 |
+| [Define attribute statements](https://help.okta.com/en-us/content/topics/apps/define-attribute-statements.htm) | 2026-10-23 21:10 |
+| [Manage signing certificates](https://help.okta.com/en-us/content/topics/apps/manage-signing-certificates.htm) | 2026-10-23 21:16 |
+
+## Next
+
+- [Enterprise SSO](/docs/guides/sso/)
+- [Provision the staff from Okta with SCIM](/docs/guides/scim/)

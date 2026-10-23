@@ -1158,6 +1158,39 @@ Plan 12f gives the operator of a deployment the support tools of day one. `opera
 - The audit table `ta_operator_audit` is append-only: core never updates or deletes a row. `hooks.operator.afterAction` sends each row to a separate system.
 - An audit id is a monotonic ULID (`newMonotonicId`). The audit list reads the rows in id order. So the rows of one isolate list in the order of their writes, also inside one millisecond. The rows of two isolates in one millisecond have no defined order between them.
 
+## Enterprise SSO and SCIM
+
+Plan 12d. `sso` and `scim` are off by default, and each needs
+`organizations`. The guides are on the site: Enterprise SSO, SSO with
+Entra ID, Okta, and Google Workspace, and SCIM provisioning. The routes
+page gives each route with its errors.
+
+- An organization proves an email domain by a TXT record at
+  `_authtempo-challenge.<domain>`. Every resolver of `sso.dns` must give
+  the value. Core has no default resolver: pass `dohCloudflare(fetch)` and
+  `dohGoogle(fetch)`, or your own ports.
+- A verified domain of an organization can sign in as any existing user
+  at that domain. Core never reads `email_verified` of the provider.
+- An organization adds OIDC (`sso.oidc`) and SAML (`sso.saml`)
+  connections. Core is the service provider. A SAML connection takes one
+  narrow profile: a signed Assertion, RSA-SHA256 or ECDSA-SHA256, a
+  persistent `NameID` or `subjectAttribute`, no encryption.
+- An owner manages domains, connections, and SCIM tokens from a fresh
+  session with a second factor. A platform operator manages every
+  organization. The app calls `auth.api.sso` and `auth.api.scim` with
+  `{ kind: "app", name }` as the actor. Each write writes one audit row.
+- `enforce: true` on a domain refuses every other first factor of its
+  addresses with `sso_required`. The operator turns it off with
+  `POST /operator/sso/enforce-off` and a reason.
+- The discovery answers `{ sso: false }` for a domain routed to a SAML
+  connection. A fix of the final fix wave of plan 12d closes that gap.
+- SCIM 2.0 lives under `<basePath>/scim/v2`. An organization holds at
+  most 2 live `sk_` tokens. A SCIM create needs an address in a verified
+  domain of the token's organization. A deactivate ends the person's
+  access at once when a domain of the organization claims the address.
+- One SCIM request changes at most 9 members of a group (the D1 Free
+  budget). Okta sends larger batches, and they answer 400.
+
 ## Hooks
 
 A hook is your code at a named point of a core flow (plan 9d). Pass plain

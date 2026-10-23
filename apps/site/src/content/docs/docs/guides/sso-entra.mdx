@@ -1,0 +1,92 @@
+---
+title: SSO with Entra ID
+description: Connect the Entra ID tenant of an organization to core by OIDC or by SAML, with the values to copy each way.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 30
+  - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
+  - packages/core/README.md "Enterprise SSO and SCIM"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import sample from "../../../../../samples/guides/sso-entra.ts?raw";
+import test from "../../../../../samples/guides/sso-providers.test.ts?raw";
+
+**For:** an app developer, or the Entra ID admin of a customer, who connects the customer's Entra ID tenant to an organization.
+
+**What it does:** this page gives the steps in the Microsoft Entra admin center for an OIDC connection and for a SAML connection. Each field name is the name on the Microsoft Learn pages that the last table lists, with the date of each read.
+
+## Before you start
+
+- A verified domain of the organization, by the steps of [Enterprise SSO](/docs/guides/sso/).
+- An Entra ID admin of the customer, with the role that the [Microsoft Learn page](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/add-application-portal-setup-sso) names.
+
+## Steps
+
+Pick one kind. OIDC needs fewer values.
+
+### OIDC
+
+1. In the Microsoft Entra admin center, go to "Entra ID" > "App registrations" > "New registration".
+2. Enter a "Name". Under "Supported account types", select "Single tenant only".
+3. Select "Register". Copy the "Application (client) ID" and the "Directory (tenant) ID".
+4. Go to "Certificates & secrets" > "Client secrets" > "New client secret". Copy its "Value" now.
+5. Create the connection with the values of steps 3 and 4, as `entraOidc` below does.
+6. Go to "Authentication" > "Add Redirect URI", and select the "Web" platform.
+7. Enter `<baseURL><basePath>/sso/<connectionId>/callback`, with the `id` of the connection.
+
+The issuer holds the tenant ID in GUID form, not the domain name of the tenant. Core reads the discovery document of the issuer, and that document names the GUID form. Core needs the two to be equal.
+
+The secret has a life of at most 24 months. Before it ends, make a new one and update the connection with `clientSecret`.
+
+### SAML
+
+1. Go to "Entra ID" > "Enterprise apps" > "All applications", and open the app of the customer.
+2. Select "Single sign-on", then "SAML".
+3. Copy the "Login URL" and the "Microsoft Entra Identifier" of the "Set up" section.
+4. In "SAML Certificates", download the certificate in the Base 64 form.
+5. Create the connection with these three values, as `entraSaml` below does.
+6. In "Basic SAML Configuration", select "Edit".
+7. Enter the `spEntityId` of the connection in "Identifier (Entity ID)".
+8. Enter the `acsUrl` of the connection in "Reply URL (Assertion Consumer Service URL)".
+9. In "Attributes & Claims", select "Edit", then "Add new claim".
+10. Give the claim the name `email`, and the email address of the person as its source.
+11. Assign the people of the customer to the app, and select "Test".
+
+Core asks for the persistent `NameID` format in each request. Entra ID honors the format of the request, so you change nothing in "Name identifier value".
+
+<Code code={sample} lang="ts" title="The connection input of Entra ID" />
+
+<Code code={test} lang="ts" title="The connection of each provider as a test" />
+
+## How it behaves
+
+- Entra ID signs the Assertion with the certificate of the app. Core verifies it with the certificate of the connection, never with a key of the document.
+- A connection holds one or two certificates. To roll the key over, add the new certificate to `certificates`, activate it in Entra ID, then remove the old one.
+- Each address must be in a verified domain of the organization. A person of the tenant with another address gets [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch).
+- Core sends the client secret in the body of the token request.
+
+## If it fails
+
+- [`sso_failed`](/docs/reference/errors/#sso_failed): the log line names the step. `discovery` means a wrong tenant form in the issuer. `audience` means a wrong "Identifier (Entity ID)". `destination` or `subject_confirmation` means a wrong "Reply URL". `address` means no claim `email`. `subject` means a `NameID` that is not persistent.
+- [`sso_domain_mismatch`](/docs/reference/errors/#sso_domain_mismatch): the claim `email` holds an address outside the verified domains.
+- [`email_required`](/docs/reference/errors/#email_required): the ID token of an OIDC sign-in holds no address.
+- [`sso_not_configured`](/docs/reference/errors/#sso_not_configured): the connection is off, or the config does not turn its kind on.
+- [`invalid_body`](/docs/reference/errors/#invalid_body): the connection create refused a value. The message names the field.
+
+## The Microsoft Learn pages
+
+| Page | Read (UTC) | Updated on the page |
+| --- | --- | --- |
+| [Register an application](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app) | 2026-10-23 20:58 | 2026-06-05 |
+| [Add a redirect URI](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-redirect-uri) | 2026-10-23 20:59 | 2026-05-14 |
+| [Add credentials](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials) | 2026-10-23 20:59 | 2025-04-08 |
+| [OpenID Connect on the Microsoft identity platform](https://learn.microsoft.com/en-us/entra/identity-platform/v2-protocols-oidc) | 2026-10-23 20:58 | 2026-06-30 |
+| [Enable SAML single sign-on](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/add-application-portal-setup-sso) | 2026-10-23 20:58 | 2025-07-10 |
+| [Customize SAML token claims](https://learn.microsoft.com/en-us/entra/identity-platform/saml-claims-customization) | 2026-10-23 21:10 | 2025-05-14 |
+| [Manage certificates for federated single sign-on](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/tutorial-manage-certificates-for-federated-single-sign-on) | 2026-10-23 20:59 | 2026-03-11 |
+
+## Next
+
+- [Enterprise SSO](/docs/guides/sso/)
+- [Provision the staff from Entra ID with SCIM](/docs/guides/scim/)

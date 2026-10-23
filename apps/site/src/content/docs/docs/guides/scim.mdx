@@ -1,0 +1,130 @@
+---
+title: SCIM provisioning
+description: Let the directory of an organization, such as Entra ID or Okta, create, change, and remove its staff through a SCIM 2.0 server.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 30
+  - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
+  - packages/core/README.md "Enterprise SSO and SCIM"
+  - packages/client/README.md "Enterprise SSO and SCIM tokens"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/scim.ts?raw";
+import test from "../../../../../samples/guides/scim.test.ts?raw";
+
+**For:** an app developer whose customers want their directory to add and remove their staff in the app.
+
+**What it does:** core serves SCIM 2.0 (RFC 7643 and RFC 7644) for Users and Groups under `<basePath>/scim/v2`. The directory of an organization calls it with a SCIM token of that organization. A SCIM group can give a role, a team, or both.
+
+## Before you start
+
+- A verified domain of the organization, by the steps of [Enterprise SSO](/docs/guides/sso/). A SCIM create needs an address in a verified domain.
+- An SSO connection of the organization, for the role map. The [Enterprise SSO](/docs/guides/sso/) steps add one.
+- [Teams](/docs/guides/teams/), when a group must give a team.
+
+## Steps
+
+1. Add `scim` to the config, beside `organizations` and `sso`.
+2. Set `scim.groups` to `roles`, `teams`, or `both`.
+3. Set `scim.defaultRole`, the role of a person that no mapped group names.
+
+<Code code={config} lang="ts" title="The SCIM config and the directory setup" />
+
+4. Create a token: `client.scim.tokens.create({ organizationId, name })` on the owner's page.
+5. Show the clear token once. Core keeps only its SHA-256.
+6. In the directory, enter the base URL `<baseURL><basePath>/scim/v2` and the token.
+7. Set the role map: `scimRoles` of the connection, by group name.
+8. Start the provisioning in the directory.
+
+<Code code={test} lang="ts" title="A create, a role by group, a refusal, and a deactivate as a test" />
+
+## How it behaves
+
+### The token
+
+- A token holds `sk_` and 43 characters. It takes the scopes `scim.users.read`, `scim.users.write`, `scim.groups.read`, and `scim.groups.write`. With no list it takes all four.
+- `expiresInDays` is 1 to 730. With no value, the token never expires.
+- An organization holds at most 2 live tokens. To rotate, create the new token, move the directory to it, then revoke the old one. A third token answers [`token_limit`](/docs/reference/errors/#token_limit).
+- The organization of each call is the organization of the token, never a value of the path or the body.
+- A wrong token answers 401. Each failure counts on `scim-auth:ip:<ip>`, 60 per 15 minutes. A valid token counts on `scim:token:<id>`, 1200 per 10 minutes.
+
+### The address rule
+
+A create, and a change of the address, needs the address in a verified domain of the token's organization. Else core answers 400 `invalidValue`, and creates nothing. This rule stops a token from taking an account outside the domains of its organization. A user who exists at the address gets a member row, and is not copied.
+
+### The role map
+
+The map is `scimRoles` of the connection: `{ "<group name>": "<role>" }`. Set it with `client.sso.connections.update` or `auth.api.scim.setRoleMap`. The map of an organization is the map of its enabled connection that it created first.
+
+- A member gets the highest-ranked role of its mapped groups, else `scim.defaultRole`.
+- SCIM never gives or takes `owner` or the platform role. A person whom the app made an owner stays an owner.
+- A change of the map changes no role at once. A member gets the role of the new map at the next change of its groups, or at a rename of a mapped group.
+
+### Teams
+
+With `scim.groups` set to `teams` or `both`, each group has one team. A group create creates the team, and a member change is a team member change. A SCIM team write fires no team hook. An app that watches the team hooks must also watch `hooks.scim.afterChange`, which reports each write after its commit.
+
+### A deactivate and a delete
+
+- `active: false` removes the member row. When a verified domain of the organization claims the address, the person's access ends at once. Every session, OAuth refresh token, and API token of the person ends. Each organization token that the person made in the organization goes too.
+- The sessions that do not fit the call budget wait for the sweep. Each door refuses them at once all the same.
+- The record of a deactivate also refuses a session or a refresh token that begins in the 5 seconds after it. That bound covers a server whose clock runs ahead.
+- `active: true` gives back the role of the groups, and not the teams. The teams come back at the next member change of each group.
+- A PUT with no `active` reads as `active: true`, as RFC 7644 says, so it reactivates the person.
+- A delete runs the deactivate, then deletes the SCIM record. The account stays: only the person deletes an account.
+- With `enforce` off, a deprovisioned person can still sign in by their own methods. A deactivated person who signs in through the connection gets [`account_disabled`](/docs/reference/errors/#account_disabled).
+
+A group write can race a deactivate. Core then runs the deactivate again, up to 5 rounds. On D1 Free, a few races in one request can still answer 409, and the person keeps access until the directory sends it again. The [routes page](/docs/reference/routes/#scim) lists each such case.
+
+### What core refuses
+
+| Request | Answer |
+| --- | --- |
+| `POST /Bulk`, `GET /Me`, and each `/.search` | 501 |
+| A `password` in a PATCH | 400 `invalidValue`. The password change is off |
+| A filter outside the grammar of the [routes page](/docs/reference/routes/#get-scim-v2-users) | 400 `invalidFilter` |
+| `sortBy` or `sortOrder` | 400 `invalidValue` |
+| A PATCH path with an index, or an op `move` or `copy` | 400 `invalidPath` |
+| A path to an attribute that the schema does not know | 400 `invalidPath` |
+| A `schemas` URN that core does not serve, such as a custom extension | 400 `invalidSyntax` |
+| A remove of `userName` or of a group `displayName`, or a replace of it with null | 400 `mutability` |
+| A body over 1 MB | 413 |
+| A request that changes more than 9 members of a group | 400 `invalidValue` |
+
+To fix a custom extension URN, remove the custom mapping in the directory, or ask for the extension.
+
+### What core accepts from a directory
+
+- An attribute that the schema does not know: core ignores it, stores nothing of it, and answers the User as stored.
+- A `password` in a POST or a PUT: core ignores it, because Okta sends a placeholder in each create.
+- An `op` with a capital letter, such as `Replace`, and the strings `"True"` and `"False"` for a boolean, as Entra ID sends them.
+- A PATCH with no `path`, as Entra ID and Okta send it.
+- The Group URN `http://schemas.microsoft.com/2006/11/ResourceManagement/ADSCIM/2.0/Group` of Entra ID. Core reads nothing of it.
+- The manager of Entra ID as a list of one object.
+- A remove of a person who is not a member: 204, and nothing changes. A directory sends a removal again after a time-out.
+- After a write of a value with `primary: true`, each other value of that attribute gets `primary: false`.
+
+### The known gaps
+
+- Entra ID can match a person with the filter `emails[type eq "work"].value eq "<address>"`. Core does not serve that filter yet, and answers `invalidFilter`. Keep the default match of Entra ID on `userName`.
+- One request changes at most 9 members of a group, from the D1 Free budget of 50 queries. Okta sends up to 1000 members in one group PATCH, and a PUT with every member. Such a request answers 400. Push smaller groups, or ask Okta support for a smaller batch.
+- A list with no filter reads every User of the organization for `totalResults`. On Postgres with 10 000 Users, it took 29.7 ms at the median and 40.6 ms at the most (10 runs, load 14, measured 2026-10-24).
+
+## If it fails
+
+- [`token_limit`](/docs/reference/errors/#token_limit): the organization holds 2 live tokens. Revoke one first.
+- [`second_factor_required`](/docs/reference/errors/#second_factor_required): the owner has no second factor.
+- [`session_not_fresh`](/docs/reference/errors/#session_not_fresh): prove it again, then call once more.
+- [`forbidden_rank`](/docs/reference/errors/#forbidden_rank): the caller is not an owner of the organization.
+- [`impersonation_session`](/docs/reference/errors/#impersonation_session): an impersonation session cannot create or revoke a token.
+- [`account_disabled`](/docs/reference/errors/#account_disabled): the directory deactivated the person.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): see the SCIM keys of [Limits](/docs/reference/limits/).
+
+A SCIM route answers the SCIM error message of RFC 7644, with `scimType`, never a code of the errors page.
+
+## Next
+
+- [SCIM routes](/docs/reference/routes/#scim)
+- [Enterprise SSO](/docs/guides/sso/)
+- [Run your code at a hook point](/docs/guides/hooks/)

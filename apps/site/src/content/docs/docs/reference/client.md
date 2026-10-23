@@ -156,8 +156,25 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.jwt.token()` | `GET /token` | `{ token }` |
 | `client.oauth.grants()` | `GET /oauth/grants` | `OAuthGrantJSON[]` |
 | `client.oauth.revoke({ clientId })` | `POST /oauth/grants/revoke` | `{ ok: true }` |
+| `client.sso.discover({ email, next? })` | `POST /sso/discover` | `{ sso: true, start }` or `{ sso: false }`. It takes no session |
+| `client.sso.startURL({ connectionId, next? })` | `GET /sso/:connectionId/start` | The URL of the start, with no request. `invalid_body` with status 0 for an id outside the segment rule |
+| `client.sso.signIn({ connectionId, next? })` | `GET /sso/:connectionId/start` | `{ url }`, after it sends the browser to the start through `navigate` |
+| `client.sso.domains.list({ organizationId })` | `GET /sso/domains` | `SsoDomainJSON[]` |
+| `client.sso.domains.add({ organizationId, domain })` | `POST /sso/domains/add` | `SsoDomainJSON`, with `record`, the TXT record to publish |
+| `client.sso.domains.verify({ id })` | `POST /sso/domains/verify` | `SsoDomainJSON` with `verified: true` |
+| `client.sso.domains.update({ id, connectionId?, enforce?, includeSubdomains? })` | `POST /sso/domains/update` | `SsoDomainJSON` |
+| `client.sso.domains.delete({ id })` | `POST /sso/domains/delete` | `{ ok: true }` |
+| `client.sso.connections.list({ organizationId })` | `GET /sso/connections` | `SsoConnectionJSON[]`. No answer holds the client secret |
+| `client.sso.connections.create(input: SsoConnectionInput)` | `POST /sso/connections/create` | `SsoConnectionJSON` |
+| `client.sso.connections.update({ id, ...fields })` | `POST /sso/connections/update` | `SsoConnectionJSON` |
+| `client.sso.connections.delete({ id })` | `POST /sso/connections/delete` | `{ ok: true }` |
+| `client.scim.tokens.list({ organizationId })` | `GET /scim/tokens` | `ScimTokenJSON[]` |
+| `client.scim.tokens.create({ organizationId, name, scopes?, expiresInDays? })` | `POST /scim/tokens/create` | `{ token, id, hint }`. The clear token appears once |
+| `client.scim.tokens.revoke({ id })` | `POST /scim/tokens/revoke` | `{ ok: true }` |
 
 The password, email code, and second factor operations answer `not_found` when the server turns the feature off.
+
+The SSO and SCIM token operations answer `not_found` when the server turns `sso` or `scim` off. A domain, connection, or SCIM token call needs a fresh session of an owner with a second factor on. Wrap each one in `withFresh`. [Enterprise SSO](/docs/guides/sso/) and [SCIM provisioning](/docs/guides/scim/) give the flows.
 
 For passkey autofill, start the autofill when the page loads, before a passkey button can run. A new passkey ceremony ends a waiting one, also a register.
 
@@ -252,6 +269,7 @@ The types of the package:
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions` |
 | Answers | `ApiTokenSummaryJSON`, `OrganizationTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `TeamJSON`, `TeamMemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 | Account settings | `SessionSummaryJSON`, `FreshJSON`, `PublicUserJSON`, `IdentityEntryJSON`, `IdentityListJSON` |
+| Enterprise SSO and SCIM | `SsoDomainJSON`, `SsoConnectionJSON`, `SsoConnectionInput`, `ScimTokenJSON` |
 
 ## Next
 

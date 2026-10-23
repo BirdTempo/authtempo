@@ -194,14 +194,15 @@ An SDK imports `@authtempo/core/routes`, never `@authtempo/core/testing`, which 
 | `RouteEntry` | One row of `ROUTES`: `method`, `path`, `feature`, `auth`, `codes`, `oauthCodes`, and `crossSiteForm` on the one cross-site form post. |
 | `RouteFeature` | The config part that turns a route on. |
 | `ROUTE_FEATURES` | Every feature once, as a tuple. `RouteFeature` is one of its members. |
-| `AuthForm` | A credential form that a route takes: `none`, `session`, `apiToken`, `organizationToken`, `sessionJwt`, `accessToken`, `dpopAccessToken`, `operator`, `initialAccessToken`, or `clientSecretBasic`. |
-| `RouteMethod` | `GET` or `POST`. |
+| `AuthForm` | A credential form that a route takes: `none`, `session`, `apiToken`, `organizationToken`, `sessionJwt`, `accessToken`, `dpopAccessToken`, `operator`, `initialAccessToken`, `clientSecretBasic`, or `scimToken`. |
+| `RouteMethod` | `GET`, `POST`, `PUT`, `PATCH`, or `DELETE`. Only the SCIM routes use the last three. |
 | `RouteLiteral` | One row of `ROUTES` with its literal method and path. |
 | `RoutePath` | A path that `ROUTES` holds for a method. An SDK types its paths with it, so a path that core does not serve fails the compile. |
 | `RouteKey` | `"<METHOD> <path>"` of one row of `ROUTES`. A key that `ROUTES` does not hold fails the compile. |
 | `ROUTER_CODES`, `RouterCode` | The codes that the router answers for every route: `not_found`, `origin_not_trusted`, and `internal`. An entry's `codes` never repeats them. |
 | `USER_ACTOR_CODES` | The codes of the operator routes that only a request with a session gets: `operator_self` and `impersonation_session`. A call with an operator secret never gets them. |
 | `PROVIDER_NAME_RE` | The name rule of `:provider`. |
+| `PARAM_SEGMENT_RE` | The rule of every other `:<name>` segment, such as `:connectionId`: 1 to 128 characters of `[A-Za-z0-9._:-]`. |
 | `AUTH_ERROR_PARAM` | The query parameter of a browser flow failure, `auth_error`. |
 | `routeAnchor` | The anchor of a route on [Routes](/docs/reference/routes/): the method, then the path with each run of other characters as one hyphen. |
 | `errorAnchor`, `ErrorTable` | The anchor of a code on [Errors](/docs/reference/errors/), and the table of the code: `core` or `oauth`. |

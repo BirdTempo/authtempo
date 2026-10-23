@@ -142,72 +142,6 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
   },
   {
     method: "GET",
-    path: "/sso/domains",
-    reason:
-      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/domains/add",
-    reason:
-      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/domains/verify",
-    reason:
-      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/domains/update",
-    reason:
-      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/domains/delete",
-    reason:
-      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "GET",
-    path: "/sso/connections",
-    reason:
-      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/connections/create",
-    reason:
-      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/connections/update",
-    reason:
-      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/connections/delete",
-    reason:
-      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "POST",
-    path: "/sso/discover",
-    reason:
-      "an SSO owner route; client.sso of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "GET",
-    path: "/sso/:connectionId/start",
-    reason:
-      "the browser opens it from the sign-in page of core to start an SSO sign-in (plan 12d Task 4b)",
-  },
-  {
-    method: "GET",
     path: "/sso/:connectionId/callback",
     reason: "the identity provider sends the browser back to it (plan 12d Task 4b)",
   },
@@ -261,24 +195,6 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     method: "GET",
     path: "/user/delete/confirm",
     reason: "the confirm page of the mailed delete link; a browser opens it (plan 12a Task 20)",
-  },
-  {
-    method: "GET",
-    path: "/scim/tokens",
-    reason:
-      "a SCIM token route of an owner; client.scim.tokens of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "POST",
-    path: "/scim/tokens/create",
-    reason:
-      "a SCIM token route of an owner; client.scim.tokens of plan 12d Task 13 calls it, and that task deletes this row",
-  },
-  {
-    method: "POST",
-    path: "/scim/tokens/revoke",
-    reason:
-      "a SCIM token route of an owner; client.scim.tokens of plan 12d Task 13 calls it, and that task deletes this row",
   },
   {
     method: "GET",
@@ -461,5 +377,21 @@ describe("the SDK call tables and ROUTES (plan 11d)", () => {
       `sdk routes: ${covered} called, ${EXEMPT.length} exempt, ${routes.length} of ROUTES`,
     );
     expect(covered + EXEMPT.length).toBe(routes.length);
+  });
+
+  it("calls every session route of plan 12d through the client, with no exemption", () => {
+    // The owner routes of the domains, the connections, and the SCIM tokens (plan 12d Task 13).
+    const owned = ROUTES.filter(
+      (r) =>
+        (r.feature === "sso" || r.feature === "scim") &&
+        (r.auth as readonly string[]).includes("session"),
+    ).map(key);
+    expect(owned).toHaveLength(12);
+    const client = new Set(CLIENT_CALLS.map(key));
+    const exempt = new Set(EXEMPT.map(key));
+    for (const r of owned) {
+      expect(client.has(r), r).toBe(true);
+      expect(exempt.has(r), r).toBe(false);
+    }
   });
 });

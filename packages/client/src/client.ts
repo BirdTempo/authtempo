@@ -1,5 +1,6 @@
 import type {
   ApiTokenSummary,
+  ConnectionFields,
   IdentityEntry,
   InvitationSummary,
   MemberSummary,
@@ -11,12 +12,16 @@ import type {
   PublicKeyCredentialRequestOptionsJSON,
   PublicSession,
   PublicUser,
+  ScimScope,
+  ScimTokenSummary,
   SessionSummary,
+  SsoConnectionSummary,
+  SsoDomainSummary,
   TeamMemberSummary,
   TeamSummary,
 } from "@authtempo/core";
 import { ERRORS, type ErrorCode, type OAuthErrorCode } from "@authtempo/core/errors";
-import { PROVIDER_NAME_RE, type RouteMethod } from "@authtempo/core/routes";
+import { PARAM_SEGMENT_RE, PROVIDER_NAME_RE, type RouteMethod } from "@authtempo/core/routes";
 import { type ClientOperation, callOf, selected } from "./calls.js";
 import { readRedirectError } from "./redirect-error.js";
 import { type ClientFailure, type ClientResult, fail, ok } from "./result.js";
@@ -90,6 +95,19 @@ export type OrganizationTokenSummaryJSON = Omit<
 
 /** One OAuth grant of the signed-in person (plan 9g final fix wave). */
 export type OAuthGrantJSON = Omit<OAuthGrantSummary, "createdAt"> & { createdAt: string };
+
+/** One SSO domain of an organization (plan 12d). `record` is the TXT record to publish while it is pending. */
+export type SsoDomainJSON = SsoDomainSummary;
+/** One SSO connection of an organization (plan 12d). No answer holds the client secret. */
+export type SsoConnectionJSON = SsoConnectionSummary;
+/** One SCIM token of an organization (plan 12d). Never the token, never its hash. */
+export type ScimTokenJSON = ScimTokenSummary;
+/** The fields of a new SSO connection. Core checks the rules of each kind and names the field it refuses. */
+export type SsoConnectionInput = Omit<ConnectionFields, "organizationId" | "kind" | "label"> & {
+  organizationId: string;
+  kind: "oidc" | "saml";
+  label: string;
+};
 
 /** A method that a challenge offers, in the order of preference (plan 12c). */
 export type ChallengeMethodJSON = "passkey" | "totp" | "email" | "backup";
@@ -724,6 +742,72 @@ export interface Client {
     }): Promise<ClientResult<{ url: string }>>;
   };
   /**
+   * Enterprise SSO (plan 12d). The discovery and the start take no session.
+   * The domain and connection calls need a fresh session of an owner of the
+   * organization with a second factor on, or of a platform operator: wrap
+   * a write in `withFresh`.
+   */
+  sso: {
+    /**
+     * Finds the connection of an address: `{ sso: true, start }` when a
+     * verified domain routes it to an enabled connection, else `{ sso: false }`.
+     * Send the browser to `start` with `next` as its query.
+     */
+    discover(input: {
+      email: string;
+      next?: string | undefined;
+    }): Promise<ClientResult<{ sso: true; start: string } | { sso: false }>>;
+    /** The URL of `GET <basePath>/sso/:connectionId/start`. `invalid_body` with status 0 for an id that the router refuses. */
+    startURL(input: { connectionId: string; next?: string | undefined }): ClientResult<string>;
+    /** Sends the browser to the start URL through `navigate`, as `social.signIn` does. */
+    signIn(input: {
+      connectionId: string;
+      next?: string | undefined;
+    }): ClientResult<{ url: string }>;
+    /** The email domains of an organization and their DNS proof. */
+    domains: {
+      list(input: { organizationId: string }): Promise<ClientResult<SsoDomainJSON[]>>;
+      /** Answers the domain with `record`, the TXT record to publish. */
+      add(input: { organizationId: string; domain: string }): Promise<ClientResult<SsoDomainJSON>>;
+      /** Asks every resolver of the server for the record. */
+      verify(input: { id: string }): Promise<ClientResult<SsoDomainJSON>>;
+      /** Routes the domain to a connection (`null`: no route) and sets its flags. */
+      update(input: {
+        id: string;
+        connectionId?: string | null | undefined;
+        enforce?: boolean | undefined;
+        includeSubdomains?: boolean | undefined;
+      }): Promise<ClientResult<SsoDomainJSON>>;
+      delete(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+    };
+    /** The OIDC and SAML connections of an organization. */
+    connections: {
+      list(input: { organizationId: string }): Promise<ClientResult<SsoConnectionJSON[]>>;
+      create(input: SsoConnectionInput): Promise<ClientResult<SsoConnectionJSON>>;
+      /** `kind` and `organizationId` never change. */
+      update(input: { id: string } & ConnectionFields): Promise<ClientResult<SsoConnectionJSON>>;
+      delete(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+    };
+  };
+  /**
+   * The SCIM tokens of an organization (plan 12d), for its directory. The
+   * calls need what the SSO domain calls need. The directory calls the SCIM
+   * routes itself with the token: the client has no SCIM call.
+   */
+  scim: {
+    tokens: {
+      list(input: { organizationId: string }): Promise<ClientResult<ScimTokenJSON[]>>;
+      /** The clear token appears once. At most two live tokens, else `token_limit`. */
+      create(input: {
+        organizationId: string;
+        name: string;
+        scopes?: ScimScope[] | undefined;
+        expiresInDays?: number | undefined;
+      }): Promise<ClientResult<{ token: string; id: string; hint: string }>>;
+      revoke(input: { id: string }): Promise<ClientResult<{ ok: true }>>;
+    };
+  };
+  /**
    * Runs `op`. On `session_not_fresh` it runs `reauth`, a prompt of the app's
    * own page, and after its success it runs `op` once more. A second
    * `session_not_fresh` is the answer: the function never loops. A failed
@@ -1010,6 +1094,25 @@ export function createClient(options: ClientOptions): Client {
       routeURL(
         options,
         path.replace(":provider", input.provider),
+        input.next !== undefined ? { next: input.next } : undefined,
+      ),
+    );
+  }
+  /**
+   * The start URL of an SSO connection (plan 12d). The id must pass the
+   * router's segment rule, and a segment of dots only would leave the path.
+   */
+  function ssoStartURL(input: {
+    connectionId: string;
+    next?: string | undefined;
+  }): ClientResult<string> {
+    const id = input.connectionId;
+    if (!PARAM_SEGMENT_RE.test(id) || /^\.+$/.test(id)) return fail("invalid_body", 0);
+    const { path } = callOf("sso.start");
+    return ok(
+      routeURL(
+        options,
+        path.replace(":connectionId", id),
         input.next !== undefined ? { next: input.next } : undefined,
       ),
     );
@@ -1605,6 +1708,61 @@ export function createClient(options: ClientOptions): Client {
     reauth,
     user,
     identities,
+    sso: {
+      // JSON leaves out a key whose value is undefined, so the body names only the set fields.
+      discover: (input) =>
+        send<{ sso: true; start: string } | { sso: false }>("sso.discover", input),
+      startURL: ssoStartURL,
+      signIn(input) {
+        const url = ssoStartURL(input);
+        if (!url.ok) return url;
+        if (!navigate(url.value)) return fail("unexpected", 0);
+        return ok({ url: url.value });
+      },
+      domains: {
+        list: (input) =>
+          part<{ domains: SsoDomainJSON[] }, "sso.domains.list">("sso.domains.list", undefined, {
+            organizationId: input.organizationId,
+          }),
+        add: (input) =>
+          part<{ domain: SsoDomainJSON }, "sso.domains.add">("sso.domains.add", input),
+        verify: (input) =>
+          part<{ domain: SsoDomainJSON }, "sso.domains.verify">("sso.domains.verify", input),
+        update: (input) =>
+          part<{ domain: SsoDomainJSON }, "sso.domains.update">("sso.domains.update", input),
+        delete: (input) => send<{ ok: true }>("sso.domains.delete", input),
+      },
+      connections: {
+        list: (input) =>
+          part<{ connections: SsoConnectionJSON[] }, "sso.connections.list">(
+            "sso.connections.list",
+            undefined,
+            { organizationId: input.organizationId },
+          ),
+        create: (input) =>
+          part<{ connection: SsoConnectionJSON }, "sso.connections.create">(
+            "sso.connections.create",
+            input,
+          ),
+        update: (input) =>
+          part<{ connection: SsoConnectionJSON }, "sso.connections.update">(
+            "sso.connections.update",
+            input,
+          ),
+        delete: (input) => send<{ ok: true }>("sso.connections.delete", input),
+      },
+    },
+    scim: {
+      tokens: {
+        list: (input) =>
+          part<{ tokens: ScimTokenJSON[] }, "scim.tokens.list">("scim.tokens.list", undefined, {
+            organizationId: input.organizationId,
+          }),
+        create: (input) =>
+          send<{ token: string; id: string; hint: string }>("scim.tokens.create", input),
+        revoke: (input) => send<{ ok: true }>("scim.tokens.revoke", input),
+      },
+    },
     withFresh,
     errors: ERRORS,
   };
