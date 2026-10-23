@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parsePatch } from "../../src/engine/scim/patch.js";
+import { applyPatch } from "../../src/engine/scim/users.js";
 
 const URN = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 const ENTERPRISE = "urn:ietf:params:scim:schemas:extension:enterprise:2.0:User";
@@ -811,5 +812,28 @@ describe("parsePatch (plan 12d Task 10, RFC 7644 section 3.5.2)", () => {
         expect(r.detail.length, name).toBeGreaterThan(0);
       }
     }
+  });
+});
+
+describe("applyPatch (plan 12d Task 12, ruling 67)", () => {
+  // A core rule applies only to a key of the core User (users.ts, the guard
+  // container === doc). No enterprise attribute of RFC 7643 section 4.3 has
+  // the name of a core attribute today, so the parser cannot send one. The
+  // test calls applyPatch directly, so a later enterprise attribute with such
+  // a name cannot take the required or multi-valued rule of the core one.
+  it("keeps the rules of the core User off a key of the enterprise extension", () => {
+    const resource = {
+      schemas: ["urn:ietf:params:scim:schemas:core:2.0:User", ENTERPRISE],
+      userName: "ada@acme.example",
+      [ENTERPRISE]: { userName: "ext", emails: "ext" },
+    };
+    const result = applyPatch(resource, [
+      { op: "remove", path: at(`${ENTERPRISE}:userName`), value: null },
+      { op: "add", path: at(`${ENTERPRISE}:emails`), value: "next" },
+    ]);
+    expect(result).toEqual({
+      ok: true,
+      value: { ...resource, [ENTERPRISE]: { emails: "next" } },
+    });
   });
 });

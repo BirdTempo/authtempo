@@ -284,8 +284,10 @@ export function applyGroupPatch(
     const path = op.path;
     if (path === null) return refused("each operation needs a path", "invalidPath");
     if (path.attr === "displayName") {
-      // RFC 7644 section 3.5.2.2: the remove of a required attribute answers mutability.
-      if (op.op === "remove") return refused("displayName is required", "mutability");
+      // RFC 7644 section 3.5.2.2: a required attribute that becomes unassigned answers
+      // mutability. A remove, or a replace with null, makes it unassigned (ruling 67).
+      if (op.op === "remove" || (op.op === "replace" && op.value === null))
+        return refused("displayName is required", "mutability");
       const text = columnText(op.value, "displayName", DISPLAY_NAME_MAX);
       if (typeof text !== "string") return text;
       displayName = text;

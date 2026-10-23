@@ -516,8 +516,12 @@ export function applyPatch(
     const multi = facts?.multiValued === true;
     const current = container[key];
     if (path.filter === null && path.sub === null) {
-      // RFC 7644 section 3.5.2.2: the remove of a required attribute answers mutability.
-      if (op.op === "remove" && facts?.required === true)
+      // RFC 7644 section 3.5.2.2: a required attribute that becomes unassigned answers
+      // mutability. A remove, or a replace with null, makes it unassigned (ruling 67).
+      if (
+        facts?.required === true &&
+        (op.op === "remove" || (op.op === "replace" && op.value === null))
+      )
         return refused(`${path.attr} is required`, "mutability");
       if (op.op === "remove") delete container[key];
       else if (multi) {

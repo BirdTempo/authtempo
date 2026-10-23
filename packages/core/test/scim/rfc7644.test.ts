@@ -17,8 +17,9 @@ import { SCIM_IP, type ScimWorld, scim, scimAuth, scimToken } from "./helpers.js
  *   sort order rule applies. The refusal has its test.
  * - 3.7.1 to 3.7.4: Bulk is not served (bulk.supported false). The 501 has
  *   its test under 3.7.
- * - 3.8: the Accept header and the ".scim" suffix are MAY forms; this server
- *   reads and writes JSON in UTF-8 only. The UTF-8 rule has its test.
+ * - 3.8, the ".scim" suffix: a MAY form that this server does not serve.
+ *   The Accept header application/scim+json is a MUST and has its test, as
+ *   has the UTF-8 rule.
  * - 3.10: the section defines the attribute notation and has no MUST of its
  *   own. The tests of 3.4.2.2, 3.5.2, and 3.9 use the notation.
  * - 3.11: /Me is not served. The 501 has its test.
@@ -535,6 +536,33 @@ describe("RFC 7644 sections 3.1 to 3.14 (plan 12d Task 12)", () => {
     );
   });
 
+  it("3.5.2.2 refuses a replace that sets a required attribute to null with mutability", async () => {
+    const w = await world();
+    const id = String((await user(w, "ada")).body.id);
+    // A null value makes the attribute unassigned, by path or by the no-path form.
+    for (const op of [
+      { op: "replace", path: "userName", value: null },
+      { op: "replace", value: { userName: null } },
+    ])
+      expectError(await call(w, "PATCH", `/Users/${id}`, patch(op)), 400, "mutability");
+    const got = await call(w, "GET", `/Users/${id}`);
+    expect(got.body.userName).toBe("ada@acme.example");
+    const g = await call(w, "POST", "/Groups", { schemas: [GROUP_URN], displayName: "Eng" });
+    const gid = String(g.body.id);
+    for (const op of [
+      { op: "replace", path: "displayName", value: null },
+      { op: "replace", value: { displayName: null } },
+    ])
+      expectError(await call(w, "PATCH", `/Groups/${gid}`, patch(op)), 400, "mutability");
+    expect((await call(w, "GET", `/Groups/${gid}`)).body.displayName).toBe("Eng");
+    // A bad value that is not null keeps invalidValue.
+    expectError(
+      await call(w, "PATCH", `/Users/${id}`, patch({ op: "replace", value: { userName: 7 } })),
+      400,
+      "invalidValue",
+    );
+  });
+
   it("3.5.2 refuses a path with an index and a move with invalidPath", async () => {
     const w = await world();
     const id = String((await user(w, "ada")).body.id);
@@ -571,6 +599,18 @@ describe("RFC 7644 sections 3.1 to 3.14 (plan 12d Task 12)", () => {
     expectError(bulk, 501);
     const config = await call(w, "GET", "/ServiceProviderConfig");
     expect(config.body.bulk).toEqual({ supported: false, maxOperations: 0, maxPayloadSize: 0 });
+  });
+
+  it("3.8 answers application/scim+json to Accept: application/scim+json", async () => {
+    const w = await world();
+    const accept = { accept: "application/scim+json" };
+    const made = await call(w, "POST", "/Users", userBody("ada"), accept);
+    const got = await call(w, "GET", `/Users/${String(made.body.id)}`, undefined, accept);
+    const missing = await call(w, "GET", "/Users/unknown-id", undefined, accept);
+    expect([made.status, got.status, missing.status]).toEqual([201, 200, 404]);
+    for (const r of [made, got, missing])
+      expect(r.headers.get("content-type")).toBe("application/scim+json");
+    expect(got.body.userName).toBe("ada@acme.example");
   });
 
   it("3.8 reads and answers JSON in UTF-8", async () => {

@@ -1692,7 +1692,7 @@ Then nothing changes, so the person keeps access. The directory then marks the p
 | Field | Value |
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.users.write` |
-| Input | None. The body is a PatchOp message of RFC 7644 section 3.5.2, and `If-Match` may name the version. A change of `password` answers 400 `invalidValue`, because the password change is off. A remove of `userName` answers 400 `mutability` |
+| Input | None. The body is a PatchOp message of RFC 7644 section 3.5.2, and `If-Match` may name the version. A change of `password` answers 400 `invalidValue`, because the password change is off. A remove of `userName`, or a replace of it with null, answers 400 `mutability` |
 | Answer | The User. The operations apply together, or none applies. A deactivate answers 409 only when group writes race each round, or when no small round fits on D1. Then nothing changes. The paragraphs on these races above list the cases on D1 and say what the directory does then. When an operation writes a value with `primary` true, each other value of that attribute gets `primary` false |
 | Errors | None |
 
@@ -1758,7 +1758,7 @@ With `scim.groups` set to `teams` or `both`, each group has one team of the orga
 | Field | Value |
 | --- | --- |
 | Needs | An `sk_` bearer token. The token needs the scope `scim.groups.write` |
-| Input | None. The body is a PatchOp message: `add` and `remove` of `members`, and `replace` of `displayName`, `externalId`, or `members`. A `remove` takes the path `members[value eq "<id>"]` or a list of values. A `remove` of `displayName` answers 400 `mutability`. `If-Match` may name the version |
+| Input | None. The body is a PatchOp message: `add` and `remove` of `members`, and `replace` of `displayName`, `externalId`, or `members`. A `remove` takes the path `members[value eq "<id>"]` or a list of values. A `remove` of `displayName`, or a `replace` of it with null, answers 400 `mutability`. `If-Match` may name the version |
 | Answer | 204 with no body, as RFC 7644 section 3.5.2 allows. With `attributes` in the query, 200 with the Group. The operations apply together, or none applies. A PATCH that changes nothing writes nothing: no new version and no audit row. So a remove of a User that is not a member, by the filter path or by a list of values, answers as a removal does. A directory sends a removal again after a time-out, and an error marks its push as failed |
 | Errors | None |
 
