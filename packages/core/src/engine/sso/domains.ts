@@ -730,10 +730,25 @@ function ownExpect(row: Pick<SsoDomainRow, "domain" | "challenge">): {
 }
 
 /**
+ * True when `name` is one DNS label under `domain`. A name deeper down sits
+ * in a zone that the owner of a subdomain may hold, so it proves nothing
+ * about the domain (review of plan 12d Task 14, M1).
+ */
+function childOf(name: string, domain: string): boolean {
+  const suffix = `.${domain.toLowerCase()}`;
+  const lower = name.toLowerCase();
+  if (!lower.endsWith(suffix)) return false;
+  const head = lower.slice(0, -suffix.length);
+  return head !== "" && !head.includes(".");
+}
+
+/**
  * The record of the compat package for the row, or null when the config
- * has none or the function gives none. A row with a connection reads the
- * connection's label: the compat package of Better Auth holds its
- * providerId there (ruling 61 P5).
+ * has none, the function gives none, or its name is not one label under
+ * the domain. A row with a connection reads the connection's label once,
+ * here, and the record comes from that read: the verify and the recheck
+ * each call this once. The compat package of Better Auth holds its
+ * providerId in the label (ruling 61 P5).
  */
 async function compatExpect(
   config: ResolvedConfig,
@@ -750,7 +765,8 @@ async function compatExpect(
     meter?.step(1);
     label = connection?.label ?? null;
   }
-  return record(row, label);
+  const expect = record(row, label);
+  return expect !== null && childOf(expect.name, row.domain) ? expect : null;
 }
 
 /**

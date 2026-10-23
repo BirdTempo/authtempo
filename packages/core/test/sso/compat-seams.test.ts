@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { scimRequestAs, verifyDomainByRecord, withDomainRecord } from "../../src/compat.js";
 import { carryDomainRecord, type DomainRecordOf } from "../../src/compat-seams.js";
 import { createAuth } from "../../src/create-auth.js";
-import { createConnection } from "../../src/engine/sso/connections.js";
+import { createConnection, updateConnection } from "../../src/engine/sso/connections.js";
 import { addDomain, updateDomain, verifyDomainWith } from "../../src/engine/sso/domains.js";
 import { sweepExpired } from "../../src/engine/sweep.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
@@ -31,12 +31,15 @@ const BA_RECORD: DomainRecordOf = (row, label) =>
 /**
  * A world whose config carries `BA_RECORD`, as `createAuth` carries it from
  * `withDomainRecord`, and a domain routed to a connection labelled "acme-sso".
+ * With `marked` false, the config carries no record.
  */
-async function recordWorld() {
+async function recordWorld(marked = true) {
   const w = ssoAuth({ sso: { oidc: true } });
-  const input = {};
-  withDomainRecord(input as never, BA_RECORD);
-  carryDomainRecord(input, w.config);
+  if (marked) {
+    const input = {};
+    withDomainRecord(input as never, BA_RECORD);
+    carryDomainRecord(input, w.config);
+  }
   const organizationId = await seedOrganization(w);
   const connection = await createConnection(w.config, SSO_APP, {
     organizationId,
@@ -59,7 +62,7 @@ async function recordWorld() {
   ]);
   if (!row) throw new Error("no row");
   const ba = { name: "_ba-acme-sso.acme.example", value: row.challenge };
-  return { w, id: added.value.id, own: added.value.record, ba };
+  return { w, id: added.value.id, own: added.value.record, ba, connectionId: connection.value.id };
 }
 
 describe("the compat seams of core (plan 12d Task 14)", () => {
@@ -89,18 +92,59 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
   });
 
   it("answers domain_unverified to a compat verify on a config with no record", async () => {
-    const w = ssoAuth();
-    const added = await addDomain(w.config, SSO_APP, {
-      organizationId: await seedOrganization(w),
-      domain: "acme.example",
+    // The domain is routed to a connection with a label, so only the missing mark refuses it.
+    const { w, id, own, ba } = await recordWorld(false);
+    for (const r of [own, ba]) {
+      w.answers.a[r.name] = [r.value];
+      w.answers.b[r.name] = [r.value];
+    }
+    expect(await verifyDomainWith(w.config, SSO_APP, { id }, "compat")).toMatchObject({
+      ok: false,
+      code: "domain_unverified",
     });
-    if (!added.ok || added.value.record === null) throw new Error("no domain");
-    w.answers.a[added.value.record.name] = [added.value.record.value];
-    w.answers.b[added.value.record.name] = [added.value.record.value];
-    expect(
-      await verifyDomainWith(w.config, SSO_APP, { id: added.value.id }, "compat"),
-    ).toMatchObject({ ok: false, code: "domain_unverified" });
     expect(w.a.calls).toEqual([]);
+    // Core's own verify proves it, and the recheck asks for core's record only.
+    expect((await verifyDomainWith(w.config, SSO_APP, { id }, "own")).ok).toBe(true);
+    w.clock.advance(31 * DAY_MS);
+    w.a.calls.length = 0;
+    w.answers.a[own.name] = [];
+    w.answers.b[own.name] = [];
+    expect((await sweepExpired(w.config)).ssoDomains).toBe(1);
+    expect(w.a.calls).toEqual([own.name]);
+    const row = await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: id }]);
+    expect(row).toMatchObject({ claimedDomain: "acme.example", failures: 1 });
+  });
+
+  it("takes a compat record of one DNS label under the domain only (review M1)", async () => {
+    const { w, id, own, ba, connectionId } = await recordWorld();
+    // Core's own route takes a dot in a label. The record then sits in the zone of sub.acme.example.
+    const deep = { name: "_ba-x.sub.acme.example", value: ba.value };
+    const relabel = async (label: string) => {
+      const r = await updateConnection(w.config, SSO_APP, { id: connectionId, label });
+      if (!r.ok) throw new Error(r.code);
+    };
+    await relabel("x.sub");
+    w.answers.a[deep.name] = [deep.value];
+    w.answers.b[deep.name] = [deep.value];
+    expect(await verifyDomainWith(w.config, SSO_APP, { id }, "compat")).toMatchObject({
+      ok: false,
+      code: "domain_unverified",
+    });
+    expect(w.a.calls).toEqual([]);
+    // A claim that the record of the label "acme-sso" proved is not kept by the deeper name.
+    await relabel("acme-sso");
+    w.answers.a[ba.name] = [ba.value];
+    w.answers.b[ba.name] = [ba.value];
+    expect((await verifyDomainWith(w.config, SSO_APP, { id }, "compat")).ok).toBe(true);
+    await relabel("x.sub");
+    w.answers.a[ba.name] = [];
+    w.answers.b[ba.name] = [];
+    w.clock.advance(31 * DAY_MS);
+    w.a.calls.length = 0;
+    expect((await sweepExpired(w.config)).ssoDomains).toBe(1);
+    expect(w.a.calls).toEqual([own.name]);
+    const row = await w.storage.findOne("ssoDomain", [{ field: "id", op: "eq", value: id }]);
+    expect(row).toMatchObject({ claimedDomain: "acme.example", failures: 1 });
   });
 
   it("keeps a claim that the compat record proved at the recheck (ruling 61 F4)", async () => {

@@ -14,6 +14,8 @@ import type { ScimCaller } from "./engine/scim/tokens.js";
  * the label of its connection. The challenge is the row's current one. So a
  * row with a new challenge, after a retry or a loss, never proves itself by
  * an old record. Null: the compat package has no record for this row.
+ * Core takes a name of one DNS label under the domain only: a deeper name
+ * proves nothing, as the owner of a subdomain may hold its zone.
  */
 export type DomainRecordOf = (
   row: { domain: string; challenge: string },
