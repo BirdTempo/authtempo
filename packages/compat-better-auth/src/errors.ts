@@ -148,7 +148,8 @@ export const BETTER_AUTH_CODES = {
   domain_unverified: "DOMAIN_UNVERIFIED",
   domain_taken: "DOMAIN_TAKEN",
   domain_limit: "DOMAIN_LIMIT",
-  // Plan 12d ruling 30. Better Auth's deleteUser has no such limit: core's own name.
+  // Plan 12d ruling 30 and plan 12f2 ruling 1 Q3. Better Auth's deleteUser and
+  // removeUser have no such limit: core's own name.
   delete_too_large: "DELETE_TOO_LARGE",
   // Plan 12d Task 3. authtempo's own names until plan 12d Task 14 reads the
   // codes of @better-auth/sso. The status stays core's.

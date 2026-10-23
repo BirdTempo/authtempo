@@ -388,6 +388,70 @@ export async function endImpersonationsPage(
 /** The calls that a ban or a revoke keeps after `endImpersonationsPage`: the own sessions of the user. */
 export const ACCESS_END_KEEP = ACCESS_END_LEAST + PAGE_LEAST;
 
+/**
+ * The least calls of `endOwnSessionsPage` and of `endImpersonationsPage`,
+ * each: the read, and the pending-end row or the last delete.
+ */
+export const SESSIONS_PAGE_LEAST = 2;
+
+/**
+ * Ends a page of the own sessions of a user whose row the caller deletes,
+ * inside `budget` calls of `meter` (ruling 1 of plan 12f2, item B1). The
+ * account delete calls it in its transaction. One read by the `userId`
+ * index takes the sessions, and a page ends them (`endSessionPage`). The
+ * page keeps `keep` calls for the steps of the caller after it. The rows
+ * that do not fit stay with one pending-end row, and the sweep ends them.
+ * Until then each door refuses them, because the user row is gone. With no
+ * row left, a last delete takes a session that a sign-in wrote after the
+ * read, with no hook (plan 9d). The answer is the count of ended sessions,
+ * and `left` when rows stay.
+ */
+export async function endOwnSessionsPage(
+  tx: StorageAdapter,
+  config: ResolvedConfig,
+  userId: string,
+  ended: SessionRow[] | null,
+  now: Date,
+  meter: Meter,
+  budget: number,
+  keep: number,
+  reason: PendingEndReason,
+  stops: ImpersonationStops | null,
+): Promise<{ ended: number; left: boolean }> {
+  const byUser: Where<"session">[] = [{ field: "userId", op: "eq", value: userId }];
+  const read = await tx.findMany("session", byUser, {
+    sort: { field: "id", dir: "asc" },
+    limit: END_ALL_LIMIT.default + 1,
+  });
+  meter.step(1);
+  const rows = read.slice(0, END_ALL_LIMIT.default);
+  // The page counts its read again, so it gets 1 more. The calls of the caller and the last step stay out.
+  const pageBudget = budget - meter.used + 1 - keep - 1;
+  // No lock of its own: the caller took the locks of these rows (holdImpersonations).
+  const page =
+    rows.length > 0 && pageBudget >= PAGE_LEAST
+      ? await endSessionPage(tx, config, rows, ended, now, pageBudget, null, stops)
+      : { deleted: 0, stopped: rows.length > 0, used: 1 };
+  meter.step(page.used - 1);
+  const left = page.stopped || read.length > rows.length;
+  let late = 0;
+  // The newest session that the read holds: a row of a clock that runs ahead stays covered
+  // (rulings 55 and 58 of plan 12d), as in `endImpersonationsPage`.
+  if (left)
+    await writePendingEnd(
+      tx,
+      config,
+      userId,
+      reason,
+      Math.max(...read.map((r) => r.createdAt.getTime())),
+      {},
+    );
+  // A sign-in that commits after the read loses its row here, with no hook (plan 9d).
+  else late = await tx.delete("session", byUser);
+  meter.step(1);
+  return { ended: page.deleted + late, left };
+}
+
 /** The impersonation sessions of `operatorId` on `targets`: by the `userId` index. */
 function impersonationWhere(operatorId: string, targets: readonly string[]): Where<"session">[] {
   return [

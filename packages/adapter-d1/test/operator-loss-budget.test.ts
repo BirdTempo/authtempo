@@ -292,6 +292,10 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * sessions of the user once for the stop rows and the hook list. So the
  * delete reserves the same and sends 1 query fewer before its page, and the
  * page ends 1 session more: 46 queries, 3 sessions, sweeps of 47, 47, and 44.
+ * Plan 12f2 Task 4 (2026-10-22, on 12f) ends the own sessions of the delete
+ * in a page (ruling 1 of plan 12f2, B1). On 12f it gave [48, 4, [47, 47, 42]]
+ * and [49, 11, [47, 47, 26]]. The move of 12f2 onto 12d and 12i measures
+ * the counts again.
  */
 const DELETE_COUNTS: [number, number, number[]] = [46, 3, [47, 47, 44]];
 const REMOVE_COUNTS: [number, number, number[]] = [47, 10, [47, 47, 28]];

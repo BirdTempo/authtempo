@@ -189,6 +189,12 @@ describe("account races on Postgres (plan 12a)", () => {
       ]);
       // The delete holds the user row as the change does: the later one waits, then reads the row again.
       expect(deleted).toEqual({ ok: true, value: { ok: true } });
+      // Ruling 1 of plan 12f2 (B1, Q4): a session past the page of the delete ends at the sweep.
+      // The meter of the delete also counts the statements of the parallel confirm on this
+      // adapter, so in some rounds the page ends no session. The door refuses that session
+      // at once, before the sweep (ruling 3 of plan 12f2): the user row is gone.
+      expect(await w.auth.api.getSession(me.token)).toBeNull();
+      await w.auth.api.sweepExpired();
       const left = await db.sql`SELECT id FROM ta_user WHERE id = ${me.user.id}`;
       expect(left).toHaveLength(0);
       for (const table of ["ta_identity", "ta_session", "ta_member"]) {

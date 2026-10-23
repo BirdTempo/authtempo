@@ -9,6 +9,7 @@ sources:
   - packages/core/README.md "Organizations"
   - packages/core/src/http/impersonation-rules.ts
   - docs/superpowers/plans/2026-10-14-12h-observability.md
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
 ---
 
 **For:** a developer who reads an error answer of authtempo and must act on it.
