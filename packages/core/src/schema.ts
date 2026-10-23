@@ -587,6 +587,8 @@ export type OperatorAction =
   | "impersonation_start"
   | "impersonation_stop"
   | "create_admin"
+  | "user_update"
+  | "user_delete"
   | (typeof SSO_AUDIT_ACTIONS)[number];
 
 /** The audit actions of plan 12d (spec 30 item 22). 12f's `OperatorAction` is their union with its own. */

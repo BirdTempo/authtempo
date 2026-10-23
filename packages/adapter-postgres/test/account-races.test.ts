@@ -2039,3 +2039,129 @@ describe("the social fill beside a profile update on Postgres (plan 12a fix wave
     }
   }, 60_000);
 });
+
+describe("the operator delete races on Postgres (plan 12f2 Task 4)", () => {
+  const APP = { kind: "app", name: "support-tool" } as const;
+  const REASON = { reason: "Ticket 4521", ip: null, userAgent: null };
+
+  /** The world of plan 12a with organizations and the operator user tools. The app acts. */
+  function operatorWorld() {
+    const sent: MailMessage[] = [];
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: SECRET,
+      trustedOrigins: [],
+      storage: createPostgresAdapter(db.sql),
+      limiter: OPEN,
+      mail: {
+        send: async (m) => {
+          sent.push(m);
+        },
+      },
+      organizations: {
+        platformRole: "operator",
+        platformOrganization: "platform-co",
+        ranks: { viewer: 1, member: 2, admin: 3, owner: 4, operator: 5 },
+      },
+      operator: { users: true },
+    });
+    const tokenOf = (m: MailMessage | undefined) => {
+      const token = /token=([A-Za-z0-9_%-]+)/.exec(m?.text ?? "")?.[1];
+      if (!token) throw new Error("no link");
+      return decodeURIComponent(token);
+    };
+    async function signIn(email: string) {
+      await auth.api.requestMagicLink({ email, ip: null });
+      const r = await auth.api.verifyMagicLink({
+        token: tokenOf([...sent].reverse().find((x) => x.to === email)),
+        ip: null,
+        userAgent: null,
+      });
+      if (!r.ok) throw new Error(r.code);
+      if (!("token" in r.value)) throw new Error("the link answered a challenge");
+      const s = await auth.api.getSession(r.value.token);
+      if (!s) throw new Error("no session");
+      return { ...s, token: r.value.token };
+    }
+    return { auth, sent, tokenOf, signIn };
+  }
+
+  /** The rows that name the user in the tables of the race. */
+  async function rowsOf(userId: string): Promise<number> {
+    let n = (await db.sql`SELECT id FROM ta_user WHERE id = ${userId}`).length;
+    for (const table of ["ta_identity", "ta_session", "ta_member"])
+      n += (await db.sql`SELECT id FROM ${db.sql(table)} WHERE user_id = ${userId}`).length;
+    return n;
+  }
+
+  it("an operator delete beside a change of address: the delete wins, no deadlock, and no row of the user stays", async () => {
+    const w = operatorWorld();
+    for (let round = 0; round < 8; round++) {
+      const email = `op-del-${round}@example.com`;
+      const target = `op-moved-${round}@example.com`;
+      const me = await w.signIn(email);
+      expect((await w.auth.api.user.changeEmail({ session: me, newEmail: target })).ok).toBe(true);
+      const token = w.tokenOf([...w.sent].reverse().find((m) => m.to === target));
+      const before = w.sent.length;
+      const [deleted, moved] = await Promise.all([
+        w.auth.api.operator.users.delete({ actor: APP, userId: me.user.id, ...REASON }),
+        w.auth.api.user.confirmEmailChange({ token, ip: null, userAgent: null }),
+      ]);
+      // The delete holds the user row as the change does: the later one waits, then reads the row again.
+      expect(deleted).toMatchObject({ ok: true });
+      // A session past the page of the delete ends at the sweep (ruling 1 of plan 12f2, B1).
+      // The door refuses it at once, before the sweep: the user row is gone.
+      expect(await w.auth.api.getSession(me.token)).toBeNull();
+      await w.auth.api.sweepExpired();
+      expect(await rowsOf(me.user.id)).toBe(0);
+      const notice = w.sent
+        .slice(before)
+        .filter((m) => m.text.startsWith("Your account was deleted."));
+      // The move committed first: the delete read the moved row, and its notice goes to the new address.
+      expect(notice.map((m) => m.to)).toEqual([moved.ok ? target : email]);
+      if (!moved.ok) expect(["invalid_token", "token_expired"]).toContain(moved.code);
+    }
+  }, 60_000);
+
+  it("an operator delete beside a removal of the user from a shared organization, a delay sweep: no deadlock, and the organization keeps its owner", async () => {
+    const w = operatorWorld();
+    const ada = await w.signIn("ada@example.com");
+    // The removal reads before its transaction, so the delete starts 0 to 11 ms
+    // after it. The two transactions then overlap in some rounds.
+    for (let round = 0; round < 12; round++) {
+      const pat = await w.signIn(`pat-${round}@example.com`);
+      const made = await w.auth.api.createOrganization({
+        user: ada.user,
+        slug: `acme-${round}`,
+        name: "Acme",
+      });
+      if (!made.ok) throw new Error(made.code);
+      const organizationId = made.value.organization.id;
+      const added = await w.auth.api.addMember({
+        user: ada.user,
+        organizationId,
+        userId: pat.user.id,
+        role: "member",
+      });
+      if (!added.ok) throw new Error(added.code);
+      const [removed, deleted] = await Promise.all([
+        w.auth.api.removeMember({ user: ada.user, organizationId, userId: pat.user.id }),
+        (async () => {
+          await new Promise((r) => setTimeout(r, round));
+          return w.auth.api.operator.users.delete({ actor: APP, userId: pat.user.id, ...REASON });
+        })(),
+      ]);
+      // Both hold the user row first: the later one waits, then reads the rows again.
+      expect(deleted).toMatchObject({ ok: true, value: { organizations: [] } });
+      if (!removed.ok) expect(["not_found", "conflict"]).toContain(removed.code);
+      // A session past the page of the delete ends at the sweep (ruling 1 of plan 12f2, B1).
+      // The door refuses it at once, before the sweep: the user row is gone.
+      expect(await w.auth.api.getSession(pat.token)).toBeNull();
+      await w.auth.api.sweepExpired();
+      expect(await rowsOf(pat.user.id)).toBe(0);
+      const members = await db.sql<{ user_id: string }[]>`
+        SELECT user_id FROM ta_member WHERE organization_id = ${organizationId}`;
+      expect(members.map((m) => m.user_id)).toEqual([ada.user.id]);
+    }
+  }, 60_000);
+});

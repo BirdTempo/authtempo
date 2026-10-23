@@ -403,7 +403,8 @@ export const USER_CREATE_VIA = {
  * and unban (plan 12f). `scim`: the organization's directory moves the
  * address of its staff (plan 12d). `username`: the person sets the
  * username (plan 12i). `phone`: the person adds or removes the phone
- * (plan 12i).
+ * (plan 12i). `operator`: an operator changes the name or the image (plan
+ * 12f2).
  */
 export type UserUpdateVia =
   | "profile"
@@ -412,7 +413,8 @@ export type UserUpdateVia =
   | "unban"
   | "scim"
   | "username"
-  | "phone";
+  | "phone"
+  | "operator";
 /**
  * The flow that proves the address of an existing unverified user (plan
  * 12a). `social` is a sign-in with a verified provider address.
@@ -499,7 +501,7 @@ export interface UserHooks {
    */
   beforeCreate?(e: { user: UserRow; via: UserCreateVia }): Awaitable<UserCreatePatchAnswer>;
   afterCreate?(e: { user: UserRow; via: UserCreateVia }): Awaitable<void>;
-  /** The profile update, the change of address, the ban, and the unban. `patch` holds the fields the flow writes. */
+  /** The profile update, the change of address, the ban, the unban, and the operator update. `patch` holds the fields the flow writes. */
   beforeUpdate?(e: { user: UserRow; patch: UserPatch; via: UserUpdateVia }): Awaitable<void>;
   /** `user` is the stored row after the update. */
   afterUpdate?(e: { user: UserRow; previous: UserRow; via: UserUpdateVia }): Awaitable<void>;

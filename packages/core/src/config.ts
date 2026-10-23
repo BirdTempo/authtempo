@@ -1009,8 +1009,13 @@ export interface ResolvedJwtMint {
   rotateEvery: number | null;
 }
 
-/** The scopes of a named operator secret (plan 12f). Each scope opens one group of operator routes. */
-export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit" | "sso";
+/**
+ * The scopes of a named operator secret (plan 12f). Each scope opens one
+ * group of operator routes. `sso` opens the SSO tools (plan 12d).
+ * `delete` opens the account delete (plan 12f2, owner decision 3), and an
+ * entry with it needs `users` too.
+ */
+export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit" | "sso" | "delete";
 
 /** One named operator secret with its scopes (plan 12f, owner decision 1). */
 export interface OperatorSecretEntry {
@@ -3198,7 +3203,10 @@ const OPERATOR_SCOPES: ReadonlySet<string> = new Set<OperatorScope>([
   "sessions",
   "audit",
   "sso",
+  "delete",
 ]);
+/** The scope names for a refusal text, from the one list (ruling 1 of plan 12f2, item B7). */
+const SCOPE_TEXT = [...OPERATOR_SCOPES].join(", ").replace(/, (\w+)$/, ", or $1");
 const OPERATOR_NAME = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const HASH_TEXT = "must be the SHA-256 of the secret as 64 lowercase hex characters";
@@ -3220,9 +3228,14 @@ function resolveOperatorEntry(input: unknown): ResolvedOperatorSecret {
     throw new ConfigError("operator.secrets[].scopes must list one scope or more");
   for (const scope of scopes as unknown[])
     if (typeof scope !== "string" || !OPERATOR_SCOPES.has(scope))
-      throw new ConfigError(
-        "operator.secrets[].scopes holds a scope that is not keys, secrets, users, sessions, audit, or sso",
-      );
+      throw new ConfigError(`operator.secrets[].scopes holds a scope that is not ${SCOPE_TEXT}`);
+  // The delete reads the target user first, as the user tools do, and the
+  // tools need `users` on (plan 12f2 Task 4). A secret that can delete an
+  // account it cannot read is a mistake of the config.
+  if ((scopes as unknown[]).includes("delete") && !(scopes as unknown[]).includes("users"))
+    throw new ConfigError(
+      `operator.secrets[] entry ${name} has the scope delete and not users; add users`,
+    );
   return Object.freeze({
     name,
     secretHash,

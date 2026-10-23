@@ -6,6 +6,7 @@ sources:
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 31
   - packages/observe/README.md "What a sink never gets"
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
 ---
 
 **For:** an operator who reads the events of authtempo in a sink, or a developer who writes a sink.
@@ -156,6 +157,7 @@ Each event has these fields too:
 | `operator.step_failed` | error | `rowId: id`, `errorName: errorName` | `authtempo: operator step failed` |
 | `operator.family_end_failed` | error | `rowId: id`, `errorName: errorName` | `authtempo: operator family end failed` |
 | `operator.ban_write_gave_up` | error | `userId: id` | `authtempo: operator ban write gave up` |
+| `operator.update_gave_up` | error | `userId: id` | `authtempo: operator update gave up` |
 | `operator.guard_refused` | error | `route: enum` | `authtempo: operator guard refused` |
 | `operator.read` | error | `actor: enum`, `actorId: id`, `fn: identifier` | `authtempo: operator read` |
 | `operator.route_unauthorized` | error | `route: route`, `reason: enum` | `authtempo: operator route unauthorized` |
@@ -233,9 +235,9 @@ An enum field takes only the values of its list. A long list names its count and
 | `oauth.client_register.outcome` | `success`, `failure` |
 | `organization.change.action` | `create`, `update`, `delete`, `addMember`, `updateMemberRole`, `removeMember`, `invite`, `acceptInvitation`, `declineInvitation`, `revokeInvitation`, `createTeam`, `updateTeam`, `deleteTeam`, `addTeamMember`, `removeTeamMember` |
 | `organization.role_change.action` | `create`, `update`, `delete` |
-| `operator.action.action` | 28 values: each action of an audit row, the 18 of SSO and SCIM too. [Routes](/docs/reference/routes/) lists them under the operator audit. |
+| `operator.action.action` | 30 values: each action of an audit row, the 18 of SSO and SCIM and the 2 of plan 12f2 too. [Routes](/docs/reference/routes/) lists them under the operator audit. |
 | `operator.action.actorKind` | `secret`, `user`, `app`, `scim` |
-| `operator.refused.action` | 28 values: each action of an audit row, the 18 of SSO and SCIM too. [Routes](/docs/reference/routes/) lists them under the operator audit. |
+| `operator.refused.action` | 30 values: each action of an audit row, the 18 of SSO and SCIM and the 2 of plan 12f2 too. [Routes](/docs/reference/routes/) lists them under the operator audit. |
 | `operator.refused.actorKind` | `secret`, `user`, `app`, `scim` |
 | `limit.hit.family` | 99 values: each family of [Limits](/docs/reference/limits/). |
 | `sso.guard_refused.step` | `impersonation`, `rank`, `email`, `second_factor`, `fresh` |

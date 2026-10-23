@@ -750,6 +750,17 @@ const TOUCHED: Record<string, string[]> = {
     "member",
     "team member",
   ],
+  // Plan 12f2 Task 4. On main the solo organization goes set-based, and its teams go at
+  // the sweep (ruling 78 of plan 12d).
+  "an operator delete with a solo and a shared organization": [
+    "user",
+    "session",
+    "SCIM user",
+    "organization",
+    "invitation",
+    "member",
+    "team member",
+  ],
   "an impersonation start": ["user", "session"],
   "an impersonation stop": ["session"],
   "an end of the sessions of a user": ["user", "session"],
@@ -1008,6 +1019,8 @@ const FLOWS: Record<string, (w: World, s: Scene) => Promise<unknown>> = {
     if (!made.ok) throw new Error(made.code);
     return w.auth.api.user.delete({ session: s.oli, ip: null, userAgent: null });
   },
+  "an operator delete with a solo and a shared organization": (w, s) =>
+    w.auth.api.operator.users.delete({ actor: APP, userId: s.oli.user.id, ...reason }),
   "an impersonation start": (w, s) =>
     w.auth.api.operator.impersonate({ operator: s.ada, userId: s.pat.user.id, ...reason }),
   "an impersonation stop": async (w, s) =>
@@ -1410,6 +1423,8 @@ const SITES: Record<string, readonly string[] | string> = {
     "a SCIM group rename",
     "a SCIM group delete",
   ],
+  "operator/accounts updateUser": "one kind: the compare-and-set of the user row",
+  "operator/accounts deleteUser": ["an operator delete with a solo and a shared organization"],
 };
 
 /** The sites that SITES pins to the flow `name`, sorted. */
@@ -1428,8 +1443,9 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // Ruling 78 adds the one of organization-rest.ts. Plan 12i Task 2 adds the
     // one of username.ts, and Task 5 the two of phone.ts. Task 6 adds the two of
     // anonymous.ts, and Task 7 the one of the anonymous upgrade. Task 8 adds the
-    // one of the passkey-first sign-up.
-    expect(found.length).toBe(84);
+    // one of the passkey-first sign-up. Plan 12f2 Task 4 adds the two of
+    // operator/accounts.ts.
+    expect(found.length).toBe(86);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {

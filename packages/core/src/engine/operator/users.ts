@@ -123,7 +123,10 @@ function logRead(observe: Observer, actor: OperatorActor, fn: string): void {
  * page users: the sweep deletes the rows past `expiresAt`, and the count
  * stops at `SESSION_COUNT_MAX`.
  */
-async function operatorUsers(config: ResolvedConfig, rows: UserRow[]): Promise<OperatorUser[]> {
+export async function operatorUsers(
+  config: ResolvedConfig,
+  rows: UserRow[],
+): Promise<OperatorUser[]> {
   if (rows.length === 0) return [];
   const storage = config.storage;
   const now = config.clock.now();

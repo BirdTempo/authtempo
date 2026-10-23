@@ -681,6 +681,9 @@ export const EVENTS = {
   "operator.ban_write_gave_up": fault("error", "authtempo: operator ban write gave up", {
     userId: ROW_ID,
   }),
+  "operator.update_gave_up": fault("error", "authtempo: operator update gave up", {
+    userId: ROW_ID,
+  }),
   // The route keys and `api`, the name of an engine call (ruling 1 point 18 of plan 12h).
   "operator.guard_refused": fault("error", "authtempo: operator guard refused", {
     route: enumOf([...ROUTE_KEYS, "api"]),

@@ -1266,7 +1266,7 @@ The notice holds the event, the time, the IP address when core has it, and what 
 
 Plan 12f gives the operator of a deployment the support tools of day one. `operator.users: true` turns them on; they are off by default. Each write runs its change and one audit row in one transaction. The guide `/docs/guides/operator-tools/` (plan 12f Task 14) gives the setup.
 
-- The actors: a named operator secret, a platform operator, and the app in process (`{ kind: "app", name }`). Each entry of `operator.secrets` names its scopes from `keys`, `secrets`, `users`, `sessions`, and `audit`. A platform operator holds `organizations.platformRole` in `organizations.platformOrganization`. The 11c `operator.secretHash` is one secret named `default` with `keys` and `secrets` only.
+- The actors: a named operator secret, a platform operator, and the app in process (`{ kind: "app", name }`). Each entry of `operator.secrets` names its scopes from `keys`, `secrets`, `users`, `sessions`, `audit`, and `delete` (plan 12f2; an entry with `delete` needs `users` too). A platform operator holds `organizations.platformRole` in `organizations.platformOrganization`. The 11c `operator.secretHash` is one secret named `default` with `keys` and `secrets` only.
 - The guard of a platform operator: no impersonation session, the platform role, a verified address, a second factor, and a fresh session. Each failure answers 403 `operator_required`.
 - The routes under `<basePath>/operator/` are in the table above. `POST users/create-admin` takes a secret only.
 - A request with an operator secret and a session answers 401. A route of a tool that is off answers 404. With `operator.users` and no secret entry, the four secret routes of plans 11c and 11c2 answer 404 too.

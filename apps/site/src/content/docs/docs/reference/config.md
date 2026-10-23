@@ -9,6 +9,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-11g-openapi.md
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md "Task 2"
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 2"
+  - docs/superpowers/plans/2026-10-15-12f2-operator-users.md "Task 4"
 ---
 
 **For:** a developer who writes the config of `createAuth`, or reads an error of construction.
@@ -356,7 +357,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `operator.secrets` | list | none | One entry or more, each a named secret with its scopes. Two entries with one name or one hash are refused. |
 | `operator.secrets[].name` | string | required | `^[a-z0-9][a-z0-9_-]{0,31}$`. The audit row names the secret by it. |
 | `operator.secrets[].secretHash` | string | required | The SHA-256 of the secret as 64 lowercase hex characters, as `operator.secretHash`. |
-| `operator.secrets[].scopes` | string list | required | One scope or more of `keys`, `secrets`, `users`, `sessions`, `audit`, and `sso`. `keys` opens `POST /operator/keys/rotate`, and `secrets` opens the secret status and rewrap routes. `sso` opens `POST /operator/sso/enforce-off` (plan 12d). A secret with no scope for a route gets 403 `operator_required`. |
+| `operator.secrets[].scopes` | string list | required | One scope or more of `keys`, `secrets`, `users`, `sessions`, `audit`, `sso`, and `delete`. `keys` opens `POST /operator/keys/rotate`, and `secrets` opens the secret status and rewrap routes. `sso` opens `POST /operator/sso/enforce-off` (plan 12d). `delete` opens the operator delete of an account, and an entry with it needs `users` too: the delete reads the user first. Give `delete` only to the secret of the person who handles deletion requests, because a delete cannot be undone. A secret with no scope for a route gets 403 `operator_required`. |
 | `operator.users` | `true` | off | Turns on the user, session, and audit tools of plan 12f. It needs a secret with the scope `users` or `organizations.platformRole`, so that an actor can use the tools. |
 | `operator.impersonation` | object | off | Turns on impersonation. It needs `operator.users` and `organizations.platformRole`: only a platform operator starts one. |
 | `operator.impersonation.ttlMinutes` | number | 60 | A whole number from 5 to 240. The life of an impersonation session. The sliding refresh never moves it. |
