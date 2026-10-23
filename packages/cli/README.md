@@ -272,6 +272,8 @@ Exit 1 names a part that gave no answer.
 ```bash
 authtempo users search https://api.example.com --email ada@example.com
 authtempo users ban https://api.example.com <user id> --reason "spam" --yes
+authtempo users update https://api.example.com <user id> --name "Ada Lovelace" --reason "ticket 4711" --yes
+authtempo users delete https://api.example.com <user id> --reason "request 4713"
 authtempo sessions end-all https://api.example.com --reason "breach" --yes
 authtempo audit list https://api.example.com --all
 authtempo create-admin https://api.example.com --email root@example.com --reason "first operator" --yes
@@ -281,7 +283,8 @@ These commands call the operator user tools of plan 12f (spec 26 item 11)
 under `<basePath>/operator/`. The deployment needs `operator.users` and a
 named secret in `operator.secrets` with the scope of each command: `users`
 for `users` and `create-admin`, `sessions` for `sessions`, and `audit` for
-`audit`. The operator secret comes from `--token-env` or `--token-file`
+`audit`. `users delete` needs the `delete` scope beside `users` (plan
+12f2). The operator secret comes from `--token-env` or `--token-file`
 only, as for `keys rotate`.
 
 - `users list|search|get` and `audit list` print a table on stdout, or one
@@ -289,13 +292,20 @@ only, as for `keys rotate`.
   with pages of 100 rows, up to `--max-calls` (100 by default, then exit 1
   and a warning). A `next` that does not move, or a stop after the first
   page, stops with exit 2. The command then prints the rows read before it.
-- `users ban|unban|platform-role|second-factor-off`, `sessions end|end-all`,
-  and `create-admin` need `--reason`. The CLI checks it before any request.
+- `users ban|unban|platform-role|second-factor-off|update|delete`,
+  `sessions end|end-all`, and `create-admin` need `--reason`. The CLI checks it before any request.
   It is 1 to 500 UTF-16 code units with no control character, line or
   paragraph separator, lone surrogate, or format character except U+200C and
   U+200D. With no terminal, or with
   `--no-input`, they need `--yes`. Each `users` write and `create-admin`
   writes one audit row, and the command prints its id.
+- `users update` takes `--name`, `--no-name`, `--image`, and `--no-image`,
+  at least one. It sends no address and no password. With `--json` it
+  prints the user after the change.
+- `users delete` cannot be undone. Without `--yes` it asks for the user
+  id, and only the typed user id deletes the account. It prints each
+  organization that went with the account. Each call also counts on
+  `operator-delete:actor:<kind>:<id>`, 100 calls an hour for one actor.
 - A ban or a revoke that answers `familyEndFailed: true` prints its line,
   then a `warning:` line on stderr, and exits 1. The act ran, and the end of
   the OAuth refresh families failed. `sessions end` for the user ends them.

@@ -153,6 +153,8 @@ export function confinedIo(opts: {
     },
     run: () => Promise.reject(new Error("this tool runs no child process")),
     confirm: async () => false,
+    // No tool runs a command that asks: the empty line matches no answer.
+    prompt: async () => "",
   };
   return { io, lines: () => ({ out: [...out], err: [...err] }) };
 }

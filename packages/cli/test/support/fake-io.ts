@@ -24,6 +24,8 @@ export function fakeIo(
     /** The mode of a file by its path; a file with no entry has mode 0600. */
     modes?: Record<string, number>;
     answer?: boolean;
+    /** The line that `prompt` answers. The default is the empty line. */
+    typed?: string;
     fetch?: (url: string, init: RequestInit) => Promise<Response>;
     run?: (command: string, args: readonly string[], cwd: string) => Promise<RunResult>;
     /** The random bytes of `randomBytes`. The default fills each byte from a counter, so a test can predict it. */
@@ -96,6 +98,9 @@ export function fakeIo(
     },
     async confirm() {
       return o.answer ?? false;
+    },
+    async prompt() {
+      return o.typed ?? "";
     },
   };
 }

@@ -7,7 +7,7 @@ sources:
   - packages/cli/src/help/sessions.ts
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
 sidebar:
-  order: 20
+  order: 22
 ---
 
 **For:** an operator who must end sessions after a theft of a device or a breach.

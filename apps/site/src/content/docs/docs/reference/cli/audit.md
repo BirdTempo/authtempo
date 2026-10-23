@@ -7,7 +7,7 @@ sources:
   - packages/cli/src/help/audit.ts
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md "Task 12"
 sidebar:
-  order: 23
+  order: 25
 ---
 
 **For:** an operator or an auditor who checks the operator acts of a deployment.

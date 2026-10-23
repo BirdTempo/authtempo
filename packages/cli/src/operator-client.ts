@@ -33,6 +33,12 @@ export interface OperatorCall {
    * `OPERATOR_USERS_PER_IP.max` for the user tools of 12f.
    */
   perHour: number;
+  /**
+   * The text of a 429 for a route with a limit beside the limit per IP
+   * (plan 12f2 Task 6): the delete counts each actor too. Without it, the
+   * text names `perHour` per IP.
+   */
+  limits?: string;
   /** The scope that the route needs (spec 26 item 3). The 403 text names it. */
   scope?: OperatorScope;
   /**
@@ -46,7 +52,7 @@ export interface OperatorCall {
 }
 
 /** The scopes of a named operator secret (spec 26 item 3). */
-export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit";
+export type OperatorScope = "keys" | "secrets" | "users" | "sessions" | "audit" | "delete";
 
 /**
  * The text of each refusal code that a write of plans 12f and 12f2 can
@@ -162,7 +168,7 @@ export async function operatorCall(ctx: Ctx, call: OperatorCall): Promise<unknow
   }
   if (res.status === 401) throw new OperatorStop(401, "the deployment refused the operator secret");
   if (res.status === 429) {
-    const why = `the operator routes allow ${call.perHour} calls per IP per hour`;
+    const why = call.limits ?? `the operator routes allow ${call.perHour} calls per IP per hour`;
     throw new OperatorStop(429, why, `${why}; wait, then run it again`);
   }
   // The capped reader of the checks: it cancels the stream at the cap, so a

@@ -4,7 +4,9 @@ import type { Command } from "../command.js";
 import { Stop, UsageError } from "../errors.js";
 import {
   PROOF_DAYS,
+  UPDATE_INVALID,
   USERS_BAN_HELP,
+  USERS_DELETE_HELP,
   USERS_GET_HELP,
   USERS_HELP,
   USERS_LIST_HELP,
@@ -12,13 +14,22 @@ import {
   USERS_SEARCH_HELP,
   USERS_SECOND_FACTOR_OFF_HELP,
   USERS_UNBAN_HELP,
+  USERS_UPDATE_HELP,
 } from "../help/users.js";
-import type { OperatorWriteJson, UserJson, UsersListJson } from "../json.js";
-import { readOperatorSecret } from "../operator-client.js";
+import type {
+  OperatorWriteJson,
+  UserDeleteJson,
+  UserJson,
+  UsersListJson,
+  UserUpdateJson,
+} from "../json.js";
+import { type OperatorScope, readOperatorSecret } from "../operator-client.js";
 import {
   ask,
+  askTyped,
   auditIdOf,
   bannedText,
+  DELETE_LIMITS,
   familyEndWarning,
   needYes,
   operatorUser,
@@ -77,6 +88,14 @@ const FACTOR_OPTIONS = {
   "proof-reference": { type: "string" },
   "proof-checked-at": { type: "string" },
 } as const;
+const UPDATE_OPTIONS = {
+  ...WRITE_OPTIONS,
+  name: { type: "string" },
+  "no-name": { type: "boolean" },
+  image: { type: "string" },
+  "no-image": { type: "boolean" },
+} as const;
+const DELETE_OPTIONS = WRITE_OPTIONS;
 
 type Options = Command["options"];
 
@@ -196,8 +215,8 @@ async function runGet(argv: string[], ctx: Ctx): Promise<number> {
   return 0;
 }
 
-/** One write on one user: its route, its body, its question, and its result line. */
-interface UserWrite {
+/** One write on one user: its route, its body, and its question. */
+interface UserPost {
   /** The words of the command, such as `users ban`, for the usage error of the confirmation rule. */
   command: string;
   path: string;
@@ -205,36 +224,49 @@ interface UserWrite {
   question: string;
   /** What did not happen on a no: `no <act>: the answer was not yes`. */
   act: string;
-  /** The result line, with the audit row id after it. */
-  done: string;
   invalid?: string;
+  /** The scope of the route. The default is `users`. */
+  scope?: OperatorScope;
+  /** True for an act that cannot be undone: the question needs the typed user id, not a yes. */
+  typed?: boolean;
+  /** The 429 text of a route with a limit beside the limit per IP. */
+  limits?: string;
+}
+
+/** A write on one user with one result line, then the audit row id. */
+interface UserWrite extends UserPost {
+  done: string;
+}
+
+/** The flags of a write that `postUser` reads. */
+interface WriteValues {
+  json?: boolean | undefined;
+  yes?: boolean | undefined;
+  "no-input"?: boolean | undefined;
+  "token-file"?: string | undefined;
+  "token-env"?: string | undefined;
+  "base-path"?: string | undefined;
+  timeout?: string | undefined;
 }
 
 /**
  * The common steps of a write on one user. First the confirmation rule,
- * before the secret. Then the secret, the question, and one POST. Last the
- * audit row id, on stdout or in the JSON document. An answer with
- * `familyEndFailed: true` adds the warning and exit 1, so a script sees it.
+ * before the secret. Then the secret, the question, and one POST. It
+ * answers the body of the answer and the request line, for the stop text
+ * of a body with no audit row id.
  */
-async function writeUser(
+async function postUser(
   ctx: Ctx,
-  values: {
-    json?: boolean | undefined;
-    yes?: boolean | undefined;
-    "no-input"?: boolean | undefined;
-    "token-file"?: string | undefined;
-    "token-env"?: string | undefined;
-    "base-path"?: string | undefined;
-    timeout?: string | undefined;
-  },
+  values: WriteValues,
   t: ToolTarget,
   userId: string,
-  w: UserWrite,
-): Promise<number> {
+  w: UserPost,
+): Promise<{ body: unknown; request: string }> {
   needYes(ctx, values, w.command);
   const secret = readOperatorSecret(ctx, values);
   ctx.err(`posting ${t.base}${t.basePath}${w.path}`);
-  await ask(ctx, values, w.question, w.act);
+  if (w.typed === true) await askTyped(ctx, values, w.question, userId, w.act);
+  else await ask(ctx, values, w.question, w.act);
   const body = await toolCall(
     ctx,
     { ...t, secret },
@@ -242,12 +274,29 @@ async function writeUser(
       path: w.path,
       method: "POST",
       body: { userId, ...w.body },
-      scope: "users",
+      scope: w.scope ?? "users",
       userId,
       ...(w.invalid === undefined ? {} : { invalid: w.invalid }),
+      ...(w.limits === undefined ? {} : { limits: w.limits }),
     },
   );
-  const auditId = auditIdOf(body, `POST ${t.base}${t.basePath}${w.path}`);
+  return { body, request: `POST ${t.base}${t.basePath}${w.path}` };
+}
+
+/**
+ * A write on one user with `postUser`. Last the audit row id, on stdout or
+ * in the JSON document. An answer with `familyEndFailed: true` adds the
+ * warning and exit 1, so a script sees it.
+ */
+async function writeUser(
+  ctx: Ctx,
+  values: WriteValues,
+  t: ToolTarget,
+  userId: string,
+  w: UserWrite,
+): Promise<number> {
+  const { body, request } = await postUser(ctx, values, t, userId, w);
+  const auditId = auditIdOf(body, request);
   const exit = (body as { familyEndFailed?: unknown }).familyEndFailed === true ? 1 : 0;
   if (values.json === true)
     printJson(ctx, { auditId, exit, stopped: null } satisfies OperatorWriteJson);
@@ -345,6 +394,87 @@ async function runFactorOff(argv: string[], ctx: Ctx): Promise<number> {
   });
 }
 
+/** The fields of an update in words, such as `the name and the image`. */
+function fieldWords(fields: readonly string[]): string {
+  return fields.map((f) => `the ${f}`).join(" and ");
+}
+
+/**
+ * `authtempo users update <base url> <user id>` (plan 12f2 Task 6, spec 26):
+ * the name or the image of a user, or both. A `--no-` flag sends null, so
+ * the field goes. No flag sends an address or a password: the route
+ * refuses each other key.
+ */
+async function runUpdate(argv: string[], ctx: Ctx): Promise<number> {
+  const { values, positionals } = parse(argv, UPDATE_OPTIONS);
+  const [target, id, ...extra] = positionals;
+  const t = toolTarget(target, values);
+  const userId = userIdOf(id, extra);
+  const body: { name?: string | null; image?: string | null } = {};
+  for (const field of ["name", "image"] as const) {
+    const value = values[field];
+    const none = values[`no-${field}`] === true;
+    if (value !== undefined && none)
+      throw new UsageError(`give one of --${field} and --no-${field}`);
+    if (value !== undefined) body[field] = value;
+    else if (none) body[field] = null;
+  }
+  const fields = Object.keys(body);
+  if (fields.length === 0)
+    throw new UsageError("give at least one of --name, --no-name, --image, and --no-image");
+  const reason = reasonOf(values.reason);
+  const { body: answer, request } = await postUser(ctx, values, t, userId, {
+    command: "users update",
+    path: "/operator/users/update",
+    body: { ...body, reason },
+    question: `Change ${fieldWords(fields)} of the user ${userId}?`,
+    act: "change",
+    invalid: UPDATE_INVALID,
+  });
+  const auditId = auditIdOf(answer, request);
+  const user = operatorUser((answer as { user?: unknown }).user);
+  if (user === null) throw new Stop(`${request} answered 200 with no user`);
+  if (values.json === true)
+    printJson(ctx, { user, auditId, exit: 0, stopped: null } satisfies UserUpdateJson);
+  else ctx.out(writtenLine(`changed ${fieldWords(fields)} of ${userId}`, auditId));
+  return 0;
+}
+
+/**
+ * `authtempo users delete <base url> <user id>` (plan 12f2 Task 6, spec 26
+ * and 8.15). The act cannot be undone, so the question asks for the typed
+ * user id, not a yes. The secret needs the `delete` scope. The organizations
+ * that the user alone held go with the account; the command prints each id.
+ */
+async function runDelete(argv: string[], ctx: Ctx): Promise<number> {
+  const { values, positionals } = parse(argv, DELETE_OPTIONS);
+  const [target, id, ...extra] = positionals;
+  const t = toolTarget(target, values);
+  const userId = userIdOf(id, extra);
+  const reason = reasonOf(values.reason);
+  const { body, request } = await postUser(ctx, values, t, userId, {
+    command: "users delete",
+    path: "/operator/users/delete",
+    body: { reason },
+    question: `Delete the account ${userId}? This cannot be undone. Type the user id to confirm:`,
+    act: "delete",
+    scope: "delete",
+    typed: true,
+    limits: DELETE_LIMITS,
+  });
+  const auditId = auditIdOf(body, request);
+  const organizations = (body as { organizations?: unknown }).organizations;
+  if (!Array.isArray(organizations) || !organizations.every((o) => typeof o === "string"))
+    throw new Stop(`${request} answered 200 with no list of organizations`);
+  if (values.json === true)
+    printJson(ctx, { organizations, auditId, exit: 0, stopped: null } satisfies UserDeleteJson);
+  else {
+    ctx.out(writtenLine(`deleted ${userId}`, auditId));
+    for (const org of organizations) ctx.out(`deleted the organization ${org}`);
+  }
+  return 0;
+}
+
 const SUBCOMMANDS: Readonly<Record<string, (argv: string[], ctx: Ctx) => Promise<number>>> = {
   list: runList,
   search: runSearch,
@@ -353,6 +483,8 @@ const SUBCOMMANDS: Readonly<Record<string, (argv: string[], ctx: Ctx) => Promise
   unban: runUnban,
   "platform-role": runPlatformRole,
   "second-factor-off": runFactorOff,
+  update: runUpdate,
+  delete: runDelete,
 };
 
 /**
@@ -371,6 +503,8 @@ export const usersCommand: Command = {
     unban: { help: USERS_UNBAN_HELP, options: UNBAN_OPTIONS },
     "platform-role": { help: USERS_PLATFORM_ROLE_HELP, options: ROLE_OPTIONS },
     "second-factor-off": { help: USERS_SECOND_FACTOR_OFF_HELP, options: FACTOR_OPTIONS },
+    update: { help: USERS_UPDATE_HELP, options: UPDATE_OPTIONS },
+    delete: { help: USERS_DELETE_HELP, options: DELETE_OPTIONS },
   },
   run: (argv, ctx) => runGroup("users", argv, ctx, SUBCOMMANDS),
 };

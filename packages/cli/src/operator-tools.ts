@@ -1,5 +1,6 @@
 import {
   isOperatorReason,
+  OPERATOR_DELETE_PER_ACTOR,
   OPERATOR_USERS_PER_IP,
   REASON_MAX,
 } from "@authtempo/core/operator-secret";
@@ -45,6 +46,15 @@ export const WRITE_OPTIONS = {
  * and the help print the number that core counts.
  */
 export const TOOL_CALLS_PER_HOUR = OPERATOR_USERS_PER_IP.max;
+
+/**
+ * The deletes of one actor in an hour: 100 (plan 12f2 Task 5, ruling 7).
+ * Core's limiter reads the same value. Each call counts, also a refused one.
+ */
+export const DELETES_PER_HOUR = OPERATOR_DELETE_PER_ACTOR.max;
+
+/** The 429 text of `users delete`: the route counts each IP and each actor. */
+export const DELETE_LIMITS = `the operator routes allow ${TOOL_CALLS_PER_HOUR} calls per IP per hour, and ${DELETES_PER_HOUR} deletes per actor per hour`;
 
 // The reason rule and the proof rules come from core (ruling 40 of plan 12f): one source.
 export {
@@ -157,6 +167,23 @@ export async function ask(
   if (!(await ctx.confirm(question))) throw new Stop(`no ${act}: the answer was not yes`);
 }
 
+/**
+ * The typed question of an act that cannot be undone, unless `--yes`
+ * (plan 12f2 Task 6). The answer must equal `expected`, the user id, so a
+ * yes by habit does not act. `needYes` ran before, so a person can answer.
+ */
+export async function askTyped(
+  ctx: Ctx,
+  values: ConfirmValues,
+  question: string,
+  expected: string,
+  act: string,
+): Promise<void> {
+  if (values.yes === true) return;
+  if ((await ctx.prompt(question)).trim() !== expected)
+    throw new Stop(`no ${act}: the answer was not the user id`);
+}
+
 /** One call of a route of the user tools. */
 export interface ToolCall {
   path: string;
@@ -168,6 +195,8 @@ export interface ToolCall {
   invalid?: string;
   /** The user id of a command that acts on one user. A 404 then has two causes. */
   userId?: string;
+  /** The 429 text of a route with a limit beside the limit per IP. */
+  limits?: string;
 }
 
 /**

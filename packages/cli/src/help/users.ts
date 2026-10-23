@@ -1,4 +1,5 @@
 import {
+  DELETES_PER_HOUR,
   PAGE_MAX,
   PROOF_MAX_AGE_MS,
   PROOF_METHODS,
@@ -98,6 +99,8 @@ export const USERS_HELP: HelpText = {
     "authtempo users unban <base url> <user id> --reason <text> --yes",
     "authtempo users platform-role <base url> <user id> --grant | --revoke --reason <text> --yes",
     "authtempo users second-factor-off <base url> <user id> --reason <text> --proof-method <method> --proof-reference <text> --proof-checked-at <date> --yes",
+    "authtempo users update <base url> <user id> [--name <name> | --no-name] [--image <url> | --no-image] --reason <text> --yes",
+    "authtempo users delete <base url> <user id> --reason <text> [--yes]",
   ],
   examples: [
     {
@@ -308,5 +311,90 @@ export const USERS_SECOND_FACTOR_OFF_HELP: HelpText = {
       says: "The deployment turned the factors off. The command prints the audit row id.",
     },
     { code: 2, says: writeStop("users") },
+  ],
+};
+
+/** The text after `invalid_body` of `users update`: the name rule and the image rule of core. */
+export const UPDATE_INVALID =
+  "--name is 1 to 200 UTF-16 code units with no control or format character, and --image is an https URL with a host, of at most 2048 characters, with no space";
+
+export const USERS_UPDATE_HELP: HelpText = {
+  command: "users update",
+  page: "users-update",
+  purpose:
+    "Correct the name or the image of a user. The command sends no address, no password, and no other field.",
+  usage: [
+    `authtempo users update <base url> <user id> [--name <name> | --no-name] [--image <url> | --no-image] --reason <text> ${TOKEN} --yes`,
+  ],
+  examples: [
+    {
+      line: 'authtempo users update https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3 --name "Ada Lovelace" --reason "ticket 4711" --yes',
+      says: "Correct the name of a user.",
+    },
+    {
+      line: 'authtempo users update https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3 --no-image --reason "ticket 4712" --yes',
+      says: "Remove the image of a user.",
+    },
+  ],
+  flags: [
+    {
+      flag: "--name <name>",
+      says: "The new name: 1 to 200 UTF-16 code units with no control or format character.",
+    },
+    { flag: "--no-name", says: "Remove the name. The user then has no name." },
+    {
+      flag: "--image <url>",
+      says: "The new image: an https URL with a host, of at most 2048 characters, with no space.",
+    },
+    { flag: "--no-image", says: "Remove the image. The user then has no image." },
+    REASON_FLAG,
+    ...WRITE_FLAGS,
+  ],
+  exits: [
+    { code: 0, says: "The deployment changed the user. The command prints the audit row id." },
+    { code: 2, says: writeStop("users") },
+  ],
+  notes: [
+    "Give at least one of --name, --no-name, --image, and --no-image. The audit row names the changed fields, never a value.",
+  ],
+};
+
+export const USERS_DELETE_HELP: HelpText = {
+  command: "users delete",
+  page: "users-delete",
+  purpose:
+    "Delete the account of a user on a request. The organizations that the user alone holds go with it. It cannot be undone.",
+  usage: [`authtempo users delete <base url> <user id> --reason <text> ${TOKEN} [--yes]`],
+  examples: [
+    {
+      line: 'authtempo users delete https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3 --reason "request 4713"',
+      says: "Delete an account. The command asks for the user id.",
+    },
+    {
+      line: 'authtempo users delete https://api.example.com 01J8Z3Q4R5S6T7V8W9X0Y1Z2A3 --reason "request 4713" --yes',
+      says: "Delete an account from a script, with no question.",
+    },
+  ],
+  flags: [
+    REASON_FLAG,
+    ...operatorFlagsWithYes(),
+    {
+      flag: "--yes",
+      says: "Delete with no question. A run with no terminal needs it.",
+    },
+    { flag: "--no-input", says: "Never ask a question. Without --yes, the command then stops." },
+    ...COMMON_FLAGS,
+  ],
+  exits: [
+    {
+      code: 0,
+      says: "The deployment deleted the account. The command prints the audit row id and each organization that went with it.",
+    },
+    { code: 2, says: writeStop("delete") },
+  ],
+  notes: [
+    "The secret needs the delete scope beside the users scope.",
+    "Without --yes, the command asks for the user id. Only the typed user id deletes the account; yes does not.",
+    `Each call counts on ${DELETES_PER_HOUR} deletes per actor per hour, also a refused call.`,
   ],
 };

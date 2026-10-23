@@ -313,6 +313,36 @@ export const OPERATOR_WRITE_JSON_KEYS = {
   stopped: true,
 } as const satisfies Record<keyof OperatorWriteJson, true>;
 
+/**
+ * `authtempo users update --json` (plan 12f2): the user after the change,
+ * and the audit row of the act. The user is null only in the document of a stop.
+ */
+export interface UserUpdateJson extends RunKeys {
+  user: OperatorUserJson | null;
+  auditId: string;
+}
+export const USER_UPDATE_JSON_KEYS = {
+  user: true,
+  auditId: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof UserUpdateJson, true>;
+
+/**
+ * `authtempo users delete --json` (plan 12f2): the ids of the organizations
+ * that went with the account, and the audit row of the act.
+ */
+export interface UserDeleteJson extends RunKeys {
+  organizations: string[];
+  auditId: string;
+}
+export const USER_DELETE_JSON_KEYS = {
+  organizations: true,
+  auditId: true,
+  exit: true,
+  stopped: true,
+} as const satisfies Record<keyof UserDeleteJson, true>;
+
 /** `authtempo sessions end --json` (plan 12f): the sums of the calls, and the audit row of each call. */
 export interface SessionsEndJson extends RunKeys {
   ended: number;
@@ -462,6 +492,8 @@ export const STOP_JSON = {
   "users unban": { auditId: "", exit: 2, stopped: null },
   "users platform-role": { auditId: "", exit: 2, stopped: null },
   "users second-factor-off": { auditId: "", exit: 2, stopped: null },
+  "users update": { user: null, auditId: "", exit: 2, stopped: null },
+  "users delete": { organizations: [], auditId: "", exit: 2, stopped: null },
   sessions: { exit: 2, stopped: null },
   "sessions end": { ended: 0, calls: 0, more: false, auditIds: [], exit: 2, stopped: null },
   "sessions end-all": { ended: 0, calls: 0, more: false, exit: 2, stopped: null },
@@ -496,6 +528,8 @@ export const STOP_JSON = {
   "users unban": OperatorWriteJson;
   "users platform-role": OperatorWriteJson;
   "users second-factor-off": OperatorWriteJson;
+  "users update": UserUpdateJson;
+  "users delete": UserDeleteJson;
   sessions: GroupJson;
   "sessions end": SessionsEndJson;
   "sessions end-all": SessionsEndAllJson;
