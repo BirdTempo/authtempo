@@ -24,7 +24,7 @@ export type ScryptFn = (password: Uint8Array, salt: Uint8Array) => Promise<Uint8
 export const nobleScrypt: ScryptFn = (password, salt) =>
   scryptAsync(password, salt, { ...SCRYPT, maxmem: MAXMEM });
 
-function toHex(bytes: Uint8Array): string {
+export function toHex(bytes: Uint8Array): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
@@ -34,7 +34,7 @@ function toHex(bytes: Uint8Array): string {
  * core package index does not export it (checked 2026-10-10). This copy
  * stays until core exports it. Then use core's: one source for one fact.
  */
-function equalHex(a: string, b: string): boolean {
+export function equalHex(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);

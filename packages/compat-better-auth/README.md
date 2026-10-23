@@ -16,6 +16,8 @@ pnpm and npm, in the app's `package.json`:
     "@better-auth/expo": "npm:@authtempo/compat-better-auth@0.0.0",
     "@better-auth/passkey": "npm:@authtempo/compat-better-auth@0.0.0",
     "@better-auth/api-key": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/sso": "npm:@authtempo/compat-better-auth@0.0.0",
+    "@better-auth/scim": "npm:@authtempo/compat-better-auth@0.0.0",
     "@authtempo/core": "0.0.0",
     "@authtempo/client": "0.0.0",
     "@authtempo/handoff": "0.0.0",
@@ -30,7 +32,7 @@ required peers, also in an app that uses one database: the server entry
 loads both. Neither has a runtime dependency.
 
 Map only the names the app imports. A Better Auth package with no alias, for
-example `@better-auth/sso`, stays the real package, and `betterAuth`
+example `@better-auth/stripe`, stays the real package, and `betterAuth`
 refuses its plugin by id at construction.
 
 | Import in the app | Answered by |
@@ -52,6 +54,9 @@ refuses its plugin by id at construction.
 | `@better-auth/passkey/client` | `./client` (`passkeyClient`) |
 | `@better-auth/api-key` | `./api-key` (`apiKey`, plan 12k) |
 | `@better-auth/api-key/client` | `./api-key/client` (`apiKeyClient`, plan 12k) |
+| `@better-auth/sso` | `.` (`sso`, plan 12d) |
+| `@better-auth/sso/client` | `./client` (`ssoClient`, plan 12d) |
+| `@better-auth/scim` | `.` (`scim`, plan 12d) |
 
 `better-auth/api` maps to `./api`, which exports `APIError` only (plan 9b).
 An import of another name from it, such as `createAuthMiddleware`, fails at
@@ -583,6 +588,8 @@ answer type holds `twoFactorRedirect` only when the client options name
 | `twoFactor` | Core's TOTP second factor (plan 9f) on the password sign-in. Needs `emailAndPassword.enabled`. `/two-factor/enable` (the password) answers `{ method: "totp", totpURI, backupCodes }`; `/two-factor/verify-totp` with the session turns the factor on and ends the other sessions; at the next sign-in core answers a challenge and sets `better-auth.two_factor`, and `verify-totp` or `verify-backup-code` with that cookie opens the session. `trustDevice: true` sets `better-auth.trust_device` for `trustDeviceMaxAge` (whole days, default 30). `disable`, `get-totp-uri`, and `generate-backup-codes` take the password. `send-otp`, `verify-otp`, and `method: "otp"` answer `NOT_SUPPORTED` (501). Pass `accountLockout: { enabled: false }`: core has no account lockout. `user.twoFactorEnabled` comes from core's `ta_second_factor` row; the Better Auth `twoFactor` table is not read. Backup codes are 23 characters (`backupCodeOptions.length` 23 to 32). Core's gate on the magic link, the email code, and social stays off, as in Better Auth; a reset by code of a user with the factor on opens no session on a device that is not trusted (plan 12c). |
 
 | `admin` | Core's operator tools (plan 12f). Needs `organization` and `authtempo.platformOrganization`. See "The admin plugin". |
+| `sso` | Core's OIDC and SAML connections and its domain proof (plan 12d). Needs `organization` and `authtempo.ssoDns`. See "SSO and SCIM". |
+| `scim` | Core's SCIM server (plan 12d). Needs `organization`. Each static credential acts on one organization. See "SSO and SCIM". |
 
 Give each plugin once. A second entry with the same id is refused at start, because the server reads only the first.
 
@@ -1343,6 +1350,178 @@ export default {
   },
 };
 ```
+
+## SSO and SCIM
+
+Since plan 12d (Task 14, spec 30), `sso(options)` of `@better-auth/sso` and
+`scim(options)` of `@better-auth/scim` map onto core's SSO and SCIM. The shim
+reads both packages at 1.7.2 (`BETTER_AUTH_SSO_VERSION` and
+`BETTER_AUTH_SCIM_VERSION`). Core keeps its own tables, `ta_sso_connection`,
+`ta_sso_domain`, and the SCIM tables of migration 0011. Better Auth's
+`ssoProvider` and SCIM tables stay as they are: no migration writes them.
+
+Each provider is a core connection. The connection's label holds the Better
+Auth `providerId`, so a `providerId` names one connection. A provider's
+domain is a core domain, routed to the connection. Core's manager guard
+decides each provider call: an owner of the organization, with a verified
+address, a second factor, and a fresh session. A platform operator passes
+too. So the owner turns on `twoFactor` before the first register.
+Each Better Auth path spends one to four of core's manager calls: core
+allows 30 per person in 15 minutes (`sso-manage:user:<userId>`). A register
+spends three, and a verify of a domain spends three.
+
+### The sso options
+
+| Option | On core |
+| --- | --- |
+| `organizationProvisioning.defaultRole` | `defaultRole` of each new connection (`member` or `admin`) |
+| `disableImplicitSignUp` | `jit: false` on each new connection |
+| `providersLimit` (a number, default 10) | `sso.limits.connectionsPerOrganization` |
+| `provisionUser` | `hooks.sso.beforeSignIn`; with `provisionUserOnEveryLogin`, at each sign-in |
+| `saml.clockSkew` (whole seconds, at most 300000 ms) | `sso.saml.clockSkewSeconds` |
+| `domainVerification.tokenPrefix` | the name of Better Auth's record, `_<prefix>-<providerId>.<domain>` |
+| `saml.requireTimestamps`, `saml.maxResponseSize` (at most 262144), `algorithms.onDeprecated: "reject"`, `saml.enableInResponseToValidation: true` | accepted: core is at least as strict |
+| `saml.requestTTL`, `saml.maxMetadataSize`, `compatibility.microsoftEntra` | a note at start: core uses its own value, or accepts the Entra shapes always |
+
+`authtempo.ssoDns` is required with `sso`. It is core's `sso.dns`, for
+example `[dohCloudflare(fetch), dohGoogle(fetch)]` from `@authtempo/core`.
+Every resolver must give the record. Core has no default resolver, and
+Better Auth's `node:dns` read is not used.
+
+These options are refused at start. Each message names the option and the
+reason.
+
+- `trustEmailVerified: true`: the domain proof is the only proof of an address.
+- `domainVerification.enabled: false`: core proves each domain by DNS.
+- `saml.allowIdpInitiated: true`, `saml.idpInitiatedCallbackUrl`, and `saml.enableInResponseToValidation: false`: core binds each Response to its request.
+- `saml.enableSingleLogout` and the three logout options: core has no SAML single logout.
+- The four allowed algorithm lists: core keeps its own list.
+- `resolvePrivateKey`: core sends the client secret, so `private_key_jwt` is refused.
+- `redirectURI`: core gives each connection its own callback.
+- `defaultSSO`: register each provider through `/sso/register`.
+- `organizationProvisioning.getRole` and `organizationProvisioning.disabled`: core gives one role per connection, and adds the member at each SSO sign-in.
+- `defaultOverrideUserInfo: true`: core keeps the profile of a user that exists.
+- `guardProviderMutation` and `resolveUser`: core's manager guard and resolution run, with no app code.
+- A `providersLimit` function, and `modelName`, `fields`, and `schema`.
+
+### The provider fields
+
+`/sso/register` and `/sso/update-provider` read each field of a provider.
+A field that core has no feature for answers `NOT_SUPPORTED` (501). The
+message names the field and the reason. A field of the wrong form answers
+`VALIDATION_ERROR` (400). The fields map so:
+
+- `providerId` is the connection's label: letters, digits, `_`, and `-`. `_<prefix>-<providerId>` must fit one DNS label of 63 characters.
+- `issuer`, `oidcConfig.clientId`, `clientSecret`, and `scopes` map to the connection's `issuer`, `clientId`, `clientSecret` (sealed with the keyring), and `scope`.
+- `authorizationEndpoint`, `tokenEndpoint`, and `jwksEndpoint` come together, or none of them, and core reads the discovery document.
+- `samlConfig.entryPoint`, `cert` (or `idpMetadata.cert`), `idpMetadata.entityID`, and `idpMetadata.metadata` map to `ssoUrl`, `certificates`, `idpEntityId`, and `idpMetadata`. Pass the metadata XML or the other three, not both.
+- `samlConfig.mapping.email` and `name` map to `attributes`. `identifierFormat` takes the persistent NameID format only.
+- `domain` is one domain. Better Auth's comma list is refused: register one provider per domain.
+- `organizationId` is required: core keeps each connection in an organization.
+
+These provider fields are refused:
+
+- `tokenEndpointAuthentication` other than `client_secret_post`: core sends the secret in the body. `private_key_jwt` and its key fields are refused too.
+- `pkce: false`, `userInfoEndpoint`, `overrideUserInfo: true`, and `allowIdpInitiated`.
+- A `discoveryEndpoint` other than the issuer's.
+- A mapping other than core's claims, and `emailVerified` and `extraFields` of each mapping.
+- An encrypted assertion and its keys, `spMetadata`, and `privateKey`.
+- `audience`, `callbackUrl`, and `idpInitiatedCallbackUrl`.
+- `wantAssertionsSigned: false` and `authnRequestsSigned: true`.
+- A SHA-1 algorithm, or another algorithm that core does not verify.
+- The single logout services of the IdP metadata.
+
+For a SAML provider, Better Auth's `issuer` is the SP entity id. Core gives
+each connection its own SP entity id, and the provider's answer gives it as
+`issuer`. Give the IdP the SP metadata of the connection.
+
+### The paths
+
+| Better Auth path | Core route |
+| --- | --- |
+| `POST /sso/register` | `POST /sso/connections/create`, then `POST /sso/domains/add` and `POST /sso/domains/update` |
+| `GET /sso/providers` | `GET /sso/connections` and `GET /sso/domains` of each organization that the caller manages |
+| `GET /sso/get-provider?providerId=` | `GET /sso/connections` and `GET /sso/domains` |
+| `POST /sso/update-provider` | `POST /sso/connections/update`; a new domain is added and routed, and the old one deleted |
+| `POST /sso/delete-provider` | `POST /sso/domains/delete` for each domain of the connection, then `POST /sso/connections/delete` |
+| `POST /sso/request-domain-verification` | `GET /sso/domains`: the token is core's challenge |
+| `POST /sso/verify-domain` | `POST /sso/domains/verify` with Better Auth's record |
+| `POST /sign-in/sso` | `POST /sso/discover`, then the start path of the connection |
+| `GET /sso/callback/:providerId` | `GET /sso/:connectionId/callback` |
+| `POST /sso/saml2/sp/acs/:providerId` | `POST /sso/:connectionId/acs` |
+| `GET /sso/saml2/sp/metadata?providerId=` | `GET /sso/:connectionId/metadata` |
+| `/scim/v2/*` | the same paths |
+
+Three paths answer `NOT_SUPPORTED` (501): the shared `GET /sso/callback`,
+`/sso/saml2/sp/slo/:providerId`, and `POST /sso/saml2/logout/:providerId`.
+Core has no shared callback and no SAML single logout.
+
+Core's start sends the callback of the connection,
+`<basePath>/sso/<connectionId>/callback`, as the `redirect_uri`. Register
+that URL at the IdP: the register answers it as `redirectURI`.
+
+`signIn.sso` takes `email`, `domain`, `providerId`, or `organizationSlug`,
+with `callbackURL`. It answers `{ url, redirect: true }`, where `url` is
+core's start path with `next`. `errorCallbackURL`, `newUserCallbackURL`,
+`scopes`, `loginHint`, `additionalParams`, and `requestSignUp` answer
+`NOT_SUPPORTED`. Core's discovery answers no SAML connection yet. Until its
+fix, the shim reads the domain claim itself for a SAML connection.
+
+### The domain proof
+
+`request-domain-verification` answers `domainVerificationToken` and
+`domainVerificationRecords`, two TXT records. Publish both:
+
+- Better Auth's record, `_<prefix>-<providerId>.<domain>` with the value `_<prefix>-<providerId>=<token>` or the token alone. The shim's `verify-domain` reads it.
+- Core's record, `_authtempo-challenge.<domain>` with `authtempo-domain=<token>`. Core's own routes read it.
+
+The 30-day recheck asks for core's record, then for Better Auth's. A domain
+keeps its claim while either record holds on every resolver. Three failed
+rechecks that span 72 hours lose the claim.
+
+### The scim options
+
+Each `connections[].credentials[]` is a bearer of one organization: the
+connection's `provisioningDomainId`, else its `id`. The shim keeps the
+SHA-256 of each token from `scim()` on, never the token. A bearer that
+matches a credential that has not expired runs core's SCIM route as that
+credential. Its four scopes map one to one, with all four by default. Its
+limit key is `scim:token:<connection id>:<credential id>`, and its audit rows
+name that id. Any other bearer goes to core's own SCIM tokens.
+
+Refused at start: `authentication` (a custom verifier), `identity`
+(explicit linking), `projection` (code that core cannot run), and
+`managedConnections`. Core's SCIM tokens replace managed connections:
+`tempo.api.scim.tokens.create` and the `/scim/tokens` routes.
+
+### The copy
+
+`copyBetterAuthSso(auth, { after })` copies Better Auth's rows into core.
+`auth` is the shim app on `betterAuthSchemaStorage` or `drizzleAdapter`.
+Call it until `next` is null:
+
+```ts
+let after: string | null = null;
+do {
+  const r = await copyBetterAuthSso(auth, { after });
+  console.log(r.connections, r.domains, r.scimUsers, r.scimGroups, r.scimGroupMembers);
+  console.log(r.skipped, r.changed);
+  after = r.next;
+} while (after !== null);
+```
+
+One call stays under 50 statements on D1, the limit of one Worker invocation
+on D1 Free. Each call reads one page and stops before a row whose measured
+worst cost does not fit. The writes go through `tempo.api.sso` and
+`tempo.api.scim` with the app actor `copy-better-auth-sso`. So core seals
+each client secret, and each SCIM user passes the address rule.
+
+- A provider is copied with its domain, routed to the connection. A verified Better Auth domain is pending in core: verify it again, and the published Better Auth record proves it.
+- A SCIM user is copied when its address is in a verified domain of the organization. Else `skipped` holds core's SCIM error. Verify the domains first.
+- A group is copied with no member, and each member is added by a SCIM PATCH. So a group of any size fits the budget.
+- `changed` lists what the owner must do. It names the new `redirectURI` at the IdP and the SP metadata of a SAML connection. It names a `client_secret_basic` client, which core sends as `client_secret_post`. It names a domain to verify again.
+- A second run copies nothing twice. A connection that holds the `providerId` as its label is `present`. So is a SCIM user with the same `externalId` or `userName`. So is a group with the same `externalId` or `displayName`.
+- No token is copied. A static credential stays in the `scim` options. Create a core SCIM token for a managed connection.
 
 ## JWT and the OAuth provider
 

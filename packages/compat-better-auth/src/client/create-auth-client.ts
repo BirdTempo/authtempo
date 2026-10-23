@@ -636,6 +636,11 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
       if (fo.onSuccess) await fo.onSuccess({ data: json, response: res, request });
       return { data: json as T, error: null };
     }
+    // Better Auth's verify-domain answers 204 with no body (plan 12d Task 14).
+    if (res.status === 204) {
+      if (fo.onSuccess) await fo.onSuccess({ data: null, response: res, request });
+      return { data: null as T, error: null };
+    }
     const code = typeof json?.code === "string" ? json.code : BETTER_AUTH_CODES.unexpected;
     const error =
       typeof json?.message === "string"
@@ -825,6 +830,12 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
       async passkey() {
         const r = await run((c) => c.passkey.signIn(), toClientSession);
         if (r.data) store.refetchIfStarted();
+        return r;
+      },
+      async sso(input) {
+        // The start path of the connection: the browser goes there, and core's start goes to the IdP.
+        const r = await shim<{ url: string; redirect: boolean }>("/sign-in/sso", input);
+        if (r.data?.redirect && typeof location !== "undefined") location.href = r.data.url;
         return r;
       },
       async emailOtp({ email, otp, name, image }) {
@@ -1486,6 +1497,20 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
       },
       sendOtp: async () => notSupported("core has no email or SMS second factor"),
       verifyOtp: async () => notSupported("core has no email or SMS second factor"),
+    },
+    sso: {
+      register: (input) => shim("/sso/register", input),
+      providers: () => shim("/sso/providers", undefined, "GET"),
+      getProvider: (input) =>
+        shim(
+          `/sso/get-provider?providerId=${encodeURIComponent(input.query.providerId)}`,
+          undefined,
+          "GET",
+        ),
+      updateProvider: (input) => shim("/sso/update-provider", input),
+      deleteProvider: (input) => shim("/sso/delete-provider", input),
+      requestDomainVerification: (input) => shim("/sso/request-domain-verification", input),
+      verifyDomain: (input) => shim("/sso/verify-domain", input),
     },
     admin: {
       listUsers: (input) =>

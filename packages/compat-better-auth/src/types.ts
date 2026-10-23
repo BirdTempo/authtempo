@@ -1,6 +1,7 @@
 import type { BrowserWebAuthn } from "@authtempo/client";
 import type {
   Auth,
+  DnsTxtPort,
   HandleOptions,
   LimiterPort,
   PasswordHashSeam,
@@ -557,6 +558,104 @@ export interface ApiKeyOptions {
   schema?: unknown;
 }
 
+/** One static bearer credential of a SCIM connection (@better-auth/scim 1.7.2 dist/index.d.mts:12). */
+export interface ScimCredentialOptions {
+  type: "bearer";
+  /** The credential's id: the key of its limit and the actor name of its audit rows. */
+  id: string;
+  /** The clear token. The shim keeps its SHA-256 only, from construction on. */
+  token: string;
+  scopes?: readonly ScimScope[];
+  expiresAt?: Date;
+}
+
+/** A SCIM scope of @better-auth/scim 1.7.2, the same four as core's. */
+export type ScimScope =
+  | "scim.users.read"
+  | "scim.users.write"
+  | "scim.groups.read"
+  | "scim.groups.write";
+
+/**
+ * `scim(options)` of @better-auth/scim 1.7.2 (dist/index.d.mts:336, read
+ * 2026-10-22). Each connection maps onto one organization: its
+ * `provisioningDomainId`, else its `id`. The keys that core has no feature
+ * for are typed here, so that checkOptions names each one.
+ */
+export interface ScimOptions {
+  connections: readonly {
+    id: string;
+    credentials: readonly ScimCredentialOptions[];
+    provisioningDomainId?: string;
+  }[];
+  authentication?: unknown;
+  managedConnections?: unknown;
+  identity?: unknown;
+  projection?: unknown;
+  compatibility?: { microsoftEntra?: { acceptLegacyGroupSchema?: boolean } };
+}
+
+/** The SAML options of `sso(options)` (@better-auth/sso 1.7.2 index-sM6JWXeV.d.mts:576 to :677). */
+export interface SsoSamlOptions {
+  enableInResponseToValidation?: boolean;
+  allowIdpInitiated?: boolean;
+  requestTTL?: number;
+  clockSkew?: number;
+  requireTimestamps?: boolean;
+  algorithms?: {
+    onDeprecated?: "reject" | "warn" | "allow";
+    allowedSignatureAlgorithms?: string[];
+    allowedDigestAlgorithms?: string[];
+    allowedKeyEncryptionAlgorithms?: string[];
+    allowedDataEncryptionAlgorithms?: string[];
+  };
+  maxResponseSize?: number;
+  maxMetadataSize?: number;
+  enableSingleLogout?: boolean;
+  logoutRequestTTL?: number;
+  wantLogoutRequestSigned?: boolean;
+  wantLogoutResponseSigned?: boolean;
+  idpInitiatedCallbackUrl?: string;
+}
+
+/**
+ * `sso(options)` of @better-auth/sso 1.7.2 (index-sM6JWXeV.d.mts:320, read
+ * 2026-10-22). The keys that core has no feature for are typed here, so
+ * that checkOptions names each one.
+ */
+export interface SsoOptions {
+  resolveUser?: unknown;
+  guardProviderMutation?: unknown;
+  /**
+   * Runs as core's `hooks.sso.beforeSignIn`, before the first write of the
+   * sign-in. `user` is null for a user that the sign-in creates. A throw
+   * refuses the sign-in.
+   */
+  provisionUser?: (data: {
+    user: User | null;
+    userInfo: Record<string, unknown>;
+    provider: { providerId: string; organizationId: string };
+  }) => unknown;
+  provisionUserOnEveryLogin?: boolean;
+  organizationProvisioning?: {
+    disabled?: boolean;
+    defaultRole?: "member" | "admin";
+    getRole?: unknown;
+  };
+  defaultSSO?: unknown;
+  defaultOverrideUserInfo?: boolean;
+  disableImplicitSignUp?: boolean;
+  modelName?: string;
+  fields?: unknown;
+  schema?: unknown;
+  providersLimit?: number | ((user: User) => unknown);
+  trustEmailVerified?: boolean;
+  domainVerification?: { enabled?: boolean; tokenPrefix?: string };
+  redirectURI?: string;
+  resolvePrivateKey?: unknown;
+  saml?: SsoSamlOptions;
+}
+
 interface Marker<I extends string, O> {
   readonly kind: typeof COMPAT_PLUGIN;
   readonly id: I;
@@ -574,7 +673,23 @@ export type ApiKeyPlugin = Marker<"api-key", ApiKeyOptions> & {
   /** True when the call had a second argument, which checkOptions refuses (plan 12k Task 12 review, L7). */
   readonly secondArgument?: true;
 };
+export type SsoPlugin = Marker<"sso", SsoOptions>;
+/**
+ * The options that the `scim` marker keeps: each credential with the
+ * SHA-256 of its token in hex, never the token. `tokenHash` is null for a
+ * token that is not a non-empty string, which checkOptions refuses.
+ */
+export type ScimMarkerOptions = Omit<ScimOptions, "connections"> & {
+  connections: readonly {
+    id: string;
+    credentials: readonly (Omit<ScimCredentialOptions, "token"> & { tokenHash: string | null })[];
+    provisioningDomainId?: string;
+  }[];
+};
+export type ScimPlugin = Marker<"scim", ScimMarkerOptions>;
 export type CompatPlugin =
+  | SsoPlugin
+  | ScimPlugin
   | AdminPlugin
   | OrganizationPlugin
   | PasskeyPlugin
@@ -796,6 +911,13 @@ export interface BetterAuthOptions {
      * each stored prefix. Core's `tokens.movedPrefixes` rule checks them.
      */
     movedKeyPrefixes?: string[];
+    /**
+     * The DNS resolvers of the domain proof of the `sso` plugin (plan 12d
+     * Task 14), core's `sso.dns`. Better Auth reads node:dns; core has no
+     * default resolver. Pass `[dohCloudflare(fetch), dohGoogle(fetch)]` from
+     * `@authtempo/core`, or your own ports. Every resolver must give the record.
+     */
+    ssoDns?: DnsTxtPort[];
   };
 }
 
@@ -1240,7 +1362,7 @@ export interface OrganizationClientOptions {
 export type ClientPlugin =
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
-      readonly id: "passkey" | "magic-link" | "email-otp" | "admin" | "api-key";
+      readonly id: "passkey" | "magic-link" | "email-otp" | "admin" | "api-key" | "sso";
     }
   | {
       readonly kind: typeof COMPAT_CLIENT_PLUGIN;
@@ -1330,6 +1452,26 @@ export interface AuthClient<TF extends boolean = false> {
     passkey(input?: {
       autoFill?: boolean;
     }): Promise<CompatClientResult<{ session: ClientSession; user: ClientUser }>>;
+    /**
+     * `POST /sign-in/sso` of @better-auth/sso 1.7.2 (plan 12d Task 14): the
+     * start path of the connection that one key names. In a browser the
+     * client goes there. The keys that core has no feature for answer
+     * NOT_SUPPORTED from the server.
+     */
+    sso(input: {
+      email?: string;
+      organizationSlug?: string;
+      providerId?: string;
+      domain?: string;
+      callbackURL: string;
+      providerType?: "oidc" | "saml";
+      errorCallbackURL?: string;
+      newUserCallbackURL?: string;
+      scopes?: string[];
+      loginHint?: string;
+      additionalParams?: Record<string, string>;
+      requestSignUp?: boolean;
+    }): Promise<CompatClientResult<{ url: string; redirect: boolean }>>;
     /** Core's sign-in by email code (plan 9e). `name`, `image`, and other user fields answer NOT_SUPPORTED. */
     emailOtp(input: {
       email: string;
@@ -1600,10 +1742,45 @@ export interface AuthClient<TF extends boolean = false> {
    * decides. Each call that core does not serve answers NOT_SUPPORTED.
    */
   admin: AdminClientCalls;
+  /**
+   * The `authClient.sso` calls of @better-auth/sso 1.7.2's client
+   * (dist/client.d.mts, read 2026-10-22), on the shim's `/sso/*` paths
+   * (plan 12d Task 14). Core's session, manager guard, and audit decide.
+   */
+  sso: SsoClientCalls;
   useSession: SessionStore;
   /** Expo only: the stored session as one cookie header value, `__Host-tempo_session=<token>`, or "" when none. */
   getCookie(): string;
   $Infer: { Session: { session: ClientSession; user: ClientSessionUser } };
+}
+
+/** One provider as the shim's `/sso/*` paths answer it, in Better Auth's shape. */
+export type SsoProviderAnswer = Record<string, unknown> & {
+  providerId: string;
+  type: "oidc" | "saml";
+  organizationId: string;
+  domainVerified: boolean;
+};
+
+/** The calls of `authClient.sso` (plan 12d Task 14). Each body is Better Auth's. */
+export interface SsoClientCalls {
+  register(input: Record<string, unknown>): Promise<CompatClientResult<SsoProviderAnswer>>;
+  providers(): Promise<CompatClientResult<{ providers: SsoProviderAnswer[] }>>;
+  getProvider(input: {
+    query: { providerId: string };
+  }): Promise<CompatClientResult<SsoProviderAnswer>>;
+  updateProvider(
+    input: Record<string, unknown> & { providerId: string },
+  ): Promise<CompatClientResult<SsoProviderAnswer>>;
+  deleteProvider(input: { providerId: string }): Promise<CompatClientResult<{ success: boolean }>>;
+  requestDomainVerification(input: { providerId: string }): Promise<
+    CompatClientResult<{
+      domainVerificationToken: string;
+      domainVerificationRecords: { name: string; type: "TXT"; value: string }[];
+    }>
+  >;
+  /** Better Auth answers 204 with no body: `data` is null on success. */
+  verifyDomain(input: { providerId: string }): Promise<CompatClientResult<null>>;
 }
 
 /** A call of `authClient.admin` that core does not serve: it answers NOT_SUPPORTED with a section 26 line. */

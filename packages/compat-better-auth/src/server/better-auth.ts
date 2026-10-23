@@ -16,6 +16,7 @@ import { emailOtpRoute } from "./email-otp.js";
 import { type Mapped, mapOptions } from "./map-options.js";
 import { getSessionRoute } from "./session.js";
 import { sessionTokenOf } from "./shapes.js";
+import { scimRoute, ssoAcsRoute, ssoRoute } from "./sso-routes.js";
 import { twoFactorRoute, withTwoFactor } from "./two-factor.js";
 
 /** The JSON field that holds the new password, per core route (core http/routes/password.ts, read 2026-10-10). */
@@ -122,8 +123,14 @@ export function createHandler(
     // expo-origin step, so the scheme of a native app counts.
     // In Better Auth's shape on every path (the lead's ruling): Better Auth
     // 1.7.2 has one origin check, so both of core's rules answer INVALID_ORIGIN.
+    // An IdP posts the SAML form cross-site: core's own ACS route takes it (plan 12d Task 14).
+    const acs = await ssoAcsRoute(auth, mapped, req);
+    if (acs) return acs;
     const refusal = crossSiteRefusal(auth, req);
     if (refusal) return invalidOrigin(refusal);
+    // Better Auth's sso and scim paths (plan 12d Task 14). Null for every other request.
+    const sso = (await ssoRoute(auth, mapped, req)) ?? (await scimRoute(auth, mapped, req));
+    if (sso) return sso;
     const copy = req.method === "POST" ? req.clone() : null;
     // Better Auth's admin calls (plan 12f): the refusals of the calls that core does not
     // serve, then the calls that map onto core's operator routes. Null for every other request.

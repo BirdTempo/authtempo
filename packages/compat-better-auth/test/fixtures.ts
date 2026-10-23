@@ -8,6 +8,10 @@ import pgTeams from "./fixtures/better-auth-1.7.2-teams.postgres.sql?raw";
 import sqliteTeams from "./fixtures/better-auth-1.7.2-teams.sqlite.sql?raw";
 import pgApiKey from "./fixtures/better-auth-api-key-1.7.5.postgres.sql?raw";
 import sqliteApiKey from "./fixtures/better-auth-api-key-1.7.5.sqlite.sql?raw";
+import pgSso from "./fixtures/better-auth-sso-scim-1.7.2.postgres.sql?raw";
+import sqliteSso from "./fixtures/better-auth-sso-scim-1.7.2.sqlite.sql?raw";
+import pgSsoRows from "./fixtures/better-auth-sso-scim-1.7.2-rows.postgres.sql?raw";
+import sqliteSsoRows from "./fixtures/better-auth-sso-scim-1.7.2-rows.sqlite.sql?raw";
 import pgSnake from "./fixtures/consumer-i-snake.postgres.sql?raw";
 
 export const BETTER_AUTH_PG = pgCamel;
@@ -25,6 +29,12 @@ export const BETTER_AUTH_1421_TEAMS_SQLITE = sqliteTeams1421;
 /** @better-auth/api-key 1.7.5's own apikey table, to apply after the fixture of its dialect (plan 12k Task 12). */
 export const BETTER_AUTH_API_KEY_PG = pgApiKey;
 export const BETTER_AUTH_API_KEY_SQLITE = sqliteApiKey;
+/** The tables of @better-auth/sso and @better-auth/scim 1.7.2, to apply after the fixture of its dialect (plan 12d Task 14). */
+export const BETTER_AUTH_SSO_PG = pgSso;
+export const BETTER_AUTH_SSO_SQLITE = sqliteSso;
+/** The rows that Better Auth 1.7.2 wrote with sso and scim, to apply after both table fixtures (plan 12d Task 14). */
+export const BETTER_AUTH_SSO_ROWS_PG = pgSsoRows;
+export const BETTER_AUTH_SSO_ROWS_SQLITE = sqliteSsoRows;
 
 const FOREIGN_KEY = / references "\w+" \("id"\) on delete cascade/g;
 
