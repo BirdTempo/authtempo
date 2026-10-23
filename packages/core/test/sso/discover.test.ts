@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createConnection } from "../../src/engine/sso/connections.js";
 import { updateDomain } from "../../src/engine/sso/domains.js";
 import { signInPageResponse } from "../../src/http/sign-in-response.js";
-import { BASE_URL, get, makeAuth, post } from "../helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "../helpers.js";
 import { SSO_APP, seedOrganization, ssoAuth, verifiedDomain } from "./helpers.js";
 
 beforeEach(() => {
@@ -121,13 +121,43 @@ describe("the discovery at sign-in (plan 12d Task 4)", () => {
     const { w, ca, cb } = await world();
     expect(await (await discover(w, "x@eu.acme.example")).json()).toEqual({
       sso: true,
-      start: `/auth/sso/${cb}/start`,
+      connectionId: cb,
+      start: `${BASE_URL}/auth/sso/${cb}/start`,
     });
     expect(await (await discover(w, "X@US.acme.example")).json()).toEqual({
       sso: true,
-      start: `/auth/sso/${ca}/start`,
+      connectionId: ca,
+      start: `${BASE_URL}/auth/sso/${ca}/start`,
     });
     expect(await (await discover(w, "x@other.example")).json()).toEqual({ sso: false });
+  });
+
+  it("answers the start on the baseURL origin when the app is on another origin, with next", async () => {
+    const { w, cb } = await world();
+    // The test config is a split origin: baseURL is the api origin, and the app is a trusted origin.
+    expect(w.config.baseURL).toBe(BASE_URL);
+    expect(APP_ORIGIN).not.toBe(BASE_URL);
+    const next = "/dashboard?tab=sso";
+    const res = await w.handle(
+      post("/auth/sso/discover", { email: "x@eu.acme.example", next }, { origin: APP_ORIGIN }),
+    );
+    const answer = (await res.json()) as { sso: true; connectionId: string; start: string };
+    expect(answer.connectionId).toBe(cb);
+    const start = new URL(answer.start);
+    expect(start.origin).toBe(BASE_URL);
+    expect(start.pathname).toBe(`/auth/sso/${cb}/start`);
+    expect(start.searchParams.get("next")).toBe(next);
+    // The browser follows the URL as it is: the start of the api origin sends it to the IdP.
+    const go = await w.handle(new Request(answer.start));
+    expect(go.status).toBe(302);
+    expect(new URL(go.headers.get("location") ?? "").origin).toBe(
+      "https://login.globex-idp.example",
+    );
+    // The start keeps the next of the JSON discovery for the callback.
+    const state = await w.config.storage.findOne("verification", [
+      { field: "purpose", op: "eq", value: "oauth-state" },
+    ]);
+    expect((state?.data as { next?: string } | undefined)?.next).toBe(next);
   });
 
   it("answers the same for an address with and without a user", async () => {
@@ -156,14 +186,14 @@ describe("the discovery at sign-in (plan 12d Task 4)", () => {
       "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://app.example.com; base-uri 'none'; frame-ancestors 'none'",
     );
     const html = await page.text();
-    const start = `/auth/sso/${cb}/start?next=${encodeURIComponent(next)}`;
+    const start = `${BASE_URL}/auth/sso/${cb}/start?next=${encodeURIComponent(next)}`;
     // The start holds no character to escape: `next` is URL-encoded. The unit test of the page covers the escape.
     expect(start).not.toMatch(/[&<>"']/);
     expect(html).toContain(`<meta http-equiv="refresh" content="0; url=${start}">`);
     expect(html).toContain(`<a href="${start}">Continue</a>`);
     expect(html).not.toContain("<script");
     // The page goes on with a GET, a navigation that is not a form post. The start then sends the browser to the IdP.
-    const go = await w.handle(get(start));
+    const go = await w.handle(new Request(start));
     expect(go.status).toBe(302);
     expect(new URL(go.headers.get("location") ?? "").origin).toBe(
       "https://login.globex-idp.example",

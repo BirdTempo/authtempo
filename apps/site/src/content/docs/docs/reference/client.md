@@ -156,7 +156,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.jwt.token()` | `GET /token` | `{ token }` |
 | `client.oauth.grants()` | `GET /oauth/grants` | `OAuthGrantJSON[]` |
 | `client.oauth.revoke({ clientId })` | `POST /oauth/grants/revoke` | `{ ok: true }` |
-| `client.sso.discover({ email, next? })` | `POST /sso/discover` | `{ sso: true, start }` or `{ sso: false }`. It takes no session |
+| `client.sso.discover({ email, next? })` | `POST /sso/discover` | `{ sso: true, connectionId, start }` or `{ sso: false }`. `start` is an absolute URL on the origin of `baseURL`, with `next` as its query. It takes no session |
 | `client.sso.startURL({ connectionId, next? })` | `GET /sso/:connectionId/start` | The URL of the start, with no request. `invalid_body` with status 0 for an id outside the segment rule |
 | `client.sso.signIn({ connectionId, next? })` | `GET /sso/:connectionId/start` | `{ url }`, after it sends the browser to the start through `navigate` |
 | `client.sso.domains.list({ organizationId })` | `GET /sso/domains` | `SsoDomainJSON[]` |

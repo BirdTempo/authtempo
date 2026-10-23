@@ -151,9 +151,9 @@ export const discoverBody = z.object({
   next: z.string().max(2048).optional(),
 });
 
-/** The answer of the discovery: the start path of the connection, or no SSO. */
+/** The answer of the discovery: the connection and its start URL on the `baseURL` origin, or no SSO. */
 const discoverAnswer = z.union([
-  z.strictObject({ sso: z.literal(true), start: z.string() }),
+  z.strictObject({ sso: z.literal(true), connectionId: z.string(), start: z.string() }),
   z.strictObject({ sso: z.literal(false) }),
 ]);
 const jsonBody = <T extends z.ZodType>(schema: T) =>

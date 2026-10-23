@@ -212,7 +212,12 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, discoverBody);
         if (!body.ok) return jsonCaller ? respond(body) : redirect(authErrorUrl(config, body.code));
-        const r = await discoverSso(config, { email: body.value.email, ip: ctx.ip });
+        // The start of a JSON answer and of the form page both carry `next`.
+        const r = await discoverSso(config, {
+          email: body.value.email,
+          next: body.value.next,
+          ip: ctx.ip,
+        });
         if (jsonCaller) return r.ok ? json(r.value) : respond(r);
         // A form: the code goes to the error page of the app, as a social failure does.
         if (!r.ok) return redirect(authErrorUrl(config, r.code));
@@ -220,10 +225,7 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
         // A page of this origin, not a 303. Chromium applies form-action to each
         // redirect after the post, so it would block the 302 of the start to the
         // IdP. A failure above goes to appURL, which is baseURL or a trusted origin.
-        const next = body.value.next;
-        const location =
-          next === undefined ? r.value.start : `${r.value.start}?next=${encodeURIComponent(next)}`;
-        return new Response(ssoContinuePage({ location, appName: config.appName }), {
+        return new Response(ssoContinuePage({ location: r.value.start, appName: config.appName }), {
           status: 200,
           headers: pageHeaders(config, noScriptPagePolicy(config)),
         });

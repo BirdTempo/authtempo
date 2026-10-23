@@ -1041,9 +1041,9 @@ async function signInSso(mapped: Mapped, request: Request, calls: Calls): Promis
     // Core's discovery first: its limiter counts each ask.
     const found = await calls.core("/sso/discover", { email: address });
     if (!found.ok) return calls.refusal(found);
-    const r = (await found.json()) as { sso: boolean; start?: string };
-    const start = r.sso && r.start ? /\/sso\/([^/]+)\/start$/.exec(r.start)?.[1] : undefined;
-    connectionId = start ?? (await samlConnectionOf(mapped, address));
+    const r = (await found.json()) as { sso: boolean; connectionId?: string };
+    connectionId =
+      (r.sso ? r.connectionId : undefined) ?? (await samlConnectionOf(mapped, address));
   } else if (typeof organizationSlug === "string") {
     const org = await storage.findOne("organization", [
       { field: "slug", op: "eq", value: organizationSlug },

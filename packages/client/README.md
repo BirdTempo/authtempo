@@ -320,7 +320,7 @@ each one answers `not_found`.
 
 | Operation | Route | Value |
 | --- | --- | --- |
-| `sso.discover({ email, next? })` | `POST /sso/discover` | `{ sso: true, start }` or `{ sso: false }` |
+| `sso.discover({ email, next? })` | `POST /sso/discover` | `{ sso: true, connectionId, start }` or `{ sso: false }`. `start` is an absolute URL on the server origin, with `next` |
 | `sso.startURL({ connectionId, next? })` | `GET /sso/:connectionId/start` | the start URL, with no request |
 | `sso.signIn({ connectionId, next? })` | `GET /sso/:connectionId/start` | `{ url }`, after `navigate` |
 | `sso.domains.list({ organizationId })` | `GET /sso/domains` | list of `SsoDomainJSON` |

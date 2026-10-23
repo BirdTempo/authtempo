@@ -749,14 +749,16 @@ export interface Client {
    */
   sso: {
     /**
-     * Finds the connection of an address: `{ sso: true, start }` when a
-     * verified domain routes it to an enabled connection, else `{ sso: false }`.
-     * Send the browser to `start` with `next` as its query.
+     * Finds the connection of an address: `{ sso: true, connectionId, start }`
+     * when a verified domain routes it to an enabled connection, else
+     * `{ sso: false }`. `start` is an absolute URL on the origin of the
+     * server, and it carries `next` when the input names it. Send the
+     * browser to `start` as it is, or pass `connectionId` to `signIn`.
      */
     discover(input: {
       email: string;
       next?: string | undefined;
-    }): Promise<ClientResult<{ sso: true; start: string } | { sso: false }>>;
+    }): Promise<ClientResult<{ sso: true; connectionId: string; start: string } | { sso: false }>>;
     /** The URL of `GET <basePath>/sso/:connectionId/start`. `invalid_body` with status 0 for an id that the router refuses. */
     startURL(input: { connectionId: string; next?: string | undefined }): ClientResult<string>;
     /** Sends the browser to the start URL through `navigate`, as `social.signIn` does. */
@@ -1711,7 +1713,10 @@ export function createClient(options: ClientOptions): Client {
     sso: {
       // JSON leaves out a key whose value is undefined, so the body names only the set fields.
       discover: (input) =>
-        send<{ sso: true; start: string } | { sso: false }>("sso.discover", input),
+        send<{ sso: true; connectionId: string; start: string } | { sso: false }>(
+          "sso.discover",
+          input,
+        ),
       startURL: ssoStartURL,
       signIn(input) {
         const url = ssoStartURL(input);

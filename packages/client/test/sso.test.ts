@@ -3,7 +3,7 @@ import { ROUTES } from "@authtempo/core/routes";
 import { describe, expect, it } from "vitest";
 import { type Client, createClient } from "../src/client.js";
 import type { ClientResult } from "../src/result.js";
-import { BASE_URL } from "./harness.js";
+import { APP_ORIGIN, BASE_URL, inProcessFetch, makeServer, tokenFromMail } from "./harness.js";
 
 /** One domain as the route answers it: a pending domain with its record. */
 const DOMAIN = {
@@ -76,8 +76,8 @@ const CASES: readonly Case[] = [
     route: "POST /sso/discover",
     url: "/auth/sso/discover",
     body: { email: "ada@acme.example", next: "/home" },
-    answer: { sso: true, start: "/auth/sso/c1/start" },
-    value: { sso: true, start: "/auth/sso/c1/start" },
+    answer: { sso: true, connectionId: "c1", start: "https://api.example.com/auth/sso/c1/start" },
+    value: { sso: true, connectionId: "c1", start: "https://api.example.com/auth/sso/c1/start" },
   },
   {
     name: "sso.domains.list",
@@ -310,5 +310,71 @@ describe("client.sso and client.scim.tokens (plan 12d Task 13)", () => {
       status: 0,
     });
     expect(went).toEqual(["https://api.example.com/auth/sso/c1/start"]);
+  });
+
+  it("discovers on a split origin: the start is a URL of the api origin, with next", async () => {
+    // The two resolvers of the domain proof read one test zone.
+    const zone = new Map<string, string[]>();
+    const dns = ["a", "b"].map((name) => ({
+      name,
+      txt: async (n: string) => zone.get(n) ?? [],
+    }));
+    const server = makeServer({ appURL: APP_ORIGIN, organizations: {}, sso: { oidc: true, dns } });
+    const sso = server.auth.api.sso;
+    if (!sso) throw new Error("sso is off");
+    // An owner makes the organization through the client, signed in by a magic link.
+    const { fetch } = inProcessFetch(server.auth);
+    const owner = createClient({ baseURL: BASE_URL, fetch });
+    if (!(await owner.magicLink.request({ email: "owner@owner.example" })).ok) throw new Error();
+    const v = await owner.magicLink.verify({
+      token: tokenFromMail(server.mail.at(-1)?.text ?? ""),
+    });
+    if (!v.ok) throw new Error(v.code);
+    const made = await owner.organizations.create({ slug: "acme", name: "Acme" });
+    if (!made.ok) throw new Error(made.code);
+    const organizationId = made.value.organization.id;
+    // The app proves the domain and routes it to an OIDC connection.
+    const actor = { kind: "app", name: "admin-page" } as const;
+    const domain = await sso.domains.add({ actor, organizationId, domain: "acme.example" });
+    if (!domain.ok || !domain.value.record) throw new Error("no domain");
+    zone.set(domain.value.record.name, [domain.value.record.value]);
+    if (!(await sso.domains.verify({ actor, id: domain.value.id })).ok) throw new Error();
+    const idp = "https://login.acme-idp.example";
+    const connection = await sso.connections.create({
+      actor,
+      organizationId,
+      kind: "oidc",
+      label: "Acme staff",
+      issuer: idp,
+      clientId: "acme-client",
+      clientSecret: "acme-secret-0123456789",
+      endpoints: {
+        authorizeUrl: `${idp}/authorize`,
+        tokenUrl: `${idp}/token`,
+        jwksUrl: `${idp}/keys`,
+      },
+    });
+    if (!connection.ok) throw new Error(connection.code);
+    const connectionId = connection.value.id;
+    const routed = await sso.domains.update({ actor, id: domain.value.id, connectionId });
+    if (!routed.ok) throw new Error(routed.code);
+
+    // A page of the app origin asks the api origin.
+    const page = createClient({ baseURL: BASE_URL, fetch: inProcessFetch(server.auth).fetch });
+    const found = await page.sso.discover({ email: "ada@acme.example", next: "/home" });
+    if (!found.ok || !found.value.sso) throw new Error("no SSO");
+    expect(found.value.connectionId).toBe(connectionId);
+    const start = new URL(found.value.start);
+    expect(start.origin).toBe(BASE_URL);
+    expect(start.origin).not.toBe(APP_ORIGIN);
+    // The answer is the start URL that the client builds for the same connection and next.
+    expect(page.sso.startURL({ connectionId, next: "/home" })).toEqual({
+      ok: true,
+      value: found.value.start,
+    });
+    // The browser goes to the start as it is, and the start sends it to the provider.
+    const go = await server.auth.handle(new Request(found.value.start));
+    expect(go.status).toBe(302);
+    expect(new URL(go.headers.get("location") ?? "").origin).toBe(idp);
   });
 });
