@@ -1021,20 +1021,22 @@ describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and
  * binding, 2026-10-24: the status, the queries, the lost rounds, the ended
  * sessions, the families ended with their marks, and the role that stays.
  * A lost round costs 5 queries. After one, a full round fits and ends a
- * page. After two or three, the next round is small (ruling 66 of plan
- * 12d): it ends no session and no family, and its pending-end row covers
- * them all, so each door refuses them at once. A PATCH lost at the member
- * delete costs more, with its undo, so a small round follows. After four
- * lost rounds no round fits, and the answer is 409 with no change.
+ * page. After two, the next round is small (ruling 66 of plan 12d): it
+ * ends no session and no family, and its pending-end row covers them all,
+ * so each door refuses them at once. A PATCH lost at the member delete
+ * costs more, with its undo, so a small round follows. After three lost
+ * rounds no round fits, and the answer is 409 with no change. Before ruling
+ * 74 item 16 that took four: the small round now reads the newest OAuth
+ * code and approved device row, 2 queries more (measured 2026-10-24).
  *
  * An address move adds `MOVE_CALLS` 7 to each guard, and a name fill
  * `NAME_CALLS` 2 (ruling 69 of plan 12d). So after one lost round at the
- * member read a move runs a small round. After two, no small round fits,
- * and the answer is 409. A move with a name fill answers 409 after one lost
- * round, so its case of two races loses one round only. A name fill alone
- * answers 409 after three. At the member delete, a deactivate with no move
- * answers 409 after two lost rounds, and a move after one. A DELETE answers
- * 409 after four at the member read. In a 409 the role is the one of the
+ * member read no small round of a move fits, and the answer is 409. A move
+ * with a name fill answers 409 after one lost round too, so each case of
+ * two races loses one round only. A name fill alone answers 409 after
+ * three. At the member delete, a deactivate with no move answers 409 after
+ * two lost rounds, and a move after one. A DELETE answers 409 after three
+ * at the member read. In a 409 the role is the one of the
  * last group write: member when it took the admin role. The deprovision
  * wrote nothing. The move of a deactivate runs after its member delete, so
  * a round lost there undoes no move. With the move first, that case made
@@ -1052,21 +1054,21 @@ describe("a deprovision that races a mapped group write on D1 (rulings 63 M2 and
  */
 const RACE_COUNTS: Record<string, [number, number, number, number, number, string | null]> = {
   "PATCH findOne/1": [200, 49, 1, 1, 2, null],
-  "PATCH findOne/2": [200, 44, 2, 0, 0, null],
-  "PATCH findOne/3": [200, 48, 3, 0, 0, null],
-  "DELETE findOne/3": [204, 47, 3, 0, 0, null],
-  "PATCH delete/1": [200, 46, 1, 0, 0, null],
+  "PATCH findOne/2": [200, 46, 2, 0, 0, null],
+  "PATCH findOne/3": [409, 23, 3, 0, 0, "member"],
+  "DELETE findOne/3": [409, 23, 3, 0, 0, "member"],
+  "PATCH delete/1": [200, 48, 1, 0, 0, null],
   "DELETE delete/1": [204, 48, 1, 4, 3, null],
   "DELETE delete/2": [204, 48, 1, 4, 3, null],
-  "PATCH findOne/4": [409, 28, 4, 0, 0, "admin"],
-  "PATCH move findOne/1": [200, 46, 1, 0, 0, null],
-  "PATCH move findOne/2": [409, 21, 2, 0, 0, "admin"],
+  "PATCH findOne/4": [409, 23, 3, 0, 0, "member"],
+  "PATCH move findOne/1": [409, 16, 1, 0, 0, "member"],
+  "PATCH move findOne/2": [409, 16, 1, 0, 0, "member"],
   "PATCH name findOne/1": [409, 16, 1, 0, 0, "member"],
   "PATCH name findOne/2": [409, 16, 1, 0, 0, "member"],
-  "DELETE findOne/4": [409, 28, 4, 0, 0, "admin"],
+  "DELETE findOne/4": [409, 23, 3, 0, 0, "member"],
   "PATCH delete/2": [409, 34, 2, 0, 0, "admin"],
   "PATCH move delete/1": [409, 24, 1, 0, 0, "member"],
-  "PATCH fill findOne/2": [200, 46, 2, 0, 0, null],
+  "PATCH fill findOne/2": [200, 48, 2, 0, 0, null],
   "PATCH fill findOne/3": [409, 23, 3, 0, 0, "member"],
 };
 
@@ -1096,13 +1098,13 @@ const GRANTED = [
 const GRANT_COUNTS: Record<string, number[][]> = {
   "PATCH findOne/1": REFUSED_FULL,
   "PATCH findOne/2": REFUSED_SMALL,
-  "PATCH findOne/3": REFUSED_SMALL,
-  "DELETE findOne/3": REFUSED_SMALL,
+  "PATCH findOne/3": GRANTED,
+  "DELETE findOne/3": GRANTED,
   "PATCH delete/1": REFUSED_SMALL,
   "DELETE delete/1": REFUSED_FULL,
   "DELETE delete/2": REFUSED_FULL,
   "PATCH findOne/4": GRANTED,
-  "PATCH move findOne/1": REFUSED_SMALL,
+  "PATCH move findOne/1": GRANTED,
   "PATCH move findOne/2": GRANTED,
   "PATCH name findOne/1": GRANTED,
   "PATCH name findOne/2": GRANTED,

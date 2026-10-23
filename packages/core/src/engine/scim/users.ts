@@ -169,12 +169,14 @@ const ROUND_TAIL = 32;
  * of plan 12d): as `ROUND_TAIL`, with `markAllAccessEnd` in place of the
  * page. Measured as `ROUND_TAIL`, 2026-10-24: a small round that began at
  * 19 calls of the meter ended the request at 44 queries, with the user in
- * the group. So the tail is 45 - 19 = 26. Two lost rounds at the member
- * read and one small round fit the budget of 50, and so do three. A fourth
- * lost round leaves no room. With a name fill a third lost round leaves no
+ * the group. So the tail was 45 - 19 = 26. The reads of the newest OAuth
+ * code and approved device row (ruling 74 item 16) add 2: the same round
+ * ended at 46, so the tail is 28. Two lost rounds at the member read and
+ * one small round fit the budget of 50, and so do three. A fourth lost
+ * round leaves no room. With a name fill a third lost round leaves no
  * room, with an address move a second, and with both the first.
  */
-const SMALL_TAIL = 26;
+const SMALL_TAIL = 28;
 
 /**
  * The calls that an address move adds to a round, full or small (ruling 69
@@ -1064,10 +1066,26 @@ export async function scimGetUser(
   return oneAnswer(config, row, groups.get(row.id) ?? [], 200, url);
 }
 
+/** True when the stored User holds an email of `type` at `email`, each with no case. */
+function hasTypedEmail(row: ScimUserRow, type: string, email: string | null): boolean {
+  const emails = Array.isArray(row.data.emails)
+    ? (row.data.emails as Record<string, unknown>[])
+    : [];
+  return emails.some(
+    (e) =>
+      typeof e.type === "string" &&
+      typeof e.value === "string" &&
+      scimKey(e.type) === scimKey(type) &&
+      normalizeEmail(e.value) === email,
+  );
+}
+
 /**
  * Lists the Users of the caller's organization (Behavior 4), by `id`, with
  * the filter of Task 9 Behavior 6 and its paging. `emails.value` compares
- * with the address of the core user.
+ * with the address of the core user. The typed form of Entra ID also needs
+ * an email of the stored User with that type and that value (ruling 60 P3
+ * of plan 12d). Both compare with no case.
  */
 export async function scimListUsers(
   config: ResolvedConfig,
@@ -1098,6 +1116,8 @@ export async function scimListUsers(
           { field: "userId", op: "eq", value: user.id },
         ])
       : [];
+    const type = "type" in filter && typeof filter.type === "string" ? filter.type : null;
+    if (type !== null) rows = rows.filter((r) => hasTypedEmail(r, type, email));
   } else {
     const where =
       filter.attr === "userName"

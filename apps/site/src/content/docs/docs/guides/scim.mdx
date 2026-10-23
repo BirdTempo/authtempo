@@ -75,7 +75,7 @@ With `scim.groups` set to `teams` or `both`, each group has one team. A group cr
 - A delete runs the deactivate, then deletes the SCIM record. The account stays: only the person deletes an account.
 - With `enforce` off, a deprovisioned person can still sign in by their own methods. A deactivated person who signs in through the connection gets [`account_disabled`](/docs/reference/errors/#account_disabled).
 
-A group write can race a deactivate. Core then runs the deactivate again, up to 5 rounds. On D1 Free, a few races in one request can still answer 409, and the person keeps access until the directory sends it again. For example, a delete answers 409 after 4 lost rounds at the member read, or after 2 at the member delete. The [routes page](/docs/reference/routes/#scim) lists each such case.
+A group write can race a deactivate. Core then runs the deactivate again, up to 5 rounds. On D1 Free, a few races in one request can still answer 409, and the person keeps access until the directory sends it again. For example, a delete answers 409 after 3 lost rounds at the member read, or after 2 at the member delete. The [routes page](/docs/reference/routes/#scim) lists each such case.
 
 A person can move the account to an address of their own. When no verified domain of the organization claims the current address, a change of the address and a reactivate answer 400 `mutability`. So the directory cannot take the account back into the domain. A deactivate and a delete still run.
 
@@ -104,12 +104,12 @@ To fix a custom extension URN, remove the custom mapping in the directory, or as
 - A PATCH with no `path`, as Entra ID and Okta send it.
 - The Group URN `http://schemas.microsoft.com/2006/11/ResourceManagement/ADSCIM/2.0/Group` of Entra ID. Core reads nothing of it.
 - The manager of Entra ID as a list of one object.
+- The email match of Entra ID: the filter `emails[type eq "work"].value eq "<address>"`.
 - A remove of a person who is not a member: 204, and nothing changes. A directory sends a removal again after a time-out.
 - After a write of a value with `primary: true`, each other value of that attribute gets `primary: false`.
 
 ### The known gaps
 
-- Entra ID can match a person with the filter `emails[type eq "work"].value eq "<address>"`. Core does not serve that filter yet, and answers `invalidFilter`. Keep the default match of Entra ID on `userName`.
 - One request changes at most 9 members of a group, from the D1 Free budget of 50 queries. Okta sends up to 1000 members in one group PATCH, and a PUT with every member. Such a request answers 400. Push smaller groups, or ask Okta support for a smaller batch.
 - A list with no filter reads every User of the organization for `totalResults`. On Postgres with 10 000 Users, it took 29.7 ms at the median and 40.6 ms at the most (10 runs, load 14, measured 2026-10-24).
 

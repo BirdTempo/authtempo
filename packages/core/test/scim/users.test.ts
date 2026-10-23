@@ -23,8 +23,9 @@ import { randomBase64Url, sha256Hex } from "../../src/primitives/crypto.js";
 import type { ScimScope } from "../../src/schema.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
 import { meterOf } from "../../src/storage/meter.js";
-import { LONG_TEST_MS } from "../helpers.js";
+import { BASE_URL, LONG_TEST_MS } from "../helpers.js";
 import {
+  approvedDevice,
   authorized,
   basicHeader,
   exchange,
@@ -1172,8 +1173,9 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
   const SCOPE = "mcp:read offline_access";
 
   /** The world with OAuth, a session.afterEnd hook (the worst page), and Ada as a SCIM User. */
-  async function oauthWorld(refreshTtlDays?: number) {
+  async function oauthWorld(refreshTtlDays?: number, extra: Partial<AuthConfig> = {}) {
     const w = await world({
+      ...extra,
       oauth: {
         resources: [RESOURCE],
         scopes: SCOPES,
@@ -1247,7 +1249,11 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
    * authorize and the exchange. The answer is the refresh token of the
    * exchange and the pending-end row.
    */
-  async function racedDeactivate(t: Awaited<ReturnType<typeof oauthWorld>>, ahead = 0) {
+  async function racedDeactivate(
+    t: Awaited<ReturnType<typeof oauthWorld>>,
+    ahead = 0,
+    ttl: number | null = null,
+  ) {
     const { w, h, token, user, id, cookie } = t;
     w.clock.advance(MINUTE);
     const clientId = await registered(h);
@@ -1275,9 +1281,14 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
           delete: async (model, where) => {
             const n = await tx.delete(model, where);
             if (model === "oauthToken" && answer === null) {
+              // With `ttl`, another instance with that refreshTtlDays runs the exchange.
+              const oauth = w.config.oauth as { refreshTtlDays: number };
+              const own = oauth.refreshTtlDays;
+              if (ttl !== null) oauth.refreshTtlDays = ttl;
               w.clock.advance(ahead);
               answer = await h.auth.handle(exchange(code, clientId, p.verifier));
               w.clock.advance(-ahead);
+              oauth.refreshTtlDays = own;
             }
             return n;
           },
@@ -1321,30 +1332,51 @@ describe("the record of a SCIM deactivate and the door of each family (ruling 56
     const [record, ...more] = await rowsOf(w, "session-end-record", user.id);
     expect(more).toEqual([]);
     const before = new Date(String(record?.data?.before)).getTime();
-    // The longest life: a refresh token of 30 days from a code of 5 minutes, then one day.
-    expect((record?.expiresAt.getTime() ?? 0) - before).toBe(31 * DAY + 5 * MINUTE);
-    w.clock.advance(before + 31 * DAY - w.clock.now().getTime());
+    // The longest life of a family on any instance (ruling 74 item 7): a refresh token of
+    // 365 days from a device code of 30 minutes, then one day.
+    expect((record?.expiresAt.getTime() ?? 0) - before).toBe(366 * DAY + 30 * MINUTE);
+    w.clock.advance(before + 366 * DAY + 29 * MINUTE - w.clock.now().getTime());
     await sweepExpired(w.config);
     expect(await rowsOf(w, "session-end-record", user.id)).toHaveLength(1);
-    w.clock.advance(6 * MINUTE);
+    w.clock.advance(2 * MINUTE);
     await sweepExpired(w.config);
     expect(await rowsOf(w, "session-end-record", user.id)).toEqual([]);
   });
 
-  it("keeps the record life of the act config when a deploy lowers it before the sweep", async () => {
-    const t = await oauthWorld(90);
+  it("keeps the record life of the act config across many sweeps when a deploy lowers it (ruling 74 item 9)", async () => {
+    // Sessions of 400 days outlive every family, so the session life of the act config holds.
+    const t = await oauthWorld(undefined, { session: { ttlDays: 400 } });
     const { w, h, user } = t;
     const { clientId, raced, row } = await racedDeactivate(t);
     const before = new Date(String(row.data?.before)).getTime();
-    // A deploy lowers refreshTtlDays to 7, and the sweep runs a day after the act.
-    (w.config.oauth as { refreshTtlDays: number }).refreshTtlDays = 7;
-    w.clock.advance(DAY);
+    // The pending-end row stores the life of the act config: 400 days, then one day.
+    expect(row.data?.recordLife).toBe(401 * DAY);
+    // A deploy lowers session.ttlDays to 30. Then a sweep runs each 10 days for 300 days.
+    (w.config.session as { ttlDays: number }).ttlDays = 30;
+    const expiries = new Set<number>();
+    for (let day = 1; day <= 300; day += 10) {
+      w.clock.advance(before + day * DAY - w.clock.now().getTime());
+      await sweepExpired(w.config);
+      const records = await rowsOf(w, "session-end-record", user.id);
+      expect(records, `day ${day}`).toHaveLength(1);
+      for (const r of records) expiries.add(r.expiresAt.getTime());
+    }
+    // Each sweep kept the one expiry from before: the life of the act config.
+    expect([...expiries]).toEqual([before + 401 * DAY]);
+    expect(await refresh(h, raced, clientId)).toBe(400);
+  });
+
+  it("covers a family of an instance with a longer refreshTtlDays (ruling 74 item 7)", async () => {
+    const t = await oauthWorld();
+    const { w, h, user } = t;
+    // The act runs with 30 days; another instance with 90 days runs the raced exchange.
+    const { clientId, raced, row } = await racedDeactivate(t, 0, 90);
+    const before = new Date(String(row.data?.before)).getTime();
+    const token = await rowOf(w, raced);
+    expect((token?.expiresAt.getTime() ?? 0) - before).toBeGreaterThan(89 * DAY);
     await sweepAll(w, user.id);
-    const [record] = await rowsOf(w, "session-end-record", user.id);
-    // The life counts from before, not from the clock of the sweep: 90 days, 5 minutes, one day.
-    expect((record?.expiresAt.getTime() ?? 0) - before).toBe(91 * DAY + 5 * MINUTE);
-    // On day 32 the family of the act config still lives, and the record still refuses it.
-    w.clock.advance(before + 32 * DAY - w.clock.now().getTime());
+    // On day 60 the family still lives, so the record still refuses it.
+    w.clock.advance(before + 60 * DAY - w.clock.now().getTime());
     await sweepExpired(w.config);
     expect(await rowsOf(w, "session-end-record", user.id)).toHaveLength(1);
     expect(await refresh(h, raced, clientId)).toBe(400);
@@ -1632,5 +1664,89 @@ describe("the credentials and the small round of a SCIM deprovision (ruling 69 o
     // The door reads the row for a session from before the user mark of the act.
     const marked = { id: ada.id, updatedAt: before };
     expect(await revokedFor(w.config, marked, ahead.session)).toBe(true);
+  });
+  const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
+
+  /**
+   * Ada with a code of the code flow and an approved device row, each not
+   * yet spent. With `ahead`, an instance whose clock runs `ahead` ms ahead
+   * writes both. Then the small round of a deprovision runs: its pending-end
+   * row, and the user write after it, as `writeChange` writes them.
+   */
+  async function smallRoundWithGrants(ahead: number) {
+    const w = await world({
+      oauth: {
+        resources: [RESOURCE],
+        scopes: SCOPES,
+        registration: { cimd: false, dynamic: true },
+        device: {},
+      },
+    });
+    await signUpAndVerify(w, ADA);
+    const ada = await userAt(w, ADA);
+    if (!ada) throw new Error("no user");
+    const h = { auth: { handle: w.handle }, config: w.config, storage: w.storage, clock: w.clock };
+    const handle = h as unknown as Handle;
+    const s = await createSession(w.config, { userId: ada.id, ip: null, userAgent: null });
+    const cookie = `__Host-tempo_session=${s.token}`;
+    const registeredRes = await w.handle(
+      new Request(`${BASE_URL}/auth/oauth/register`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          redirect_uris: [REDIRECT],
+          client_name: "Living room TV",
+          grant_types: ["authorization_code", "refresh_token", DEVICE_GRANT],
+        }),
+      }),
+    );
+    const clientId = ((await registeredRes.json()) as { client_id: string }).client_id;
+    w.clock.advance(ahead);
+    const p = await pkce();
+    const { code } = await authorized(handle, cookie, {
+      clientId,
+      challenge: p.challenge,
+      scope: "mcp:read",
+    });
+    const deviceCode = await approvedDevice(handle, clientId, cookie);
+    w.clock.advance(-ahead);
+    const before = await w.storage.transaction(async (tx) => {
+      const at = await markAllAccessEnd(tx, w.config, ada.id, meterOf(w.storage, 0), "revoked");
+      const now = Math.max(w.clock.now().getTime(), at.getTime());
+      await tx.update("user", [{ field: "id", op: "eq", value: ada.id }], {
+        updatedAt: new Date(now),
+      });
+      return at;
+    });
+    // The poll waits for the interval of the device grant.
+    w.clock.advance(6_000);
+    const exchanged = await w.handle(exchange(code, clientId, p.verifier));
+    const polled = await w.handle(
+      tokenPost({ grant_type: DEVICE_GRANT, device_code: deviceCode, client_id: clientId }),
+    );
+    const codes = await w.storage.findMany("verification", [
+      { field: "purpose", op: "eq", value: "oauth-code" },
+    ]);
+    const devices = await w.storage.findMany("oauthDevice", []);
+    return {
+      before,
+      exchanged: [exchanged.status, ((await exchanged.json()) as { error?: string }).error],
+      polled: [polled.status, ((await polled.json()) as { error?: string }).error],
+      starts: [...codes, ...devices].map((r) => r.createdAt.getTime()),
+    };
+  }
+
+  it("refuses the code exchange and the device poll of grants from before a small round (ruling 74 item 17)", async () => {
+    const r = await smallRoundWithGrants(0);
+    expect(r.exchanged).toEqual([400, "invalid_grant"]);
+    expect(r.polled).toEqual([400, "invalid_grant"]);
+  });
+
+  it("covers the newest OAuth code and device row in the before of a small round, from a clock 30 s ahead (ruling 74 item 16)", async () => {
+    const r = await smallRoundWithGrants(30_000);
+    // Both rows start past the 5 s bound of the act, and before still covers them.
+    for (const start of r.starts) expect(r.before.getTime()).toBeGreaterThanOrEqual(start);
+    expect(r.exchanged).toEqual([400, "invalid_grant"]);
+    expect(r.polled).toEqual([400, "invalid_grant"]);
   });
 });

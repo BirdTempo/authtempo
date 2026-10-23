@@ -1,7 +1,8 @@
 /**
  * The SCIM filter subset (plan 12d Task 9 Behavior 6, RFC 7644 section
  * 3.4.2.2). Filtering is OPTIONAL in RFC 7644, and core serves one `eq`
- * clause, plus the one member check that Entra ID sends. The text comes from
+ * clause, plus the one member check that Entra ID sends, and the typed
+ * email match of Entra ID (ruling 60 P3 of plan 12d). The text comes from
  * a directory, so the reader bounds its length, scans it once, and builds no
  * regular expression and no query from it. Every other text answers null, and
  * the route answers 400 `invalidFilter`.
@@ -13,7 +14,8 @@ type FilterAttr = "userName" | "externalId" | "emails.value" | "id" | "displayNa
 
 export type ScimFilter =
   | { attr: FilterAttr; value: string }
-  | { attr: "id"; value: string; member: string };
+  | { attr: "id"; value: string; member: string }
+  | { attr: "emails.value"; value: string; type: string };
 
 /**
  * The key form of a text that SCIM compares with no case: NFKC, then lower
@@ -47,6 +49,11 @@ const GROUP_ATTRS: ReadonlyMap<string, FilterAttr> = new Map([
 const LONE_SURROGATE_RE = /\p{Cs}/u;
 
 const MEMBER_ATTRS: ReadonlyMap<string, "value"> = new Map([["value", "value"]]);
+const TYPE_ATTRS: ReadonlyMap<string, "type"> = new Map([["type", "type"]]);
+
+// The text before the type clause, and between it and the value clause, in lowercase.
+const EMAILS_OPEN = "emails[";
+const EMAILS_VALUE = "].";
 
 // The text between the group clause and the member clause, in lowercase.
 const MEMBER_JOIN = " and members[";
@@ -110,6 +117,15 @@ function readEq<A extends string>(
  */
 export function parseScimFilter(text: string, resource: "User" | "Group"): ScimFilter | null {
   if (text.length === 0 || text.length > SCIM_FILTER_MAX) return null;
+  // Entra ID can match a User by its email of one type: `emails[type eq "work"].value eq "a"`.
+  if (resource === "User" && asciiLower(text.slice(0, EMAILS_OPEN.length)) === EMAILS_OPEN) {
+    const type = readEq(text, EMAILS_OPEN.length, TYPE_ATTRS);
+    if (type === null || text.slice(type.end, type.end + EMAILS_VALUE.length) !== EMAILS_VALUE)
+      return null;
+    const value = readEq(text, type.end + EMAILS_VALUE.length, MEMBER_ATTRS);
+    if (value === null || value.end !== text.length) return null;
+    return { attr: "emails.value", value: value.value, type: type.value };
+  }
   const first = readEq(text, 0, resource === "User" ? USER_ATTRS : GROUP_ATTRS);
   if (first === null) return null;
   if (first.end === text.length) return { attr: first.attr, value: first.value };

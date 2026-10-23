@@ -1,4 +1,9 @@
-import type { ResolvedConfig } from "../../config.js";
+import {
+  OAUTH_CODE_TTL_MINUTES_MAX,
+  OAUTH_DEVICE_CODE_TTL_MINUTES_MAX,
+  OAUTH_REFRESH_TTL_DAYS_MAX,
+  type ResolvedConfig,
+} from "../../config.js";
 import { sha256Hex } from "../../primitives/crypto.js";
 import { newId } from "../../primitives/ids.js";
 import type { SessionRow, VerificationRow } from "../../schema.js";
@@ -86,10 +91,12 @@ const RECORD_MARGIN_MS = DAY_MS;
  * The skew bound of `before` (ruling 58 of plan 12d): `before` is at least
  * the clock of the act plus 5 s. Another instance can write a session or a
  * family with a clock that runs ahead, also after the act read its rows.
- * Serverless hosts keep their clocks by NTP, which holds them well under
- * one second apart. On Workers the clock of a request is the time of its
- * last I/O, so it lags and never leads (Cloudflare docs, read 2026-10-22).
- * 5 s covers such skew with margin. The cost: a session or a family that
+ * On Workers, `Date.now()` returns the time of the last I/O, and it does
+ * not advance while code runs (Cloudflare docs, Workers security model,
+ * read 2026-10-24). So the clock of a request can lag, and does not run
+ * ahead inside the request. That page says nothing of the skew between
+ * hosts: 5 s is a margin that core chooses, not a fact of the page. The
+ * cost: a session or a family that
  * starts in the 5 s after the act is refused too, as one from before it.
  * A longer bound refuses more such sign-ins, so the bound stays short.
  */
@@ -103,13 +110,17 @@ export const ACCESS_END_SKEW_MS = 5_000;
  * lives as long as its newest token: `oauth.refreshTtlDays` from its write.
  * A code or a device code from before the act can make that token until it
  * expires, so its life comes on top. Then the margin.
+ *
+ * Another instance of the app can run a longer `oauth.refreshTtlDays`, and
+ * write a family that the act does not read (ruling 74 item 7 of plan 12d).
+ * So the family life is the bound of the config check, not the value of
+ * this config: 365 days, and the longest code, 30 minutes of a device code.
  */
 export function recordLife(config: ResolvedConfig): number {
   const session = config.session.ttlDays * DAY_MS;
-  const oauth = config.oauth;
-  const family = oauth
-    ? oauth.refreshTtlDays * DAY_MS +
-      Math.max(oauth.codeTtlMinutes, oauth.device?.codeTtlMinutes ?? 0) * MINUTE_MS
+  const family = config.oauth
+    ? OAUTH_REFRESH_TTL_DAYS_MAX * DAY_MS +
+      Math.max(OAUTH_CODE_TTL_MINUTES_MAX, OAUTH_DEVICE_CODE_TTL_MINUTES_MAX) * MINUTE_MS
     : 0;
   return Math.max(session, family) + RECORD_MARGIN_MS;
 }
@@ -241,9 +252,7 @@ export async function endAllAccessPage(
       ...read.map((r) => r.createdAt.getTime()),
       ...tokens.map((t) => Math.max(t.createdAt.getTime(), familyStart(t).getTime())),
     );
-    before = await writePendingEnd(tx, config, userId, reason, newest, {
-      families: rest,
-    });
+    before = await writePendingEnd(tx, config, userId, reason, newest, { families: rest });
   }
   // A sign-in that commits after the read loses its row here, with no hook (plan 9d).
   else late = await tx.delete("session", byUser);
@@ -253,10 +262,10 @@ export async function endAllAccessPage(
 
 /**
  * The calls of `markAllAccessEnd`: the challenges, the read of the refresh
- * tokens, the read of the newest session, the handoff codes, and the
- * pending-end row.
+ * tokens, the reads of the newest session, OAuth code, and approved device
+ * row, the handoff codes, and the pending-end row.
  */
-export const ACCESS_MARK_CALLS = 5;
+export const ACCESS_MARK_CALLS = 7;
 
 /**
  * The small form of `endAllAccessPage` (ruling 66 of plan 12d), in the
@@ -283,11 +292,29 @@ export async function markAllAccessEnd(
 ): Promise<Date> {
   await deleteTwoFactorChallenges(tx, userId);
   const tokens = await tx.findMany("oauthToken", [{ field: "userId", op: "eq", value: userId }]);
+  const newestOf = { sort: { field: "createdAt" as const, dir: "desc" as const }, limit: 1 };
   // The newest session only, for `before` (ruling 56 of plan 12d): the row covers the rest.
-  const newest = await tx.findMany("session", [{ field: "userId", op: "eq", value: userId }], {
-    sort: { field: "createdAt", dir: "desc" },
-    limit: 1,
-  });
+  const newest = await tx.findMany(
+    "session",
+    [{ field: "userId", op: "eq", value: userId }],
+    newestOf,
+  );
+  // The newest OAuth code and approved device row too (ruling 74 item 16 of plan 12d). They
+  // stay, and the exchange and the poll refuse one that started at or before `before`. So
+  // `before` covers one that an instance with a clock ahead wrote.
+  const code = await tx.findMany(
+    "verification",
+    [
+      { field: "purpose", op: "eq", value: "oauth-code" },
+      { field: "identifier", op: "eq", value: userId },
+    ],
+    newestOf,
+  );
+  const device = await tx.findMany(
+    "oauthDevice",
+    [{ field: "userId", op: "eq", value: userId }],
+    newestOf,
+  );
   await deleteHandoffCodes(tx, userId);
   const before = await writePendingEnd(
     tx,
@@ -295,7 +322,7 @@ export async function markAllAccessEnd(
     userId,
     reason,
     Math.max(
-      ...newest.map((r) => r.createdAt.getTime()),
+      ...[...newest, ...code, ...device].map((r) => r.createdAt.getTime()),
       ...tokens.map((t) => Math.max(t.createdAt.getTime(), familyStart(t).getTime())),
     ),
     { families: [...new Set(tokens.map((t) => t.familyId))] },

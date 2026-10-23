@@ -163,6 +163,24 @@ describe("the Entra ID sequence (plan 12d Task 12)", () => {
     expectStatus(gone, 404);
   });
 
+  it("matches the User of the page by its work email (ruling 60 P3 of plan 12d)", async () => {
+    const w = await entraWorld();
+    const id = await createdUser(w);
+    // The work email of the page's Create User body.
+    const work = CREATED.emails[0]?.value ?? "";
+    const find = async (type: string, value: string) => {
+      const filter = `emails[type eq "${type}"].value eq "${value}"`;
+      const r = await scim(w, w.token, "GET", `/Users?filter=${encodeURIComponent(filter)}`);
+      expect(r.status, filter).toBe(200);
+      return ((await r.json()) as { Resources: { id: string }[] }).Resources.map((x) => x.id);
+    };
+    expect(await find("work", work)).toEqual([id]);
+    // The type and the address compare with no case.
+    expect(await find("Work", work.toUpperCase())).toEqual([id]);
+    expect(await find("home", work)).toEqual([]);
+    expect(await find("work", "someone@testuser.com")).toEqual([]);
+  });
+
   it("replays the group requests of the page in the order of its flow", async () => {
     const w = await entraWorld();
     const userId = await createdUser(w);

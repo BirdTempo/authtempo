@@ -2468,11 +2468,25 @@ function resolveDevice(input: unknown): ResolvedOAuth["device"] {
   if (typeof interval !== "number")
     throw new ConfigError("oauth.device.interval must be an integer from 5 to 60");
   return {
-    codeTtlMinutes: integerIn("oauth.device.codeTtlMinutes", ttl, 1, 30),
+    codeTtlMinutes: integerIn(
+      "oauth.device.codeTtlMinutes",
+      ttl,
+      1,
+      OAUTH_DEVICE_CODE_TTL_MINUTES_MAX,
+    ),
     // RFC 8628 section 3.2: a client with no interval polls every 5 seconds, so no shorter value.
     interval: integerIn("oauth.device.interval", interval, 5, 60),
   };
 }
+
+/**
+ * The bounds of the OAuth lives. The record of a SCIM deactivate lives past
+ * the longest family that any instance can write, so it reads these bounds
+ * (ruling 74 item 7 of plan 12d).
+ */
+export const OAUTH_REFRESH_TTL_DAYS_MAX = 365;
+export const OAUTH_CODE_TTL_MINUTES_MAX = 10;
+export const OAUTH_DEVICE_CODE_TTL_MINUTES_MAX = 30;
 
 function integerIn(path: string, value: number, min: number, max: number): number {
   if (!Number.isSafeInteger(value) || value < min || value > max)
@@ -2594,8 +2608,18 @@ function resolveOAuth(
       1,
       60,
     ),
-    refreshTtlDays: integerIn("oauth.refreshTtlDays", input.refreshTtlDays ?? 30, 1, 365),
-    codeTtlMinutes: integerIn("oauth.codeTtlMinutes", input.codeTtlMinutes ?? 5, 1, 10),
+    refreshTtlDays: integerIn(
+      "oauth.refreshTtlDays",
+      input.refreshTtlDays ?? 30,
+      1,
+      OAUTH_REFRESH_TTL_DAYS_MAX,
+    ),
+    codeTtlMinutes: integerIn(
+      "oauth.codeTtlMinutes",
+      input.codeTtlMinutes ?? 5,
+      1,
+      OAUTH_CODE_TTL_MINUTES_MAX,
+    ),
     introspection: resolveIntrospection(input.introspection, resources as string[]),
     dpop: resolveDpop(input.dpop),
     signInURL: resolveSignInURL(input.signInURL, origins),

@@ -53,7 +53,7 @@ The ban runs one transaction. It writes the ban fields, and ends these rows of t
 - the impersonation sessions that the user opened as an operator, as many as fit the call;
 - the sessions of the user, as many as fit the call.
 
-The whole call fits 50 storage calls, the limit of one D1 Free run. The sessions and the impersonation sessions that do not fit stay, with one pending-end row. The sweep ends them. Until then, every door refuses them: the session read, the session JWT mint, and `api.jwt.sessionLive`. [The ban](/docs/guides/operator-tools/#the-ban) gives the counts of a test on D1.
+The whole call fits 50 storage calls, the limit of one D1 Free run. The sessions and the impersonation sessions that do not fit stay, with one pending-end row. The sweep ends them. Until then, every door refuses them: the session read, the session JWT mint, and `api.jwt.sessionLive`. That row also refuses a session or an OAuth refresh family that starts in the 5 seconds after the ban. The bound covers a server whose clock runs ahead. [The ban](/docs/guides/operator-tools/#the-ban) gives the counts of a test on D1.
 
 ## What lives to its exp
 
