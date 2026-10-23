@@ -276,17 +276,19 @@ interface RoleLoss {
 /**
  * The fixed calls of a member write before its transaction, at the worst
  * (ruling 63 of plan 12f). Through the route: the impersonation step of
- * the router, the route limiter, and `resolveSession` (5, with the
- * pending-end read of ruling 50 and the session-cap read of ruling 44 of
- * plan 12d). Then the
- * standing of the caller (3): the organization, and the organization and
- * member row of `membership`. Then the target's `membership` (2), and its
- * user (1). The reads of the role rows (plan 12k) and the ready check of
- * the storage come on top. `roleLossOf` takes the count of the role reads
- * that ran. The D1 test `operator-loss-budget.test.ts` counts the whole
- * invocation on the binding. At 10, a removal with a due refresh sent 51
- * queries, and 52 with `sso.saml` on (run of 2026-10-22). So 10 left out
- * the refresh and the session-cap read, and 12 holds them.
+ * the router (1) and `resolveSession` (5, with the pending-end read of
+ * ruling 50 and the session-cap read of ruling 44 of plan 12d). The member
+ * routes have no limiter. Then the standing of the caller (3): the
+ * organization, and the organization and member row of `membership`. Then
+ * the target's `membership` (2), and its user (1). The sum is 12. The
+ * reads of the role rows (plan 12k) and the ready check of the storage
+ * come on top. `roleLossOf` takes the count of the role reads that ran.
+ * The D1 test `operator-loss-budget.test.ts` counts the whole invocation
+ * on the binding. At 10, a removal with a due refresh sent 51 queries, and
+ * 52 with `sso.saml` on (run of 2026-10-22). So 10 left out the refresh
+ * and the session-cap read, and 12 holds them. A log of the statements of
+ * that removal on 2026-10-24 showed these 12 before the user hold, after
+ * the ready check (ruling 74 item 4 of plan 12d).
  */
 const MEMBER_WRITE_CALLS_BEFORE = 12;
 
