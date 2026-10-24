@@ -5,7 +5,11 @@ export interface VerifyIdTokenInput {
   token: string;
   jwksUrl: string;
   issuer: string | string[];
-  audience: string;
+  /**
+   * The client ids that the token may name in `aud`. A list holds the web
+   * client id and the ids of the app's native clients (plan 12i Task 10).
+   */
+  audience: string | string[];
   /** The engine clock, so a test can move time and a token can expire. */
   now: Date;
   /**

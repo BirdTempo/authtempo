@@ -423,11 +423,12 @@ describe("session create hooks (plan 9d)", () => {
     ).toHaveLength(1);
     // The after hook too: each flow passes its via to sessionOpened after its commit.
     // A social sign-in also passes its provider (plan 12h Task 5) and its
-    // state payload (plan 12i Task 19).
+    // state payload (plan 12i Task 19). The callback and the ID-token route
+    // share one sign-in, which names the provider of its input (plan 12i Task 10).
     const opened = (file: string, via: string) =>
       read(file).match(
         new RegExp(
-          `sessionOpened\\([^;]*?"${via}"(?:, provider\\.name(?:, stateData)?)?,?\\s*\\)`,
+          `sessionOpened\\([^;]*?"${via}"(?:, (?:provider\\.name|input\\.provider)(?:, stateData)?)?,?\\s*\\)`,
           "g",
         ),
       )?.length ?? 0;

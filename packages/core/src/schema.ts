@@ -219,8 +219,11 @@ export type VerificationPurpose =
   | "id-token-nonce"
   /**
    * A spent ID token (plan 12i). The identifier is the provider name. The
-   * valueHash is the SHA-256 hex of the token. The row lives until the
-   * token's `exp`, so a replay fails while the token is valid.
+   * valueHash is the SHA-256 hex of `id-token-used:<provider>:<payload>`,
+   * with the payload part of the token in the canonical base64url. A hash
+   * of the token text would miss a copy with other spare bits (Task 10).
+   * The row lives until the token's `exp`, so a replay fails while the
+   * token is valid.
    */
   | "id-token-used"
   /**

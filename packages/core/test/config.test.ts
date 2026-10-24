@@ -147,7 +147,7 @@ describe("social config", () => {
     // Compat reads the list (plan 12i), so a preset missing from it gets the wrong refusal there.
     // The type names no key by hand, so a new preset key fails the type check until it is here.
     const presets: Required<
-      Omit<NonNullable<AuthConfig["social"]>, "oidc" | "oauth2" | "fetch" | "stateData">
+      Omit<NonNullable<AuthConfig["social"]>, "oidc" | "oauth2" | "fetch" | "stateData" | "idToken">
     > = {
       google: { clientId: "g", clientSecret: "s" },
       apple: { clientId: "com.x.web", teamId: "T", keyId: "K", privateKey: "pem" },

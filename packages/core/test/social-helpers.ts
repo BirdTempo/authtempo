@@ -29,7 +29,8 @@ export function fakeJwt(tokens: Record<string, FakeIdToken>): JwtSeam {
     async verifyIdToken(input) {
       const t = tokens[input.token];
       const issuers = Array.isArray(input.issuer) ? input.issuer : [input.issuer];
-      if (!t || t.audience !== input.audience || !issuers.includes(t.issuer)) {
+      const audiences = Array.isArray(input.audience) ? input.audience : [input.audience];
+      if (!t || !audiences.includes(t.audience) || !issuers.includes(t.issuer)) {
         throw new Error("fake jwt: verify failed");
       }
       return t.claims;

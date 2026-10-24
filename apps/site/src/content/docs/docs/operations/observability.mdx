@@ -183,6 +183,7 @@ With no sink, core writes each line of this table with `console`, with the text 
 | `authtempo: social token answer refused` | `social.token_refused` | Act when it repeats. The token answer of a provider said that the exchange failed, for example Slack's `ok: false`. |
 | `authtempo: social id token rejected` | `social.id_token_rejected` | Watch. The ID token of a provider did not verify. |
 | `authtempo: social nonce mismatch` | `social.nonce_mismatch` | Watch. The nonce of an ID token did not match the request. |
+| `authtempo: social id token used again` | `social.id_token_replayed` | Watch. A token of the ID-token route came a second time. A rise can mean that a token leaked from an app. |
 | `authtempo: social id token claims refused` | `social.claims_refused` | Watch. An ID token failed the issuer or claim check of its provider, for example a token of another Entra ID tenant. |
 | `authtempo: social user info failed` | `social.user_info_failed` | Watch. The user info request to a provider failed. |
 | `authtempo: social user info has a bad subject` | `social.bad_subject` | Watch. The user info of a provider held a subject that core refuses. |

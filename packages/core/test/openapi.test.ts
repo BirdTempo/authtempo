@@ -97,7 +97,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12i Task 2 adds GET /username/available and POST /user/username.
     // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
     // Plan 12i Task 11 adds the three multi-session routes.
-    expect(keys.length).toBe(199);
+    // Plan 12i Task 10 adds the nonce and the sign-in of the ID-token route.
+    expect(keys.length).toBe(201);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -200,8 +201,9 @@ describe("openApiDocument (plan 11g)", () => {
     // options bodies: 102. Plan 12i Task 2 adds the body of POST
     // /user/username: 103. Plan 12i Task 5 adds the five phone bodies: 108.
     // Plan 12i Task 6 adds the two anonymous bodies: 110. Plan 12i Task 11
-    // adds the bodies of the multi-session switch and sign-out: 112.
-    expect(bodies.length).toBe(112);
+    // adds the bodies of the multi-session switch and sign-out: 112. Plan 12i
+    // Task 10 adds the bodies of the ID-token nonce and sign-in: 114.
+    expect(bodies.length).toBe(114);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -445,8 +447,9 @@ describe("openApiDocument (plan 11g)", () => {
     // of the set, and the query of the check. Plan 12i Task 5 adds the 5
     // answers and the 5 bodies of the phone routes. Plan 12i Task 6 adds the
     // 2 answers and the 2 bodies of the anonymous routes. Plan 12i Task 11
-    // adds the 3 answers and the 2 bodies of the multi-session routes.
-    expect([answers, bodies, queries]).toEqual([149, 112, 32]);
+    // adds the 3 answers and the 2 bodies of the multi-session routes. Plan
+    // 12i Task 10 adds the 2 answers and the 2 bodies of the ID-token route.
+    expect([answers, bodies, queries]).toEqual([151, 114, 32]);
   });
 
   it("takes the request_id form of the authorize query", () => {
@@ -488,7 +491,8 @@ describe("openApiDocument (plan 11g)", () => {
 
   it("holds each provider path to the name rule", () => {
     const paths = Object.entries(reference().paths).filter(([p]) => p.includes("{provider}"));
-    expect(paths.length).toBe(3);
+    // The start, the link, the callback, and the two of the ID-token route (plan 12i Task 10).
+    expect(paths.length).toBe(5);
     for (const [path, item] of paths)
       for (const op of Object.values(item)) {
         const param = op.parameters?.find((p) => p.in === "path");

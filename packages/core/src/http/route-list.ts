@@ -11,7 +11,7 @@ import type { ErrorCode, OAuthErrorCode, ScimType } from "../errors.js";
  * reads it, and the route list test holds it to the entries. Plan 12h adds
  * `health` and `readiness`, the probes of a host. Plan 12i adds
  * `passkeyRelatedOrigins`, the document of WebAuthn Level 3,
- * `username`, `phone`, `anonymous`, and `multiSession`.
+ * `username`, `phone`, `anonymous`, `multiSession`, and `socialIdToken`.
  */
 export const ROUTE_FEATURES = [
   "session",
@@ -47,6 +47,7 @@ export const ROUTE_FEATURES = [
   "phone",
   "anonymous",
   "multiSession",
+  "socialIdToken",
 ] as const;
 export type RouteFeature = (typeof ROUTE_FEATURES)[number];
 
@@ -93,6 +94,8 @@ export interface RouteEntry {
    * `username` (plan 12i) needs `username`. `phone` (plan 12i) needs `phone`.
    * `anonymous` (plan 12i Task 6) needs `anonymous`.
    * `multiSession` (plan 12i) needs `multiSession`.
+   * `socialIdToken` (plan 12i Task 10) needs `google` or `apple`, and
+   * `social.idToken` not false. Its two routes exist for those two only.
    */
   readonly feature: RouteFeature;
   /** The credentials that the route takes. More than one means any one of them. */
@@ -513,6 +516,36 @@ export const ROUTES = Object.freeze([
     ],
     oauthCodes: [],
     crossSiteForm: true,
+  },
+  // Plan 12i Task 10: the ID-token route of google and apple (spec 32 item 10).
+  {
+    method: "POST",
+    path: "/social/:provider/id-token/nonce",
+    feature: "socialIdToken",
+    auth: ["none"],
+    codes: ["invalid_body", "rate_limited"],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/social/:provider/id-token",
+    feature: "socialIdToken",
+    auth: ["none"],
+    codes: [
+      "invalid_body",
+      "invalid_token",
+      "rate_limited",
+      "oauth_failed",
+      "email_required",
+      "email_taken_unverified",
+      "sign_up_closed",
+      "hook_refused",
+      "hook_failed",
+      "conflict",
+      "account_banned",
+      "sso_required",
+    ],
+    oauthCodes: [],
   },
   {
     method: "POST",

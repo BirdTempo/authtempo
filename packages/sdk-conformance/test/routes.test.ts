@@ -91,6 +91,19 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     reason:
       "the client calls of multi-session come with plan 12i Task 15, the client over every addition",
   },
+  // Plan 12i Task 10: Task 15 adds the client calls of the ID-token route and removes these two rows.
+  {
+    method: "POST",
+    path: "/social/:provider/id-token/nonce",
+    reason:
+      "the client calls of the ID-token route come with plan 12i Task 15, the client over every addition",
+  },
+  {
+    method: "POST",
+    path: "/social/:provider/id-token",
+    reason:
+      "the client calls of the ID-token route come with plan 12i Task 15, the client over every addition",
+  },
   {
     method: "POST",
     path: "/operator/keys/rotate",

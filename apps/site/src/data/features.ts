@@ -23,8 +23,8 @@ export interface Feature {
  * `operatorSso`, and `scim`. Plan 12d Task 13 points `sso` to the SSO guide,
  * `operatorSso` to the override section of that guide, and `scim` to the
  * SCIM guide. Plan 12i adds `passkeyRelatedOrigins`, the 29th,
- * `username`, the 30th, `phone`, the 31st, `anonymous`, the 32nd, and
- * `multiSession`, the 33rd. A Record over
+ * `username`, the 30th, `phone`, the 31st, `anonymous`, the 32nd,
+ * `multiSession`, the 33rd, and `socialIdToken`, the 34th. A Record over
  * the union fails the site's typecheck when core adds a member, so a new
  * feature cannot
  * ship without its row. Each line restates the description of its guide.
@@ -251,6 +251,12 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "The sessions of several users in one browser, with a switch and a sign-out of one.",
     icon: "session",
     guide: "/docs/reference/routes/#multi-session",
+  },
+  socialIdToken: {
+    title: "ID-token sign-in",
+    line: "Google One Tap and the native Apple sheet, with a nonce of one use and one sign-in per token.",
+    icon: "routes",
+    guide: "/docs/reference/routes/#post-social-provider-id-token",
   },
 };
 

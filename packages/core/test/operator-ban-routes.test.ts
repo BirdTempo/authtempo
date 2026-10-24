@@ -42,6 +42,8 @@ const BAN_ROUTES = [
   "POST /passkey/authenticate/verify",
   "GET /social/:provider/callback",
   "POST /social/apple/callback",
+  // Plan 12i Task 10: the ID-token route opens a session through the social resolution.
+  "POST /social/:provider/id-token",
   "POST /handoff/redeem",
   "POST /totp/verify",
   "POST /totp/challenge",

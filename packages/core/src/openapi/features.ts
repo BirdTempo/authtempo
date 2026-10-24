@@ -40,6 +40,7 @@ export const FEATURE_INFO: Record<RouteFeature, { configKey: string; default: "o
   phone: { configKey: "phone", default: "off" },
   anonymous: { configKey: "anonymous", default: "off" },
   multiSession: { configKey: "multiSession", default: "off" },
+  socialIdToken: { configKey: "social.google or social.apple", default: "off" },
 };
 
 const FEATURE_OF: ReadonlyMap<string, RouteFeature> = new Map(

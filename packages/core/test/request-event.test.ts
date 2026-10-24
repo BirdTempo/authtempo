@@ -114,6 +114,12 @@ const FAILING: Readonly<
     provider: "apple",
     make: async () => formPost("/auth/social/apple/callback", { code: "c1", state: "nope" }),
   },
+  // No nonce with requireNonce on: invalid_token (plan 12i Task 10).
+  "POST /social/:provider/id-token": {
+    via: "social",
+    provider: "google",
+    make: async () => post("/auth/social/google/id-token", { idToken: "a.b.c" }),
+  },
   // A state that no start wrote: the step `state` answers sso_failed (plan 12d).
   "GET /sso/:connectionId/callback": {
     via: "sso",

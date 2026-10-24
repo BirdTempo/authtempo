@@ -27,6 +27,8 @@ const credential = { id: "x", response: { clientDataJSON: "x" } };
 const BODIES: Readonly<Record<string, unknown>> = {
   "/handoff/redeem": { code: "x", verifier: "v".repeat(43) },
   "/identities/unlink": { id: "x" },
+  // The ID-token sign-in of plan 12i Task 10 needs a token; it reads no session.
+  "/social/:provider/id-token": { idToken: "a.b.c", nonce: "A".repeat(43) },
   "/magic-link/request": { email: EMAIL },
   "/oauth/grants/revoke": { clientId: "x" },
   "/organizations/active": { organizationId: null },

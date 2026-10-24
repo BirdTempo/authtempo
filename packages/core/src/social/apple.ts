@@ -7,6 +7,12 @@ export interface AppleConfig extends RedirectOverride {
   keyId: string;
   /** PKCS#8 PEM of the Sign in with Apple key. Rotate it in the developer portal; this config is the only copy. */
   privateKey: string;
+  /**
+   * The other client ids that an ID token of the ID-token route may name
+   * in `aud`: the bundle id of each native app (plan 12i Task 10). 1 to 10
+   * entries. The redirect flow takes `clientId` only.
+   */
+  audiences?: string[];
 }
 
 const APPLE_AUDIENCE = "https://appleid.apple.com";
@@ -43,6 +49,12 @@ export function appleProvider(c: AppleConfig): OidcProvider {
         },
       });
     },
+    // Apple's nonce claim holds the value that the app passed to the sheet
+    // (plan 12i Task 10, open point 3). Apple names no form, so an app may
+    // pass the raw nonce or its SHA-256 hex, as Better Auth's
+    // `exact-or-sha256` takes. The id_token page says the claim is "present
+    // only if you pass it in the authorization request" (read 2026-10-25).
+    idToken: { audiences: c.audiences ?? [], nonceForm: "raw-or-sha256" },
     profile(claims, extra) {
       const verified = claims.email_verified;
       return {

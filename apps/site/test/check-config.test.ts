@@ -42,7 +42,11 @@ describe("checkConfig", () => {
     // anonymous.isolateLimiter.
     // Plan 12i Task 11 adds multiSession and multiSession.max.
     // Plan 12i Task 7 adds hooks.anonymous.
-    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1);
+    // Plan 12i Task 10 adds social.idToken, social.idToken.requireNonce, and
+    // audiences on social.google and social.apple.
+    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4);
+    expect(keys).toContain("social.idToken.requireNonce");
+    expect(keys).toContain("social.apple.audiences");
     expect(keys).toContain("multiSession.max");
     expect(keys).toContain("passkey.extensions.largeBlob");
     expect(keys).toContain("social.oauth2[].tokenRequest");

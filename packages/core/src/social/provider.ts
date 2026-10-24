@@ -83,6 +83,24 @@ export interface SocialProfile {
   emailVerified: boolean;
   name: string | null;
   image: string | null;
+  /**
+   * True when `name` is the client's word, not a claim of the provider
+   * (plan 12i Task 10): the name that Apple's native sheet gives the app.
+   * Such a name fills a new user only, never an existing user.
+   */
+  nameOnCreate?: true;
+}
+
+/**
+ * The ID-token route of a provider (plan 12i Task 10, spec 32 item 10).
+ * `audiences` are the client ids beside `clientId` that a token may name,
+ * such as an iOS bundle id or an Android client id. `nonceForm` is the
+ * form of the `nonce` claim: the raw nonce, or the raw nonce or the
+ * lowercase SHA-256 hex of it.
+ */
+export interface IdTokenRoute {
+  audiences: readonly string[];
+  nonceForm: "raw" | "raw-or-sha256";
 }
 
 export interface CallbackExtra {
@@ -163,6 +181,8 @@ export interface OidcProvider extends ProviderBase {
    */
   checkClaims?(claims: Record<string, unknown>): boolean;
   profile(claims: Record<string, unknown>, extra: CallbackExtra): SocialProfile;
+  /** Set on `google` and `apple` only: the provider serves the ID-token route (plan 12i Task 10). */
+  idToken?: IdTokenRoute;
 }
 
 /**

@@ -107,14 +107,18 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.fetch` | fetch | the global fetch | The fetch of every provider call. Tests inject one. |
 | `social.stateData` | object or `false` | `false` | The app payload through the social flow. The start and the link start take `data`, and the hooks get `stateData`. [Carry app data through a social sign-in](/docs/guides/social-state-data/). |
 | `social.stateData.maxBytes` | number | `1024` | 1 to 1024. The most UTF-8 bytes of the JSON of `data`. |
+| `social.idToken` | object or `false` | on with `social.google` or `social.apple` | The ID-token route of Google One Tap and Apple's native sheet: `POST /social/<provider>/id-token/nonce` and `POST /social/<provider>/id-token`. `false` removes both routes. |
+| `social.idToken.requireNonce` | boolean | `true` | A sign-in needs a nonce of the nonce route, and the token must carry it. Google's nonce is compared raw. Apple's nonce is compared raw or as its SHA-256 hex. |
 | `social.google.clientId` | string | required | The client id of the Google OAuth client. |
 | `social.google.clientSecret` | string | required | Core sends it in the token request body. |
 | `social.google.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.google.audiences` | string list | none | 1 to 10 other client ids, such as an Android or an iOS client id, that a token of the ID-token route may name in `aud`. The redirect flow takes `clientId` only. |
 | `social.apple.clientId` | string | required | The Services ID, such as `com.example.web`. |
 | `social.apple.teamId` | string | required | The team id of the Apple developer account. |
 | `social.apple.keyId` | string | required | The id of the Sign in with Apple key. |
 | `social.apple.privateKey` | string | required | The PKCS#8 PEM of the key. Core signs a client secret of five minutes for each exchange. |
 | `social.apple.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
+| `social.apple.audiences` | string list | none | 1 to 10 bundle ids of the native apps that a token of the ID-token route may name in `aud`. The redirect flow takes `clientId` only. |
 | `social.github.clientId` | string | required | The client id of the GitHub OAuth app. |
 | `social.github.clientSecret` | string | required | The client secret of the GitHub OAuth app. |
 | `social.github.redirectURI` | string | `<baseURL><basePath>/social/github/callback` | The callback URL that the provider has registered, for an app that cannot register the default. An `https:` URL in the normal form, on the origin of an entry of `baseURL`, with a path under `basePath`, and no query or fragment. Not the path of a route of core, nor of another provider. Core sends its path on the request's entry as `redirect_uri` and serves its path as the callback. Each preset and list entry takes this key. |

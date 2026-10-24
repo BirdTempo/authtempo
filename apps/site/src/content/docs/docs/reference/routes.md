@@ -286,6 +286,24 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | Answer | The same as the GET callback. A cross-site post carries no trust cookie, so a user with the second factor on goes to the challenge page, which offers the trusted device |
 | Errors | [`oauth_denied`](/docs/reference/errors/#oauth_denied), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`email_mismatch`](/docs/reference/errors/#email_mismatch), [`identity_taken`](/docs/reference/errors/#identity_taken), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
+<h3 id="post-social-provider-id-token-nonce"><code>POST /social/:provider/id-token/nonce</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. The route exists for `google` and `apple`, while `social.idToken` is not `false` |
+| Input | JSON `{}` |
+| Answer | `{ nonce, expiresAt }`. The nonce is 32 random bytes as base64url, and it lives 5 minutes. Core stores only its SHA-256 hex. Pass the nonce to Google One Tap as `nonce`. Pass it to Apple's sheet as is, or as its SHA-256 hex |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited) |
+
+<h3 id="post-social-provider-id-token"><code>POST /social/:provider/id-token</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. The route exists for `google` and `apple`, while `social.idToken` is not `false`. The Origin check applies, so core takes no form post of One Tap's redirect mode |
+| Input | JSON `{ idToken, nonce?, name?, next?, trustDevice? }`. `nonce` is the value of the nonce route, needed while `social.idToken.requireNonce` is on. `name` is the name that Apple's native sheet gives the app; it fills a new Apple user only |
+| Answer | `{ token, user, session, via? }` with the session cookie, or `{ twoFactor }` with no cookie for a user with the second factor on. The nonce is spent once. The token must verify against the provider's key set, with RS256 or ES256, the provider's issuer, one `aud` of `clientId` and `audiences`, an `exp` not past, an `iat` at most 60 seconds ahead, and a life of at most one day. Each token signs in once, on every instance. The account rules and the gate are those of the callback. A live anonymous session of the request is replaced |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
+
 ## Passkeys
 
 These routes exist when the config sets `passkey`.

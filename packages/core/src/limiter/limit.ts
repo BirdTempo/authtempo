@@ -107,6 +107,9 @@ export const LIMIT_FAMILIES = Object.freeze([
   "anonymous-delete:user",
   // Plan 12i Task 11: the multi-session routes.
   "multi-session:ip",
+  // Plan 12i Task 10: the ID-token nonce and the ID-token sign-in.
+  "id-token-nonce:ip",
+  "id-token:ip",
 ] as const);
 
 export type LimitFamily = (typeof LIMIT_FAMILIES)[number];

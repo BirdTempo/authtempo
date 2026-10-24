@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { type AuthConfig, resolveConfig } from "../src/config.js";
+import { ID_TOKEN_PROVIDERS } from "../src/engine/id-token.js";
 import { routeKeyOf } from "../src/http/route-key.js";
 import {
   ROUTE_FEATURES,
@@ -36,7 +37,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   "multi-session": ["multiSession"],
   identities: ["account"],
   "magic-link": ["magicLink"],
-  social: ["social"],
+  social: ["social", "socialIdToken"],
   passkeys: ["passkey", "passkeyRelatedOrigins"],
   password: ["password"],
   totp: ["totp"],
@@ -80,7 +81,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12i Task 2 adds GET /username/available and POST /user/username.
     // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
     // Plan 12i Task 11 adds the three multi-session routes.
-    expect(listed.length).toBe(199);
+    // Plan 12i Task 10 adds the nonce and the sign-in of the ID-token route.
+    expect(listed.length).toBe(201);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -122,7 +124,20 @@ describe("ROUTES (plan 11a)", () => {
     features: RouteFeature[];
     off?: true;
   }[] = [
-    { name: "social", delta: { social: SOCIAL }, features: ["social"] },
+    { name: "social", delta: { social: SOCIAL }, features: ["social", "socialIdToken"] },
+    // Plan 12i Task 10: social.idToken false keeps the redirect flow and drops the ID-token route.
+    {
+      name: "social without the ID-token route",
+      delta: { social: { ...SOCIAL, idToken: false } },
+      features: ["social"],
+    },
+    {
+      name: "social.idToken false",
+      start: { social: SOCIAL },
+      delta: { social: { ...SOCIAL, idToken: false } },
+      features: ["socialIdToken"],
+      off: true,
+    },
     {
       name: "passkey",
       delta: { passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] } },
@@ -356,7 +371,14 @@ describe("the entry fields and the module tie (plan 11g)", () => {
     const providers = everyFeature().social.providers.length;
     for (const key of entries.keys()) {
       const template = key.includes("/:provider/");
-      const want = !template ? 1 : key.endsWith("/callback") ? providers - 1 : providers;
+      // The ID-token route serves google and apple only (plan 12i Task 10).
+      const want = !template
+        ? 1
+        : key.includes("/:provider/id-token")
+          ? ID_TOKEN_PROVIDERS.length
+          : key.endsWith("/callback")
+            ? providers - 1
+            : providers;
       const got = mounted.get(key) ?? 0;
       expect(got, `${key} is the key of ${got} routes, not ${want}`).toBe(want);
     }

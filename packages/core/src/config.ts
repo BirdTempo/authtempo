@@ -388,6 +388,14 @@ export interface AuthConfig {
      * decision. Default false: a start with `data` answers `invalid_body`.
      */
     stateData?: { maxBytes?: number } | false;
+    /**
+     * The ID-token route of `google` and `apple` (plan 12i Task 10): Google
+     * One Tap and Apple's native sheet give the app an ID token, and the
+     * app posts it to `POST /social/<provider>/id-token`. On while `google`
+     * or `apple` is set; false turns it off. `requireNonce` (default true)
+     * refuses a token with no nonce of `POST /social/<provider>/id-token/nonce`.
+     */
+    idToken?: { requireNonce?: boolean } | false;
   };
   /** The ID token verifier and the Apple secret signer. Default: jose. Tests inject a fake. */
   jwt?: JwtSeam;
@@ -1330,6 +1338,8 @@ export interface ResolvedConfig {
     fetch: typeof fetch;
     /** Null while `social.stateData` is off. */
     stateData: { maxBytes: number } | null;
+    /** Null while `social.idToken` is false (plan 12i Task 10). */
+    idToken: { requireNonce: boolean } | null;
   };
   jwt: JwtSeam;
   passkey: ResolvedPasskey | null;
@@ -1913,7 +1923,12 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       linkBuilder: input.magicLink?.linkBuilder ?? defaultMagicLink(baseURL, basePath),
       confirmPage: input.magicLink?.confirmPage ?? defaultConfirmPage,
     },
-    social: { providers, fetch: fetchFn, stateData: resolveStateData(input.social?.stateData) },
+    social: {
+      providers,
+      fetch: fetchFn,
+      stateData: resolveStateData(input.social?.stateData),
+      idToken: resolveIdToken(input.social?.idToken),
+    },
     jwt: input.jwt ?? createJoseJwtSeam(fetchFn),
     passkey,
     webauthn: input.webauthn ?? createSimpleWebAuthnSeam(),
@@ -3768,6 +3783,45 @@ function resolveStateData(
   return { maxBytes };
 }
 
+/** The most entries of `audiences` on `google` and `apple` (plan 12i Task 10). */
+export const ID_TOKEN_AUDIENCES_MAX = 10;
+/** The longest audience: a client id of Google or a bundle id of Apple is far shorter. */
+const AUDIENCE_MAX = 255;
+
+function resolveIdToken(
+  input: NonNullable<AuthConfig["social"]>["idToken"],
+): ResolvedConfig["social"]["idToken"] {
+  if (input === false) return null;
+  if (input === undefined) return { requireNonce: true };
+  if (!isPlainObject(input)) throw new ConfigError("social.idToken must be an object or false");
+  for (const key of Object.keys(input))
+    if (key !== "requireNonce")
+      throw new ConfigError(`social.idToken.${key} is not an option; core has requireNonce`);
+  if (input.requireNonce !== undefined && typeof input.requireNonce !== "boolean")
+    throw new ConfigError("social.idToken.requireNonce must be a boolean");
+  return { requireNonce: input.requireNonce ?? true };
+}
+
+/**
+ * The `audiences` of `google` or `apple` (plan 12i Task 10): 1 to 10 client
+ * ids, each 1 to 255 characters with no control character, none twice, and
+ * none equal to `clientId`, which the route takes already.
+ */
+function checkAudiences(at: string, value: unknown, clientId: string): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value) || value.length < 1 || value.length > ID_TOKEN_AUDIENCES_MAX)
+    throw new ConfigError(`${at} must be a list of 1 to ${ID_TOKEN_AUDIENCES_MAX} client ids`);
+  const seen = new Set<string>([clientId]);
+  for (const a of value) {
+    if (typeof a !== "string" || a.length < 1 || a.length > AUDIENCE_MAX || hasControlChar(a))
+      throw new ConfigError(
+        `${at} must hold strings of 1 to ${AUDIENCE_MAX} characters with no control character`,
+      );
+    if (seen.has(a)) throw new ConfigError(`${at} holds ${a} twice, or holds clientId`);
+    seen.add(a);
+  }
+}
+
 function socialProviders(
   social: AuthConfig["social"],
   baseURLs: readonly string[],
@@ -3790,10 +3844,12 @@ function socialProviders(
   };
   if (social?.google) {
     requireFields("social.google", social.google, ["clientId", "clientSecret"]);
+    checkAudiences("social.google.audiences", social.google.audiences, social.google.clientId);
     push("social.google", social.google, googleProvider(social.google));
   }
   if (social?.apple) {
     requireFields("social.apple", social.apple, ["clientId", "teamId", "keyId", "privateKey"]);
+    checkAudiences("social.apple.audiences", social.apple.audiences, social.apple.clientId);
     push("social.apple", social.apple, appleProvider(social.apple));
   }
   if (social?.github) {

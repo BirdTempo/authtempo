@@ -132,14 +132,19 @@ export const CONFIG_KEYS = {
     oauth2: true,
     fetch: true,
     stateData: true,
+    idToken: true,
   } satisfies Keys<Part<"social">>,
   "social.stateData": { maxBytes: true } satisfies Keys<
     NonNullable<Exclude<Part<"social">["stateData"], false>>
+  >,
+  "social.idToken": { requireNonce: true } satisfies Keys<
+    NonNullable<Exclude<Part<"social">["idToken"], false>>
   >,
   "social.google": {
     clientId: true,
     clientSecret: true,
     redirectURI: true,
+    audiences: true,
   } satisfies Keys<GoogleConfig>,
   "social.apple": {
     clientId: true,
@@ -147,6 +152,7 @@ export const CONFIG_KEYS = {
     keyId: true,
     privateKey: true,
     redirectURI: true,
+    audiences: true,
   } satisfies Keys<AppleConfig>,
   "social.github": {
     clientId: true,

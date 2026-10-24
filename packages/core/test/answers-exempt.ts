@@ -84,6 +84,9 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   // Plan 12i Task 6: the anonymous routes with anonymous off.
   "POST /anonymous/sign-in",
   "POST /anonymous/delete",
+  // Plan 12i Task 10: the ID-token paths of a provider that has no such route.
+  "POST /social/:provider/id-token/nonce",
+  "POST /social/:provider/id-token",
   "POST /oauth/device",
   "POST /oauth/device_authorization",
   "POST /oauth/grants/revoke",
@@ -305,6 +308,9 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   // Plan 12i Task 11: the cross-site switch, and the Fetch Metadata test of every POST.
   "POST /multi-session/sign-out",
   "POST /multi-session/switch",
+  // Plan 12i Task 10: the Fetch Metadata test of every POST.
+  "POST /social/:provider/id-token/nonce",
+  "POST /social/:provider/id-token",
   // Plan 12d Task 4: the discovery at sign-in.
   "POST /sso/discover", // Plan 12d Task 9b: the SCIM token writes and the posts of /scim/v2.
   "POST /scim/tokens/create",
@@ -339,6 +345,8 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "five lost rounds of the user hold at a sign-in; account-delete.test.ts proves the engine path",
     [
       ...CALLBACKS,
+      // Plan 12i Task 10: the ID-token route runs the social resolution of the callbacks.
+      "POST /social/:provider/id-token",
       "POST /handoff/redeem",
       "POST /magic-link/verify",
       "POST /otp/reset",
@@ -463,6 +471,11 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "sso_required",
     "the Apple callback needs an Apple key; sso/enforce.test.ts drives the same door of completeSocial through the Google callback",
     ["POST /social/apple/callback"],
+  ),
+  ...rows(
+    "sso_required",
+    "the ID-token route signs in through signInByProfile, the door of completeSocial that sso/enforce.test.ts drives through the Google callback (plan 12i Task 10)",
+    ["POST /social/:provider/id-token"],
   ),
   ...rows(
     "sso_required",
@@ -658,6 +671,15 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
         "the route proves an address or sets one, so its user always has one; the schema is nullable because a user can have no address (plan 12i); address-less.test.ts proves the null rules",
     }),
   ),
+  // Plan 12i Task 10: the ID-token route makes a user of a verified address
+  // or finds the user of its identity, and a link needs the user's own address.
+  {
+    key: "POST /social/:provider/id-token",
+    field: "user.email",
+    form: "null",
+    reason:
+      "a new user needs the token's address (email_required), and a link of google or apple needs the user's own verified address (email_mismatch), so no user of core with no address holds such an identity; address-less.test.ts proves the null rules",
+  },
   // Plan 12i Task 1 (ruling 15): these routes need a member, and every member
   // has a verified address. The organization create, the member add, and the
   // invitation accept each need one (`verified` in organizations.ts), and no

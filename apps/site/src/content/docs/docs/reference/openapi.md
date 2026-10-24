@@ -93,6 +93,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `phone` | `phone` | off |
 | `anonymous` | `anonymous` | off |
 | `multiSession` | `multiSession` | off |
+| `socialIdToken` | `social.google or social.apple` | off |
 
 ## The error shape
 

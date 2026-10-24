@@ -34,7 +34,7 @@ import {
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hasAddress } from "./address.js";
-import { type AnonymousCaller, upgradeSteps } from "./anonymous.js";
+import { type AnonymousCaller, type UpgradeSteps, upgradeSteps } from "./anonymous.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
 import {
@@ -57,7 +57,7 @@ import {
   sessionsEnded,
 } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
-import { openStateData, sealStateData } from "./state-data.js";
+import { type OpenedStateData, openStateData, sealStateData } from "./state-data.js";
 import {
   type BeforeResolveWrite,
   ClaimLostError,
@@ -447,11 +447,7 @@ export async function completeSocial(
   const bounded: SocialProfile = addressless
     ? { ...checked, email: null, emailVerified: false }
     : checked;
-  // Only SSO signs in an address of an enforced domain (plan 12d), by the profile address, before the resolution.
-  const address = bounded.email === null ? null : normalizeEmail(bounded.email);
-  const enforced = link || address === null ? null : await enforcedAnswer(config, address);
-  if (enforced) return enforced;
-  // A link (plan 12a): no session opens, and no sign-in gate applies.
+  // A link (plan 12a): no session opens, no sign-in gate applies, and no enforced domain refuses it.
   if (link)
     return completeLink(
       config,
@@ -463,18 +459,71 @@ export async function completeSocial(
       now,
       stateData,
     );
+  const signedIn = await signInByProfile(config, {
+    provider: provider.name,
+    profile: bounded,
+    addressless,
+    next: safeNext(data.next),
+    ip: input.ip,
+    userAgent: input.userAgent,
+    trustDevice: input.trustDevice,
+    // The binding cookie ties this callback to the browser of the start, so the row's anonymous user links.
+    upgrade: upgradeSteps(
+      config,
+      input.anonymous ?? null,
+      typeof data.anonymousUserId === "string" ? data.anonymousUserId : null,
+      "bound",
+    ),
+    ...(opened.value ? { opened: opened.value } : {}),
+    now,
+  });
+  if (!signedIn.ok || "twoFactor" in signedIn.value) return signedIn;
+  const { next, user } = signedIn.value;
+  return ok({ token: signedIn.value.token, next, user });
+}
+
+/** A social sign-in of a verified profile, before its session or its challenge. */
+export interface ProfileSignIn {
+  provider: string;
+  profile: SocialProfile;
+  addressless: boolean;
+  next: string;
+  ip: string | null;
+  userAgent: string | null;
+  trustDevice: string | undefined;
+  upgrade: UpgradeSteps;
+  /** The opened state payload of the social flow (plan 12i Task 19). */
+  opened?: OpenedStateData;
+  now: Date;
+}
+
+/** The session of a social sign-in, with its row for a JSON answer. */
+export interface ProfileSignedIn {
+  token: string;
+  session: SessionRow;
+  next: string;
+  user: UserRow;
+}
+
+/**
+ * The sign-in of a verified social profile, for the callback and for the
+ * ID-token route (plan 12i Task 10). One code for both pathways keeps one
+ * account rule (spec 8.3), one gate (12c), and one anonymous upgrade.
+ */
+export async function signInByProfile(
+  config: ResolvedConfig,
+  input: ProfileSignIn,
+): Promise<Result<ProfileSignedIn | SignInChallenge>> {
+  const { now, next, upgrade } = input;
+  const bounded = input.profile;
+  const address = bounded.email === null ? null : normalizeEmail(bounded.email);
+  const enforced = address === null ? null : await enforcedAnswer(config, address);
+  if (enforced) return enforced;
+  const stateData = input.opened?.value ?? null;
 
   // The session or the challenge commits with the claim in one transaction,
   // so a claimant's in-flight callback cannot keep a session the claim deleted.
   const ended = endedList(config);
-  const next = safeNext(data.next);
-  // The binding cookie ties this callback to the browser of the start, so the row's anonymous user links.
-  const upgrade = upgradeSteps(
-    config,
-    input.anonymous ?? null,
-    typeof data.anonymousUserId === "string" ? data.anonymousUserId : null,
-    "bound",
-  );
   // The hook runs before the resolution's first write, for the D1 undo (see
   // `insertSignUp` in password.ts). A user with the second factor on gets a
   // challenge in place of the session (plan 12c). A new identity of a
@@ -486,12 +535,12 @@ export async function completeSocial(
       ip: input.ip,
       userAgent: input.userAgent,
       via: "social",
-      method: socialMethod(entry.name),
+      method: socialMethod(input.provider),
       next,
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.social ?? false,
       // A challenge carries the opened bytes to `session.afterCreate` at its verify.
-      ...(opened.value ? { stateData: opened.value } : {}),
+      ...(input.opened ? { stateData: input.opened } : {}),
       upgrade,
     },
     now,
@@ -506,7 +555,7 @@ export async function completeSocial(
   const resolved = await hookGuard(() =>
     resolveSocialUser(
       config.storage,
-      provider.name,
+      input.provider,
       bounded,
       now,
       verified,
@@ -520,7 +569,7 @@ export async function completeSocial(
         await steps.before(tx, user);
       },
       made,
-      addressless,
+      input.addressless,
     ),
   );
   if (!resolved.ok) return resolved;
@@ -534,9 +583,9 @@ export async function completeSocial(
     return ok({ ...after.pending, next, user });
   }
   await touchTrust(config, steps.trustId(), now);
-  await sessionOpened(config, after.session, user, "social", provider.name, stateData);
+  await sessionOpened(config, after.session, user, "social", input.provider, stateData);
   await upgrade.after();
-  return ok({ token: after.token, next, user });
+  return ok({ token: after.token, session: after.session, next, user });
 }
 
 /** The session of a link's start, as `linkSession` read it. */
@@ -1009,7 +1058,7 @@ async function userinfoProfile(
  * person can still sign in. The image must be an `https:` URL, so a
  * `javascript:` or `data:` value never reaches the user row.
  */
-function boundProfile(
+export function boundProfile(
   observe: Observer,
   profile: SocialProfile,
   providerName: string,
@@ -1301,7 +1350,9 @@ function identityRow(userId: string, provider: string, subject: string, now: Dat
  */
 function filledUser(user: UserRow, profile: SocialProfile, now: Date): UserRow {
   const patch: Partial<Pick<UserRow, "name" | "image">> = {};
-  if (user.name === null && profile.name) patch.name = profile.name;
+  // A name of the client, not of the provider, fills a new user only (plan 12i Task 10).
+  if (user.name === null && profile.name && profile.nameOnCreate !== true)
+    patch.name = profile.name;
   if (user.image === null && profile.image) patch.image = profile.image;
   if (Object.keys(patch).length === 0) return user;
   return { ...user, ...patch, updatedAt: now };

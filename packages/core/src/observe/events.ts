@@ -180,6 +180,8 @@ export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
   "POST /handoff/redeem": "handoff",
   "GET /social/:provider/callback": "social",
   "POST /social/apple/callback": "social",
+  // The ID-token route of plan 12i Task 10.
+  "POST /social/:provider/id-token": "social",
   // The OIDC callback and the SAML ACS of plan 12d.
   "GET /sso/:connectionId/callback": "sso",
   "POST /sso/:connectionId/acs": "sso",
@@ -578,6 +580,10 @@ export const EVENTS = {
     errorClass: ERROR_CLASS,
   }),
   "social.nonce_mismatch": fault("error", "authtempo: social nonce mismatch", {
+    provider: PROVIDER,
+  }),
+  // The second use of one ID token at the ID-token route (plan 12i Task 10).
+  "social.id_token_replayed": fault("error", "authtempo: social id token used again", {
     provider: PROVIDER,
   }),
   "social.claims_refused": fault("error", "authtempo: social id token claims refused", {

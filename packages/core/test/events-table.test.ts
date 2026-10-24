@@ -10,7 +10,8 @@ import { FIELD_KINDS } from "../src/redact.js";
  * of 12h Task 2 and the role row line of 12k. Plan 12i Task 13 adds the
  * claims line of the social flow. Plan 12i Task 2 adds the username set
  * line, and Task 4 the line of the SMS port. Plan 12i Task 14 adds the
- * token answer refusal line. The Task 5 fix round adds the line of an SMS
+ * token answer refusal line, and Task 10 the line of an ID token used
+ * again. The Task 5 fix round adds the line of an SMS
  * after the answer (ruling 23). The second fix round adds the line of a
  * Worker with no waitUntil (ruling 29). Task 7 adds the line of the
  * upgrade clean-up (ruling 36 L2). A call that builds a text for each
@@ -68,6 +69,7 @@ const START_LIST: readonly string[] = [
   "authtempo: social token answer has no token",
   "authtempo: social id token rejected",
   "authtempo: social nonce mismatch",
+  "authtempo: social id token used again",
   "authtempo: social user info failed",
   "authtempo: social user info has a bad subject",
   "authtempo: social id token claims refused",
@@ -131,10 +133,10 @@ const ENTRIES = Object.entries(EVENTS) as [string, EventSpec][];
 describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
   it("has one row for each line of the start list", () => {
     const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
-    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, and 3 + 1 + 3 + 1 + 1 of
-    // plan 12i (Task 14: 1, Task 5: 3, Task 6: 1, Task 7: 1).
-    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1 + 1);
-    expect(texts).toHaveLength(77 + 1 + 3 + 1 + 1);
+    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, and 3 + 1 + 3 + 1 + 1 + 1 of
+    // plan 12i (Task 14: 1, Task 5: 3, Task 6: 1, Task 7: 1, Task 10: 1).
+    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1 + 1 + 1);
+    expect(texts).toHaveLength(77 + 1 + 3 + 1 + 1 + 1);
     expect(new Set(texts)).toEqual(new Set(START_LIST));
   });
 

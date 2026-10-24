@@ -1,11 +1,12 @@
 import type { ResolvedConfig } from "../../config.js";
 import { anonymousCaller } from "../../engine/anonymous.js";
+import { ID_TOKEN_PROVIDERS, idTokenNonce, signInWithIdToken } from "../../engine/id-token.js";
 import { socialMethod } from "../../engine/last-method.js";
 import { sessionCookieToken, sessionMaxAgeSeconds } from "../../engine/sessions.js";
 import { completeSocial, startLink, startSocial } from "../../engine/social.js";
 import type { Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
-import { callbackBody, linkBody } from "../contract/social.js";
+import { callbackBody, idTokenBody, idTokenNonceBody, linkBody } from "../contract/social.js";
 import {
   bindingCookieName,
   clearOauthCookie,
@@ -13,10 +14,16 @@ import {
   readCookie,
   sessionCookie,
 } from "../cookies.js";
-import { json, respond } from "../json.js";
+import { json, readJson, respond } from "../json.js";
 import { authErrorRedirect, redirect, resolveNext } from "../redirect.js";
 import type { Route, RouteContext } from "../router.js";
-import { challengePageUrl, trustTokenOf, withLastMethod } from "../session-answer.js";
+import {
+  challengePageUrl,
+  signedInResponse,
+  trustTokenOf,
+  twoFactorJson,
+  withLastMethod,
+} from "../session-answer.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
 
 const BIND_MAX_AGE_SECONDS = 600;
@@ -181,8 +188,63 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
       },
       callback,
       ...alias,
+      ...idTokenRoutes(config, provider.name, provider.kind === "oidc" && !!provider.idToken),
     ];
   });
+}
+
+/**
+ * The ID-token route of `google` and `apple` (plan 12i Task 10). JSON in,
+ * JSON out: Google One Tap's callback and Apple's native sheet give the app
+ * the token, and the app posts it. The router's Origin rule is the CSRF
+ * guard, so core takes no form post and no `g_csrf_token`.
+ */
+function idTokenRoutes(config: ResolvedConfig, name: string, serves: boolean): Route[] {
+  if (!serves || !config.social.idToken || !ID_TOKEN_PROVIDERS.includes(name)) return [];
+  return [
+    {
+      method: "POST",
+      path: `/social/${name}/id-token/nonce`,
+      key: "POST /social/:provider/id-token/nonce",
+      async handler(ctx) {
+        const body = await readJson(ctx.request, idTokenNonceBody);
+        if (!body.ok) return respond(body);
+        const r = await idTokenNonce(ctx.config, { provider: name, ip: ctx.ip });
+        if (!r.ok) return respond(r);
+        return json({ nonce: r.value.nonce, expiresAt: r.value.expiresAt.toISOString() });
+      },
+    },
+    {
+      method: "POST",
+      path: `/social/${name}/id-token`,
+      key: "POST /social/:provider/id-token",
+      async handler(ctx) {
+        const body = await readJson(ctx.request, idTokenBody);
+        if (!body.ok) return respond(body);
+        const r = await signInWithIdToken(ctx.config, {
+          provider: name,
+          idToken: body.value.idToken,
+          nonce: body.value.nonce,
+          name: body.value.name,
+          next: body.value.next,
+          trustDevice: trustTokenOf(ctx.config, ctx.request, body.value.trustDevice),
+          ip: ctx.ip,
+          userAgent: ctx.request.headers.get("user-agent"),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
+        });
+        if (!r.ok) return respond(r);
+        // The challenge row keeps the method, and its verify sets the cookie (plan 12i Task 12).
+        if ("twoFactor" in r.value) return twoFactorJson(r.value);
+        const method = socialMethod(name);
+        return withLastMethod(
+          ctx.config,
+          ctx.request,
+          signedInResponse(ctx.config, r.value, method),
+          method,
+        );
+      },
+    },
+  ];
 }
 
 async function callbackParams(request: Request, url: URL): Promise<CallbackParams> {

@@ -413,6 +413,19 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
       session: true,
     },
     { key: "POST /social/apple/callback", body: { code: "c", state: "s" } },
+    // Plan 12i Task 10: the ID-token route. The valid sign-in body has no live nonce: invalid_token.
+    {
+      key: "POST /social/:provider/id-token/nonce",
+      path: "/social/google/id-token/nonce",
+      body: {},
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /social/:provider/id-token",
+      path: "/social/apple/id-token",
+      body: { idToken: "a.b.c", nonce: "A".repeat(43) },
+      refused: INVALID_BODY,
+    },
     // Plan 12i Task 9: the hints of one ceremony. The body is optional and strict.
     {
       key: "POST /passkey/register/options",
@@ -841,7 +854,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 2 adds GET /username/available and POST /user/username.
     // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
     // Plan 12i Task 11 adds the three multi-session routes.
-    expect(keys.length).toBe(199);
+    // Plan 12i Task 10 adds the two routes of the ID-token sign-in.
+    expect(keys.length).toBe(201);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -1407,7 +1421,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 2 adds the body of POST /user/username.
     // Plan 12i Task 5 adds the bodies of the five phone routes, and Task 6 the two anonymous bodies.
     // Plan 12i Task 11 adds the bodies of the multi-session switch and sign-out.
-    expect(withBody.length).toBe(103);
+    // Plan 12i Task 10 adds the bodies of the ID-token nonce and sign-in.
+    expect(withBody.length).toBe(105);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1433,7 +1448,8 @@ describe("the route contract (plan 11g)", () => {
       if (row.refused) expect(answer, `${row.key}: the valid body`).not.toEqual(row.refused);
     }
     // The two social bodies have no required key, so no body of this form is refused.
-    expect(refusals).toBe(101);
+    // The two strict bodies of the ID-token route refuse it (plan 12i Task 10).
+    expect(refusals).toBe(103);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1457,7 +1473,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 2 adds the body of POST /user/username to json.
     // Plan 12i Task 5 adds the five phone bodies to json, and Task 6 the two anonymous bodies.
     // Plan 12i Task 11 adds the two multi-session bodies to json.
-    expect(counts).toEqual({ json: 94, both: 10, form: 8 });
+    // Plan 12i Task 10 adds the two ID-token bodies to json.
+    expect(counts).toEqual({ json: 96, both: 10, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

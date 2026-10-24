@@ -136,6 +136,9 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   // Plan 12i Task 5: the phone routes. A new number for the request and the add.
   "POST /phone/request": { phone: "+14155550100" },
   "POST /phone/verify": { phone: "$phone", code: "$phoneCode" },
+  // Plan 12i Task 10: the ID-token route. The nonce is well formed; no row holds it.
+  "POST /social/:provider/id-token/nonce": {},
+  "POST /social/:provider/id-token": { idToken: "a.b.c", nonce: BODY43 },
   "POST /phone/add": { phone: "+14155550101" },
   "POST /phone/add/verify": { code: "$phoneCode" },
   "POST /phone/remove": {},
@@ -719,6 +722,8 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     const callbacks: RouteKey[] = [
       "GET /social/:provider/callback",
       "POST /social/apple/callback",
+      // The ID-token route needs a token of a key set: id-token.test.ts proves it (plan 12i Task 10).
+      "POST /social/:provider/id-token",
       "GET /sso/:connectionId/callback",
       "POST /sso/:connectionId/acs",
     ];
@@ -1154,6 +1159,8 @@ describe("the codes of one route (plan 11g)", () => {
 const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "GET /social/:provider/callback",
   "POST /social/apple/callback",
+  // The ID-token route needs a token of a key set: id-token.test.ts arms the hooks (plan 12i Task 10).
+  "POST /social/:provider/id-token",
   "POST /passkey/authenticate/verify",
   "POST /identities/unlink",
   // The claims hook of the JWT: its own test above.
