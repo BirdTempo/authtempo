@@ -8,6 +8,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { sendAccountMail } from "./account-mail.js";
+import { hasAddress, verifiedHandle } from "./address.js";
 import { checkCode, consumeCode, issueCode, newestCode, verifyGate } from "./email-otp.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
@@ -64,8 +65,12 @@ export const OLD_ADDRESS_PROOFS: readonly VerificationPurpose[] = [
 
 interface ChangeData {
   newEmail: string;
-  /** The address of the requesting session at the request. The move and the notice use it. */
-  oldEmail: string;
+  /**
+   * The address of the requesting session at the request. The move and the
+   * notice use it. Null for a user with no address (plan 12i): the move
+   * then renames no identity, ends no old proof, and sends no notice.
+   */
+  oldEmail: string | null;
   sessionId: string;
   next: string;
   /**
@@ -80,7 +85,7 @@ function changeData(row: VerificationRow): ChangeData | null {
   if (
     !d ||
     typeof d.newEmail !== "string" ||
-    typeof d.oldEmail !== "string" ||
+    (typeof d.oldEmail !== "string" && d.oldEmail !== null) ||
     typeof d.sessionId !== "string"
   )
     return null;
@@ -121,7 +126,11 @@ export async function requestEmailChange(
   const method = input.method ?? "link";
   const otp = config.emailOtp;
   if (method === "code" && !otp) return fail("not_found");
-  if (!user.emailVerified) return fail("email_unverified");
+  // A user with no address (plan 12i) needs another proved handle: a phone or a passkey.
+  if (
+    hasAddress(user) ? !user.emailVerified : !(await verifiedHandle(config, config.storage, user))
+  )
+    return fail("email_unverified");
   const fresh = requireFresh(config, session);
   if (!fresh.ok) return fresh;
   if (method !== "link" && method !== "code") return fail("invalid_body");
@@ -265,20 +274,24 @@ async function applyChange(config: ResolvedConfig, move: Move): Promise<Result<A
             // The proof was spent, expired, or replaced since the read: undo the move.
             if (!consumed.ok) stopWith(consumed.code);
             // The `email` identity follows the address: it marks the mailbox that signs in by magic link.
-            const renamed = await tx.update(
-              "identity",
-              [
-                { field: "provider", op: "eq", value: "email" },
-                { field: "userId", op: "eq", value: previous.id },
-                { field: "subject", op: "eq", value: data.oldEmail },
-              ],
-              { subject: data.newEmail, updatedAt: now },
-            );
+            const renamed =
+              data.oldEmail === null
+                ? 0
+                : await tx.update(
+                    "identity",
+                    [
+                      { field: "provider", op: "eq", value: "email" },
+                      { field: "userId", op: "eq", value: previous.id },
+                      { field: "subject", op: "eq", value: data.oldEmail },
+                    ],
+                    { subject: data.newEmail, updatedAt: now },
+                  );
             if (renamed === 0) await ensureEmailIdentity(tx, previous.id, data.newEmail, now);
-            await tx.delete("verification", [
-              { field: "purpose", op: "in", value: OLD_ADDRESS_PROOFS },
-              { field: "identifier", op: "eq", value: data.oldEmail },
-            ]);
+            if (data.oldEmail !== null)
+              await tx.delete("verification", [
+                { field: "purpose", op: "in", value: OLD_ADDRESS_PROOFS },
+                { field: "identifier", op: "eq", value: data.oldEmail },
+              ]);
             // A delete link went to the old mailbox: it ends with the move (plan 12a Task 20).
             await tx.delete("verification", [
               { field: "purpose", op: "eq", value: "account-delete" },

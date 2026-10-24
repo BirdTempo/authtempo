@@ -28,11 +28,23 @@ import type {
 // extra field fails it too (Review Focus 4). The key lists below feed the
 // runtime check in test/better-auth.test.ts.
 
+/**
+ * The address that Better Auth's shapes show for a user with no address
+ * (plan 12i). Better Auth's own default form is `<id>@<namespace>.placeholder.invalid`
+ * (`createPlaceholderEmail` of @better-auth/core 1.7.2, deviation 7), and
+ * `.invalid` never resolves (RFC 6761 section 6.4). The storage of the
+ * Better Auth tables refuses a null address until Task 16 of plan 12i maps
+ * it, so only a core row reaches this form today.
+ */
+export function shownAddress(user: { id: string; email: string | null }): string {
+  return user.email ?? `${user.id}@anonymous.placeholder.invalid`;
+}
+
 export function toUser(u: UserRow): User {
   return {
     id: u.id,
     name: u.name ?? "",
-    email: u.email,
+    email: shownAddress(u),
     emailVerified: u.emailVerified,
     image: u.image,
     createdAt: u.createdAt,
@@ -111,7 +123,11 @@ export function toMember(organizationId: string, m: MemberSummary): Member {
     userId: m.userId,
     role: m.role,
     createdAt: m.createdAt,
-    user: { id: m.userId, email: m.email, name: m.name ?? "" },
+    user: {
+      id: m.userId,
+      email: shownAddress({ id: m.userId, email: m.email }),
+      name: m.name ?? "",
+    },
   };
 }
 

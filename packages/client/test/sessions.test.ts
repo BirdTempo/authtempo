@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { createClient } from "../src/client.js";
 import { BASE_URL, inProcessFetch, makeServer, tokenFromMail } from "./harness.js";
 
+/** The address of a test user that has one (plan 12i): a user can have no address, so a read checks it. */
+function emailOf(user: { email: string | null }): string {
+  if (user.email === null) throw new Error("the test user has no address");
+  return user.email;
+}
+
 const DAY = 86_400_000;
 
 /** A signed-in cookie session through the magic link, so the session tests start signed in. */
@@ -38,7 +44,7 @@ describe("session and sign-out", () => {
     const server = makeServer();
     const { session } = await signedIn(server);
     // A second client with no cookie jar: the bearer token is the whole session.
-    const bearer = await bearerFor(server, session.user.email);
+    const bearer = await bearerFor(server, emailOf(session.user));
     const native = createClient({
       baseURL: BASE_URL,
       fetch: inProcessFetch(server.auth).fetch,

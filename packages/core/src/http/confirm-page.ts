@@ -20,6 +20,11 @@ export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (ch) => ESCAPES[ch] ?? ch);
 }
 
+/** The line that names the signed-in account. A user with no address (plan 12i) gets no name. */
+export function signedInAs(email: string | null): string {
+  return email === null ? "Signed in." : `Signed in as ${escapeHtml(email)}.`;
+}
+
 /**
  * The page a magic link opens. It does nothing on load. The person presses
  * the button, and the browser posts the token to `action`. A mail scanner

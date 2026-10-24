@@ -22,6 +22,7 @@ import { currentSecret, secretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { JwkRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
+import { hasAddress } from "./address.js";
 import { bannedFor } from "./operator/ban-rule.js";
 import { impersonationLoss, revokedFor } from "./operator/guards.js";
 import { sessionIsLive } from "./sessions.js";
@@ -75,8 +76,9 @@ export interface SessionJwtClaims {
   iat: number;
   exp: number;
   sid: string;
-  email: string;
-  email_verified: boolean;
+  /** Absent for a user with no address (plan 12i), with `email_verified`. */
+  email?: string;
+  email_verified?: boolean;
   name: string | null;
   org: string | null;
   /** The operator of an impersonation session (RFC 8693 section 4.1, plan 12f). Absent otherwise. */
@@ -390,8 +392,7 @@ export async function mintSessionJwt(
     iat,
     exp,
     sid: session.id,
-    email: user.email,
-    email_verified: user.emailVerified,
+    ...(hasAddress(user) ? { email: user.email, email_verified: user.emailVerified } : {}),
     name: user.name,
     org: session.activeOrganizationId,
     // RFC 8693 section 4.1: the actor who acts for the subject.

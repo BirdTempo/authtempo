@@ -679,7 +679,8 @@ describe("authtempo check (spec 19)", () => {
             { name: "nickname", type: "text", notNull: false, hasDefault: false },
             { name: "plan", type: "text", notNull: true, hasDefault: false },
           ],
-          unique: [],
+          // Version 15 (plan 12i) adds two unique indexes; the failure drops the one of email only.
+          unique: t.unique.filter((u) => u.name !== "ux_ta_user__email"),
         }),
       ],
       ["ta_verification", (t: LiveTable) => ({ ...t, unique: [] })],

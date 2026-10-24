@@ -96,9 +96,10 @@ describe("d1 migration matches the core schema", () => {
         notNull: false,
         hasDefault: true,
       });
-      expect(user?.columns.find((c) => c.name === "email")).toEqual({
-        name: "email",
-        type: "TEXT",
+      // A NOT NULL column with no default. The address is nullable since plan 12i.
+      expect(user?.columns.find((c) => c.name === "email_verified")).toEqual({
+        name: "email_verified",
+        type: "INTEGER",
         notNull: true,
         hasDefault: false,
       });

@@ -187,6 +187,9 @@ describe("importUsers: passkeys (I-2)", () => {
                 const credentialId = (data as { credentialId: string }).credentialId;
                 await db.create("passkey", {
                   ...passkey(credentialId),
+                  discoverable: null,
+                  prf: false,
+                  largeBlob: false,
                   id: `race-${credentialId}`,
                   userId: "app-1",
                   createdAt: AT,
@@ -228,6 +231,10 @@ describe("importUsers: a half record (I-3)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: AT,
       updatedAt: AT,
     });
@@ -495,6 +502,10 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: AT,
       updatedAt: AT,
     });
@@ -823,6 +834,10 @@ describe("importUsers: the repair mode (plan 9b2)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: AT,
       updatedAt: AT,
     });

@@ -50,6 +50,7 @@ export {
   compatMigration0009Sql,
   compatMigration0010Sql,
   compatMigration0011Sql,
+  compatMigration0012Sql,
   compatMigrationSql,
 } from "./storage/migration.js";
 export { type NamingOptions, resolveNames } from "./storage/names.js";

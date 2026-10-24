@@ -1564,6 +1564,10 @@ describe("the back-channel logout lines (plan 12e)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: h.clock.now(),
       updatedAt: h.clock.now(),
     });

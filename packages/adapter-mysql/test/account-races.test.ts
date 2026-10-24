@@ -4,6 +4,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createMysqlAdapter } from "../src/index.js";
 import { freshDatabase, MYSQL_84, type MysqlDatabase } from "./db.js";
 
+/** The address of a test user that has one (plan 12i): a user can have no address, so a read checks it. */
+function emailOf(user: { email: string | null }): string {
+  if (user.email === null) throw new Error("the test user has no address");
+  return user.email;
+}
+
 // The port of adapter-postgres/test/account-races.test.ts to MySQL 8.4
 // (ruling 1 of plan 12g). The account races of plan 12a on the real MySQL
 // adapter, through core's built output, with separate connections. The
@@ -500,7 +506,7 @@ describe("the change of address races on MySQL 8.4 (plan 12a Task 8)", () => {
 });
 
 interface MoveRow {
-  email: string;
+  email: string | null;
   name: string | null;
   updatedAt: Date;
 }
@@ -861,15 +867,17 @@ describe("the link of a social identity on MySQL 8.4 (plan 12a Task 10)", () => 
       const b = await w.begin(bob);
       w.linked.length = 0;
       const answers = await Promise.all([
-        w.finish(ada, a, `ada-${delay}`, sub, ada.user.email),
-        delayed(delay, () => w.finish(bob, b, `bob-${delay}`, sub, bob.user.email)),
+        w.finish(ada, a, `ada-${delay}`, sub, emailOf(ada.user)),
+        delayed(delay, () => w.finish(bob, b, `bob-${delay}`, sub, emailOf(bob.user))),
       ]);
       expect([...answers].sort()).toEqual(["identity_taken", "linked"]);
       const winner = answers[0] === "linked" ? ada : bob;
       expect((await w.rowsOf(sub)).map((r) => r.user_id)).toEqual([winner.user.id]);
       expect(w.linked).toEqual([`${sub}:${winner.user.id}`]);
-      expect(w.linkNotices(ada.user.email).length + w.linkNotices(bob.user.email).length).toBe(1);
-      expect(w.linkNotices(winner.user.email)).toHaveLength(1);
+      expect(
+        w.linkNotices(emailOf(ada.user)).length + w.linkNotices(emailOf(bob.user)).length,
+      ).toBe(1);
+      expect(w.linkNotices(emailOf(winner.user))).toHaveLength(1);
     }
   }, 60_000);
 
@@ -904,14 +912,16 @@ describe("the link of a social identity on MySQL 8.4 (plan 12a Task 10)", () => 
       w.linked.length = 0;
       w.meet();
       const answers = await Promise.all([
-        w.finish(ada, a, `ada-met-${round}`, sub, ada.user.email),
-        w.finish(bob, b, `bob-met-${round}`, sub, bob.user.email),
+        w.finish(ada, a, `ada-met-${round}`, sub, emailOf(ada.user)),
+        w.finish(bob, b, `bob-met-${round}`, sub, emailOf(bob.user)),
       ]);
       expect([...answers].sort()).toEqual(["identity_taken", "linked"]);
       const winner = answers[0] === "linked" ? ada : bob;
       expect((await w.rowsOf(sub)).map((r) => r.user_id)).toEqual([winner.user.id]);
       expect(w.linked).toEqual([`${sub}:${winner.user.id}`]);
-      expect(w.linkNotices(ada.user.email).length + w.linkNotices(bob.user.email).length).toBe(1);
+      expect(
+        w.linkNotices(emailOf(ada.user)).length + w.linkNotices(emailOf(bob.user)).length,
+      ).toBe(1);
     }
   }, 60_000);
 

@@ -45,6 +45,10 @@ describe("names", () => {
       "banned_at",
       "ban_reason",
       "ban_until",
+      "username",
+      "display_username",
+      "phone",
+      "is_anonymous",
     ]);
   });
   it("names unique indexes with double underscores and parses them back", () => {
@@ -194,11 +198,15 @@ describe("statements", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: t0,
       updatedAt: t0,
     });
     expect(s.sql).toBe(
-      "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     );
     expect(s.params).toEqual([
       "u1",
@@ -211,6 +219,10 @@ describe("statements", () => {
       null,
       null,
       null,
+      null,
+      null,
+      null,
+      0,
     ]);
     const p = insertStatement(POSTGRES, "verification", {
       id: "v1",
@@ -240,7 +252,7 @@ describe("statements", () => {
       { sort: { field: "createdAt", dir: "asc" }, limit: 2 },
     );
     expect(s?.sql).toBe(
-      "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until FROM ta_user WHERE name IS NULL AND email <> ? AND id IN (?, ?) AND created_at > ? ORDER BY created_at IS NULL, created_at ASC LIMIT ?",
+      "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous FROM ta_user WHERE name IS NULL AND email <> ? AND id IN (?, ?) AND created_at > ? ORDER BY created_at IS NULL, created_at ASC LIMIT ?",
     );
     expect(s?.params).toEqual(["x", "a", "b", t0.getTime(), 2]);
     const d = selectStatement(SQLITE, "user", [], { sort: { field: "name", dir: "desc" } });
@@ -249,7 +261,7 @@ describe("statements", () => {
       sort: { field: "name", dir: "asc" },
     });
     expect(p?.sql).toBe(
-      "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until FROM ta_user WHERE name IS NOT NULL ORDER BY name ASC",
+      "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous FROM ta_user WHERE name IS NOT NULL ORDER BY name ASC",
     );
     expect(p?.params).toEqual([]);
   });
@@ -442,6 +454,10 @@ describe("final review fixes", () => {
           bannedAt: null,
           banReason: null,
           banUntil: null,
+          username: null,
+          displayUsername: null,
+          phone: null,
+          isAnonymous: false,
           createdAt: t0,
           updatedAt: t0,
         }),
@@ -529,6 +545,10 @@ describe("the D1 undo of a user create (plan 8b)", () => {
     bannedAt: null,
     banReason: null,
     banUntil: null,
+    username: null,
+    displayUsername: null,
+    phone: null,
+    isAnonymous: false,
     createdAt: t0,
     updatedAt: t0,
   });

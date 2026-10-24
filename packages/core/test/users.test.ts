@@ -99,6 +99,10 @@ describe("findOrCreateUserByEmail", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -138,6 +142,10 @@ describe("findOrCreateUserByEmail", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     };
@@ -180,6 +188,10 @@ describe("findOrCreateUserByEmail repairs a missing email identity (plan 3 input
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -228,6 +240,10 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       ...row,
     });
     await storage.create("passkey", {
@@ -239,6 +255,9 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       transports: null,
       deviceType: "singleDevice",
       backedUp: false,
+      discoverable: null,
+      prf: false,
+      largeBlob: false,
       name: null,
       ...row,
     });
@@ -251,6 +270,10 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       ...row,
     });
     await storage.create("passkey", {
@@ -262,6 +285,9 @@ describe("claimEmail covers passkeys (plan 4 input)", () => {
       transports: null,
       deviceType: "singleDevice",
       backedUp: false,
+      discoverable: null,
+      prf: false,
+      largeBlob: false,
       name: null,
       ...row,
     });
@@ -311,6 +337,10 @@ describe("claimEmail covers handoff codes (plan 5a input)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -363,6 +393,10 @@ describe("claimEmail and the password row (plan 8)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -537,6 +571,10 @@ describe("claimEmail needs user.beforeVerify first (plan 12a, Task 18)", () => {
         bannedAt: null,
         banReason: null,
         banUntil: null,
+        username: null,
+        displayUsername: null,
+        phone: null,
+        isAnonymous: false,
         createdAt: now,
         updatedAt: now,
       });

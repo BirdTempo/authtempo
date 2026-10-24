@@ -11,6 +11,7 @@ import { type Meter, meterOf } from "../storage/meter.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { USER_CHILD_MODELS } from "../storage/sql.js";
 import { sendAccountMail } from "./account-mail.js";
+import { hasAddress } from "./address.js";
 import { CONFIRM_PER_IP } from "./email-change.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
@@ -234,6 +235,8 @@ export async function requestAccountDelete(
   );
   if (!held.ok) return held;
   const user = held.value;
+  // Mail skips a user with no address (plan 12i): no link goes out, and the answer is the same.
+  if (!hasAddress(user)) return ok({ sent: true });
   const link = `${config.baseURL}${config.basePath}/user/delete/confirm?token=${encodeURIComponent(token)}`;
   await sendAccountMail(config, {
     kind: "delete_confirm",

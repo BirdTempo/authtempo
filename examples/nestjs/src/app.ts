@@ -30,7 +30,8 @@ export interface AppEnv {
   protect?: ((path: string) => boolean) | undefined;
 }
 
-type WithCaller = ExpressRequest & { caller?: { email: string } };
+// A user can have no address (authtempo plan 12i), so the caller's email can be null.
+type WithCaller = ExpressRequest & { caller?: { email: string | null } };
 
 /** A guard that knows the caller from a ts_ bearer or an API token in the Authorization header. */
 class CallerGuard implements CanActivate {

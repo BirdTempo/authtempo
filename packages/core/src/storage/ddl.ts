@@ -59,6 +59,12 @@ const utf8 = (length: number, why: string): MysqlString => ({ length, charset: "
 export const MYSQL_STRINGS: Readonly<Record<string, MysqlString>> = {
   "user.id": ascii(64, ROW_ID),
   "user.email": utf8(254, EMAIL),
+  // Schema version 15 (plan 12i): the username and the phone are unique keys.
+  "user.username": ascii(
+    64,
+    "the stored form of USERNAME_RE (plan 12i Task 2): [a-z0-9_.] after NFKC and lower case, at most 30 by username.maxLength; the margin holds an imported name",
+  ),
+  "user.phone": ascii(16, "E.164 by PHONE_RE (plan 12i Task 4): a plus sign and at most 15 digits"),
   "identity.id": ascii(64, ROW_ID),
   "identity.userId": ascii(64, ROW_ID),
   "identity.provider": utf8(
@@ -76,7 +82,7 @@ export const MYSQL_STRINGS: Readonly<Record<string, MysqlString>> = {
   "verification.id": ascii(64, ROW_ID),
   "verification.purpose": ascii(
     32,
-    "the VerificationPurpose union (schema.ts); its longest member has 18 characters",
+    "the VerificationPurpose union (schema.ts); its longest member has 19 characters (password-verify-otp, plan 12i)",
   ),
   "verification.identifier": {
     length: 2048,

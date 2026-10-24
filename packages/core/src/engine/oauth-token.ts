@@ -21,6 +21,7 @@ import type {
   UserRow,
   VerificationRow,
 } from "../schema.js";
+import { hasAddress, provedAccount } from "./address.js";
 import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
@@ -167,7 +168,7 @@ export async function liveUser(
   issuedAt?: Date,
 ): Promise<UserRow | null> {
   const user = await config.storage.findOne("user", [{ field: "id", op: "eq", value: userId }]);
-  if (!user?.emailVerified || activeBan(user, config.clock.now())) return null;
+  if (!user || !provedAccount(user) || activeBan(user, config.clock.now())) return null;
   if (issuedAt && bannedFor(user, issuedAt)) return null;
   return user;
 }
@@ -782,12 +783,17 @@ function cnfJkt(cnf: unknown): string | null | undefined {
 
 /**
  * The user claims of each scope (OIDC Core 1.0 section 5.4). The ID token,
- * userinfo, and `claims_supported` of the metadata read this one map.
+ * userinfo, and `claims_supported` of the metadata read this one map. A
+ * claim whose value is undefined is left out: a user with no address (plan
+ * 12i) gets neither `email` nor `email_verified`.
  */
 export const SCOPE_CLAIMS: Readonly<
   Record<string, Readonly<Record<string, (u: UserRow) => unknown>>>
 > = {
-  email: { email: (u) => u.email, email_verified: (u) => u.emailVerified },
+  email: {
+    email: (u) => (hasAddress(u) ? u.email : undefined),
+    email_verified: (u) => (hasAddress(u) ? u.emailVerified : undefined),
+  },
   profile: { name: (u) => u.name, picture: (u) => u.image },
 };
 
@@ -810,7 +816,10 @@ function scopeClaims(user: UserRow, scopes: readonly string[]): Record<string, u
   for (const scope of scopes) {
     // An own key only: a scope such as "constructor" names no claims.
     const named = Object.hasOwn(SCOPE_CLAIMS, scope) ? SCOPE_CLAIMS[scope] : undefined;
-    for (const [name, value] of Object.entries(named ?? {})) claims[name] = value(user);
+    for (const [name, value] of Object.entries(named ?? {})) {
+      const claim = value(user);
+      if (claim !== undefined) claims[name] = claim;
+    }
   }
   return claims;
 }

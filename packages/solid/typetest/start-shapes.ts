@@ -13,6 +13,6 @@ export default createMiddleware({ onRequest: [authOnRequest({ auth })] });
 // An API route: the handlers take an APIEvent, and getSession reads its locals.
 const handlers = authRouteHandlers(auth);
 export const GET = (event: APIEvent) => handlers.GET(event);
-export const email = (event: APIEvent): string | undefined => getSession(event)?.user.email;
+export const email = (event: APIEvent): string | null | undefined => getSession(event)?.user.email;
 // The field that the entry declares on App.RequestEventLocals.
 export const field = (event: APIEvent) => event.locals.session;

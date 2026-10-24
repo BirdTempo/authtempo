@@ -9,6 +9,7 @@ import { currentSecret } from "../primitives/keyring.js";
 import { namedResource } from "../primitives/resource.js";
 import type { OAuthClientRow, OAuthDeviceRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
+import { provedAccount } from "./address.js";
 import { issuerOf } from "./jwt.js";
 import { authTimeOf, consentCovers, grantConsent } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
@@ -338,7 +339,7 @@ export async function decideDevice(
     return { kind: "error", error: "rate_limited" };
   const { user } = input.session;
   // A grant would outlive a claim of the address (spec 8.7), as at the authorize step.
-  if (!user.emailVerified) return { kind: "code", userCode, error: "unverified" };
+  if (!provedAccount(user)) return { kind: "code", userCode, error: "unverified" };
   const client = await config.storage.findOne("oauthClient", [
     { field: "id", op: "eq", value: row.clientId },
   ]);

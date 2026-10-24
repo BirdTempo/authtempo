@@ -21,7 +21,7 @@ import { defaultRoles, type Role } from "../access.js";
 import { BETTER_AUTH_CODES, clientError, compatClientError } from "../errors.js";
 import { corePermissionsOf, toBetterAuthNames, toCoreNames } from "../role-map.js";
 import { ADMIN_NOT_SUPPORTED } from "../server/admin-lines.js";
-import { COOKIE_NAME, STATE_DATA_REFUSAL, toNext } from "../server/shapes.js";
+import { COOKIE_NAME, STATE_DATA_REFUSAL, shownAddress, toNext } from "../server/shapes.js";
 import type {
   AdminClientCalls,
   AdminListUsersQuery,
@@ -56,7 +56,7 @@ function toClientUser(u: PublicSession["user"]): ClientUser {
   return {
     id: u.id,
     name: u.name ?? "",
-    email: u.email,
+    email: shownAddress(u),
     emailVerified: u.emailVerified,
     image: u.image,
   };
@@ -133,7 +133,11 @@ function memberOf(organizationId: string, m: MemberJSON): Member {
     userId: m.userId,
     role: m.role,
     createdAt: new Date(m.createdAt),
-    user: { id: m.userId, email: m.email, name: m.name ?? "" },
+    user: {
+      id: m.userId,
+      email: shownAddress({ id: m.userId, email: m.email }),
+      name: m.name ?? "",
+    },
   };
 }
 function invitationOf(i: InvitationJSON): Invitation {

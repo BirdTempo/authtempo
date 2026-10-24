@@ -1,4 +1,4 @@
-// authtempo schema version 14, dialect mysql, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 15, dialect mysql, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Keep this file out of the schema glob of drizzle.config.ts, so drizzle-kit generate writes no migration for it.
 // Set tablesFilter in drizzle.config.ts to the table patterns of the app, so drizzle-kit push and pull leave the ta_ tables alone.
@@ -19,16 +19,22 @@ export const taUser = mysqlTable(
     id: varchar("id", { length: 64 }).primaryKey(),
     createdAt: epochMs("created_at").notNull(),
     updatedAt: epochMs("updated_at").notNull(),
-    email: varchar("email", { length: 254 }).notNull(),
+    email: varchar("email", { length: 254 }),
     emailVerified: boolean("email_verified").notNull(),
     name: text("name"),
     image: text("image"),
     bannedAt: epochMs("banned_at"),
     banReason: text("ban_reason"),
     banUntil: epochMs("ban_until"),
+    username: varchar("username", { length: 64 }),
+    displayUsername: text("display_username"),
+    phone: varchar("phone", { length: 16 }),
+    isAnonymous: boolean("is_anonymous").notNull(),
   },
   (t) => [
     uniqueIndex("ux_ta_user__email").on(t.email),
+    uniqueIndex("ux_ta_user__username").on(t.username),
+    uniqueIndex("ux_ta_user__phone").on(t.phone),
   ],
 );
 
@@ -107,6 +113,9 @@ export const taPasskey = mysqlTable(
     deviceType: text("device_type").notNull(),
     backedUp: boolean("backed_up").notNull(),
     name: text("name"),
+    discoverable: boolean("discoverable"),
+    prf: boolean("prf").notNull(),
+    largeBlob: boolean("large_blob").notNull(),
   },
   (t) => [
     uniqueIndex("ux_ta_passkey__credential_id").on(t.credentialId),

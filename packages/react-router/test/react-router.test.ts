@@ -147,7 +147,7 @@ describe("@authtempo/react-router (plan 11d2)", () => {
     const { signIn, args, middleware } = setup();
     const cookie = await signIn();
     const a = args(new Request(`${BASE}/`, { headers: { cookie } }));
-    let seen: string | undefined;
+    let seen: string | null | undefined;
     const res = await middleware(a, async () => {
       seen = getSession(a.context)?.user.email;
       return new Response("page");

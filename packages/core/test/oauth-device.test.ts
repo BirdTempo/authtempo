@@ -12,7 +12,7 @@ import type { LimiterPort } from "../src/limiter/port.js";
 import { fromBase64Url } from "../src/primitives/crypto.js";
 import type { SecretVersion } from "../src/primitives/keyring.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, makeAuth, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, emailOf, makeAuth, post } from "./helpers.js";
 import {
   approvedDevice,
   basicHeader,
@@ -1101,7 +1101,7 @@ describe("the end of a decided device code (plan 12e Task 14, ruling 44 S4)", ()
 
   it("deletes the user's decided device rows at a reset, a change, and a grant revoke", async () => {
     const ends = [
-      async (a: Awaited<ReturnType<typeof approved>>) => resetByLink(a.h, a.s.user.email),
+      async (a: Awaited<ReturnType<typeof approved>>) => resetByLink(a.h, emailOf(a.s.user)),
       async (a: Awaited<ReturnType<typeof approved>>) => {
         const session = await resolveSession(a.h.config, a.s.token);
         if (!session) throw new Error("no session");
@@ -1150,7 +1150,7 @@ describe("the end of a decided device code (plan 12e Task 14, ruling 44 S4)", ()
     (store as { create: StorageAdapter["create"] }).create = (async (model, data) => {
       if (model === "oauthToken" && gate) {
         gate = false;
-        await resetByLink(a.h, a.s.user.email);
+        await resetByLink(a.h, emailOf(a.s.user));
       }
       return create(model, data);
     }) as StorageAdapter["create"];

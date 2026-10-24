@@ -440,18 +440,7 @@ async function resolveInTransaction(
     }
     return { user: resolved, created: false };
   }
-  const drafted: UserRow = {
-    id: newId(now),
-    email,
-    emailVerified: true,
-    name: null,
-    image: null,
-    bannedAt: null,
-    banReason: null,
-    banUntil: null,
-    createdAt: now,
-    updatedAt: now,
-  };
+  const drafted = draftUserRow({ email, emailVerified: true, name: null }, now);
   // The sign-up rule and `user.beforeCreate`, then the session hook, all
   // before the user create (plan 12a, spec 8.9): the D1 undo (`BeforeResolveWrite`).
   const minted = steps ? await steps.user(tx, drafted) : drafted;
@@ -469,20 +458,51 @@ async function resolveInTransaction(
   return { user, created: true };
 }
 
+/** The fields of a new user row that a writer names; `draftUserRow` sets the rest. */
+export type UserDraftFields = Pick<UserRow, "email" | "emailVerified" | "name"> &
+  Partial<Pick<UserRow, "id" | "image" | "username" | "displayUsername" | "phone" | "isAnonymous">>;
+
+/**
+ * The one builder of a new user row (plan 12i Task 1). Each writer of a
+ * user row drafts it here, runs its sign-up rule and its hooks on the
+ * draft, and then creates it. So every new field of the row has one
+ * default: no ban, no username, no phone, not anonymous.
+ */
+export function draftUserRow(fields: UserDraftFields, now: Date): UserRow {
+  return {
+    id: fields.id ?? newId(now),
+    email: fields.email,
+    emailVerified: fields.emailVerified,
+    name: fields.name,
+    image: fields.image ?? null,
+    bannedAt: null,
+    banReason: null,
+    banUntil: null,
+    username: fields.username ?? null,
+    displayUsername: fields.displayUsername ?? null,
+    phone: fields.phone ?? null,
+    isAnonymous: fields.isAnonymous ?? false,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 /**
  * The sign-up rule at a create (plan 12b): stops the flow with
  * `sign_up_closed` unless `signUp` lets `email` become a user. It reads the
  * invitations and their organizations in the create's transaction. So an
  * invitation revoked before the commit refuses it, and so does an
- * invitation of a deleted organization.
+ * invitation of a deleted organization. A null address (plan 12i) passes
+ * `"open"` and stops under `"invited"`, because an invitation names an
+ * address.
  */
 export async function mayCreateUser(
   config: ResolvedConfig,
   tx: StorageAdapter,
-  email: string,
+  email: string | null,
 ): Promise<void> {
   if (config.signUp === "open") return;
-  if (config.signUp === "invited") {
+  if (config.signUp === "invited" && email !== null) {
     const pending = await tx.findMany(
       "invitation",
       [

@@ -7,6 +7,7 @@ import {
   compatMigration0009Sql,
   compatMigration0010Sql,
   compatMigration0011Sql,
+  compatMigration0012Sql,
   resolveNames,
 } from "@authtempo/compat-better-auth";
 import { expect, it } from "vitest";
@@ -85,6 +86,12 @@ await env.DB.batch(
 );
 // 0011 names ta_ tables only, so its text is the same for every naming (plan 12d).
 await env.DB.batch(statements(compatMigration0011Sql("sqlite")).map((s) => env.DB.prepare(s)));
+// 0012 names the user and passkey tables and their columns, so its text takes the naming (plan 12i).
+await env.DB.batch(
+  statements(compatMigration0012Sql("sqlite", resolveNames({ casing: "snake" }))).map((s) =>
+    env.DB.prepare(s),
+  ),
+);
 
 const count = async (table: string) =>
   (await env.DB.prepare(`SELECT count(*) AS n FROM "${table}"`).first<number>("n")) ?? -1;

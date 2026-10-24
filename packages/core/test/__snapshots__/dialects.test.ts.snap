@@ -1862,7 +1862,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_passkey WHERE id = ? RETURNING id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name",
+    "sql": "DELETE FROM ta_passkey WHERE id = ? RETURNING id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name, discoverable, prf, large_blob",
   },
   "passkey.insert": {
     "params": [
@@ -1877,8 +1877,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "s-deviceType",
       1,
       "s-name",
+      1,
+      1,
+      1,
     ],
-    "sql": "INSERT INTO ta_passkey (id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_passkey (id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name, discoverable, prf, large_blob) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "passkey.reinsertRow": {
     "params": [
@@ -1893,8 +1896,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "s-deviceType",
       1,
       "s-name",
+      1,
+      1,
+      1,
     ],
-    "sql": "INSERT INTO ta_passkey (id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_passkey (id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name, discoverable, prf, large_blob) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "passkey.restoreRow": {
     "params": [
@@ -1918,9 +1924,15 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       1,
       "s-name",
       "s-name",
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
       "id-1",
     ],
-    "sql": "UPDATE ta_passkey SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, user_id = CASE WHEN user_id IS ? THEN ? ELSE user_id END, credential_id = CASE WHEN credential_id IS ? THEN ? ELSE credential_id END, public_key = CASE WHEN public_key IS ? THEN ? ELSE public_key END, counter = CASE WHEN counter IS ? THEN ? ELSE counter END, transports = CASE WHEN transports IS ? THEN ? ELSE transports END, device_type = CASE WHEN device_type IS ? THEN ? ELSE device_type END, backed_up = CASE WHEN backed_up IS ? THEN ? ELSE backed_up END, name = CASE WHEN name IS ? THEN ? ELSE name END WHERE id = ?",
+    "sql": "UPDATE ta_passkey SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, user_id = CASE WHEN user_id IS ? THEN ? ELSE user_id END, credential_id = CASE WHEN credential_id IS ? THEN ? ELSE credential_id END, public_key = CASE WHEN public_key IS ? THEN ? ELSE public_key END, counter = CASE WHEN counter IS ? THEN ? ELSE counter END, transports = CASE WHEN transports IS ? THEN ? ELSE transports END, device_type = CASE WHEN device_type IS ? THEN ? ELSE device_type END, backed_up = CASE WHEN backed_up IS ? THEN ? ELSE backed_up END, name = CASE WHEN name IS ? THEN ? ELSE name END, discoverable = CASE WHEN discoverable IS ? THEN ? ELSE discoverable END, prf = CASE WHEN prf IS ? THEN ? ELSE prf END, large_blob = CASE WHEN large_blob IS ? THEN ? ELSE large_blob END WHERE id = ?",
   },
   "passkey.select": {
     "params": [
@@ -1930,7 +1942,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name FROM ta_passkey WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
+    "sql": "SELECT id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name, discoverable, prf, large_blob FROM ta_passkey WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
   },
   "passkey.undoCreate": {
     "params": [
@@ -1942,7 +1954,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name FROM ta_passkey WHERE id = ?",
+    "sql": "SELECT id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name, discoverable, prf, large_blob FROM ta_passkey WHERE id = ?",
   },
   "passkey.update": {
     "params": [
@@ -1956,9 +1968,12 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "s-deviceType",
       1,
       "s-name",
+      1,
+      1,
+      1,
       "id-1",
     ],
-    "sql": "UPDATE ta_passkey SET created_at = ?, updated_at = ?, user_id = ?, credential_id = ?, public_key = ?, counter = ?, transports = ?, device_type = ?, backed_up = ?, name = ? WHERE id = ?",
+    "sql": "UPDATE ta_passkey SET created_at = ?, updated_at = ?, user_id = ?, credential_id = ?, public_key = ?, counter = ?, transports = ?, device_type = ?, backed_up = ?, name = ?, discoverable = ?, prf = ?, large_blob = ? WHERE id = ?",
   },
   "password.delete": {
     "params": [
@@ -3296,7 +3311,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_user WHERE id = ? RETURNING id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until",
+    "sql": "DELETE FROM ta_user WHERE id = ? RETURNING id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous",
   },
   "user.insert": {
     "params": [
@@ -3310,8 +3325,12 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       1767225600000,
       "s-banReason",
       1767225600000,
+      "s-username",
+      "s-displayUsername",
+      "s-phone",
+      1,
     ],
-    "sql": "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "user.reinsertRow": {
     "params": [
@@ -3325,8 +3344,12 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       1767225600000,
       "s-banReason",
       1767225600000,
+      "s-username",
+      "s-displayUsername",
+      "s-phone",
+      1,
     ],
-    "sql": "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    "sql": "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   },
   "user.restoreRow": {
     "params": [
@@ -3348,9 +3371,17 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "s-banReason",
       1767225600000,
       1767225600000,
+      "s-username",
+      "s-username",
+      "s-displayUsername",
+      "s-displayUsername",
+      "s-phone",
+      "s-phone",
+      1,
+      1,
       "id-1",
     ],
-    "sql": "UPDATE ta_user SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, email = CASE WHEN email IS ? THEN ? ELSE email END, email_verified = CASE WHEN email_verified IS ? THEN ? ELSE email_verified END, name = CASE WHEN name IS ? THEN ? ELSE name END, image = CASE WHEN image IS ? THEN ? ELSE image END, banned_at = CASE WHEN banned_at IS ? THEN ? ELSE banned_at END, ban_reason = CASE WHEN ban_reason IS ? THEN ? ELSE ban_reason END, ban_until = CASE WHEN ban_until IS ? THEN ? ELSE ban_until END WHERE id = ?",
+    "sql": "UPDATE ta_user SET created_at = CASE WHEN created_at IS ? THEN ? ELSE created_at END, updated_at = CASE WHEN updated_at IS ? THEN ? ELSE updated_at END, email = CASE WHEN email IS ? THEN ? ELSE email END, email_verified = CASE WHEN email_verified IS ? THEN ? ELSE email_verified END, name = CASE WHEN name IS ? THEN ? ELSE name END, image = CASE WHEN image IS ? THEN ? ELSE image END, banned_at = CASE WHEN banned_at IS ? THEN ? ELSE banned_at END, ban_reason = CASE WHEN ban_reason IS ? THEN ? ELSE ban_reason END, ban_until = CASE WHEN ban_until IS ? THEN ? ELSE ban_until END, username = CASE WHEN username IS ? THEN ? ELSE username END, display_username = CASE WHEN display_username IS ? THEN ? ELSE display_username END, phone = CASE WHEN phone IS ? THEN ? ELSE phone END, is_anonymous = CASE WHEN is_anonymous IS ? THEN ? ELSE is_anonymous END WHERE id = ?",
   },
   "user.select": {
     "params": [
@@ -3360,7 +3391,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until FROM ta_user WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
+    "sql": "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous FROM ta_user WHERE id IN (?, ?) AND substr(id, 1, ?) = ? ORDER BY created_at IS NULL DESC, created_at DESC, id IS NULL, id ASC LIMIT ?",
   },
   "user.undoCreate": {
     "params": [
@@ -3389,7 +3420,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until FROM ta_user WHERE id = ?",
+    "sql": "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous FROM ta_user WHERE id = ?",
   },
   "user.update": {
     "params": [
@@ -3402,9 +3433,13 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       1767225600000,
       "s-banReason",
       1767225600000,
+      "s-username",
+      "s-displayUsername",
+      "s-phone",
+      1,
       "id-1",
     ],
-    "sql": "UPDATE ta_user SET created_at = ?, updated_at = ?, email = ?, email_verified = ?, name = ?, image = ?, banned_at = ?, ban_reason = ?, ban_until = ? WHERE id = ?",
+    "sql": "UPDATE ta_user SET created_at = ?, updated_at = ?, email = ?, email_verified = ?, name = ?, image = ?, banned_at = ?, ban_reason = ?, ban_until = ?, username = ?, display_username = ?, phone = ?, is_anonymous = ? WHERE id = ?",
   },
   "verification.delete": {
     "params": [
@@ -5377,7 +5412,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_passkey WHERE id = $1 RETURNING id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name",
+    "sql": "DELETE FROM ta_passkey WHERE id = $1 RETURNING id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name, discoverable, prf, large_blob",
   },
   "passkey.insert": {
     "params": [
@@ -5392,8 +5427,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "s-deviceType",
       true,
       "s-name",
+      true,
+      true,
+      true,
     ],
-    "sql": "INSERT INTO ta_passkey (id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+    "sql": "INSERT INTO ta_passkey (id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name, discoverable, prf, large_blob) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
   },
   "passkey.reinsertRow": {
     "params": [
@@ -5408,8 +5446,11 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "s-deviceType",
       true,
       "s-name",
+      true,
+      true,
+      true,
     ],
-    "sql": "INSERT INTO ta_passkey (id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+    "sql": "INSERT INTO ta_passkey (id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name, discoverable, prf, large_blob) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
   },
   "passkey.restoreRow": {
     "params": [
@@ -5433,9 +5474,15 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       true,
       "s-name",
       "s-name",
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
       "id-1",
     ],
-    "sql": "UPDATE ta_passkey SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, user_id = CASE WHEN user_id IS NOT DISTINCT FROM $5 THEN $6 ELSE user_id END, credential_id = CASE WHEN credential_id IS NOT DISTINCT FROM $7 THEN $8 ELSE credential_id END, public_key = CASE WHEN public_key IS NOT DISTINCT FROM $9 THEN $10 ELSE public_key END, counter = CASE WHEN counter IS NOT DISTINCT FROM $11 THEN $12 ELSE counter END, transports = CASE WHEN transports IS NOT DISTINCT FROM $13 THEN $14 ELSE transports END, device_type = CASE WHEN device_type IS NOT DISTINCT FROM $15 THEN $16 ELSE device_type END, backed_up = CASE WHEN backed_up IS NOT DISTINCT FROM $17 THEN $18 ELSE backed_up END, name = CASE WHEN name IS NOT DISTINCT FROM $19 THEN $20 ELSE name END WHERE id = $21",
+    "sql": "UPDATE ta_passkey SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, user_id = CASE WHEN user_id IS NOT DISTINCT FROM $5 THEN $6 ELSE user_id END, credential_id = CASE WHEN credential_id IS NOT DISTINCT FROM $7 THEN $8 ELSE credential_id END, public_key = CASE WHEN public_key IS NOT DISTINCT FROM $9 THEN $10 ELSE public_key END, counter = CASE WHEN counter IS NOT DISTINCT FROM $11 THEN $12 ELSE counter END, transports = CASE WHEN transports IS NOT DISTINCT FROM $13 THEN $14 ELSE transports END, device_type = CASE WHEN device_type IS NOT DISTINCT FROM $15 THEN $16 ELSE device_type END, backed_up = CASE WHEN backed_up IS NOT DISTINCT FROM $17 THEN $18 ELSE backed_up END, name = CASE WHEN name IS NOT DISTINCT FROM $19 THEN $20 ELSE name END, discoverable = CASE WHEN discoverable IS NOT DISTINCT FROM $21 THEN $22 ELSE discoverable END, prf = CASE WHEN prf IS NOT DISTINCT FROM $23 THEN $24 ELSE prf END, large_blob = CASE WHEN large_blob IS NOT DISTINCT FROM $25 THEN $26 ELSE large_blob END WHERE id = $27",
   },
   "passkey.select": {
     "params": [
@@ -5445,7 +5492,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name FROM ta_passkey WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
+    "sql": "SELECT id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name, discoverable, prf, large_blob FROM ta_passkey WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
   },
   "passkey.undoCreate": {
     "params": [
@@ -5457,7 +5504,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name FROM ta_passkey WHERE id = $1",
+    "sql": "SELECT id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name, discoverable, prf, large_blob FROM ta_passkey WHERE id = $1",
   },
   "passkey.update": {
     "params": [
@@ -5471,9 +5518,12 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "s-deviceType",
       true,
       "s-name",
+      true,
+      true,
+      true,
       "id-1",
     ],
-    "sql": "UPDATE ta_passkey SET created_at = $1, updated_at = $2, user_id = $3, credential_id = $4, public_key = $5, counter = $6, transports = $7, device_type = $8, backed_up = $9, name = $10 WHERE id = $11",
+    "sql": "UPDATE ta_passkey SET created_at = $1, updated_at = $2, user_id = $3, credential_id = $4, public_key = $5, counter = $6, transports = $7, device_type = $8, backed_up = $9, name = $10, discoverable = $11, prf = $12, large_blob = $13 WHERE id = $14",
   },
   "password.delete": {
     "params": [
@@ -6811,7 +6861,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "DELETE FROM ta_user WHERE id = $1 RETURNING id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until",
+    "sql": "DELETE FROM ta_user WHERE id = $1 RETURNING id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous",
   },
   "user.insert": {
     "params": [
@@ -6825,8 +6875,12 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       2026-01-01T00:00:00.000Z,
       "s-banReason",
       2026-01-01T00:00:00.000Z,
+      "s-username",
+      "s-displayUsername",
+      "s-phone",
+      true,
     ],
-    "sql": "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+    "sql": "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
   },
   "user.reinsertRow": {
     "params": [
@@ -6840,8 +6894,12 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       2026-01-01T00:00:00.000Z,
       "s-banReason",
       2026-01-01T00:00:00.000Z,
+      "s-username",
+      "s-displayUsername",
+      "s-phone",
+      true,
     ],
-    "sql": "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+    "sql": "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)",
   },
   "user.restoreRow": {
     "params": [
@@ -6863,9 +6921,17 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "s-banReason",
       2026-01-01T00:00:00.000Z,
       2026-01-01T00:00:00.000Z,
+      "s-username",
+      "s-username",
+      "s-displayUsername",
+      "s-displayUsername",
+      "s-phone",
+      "s-phone",
+      true,
+      true,
       "id-1",
     ],
-    "sql": "UPDATE ta_user SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, email = CASE WHEN email IS NOT DISTINCT FROM $5 THEN $6 ELSE email END, email_verified = CASE WHEN email_verified IS NOT DISTINCT FROM $7 THEN $8 ELSE email_verified END, name = CASE WHEN name IS NOT DISTINCT FROM $9 THEN $10 ELSE name END, image = CASE WHEN image IS NOT DISTINCT FROM $11 THEN $12 ELSE image END, banned_at = CASE WHEN banned_at IS NOT DISTINCT FROM $13 THEN $14 ELSE banned_at END, ban_reason = CASE WHEN ban_reason IS NOT DISTINCT FROM $15 THEN $16 ELSE ban_reason END, ban_until = CASE WHEN ban_until IS NOT DISTINCT FROM $17 THEN $18 ELSE ban_until END WHERE id = $19",
+    "sql": "UPDATE ta_user SET created_at = CASE WHEN created_at IS NOT DISTINCT FROM $1 THEN $2 ELSE created_at END, updated_at = CASE WHEN updated_at IS NOT DISTINCT FROM $3 THEN $4 ELSE updated_at END, email = CASE WHEN email IS NOT DISTINCT FROM $5 THEN $6 ELSE email END, email_verified = CASE WHEN email_verified IS NOT DISTINCT FROM $7 THEN $8 ELSE email_verified END, name = CASE WHEN name IS NOT DISTINCT FROM $9 THEN $10 ELSE name END, image = CASE WHEN image IS NOT DISTINCT FROM $11 THEN $12 ELSE image END, banned_at = CASE WHEN banned_at IS NOT DISTINCT FROM $13 THEN $14 ELSE banned_at END, ban_reason = CASE WHEN ban_reason IS NOT DISTINCT FROM $15 THEN $16 ELSE ban_reason END, ban_until = CASE WHEN ban_until IS NOT DISTINCT FROM $17 THEN $18 ELSE ban_until END, username = CASE WHEN username IS NOT DISTINCT FROM $19 THEN $20 ELSE username END, display_username = CASE WHEN display_username IS NOT DISTINCT FROM $21 THEN $22 ELSE display_username END, phone = CASE WHEN phone IS NOT DISTINCT FROM $23 THEN $24 ELSE phone END, is_anonymous = CASE WHEN is_anonymous IS NOT DISTINCT FROM $25 THEN $26 ELSE is_anonymous END WHERE id = $27",
   },
   "user.select": {
     "params": [
@@ -6875,7 +6941,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       "id-",
       5,
     ],
-    "sql": "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until FROM ta_user WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
+    "sql": "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous FROM ta_user WHERE id IN ($1, $2) AND substr(id, 1, $3) = $4 ORDER BY created_at DESC, id ASC LIMIT $5",
   },
   "user.undoCreate": {
     "params": [
@@ -6904,7 +6970,7 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
     "params": [
       "id-1",
     ],
-    "sql": "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until FROM ta_user WHERE id = $1",
+    "sql": "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous FROM ta_user WHERE id = $1",
   },
   "user.update": {
     "params": [
@@ -6917,9 +6983,13 @@ exports[`the dialects (plan 12g) > keeps the SQLite and Postgres strings of ever
       2026-01-01T00:00:00.000Z,
       "s-banReason",
       2026-01-01T00:00:00.000Z,
+      "s-username",
+      "s-displayUsername",
+      "s-phone",
+      true,
       "id-1",
     ],
-    "sql": "UPDATE ta_user SET created_at = $1, updated_at = $2, email = $3, email_verified = $4, name = $5, image = $6, banned_at = $7, ban_reason = $8, ban_until = $9 WHERE id = $10",
+    "sql": "UPDATE ta_user SET created_at = $1, updated_at = $2, email = $3, email_verified = $4, name = $5, image = $6, banned_at = $7, ban_reason = $8, ban_until = $9, username = $10, display_username = $11, phone = $12, is_anonymous = $13 WHERE id = $14",
   },
   "verification.delete": {
     "params": [

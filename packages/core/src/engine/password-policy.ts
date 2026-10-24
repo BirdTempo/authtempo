@@ -11,12 +11,12 @@ export const PASSWORD_MAX_LENGTH = 128;
  */
 export function passwordPolicyError(
   password: string,
-  email: string,
+  email: string | null,
   minLength: number,
 ): "password_policy" | null {
   const length = [...password].length;
   if (length < minLength || length > PASSWORD_MAX_LENGTH) return "password_policy";
   if (hasControlChar(password)) return "password_policy";
-  if (password.toLowerCase() === email.toLowerCase()) return "password_policy";
+  if (email !== null && password.toLowerCase() === email.toLowerCase()) return "password_policy";
   return null;
 }

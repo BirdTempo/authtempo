@@ -13,7 +13,8 @@ describe("schema version 12 (plan 12f)", () => {
   });
 
   it("adds the ban fields and the actor field as the last nullable fields", () => {
-    expect(Object.entries(schema.user.fields).slice(-3)).toEqual([
+    // Plan 12i adds four fields after banUntil.
+    expect(Object.entries(schema.user.fields).slice(-7, -4)).toEqual([
       ["bannedAt", { type: "date", nullable: true }],
       ["banReason", { type: "string", nullable: true }],
       ["banUntil", { type: "date", nullable: true }],

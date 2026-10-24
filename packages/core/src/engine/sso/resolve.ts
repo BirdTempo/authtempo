@@ -184,9 +184,11 @@ async function beforeSignIn(
     // address in the domain, so the user's own address must be in it too.
     // The profile address passed the same check, so an equal address reads
     // nothing more.
+    // A user with no address (plan 12i) is in no domain.
     if (
       user.email !== email &&
-      !(await inOrganizationDomains(tx, event.connection.organizationId, user.email))
+      (user.email === null ||
+        !(await inOrganizationDomains(tx, event.connection.organizationId, user.email)))
     )
       stopWith("sso_domain_mismatch");
     const row = await tx.findOne("scimUser", [

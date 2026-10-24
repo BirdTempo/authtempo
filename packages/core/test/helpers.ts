@@ -90,11 +90,25 @@ export function makeAuth(overrides: Partial<AuthConfig> = {}) {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
   }
   return { config, storage, mail: sent, clock, seedUser };
+}
+
+/**
+ * The address of a test user that has one. A user can have no address
+ * from schema version 15 (plan 12i), so a test reads it through this
+ * check, never an assertion. It throws for a user with no address.
+ */
+export function emailOf(user: { email: string | null }): string {
+  if (user.email === null) throw new Error("the test user has no address");
+  return user.email;
 }
 
 export function post(path: string, body: unknown, headers: Record<string, string> = {}): Request {

@@ -8,6 +8,7 @@ import { hasControlChar } from "../primitives/text.js";
 import { clientRef } from "../redact.js";
 import type { OAuthClientRow, SessionRow, UserRow, VerificationRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
+import { provedAccount } from "./address.js";
 import { issuerOf } from "./jwt.js";
 import { pkceRequired } from "./oauth-client-auth.js";
 import { findClient } from "./oauth-clients.js";
@@ -608,7 +609,8 @@ async function sessionStep(
   // first, before checkAuthorize. This one keeps sessionStep safe on its own.
   if (held && held.data.userId !== null && held.data.userId !== session.user.id)
     return { kind: "error", error: "invalid_request" };
-  if (!session.user.emailVerified)
+  // A claim of an unproved address could take the grant (spec 8.7); a user with no address has none to claim (plan 12i).
+  if (!provedAccount(session.user))
     return settle(config, held, () => Promise.resolve(denied(config, request, "access_denied")));
   if (
     request.prompt !== "consent" &&
@@ -732,7 +734,7 @@ export async function decideAuthorize(
   if (!(await spendHeld(config, held))) return { kind: "error", error: "invalid_request" };
   const c = await checkAuthorize(config, new URLSearchParams(held.data.params));
   if (!c.ok) return c.step;
-  if (input.decision !== "allow" || !input.session.user.emailVerified)
+  if (input.decision !== "allow" || !provedAccount(input.session.user))
     return denied(config, c.request, "access_denied");
   await grantConsent(config, input.session.user.id, c.request.clientId, c.request.scopes);
   return codeRedirect(config, c.request, input.session);

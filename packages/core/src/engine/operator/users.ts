@@ -20,7 +20,8 @@ import {
  */
 export interface OperatorUser {
   id: string;
-  email: string;
+  /** Null for a user with no address (plan 12i): the list then shows `username` or `phone`. */
+  email: string | null;
   emailVerified: boolean;
   name: string | null;
   createdAt: string;
@@ -263,7 +264,7 @@ export async function searchUsers(
     ]);
     // A cursor user who moved out of the prefix would skip the rest of the
     // prefix and answer `next: null` (review 12f Task 5 L2).
-    if (!last?.email.startsWith(prefix)) return fail("invalid_body");
+    if (!last?.email?.startsWith(prefix)) return fail("invalid_body");
     where.push({ field: "email", op: "gt", value: last.email });
   }
   const rows = await config.storage.findMany("user", where, {

@@ -163,6 +163,10 @@ describe("authtempo-import", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: at,
       updatedAt: at,
     });
@@ -430,6 +434,10 @@ describe("authtempo-import", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: at,
       updatedAt: at,
     });
@@ -478,6 +486,10 @@ describe("authtempo-import", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: new Date("2024-01-15T10:29:00.500Z"),
       updatedAt: new Date("2024-01-15T10:29:00.500Z"),
     });

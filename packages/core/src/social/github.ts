@@ -86,7 +86,7 @@ export async function githubUserinfo(
   );
   return {
     subject,
-    email: primary ? (primary.email as string) : stringClaim(user, "email"),
+    email: typeof primary?.email === "string" ? primary.email : stringClaim(user, "email"),
     emailVerified: primary?.verified === true,
     name: stringClaim(user, "name") ?? stringClaim(user, "login"),
     image: stringClaim(user, "avatar_url"),

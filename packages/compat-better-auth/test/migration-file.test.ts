@@ -16,6 +16,7 @@ import shipped0008 from "../migrations/d1/0008_compat_schema_v11.sql?raw";
 import shipped0009 from "../migrations/d1/0009_compat_schema_v12.sql?raw";
 import shipped0010 from "../migrations/d1/0010_compat_schema_v13.sql?raw";
 import shipped0011 from "../migrations/d1/0011_compat_schema_v14.sql?raw";
+import shipped0012 from "../migrations/d1/0012_compat_schema_v15.sql?raw";
 import shippedBefore17 from "../migrations/d1-before-1.7/0001_compat_better_auth.sql?raw";
 import shipped0002Before17 from "../migrations/d1-before-1.7/0002_compat_schema_v5.sql?raw";
 import shipped0003Before17 from "../migrations/d1-before-1.7/0003_compat_schema_v6.sql?raw";
@@ -27,6 +28,7 @@ import shipped0008Before17 from "../migrations/d1-before-1.7/0008_compat_schema_
 import shipped0009Before17 from "../migrations/d1-before-1.7/0009_compat_schema_v12.sql?raw";
 import shipped0010Before17 from "../migrations/d1-before-1.7/0010_compat_schema_v13.sql?raw";
 import shipped0011Before17 from "../migrations/d1-before-1.7/0011_compat_schema_v14.sql?raw";
+import shipped0012Before17 from "../migrations/d1-before-1.7/0012_compat_schema_v15.sql?raw";
 import {
   COMPAT_MIGRATION_0002_SQL,
   COMPAT_MIGRATION_0003_SQL,
@@ -39,12 +41,14 @@ import {
   compatMigration0009Sql,
   compatMigration0010Sql,
   compatMigration0011Sql,
+  compatMigration0012Sql,
   compatMigrationSql,
   MIGRATION_0007_NAME,
   MIGRATION_0008_NAME,
   MIGRATION_0009_NAME,
   MIGRATION_0010_NAME,
   MIGRATION_0011_NAME,
+  MIGRATION_0012_NAME,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
 import { before17 } from "./d1/sql.js";
@@ -902,6 +906,98 @@ describe("migration 0011 (plan 12d)", () => {
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "11" },
       { key: "schema_version", value: "14" },
+    ]);
+  });
+});
+
+describe("migration 0012 (plan 12i)", () => {
+  it("ships both D1 files as the default naming's SQLite text", () => {
+    const text = compatMigration0012Sql("sqlite", resolveNames());
+    expect(normalize(shipped0012)).toBe(normalize(text));
+    expect(normalize(shipped0012Before17)).toBe(normalize(text));
+  });
+
+  it("is the runner's step after 0011, and the step writes '12' and '15'", () => {
+    const names = [...COMPAT_MIGRATION_NAMES];
+    expect(names.indexOf(MIGRATION_0012_NAME)).toBe(names.indexOf(MIGRATION_0011_NAME) + 1);
+    expect(MIGRATION_0012_NAME).toBe("0012_compat_schema_v15");
+    for (const dialect of ["postgres", "sqlite"] as const) {
+      const text = compatMigration0012Sql(dialect, resolveNames());
+      expect(text).toContain("UPDATE ta_meta SET value = '12' WHERE key = 'compat_better_auth';");
+      expect(text).toContain("UPDATE ta_meta SET value = '15' WHERE key = 'schema_version';");
+    }
+    // Postgres adds a plugin column and its unique key only when the table lacks them.
+    const pg = compatMigration0012Sql("postgres", resolveNames());
+    expect(pg).toContain('ALTER TABLE "user" ADD COLUMN IF NOT EXISTS "username" text;');
+    expect(pg).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS ux_user__phone_number ON "user" ("phoneNumber");',
+    );
+  });
+
+  it("adds Better Auth's plugin columns and core's passkey flags, and keeps each row", () => {
+    const db = sqlite(BETTER_AUTH_SQLITE);
+    for (const text of [
+      shipped,
+      shipped0002,
+      shipped0003,
+      shipped0004,
+      shipped0005,
+      shipped0006,
+      shipped0007,
+      shipped0008,
+      shipped0009,
+      shipped0010,
+      shipped0011,
+    ])
+      db.exec(text);
+    // A user and a passkey as Better Auth wrote them before the migration.
+    db.exec(
+      `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt") VALUES ('u1','Ann','ann@example.com',1,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z')`,
+    );
+    db.exec(
+      `INSERT INTO "passkey" ("id","name","publicKey","userId","credentialID","counter","deviceType","backedUp","transports","createdAt") VALUES ('p1',NULL,'AQ==','u1','c1',0,'singleDevice',0,NULL,'2026-09-01T00:00:00.000Z')`,
+    );
+    db.exec(shipped0012);
+    type Column = { name: string; type: string; notnull: number; dflt_value: string | null };
+    const columns = (table: string) =>
+      (db.prepare(`PRAGMA table_info("${table}")`).all() as Column[]).map(
+        ({ name, type, notnull, dflt_value }) => ({ name, type, notnull, dflt_value }),
+      );
+    expect(columns("user").slice(-5)).toEqual([
+      { name: "username", type: "TEXT", notnull: 0, dflt_value: null },
+      { name: "displayUsername", type: "TEXT", notnull: 0, dflt_value: null },
+      { name: "phoneNumber", type: "TEXT", notnull: 0, dflt_value: null },
+      { name: "phoneNumberVerified", type: "INTEGER", notnull: 0, dflt_value: null },
+      { name: "isAnonymous", type: "INTEGER", notnull: 0, dflt_value: "0" },
+    ]);
+    expect(columns("passkey").slice(-3)).toEqual([
+      { name: "taDiscoverable", type: "INTEGER", notnull: 0, dflt_value: null },
+      { name: "taPrf", type: "INTEGER", notnull: 1, dflt_value: "0" },
+      { name: "taLargeBlob", type: "INTEGER", notnull: 1, dflt_value: "0" },
+    ]);
+    expect(db.prepare(`SELECT "isAnonymous", "username" FROM "user"`).all()).toEqual([
+      { isAnonymous: 0, username: null },
+    ]);
+    expect(db.prepare(`SELECT "taPrf", "taLargeBlob" FROM "passkey"`).all()).toEqual([
+      { taPrf: 0, taLargeBlob: 0 },
+    ]);
+    // The unique keys of the username and the phone; a NULL never conflicts.
+    db.exec(
+      `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt","username","phoneNumber") VALUES ('u2','Bo','bo@example.com',1,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z','bo','+14155550100')`,
+    );
+    expect(() =>
+      db.exec(
+        `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt","username") VALUES ('u3','Cy','cy@example.com',1,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z','bo')`,
+      ),
+    ).toThrow(/UNIQUE constraint failed/);
+    expect(() =>
+      db.exec(
+        `INSERT INTO "user" ("id","name","email","emailVerified","image","createdAt","updatedAt","phoneNumber") VALUES ('u4','Di','di@example.com',1,NULL,'2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z','+14155550100')`,
+      ),
+    ).toThrow(/UNIQUE constraint failed/);
+    expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
+      { key: "compat_better_auth", value: "12" },
+      { key: "schema_version", value: "15" },
     ]);
   });
 });

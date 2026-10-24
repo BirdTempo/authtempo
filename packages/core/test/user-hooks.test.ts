@@ -17,7 +17,7 @@ import type { Result } from "../src/result.js";
 import type { IdentityRow, UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { DEFAULT_OBSERVE, makeAuth, post, tokenFromMail } from "./helpers.js";
+import { DEFAULT_OBSERVE, emailOf, makeAuth, post, tokenFromMail } from "./helpers.js";
 import { FAST, pwHandle } from "./password-helpers.js";
 import {
   type FakeIdToken,
@@ -380,6 +380,10 @@ describe("hooks.user (plan 12a, spec 8.9)", () => {
             bannedAt: null,
             banReason: null,
             banUntil: null,
+            username: null,
+            displayUsername: null,
+            phone: null,
+            isAnonymous: false,
             createdAt: now,
             updatedAt: now,
           });
@@ -387,7 +391,7 @@ describe("hooks.user (plan 12a, spec 8.9)", () => {
             id: newId(now),
             userId: winner.id,
             provider: "email",
-            subject: winner.email,
+            subject: emailOf(winner),
             linkedAt: now,
             createdAt: now,
             updatedAt: now,
@@ -484,6 +488,10 @@ describe("patchedNewUser (plan 12a)", () => {
     bannedAt: null,
     banReason: null,
     banUntil: null,
+    username: null,
+    displayUsername: null,
+    phone: null,
+    isAnonymous: false,
     createdAt: new Date(0),
     updatedAt: new Date(0),
   };

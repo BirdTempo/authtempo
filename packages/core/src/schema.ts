@@ -1,4 +1,4 @@
-export const SCHEMA_VERSION = 14;
+export const SCHEMA_VERSION = 15;
 
 export interface BaseRow {
   id: string;
@@ -7,7 +7,12 @@ export interface BaseRow {
 }
 
 export interface UserRow extends BaseRow {
-  email: string;
+  /**
+   * The address, in the form of `normalizeEmail`. Null from schema version 15
+   * (plan 12i): an account can have no address. A read takes the guard
+   * `hasAddress` (`engine/address.ts`), never an assertion.
+   */
+  email: string | null;
   emailVerified: boolean;
   name: string | null;
   image: string | null;
@@ -17,6 +22,14 @@ export interface UserRow extends BaseRow {
   banReason: string | null;
   /** The end of the ban. Null with `bannedAt` set: the ban has no end. */
   banUntil: Date | null;
+  /** The stored username (plan 12i): NFKC, then lower case. Unique; null for none. */
+  username: string | null;
+  /** The username in the case that the person typed (plan 12i). */
+  displayUsername: string | null;
+  /** The phone number in E.164 (plan 12i). Unique. A stored phone is always a proved phone. */
+  phone: string | null;
+  /** True for an anonymous account (plan 12i). A sign-in replaces it. */
+  isAnonymous: boolean;
 }
 
 export interface IdentityRow extends BaseRow {
@@ -183,7 +196,35 @@ export type VerificationPurpose =
    * hex of `session-cap:<sessionId>`. The expiresAt is the cap, and the data
    * is null. The session ends at the cap, so the sweep deletes the row with it.
    */
-  | "session-cap";
+  | "session-cap"
+  /**
+   * A phone sign-in code (plan 12i). The identifier is the number in E.164.
+   * The valueHash is HMAC-SHA256 under the current secret version of
+   * `<row id>:<code>`, in hex. The data is { attempts }.
+   */
+  | "phone-otp"
+  /**
+   * A code that adds a phone to an account (plan 12i). The identifier is the
+   * user id. The data is { phone, attempts }, and the hash is as for `phone-otp`.
+   */
+  | "phone-add-otp"
+  /**
+   * A nonce for an ID-token sign-in (plan 12i). The identifier is the
+   * provider name. The valueHash is the SHA-256 hex of the nonce.
+   */
+  | "id-token-nonce"
+  /**
+   * A spent ID token (plan 12i). The identifier is the provider name. The
+   * valueHash is the SHA-256 hex of the token. The row lives until the
+   * token's `exp`, so a replay fails while the token is valid.
+   */
+  | "id-token-used"
+  /**
+   * The address proof at sign-up by an email code (plan 12i). The
+   * identifier is the normalized address. The data is { passwordId,
+   * attempts, anonymousUserId }, and the hash is as for `email-otp`.
+   */
+  | "password-verify-otp";
 
 export interface VerificationRow extends BaseRow {
   purpose: VerificationPurpose;
@@ -211,6 +252,16 @@ export interface PasskeyRow extends BaseRow {
   deviceType: string;
   backedUp: boolean;
   name: string | null;
+  /**
+   * The `credProps.rk` output of the registration (plan 12i): true for a
+   * discoverable credential. Null when the browser did not answer it. The
+   * three flags are advice of the client and decide nothing.
+   */
+  discoverable: boolean | null;
+  /** True when the authenticator said that it supports the PRF extension (plan 12i). */
+  prf: boolean;
+  /** True when the authenticator said that it supports the `largeBlob` extension (plan 12i). */
+  largeBlob: boolean;
 }
 
 export interface OrganizationRow extends BaseRow {
@@ -800,15 +851,19 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
   user: {
     fields: {
       ...base,
-      email: { type: "string" },
+      email: { type: "string", nullable: true },
       emailVerified: { type: "boolean" },
       name: { type: "string", nullable: true },
       image: { type: "string", nullable: true },
       bannedAt: { type: "date", nullable: true },
       banReason: { type: "string", nullable: true },
       banUntil: { type: "date", nullable: true },
+      username: { type: "string", nullable: true },
+      displayUsername: { type: "string", nullable: true },
+      phone: { type: "string", nullable: true },
+      isAnonymous: { type: "boolean" },
     },
-    unique: [["email"]],
+    unique: [["email"], ["username"], ["phone"]],
     indexes: [],
   },
   identity: {
@@ -864,6 +919,9 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       deviceType: { type: "string" },
       backedUp: { type: "boolean" },
       name: { type: "string", nullable: true },
+      discoverable: { type: "boolean", nullable: true },
+      prf: { type: "boolean" },
+      largeBlob: { type: "boolean" },
     },
     unique: [["credentialId"]],
     indexes: [["userId"]],

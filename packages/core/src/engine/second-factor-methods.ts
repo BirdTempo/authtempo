@@ -8,6 +8,7 @@ import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, UserRow, VerificationRow } from "../schema.js";
 import type { PublicKeyCredentialRequestOptionsJSON } from "../seams/webauthn.js";
 import { StorageError } from "../storage/port.js";
+import { hasAddress } from "./address.js";
 import { requireFresh } from "./fresh.js";
 import { HookStop } from "./hooks.js";
 import { sendNotice } from "./notices.js";
@@ -351,6 +352,8 @@ export async function sendSecondFactorEmail(
     { field: "id", op: "eq", value: row.identifier },
   ]);
   if (!user) return fail("invalid_token");
+  // The email method needs a verified address to turn on, so a user with none never has it (plan 12i).
+  if (!hasAddress(user)) return fail("invalid_body");
   if (!(await limit(config, "second-factor-email:user", user.id, EMAIL_SENDS_PER_USER)))
     return fail("rate_limited");
   if (!(await limit(config, "totp:email-day", user.email, MAILED_CODES_PER_EMAIL_DAY)))

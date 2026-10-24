@@ -14,7 +14,7 @@ sources:
 
 **For:** an operator who deploys a new core, or a developer who reads the tables.
 
-**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 14 needs the migrations up to `0014_schema_v14`.
+**What it does:** this page lists the tables that each schema version adds, and how each adapter applies its migrations. Core at version 15 needs the migrations up to `0015_schema_v15`.
 
 ## Before you start
 
@@ -38,8 +38,9 @@ sources:
 | 12 | `0012_schema_v12` | `ta_operator_audit`. It also adds the three ban fields to `ta_user` and `actor_id` to `ta_session` (plan 12f). |
 | 13 | `0013_schema_v13` | `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`, `ta_moved_token`. It also adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token` (plan 12k). |
 | 14 | `0014_schema_v14` | `ta_sso_connection`, `ta_sso_domain`, `ta_scim_token`, `ta_scim_user`, `ta_scim_group`, `ta_scim_group_member` (plan 12d). |
+| 15 | `0015_schema_v15` | No table. It makes `email` of `ta_user` nullable, and adds `username`, `display_username`, `phone`, and `is_anonymous` to `ta_user`, and three flags to `ta_passkey` (plan 12i). |
 
-`SCHEMA_VERSION` of `@authtempo/core` is 14.
+`SCHEMA_VERSION` of `@authtempo/core` is 15.
 
 Version 9 adds `secret_version` to `ta_totp`, `ta_second_factor`, `ta_verification`, and `ta_jwk` (plan 12b). Its migration is `0009_schema_v9` in both adapters and `0006_compat_schema_v9` in the compatibility package. Every row of today reads as version 1. A Worker at version 8 that still runs after the migration writes the default 1. That is correct while the app has one secret: add a second secret version only after every Worker runs core at version 9.
 
@@ -103,6 +104,19 @@ Version 14 comes from the `0014_schema_v14` migration in both adapters, and from
 | `scimUser` | `ta_scim_user` | table | The SCIM view of one user in one organization, unique on (`organization_id`, `user_id`) and on (`organization_id`, `user_name_key`). It has a `user_id`, so the account delete removes it (plan 12d). |
 | `scimGroup` | `ta_scim_group` | table | A SCIM group of one organization, unique on (`organization_id`, `display_name_key`) (plan 12d). |
 | `scimGroupMember` | `ta_scim_group_member` | table | One member of one SCIM group, unique on (`group_id`, `scim_user_id`) (plan 12d). |
+
+Version 15 comes from the `0015_schema_v15` migration of D1 and Postgres, from `0003_schema_v15` on MySQL, and from `0012_compat_schema_v15` in the compatibility package (plan 12i). It adds no table. On D1 and SQLite, the migration rebuilds `ta_user`, because SQLite cannot drop NOT NULL. No table refers to `ta_user`, so the rebuild keeps every row and every other table.
+
+| Field | Column | Type | What it holds |
+| --- | --- | --- | --- |
+| `user.email` | `email` | string, nullable | The address. Null for an account with no address: an anonymous account, a phone account, or an account of a passkey sign-up. Still unique: a null never conflicts (plan 12i). |
+| `user.username` | `username` | string, nullable | The username in its stored form: NFKC, then lower case. Unique (plan 12i). |
+| `user.displayUsername` | `display_username` | string, nullable | The username in the case that the person typed (plan 12i). |
+| `user.phone` | `phone` | string, nullable | The phone number in E.164. Unique. Core stores a phone only after a code proved it (plan 12i). |
+| `user.isAnonymous` | `is_anonymous` | boolean | True for an anonymous account. The migration writes false into each row of version 14 (plan 12i). |
+| `passkey.discoverable` | `discoverable` | boolean, nullable | The `credProps` answer of the registration: true for a discoverable credential, null when the browser gave none (plan 12i). |
+| `passkey.prf` | `prf` | boolean | True when the authenticator said that it supports the PRF extension. Default false (plan 12i). |
+| `passkey.largeBlob` | `large_blob` | boolean | True when the authenticator said that it supports the `largeBlob` extension. Default false (plan 12i). |
 
 The counts are `integer` on Postgres, as every count of core is, except the passkey `counter` and the TOTP `lastStep`.
 
@@ -221,6 +235,7 @@ The compatibility package keeps the tables of Better Auth 1.7. It adds columns t
 | `0009_compat_schema_v12` | `taBannedAt`, `taBanReason`, and `taBanUntil` on `user`, `taActorId` on `session`, and `ta_operator_audit`. No default. It copies each ban of the admin plugin (`banned`, `banReason`, `banExpires`) into the ban columns, and skips a row that has `taBannedAt`. The text names the user and session tables, so tables with other names take the text of `compatMigration0009Sql`. |
 | `0010_compat_schema_v13` | `activeTeamId` on `session` and `teamId` on `invitation`, the columns of Better Auth's teams option. No default and no fill. On Postgres it adds each column only when it is absent. It creates Better Auth's `organizationRole` when it is absent, and adds `taRank` (default 1) and the unique key on (`organizationId`, `role`). It creates Better Auth's `team` and `teamMember` when they are absent. It adds `teamMember.taOrganizationId` and `taUpdatedAt` with a fill, and the unique key on (`teamId`, `userId`). The `d1-before-1.7` file also adds `team.memberCount` (default 0) and `teamMember.membershipKey` (unique), which the team tables of Better Auth 1.4.21 lack. On Postgres it adds these two columns only when they are absent. On D1, tables that hold `session.activeTeamId` and `invitation.teamId` already take an own 0010 file, applied before `authtempo migrate`. It is the shipped file of its directory without its two `ALTER TABLE ... ADD COLUMN` lines of `session` and `invitation`. The other lines must stay. They create the `organizationRole`, `team`, and `teamMember` tables when they are absent. They add `taRank`, the `ta` columns, and the unique keys, and move the versions. The text names the session, invitation, organization, organizationRole, team, and teamMember tables, so tables with other names take the text of `compatMigration0010Sql`. |
 | `0011_compat_schema_v14` | The six tables of version 14. Better Auth's `ssoProvider` table and the tables of its SCIM plugin stay as they are. The text names `ta_` tables only, so it is the same for every naming. |
+| `0012_compat_schema_v15` | The columns of Better Auth's username, phone number, and anonymous plugins on `user`: `username`, `displayUsername`, `phoneNumber`, `phoneNumberVerified`, and `isAnonymous` (default false), with a unique key on `username` and on `phoneNumber`. On Postgres it adds each column only when it is absent. It adds `taDiscoverable`, `taPrf`, and `taLargeBlob` to `passkey`. Better Auth's `user.email` stays NOT NULL. The text names the user and passkey tables, so tables with other names take the text of `compatMigration0012Sql`. |
 
 On D1, a database made by a Better Auth older than 1.7 uses the folder `d1-before-1.7`. [Better Auth compatibility](/docs/reference/compat-better-auth/) tells the rest.
 

@@ -74,7 +74,8 @@ runAdapterConformance(
     await migrateWithoutLock(pg.sql, s.names);
     return { adapter: s.storage, close: () => pg.close(), stop: () => pg.stop() };
   },
-  { rowLocks: true, ping: true, oldStore: oldStore(BETTER_AUTH_PG) },
+  // Better Auth's user.email is NOT NULL until Task 16 of plan 12i maps a null address.
+  { rowLocks: true, ping: true, nullEmail: false, oldStore: oldStore(BETTER_AUTH_PG) },
 );
 
 runAdapterConformance(
@@ -88,6 +89,7 @@ runAdapterConformance(
   {
     rowLocks: true,
     ping: true,
+    nullEmail: false,
     oldStore: oldStore(CONSUMER_I_PG, { casing: "snake" }),
   },
 );
@@ -117,6 +119,10 @@ const user = (id: string, email: string) => ({
   bannedAt: null,
   banReason: null,
   banUntil: null,
+  username: null,
+  displayUsername: null,
+  phone: null,
+  isAnonymous: false,
   createdAt: at,
   updatedAt: at,
 });
@@ -136,7 +142,7 @@ describe("the compat runner on postgres (plan 11c)", () => {
 
   // The beforeEach of the mapping tests ran these two checks until ruling 53
   // of plan 12k moved it to the steps without the lock.
-  it("applies 0001 to 0011 on the Better Auth era rows, and a second run applies none", async () => {
+  it("applies 0001 to 0012 on the Better Auth era rows, and a second run applies none", async () => {
     const pg = await freshBetterAuthSchema(BETTER_AUTH_PG);
     try {
       await pg.sql.unsafe(BETTER_AUTH_ERA);
@@ -153,6 +159,7 @@ describe("the compat runner on postgres (plan 11c)", () => {
         "0009_compat_schema_v12",
         "0010_compat_schema_v13",
         "0011_compat_schema_v14",
+        "0012_compat_schema_v15",
       ]);
       expect(await s.migrate()).toEqual([]);
     } finally {
@@ -204,8 +211,8 @@ describe("the Better Auth mapping on postgres", () => {
     await pg.close();
   });
 
-  it("serves core schema version 14; a new core version needs migration 0012 and a mapping change", () => {
-    expect(SCHEMA_VERSION).toBe(14);
+  it("serves core schema version 15; a new core version needs migration 0013 and a mapping change", () => {
+    expect(SCHEMA_VERSION).toBe(15);
   });
 
   it("names only columns the table field list knows", () => {
@@ -287,6 +294,9 @@ describe("the Better Auth mapping on postgres", () => {
       transports: null,
       deviceType: "multiDevice",
       backedUp: true,
+      discoverable: null,
+      prf: false,
+      largeBlob: false,
       name: null,
       createdAt: at,
       updatedAt: at,
@@ -648,8 +658,8 @@ describe("the compat migration on postgres", () => {
         "teamMember",
       ]);
       expect(await pg.sql.unsafe("SELECT key, value FROM ta_meta ORDER BY key")).toEqual([
-        { key: "compat_better_auth", value: "11" },
-        { key: "schema_version", value: "14" },
+        { key: "compat_better_auth", value: "12" },
+        { key: "schema_version", value: "15" },
       ]);
       // Core's columns in core's order (plans 9f and 9g), so core's statements read these tables.
       for (const model of [

@@ -1333,7 +1333,8 @@ async function writeChange(
   // and for the rule of a move and a reactivate (ruling 74 M2 of plan 12d).
   const claimed =
     deactivate || move || reactivate
-      ? (await claimingDomain(storage, user.email))?.organizationId === caller.organizationId
+      ? user.email !== null &&
+        (await claimingDomain(storage, user.email))?.organizationId === caller.organizationId
       : false;
   if ((move || reactivate) && !claimed) return LEFT_DOMAIN();
   if (move) {

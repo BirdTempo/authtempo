@@ -13,6 +13,8 @@ const row = (createdAt: unknown, updatedAt: unknown) => ({
   emailVerified: 1,
   name: "",
   image: null,
+  // Migration 0012 (plan 12i) gives the column the default 0.
+  isAnonymous: 0,
   createdAt,
   updatedAt,
 });

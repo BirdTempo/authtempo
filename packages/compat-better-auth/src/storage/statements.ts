@@ -335,6 +335,8 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
   function encode(model: ModelName, field: string, value: unknown): unknown {
     const { type } = def(model, field);
     const codec = MAP[model].fields[field]?.codec;
+    if (codec === "notNull" && (value === null || value === undefined))
+      throw invalid(model, field, "the Better Auth table needs a value here");
     const given =
       codec === "nullAsEmpty" && (value === null || value === undefined)
         ? ""

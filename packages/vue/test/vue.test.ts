@@ -11,7 +11,7 @@ const Probe = defineComponent({
       const s = session.value;
       if (s.isPending) return h("p", "pending");
       if (s.error) return h("p", `error:${s.error.code}`);
-      return h("p", s.data ? s.data.user.email : "signed out");
+      return h("p", s.data ? (s.data.user.email ?? "no address") : "signed out");
     };
   },
 });

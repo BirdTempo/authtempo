@@ -8,7 +8,7 @@ import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
 import { createMemoryAdapter } from "../src/storage/memory.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, BASE_URL, get, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, emailOf, get, post } from "./helpers.js";
 import {
   basicHeader,
   codeFor,
@@ -95,6 +95,10 @@ function world(over: Partial<AuthConfig> = {}, storage: StorageAdapter = createM
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: t0,
       updatedAt: t0,
     });
@@ -222,7 +226,7 @@ describe("the grant and touch checks (plan 12k Task 3)", () => {
       await w.auth.api.inviteMember({
         user: admin,
         organizationId,
-        email: grader.email,
+        email: emailOf(grader),
         role: "member",
       }),
     );
@@ -271,7 +275,7 @@ describe("the grant and touch checks (plan 12k Task 3)", () => {
       await w.auth.api.inviteMember({
         user: guardian,
         organizationId,
-        email: x.email,
+        email: emailOf(x),
         role: "learner",
       }),
     );
@@ -428,7 +432,7 @@ describe("hasPermission (plan 12k Task 3)", () => {
     );
     const ada = await w.user("ada@example.com");
     const org = mustOk(await w.auth.api.createOrganization({ user: ada, slug: "acme", name: "A" }));
-    const caller = await callerOf(w.auth, bearer(await sessionOf(w.auth, sent, ada.email)));
+    const caller = await callerOf(w.auth, bearer(await sessionOf(w.auth, sent, emailOf(ada))));
     const input = { organizationId: org.organization.id, permissions: { member: ["read"] } };
     expect(await w.auth.hasPermission(caller, input)).toBe(true);
     broken = true;
@@ -482,7 +486,7 @@ describe("the permission routes (plan 12k Task 3)", () => {
     mustOk(
       await w.auth.api.addMember({ user: ada, organizationId: id, userId: bob.id, role: "member" }),
     );
-    const ts = await sessionOf(w.auth, sent, ada.email);
+    const ts = await sessionOf(w.auth, sent, emailOf(ada));
     const tk = mustOk(await w.auth.api.tokens.create({ user: ada, name: "script" })).token;
     return { w, sent, ada, id, ts, tk };
   }

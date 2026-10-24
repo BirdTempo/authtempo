@@ -96,8 +96,9 @@ describe("schemaDdl (plan 12g)", () => {
   it("names each index as fieldsFromUniqueIndex reads it back", () => {
     const want = schemaKeys();
     // 27 models of version 13 hold 50 named keys, and ta_limit holds one.
-    // Version 14 (plan 12d) adds 6 models with 13 named keys.
-    expect(want).toHaveLength(64);
+    // Version 14 (plan 12d) adds 6 models with 13 named keys. Version 15
+    // (plan 12i) adds the unique keys of user.username and user.phone.
+    expect(want).toHaveLength(66);
     for (const d of DIALECTS) {
       const have = ddlKeys(d);
       expect({ dialect: d.name, keys: have }).toEqual({ dialect: d.name, keys: want });
@@ -134,13 +135,13 @@ describe("schemaDdl (plan 12g)", () => {
 
   it("ends with the version row", () => {
     expect(schemaDdl(SQLITE).at(-1)).toBe(
-      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '14')",
+      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '15')",
     );
     expect(schemaDdl(POSTGRES).at(-1)).toBe(
-      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '14')",
+      "INSERT INTO ta_meta (key, value) VALUES ('schema_version', '15')",
     );
     expect(schemaDdl(MYSQL).at(-1)).toBe(
-      "INSERT INTO `ta_meta` (`key`, `value`) VALUES ('schema_version', '14')",
+      "INSERT INTO `ta_meta` (`key`, `value`) VALUES ('schema_version', '15')",
     );
   });
 

@@ -39,7 +39,7 @@ import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { SOCIAL } from "./every-feature.js";
-import { BASE_URL, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
+import { BASE_URL, emailOf, makeAuth, seedPlatform, tokenFromMail } from "./helpers.js";
 import {
   authorized,
   codeFor,
@@ -455,7 +455,7 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     const org = must(
       await createOrganization(config, { user: me.user, slug: "acme", name: "Acme" }),
     );
-    must(await requestPasswordReset(config, { email: me.user.email, ip: null }));
+    must(await requestPasswordReset(config, { email: emailOf(me.user), ip: null }));
     const resetToken = w.lastToken();
     must(await requestEmailChange(config, { session: me, newEmail: "ada2@example.com" }));
     const emailChangeToken = w.lastToken();
@@ -465,7 +465,7 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
       await mintSessionJwt(config, { userId: me.user.id, sessionId: me.session.id }),
     );
     must(await enableEmailMethod(config, { session: me, password: PASSWORD }));
-    const challenge = await challengeOf(w, me.user.email);
+    const challenge = await challengeOf(w, emailOf(me.user));
     // A token with a window (plan 12k): its window is the limiter call of GET /tokens/current.
     const windowed = must(
       await createApiToken(config, {
@@ -769,7 +769,7 @@ describe("the codes of one route (plan 11g)", () => {
         fills,
       );
     const dan = await verifiedSession(w.auth, "dan@example.com");
-    expect(await invite(dan.user.email)).toEqual({ status: 200, code: null });
+    expect(await invite(emailOf(dan.user))).toEqual({ status: 200, code: null });
     const danToken = w.lastInvitation();
     expect(await invite("eve@example.com")).toEqual({ status: 200, code: null });
     expect(await invite("frank@example.com")).toEqual({ status: 200, code: null });
@@ -887,7 +887,7 @@ describe("the codes of one route (plan 11g)", () => {
     expect(
       await call(w, "POST /password/sign-up", {}, { email: "new@example.com", password: PASSWORD }),
     ).toEqual({ status: 400, code: "password_breached" });
-    must(await requestPasswordReset(w.auth.config, { email: ada.user.email, ip: null }));
+    must(await requestPasswordReset(w.auth.config, { email: emailOf(ada.user), ip: null }));
     expect(
       await call(
         w,
@@ -901,7 +901,7 @@ describe("the codes of one route (plan 11g)", () => {
       status: 503,
       code: "breach_check_unavailable",
     });
-    must(await requestResetOtp(w.auth.config, { email: ada.user.email, ip: null }));
+    must(await requestResetOtp(w.auth.config, { email: emailOf(ada.user), ip: null }));
     expect(
       await call(
         w,
@@ -925,6 +925,10 @@ describe("the codes of one route (plan 11g)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });
@@ -962,14 +966,14 @@ describe("the codes of one route (plan 11g)", () => {
       code: "totp_not_enabled",
     });
     // The sign-in challenge: a wrong code each time, until the challenge is spent.
-    const challenge = await challengeOf(w, me.user.email);
+    const challenge = await challengeOf(w, emailOf(me.user));
     const verify = () => call(w, "POST /totp/verify", {}, { challenge, code: wrong });
     expect(await verify()).toEqual({ status: 400, code: "invalid_code" });
     const codes: string[] = [];
     for (let i = 0; i < CHALLENGE_MAX_ATTEMPTS; i++) codes.push((await verify()).code ?? "");
     expect(codes).toContain("too_many_attempts");
     // The form of the challenge page carries each code in a redirect.
-    const page = await challengeOf(w, me.user.email);
+    const page = await challengeOf(w, emailOf(me.user));
     const form = () => call(w, "POST /totp/challenge", {}, { challenge: page, code: wrong });
     const formCodes: Answer[] = [];
     for (let i = 0; i <= CHALLENGE_MAX_ATTEMPTS; i++) formCodes.push(await form());
@@ -1184,7 +1188,7 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
     await inviteMember(config, {
       user: ada.user,
       organizationId,
-      email: dan.user.email,
+      email: emailOf(dan.user),
       role: "member",
     }),
   );
@@ -1193,13 +1197,13 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
   const team = must(await createTeam(config, { user: ada.user, organizationId, name: "Core" }));
   const empty = must(await createTeam(config, { user: ada.user, organizationId, name: "Web" }));
   must(await addTeamMember(config, { user: ada.user, teamId: team.id, userId: carol.user.id }));
-  must(await requestMagicLink(config, { email: ada.user.email, ip: null }));
+  must(await requestMagicLink(config, { email: emailOf(ada.user), ip: null }));
   const magicToken = w.lastToken();
-  must(await requestEmailOtp(config, { email: ada.user.email, ip: null }));
+  must(await requestEmailOtp(config, { email: emailOf(ada.user), ip: null }));
   const otpCode = w.lastCode();
-  must(await requestResetOtp(config, { email: ada.user.email, ip: null }));
+  must(await requestResetOtp(config, { email: emailOf(ada.user), ip: null }));
   const resetCode = w.lastCode();
-  must(await requestPasswordReset(config, { email: ada.user.email, ip: null }));
+  must(await requestPasswordReset(config, { email: emailOf(ada.user), ip: null }));
   const resetToken = w.lastToken();
   must(
     await passwordSignUp(config, {
@@ -1237,10 +1241,10 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
   const handoffCode = new URL(landed.location).searchParams.get("code") ?? "";
   // One enrolled user per TOTP route: a code passes once, and the first route spends it.
   const totp = await enrolled(w.auth, "totp@example.com");
-  const totpChallenge = await challengeOf(w, totp.user.email);
+  const totpChallenge = await challengeOf(w, emailOf(totp.user));
   const totpCode = await codeNow(w.auth, totp.secret);
   const totpForm = await enrolled(w.auth, "totp-form@example.com");
-  const formChallenge = await challengeOf(w, totpForm.user.email);
+  const formChallenge = await challengeOf(w, emailOf(totpForm.user));
   const formCode = await codeNow(w.auth, totpForm.secret);
   const bodies: { readonly [K in RouteKey]?: Record<string, unknown> } = {
     "POST /password/sign-in": { email: ada.user.email, password: PASSWORD },
@@ -1345,14 +1349,14 @@ describe("token_expired on every route that declares it (plan 11g)", () => {
       await inviteMember(config, {
         user: ada.user,
         organizationId: org.organization.id,
-        email: dan.user.email,
+        email: emailOf(dan.user),
         role: "member",
       }),
     );
     const inviteToken = w.lastInvitation();
-    must(await requestPasswordReset(config, { email: ada.user.email, ip: null }));
+    must(await requestPasswordReset(config, { email: emailOf(ada.user), ip: null }));
     const resetToken = w.lastToken();
-    must(await requestMagicLink(config, { email: ada.user.email, ip: null }));
+    must(await requestMagicLink(config, { email: emailOf(ada.user), ip: null }));
     const magicToken = w.lastToken();
     must(
       await passwordSignUp(config, {
@@ -1814,6 +1818,10 @@ describe("the shapes of the OAuth answers (plan 11g)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: now,
       updatedAt: now,
     });

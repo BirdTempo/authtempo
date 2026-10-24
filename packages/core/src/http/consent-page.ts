@@ -1,4 +1,4 @@
-import { escapeHtml } from "./confirm-page.js";
+import { escapeHtml, signedInAs } from "./confirm-page.js";
 
 /** What the OAuth consent page gets (plan 9g). */
 export interface ConsentPageInput {
@@ -10,8 +10,8 @@ export interface ConsentPageInput {
   clientId: string;
   /** Where the browser goes after the answer: the redirect URI's origin, or its scheme. */
   redirectTo: string;
-  /** The signed-in user's address. */
-  email: string;
+  /** The signed-in user's address. Null for a user with no address (plan 12i): the page names none. */
+  email: string | null;
   scopes: { name: string; description: string }[];
   /** The resource of the request: the `aud` of the access tokens. */
   resource: string;
@@ -75,7 +75,7 @@ ${STYLE}
 ${scopes}
 </ul>
 <p class="small">For <code>${escapeHtml(input.resource)}</code>.${others}</p>
-<p class="small">Signed in as ${escapeHtml(input.email)}. Client id: <code>${escapeHtml(input.clientId)}</code>.</p>
+<p class="small">${signedInAs(input.email)} Client id: <code>${escapeHtml(input.clientId)}</code>.</p>
 <p class="small">After your answer, the browser goes to ${escapeHtml(input.redirectTo)}.</p>
 <form method="post" action="${escapeHtml(input.action)}">
 ${fields}

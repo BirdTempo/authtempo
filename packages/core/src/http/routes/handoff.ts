@@ -20,7 +20,7 @@ export function handoffRoutes(config: ResolvedConfig): Route[] {
   if (!handoff) return [];
   const page = (handoffId: string): Response =>
     signInPageResponse(config, continuePath(config, handoffId));
-  const confirm = (handoffId: string, email: string, redirectTo: string): Response => {
+  const confirm = (handoffId: string, email: string | null, redirectTo: string): Response => {
     const html = handoff.confirmPage({
       action: `${config.basePath}/handoff/continue`,
       handoffId,

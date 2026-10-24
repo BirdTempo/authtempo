@@ -316,6 +316,10 @@ describe("the rehash on sign-in (plan 8)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: at,
       updatedAt: at,
     });

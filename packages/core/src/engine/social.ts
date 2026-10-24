@@ -29,6 +29,7 @@ import {
   type TokenEndpointAuthMethod,
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import { hasAddress } from "./address.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
 import {
@@ -56,6 +57,7 @@ import {
   ClaimLostError,
   ClaimRacedError,
   claimEmail,
+  draftUserRow,
   ensureEmailIdentity,
   normalizeEmail,
   undoSessionIfIdentityGone,
@@ -934,7 +936,8 @@ async function linkInTransaction(
       profile.emailVerified &&
       profile.email !== null &&
       normalizeEmail(profile.email) === user.email;
-    if (!user.emailVerified && proved) {
+    // `proved` holds an address; `hasAddress` narrows the type for the identity write.
+    if (!user.emailVerified && proved && hasAddress(user)) {
       const claimed = { ...user, emailVerified: true, updatedAt: now };
       const filled = filledUser(claimed, profile, now);
       // `user.beforeVerify`, then the session hook, before the first write (plan 12a).
@@ -980,18 +983,10 @@ async function linkInTransaction(
     await writeFill(tx, current, filled);
     return ok({ user: filled, trustedIdentityId: null, created: false });
   }
-  const drafted: UserRow = {
-    id: newId(now),
-    email,
-    emailVerified: profile.emailVerified,
-    name: profile.name,
-    image: profile.image,
-    bannedAt: null,
-    banReason: null,
-    banUntil: null,
-    createdAt: now,
-    updatedAt: now,
-  };
+  const drafted = draftUserRow(
+    { email, emailVerified: profile.emailVerified, name: profile.name, image: profile.image },
+    now,
+  );
   const linking: IdentitySummary = { provider, subject: profile.subject };
   // The sign-up rule and `user.beforeCreate`, then `identity.beforeLink`, then
   // the session hook, all before the user create (plan 12a, spec 8.9).

@@ -7,7 +7,7 @@ import { changePassword, requestPasswordReset, resetPassword } from "../src/engi
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { StorageAdapter } from "../src/storage/port.js";
-import { APP_ORIGIN, get, post } from "./helpers.js";
+import { APP_ORIGIN, emailOf, get, post } from "./helpers.js";
 import {
   authorized,
   authorizeGet,
@@ -414,7 +414,7 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
 
   it("a reset by link", async () => {
     const { h, c, tokens, family } = await granted();
-    await requestPasswordReset(h.config, { email: c.user.email, ip: null });
+    await requestPasswordReset(h.config, { email: emailOf(c.user), ip: null });
     const token = h.mails.at(-1)?.token ?? "";
     const writes = recordNextTransaction(h.storage);
     const r = await resetPassword(h.config, {
@@ -433,12 +433,12 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
 
   it("a reset by code", async () => {
     const { h, c, tokens } = await granted();
-    const sent = await requestResetOtp(h.config, { email: c.user.email, ip: null });
+    const sent = await requestResetOtp(h.config, { email: emailOf(c.user), ip: null });
     if (!sent.ok) throw new Error(sent.code);
     const code = /\b(\d{8}|\d{6})\b/.exec(h.mails.at(-1)?.text ?? "")?.[1] ?? "";
     const writes = recordNextTransaction(h.storage);
     const r = await resetPasswordWithOtp(h.config, {
-      email: c.user.email,
+      email: emailOf(c.user),
       code,
       password: "a new long password",
       ip: null,
@@ -530,7 +530,7 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
         await outer.auth.handle(exchange(late.code, c.clientId, p.verifier)),
       );
     };
-    await requestPasswordReset(h.config, { email: c.user.email, ip: null });
+    await requestPasswordReset(h.config, { email: emailOf(c.user), ip: null });
     const r = await resetPassword(h.config, {
       token: h.mails.at(-1)?.token ?? "",
       password: "a new long password",
@@ -552,7 +552,7 @@ describe("a reset or a change of the password ends the refresh tokens and keeps 
       const c = await codeFor(h, "mcp:read");
       const writes = recordNextTransaction(h.storage);
       if (end === "reset") {
-        await requestPasswordReset(h.config, { email: c.user.email, ip: null });
+        await requestPasswordReset(h.config, { email: emailOf(c.user), ip: null });
         const r = await resetPassword(h.config, {
           token: h.mails.at(-1)?.token ?? "",
           password: "a new long password",
@@ -678,7 +678,7 @@ describe("a family end that fails after the commit (ruling 45 of plan 12e)", () 
 
   it("a reset sends its notice and runs its hooks before the family end throws", async () => {
     const { h, c, events } = await failingEnd();
-    await requestPasswordReset(h.config, { email: c.user.email, ip: null });
+    await requestPasswordReset(h.config, { email: emailOf(c.user), ip: null });
     await expect(
       resetPassword(h.config, {
         token: h.mails.at(-1)?.token ?? "",

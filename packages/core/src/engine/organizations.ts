@@ -8,6 +8,7 @@ import type { MemberRow, OrganizationRow, SessionRow, UserRow } from "../schema.
 import { findManyIn, IN_CHUNK } from "../storage/batch.js";
 import { meterOf } from "../storage/meter.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
+import { byAddressThenId } from "./address.js";
 import {
   hookGuard,
   type MemberVia,
@@ -61,7 +62,8 @@ export interface MemberSummary {
   id: string;
   userId: string;
   role: string;
-  email: string;
+  /** Null for a member with no address (plan 12i). */
+  email: string | null;
   name: string | null;
   createdAt: Date;
 }
@@ -922,7 +924,7 @@ async function summaries(config: ResolvedConfig, members: MemberRow[]): Promise<
           ]
         : [];
     })
-    .sort((a, b) => (a.email < b.email ? -1 : a.email > b.email ? 1 : a.id < b.id ? -1 : 1));
+    .sort(byAddressThenId);
 }
 
 export async function listMembers(

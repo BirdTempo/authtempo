@@ -3,6 +3,7 @@ import { limit } from "../limiter/limit.js";
 import { fail, ok, type Result } from "../result.js";
 import type { IdentityRow, UserRow } from "../schema.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
+import { hasAddress } from "./address.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
@@ -34,6 +35,8 @@ export interface Credentials {
    * address alone decides. A later switch must change this one line.
    */
   mailbox: boolean;
+  /** A stored phone (plan 12i): a stored phone is always a proved phone. */
+  phone: boolean;
 }
 
 export async function credentialsOf(
@@ -51,7 +54,8 @@ export async function credentialsOf(
     password: row !== null && !row.hash.startsWith(PENDING_HASH_PREFIX),
     passkeys,
     identities: await storage.findMany("identity", [{ field: "userId", op: "eq", value: user.id }]),
-    mailbox: user.emailVerified,
+    mailbox: hasAddress(user) && user.emailVerified,
+    phone: user.phone !== null,
   };
 }
 
@@ -69,7 +73,8 @@ function count(config: ResolvedConfig, c: Credentials): number {
     (c.password ? 1 : 0) +
     c.passkeys +
     c.identities.filter((i) => signsIn(config, i)).length +
-    (c.mailbox ? 1 : 0)
+    (c.mailbox ? 1 : 0) +
+    (c.phone ? 1 : 0)
   );
 }
 

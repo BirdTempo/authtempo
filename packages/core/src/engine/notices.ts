@@ -87,18 +87,25 @@ export function defaultNoticeMail(input: NoticeMailInput): MailMessage {
  * A builder or a mail port that throws writes one line with the event and
  * the filtered error name. The flow then answers its success: the change is
  * committed, and a notice must not undo it. The line holds no address and
- * no error message, because app code sets both.
+ * no error message, because app code sets both. A user with no address
+ * (plan 12i) gets no notice, and the call writes no line.
  */
 export async function sendNotice(
   config: ResolvedConfig,
-  input: Omit<NoticeMailInput, "appName" | "at">,
+  input: Omit<NoticeMailInput, "appName" | "at" | "email"> & { email: string | null },
 ): Promise<void> {
   const notices = config.account.notices;
-  if (!notices) return;
+  const { email } = input;
+  if (!notices || email === null) return;
   try {
-    const message = notices.mail({ ...input, appName: config.appName, at: config.clock.now() });
+    const message = notices.mail({
+      ...input,
+      email,
+      appName: config.appName,
+      at: config.clock.now(),
+    });
     // To the user's address, whatever the builder wrote.
-    await config.mail.send({ ...message, to: input.email });
+    await config.mail.send({ ...message, to: email });
   } catch (e) {
     config.observe.emit({ name: "notice.mail_failed", event: input.event, errorName: e });
   }

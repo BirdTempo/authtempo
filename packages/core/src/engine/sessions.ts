@@ -315,7 +315,7 @@ async function patchedInput(
 export interface PreparedSession {
   readonly input: SessionInput;
   /** The address that `writeSession` compares again, with `sameAddress`. */
-  readonly address?: string;
+  readonly address?: string | null;
 }
 
 /**
@@ -831,7 +831,8 @@ export function renewedSessionCookie(
 /** The public shape of a user. Never an internal field. */
 export function publicUser(user: UserRow): {
   id: string;
-  email: string;
+  /** Null for a user with no address (plan 12i). */
+  email: string | null;
   emailVerified: boolean;
   name: string | null;
   image: string | null;

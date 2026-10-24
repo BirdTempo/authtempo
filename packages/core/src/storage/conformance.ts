@@ -110,6 +110,13 @@ export interface ConformanceOptions {
    * (ruling 2 of plan 12g). Default 1.
    */
   lockStatements?: number;
+  /**
+   * False for a storage whose user table needs an address in every row: the
+   * Better Auth tables, until plan 12i Task 16 maps a null address to a
+   * placeholder. The suite then holds that a create with no address fails
+   * with a StorageError. Default true (schema version 15).
+   */
+  nullEmail?: boolean;
 }
 
 function user(id: string, email: string, at: Date): UserRow {
@@ -122,6 +129,10 @@ function user(id: string, email: string, at: Date): UserRow {
     bannedAt: null,
     banReason: null,
     banUntil: null,
+    username: null,
+    displayUsername: null,
+    phone: null,
+    isAnonymous: false,
     createdAt: at,
     updatedAt: at,
   };
@@ -196,6 +207,9 @@ function passkey(id: string, counter: number, at: Date): PasskeyRow {
     deviceType: "singleDevice",
     backedUp: false,
     name: null,
+    discoverable: null,
+    prf: false,
+    largeBlob: false,
     createdAt: at,
     updatedAt: at,
   };
@@ -319,6 +333,49 @@ export function runAdapterConformance(
         StorageError,
       );
     });
+
+    // Schema version 15 (plan 12i): an address, a username, and a phone are
+    // each unique and each nullable. A null never conflicts, as in SQL.
+    const KEYS = [
+      ["email", "a@example.com", "b@example.com"],
+      ["username", "ada", "bob"],
+      ["phone", "+14155550100", "+14155550101"],
+    ] as const;
+    for (const [field, value, other] of KEYS) {
+      const keyed = (id: string, v: string | null): UserRow => ({
+        ...user(id, `${id}@example.com`, t0),
+        [field]: v,
+      });
+      it(`two null values coexist under the unique key of user ${field}`, async () => {
+        if (field === "email" && options.nullEmail === false) {
+          // This storage holds an address in every row: a create with none fails.
+          await expect(db.create("user", keyed("u1", null))).rejects.toBeInstanceOf(StorageError);
+          expect(await db.findMany("user", [])).toEqual([]);
+          return;
+        }
+        await db.create("user", keyed("u1", null));
+        await db.create("user", keyed("u2", null));
+        await db.create("user", keyed("u3", other));
+        const nulls = await db.findMany("user", [{ field, op: "eq", value: null }]);
+        expect(nulls.map((r) => r.id).sort()).toEqual(["u1", "u2"]);
+        for (const r of nulls) expect(r[field]).toBeNull();
+      });
+      it(`a second equal non-null value of user ${field} fails`, async () => {
+        await db.create("user", keyed("u1", value));
+        await expect(db.create("user", keyed("u2", value))).rejects.toMatchObject({
+          name: "StorageError",
+          code: "unique_violation",
+          model: "user",
+        });
+        await db.create("user", keyed("u3", other));
+        await expect(
+          db.update("user", [{ field: "id", op: "eq", value: "u3" }], { [field]: value }),
+        ).rejects.toMatchObject({ name: "StorageError", code: "unique_violation" });
+        expect((await db.findMany("user", [{ field, op: "eq", value }])).map((r) => r.id)).toEqual([
+          "u1",
+        ]);
+      });
+    }
 
     it("rolls back a transaction when the function throws", async () => {
       await expect(
@@ -2755,6 +2812,10 @@ async function rotationRun(storage: StorageAdapter): Promise<void> {
     bannedAt: null,
     banReason: null,
     banUntil: null,
+    username: null,
+    displayUsername: null,
+    phone: null,
+    isAnonymous: false,
     createdAt: at,
     updatedAt: at,
   });
@@ -2893,6 +2954,12 @@ export interface StoredFormOptions {
    * to the rows that name them. Default: none.
    */
   parents?: readonly ModelName[];
+  /**
+   * False for a store whose user table needs an address in every row (see
+   * `ConformanceOptions.nullEmail`). The row of nulls then keeps its
+   * address. Default true.
+   */
+  nullEmail?: boolean;
 }
 
 /** Values that a column type can read back in another form: numbers, JSON, keywords, and spaces. */
@@ -2912,9 +2979,10 @@ const STORED_TEXTS = (r: number) => [
 /**
  * Row `r` of `model` with a value of each type in each field. A field that
  * names a parent row names row `r` of that parent. With `nulls`, each
- * nullable field is null. `prefix` starts each free text.
+ * nullable field is null, but the user address when `keepEmail` is set.
+ * `prefix` starts each free text.
  */
-function storedRow(model: ModelName, r: number, nulls: boolean, prefix = "") {
+function storedRow(model: ModelName, r: number, nulls: boolean, prefix = "", keepEmail = false) {
   const fields = schema[model].fields as Record<
     string,
     { type: string; nullable?: boolean; int64?: true }
@@ -2928,7 +2996,8 @@ function storedRow(model: ModelName, r: number, nulls: boolean, prefix = "") {
     else if (f === "organizationId" || f === "activeOrganizationId")
       out[f] = `id-organization-${r}`;
     else if (f === "teamId" || f === "activeTeamId") out[f] = `id-team-${r}`;
-    else if (nulls && def.nullable) out[f] = null;
+    else if (nulls && def.nullable && !(keepEmail && model === "user" && f === "email"))
+      out[f] = null;
     else if (model === "invitation" && f === "teamIds") out[f] = [`id-team-${r}`];
     else if (model === "organizationRole" && f === "permissions") out[f] = { project: ["read"] };
     else if (model === "passkey" && f === "publicKey") out[f] = "AQID-_";
@@ -2958,6 +3027,7 @@ export function runStoredFormConformance(
   options: StoredFormOptions = {},
 ): void {
   const parents = options.parents ?? [];
+  const keepEmail = options.nullEmail === false;
   const models = [
     ...parents,
     ...(Object.keys(schema) as ModelName[]).filter((m) => !parents.includes(m)),
@@ -2989,7 +3059,7 @@ export function runStoredFormConformance(
   async function writeAll(db: StorageAdapter, many: boolean, prefix = ""): Promise<string[]> {
     const errors: string[] = [];
     for (const m of models) {
-      const rows = [0, 1, 2].map((r) => storedRow(m, r, r === 2, prefix));
+      const rows = [0, 1, 2].map((r) => storedRow(m, r, r === 2, prefix, keepEmail));
       try {
         if (many) await db.createMany(m, rows as never[]);
         else for (const row of rows) await db.create(m, row as never);
@@ -3054,7 +3124,9 @@ export function runStoredFormConformance(
       // Each free text starts with a lone high and a lone low surrogate.
       const names = async (db: StorageAdapter) =>
         (await db.findMany("user", [], { sort: { field: "id", dir: "asc" } })).map((u) => u.name);
-      const fixed = [0, 1, 2].map((r) => storedRow("user", r, r === 2, "a\ufffdb\ufffd").name);
+      const fixed = [0, 1, 2].map(
+        (r) => storedRow("user", r, r === 2, "a\ufffdb\ufffd", keepEmail).name,
+      );
       const one = await open();
       let created: string;
       try {

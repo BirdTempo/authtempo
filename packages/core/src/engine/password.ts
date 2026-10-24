@@ -9,6 +9,7 @@ import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { hasAddress, provedAccount } from "./address.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
 import { HookStop, hookGuard, stopWith } from "./hooks.js";
@@ -44,6 +45,7 @@ import { holdUser, userStays } from "./user-hold.js";
 import {
   ClaimLostError,
   claimEmail,
+  draftUserRow,
   ensureEmailIdentity,
   mayCreateUser,
   normalizeEmail,
@@ -188,7 +190,7 @@ type Resolved = NonNullable<ResolvedConfig["password"]>;
 async function screen(
   pw: Resolved,
   password: string,
-  email: string,
+  email: string | null,
 ): Promise<"password_policy" | "password_breached" | "breach_check_unavailable" | null> {
   const policy = passwordPolicyError(password, email, pw.minLength);
   if (policy) return policy;
@@ -321,18 +323,10 @@ function insertSignUp(
     // reads it and answers `email_taken`. Postgres isolates the transaction,
     // so the order is no guard there. Checked 2026-10-10.
     // `user.beforeCreate` before the session hook and the first write (plan 12a).
-    const minted: UserRow = await made.user(tx, {
-      id: newId(now),
-      email: row.email,
-      emailVerified: false,
-      name: row.name,
-      image: null,
-      bannedAt: null,
-      banReason: null,
-      banUntil: null,
-      createdAt: now,
-      updatedAt: now,
-    });
+    const minted: UserRow = await made.user(
+      tx,
+      draftUserRow({ email: row.email, emailVerified: false, name: row.name }, now),
+    );
     // The session hook before the first write, with the minted user (plan
     // 9d, fix round 1). On D1 a refusal after a create makes the undo
     // delete the created row by id (`undoCreateWhere`), and only the user
@@ -479,18 +473,10 @@ function insertUniform(
     // The order and the guards of `insertSignUp`, with no session.
     // `user.beforeCreate` before the first write (plan 12a). A known address
     // returned above, so only a new address meets the hook.
-    const minted = await made.user(tx, {
-      id: newId(now),
-      email: row.email,
-      emailVerified: false,
-      name: row.name,
-      image: null,
-      bannedAt: null,
-      banReason: null,
-      banUntil: null,
-      createdAt: now,
-      updatedAt: now,
-    });
+    const minted = await made.user(
+      tx,
+      draftUserRow({ email: row.email, emailVerified: false, name: row.name }, now),
+    );
     const user = await tx.create("user", minted);
     const pending = `${PENDING_HASH_PREFIX}${row.hash}`;
     const password = await tx.create("password", {
@@ -675,7 +661,8 @@ export async function passwordSignIn(
     : null;
   // A pending row counts as no row. The re-check below matches the proved
   // hash, so it never matches a pending row either.
-  if (!user || !row || row.hash.startsWith(PENDING_HASH_PREFIX)) {
+  // The read is by address, so `hasAddress` holds; the guard narrows the type.
+  if (!user || !hasAddress(user) || !row || row.hash.startsWith(PENDING_HASH_PREFIX)) {
     await pw.hash.verify(input.password, await pw.hash.dummy());
     return refuse();
   }
@@ -935,7 +922,7 @@ export async function verifyPasswordEmail(
         if (kept === 0) return fail("invalid_token");
         if (prepared === null) return ok({ user, signedIn: null });
         await claimEmail(tx, user.id, { passwordId }, now, verify, ended);
-        await ensureEmailIdentity(tx, user.id, user.email, now);
+        await ensureEmailIdentity(tx, user.id, row.identifier, now);
         const s = await writeSession(config, prepared, tx);
         return ok({ user: claimed, signedIn: s });
       }),
@@ -1320,18 +1307,7 @@ function applyReset(
       await mayCreateUser(config, tx, email);
       // `user.beforeCreate` after the rule and before the session hook (plan 12a).
       // Its stop undoes the consume too, so the link stays usable.
-      minted = await made.user(tx, {
-        id: newId(now),
-        email,
-        emailVerified: true,
-        name: null,
-        image: null,
-        bannedAt: null,
-        banReason: null,
-        banUntil: null,
-        createdAt: now,
-        updatedAt: now,
-      });
+      minted = await made.user(tx, draftUserRow({ email, emailVerified: true, name: null }, now));
       user = minted;
     } else user = found.emailVerified ? found : { ...found, emailVerified: true, updatedAt: now };
     // The second factor (plan 12c, owner decision 1 of 2026-10-14): a reset
@@ -1492,7 +1468,7 @@ export async function changePassword(
   const pw = config.password;
   if (!pw) return fail("not_found");
   const { user, session } = input.session;
-  if (!user.emailVerified) return fail("email_unverified");
+  if (!provedAccount(user)) return fail("email_unverified");
   const row = await config.storage.findOne("password", [
     { field: "userId", op: "eq", value: user.id },
   ]);
@@ -1646,7 +1622,12 @@ export async function verifyPassword(
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
   ]);
-  if (user && !(await limit(config, "password:email", user.email, SIGN_IN_PER_EMAIL)))
+  // A user with no address (plan 12i) has no address key: the per-IP limit and the session hold.
+  if (
+    user &&
+    hasAddress(user) &&
+    !(await limit(config, "password:email", user.email, SIGN_IN_PER_EMAIL))
+  )
     return fail("rate_limited");
   return checkUserPassword(config, input.userId, input.password);
 }

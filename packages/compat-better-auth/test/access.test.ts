@@ -753,8 +753,8 @@ describe("the access control shim (spec 29 item 18)", () => {
           expect(
             await pg.sql.unsafe(`SELECT key, value FROM ta_meta ORDER BY key`).then((r) => [...r]),
           ).toEqual([
-            { key: "compat_better_auth", value: "11" },
-            { key: "schema_version", value: "14" },
+            { key: "compat_better_auth", value: "12" },
+            { key: "schema_version", value: "15" },
           ]);
         } finally {
           await pg.close();
@@ -771,7 +771,7 @@ describe("the access control shim (spec 29 item 18)", () => {
       const shipped = Object.keys(files)
         .sort()
         .map((k) => files[k] as string);
-      expect(shipped.length).toBe(11);
+      expect(shipped.length).toBe(12);
       for (const withTable of [true, false]) {
         const db = new DatabaseSync(":memory:");
         db.exec("PRAGMA foreign_keys = ON;");
@@ -809,8 +809,8 @@ describe("the access control shim (spec 29 item 18)", () => {
           ),
         ).toThrow(/UNIQUE constraint failed/);
         expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
-          { key: "compat_better_auth", value: "11" },
-          { key: "schema_version", value: "14" },
+          { key: "compat_better_auth", value: "12" },
+          { key: "schema_version", value: "15" },
         ]);
       }
     });

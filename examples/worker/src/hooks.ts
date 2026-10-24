@@ -36,7 +36,7 @@ export function exampleHooks(db: D1Database): HooksConfig {
     session: {
       // A refused reset proves the D1 undo of the link's consume (final fix wave M-6).
       beforeCreate({ user, via }) {
-        if (via === "password" && user.email.startsWith("hooks-reset-refused"))
+        if (via === "password" && user.email?.startsWith("hooks-reset-refused"))
           throw hookRefusal("Password sign-in is closed for this account.");
       },
     },

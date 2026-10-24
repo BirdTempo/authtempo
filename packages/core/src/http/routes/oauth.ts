@@ -693,7 +693,10 @@ function deviceRoutes(
       status: 200,
       headers: pageHeaders(config, noScriptPagePolicy(config)),
     });
-  const stepPage = (step: Exclude<DeviceStep, { kind: "error" }>, email: string): Response => {
+  const stepPage = (
+    step: Exclude<DeviceStep, { kind: "error" }>,
+    email: string | null,
+  ): Response => {
     if (step.kind === "done")
       return page({ step: "done", appName: config.appName, approved: step.approved });
     if (step.kind === "code")

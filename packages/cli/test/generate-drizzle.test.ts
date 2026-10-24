@@ -50,6 +50,10 @@ const USER: Models["user"] = {
   bannedAt: null,
   banReason: null,
   banUntil: null,
+  username: null,
+  displayUsername: null,
+  phone: null,
+  isAnonymous: false,
 };
 const SESSION: Models["session"] = {
   id: "session-drizzle-1",
@@ -89,6 +93,9 @@ const PASSKEY: Models["passkey"] = {
   transports: "internal",
   deviceType: "multiDevice",
   backedUp: false,
+  discoverable: null,
+  prf: false,
+  largeBlob: false,
   name: null,
 };
 

@@ -14,6 +14,7 @@ import type {
   RegistrationResponseJSON,
 } from "../seams/webauthn.js";
 import { StorageError, type Where } from "../storage/port.js";
+import { passkeyUserName, provedAccount } from "./address.js";
 import { hookGuard } from "./hooks.js";
 import { guardedRemove } from "./identities.js";
 import { sendNotice } from "./notices.js";
@@ -194,7 +195,7 @@ export async function passkeyRegistrationOptions(
   input: { user: UserRow; hints?: PasskeyHint[] | undefined },
 ): Promise<Result<PublicKeyCredentialCreationOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!provedAccount(input.user)) return fail("email_unverified");
   const existing = await config.storage.findMany("passkey", [
     { field: "userId", op: "eq", value: input.user.id },
   ]);
@@ -203,8 +204,8 @@ export async function passkeyRegistrationOptions(
     rpID: config.passkey.rpID,
     rpName: config.passkey.rpName,
     userID: userHandleOf(input.user.id),
-    userName: input.user.email,
-    userDisplayName: input.user.name ?? input.user.email,
+    userName: passkeyUserName(config, input.user),
+    userDisplayName: input.user.name ?? passkeyUserName(config, input.user),
     challenge: bytes,
     excludeCredentials: existing.map((p) => ({
       id: p.credentialId,
@@ -224,7 +225,7 @@ export async function verifyPasskeyRegistration(
   input: { user: UserRow; response: unknown; name?: string | undefined },
 ): Promise<Result<PasskeySummary>> {
   if (!config.passkey) return fail("not_found");
-  if (!input.user.emailVerified) return fail("email_unverified");
+  if (!provedAccount(input.user)) return fail("email_unverified");
   const challenge = challengeFromResponse(input.response);
   if (!challenge) return fail("invalid_token");
   const consumed = await consumeChallenge(config, challenge, input.user.id, "registration");
@@ -261,6 +262,10 @@ export async function verifyPasskeyRegistration(
       deviceType: registered.deviceType,
       backedUp: registered.backedUp,
       name: registeredName(input.name),
+      // The extension flags of plan 12i Task 21; this ceremony reads none of them yet.
+      discoverable: null,
+      prf: false,
+      largeBlob: false,
       createdAt: now,
       updatedAt: now,
     });

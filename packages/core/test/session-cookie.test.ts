@@ -39,6 +39,10 @@ describe("the session cookie name (plan 12b)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: new Date("2026-10-14T00:00:00.000Z"),
       updatedAt: new Date("2026-10-14T00:00:00.000Z"),
     });
@@ -63,6 +67,10 @@ describe("the session cookie name (plan 12b)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: new Date("2026-10-14T00:00:00.000Z"),
       updatedAt: new Date("2026-10-14T00:00:00.000Z"),
     });
@@ -91,6 +99,10 @@ describe("the session cookie name (plan 12b)", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: new Date("2026-10-14T00:00:00.000Z"),
       updatedAt: new Date("2026-10-14T00:00:00.000Z"),
     });
@@ -171,6 +183,10 @@ describe("the session cookie name (plan 12b)", () => {
         bannedAt: null,
         banReason: null,
         banUntil: null,
+        username: null,
+        displayUsername: null,
+        phone: null,
+        isAnonymous: false,
         createdAt: new Date("2026-10-14T00:00:00.000Z"),
         updatedAt: new Date("2026-10-14T00:00:00.000Z"),
       });

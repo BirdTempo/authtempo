@@ -16,8 +16,19 @@ import type { BetterAuthTable } from "./names.js";
  * (`invitation.teamId`, plan 12k Task 11). An empty list and null are null.
  * Better Auth refuses a team id that holds "," (INVALID_TEAM_ID), so the
  * join loses nothing.
+ * `notNull`: core allows null, and the table column does not. A write of
+ * null fails with `invalid_argument` before any statement runs. Better
+ * Auth's `user.email` is NOT NULL, and core's address is nullable from
+ * schema version 15 (plan 12i). Task 16 of plan 12i maps a null address to
+ * Better Auth's placeholder address in its place.
  */
-export type Codec = "nullAsEmpty" | "base64Std" | "emptyAsNull" | "permission" | "commaList";
+export type Codec =
+  | "nullAsEmpty"
+  | "base64Std"
+  | "emptyAsNull"
+  | "permission"
+  | "commaList"
+  | "notNull";
 
 export interface FieldMap {
   readonly column: string;
@@ -145,11 +156,19 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
   user: {
     table: "user",
     fields: {
-      ...same("id", "email", "emailVerified", "image", "createdAt", "updatedAt"),
+      ...same("id", "emailVerified", "image", "createdAt", "updatedAt"),
+      email: as("email", "notNull"),
       name: as("name", "nullAsEmpty"),
       bannedAt: as("taBannedAt"),
       banReason: as("taBanReason"),
       banUntil: as("taBanUntil"),
+      // Better Auth's own columns of its username, phone number, and anonymous
+      // plugins (plan 12i). Migration 0012 adds each one that is absent. Task
+      // 16 of plan 12i writes phoneNumberVerified with the phone mapping.
+      username: as("username"),
+      displayUsername: as("displayUsername"),
+      phone: as("phoneNumber"),
+      isAnonymous: as("isAnonymous"),
     },
   },
   identity: {
@@ -221,6 +240,10 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       publicKey: as("publicKey", "base64Std"),
       transports: as("transports", "emptyAsNull"),
       updatedAt: as("taUpdatedAt"),
+      // The extension flags of plan 12i (migration 0012).
+      discoverable: as("taDiscoverable"),
+      prf: as("taPrf"),
+      largeBlob: as("taLargeBlob"),
     },
   },
   organization: {

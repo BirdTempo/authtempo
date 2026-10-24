@@ -300,6 +300,10 @@ describe("members", () => {
       bannedAt: null,
       banReason: null,
       banUntil: null,
+      username: null,
+      displayUsername: null,
+      phone: null,
+      isAnonymous: false,
       createdAt: auth.clock.now(),
       updatedAt: auth.clock.now(),
     });

@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createPostgresAdapter } from "../src/index.js";
 import { freshDatabase } from "./db.js";
 
+/** The address of a test user that has one (plan 12i): a user can have no address, so a read checks it. */
+function emailOf(user: { email: string | null }): string {
+  if (user.email === null) throw new Error("the test user has no address");
+  return user.email;
+}
+
 // createAdmin of plan 12f Task 8 beside the account delete, on the real
 // Postgres adapter, through core's built output, with separate connections.
 // The memory adapter runs one transaction at a time, so only Postgres shows
@@ -135,7 +141,7 @@ describe("createAdmin beside the account delete on Postgres (plan 12f Task 8)", 
         await new Promise((r) => setTimeout(r, HOLD_MS));
       };
       const answers = await Promise.allSettled([
-        w.createAdmin(me.user.email),
+        w.createAdmin(emailOf(me.user)),
         (async () => {
           while (deleting === null) await new Promise((r) => setTimeout(r, 10));
           return deleting;

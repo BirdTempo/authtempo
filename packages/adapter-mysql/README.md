@@ -68,7 +68,9 @@ parent row must see the commit of the other caller.
 Run `applyMysqlMigrations(pool)` at deploy, or `authtempo migrate --target
 mysql`. MySQL starts at the baseline `0001_schema_v13`: no MySQL database
 held an older version. `0002_schema_v14` adds the SSO and SCIM tables of
-schema version 14. MySQL commits each DDL statement at once. So the
+schema version 14. `0003_schema_v15` makes `ta_user.email` nullable and
+adds the username, the phone, the anonymous flag, and the passkey flags of
+schema version 15. MySQL commits each DDL statement at once. So the
 runner records each statement as a step in `ta_migrations`, and after a
 failure it resumes at the first step with no record. The last step writes the
 version. A step and its record are two statements. After a stop between the

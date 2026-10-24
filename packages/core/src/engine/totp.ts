@@ -17,6 +17,7 @@ import type {
   UserRow,
 } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { passkeyUserName } from "./address.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard } from "./hooks.js";
 import { sendNotice } from "./notices.js";
@@ -388,7 +389,11 @@ export async function setupTotp(
   }
   return ok({
     secret: base32Encode(secret),
-    uri: otpauthUri({ secret, issuer: input.issuer ?? totp.issuer, account: user.email }),
+    uri: otpauthUri({
+      secret,
+      issuer: input.issuer ?? totp.issuer,
+      account: passkeyUserName(config, user),
+    }),
     backupCodes: codes,
   });
 }
@@ -700,7 +705,9 @@ export async function totpUri(
   ]);
   const secret = await openSecret(config, row);
   if (!user || !secret) return fail("totp_not_enabled");
-  return ok({ uri: otpauthUri({ secret, issuer: totp.issuer, account: user.email }) });
+  return ok({
+    uri: otpauthUri({ secret, issuer: totp.issuer, account: passkeyUserName(config, user) }),
+  });
 }
 
 /** Deletes every trusted device of the user: each next password sign-in asks for the factor. */
