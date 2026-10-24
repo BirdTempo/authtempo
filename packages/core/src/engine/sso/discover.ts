@@ -1,5 +1,6 @@
 import type { ResolvedConfig, ResolvedSso } from "../../config.js";
 import { ipKey } from "../../limiter/ip-key.js";
+import { limit } from "../../limiter/limit.js";
 import { fail, ok, type Result } from "../../result.js";
 import { normalizeEmail } from "../users.js";
 import { claimingDomain } from "./domains.js";
@@ -50,7 +51,7 @@ export async function discoverSso(
 ): Promise<Result<{ sso: true; connectionId: string; start: string } | { sso: false }>> {
   const sso = config.sso;
   if (!sso) return fail("not_found");
-  if (!(await config.limiter.allow(`sso-discover:ip:${ipKey(input.ip)}`, DISCOVER_LIMIT)))
+  if (!(await limit(config, "sso-discover:ip", ipKey(input.ip), DISCOVER_LIMIT)))
     return fail("rate_limited");
   const email = normalizeEmail(input.email);
   if (email === null) return ok({ sso: false });

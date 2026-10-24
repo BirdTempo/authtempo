@@ -1,6 +1,13 @@
 import { isIpLiteral } from "../limiter/ip-key.js";
 import type { Clock } from "../primitives/clock.js";
-import { CONTROL, KEYED_HASH_INFO, keyedHashKey, keyedHashWith, scrub } from "../redact.js";
+import {
+  CONTROL,
+  KEYED_HASH_INFO,
+  keyedHashKey,
+  keyedHashWith,
+  scrub,
+  secretParts,
+} from "../redact.js";
 import type { ResolvedObserve } from "./config.js";
 import { defaultOutput } from "./default-output.js";
 import { type EventInput, type EventName, specOf, validateEvent } from "./events.js";
@@ -31,8 +38,23 @@ export interface Observer {
    * finds a handler that emits outside the scope of its request.
    */
   unscoped(): Observer;
+  /**
+   * An observer of the same scope and buffer that also scrubs `values` from
+   * each string field (plan 12d). A value is a secret of one request: a SCIM
+   * password or token, an OIDC client secret, or the bearer values of a SAML
+   * post. The config secrets stay on the list.
+   */
+  secrets(values: readonly string[]): Observer;
   flush(): Promise<void>;
   stats(): ObserveStats;
+}
+
+const NO_SECRETS: ReadonlySet<string> = new Set();
+
+/** The secrets of an observer with `values` added, each split as `secretParts` splits it. */
+function withValues(secrets: ReadonlySet<string>, values: readonly string[]): ReadonlySet<string> {
+  const more = values.flatMap((v) => (typeof v === "string" ? secretParts(v) : []));
+  return more.length === 0 ? secrets : new Set([...secrets, ...more]);
 }
 
 /** A raw user agent is cut to this length (spec 31 item 8). */
@@ -104,7 +126,12 @@ export function createObserver(
 
   const stamp = (name: EventName, scope: RequestScope | null) => stamped(name, deps.clock, scope);
 
-  function hold(input: EventInput, scope: RequestScope | null, unscoped: boolean) {
+  function hold(
+    input: EventInput,
+    scope: RequestScope | null,
+    unscoped: boolean,
+    secrets: ReadonlySet<string>,
+  ) {
     const event = stamp(input.name, scope);
     const held: Held = { event };
     // The scrub of the default output, also with a sink: no sink is the only
@@ -116,7 +143,7 @@ export function createObserver(
     // field of a closed list.
     for (const [key, value] of Object.entries(checkedFields(input)))
       if (!Object.hasOwn(event, key))
-        event[key] = typeof value === "string" ? scrub(value, deps.secrets) : value;
+        event[key] = typeof value === "string" ? scrub(value, secrets) : value;
     if (unscoped) event.rejected = [...(event.rejected ?? []), "unscoped"];
     const { include } = config;
     // The raw IP and the raw agent come from the client, so each one gets the
@@ -125,7 +152,7 @@ export function createObserver(
     // address after the scrub is dropped.
     if (scope?.ip) {
       if (include.ip === "raw") {
-        const ip = scrub(scope.ip, deps.secrets);
+        const ip = scrub(scope.ip, secrets);
         if (isIpLiteral(ip)) event.ip = ip;
       } else if (include.ip === "hash") held.ip = scope.ip;
     }
@@ -133,7 +160,7 @@ export function createObserver(
     if (scope?.userAgent && include.userAgent === "raw")
       event.userAgent = scrub(
         scope.userAgent.replace(CONTROL, "").replaceAll("\t", ""),
-        deps.secrets,
+        secrets,
       ).slice(0, USER_AGENT_MAX);
     if (include.email === "hash" && typeof input.email === "string") held.email = input.email;
     return held;
@@ -208,17 +235,23 @@ export function createObserver(
     else dropped.sink_threw += held.length;
   }
 
-  function make(scope: RequestScope | null, unscoped = false): Observer {
+  function make(
+    scope: RequestScope | null,
+    unscoped = false,
+    extra: ReadonlySet<string> = NO_SECRETS,
+  ): Observer {
+    const secrets = extra.size === 0 ? deps.secrets : new Set([...deps.secrets, ...extra]);
     return {
       emit(input) {
         if (buffer.length >= config.buffer) {
           dropped.buffer_full += 1;
           return;
         }
-        buffer.push(hold(input, scope, unscoped));
+        buffer.push(hold(input, scope, unscoped, secrets));
       },
-      scope: (next) => make(next),
-      unscoped: () => make(null, true),
+      scope: (next) => make(next, false, extra),
+      unscoped: () => make(null, true, extra),
+      secrets: (values) => make(scope, unscoped, withValues(extra, values)),
       flush,
       stats: () => ({ buffered: buffer.length, dropped: { ...dropped } }),
     };
@@ -247,10 +280,25 @@ export function createDefaultObserver(deps: {
     scope: () => observer,
     // A line has no trace, so the mark has nothing to change here.
     unscoped: () => observer,
+    secrets: (values) =>
+      createDefaultObserver({ clock: deps.clock, secrets: withValues(deps.secrets, values) }),
     flush: async () => {},
     stats: () => ({ buffered: 0, dropped: noDrops() }),
   };
   return observer;
+}
+
+/**
+ * `config` with an observer that also scrubs `values` (plan 12d): the
+ * secrets of one request. A null, an undefined, or an empty value adds
+ * nothing, and with no value left the answer is `config` itself.
+ */
+export function withSecrets<C extends { observe: Observer }>(
+  config: C,
+  values: readonly (string | null | undefined)[],
+): C {
+  const kept = values.filter((v): v is string => typeof v === "string" && v.length > 0);
+  return kept.length === 0 ? config : { ...config, observe: config.observe.secrets(kept) };
 }
 
 /** The observer of the construction config (plan 12h Task 4): it marks each event `unscoped`. */

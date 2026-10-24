@@ -1,19 +1,17 @@
-import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../../src/config.js";
 import type { SessionVia } from "../../src/engine/hooks.js";
 import { resolveSession } from "../../src/engine/sessions.js";
 import { updateDomain } from "../../src/engine/sso/domains.js";
 import { verifyTwoFactor } from "../../src/engine/totp.js";
+import type { AuthEvent } from "../../src/observe/port.js";
 import { FAST } from "../password-helpers.js";
 import { codeNow, enrolled } from "../totp-helpers.js";
 import { SSO_APP, seedOrganization, verifiedDomain } from "./helpers.js";
 import { oidcConnection, type SsoWorld, ssoSignIn, ssoSignInWorld } from "./sign-in-helpers.js";
 
-let info: MockInstance<typeof console.info>;
-
 beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
-  info = vi.spyOn(console, "info").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -37,7 +35,10 @@ function signIn(w: SsoWorld, connectionId: string, claims: Record<string, unknow
 
 describe("the second factor of an SSO sign-in (plan 12d Task 5)", () => {
   it("passes the gate only on a listed amr, acr, or AuthnContextClassRef", async () => {
-    const { w, organizationId } = await gated();
+    const batches: AuthEvent[][] = [];
+    const { w, organizationId } = await gated({
+      observe: { sink: { write: (b) => void batches.push([...b]) } },
+    });
     // Ada turns the factor on through 12c's enable.
     await enrolled(w, ADA);
     const amrList = await oidcConnection(w, organizationId, "acme", { mfa: { amr: ["mfa"] } });
@@ -58,11 +59,12 @@ describe("the second factor of an SSO sign-in (plan 12d Task 5)", () => {
     const acr = await signIn(w, acrList, { acr: "phr" });
     expect(acr.challenge).toBeNull();
     expect((await resolveSession(w.config, acr.token ?? ""))?.user.email).toBe(ADA);
-    // One log line for each pass by the IdP: the connection id and the key of its list.
-    const line = "authtempo: sso second factor by the idp";
-    expect(info.mock.calls.filter((c) => c[0] === line)).toEqual([
-      [line, amrList, "amr"],
-      [line, acrList, "acr"],
+    // One event for each pass by the IdP: the connection id and the key of its list (plan 12h).
+    await w.config.observe.flush();
+    const passes = batches.flat().filter((e) => e.name === "sso.second_factor_idp");
+    expect(passes.map((e) => [e.connectionId, e.claim])).toEqual([
+      [amrList, "amr"],
+      [acrList, "acr"],
     ]);
   });
 

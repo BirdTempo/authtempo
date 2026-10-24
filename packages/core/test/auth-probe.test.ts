@@ -64,7 +64,9 @@ const authOf = (key: RouteKey): readonly string[] => entryOf(key).auth;
 /** The request of one route: the path with a real provider, the body by its media, the headers. */
 function requestOf(key: RouteKey, headers: Record<string, string>): Request {
   const entry = entryOf(key);
-  const url = `${BASE}/auth${entry.path.replace(":provider", "google")}`;
+  // Each other parameter takes a value of the id form, so an event field of it passes its kind (plan 12h).
+  const path = entry.path.replace(":provider", "google").replace(/:([A-Za-z]+)/g, "p-$1");
+  const url = `${BASE}/auth${path}`;
   if (entry.method === "GET") return new Request(url, { headers });
   // A DELETE carries no body (plan 12d Task 10, the SCIM Users).
   if (entry.method === "DELETE")

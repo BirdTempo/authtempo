@@ -1,6 +1,7 @@
 import { domainRecordFor } from "../../compat-seams.js";
 import type { ResolvedConfig } from "../../config.js";
 import { ERRORS } from "../../errors.js";
+import { limit } from "../../limiter/limit.js";
 import { randomBase64Url } from "../../primitives/crypto.js";
 import { isIpLiteral } from "../../primitives/host.js";
 import { newId } from "../../primitives/ids.js";
@@ -10,8 +11,7 @@ import type { OperatorAuditRow, SsoDomainRow } from "../../schema.js";
 import { PROVIDER_TIMEOUT_MS } from "../../social/provider.js";
 import type { Meter } from "../../storage/meter.js";
 import { type StorageAdapter, StorageError } from "../../storage/port.js";
-import { runAfter } from "../hooks.js";
-import { auditDraft, operatorAct, writeAuditIn } from "../operator/audit.js";
+import { auditDraft, operatorAct, operatorActed, writeAuditIn } from "../operator/audit.js";
 import { type OperatorActor, requireScope } from "../operator/guards.js";
 import { lockOrganization } from "../teams.js";
 import type { DnsTxtPort } from "./dns.js";
@@ -95,9 +95,13 @@ export interface SsoActMeta {
   userAgent?: string | null;
 }
 
-/** The after hook of one audit row, after the commit (deviation 3 of plan 12d). The connections call it too. */
+/**
+ * The after hook of one audit row, after the commit (deviation 3 of plan
+ * 12d), and the event `operator.action` beside it (plan 12h). The
+ * connections call it too.
+ */
 export async function afterAudit(config: ResolvedConfig, row: OperatorAuditRow): Promise<void> {
-  await runAfter("operator.afterAction", config.hooks.operator.afterAction, { audit: row }, row.id);
+  await operatorActed(config, row);
 }
 
 /** The longest DNS name in text form, with no trailing dot (RFC 1035 section 2.3.4). */
@@ -158,21 +162,22 @@ export function normalizeDomain(raw: unknown): string | null {
  * and each within `PROVIDER_TIMEOUT_MS`. A string of the list must equal a
  * value exactly: no trim, no case fold. A port joins the parts of one TXT
  * string itself (`DnsTxtPort`). A null, a throw, a timeout, or a list with
- * no value is a failure. The first failure ends the check with one log
- * line. The line names the port and the domain, never the challenge. `meter`
+ * no value is a failure. The first failure ends the check with one fault
+ * event. It names the port and the domain row, never the challenge. `meter`
  * counts each port call as one call of the invocation (a DoH fetch is a
  * subrequest).
  */
 async function everyPortGives(
+  config: ResolvedConfig,
   ports: readonly DnsTxtPort[],
-  domain: string,
+  row: SsoDomainRow,
   expect: { name: string; values: readonly string[] },
   meter?: Meter,
 ): Promise<boolean> {
   for (const port of ports) {
     meter?.add(1);
     if (!(await portGives(port, expect))) {
-      console.error("authtempo: sso domain unverified", port.name, domain);
+      config.observe.emit({ name: "sso.domain_unverified", port: port.name, domainId: row.id });
       return false;
     }
   }
@@ -361,8 +366,10 @@ export async function verifyDomainWith(
   ]);
   if (!row) return fail("not_found");
   if (
-    !(await config.limiter.allow(
-      `sso-domain-verify:org:${row.organizationId}`,
+    !(await limit(
+      config,
+      "sso-domain-verify:org",
+      row.organizationId,
       DOMAIN_VERIFY_PER_ORGANIZATION,
     ))
   )
@@ -372,7 +379,7 @@ export async function verifyDomainWith(
   if (row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime())
     return fail("token_expired");
   const expect = record === "own" ? ownExpect(row) : await compatExpect(config, row);
-  if (expect === null || !(await everyPortGives(sso.value.dns, row.domain, expect)))
+  if (expect === null || !(await everyPortGives(config, sso.value.dns, row, expect)))
     return fail("domain_unverified");
   const draft = ssoDraft(actor, "sso_domain_verify", {
     targetUserId: null,
@@ -789,15 +796,15 @@ async function rowProven(
   row: SsoDomainRow,
   meter?: Meter,
 ): Promise<boolean> {
-  if (await everyPortGives(ports, row.domain, ownExpect(row), meter)) return true;
+  if (await everyPortGives(config, ports, row, ownExpect(row), meter)) return true;
   const compat = await compatExpect(config, row, meter);
-  return compat !== null && (await everyPortGives(ports, row.domain, compat, meter));
+  return compat !== null && (await everyPortGives(config, ports, row, compat, meter));
 }
 
 /**
  * The loss of one domain. One transaction clears `verifiedAt`,
  * `claimedDomain`, and `enforce`, and writes the `sso_domain_lost` audit
- * row with the app actor `authtempo-sweep`. Then one log line names the
+ * row with the app actor `authtempo-sweep`. Then one fault event names the
  * domain id. The row becomes a pending row with a new challenge, and it
  * lives `PENDING_DOMAIN_MS` as every pending row does (spec 30 item 2). So
  * the old record proves nothing again, and the sweep deletes a row that no
@@ -835,7 +842,7 @@ async function loseDomain(config: ResolvedConfig, row: SsoDomainRow, now: Date):
     return writeAuditIn(tx, draft.value, now);
   });
   if (audit === null) return;
-  console.error("authtempo: sso domain lost", row.id);
+  config.observe.emit({ name: "sso.domain_lost", rowId: row.id });
   await afterAudit(config, audit);
 }
 

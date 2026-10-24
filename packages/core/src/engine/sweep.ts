@@ -277,6 +277,10 @@ const SOFT_STEPS = {
   link: "sweep.link_stopped",
   outbox: "sweep.outbox_stopped",
   "pending end": "sweep.pending_end_stopped",
+  // The two last steps of plan 12d: the recheck of the verified domains, and the rows that a
+  // solo organization of an account delete leaves.
+  "sso recheck": "sweep.sso_recheck_stopped",
+  "organization rest": "sweep.organization_rest_stopped",
 } as const;
 
 /**
@@ -467,6 +471,7 @@ export async function sweepExpired(
   // a sweep of 50 calls rechecks several domains, not one.
   const ssoDomains = config.sso
     ? await softStep(
+        config.observe,
         "sso recheck",
         recheckDomains(config, now, { meter, limit: budget - pendingReserve }),
       )
@@ -474,6 +479,7 @@ export async function sweepExpired(
   // The rows of the solo organizations of an account delete. No flow reaches them: each read
   // needs the organization row or a member row, which the act deleted.
   const organizationRows = await softStep(
+    config.observe,
     "organization rest",
     sweepOrganizationRest(
       config,

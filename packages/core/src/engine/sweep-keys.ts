@@ -24,4 +24,9 @@ export const SWEEP_KEYS: Readonly<Record<keyof SweepResult, true>> = {
   oauthSessionLinks: true,
   oauthLogouts: true,
   oauthClientSecrets: true,
+  // The counts of plan 12d.
+  ssoDomains: true,
+  ssoPendingDomains: true,
+  scimTokens: true,
+  organizationRows: true,
 };

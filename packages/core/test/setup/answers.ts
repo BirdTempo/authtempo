@@ -75,12 +75,15 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   const ROUTER = new Set<string>(ROUTER_CODES);
   /**
    * The keys of an error body beside `error`, for each code that has one
-   * (ruling 7 of plan 12h). `message` is only on hook_refused, and `reason`
-   * is only on not_ready.
+   * (ruling 7 of plan 12h). `message` is on hook_refused, and on the
+   * invalid_body of an SSO or SCIM manager write (plan 12d). `reason` is
+   * only on not_ready, and `detail` only on sso_required (plan 12d).
    */
   const CODE_KEYS: Readonly<Record<string, readonly string[]>> = {
     hook_refused: ["message"],
     not_ready: ["reason"],
+    invalid_body: ["message"],
+    sso_required: ["detail"],
   };
 
   interface AnswerRecord {

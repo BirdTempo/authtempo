@@ -7,8 +7,10 @@
  *
  * The readers are readJson and readBody (json.ts, body.ts), the OAuth
  * readObject and formParams (routes/oauth.ts), and the operator
- * readRewrapBody and readStopBody (routes/operator.ts). One helper holds the
- * rule, so the readers cannot drift.
+ * readRewrapBody and readStopBody (routes/operator.ts). Plan 12d adds the
+ * SCIM body (readScimBody, routes/scim.ts), the SAML form of the ACS, and
+ * the query of the SSO manager reads (acsForm and readQuery, routes/sso.ts).
+ * One helper holds the rule, so the readers cannot drift.
  */
 export function holdsBadText(raw: unknown): boolean {
   const stack: unknown[] = [raw];

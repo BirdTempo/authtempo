@@ -2,6 +2,8 @@ import type { ResolvedConfig } from "../../config.js";
 import { ERRORS } from "../../errors.js";
 import { safeNext } from "../../http/safe-next.js";
 import { ipKey } from "../../limiter/ip-key.js";
+import { limit } from "../../limiter/limit.js";
+import { withSecrets } from "../../observe/observer.js";
 import {
   constantTimeEqual,
   randomBase64Url,
@@ -10,7 +12,7 @@ import {
 } from "../../primitives/crypto.js";
 import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
-import { checkResponse, NS_SAML, NS_SAMLP } from "../../saml/assertion.js";
+import { checkResponse, NS_SAML, NS_SAMLP, type SamlStep } from "../../saml/assertion.js";
 import { importVerifyKey, readCertificate, strictBase64 } from "../../saml/der.js";
 import { NS_DSIG } from "../../saml/dsig.js";
 import { childElements, parseXml, textOf, XML_LIMITS, type XmlElement } from "../../saml/xml.js";
@@ -76,9 +78,18 @@ interface SamlRequestData {
   bindHash: string;
 }
 
-/** The one log line of a refused step (Global Constraints of plan 12d): the connection id, the step, and the IP. */
-function refused(connectionId: string, step: string, ip: string | null): Result<never> {
-  console.error("authtempo: sso failed", connectionId, step, ip);
+/**
+ * The one fault event of a refused step (Global Constraints of plan 12d):
+ * the connection id and the step. The IP is an address input, so only the
+ * include rule writes it (plan 12h).
+ */
+function refused(
+  config: ResolvedConfig,
+  connectionId: string,
+  step: SamlStep,
+  ip: string | null,
+): Result<never> {
+  config.observe.emit({ name: "sso.failed", connectionId, step, ip });
   return fail("sso_failed");
 }
 
@@ -177,22 +188,26 @@ export async function startSaml(
 const warned = new Map<string, number>();
 
 /**
- * One warning line per connection per day per isolate for a certificate
+ * One warning event per connection per day per isolate for a certificate
  * past its `notAfter` (Behavior 7). The certificate still verifies: many
  * IdPs sign with an expired certificate, and the owner's upload is the trust.
  */
-function warnExpired(connectionId: string, now: Date): void {
+function warnExpired(config: ResolvedConfig, connectionId: string, now: Date): void {
   const day = Math.floor(now.getTime() / DAY_MS);
   if (warned.get(connectionId) === day) return;
   warned.delete(connectionId);
   const oldest = warned.size >= WARNED_MAX ? warned.keys().next().value : undefined;
   if (oldest !== undefined) warned.delete(oldest);
   warned.set(connectionId, day);
-  console.warn("authtempo: saml certificate expired", connectionId);
+  config.observe.emit({ name: "saml.certificate_expired", connectionId });
 }
 
 /** The verify keys of the row's certificates. A certificate that does not import gives no key. */
-async function keysOf(row: SsoConnectionRow, now: Date): Promise<CryptoKey[]> {
+async function keysOf(
+  config: ResolvedConfig,
+  row: SsoConnectionRow,
+  now: Date,
+): Promise<CryptoKey[]> {
   const keys: CryptoKey[] = [];
   let expired = false;
   for (const pem of samlConfig(row).certificates) {
@@ -202,7 +217,7 @@ async function keysOf(row: SsoConnectionRow, now: Date): Promise<CryptoKey[]> {
     if (info.notAfter.getTime() <= now.getTime()) expired = true;
     keys.push(key);
   }
-  if (expired) warnExpired(row.id, now);
+  if (expired) warnExpired(config, row.id, now);
   return keys;
 }
 
@@ -224,16 +239,20 @@ export interface SamlComplete {
  * else `request`. A spent row answers `request_spent`. Then the connection,
  * `checkResponse`, the spend of the row by one conditional update, and the
  * `saml-assertion` row, whose unique key refuses a replay (Profiles
- * 4.1.4.5). Each failure answers `sso_failed` with one log line.
+ * 4.1.4.5). Each failure answers `sso_failed` with one `sso.failed` event.
  */
 export async function completeSaml(
-  config: ResolvedConfig,
+  outer: ResolvedConfig,
   input: SamlComplete,
 ): Promise<Result<SsoSignedIn | SignInChallenge>> {
+  // The bearer values of the post: each event of the act scrubs them (plan 12d on 12h).
+  const config = withSecrets(outer, [
+    ...input.form.getAll("SAMLResponse"),
+    ...input.form.getAll("RelayState"),
+  ]);
   const id = input.connectionId;
-  const no = (step: string) => refused(id, step, input.ip);
-  if (!(await config.limiter.allow(`sso-acs:ip:${ipKey(input.ip)}`, ACS_LIMIT)))
-    return fail("rate_limited");
+  const no = (step: SamlStep) => refused(config, id, step, input.ip);
+  if (!(await limit(config, "sso-acs:ip", ipKey(input.ip), ACS_LIMIT))) return fail("rate_limited");
   const sso = config.sso;
   if (!sso?.saml) return fail("sso_not_configured");
   const responses = input.form.getAll("SAMLResponse");
@@ -274,7 +293,7 @@ export async function completeSaml(
     spEntityId: spEntityId(config, id),
     idpEntityId: c.idpEntityId,
     requestId: data.requestId,
-    keys: await keysOf(connection, now),
+    keys: await keysOf(config, connection, now),
     now,
     skewMs,
     subjectAttribute: c.subjectAttribute,

@@ -76,6 +76,14 @@ export const LIMIT_FAMILIES = Object.freeze([
   "oauth-introspect:client",
   "oauth-end-session:ip",
   "oauth-credentials:client",
+  // Plan 12d: the SSO manager routes, the domain proof, the sign-in, and the SCIM server.
+  "sso-manage:user",
+  "sso-domain-verify:org",
+  "sso-discover:ip",
+  "sso-start:ip",
+  "sso-acs:ip",
+  "scim-auth:ip",
+  "scim:token",
 ] as const);
 
 export type LimitFamily = (typeof LIMIT_FAMILIES)[number];

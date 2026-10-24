@@ -1186,6 +1186,8 @@ describe("the route contract (plan 11g)", () => {
      */
     const VALID_FORMS: {
       key: RouteKey;
+      /** The path of a route with a parameter: its key holds the template. */
+      path?: string;
       media: "json" | "form";
       body: Record<string, unknown>;
       fresh?: () => Promise<Record<string, unknown>>;
@@ -1270,6 +1272,8 @@ describe("the route contract (plan 11g)", () => {
         // The SAML ACS (plan 12d Task 8): a form of no start answers the step request, and a
         // form without a key the step form. Each failure of the ACS is a redirect with sso_failed.
         key: "POST /sso/:connectionId/acs",
+        // An id that names no connection, in the id form (the events of plan 12h reject another form).
+        path: "/sso/c-none/acs",
         media: "form",
         body: { SAMLResponse: "PHNhbWxwOlJlc3BvbnNlLz4=", RelayState: `rs_${BODY43}` },
         required: ["SAMLResponse", "RelayState"],
@@ -1305,7 +1309,7 @@ describe("the route contract (plan 11g)", () => {
       expect(contract.query, `${row.key} has a query`).toBeUndefined();
       expect(body.schema.safeParse(row.body).success, `${row.key}: the valid body`).toBe(true);
       expect(requiredOf(body.schema), row.key).toEqual(row.required);
-      const path = `/auth${row.key.slice("POST ".length)}`;
+      const path = `/auth${row.path ?? row.key.slice("POST ".length)}`;
       const send = (b: Record<string, unknown>) =>
         w.handle(
           row.media === "json" ? post(path, b, row.headers) : postForm(path, b, row.headers),

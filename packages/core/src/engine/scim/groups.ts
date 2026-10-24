@@ -17,6 +17,7 @@
  */
 
 import type { ResolvedConfig } from "../../config.js";
+import { organizationChange } from "../../observe/events.js";
 import { newId } from "../../primitives/ids.js";
 import type {
   MemberRow,
@@ -462,13 +463,18 @@ async function planRoles(
     for (const c of changes) {
       c.user = users.get(c.member.userId) ?? null;
       if (c.user)
-        await runBefore("organization.beforeUpdateMemberRole", hooks.beforeUpdateMemberRole, {
-          organization: publicOrganization(organization),
-          member: memberSummary(c.member, c.user),
-          role: c.role,
-          memberUser: c.user,
-          by: null,
-        });
+        await runBefore(
+          config.observe,
+          "organization.beforeUpdateMemberRole",
+          hooks.beforeUpdateMemberRole,
+          {
+            organization: publicOrganization(organization),
+            member: memberSummary(c.member, c.user),
+            role: c.role,
+            memberUser: c.user,
+            by: null,
+          },
+        );
     }
   }
   return { changes, pairs };
@@ -546,11 +552,19 @@ async function afterChange(
   id: string,
 ): Promise<void> {
   await runAfter(
+    config.observe,
     "scim.afterChange",
     config.hooks.scim.afterChange,
     { organizationId, resource: "Group", action, id },
     id,
   );
+  config.observe.emit({
+    name: "scim.change",
+    resource: "Group",
+    action,
+    organizationId,
+    resourceId: id,
+  });
 }
 
 /** The member rows of one group write, and the role recompute with them. */
@@ -952,8 +966,9 @@ async function writeGroup(
   if (!written.ok) return failAnswer(written);
   const audit: OperatorAuditRow = written.value;
   for (const c of changes)
-    if (c.user)
+    if (c.user) {
       await runAfter(
+        config.observe,
         "organization.afterUpdateMemberRole",
         config.hooks.organization.afterUpdateMemberRole,
         {
@@ -965,6 +980,8 @@ async function writeGroup(
         },
         c.member.id,
       );
+      config.observe.emit(organizationChange("afterUpdateMemberRole", orgId));
+    }
   await afterChange(
     config,
     orgId,

@@ -31,8 +31,10 @@ import {
   scimPatchUser,
   scimReplaceUser,
 } from "../../engine/scim/users.js";
+import { withSecrets } from "../../observe/observer.js";
 import { readCappedBytes } from "../../primitives/read-capped.js";
 import type { ScimScope } from "../../schema.js";
+import { holdsBadText } from "../body-text.js";
 import { scimTokenCreateBody, scimTokenIdBody, scimTokenListQuery } from "../contract/scim.js";
 import { json } from "../json.js";
 import type { RouteKey } from "../route-list.js";
@@ -85,11 +87,46 @@ export async function readScimBody(
   } catch {
     return { ok: false, response: scimError(400, "the body is not UTF-8", "invalidSyntax") };
   }
+  let value: unknown;
   try {
-    return { ok: true, value: JSON.parse(text) };
+    value = JSON.parse(text);
   } catch {
     return { ok: false, response: scimError(400, "the body is not JSON", "invalidSyntax") };
   }
+  // The port refuses a NUL or a lone surrogate in a where value (plan 12g), so the reader refuses it first.
+  if (holdsBadText(value))
+    return {
+      ok: false,
+      response: scimError(400, "the body holds a NUL or a lone surrogate", "invalidValue"),
+    };
+  return { ok: true, value };
+}
+
+/**
+ * Each password of a SCIM body (ruling 60 P2 of plan 12d): the value of a
+ * key `password` at any depth, and the value of a PATCH operation whose
+ * path is `password`. Core stores none of them, and each event of the
+ * request scrubs them.
+ */
+export function passwordsOf(body: unknown): string[] {
+  const out: string[] = [];
+  const stack: unknown[] = [body];
+  while (stack.length > 0) {
+    const value = stack.pop();
+    if (typeof value !== "object" || value === null) continue;
+    const entries = Object.entries(value);
+    const path = entries.find(([k]) => k.toLowerCase() === "path")?.[1];
+    for (const [key, item] of entries) {
+      const named =
+        key.toLowerCase() === "password" ||
+        (key.toLowerCase() === "value" &&
+          typeof path === "string" &&
+          path.toLowerCase() === "password");
+      if (named && typeof item === "string") out.push(item);
+      else stack.push(item);
+    }
+  }
+  return out;
 }
 
 /** One SCIM route: its scope (`any` for discovery), and whether it reads a body. */
@@ -110,13 +147,18 @@ export interface ScimRouteSpec {
  * scope of the route answers 403 with no `scimType`. The body of a caller
  * with no token is never read. Tasks 10 and 11 mount their routes here.
  */
-export function scimRoute(config: ResolvedConfig, spec: ScimRouteSpec): Route {
+export function scimRoute(spec: ScimRouteSpec): Route {
   return {
     method: spec.method,
     path: spec.path,
     key: spec.key,
-    async handler(ctx) {
-      const auth = await authenticateScim(config, ctx.request, ctx.ip);
+    async handler(request) {
+      // Each event of the request scrubs its bearer token, then each password of its body (plan 12d on 12h).
+      const bearer = /^Bearer\s+(\S+)$/i.exec(
+        request.request.headers.get("authorization") ?? "",
+      )?.[1];
+      let ctx: RouteContext = { ...request, config: withSecrets(request.config, [bearer]) };
+      const auth = await authenticateScim(ctx.config, ctx.request, ctx.ip);
       if (!auth.ok) {
         if (auth.status === 429) return scimError(429, "too many requests; try again later");
         const res = scimError(401, "the request needs a valid SCIM token as its bearer");
@@ -128,6 +170,7 @@ export function scimRoute(config: ResolvedConfig, spec: ScimRouteSpec): Route {
       if (!spec.body) return spec.handle(ctx, auth.caller, undefined);
       const read = await readScimBody(ctx.request);
       if (!read.ok) return read.response;
+      ctx = { ...ctx, config: withSecrets(ctx.config, passwordsOf(read.value)) };
       return spec.handle(ctx, auth.caller, read.value);
     },
   };
@@ -180,7 +223,7 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
     userAgent: ctx.request.headers.get("user-agent"),
   });
   const discovery = (path: string, key: RouteKey, handle: ScimRouteSpec["handle"]) =>
-    scimRoute(config, { method: "GET", path, key, scope: "any", body: false, handle });
+    scimRoute({ method: "GET", path, key, scope: "any", body: false, handle });
   const users = (
     method: Route["method"],
     path: string,
@@ -189,7 +232,7 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
     body: boolean,
     run: (ctx: RouteContext, caller: ScimCaller, value: unknown) => Promise<ScimResult>,
   ) =>
-    scimRoute(config, {
+    scimRoute({
       method,
       path,
       key,
@@ -199,7 +242,7 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
     });
   const ifMatch = (ctx: RouteContext) => ctx.request.headers.get("if-match");
   const refused = (method: "GET" | "POST", path: string, key: RouteKey) =>
-    scimRoute(config, { method, path, key, scope: "any", body: false, handle: notSupported });
+    scimRoute({ method, path, key, scope: "any", body: false, handle: notSupported });
   return [
     {
       method: "GET",
@@ -207,11 +250,11 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       key: "GET /scim/tokens",
       handler: (ctx) =>
         managedCall(
-          config,
+          ctx.config,
           ctx,
           async (c) => readQuery(c.url, scimTokenListQuery),
           async (q) => q.organizationId,
-          (actor, q) => listScimTokens(config, actor, q),
+          (actor, q) => listScimTokens(ctx.config, actor, q),
           (tokens) => json({ tokens }),
         ),
     },
@@ -221,11 +264,11 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       key: "POST /scim/tokens/create",
       handler: (ctx) =>
         managedCall(
-          config,
+          ctx.config,
           ctx,
           managedBody(scimTokenCreateBody),
           async (b) => b.organizationId,
-          (actor, b) => createScimToken(config, actor, b, meta(ctx)),
+          (actor, b) => createScimToken(ctx.config, actor, b, meta(ctx)),
           (created) => json(created),
         ),
     },
@@ -235,35 +278,35 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       key: "POST /scim/tokens/revoke",
       handler: (ctx) =>
         managedCall(
-          config,
+          ctx.config,
           ctx,
           managedBody(scimTokenIdBody),
-          (b) => scimTokenOrganization(config, b.id),
-          (actor, b) => revokeScimToken(config, actor, b, meta(ctx)),
+          (b) => scimTokenOrganization(ctx.config, b.id),
+          (actor, b) => revokeScimToken(ctx.config, actor, b, meta(ctx)),
           (value) => json(value),
         ),
     },
-    discovery("/scim/v2/ServiceProviderConfig", "GET /scim/v2/ServiceProviderConfig", async () =>
-      scimJson(serviceProviderConfig(config)),
+    discovery("/scim/v2/ServiceProviderConfig", "GET /scim/v2/ServiceProviderConfig", async (ctx) =>
+      scimJson(serviceProviderConfig(ctx.config)),
     ),
     discovery("/scim/v2/ResourceTypes", "GET /scim/v2/ResourceTypes", async (ctx) =>
-      discoveryList(ctx, resourceTypes(config)),
+      discoveryList(ctx, resourceTypes(ctx.config)),
     ),
     discovery("/scim/v2/ResourceTypes/:id", "GET /scim/v2/ResourceTypes/:id", async (ctx) =>
-      discoveryOne(ctx, resourceTypes(config)),
+      discoveryOne(ctx, resourceTypes(ctx.config)),
     ),
     discovery("/scim/v2/Schemas", "GET /scim/v2/Schemas", async (ctx) =>
-      discoveryList(ctx, scimSchemas(config)),
+      discoveryList(ctx, scimSchemas(ctx.config)),
     ),
     discovery("/scim/v2/Schemas/:id", "GET /scim/v2/Schemas/:id", async (ctx) =>
-      discoveryOne(ctx, scimSchemas(config)),
+      discoveryOne(ctx, scimSchemas(ctx.config)),
     ),
     // The Users of plan 12d Task 10, each through the builder: the token, the scope, the body.
     users("GET", "/scim/v2/Users", "GET /scim/v2/Users", "scim.users.read", false, (ctx, c) =>
-      scimListUsers(config, c, ctx.url),
+      scimListUsers(ctx.config, c, ctx.url),
     ),
-    users("POST", "/scim/v2/Users", "POST /scim/v2/Users", "scim.users.write", true, (_, c, b) =>
-      scimCreateUser(config, c, b),
+    users("POST", "/scim/v2/Users", "POST /scim/v2/Users", "scim.users.write", true, (ctx, c, b) =>
+      scimCreateUser(ctx.config, c, b),
     ),
     users(
       "GET",
@@ -271,7 +314,7 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       "GET /scim/v2/Users/:id",
       "scim.users.read",
       false,
-      (ctx, c) => scimGetUser(config, c, ctx.params.id ?? "", ctx.url),
+      (ctx, c) => scimGetUser(ctx.config, c, ctx.params.id ?? "", ctx.url),
     ),
     users(
       "PUT",
@@ -279,7 +322,7 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       "PUT /scim/v2/Users/:id",
       "scim.users.write",
       true,
-      (ctx, c, b) => scimReplaceUser(config, c, ctx.params.id ?? "", b, ifMatch(ctx)),
+      (ctx, c, b) => scimReplaceUser(ctx.config, c, ctx.params.id ?? "", b, ifMatch(ctx)),
     ),
     users(
       "PATCH",
@@ -287,7 +330,7 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       "PATCH /scim/v2/Users/:id",
       "scim.users.write",
       true,
-      (ctx, c, b) => scimPatchUser(config, c, ctx.params.id ?? "", b, ifMatch(ctx)),
+      (ctx, c, b) => scimPatchUser(ctx.config, c, ctx.params.id ?? "", b, ifMatch(ctx)),
     ),
     users(
       "DELETE",
@@ -295,15 +338,20 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       "DELETE /scim/v2/Users/:id",
       "scim.users.write",
       false,
-      (ctx, c) => scimDeleteUser(config, c, ctx.params.id ?? "", ifMatch(ctx)),
+      (ctx, c) => scimDeleteUser(ctx.config, c, ctx.params.id ?? "", ifMatch(ctx)),
     ),
     // The Groups of plan 12d Task 11. A PATCH answers 204 unless the query asks for
     // attributes (Behavior 4), so the route hands the URL on.
     users("GET", "/scim/v2/Groups", "GET /scim/v2/Groups", "scim.groups.read", false, (ctx, c) =>
-      scimListGroups(config, c, ctx.url),
+      scimListGroups(ctx.config, c, ctx.url),
     ),
-    users("POST", "/scim/v2/Groups", "POST /scim/v2/Groups", "scim.groups.write", true, (_, c, b) =>
-      scimCreateGroup(config, c, b),
+    users(
+      "POST",
+      "/scim/v2/Groups",
+      "POST /scim/v2/Groups",
+      "scim.groups.write",
+      true,
+      (ctx, c, b) => scimCreateGroup(ctx.config, c, b),
     ),
     users(
       "GET",
@@ -311,7 +359,7 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       "GET /scim/v2/Groups/:id",
       "scim.groups.read",
       false,
-      (ctx, c) => scimGetGroup(config, c, ctx.params.id ?? "", ctx.url),
+      (ctx, c) => scimGetGroup(ctx.config, c, ctx.params.id ?? "", ctx.url),
     ),
     users(
       "PUT",
@@ -319,7 +367,7 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       "PUT /scim/v2/Groups/:id",
       "scim.groups.write",
       true,
-      (ctx, c, b) => scimReplaceGroup(config, c, ctx.params.id ?? "", b, ifMatch(ctx)),
+      (ctx, c, b) => scimReplaceGroup(ctx.config, c, ctx.params.id ?? "", b, ifMatch(ctx)),
     ),
     users(
       "PATCH",
@@ -327,7 +375,7 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       "PATCH /scim/v2/Groups/:id",
       "scim.groups.write",
       true,
-      (ctx, c, b) => scimPatchGroup(config, c, ctx.params.id ?? "", b, ifMatch(ctx), ctx.url),
+      (ctx, c, b) => scimPatchGroup(ctx.config, c, ctx.params.id ?? "", b, ifMatch(ctx), ctx.url),
     ),
     users(
       "DELETE",
@@ -335,7 +383,7 @@ export function scimRoutes(config: ResolvedConfig): Route[] {
       "DELETE /scim/v2/Groups/:id",
       "scim.groups.write",
       false,
-      (ctx, c) => scimDeleteGroup(config, c, ctx.params.id ?? "", ifMatch(ctx)),
+      (ctx, c) => scimDeleteGroup(ctx.config, c, ctx.params.id ?? "", ifMatch(ctx)),
     ),
     // The refusals of the design's 9.5, and the two resource searches. Without the two,
     // a search of a directory meets a 404 that does not say "not supported".

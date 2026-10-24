@@ -212,7 +212,7 @@ describe("the SCIM base (plan 12d Task 9)", () => {
     const { token } = await scimToken(w);
     const seen: unknown[] = [];
     const routes: Route[] = [
-      scimRoute(w.config, {
+      scimRoute({
         method: "POST",
         path: "/scim/v2/Probe",
         // A test stub of a path outside ROUTES has no key (ruling 3 of plan 12d).

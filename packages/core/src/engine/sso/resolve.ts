@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { organizationChange } from "../../observe/events.js";
 import { newId } from "../../primitives/ids.js";
 import { fail, ok, type Result } from "../../result.js";
 import type {
@@ -124,14 +125,19 @@ async function joinChecks(
     updatedAt: now,
   };
   // The hook of `addMemberIn`, which runs no hook with `checked`.
-  await runBefore("organization.beforeAddMember", config.hooks.organization.beforeAddMember, {
-    organization: publicOrganization(organization),
-    member: { userId: user.id, role: member.role },
-    memberUser: user,
-    by: null,
-    via: "sso",
-    invitation: null,
-  });
+  await runBefore(
+    config.observe,
+    "organization.beforeAddMember",
+    config.hooks.organization.beforeAddMember,
+    {
+      organization: publicOrganization(organization),
+      member: { userId: user.id, role: member.role },
+      memberUser: user,
+      by: null,
+      via: "sso",
+      invitation: null,
+    },
+  );
   return { organization, member };
 }
 
@@ -189,7 +195,7 @@ async function beforeSignIn(
     ]);
     if (row && !row.active) stopWith("account_disabled");
   }
-  await runBefore("sso.beforeSignIn", config.hooks.sso.beforeSignIn, {
+  await runBefore(config.observe, "sso.beforeSignIn", config.hooks.sso.beforeSignIn, {
     ...event,
     user: created ? null : user,
   });
@@ -222,12 +228,12 @@ export async function resolveSsoUser(
   input: SsoResolveInput,
 ): Promise<Result<SsoSignedIn | SignInChallenge>> {
   const email = profile.email === null ? null : normalizeEmail(profile.email);
-  if (email === null) return refused(connection, "email_required", input.ip);
+  if (email === null) return refused(config, connection, "email_required", input.ip);
   // An IdP that an organization owner configured is that owner's word. The
   // owner's DNS proof makes the word true for an address in the domain
   // (spec 30 item 11). So the IdP's email_verified is never read.
   if (!(await inOrganizationDomains(config.storage, connection.organizationId, email)))
-    return refused(connection, "sso_domain_mismatch", input.ip);
+    return refused(config, connection, "sso_domain_mismatch", input.ip);
   const now = config.clock.now();
   const { next } = input;
   const ended = endedList(config);
@@ -286,7 +292,7 @@ export async function resolveSsoUser(
       steps,
     ),
   );
-  if (!resolved.ok) return refused(connection, resolved.code, input.ip, resolved);
+  if (!resolved.ok) return refused(config, connection, resolved.code, input.ip, resolved);
   const { user, after } = resolved.value;
   // After the commit, before the session hook and before a challenge answer (plan 12a).
   await verified.after(user);
@@ -299,6 +305,7 @@ export async function resolveSsoUser(
     ]);
     if (organization)
       await runAfter(
+        config.observe,
         "organization.afterAddMember",
         config.hooks.organization.afterAddMember,
         {
@@ -318,27 +325,31 @@ export async function resolveSsoUser(
         },
         member.id,
       );
+    if (organization) config.observe.emit(organizationChange("afterAddMember", organization.id));
   }
   if (after.kind === "challenge") return ok({ ...after.pending, next, user });
   await touchTrust(config, gate.trustId(), now);
   const key = gateOn ? passedKey(connection.mfa, profile) : null;
   // The pass of the second factor by the IdP (spec 30 item 13): the key name, and no new field.
-  if (key !== null) console.info("authtempo: sso second factor by the idp", connection.id, key);
+  if (key !== null)
+    config.observe.emit({ name: "sso.second_factor_idp", connectionId: connection.id, claim: key });
   await sessionOpened(config, after.session, user, "sso");
   return ok({ token: after.token, next, user });
 }
 
 /**
- * One log line of a refused resolution: the connection id, the code, and
- * the IP (Global Constraints of plan 12d). `result` keeps the hook text of
- * a refusal.
+ * One fault event of a refused resolution: the connection id and the code
+ * (Global Constraints of plan 12d). The IP is an address input, so only the
+ * include rule writes it (plan 12h). `result` keeps the hook text of a
+ * refusal.
  */
 function refused(
+  config: ResolvedConfig,
   connection: SsoConnectionRow,
   code: Exclude<Result<never>, { ok: true }>["code"],
   ip: string | null,
   result?: Result<never>,
 ): Result<never> {
-  console.error("authtempo: sso refused", connection.id, code, ip);
+  config.observe.emit({ name: "sso.refused", connectionId: connection.id, code, ip });
   return result ?? fail(code);
 }

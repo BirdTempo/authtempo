@@ -27,9 +27,11 @@ import { requireSsoManager, type SsoActor } from "../../engine/sso/guard.js";
 import { completeSsoOidc, startSso } from "../../engine/sso/oidc.js";
 import type { SsoSignedIn } from "../../engine/sso/resolve.js";
 import { completeSaml, SAML_FORM_MAX, spMetadata } from "../../engine/sso/saml-sp.js";
+import { limit } from "../../limiter/limit.js";
 import { readCappedBytes } from "../../primitives/read-capped.js";
 import { fail, ok, type Result } from "../../result.js";
 import { isJsonRequest, readBody } from "../body.js";
+import { holdsBadText } from "../body-text.js";
 import {
   connectionCreateBody,
   connectionIdBody,
@@ -50,7 +52,8 @@ import {
 } from "../cookies.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
-import { authErrorUrl, redirect, resolveNext } from "../redirect.js";
+import { authErrorRedirect, redirect, resolveNext } from "../redirect.js";
+import { routeKeyOf } from "../route-key.js";
 import type { RoutePath } from "../route-list.js";
 import type { Route, RouteContext } from "../router.js";
 import { challengePageUrl, trustTokenOf } from "../session-answer.js";
@@ -65,13 +68,15 @@ export const SSO_MANAGE_PER_USER = { seconds: 900, max: 30 };
 /** The life of the binding cookie: the life of the state row. */
 const BIND_MAX_AGE_SECONDS = 600;
 
-/** One query string read by its schema. A repeated key answers `invalid_body`. */
+/** One query string read by its schema. A repeated key, a NUL, or a lone surrogate answers `invalid_body`. */
 export function readQuery<T>(url: URL, schema: z.ZodType<T>): Result<T> {
   const raw: Record<string, string> = Object.create(null);
   for (const [key, value] of url.searchParams) {
     if (key in raw) return fail("invalid_body");
     raw[key] = value;
   }
+  // The port refuses a NUL or a lone surrogate in a where value (plan 12g).
+  if (holdsBadText(raw)) return fail("invalid_body");
   const parsed = schema.safeParse(raw);
   return parsed.success ? ok(parsed.data) : fail("invalid_body");
 }
@@ -99,13 +104,14 @@ export async function managedCall<T, V>(
   const resolved = await sessionFromRequest(config, ctx.request);
   if (!resolved) return json({ error: "unauthorized" }, 401);
   const renewed = renewedSessionCookie(config, ctx.request, resolved);
-  if (!(await config.limiter.allow(`sso-manage:user:${resolved.user.id}`, SSO_MANAGE_PER_USER)))
+  if (!(await limit(config, "sso-manage:user", resolved.user.id, SSO_MANAGE_PER_USER)))
     return send(respond(fail("rate_limited")), renewed);
   const read = await input(ctx);
   if (!read.ok) return send(respond(read), renewed);
   const organizationId = await organizationOf(read.value);
   if (organizationId === null) return send(respond(fail("not_found")), renewed);
-  const actor = await requireSsoManager(config, resolved, organizationId);
+  const route = routeKeyOf(ctx.request.method, ctx.url.pathname.slice(config.basePath.length));
+  const actor = await requireSsoManager(config, resolved, organizationId, route);
   if (!actor.ok) return send(respond(actor), renewed);
   const r = await run(actor.value, read.value);
   return send(r.ok ? answer(r.value) : respond(r), renewed);
@@ -119,8 +125,8 @@ export function managedBody<T>(schema: z.ZodType<T>) {
 
 /**
  * The form of an ACS post, at most `SAML_FORM_MAX` bytes. A body past the
- * cap, a body that is not UTF-8, or another media type gives an empty
- * form. `completeSaml` refuses an empty form at the step `form`.
+ * cap, a body that is not UTF-8, a NUL or a lone surrogate, or another
+ * media type gives an empty form. `completeSaml` refuses an empty form at the step `form`.
  */
 async function acsForm(request: Request): Promise<URLSearchParams> {
   const type = (request.headers.get("content-type") ?? "").split(";")[0]?.trim().toLowerCase();
@@ -132,11 +138,14 @@ async function acsForm(request: Request): Promise<URLSearchParams> {
     request.signal,
   );
   if (bytes === null) return new URLSearchParams();
+  let form: URLSearchParams;
   try {
-    return new URLSearchParams(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    form = new URLSearchParams(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
   } catch {
     return new URLSearchParams();
   }
+  // A NUL or a lone surrogate gives an empty form too (plan 12g, holdsBadText).
+  return holdsBadText([...form]) ? new URLSearchParams() : form;
 }
 
 /**
@@ -161,14 +170,16 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
     organizationOf: (input: T) => Promise<string | null>,
     run: (actor: SsoActor, input: T) => Promise<Result<V>>,
     answer: (value: V) => Response,
-  ) => managedCall(config, ctx, input, organizationOf, run, answer);
+  ) => managedCall(ctx.config, ctx, input, organizationOf, run, answer);
   const body = managedBody;
-  const byId = (input: { id: string }) => domainOrganization(config, input.id);
-  const byConnection = (input: { id: string }) => connectionOrganization(config, input.id);
+  const byId = (input: { id: string }, ctx: RouteContext) =>
+    domainOrganization(ctx.config, input.id);
+  const byConnection = (input: { id: string }, ctx: RouteContext) =>
+    connectionOrganization(ctx.config, input.id);
   const post = <T, V, P extends RoutePath<"POST">>(
     path: P,
     schema: z.ZodType<T>,
-    organizationOf: (input: T) => Promise<string | null>,
+    organizationOf: (input: T, ctx: RouteContext) => Promise<string | null>,
     run: (actor: SsoActor, input: T, ctx: RouteContext) => Promise<Result<V>>,
     answer: (value: V) => Response,
   ): Route => ({
@@ -176,7 +187,13 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
     path,
     key: `POST ${path}`,
     handler: (ctx) =>
-      managed(ctx, body(schema), organizationOf, (actor, input) => run(actor, input, ctx), answer),
+      managed(
+        ctx,
+        body(schema),
+        (input) => organizationOf(input, ctx),
+        (actor, input) => run(actor, input, ctx),
+        answer,
+      ),
   });
   const bindName = bindingCookieName(config.cookieName);
   // The binding cookie of the SSO flows (plan 12d Task 4): the 12b cookie on its own path.
@@ -187,8 +204,11 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
   };
   // The answer of the OIDC callback and of the SAML ACS. Each answer ends
   // the flow of this browser, so the binding cookie goes.
-  const signedInAnswer = (r: Result<SsoSignedIn | SignInChallenge>): Response => {
-    if (!r.ok) return unbound(redirect(authErrorUrl(config, r.code)));
+  const signedInAnswer = (
+    config: ResolvedConfig,
+    r: Result<SsoSignedIn | SignInChallenge>,
+  ): Response => {
+    if (!r.ok) return unbound(authErrorRedirect(config, r.code));
     if ("twoFactor" in r.value)
       return unbound(redirect(challengePageUrl(config, r.value.twoFactor.challenge)));
     const res = redirect(resolveNext(config, r.value.next));
@@ -211,24 +231,27 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, discoverBody);
-        if (!body.ok) return jsonCaller ? respond(body) : redirect(authErrorUrl(config, body.code));
+        if (!body.ok) return jsonCaller ? respond(body) : authErrorRedirect(ctx.config, body.code);
         // The start of a JSON answer and of the form page both carry `next`.
-        const r = await discoverSso(config, {
+        const r = await discoverSso(ctx.config, {
           email: body.value.email,
           next: body.value.next,
           ip: ctx.ip,
         });
         if (jsonCaller) return r.ok ? json(r.value) : respond(r);
         // A form: the code goes to the error page of the app, as a social failure does.
-        if (!r.ok) return redirect(authErrorUrl(config, r.code));
-        if (!r.value.sso) return redirect(authErrorUrl(config, "sso_not_configured"));
+        if (!r.ok) return authErrorRedirect(ctx.config, r.code);
+        if (!r.value.sso) return authErrorRedirect(ctx.config, "sso_not_configured");
         // A page of this origin, not a 303. Chromium applies form-action to each
         // redirect after the post, so it would block the 302 of the start to the
         // IdP. A failure above goes to appURL, which is baseURL or a trusted origin.
-        return new Response(ssoContinuePage({ location: r.value.start, appName: config.appName }), {
-          status: 200,
-          headers: pageHeaders(config, noScriptPagePolicy(config)),
-        });
+        return new Response(
+          ssoContinuePage({ location: r.value.start, appName: ctx.config.appName }),
+          {
+            status: 200,
+            headers: pageHeaders(ctx.config, noScriptPagePolicy(ctx.config)),
+          },
+        );
       },
     },
     {
@@ -236,12 +259,12 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       path: "/sso/:connectionId/start",
       key: "GET /sso/:connectionId/start",
       async handler(ctx) {
-        const r = await startSso(config, {
+        const r = await startSso(ctx.config, {
           connectionId: ctx.params.connectionId ?? "",
           next: ctx.url.searchParams.get("next") ?? undefined,
           ip: ctx.ip,
         });
-        if (!r.ok) return redirect(authErrorUrl(config, r.code));
+        if (!r.ok) return authErrorRedirect(ctx.config, r.code);
         const res = redirect(r.value.location);
         res.headers.set(
           "set-cookie",
@@ -256,7 +279,7 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       key: "GET /sso/:connectionId/callback",
       async handler(ctx) {
         const q = ctx.url.searchParams;
-        const r = await completeSsoOidc(config, {
+        const r = await completeSsoOidc(ctx.config, {
           connectionId: ctx.params.connectionId ?? "",
           code: q.get("code"),
           state: q.get("state"),
@@ -265,9 +288,9 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           // A GET callback is a top-level navigation, so a Lax trust cookie comes with it (plan 12c).
-          trustDevice: trustTokenOf(config, ctx.request, undefined),
+          trustDevice: trustTokenOf(ctx.config, ctx.request, undefined),
         });
-        return signedInAnswer(r);
+        return signedInAnswer(ctx.config, r);
       },
     },
     {
@@ -277,16 +300,16 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       // The IdP posts the form cross-site, as Apple's callback; the request row and the binding cookie bind it.
       allowCrossSiteForm: true,
       async handler(ctx) {
-        const r = await completeSaml(config, {
+        const r = await completeSaml(ctx.config, {
           connectionId: ctx.params.connectionId ?? "",
           form: await acsForm(ctx.request),
           bindToken: readCookie(ctx.request, bindName),
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           // A cross-site form post carries no Lax trust cookie; the challenge page then offers the trusted device (plan 12c).
-          trustDevice: trustTokenOf(config, ctx.request, undefined),
+          trustDevice: trustTokenOf(ctx.config, ctx.request, undefined),
         });
-        return signedInAnswer(r);
+        return signedInAnswer(ctx.config, r);
       },
     },
     {
@@ -294,13 +317,13 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       path: "/sso/:connectionId/metadata",
       key: "GET /sso/:connectionId/metadata",
       async handler(ctx) {
-        const row = await config.storage.findOne("ssoConnection", [
+        const row = await ctx.config.storage.findOne("ssoConnection", [
           { field: "id", op: "eq", value: ctx.params.connectionId ?? "" },
         ]);
         // An owner sets up the IdP before the connection is on, so `enabled` does not count here.
-        if (row?.kind !== "saml" || config.sso?.saml === null)
+        if (row?.kind !== "saml" || ctx.config.sso?.saml === null)
           return respond(fail("sso_not_configured"));
-        return new Response(spMetadata(config, row), {
+        return new Response(spMetadata(ctx.config, row), {
           status: 200,
           headers: { "content-type": "application/samlmetadata+xml" },
         });
@@ -315,7 +338,7 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
           ctx,
           async (c) => readQuery(c.url, domainListQuery),
           async (q) => q.organizationId,
-          (actor, q) => listDomains(config, actor, q),
+          (actor, q) => listDomains(ctx.config, actor, q),
           (domains) => json({ domains }),
         ),
     },
@@ -323,7 +346,7 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       "/sso/domains/add",
       domainAddBody,
       async (b) => b.organizationId,
-      (actor, b, ctx) => addDomain(config, actor, { ...b, ...meta(ctx) }),
+      (actor, b, ctx) => addDomain(ctx.config, actor, { ...b, ...meta(ctx) }),
       (domain) => json({ domain }),
     ),
     post(
@@ -333,7 +356,7 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       // A request that verifyDomainByRecord marked asks for the compat package's record (plan 12d Task 14).
       (actor, b, ctx) =>
         verifyDomainWith(
-          config,
+          ctx.config,
           actor,
           { ...b, ...meta(ctx) },
           isRecordVerify(ctx.request) ? "compat" : "own",
@@ -345,7 +368,7 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       domainUpdateBody,
       byId,
       (actor, b, ctx) =>
-        updateDomain(config, actor, {
+        updateDomain(ctx.config, actor, {
           id: b.id,
           ...(b.connectionId === undefined ? {} : { connectionId: b.connectionId }),
           ...(b.enforce === undefined ? {} : { enforce: b.enforce }),
@@ -358,7 +381,7 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       "/sso/domains/delete",
       domainIdBody,
       byId,
-      (actor, b, ctx) => deleteDomain(config, actor, { ...b, ...meta(ctx) }),
+      (actor, b, ctx) => deleteDomain(ctx.config, actor, { ...b, ...meta(ctx) }),
       (value) => json(value),
     ),
     {
@@ -370,7 +393,7 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
           ctx,
           async (c) => readQuery(c.url, connectionListQuery),
           async (q) => q.organizationId,
-          (actor, q) => listConnections(config, actor, q),
+          (actor, q) => listConnections(ctx.config, actor, q),
           (connections) => json({ connections }),
         ),
     },
@@ -378,21 +401,21 @@ export function ssoRoutes(config: ResolvedConfig): Route[] {
       "/sso/connections/create",
       connectionCreateBody,
       async (b) => b.organizationId,
-      (actor, b, ctx) => createConnection(config, actor, b, meta(ctx)),
+      (actor, b, ctx) => createConnection(ctx.config, actor, b, meta(ctx)),
       (connection) => json({ connection }),
     ),
     post(
       "/sso/connections/update",
       connectionUpdateBody,
       byConnection,
-      (actor, b, ctx) => updateConnection(config, actor, b, meta(ctx)),
+      (actor, b, ctx) => updateConnection(ctx.config, actor, b, meta(ctx)),
       (connection) => json({ connection }),
     ),
     post(
       "/sso/connections/delete",
       connectionIdBody,
       byConnection,
-      (actor, b, ctx) => deleteConnection(config, actor, b, meta(ctx)),
+      (actor, b, ctx) => deleteConnection(ctx.config, actor, b, meta(ctx)),
       (value) => json(value),
     ),
   ];

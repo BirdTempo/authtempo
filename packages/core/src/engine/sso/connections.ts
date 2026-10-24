@@ -1,5 +1,6 @@
 import type { ResolvedConfig, ResolvedSso } from "../../config.js";
 import { ERRORS } from "../../errors.js";
+import { withSecrets } from "../../observe/observer.js";
 import { openSealed, seal } from "../../primitives/aead.js";
 import { isPublicHost } from "../../primitives/host.js";
 import { newId } from "../../primitives/ids.js";
@@ -599,18 +600,18 @@ async function sealSecret(config: ResolvedConfig, connectionId: string, plain: s
  * It opens the sealed value under the version that the row names, with
  * the row id as the bound data. A SAML row has no secret. A version that
  * the config does not hold answers null, and so does a value that does
- * not open. Each writes one log line that names the row, never a value.
+ * not open. Each emits one fault event that names the row, never a value.
  */
 export async function connectionSecret(
   config: ResolvedConfig,
   row: SsoConnectionRow,
 ): Promise<string | null> {
   if (row.clientSecret === null) return null;
-  const secret = secretFor(config.keyring, row.secretVersion, row.id);
+  const secret = secretFor(config.observe, config.keyring, row.secretVersion, row.id);
   if (secret === null) return null;
   const plain = await openSealed(secret, CONNECTION_SEAL_INFO, row.clientSecret, row.id);
   if (plain === null) {
-    console.error("authtempo: an sso client secret did not open", row.id);
+    config.observe.emit({ name: "sso.client_secret_unopened", rowId: row.id });
     return null;
   }
   return new TextDecoder().decode(plain);
@@ -676,11 +677,13 @@ function connectionDraft(
  * the subject, and the attribute `email` for the address.
  */
 export async function createConnection(
-  config: ResolvedConfig,
+  outer: ResolvedConfig,
   actor: SsoActor,
   input: ConnectionFields & { organizationId: string; kind: "oidc" | "saml"; label: string },
   meta: SsoActMeta = {},
 ): Promise<Result<SsoConnectionSummary>> {
+  // Each event of the act scrubs the client secret of the body (plan 12d on 12h).
+  const config = withSecrets(outer, [input.clientSecret]);
   const sso = ssoOn(config);
   if (!sso.ok) return sso;
   const kind: unknown = input.kind;
@@ -796,11 +799,13 @@ export async function connectionOrganization(
  * audit row with the changed keys.
  */
 export async function updateConnection(
-  config: ResolvedConfig,
+  outer: ResolvedConfig,
   actor: SsoActor,
   input: ConnectionFields & { id: string },
   meta: SsoActMeta = {},
 ): Promise<Result<SsoConnectionSummary>> {
+  // Each event of the act scrubs the client secret of the body (plan 12d on 12h).
+  const config = withSecrets(outer, [input.clientSecret]);
   const sso = ssoOn(config);
   if (!sso.ok) return sso;
   const held = await config.storage.findOne("ssoConnection", [

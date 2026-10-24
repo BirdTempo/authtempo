@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { resolveConfig } from "../src/config.js";
+import { type AuthConfig, resolveConfig } from "../src/config.js";
 import { authErrorRedirect } from "../src/http/redirect.js";
 import { createRouter } from "../src/http/router.js";
 import { SIGN_IN_ROUTES } from "../src/observe/events.js";
@@ -9,6 +9,7 @@ import { BASE_URL, get, post, tokenFromMail } from "./helpers.js";
 import { REDIRECT, RESOURCE, SCOPES } from "./oauth-helpers.js";
 import { formPost, observed } from "./observe-helpers.js";
 import { FAST } from "./password-helpers.js";
+import { fakeDns } from "./sso/helpers.js";
 
 // Plan 12h Task 4 (spec 31 items 5 and 6): the request event and the sign-in failure.
 
@@ -41,13 +42,28 @@ async function spentLink(s: Observed): Promise<string> {
   return token;
 }
 
+/** The config of the SSO sign-in routes of plan 12d: organizations, OIDC, SAML, and two fake resolvers. */
+const SSO_ON: Partial<AuthConfig> = {
+  organizations: {},
+  sso: { oidc: true, saml: true, dns: [fakeDns("a", {}), fakeDns("b", {})] },
+};
+
 /**
  * One failing request for each sign-in route, with the session method that
- * the route opens and the provider of a social route. A key of
- * SIGN_IN_ROUTES with no row here fails the test.
+ * the route opens and the provider of a social route. `over` is the config
+ * that mounts the route. A key of SIGN_IN_ROUTES with no row here fails the
+ * test.
  */
 const FAILING: Readonly<
-  Record<string, { via: string; provider?: string; make: (s: Observed) => Promise<Request> }>
+  Record<
+    string,
+    {
+      via: string;
+      provider?: string;
+      over?: Partial<AuthConfig>;
+      make: (s: Observed) => Promise<Request>;
+    }
+  >
 > = {
   "POST /password/sign-in": {
     via: "password",
@@ -84,6 +100,18 @@ const FAILING: Readonly<
     via: "social",
     provider: "apple",
     make: async () => formPost("/auth/social/apple/callback", { code: "c1", state: "nope" }),
+  },
+  // A state that no start wrote: the step `state` answers sso_failed (plan 12d).
+  "GET /sso/:connectionId/callback": {
+    via: "sso",
+    over: SSO_ON,
+    make: async () => get("/auth/sso/c1/callback?code=c1&state=nope"),
+  },
+  // A RelayState that no start wrote: the step `request` answers sso_failed.
+  "POST /sso/:connectionId/acs": {
+    via: "sso",
+    over: SSO_ON,
+    make: async () => formPost("/auth/sso/c1/acs", { SAMLResponse: "PHg+", RelayState: "nope" }),
   },
 };
 
@@ -318,11 +346,13 @@ describe("the request event (plan 12h Task 4)", () => {
   it("emits a sign-in failure for each sign-in route that answers a failure", async () => {
     const keys = Object.keys(SIGN_IN_ROUTES);
     expect(keys.length).toBeGreaterThan(0);
+    // Each row of FAILING is a sign-in route, so a lost row of SIGN_IN_ROUTES fails here.
+    expect(Object.keys(FAILING).sort()).toEqual([...keys].sort());
     for (const key of keys) {
-      const s = observed();
       const row = FAILING[key];
       expect(row, `a failing request for ${key}`).toBeDefined();
       if (!row) continue;
+      const s = observed(row.over);
       expect(SIGN_IN_ROUTES[key as keyof typeof SIGN_IN_ROUTES], key).toBe(row.via);
       const req = await row.make(s);
       const before = (await s.events()).length;

@@ -17,6 +17,7 @@
 
 import type { ResolvedConfig } from "../../config.js";
 import type { ScimType } from "../../errors.js";
+import { organizationChange } from "../../observe/events.js";
 import { newId } from "../../primitives/ids.js";
 import { hasControlChar } from "../../primitives/text.js";
 import type {
@@ -883,14 +884,19 @@ async function joinChecks(
     createdAt: now,
     updatedAt: now,
   };
-  await runBefore("organization.beforeAddMember", config.hooks.organization.beforeAddMember, {
-    organization: publicOrganization(organization),
-    member: { userId: user.id, role: member.role },
-    memberUser: user,
-    by: null,
-    via: "scim",
-    invitation: null,
-  });
+  await runBefore(
+    config.observe,
+    "organization.beforeAddMember",
+    config.hooks.organization.beforeAddMember,
+    {
+      organization: publicOrganization(organization),
+      member: { userId: user.id, role: member.role },
+      memberUser: user,
+      by: null,
+      via: "scim",
+      invitation: null,
+    },
+  );
   return { organization, member };
 }
 
@@ -913,6 +919,7 @@ async function joinWrite(
 /** The after hooks of a member add. */
 async function afterJoin(config: ResolvedConfig, join: Join, member: MemberRow, user: UserRow) {
   await runAfter(
+    config.observe,
     "organization.afterAddMember",
     config.hooks.organization.afterAddMember,
     {
@@ -932,6 +939,7 @@ async function afterJoin(config: ResolvedConfig, join: Join, member: MemberRow, 
     },
     member.id,
   );
+  config.observe.emit(organizationChange("afterAddMember", join.organization.id));
 }
 
 /** `hooks.scim.afterChange` once per write, after the commit (Behavior 9). */
@@ -942,11 +950,19 @@ async function afterChange(
   id: string,
 ): Promise<void> {
   await runAfter(
+    config.observe,
     "scim.afterChange",
     config.hooks.scim.afterChange,
     { organizationId, resource: "User", action, id },
     id,
   );
+  config.observe.emit({
+    name: "scim.change",
+    resource: "User",
+    action,
+    organizationId,
+    resourceId: id,
+  });
 }
 
 /**
@@ -985,7 +1001,7 @@ export async function scimCreateUser(
     };
     // After the claim or the create: the locks, the member row, the scimUser row, the audit row.
     const after = async (tx: StorageAdapter, user: UserRow) => {
-      await holdUser(tx, user.id);
+      await holdUser(config.observe, tx, user.id);
       await fillName(tx, user, doc, now);
       const j = join;
       joined = j ? await joinWrite(config, tx, j, user) : null;
@@ -1371,8 +1387,7 @@ async function writeChange(
     };
   };
   let plan = planOf(member);
-  if (deactivate && plan.kept)
-    console.info("authtempo: scim kept the member row of an owner", row.id);
+  if (deactivate && plan.kept) config.observe.emit({ name: "scim.owner_kept", scimUserId: row.id });
   const names = doc === null ? [] : changedNames(row, doc);
   const action =
     change.kind === "delete"
@@ -1389,13 +1404,14 @@ async function writeChange(
         const { member, removes, removeEvent, ends, stops } = p;
         // The before hooks first: no lock and no write comes before them.
         if (move && doc)
-          await runBefore("user.beforeUpdate", config.hooks.user.beforeUpdate, {
+          await runBefore(config.observe, "user.beforeUpdate", config.hooks.user.beforeUpdate, {
             user,
             patch: { email: doc.address },
             via: "scim",
           });
         if (removes && removeEvent)
           await runBefore(
+            config.observe,
             "organization.beforeRemoveMember",
             config.hooks.organization.beforeRemoveMember,
             removeEvent,
@@ -1404,7 +1420,7 @@ async function writeChange(
           join = await joinChecks(config, tx, caller.organizationId, user, now, row.id);
         // The lock order of user-hold.ts: the user row, the sessions, the organization row, the
         // member rows, the scimGroupMember rows.
-        const held = await holdUser(tx, user.id);
+        const held = await holdUser(config.observe, tx, user.id);
         // The claim of a move or a reactivate read the address before the hold. A change of
         // address in between answers 409, and the directory sends the request again (ruling 78
         // of plan 12d).
@@ -1567,18 +1583,22 @@ async function writeChange(
   if (!written.ok) return failAnswer(written);
   await sessionsEnded(config, plan.ends.ended, "revoked", plan.stops);
   await endFamilies(config, plan.ends.families);
-  if (plan.removes && plan.removeEvent && plan.member)
+  if (plan.removes && plan.removeEvent && plan.member) {
     await runAfter(
+      config.observe,
       "organization.afterRemoveMember",
       config.hooks.organization.afterRemoveMember,
       plan.removeEvent,
       plan.member.id,
     );
+    config.observe.emit(organizationChange("afterRemoveMember", plan.member.organizationId));
+  }
   const j = join as Join | null;
   const added = joined as MemberRow | null;
   if (j && added) await afterJoin(config, j, added, user);
   if (move && doc)
     await runAfter(
+      config.observe,
       "user.afterUpdate",
       config.hooks.user.afterUpdate,
       {

@@ -13,6 +13,7 @@ import { hasSecondFactor, isPlatformOperator, requireOperatorUser } from "../ope
 import { isOwner } from "../organizations.js";
 import { rankOf } from "../ranks.js";
 import type { ResolvedSession } from "../sessions.js";
+import type { SsoGuardStep } from "./steps.js";
 
 /**
  * Who manages the SSO setup of an organization (plan 12d deviation 4): an
@@ -23,9 +24,13 @@ export type SsoActor =
   | { kind: "platform"; user: UserRow; session: SessionRow }
   | { kind: "app"; name: string };
 
-/** One log line per refusal, with the step name and no user id (plan 12d Task 3 form). */
-function refused(step: string, code: ErrorCode = "forbidden_rank"): Result<never> {
-  console.error("authtempo: sso guard refused", step);
+/** One fault event per refusal, with the step name and no user id (plan 12d Task 3 form, plan 12h). */
+function refused(
+  config: ResolvedConfig,
+  step: SsoGuardStep,
+  code: ErrorCode = "forbidden_rank",
+): Result<never> {
+  config.observe.emit({ name: "sso.guard_refused", step });
   return fail(code);
 }
 
@@ -68,26 +73,29 @@ async function ownsOrganization(
  * 5. A second factor has a method, else `second_factor_required`.
  * 6. The session is fresh, else `session_not_fresh`.
  *
- * Each refusal of this guard writes one log line with the step name and no
- * user id. The actor of steps 3 to 6 is `owner`.
+ * Each refusal of this guard emits `sso.guard_refused` with the step name
+ * and no user id. The actor of steps 3 to 6 is `owner`.
  */
 export async function requireSsoManager(
   config: ResolvedConfig,
   resolved: ResolvedSession,
   organizationId: string,
+  route = "api",
 ): Promise<Result<SsoActor>> {
   const { user, session } = resolved;
-  if (session.actorId !== null) return refused("impersonation");
+  if (session.actorId !== null) return refused(config, "impersonation");
   if (await isPlatformOperator(config, user.id)) {
-    const operator = await requireOperatorUser(config, resolved, "sso");
+    // The route key of the request names the caller in the event of the operator guard (plan 12h).
+    const operator = await requireOperatorUser(config, resolved, route);
     if (operator.ok)
       return ok({ kind: "platform", user: operator.value.user, session: operator.value.session });
     if (!(await ownsOrganization(config, user.id, organizationId))) return operator;
-  } else if (!(await ownsOrganization(config, user.id, organizationId))) return refused("rank");
-  if (!user.emailVerified) return refused("email", "email_unverified");
+  } else if (!(await ownsOrganization(config, user.id, organizationId)))
+    return refused(config, "rank");
+  if (!user.emailVerified) return refused(config, "email", "email_unverified");
   if (!(await hasSecondFactor(config, user.id)))
-    return refused("second_factor", "second_factor_required");
-  if (!requireFresh(config, session).ok) return refused("fresh", "session_not_fresh");
+    return refused(config, "second_factor", "second_factor_required");
+  if (!requireFresh(config, session).ok) return refused(config, "fresh", "session_not_fresh");
   return ok({ kind: "owner", user, session });
 }
 

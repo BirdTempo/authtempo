@@ -19,6 +19,7 @@ import { createSession, resolveSession } from "../../src/engine/sessions.js";
 import { deleteDomain } from "../../src/engine/sso/domains.js";
 import { sweepExpired } from "../../src/engine/sweep.js";
 import { createApiToken } from "../../src/engine/tokens.js";
+import type { AuthEvent } from "../../src/observe/port.js";
 import { randomBase64Url, sha256Hex } from "../../src/primitives/crypto.js";
 import type { ScimScope } from "../../src/schema.js";
 import { createMemoryAdapter } from "../../src/storage/memory.js";
@@ -48,9 +49,8 @@ const ERROR_URN = "urn:ietf:params:scim:api:messages:2.0:Error";
 const ADA = "ada@acme.example";
 
 beforeEach(() => {
-  // A refused sign-in and a kept owner row each write one log line.
+  // A refused sign-in writes one log line.
   vi.spyOn(console, "error").mockImplementation(() => {});
-  vi.spyOn(console, "info").mockImplementation(() => {});
 });
 
 afterEach(() => {
@@ -392,7 +392,8 @@ describe("the SCIM Users (plan 12d Task 10)", () => {
   });
 
   it("keeps the member row of an owner at a deactivate", async () => {
-    const w = await world();
+    const batches: AuthEvent[][] = [];
+    const w = await world({ observe: { sink: { write: (b) => void batches.push([...b]) } } });
     const token = await tokenOf(w, w.organizationId);
     const owner = await userAt(w, "owner@acme.example");
     if (!owner) throw new Error("no owner");
@@ -406,10 +407,14 @@ describe("the SCIM Users (plan 12d Task 10)", () => {
     );
     expect(off.status).toBe(200);
     expect((await membersOf(w, owner.id)).map((m) => m.role)).toEqual(["owner"]);
-    expect(console.info).toHaveBeenCalledWith(
-      "authtempo: scim kept the member row of an owner",
-      id,
-    );
+    // The event of the kept row names the SCIM user (plan 12h).
+    await w.config.observe.flush();
+    expect(
+      batches
+        .flat()
+        .filter((e) => e.name === "scim.owner_kept")
+        .map((e) => e.scimUserId),
+    ).toEqual([id]);
   });
 
   it("deletes the SCIM user and keeps the account", async () => {

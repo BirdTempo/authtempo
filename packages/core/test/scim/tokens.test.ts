@@ -59,7 +59,7 @@ async function manage(
 function probeRoutes(w: ScimWorld) {
   const seen: unknown[] = [];
   const routes: Route[] = [
-    scimRoute(w.config, {
+    scimRoute({
       method: "POST",
       path: "/scim/v2/Probe",
       // A test stub of a path outside ROUTES has no key (ruling 3 of plan 12d).
@@ -71,7 +71,7 @@ function probeRoutes(w: ScimWorld) {
         return scimJson({ organizationId: caller.organizationId }, 201);
       },
     }),
-    scimRoute(w.config, {
+    scimRoute({
       method: "GET",
       path: "/scim/v2/Probe",
       key: undefined as never,

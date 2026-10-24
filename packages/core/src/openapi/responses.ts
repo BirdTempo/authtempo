@@ -18,7 +18,11 @@ export const ERROR_SCHEMAS = {
     type: "object",
     properties: {
       error: { type: "string" },
-      message: { type: "string", description: "The app's text. Present only on `hook_refused`." },
+      message: {
+        type: "string",
+        description:
+          "The app's text on `hook_refused`, or the rule that an SSO or SCIM manager body broke on `invalid_body`.",
+      },
       // Plan 12h Task 8 (spec 31 item 12): a fixed string, never the text of the cause.
       reason: {
         type: "string",

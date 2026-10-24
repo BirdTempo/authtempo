@@ -12,11 +12,13 @@ import {
   OPERATOR_HOOK_POINTS,
   ORGANIZATION_HOOK_POINTS,
   PATCH_SHAPE_REFUSALS,
+  SCIM_HOOK_POINTS,
   SESSION_END_REASONS,
   SESSION_HOOK_POINTS,
   SESSION_PATCH_REFUSALS,
   SESSION_VIA,
   type SessionVia,
+  SSO_HOOK_POINTS,
   USER_CREATE_VIA,
   USER_HOOK_POINTS,
   USER_PATCH_REFUSALS,
@@ -37,6 +39,7 @@ import {
 } from "../engine/oauth-refusals.js";
 import { OPERATOR_ACTIONS } from "../engine/operator/actions.js";
 import type { OperatorActor } from "../engine/operator/guards.js";
+import { SSO_FAILED_STEPS, SSO_GUARD_STEPS, SSO_MFA_CLAIMS } from "../engine/sso/steps.js";
 import { SWEEP_KEYS } from "../engine/sweep-keys.js";
 import { ERRORS, OAUTH_ERRORS } from "../errors.js";
 import { ROUTES, type RouteKey } from "../http/route-list.js";
@@ -44,7 +47,7 @@ import type { UnauthorizedReason } from "../http/routes/operator.js";
 import { LIMIT_FAMILIES } from "../limiter/limit.js";
 import { ENTROPY_WARN_BITS } from "../primitives/keyring.js";
 import { appErrorName, FIELD_KINDS, type FieldKind, REJECT } from "../redact.js";
-import type { SecondFactorMethod } from "../schema.js";
+import { AUDIT_ACTOR_KINDS, type SecondFactorMethod } from "../schema.js";
 import type { AuthEvent } from "./port.js";
 
 export interface FieldSpec {
@@ -115,13 +118,15 @@ const COUNT = { kind: "count" } as const;
 
 const enumOf = (values: readonly string[]) => ({ kind: "enum", values }) as const;
 
-/** Every hook name, read from the five hook point constants. */
+/** Every hook name, read from the seven hook point constants (the last two of plan 12d). */
 const HOOK_NAMES: readonly string[] = [
   ...Object.keys(ORGANIZATION_HOOK_POINTS).map((p) => `organization.${p}`),
   ...Object.keys(SESSION_HOOK_POINTS).map((p) => `session.${p}`),
   ...Object.keys(USER_HOOK_POINTS).map((p) => `user.${p}`),
   ...Object.keys(IDENTITY_HOOK_POINTS).map((p) => `identity.${p}`),
   ...Object.keys(OPERATOR_HOOK_POINTS).map((p) => `operator.${p}`),
+  ...Object.keys(SSO_HOOK_POINTS).map((p) => `sso.${p}`),
+  ...Object.keys(SCIM_HOOK_POINTS).map((p) => `scim.${p}`),
 ];
 
 /** The key of each entry of ROUTES, `<method> <path>`. */
@@ -169,6 +174,9 @@ export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
   "POST /handoff/redeem": "handoff",
   "GET /social/:provider/callback": "social",
   "POST /social/apple/callback": "social",
+  // The OIDC callback and the SAML ACS of plan 12d.
+  "GET /sso/:connectionId/callback": "sso",
+  "POST /sso/:connectionId/acs": "sso",
 };
 
 /** The template of a route key, or `unmatched`, as the line of an unhandled error prints it. */
@@ -481,7 +489,8 @@ export const EVENTS = {
   "secrets.rewrap_failed": fault(
     "error",
     "authtempo: a sealed value did not move to the current secret; it did not open, or a concurrent write changed it first",
-    { model: { kind: "name" }, rowId: ROW_ID, version: COUNT },
+    // An identifier, not a name: plan 12d adds the model ssoConnection, in camel case.
+    { model: { kind: "identifier" }, rowId: ROW_ID, version: COUNT },
     {
       args: (e) => [
         "authtempo: a sealed value did not move to the current secret; it did not open, or a concurrent write changed it first",
@@ -662,6 +671,42 @@ export const EVENTS = {
     "authtempo: the sweep pending end step stopped",
     SWEEP_STOP,
   ),
+  "sweep.sso_recheck_stopped": fault(
+    "error",
+    "authtempo: the sweep sso recheck step stopped",
+    SWEEP_STOP,
+  ),
+  "sweep.organization_rest_stopped": fault(
+    "error",
+    "authtempo: the sweep organization rest step stopped",
+    SWEEP_STOP,
+  ),
+  // The lines of plan 12d (SSO and SCIM). The raw IP of a refused sign-in is
+  // an address input: only the include rule writes it (spec 31 item 8).
+  "sso.guard_refused": fault("error", "authtempo: sso guard refused", {
+    step: enumOf(SSO_GUARD_STEPS),
+  }),
+  "sso.failed": fault("error", "authtempo: sso failed", {
+    connectionId: ROW_ID,
+    step: enumOf(SSO_FAILED_STEPS),
+  }),
+  "sso.denied": fault("error", "authtempo: sso denied", { connectionId: ROW_ID }),
+  "sso.refused": fault("error", "authtempo: sso refused", {
+    connectionId: ROW_ID,
+    code: { kind: "code" },
+  }),
+  "saml.certificate_expired": fault("warn", "authtempo: saml certificate expired", {
+    connectionId: ROW_ID,
+  }),
+  "sso.client_secret_unopened": fault("error", "authtempo: an sso client secret did not open", {
+    rowId: ROW_ID,
+  }),
+  // The row id of the domain, not the name: no field kind holds a DNS name.
+  "sso.domain_unverified": fault("error", "authtempo: sso domain unverified", {
+    port: PROVIDER,
+    domainId: ROW_ID,
+  }),
+  "sso.domain_lost": fault("error", "authtempo: sso domain lost", { rowId: ROW_ID }),
   // The flow events of plan 12h Task 6. Each success emits after its commit.
   "api_token.create": { level: "info", fields: TOKEN_EVENT },
   "api_token.update": { level: "info", fields: TOKEN_EVENT },
@@ -710,7 +755,8 @@ export const EVENTS = {
     level: "info",
     fields: {
       action: enumOf(OPERATOR_ACTIONS),
-      actorKind: enumOf(Object.keys(ACTOR_KINDS)),
+      // The kinds of an audit row: a SCIM write writes `scim` (plan 12d).
+      actorKind: enumOf(AUDIT_ACTOR_KINDS),
       auditId: ROW_ID,
     },
   },
@@ -719,13 +765,31 @@ export const EVENTS = {
     level: "warn",
     fields: {
       action: { kind: "enum", values: OPERATOR_ACTIONS, optional: true },
-      actorKind: enumOf(Object.keys(ACTOR_KINDS)),
+      actorKind: enumOf(AUDIT_ACTOR_KINDS),
       code: { kind: "code" },
     },
   },
   // A refusal of a limit (plan 12h Task 7). The family only: the subject of
   // the key is an address, an IP, or a user id (spec 31 item 10).
   "limit.hit": { level: "warn", fields: { family: enumOf(LIMIT_FAMILIES) } },
+  // The IdP passed the second factor of a connection (spec 30 item 13): the
+  // claim that matched, never its value.
+  "sso.second_factor_idp": {
+    level: "info",
+    fields: { connectionId: ROW_ID, claim: enumOf(SSO_MFA_CLAIMS) },
+  },
+  // A SCIM deactivate kept the member row of an owner (plan 12d Task 10).
+  "scim.owner_kept": { level: "info", fields: { scimUserId: ROW_ID } },
+  // Beside `hooks.scim.afterChange`, once per committed SCIM write.
+  "scim.change": {
+    level: "info",
+    fields: {
+      resource: enumOf(["User", "Group"]),
+      action: enumOf(["create", "update", "deactivate", "delete"]),
+      organizationId: ROW_ID,
+      resourceId: ROW_ID,
+    },
+  },
   sweep: { level: "info", fields: { ...SWEEP_COUNTS, durationMs: { kind: "durationMs" } } },
 } as const satisfies Readonly<Record<string, EventSpec>>;
 
@@ -878,6 +942,8 @@ export const HOOK_EVENTS: Readonly<Record<HookName, EventName | { readonly exemp
   "identity.afterUnlink": NO_EVENT_EXEMPT,
   "operator.beforeAction": "operator.refused",
   "operator.afterAction": "operator.action",
+  "sso.beforeSignIn": REFUSAL_EXEMPT,
+  "scim.afterChange": "scim.change",
 };
 
 /** The `organization.change` event of an `after` point, emitted beside its hook. */

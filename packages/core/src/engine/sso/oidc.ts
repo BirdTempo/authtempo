@@ -1,6 +1,8 @@
 import type { ResolvedConfig, ResolvedSso } from "../../config.js";
 import { safeNext } from "../../http/safe-next.js";
 import { ipKey } from "../../limiter/ip-key.js";
+import { limit } from "../../limiter/limit.js";
+import { withSecrets } from "../../observe/observer.js";
 import {
   constantTimeEqual,
   randomBase64Url,
@@ -23,6 +25,7 @@ import { connectionSecret, type OidcStored, tokenAuthOf } from "./connections.js
 import { kindOn } from "./discover.js";
 import { resolveSsoUser, type SsoProfile, type SsoSignedIn } from "./resolve.js";
 import { startSaml } from "./saml-sp.js";
+import type { OidcStep } from "./steps.js";
 
 /**
  * The OIDC sign-in of one SSO connection (plan 12d Task 4, spec 30 item 6).
@@ -145,11 +148,20 @@ export function ssoCallbackUrl(config: ResolvedConfig, connectionId: string): st
 }
 
 /** A value, or the name of the step that failed. */
-type Stepped<T> = { ok: true; value: T } | { ok: false; step: string };
+type Stepped<T> = { ok: true; value: T } | { ok: false; step: OidcStep };
 
-/** The one log line of a refused step (Global Constraints of plan 12d): the connection id, the step, and the IP. */
-function refused(connectionId: string, step: string, ip: string | null): Result<never> {
-  console.error("authtempo: sso failed", connectionId, step, ip);
+/**
+ * The one fault event of a refused step (Global Constraints of plan 12d):
+ * the connection id and the step. The IP is an address input, so only the
+ * include rule writes it (plan 12h).
+ */
+function refused(
+  config: ResolvedConfig,
+  connectionId: string,
+  step: OidcStep,
+  ip: string | null,
+): Result<never> {
+  config.observe.emit({ name: "sso.failed", connectionId, step, ip });
   return fail("sso_failed");
 }
 
@@ -172,7 +184,12 @@ async function discoveredEndpoints(
     return { ok: true, value: kept.endpoints };
   discovered.delete(row.id);
   // `discover` refuses a document whose issuer is not this issuer, so another tenant's document fails.
-  const endpoints = await discover("sso", issuer, cappedFetch(sso.fetch, SSO_DISCOVERY_BODY_MAX));
+  const endpoints = await discover(
+    config.observe,
+    "sso",
+    issuer,
+    cappedFetch(sso.fetch, SSO_DISCOVERY_BODY_MAX),
+  );
   if (!endpoints) return { ok: false, step: "discovery" };
   // The document is on the tenant's host, and core fetches these URLs (spec 30 item 5).
   if (
@@ -187,12 +204,16 @@ async function discoveredEndpoints(
   return { ok: true, value: endpoints };
 }
 
-/** The provider of a row with the step of its failure: `secret`, `discovery`, or `discovery_host`. */
+/**
+ * The provider of a row with the step of its failure: `secret`,
+ * `discovery`, or `discovery_host`. `secret` is the opened client secret,
+ * for the scrub of the events of the callback.
+ */
 async function providerOf(
   config: ResolvedConfig,
   sso: ResolvedSso,
   row: SsoConnectionRow,
-): Promise<Stepped<OidcProvider>> {
+): Promise<{ ok: true; value: OidcProvider; secret: string } | { ok: false; step: OidcStep }> {
   const c = row.config as unknown as OidcStored;
   const clientSecret = await connectionSecret(config, row);
   if (clientSecret === null) return { ok: false, step: "secret" };
@@ -214,7 +235,7 @@ async function providerOf(
   });
   // With endpoints, `oidcProvider` builds the provider and never a discovery entry.
   return provider.kind === "oidc"
-    ? { ok: true, value: provider }
+    ? { ok: true, value: provider, secret: clientSecret }
     : { ok: false, step: "discovery" };
 }
 
@@ -232,7 +253,7 @@ export async function connectionProvider(
   if (!config.sso || row.kind !== "oidc") return null;
   const r = await providerOf(config, config.sso, row);
   if (!r.ok) {
-    console.error("authtempo: sso failed", row.id, r.step, null);
+    config.observe.emit({ name: "sso.failed", connectionId: row.id, step: r.step });
     return null;
   }
   return r.value;
@@ -266,7 +287,7 @@ export async function startSso(
   config: ResolvedConfig,
   input: { connectionId: string; next?: string | undefined; ip: string | null },
 ): Promise<Result<{ location: string; bindToken: string }>> {
-  if (!(await config.limiter.allow(`sso-start:ip:${ipKey(input.ip)}`, START_LIMIT)))
+  if (!(await limit(config, "sso-start:ip", ipKey(input.ip), START_LIMIT)))
     return fail("rate_limited");
   const live = await liveConnection(config, input.connectionId);
   if (!live.ok) return live;
@@ -274,7 +295,7 @@ export async function startSso(
   // A SAML connection sends an AuthnRequest (plan 12d Task 8).
   if (row.kind === "saml") return startSaml(config, row, input);
   const provider = await providerOf(config, sso, row);
-  if (!provider.ok) return refused(row.id, provider.step, input.ip);
+  if (!provider.ok) return refused(config, row.id, provider.step, input.ip);
   const now = config.clock.now();
   const state = randomToken(OAUTH_STATE_PREFIX);
   const verifier = randomBase64Url(32);
@@ -354,7 +375,7 @@ function profileOf(claims: Record<string, unknown>): SsoProfile | null {
  * state must name the connection of the path, and the binding cookie must
  * match. Then the code exchange with the connection's redirect URI, the ID
  * token through the jwt seam, and the nonce. Each failure answers
- * `sso_failed` with one log line that names the step.
+ * `sso_failed` with one `sso.failed` event that names the step.
  */
 export async function completeSsoOidc(
   config: ResolvedConfig,
@@ -362,7 +383,7 @@ export async function completeSsoOidc(
   seam: SsoOidcSeam = {},
 ): Promise<Result<SsoSignedIn | SignInChallenge>> {
   const id = input.connectionId;
-  const no = (step: string) => refused(id, step, input.ip);
+  const no = (step: OidcStep) => refused(config, id, step, input.ip);
   const state = input.state ?? "";
   if (!STATE_RE.test(state)) return no("state");
   const now = config.clock.now();
@@ -389,7 +410,7 @@ export async function completeSsoOidc(
   if (!input.bindToken || !constantTimeEqual(await sha256Hex(input.bindToken), data.bindHash))
     return no("binding");
   if (input.error) {
-    console.error("authtempo: sso denied", id, input.ip);
+    config.observe.emit({ name: "sso.denied", connectionId: id, ip: input.ip });
     return fail("oauth_denied");
   }
   if (!input.code) return no("code");
@@ -401,9 +422,11 @@ export async function completeSsoOidc(
   const provider = await providerOf(config, sso, connection);
   if (!provider.ok) return no(provider.step);
   const p = provider.value;
+  // From here each event of the request scrubs the opened client secret too (plan 12d on 12h).
+  const scrubbed = withSecrets(config, [provider.secret]);
   // Each IdP call goes through `sso.fetch` with its byte cap (plan 12d), the JWKS read too.
   const token = await exchangeProviderCode(
-    config,
+    scrubbed,
     p,
     input.code,
     data.verifier,
@@ -415,7 +438,7 @@ export async function completeSsoOidc(
   if (token === null) return no("exchange");
   let claims: Record<string, unknown>;
   try {
-    claims = await config.jwt.verifyIdToken({
+    claims = await scrubbed.jwt.verifyIdToken({
       token,
       jwksUrl: p.jwksUrl,
       issuer: p.issuer,
@@ -432,7 +455,7 @@ export async function completeSsoOidc(
   const profile = profileOf(claims);
   if (!profile) return no("subject");
   seam.onProfile?.(profile);
-  return resolveSsoUser(config, connection, profile, {
+  return resolveSsoUser(scrubbed, connection, profile, {
     next: safeNext(data.next),
     ip: input.ip,
     userAgent: input.userAgent,

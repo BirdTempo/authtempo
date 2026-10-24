@@ -284,7 +284,6 @@ export function operatorRoutes(config: ResolvedConfig): Route[] {
  */
 function ssoOperatorRoutes(config: ResolvedConfig): Route[] {
   if (!config.operator || !config.sso) return [];
-  const api = operatorApi(config);
   const path = "/operator/sso/enforce-off";
   return [
     {
@@ -292,7 +291,7 @@ function ssoOperatorRoutes(config: ResolvedConfig): Route[] {
       path,
       key: `POST ${path}`,
       async handler(ctx) {
-        const caller = await readOperatorActor(config, ctx, `POST ${path}`);
+        const caller = await readOperatorActor(ctx.config, ctx, `POST ${path}`);
         if (!caller.ok) return respond(caller);
         const { actor, renewed } = caller.value;
         const send = (res: Response) => {
@@ -305,7 +304,7 @@ function ssoOperatorRoutes(config: ResolvedConfig): Route[] {
         if (!body.ok) return send(respond(body));
         return send(
           respond(
-            await api.sso.enforceOff({
+            await operatorApi(ctx.config).sso.enforceOff({
               actor,
               domainId: body.value.domainId,
               reason: body.value.reason,

@@ -2,6 +2,7 @@ import { scimCallerOf } from "../../compat-seams.js";
 import type { ResolvedConfig } from "../../config.js";
 import { ERRORS } from "../../errors.js";
 import { ipKey } from "../../limiter/ip-key.js";
+import { limit } from "../../limiter/limit.js";
 import { SCIM_TOKEN_PREFIX } from "../../primitives/credentials.js";
 import { randomToken, sha256Hex } from "../../primitives/crypto.js";
 import { newId } from "../../primitives/ids.js";
@@ -301,14 +302,12 @@ export async function authenticateScim(
 ): Promise<{ ok: true; caller: ScimCaller } | { ok: false; status: 401 | 429 }> {
   const failed = async (): Promise<{ ok: false; status: 401 | 429 }> => ({
     ok: false,
-    status: (await config.limiter.allow(`scim-auth:ip:${ipKey(ip)}`, SCIM_AUTH_FAILURES))
-      ? 401
-      : 429,
+    status: (await limit(config, "scim-auth:ip", ipKey(ip), SCIM_AUTH_FAILURES)) ? 401 : 429,
   });
   // A caller that a compat package checked (plan 12d Task 14): the limit of its credential, no row.
   const checked = scimCallerOf(request);
   if (checked !== null)
-    return (await config.limiter.allow(`scim:token:${checked.tokenId}`, SCIM_PER_TOKEN))
+    return (await limit(config, "scim:token", checked.tokenId, SCIM_PER_TOKEN))
       ? { ok: true, caller: checked }
       : { ok: false, status: 429 };
   const token = BEARER_RE.exec(request.headers.get("authorization") ?? "")?.[1];
@@ -318,7 +317,7 @@ export async function authenticateScim(
   ]);
   const now = config.clock.now();
   if (!row || (row.expiresAt !== null && row.expiresAt.getTime() <= now.getTime())) return failed();
-  if (!(await config.limiter.allow(`scim:token:${row.id}`, SCIM_PER_TOKEN)))
+  if (!(await limit(config, "scim:token", row.id, SCIM_PER_TOKEN)))
     return { ok: false, status: 429 };
   if (row.lastUsedAt === null || now.getTime() - row.lastUsedAt.getTime() >= LAST_USED_EVERY_MS)
     // The where holds the value that was read, so two parallel calls write one update.
