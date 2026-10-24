@@ -618,7 +618,9 @@ These routes exist when the config sets `phone`. A phone code is one factor over
 
 The limits and the number checks run before the read of the number. So a 429 and a refusal tell nothing about an account.
 
-`POST /phone/request` sends its code after the answer. The daily cap, the code row, and the SMS run under the `waitUntil` that the host passes to `handle`. With no `waitUntil`, that work runs detached. So the answer time does not tell whether a number has an account: the supplier time is not in the answer. For the same reason, a cap refusal or an outage of the SMS port no longer shows in the answer. Core writes one `sms.not_sent` line with the reason, `capped` or `unavailable`. Watch that line, because the person who asked gets `{ sent: true }` and no code. On Workers, pass `(p) => ctx.waitUntil(p)`. With no `waitUntil`, the runtime can stop the send after the answer.
+`POST /phone/request` sends its code after the answer. The daily cap, the code row, and the SMS run under the `waitUntil` that the host passes to `handle`. With no `waitUntil`, that work runs detached. So the answer time does not tell whether a number has an account: the supplier time is not in the answer. For the same reason, a cap refusal or an outage of the SMS port no longer shows in the answer. Core writes one `sms.not_sent` line with the reason, `capped` or `unavailable`. Watch that line, because the person who asked gets `{ sent: true }` and no code. A send after the answer has a time limit of 10 seconds. A hung SMS port then gives the reason `timeout`, and the flush of the events of the request still runs.
+
+On Workers, pass `(p) => ctx.waitUntil(p)`, or mount a binding that passes it. Workers stops detached work at the answer, before its first I/O step. So on Workers with no `waitUntil`, `handle` waits for the work before it answers, and the code goes out. Core then writes one `observe.wait_until_missing` line. On other runtimes the work runs detached.
 
 Some residuals stay:
 
@@ -626,6 +628,8 @@ Some residuals stay:
 - A region of one digit, such as `+1`, admits every country of that zone, with its numbers of a high cost: list narrow prefixes.
 - Number recycling and SIM swap. A carrier gives a number to a new person, or an attacker moves the number to a new SIM. The new holder of the number then signs in to the account with the phone code. For an account with an address, core sends no mail at a phone sign-in. The session is fresh, so the routes with the fresh rule open to the new holder. Turn on the second factor and keep `totp.gate.phone` on to stop a holder of the number alone.
 - A user with no address who moves the phone to a new number gets no notice on any channel. The old number gets no text.
+- The work after the answer starts in the same task as the answer. Its first store calls run before the answer goes out. A known number answers about 0.3 to 0.8 ms later than an unknown one (measured in process, memory store, 2026-10-25 re-review). On a store with a sync driver, the cap count and the code row add to that time.
+- On Workers with no `waitUntil`, the answer waits for the cap, the row, and the SMS of a known number. Its time then tells an account. Pass `waitUntil` to close it: each binding takes one, and most read it from the platform.
 
 <h3 id="post-phone-request"><code>POST /phone/request</code></h3>
 
