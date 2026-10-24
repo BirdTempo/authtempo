@@ -1332,6 +1332,8 @@ const SQLITE_TEXTS: readonly ((names: Names, variant: SqliteVariant) => string)[
   () => compatMigration0008Sql("sqlite"),
   (names) => compatMigration0009Sql("sqlite", names),
   (names, variant) => compatMigration0010Sql("sqlite", names, variant),
+  // Plan 12d: core's schema version 14, the same text for both variants.
+  () => compatMigration0011Sql("sqlite"),
 ];
 if (SQLITE_TEXTS.length !== COMPAT_MIGRATION_NAMES.length)
   throw new Error(
