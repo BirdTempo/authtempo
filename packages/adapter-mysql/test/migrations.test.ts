@@ -66,7 +66,7 @@ for (const server of MYSQL_SERVERS) {
       // The lock lets one runner apply every step; the other finds each step recorded.
       expect(results.flat()).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
       expect(await recorded(db)).toEqual(ALL_STEPS);
-      expect(await version(db)).toBe("13");
+      expect(await version(db)).toBe("14");
       expect(await applyMysqlMigrations(db.pool)).toEqual([]);
     });
 
@@ -84,12 +84,12 @@ for (const server of MYSQL_SERVERS) {
       expect(await version(db)).toBeNull();
       expect(await applyMysqlMigrations(db.pool)).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
       expect(await recorded(db)).toEqual(ALL_STEPS);
-      expect(await version(db)).toBe("13");
+      expect(await version(db)).toBe("14");
       // The third step made its table: a step recorded before it ran would leave it out.
       const tables = await db.q<RowDataPacket[]>`SELECT COUNT(*) AS n FROM information_schema.tables
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME LIKE 'ta\\_%'`;
-      // 27 model tables, ta_meta, ta_limit, and ta_migrations.
-      expect(Number(tables[0]?.n)).toBe(30);
+      // 27 model tables of version 13, 6 of version 14, ta_meta, ta_limit, and ta_migrations.
+      expect(Number(tables[0]?.n)).toBe(36);
     });
 
     it("finishes a run that stopped between a step and its record", async () => {
@@ -97,14 +97,17 @@ for (const server of MYSQL_SERVERS) {
       const cleanShape = await readMysqlShape(clean.pool);
       await clean.close();
       const last = ALL_STEPS.length;
-      for (const at of [2, last]) {
+      // The version row of the baseline, and the version update of the last file.
+      for (const at of [2, baseline.length, last]) {
         db = await freshDatabase(server, { migrate: false });
         await stopAfter(db, at);
         // The step ran, and its record is missing.
         expect(await recorded(db)).toEqual(ALL_STEPS.slice(0, at - 1));
-        expect(await applyMysqlMigrations(db.pool)).toEqual(MYSQL_MIGRATIONS.map((m) => m.name));
+        // The run changes each file from the one of the step on.
+        const open = at <= baseline.length ? MYSQL_MIGRATIONS : MYSQL_MIGRATIONS.slice(1);
+        expect(await applyMysqlMigrations(db.pool)).toEqual(open.map((m) => m.name));
         expect(await recorded(db)).toEqual(ALL_STEPS);
-        expect(await version(db)).toBe("13");
+        expect(await version(db)).toBe("14");
         expect(await readMysqlShape(db.pool)).toEqual(cleanShape);
         await db.close();
         db = null;
@@ -121,9 +124,9 @@ for (const server of MYSQL_SERVERS) {
       );
       expect(await recorded(db)).toEqual(ALL_STEPS.slice(0, 1));
       await db.close();
-      // The version row of another value is not the row the last step makes.
+      // The version row of another value is not the row the last step of the baseline makes.
       db = await freshDatabase(server, { migrate: false });
-      await stopAfter(db, ALL_STEPS.length);
+      await stopAfter(db, baseline.length);
       await db.q`UPDATE ta_meta SET value = '12' WHERE ${db.q("key")} = 'schema_version'`;
       const stoppedRow = await applyMysqlMigrations(db.pool).catch((e: unknown) => e);
       expect(String((stoppedRow as Error).message)).toMatch(
@@ -196,7 +199,8 @@ for (const server of MYSQL_SERVERS) {
       // live tables to the schema.
       const digest = createHash("sha256").update(JSON.stringify(baseline)).digest("hex");
       expect(digest).toBe("1c55f449b21a23f5aa8d489d1877d276c88d504e275929993cedffbe0a94bbd9");
-      expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual(["0001_schema_v13"]);
+      // Plan 12d appends the file of schema version 14 after it.
+      expect(MYSQL_MIGRATIONS.map((m) => m.name)).toEqual(["0001_schema_v13", "0002_schema_v14"]);
     });
   });
 }
