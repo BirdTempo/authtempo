@@ -13,7 +13,7 @@ import { adminRefusal, adminRoute } from "./admin.js";
 import { createApi } from "./api.js";
 import { checkOptions } from "./check-options.js";
 import { emailOtpRoute } from "./email-otp.js";
-import { type Mapped, mapOptions } from "./map-options.js";
+import { type Mapped, mapOptions, mappedFor } from "./map-options.js";
 import { getSessionRoute } from "./session.js";
 import { sessionTokenOf } from "./shapes.js";
 import { scimRoute, ssoAcsRoute, ssoRoute } from "./sso-routes.js";
@@ -84,9 +84,9 @@ export async function withFreshCode(res: Response): Promise<Response> {
  */
 export function createHandler(
   auth: Auth,
-  mapped: Mapped,
+  base: Mapped,
 ): (request: Request, options?: HandleOptions) => Promise<Response> {
-  const { basePath, plugins } = mapped;
+  const { basePath, plugins } = base;
   // Core's own change routes follow Better Auth's option (plan 12a), as the
   // magic link does. The email code paths reach them through auth.handle.
   const changePath = `${basePath}/user/change-email`;
@@ -96,6 +96,13 @@ export function createHandler(
   // Core's /tokens and /organizations/tokens routes pass through since plan
   // 12k Task 12: both token models keep core's own tables here.
   const serve = async (request: Request): Promise<Response> => {
+    // A host outside a baseURL list gets core's 421 before any route work,
+    // the SAML ACS too (plan 12i Task 18). Core's gate checks the host first,
+    // and 421 is its only answer of that rule.
+    const hostRefusal = crossSiteRefusal(auth, request);
+    if (hostRefusal?.status === 421) return hostNotAllowed(hostRefusal);
+    // The request's entry of the list: each inner request and URL is built on it.
+    const mapped = mappedFor(base, request);
     const { pathname } = new URL(request.url);
     // Core answers 404 outside basePath: one source for that rule (Task 7 ruling).
     // Core always mounts the magic link routes. Better Auth serves them only with the plugin.
@@ -103,7 +110,7 @@ export function createHandler(
       return Response.json({ error: "not_found" }, { status: 404 });
     }
     if (
-      (!mapped.account.changeEmail &&
+      (!base.account.changeEmail &&
         (pathname === changePath || pathname.startsWith(`${changePath}/`))) ||
       pathname === reauthCodePath
     )
@@ -175,6 +182,15 @@ export function createHandler(
     }
     return res;
   };
+}
+
+/** Core's 421 of a host outside the `baseURL` list in Better Auth's shape, with core's headers. */
+function hostNotAllowed(refusal: Response): Response {
+  const code = BETTER_AUTH_CODES.host_not_allowed;
+  return new Response(JSON.stringify({ code, message: messageOf(code) }), {
+    status: refusal.status,
+    headers: refusal.headers,
+  });
 }
 
 /**

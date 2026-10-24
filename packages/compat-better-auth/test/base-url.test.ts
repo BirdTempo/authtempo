@@ -1,9 +1,11 @@
 import { createMemoryAdapter, createMemoryLimiter, systemClock } from "@authtempo/core";
 import { describe, expect, it } from "vitest";
 import { BetterAuthCompatError } from "../src/compat-error.js";
+import { organization } from "../src/plugins.js";
 import { betterAuth } from "../src/server/better-auth.js";
 import { checkOptions } from "../src/server/check-options.js";
 import { mapOptions } from "../src/server/map-options.js";
+import { sso } from "../src/sso.js";
 import type { BetterAuthOptions, CompatDatabase } from "../src/types.js";
 
 // The base URL of Better Auth on core's list (plan 12i Task 18, spec 32 item 18).
@@ -107,5 +109,87 @@ describe("the base URL list through the shim (plan 12i Task 18)", () => {
     ).toEqual([
       "baseURL.fallback: must be one origin of allowedHosts: core answers 421 to any other host and builds no URL from it",
     ]);
+  });
+});
+
+describe("the shim on the second entry of the list (plan 12i Task 18)", () => {
+  const A = "https://a.example";
+  const B = "https://b.example";
+  const listed = (extra: Partial<BetterAuthOptions> = {}): BetterAuthOptions => ({
+    ...options({ allowedHosts: ["a.example", "b.example"], protocol: "https" }),
+    ...extra,
+  });
+  /** A JSON POST from the page of `host` to `host`. */
+  const post = (host: string, path: string, body: unknown = {}) =>
+    new Request(`${host}/api/auth${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: host },
+      body: JSON.stringify(body),
+    });
+
+  it("answers a shim path on B as on A: core's inner request runs on B", async () => {
+    const auth = betterAuth(listed());
+    for (const path of ["/revoke-sessions", "/sign-out"]) {
+      const onA = await auth.handler(post(A, path));
+      const onB = await auth.handler(post(B, path));
+      expect([path, onB.status, await onB.text()]).toEqual([path, onA.status, await onA.text()]);
+    }
+    const revoke = await auth.handler(post(B, "/revoke-sessions"));
+    expect(revoke.status).toBe(401);
+    // The default landing origin is the request's entry too, as core's default appURL.
+    const link = { provider: "github", callbackURL: `${B}/home` };
+    // On B the URL passes and core's link route answers: no provider github here.
+    const onB = await auth.handler(post(B, "/link-social", link));
+    expect(onB.status).toBe(404);
+    const onA = await auth.handler(post(A, "/link-social", link));
+    expect([onA.status, ((await onA.json()) as { code: string }).code]).toEqual([
+      403,
+      "INVALID_CALLBACK_URL",
+    ]);
+  });
+
+  it("mails the links of a request on B, and the send callbacks take them", async () => {
+    const sent: string[] = [];
+    const auth = betterAuth(
+      listed({
+        emailAndPassword: {
+          enabled: true,
+          sendResetPassword: async ({ url }) => void sent.push(url),
+        },
+        emailVerification: { sendVerificationEmail: async ({ url }) => void sent.push(url) },
+      }),
+    );
+    const signUp = await auth.handler(
+      post(B, "/password/sign-up", { email: "ada@example.com", password: "correct horse battery" }),
+    );
+    expect(signUp.status).toBe(200);
+    const reset = await auth.handler(
+      post(B, "/password/reset/request", { email: "ada@example.com" }),
+    );
+    expect(reset.status).toBe(200);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatch(/^https:\/\/b\.example\/api\/auth\/password\/verify\?token=/);
+    expect(sent[1]).toMatch(/^https:\/\/b\.example\/api\/auth\/password\/reset\?token=/);
+  });
+
+  it("answers 421 before the SAML ACS on a host outside the list, in Better Auth's shape", async () => {
+    const auth = betterAuth(
+      listed({
+        authtempo: { ssoDns: [{ name: "a", txt: async () => [] }] },
+        plugins: [organization({ sendInvitationEmail: async () => {} }), sso({})],
+      }),
+    );
+    for (const request of [
+      new Request("https://c.example/api/auth/sso/saml2/sp/acs/acme", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "SAMLResponse=x",
+      }),
+      new Request("https://c.example/api/auth/get-session"),
+    ]) {
+      const res = await auth.handler(request);
+      expect(res.status).toBe(421);
+      expect(await res.json()).toEqual({ code: "HOST_NOT_ALLOWED", message: "Host not allowed" });
+    }
   });
 });

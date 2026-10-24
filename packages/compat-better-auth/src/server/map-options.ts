@@ -69,13 +69,18 @@ const DAY = 86_400;
 
 export interface Mapped {
   config: AuthConfig;
+  /** The origin of inner requests: the primary, or the request's entry after `mappedFor`. */
   origin: string;
+  /** Every origin of a `baseURL` list, the primary first. Empty for a string (plan 12i Task 18). */
+  origins: readonly string[];
   basePath: string;
   /** The ids of the compat plugins in use. */
   plugins: Set<string>;
   clientIp: (request: Request) => string | null;
   /** Where core lands a sign-in: `authtempo.appURL`, else the origin of baseURL. */
   appOrigin: string;
+  /** True with no `authtempo.appURL`: core's default appURL follows the request's entry. */
+  appOriginFollows: boolean;
   /** `emailAndPassword.minPasswordLength` or Better Auth's default, for the length codes. */
   minPasswordLength: number;
   /** The account operations that the options turn on (plan 12a). */
@@ -448,6 +453,19 @@ function baseOrigins(baseURL: BetterAuthOptions["baseURL"]): string[] {
   return first === undefined ? origins : [first, ...origins.filter((o) => o !== first)];
 }
 
+/**
+ * The mapping of one request (plan 12i Task 18). On a `baseURL` list, the
+ * shim builds each inner request, each SSO URL, and the default landing
+ * origin on the request's entry, as core does. Else core's Origin rule
+ * refuses a page of B, and a callback goes to A without B's binding cookie.
+ * The gate answered 421 to a host outside the list before this call.
+ */
+export function mappedFor(mapped: Mapped, request: Request): Mapped {
+  const origin = new URL(request.url).origin;
+  if (origin === mapped.origin || !mapped.origins.includes(origin)) return mapped;
+  return { ...mapped, origin, appOrigin: mapped.appOriginFollows ? origin : mapped.appOrigin };
+}
+
 /** Runs after checkOptions found no refusal, so every value here has its checked type. */
 export function mapOptions(options: BetterAuthOptions): Mapped {
   const origins = baseOrigins(options.baseURL);
@@ -501,7 +519,8 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     storage: database.storage,
     limiter: skipUnknownIp(database.limiter),
     mail: compatMail({
-      origin,
+      // A mail link names the entry of its request (plan 12i Task 18).
+      origins: origins.length > 0 ? origins : [origin],
       basePath,
       storage: database.storage,
       sendResetPassword: ep?.sendResetPassword,
@@ -670,10 +689,12 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     // The Better Auth record of a domain proof reaches the verify and the recheck (ruling 61 F4).
     config: sso ? withDomainRecord(config, betterAuthRecord(sso.tokenPrefix)) : config,
     origin,
+    origins,
     basePath,
     plugins,
     clientIp: clientIp ?? ((r) => r.headers.get("cf-connecting-ip") || null),
     appOrigin: options.authtempo?.appURL ?? origin,
+    appOriginFollows: options.authtempo?.appURL === undefined,
     minPasswordLength: ep?.minPasswordLength ?? BETTER_AUTH_DEFAULTS.minPasswordLength,
     account: {
       changeEmail: options.user?.changeEmail?.enabled === true,

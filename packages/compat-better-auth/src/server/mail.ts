@@ -73,7 +73,8 @@ export function compatAccountMail(input: AccountMailInput): MailMessage {
 }
 
 export interface MailRoutes {
-  origin: string;
+  /** The origins of the links: each entry of a `baseURL` list, or the one origin. */
+  origins: readonly string[];
   basePath: string;
   storage: StorageAdapter;
   sendResetPassword?: SendEmail | undefined;
@@ -100,7 +101,9 @@ export async function sha256Hex(text: string): Promise<string> {
  * an enabled feature, so that throw means a bug.
  */
 export function compatMail(routes: MailRoutes): MailPort {
-  const prefix = `${routes.origin}${routes.basePath}`;
+  const prefixes = routes.origins.map((o) => `${o}${routes.basePath}`);
+  /** True when `link` is the core path `path` on any origin of the list. */
+  const at = (link: string, path: string) => prefixes.some((p) => link.startsWith(`${p}${path}`));
   const userByEmail = async (email: string) => {
     const u = await routes.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
     return u ? toUser(u) : null;
@@ -161,7 +164,7 @@ export function compatMail(routes: MailRoutes): MailPort {
       }
       if (link.startsWith(DROP_LINK_PREFIX)) return;
       const token = new URL(link).searchParams.get("token") ?? "";
-      if (link.startsWith(`${prefix}/password/verify?`)) {
+      if (at(link, "/password/verify?")) {
         if (!routes.sendVerificationEmail)
           throw new Error("authtempo compat: no sendVerificationEmail");
         await routes.sendVerificationEmail({
@@ -171,7 +174,7 @@ export function compatMail(routes: MailRoutes): MailPort {
         });
         return;
       }
-      if (link.startsWith(`${prefix}/password/reset?`)) {
+      if (at(link, "/password/reset?")) {
         if (!routes.sendResetPassword) throw new Error("authtempo compat: no sendResetPassword");
         // Core mails a reset link to every address and answers 200 for each,
         // so the answer tells no one which address has an account. With no
@@ -182,12 +185,12 @@ export function compatMail(routes: MailRoutes): MailPort {
         await routes.sendResetPassword({ user, url: link, token });
         return;
       }
-      if (link.startsWith(`${prefix}/magic-link/verify?`)) {
+      if (at(link, "/magic-link/verify?")) {
         if (!routes.sendMagicLink) throw new Error("authtempo compat: no sendMagicLink");
         await routes.sendMagicLink({ email: message.to, url: link, token });
         return;
       }
-      if (link.startsWith(`${prefix}/user/change-email/confirm?`)) {
+      if (at(link, "/user/change-email/confirm?")) {
         if (!routes.sendVerificationEmail)
           throw new Error("authtempo compat: no sendVerificationEmail");
         // Better Auth 1.7.2 sends the change link through sendVerificationEmail,
@@ -207,7 +210,7 @@ export function compatMail(routes: MailRoutes): MailPort {
         });
         return;
       }
-      if (link.startsWith(`${prefix}/user/delete/confirm?`)) {
+      if (at(link, "/user/delete/confirm?")) {
         const cb = routes.sendDeleteAccountVerification;
         if (!cb) throw new Error("authtempo compat: no sendDeleteAccountVerification");
         // Better Auth 1.7.2 passes the session's user (update-user.mjs:325 to :329).

@@ -26,6 +26,7 @@ import test from "../../../../../samples/guides/base-url-list.test.ts?raw";
 1. Set `baseURL` to the list. The first entry is the primary.
 2. Register each host's callback at each social provider: `<entry><basePath>/social/<provider>/callback`.
 3. On Node, build `request.url` from the host that your proxy checked. Core reads the host from `request.url` only.
+4. With Express `trust proxy` or Fastify `trustProxy`, the binding reads `X-Forwarded-Host` and `X-Forwarded-Proto`. Then your proxy must set both headers on each request and drop the client's values. A client can still pick only an entry of the list.
 
 <Code code={config} lang="ts" title="Two hosts in one config" />
 
@@ -40,10 +41,15 @@ import test from "../../../../../samples/guides/base-url-list.test.ts?raw";
 - A `redirectURI` override must be on an entry of the list. The start sends its path on the entry where the sign-in started, so the sign-in ends on that host.
 - The session cookie has the `__Host-` prefix and no `Domain`. Each host keeps its own session.
 - A session JWT of any entry verifies on each entry, with the audience of the entry that minted it.
+- A back-channel logout token names the issuer of the entry where the client got its ID token. If that entry left the list, the token names the primary.
 - An OAuth code or a held authorize request of one entry answers `invalid_grant`, or is not found, on another entry. RFC 8414 binds an issuer to the host of its metadata.
 - Outside a request, core uses the primary: `auth.baseURL`, the sweep, and each `auth.api` call.
 - A `baseURL` string serves any host, as before. The 421 answer needs a list.
 - The Better Auth shim maps `{ allowedHosts, fallback, protocol }` to the list. It refuses a wildcard host, because any customer of a shared platform can own a matching host. It refuses `protocol: "auto"` and no `protocol`, because `auto` reads a proxy header.
+- The shim serves its own paths, the SSO URLs, and the mail links on the request's entry. A host outside the list gets 421 `HOST_NOT_ALLOWED` before any shim path, the SAML ACS too.
+- These stay on the primary: the default `appName`, the TOTP issuer label, and the OpenAPI `serverUrl`. Set `appName` to give each host one name.
+- A refresh token and a device code are not bound to an entry. A refresh on another entry gives no ID token.
+- An SSO identity provider must register the callback or ACS of each entry where a sign-in starts.
 
 ## If it fails
 
