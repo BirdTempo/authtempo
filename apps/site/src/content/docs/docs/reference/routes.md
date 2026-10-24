@@ -379,7 +379,7 @@ A script with a software authenticator can make a user at each verify, with no a
 | --- | --- |
 | Needs | A session cookie, or a `ts_` bearer token |
 | Input | None |
-| Answer | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, discoverable, prf, largeBlob, createdAt }], rpId, userHandle }`. `discoverable` (or null), `prf`, and `largeBlob` are advice from unsigned client outputs. `rpId` and `userHandle` (base64url of the user id bytes) are the inputs of `PublicKeyCredential.signalAllAcceptedCredentials` |
+| Answer | `{ passkeys: [{ id, credentialId, name, deviceType, backedUp, discoverable, prf, largeBlob, createdAt }], rpId, userHandle, userName, userDisplayName }`. `discoverable` (or null), `prf`, and `largeBlob` are advice from unsigned client outputs. `rpId` and `userHandle` (base64url of the user id bytes) are the inputs of `PublicKeyCredential.signalAllAcceptedCredentials`. `userName` and `userDisplayName` are the names of a new registration, the inputs of `PublicKeyCredential.signalCurrentUserDetails` |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized) |
 
 <h3 id="post-passkeys-delete"><code>POST /passkeys/delete</code></h3>

@@ -70,6 +70,42 @@ describe("the source rules of plan 12i", () => {
     expect(phone.match(/countedSend\(config, /g)).toHaveLength(2);
   });
 
+  it("opens no session outside the gate (plan 12i Task 15)", async () => {
+    // A session opens through prepareSession or openSession. Each file that
+    // calls one is a pathway with a decision in the gate table
+    // (gate-table.test.ts). The phone code and the ID-token sign-in pass the
+    // gate of 12c, so they open sessions only through gatedSteps.
+    const { readdirSync, readFileSync }: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
+    const src = new URL("../src/", import.meta.url);
+    const files = readdirSync(src, { recursive: true }).filter((file) => file.endsWith(".ts"));
+    expect(files).toContain("engine/phone.ts");
+    expect(files).toContain("engine/id-token.ts");
+    const openers = files
+      .filter((file) => file !== "engine/sessions.ts")
+      .filter((file) =>
+        /\b(prepareSession|openSession)\(/.test(readFileSync(new URL(file, src), "utf8")),
+      )
+      .sort();
+    expect(openers).not.toContain("engine/phone.ts");
+    expect(openers).not.toContain("engine/id-token.ts");
+    expect(openers).toEqual([
+      // The anonymous sign-in: no factor can be on (ANONYMOUS_REFUSED).
+      "engine/anonymous.ts",
+      // The handoff redeem: the code comes from a session that passed its gate.
+      "engine/handoff.ts",
+      // An impersonation: an operator act, never a way in.
+      "engine/operator/impersonation.ts",
+      // The passkey sign-in and the passkey-first sign-up: two factors in one.
+      "engine/passkeys.ts",
+      // The password gate itself, the sign-up, the verify link, and the reset.
+      "engine/password.ts",
+      // gatedSteps: the session after a gate that passed or was off.
+      "engine/second-factor.ts",
+      // The verify of a challenge.
+      "engine/totp.ts",
+    ]);
+  });
+
   it("checks a phone code through the one compare of the email code", async () => {
     // compareCode runs one keyed HMAC and one constant-time compare on every
     // path. A second compare in the phone code would drift from it.

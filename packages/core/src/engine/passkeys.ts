@@ -819,15 +819,25 @@ export async function checkSignInAssertionOf(
 }
 
 /**
- * The inputs of `signalAllAcceptedCredentials` for the user (WebAuthn Level
- * 3, plan 12i): the RP ID and the base64url user handle.
+ * The inputs of the Signal API for the user (WebAuthn Level 3, plan 12i):
+ * the RP ID and the base64url user handle for
+ * `signalAllAcceptedCredentials`, and the names of the registration
+ * options for `signalCurrentUserDetails` (plan 12i Task 15). The names
+ * come from the one rule of the options, so the browser shows what a new
+ * registration would show.
  */
 export function signalInputs(
   config: ResolvedConfig,
   user: UserRow,
-): Result<{ rpId: string; userHandle: string }> {
+): Result<{ rpId: string; userHandle: string; userName: string; userDisplayName: string }> {
   if (!config.passkey) return fail("not_found");
-  return ok({ rpId: config.passkey.rpID, userHandle: toBase64Url(userHandleOf(user.id)) });
+  const userName = passkeyUserName(config, user);
+  return ok({
+    rpId: config.passkey.rpID,
+    userHandle: toBase64Url(userHandleOf(user.id)),
+    userName,
+    userDisplayName: user.name ?? userName,
+  });
 }
 
 export async function listPasskeys(

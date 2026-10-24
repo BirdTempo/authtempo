@@ -86,13 +86,13 @@ more request headers go in the fifth.
 | `client.session.refresh()` | `POST /session/refresh` | As `session()`. It slides the expiry and renews the cookie when the refresh is due. The store reads again. The store's own read calls it when `needsRefresh` is true, and keeps the GET answer if it fails. Call it yourself after a direct `session()`. |
 | `client.signOut()` | `POST /sign-out` | `ClientResult<{ ok: true }>` |
 | `client.readRedirectError(url)` | none | The code of `?auth_error=<code>`: an `ErrorCode` or an `OAuthErrorCode`, because core's OAuth sign-in route sends a code of `OAUTH_ERRORS`. `unexpected` for a code that neither table has, or `null` |
-| `client.social.startURL({ provider, next? })` | `GET /social/:provider/start` (built, not fetched) | `ClientResult<string>`; `invalid_body` with status 0 for a name that core refuses |
-| `client.social.signIn({ provider, next? })` | `GET /social/:provider/start` (a navigation) | `ClientResult<{ url }>`; `unexpected` with status 0 when the default `navigate` finds no `location` |
-| `client.signIn.password({ email, password, trustDevice?, next?, captchaToken? })` | `POST /password/sign-in`, then `POST /totp/verify` through `verify` | `ClientResult<PasswordSignIn>`. The second factor step has `methods`, and `verify` takes `{ code }`, `{ backupCode }`, or `{ emailCode }`. For the passkey method, call `secondFactor.passkey.verify` |
+| `client.social.startURL({ provider, next?, data? })` | `GET /social/:provider/start` (built, not fetched) | `ClientResult<string>`; `invalid_body` with status 0 for a name that core refuses. `data` is a JSON object for the hooks of the sign-in, sent as base64url in the query, so it is never a secret |
+| `client.social.signIn({ provider, next?, data? })` | `GET /social/:provider/start` (a navigation) | `ClientResult<{ url }>`; `unexpected` with status 0 when the default `navigate` finds no `location` |
+| `client.signIn.password({ email \| username \| phone, password, trustDevice?, next?, captchaToken? })` | `POST /password/sign-in`, then `POST /totp/verify` through `verify` | `ClientResult<PasswordSignIn>`. The second factor step has `methods`, and `verify` takes `{ code }`, `{ backupCode }`, or `{ emailCode }`. For the passkey method, call `secondFactor.passkey.verify` |
 | `client.magicLink.request({ email, next? })` | `POST /magic-link/request` | `ClientResult<{ sent: true }>` |
 | `client.magicLink.verify({ token, trustDevice? })` | `POST /magic-link/verify` | `ClientResult<PublicSession \| TwoFactorChallengeJSON>` |
-| `client.passkey.register({ name? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `ClientResult<PasskeySummaryJSON>` |
-| `client.passkey.signIn({ autofill?, extensions?, onExtensionResults? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `ClientResult<PublicSession>`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing. `extensions` takes PRF salts and a `largeBlob` read (plan 12i). After a sign-in that succeeded, `onExtensionResults` gets the PRF output and the large blob; the client never sends them |
+| `client.passkey.register({ name?, hints? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `ClientResult<PasskeySummaryJSON>` |
+| `client.passkey.signIn({ autofill?, hints?, extensions?, onExtensionResults? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `ClientResult<PublicSession>`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing. `extensions` takes PRF salts and a `largeBlob` read (plan 12i). After a sign-in that succeeded, `onExtensionResults` gets the PRF output and the large blob; the client never sends them |
 | `client.passkey.abort()` | none | Ends a waiting passkey ceremony, which answers `cancelled`. A new passkey ceremony also ends the waiting one, because a browser refuses a second pending request |
 | `client.passkeys.list()` | `GET /passkeys` | `ClientResult<PasskeySummaryJSON[]>` |
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `ClientResult<{ ok: true }>` |
@@ -345,6 +345,33 @@ outside the router's segment rule. No answer holds a client secret. The
 directory calls the SCIM routes itself with its token, so the client has
 no SCIM protocol call.
 
+## The sign-in additions
+
+These calls serve the sign-in additions of plan 12i. Each answers
+`not_found` while its server config is off.
+
+| Operation | Route | Answer type |
+| --- | --- | --- |
+| `client.password.signIn({ username, password })`, `client.password.signIn({ phone, password })` | `POST /password/sign-in` | As with `email`. Pass exactly one identifier |
+| `client.passkey.signUp({ name, hints?, captchaToken? })` | `POST /passkey/sign-up/options`, then `/passkey/sign-up/verify` | `ClientResult<PublicSession>` of a new account whose only way in is the new passkey. It needs the server's `passkey.signUp` |
+| `client.passkey.signalUnknown({ rpId, credentialId })` | none | `true` when the browser has `PublicKeyCredential.signalUnknownCredential`. `passkey.signIn` calls it once on `passkey_unknown` |
+| `client.passkeys.sync()` | `GET /passkeys` | `ClientResult<{ signaled }>`. It gives the browser the credential ids that the server holds (`signalAllAcceptedCredentials`) |
+| `client.passkeys.signalDetails()` | `GET /passkeys` | `ClientResult<{ signaled }>`. It gives the browser the current names of the person (`signalCurrentUserDetails`) |
+| `client.social.idTokenNonce({ provider })` | `POST /social/:provider/id-token/nonce` | `ClientResult<IdTokenNonceJSON>`. Give `providerNonce` to Google or Apple, and keep `nonce` |
+| `client.social.oneTapNonce()` | `POST /social/google/id-token/nonce` | As `idTokenNonce({ provider: "google" })` |
+| `client.social.idToken({ provider, idToken, nonce?, name?, next?, trustDevice? })` | `POST /social/:provider/id-token` | A session, or `TwoFactorChallengeJSON`. The token and the nonce go in the body only |
+| `client.multiSession.list()` | `GET /multi-session` | `ClientResult<BrowserSessionJSON[]>`, with no token |
+| `client.multiSession.switch({ sessionId })` | `POST /multi-session/switch` | `ClientResult<PublicSession>`. The store reads again |
+| `client.multiSession.signOut({ sessionId })` | `POST /multi-session/sign-out` | `ClientResult<{ ok: true }>`. `signOut()` ends every session of the browser |
+| `client.lastMethod()` | none | `LastMethod \| null` from the last method cookie. A value outside core's closed set reads as `null` |
+
+A Signal API call is advice to the device. The client calls a method only
+where the browser has it, and a failed call changes no answer. It sends
+nothing to the server. The multi-session calls read the browser's
+cookies only: a bearer token answers `unauthorized`. `lastMethod()` reads
+`document.cookie`; pass `cookies` and `lastMethodCookie` in the options to
+change the source or the name.
+
 ## Passkeys
 
 The client reaches WebAuthn through a seam, `BrowserWebAuthn`. The
@@ -416,7 +443,7 @@ Each one needs a session, except `user.confirmEmailChange`.
 | `client.user.confirmDelete({ token })` | `POST /user/delete/confirm` | `ClientResult<{ ok: true }>`, for an app that serves its own confirm page of the mailed delete link. Needs a session of the same user, not a fresh one. The account and the caller's session end |
 | `client.identities.list()` | `GET /identities` | `ClientResult<IdentityListJSON>`: `identities`, `password`, `passkeys` |
 | `client.identities.unlink({ id })` | `POST /identities/unlink` | `ClientResult<{ ok: true }>` |
-| `client.identities.link({ provider, next? })` | `POST /social/:provider/link`, then a navigation | `ClientResult<{ url }>`; `invalid_body` with status 0 for a name that core refuses |
+| `client.identities.link({ provider, next?, data? })` | `POST /social/:provider/link`, then a navigation | `ClientResult<{ url }>`; `invalid_body` with status 0 for a name that core refuses |
 
 `GET /user/change-email/confirm` is the page of the mailed link. A
 browser opens it, so the client has no call for it.

@@ -35,6 +35,8 @@ sources:
 | `broadcast` | `true` where `BroadcastChannel` exists | Tell the other tabs of the origin after a change, on the channel `authtempo-session`, and read again when one tells. |
 | `refetchOnVisible` | `true` where `document` exists | Read the session again when the page becomes visible. |
 | `onSessionEnd` | none | Runs with `sent`, the token that the read sent, when `session()` answers `null` to a 401. It does not run when no token was sent. Clear the stored token only when it is still `sent`: a newer sign-in may have written another. |
+| `cookies` | `document.cookie` | A function that answers the cookies that page script can read. `lastMethod()` reads it. Where no `document` exists, the default answers none. |
+| `lastMethodCookie` | `"__Host-tempo_last_method"` | The name of the last method cookie. Set it to the server's `lastMethod.cookieName` when you change that. |
 
 `createTransport(options)` answers a `Call` for a route of your own app's code. Its path is a `RoutePath` of `@authtempo/core/routes`, so a path that core does not serve fails the compile. A query goes in the fourth argument, never in the path. More request headers go in the fifth argument.
 
@@ -77,20 +79,27 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.session.refresh()` | `POST /session/refresh` | As `session()`. It slides the expiry and renews the cookie when the refresh is due. The store reads again. The store's own read calls it when `needsRefresh` is true, and keeps the GET answer if it fails. Call it yourself after a direct `session()`. |
 | `client.signOut()` | `POST /sign-out` | `{ ok: true }` |
 | `client.readRedirectError(url)` | none | The code of `?auth_error=<code>`: an `ErrorCode` or an `OAuthErrorCode`, because core's OAuth sign-in route sends a code of `OAUTH_ERRORS`. `unexpected` for a code that neither table has, or `null` |
-| `client.social.startURL({ provider, next? })` | `GET /social/:provider/start` (built, not fetched) | `string`; `invalid_body` with status 0 for a name that core refuses |
-| `client.social.signIn({ provider, next? })` | `GET /social/:provider/start` (a navigation) | `{ url }`; `unexpected` with status 0 when the default `navigate` finds no `location` |
-| `client.signIn.password({ email, password, trustDevice?, next?, captchaToken? })` | `POST /password/sign-in`, then `POST /totp/verify` through `verify` | `PasswordSignIn`: `{ kind: "session", session }`, or `{ kind: "second-factor", challenge, expiresAt, methods, verify }`. `verify` takes `{ code }`, `{ backupCode }`, or `{ emailCode }`. For the passkey method, call `secondFactor.passkey.verify` |
+| `client.social.startURL({ provider, next?, data? })` | `GET /social/:provider/start` (built, not fetched) | `string`; `invalid_body` with status 0 for a name that core refuses. `data` is a JSON object that the hooks of the sign-in get. The client sends it as base64url in the query, so it is never a secret. It needs the server's `social.stateData` |
+| `client.social.signIn({ provider, next?, data? })` | `GET /social/:provider/start` (a navigation) | `{ url }`; `unexpected` with status 0 when the default `navigate` finds no `location` |
+| `client.social.idTokenNonce({ provider })` | `POST /social/:provider/id-token/nonce` | `{ nonce, providerNonce, expiresAt }`. Give `providerNonce` to Google or Apple. Keep `nonce` for `idToken` |
+| `client.social.oneTapNonce()` | `POST /social/google/id-token/nonce` | As `idTokenNonce({ provider: "google" })`, for Google One Tap |
+| `client.social.idToken({ provider, idToken, nonce?, name?, next?, trustDevice? })` | `POST /social/:provider/id-token` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON`. The token and the nonce go in the body, never in a URL. `name` is the name that Apple's sheet gives |
+| `client.signIn.password({ email \| username \| phone, password, trustDevice?, next?, captchaToken? })` | `POST /password/sign-in`, then `POST /totp/verify` through `verify` | `PasswordSignIn`: `{ kind: "session", session }`, or `{ kind: "second-factor", challenge, expiresAt, methods, verify }`. `verify` takes `{ code }`, `{ backupCode }`, or `{ emailCode }`. For the passkey method, call `secondFactor.passkey.verify` |
 | `client.magicLink.request({ email, next? })` | `POST /magic-link/request` | `{ sent: true }` |
 | `client.magicLink.verify({ token, trustDevice? })` | `POST /magic-link/verify` | `PublicSession`, or a `TwoFactorChallengeJSON` |
-| `client.passkey.register({ name? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `PasskeySummaryJSON` |
-| `client.passkey.signIn({ autofill?, extensions?, onExtensionResults? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `PublicSession`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing. `extensions` takes PRF salts and a `largeBlob` read. After a sign-in that succeeded, `onExtensionResults` gets the PRF output and the large blob; the client never sends them |
+| `client.passkey.register({ name?, hints? })` | `POST /passkey/register/options`, then `/passkey/register/verify` | `PasskeySummaryJSON`. `hints` replace the server's list for this ceremony: `security-key`, `client-device`, or `hybrid` |
+| `client.passkey.signUp({ name, hints?, captchaToken? })` | `POST /passkey/sign-up/options`, then `/passkey/sign-up/verify` | `PublicSession` of a new account whose only way in is the new passkey. It needs the server's `passkey.signUp` |
+| `client.passkey.signIn({ autofill?, hints?, extensions?, onExtensionResults? })` | `POST /passkey/authenticate/options`, then `/passkey/authenticate/verify` | `PublicSession`. With `autofill: true` the browser waits for the autofill of a field with `autocomplete="username webauthn"`; with no conditional mediation it answers `cancelled` and sends nothing. `extensions` takes PRF salts and a `largeBlob` read. After a sign-in that succeeded, `onExtensionResults` gets the PRF output and the large blob; the client never sends them |
+| `client.passkey.signalUnknown({ rpId, credentialId })` | none | `true` when the browser has `PublicKeyCredential.signalUnknownCredential`, else `false`. It never throws. `passkey.signIn` calls it once on `passkey_unknown` |
 | `client.passkey.abort()` | none | Ends a waiting passkey ceremony, which answers `cancelled`. A new passkey ceremony also ends the waiting one, because a browser refuses a second pending request |
 | `client.passkeys.list()` | `GET /passkeys` | `PasskeySummaryJSON[]` |
 | `client.passkeys.delete({ id })` | `POST /passkeys/delete` | `{ ok: true }` |
 | `client.passkeys.rename({ id, name })` | `POST /passkeys/rename` | `PasskeySummaryJSON`. No fresh session is needed |
+| `client.passkeys.sync()` | `GET /passkeys` | `{ signaled }`. It gives the browser the credential ids that the server holds, through `PublicKeyCredential.signalAllAcceptedCredentials` |
+| `client.passkeys.signalDetails()` | `GET /passkeys` | `{ signaled }`. It gives the browser the current names of the person, through `PublicKeyCredential.signalCurrentUserDetails` |
 | `client.handoff.redeem({ code, verifier })` | `POST /handoff/redeem` | `{ token }` and `PublicSession` |
 | `client.password.signUp({ email, password, name?, username? })` | `POST /password/sign-up` | `{ token }` and `PublicSession` |
-| `client.password.signIn({ email, password, trustDevice?, next? })` | `POST /password/sign-in` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
+| `client.password.signIn({ email \| username \| phone, password, trustDevice?, next?, captchaToken? })` | `POST /password/sign-in` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.password.resendVerification({ email })` | `POST /password/verify/resend` | `{ sent: true }` |
 | `client.password.verifyEmail({ token })` | `POST /password/verify` | `{ verified: true }` |
 | `client.password.verifyCode({ email, code })` | `POST /password/verify/code` | A session with `token`, or `{ verified: true }` |
@@ -108,6 +117,10 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.phone.remove()` | `POST /phone/remove` | `{ ok: true }`. It needs a fresh session |
 | `client.anonymous.signIn({ captchaToken? })` | `POST /anonymous/sign-in` | `{ token }` and `PublicSession` of a new anonymous user, or of the live anonymous session |
 | `client.anonymous.delete()` | `POST /anonymous/delete` | `{ ok: true }`. Only an anonymous session may call it |
+| `client.multiSession.list()` | `GET /multi-session` | `BrowserSessionJSON[]`: the sessions of this browser, with no token |
+| `client.multiSession.switch({ sessionId })` | `POST /multi-session/switch` | `PublicSession` of the session that is now active |
+| `client.multiSession.signOut({ sessionId })` | `POST /multi-session/sign-out` | `{ ok: true }`. It ends one session of this browser; `signOut()` ends each one |
+| `client.lastMethod()` | none | The `LastMethod` of the last sign-in in this browser, from the last method cookie, or `null`. A value outside core's closed set reads as `null`. It names a method, never an account |
 | `client.totp.setup({ password })` | `POST /totp/setup` | `{ secret, uri, backupCodes }` |
 | `client.totp.enable({ code })` | `POST /totp/enable` | `TotpStatusJSON` |
 | `client.totp.verify({ challenge, code?, backupCode?, emailCode?, trustDevice? })` | `POST /totp/verify` | `TwoFactorSessionJSON` |
@@ -209,7 +222,7 @@ These operations serve the settings page of the signed-in person. Each one needs
 | `client.username.set({ username })` | `POST /user/username` | `{ username, displayUsername }`. It needs a fresh session |
 | `client.identities.list()` | `GET /identities` | `IdentityListJSON`: `identities`, `password`, `passkeys` |
 | `client.identities.unlink({ id })` | `POST /identities/unlink` | `{ ok: true }` |
-| `client.identities.link({ provider, next? })` | `POST /social/:provider/link`, then a navigation | `{ url }`; `invalid_body` with status 0 for a name that core refuses |
+| `client.identities.link({ provider, next?, data? })` | `POST /social/:provider/link`, then a navigation | `{ url }`; `invalid_body` with status 0 for a name that core refuses |
 
 `GET /user/change-email/confirm` is the page of the mailed link. A browser opens it, so the client has no call for it.
 
@@ -278,6 +291,7 @@ The types of the package:
 | --- | --- |
 | The client | `Client`, `ClientOptions`, `ClientResult`, `ClientFailure`, `ClientCode`, `OAuthClientCode`, `OAuthFailure`, `OAuthResult`, `SdkCode`, `ErrorTable`, `ErrorCode`, `Call`, `Query`, `TransportOptions`, `ClientCall`, `ClientOperation`, `Statements`, `ClientSessionState`, `SessionState`, `SessionStore`, `Locale`, `ErrorTexts` |
 | Passkeys | `BrowserWebAuthn`, `CredentialsContainerLike`, `PublicKeyCredentialLike`, `PasskeySummaryJSON`, `CeremonyOptions`, `PasskeyExtensionResults` |
+| Sign-in additions | `PasswordIdentifier`, `IdTokenNonceJSON`, `BrowserSessionJSON`, `SocialStateData` |
 | Answers | `ApiTokenSummaryJSON`, `OrganizationTokenSummaryJSON`, `InvitationJSON`, `MemberJSON`, `RoleJSON`, `TeamJSON`, `TeamMemberJSON`, `OAuthGrantJSON`, `OrganizationJSON`, `TotpStatusJSON`, `ChallengeMethodJSON`, `SecondFactorEnableJSON`, `TwoFactorChallengeJSON`, `TwoFactorSessionJSON`, `PasswordSignIn` |
 | Account settings | `SessionSummaryJSON`, `FreshJSON`, `PublicUserJSON`, `IdentityEntryJSON`, `IdentityListJSON` |
 | Enterprise SSO and SCIM | `SsoDomainJSON`, `SsoConnectionJSON`, `SsoConnectionInput`, `ScimTokenJSON` |

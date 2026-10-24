@@ -71,6 +71,47 @@ function pkcStatic(): PublicKeyCredentialStatic | undefined {
   return (globalThis as { PublicKeyCredential?: PublicKeyCredentialStatic }).PublicKeyCredential;
 }
 
+/**
+ * The Signal API of WebAuthn Level 3 (plan 12i): three static methods of
+ * `PublicKeyCredential`. A browser without them has none, so the client
+ * reads each one at the call. Every id is base64url.
+ */
+interface SignalStatic {
+  signalUnknownCredential?: (input: { rpId: string; credentialId: string }) => Promise<unknown>;
+  signalAllAcceptedCredentials?: (input: {
+    rpId: string;
+    userId: string;
+    allAcceptedCredentialIds: string[];
+  }) => Promise<unknown>;
+  signalCurrentUserDetails?: (input: {
+    rpId: string;
+    userId: string;
+    name: string;
+    displayName: string;
+  }) => Promise<unknown>;
+}
+
+/**
+ * Tells the passkey provider of the browser (plan 12i). Each call answers
+ * true when the browser has the method and it settled, else false. It
+ * never throws: a signal is advice to the device, so a failure must not
+ * break the flow that sends it. It sends nothing to the server.
+ */
+export async function signalPasskeys<K extends keyof SignalStatic>(
+  method: K,
+  input: Parameters<NonNullable<SignalStatic[K]>>[0],
+): Promise<boolean> {
+  const pkc = (globalThis as { PublicKeyCredential?: SignalStatic }).PublicKeyCredential;
+  const fn = pkc?.[method];
+  if (typeof fn !== "function") return false;
+  try {
+    await (fn as (i: typeof input) => Promise<unknown>).call(pkc, input);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function supportsPasskeys(): boolean {
   return pkcStatic() !== undefined;
 }

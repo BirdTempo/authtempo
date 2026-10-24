@@ -72,51 +72,6 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     reason:
       "the browser reads the related origins document at the RP ID host (WebAuthn Level 3); no SDK call needs it (plan 12i)",
   },
-  // Plan 12i Task 11: Task 15 adds the client calls of multi-session and removes these three rows.
-  {
-    method: "GET",
-    path: "/multi-session",
-    reason:
-      "the client calls of multi-session come with plan 12i Task 15, the client over every addition",
-  },
-  {
-    method: "POST",
-    path: "/multi-session/switch",
-    reason:
-      "the client calls of multi-session come with plan 12i Task 15, the client over every addition",
-  },
-  {
-    method: "POST",
-    path: "/multi-session/sign-out",
-    reason:
-      "the client calls of multi-session come with plan 12i Task 15, the client over every addition",
-  },
-  // Plan 12i Task 10: Task 15 adds the client calls of the ID-token route and removes these two rows.
-  {
-    method: "POST",
-    path: "/social/:provider/id-token/nonce",
-    reason:
-      "the client calls of the ID-token route come with plan 12i Task 15, the client over every addition",
-  },
-  {
-    method: "POST",
-    path: "/social/:provider/id-token",
-    reason:
-      "the client calls of the ID-token route come with plan 12i Task 15, the client over every addition",
-  },
-  // Plan 12i Task 8: Task 15 adds the client calls of the passkey-first sign-up and removes these two rows.
-  {
-    method: "POST",
-    path: "/passkey/sign-up/options",
-    reason:
-      "the client calls of the passkey-first sign-up come with plan 12i Task 15, the client over every addition",
-  },
-  {
-    method: "POST",
-    path: "/passkey/sign-up/verify",
-    reason:
-      "the client calls of the passkey-first sign-up come with plan 12i Task 15, the client over every addition",
-  },
   {
     method: "POST",
     path: "/operator/keys/rotate",

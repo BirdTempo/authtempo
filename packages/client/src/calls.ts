@@ -40,6 +40,10 @@ export const CLIENT_CALLS = [
   { operation: "magicLink.verify", method: "POST", path: "/magic-link/verify" },
   // A browser navigation, not a fetch: client.social builds its URL from this row.
   { operation: "social.start", method: "GET", path: "/social/:provider/start" },
+  // Plan 12i Task 10: the ID-token route of Google One Tap and the native Apple sheet.
+  // `social.oneTapNonce` calls the nonce row for google.
+  { operation: "social.idTokenNonce", method: "POST", path: "/social/:provider/id-token/nonce" },
+  { operation: "social.idToken", method: "POST", path: "/social/:provider/id-token" },
   { operation: "handoff.redeem", method: "POST", path: "/handoff/redeem" },
   { operation: "passkey.register.options", method: "POST", path: "/passkey/register/options" },
   {
@@ -50,7 +54,13 @@ export const CLIENT_CALLS = [
   },
   { operation: "passkey.signIn.options", method: "POST", path: "/passkey/authenticate/options" },
   { operation: "passkey.signIn.verify", method: "POST", path: "/passkey/authenticate/verify" },
+  // Plan 12i Task 8: the passkey-first sign-up, a ceremony of two calls.
+  { operation: "passkey.signUp.options", method: "POST", path: "/passkey/sign-up/options" },
+  { operation: "passkey.signUp.verify", method: "POST", path: "/passkey/sign-up/verify" },
   { operation: "passkeys.list", method: "GET", path: "/passkeys", select: "passkeys" },
+  // Plan 12i Task 9: the list gives the inputs of the Signal API to the two signal calls.
+  { operation: "passkeys.sync", method: "GET", path: "/passkeys" },
+  { operation: "passkeys.signalDetails", method: "GET", path: "/passkeys" },
   { operation: "passkeys.delete", method: "POST", path: "/passkeys/delete" },
   { operation: "passkeys.rename", method: "POST", path: "/passkeys/rename", select: "passkey" },
   { operation: "password.signUp", method: "POST", path: "/password/sign-up" },
@@ -75,6 +85,10 @@ export const CLIENT_CALLS = [
   // Plan 12i Task 6: the anonymous sign-in and its own delete.
   { operation: "anonymous.signIn", method: "POST", path: "/anonymous/sign-in" },
   { operation: "anonymous.delete", method: "POST", path: "/anonymous/delete" },
+  // Plan 12i Task 11: the sessions of the browser. The routes read the cookies only.
+  { operation: "multiSession.list", method: "GET", path: "/multi-session", select: "sessions" },
+  { operation: "multiSession.switch", method: "POST", path: "/multi-session/switch" },
+  { operation: "multiSession.signOut", method: "POST", path: "/multi-session/sign-out" },
   { operation: "organizations.create", method: "POST", path: "/organizations/create" },
   {
     operation: "organizations.list",

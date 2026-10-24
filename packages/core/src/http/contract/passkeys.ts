@@ -92,6 +92,7 @@ export const PASSKEYS_CONTRACT = {
     answer: { kind: "json", schema: SessionSignInAnswer },
   },
   // `rpId` and `userHandle` are the inputs of signalAllAcceptedCredentials (plan 12i).
+  // `userName` and `userDisplayName` are those of signalCurrentUserDetails (Task 15).
   "GET /passkeys": {
     answer: {
       kind: "json",
@@ -99,6 +100,8 @@ export const PASSKEYS_CONTRACT = {
         passkeys: z.array(PasskeySummary),
         rpId: z.string(),
         userHandle: z.string(),
+        userName: z.string(),
+        userDisplayName: z.string(),
       }),
     },
   },

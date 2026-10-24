@@ -49,6 +49,7 @@ interface MethodAt {
   "reauth.email.request": Client["reauth"]["requestEmailCode"];
   "passkey.register.verify": Client["passkey"]["register"];
   "passkey.signIn.verify": Client["passkey"]["signIn"];
+  "passkey.signUp.verify": Client["passkey"]["signUp"];
   "secondFactor.passkey.enable.verify": Client["secondFactor"]["passkey"]["enable"];
   "secondFactor.passkey.verify.verify": Client["secondFactor"]["passkey"]["verify"];
 }
@@ -83,9 +84,12 @@ export const COMPARED = [
   "signOut",
   "magicLink.request",
   "magicLink.verify",
+  "social.idTokenNonce",
+  "social.idToken",
   "handoff.redeem",
   "passkey.register.verify",
   "passkey.signIn.verify",
+  "passkey.signUp.verify",
   "passkeys.list",
   "passkeys.delete",
   "passkeys.rename",
@@ -108,6 +112,9 @@ export const COMPARED = [
   "phone.remove",
   "anonymous.signIn",
   "anonymous.delete",
+  "multiSession.list",
+  "multiSession.switch",
+  "multiSession.signOut",
   "organizations.create",
   "organizations.list",
   "organizations.update",
@@ -206,9 +213,12 @@ export const ANSWER_ROWS: { readonly [O in Compared]: AnswerEqual<O> } = {
   signOut: true,
   "magicLink.request": true,
   "magicLink.verify": true,
+  "social.idTokenNonce": true,
+  "social.idToken": true,
   "handoff.redeem": true,
   "passkey.register.verify": true,
   "passkey.signIn.verify": true,
+  "passkey.signUp.verify": true,
   "passkeys.list": true,
   "passkeys.delete": true,
   "passkeys.rename": true,
@@ -231,6 +241,9 @@ export const ANSWER_ROWS: { readonly [O in Compared]: AnswerEqual<O> } = {
   "phone.remove": true,
   "anonymous.signIn": true,
   "anonymous.delete": true,
+  "multiSession.list": true,
+  "multiSession.switch": true,
+  "multiSession.signOut": true,
   "organizations.create": true,
   "organizations.list": true,
   "organizations.update": true,
@@ -341,6 +354,8 @@ export const BODY_AS_INPUT = [
   "phone.verify",
   "phone.add",
   "phone.verifyAdd",
+  "multiSession.switch",
+  "multiSession.signOut",
   "organizations.create",
   "organizations.update",
   "organizations.delete",
@@ -413,6 +428,8 @@ export const BODY_ROWS: { readonly [O in BodyAsInput]: BodyEqual<O> } = {
   "phone.verify": true,
   "phone.add": true,
   "phone.verifyAdd": true,
+  "multiSession.switch": true,
+  "multiSession.signOut": true,
   "organizations.create": true,
   "organizations.update": true,
   "organizations.delete": true,
@@ -475,6 +492,15 @@ export const NOT_COMPARED = [
   { operation: "social.start", reason: "a browser navigation to a redirect; no JSON answer" },
   { operation: "passkey.register.options", reason: "the first call of the register ceremony" },
   { operation: "passkey.signIn.options", reason: "the first call of the sign-in ceremony" },
+  { operation: "passkey.signUp.options", reason: "the first call of the sign-up ceremony" },
+  {
+    operation: "passkeys.sync",
+    reason: "answers what the browser was told; the route's answer feeds the Signal API",
+  },
+  {
+    operation: "passkeys.signalDetails",
+    reason: "answers what the browser was told; the route's answer feeds the Signal API",
+  },
   {
     operation: "secondFactor.passkey.enable.options",
     reason: "the first call of the passkey enable ceremony",

@@ -6,7 +6,8 @@ import {
   passkeyRegistrationOptions,
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
-import { createSession } from "../src/engine/sessions.js";
+import { updateProfile } from "../src/engine/profile.js";
+import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { passkeyRoutes } from "../src/http/routes/passkeys.js";
 import { onDomainTree } from "../src/primitives/host.js";
@@ -371,17 +372,37 @@ describe("the inputs of the Signal API (WebAuthn Level 3)", () => {
 
   it("answers rpId and userHandle on the passkey list", async () => {
     const w = await passkeyWorld(RELATED);
+    // A name of the person, so the display name differs from the user name.
+    const session = await resolveSession(w.auth.config, w.cookie.split("=")[1] ?? "");
+    if (!session) throw new Error("no session");
+    expect((await updateProfile(w.auth.config, { session, name: "Ada Lovelace" })).ok).toBe(true);
     const options = await w.handle(
       post("/auth/passkey/register/options", {}, { cookie: w.cookie }),
     );
-    const creation = (await options.json()) as { user: { id: string } };
+    const creation = (await options.json()) as {
+      user: { id: string; name: string; displayName: string };
+    };
     const res = await w.handle(get("/auth/passkeys", { cookie: w.cookie }));
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { passkeys: unknown[]; rpId: string; userHandle: string };
+    const body = (await res.json()) as {
+      passkeys: unknown[];
+      rpId: string;
+      userHandle: string;
+      userName: string;
+      userDisplayName: string;
+    };
     // The user handle is base64url of the user id bytes, as the registration options carry it.
     const expected = btoa(w.user.id).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-    expect(body).toEqual({ passkeys: [], rpId: "example.com", userHandle: expected });
+    // The names of signalCurrentUserDetails (plan 12i Task 15) are those of the options.
+    expect(body).toEqual({
+      passkeys: [],
+      rpId: "example.com",
+      userHandle: expected,
+      userName: creation.user.name,
+      userDisplayName: creation.user.displayName,
+    });
     expect(body.userHandle).toBe(creation.user.id);
+    expect([body.userName, body.userDisplayName]).toEqual(["ada@example.com", "Ada Lovelace"]);
   });
 });
 

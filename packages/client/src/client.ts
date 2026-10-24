@@ -8,6 +8,7 @@ import type {
   OAuthGrantSummary,
   OrganizationSummary,
   OrganizationTokenSummary,
+  PasskeyHint,
   PasskeySignInExtensions,
   PasskeySummary,
   PublicKeyCredentialCreationOptionsJSON,
@@ -23,7 +24,13 @@ import type {
   TeamSummary,
 } from "@authtempo/core";
 import { ERRORS, type ErrorCode, type OAuthErrorCode } from "@authtempo/core/errors";
-import { PARAM_SEGMENT_RE, PROVIDER_NAME_RE, type RouteMethod } from "@authtempo/core/routes";
+import {
+  DEFAULT_LAST_METHOD_COOKIE,
+  isLastMethod,
+  PARAM_SEGMENT_RE,
+  PROVIDER_NAME_RE,
+  type RouteMethod,
+} from "@authtempo/core/routes";
 import { type ClientOperation, callOf, selected } from "./calls.js";
 import { readRedirectError } from "./redirect-error.js";
 import { type ClientFailure, type ClientResult, fail, ok } from "./result.js";
@@ -36,9 +43,11 @@ import {
 import { createRawTransport, type Query, routeURL, type TransportOptions } from "./transport.js";
 import {
   type BrowserWebAuthn,
+  base64UrlEncode,
   browserWebAuthn,
   type CeremonyOptions,
   type PasskeyExtensionResults,
+  signalPasskeys,
   splitExtensionResults,
   supportsAutofill,
   WebAuthnCancelled,
@@ -60,6 +69,47 @@ type PublicSessionJSON = Omit<PublicSession, "needsRefresh">;
 type Via = { via?: LastMethod };
 /** The answer of a sign-in that opens a session and answers its bearer token. */
 type SignInJSON = { token: string } & PublicSessionJSON & Via;
+
+/**
+ * The identifier of a password sign-in (plan 12i Task 3): exactly one of
+ * an address, a username, or a phone number in E.164 form.
+ */
+export type PasswordIdentifier =
+  | { email: string; username?: undefined; phone?: undefined }
+  | { username: string; email?: undefined; phone?: undefined }
+  | { phone: string; email?: undefined; username?: undefined };
+
+/**
+ * The nonce of the ID-token route (plan 12i Task 10, ruling 37). Give
+ * `providerNonce` to Google or Apple, and send `nonce` with the token.
+ * Neither goes in a URL or a log line.
+ */
+export interface IdTokenNonceJSON {
+  nonce: string;
+  providerNonce: string;
+  expiresAt: string;
+}
+
+/** One session of this browser (plan 12i Task 11). It holds no token. */
+export interface BrowserSessionJSON {
+  sessionId: string;
+  active: boolean;
+  user: {
+    id: string;
+    name: string | null;
+    email: string | null;
+    username: string | null;
+    image: string | null;
+  };
+}
+
+/**
+ * The app payload of a social sign-in or link (plan 12i Task 19): a JSON
+ * object. The client sends it as the base64url of its UTF-8 JSON. It needs
+ * the server's `social.stateData`. It is never a secret: it rides in the
+ * start URL, and the person's browser sends it.
+ */
+export type SocialStateData = Record<string, unknown>;
 
 export type OrganizationJSON = Omit<OrganizationSummary, "createdAt"> & { createdAt: string };
 export type MemberJSON = Omit<MemberSummary, "createdAt"> & { createdAt: string };
@@ -198,6 +248,14 @@ export interface ClientOptions extends TransportOptions {
   onSessionEnd?: ((sent: string) => void | Promise<void>) | undefined;
   /** Sends the browser to a URL: the social start. Default `location.assign`. Tests and a router inject one. */
   navigate?: ((url: string) => void) | undefined;
+  /**
+   * The cookies that page script can read, as `document.cookie` holds
+   * them (plan 12i Task 15). `lastMethod()` reads them. Default
+   * `document.cookie`, or none where `document` does not exist.
+   */
+  cookies?: (() => string) | undefined;
+  /** The name of the server's `lastMethod.cookieName`. Default `__Host-tempo_last_method`. */
+  lastMethodCookie?: string | undefined;
 }
 
 /** The state of `client.store`. */
@@ -247,22 +305,58 @@ export interface Client {
   readRedirectError(url: string | URL): ErrorCode | OAuthErrorCode | "unexpected" | null;
   /** Social sign-in in a browser (plan 11d). A native app rides a social sign-in through the handoff's `next`. */
   social: {
-    /** The URL of `GET <basePath>/social/:provider/start`. `invalid_body` with status 0 for a name that core refuses. */
-    startURL(input: { provider: string; next?: string | undefined }): ClientResult<string>;
+    /**
+     * The URL of `GET <basePath>/social/:provider/start`. `invalid_body` with
+     * status 0 for a name that core refuses. `data` is the app payload
+     * (plan 12i): the hooks of the sign-in get it.
+     */
+    startURL(input: {
+      provider: string;
+      next?: string | undefined;
+      data?: SocialStateData | undefined;
+    }): ClientResult<string>;
     /** Sends the browser to the start URL through `navigate`. With the default `navigate` and no `location`, it answers `unexpected` with status 0. */
-    signIn(input: { provider: string; next?: string | undefined }): ClientResult<{ url: string }>;
+    signIn(input: {
+      provider: string;
+      next?: string | undefined;
+      data?: SocialStateData | undefined;
+    }): ClientResult<{ url: string }>;
+    /**
+     * A nonce for an ID token of `google` or `apple` (plan 12i). Give
+     * `providerNonce` to the provider's script or sheet, then pass `nonce`
+     * to `idToken`. It answers `not_found` while the server's
+     * `social.idToken` is off.
+     */
+    idTokenNonce(input: { provider: string }): Promise<ClientResult<IdTokenNonceJSON>>;
+    /** `idTokenNonce({ provider: "google" })`, for Google One Tap. */
+    oneTapNonce(): Promise<ClientResult<IdTokenNonceJSON>>;
+    /**
+     * The sign-in by an ID token of Google One Tap or the native Apple
+     * sheet (plan 12i). The token and the nonce go in the body, never in
+     * the URL. A session, or `{ twoFactor }` for a user with the second
+     * factor on. `name` is the name that Apple's sheet gives the app.
+     */
+    idToken(input: {
+      provider: string;
+      idToken: string;
+      nonce?: string | undefined;
+      name?: string | undefined;
+      next?: string | undefined;
+      trustDevice?: string | undefined;
+    }): Promise<ClientResult<SignInJSON | TwoFactorChallengeJSON>>;
   };
   /** Sign-ins in one call (plan 11d). */
   signIn: {
     /** `password.signIn`, with the second factor step as an object whose `verify` ends it. */
-    password(input: {
-      email: string;
-      password: string;
-      trustDevice?: string | undefined;
-      next?: string | undefined;
-      /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
-      captchaToken?: string | undefined;
-    }): Promise<ClientResult<PasswordSignIn>>;
+    password(
+      input: PasswordIdentifier & {
+        password: string;
+        trustDevice?: string | undefined;
+        next?: string | undefined;
+        /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
+        captchaToken?: string | undefined;
+      },
+    ): Promise<ClientResult<PasswordSignIn>>;
   };
   /**
    * The session store (plan 11d): one read at the first subscriber, and one
@@ -299,8 +393,26 @@ export interface Client {
     }): Promise<ClientResult<{ token: string } & PublicSessionJSON>>;
   };
   passkey: {
-    /** Needs a session. Registers a new passkey for the signed-in user. */
-    register(input?: { name?: string | undefined }): Promise<ClientResult<PasskeySummaryJSON>>;
+    /**
+     * Needs a session. Registers a new passkey for the signed-in user.
+     * `hints` (WebAuthn Level 3, plan 12i) replace the server's list for
+     * this ceremony: `security-key`, `client-device`, or `hybrid`.
+     */
+    register(input?: {
+      name?: string | undefined;
+      hints?: PasskeyHint[] | undefined;
+    }): Promise<ClientResult<PasskeySummaryJSON>>;
+    /**
+     * The passkey-first sign-up (plan 12i): a new account whose only way in
+     * is the new passkey. Needs the server's `passkey.signUp`. `name` is
+     * the person's name. The session comes with its cookie.
+     * `captchaToken` is sent in the header `x-captcha-response`.
+     */
+    signUp(input: {
+      name: string;
+      hints?: PasskeyHint[] | undefined;
+      captchaToken?: string | undefined;
+    }): Promise<ClientResult<PublicSessionJSON & Via>>;
     /**
      * A discoverable-credential sign-in. Answers the session; the browser gets
      * the cookie. With `autofill: true` the browser waits for the person to pick
@@ -310,6 +422,8 @@ export interface Client {
      */
     signIn(input?: {
       autofill?: boolean | undefined;
+      /** The hints of this ceremony (WebAuthn Level 3, plan 12i). */
+      hints?: PasskeyHint[] | undefined;
       /**
        * PRF salts (base64url of 32 bytes each) and a `largeBlob` read (plan
        * 12i). Each needs its key of the server's `passkey.extensions` on.
@@ -321,6 +435,13 @@ export interface Client {
        */
       onExtensionResults?: ((results: PasskeyExtensionResults) => void) | undefined;
     }): Promise<ClientResult<PublicSessionJSON & Via>>;
+    /**
+     * Tells the browser's passkey provider that the server has no such
+     * credential (the Signal API, plan 12i). `signIn` calls it on
+     * `passkey_unknown`. True when the browser has the method. It sends
+     * nothing to the server and never throws.
+     */
+    signalUnknown(input: { rpId: string; credentialId: string }): Promise<boolean>;
     /** Ends a waiting passkey ceremony, the autofill or another. It answers `cancelled`. */
     abort(): void;
   };
@@ -333,6 +454,19 @@ export interface Client {
      * joiners. The rename needs no fresh session.
      */
     rename(input: { id: string; name: string }): Promise<ClientResult<PasskeySummaryJSON>>;
+    /**
+     * Needs a session. Tells the browser's passkey provider which passkeys
+     * of the person the server still holds, so the device hides a deleted
+     * one (`signalAllAcceptedCredentials`, plan 12i). `signaled` is false
+     * where the browser has no such method.
+     */
+    sync(): Promise<ClientResult<{ signaled: boolean }>>;
+    /**
+     * Needs a session. Tells the browser's passkey provider the current
+     * names of the person, for example after a new username
+     * (`signalCurrentUserDetails`, plan 12i).
+     */
+    signalDetails(): Promise<ClientResult<{ signaled: boolean }>>;
   };
   /**
    * Every operation answers `not_found` when the server runs without the `password` config.
@@ -364,14 +498,15 @@ export interface Client {
      * (plan 9f): then call `totp.verify` with the challenge. `trustDevice` is
      * a native app's token from an earlier verify; a browser sends the cookie.
      */
-    signIn(input: {
-      email: string;
-      password: string;
-      trustDevice?: string | undefined;
-      next?: string | undefined;
-      /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
-      captchaToken?: string | undefined;
-    }): Promise<ClientResult<SignInJSON | TwoFactorChallengeJSON>>;
+    signIn(
+      input: PasswordIdentifier & {
+        password: string;
+        trustDevice?: string | undefined;
+        next?: string | undefined;
+        /** The captcha widget's token (plan 12b). The client sends it in the header `x-captcha-response`. */
+        captchaToken?: string | undefined;
+      },
+    ): Promise<ClientResult<SignInJSON | TwoFactorChallengeJSON>>;
     /** A new verify link. Always `{ sent: true }`, except `rate_limited`, so it does not tell whether the address has an account. */
     resendVerification(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
     /** The JSON verify of the link's token. Sets the session cookie when the address was unverified. */
@@ -834,8 +969,30 @@ export interface Client {
     link(input: {
       provider: string;
       next?: string | undefined;
+      /** The app payload (plan 12i): the link hook gets it. */
+      data?: SocialStateData | undefined;
     }): Promise<ClientResult<{ url: string }>>;
   };
+  /**
+   * The sessions of this browser (plan 12i). Every operation answers
+   * `not_found` when the server runs without `multiSession`. The routes
+   * read the browser's cookies only: a bearer token answers `unauthorized`.
+   * No answer holds a token.
+   */
+  multiSession: {
+    list(): Promise<ClientResult<BrowserSessionJSON[]>>;
+    /** Makes another session of this browser the active one. The store reads again. */
+    switch(input: { sessionId: string }): Promise<ClientResult<PublicSessionJSON>>;
+    /** Ends one session of this browser. `signOut()` ends every one. */
+    signOut(input: { sessionId: string }): Promise<ClientResult<{ ok: true }>>;
+  };
+  /**
+   * The method of the last sign-in in this browser (plan 12i), from the
+   * server's last method cookie, or null. It is a hint for the sign-in
+   * page only: it names a method, never an account. A value that is not
+   * of core's closed set reads as null.
+   */
+  lastMethod(): LastMethod | null;
   /**
    * Enterprise SSO (plan 12d). The discovery and the start take no session.
    * The domain and connection calls need a fresh session of an owner of the
@@ -984,11 +1141,57 @@ const isFresh = (v: unknown): v is FreshJSON => isRecord(v) && typeof v.freshUnt
 const isEnded = (v: unknown): v is { ended: number } => isRecord(v) && typeof v.ended === "number";
 const isRevoked = (v: unknown): v is { ok: true; current: boolean } =>
   isRecord(v) && v.ok === true && typeof v.current === "boolean";
+// A user with no address answers a null email (plan 12i Task 1).
 const isUserAnswer = (v: unknown): v is { user: PublicUserJSON } =>
   isRecord(v) &&
   isRecord(v.user) &&
   typeof v.user.id === "string" &&
-  typeof v.user.email === "string";
+  (typeof v.user.email === "string" || v.user.email === null);
+const isNonceAnswer = (v: unknown): v is IdTokenNonceJSON =>
+  isRecord(v) &&
+  typeof v.nonce === "string" &&
+  typeof v.providerNonce === "string" &&
+  typeof v.expiresAt === "string";
+const isBrowserSessions = (v: unknown): v is { sessions: BrowserSessionJSON[] } =>
+  isRecord(v) &&
+  Array.isArray(v.sessions) &&
+  v.sessions.every(
+    (s) =>
+      isRecord(s) &&
+      typeof s.sessionId === "string" &&
+      typeof s.active === "boolean" &&
+      isRecord(s.user) &&
+      typeof s.user.id === "string",
+  );
+/** The inputs of the Signal API on `GET /passkeys` (plan 12i). */
+interface SignalInputs {
+  passkeys: { credentialId: string }[];
+  rpId: string;
+  userHandle: string;
+  userName: string;
+  userDisplayName: string;
+}
+const isSignalInputs = (v: unknown): v is SignalInputs =>
+  isRecord(v) &&
+  Array.isArray(v.passkeys) &&
+  v.passkeys.every((p) => isRecord(p) && typeof p.credentialId === "string") &&
+  typeof v.rpId === "string" &&
+  typeof v.userHandle === "string" &&
+  typeof v.userName === "string" &&
+  typeof v.userDisplayName === "string";
+
+/** The app payload as the start query and the link body carry it: base64url of UTF-8 JSON (plan 12i). */
+const encodeStateData = (data: SocialStateData): string =>
+  base64UrlEncode(new TextEncoder().encode(JSON.stringify(data)));
+
+/** The value of the cookie `name` in a `document.cookie` string, or null. */
+function cookieValue(cookies: string, name: string): string | null {
+  for (const part of cookies.split(";")) {
+    const at = part.indexOf("=");
+    if (at > 0 && part.slice(0, at).trim() === name) return part.slice(at + 1).trim();
+  }
+  return null;
+}
 const isSessionList = (v: unknown): v is { sessions: SessionSummaryJSON[] } =>
   isRecord(v) &&
   Array.isArray(v.sessions) &&
@@ -1184,15 +1387,33 @@ export function createClient(options: ClientOptions): Client {
     location.assign(url);
     return true;
   };
-  function startURL(input: { provider: string; next?: string | undefined }): ClientResult<string> {
+  function startURL(input: {
+    provider: string;
+    next?: string | undefined;
+    data?: SocialStateData | undefined;
+  }): ClientResult<string> {
     if (!PROVIDER_NAME_RE.test(input.provider)) return fail("invalid_body", 0);
     const { path } = callOf("social.start");
+    const query = {
+      ...(input.next !== undefined ? { next: input.next } : {}),
+      ...(input.data !== undefined ? { data: encodeStateData(input.data) } : {}),
+    };
     return ok(
       routeURL(
         options,
         path.replace(":provider", input.provider),
-        input.next !== undefined ? { next: input.next } : undefined,
+        Object.keys(query).length > 0 ? query : undefined,
       ),
+    );
+  }
+  /** The nonce of the ID-token route. The provider's name fills the path; nothing else does. */
+  function idTokenNonce(input: { provider: string }): Promise<ClientResult<IdTokenNonceJSON>> {
+    if (!PROVIDER_NAME_RE.test(input.provider)) return Promise.resolve(fail("invalid_body", 0));
+    return shaped(
+      send<unknown>("social.idTokenNonce", {}, undefined, undefined, undefined, {
+        provider: input.provider,
+      }),
+      isNonceAnswer,
     );
   }
   /**
@@ -1256,6 +1477,7 @@ export function createClient(options: ClientOptions): Client {
           captchaHeader(captchaToken),
         ),
       ),
+    // `rest` holds the password and exactly one identifier: an address, a username, or a phone.
     signIn: ({ trustDevice, next, captchaToken, ...rest }) =>
       changes(
         send<SignInJSON | TwoFactorChallengeJSON>(
@@ -1432,12 +1654,15 @@ export function createClient(options: ClientOptions): Client {
   const identities: Client["identities"] = {
     list: () => shaped(send<unknown>("identities.list"), isIdentityList),
     unlink: ({ id }) => shaped(send<unknown>("identities.unlink", { id }), isOkTrue),
-    async link({ provider, next }) {
+    async link({ provider, next, data }) {
       if (!PROVIDER_NAME_RE.test(provider)) return fail("invalid_body", 0);
       const r = await shaped(
         send<unknown>(
           "identities.link",
-          next !== undefined ? { next } : {},
+          {
+            ...(next !== undefined ? { next } : {}),
+            ...(data !== undefined ? { data: encodeStateData(data) } : {}),
+          },
           undefined,
           undefined,
           undefined,
@@ -1471,6 +1696,22 @@ export function createClient(options: ClientOptions): Client {
         if (!url.ok) return url;
         if (!navigate(url.value)) return fail("unexpected", 0);
         return ok({ url: url.value });
+      },
+      idTokenNonce,
+      oneTapNonce: () => idTokenNonce({ provider: "google" }),
+      // The token and the nonce go in the JSON body only: no URL and no log line holds them.
+      idToken: ({ provider, ...body }) => {
+        if (!PROVIDER_NAME_RE.test(provider)) return Promise.resolve(fail("invalid_body", 0));
+        return changes(
+          send<SignInJSON | TwoFactorChallengeJSON>(
+            "social.idToken",
+            body,
+            undefined,
+            undefined,
+            undefined,
+            { provider },
+          ),
+        );
       },
     },
     signIn: {
@@ -1546,7 +1787,7 @@ export function createClient(options: ClientOptions): Client {
         pending = null;
         const options = await send<PublicKeyCredentialCreationOptionsJSON>(
           "passkey.register.options",
-          {},
+          input.hints !== undefined ? { hints: input.hints } : {},
         );
         if (!options.ok) return options;
         const response = await ceremony(() => webauthn.create(options.value));
@@ -1559,11 +1800,20 @@ export function createClient(options: ClientOptions): Client {
         );
       },
       async signIn(input = {}) {
-        const body = input.extensions !== undefined ? { extensions: input.extensions } : {};
-        const response = await assertion(
-          () => send<PublicKeyCredentialRequestOptionsJSON>("passkey.signIn.options", body),
-          input.autofill === true,
-        );
+        const body = {
+          ...(input.hints !== undefined ? { hints: input.hints } : {}),
+          ...(input.extensions !== undefined ? { extensions: input.extensions } : {}),
+        };
+        // The RP ID of the options: the input of signalUnknownCredential below.
+        let rpId: string | undefined;
+        const response = await assertion(async () => {
+          const options = await send<PublicKeyCredentialRequestOptionsJSON>(
+            "passkey.signIn.options",
+            body,
+          );
+          if (options.ok) rpId = options.value.rpId;
+          return options;
+        }, input.autofill === true);
         if (!response.ok) return response;
         // A PRF output or a large blob stays in the browser (plan 12i).
         const split = splitExtensionResults(response.value);
@@ -1571,8 +1821,31 @@ export function createClient(options: ClientOptions): Client {
           send<PublicSessionJSON & Via>("passkey.signIn.verify", { response: split.response }),
         );
         if (signedIn.ok && input.onExtensionResults) input.onExtensionResults(split.results);
+        // The server holds no such credential: the device may remove it (WebAuthn Level 3).
+        if (!signedIn.ok && signedIn.code === "passkey_unknown" && rpId !== undefined)
+          await signalPasskeys("signalUnknownCredential", {
+            rpId,
+            credentialId: response.value.id,
+          });
         return signedIn;
       },
+      async signUp({ name, hints, captchaToken }) {
+        // A browser refuses a create while a get waits, as at the register.
+        pending?.abort();
+        pending = null;
+        const options = await send<PublicKeyCredentialCreationOptionsJSON>(
+          "passkey.signUp.options",
+          { name, ...(hints !== undefined ? { hints } : {}) },
+          undefined,
+          captchaHeader(captchaToken),
+        );
+        if (!options.ok) return options;
+        const response = await ceremony(() => webauthn.create(options.value));
+        if (!response.ok) return response;
+        const sent = splitExtensionResults(response.value).response;
+        return changes(send<PublicSessionJSON & Via>("passkey.signUp.verify", { response: sent }));
+      },
+      signalUnknown: (input) => signalPasskeys("signalUnknownCredential", input),
       abort() {
         pending?.abort();
         pending = null;
@@ -1582,6 +1855,27 @@ export function createClient(options: ClientOptions): Client {
       list: () => part<{ passkeys: PasskeySummaryJSON[] }, "passkeys.list">("passkeys.list"),
       delete: (input) => send<{ ok: true }>("passkeys.delete", input),
       rename: ({ id, name }) => part("passkeys.rename", { id, name }, undefined, isPasskeyAnswer),
+      async sync() {
+        const r = await shaped(send<unknown>("passkeys.sync"), isSignalInputs);
+        if (!r.ok) return r;
+        const signaled = await signalPasskeys("signalAllAcceptedCredentials", {
+          rpId: r.value.rpId,
+          userId: r.value.userHandle,
+          allAcceptedCredentialIds: r.value.passkeys.map((p) => p.credentialId),
+        });
+        return ok({ signaled });
+      },
+      async signalDetails() {
+        const r = await shaped(send<unknown>("passkeys.signalDetails"), isSignalInputs);
+        if (!r.ok) return r;
+        const signaled = await signalPasskeys("signalCurrentUserDetails", {
+          rpId: r.value.rpId,
+          userId: r.value.userHandle,
+          name: r.value.userName,
+          displayName: r.value.userDisplayName,
+        });
+        return ok({ signaled });
+      },
     },
     password,
     emailOtp: {
@@ -1855,6 +2149,34 @@ export function createClient(options: ClientOptions): Client {
     phone,
     anonymous,
     identities,
+    // A switch and a sign-out change the session of the browser, so the store reads again.
+    multiSession: {
+      list: () =>
+        part<{ sessions: BrowserSessionJSON[] }, "multiSession.list">(
+          "multiSession.list",
+          undefined,
+          undefined,
+          isBrowserSessions,
+        ),
+      switch: ({ sessionId }) =>
+        changes(
+          shaped(send<unknown>("multiSession.switch", { sessionId }), (v): v is PublicSessionJSON =>
+            isPublicSession(v),
+          ),
+        ),
+      signOut: ({ sessionId }) =>
+        changes(shaped(send<unknown>("multiSession.signOut", { sessionId }), isOkTrue)),
+    },
+    lastMethod() {
+      const read =
+        options.cookies ??
+        (() => (globalThis as { document?: { cookie?: unknown } }).document?.cookie);
+      const cookies = read();
+      if (typeof cookies !== "string") return null;
+      const value = cookieValue(cookies, options.lastMethodCookie ?? DEFAULT_LAST_METHOD_COOKIE);
+      // The cookie is readable by page script, so its value is checked against the closed set.
+      return isLastMethod(value) ? value : null;
+    },
     sso: {
       // JSON leaves out a key whose value is undefined, so the body names only the set fields.
       discover: (input) =>

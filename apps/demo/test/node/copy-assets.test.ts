@@ -90,14 +90,17 @@ describe("copy-assets.mjs", () => {
     expect(copy).toContain('import { ERRORS } from "../core/errors.js";');
     expect(readFileSync(join(client, "client.js"), "utf8")).toContain(
       // The start link of client.sso reads the segment rule too (plan 12d Task 13).
-      'import { PARAM_SEGMENT_RE, PROVIDER_NAME_RE } from "../core/routes.js";',
+      // lastMethod() reads the cookie name and the closed set (plan 12i Task 15).
+      'import { DEFAULT_LAST_METHOD_COOKIE, isLastMethod, PARAM_SEGMENT_RE, PROVIDER_NAME_RE, } from "../core/routes.js";',
     );
     for (const name of files(client))
       expect(readFileSync(join(client, name), "utf8"), name).not.toContain("@authtempo/");
     expect(files(join(dir, "assets/core"))).toEqual([
       "access.js",
+      "engine/last-method.js",
       "errors.js",
       "http/anchors.js",
+      "http/cookies.js",
       "http/redirect.js",
       "http/route-key.js",
       "http/route-list.js",
