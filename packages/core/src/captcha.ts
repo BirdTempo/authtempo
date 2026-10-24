@@ -33,8 +33,8 @@ export const CAPTCHA_FLOWS: readonly CaptchaFlow[] = Object.freeze([
 /**
  * The default flows: the password sign-up and the three that send mail, so
  * a bot costs the app money. The other flows are opt-in. The phone code, the
- * anonymous sign-in, and the passkey-first sign-up also write rows or send,
- * so each has a daily cap of the deployment instead (ruling 38 M3).
+ * anonymous sign-in, and the passkey-first sign-up also write rows or send.
+ * So each has a daily cap of the deployment instead (ruling 38 M3).
  */
 export const DEFAULT_CAPTCHA_FLOWS: readonly CaptchaFlow[] = Object.freeze([
   "password-sign-up",

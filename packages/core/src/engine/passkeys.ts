@@ -357,11 +357,11 @@ export interface PasskeySignUpOptions {
 
 /**
  * `POST /passkey/sign-up/options` (plan 12i Task 8, spec 32 item 2). The
- * name rule, the sign-up rule of the deployment, the per-IP limit, the
- * captcha, and the daily cap of the deployment come first, in that order. A
- * failed captcha does not count against the cap. Then the user id is
- * minted, and a challenge row keeps it with the name for 5 minutes. No user
- * row exists until the verify. The options carry no address and no data of another
+ * name rule, the sign-up rule, the per-IP limit, the captcha, and the
+ * daily cap of the deployment come first, in that order. A failed captcha
+ * does not count against the cap. Then the user id is minted, and a
+ * challenge row keeps it with the name for 5 minutes. No user row exists
+ * until the verify. The options carry no address and no data of another
  * user: the user handle is the new id, and the user name is the name given.
  */
 export async function passkeySignUpOptions(
