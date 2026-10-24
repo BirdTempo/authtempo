@@ -1,8 +1,8 @@
-// authtempo schema version 13, dialect postgres, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 14, dialect postgres, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Add these two keys to prisma.config.ts, so Prisma Migrate leaves the ta_ tables alone:
 //   experimental: { externalTables: true },
-//   tables: { external: ["public.ta_user", "public.ta_identity", "public.ta_session", "public.ta_verification", "public.ta_passkey", "public.ta_organization", "public.ta_member", "public.ta_invitation", "public.ta_password", "public.ta_api_token", "public.ta_totp", "public.ta_trusted_device", "public.ta_jwk", "public.ta_oauth_client", "public.ta_oauth_consent", "public.ta_oauth_token", "public.ta_oauth_device", "public.ta_oauth_subject", "public.ta_oauth_session_client", "public.ta_oauth_logout", "public.ta_second_factor", "public.ta_operator_audit", "public.ta_organization_role", "public.ta_team", "public.ta_team_member", "public.ta_organization_token", "public.ta_moved_token"] },
+//   tables: { external: ["public.ta_user", "public.ta_identity", "public.ta_session", "public.ta_verification", "public.ta_passkey", "public.ta_organization", "public.ta_member", "public.ta_invitation", "public.ta_password", "public.ta_api_token", "public.ta_totp", "public.ta_trusted_device", "public.ta_jwk", "public.ta_oauth_client", "public.ta_oauth_consent", "public.ta_oauth_token", "public.ta_oauth_device", "public.ta_oauth_subject", "public.ta_oauth_session_client", "public.ta_oauth_logout", "public.ta_second_factor", "public.ta_operator_audit", "public.ta_organization_role", "public.ta_team", "public.ta_team_member", "public.ta_organization_token", "public.ta_moved_token", "public.ta_sso_connection", "public.ta_sso_domain", "public.ta_scim_token", "public.ta_scim_user", "public.ta_scim_group", "public.ta_scim_group_member"] },
 // Externally managed tables are a Preview feature in Prisma 7.10 (read 2026-10-22).
 // The list names the schema public. Write the schema of the app in its place.
 // Keep ta_meta, ta_limit, and ta_migrations out of each Prisma migration too.
@@ -470,4 +470,114 @@ model TaMovedToken {
 
   @@unique([source, sourceId], map: "ux_ta_moved_token__source__source_id")
   @@map("ta_moved_token")
+}
+
+model TaSsoConnection {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  organizationId String @map("organization_id")
+  kind String @map("kind")
+  label String @map("label")
+  enabled Boolean @map("enabled")
+  jit Boolean @map("jit")
+  defaultRole String @map("default_role")
+  config Json @map("config")
+  /// sealed
+  clientSecret String? @map("client_secret")
+  secretVersion Int @map("secret_version")
+  mfa Json? @map("mfa")
+  scimRoles Json? @map("scim_roles")
+
+  @@index([organizationId], map: "ix_ta_sso_connection__organization_id")
+  @@map("ta_sso_connection")
+}
+
+model TaSsoDomain {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  organizationId String @map("organization_id")
+  domain String @map("domain")
+  challenge String @map("challenge")
+  claimedDomain String? @map("claimed_domain")
+  connectionId String? @map("connection_id")
+  enforce Boolean @map("enforce")
+  includeSubdomains Boolean @map("include_subdomains")
+  verifiedAt DateTime? @map("verified_at") @db.Timestamptz(6)
+  checkedAt DateTime? @map("checked_at") @db.Timestamptz(6)
+  failures Int @map("failures")
+  firstFailureAt DateTime? @map("first_failure_at") @db.Timestamptz(6)
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz(6)
+
+  @@unique([organizationId, domain], map: "ux_ta_sso_domain__organization_id__domain")
+  @@unique([claimedDomain], map: "ux_ta_sso_domain__claimed_domain")
+  @@index([connectionId], map: "ix_ta_sso_domain__connection_id")
+  @@map("ta_sso_domain")
+}
+
+model TaScimToken {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  organizationId String @map("organization_id")
+  name String @map("name")
+  /// hash
+  tokenHash String @map("token_hash")
+  hint String @map("hint")
+  scopes Json @map("scopes")
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz(6)
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
+
+  @@unique([tokenHash], map: "ux_ta_scim_token__token_hash")
+  @@index([organizationId], map: "ix_ta_scim_token__organization_id")
+  @@map("ta_scim_token")
+}
+
+model TaScimUser {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  organizationId String @map("organization_id")
+  userId String @map("user_id")
+  userName String @map("user_name")
+  userNameKey String @map("user_name_key")
+  externalId String? @map("external_id")
+  active Boolean @map("active")
+  displayName String? @map("display_name")
+  data Json @map("data")
+  version Int @map("version")
+
+  @@unique([organizationId, userId], map: "ux_ta_scim_user__organization_id__user_id")
+  @@unique([organizationId, userNameKey], map: "ux_ta_scim_user__organization_id__user_name_key")
+  @@index([organizationId, externalId], map: "ix_ta_scim_user__organization_id__external_id")
+  @@map("ta_scim_user")
+}
+
+model TaScimGroup {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  organizationId String @map("organization_id")
+  displayName String @map("display_name")
+  displayNameKey String @map("display_name_key")
+  externalId String? @map("external_id")
+  teamId String? @map("team_id")
+  version Int @map("version")
+
+  @@unique([organizationId, displayNameKey], map: "ux_ta_scim_group__organization_id__display_name_key")
+  @@index([organizationId, externalId], map: "ix_ta_scim_group__organization_id__external_id")
+  @@map("ta_scim_group")
+}
+
+model TaScimGroupMember {
+  id String @id @map("id")
+  createdAt DateTime @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+  groupId String @map("group_id")
+  scimUserId String @map("scim_user_id")
+
+  @@unique([groupId, scimUserId], map: "ux_ta_scim_group_member__group_id__scim_user_id")
+  @@index([scimUserId], map: "ix_ta_scim_group_member__scim_user_id")
+  @@map("ta_scim_group_member")
 }

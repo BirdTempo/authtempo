@@ -1,8 +1,8 @@
-// authtempo schema version 13, dialect sqlite, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 14, dialect sqlite, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Add these two keys to prisma.config.ts, so Prisma Migrate leaves the ta_ tables alone:
 //   experimental: { externalTables: true },
-//   tables: { external: ["ta_user", "ta_identity", "ta_session", "ta_verification", "ta_passkey", "ta_organization", "ta_member", "ta_invitation", "ta_password", "ta_api_token", "ta_totp", "ta_trusted_device", "ta_jwk", "ta_oauth_client", "ta_oauth_consent", "ta_oauth_token", "ta_oauth_device", "ta_oauth_subject", "ta_oauth_session_client", "ta_oauth_logout", "ta_second_factor", "ta_operator_audit", "ta_organization_role", "ta_team", "ta_team_member", "ta_organization_token", "ta_moved_token"] },
+//   tables: { external: ["ta_user", "ta_identity", "ta_session", "ta_verification", "ta_passkey", "ta_organization", "ta_member", "ta_invitation", "ta_password", "ta_api_token", "ta_totp", "ta_trusted_device", "ta_jwk", "ta_oauth_client", "ta_oauth_consent", "ta_oauth_token", "ta_oauth_device", "ta_oauth_subject", "ta_oauth_session_client", "ta_oauth_logout", "ta_second_factor", "ta_operator_audit", "ta_organization_role", "ta_team", "ta_team_member", "ta_organization_token", "ta_moved_token", "ta_sso_connection", "ta_sso_domain", "ta_scim_token", "ta_scim_user", "ta_scim_group", "ta_scim_group_member"] },
 // Externally managed tables are a Preview feature in Prisma 7.10 (read 2026-10-22).
 // Keep ta_meta, ta_limit, and ta_migrations out of each Prisma migration too.
 
@@ -575,4 +575,137 @@ model TaMovedToken {
 
   @@unique([source, sourceId], map: "ux_ta_moved_token__source__source_id")
   @@map("ta_moved_token")
+}
+
+model TaSsoConnection {
+  id String @id @map("id")
+  /// epoch milliseconds
+  createdAt BigInt @map("created_at")
+  /// epoch milliseconds
+  updatedAt BigInt @map("updated_at")
+  organizationId String @map("organization_id")
+  kind String @map("kind")
+  label String @map("label")
+  enabled Boolean @map("enabled")
+  jit Boolean @map("jit")
+  defaultRole String @map("default_role")
+  /// JSON text
+  config String @map("config")
+  /// sealed
+  clientSecret String? @map("client_secret")
+  secretVersion Int @map("secret_version")
+  /// JSON text
+  mfa String? @map("mfa")
+  /// JSON text
+  scimRoles String? @map("scim_roles")
+
+  @@index([organizationId], map: "ix_ta_sso_connection__organization_id")
+  @@map("ta_sso_connection")
+}
+
+model TaSsoDomain {
+  id String @id @map("id")
+  /// epoch milliseconds
+  createdAt BigInt @map("created_at")
+  /// epoch milliseconds
+  updatedAt BigInt @map("updated_at")
+  organizationId String @map("organization_id")
+  domain String @map("domain")
+  challenge String @map("challenge")
+  claimedDomain String? @map("claimed_domain")
+  connectionId String? @map("connection_id")
+  enforce Boolean @map("enforce")
+  includeSubdomains Boolean @map("include_subdomains")
+  /// epoch milliseconds
+  verifiedAt BigInt? @map("verified_at")
+  /// epoch milliseconds
+  checkedAt BigInt? @map("checked_at")
+  failures Int @map("failures")
+  /// epoch milliseconds
+  firstFailureAt BigInt? @map("first_failure_at")
+  /// epoch milliseconds
+  expiresAt BigInt? @map("expires_at")
+
+  @@unique([organizationId, domain], map: "ux_ta_sso_domain__organization_id__domain")
+  @@unique([claimedDomain], map: "ux_ta_sso_domain__claimed_domain")
+  @@index([connectionId], map: "ix_ta_sso_domain__connection_id")
+  @@map("ta_sso_domain")
+}
+
+model TaScimToken {
+  id String @id @map("id")
+  /// epoch milliseconds
+  createdAt BigInt @map("created_at")
+  /// epoch milliseconds
+  updatedAt BigInt @map("updated_at")
+  organizationId String @map("organization_id")
+  name String @map("name")
+  /// hash
+  tokenHash String @map("token_hash")
+  hint String @map("hint")
+  /// JSON text
+  scopes String @map("scopes")
+  /// epoch milliseconds
+  expiresAt BigInt? @map("expires_at")
+  /// epoch milliseconds
+  lastUsedAt BigInt? @map("last_used_at")
+
+  @@unique([tokenHash], map: "ux_ta_scim_token__token_hash")
+  @@index([organizationId], map: "ix_ta_scim_token__organization_id")
+  @@map("ta_scim_token")
+}
+
+model TaScimUser {
+  id String @id @map("id")
+  /// epoch milliseconds
+  createdAt BigInt @map("created_at")
+  /// epoch milliseconds
+  updatedAt BigInt @map("updated_at")
+  organizationId String @map("organization_id")
+  userId String @map("user_id")
+  userName String @map("user_name")
+  userNameKey String @map("user_name_key")
+  externalId String? @map("external_id")
+  active Boolean @map("active")
+  displayName String? @map("display_name")
+  /// JSON text
+  data String @map("data")
+  version Int @map("version")
+
+  @@unique([organizationId, userId], map: "ux_ta_scim_user__organization_id__user_id")
+  @@unique([organizationId, userNameKey], map: "ux_ta_scim_user__organization_id__user_name_key")
+  @@index([organizationId, externalId], map: "ix_ta_scim_user__organization_id__external_id")
+  @@map("ta_scim_user")
+}
+
+model TaScimGroup {
+  id String @id @map("id")
+  /// epoch milliseconds
+  createdAt BigInt @map("created_at")
+  /// epoch milliseconds
+  updatedAt BigInt @map("updated_at")
+  organizationId String @map("organization_id")
+  displayName String @map("display_name")
+  displayNameKey String @map("display_name_key")
+  externalId String? @map("external_id")
+  teamId String? @map("team_id")
+  version Int @map("version")
+
+  @@unique([organizationId, displayNameKey], map: "ux_ta_scim_group__organization_id__display_name_key")
+  @@index([organizationId, externalId], map: "ix_ta_scim_group__organization_id__external_id")
+  @@map("ta_scim_group")
+}
+
+model TaScimGroupMember {
+  id String @id @map("id")
+  /// epoch milliseconds
+  createdAt BigInt @map("created_at")
+  /// epoch milliseconds
+  updatedAt BigInt @map("updated_at")
+  groupId String @map("group_id")
+  scimUserId String @map("scim_user_id")
+
+  @@unique([groupId, scimUserId], map: "ux_ta_scim_group_member__group_id__scim_user_id")
+  @@index([scimUserId], map: "ix_ta_scim_group_member__scim_user_id")
+  @@map("ta_scim_group_member")
 }

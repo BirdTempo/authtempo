@@ -34,8 +34,11 @@ export const MODELS = Object.keys(schema) as ModelName[];
 export const pascal = (model: string): string =>
   `${model.charAt(0).toUpperCase()}${model.slice(1)}`;
 
-/** The fields that hold a sealed value: the clear value is never stored. */
-const SEALED: readonly string[] = ["totp.secret", "jwk.privateKey"];
+/**
+ * The fields that hold a sealed value: the clear value is never stored.
+ * Plan 12d adds the client secret of an OIDC connection.
+ */
+const SEALED: readonly string[] = ["totp.secret", "jwk.privateKey", "ssoConnection.clientSecret"];
 
 /**
  * The fields that hold a hash with no name that ends in `Hash`: the password

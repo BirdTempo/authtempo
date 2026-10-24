@@ -1,4 +1,4 @@
-// authtempo schema version 13, dialect sqlite, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 14, dialect sqlite, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Keep this file out of the schema glob of drizzle.config.ts, so drizzle-kit generate writes no migration for it.
 // Set tablesFilter in drizzle.config.ts to the table patterns of the app, so drizzle-kit push and pull leave the ta_ tables alone.
@@ -531,5 +531,131 @@ export const taMovedToken = sqliteTable(
   },
   (t) => [
     uniqueIndex("ux_ta_moved_token__source__source_id").on(t.source, t.sourceId),
+  ],
+);
+
+export const taSsoConnection = sqliteTable(
+  "ta_sso_connection",
+  {
+    id: text("id").primaryKey(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    kind: text("kind").notNull(),
+    label: text("label").notNull(),
+    enabled: integer("enabled", { mode: "boolean" }).notNull(),
+    jit: integer("jit", { mode: "boolean" }).notNull(),
+    defaultRole: text("default_role").notNull(),
+    config: text("config", { mode: "json" }).notNull(),
+    clientSecret: text("client_secret"), // sealed
+    secretVersion: integer("secret_version").notNull(),
+    mfa: text("mfa", { mode: "json" }),
+    scimRoles: text("scim_roles", { mode: "json" }),
+  },
+  (t) => [
+    index("ix_ta_sso_connection__organization_id").on(t.organizationId),
+  ],
+);
+
+export const taSsoDomain = sqliteTable(
+  "ta_sso_domain",
+  {
+    id: text("id").primaryKey(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    domain: text("domain").notNull(),
+    challenge: text("challenge").notNull(),
+    claimedDomain: text("claimed_domain"),
+    connectionId: text("connection_id"),
+    enforce: integer("enforce", { mode: "boolean" }).notNull(),
+    includeSubdomains: integer("include_subdomains", { mode: "boolean" }).notNull(),
+    verifiedAt: integer("verified_at", { mode: "timestamp_ms" }),
+    checkedAt: integer("checked_at", { mode: "timestamp_ms" }),
+    failures: integer("failures").notNull(),
+    firstFailureAt: integer("first_failure_at", { mode: "timestamp_ms" }),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_sso_domain__organization_id__domain").on(t.organizationId, t.domain),
+    uniqueIndex("ux_ta_sso_domain__claimed_domain").on(t.claimedDomain),
+    index("ix_ta_sso_domain__connection_id").on(t.connectionId),
+  ],
+);
+
+export const taScimToken = sqliteTable(
+  "ta_scim_token",
+  {
+    id: text("id").primaryKey(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    name: text("name").notNull(),
+    tokenHash: text("token_hash").notNull(), // hash
+    hint: text("hint").notNull(),
+    scopes: text("scopes", { mode: "json" }).notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp_ms" }),
+    lastUsedAt: integer("last_used_at", { mode: "timestamp_ms" }),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_scim_token__token_hash").on(t.tokenHash),
+    index("ix_ta_scim_token__organization_id").on(t.organizationId),
+  ],
+);
+
+export const taScimUser = sqliteTable(
+  "ta_scim_user",
+  {
+    id: text("id").primaryKey(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    userId: text("user_id").notNull(),
+    userName: text("user_name").notNull(),
+    userNameKey: text("user_name_key").notNull(),
+    externalId: text("external_id"),
+    active: integer("active", { mode: "boolean" }).notNull(),
+    displayName: text("display_name"),
+    data: text("data", { mode: "json" }).notNull(),
+    version: integer("version").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_scim_user__organization_id__user_id").on(t.organizationId, t.userId),
+    uniqueIndex("ux_ta_scim_user__organization_id__user_name_key").on(t.organizationId, t.userNameKey),
+    index("ix_ta_scim_user__organization_id__external_id").on(t.organizationId, t.externalId),
+  ],
+);
+
+export const taScimGroup = sqliteTable(
+  "ta_scim_group",
+  {
+    id: text("id").primaryKey(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    organizationId: text("organization_id").notNull(),
+    displayName: text("display_name").notNull(),
+    displayNameKey: text("display_name_key").notNull(),
+    externalId: text("external_id"),
+    teamId: text("team_id"),
+    version: integer("version").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_scim_group__organization_id__display_name_key").on(t.organizationId, t.displayNameKey),
+    index("ix_ta_scim_group__organization_id__external_id").on(t.organizationId, t.externalId),
+  ],
+);
+
+export const taScimGroupMember = sqliteTable(
+  "ta_scim_group_member",
+  {
+    id: text("id").primaryKey(),
+    createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    groupId: text("group_id").notNull(),
+    scimUserId: text("scim_user_id").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_scim_group_member__group_id__scim_user_id").on(t.groupId, t.scimUserId),
+    index("ix_ta_scim_group_member__scim_user_id").on(t.scimUserId),
   ],
 );

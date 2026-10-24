@@ -14,8 +14,11 @@ import { freshMysqlDatabase, MYSQL_SERVERS } from "./support/mysql.js";
 // database and its own user, so a test can look for the user and the
 // password in each output line.
 
-/** The MySQL migrations, typed here: the baseline of adapter-mysql at version 13. */
-const CORE = ["0001_schema_v13"];
+/**
+ * The MySQL migrations, typed here: the baseline of adapter-mysql at version
+ * 13, and the file of version 14 (plan 12d).
+ */
+const CORE = ["0001_schema_v13", "0002_schema_v14"];
 
 beforeAll(() => {
   assertFreshBuild();
@@ -46,7 +49,7 @@ describe.each(MYSQL_SERVERS)(
         tables: "core",
         dryRun: false,
         before: null,
-        after: 13,
+        after: 14,
         pending: CORE,
         applied: CORE,
         copied: [],
@@ -57,8 +60,8 @@ describe.each(MYSQL_SERVERS)(
       const again = migrate(["--json"]);
       expect(again.status, again.stderr).toBe(0);
       expect(JSON.parse(again.stdout)).toMatchObject({
-        before: 13,
-        after: 13,
+        before: 14,
+        after: 14,
         pending: [],
         applied: [],
       });
@@ -127,14 +130,15 @@ describe.each(MYSQL_SERVERS)(
       expect(r.status, r.stderr).toBe(0);
       expect(JSON.parse(r.stdout)).toMatchObject({
         before: null,
-        after: 13,
+        after: 14,
         pending: CORE,
         applied: CORE,
       });
       const rows = (await db.query(
         `SELECT COUNT(*) AS n FROM \`${db.name}\`.\`ta_migrations\``,
       )) as RowDataPacket[];
-      expect(Number(rows[0]?.n)).toBe(steps.length);
+      // Every step of every file: the run resumed the baseline and applied 0002.
+      expect(Number(rows[0]?.n)).toBe(MYSQL_MIGRATIONS.flatMap((m) => m.statements).length);
     });
 
     it("check reports schema_shape on MySQL", async () => {
@@ -152,7 +156,7 @@ describe.each(MYSQL_SERVERS)(
         id: "schema_version",
         status: "pass",
         code: null,
-        detail: "the database is at version 13",
+        detail: "the database is at version 14",
       });
       expect(result("schema_shape")).toEqual({
         id: "schema_shape",

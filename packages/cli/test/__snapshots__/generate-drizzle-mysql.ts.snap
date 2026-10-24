@@ -1,4 +1,4 @@
-// authtempo schema version 13, dialect mysql, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
+// authtempo schema version 14, dialect mysql, authtempo CLI 0.0.0. authtempo owns these tables. Create and change them with `authtempo migrate`. Write rows through the engine only.
 // This file is for reads. A write through the ORM skips the engine's guards: the claim rule, the conditional consume, and the undo of a user create.
 // Keep this file out of the schema glob of drizzle.config.ts, so drizzle-kit generate writes no migration for it.
 // Set tablesFilter in drizzle.config.ts to the table patterns of the app, so drizzle-kit push and pull leave the ta_ tables alone.
@@ -538,5 +538,131 @@ export const taMovedToken = mysqlTable(
   },
   (t) => [
     uniqueIndex("ux_ta_moved_token__source__source_id").on(t.source, t.sourceId),
+  ],
+);
+
+export const taSsoConnection = mysqlTable(
+  "ta_sso_connection",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    createdAt: epochMs("created_at").notNull(),
+    updatedAt: epochMs("updated_at").notNull(),
+    organizationId: varchar("organization_id", { length: 64 }).notNull(),
+    kind: text("kind").notNull(),
+    label: text("label").notNull(),
+    enabled: boolean("enabled").notNull(),
+    jit: boolean("jit").notNull(),
+    defaultRole: text("default_role").notNull(),
+    config: json("config").notNull(),
+    clientSecret: text("client_secret"), // sealed
+    secretVersion: int("secret_version").notNull(),
+    mfa: json("mfa"),
+    scimRoles: json("scim_roles"),
+  },
+  (t) => [
+    index("ix_ta_sso_connection__organization_id").on(t.organizationId),
+  ],
+);
+
+export const taSsoDomain = mysqlTable(
+  "ta_sso_domain",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    createdAt: epochMs("created_at").notNull(),
+    updatedAt: epochMs("updated_at").notNull(),
+    organizationId: varchar("organization_id", { length: 64 }).notNull(),
+    domain: varchar("domain", { length: 253 }).notNull(),
+    challenge: text("challenge").notNull(),
+    claimedDomain: varchar("claimed_domain", { length: 253 }),
+    connectionId: varchar("connection_id", { length: 64 }),
+    enforce: boolean("enforce").notNull(),
+    includeSubdomains: boolean("include_subdomains").notNull(),
+    verifiedAt: epochMs("verified_at"),
+    checkedAt: epochMs("checked_at"),
+    failures: int("failures").notNull(),
+    firstFailureAt: epochMs("first_failure_at"),
+    expiresAt: epochMs("expires_at"),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_sso_domain__organization_id__domain").on(t.organizationId, t.domain),
+    uniqueIndex("ux_ta_sso_domain__claimed_domain").on(t.claimedDomain),
+    index("ix_ta_sso_domain__connection_id").on(t.connectionId),
+  ],
+);
+
+export const taScimToken = mysqlTable(
+  "ta_scim_token",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    createdAt: epochMs("created_at").notNull(),
+    updatedAt: epochMs("updated_at").notNull(),
+    organizationId: varchar("organization_id", { length: 64 }).notNull(),
+    name: text("name").notNull(),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(), // hash
+    hint: text("hint").notNull(),
+    scopes: json("scopes").notNull(),
+    expiresAt: epochMs("expires_at"),
+    lastUsedAt: epochMs("last_used_at"),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_scim_token__token_hash").on(t.tokenHash),
+    index("ix_ta_scim_token__organization_id").on(t.organizationId),
+  ],
+);
+
+export const taScimUser = mysqlTable(
+  "ta_scim_user",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    createdAt: epochMs("created_at").notNull(),
+    updatedAt: epochMs("updated_at").notNull(),
+    organizationId: varchar("organization_id", { length: 64 }).notNull(),
+    userId: varchar("user_id", { length: 64 }).notNull(),
+    userName: text("user_name").notNull(),
+    userNameKey: varchar("user_name_key", { length: 752 }).notNull(),
+    externalId: varchar("external_id", { length: 256 }),
+    active: boolean("active").notNull(),
+    displayName: text("display_name"),
+    data: json("data").notNull(),
+    version: int("version").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_scim_user__organization_id__user_id").on(t.organizationId, t.userId),
+    uniqueIndex("ux_ta_scim_user__organization_id__user_name_key").on(t.organizationId, t.userNameKey),
+    index("ix_ta_scim_user__organization_id__external_id").on(t.organizationId, t.externalId),
+  ],
+);
+
+export const taScimGroup = mysqlTable(
+  "ta_scim_group",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    createdAt: epochMs("created_at").notNull(),
+    updatedAt: epochMs("updated_at").notNull(),
+    organizationId: varchar("organization_id", { length: 64 }).notNull(),
+    displayName: text("display_name").notNull(),
+    displayNameKey: varchar("display_name_key", { length: 752 }).notNull(),
+    externalId: varchar("external_id", { length: 256 }),
+    teamId: text("team_id"),
+    version: int("version").notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_scim_group__organization_id__display_name_key").on(t.organizationId, t.displayNameKey),
+    index("ix_ta_scim_group__organization_id__external_id").on(t.organizationId, t.externalId),
+  ],
+);
+
+export const taScimGroupMember = mysqlTable(
+  "ta_scim_group_member",
+  {
+    id: varchar("id", { length: 64 }).primaryKey(),
+    createdAt: epochMs("created_at").notNull(),
+    updatedAt: epochMs("updated_at").notNull(),
+    groupId: varchar("group_id", { length: 64 }).notNull(),
+    scimUserId: varchar("scim_user_id", { length: 64 }).notNull(),
+  },
+  (t) => [
+    uniqueIndex("ux_ta_scim_group_member__group_id__scim_user_id").on(t.groupId, t.scimUserId),
+    index("ix_ta_scim_group_member__scim_user_id").on(t.scimUserId),
   ],
 );

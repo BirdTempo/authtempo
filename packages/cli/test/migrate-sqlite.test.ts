@@ -48,6 +48,7 @@ const CORE = [
   "0011_schema_v11",
   "0012_schema_v12",
   "0013_schema_v13",
+  "0014_schema_v14",
 ];
 
 /** The CLI's own libSQL server (ruling 1 of plan 12g, map point 15). */
@@ -95,7 +96,7 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
       tables: "core",
       dryRun: false,
       before: null,
-      after: 13,
+      after: 14,
       pending: CORE,
       applied: CORE,
       copied: [],
@@ -107,8 +108,8 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
     const again = migrateFile(["--json"]);
     expect(again.status, again.stderr).toBe(0);
     expect(JSON.parse(again.stdout)).toMatchObject({
-      before: 13,
-      after: 13,
+      before: 14,
+      after: 14,
       pending: [],
       applied: [],
     });
@@ -154,24 +155,25 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
   it("stops on a newer database before any write", () => {
     expect(migrateFile().status).toBe(0);
     const db = new DatabaseSync(file);
-    db.exec(readFileSync(join(PKG, "test/fixtures/sqlite/0014_future.sql"), "utf8"));
+    db.exec(readFileSync(join(PKG, "test/fixtures/sqlite/0015_future.sql"), "utf8"));
     const before = db.prepare("SELECT name, applied_at FROM ta_migrations ORDER BY name").all();
     db.close();
     const r = migrateFile();
     expect(r.status).toBe(2);
     expect(r.stdout).toBe("");
     expect(linesOf(r.stderr).at(-1)).toBe(
-      "stopped: the database is at version 14; this CLI knows version 13; use a newer CLI",
+      "stopped: the database is at version 15; this CLI knows version 14; use a newer CLI",
     );
     const after = new DatabaseSync(file);
     try {
       expect(
         after.prepare("SELECT name, applied_at FROM ta_migrations ORDER BY name").all(),
       ).toEqual(before);
-      expect(before).toHaveLength(14);
+      // The 14 core files and the future fixture.
+      expect(before).toHaveLength(15);
       expect(
         after.prepare("SELECT value FROM ta_meta WHERE key = 'schema_version'").get()?.value,
-      ).toBe("14");
+      ).toBe("15");
     } finally {
       after.close();
     }
@@ -224,14 +226,14 @@ describe("authtempo migrate --target sqlite (plan 12g Task 6)", () => {
     );
     try {
       expect(r.status, r.stderr).toBe(0);
-      expect(JSON.parse(r.stdout)).toMatchObject({ before: null, after: 13, applied: CORE });
+      expect(JSON.parse(r.stdout)).toMatchObject({ before: null, after: 14, applied: CORE });
       expect(linesOf(r.stderr)[0]).toBe(`connecting to ${LIBSQL_URL.replace(/^\w+:\/\//, "")}`);
       for (const line of [...linesOf(r.stdout), ...linesOf(r.stderr)]) {
         expect(line).not.toContain(token);
         expect(line).not.toContain(query);
       }
       const rs = await client.execute("SELECT value FROM ta_meta WHERE key = 'schema_version'");
-      expect(rs.rows[0]?.value).toBe("13");
+      expect(rs.rows[0]?.value).toBe("14");
     } finally {
       client.close();
     }
@@ -262,7 +264,7 @@ describe("authtempo check --target sqlite (plan 12g Task 6)", () => {
       id: "schema_version",
       status: "pass",
       code: null,
-      detail: "the database is at version 13",
+      detail: "the database is at version 14",
     });
     expect(result(report, "schema_shape")).toEqual({
       id: "schema_shape",
