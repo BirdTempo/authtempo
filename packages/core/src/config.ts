@@ -646,6 +646,14 @@ export interface PasskeyConfig {
    * PRF output and a large blob stay in the browser.
    */
   extensions?: PasskeyExtensions;
+  /**
+   * Default false. With true, `POST /passkey/sign-up/options` and
+   * `/verify` make a user with a passkey and no address (plan 12i). The
+   * user gives a name. The `signUp` rule of the deployment applies: only
+   * `"open"` lets a passkey-first user in, because an invitation names an
+   * address.
+   */
+  signUp?: boolean;
 }
 
 /** The passkey extensions of the config (plan 12i). `largeBlob` is the `support` value of the registration. */
@@ -662,6 +670,7 @@ export interface ResolvedPasskey {
   relatedOrigins: boolean;
   hints: { register: PasskeyHint[]; signIn: PasskeyHint[] };
   extensions: Required<PasskeyExtensions>;
+  signUp: boolean;
 }
 
 /**
@@ -1845,6 +1854,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         );
       }
     }
+    if (input.passkey.signUp !== undefined && typeof input.passkey.signUp !== "boolean")
+      throw new ConfigError("passkey.signUp must be true or false");
     if (outside > RELATED_ORIGINS_MAX)
       throw new ConfigError(
         `relatedOrigins: at most five origins outside ${input.passkey.rpID}, the minimum a client must support (WebAuthn Level 3)`,
@@ -1859,6 +1870,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         signIn: passkeyHints("passkey.hints.signIn", input.passkey.hints?.signIn),
       },
       extensions: passkeyExtensions(input.passkey.extensions),
+      signUp: input.passkey.signUp ?? false,
     };
   }
   let password: ResolvedConfig["password"] = null;

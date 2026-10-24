@@ -187,6 +187,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `passkey.extensions.prf` | boolean | `false` | Asks for PRF at the registration and stores the `prf` flag. The sign-in options take PRF salts. |
 | `passkey.extensions.largeBlob` | `"preferred"`, `"required"`, or `false` | `false` | The `largeBlob.support` value of the registration. Stores the `largeBlob` flag. The sign-in options take a `largeBlob` read. |
 | `passkey.extensions.credProps` | boolean | `false` | Asks for `credProps` at the registration and stores `rk` as the `discoverable` flag. |
+| `passkey.signUp` | boolean | `false` | With `true`, `POST /passkey/sign-up/options` and `/verify` make a user with a passkey and no address. Only `signUp: "open"` lets such a user in. |
 
 ## Handoff
 
@@ -407,7 +408,7 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | --- | --- | --- | --- |
 | `captcha` | object | off | Turns the check on for the flows in `captcha.flows`. |
 | `captcha.port` | `CaptchaPort` | required | An object with `verify`. `@authtempo/captcha-turnstile` gives one. Its optional `page` puts the widget on core's sign-in page: `scriptSrc` is an https URL, `responseField` is 1 to 64 letters, digits, `_`, or `-`, and `cspSources` holds https origins with no path. |
-| `captcha.flows` | `CaptchaFlow[]` | `password-sign-up`, `magic-link-request`, `email-otp-request`, `password-reset-request` | 1 or more distinct flows. `password-sign-in` and `phone-request` are off by default. `password-reset-request` covers the reset link and the reset code. `phone-request` covers the phone code request. |
+| `captcha.flows` | `CaptchaFlow[]` | `password-sign-up`, `magic-link-request`, `email-otp-request`, `password-reset-request` | 1 or more distinct flows. `password-sign-in`, `phone-request`, `anonymous-sign-in`, and `passkey-sign-up` are off by default. `password-reset-request` covers the reset link and the reset code. `phone-request` covers the phone code request. `passkey-sign-up` covers the options of the passkey sign-up. |
 | `captcha.onUnavailable` | `"allow"` \| `"refuse"` | `"allow"` | What happens when the captcha gives no answer. `"allow"` writes one log line and goes on: the limits still bound the flow. `"refuse"` answers 503 `captcha_unavailable`. |
 
 ## Account

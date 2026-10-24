@@ -24,7 +24,8 @@ export interface Feature {
  * `operatorSso` to the override section of that guide, and `scim` to the
  * SCIM guide. Plan 12i adds `passkeyRelatedOrigins`, the 29th,
  * `username`, the 30th, `phone`, the 31st, `anonymous`, the 32nd,
- * `multiSession`, the 33rd, and `socialIdToken`, the 34th. A Record over
+ * `multiSession`, the 33rd, `socialIdToken`, the 34th, and `passkeySignUp`,
+ * the 35th. A Record over
  * the union fails the site's typecheck when core adds a member, so a new
  * feature cannot
  * ship without its row. Each line restates the description of its guide.
@@ -95,6 +96,12 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     line: "Use one passkey on related sites, with the document of WebAuthn Level 3.",
     icon: "passkey",
     guide: "/docs/guides/passkeys/#related-origins",
+  },
+  passkeySignUp: {
+    title: "Passkey sign-up",
+    line: "Make an account with a passkey and a name, and no address.",
+    icon: "passkey",
+    guide: "/docs/reference/routes/#post-passkey-sign-up-options",
   },
   password: {
     title: "Passwords",

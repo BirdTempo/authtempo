@@ -1,3 +1,4 @@
+import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
 import { anonymousCaller } from "../../engine/anonymous.js";
 import { requireFresh } from "../../engine/fresh.js";
@@ -6,10 +7,12 @@ import {
   listPasskeys,
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
+  passkeySignUpOptions,
   renamePasskey,
   signalInputs,
   verifyPasskeyAuthentication,
   verifyPasskeyRegistration,
+  verifyPasskeySignUp,
 } from "../../engine/passkeys.js";
 import {
   publicSession,
@@ -17,6 +20,7 @@ import {
   sessionFromRequest,
   sessionMaxAgeSeconds,
 } from "../../engine/sessions.js";
+import type { SessionRow, UserRow } from "../../schema.js";
 import {
   authenticateOptionsBody,
   authenticateVerifyBody,
@@ -24,6 +28,8 @@ import {
   optionsBody,
   registerVerifyBody,
   renameBody,
+  signUpOptionsBody,
+  signUpVerifyBody,
 } from "../contract/passkeys.js";
 import { sessionCookie } from "../cookies.js";
 import { json, readJson, readOptionalJson, respond } from "../json.js";
@@ -48,6 +54,28 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
     return res;
   };
   const unauthorized = () => json({ error: "unauthorized" }, 401);
+  /** The answer of a sign-in by a passkey: the session, its cookie, and the last method. */
+  const signedIn = (
+    ctx: RouteContext,
+    r: { user: UserRow; session: SessionRow; token: string },
+  ): Response => {
+    const res = json(
+      {
+        ...publicSession({ user: r.user, session: r.session, refreshed: false }),
+        ...viaField(ctx.config, "passkey"),
+      },
+      200,
+      {
+        "set-cookie": sessionCookie(
+          ctx.config.cookieName,
+          r.token,
+          sessionMaxAgeSeconds(ctx.config),
+          ctx.config.cookie.sameSite,
+        ),
+      },
+    );
+    return withLastMethod(ctx.config, ctx.request, res, "passkey");
+  };
   return [
     {
       method: "POST",
@@ -120,26 +148,49 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
           userAgent: ctx.request.headers.get("user-agent"),
           anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
-        if (!r.ok) return respond(r);
-        const maxAge = sessionMaxAgeSeconds(ctx.config);
-        const res = json(
-          {
-            ...publicSession({ user: r.value.user, session: r.value.session, refreshed: false }),
-            ...viaField(ctx.config, "passkey"),
-          },
-          200,
-          {
-            "set-cookie": sessionCookie(
-              ctx.config.cookieName,
-              r.value.token,
-              maxAge,
-              ctx.config.cookie.sameSite,
-            ),
-          },
-        );
-        return withLastMethod(ctx.config, ctx.request, res, "passkey");
+        return r.ok ? signedIn(ctx, r.value) : respond(r);
       },
     },
+    // The passkey-first sign-up (plan 12i Task 8). It makes a user with no
+    // address. A live anonymous session of the request is replaced (Task 7).
+    ...(config.passkey.signUp
+      ? [
+          {
+            method: "POST",
+            path: "/passkey/sign-up/options",
+            key: "POST /passkey/sign-up/options",
+            async handler(ctx: RouteContext) {
+              const body = await readJson(ctx.request, signUpOptionsBody);
+              if (!body.ok) return respond(body);
+              return respond(
+                await passkeySignUpOptions(ctx.config, {
+                  name: body.value.name,
+                  ip: ctx.ip,
+                  hints: body.value.hints,
+                  captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+                  anonymous: await anonymousCaller(ctx.config, ctx.request),
+                }),
+              );
+            },
+          } satisfies Route,
+          {
+            method: "POST",
+            path: "/passkey/sign-up/verify",
+            key: "POST /passkey/sign-up/verify",
+            async handler(ctx: RouteContext) {
+              const body = await readJson(ctx.request, signUpVerifyBody);
+              if (!body.ok) return respond(body);
+              const r = await verifyPasskeySignUp(ctx.config, {
+                response: body.value.response,
+                ip: ctx.ip,
+                userAgent: ctx.request.headers.get("user-agent"),
+                anonymous: await anonymousCaller(ctx.config, ctx.request),
+              });
+              return r.ok ? signedIn(ctx, r.value) : respond(r);
+            },
+          } satisfies Route,
+        ]
+      : []),
     {
       method: "GET",
       path: "/passkeys",

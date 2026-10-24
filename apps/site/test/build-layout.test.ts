@@ -796,7 +796,8 @@ describe("the demo page (plan 11b Task 12)", () => {
     // plan 12k dynamicRoles and teams, plan 12h readiness, and plan 12d sso,
     // operatorSso, and scim, and plan 12i passkeyRelatedOrigins, username, and phone.
     // Plan 12i Task 6 adds anonymous. Task 11 adds multiSession. Task 10 adds socialIdToken.
-    expect(exempt).toHaveLength(21);
+    // Task 8 adds passkeySignUp.
+    expect(exempt).toHaveLength(22);
     for (const m of exempt) {
       const f = (/ id="off-([^"]+)"/.exec(m[1] ?? "")?.[1] ?? "") as keyof typeof DEMO_EXEMPT;
       expect({ f, dt: textOf(m[2] ?? ""), dd: textOf(m[3] ?? "") }).toEqual({

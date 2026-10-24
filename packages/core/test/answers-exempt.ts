@@ -126,6 +126,9 @@ const NOT_FOUND_ANSWERED: readonly RouteKey[] = [
   "POST /otp/reset/request",
   "POST /otp/verify",
   "POST /passkey/authenticate/options",
+  // Plan 12i Task 8: the sign-up with passkey.signUp off, at the engine call.
+  "POST /passkey/sign-up/options",
+  "POST /passkey/sign-up/verify",
   "POST /passkeys/delete",
   "POST /passkeys/rename",
   // Plan 12i Task 5: the remove of a user with no phone.
@@ -245,6 +248,9 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /passkey/authenticate/verify",
   "POST /passkey/register/options",
   "POST /passkey/register/verify",
+  // Plan 12i Task 8: the passkey-first sign-up.
+  "POST /passkey/sign-up/options",
+  "POST /passkey/sign-up/verify",
   "POST /passkeys/delete",
   "POST /passkeys/rename",
   "POST /password/change",
@@ -587,6 +593,25 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
     "authenticatorSelection.userVerification",
   ]),
   ...optionsRows("POST /passkey/authenticate/options", REQUEST_OPTION_KEYS),
+  // Plan 12i Task 8: the creation options of a passkey-first sign-up, as of a registration.
+  ...optionsRows("POST /passkey/sign-up/options", [
+    "timeout",
+    "attestation",
+    "authenticatorSelection",
+    "excludeCredentials",
+    "hints",
+    "rp.id",
+    "authenticatorSelection.residentKey",
+    "authenticatorSelection.requireResidentKey",
+    "authenticatorSelection.userVerification",
+  ]),
+  {
+    key: "POST /passkey/sign-up/options",
+    field: "excludeCredentials[].transports",
+    form: "absent",
+    reason:
+      "a new user has no passkey: passkeys.ts passkeySignUpOptions calls the seam with an empty excludeCredentials, so no item exists",
+  },
   {
     key: "POST /passkey/authenticate/options",
     field: "allowCredentials[].transports",

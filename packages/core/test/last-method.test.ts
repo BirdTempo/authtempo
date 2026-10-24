@@ -13,6 +13,7 @@ import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { setUsername } from "../src/engine/username.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { fromBase64Url } from "../src/primitives/crypto.js";
 import { tiktokEntry } from "../src/social/entries/index.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
@@ -67,7 +68,8 @@ function world(extra: Partial<AuthConfig> = {}) {
       fetch: fetchFn,
     },
     jwt: fakeJwt(tokens),
-    passkey: RP,
+    // The passkey-first sign-up of plan 12i Task 8 sets the value passkey too.
+    passkey: { ...RP, signUp: true },
     lastMethod: {},
     ...extra,
   });
@@ -237,6 +239,20 @@ async function signedUp(w: World): Promise<{ res: Response; token: string }> {
  * case, the value, and the run. `json` is true when the answer has `via`.
  */
 const MORE: [string, string, (w: World) => Promise<{ res: Response; json: boolean }>][] = [
+  [
+    "the passkey-first sign-up (plan 12i Task 8)",
+    "passkey",
+    async (w) => {
+      const options = await w.handle(post("/auth/passkey/sign-up/options", { name: "Ada" }));
+      const o = (await options.json()) as { challenge: string; user: { id: string } };
+      const soft = await SoftAuthenticator.create({ rpID: RP.rpID, origin: APP_ORIGIN });
+      const response = await soft.register(o.challenge, fromBase64Url(o.user.id));
+      return {
+        res: await w.handle(post("/auth/passkey/sign-up/verify", { response })),
+        json: true,
+      };
+    },
+  ],
   [
     "the sign-up with a session",
     "password",

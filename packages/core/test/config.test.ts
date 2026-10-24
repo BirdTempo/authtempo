@@ -391,7 +391,23 @@ describe("passkey config", () => {
       hints: { register: [], signIn: [] },
       // Plan 12i Task 21: each passkey extension is off by default.
       extensions: { prf: false, largeBlob: false, credProps: false },
+      // Plan 12i Task 8: the passkey-first sign-up is off by default.
+      signUp: false,
     });
+  });
+  it("refuses a passkey.signUp that is not a boolean (plan 12i Task 8)", () => {
+    expect(() =>
+      resolveConfig({
+        ...base,
+        passkey: {
+          rpID: "example.com",
+          rpName: "Example",
+          origins: ["https://example.com"],
+          signUp: "yes" as never,
+        },
+        trustedOrigins: ["https://example.com"],
+      }),
+    ).toThrow("passkey.signUp must be true or false");
   });
   it("refuses a passkey extension value of another type (plan 12i Task 21)", () => {
     const pk = { rpID: "api.example.com", rpName: "Example", origins: ["https://api.example.com"] };

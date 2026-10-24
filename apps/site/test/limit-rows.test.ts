@@ -79,11 +79,13 @@ describe("the account limits of the engine", () => {
   );
   const page = rows(readFileSync(`${DOCS}docs/reference/limits.md`, "utf8").split("\n"));
 
-  it("are the eleven keys of the eight engine files", () => {
+  // Plan 12i Task 8 adds passkey-sign-up:ip, the options of the passkey-first sign-up.
+  it("are the twelve keys of the eight engine files", () => {
     expect([...limits.keys()].sort()).toEqual([
       "email-change-confirm:ip",
       "email-change:user",
       "passkey-rename:user",
+      "passkey-sign-up:ip",
       "reauth-mail:user",
       "reauth:user",
       "session-revoke:user",

@@ -90,8 +90,8 @@ describe("the demo lists and the routes of core", () => {
       // Plan 12i Task 5 adds the five routes of phone: 106. Task 6 adds the
       // two routes of anonymous: 108. Task 11 adds the three routes of
       // multiSession: 111. Plan 12i Task 10 adds the two routes of
-      // socialIdToken: 113.
-      expect(checked).toBe(113);
+      // socialIdToken: 113. Task 8 adds the two routes of passkeySignUp: 115.
+      expect(checked).toBe(115);
     },
     LONG_TEST_MS,
   );

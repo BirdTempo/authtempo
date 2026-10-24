@@ -236,6 +236,7 @@ export const CONFIG_KEYS = {
     relatedOrigins: true,
     hints: true,
     extensions: true,
+    signUp: true,
   } satisfies Keys<Part<"passkey">>,
   "passkey.hints": { register: true, signIn: true } satisfies Keys<
     NonNullable<Part<"passkey">["hints"]>

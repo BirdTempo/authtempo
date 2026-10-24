@@ -109,6 +109,8 @@ export const LIMIT_FAMILIES = Object.freeze([
   "anonymous:ip",
   "anonymous:all-day",
   "anonymous-delete:user",
+  // Plan 12i Task 8: the options of a passkey-first sign-up.
+  "passkey-sign-up:ip",
   // Plan 12i Task 11: the multi-session routes.
   "multi-session:ip",
   // Plan 12i Task 10: the ID-token nonce and the ID-token sign-in.

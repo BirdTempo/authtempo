@@ -47,6 +47,7 @@ export const DEMO_EXEMPT = {
   multiSession:
     "The demo shows one visitor's own account, so it keeps one session in each browser.",
   socialIdToken: "The demo provider issues no ID token, and the demo has no Google or Apple app.",
+  passkeySignUp: "The demo signs up by a mailed link, so each account has an address to show.",
 } as const satisfies Partial<Record<RouteFeature, string>>;
 
 /**

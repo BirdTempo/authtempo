@@ -11,7 +11,8 @@ import type { ErrorCode, OAuthErrorCode, ScimType } from "../errors.js";
  * reads it, and the route list test holds it to the entries. Plan 12h adds
  * `health` and `readiness`, the probes of a host. Plan 12i adds
  * `passkeyRelatedOrigins`, the document of WebAuthn Level 3,
- * `username`, `phone`, `anonymous`, `multiSession`, and `socialIdToken`.
+ * `passkeySignUp`, `username`, `phone`, `anonymous`, `multiSession`, and
+ * `socialIdToken`.
  */
 export const ROUTE_FEATURES = [
   "session",
@@ -21,6 +22,7 @@ export const ROUTE_FEATURES = [
   "social",
   "passkey",
   "passkeyRelatedOrigins",
+  "passkeySignUp",
   "password",
   "totp",
   "emailOtp",
@@ -91,6 +93,7 @@ export interface RouteEntry {
    * and `sso`. `operatorSso` (plan 12d) needs `operator` and `sso`. `scim`
    * (plan 12d) needs `organizations` and `scim`.
    * `passkeyRelatedOrigins` (plan 12i) needs `passkey` with `relatedOrigins: true`.
+   * `passkeySignUp` (plan 12i Task 8) needs `passkey` with `signUp: true`.
    * `username` (plan 12i) needs `username`. `phone` (plan 12i) needs `phone`.
    * `anonymous` (plan 12i Task 6) needs `anonymous`.
    * `multiSession` (plan 12i) needs `multiSession`.
@@ -604,6 +607,39 @@ export const ROUTES = Object.freeze([
       "conflict",
       "account_banned",
       "sso_required",
+    ],
+    oauthCodes: [],
+  },
+  // Plan 12i Task 8: the passkey-first sign-up (spec 32 item 2).
+  {
+    method: "POST",
+    path: "/passkey/sign-up/options",
+    feature: "passkeySignUp",
+    auth: ["none"],
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "captcha_required",
+      "captcha_failed",
+      "captcha_unavailable",
+      "sign_up_closed",
+    ],
+    oauthCodes: [],
+  },
+  {
+    method: "POST",
+    path: "/passkey/sign-up/verify",
+    feature: "passkeySignUp",
+    auth: ["none"],
+    codes: [
+      "invalid_body",
+      "rate_limited",
+      "invalid_token",
+      "token_expired",
+      "passkey_failed",
+      "sign_up_closed",
+      "hook_refused",
+      "hook_failed",
     ],
     oauthCodes: [],
   },

@@ -182,6 +182,9 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "POST /social/:provider/id-token": NO_SESSION,
   "POST /passkey/authenticate/options": NO_SESSION,
   "POST /passkey/authenticate/verify": NO_SESSION,
+  // A passkey-first sign-up makes a new user; it reads no session but an anonymous one (plan 12i Task 8).
+  "POST /passkey/sign-up/options": NO_SESSION,
+  "POST /passkey/sign-up/verify": NO_SESSION,
   "GET /passkeys": READ,
   "POST /passkeys/rename": "A name of a passkey is no way in.",
   "POST /password/sign-up": NO_SESSION,

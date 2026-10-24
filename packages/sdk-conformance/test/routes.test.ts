@@ -104,6 +104,19 @@ const EXEMPT: readonly { method: string; path: string; reason: string }[] = [
     reason:
       "the client calls of the ID-token route come with plan 12i Task 15, the client over every addition",
   },
+  // Plan 12i Task 8: Task 15 adds the client calls of the passkey-first sign-up and removes these two rows.
+  {
+    method: "POST",
+    path: "/passkey/sign-up/options",
+    reason:
+      "the client calls of the passkey-first sign-up come with plan 12i Task 15, the client over every addition",
+  },
+  {
+    method: "POST",
+    path: "/passkey/sign-up/verify",
+    reason:
+      "the client calls of the passkey-first sign-up come with plan 12i Task 15, the client over every addition",
+  },
   {
     method: "POST",
     path: "/operator/keys/rotate",

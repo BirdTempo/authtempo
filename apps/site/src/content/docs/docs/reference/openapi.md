@@ -92,6 +92,7 @@ The document has one tag for each feature. Each tag and each operation carry `x-
 | `username` | `username` | off |
 | `phone` | `phone` | off |
 | `anonymous` | `anonymous` | off |
+| `passkeySignUp` | `passkey.signUp` | off |
 | `multiSession` | `multiSession` | off |
 | `socialIdToken` | `social.google or social.apple` | off |
 

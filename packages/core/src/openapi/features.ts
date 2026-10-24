@@ -14,6 +14,7 @@ export const FEATURE_INFO: Record<RouteFeature, { configKey: string; default: "o
   social: { configKey: "social", default: "off" },
   passkey: { configKey: "passkey", default: "off" },
   passkeyRelatedOrigins: { configKey: "passkey.relatedOrigins", default: "off" },
+  passkeySignUp: { configKey: "passkey.signUp", default: "off" },
   password: { configKey: "password", default: "off" },
   totp: { configKey: "totp", default: "off" },
   emailOtp: { configKey: "emailOtp", default: "on" },

@@ -109,7 +109,7 @@ function postForm(
 function world(secretHash = "0".repeat(64)) {
   const auth = makeAuth({
     password: { hash: FAST, uniformSignUp: false },
-    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL] },
+    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL], signUp: true },
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     // The platform role turns on the impersonation routes (plan 12f).
@@ -446,6 +446,17 @@ async function validBodies(w: World): Promise<{ rows: BodyRow[]; cookie: Record<
     },
     {
       key: "POST /passkey/authenticate/verify",
+      body: { response: { id: "cred", response: { clientDataJSON: "data" } } },
+      refused: INVALID_BODY,
+    },
+    // Plan 12i Task 8: the passkey-first sign-up. The body is strict.
+    {
+      key: "POST /passkey/sign-up/options",
+      body: { name: "Ana", hints: ["client-device"] },
+      refused: INVALID_BODY,
+    },
+    {
+      key: "POST /passkey/sign-up/verify",
       body: { response: { id: "cred", response: { clientDataJSON: "data" } } },
       refused: INVALID_BODY,
     },
@@ -862,7 +873,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 11 adds the three multi-session routes.
     // Plan 12i Task 10 adds the two routes of the ID-token sign-in.
     // Plan 12i Task 20 adds POST /password/verify/code.
-    expect(keys.length).toBe(202);
+    // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
+    expect(keys.length).toBe(204);
     // Every mounted route of every module has a key with a contract, and every contract is mounted.
     const mounted = new Set<string>();
     const modules = coreRouteModules(everyFeature());
@@ -1430,7 +1442,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 11 adds the bodies of the multi-session switch and sign-out.
     // Plan 12i Task 10 adds the bodies of the ID-token nonce and sign-in.
     // Plan 12i Task 20 adds the body of the sign-up code.
-    expect(withBody.length).toBe(106);
+    // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up.
+    expect(withBody.length).toBe(108);
     let refusals = 0;
     for (const row of rows) {
       const contract = CONTRACT[row.key];
@@ -1458,7 +1471,8 @@ describe("the route contract (plan 11g)", () => {
     // The two social bodies have no required key, so no body of this form is refused.
     // The two strict bodies of the ID-token route refuse it (plan 12i Task 10).
     // Plan 12i Task 20 adds the refusal of the sign-up code body.
-    expect(refusals).toBe(104);
+    // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up: 106.
+    expect(refusals).toBe(106);
   });
 
   it("names the media of a body by its read call", async () => {
@@ -1484,7 +1498,8 @@ describe("the route contract (plan 11g)", () => {
     // Plan 12i Task 11 adds the two multi-session bodies to json.
     // Plan 12i Task 10 adds the two ID-token bodies to json.
     // Plan 12i Task 20 adds the body of the sign-up code to json.
-    expect(counts).toEqual({ json: 97, both: 10, form: 8 });
+    // Plan 12i Task 8 adds the two bodies of the passkey-first sign-up to json.
+    expect(counts).toEqual({ json: 99, both: 10, form: 8 });
     // The valid body as a form: a `json` route refuses it, and a route that reads a form does not.
     for (const row of rows) {
       const path = row.path ?? row.key.slice("POST ".length);

@@ -18,6 +18,7 @@ import { addMember, createOrganization } from "../src/engine/organizations.js";
 import {
   passkeyAuthenticationOptions,
   passkeyRegistrationOptions,
+  passkeySignUpOptions,
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
 import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../src/engine/password.js";
@@ -37,6 +38,7 @@ import { AUTH_ERROR_PARAM } from "../src/http/redirect.js";
 import { ROUTES, type RouteKey } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { fromBase64Url } from "../src/primitives/crypto.js";
 import { newId } from "../src/primitives/ids.js";
 import type { UserRow } from "../src/schema.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
@@ -109,6 +111,9 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /magic-link/verify": { token: "$magicToken" },
   "POST /passkey/register/verify": { response: CEREMONY },
   "POST /passkey/authenticate/verify": { response: CEREMONY },
+  // Plan 12i Task 8: the passkey-first sign-up. A family that needs a real ceremony makes one.
+  "POST /passkey/sign-up/options": { name: "Ana" },
+  "POST /passkey/sign-up/verify": { response: CEREMONY },
   "POST /passkeys/delete": { id: "p1" },
   "POST /passkeys/rename": { id: "p1", name: "Key" },
   "POST /password/sign-up": { email: "$newEmail", password: PASSWORD },
@@ -350,7 +355,8 @@ function world(extra: Partial<AuthConfig> = {}) {
   const auth = makeAuth({
     limiter,
     password: { hash: FAST, uniformSignUp: false },
-    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL] },
+    // The passkey-first sign-up of plan 12i Task 8.
+    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL], signUp: true },
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     organizations: { dynamicRoles: {}, teams: {} },
@@ -423,6 +429,16 @@ async function challengeOf(w: World, email: string): Promise<string> {
   });
   if (!r.ok || !("twoFactor" in r.value)) throw new Error("the sign-in answered no challenge");
   return r.value.twoFactor.challenge;
+}
+
+/**
+ * The body of a passkey-first sign-up verify (plan 12i Task 8): the options
+ * of `config`, and a new authenticator's registration of them.
+ */
+async function signUpCeremony(config: World["auth"]["config"]): Promise<Record<string, unknown>> {
+  const options = must(await passkeySignUpOptions(config, { name: "Ana", ip: null }));
+  const soft = await SoftAuthenticator.create({ rpID: "api.example.com", origin: BASE_URL });
+  return { response: await soft.register(options.challenge, fromBase64Url(options.user.id)) };
 }
 
 /** `fn` answered ok, or the test stops with its code. */
@@ -734,13 +750,18 @@ describe("the codes that one world answers on every route (plan 11g)", () => {
     // The reset code is one mail of its own, after the sign-in code is spent by nothing: the last mail wins.
     const first = await probe(
       w,
-      routes.filter((key) => key !== otpReset),
+      routes.filter((key) => key !== otpReset && key !== "POST /passkey/sign-up/verify"),
       () => ({}),
       fills,
     );
     must(await requestResetOtp(config, { email, ip: null }));
     const second = await probe(w, [otpReset], () => ({}), { ...fills, $otpCode: w.lastCode() });
-    expect(unlike({ ...first, ...second }, "sign_up_closed", 403)).toEqual({});
+    // The passkey-first sign-up verify (plan 12i Task 8): options made while the sign-up was open.
+    const signUp = "POST /passkey/sign-up/verify";
+    const third = {
+      [signUp]: await call(w, signUp, {}, await signUpCeremony({ ...config, signUp: "open" })),
+    };
+    expect(unlike({ ...first, ...second, ...third }, "sign_up_closed", 403)).toEqual({});
   });
 });
 
@@ -1316,7 +1337,10 @@ async function hookFlows(w: ReturnType<typeof hookWorld>) {
   const anonymous = must(
     await signInAnonymous(config, { current: null, ip: null, userAgent: null }),
   );
+  // Plan 12i Task 8: a passkey-first sign-up runs user.beforeCreate and the session hook.
+  const signUp = await signUpCeremony(config);
   const bodies: { readonly [K in RouteKey]?: Record<string, unknown> } = {
+    "POST /passkey/sign-up/verify": signUp,
     "POST /anonymous/sign-in": {},
     "POST /anonymous/delete": {},
     "POST /phone/verify": { phone, code: signInCode },
@@ -1460,6 +1484,8 @@ describe("token_expired on every route that declares it (plan 11g)", () => {
       }),
     );
     const handoffCode = new URL(landed.location).searchParams.get("code") ?? "";
+    // Plan 12i Task 8: a sign-up challenge of 5 minutes.
+    const signUp = await signUpCeremony(config);
     // Past every lifetime. The sessions of the probe are new ones.
     w.auth.clock.advance(31 * 86_400_000);
     const adaAgain = await createSession(config, {
@@ -1480,6 +1506,7 @@ describe("token_expired on every route that declares it (plan 11g)", () => {
       "POST /password/reset": { token: resetToken, password: "a new horse battery" },
       "POST /password/verify": { token: verifyToken },
       "POST /magic-link/verify": { token: magicToken },
+      "POST /passkey/sign-up/verify": signUp,
     };
     const queries: { readonly [K in RouteKey]?: Record<string, string> } = {
       "GET /handoff/continue": { h: start.handoffId },

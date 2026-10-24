@@ -177,6 +177,8 @@ export const SIGN_IN_ROUTES: { readonly [K in RouteKey]?: SessionVia } = {
   // The anonymous sign-in of plan 12i Task 6.
   "POST /anonymous/sign-in": "anonymous",
   "POST /passkey/authenticate/verify": "passkey",
+  // The passkey-first sign-up of plan 12i Task 8.
+  "POST /passkey/sign-up/verify": "passkey",
   "POST /handoff/redeem": "handoff",
   "GET /social/:provider/callback": "social",
   "POST /social/apple/callback": "social",

@@ -47,9 +47,10 @@ import { draftUserRow } from "./users.js";
  * its own route for an anonymous user, `POST /anonymous/delete`. Each entry
  * declares the code in `ROUTES`, and anonymous.test.ts holds both ways.
  *
- * Not listed: each sign-in route (the phone code and every social preset
- * too), because a sign-in leaves the anonymous user and changes nothing of
- * it. Also not listed: the remove of a passkey or a phone, because an
+ * Not listed: each sign-in route (the phone code, every social preset, and
+ * the passkey-first sign-up too), because a sign-in leaves the anonymous
+ * user and changes nothing of it. The sign-up makes a new user and replaces
+ * the anonymous user through the upgrade (plan 12i Task 8). Also not listed: the remove of a passkey or a phone, because an
  * anonymous user can hold neither, so the route finds nothing to remove.
  * Also not listed: the three multi-session routes. They change no account
  * and grant no privilege. A switch leaves the anonymous user as a sign-in

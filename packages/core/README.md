@@ -1186,6 +1186,7 @@ The second factor at `/reauth` (spec 8.15). A passkey proves two factors, so it 
 | `reauth:user:<userId>` | 15 minutes | 10 | `POST /reauth`, right or wrong. Its own key: a guessed password costs the owner's sign-in nothing. A wrong email code also counts on `otp-verify:ip` and `otp-verify:email`, the keys of the email code sign-in |
 | `reauth-mail:user:<userId>` | 15 minutes | 3 | `POST /reauth/email`, then `otp:email` and `otp:email-day` of the address, shared with every mailed code |
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | `POST /reauth/passkey/options`, shared with the passkey sign-in options |
+| `passkey-sign-up:ip:<ip>` | 1 hour | 10 | `POST /passkey/sign-up/options` (plan 12i Task 8), after the name rule and the sign-up rule. A refused body counts no try |
 | `session-revoke:user:<userId>` | 15 minutes | 30 | `POST /sessions/revoke` and `POST /sessions/revoke-others` together |
 | `user-update:user:<userId>` | 15 minutes | 30 | `POST /user/update`, also when a hook refuses it. A refused body and an unverified user count no try |
 | `passkey-rename:user:<userId>` | 15 minutes | 30 | `POST /passkeys/rename`, also for an unknown id or another user's id. A refused name counts no try |

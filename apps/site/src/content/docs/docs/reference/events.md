@@ -205,8 +205,8 @@ An enum field takes only the values of its list. A long list names its count and
 | `email.verify.outcome` | `success`, `failure` |
 | `reauth.method` | `password`, `email_otp`, `passkey` |
 | `reauth.outcome` | `success`, `failure` |
-| `captcha.port_threw.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request`, `anonymous-sign-in` |
-| `captcha.no_answer.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request`, `anonymous-sign-in` |
+| `captcha.port_threw.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request`, `anonymous-sign-in`, `passkey-sign-up` |
+| `captcha.no_answer.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request`, `anonymous-sign-in`, `passkey-sign-up` |
 | `sms.not_sent.reason` | `capped`, `unavailable`, `timeout` |
 | `hook.copy_failed.hook` | 48 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
 | `hook.before_failed.hook` | 48 values: each hook name, `<group>.<point>`, from the eight hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
@@ -237,7 +237,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `operator.action.actorKind` | `secret`, `user`, `app`, `scim` |
 | `operator.refused.action` | 28 values: each action of an audit row, the 18 of SSO and SCIM too. [Routes](/docs/reference/routes/) lists them under the operator audit. |
 | `operator.refused.actorKind` | `secret`, `user`, `app`, `scim` |
-| `limit.hit.family` | 97 values: each family of [Limits](/docs/reference/limits/). |
+| `limit.hit.family` | 98 values: each family of [Limits](/docs/reference/limits/). |
 | `sso.guard_refused.step` | `impersonation`, `rank`, `email`, `second_factor`, `fresh` |
 | `sso.failed.step` | 30 values: each refused step of an OIDC start or callback, and of a SAML post. [Errors](/docs/reference/errors/) names the steps under `sso_failed`. |
 | `sso.second_factor_idp.claim` | `amr`, `acr`, `authnContext` |

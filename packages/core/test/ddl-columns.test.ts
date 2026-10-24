@@ -246,8 +246,9 @@ describe("the column map (plan 12g)", () => {
     // per-IP key of the multi-session routes. Plan 12i Task 10 adds 2: the
     // per-IP keys of the ID-token nonce and sign-in. Plan 12i Task 20 adds 2:
     // the per-IP and the per-address keys of the sign-up code. Ruling 39 adds
-    // 1: the day cap of the sign-up code mails.
-    expect(sites.length).toBe(106);
+    // 1: the day cap of the sign-up code mails. Plan 12i Task 8 adds 2: the
+    // per-IP keys of the passkey-first sign-up options and its verify.
+    expect(sites.length).toBe(108);
     expect(sites).toContain('engine/id-token.ts "id-token:ip" ipKey(input.ip)');
     expect(sites).toContain('engine/password.ts "password-verify-code:email-day" email');
     expect(sites).toContain('engine/phone.ts "phone-add:phone" input.phone');

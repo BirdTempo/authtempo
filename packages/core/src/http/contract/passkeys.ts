@@ -52,6 +52,13 @@ export const authenticateOptionsBody = z.strictObject({
     })
     .optional(),
 });
+/**
+ * The body of the sign-up options (plan 12i Task 8): the name of the
+ * person and the hints. The engine applies the name rule, so an api caller
+ * meets it too.
+ */
+export const signUpOptionsBody = z.strictObject({ name: z.string(), hints: hintsField });
+export const signUpVerifyBody = z.strictObject({ response: credentialJson });
 export const deleteBody = z.object({ id: z.string().min(1).max(64) });
 export const renameBody = z.strictObject({ id: z.string().min(1).max(64), name: z.string() });
 
@@ -73,6 +80,15 @@ export const PASSKEYS_CONTRACT = {
   },
   "POST /passkey/authenticate/verify": {
     body: { schema: authenticateVerifyBody, media: ["json"], parsedBy: "zod" },
+    answer: { kind: "json", schema: SessionSignInAnswer },
+  },
+  // The passkey-first sign-up (plan 12i Task 8). No gate (Review Focus 1).
+  "POST /passkey/sign-up/options": {
+    body: { schema: signUpOptionsBody, media: ["json"], parsedBy: "zod" },
+    answer: { kind: "json", schema: CreationOptionsJson },
+  },
+  "POST /passkey/sign-up/verify": {
+    body: { schema: signUpVerifyBody, media: ["json"], parsedBy: "zod" },
     answer: { kind: "json", schema: SessionSignInAnswer },
   },
   // `rpId` and `userHandle` are the inputs of signalAllAcceptedCredentials (plan 12i).

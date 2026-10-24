@@ -444,7 +444,8 @@ describe("session create hooks (plan 9d)", () => {
     }).toEqual({
       magicLink: 1,
       social: 1,
-      passkey: 1,
+      // The sign-in and the passkey-first sign-up (plan 12i Task 8).
+      passkey: 2,
       handoff: 1,
       password: 4,
       emailOtp: 1,

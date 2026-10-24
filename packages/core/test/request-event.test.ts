@@ -100,6 +100,17 @@ const FAILING: Readonly<
     via: "passkey",
     make: async () => post("/auth/passkey/authenticate/verify", {}),
   },
+  // Plan 12i Task 8: the passkey-first sign-up, with a challenge that no options made.
+  "POST /passkey/sign-up/verify": {
+    via: "passkey",
+    over: {
+      passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL], signUp: true },
+    },
+    make: async () =>
+      post("/auth/passkey/sign-up/verify", {
+        response: { id: "cred", response: { clientDataJSON: "e30" } },
+      }),
+  },
   "POST /handoff/redeem": {
     via: "handoff",
     make: async () => post("/auth/handoff/redeem", { code: "spent", verifier: "x" }),

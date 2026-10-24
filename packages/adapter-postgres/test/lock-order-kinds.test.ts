@@ -1279,6 +1279,8 @@ const SITES: Record<string, readonly string[] | string> = {
     "a member removal with revokeTokens",
   ],
   "passkeys verifyPasskeyAuthentication": "a sign-in by a passkey",
+  // Plan 12i Task 8: the passkey row, then the new user row and the session, as a sign-in does.
+  "passkeys verifyPasskeySignUp": "a sign-up by a passkey: the passkey row, a new user, a sign-in",
   "password insertSignUp": [
     "an email claim by a magic link",
     "an email claim by the sign-up link",
@@ -1425,8 +1427,9 @@ describe("the transaction sites of the engine (ruling 51 of plan 12k)", () => {
     // Task 10 adds the one of scim/users.ts, and Task 11 the one of scim/groups.ts.
     // Ruling 78 adds the one of organization-rest.ts. Plan 12i Task 2 adds the
     // one of username.ts, Task 5 the two of phone.ts, Task 6 the two of anonymous.ts,
-    // and Task 7 the one of the anonymous upgrade.
-    expect(found.length).toBe(83);
+    // and Task 7 the one of the anonymous upgrade. Task 8 adds the one of the
+    // passkey-first sign-up.
+    expect(found.length).toBe(84);
     expect([...found].sort()).toEqual(Object.keys(SITES).sort());
     for (const [key, pin] of Object.entries(SITES))
       if (typeof pin !== "string") {

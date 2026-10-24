@@ -318,16 +318,16 @@ These routes exist when the config sets `passkey`.
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified |
+| Needs | A session cookie, or a `ts_` bearer token. The session is fresh, and the address is verified. A user with no address passes when it is not anonymous: a phone or passkey sign-up proved its handle |
 | Input | JSON `{ hints? }`. The body is optional. `hints` lists `security-key`, `client-device`, or `hybrid`, each once, and replaces `passkey.hints.register` for this ceremony |
-| Answer | The creation options JSON for `navigator.credentials.create`, with `hints`, and with `extensions` when `passkey.extensions` asks for one |
+| Answer | The creation options JSON for `navigator.credentials.create`, with `hints`, and with `extensions` when `passkey.extensions` asks for one. `user.name` is the first of the username, the address, the phone, the name, and the app name. `user.displayName` is the name, else the same value |
 | Errors | [`unauthorized`](/docs/reference/errors/#unauthorized), [`session_not_fresh`](/docs/reference/errors/#session_not_fresh), [`invalid_body`](/docs/reference/errors/#invalid_body), [`email_unverified`](/docs/reference/errors/#email_unverified), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
 
 <h3 id="post-passkey-register-verify"><code>POST /passkey/register/verify</code></h3>
 
 | Field | Value |
 | --- | --- |
-| Needs | A session cookie, or a `ts_` bearer token. The address is verified |
+| Needs | A session cookie, or a `ts_` bearer token. The address is verified, or the user has no address and is not anonymous |
 | Input | JSON `{ response, name? }`. A `name` that is blank after the trim, or that breaks the rule of [`POST /passkeys/rename`](#post-passkeys-rename), is stored as no name. The registration never refuses a credential for its name |
 | Answer | `{ passkey }` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`unauthorized`](/docs/reference/errors/#unauthorized), [`email_unverified`](/docs/reference/errors/#email_unverified), [`impersonation_session`](/docs/reference/errors/#impersonation_session), [`anonymous_refused`](/docs/reference/errors/#anonymous_refused) |
@@ -349,6 +349,27 @@ These routes exist when the config sets `passkey`.
 | Input | JSON `{ response }`. Core drops `prf.results` and `largeBlob.blob` from `clientExtensionResults` before any read, store, or log |
 | Answer | `{ user, session }` with the session cookie. A credential with no row answers `passkey_unknown`, so the app can call `PublicKeyCredential.signalUnknownCredential` |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`passkey_unknown`](/docs/reference/errors/#passkey_unknown), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
+
+<h3 id="post-passkey-sign-up-options"><code>POST /passkey/sign-up/options</code></h3>
+
+These two routes exist when `passkey.signUp` is true. They make a user with a passkey and no address.
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. With a live anonymous session, the verify replaces that user (see [Anonymous](#anonymous)) |
+| Input | JSON `{ name, hints? }`. `name` is 1 to 80 characters, not blank, with no control, format, or bidi character. `hints` replaces `passkey.hints.register` for this ceremony |
+| Answer | The creation options JSON for `navigator.credentials.create`. `user.id` is the base64url of the new user id, and `user.name` and `user.displayName` are the name. The options carry no address and no data of another user. No user exists until the verify |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed) |
+| Captcha | With `captcha` and the flow `passkey-sign-up`: the header `x-captcha-response`, after the per-IP limit |
+
+<h3 id="post-passkey-sign-up-verify"><code>POST /passkey/sign-up/verify</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing. The challenge of one options call makes one user |
+| Input | JSON `{ response }`. Core drops `prf.results` and `largeBlob.blob` from `clientExtensionResults` before any read, store, or log |
+| Answer | `{ user, session }` with the session cookie. The user has no address. `user.beforeCreate` and the session hooks see `via: "passkey"`. No second factor gates it: the passkey has user verification. A credential id that another user holds answers `passkey_failed` and makes nothing. Only `signUp: "open"` lets the user in |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`passkey_failed`](/docs/reference/errors/#passkey_failed), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 
 <h3 id="get-passkeys"><code>GET /passkeys</code></h3>
 

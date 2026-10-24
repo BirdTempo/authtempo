@@ -38,7 +38,7 @@ const MODULE_FEATURES: Record<RouteModule, readonly RouteFeature[]> = {
   identities: ["account"],
   "magic-link": ["magicLink"],
   social: ["social", "socialIdToken"],
-  passkeys: ["passkey", "passkeyRelatedOrigins"],
+  passkeys: ["passkey", "passkeyRelatedOrigins", "passkeySignUp"],
   password: ["password"],
   totp: ["totp"],
   "second-factor": ["totp"],
@@ -83,7 +83,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12i Task 11 adds the three multi-session routes.
     // Plan 12i Task 10 adds the nonce and the sign-in of the ID-token route.
     // Plan 12i Task 20 adds POST /password/verify/code.
-    expect(listed.length).toBe(202);
+    // Plan 12i Task 8 adds the two routes of the passkey-first sign-up.
+    expect(listed.length).toBe(204);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {
@@ -157,6 +158,15 @@ describe("ROUTES (plan 11a)", () => {
         },
       },
       features: ["passkeyRelatedOrigins"],
+    },
+    // Plan 12i Task 8: the passkey-first sign-up needs its own key.
+    {
+      name: "passkey sign-up",
+      start: { passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] } },
+      delta: {
+        passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE], signUp: true },
+      },
+      features: ["passkeySignUp"],
     },
     { name: "password", delta: { password: {} }, features: ["password", "totp", "emailOtpReset"] },
     {
