@@ -53,6 +53,7 @@ import {
   addTeamMembersIn,
   createTeamIn,
   deleteTeamIn,
+  endDeletedTeamSessions,
   endTeamSessions,
   lockOrganization,
   lockTeam,
@@ -778,7 +779,8 @@ function rowCalls(
  * sessions of the persons who leave it, the organization row and the team
  * row, the member rows of the role recompute, and the team member rows.
  * Then the audit row. The session ends of the persons who leave the team
- * come last (ruling 86 of plan 12d).
+ * come last (ruling 86 of plan 12d). A group delete ends each session of
+ * its team there too (ruling 87).
  */
 async function writeGroup(
   config: ResolvedConfig,
@@ -931,8 +933,9 @@ async function writeGroup(
       holds,
       rowCalls(write.kind, added, removed, memberRows.length),
     ) +
-    // The undo on D1 of a late conflict. A group delete removes the team rows and the
-    // sessions after the role updates, so their undo comes after the last conflict.
+    // The undo on D1 of a late conflict. A group delete removes the team rows after the
+    // role updates, so their undo comes after the last conflict. Its sessions end after the
+    // audit row, so no undo restores them (ruling 87 of plan 12d).
     undoOf(
       groupId,
       teamOf,
@@ -973,6 +976,8 @@ async function writeGroup(
         changes = [];
         // The team whose sessions of the leavers end as the last write.
         let ends: TeamRow | null = null;
+        // The team of a group delete: each of its sessions ends as the last write.
+        let deleted: TeamRow | null = null;
         const versioned =
           write.kind === "create"
             ? []
@@ -1037,9 +1042,11 @@ async function writeGroup(
               team,
               by: null,
               members,
+              sessionsLater: true,
             });
             if (!gone.ok && gone.code !== "not_found") stopWith(gone.code);
             if (gone.ok && !gone.value) throw new LostRound();
+            if (gone.ok) deleted = team;
             // A team that an owner deleted first: the group goes on with no team.
             if (!gone.ok) await members(tx);
           } else await members(tx);
@@ -1091,8 +1098,9 @@ async function writeGroup(
         const value = await writeAuditIn(tx, draftOf(caller, action, null, data), now);
         // The sessions of those who leave the team end last, after each read that can
         // conflict and after the audit row. So no undo of the write restores them (ruling 86
-        // of plan 12d).
+        // of plan 12d). A group delete ends each session of its team here too (ruling 87).
         if (ends) await endTeamSessions(tx, ends.id, leaves);
+        if (deleted) await endDeletedTeamSessions(tx, deleted.id);
         return { ok: true as const, value };
       }),
     );

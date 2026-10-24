@@ -1267,3 +1267,218 @@ describe("the session ends of the persons who leave a team on D1 (ruling 86 of p
     for (const n of Object.values(worst)) expect(n).toBeLessThanOrEqual(50);
   }, 600_000);
 });
+
+/**
+ * The state that a faulted SCIM request must leave as it was: the rows of
+ * each model that a group write touches, the roles, and the sessions.
+ */
+const faultState = async () => ({
+  groups: await count("SELECT count(*) AS n FROM ta_scim_group"),
+  rows: await count("SELECT count(*) AS n FROM ta_scim_group_member"),
+  teams: await count("SELECT count(*) AS n FROM ta_team"),
+  teamRows: await count("SELECT count(*) AS n FROM ta_team_member"),
+  versions: await count("SELECT coalesce(sum(version), 0) AS n FROM ta_scim_group"),
+  roles: String(
+    await env.DB.prepare(
+      "SELECT group_concat(role || ':' || n) AS n FROM (SELECT role, count(*) AS n FROM ta_member GROUP BY role ORDER BY role)",
+    ).first("n"),
+  ),
+  sessions: await count("SELECT count(*) AS n FROM ta_session"),
+  inTeam: await count("SELECT count(*) AS n FROM ta_session WHERE active_team_id IS NOT NULL"),
+  audit: await count("SELECT count(*) AS n FROM ta_operator_audit"),
+  users: await count("SELECT count(*) AS n FROM ta_user"),
+});
+
+/**
+ * One SCIM request with a fault at statement 1, then 2, and on, until a run
+ * ends with no fault. Each faulted run must answer 500 and leave
+ * `faultState` as it was. The answer: the worst count of a faulted run, and
+ * the status and the count of the clean run.
+ */
+async function sweep(token: string, method: string, path: string, body?: unknown) {
+  const before = await faultState();
+  let worst = 0;
+  for (let target = 1; ; target++) {
+    await env.DB.prepare("UPDATE ta_scim_token SET last_used_at = last_used_at - 120000").run();
+    const { db: view, c } = faulty(env.DB, target);
+    const res = await make(view, true).handle(
+      new Request(`${API}/auth/scim/v2${path}`, {
+        method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(body === undefined ? {} : { "content-type": "application/scim+json" }),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      }),
+    );
+    await res.text();
+    if (c.fired === "") return { worst, status: res.status, clean: c.n };
+    expect([target, res.status], c.fired).toEqual([target, 500]);
+    expect(await faultState(), `${method} ${path}, fault at ${target}: ${c.fired}`).toEqual(before);
+    worst = Math.max(worst, c.n);
+  }
+}
+
+/** A session of each SCIM User of `scimUserIds` acting in `teamId`, `k` times. */
+async function teamSessions(scimUserIds: readonly string[], teamId: string, k: number) {
+  const cols = (
+    await env.DB.prepare("SELECT name FROM pragma_table_info('ta_session')").all()
+  ).results.map((r) => String(r.name));
+  // The rows copy the session of the owner, as a sign-in writes them.
+  const pick = (c: string) =>
+    c === "id"
+      ? "'s-' || u.id || '-' || j.i"
+      : c === "user_id"
+        ? "u.user_id"
+        : c === "token_hash"
+          ? "'t-' || u.id || '-' || j.i"
+          : c === "active_organization_id"
+            ? "u.organization_id"
+            : c === "active_team_id"
+              ? "?2"
+              : `s.${c}`;
+  await env.DB.prepare("DELETE FROM ta_session WHERE id LIKE 's-%'").run();
+  await env.DB.prepare(
+    `WITH RECURSIVE j(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM j WHERE i < ?3) INSERT INTO ta_session (${cols.join(", ")}) SELECT ${cols.map(pick).join(", ")} FROM ta_session s, ta_scim_user u, j WHERE s.id = (SELECT min(id) FROM ta_session) AND u.id IN (SELECT value FROM json_each(?1))`,
+  )
+    .bind(JSON.stringify(scimUserIds), teamId, k)
+    .run();
+}
+
+describe("the faults of a group delete and of the role pair pushes on D1 (ruling 87 of plan 12d)", () => {
+  it("keeps a DELETE of a group of 1000 members inside 50 queries at a fault of each statement, for 1, 3, and 50 sessions of each member", async () => {
+    const setup = make(env.DB, false);
+    const { token } = await acme(setup);
+    const first = await users(token, PATCH_CAP);
+    const worst: Record<string, number> = {};
+    for (const k of [1, 3, 50]) {
+      const made = await call(token, "POST", "/Groups", {
+        schemas: [GROUP_URN],
+        displayName: "Admins",
+        members: members(first),
+      });
+      expect(made.status).toBe(201);
+      const id = String(made.body.id);
+      const teamId = String(
+        await env.DB.prepare("SELECT team_id AS n FROM ta_scim_group WHERE id = ?")
+          .bind(id)
+          .first("n"),
+      );
+      await teamSessions(first, teamId, k);
+      const before = await faultState();
+      expect([before.inTeam, before.roles]).toEqual([k * PATCH_CAP, "admin:1000,owner:1"]);
+      const r = await sweep(token, "DELETE", `/Groups/${id}`);
+      expect(r.status).toBe(204);
+      // The delete ended each session in the team, and took the group, the team, and the roles.
+      expect(await faultState()).toEqual({
+        ...before,
+        groups: before.groups - 1,
+        rows: before.rows - PATCH_CAP,
+        teams: before.teams - 1,
+        teamRows: before.teamRows - PATCH_CAP,
+        versions: before.versions - 1,
+        roles: "member:1000,owner:1",
+        inTeam: 0,
+        audit: before.audit + 1,
+      });
+      worst[`fault${k}`] = r.worst;
+      worst[`clean${k}`] = r.clean;
+    }
+    console.log(`group deletes: ${JSON.stringify(worst)}`);
+    // Measured on the binding, 2026-10-24. Before ruling 87 the delete ended the sessions
+    // before its audit row, and a fault there sent 32, 34, and 68.
+    expect(worst).toEqual({
+      fault1: 32,
+      clean1: 24,
+      fault3: 32,
+      clean3: 24,
+      fault50: 32,
+      clean50: 24,
+    });
+    for (const n of Object.values(worst)) expect(n).toBeLessThanOrEqual(50);
+  }, 600_000);
+
+  it("answers 204 to the smaller steps of the docs, 500 adds with 3 role pairs and 333 adds with 4, inside 50 queries at a fault of each statement", async () => {
+    const setup = make(env.DB, false);
+    const { organizationId, owner, token } = await acme(setup);
+    const ids = await users(token, 2 * PATCH_CAP);
+    const first = ids.slice(0, PATCH_CAP);
+    const second = ids.slice(PATCH_CAP);
+    const made = await call(token, "POST", "/Groups", {
+      schemas: [GROUP_URN],
+      displayName: "Admins",
+      members: members(first),
+    });
+    expect(made.status).toBe(201);
+    const id = String(made.body.id);
+    const teamId = String(
+      await env.DB.prepare("SELECT team_id AS n FROM ta_scim_group WHERE id = ?")
+        .bind(id)
+        .first("n"),
+    );
+    await teamSessions(first, teamId, 1);
+    const role = await setup.api.createRole({
+      user: owner,
+      organizationId,
+      name: "r1",
+      permissions: { member: ["read"] },
+    });
+    if (!role.ok) throw new Error(role.code);
+    const roleMix = async (list: readonly string[], name: string) =>
+      env.DB.prepare(
+        "UPDATE ta_member SET role = ?1 WHERE user_id IN (SELECT user_id FROM ta_scim_user WHERE id IN (SELECT value FROM json_each(?2)))",
+      )
+        .bind(name, JSON.stringify(list))
+        .run();
+    const mixed = (adds: readonly string[], gone: string) =>
+      patch(
+        { op: "add", path: "members", value: members(adds) },
+        { op: "remove", path: `members[value eq "${gone}"]` },
+      );
+    const counts: Record<string, number> = {};
+    // Three pairs: web to admin, member to admin, and admin to member.
+    const three = second.slice(0, 500);
+    await roleMix(three.slice(0, 150), "web");
+    let before = await faultState();
+    const r3 = await sweep(token, "PATCH", `/Groups/${id}`, mixed(three, first[0] ?? ""));
+    expect(r3.status).toBe(204);
+    expect(await faultState()).toEqual({
+      ...before,
+      rows: before.rows + 499,
+      teamRows: before.teamRows + 499,
+      versions: before.versions + 1,
+      roles: "admin:1499,member:501,owner:1",
+      inTeam: before.inTeam - 1,
+      audit: before.audit + 1,
+    });
+    counts.threePairs = r3.worst;
+    counts.threePairsClean = r3.clean;
+    // Four pairs: web, r1, and member to admin, and admin to member.
+    const four = second.slice(500, 833);
+    await roleMix(four.slice(0, 100), "web");
+    await roleMix(four.slice(100, 200), "r1");
+    before = await faultState();
+    const r4 = await sweep(token, "PATCH", `/Groups/${id}`, mixed(four, first[1] ?? ""));
+    expect(r4.status).toBe(204);
+    expect(await faultState()).toEqual({
+      ...before,
+      rows: before.rows + 332,
+      teamRows: before.teamRows + 332,
+      versions: before.versions + 1,
+      roles: "admin:1831,member:169,owner:1",
+      inTeam: before.inTeam - 1,
+      audit: before.audit + 1,
+    });
+    counts.fourPairs = r4.worst;
+    counts.fourPairsClean = r4.clean;
+    console.log(`role pair steps: ${JSON.stringify(counts)}`);
+    // Measured on the binding, 2026-10-24: the numbers of scim.mdx and routes.md.
+    expect(counts).toEqual({
+      threePairs: 49,
+      threePairsClean: 39,
+      fourPairs: 50,
+      fourPairsClean: 39,
+    });
+    for (const n of Object.values(counts)) expect(n).toBeLessThanOrEqual(50);
+  }, 600_000);
+});

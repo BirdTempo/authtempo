@@ -384,6 +384,11 @@ export async function deleteTeam(
  * `members` runs the caller's member writes in their step of the lock order
  * of user-hold.ts: after the invitations and before the team member rows.
  * A SCIM group delete changes the roles of the group's members there.
+ *
+ * With `sessionsLater`, the caller ends the sessions of the team with
+ * `endDeletedTeamSessions` as its last write. A SCIM group delete does so
+ * after its audit row, so no undo on D1 restores a session (ruling 87 of
+ * plan 12d). The locks of these sessions stay at the start of the round.
  */
 export async function deleteTeamIn(
   config: ResolvedConfig,
@@ -393,6 +398,7 @@ export async function deleteTeamIn(
     team: TeamRow;
     by: UserRow | null;
     members?: (tx: StorageAdapter) => Promise<void>;
+    sessionsLater?: boolean;
   },
 ): Promise<Result<boolean>> {
   const sc = scope(config);
@@ -452,8 +458,23 @@ export async function deleteTeamIn(
   }
   await input.members?.(tx);
   await tx.delete("teamMember", [{ field: "teamId", op: "eq", value: team.id }]);
-  await tx.update("session", byTeam, { activeTeamId: null });
+  if (!input.sessionsLater) await endDeletedTeamSessions(tx, team.id);
   return ok(true);
+}
+
+/**
+ * Clears the active team `teamId` of each session that acts in it, after
+ * the team delete of `deleteTeamIn`: one update. The caller holds the locks
+ * of these sessions and of the team, so no set moves a session into the
+ * team. The count of the changed sessions has no cap, and on D1 the undo of
+ * this update restores about 1450 sessions per statement. So a SCIM group
+ * delete runs it as its last write (ruling 87 of plan 12d). A failed update
+ * changes no session, because D1 runs it as one batch.
+ */
+export async function endDeletedTeamSessions(tx: StorageAdapter, teamId: string): Promise<void> {
+  await tx.update("session", [{ field: "activeTeamId", op: "eq", value: teamId }], {
+    activeTeamId: null,
+  });
 }
 
 /**
