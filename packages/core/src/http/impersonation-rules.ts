@@ -188,6 +188,7 @@ export const IMPERSONATION_ALLOWED: Readonly<Partial<Record<RouteKey, string>>> 
   "POST /password/sign-in": NO_SESSION,
   "GET /password/verify": NO_SESSION,
   "POST /password/verify": NO_SESSION,
+  "POST /password/verify/code": NO_SESSION,
   "POST /password/verify/resend": NO_SESSION,
   "POST /password/reset/request": NO_SESSION,
   "GET /password/reset": NO_SESSION,

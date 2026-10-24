@@ -82,7 +82,8 @@ describe("ROUTES (plan 11a)", () => {
     // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
     // Plan 12i Task 11 adds the three multi-session routes.
     // Plan 12i Task 10 adds the nonce and the sign-in of the ID-token route.
-    expect(listed.length).toBe(201);
+    // Plan 12i Task 20 adds POST /password/verify/code.
+    expect(listed.length).toBe(202);
   });
 
   it("serves only the routes of the features that are on by default for a minimal config", () => {

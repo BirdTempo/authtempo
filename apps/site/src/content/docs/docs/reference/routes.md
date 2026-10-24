@@ -419,13 +419,22 @@ These routes exist when the config sets `password`.
 | Answer | A form: 302 to `appURL` with the cookie. JSON: `{ verified: true }`, with the cookie when the address was unverified |
 | Errors | [`invalid_token`](/docs/reference/errors/#invalid_token), [`token_expired`](/docs/reference/errors/#token_expired), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
 
+<h3 id="post-password-verify-code"><code>POST /password/verify/code</code></h3>
+
+| Field | Value |
+| --- | --- |
+| Needs | Nothing |
+| Input | JSON `{ email, code }` |
+| Answer | `{ token, user, session }` with the cookie when the address was unverified; `{ verified: true }` with no cookie for a user already verified. The code is the one of the sign-up mail with `password.verifyBy: "code"`. A wrong, expired, or spent code and an unknown address answer `invalid_code` alike; the fifth wrong code spends the code |
+| Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`invalid_code`](/docs/reference/errors/#invalid_code), [`too_many_attempts`](/docs/reference/errors/#too_many_attempts), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
+
 <h3 id="post-password-verify-resend"><code>POST /password/verify/resend</code></h3>
 
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
 | Input | JSON `{ email }` |
-| Answer | `{ sent: true }` for every address; the earlier link of the address stops |
+| Answer | `{ sent: true }` for every address; the earlier link or code of the address stops. With `password.verifyBy: "code"`, the new code goes after the answer |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited) |
 
 <h3 id="post-password-reset-request"><code>POST /password/reset/request</code></h3>

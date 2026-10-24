@@ -50,7 +50,8 @@ describe("the demo lists and the routes of core", () => {
       // Plan 12k Task 7 added one tokens route: update.
       // Plan 12k Task 8 added five organizations routes: the organization tokens.
       // Plan 12h adds GET /health, so 86 became 87.
-      expect(served).toBe(87);
+      // Plan 12i Task 20 adds POST /password/verify/code of password, so 87 became 88.
+      expect(served).toBe(88);
     },
     LONG_TEST_MS,
   );

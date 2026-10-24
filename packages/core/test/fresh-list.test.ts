@@ -73,6 +73,7 @@ const BODIES: Readonly<Record<string, unknown>> = {
   "/password/reset/request": { email: EMAIL },
   "/password/sign-in": { email: EMAIL, password: "another long password" },
   "/password/sign-up": { email: "new@example.com", password: "another long password" },
+  "/password/verify/code": { email: EMAIL, code: "000000" },
   "/password/verify/resend": { email: EMAIL },
   "/reauth": { password: "another long password" },
   "/second-factor/disable": { method: "email", password: "x" },

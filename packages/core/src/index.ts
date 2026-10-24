@@ -93,6 +93,7 @@ export {
   defaultEmailOtpMail,
   defaultResetOtpMail,
   defaultSecondFactorMail,
+  defaultVerifyCodeMail,
   type EmailOtpMailInput,
 } from "./engine/email-otp-mail.js";
 export type { HandoffStart } from "./engine/handoff.js";
@@ -184,6 +185,7 @@ export type {
   PasswordSignUpResult,
   PasswordVerified,
   PasswordVerify,
+  PasswordVerifyCode,
   ResetChallenge,
   ResetResult,
 } from "./engine/password.js";

@@ -948,8 +948,14 @@ answers 400. A slug that core's slug rule refuses answers `VALIDATION_ERROR`
 - `changeEmail: { enabled: true }` serves the change of address by code
   (plan 12a). `verifyCurrentEmail: true` is refused: core proves the new
   address only.
-- Refused by name: `generateOTP`,
-  `overrideDefaultEmailVerification: true`, `sendVerificationOnSignUp: true`,
+- `overrideDefaultEmailVerification: true` is core's
+  `password.verifyBy: "code"` (plan 12i Task 20). The sign-up mails a code
+  through `sendVerificationOTP` with the type `email-verification`, and
+  `emailVerification.sendVerificationEmail` is then not required. The code
+  has 6 digits, lives 10 minutes, and takes 5 wrong tries. `otpLength`,
+  `expiresIn`, and `allowedAttempts` set the sign-in code and the reset code
+  only.
+- Refused by name: `generateOTP`, `sendVerificationOnSignUp: true`,
   `resendStrategy: "reuse"`, and `rateLimit`.
 
 `auth.handler` serves these Better Auth paths in Better Auth's shapes,
@@ -958,15 +964,17 @@ authtempo's status.
 
 | Path | Body | Answer |
 | --- | --- | --- |
-| `/email-otp/send-verification-otp` | `{ email, type }` | `{ success: true }` for `sign-in` and `forget-password`; 400 `INVALID_EMAIL` for a malformed address, as Better Auth does; 501 `NOT_SUPPORTED` for `email-verification` and `change-email` |
+| `/email-otp/send-verification-otp` | `{ email, type }` | `{ success: true }` for `sign-in` and `forget-password`, and for `email-verification` with `overrideDefaultEmailVerification`: a new sign-up code to an unverified user with a password, sent after the answer; 400 `INVALID_EMAIL` for a malformed address, as Better Auth does; 501 `NOT_SUPPORTED` for `change-email`, and for `email-verification` without the override |
+| `/email-otp/verify-email` | `{ email, otp }` | With `overrideDefaultEmailVerification`: `{ status: true, token, user }` with the session cookie, as Better Auth answers with `autoSignInAfterVerification`; `token: null` and no cookie for a user already verified; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`. Core runs its claim rule here, as at the verify link |
 | `/sign-in/email-otp` | `{ email, otp }` | `{ token, user }` with the session cookie; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`; 501 `NOT_SUPPORTED` for `name`, `image`, or another user field |
 | `/forget-password/email-otp`, `/email-otp/request-password-reset` | `{ email }` | `{ success: true }` |
 | `/email-otp/request-email-change` | `{ newEmail }` | With `changeEmail.enabled`: `{ success: true }`. The code goes to the new address with the type `change-email`. A taken address gets no code, as in Better Auth. A stale session answers 403 `SESSION_NOT_FRESH` |
 | `/email-otp/change-email` | `{ newEmail, otp }` | With `changeEmail.enabled`: `{ success: true }`, and the address moves; 400 `INVALID_OTP` for a wrong code or a `newEmail` that differs from the request |
 | `/email-otp/reset-password` | `{ email, otp, password }` | `{ success: true }` with the session cookie of the new session; for a user with the second factor on, `{ success: true }` with no cookie unless the device is trusted, as Better Auth answers every reset, and the next sign-in asks for the factor (plan 12c); 400 `PASSWORD_TOO_SHORT` and `PASSWORD_TOO_LONG` before the code check, so the code stays usable, as in Better Auth; 400 `INVALID_OTP`, `TOO_MANY_ATTEMPTS`, `INVALID_PASSWORD`, `PASSWORD_COMPROMISED` |
 
-`/email-otp/verify-email` and `/email-otp/check-verification-otp` answer 501
-`NOT_SUPPORTED`, and so do the two change paths without `changeEmail.enabled`. A wrong, expired, or spent code answers `INVALID_OTP`:
+`/email-otp/check-verification-otp` answers 501 `NOT_SUPPORTED`. So does
+`/email-otp/verify-email` without `overrideDefaultEmailVerification`, and so
+do the two change paths without `changeEmail.enabled`. A wrong, expired, or spent code answers `INVALID_OTP`:
 core does not tell expiry from a wrong code, so `OTP_EXPIRED` never
 appears. Better Auth answers `TOO_MANY_ATTEMPTS` with 403; authtempo with
 400. A password that the policy refuses for another reason than its length
@@ -1055,7 +1063,9 @@ README, "Hooks").
   reset, and a social sign-in with a verified provider address. Better Auth
   1.7.2 calls them at its verify link (`email-verification.mjs:294` and
   `:296`) and at `/email-otp/verify-email` (`routes.mjs:327` and `:332`).
-  The shim answers that path `NOT_SUPPORTED`. Better Auth also calls them at
+  The shim calls them there through core's sign-up code (plan 12i Task 20),
+  and answers that path `NOT_SUPPORTED` without
+  `overrideDefaultEmailVerification`. Better Auth also calls them at
   a change of address, and so does the shim. The change link calls the after
   hook only (`email-verification.mjs:229`). `/email-otp/change-email` calls
   both (`routes.mjs:736` and `:741`). The after hook gets the moved user,

@@ -676,6 +676,15 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
             // a taken address. The shim's signUp.email answers { token, user },
             // which the uniform answer cannot fill (plan 12b).
             uniformSignUp: false,
+            // Plan 12i Task 20: the email-otp plugin's overrideDefaultEmailVerification
+            // mails a code in place of the link, through sendVerificationOTP.
+            ...(otp?.options.overrideDefaultEmailVerification === true
+              ? {
+                  verifyBy: "code" as const,
+                  verifyCodeMail: ({ email, code }: { email: string; code: string }) =>
+                    otpMail(email, "email-verification", code),
+                }
+              : {}),
           },
         }
       : {}),

@@ -286,6 +286,8 @@ export const CONFIG_KEYS = {
     requireVerified: true,
     uniformSignUp: true,
     existingAccountMail: true,
+    verifyBy: true,
+    verifyCodeMail: true,
   } satisfies Keys<PasswordConfig>,
   "password.legacyVerify": { verify: true, timeoutMs: true } satisfies Keys<LegacyVerifyConfig>,
   emailOtp: {

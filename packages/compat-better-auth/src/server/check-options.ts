@@ -613,10 +613,8 @@ const PLUGIN_RULES: Record<string, Rule> = {
     // Plan 12b: the one sign-up rule of core; checkOptions refuses a mix of methods.
     disableSignUp: boolean,
     generateOTP: refused("core makes the code itself, from crypto.getRandomValues"),
-    overrideDefaultEmailVerification: only(
-      false,
-      "core's verify mail is a link; a code for it is a later input (see the plan index)",
-    ),
+    // Plan 12i Task 20: true is core's password.verifyBy "code".
+    overrideDefaultEmailVerification: boolean,
     sendVerificationOnSignUp: only(false, "core mails a verify link at sign-up, not a code"),
     resendStrategy: only("rotate", "core sends a new code at every request"),
     // Plan 12a: the two change paths of Better Auth 1.7.2 map onto core's change by code.
@@ -1301,8 +1299,12 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
       refuse(out, "baseURL", `its path ${path} differs from basePath ${options.basePath}`);
     }
   }
+  // Plan 12i Task 20: with overrideDefaultEmailVerification, the sign-up
+  // mails a code through sendVerificationOTP, as Better Auth does.
+  const codeProof =
+    pluginOf(options, "email-otp")?.options.overrideDefaultEmailVerification === true;
   if (options.emailAndPassword?.enabled === true) {
-    if (typeof options.emailVerification?.sendVerificationEmail !== "function") {
+    if (!codeProof && typeof options.emailVerification?.sendVerificationEmail !== "function") {
       refuse(
         out,
         "emailVerification.sendVerificationEmail",

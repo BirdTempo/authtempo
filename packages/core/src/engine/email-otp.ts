@@ -42,10 +42,11 @@ export type EmailOtpPurpose = "email-otp" | "password-reset-otp";
 export type CodePurpose = EmailOtpPurpose | "reauth-otp" | "email-change-otp";
 
 /**
- * Every purpose of a code that core draws: the mailed codes and the phone
- * codes (plan 12i). One draw, one keyed hash, and one compare serve them all.
+ * Every purpose of a code that core draws: the mailed codes, the phone
+ * codes, and the sign-up code (plan 12i). One draw, one keyed hash, and one
+ * compare serve them all.
  */
-export type DrawnPurpose = CodePurpose | "phone-otp" | "phone-add-otp";
+export type DrawnPurpose = CodePurpose | "phone-otp" | "phone-add-otp" | "password-verify-otp";
 
 /** What a draw reads of a code config: the email code's or the phone code's. */
 export interface CodeShape {

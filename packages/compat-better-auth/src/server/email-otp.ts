@@ -9,15 +9,16 @@ import { toUser } from "./shapes.js";
 /**
  * Better Auth 1.7.2's email OTP paths (dist/plugins/email-otp/routes.mjs,
  * read 2026-10-13), served by `auth.handler` with the `email-otp` plugin
- * (plan 9e). Five map onto core's code routes; these four answer
+ * (plan 9e). Five map onto core's code routes; these three answer
  * NOT_SUPPORTED (501), except the two change paths with
- * `changeEmail.enabled` (plan 12a). They are a set of Better Auth paths that this
+ * `changeEmail.enabled` (plan 12a). The verify of the address maps onto
+ * core's sign-up code with `overrideDefaultEmailVerification` (plan 12i
+ * Task 20), and answers 501 without it. They are a set of Better Auth paths that this
  * handler serves in Better Auth's shapes, because apps post them by hand
  * (consumerd's tests do). An error answers Better Auth's body `{ code,
  * message }` with core's status.
  */
 export const EMAIL_OTP_NOT_SUPPORTED: readonly string[] = [
-  "/email-otp/verify-email",
   "/email-otp/check-verification-otp",
   "/email-otp/request-email-change",
   "/email-otp/change-email",
@@ -26,6 +27,8 @@ export const EMAIL_OTP_NOT_SUPPORTED: readonly string[] = [
 const SEND = "/email-otp/send-verification-otp";
 const SIGN_IN = "/sign-in/email-otp";
 const RESET = "/email-otp/reset-password";
+/** Better Auth's verify of the address by code: core's sign-up code (plan 12i Task 20). */
+const VERIFY_EMAIL = "/email-otp/verify-email";
 /** Better Auth's change of address by code (plan 12a), served with `emailOTP({ changeEmail: { enabled: true } })`. */
 const REQUEST_CHANGE = "/email-otp/request-email-change";
 const CHANGE = "/email-otp/change-email";
@@ -33,6 +36,8 @@ const CHANGE = "/email-otp/change-email";
 const RESET_REQUESTS = new Set(["/forget-password/email-otp", "/email-otp/request-password-reset"]);
 const OTP_TYPES = new Set(["sign-in", "email-verification", "forget-password", "change-email"]);
 const NOT_SERVED = "core serves the sign-in code and the reset code only; see the plan index";
+const NO_CODE_PROOF =
+  "core proves the address at sign-up by a link; pass overrideDefaultEmailVerification: true for a code";
 
 type Body = Record<string, unknown>;
 
@@ -105,12 +110,16 @@ export async function emailOtpRoute(
     path === SEND ||
     path === SIGN_IN ||
     path === RESET ||
+    path === VERIFY_EMAIL ||
     RESET_REQUESTS.has(path) ||
     EMAIL_OTP_NOT_SUPPORTED.includes(path);
   if (!known) return null;
   const change = mapped.account.emailOtpChange && (path === REQUEST_CHANGE || path === CHANGE);
   if (EMAIL_OTP_NOT_SUPPORTED.includes(path) && !change)
     return failure(NOT_SUPPORTED, 501, NOT_SERVED);
+  // Plan 12i Task 20: the sign-up code of core, with overrideDefaultEmailVerification.
+  const codeProof = mapped.config.password?.verifyBy === "code";
+  if (path === VERIFY_EMAIL && !codeProof) return failure(NOT_SUPPORTED, 501, NO_CODE_PROOF);
   const body = await readBody(request);
   const forward = async (to: string, payload: Body) => {
     const headers = new Headers(request.headers);
@@ -172,11 +181,33 @@ export async function emailOtpRoute(
       return translate(await forward("/otp/request", { email }), success);
     if (body.type === "forget-password")
       return translate(await forward("/otp/reset/request", { email }), success);
+    // A new sign-up code (plan 12i Task 20). Core mails it only to an unverified user with a password.
+    if (body.type === "email-verification" && codeProof)
+      return translate(await forward("/password/verify/resend", { email }), success);
     return failure(NOT_SUPPORTED, 501, NOT_SERVED);
   }
   if (RESET_REQUESTS.has(path))
     return translate(await forward("/otp/reset/request", { email }), success);
   if (typeof body.otp !== "string") return failure(BETTER_AUTH_CODES.invalid_body, 400);
+  if (path === VERIFY_EMAIL)
+    // Better Auth answers { status, token, user } (routes.mjs verifyEmailOTP of
+    // 1.7.5, read 2026-10-25). Core opens the session of an unverified user,
+    // as the shim's link does. A user already verified gets { verified: true }
+    // and no session, so the token is null.
+    return translate(
+      await forward("/password/verify/code", { email, code: body.otp }),
+      async (b) => {
+        const row = await mapped.config.storage.findOne("user", [
+          { field: "email", op: "eq", value: normalizeEmail(email) ?? email },
+        ]);
+        if (!row) throw new Error("authtempo compat: the verified user is gone");
+        return {
+          status: true,
+          token: typeof b.token === "string" ? b.token : null,
+          user: toUser(row),
+        };
+      },
+    );
   if (path === SIGN_IN) {
     // Better Auth takes name, image, and other user fields for a new user.
     // Core takes none at a code sign-in, and a dropped field would be silent.

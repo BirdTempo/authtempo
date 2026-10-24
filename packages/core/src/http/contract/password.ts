@@ -47,6 +47,12 @@ export const resetRequestBody = z.object({
 
 export const resendBody = z.object({ email: z.string().max(320) });
 
+/** Plan 12i Task 20: the sign-up code. The engine compares any string, so a bad form answers `invalid_code`. */
+export const verifyCodeBody = z.object({
+  email: z.string().max(320),
+  code: z.string().max(16),
+});
+
 export const resetBody = z.object({
   token: z.string().max(64),
   // The engine refuses more than 128 code points; this cap only bounds the body.
@@ -76,6 +82,9 @@ export const resetQuery = z.object({
   error: z.enum(RESET_PAGE_ERRORS).optional(),
 });
 
+/** The confirm of a sign-up that opened no session. */
+const verifiedAnswer = z.strictObject({ verified: z.literal(true) });
+
 /** The sign-up answer, as each password config answers it (plan 12b): uniform, pending, or signed in. */
 const signUpAnswer = z.union([
   SentAnswer,
@@ -104,8 +113,13 @@ export const PASSWORD_CONTRACT = {
   },
   "POST /password/verify": {
     body: { schema: tokenBody, media: ["json", "form"], parsedBy: "zod" },
-    answer: { kind: "json", schema: z.strictObject({ verified: z.literal(true) }) },
+    answer: { kind: "json", schema: verifiedAnswer },
     alt: { kind: "redirect", param: "auth_error" },
+  },
+  "POST /password/verify/code": {
+    body: { schema: verifyCodeBody, media: ["json"], parsedBy: "zod" },
+    // A session for an unverified user; a user already verified gets no session.
+    answer: { kind: "json", schema: z.union([SignInAnswer, verifiedAnswer]) },
   },
   "POST /password/verify/resend": {
     body: { schema: resendBody, media: ["json"], parsedBy: "zod" },

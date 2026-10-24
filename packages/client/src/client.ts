@@ -376,6 +376,15 @@ export interface Client {
     resendVerification(input: { email: string }): Promise<ClientResult<{ sent: true }>>;
     /** The JSON verify of the link's token. Sets the session cookie when the address was unverified. */
     verifyEmail(input: { token: string }): Promise<ClientResult<{ verified: true }>>;
+    /**
+     * The sign-up code of `password.verifyBy: "code"` (plan 12i Task 20). A
+     * session with its cookie when the address was unverified, else
+     * `{ verified: true }`. A wrong, expired, or spent code is `invalid_code`.
+     */
+    verifyCode(input: {
+      email: string;
+      code: string;
+    }): Promise<ClientResult<SignInJSON | { verified: true }>>;
     requestReset(input: {
       email: string;
       next?: string | undefined;
@@ -1262,6 +1271,8 @@ export function createClient(options: ClientOptions): Client {
       ),
     resendVerification: (input) => send<{ sent: true }>("password.resendVerification", input),
     verifyEmail: (input) => changes(send<{ verified: true }>("password.verifyEmail", input)),
+    verifyCode: (input) =>
+      changes(send<SignInJSON | { verified: true }>("password.verifyCode", input)),
     requestReset: ({ next, captchaToken, ...rest }) =>
       send<{ sent: true }>(
         "password.requestReset",

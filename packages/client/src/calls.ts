@@ -57,6 +57,8 @@ export const CLIENT_CALLS = [
   { operation: "password.signIn", method: "POST", path: "/password/sign-in" },
   { operation: "password.resendVerification", method: "POST", path: "/password/verify/resend" },
   { operation: "password.verifyEmail", method: "POST", path: "/password/verify" },
+  // Plan 12i Task 20: the sign-up code of password.verifyBy "code".
+  { operation: "password.verifyCode", method: "POST", path: "/password/verify/code" },
   { operation: "password.requestReset", method: "POST", path: "/password/reset/request" },
   { operation: "password.reset", method: "POST", path: "/password/reset" },
   { operation: "password.change", method: "POST", path: "/password/change" },

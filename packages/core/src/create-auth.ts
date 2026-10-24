@@ -136,6 +136,7 @@ import {
   type PasswordSignUpResult,
   type PasswordVerified,
   type PasswordVerify,
+  type PasswordVerifyCode,
   passwordSignIn,
   passwordSignUp,
   type ResetResult,
@@ -143,6 +144,7 @@ import {
   resendPasswordVerification,
   resetPassword,
   verifyPassword,
+  verifyPasswordCode,
   verifyPasswordEmail,
 } from "./engine/password.js";
 import { hasPermission, type PermissionInput, permissionsOf } from "./engine/permissions.js";
@@ -330,7 +332,12 @@ export interface PasswordApi {
   /** The password of a known user again, with the sign-in's limits (plan 9f). */
   verify(input: PasswordReauth): Promise<Result<{ verified: true }>>;
   verifyEmail(input: PasswordVerify): Promise<Result<PasswordVerified>>;
-  /** A new verify link for an unverified user with a password. Always `{ sent: true }`, except `rate_limited`. */
+  /** The sign-up code of `password.verifyBy: "code"` (plan 12i Task 20): the confirm of `verifyEmail`. */
+  verifyCode(input: PasswordVerifyCode): Promise<Result<PasswordVerified>>;
+  /**
+   * A new verify link or code for an unverified user with a password. Always
+   * `{ sent: true }`, except `rate_limited`. In process, the code goes in the call.
+   */
   resendVerification(input: PasswordResend): Promise<Result<{ sent: true }>>;
   requestReset(input: PasswordResetRequest): Promise<Result<{ sent: true }>>;
   reset(input: PasswordReset): Promise<Result<ResetResult>>;
@@ -1446,6 +1453,7 @@ export function createAuth(input: AuthConfig): Auth {
               signUp: (i) => passwordSignUp(config, i),
               signIn: (i) => passwordSignIn(config, i),
               verifyEmail: (i) => verifyPasswordEmail(config, i),
+              verifyCode: (i) => verifyPasswordCode(config, i),
               resendVerification: (i) => resendPasswordVerification(config, i),
               requestReset: (i) => requestPasswordReset(config, i),
               reset: (i) => resetPassword(config, i),

@@ -244,8 +244,9 @@ describe("the column map (plan 12g)", () => {
     // Plan 12i Task 6 adds 3: the anonymous sign-in per IP, its daily cap
     // (ruling 25 M4), and its delete per user. Plan 12i Task 11 adds 1: the
     // per-IP key of the multi-session routes. Plan 12i Task 10 adds 2: the
-    // per-IP keys of the ID-token nonce and sign-in.
-    expect(sites.length).toBe(103);
+    // per-IP keys of the ID-token nonce and sign-in. Plan 12i Task 20 adds 2:
+    // the per-IP and the per-address keys of the sign-up code.
+    expect(sites.length).toBe(105);
     expect(sites).toContain('engine/id-token.ts "id-token:ip" ipKey(input.ip)');
     expect(sites).toContain('engine/phone.ts "phone-add:phone" input.phone');
     expect(sites).toContain('http/routes/multi-session.ts "multi-session:ip" ipKey(ctx.ip)');

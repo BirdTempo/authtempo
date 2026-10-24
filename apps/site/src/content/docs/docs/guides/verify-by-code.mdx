@@ -1,0 +1,62 @@
+---
+title: Prove the address by a code
+description: Mail a code of 6 digits at a password sign-up in place of the link, for a device whose mailbox is elsewhere.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 8.10
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "The address proof at sign-up by an email code"
+  - packages/core/README.md "The sign-up code"
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/verify-by-code.ts?raw";
+import test from "../../../../../samples/guides/verify-by-code.test.ts?raw";
+
+**For:** an app developer whose users sign up with a password on a device with no mailbox, such as a TV or a kiosk.
+
+**What it does:** `password.verifyBy: "code"` mails a code of 6 digits at sign-up in place of the verify link. The person types it in the app, and `POST /password/verify/code` confirms the address and opens the session.
+
+## Before you start
+
+- Password sign-in, as in [Passwords](/docs/guides/password/).
+- A mail transport in `mail.send` that delivers within the life of the code, 10 minutes. [Top level](/docs/reference/config/#top-level) lists the `mail` key.
+- The `waitUntil` of your host, passed to `auth.handle`, as in [Start on Workers with D1](/docs/start/workers-d1/). The code goes out after the answer.
+
+## Steps
+
+1. Set `password.verifyBy` to `"code"`. Set `password.verifyCodeMail` for your own text, or keep the default.
+2. Show a code field after the sign-up answers `{ sent: true }`.
+3. Post `{ email, code }` to `POST /password/verify/code`. A browser gets the session cookie. A native app reads `token` from the answer.
+4. Offer "Send a new code": it posts `{ email }` to `POST /password/verify/resend`.
+
+<Code code={config} lang="ts" title="The code in place of the link" />
+
+<Code code={test} lang="ts" title="The code as a test" />
+
+## How it behaves
+
+- The code has 6 digits from `crypto.getRandomValues` and lives 10 minutes. Core stores HMAC-SHA256 of the row id and the code under the app secret, never the code.
+- One code is live per address. A resend spends the earlier code.
+- A wrong code counts one try. The fifth wrong try spends the code and answers `too_many_attempts`. Then the person asks for a new code.
+- A wrong, expired, or spent code and an address with no code answer `invalid_code` alike, with the same work. The answer does not tell whether the address has an account.
+- The sign-up and the resend send the code after the answer, through the `waitUntil` of the request. The mail to an address that has an account goes after the answer too.
+- A right code runs the confirm of the link. It verifies the address and applies the claim rule: the other sessions and credentials of the unverified user end. Then it opens the session with `via: "password"`.
+- A user who is already verified gets `{ verified: true }` and no session. An unverified user cannot turn on the second factor, so the code never opens a session past it.
+- A code asked from an anonymous session links that anonymous user only when the confirm carries the same anonymous session.
+- The code check counts `password-verify-code:ip` 30 and `password-verify-code:email` 10 per 15 minutes. The resend counts the limits of [Limits](/docs/reference/limits/).
+- Residual: the sign-up of a new address writes the user and the password row before the answer, and a known address writes nothing. So the time of the sign-up answer can still differ, as with the link.
+- The Better Auth shim maps `emailOTP({ overrideDefaultEmailVerification: true })` to this mode. `/email-otp/verify-email` and the `email-verification` resend map onto these routes.
+
+## If it fails
+
+- [`invalid_code`](/docs/reference/errors/#invalid_code): the code is wrong, expired, or spent, or the address has no code. Ask for a new code.
+- [`too_many_attempts`](/docs/reference/errors/#too_many_attempts): five wrong tries spent the code. Ask for a new code.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): too many tries from this IP or for this address. Wait 15 minutes.
+- [`sso_required`](/docs/reference/errors/#sso_required): the address is of a domain that signs in by SSO only.
+- [`account_banned`](/docs/reference/errors/#account_banned): an operator banned the account after the mail.
+
+## Next
+
+- [Passwords](/docs/guides/password/)
+- [Email codes](/docs/guides/email-code/)
+- [Limits](/docs/reference/limits/)

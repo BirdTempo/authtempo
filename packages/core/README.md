@@ -50,7 +50,8 @@ The estimate of a secret is its length times log2 of its distinct characters. `c
 | POST | `/password/sign-in` | `{ email, password }` | `{ token, user, session }` with the cookie; 400 `invalid_body`; 401 `invalid_credentials`; 429 `rate_limited`; 404 without a `password` config |
 | GET | `/password/verify` | `?token=` | 200 HTML confirm page; 302 to `/?auth_error=invalid_token` on a malformed token. No side effect, so a mail scanner burns nothing |
 | POST | `/password/verify` | form or JSON `token` | form body: 302 to `appURL` with the cookie, or 302 to `/?auth_error=<code>`; JSON body: `{ verified: true }`, with the cookie when the address was unverified, or the error as JSON. `invalid_token` when the password row is gone; `token_expired` |
-| POST | `/password/verify/resend` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. A mail goes only to an unverified user with a password, and the earlier link of the address stops working |
+| POST | `/password/verify/code` | `{ email, code }` | `{ token, user, session }` with the cookie when the address was unverified, or `{ verified: true }`; 400 `invalid_code`, `too_many_attempts`; 429 `rate_limited`. The code of `password.verifyBy: "code"` (see "The sign-up code") |
+| POST | `/password/verify/resend` | `{ email }` | `{ sent: true }` always; 400 `invalid_body`; 429 `rate_limited`. A mail goes only to an unverified user with a password, and the earlier link or code of the address stops working |
 | POST | `/password/reset/request` | `{ email, next? }` | `{ sent: true }` always; 429 `rate_limited`; 400 `invalid_body` |
 | GET | `/password/reset` | `?token=` | 200 HTML form (`password.resetPage` replaces it); 302 to `/?auth_error=invalid_token` on a malformed token. No side effect |
 | POST | `/password/reset` | form or JSON `token`, `password`, `trustDevice?` | form body: 302 to `next` with the cookie, or, for a user with the second factor on, 302 to the challenge page with no cookie, or back to the form on `password_policy`, `password_breached`, or `breach_check_unavailable`, or 302 to `/?auth_error=<code>`; JSON body: `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie (plan 12c), or the error as JSON. `invalid_token`, `token_expired`, 429 `rate_limited`, 503 `breach_check_unavailable`. A reset that answers the challenge still sets the password and ends every session |
@@ -518,6 +519,8 @@ optional.
 | `requireVerified` | `false` | True refuses the password sign-in of an unverified address. |
 | `uniformSignUp` | `true` | Every sign-up answers `{ sent: true }` with no session. A known address gets a mail. False keeps a session at sign-up and `email_taken`. |
 | `existingAccountMail` | `defaultExistingAccountMail` | The mail to a known address at a uniform sign-up. Core sends it to the address. |
+| `verifyBy` | `"link"` | The proof of the address at sign-up: a link, or `"code"` for a code of 6 digits. |
+| `verifyCodeMail` | `defaultVerifyCodeMail` | The mail of the sign-up code. Core sends it to the address. |
 
 The default hash is PBKDF2-HMAC-SHA256 on Web Crypto. A hash is stored as
 `pbkdf2-sha256$<iterations>$<salt>$<hash>`. The salt is 16 random bytes and
@@ -586,6 +589,36 @@ Under `"invited"` only a new address with an invitation gets the rows and
 the verify mail, so the time of the answer can show that an invitation
 exists. That tells less than whether an account exists.
 
+### The sign-up code
+
+`verifyBy: "code"` (plan 12i Task 20) mails a code in place of the verify
+link. It is for a device whose mailbox is elsewhere, or a mail client that
+strips links. The code has 6 digits from `crypto.getRandomValues` and lives
+10 minutes. The row is `password-verify-otp`, keyed by the address. Its
+`valueHash` is HMAC-SHA256 under the current secret version, as the email
+code's is (spec 8.10 item 3). A new code spends the earlier live code of
+the address.
+
+`POST /password/verify/code { email, code }` checks the code. No row, an
+expired row, a spent row, and a wrong code run the same HMAC and compare,
+and each answers `invalid_code`. A wrong code counts one try by
+compare-and-set. The fifth wrong try spends the code and answers
+`too_many_attempts`. A right code is spent in one conditional update. Then
+the confirm of the link runs: the claim rule, and the session of an
+unverified user, with `via: "password"`. A user already verified gets
+`{ verified: true }` and no session, as at the link. So the code never
+opens a session past the second factor: an unverified user cannot turn
+the factor on. The confirm links an anonymous user only when the
+confirming request carries the anonymous session that asked for the code.
+
+The uniform sign-up and `POST /password/verify/resend` send the code after
+the answer, through the `waitUntil` of the request (ruling 23). The mail
+to a known address goes after the answer too. So the time of the answer
+does not hold the code row or the mail. The sign-up of a new address still
+writes the user and the password row before the answer, as with the link.
+In process, `api.password.signUp` and `resendVerification` send the code
+in the call.
+
 `breachCheck` (plan 12b, ASVS 5.0.0 6.2.12). The check fails closed, and
 core holds no list of breached passwords. An answer of `true` refuses the
 password with 400 `password_breached`. An answer of `"unavailable"`
@@ -623,6 +656,8 @@ The limits, in the same limiter as the other routes:
 | `password-reset-post:ip:<ip>` | 20 per 15 minutes |
 | `password-resend:ip:<ip>` | 20 per 15 minutes |
 | `password-resend:email:<email>` | 3 per 15 minutes |
+| `password-verify-code:ip:<ip>` | 30 per 15 minutes |
+| `password-verify-code:email:<email>` | 10 per 15 minutes |
 | `password-change:user:<userId>` | 10 per 15 minutes |
 
 `<ip>` is an IPv4 address, the IPv4 form of a mapped IPv6 address, or the

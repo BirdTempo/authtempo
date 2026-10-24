@@ -98,7 +98,8 @@ describe("openApiDocument (plan 11g)", () => {
     // Plan 12i Task 5 adds the five phone routes, and Task 6 the two anonymous routes.
     // Plan 12i Task 11 adds the three multi-session routes.
     // Plan 12i Task 10 adds the nonce and the sign-in of the ID-token route.
-    expect(keys.length).toBe(201);
+    // Plan 12i Task 20 adds POST /password/verify/code.
+    expect(keys.length).toBe(202);
     const firstSeen = [...new Set(ROUTES.map((r) => r.path.replace(/:([A-Za-z]+)/g, "{$1}")))];
     expect(Object.keys(doc.paths)).toEqual(firstSeen);
   });
@@ -202,8 +203,9 @@ describe("openApiDocument (plan 11g)", () => {
     // /user/username: 103. Plan 12i Task 5 adds the five phone bodies: 108.
     // Plan 12i Task 6 adds the two anonymous bodies: 110. Plan 12i Task 11
     // adds the bodies of the multi-session switch and sign-out: 112. Plan 12i
-    // Task 10 adds the bodies of the ID-token nonce and sign-in: 114.
-    expect(bodies.length).toBe(114);
+    // Task 10 adds the bodies of the ID-token nonce and sign-in: 114. Plan
+    // 12i Task 20 adds the body of the sign-up code: 115.
+    expect(bodies.length).toBe(115);
   });
 
   it("gives the operator route its own scheme and the default off", () => {
@@ -449,7 +451,8 @@ describe("openApiDocument (plan 11g)", () => {
     // 2 answers and the 2 bodies of the anonymous routes. Plan 12i Task 11
     // adds the 3 answers and the 2 bodies of the multi-session routes. Plan
     // 12i Task 10 adds the 2 answers and the 2 bodies of the ID-token route.
-    expect([answers, bodies, queries]).toEqual([151, 114, 32]);
+    // Plan 12i Task 20 adds the answer and the body of the sign-up code.
+    expect([answers, bodies, queries]).toEqual([152, 115, 32]);
   });
 
   it("takes the request_id form of the authorize query", () => {

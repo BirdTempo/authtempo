@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AuthConfig } from "../src/config.js";
 import { operatorApi } from "../src/engine/operator/index.js";
 import { passwordSignUp } from "../src/engine/password.js";
 import { addPhone, verifyAddPhone } from "../src/engine/phone.js";
@@ -9,7 +10,7 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { BASE_URL, settled, tokenFromMail } from "./helpers.js";
 import { operatorAuth } from "./operator-helpers.js";
-import { signUpAndVerify } from "./password-helpers.js";
+import { FAST, signUpAndVerify } from "./password-helpers.js";
 import { enrolled, PASSWORD } from "./totp-helpers.js";
 
 beforeEach(() => {
@@ -53,15 +54,20 @@ const BAN_ROUTES = [
   "POST /sso/:connectionId/acs",
   // Plan 12i Task 5: the phone code opens a session through prepareSession.
   "POST /phone/verify",
+  // Plan 12i Task 20: the sign-up code opens its session through the confirm of the link.
+  "POST /password/verify/code",
 ] as const;
 
 /** The routes of the operator tools that refuse a banned target (plan 12f Task 10). */
 const OPERATOR_ROUTES = ["POST /operator/users/platform-role", "POST /operator/users/create-admin"];
 
-async function world() {
+async function world(extra: Partial<AuthConfig> = {}) {
   // The phone code of plan 12i Task 5 reads its codes from this port.
   const sms = createRecordingSms();
-  const auth = await operatorAuth({ phone: { sms, regions: ["+1"], isolateLimiter: "allow" } });
+  const auth = await operatorAuth({
+    phone: { sms, regions: ["+1"], isolateLimiter: "allow" },
+    ...extra,
+  });
   const handle = settled(createRouter(auth.config, coreRoutes(auth.config)));
   const post = (path: string, body: unknown) =>
     handle(
@@ -185,6 +191,22 @@ describe("account_banned at the sign-in routes (plan 12f Task 10, lead item 3)",
     const token = w.lastToken();
     await w.ban();
     expect(await answerOf(await w.post("/password/verify", { token }))).toEqual(BANNED);
+  });
+
+  it("answers 403 account_banned to the sign-up code when the ban came after the mail (plan 12i Task 20)", async () => {
+    const w = await world({ password: { hash: FAST, uniformSignUp: false, verifyBy: "code" } });
+    const up = await passwordSignUp(w.auth.config, {
+      email: EMAIL,
+      password: PASSWORD,
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok) throw new Error(up.code);
+    const code = w.lastCode();
+    await w.ban();
+    expect(await answerOf(await w.post("/password/verify/code", { email: EMAIL, code }))).toEqual(
+      BANNED,
+    );
   });
 
   it("answers 403 account_banned with no challenge to a banned user with the factor on", async () => {

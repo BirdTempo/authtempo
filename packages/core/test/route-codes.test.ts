@@ -114,6 +114,7 @@ const BODIES: { readonly [K in RouteKey]?: Record<string, unknown> } = {
   "POST /password/sign-up": { email: "$newEmail", password: PASSWORD },
   "POST /password/sign-in": { email: "ada@example.com", password: PASSWORD },
   "POST /password/verify": { token: BODY43 },
+  "POST /password/verify/code": { email: "ada@example.com", code: "000000" },
   "POST /password/verify/resend": { email: "ada@example.com" },
   "POST /password/reset/request": { email: "ada@example.com" },
   "POST /password/reset": { token: "$resetToken", password: PASSWORD },
@@ -1183,6 +1184,8 @@ const HOOK_ROUTES_ELSEWHERE: readonly RouteKey[] = [
   "GET /sso/:connectionId/callback",
   // The SAML ACS needs a signed Response of a start, and it runs the same resolveSsoUser (plan 12d Task 8).
   "POST /sso/:connectionId/acs",
+  // The sign-up code needs verifyBy code: password-verify-code.test.ts drives both hook codes (plan 12i Task 20).
+  "POST /password/verify/code",
 ];
 
 /** A world whose before hooks all refuse, or all throw, once `armed`. The setup runs before. */

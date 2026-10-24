@@ -44,7 +44,8 @@ describe("checkConfig", () => {
     // Plan 12i Task 7 adds hooks.anonymous.
     // Plan 12i Task 10 adds social.idToken, social.idToken.requireNonce, and
     // audiences on social.google and social.apple.
-    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4);
+    // Plan 12i Task 20 adds password.verifyBy and password.verifyCodeMail.
+    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4 + 2);
     expect(keys).toContain("social.idToken.requireNonce");
     expect(keys).toContain("social.apple.audiences");
     expect(keys).toContain("multiSession.max");

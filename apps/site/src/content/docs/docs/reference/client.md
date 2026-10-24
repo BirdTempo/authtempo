@@ -93,6 +93,7 @@ Every operation answers a `ClientResult`. A success is `{ ok: true, value }`. A 
 | `client.password.signIn({ email, password, trustDevice?, next? })` | `POST /password/sign-in` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.password.resendVerification({ email })` | `POST /password/verify/resend` | `{ sent: true }` |
 | `client.password.verifyEmail({ token })` | `POST /password/verify` | `{ verified: true }` |
+| `client.password.verifyCode({ email, code })` | `POST /password/verify/code` | A session with `token`, or `{ verified: true }` |
 | `client.password.requestReset({ email, next? })` | `POST /password/reset/request` | `{ sent: true }` |
 | `client.password.reset({ token, password, trustDevice? })` | `POST /password/reset` | `{ token }` and `PublicSession`, or a `TwoFactorChallengeJSON` |
 | `client.password.change({ currentPassword?, newPassword })` | `POST /password/change` | `{ ok: true }` |

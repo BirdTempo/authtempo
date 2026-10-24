@@ -33,7 +33,8 @@ import {
  * Where Better Auth 1.7.2 calls `emailVerification.beforeEmailVerification`
  * and `afterEmailVerification` (read 2026-10-17). `null` is no call. The
  * shim calls them at core's claim points and at both changes of address. Better Auth's
- * `/email-otp/verify-email` answers NOT_SUPPORTED in the shim.
+ * `/email-otp/verify-email` is core's sign-up code with
+ * `overrideDefaultEmailVerification` (plan 12i Task 20), and NOT_SUPPORTED without it.
  */
 export const VERIFY_CALLBACK_PLACES = {
   verifyLink: { before: "dist/api/routes/email-verification.mjs:294", after: ":296" },

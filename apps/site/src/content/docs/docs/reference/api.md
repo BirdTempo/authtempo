@@ -65,7 +65,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `api.session` | `requireFresh(resolved)`, `reauthenticate`, `requestReauthCode`, `reauthPasskeyOptions`, `list`, `revoke`, `revokeOthers`, `refresh(token)`; present in every deployment. `refresh` slides the expiry as `POST /session/refresh` does. `api.passkeyRegistrationOptions`, `api.deletePasskey`, `api.tokens.create`, `api.tokens.update`, `api.totp.disableWithCode`, and `api.totp.regenerateBackupCodesWithCode` take a user and apply no fresh rule: call `requireFresh` first. [Fresh sessions](/docs/concepts/fresh-sessions/) |
 | `api.user` | `update`, `changeEmail`, `confirmEmailChange`, `verifyEmailChange`, `delete`, `confirmDelete`; present in every deployment. `verifyEmailChange` answers `not_found` with `emailOtp: false`. `delete` and `confirmDelete` answer `not_found` with `account.delete: false`. With `account.deleteConfirm` on, `delete` mails a link and answers `{ sent: true }` |
 | `api.identities` | `list`, `unlink`; present in every deployment. `unlink` has the fresh rule and the last-credential guard |
-| `api.password` | `signUp`, `signIn`, `verify`, `verifyEmail`, `resendVerification`, `requestReset`, `reset`, `change`; present when `password` is set |
+| `api.password` | `signUp`, `signIn`, `verify`, `verifyEmail`, `verifyCode`, `resendVerification`, `requestReset`, `reset`, `change`; present when `password` is set |
 | `api.emailOtp` | `request`, `verify`, `requestReset`, `reset`; present unless `emailOtp` is `false` |
 | `api.totp` | `setup`, `enable`, `verify`, `disable`, `disableWithCode`, `regenerateBackupCodes`, `regenerateBackupCodesWithCode`, `status`, `uri`, `revokeTrustedDevices`; present when the second factor is on. `disable` turns every method off |
 | `api.jwt` | `mint`, `verify`, `rotate`, `jwks`, `sessionLive`; present unless `jwtMint` is `false` |
@@ -92,7 +92,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `schema` | The models and the fields of the storage port. |
 | `defaultConfirmPage`, `defaultSignInPage`, `defaultHandoffConfirmPage`, `defaultResetPage`, `defaultPasswordVerifyPage`, `defaultTotpPage`, `defaultConsentPage`, `defaultDevicePage`, `defaultEmailChangePage` | The default pages. [Replace the default pages](/docs/guides/pages/) tells how to replace one. |
 | `defaultAccountDeletePage` | The page of the mailed delete link (`account.deleteConfirm`). No key replaces it. An app that serves its own page posts the token with `client.user.confirmDelete`. |
-| `defaultEmailOtpMail`, `defaultResetOtpMail`, `defaultSecondFactorMail`, `defaultAccountMail`, `defaultNoticeMail` | The default mails of the email codes and of the settings page. `defaultSecondFactorMail` is the mail of a second-factor email code. `defaultNoticeMail` is the notice after a change of a way in. |
+| `defaultEmailOtpMail`, `defaultResetOtpMail`, `defaultSecondFactorMail`, `defaultVerifyCodeMail`, `defaultAccountMail`, `defaultNoticeMail` | The default mails of the email codes and of the settings page. `defaultSecondFactorMail` is the mail of a second-factor email code. `defaultVerifyCodeMail` is the mail of the sign-up code of `password.verifyBy: "code"`. `defaultNoticeMail` is the notice after a change of a way in. |
 | `defaultPhoneMessage` | The default SMS text of a phone code: the code, the app name, and the life in minutes. |
 | `defaultExistingAccountMail` | The default mail to a known address at a uniform sign-up. `password.existingAccountMail` replaces it. |
 | `limiterKey` | Joins a key, the seconds, and the maximum into the stored key of the owned limiters. |
@@ -161,7 +161,7 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Magic link and social | `MagicLinkRequest`, `MagicLinkVerify`, `SocialStart`, `SocialStarted`, `SocialComplete`, `SocialProfile`, `SocialProviderName` |
 | Passkeys | `PasskeySummary`, `PasskeyHint`, `PasskeySignInExtensions`, `RegisteredPasskey`, `AuthenticatedPasskey`, `PublicKeyCredentialCreationOptionsJSON`, `PublicKeyCredentialRequestOptionsJSON`, `RegistrationResponseJSON`, `AuthenticationResponseJSON` |
 | Handoff | `HandoffStart` |
-| Passwords | `PasswordApi`, `PasswordSignUp`, `PasswordSignUpResult`, `PasswordSignUpPending`, `PasswordSignIn`, `PasswordIdentifier`, `PasswordSignInFields`, `PasswordSignInResult`, `PasswordSession`, `PasswordVerify`, `PasswordVerified`, `PasswordResend`, `PasswordResetRequest`, `PasswordReset`, `ResetResult`, `ResetChallenge`, `PasswordChange`, `PasswordReauth` |
+| Passwords | `PasswordApi`, `PasswordSignUp`, `PasswordSignUpResult`, `PasswordSignUpPending`, `PasswordSignIn`, `PasswordIdentifier`, `PasswordSignInFields`, `PasswordSignInResult`, `PasswordSession`, `PasswordVerify`, `PasswordVerifyCode`, `PasswordVerified`, `PasswordResend`, `PasswordResetRequest`, `PasswordReset`, `ResetResult`, `ResetChallenge`, `PasswordChange`, `PasswordReauth` |
 | Email codes | `EmailOtpApi`, `EmailOtpRequest`, `EmailOtpVerify`, `EmailOtpReset`, `EmailOtpSession`, `ResolvedEmailOtp` |
 | Phone | `PhoneApi`, `PhoneRequest`, `PhoneVerify`, `PhoneSession`, `PhoneAdd`, `PhoneAddVerify`, `PhoneRemove` |
 | Anonymous | `AnonymousApi`, `AnonymousSignIn`, `AnonymousSession`, `AnonymousDelete` |

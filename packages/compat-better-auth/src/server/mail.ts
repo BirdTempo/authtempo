@@ -30,10 +30,14 @@ export const OTP_LINK_PREFIX = "tempo-compat-otp:";
  */
 export const DROP_LINK_PREFIX = "tempo-compat-drop:";
 
-/** The mail that core's `emailOtp.mail`, `emailOtp.resetMail`, and the change code answer here. */
+/**
+ * The mail that core's `emailOtp.mail`, `emailOtp.resetMail`, the change
+ * code, and the sign-up code (`password.verifyCodeMail`, plan 12i Task 20)
+ * answer here.
+ */
 export function otpMail(
   to: string,
-  type: "sign-in" | "forget-password" | "change-email",
+  type: "sign-in" | "forget-password" | "change-email" | "email-verification",
   code: string,
 ): MailMessage {
   return {
@@ -152,7 +156,13 @@ export function compatMail(routes: MailRoutes): MailPort {
         const cb = routes.sendVerificationOTP;
         if (!cb) throw new Error("authtempo compat: no sendVerificationOTP");
         const [type, otp] = link.slice(OTP_LINK_PREFIX.length).split(":");
-        if ((type !== "sign-in" && type !== "forget-password" && type !== "change-email") || !otp)
+        if (
+          (type !== "sign-in" &&
+            type !== "forget-password" &&
+            type !== "change-email" &&
+            type !== "email-verification") ||
+          !otp
+        )
           throw new Error("authtempo compat: the email code mail is malformed");
         // Better Auth sends a reset code only to an address with a user
         // (routes.mjs requestPasswordResetEmailOTP, read 2026-10-13). Send

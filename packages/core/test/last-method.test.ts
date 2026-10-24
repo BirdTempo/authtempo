@@ -28,7 +28,7 @@ import {
   settled,
   tokenFromMail,
 } from "./helpers.js";
-import { signUpAndVerify } from "./password-helpers.js";
+import { FAST, signUpAndVerify } from "./password-helpers.js";
 import { type FakeIdToken, fakeFetch, fakeJwt, GOOGLE } from "./social-helpers.js";
 import { codeNow, EMAIL, enrolled, PASSWORD, totpAuth } from "./totp-helpers.js";
 
@@ -267,6 +267,21 @@ const MORE: [string, string, (w: World) => Promise<{ res: Response; json: boolea
       // The answer is { verified: true }: a confirm, not a sign-in answer, so no `via`.
       expect(await res.clone().json()).toEqual({ verified: true });
       return { res, json: false };
+    },
+  ],
+  [
+    // Plan 12i Task 20: the sign-up code opens the session of the sign-up, as the confirm link does.
+    "the confirm code",
+    "password",
+    async () => {
+      const w = world({ password: { hash: FAST, uniformSignUp: false, verifyBy: "code" } });
+      await w.handle(post("/auth/password/sign-up", { email: EMAIL, password: PASSWORD }));
+      const text = w.auth.mail.findLast((m) => m.to === EMAIL)?.text ?? "";
+      const code = recordCredential(/^(\d{6}) is your /.exec(text)?.[1] ?? "");
+      return {
+        res: await w.handle(post("/auth/password/verify/code", { email: EMAIL, code })),
+        json: true,
+      };
     },
   ],
   [

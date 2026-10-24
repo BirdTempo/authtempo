@@ -23,6 +23,9 @@ export const LIMIT_FAMILIES = Object.freeze([
   "password:user",
   "password-resend:ip",
   "password-resend:email",
+  // Plan 12i Task 20: the sign-up code.
+  "password-verify-code:ip",
+  "password-verify-code:email",
   "password-reset:ip",
   "password-reset:email",
   "password-reset-post:ip",

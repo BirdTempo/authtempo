@@ -1286,7 +1286,8 @@ const SITES: Record<string, readonly string[] | string> = {
   ],
   "password insertUniform": "one kind: the create of a new user and its password row, no session",
   "password passwordSignIn": "a sign-in by a password",
-  "password verifyPasswordEmail": ["an email claim by the sign-up link"],
+  // Plan 12i Task 20: the confirm of the link and of the code, one transaction.
+  "password confirmSignUp": ["an email claim by the sign-up link"],
   "password applyReset": ["a password reset"],
   "password changePassword": ["a password set", "a password change", "a second factor enable"],
   "profile updateProfile": "one kind: the compare-and-set of the user row",

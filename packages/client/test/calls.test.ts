@@ -55,8 +55,8 @@ describe("the call table of the client (plan 11d)", () => {
     // Plan 12k Task 8 adds the five organization token calls.
     // Plan 12d Task 13 adds the eleven SSO calls and the three SCIM token calls.
     // Plan 12i Task 2 adds the two username calls, and Task 5 the five phone calls.
-    // Task 6 adds the two anonymous calls.
-    expect(CLIENT_CALLS).toHaveLength(121);
+    // Task 6 adds the two anonymous calls. Task 20 adds the sign-up code.
+    expect(CLIENT_CALLS).toHaveLength(122);
   });
 
   it("calls exactly the routes of its table when every operation runs once", async () => {
@@ -92,6 +92,7 @@ describe("the call table of the client (plan 11d)", () => {
     await c.password.signIn({ email: "a@b.c", password: "p" });
     await c.password.resendVerification({ email: "a@b.c" });
     await c.password.verifyEmail({ token: "t" });
+    await c.password.verifyCode({ email: "a@b.c", code: "1" });
     await c.password.requestReset({ email: "a@b.c" });
     await c.password.reset({ token: "t", password: "p" });
     await c.password.change({ newPassword: "p" });
@@ -220,13 +221,14 @@ describe("the call table of the client (plan 11d)", () => {
     expect([...COMPARED, ...notCompared].sort()).toEqual(operations);
     // Plan 12d Task 13: thirteen compared rows, and the start link, which is not.
     // Plan 12i Task 2 adds the two username calls, and Task 5 the five phone calls.
-    // Task 6 adds the two anonymous calls.
-    expect(COMPARED).toHaveLength(114);
+    // Task 6 adds the two anonymous calls. Task 20 adds the sign-up code.
+    expect(COMPARED).toHaveLength(115);
     expect(NOT_COMPARED).toHaveLength(7);
     for (const row of NOT_COMPARED) expect(row.reason.length, row.operation).toBeGreaterThan(0);
     // A body row is a compared row.
     // Plan 12i Task 2 adds username.set. Task 5 adds phone.verify, phone.add, and phone.verifyAdd.
-    expect(BODY_AS_INPUT).toHaveLength(66);
+    // Task 20 adds password.verifyCode.
+    expect(BODY_AS_INPUT).toHaveLength(67);
     for (const op of BODY_AS_INPUT) expect(COMPARED, op).toContain(op);
     // Every row with `select` is compared: the type test reads the key.
     for (const r of CLIENT_CALLS)

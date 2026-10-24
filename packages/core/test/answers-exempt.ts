@@ -253,6 +253,7 @@ const ORIGIN_ANSWERED: readonly RouteKey[] = [
   "POST /password/sign-in",
   "POST /password/sign-up",
   "POST /password/verify",
+  "POST /password/verify/code",
   "POST /password/verify/resend",
   "POST /reauth",
   "POST /reauth/email",
@@ -356,6 +357,8 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
       "POST /password/sign-in",
       "POST /password/sign-up",
       "POST /password/verify",
+      // Plan 12i Task 20: the sign-up code runs the confirm of the link.
+      "POST /password/verify/code",
       "POST /totp/challenge",
       "POST /totp/verify",
       "POST /organizations/create",
@@ -476,6 +479,11 @@ export const ANSWERS_EXEMPT: readonly AnswersExempt[] = [
     "sso_required",
     "the ID-token route signs in through signInByProfile, the door of completeSocial that sso/enforce.test.ts drives through the Google callback (plan 12i Task 10)",
     ["POST /social/:provider/id-token"],
+  ),
+  ...rows(
+    "sso_required",
+    "the sign-up code runs confirmSignUp, the door of POST /password/verify, where sso/enforce.test.ts answers it (plan 12i Task 20)",
+    ["POST /password/verify/code"],
   ),
   ...rows(
     "sso_required",
@@ -659,6 +667,7 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
       ["POST /otp/reset", "user.email"],
       ["POST /password/reset", "user.email"],
       ["POST /password/sign-up", "user.email"],
+      ["POST /password/verify/code", "user.email"],
       ["POST /user/change-email/confirm", "user.email"],
       ["POST /user/change-email/verify", "user.email"],
     ] as const

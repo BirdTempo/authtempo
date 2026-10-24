@@ -11,6 +11,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
   - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
   - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 4"
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 20"
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.
@@ -44,6 +45,8 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `password:user:<userId>` | 15 minutes | 10 | Password check of a user with no address, in place of the address key |
 | `password-resend:ip:<ip>` | 15 minutes | 20 | Verify mail resend |
 | `password-resend:email:<email>` | 15 minutes | 3 | Verify mail resend |
+| `password-verify-code:ip:<ip>` | 15 minutes | 30 | Sign-up code verify, before the per-address limit |
+| `password-verify-code:email:<email>` | 15 minutes | 10 | Sign-up code verify. With 5 wrong tries per code, it bounds the guesses on one address |
 | `password-reset:ip:<ip>` | 15 minutes | 20 | Reset request |
 | `password-reset:email:<email>` | 15 minutes | 5 | Reset request |
 | `password-reset-post:ip:<ip>` | 15 minutes | 20 | Reset form post |

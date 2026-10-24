@@ -22,6 +22,7 @@ import {
   defaultEmailOtpMail,
   defaultResetOtpMail,
   defaultSecondFactorMail,
+  defaultVerifyCodeMail,
   type EmailOtpMailInput,
 } from "./engine/email-otp-mail.js";
 import {
@@ -766,6 +767,15 @@ export interface PasswordConfig {
   uniformSignUp?: boolean;
   /** The mail to an address that has an account, at a uniform sign-up. Core sends it to the address, whatever `to` it answers. Default `defaultExistingAccountMail`. */
   existingAccountMail?: (input: ExistingAccountMailInput) => MailMessage;
+  /**
+   * The proof of the address at sign-up (plan 12i Task 20). `"link"` (the
+   * default) mails a link. `"code"` mails a code of 6 digits that lives 10
+   * minutes, for a device whose mailbox is elsewhere. The person posts it to
+   * `POST /password/verify/code`. Each code takes 5 wrong tries.
+   */
+  verifyBy?: "link" | "code";
+  /** The mail of the sign-up code. Core sends it to the address, whatever `to` it answers. Default `defaultVerifyCodeMail`. */
+  verifyCodeMail?: (input: EmailOtpMailInput) => MailMessage;
 }
 
 export interface EmailOtpConfig {
@@ -1380,6 +1390,8 @@ export interface ResolvedConfig {
     requireVerified: boolean;
     uniformSignUp: boolean;
     existingAccountMail: (input: ExistingAccountMailInput) => MailMessage;
+    verifyBy: "link" | "code";
+    verifyCodeMail: (input: EmailOtpMailInput) => MailMessage;
   } | null;
   emailOtp: ResolvedEmailOtp | null;
   /** Null: the phone code is off, and no stored phone signs in (plan 12i). */
@@ -1866,6 +1878,11 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       throw new ConfigError("password.uniformSignUp must be a boolean");
     if (p.existingAccountMail !== undefined && typeof p.existingAccountMail !== "function")
       throw new ConfigError("password.existingAccountMail must be a function");
+    const verifyBy: unknown = p.verifyBy ?? "link";
+    if (verifyBy !== "link" && verifyBy !== "code")
+      throw new ConfigError('password.verifyBy must be "link" or "code"');
+    if (p.verifyCodeMail !== undefined && typeof p.verifyCodeMail !== "function")
+      throw new ConfigError("password.verifyCodeMail must be a function");
     password = {
       hash: p.hash ?? createPbkdf2PasswordHash(),
       minLength,
@@ -1876,6 +1893,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       requireVerified,
       uniformSignUp: p.uniformSignUp ?? true,
       existingAccountMail: p.existingAccountMail ?? defaultExistingAccountMail,
+      verifyBy,
+      verifyCodeMail: p.verifyCodeMail ?? defaultVerifyCodeMail,
     };
   }
   const signUp = input.signUp ?? "open";

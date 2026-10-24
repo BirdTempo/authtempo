@@ -4,7 +4,7 @@ import {
   createPbkdf2PasswordHash,
   systemClock,
 } from "@authtempo/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import readme from "../README.md?raw";
 import { betterAuthPasswordHash } from "../src/hash.js";
 import { bearer, COMPAT_PLUGIN, emailOTP } from "../src/plugins.js";
@@ -131,7 +131,8 @@ describe("the email-otp options (plan 9e)", () => {
         generateOTP: () => "123456",
         // Plan 12b accepts a boolean: core's one sign-up rule (test/hardening.test.ts).
         disableSignUp: "yes",
-        overrideDefaultEmailVerification: true,
+        // Plan 12i Task 20 maps true (the test below).
+        overrideDefaultEmailVerification: "yes",
         sendVerificationOnSignUp: true,
         resendStrategy: "reuse",
         changeEmail: { enabled: true, verifyCurrentEmail: true },
@@ -146,7 +147,7 @@ describe("the email-otp options (plan 9e)", () => {
       "plugins[email-otp].generateOTP: core makes the code itself, from crypto.getRandomValues",
       "plugins[email-otp].other: authtempo has no such option",
       "plugins[email-otp].otpLength: core generates 6 or 8 digits",
-      "plugins[email-otp].overrideDefaultEmailVerification: core's verify mail is a link; a code for it is a later input (see the plan index)",
+      "plugins[email-otp].overrideDefaultEmailVerification: expected a boolean",
       "plugins[email-otp].rateLimit: core's owned limiter has fixed limits per flow",
       "plugins[email-otp].resendStrategy: core sends a new code at every request",
       "plugins[email-otp].sendVerificationOTP: required",
@@ -290,9 +291,64 @@ describe("Better Auth's email OTP paths (plan 9e)", () => {
     expect(res.status).toBe(200);
   });
 
+  it("maps verify-email and the email-verification resend onto core's sign-up code with overrideDefaultEmailVerification (plan 12i Task 20)", async () => {
+    expect(
+      mapOptions(options({ overrideDefaultEmailVerification: true })).config.password,
+    ).toMatchObject({
+      verifyBy: "code",
+    });
+    expect(mapOptions(options({})).config.password).not.toHaveProperty("verifyBy");
+    // The verify link mail is not needed: the code goes through sendVerificationOTP.
+    const { emailVerification: _, ...linkless } = options({
+      overrideDefaultEmailVerification: true,
+    });
+    expect(checkOptions(linkless).refusals).toEqual([]);
+    const { auth, post, sent } = app({ overrideDefaultEmailVerification: true });
+    await auth.api.signUpEmail({
+      body: { email: EMAIL, password: "correct horse battery", name: "Otp" },
+    });
+    expect(sent.map((s) => [s.email, s.type])).toEqual([[EMAIL, "email-verification"]]);
+    const first = sent[0]?.otp ?? "";
+    expect(first).toMatch(/^\d{6}$/);
+    // The resend: a new code, and the first one is spent.
+    const again = await post("/email-otp/send-verification-otp", {
+      email: EMAIL,
+      type: "email-verification",
+    });
+    expect({ status: again.status, body: await json(again) }).toEqual({
+      status: 200,
+      body: { success: true },
+    });
+    // Core sends the new code after the answer (ruling 23 of plan 12i). The
+    // shim's inner call has no waitUntil, so on Node the send runs detached.
+    await vi.waitFor(() => expect(sent).toHaveLength(2));
+    const second = sent[1]?.otp ?? "";
+    if (first !== second) {
+      const spent = await post("/email-otp/verify-email", { email: EMAIL, otp: first });
+      expect({ status: spent.status, code: (await json(spent)).code }).toEqual({
+        status: 400,
+        code: "INVALID_OTP",
+      });
+    }
+    const wrong = await post("/email-otp/verify-email", { email: EMAIL, otp: wrongFor(second) });
+    expect({ status: wrong.status, code: (await json(wrong)).code }).toEqual({
+      status: 400,
+      code: "INVALID_OTP",
+    });
+    const res = await post("/email-otp/verify-email", { email: EMAIL, otp: second });
+    expect(res.status).toBe(200);
+    const body = await json(res);
+    expect(body.status).toBe(true);
+    expect(typeof body.token).toBe("string");
+    expect(body.user).toMatchObject({ email: EMAIL, emailVerified: true });
+    expect(Object.keys(body.user as object).sort()).toEqual([...USER_KEYS].sort());
+    expect(res.headers.getSetCookie().some((c) => c.includes(String(body.token)))).toBe(true);
+  });
+
   it("answers 501 NOT_SUPPORTED for the other paths, the other types, and a user field at sign-in", async () => {
     const { post } = app();
-    for (const path of EMAIL_OTP_NOT_SUPPORTED) {
+    // The verify of the address needs overrideDefaultEmailVerification (plan 12i Task 20).
+    for (const path of [...EMAIL_OTP_NOT_SUPPORTED, "/email-otp/verify-email"]) {
       const res = await post(path, { email: EMAIL, otp: "123456", newEmail: "b@example.com" });
       expect({ path, status: res.status, code: (await json(res)).code }).toEqual({
         path,

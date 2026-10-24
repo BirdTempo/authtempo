@@ -13,6 +13,7 @@ import {
   requestPasswordReset,
   resendPasswordVerification,
   resetPassword,
+  verifyPasswordCode,
   verifyPasswordEmail,
 } from "../../engine/password.js";
 import { PASSWORD_MAX_LENGTH } from "../../engine/password-policy.js";
@@ -28,6 +29,7 @@ import {
   signInBody,
   signUpBody,
   tokenBody,
+  verifyCodeBody,
 } from "../contract/password.js";
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
@@ -74,16 +76,20 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, signUpBody);
         if (!body.ok) return respond(body);
-        const r = await passwordSignUp(ctx.config, {
-          email: body.value.email,
-          password: body.value.password,
-          name: body.value.name,
-          username: body.value.username,
-          ip: ctx.ip,
-          userAgent: ctx.request.headers.get("user-agent"),
-          captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
-          anonymous: await anonymousCaller(ctx.config, ctx.request),
-        });
+        const r = await passwordSignUp(
+          ctx.config,
+          {
+            email: body.value.email,
+            password: body.value.password,
+            name: body.value.name,
+            username: body.value.username,
+            ip: ctx.ip,
+            userAgent: ctx.request.headers.get("user-agent"),
+            captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+            anonymous: await anonymousCaller(ctx.config, ctx.request),
+          },
+          ctx.waitUntil,
+        );
         if (!r.ok) return respond(r);
         // The uniform answer (plan 12b): the same bytes for every address, no cookie.
         if ("sent" in r.value) return json({ sent: true });
@@ -159,19 +165,50 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       },
     },
     {
-      // A new verify link (plan 8b). No session: the person may have none.
+      // The sign-up code (plan 12i Task 20). JSON only: the person types the code.
+      method: "POST",
+      path: "/password/verify/code",
+      key: "POST /password/verify/code",
+      async handler(ctx) {
+        const body = await readJson(ctx.request, verifyCodeBody);
+        if (!body.ok) return respond(body);
+        const r = await verifyPasswordCode(ctx.config, {
+          email: body.value.email,
+          code: body.value.code,
+          ip: ctx.ip,
+          userAgent: ctx.request.headers.get("user-agent"),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
+        });
+        if (!r.ok) return respond(r);
+        const s = r.value.signedIn;
+        if (!s) return json({ verified: true });
+        // The code opens the session of the sign-up, as the link's confirm does (plan 12b).
+        const res = signedIn(
+          { token: s.token, user: r.value.user, session: s.session },
+          "password",
+        );
+        return withLastMethod(ctx.config, ctx.request, res, "password");
+      },
+    },
+    {
+      // A new verify link or code (plan 8b). No session: the person may have none.
       method: "POST",
       path: "/password/verify/resend",
       key: "POST /password/verify/resend",
       async handler(ctx) {
         const body = await readJson(ctx.request, resendBody);
         if (!body.ok) return respond(body);
+        // With the code, the send runs after the answer (ruling 23 of plan 12i).
         return respond(
-          await resendPasswordVerification(ctx.config, {
-            email: body.value.email,
-            ip: ctx.ip,
-            anonymous: await anonymousCaller(ctx.config, ctx.request),
-          }),
+          await resendPasswordVerification(
+            ctx.config,
+            {
+              email: body.value.email,
+              ip: ctx.ip,
+              anonymous: await anonymousCaller(ctx.config, ctx.request),
+            },
+            ctx.waitUntil,
+          ),
         );
       },
     },

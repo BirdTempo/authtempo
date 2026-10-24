@@ -120,6 +120,7 @@ The options of these operations:
 | `user.deleteUser` | `enabled` turns the delete on, off by default as in Better Auth. `beforeDelete` and `afterDelete` map. `sendDeleteAccountVerification` turns on core's `account.deleteConfirm`, and gets `{ user, url, token }`. `deleteTokenExpiresIn` is a whole number of minutes from 300 to 86400 seconds, default 86400 as in Better Auth. |
 | `account.accountLinking` | `enabled: true`, `allowDifferentEmails: false`, and `allowUnlinkingAll: false` are accepted. `trustedProviders`, `updateUserInfoOnLink`, and `disableImplicitLinking` are refused. |
 | `emailOTP({ changeEmail })` | `enabled` serves `/email-otp/request-email-change` and `/email-otp/change-email`. `verifyCurrentEmail: true` is refused. |
+| `emailOTP({ overrideDefaultEmailVerification })` | `true` is core's `password.verifyBy: "code"`. The sign-up mails a code through `sendVerificationOTP` with the type `email-verification`. `/email-otp/verify-email` and the `email-verification` resend map onto core's sign-up code. |
 | `databaseHooks.user`, `databaseHooks.account` | `create`, `update`, and `delete` of a user, and `create` and `delete` of an account, map onto core's hooks. |
 | `emailVerification.beforeEmailVerification`, `afterEmailVerification` | Map to `user.beforeVerify` and `user.afterVerify`. Core calls them on each path that proves an unverified address. A change of address calls them too, as in Better Auth 1.7.2. The change link calls the after hook only. The change by code calls the before hook before core's code check. |
 
