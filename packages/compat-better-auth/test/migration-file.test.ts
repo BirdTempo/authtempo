@@ -496,7 +496,12 @@ describe("migration 0008 (plan 12e)", () => {
       const cols = (
         db.prepare(`PRAGMA table_info(${TABLES[model]})`).all() as { name: string }[]
       ).map((c) => c.name);
-      expect({ model, cols }).toEqual({ model, cols: columnsOf(model) });
+      // Migration 0012 adds the issuer of the two logout tables (plan 12i Task 18).
+      const later = model === "oauthSessionClient" || model === "oauthLogout" ? ["issuer"] : [];
+      expect({ model, cols }).toEqual({
+        model,
+        cols: columnsOf(model).filter((c) => !later.includes(c)),
+      });
     }
     expect(
       db
@@ -975,6 +980,14 @@ describe("migration 0012 (plan 12i)", () => {
       { name: "taPrf", type: "INTEGER", notnull: 1, dflt_value: "0" },
       { name: "taLargeBlob", type: "INTEGER", notnull: 1, dflt_value: "0" },
     ]);
+    // The issuer of a back-channel link and of its logout (plan 12i Task 18).
+    for (const table of ["ta_oauth_session_client", "ta_oauth_logout"])
+      expect(columns(table).at(-1)).toEqual({
+        name: "issuer",
+        type: "TEXT",
+        notnull: 0,
+        dflt_value: null,
+      });
     expect(db.prepare(`SELECT "isAnonymous", "username" FROM "user"`).all()).toEqual([
       { isAnonymous: 0, username: null },
     ]);

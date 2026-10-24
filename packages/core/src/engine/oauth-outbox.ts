@@ -23,6 +23,7 @@ export async function linkSession(
     await storage.create("oauthSessionClient", {
       id: newId(now),
       ...input,
+      issuer: null,
       createdAt: now,
       updatedAt: now,
     });
@@ -67,6 +68,7 @@ async function createLogout(
     sessionId: link.sessionId,
     sid: link.sid,
     attempts: 0,
+    issuer: link.issuer,
     nextAttemptAt: now,
     createdAt: now,
     updatedAt: now,

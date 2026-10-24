@@ -221,7 +221,9 @@ for (const server of MYSQL_SERVERS) {
       expect(digests).toEqual([
         ["0001_schema_v13", "1c55f449b21a23f5aa8d489d1877d276c88d504e275929993cedffbe0a94bbd9"],
         ["0002_schema_v14", "35a0f032d884b2ff0f117fa6d4e2b46dbdf76324930afca6e9ba332b8761f03b"],
-        ["0003_schema_v15", "e63af4ac309a684411b39a8950991ce63068172a1fff3f16d1a93c85a531a5ee"],
+        // Schema 15 exists only on the plan 12i lane, so its file can still change (ruling 25).
+        // Plan 12i Task 18 added the issuer of the logout tables on 2026-10-25.
+        ["0003_schema_v15", "b501421b39fa785cd3ec39e758d91fa45d3d3f5174167f37321cbf5cd6450bba"],
       ]);
     });
   });

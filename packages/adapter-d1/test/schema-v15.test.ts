@@ -33,6 +33,7 @@ describe("schema version 15 on D1 (plan 12i)", () => {
       [
         "INSERT INTO ta_user (id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until) VALUES ('u14', 1, 2, 'u14@example.com', 1, 'Ada', NULL, 3, 'spam', NULL)",
         "INSERT INTO ta_passkey (id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name) VALUES ('p14', 1, 1, 'u14', 'c14', 'pk', 7, NULL, 'singleDevice', 0, NULL)",
+        "INSERT INTO ta_oauth_session_client (id, created_at, updated_at, session_id, client_id, user_id, sid) VALUES ('l14', 1, 1, 's14', 'cl_14', 'u14', 'sid14')",
       ].map((q) => env.STAGED.prepare(q)),
     );
     await applyD1Migrations(env.STAGED, env.TEST_MIGRATIONS.slice(0, i0015 + 1));
@@ -54,6 +55,9 @@ describe("schema version 15 on D1 (plan 12i)", () => {
       column("prf", "INTEGER", 1, "0"),
       column("large_blob", "INTEGER", 1, "0"),
     ]);
+    // The issuer of a back-channel link and of its logout (plan 12i Task 18).
+    for (const table of ["ta_oauth_session_client", "ta_oauth_logout"])
+      expect((await columns(env.STAGED, table)).at(-1)).toEqual(column("issuer", "TEXT"));
     // The gate passes: the adapter reads the database at version 15.
     const db = createD1Adapter(env.STAGED);
     expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u14" }])).toEqual({
@@ -78,6 +82,10 @@ describe("schema version 15 on D1 (plan 12i)", () => {
       prf: false,
       largeBlob: false,
     });
+    // A link of version 14 holds no issuer: its logout names the primary.
+    expect(
+      await db.findOne("oauthSessionClient", [{ field: "id", op: "eq", value: "l14" }]),
+    ).toMatchObject({ sid: "sid14", issuer: null });
     // A user with no address, and the unique key on email that still refuses a second equal address.
     const at = new Date(5);
     const row = {

@@ -410,6 +410,7 @@ model TaOauthSessionClient {
   clientId String @map("client_id") @db.VarChar(2048)
   userId String @map("user_id") @db.VarChar(64)
   sid String @map("sid") @db.Text
+  issuer String? @map("issuer") @db.Text
 
   @@unique([sessionId, clientId], map: "ux_ta_oauth_session_client__session_id__client_id")
   @@index([userId], map: "ix_ta_oauth_session_client__user_id")
@@ -429,6 +430,7 @@ model TaOauthLogout {
   attempts Int @map("attempts")
   /// epoch milliseconds
   nextAttemptAt BigInt @map("next_attempt_at")
+  issuer String? @map("issuer") @db.Text
 
   @@index([nextAttemptAt], map: "ix_ta_oauth_logout__next_attempt_at")
   @@index([userId], map: "ix_ta_oauth_logout__user_id")

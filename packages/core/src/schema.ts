@@ -551,6 +551,12 @@ export interface OAuthSessionClientRow extends BaseRow {
    * The logout token sends it back, so a new secret version never changes it.
    */
   sid: string;
+  /**
+   * The issuer of the ID tokens of this link: the entry of a `baseURL` list
+   * where the client got them (plan 12i Task 18). The logout token names it.
+   * Null for a link of a core before this field.
+   */
+  issuer: string | null;
 }
 
 /** One back-channel logout to deliver (plan 12e): the outbox. The sweep retries a failed delivery. */
@@ -562,6 +568,8 @@ export interface OAuthLogoutRow extends BaseRow {
   sid: string;
   attempts: number;
   nextAttemptAt: Date;
+  /** The `issuer` of the link that this row replaced (plan 12i Task 18). Null: the primary. */
+  issuer: string | null;
 }
 
 /** The acts that write an operator audit row (plan 12f, spec 26 item 8). */
@@ -1149,6 +1157,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       clientId: { type: "string" },
       userId: { type: "string" },
       sid: { type: "string" },
+      issuer: { type: "string", nullable: true },
     },
     unique: [["sessionId", "clientId"]],
     // userId: the end of a user's sessions reads the user's links.
@@ -1164,6 +1173,7 @@ export const schema: { [M in ModelName]: ModelDef<M> } = {
       sid: { type: "string" },
       attempts: { type: "integer" },
       nextAttemptAt: { type: "date" },
+      issuer: { type: "string", nullable: true },
     },
     unique: [],
     // nextAttemptAt: the sweep reads the due rows. userId: a flow delivers the user's due rows.

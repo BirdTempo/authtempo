@@ -7,7 +7,9 @@
  * is_anonymous is NOT NULL with the default false, so a row of version 14
  * reads as a user that is not anonymous. ta_passkey gets the three extension
  * flags of plan 12i Task 21: discoverable is nullable, and prf and
- * large_blob default to false. The runner applies the text in one
+ * large_blob default to false. ta_oauth_session_client and ta_oauth_logout
+ * get the nullable issuer of plan 12i Task 18: the logout token names the
+ * issuer that the client saw. The runner applies the text in one
  * transaction. The columns keep the field order of the schema.
  */
 export const name = "0015_schema_v15";
@@ -23,6 +25,9 @@ CREATE UNIQUE INDEX ux_ta_user__phone ON ta_user (phone);
 ALTER TABLE ta_passkey ADD COLUMN discoverable boolean;
 ALTER TABLE ta_passkey ADD COLUMN prf boolean NOT NULL DEFAULT false;
 ALTER TABLE ta_passkey ADD COLUMN large_blob boolean NOT NULL DEFAULT false;
+
+ALTER TABLE ta_oauth_session_client ADD COLUMN issuer text;
+ALTER TABLE ta_oauth_logout ADD COLUMN issuer text;
 
 UPDATE ta_meta SET value = '15' WHERE key = 'schema_version';
 `;

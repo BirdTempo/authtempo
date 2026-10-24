@@ -7,8 +7,10 @@
 -- copy names the columns of version 14, so the new columns take NULL and the
 -- default 0. Each of email, username, and phone has a unique index; a NULL
 -- never conflicts. ta_passkey gets the three extension flags of plan 12i
--- Task 21. Booleans are INTEGER, and dates are INTEGER epoch milliseconds.
--- The columns keep the field order of the schema.
+-- Task 21. ta_oauth_session_client and ta_oauth_logout get the nullable
+-- issuer of plan 12i Task 18: the logout token names the issuer that the
+-- client saw. Booleans are INTEGER, and dates are INTEGER epoch
+-- milliseconds. The columns keep the field order of the schema.
 CREATE TABLE ta_user_v15 (
   id TEXT PRIMARY KEY NOT NULL,
   created_at INTEGER NOT NULL,
@@ -36,5 +38,8 @@ CREATE UNIQUE INDEX ux_ta_user__phone ON ta_user (phone);
 ALTER TABLE ta_passkey ADD COLUMN discoverable INTEGER;
 ALTER TABLE ta_passkey ADD COLUMN prf INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE ta_passkey ADD COLUMN large_blob INTEGER NOT NULL DEFAULT 0;
+
+ALTER TABLE ta_oauth_session_client ADD COLUMN issuer TEXT;
+ALTER TABLE ta_oauth_logout ADD COLUMN issuer TEXT;
 
 UPDATE ta_meta SET value = '15' WHERE key = 'schema_version';

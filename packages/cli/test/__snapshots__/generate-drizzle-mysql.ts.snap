@@ -394,6 +394,7 @@ export const taOauthSessionClient = mysqlTable(
     clientId: varchar("client_id", { length: 2048 }).notNull(),
     userId: varchar("user_id", { length: 64 }).notNull(),
     sid: text("sid").notNull(),
+    issuer: text("issuer"),
   },
   (t) => [
     uniqueIndex("ux_ta_oauth_session_client__session_id__client_id").on(t.sessionId, t.clientId),
@@ -413,6 +414,7 @@ export const taOauthLogout = mysqlTable(
     sid: text("sid").notNull(),
     attempts: int("attempts").notNull(),
     nextAttemptAt: epochMs("next_attempt_at").notNull(),
+    issuer: text("issuer"),
   },
   (t) => [
     index("ix_ta_oauth_logout__next_attempt_at").on(t.nextAttemptAt),

@@ -1274,9 +1274,11 @@ export const MIGRATION_0012_NAME = "0012_compat_schema_v15";
  * (`notNull`), and Task 16 of plan 12i maps it to the placeholder address.
  * Better Auth's `passkey` gets `taDiscoverable`, `taPrf`, and `taLargeBlob`;
  * the last two are NOT NULL with the default false, so a row that Better
- * Auth writes reads false. The columns take the app's naming, so the text
- * depends on `names`. The D1 files in this package are the text of the
- * default naming. Append-only once it ships.
+ * Auth writes reads false. Core's own `ta_oauth_session_client` and
+ * `ta_oauth_logout` get the nullable `issuer` of plan 12i Task 18. The
+ * columns take the app's naming, so the text depends on `names`. The D1
+ * files in this package are the text of the default naming. Append-only
+ * once it ships.
  */
 export function compatMigration0012Sql(dialect: "postgres" | "sqlite", n: Names): string {
   const pg = dialect === "postgres";
@@ -1300,6 +1302,8 @@ export function compatMigration0012Sql(dialect: "postgres" | "sqlite", n: Names)
     `ALTER TABLE ${P} ADD COLUMN ${p("taDiscoverable")} ${bool};`,
     `ALTER TABLE ${P} ADD COLUMN ${p("taPrf")} ${bool} NOT NULL DEFAULT ${no};`,
     `ALTER TABLE ${P} ADD COLUMN ${p("taLargeBlob")} ${bool} NOT NULL DEFAULT ${no};`,
+    `ALTER TABLE ta_oauth_session_client ADD COLUMN issuer ${text};`,
+    `ALTER TABLE ta_oauth_logout ADD COLUMN issuer ${text};`,
     "UPDATE ta_meta SET value = '15' WHERE key = 'schema_version';",
     "UPDATE ta_meta SET value = '12' WHERE key = 'compat_better_auth';",
   ].join("\n")}\n`;

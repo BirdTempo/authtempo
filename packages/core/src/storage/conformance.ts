@@ -1285,6 +1285,7 @@ export function runAdapterConformance(
         clientId: client.id,
         userId: "u1",
         sid: "s1",
+        issuer: "https://b.example/auth",
         createdAt: at,
         updatedAt: at,
       };
@@ -1300,6 +1301,7 @@ export function runAdapterConformance(
         sid: "s1",
         attempts: 1,
         nextAttemptAt: later,
+        issuer: "https://b.example/auth",
         createdAt: at,
         updatedAt: at,
       };
@@ -1366,6 +1368,7 @@ export function runAdapterConformance(
         clientId: "cl_1",
         userId: "u1",
         sid: "s1",
+        issuer: null,
         createdAt: at,
         updatedAt: at,
       };
@@ -1385,6 +1388,7 @@ export function runAdapterConformance(
         sid: "s1",
         attempts: 0,
         nextAttemptAt: at,
+        issuer: null,
         createdAt: at,
         updatedAt: at,
       };

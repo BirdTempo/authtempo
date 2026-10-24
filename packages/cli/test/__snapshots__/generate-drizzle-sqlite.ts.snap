@@ -387,6 +387,7 @@ export const taOauthSessionClient = sqliteTable(
     clientId: text("client_id").notNull(),
     userId: text("user_id").notNull(),
     sid: text("sid").notNull(),
+    issuer: text("issuer"),
   },
   (t) => [
     uniqueIndex("ux_ta_oauth_session_client__session_id__client_id").on(t.sessionId, t.clientId),
@@ -406,6 +407,7 @@ export const taOauthLogout = sqliteTable(
     sid: text("sid").notNull(),
     attempts: integer("attempts").notNull(),
     nextAttemptAt: integer("next_attempt_at", { mode: "timestamp_ms" }).notNull(),
+    issuer: text("issuer"),
   },
   (t) => [
     index("ix_ta_oauth_logout__next_attempt_at").on(t.nextAttemptAt),

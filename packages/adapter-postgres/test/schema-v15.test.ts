@@ -36,6 +36,9 @@ describe("schema version 15 on Postgres (plan 12i)", () => {
       await a.unsafe(
         "INSERT INTO ta_passkey (id, created_at, updated_at, user_id, credential_id, public_key, counter, transports, device_type, backed_up, name) VALUES ('p14', now(), now(), 'u14', 'c14', 'pk', 7, NULL, 'singleDevice', false, NULL)",
       );
+      await a.unsafe(
+        "INSERT INTO ta_oauth_session_client (id, created_at, updated_at, session_id, client_id, user_id, sid) VALUES ('l14', now(), now(), 's14', 'cl_14', 'u14', 'sid14')",
+      );
       await a.unsafe(MIGRATIONS[i0015]?.sql ?? "");
       const version = await a.unsafe<{ value: string }[]>(
         "SELECT value FROM ta_meta WHERE key = 'schema_version'",
@@ -60,6 +63,9 @@ describe("schema version 15 on Postgres (plan 12i)", () => {
         column("prf", "boolean", "NO", "false"),
         column("large_blob", "boolean", "NO", "false"),
       ]);
+      // The issuer of a back-channel link and of its logout (plan 12i Task 18).
+      for (const table of ["ta_oauth_session_client", "ta_oauth_logout"])
+        expect((await columnsOf(table)).at(-1)).toEqual(column("issuer", "text"));
       // The gate passes: the adapter reads the database at version 15.
       const db = createPostgresAdapter(a);
       expect(await db.findOne("user", [{ field: "id", op: "eq", value: "u14" }])).toEqual({
@@ -84,6 +90,10 @@ describe("schema version 15 on Postgres (plan 12i)", () => {
         prf: false,
         largeBlob: false,
       });
+      // A link of version 14 holds no issuer: its logout names the primary.
+      expect(
+        await db.findOne("oauthSessionClient", [{ field: "id", op: "eq", value: "l14" }]),
+      ).toMatchObject({ sid: "sid14", issuer: null });
       // A user with no address, and the unique key on email that still refuses a second equal address.
       const at = new Date("2026-10-23T00:00:00.000Z");
       const row = {

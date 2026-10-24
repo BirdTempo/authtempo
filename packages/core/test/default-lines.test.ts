@@ -1651,6 +1651,7 @@ describe("the back-channel logout lines (plan 12e)", () => {
       sid: "sid-1",
       attempts,
       nextAttemptAt: h.clock.now(),
+      issuer: null,
       createdAt: h.clock.now(),
       updatedAt: h.clock.now(),
     });

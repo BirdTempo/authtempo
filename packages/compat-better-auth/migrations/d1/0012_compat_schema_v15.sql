@@ -6,6 +6,8 @@
 -- those columns already runs this file without its first five lines and
 -- without the unique key that it holds. Better Auth's user.email stays NOT
 -- NULL. Better Auth's passkey table gets the three extension flags of core.
+-- Core's ta_oauth_session_client and ta_oauth_logout get the nullable issuer
+-- of plan 12i Task 18.
 -- This is the text of the default naming, the same for both variants.
 ALTER TABLE "user" ADD COLUMN "username" TEXT;
 ALTER TABLE "user" ADD COLUMN "displayUsername" TEXT;
@@ -18,5 +20,7 @@ CREATE UNIQUE INDEX ux_user__phone_number ON "user" ("phoneNumber");
 ALTER TABLE "passkey" ADD COLUMN "taDiscoverable" INTEGER;
 ALTER TABLE "passkey" ADD COLUMN "taPrf" INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE "passkey" ADD COLUMN "taLargeBlob" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE ta_oauth_session_client ADD COLUMN issuer TEXT;
+ALTER TABLE ta_oauth_logout ADD COLUMN issuer TEXT;
 UPDATE ta_meta SET value = '15' WHERE key = 'schema_version';
 UPDATE ta_meta SET value = '12' WHERE key = 'compat_better_auth';
