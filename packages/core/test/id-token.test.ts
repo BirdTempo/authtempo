@@ -658,6 +658,90 @@ describe("the ID-token route (plan 12i Task 10)", () => {
     ).toBeNull();
   });
 
+  it("keeps the ID-token sign-in when the clean-up after afterLink fails", async () => {
+    const events: { name: string; rowId?: unknown; errorName?: unknown }[] = [];
+    let down = false;
+    const w = world({
+      anonymous: { isolateLimiter: "allow" },
+      // The next transaction after afterLink is the end of the anonymous session.
+      hooks: {
+        anonymous: {
+          afterLink: () => {
+            down = true;
+          },
+        },
+      },
+      observe: { sink: { write: (b) => void events.push(...b) } },
+    });
+    const anon = await w.handle(post("/auth/anonymous/sign-in", {}, ip()));
+    const { token } = (await anon.json()) as { token: string };
+    recordCredential(token);
+    const anonUser = await w.storage.findOne("user", [
+      { field: "isAnonymous", op: "eq", value: true },
+    ]);
+    const transaction = w.storage.transaction.bind(w.storage);
+    // A store error after the commit, such as query 51 on D1 Free (ruling 36 L2).
+    w.storage.transaction = ((work) => {
+      if (!down) return transaction(work);
+      down = false;
+      return Promise.reject(new Error("Too many API requests by single worker invocation."));
+    }) as typeof w.storage.transaction;
+    const nonce = await w.nonce("google");
+    const res = await w.signIn(
+      "google",
+      { idToken: await w.google({ nonce: await hashOf(nonce) }), nonce },
+      { ...ip(), cookie: `${w.config.cookieName}=${token}` },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { token: string };
+    recordCredential(body.token);
+    expect(
+      res.headers.getSetCookie().some((c) => c.startsWith(`${w.config.cookieName}=${body.token}`)),
+    ).toBe(true);
+    await w.config.observe.flush();
+    const lines = events.filter((e) => e.name === "anonymous.cleanup_failed");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ rowId: anonUser?.id, errorName: "Error" });
+    // The anonymous user stays for the sweep.
+    expect(
+      (await w.storage.findOne("user", [{ field: "id", op: "eq", value: anonUser?.id ?? "" }]))
+        ?.isAnonymous,
+    ).toBe(true);
+  });
+
+  it("links nothing at an ID-token sign-in once anonymous is off", async () => {
+    const w = world({ anonymous: { isolateLimiter: "allow" } });
+    const anon = await w.handle(post("/auth/anonymous/sign-in", {}, ip()));
+    const { token } = (await anon.json()) as { token: string };
+    recordCredential(token);
+    // The deployment turns anonymous off; the anonymous session cookie stays in the browser.
+    const ended: string[] = [];
+    const off = world({
+      anonymous: false,
+      storage: w.storage,
+      clock: w.clock,
+      hooks: { session: { afterEnd: (e) => void ended.push(e.session.userId) } },
+    });
+    const nonce = await off.nonce("google");
+    const res = await off.signIn(
+      "google",
+      { idToken: await off.google({ nonce: await hashOf(nonce) }), nonce },
+      { ...ip(), cookie: `${w.config.cookieName}=${token}` },
+    );
+    expect(res.status).toBe(200);
+    recordCredential(((await res.json()) as { token: string }).token);
+    expect(ended).toEqual([]);
+    const anonUser = await w.storage.findOne("user", [
+      { field: "isAnonymous", op: "eq", value: true },
+    ]);
+    expect(anonUser).not.toBeNull();
+    const [row] = await w.storage.findMany("session", [
+      { field: "userId", op: "eq", value: anonUser?.id ?? "" },
+    ]);
+    // No claim: the anonymous session keeps its freshAt.
+    expect(row?.freshAt).not.toBeNull();
+  });
+
   it("refuses a bad audience list and a bad idToken option", () => {
     const google = (audiences: unknown) => () =>
       world({}, { google: { clientId: WEB, clientSecret: "s", audiences: audiences as string[] } });
