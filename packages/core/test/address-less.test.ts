@@ -1,14 +1,28 @@
 import { createLocalJWKSet, jwtVerify } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuth } from "../src/create-auth.js";
-import { hasAddress, passkeyUserName, verifiedHandle } from "../src/engine/address.js";
+import { requestAccountDelete } from "../src/engine/account-delete.js";
+import {
+  byAddressThenId,
+  hasAddress,
+  passkeyUserName,
+  verifiedHandle,
+} from "../src/engine/address.js";
 import { HookStop } from "../src/engine/hooks.js";
+import { waysIn } from "../src/engine/identities.js";
+import { acceptInvitation, inviteMember } from "../src/engine/invitations.js";
 import { publicKeySet } from "../src/engine/jwt.js";
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import { sendNotice } from "../src/engine/notices.js";
-import { passkeyRegistrationOptions, verifyPasskeyRegistration } from "../src/engine/passkeys.js";
-import { passwordSignUp } from "../src/engine/password.js";
-import { createSession, resolveSession } from "../src/engine/sessions.js";
+import { createOrganization } from "../src/engine/organizations.js";
+import {
+  deletePasskey,
+  passkeyRegistrationOptions,
+  verifyPasskeyRegistration,
+} from "../src/engine/passkeys.js";
+import { passwordSignUp, verifyPassword } from "../src/engine/password.js";
+import { requestReauthCode } from "../src/engine/reauth.js";
+import { createSession, type ResolvedSession, resolveSession } from "../src/engine/sessions.js";
 import { draftUserRow, mayCreateUser } from "../src/engine/users.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import type { UserRow } from "../src/schema.js";
@@ -35,6 +49,18 @@ type Auth = ReturnType<typeof makeAuth>;
  */
 async function addressless(storage: Auth["storage"], now: Date, name: string | null = null) {
   return storage.create("user", draftUserRow({ email: null, emailVerified: false, name }, now));
+}
+
+/** A session of `user`, as a sign-in opens it. */
+async function sessionOf(auth: Auth, user: UserRow): Promise<ResolvedSession> {
+  const { token } = await createSession(auth.config, {
+    userId: user.id,
+    ip: null,
+    userAgent: null,
+  });
+  const resolved = await resolveSession(auth.config, token);
+  if (!resolved) throw new Error("no session");
+  return resolved;
 }
 
 /** A passkey for `user`, by a real ceremony. */
@@ -285,5 +311,118 @@ describe("the account with no address (plan 12i Task 1)", () => {
       await auth.storage.findOne("user", [{ field: "id", op: "eq", value: lone.id }]),
     ).toMatchObject({ email: "found@example.com", emailVerified: true });
     expect(auth.mail.map((m) => m.to)).toEqual(["found@example.com"]);
+  });
+
+  it("counts no stored phone as a way in or a handle with no phone config (ruling 15)", async () => {
+    // A Better Auth store holds a phone that its own code verify proved; core
+    // has no phone route before Task 4, so the phone signs in nowhere.
+    const auth = makeAuth({ passkey: RP });
+    const phoned = await auth.storage.create(
+      "user",
+      draftUserRow(
+        { email: null, emailVerified: false, name: null, phone: "+14155550100" },
+        auth.clock.now(),
+      ),
+    );
+    expect(await verifiedHandle(auth.config, auth.storage, phoned)).toBe(false);
+    expect(await waysIn(auth.config, auth.storage, phoned)).toBe(0);
+    await withPasskey(auth, phoned);
+    expect(await waysIn(auth.config, auth.storage, phoned)).toBe(1);
+    const [passkey] = await auth.storage.findMany("passkey", [
+      { field: "userId", op: "eq", value: phoned.id },
+    ]);
+    if (!passkey) throw new Error("no passkey");
+    expect(await deletePasskey(auth.config, { user: phoned, id: passkey.id })).toEqual({
+      ok: false,
+      code: "last_credential",
+      status: 409,
+    });
+  });
+
+  it("sorts a member with no address after every address", () => {
+    const rows = [
+      { email: null, id: "a" },
+      { email: "z@example.com", id: "c" },
+      { email: null, id: "b" },
+      { email: "a@example.com", id: "d" },
+    ];
+    expect([...rows].sort(byAddressThenId).map((r) => r.id)).toEqual(["d", "c", "a", "b"]);
+    expect(
+      [...rows]
+        .reverse()
+        .sort(byAddressThenId)
+        .map((r) => r.id),
+    ).toEqual(["d", "c", "a", "b"]);
+  });
+
+  it("issues no re-authentication code and sends no mail to a user with no address", async () => {
+    const auth = makeAuth();
+    const send = vi.spyOn(auth.config.mail, "send");
+    const lone = await addressless(auth.storage, auth.clock.now());
+    expect(await requestReauthCode(auth.config, { session: await sessionOf(auth, lone) })).toEqual({
+      ok: true,
+      value: { sent: true },
+    });
+    expect(send).not.toHaveBeenCalled();
+    expect(
+      await auth.storage.findMany("verification", [
+        { field: "purpose", op: "eq", value: "reauth-otp" },
+      ]),
+    ).toEqual([]);
+  });
+
+  it("sends no delete link to a user with no address", async () => {
+    const auth = makeAuth({ account: { deleteConfirm: { ttlMinutes: 60 } } });
+    const send = vi.spyOn(auth.config.mail, "send");
+    const lone = await addressless(auth.storage, auth.clock.now());
+    const session = await sessionOf(auth, lone);
+    expect(await requestAccountDelete(auth.config, { session, ip: null, userAgent: null })).toEqual(
+      { ok: true, value: { sent: true } },
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(auth.mail).toEqual([]);
+  });
+
+  it("limits the password check of a user with no address by the user id (ruling 15 m4)", async () => {
+    const auth = makeAuth({ password: { hash: FAST, uniformSignUp: false } });
+    const lone = await addressless(auth.storage, auth.clock.now());
+    const other = await addressless(auth.storage, auth.clock.now());
+    // Ten tries, each from its own IP, so the per-IP limit never counts to its end.
+    for (let i = 0; i < 10; i++)
+      expect(
+        await verifyPassword(auth.config, {
+          userId: lone.id,
+          password: "a guess",
+          ip: `1.2.3.${i}`,
+        }),
+      ).toMatchObject({ ok: false, code: "invalid_credentials" });
+    expect(
+      await verifyPassword(auth.config, { userId: lone.id, password: "a guess", ip: "1.2.4.1" }),
+    ).toMatchObject({ ok: false, code: "rate_limited" });
+    // The count is per user: another user with no address still gets a try.
+    expect(
+      await verifyPassword(auth.config, { userId: other.id, password: "a guess", ip: "1.2.4.2" }),
+    ).toMatchObject({ ok: false, code: "invalid_credentials" });
+  });
+
+  it("answers email_mismatch to a user with no address at an invitation (spec 32 item 1)", async () => {
+    const auth = makeAuth({ organizations: {} });
+    const owner = await auth.seedUser("owner@example.com");
+    const org = await createOrganization(auth.config, { user: owner, slug: "acme", name: "Acme" });
+    if (!org.ok) throw new Error(org.code);
+    await inviteMember(auth.config, {
+      user: owner,
+      organizationId: org.value.organization.id,
+      email: "bob@example.com",
+      role: "member",
+    });
+    const token = /invitation=(inv_[A-Za-z0-9_-]+)/.exec(auth.mail[0]?.text ?? "")?.[1];
+    if (!token) throw new Error("no token in mail");
+    const lone = await addressless(auth.storage, auth.clock.now());
+    expect(await acceptInvitation(auth.config, { user: lone, token, ip: null })).toMatchObject({
+      ok: false,
+      code: "email_mismatch",
+      status: 403,
+    });
   });
 });

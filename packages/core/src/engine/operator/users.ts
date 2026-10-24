@@ -20,7 +20,7 @@ import {
  */
 export interface OperatorUser {
   id: string;
-  /** Null for a user with no address (plan 12i): the list then shows `username` or `phone`. */
+  /** Null for a user with no address (plan 12i). Task 2 or Task 5 of plan 12i adds `username` and `phone` to the list. */
   email: string | null;
   emailVerified: boolean;
   name: string | null;

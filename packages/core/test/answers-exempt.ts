@@ -522,6 +522,55 @@ function optionsRows(key: RouteKey, fields: readonly string[]): AnswerShapeExemp
 /** The optional keys of a request options answer that the seam always writes. */
 const REQUEST_OPTION_KEYS = ["timeout", "rpId", "allowCredentials", "userVerification"] as const;
 
+/**
+ * Plan 12i Task 1 (ruling 15): the rows that the anonymous sign-in of Task 6
+ * removes. An anonymous user has a session and shows in the operator list.
+ * Task 6 answers each null form, and then this list is empty.
+ */
+export const UNTIL_ANONYMOUS_SIGN_IN: readonly AnswerShapeExempt[] = (
+  [
+    ["GET /session", "user.email"],
+    ["POST /session/refresh", "user.email"],
+    ["POST /handoff/redeem", "user.email"],
+    ["GET /operator/users", "users[].email"],
+    ["GET /operator/users/search", "users[].email"],
+    ["GET /operator/users/get", "user.email"],
+  ] as const
+).map(
+  ([key, field]): AnswerShapeExempt => ({
+    key,
+    field,
+    form: "null",
+    reason:
+      "no route makes a user with no address before the anonymous sign-in of plan 12i Task 6; a test of that task answers the null form and drops the row; address-less.test.ts proves the engine reads",
+  }),
+);
+
+/**
+ * Plan 12i Task 1 (ruling 15): the rows of a user with no address and a
+ * verified handle (a phone or a passkey). An anonymous user cannot reach
+ * them. Task 5 opens the profile update and the API token create to such a
+ * user, and its phone user signs in by a password, a passkey, or a second
+ * factor. Task 5 answers each null form, and then this list is empty.
+ */
+export const UNTIL_VERIFIED_HANDLE: readonly AnswerShapeExempt[] = (
+  [
+    ["GET /tokens/current", "user.email"],
+    ["POST /passkey/authenticate/verify", "user.email"],
+    ["POST /password/sign-in", "user.email"],
+    ["POST /totp/verify", "user.email"],
+    ["POST /user/update", "user.email"],
+  ] as const
+).map(
+  ([key, field]): AnswerShapeExempt => ({
+    key,
+    field,
+    form: "null",
+    reason:
+      "the route needs a verified address or a credential that a user with no address gets at plan 12i Task 5; a test of that task answers the null form and drops the row; address-less.test.ts proves the engine reads",
+  }),
+);
+
 export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
   ...optionsRows("POST /passkey/register/options", [
     "timeout",
@@ -628,17 +677,14 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
         "the route proves an address or sets one, so its user always has one; the schema is nullable because a user can have no address (plan 12i); address-less.test.ts proves the null rules",
     }),
   ),
-  // Plan 12i Task 1: no route makes a user with no address before the anonymous sign-in of Task 6.
+  ...UNTIL_ANONYMOUS_SIGN_IN,
+  ...UNTIL_VERIFIED_HANDLE,
+  // Plan 12i Task 1 (ruling 15): these routes need a member, and every member
+  // has a verified address. The organization create, the member add, and the
+  // invitation accept each need one (`verified` in organizations.ts), and no
+  // route takes an address away. No task of plan 12i changes these gates.
   ...(
     [
-      ["GET /session", "user.email"],
-      ["POST /session/refresh", "user.email"],
-      ["GET /tokens/current", "user.email"],
-      ["POST /handoff/redeem", "user.email"],
-      ["POST /passkey/authenticate/verify", "user.email"],
-      ["POST /password/sign-in", "user.email"],
-      ["POST /totp/verify", "user.email"],
-      ["POST /user/update", "user.email"],
       ["POST /organizations/active", "user.email"],
       ["POST /organizations/teams/active", "user.email"],
       ["POST /organizations/create", "member.email"],
@@ -648,9 +694,6 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
       ["POST /organizations/teams/members/add", "member.email"],
       ["GET /organizations/members", "members[].email"],
       ["GET /organizations/teams/members", "members[].email"],
-      ["GET /operator/users", "users[].email"],
-      ["GET /operator/users/search", "users[].email"],
-      ["GET /operator/users/get", "user.email"],
     ] as const
   ).map(
     ([key, field]): AnswerShapeExempt => ({
@@ -658,7 +701,7 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
       field,
       form: "null",
       reason:
-        "no route makes a user with no address before the anonymous sign-in of plan 12i Task 6; a test of that task answers the null form and drops the row; address-less.test.ts proves the engine reads",
+        "every member has a verified address: the organization create, the member add, and the invitation accept need one, and no route takes an address away; address-less.test.ts proves the engine reads",
     }),
   ),
 ];

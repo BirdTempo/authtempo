@@ -1622,11 +1622,13 @@ export async function verifyPassword(
   const user = await config.storage.findOne("user", [
     { field: "id", op: "eq", value: input.userId },
   ]);
-  // A user with no address (plan 12i) has no address key: the per-IP limit and the session hold.
+  // The per-account limit: the address key of the sign-in, or the user id for a
+  // user with no address (ruling 15 of plan 12i), so many IPs share one count.
   if (
     user &&
-    hasAddress(user) &&
-    !(await limit(config, "password:email", user.email, SIGN_IN_PER_EMAIL))
+    !(await (hasAddress(user)
+      ? limit(config, "password:email", user.email, SIGN_IN_PER_EMAIL)
+      : limit(config, "password:user", user.id, SIGN_IN_PER_EMAIL)))
   )
     return fail("rate_limited");
   return checkUserPassword(config, input.userId, input.password);

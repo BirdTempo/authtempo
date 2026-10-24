@@ -466,7 +466,11 @@ export type UserDraftFields = Pick<UserRow, "email" | "emailVerified" | "name"> 
  * The one builder of a new user row (plan 12i Task 1). Each writer of a
  * user row drafts it here, runs its sign-up rule and its hooks on the
  * draft, and then creates it. So every new field of the row has one
- * default: no ban, no username, no phone, not anonymous.
+ * default: no ban, no username, no phone, not anonymous. Two writers
+ * build the row by hand: `writeUser` of the importer
+ * (packages/import/src/import.ts) and the compat sign-up answer
+ * (packages/compat-better-auth/src/server/api.ts). The type fails their
+ * compile when a field is new, so a new field needs a value there too.
  */
 export function draftUserRow(fields: UserDraftFields, now: Date): UserRow {
   return {

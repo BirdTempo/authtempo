@@ -35,6 +35,12 @@ export interface FieldMap {
   readonly codec?: Codec;
   /** A column the read takes when this one is null (Better Auth's nullable `organizationRole.updatedAt`). */
   readonly orColumn?: string;
+  /**
+   * A boolean column that gates the read: the field reads as null unless it
+   * is true. A where and a sort see the same value (Better Auth's
+   * `phoneNumberVerified`, ruling 15 of plan 12i).
+   */
+  readonly onlyWhen?: string;
 }
 
 export interface Scope {
@@ -163,13 +169,20 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       banReason: as("taBanReason"),
       banUntil: as("taBanUntil"),
       // Better Auth's own columns of its username, phone number, and anonymous
-      // plugins (plan 12i). Migration 0012 adds each one that is absent. Task
-      // 16 of plan 12i writes phoneNumberVerified with the phone mapping.
+      // plugins (plan 12i). Migration 0012 adds each one that is absent.
       username: as("username"),
       displayUsername: as("displayUsername"),
-      phone: as("phoneNumber"),
+      // Better Auth stores a sign-up's phoneNumber before its code is proved,
+      // and sets phoneNumberVerified only at the verify. Core reads a phone
+      // only where it is proved (ruling 15 of plan 12i).
+      phone: { column: "phoneNumber", onlyWhen: "phoneNumberVerified" },
       isAnonymous: as("isAnonymous"),
     },
+    // Core writes a phone only after its code (Task 4 of plan 12i), so a
+    // phone that core writes is proved. Task 16 of plan 12i maps the rest.
+    insertExtras: (row) => ({ phoneNumberVerified: row.phone === null ? null : true }),
+    updateExtras: (data) =>
+      data.phone === undefined ? {} : { phoneNumberVerified: data.phone === null ? null : true },
   },
   identity: {
     table: "account",

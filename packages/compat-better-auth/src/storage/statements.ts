@@ -308,6 +308,9 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
   const value = (model: ModelName, field: string) => {
     const c = column(model, field);
     const t = MAP[model].table;
+    // A column that reads as null unless its gate column is true (ruling 15 of plan 12i).
+    const when = MAP[model].fields[field]?.onlyWhen;
+    if (when) return `CASE WHEN ${names.column(t, when)} THEN ${c} END`;
     // A nullable Better Auth column that core reads as another while it is null (plan 12k).
     const or = MAP[model].fields[field]?.orColumn;
     if (or) {
@@ -331,6 +334,13 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       : (TABLE_FIELDS[t].find((f) => names.rawColumn(t, f).toLowerCase() === raw.toLowerCase()) ??
         null));
   const quoteRaw = (c: string) => `"${c.replaceAll('"', '""')}"`;
+  /**
+   * The bound value of an extra column. A text that bypasses encode stores
+   * U+FFFD for a lone surrogate too (ruling 85). A boolean binds as 0 or 1
+   * on SQLite, as encodeValue writes it (ruling 15 of plan 12i).
+   */
+  const extra = (v: unknown): unknown =>
+    typeof v === "string" ? wellFormed(v) : typeof v === "boolean" && !pg ? (v ? 1 : 0) : v;
 
   function encode(model: ModelName, field: string, value: unknown): unknown {
     const { type } = def(model, field);
@@ -541,8 +551,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       }
       for (const [c, v] of Object.entries(map.insertExtras?.(data) ?? {})) {
         own.push(names.column(map.table, c));
-        // A text that bypasses encode stores U+FFFD for a lone surrogate too (ruling 85).
-        vals.push(p.add(typeof v === "string" ? wellFormed(v) : v));
+        vals.push(p.add(extra(v)));
       }
       // insertExtras names the same columns for every row of a model. A row with other
       // columns would shift its values into the wrong columns of the JSON form, so it throws.
@@ -598,7 +607,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     ];
     const written = [
       ...Object.keys(data).map((f) => encode(model, f, data[f])),
-      ...Object.values(extras),
+      ...Object.values(extras).map(extra),
     ];
     const cols = set.map((f) => {
       const c = Object.keys(row).find((k) => k !== idKey && fieldOfRaw(t, k) === f);
@@ -649,7 +658,11 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       if (sorts.length > 0) {
         const terms = sorts.map((s) => {
           // Qualified, so Postgres sorts by the column and not by the output alias of the same name.
-          const raw = pg ? qualified(model, s.field) : value(model, s.field);
+          // A gated read names other columns than its alias, so it sorts by its read value.
+          const raw =
+            pg && !MAP[model].fields[s.field]?.onlyWhen
+              ? qualified(model, s.field)
+              : value(model, s.field);
           const e =
             MAP[model].fields[s.field]?.codec === "nullAsEmpty" ? `NULLIF(${raw}, '')` : raw;
           const dir = s.dir === "asc" ? "ASC" : "DESC";
@@ -674,7 +687,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
           `${column(model, f)} = ${p.add(encode(model, f, (data as Row)[f]), def(model, f).type)}`,
       );
       for (const [c, v] of Object.entries(map.updateExtras?.(data as Row) ?? {}))
-        sets.push(`${names.column(map.table, c)} = ${p.add(v)}`);
+        sets.push(`${names.column(map.table, c)} = ${p.add(extra(v))}`);
       const w = compileWhere(model, where as Where<ModelName>[], p);
       if (w.impossible) return null;
       return { sql: `UPDATE ${table(model)} SET ${sets.join(", ")}${w.clause}`, params: p.values };

@@ -20,6 +20,7 @@ export const LIMIT_FAMILIES = Object.freeze([
   "password-sign-up:email",
   "password:ip",
   "password:email",
+  "password:user",
   "password-resend:ip",
   "password-resend:email",
   "password-reset:ip",

@@ -40,6 +40,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `password-sign-up:email:<email>` | 1 hour | 5 | Password sign-up |
 | `password:ip:<ip>` | 15 minutes | 20 | Password sign-in |
 | `password:email:<email>` | 15 minutes | 10 | Password sign-in |
+| `password:user:<userId>` | 15 minutes | 10 | Password check of a user with no address, in place of the address key |
 | `password-resend:ip:<ip>` | 15 minutes | 20 | Verify mail resend |
 | `password-resend:email:<email>` | 15 minutes | 3 | Verify mail resend |
 | `password-reset:ip:<ip>` | 15 minutes | 20 | Reset request |

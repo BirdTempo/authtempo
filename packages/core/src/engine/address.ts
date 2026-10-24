@@ -15,9 +15,11 @@ export function hasAddress(user: UserRow): user is UserRow & { email: string } {
 }
 
 /**
- * True when the user proved a way to reach the person: a verified address,
- * a stored phone (a stored phone is always a proved phone), or a passkey.
- * It reads the passkeys only when the first two checks fail.
+ * True when the user proved a way to reach the person: a verified address
+ * or a passkey. A stored phone counts only from Task 4 of plan 12i, with
+ * `config.phone`: a Better Auth store can hold a phone that no code proved
+ * (ruling 15 of plan 12i). It reads the passkeys only when the address
+ * check fails.
  */
 export async function verifiedHandle(
   config: ResolvedConfig,
@@ -25,7 +27,6 @@ export async function verifiedHandle(
   user: UserRow,
 ): Promise<boolean> {
   if (hasAddress(user) && user.emailVerified) return true;
-  if (user.phone !== null) return true;
   if (!config.passkey) return false;
   return (
     (await storage.findOne("passkey", [{ field: "userId", op: "eq", value: user.id }])) !== null

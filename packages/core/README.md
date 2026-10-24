@@ -565,6 +565,7 @@ The limits, in the same limiter as the other routes:
 | `password-sign-up:email:<email>` | 5 per hour |
 | `password:ip:<ip>` | 20 per 15 minutes |
 | `password:email:<email>` | 10 per 15 minutes |
+| `password:user:<userId>` | 10 per 15 minutes, the password check of a user with no address |
 | `password-reset:ip:<ip>` | 20 per 15 minutes |
 | `password-reset:email:<email>` | 5 per 15 minutes |
 | `password-reset-post:ip:<ip>` | 20 per 15 minutes |

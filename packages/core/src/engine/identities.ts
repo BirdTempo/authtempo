@@ -35,7 +35,11 @@ export interface Credentials {
    * address alone decides. A later switch must change this one line.
    */
   mailbox: boolean;
-  /** A stored phone (plan 12i): a stored phone is always a proved phone. */
+  /**
+   * A phone that signs in (plan 12i). No phone route exists before Task 4
+   * adds `config.phone`, so no stored phone counts yet. A Better Auth store
+   * can hold a phone that no code proved (ruling 15 of plan 12i).
+   */
   phone: boolean;
 }
 
@@ -55,7 +59,8 @@ export async function credentialsOf(
     passkeys,
     identities: await storage.findMany("identity", [{ field: "userId", op: "eq", value: user.id }]),
     mailbox: hasAddress(user) && user.emailVerified,
-    phone: user.phone !== null,
+    // Task 4 of plan 12i makes this `user.phone !== null && config.phone !== false`.
+    phone: false,
   };
 }
 

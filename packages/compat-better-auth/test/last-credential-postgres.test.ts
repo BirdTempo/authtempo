@@ -288,3 +288,36 @@ describe("the guard's lock on a Better Auth user with no name (plan 12a Task 9)"
     ).toEqual({ ok: true, value: { ok: true } });
   });
 });
+
+// Ruling 15 of plan 12i (review probe P1). Better Auth 1.7.5's phone-number
+// plugin takes phoneNumber as a sign-up input, and sets phoneNumberVerified
+// only at the code verify. Core has no phone config here, so no phone is a
+// way in, proved or not.
+describe("a Better Auth phone number with no phone config (plan 12i Task 1)", () => {
+  for (const verified of ["NULL", "true"] as const) {
+    it(`counts no phone as a way in, phoneNumberVerified ${verified}: the last passkey stays`, async () => {
+      const storage = await tables(eraUser("ph", { passkey: true }));
+      await pg.sql.unsafe(
+        `UPDATE "user" SET "phoneNumber" = '+14155550100', "phoneNumberVerified" = ${verified} WHERE id = 'ph'`,
+      );
+      const { auth, signIn } = authOn(storage);
+      const me = await signIn("ph");
+      // Core reads the phone only where Better Auth marks it proved.
+      expect(me.user.phone).toBe(verified === "true" ? "+14155550100" : null);
+      expect(
+        await auth.api.identities.unlink({
+          session: me,
+          id: await googleOf(storage, me.user.id),
+          ip: null,
+          userAgent: null,
+        }),
+      ).toEqual({ ok: true, value: { ok: true } });
+      expect(await auth.api.deletePasskey({ user: me.user, id: "ph-pk" })).toEqual({
+        ok: false,
+        code: "last_credential",
+        status: 409,
+      });
+      expect((await pg.sql`SELECT id FROM "passkey" WHERE "userId" = 'ph'`).length).toBe(1);
+    });
+  }
+});

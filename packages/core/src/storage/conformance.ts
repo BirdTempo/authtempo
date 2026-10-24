@@ -348,8 +348,13 @@ export function runAdapterConformance(
       });
       it(`two null values coexist under the unique key of user ${field}`, async () => {
         if (field === "email" && options.nullEmail === false) {
-          // This storage holds an address in every row: a create with none fails.
+          // This storage holds an address in every row: a create with none fails
+          // with invalid_argument before any statement runs (ruling 15 of plan 12i).
           await expect(db.create("user", keyed("u1", null))).rejects.toBeInstanceOf(StorageError);
+          await expect(db.create("user", keyed("u1", null))).rejects.toMatchObject({
+            code: "invalid_argument",
+            model: "user",
+          });
           expect(await db.findMany("user", [])).toEqual([]);
           return;
         }
