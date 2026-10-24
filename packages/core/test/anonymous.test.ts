@@ -12,7 +12,7 @@ import { requestEmailChange } from "../src/engine/email-change.js";
 import { decideDevice } from "../src/engine/oauth-device.js";
 import { passkeyRegistrationOptions, verifyPasskeyRegistration } from "../src/engine/passkeys.js";
 import { changePassword } from "../src/engine/password.js";
-import { addPhone } from "../src/engine/phone.js";
+import { addPhone, verifyAddPhone } from "../src/engine/phone.js";
 import { updateProfile } from "../src/engine/profile.js";
 import { enablePasskeyMethod } from "../src/engine/second-factor-methods.js";
 import { type ResolvedSession, resolveSession } from "../src/engine/sessions.js";
@@ -29,7 +29,7 @@ import type { LimiterPort } from "../src/limiter/port.js";
 import { type ModelName, schema } from "../src/schema.js";
 import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
-import { APP_ORIGIN, BASE_URL, get, makeAuth, post } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, get, makeAuth, post, settled } from "./helpers.js";
 import { authorizeGet, oauthHandle, pkce, REDIRECT, registered } from "./oauth-helpers.js";
 import { observed } from "./observe-helpers.js";
 import { OPERATOR_SECRETS, operatorFixture, operatorHeader } from "./operator-helpers.js";
@@ -98,7 +98,11 @@ function features(extra: Partial<AuthConfig> = {}): Partial<AuthConfig> {
   };
 }
 
-/** The engine, and a router whose handlers count their calls. */
+/**
+ * The engine, and a router whose handlers count their calls. The router
+ * waits for the work after the answer, so a test reads the phone code that
+ * a route sent (ruling 23 of plan 12i).
+ */
 function world(extra: Partial<AuthConfig> = {}) {
   const auth = makeAuth(features(extra));
   const calls: string[] = [];
@@ -111,13 +115,17 @@ function world(extra: Partial<AuthConfig> = {}) {
       },
     }),
   );
-  return { auth, calls, handle: createRouter(auth.config, routes) };
+  return { auth, calls, handle: settled(createRouter(auth.config, routes)) };
 }
 type World = ReturnType<typeof world>;
 
 let ip = 0;
-/** A request from a new IP, so the per-IP limit of the sign-in counts only where a test means it. */
-const fromNewIp = () => ({ "x-forwarded-for": `198.51.100.${++ip}` });
+/**
+ * A request from a new IP, so the per-IP limit of the sign-in counts only
+ * where a test means it. Core reads `cf-connecting-ip` by default
+ * (`defaultClientIp`), so this header gives each request its own IP.
+ */
+const fromNewIp = () => ({ "cf-connecting-ip": `198.51.100.${++ip}` });
 
 /** The session token of an answer that set the session cookie. */
 function cookieToken(res: Response): string {
@@ -287,13 +295,15 @@ describe("anonymous sign-in (plan 12i Task 6)", () => {
 
   it("limits the sign-in by IP", async () => {
     const w = world();
-    const same = { "x-forwarded-for": "203.0.113.9" };
+    const same = { "cf-connecting-ip": "203.0.113.9" };
     for (let i = 0; i < 10; i++)
       expect((await w.handle(post("/auth/anonymous/sign-in", {}, same))).status).toBe(200);
     const eleventh = await w.handle(post("/auth/anonymous/sign-in", {}, same));
     expect(eleventh.status).toBe(429);
     expect(await eleventh.json()).toEqual({ error: "rate_limited" });
     expect(await users(w)).toHaveLength(10);
+    // The limit is per IP: another IP gets in in the same hour.
+    expect((await w.handle(post("/auth/anonymous/sign-in", {}, fromNewIp()))).status).toBe(200);
     // A new hour opens the window again.
     w.auth.clock.advance(60 * 60 * 1000);
     expect((await w.handle(post("/auth/anonymous/sign-in", {}, same))).status).toBe(200);
@@ -317,6 +327,28 @@ describe("anonymous sign-in (plan 12i Task 6)", () => {
     expect((await signIn()).status).toBe(429);
     o.clock.advance(1000);
     expect((await signIn()).status).toBe(200);
+  });
+
+  it("counts no failed captcha against the daily cap (ruling 31 L-B)", async () => {
+    const verify = vi.fn(async ({ token }: { token: string }) =>
+      token === "good" ? ("pass" as const) : ("fail" as const),
+    );
+    const w = world({
+      anonymous: { isolateLimiter: "allow", dailyCap: 1 },
+      captcha: { port: { verify }, flows: ["anonymous-sign-in"] },
+    });
+    const signIn = (token: string) =>
+      w.handle(
+        post("/auth/anonymous/sign-in", {}, { ...fromNewIp(), "x-captcha-response": token }),
+      );
+    for (let i = 0; i < 3; i++)
+      expect(await (await signIn("bad")).json()).toEqual({ error: "captcha_failed" });
+    // The cap of 1 is still free: the three failures counted nothing.
+    expect((await signIn("good")).status).toBe(200);
+    const second = await signIn("good");
+    expect(second.status).toBe(429);
+    expect(await second.json()).toEqual({ error: "rate_limited" });
+    expect(await users(w)).toHaveLength(1);
   });
 
   it("answers not_found in process with anonymous off", async () => {
@@ -437,6 +469,30 @@ describe("ANONYMOUS_REFUSED (plan 12i Task 6)", () => {
     expect(await w.auth.storage.findMany("session", [])).toEqual([]);
   });
 
+  it("decides the routes that joined the lane after Task 6 (ruling 31 join)", async () => {
+    const w = world({
+      social: {
+        google: { clientId: "g", clientSecret: "g" },
+        slack: { clientId: "sl", clientSecret: "s" },
+      },
+    });
+    const a = await anonymous(w);
+    const cookie = { cookie: a.cookie };
+    const before = await dump(w);
+    // The link of a preset of Task 14 is the link route: refused for every provider.
+    const slack = await w.handle(post("/auth/social/slack/link", {}, cookie));
+    expect(slack.status).toBe(403);
+    expect(await slack.json()).toEqual({ error: "anonymous_refused" });
+    // The phone remove of Task 5 is not listed: an anonymous user holds no phone.
+    const removed = await w.handle(post("/auth/phone/remove", {}, cookie));
+    expect(removed.status).toBe(404);
+    expect(await removed.json()).toEqual({ error: "not_found" });
+    expect(await dump(w)).toEqual(before);
+    // The phone sign-in of Task 5 is a sign-in, not a change of this user: not listed.
+    const request = await w.handle(post("/auth/phone/request", { phone: "+14155550100" }, cookie));
+    expect(await request.json()).toEqual({ sent: true });
+  });
+
   it("refuses a listed route to an anonymous user with anonymous off since", async () => {
     const w = world();
     const a = await anonymous(w);
@@ -508,6 +564,12 @@ describe("the anonymous branch of provedAccount and handleProved (plan 12i Task 
       apiToken: await createApiToken(config, { user: session.user, name: "ci" }),
       username: await setUsername(config, { session, username: "anon", ip: null, userAgent: null }),
       phone: await addPhone(config, { session, phone: "+14155550100", ip: null }),
+      phoneVerify: await verifyAddPhone(config, {
+        session,
+        code: "123456",
+        ip: null,
+        userAgent: null,
+      }),
       emailChange: await requestEmailChange(config, { session, newEmail: "a@example.com" }),
     };
     for (const [name, r] of Object.entries(answers)) expect([name, r]).toEqual([name, refused]);
@@ -710,8 +772,13 @@ describe("the anonymous sweep (plan 12i Task 6)", () => {
       session: { ttlDays: 7, slidingRefreshDays: 1 },
       hooks: { user: { afterDelete } },
     });
-    const live = await anonymous(w);
-    for (let i = 0; i < 101; i++) await anonymous(w);
+    const made = [];
+    for (let i = 0; i < 102; i++) made.push(await anonymous(w));
+    // The clock stands still, so the 102 users share one createdAt, and the read orders them
+    // by id. The live user is the lowest id: it is the first row of each read of the tie
+    // group. Only the `held` set keeps it out of the next page (ruling 31 L-A).
+    expect(new Set(made.map((m) => m.resolved.user.createdAt.getTime())).size).toBe(1);
+    const live = made.reduce((a, b) => (b.resolved.user.id < a.resolved.user.id ? b : a));
     const day = 24 * 60 * 60 * 1000;
     // 31 days on. The live user reads its session each day, so the sliding refresh keeps it.
     for (let d = 0; d < 31; d++) {

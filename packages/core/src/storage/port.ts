@@ -13,8 +13,8 @@ export interface Sort<M extends ModelName> {
   field: keyof Models[M] & string;
   dir: "asc" | "desc";
   /**
-   * True: the field is not nullable in the schema, so the SQL has no
-   * `IS NULL` term and an index on the column gives the order (ruling 27
+   * True: the field is not nullable in the schema. So the SQL has no
+   * `IS NULL` term, and an index on the column gives the order (ruling 27
    * of plan 12i). A nullable field with it is `invalid_argument`.
    */
   notNull?: true;

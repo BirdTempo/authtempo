@@ -28,9 +28,9 @@ const PINS = {
 };
 // The sweep of 101 anonymous users past their days, with no live session.
 const SWEEP_PINS = { queries: 28, anonymousUsers: 100 };
-// The rows that one read of the anonymous step may take on D1: an index entry
-// and a row for each of the 50 users of a page (ANONYMOUS_PAGE), and the one
-// index entry that ends the range (run of 2026-10-25: 101).
+// The rows that one read of the anonymous step may take on D1. That is an
+// index entry and a row for each of the 50 users of a page (ANONYMOUS_PAGE),
+// and the one index entry that ends the range. The run of 2026-10-25 read 101.
 const PAGE_ROWS = 2 * 50 + 1;
 // The sweep of 60 anonymous users past their days behind a backlog of 300
 // client links (ruling 25 M2), on the run of 2026-10-24. With no share of

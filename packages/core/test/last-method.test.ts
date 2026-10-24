@@ -36,8 +36,8 @@ import { codeNow, EMAIL, enrolled, PASSWORD, totpAuth } from "./totp-helpers.js"
 // with one value of a closed set, set at each browser sign-in. It is a hint
 // for the sign-in page only: it signs no one in and names no account.
 // The phone value comes from the phone sign-in of Task 5 and from the
-// password sign-in by phone. The anonymous sign-in of Task 6 sets no
-// cookie; Task 6 adds its case here.
+// password sign-in by phone. The anonymous sign-in of Task 6 sets no value:
+// it is not a way in, so the page has nothing to offer again.
 
 const RP = { rpID: "example.com", rpName: "Example", origins: [APP_ORIGIN] };
 const PHONE = "+14155550100";
@@ -443,6 +443,30 @@ describe("the last method cookie (plan 12i Task 12)", () => {
       for (const value of Object.values(user))
         expect(["password", "social:google"]).not.toContain(value);
     }
+  });
+
+  it("sets no value at the anonymous sign-in (plan 12i Task 6)", async () => {
+    // An anonymous user has no way back in, so the sign-in page has no method to offer.
+    const w = world({ anonymous: { isolateLimiter: "allow" } });
+    const res = await w.handle(post("/auth/anonymous/sign-in", {}));
+    expect(res.status).toBe(200);
+    expect(hasSession(res)).toBe(true);
+    expect(lastCookie(res)).toBeNull();
+    const body = await bodyOf(res);
+    expect(body).not.toHaveProperty("via");
+    expect(body.user).toMatchObject({ email: null });
+    // The answer of the live anonymous session again: still no value.
+    const token = res.headers
+      .getSetCookie()
+      .find((c) => c.startsWith(`${SESSION}=`))
+      ?.slice(SESSION.length + 1)
+      .split(";")[0];
+    const again = await w.handle(
+      post("/auth/anonymous/sign-in", {}, { cookie: `${SESSION}=${token}` }),
+    );
+    expect(again.status).toBe(200);
+    expect(lastCookie(again)).toBeNull();
+    expect(await bodyOf(again)).not.toHaveProperty("via");
   });
 
   it("names the password sign-in by its identifier: phone for a number (plan 12i Task 4)", () => {

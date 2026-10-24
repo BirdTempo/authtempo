@@ -36,6 +36,11 @@ import { draftUserRow } from "./users.js";
  * upgrade that owner decision 2 refuses (plan 12i). The account delete has
  * its own route for an anonymous user, `POST /anonymous/delete`. Each entry
  * declares the code in `ROUTES`, and anonymous.test.ts holds both ways.
+ *
+ * Not listed: each sign-in route (the phone code and every social preset
+ * too), because a sign-in leaves the anonymous user and changes nothing of
+ * it. Also not listed: the remove of a passkey or a phone, because an
+ * anonymous user can hold neither, so the route finds nothing to remove.
  */
 export const ANONYMOUS_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   // The re-authentication: an anonymous user has no proof to give.

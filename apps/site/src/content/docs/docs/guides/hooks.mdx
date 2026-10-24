@@ -46,10 +46,10 @@ import test from "../../../../../samples/guides/hooks.test.ts?raw";
 | `hooks.operator` | `beforeAction`, `afterAction` |
 | `hooks.sso` | `beforeSignIn` |
 | `via` of a member | `create`, `add`, `invitation`, `operator`, `sso`, `scim`; for a removal `remove`, `leave`, `operator`, or `scim` |
-| `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `impersonation`, `sso` |
+| `via` of a session | `password`, `magic_link`, `social`, `passkey`, `handoff`, `email_otp`, `impersonation`, `sso`, `phone`, `anonymous` |
 | `via` of a user create | the `via` of the sign-in, `password_reset` for a reset that creates the user, `operator` for `createAdmin`, or `scim` for a create by the directory |
-| `via` of a user update | `profile`, `email_change`, `ban`, `unban`, `scim`, `username` |
-| `via` of a user verify | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset` |
+| `via` of a user update | `profile`, `email_change`, `ban`, `unban`, `scim`, `username`, `phone` |
+| `via` of a user verify | `password_verify`, `magic_link`, `email_otp`, `social`, `password_reset`, `sso`, `scim` |
 | `via` of an identity link | `sign_in` for a social sign-in, `link` for the link of a signed-in user |
 | `reason` of `afterEnd` | `sign_out`, `password_reset`, `password_change`, `claim`, `expired`, `two_factor`, `revoked`, `email_change`, `account_deleted`, `oidc_logout`, `banned`, `operator`, `impersonation_end` |
 
