@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { readBody } from "../src/http/body.js";
-import { readJson } from "../src/http/json.js";
+import { readJson, readOptionalJson } from "../src/http/json.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { readQuery } from "../src/http/routes/sso.js";
@@ -81,6 +81,26 @@ const body = (text: string) =>
     headers: { "content-type": "application/json" },
     body: text,
   });
+
+describe("readOptionalJson walks the whole body (plan 12i)", () => {
+  // The passkey options, the impersonation stop, and the rewrap read an
+  // optional body through it, so it holds the rule of readJson.
+  it.each([...REFUSED, ...DEEP])("refuses %s as invalid_body", async (_, text) => {
+    expect(await readOptionalJson(body(text), z.unknown())).toEqual({
+      ok: false,
+      code: "invalid_body",
+      status: 400,
+    });
+  });
+
+  it("reads an empty body as {} and a surrogate pair as text", async () => {
+    expect(await readOptionalJson(body(""), z.unknown())).toEqual({ ok: true, value: {} });
+    expect(await readOptionalJson(body('{"a":"\\ud83d\\ude00"}'), z.unknown())).toEqual({
+      ok: true,
+      value: { a: "\u{1F600}" },
+    });
+  });
+});
 
 describe("readJson walks the whole body", () => {
   it.each(DEEP)("refuses %s as invalid_body", async (_, text) => {

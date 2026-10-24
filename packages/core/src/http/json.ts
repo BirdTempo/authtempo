@@ -41,7 +41,9 @@ export async function readJson<T>(request: Request, schema: z.ZodType<T>): Promi
 /**
  * The body of a route whose contract marks the body `optional`: an empty
  * body reads as `{}`, so a caller of the route before the body existed
- * keeps working (plan 12i). The passkey options read it.
+ * keeps working (plan 12i). The passkey options, the impersonation stop,
+ * and the rewrap read it. A NUL or a lone surrogate answers `invalid_body`,
+ * as in readJson.
  */
 export async function readOptionalJson<T>(
   request: Request,
@@ -56,6 +58,7 @@ export async function readOptionalJson<T>(
       return fail("invalid_body");
     }
   }
+  if (holdsBadText(raw)) return fail("invalid_body");
   const parsed = schema.safeParse(raw);
   return parsed.success ? ok(parsed.data) : fail("invalid_body");
 }
