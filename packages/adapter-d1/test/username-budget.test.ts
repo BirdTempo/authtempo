@@ -22,6 +22,9 @@ const SET_QUERIES = 6;
 const CHECK_QUERIES = 2;
 const SIGN_UP_QUERIES = 14;
 const TAKEN_QUERIES = 3;
+// The uniform sign-up with a name stops before any read of a user (ruling 16
+// M1): one query, the per-IP limit.
+const UNIFORM_REFUSED_QUERIES = 1;
 // Plan 12i Task 3: the password sign-in by username, run of 2026-10-24.
 // A right password, an unknown name, and a wrong password.
 const NAME_SIGN_IN_QUERIES = 12;
@@ -160,29 +163,34 @@ describe("the username on D1 (plan 12i Task 2)", () => {
     );
     expect(uniform.body).toEqual({ error: "invalid_body" });
     // Each is far inside 50.
-    expect([set.queries, check.queries, up.queries, taken.queries]).toEqual([
+    expect([set.queries, check.queries, up.queries, taken.queries, uniform.queries]).toEqual([
       SET_QUERIES,
       CHECK_QUERIES,
       SIGN_UP_QUERIES,
       TAKEN_QUERIES,
+      UNIFORM_REFUSED_QUERIES,
     ]);
-    for (const q of [set, check, up, taken]) expect(q.queries).toBeLessThanOrEqual(BUDGET);
+    for (const q of [set, check, up, taken, uniform])
+      expect(q.queries).toBeLessThanOrEqual(BUDGET);
   });
 
   it("keeps each sign-in by username within the D1 Free budget", async () => {
     const w = make();
-    // A real user: the sign-up with the name, then the verify link of the mail.
+    // A real user: the uniform sign-up, the verify link of the mail, then
+    // the set of the name with the session of the link. The uniform sign-up
+    // takes no name (ruling 16 M1).
     const up = await w.auth.handle(
-      post("/password/sign-up", {
-        email: "ada@example.com",
-        password: "correct horse battery",
-        username: "Ada",
-      }),
+      post("/password/sign-up", { email: "ada@example.com", password: "correct horse battery" }),
     );
     expect(await up.json()).toEqual({ sent: true });
     const text = w.mail.findLast((m) => m.to === "ada@example.com")?.text ?? "";
     const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
-    expect((await w.auth.handle(post("/password/verify", { token }))).status).toBe(200);
+    const verified = await w.auth.api.password?.verifyEmail({ token, ip: null, userAgent: null });
+    if (!verified?.ok || !verified.value.signedIn) throw new Error("no session");
+    const bearer = { authorization: `Bearer ${verified.value.signedIn.token}` };
+    expect((await w.auth.handle(post("/user/username", { username: "Ada" }, bearer))).status).toBe(
+      200,
+    );
     const signIn = (username: string, password: string) =>
       measure(w, post("/password/sign-in", { username, password }));
     const right = await signIn("ADA", "correct horse battery");
