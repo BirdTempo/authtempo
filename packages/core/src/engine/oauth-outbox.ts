@@ -11,19 +11,19 @@ import { type ImpersonationStops, writeStopRow } from "./operator/audit.js";
  * Links a session to a client that got an ID token in it, with the `sid` of
  * that token. A second link of the same pair is a `unique_violation`. The
  * call then answers the `sid` of the first link, so each ID token of one
- * session and one client carries one `sid`. Call it outside a transaction:
- * on Postgres a unique violation ends the transaction that holds it.
+ * session and one client carries one `sid`. The first link also keeps its
+ * `issuer`. Call it outside a transaction: on Postgres a unique violation
+ * ends the transaction that holds it.
  */
 export async function linkSession(
   storage: StorageAdapter,
-  input: { sessionId: string; clientId: string; userId: string; sid: string },
+  input: { sessionId: string; clientId: string; userId: string; sid: string; issuer: string },
   now: Date,
 ): Promise<string> {
   try {
     await storage.create("oauthSessionClient", {
       id: newId(now),
       ...input,
-      issuer: null,
       createdAt: now,
       updatedAt: now,
     });

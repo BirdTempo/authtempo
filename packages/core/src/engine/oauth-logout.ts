@@ -7,7 +7,14 @@ import { constantTimeEqual, randomBase64Url } from "../primitives/crypto.js";
 import { clientRef } from "../redact.js";
 import type { OAuthClientRow, OAuthLogoutRow, SessionRow } from "../schema.js";
 import type { Meter } from "../storage/meter.js";
-import { entryOfIssuer, issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
+import {
+  entryOfIssuer,
+  issuerOf,
+  mintConfig,
+  primaryIssuer,
+  signToken,
+  verifyLocal,
+} from "./jwt.js";
 import { findClient } from "./oauth-clients.js";
 import { endSessionById, linkSession, queueLogouts } from "./oauth-outbox.js";
 import { sidNames, storedSubject, userOfSubject } from "./oauth-subject.js";
@@ -200,14 +207,16 @@ const LOGOUT_EVENT = "http://schemas.openid.net/event/backchannel-logout";
  * 49). A second logout of one session is harmless (section 2.7).
  *
  * `sid` is the value for a new link. The call answers the `sid` of the link,
- * which the ID token must carry: the first one of the pair (ruling 57).
+ * which the ID token must carry: the first one of the pair (ruling 57). The
+ * link keeps the issuer of the request's entry of `baseURL`, which the ID
+ * token names (plan 12i Task 18).
  */
 export async function linkIdToken(
   config: ResolvedConfig,
   input: { sessionId: string; clientId: string; userId: string; sid: string },
 ): Promise<string> {
   const now = config.clock.now();
-  const sid = await linkSession(config.storage, input, now);
+  const sid = await linkSession(config.storage, { ...input, issuer: issuerOf(config) }, now);
   const session = await config.storage.findOne("session", [
     { field: "id", op: "eq", value: input.sessionId },
   ]);
@@ -222,7 +231,9 @@ export async function linkIdToken(
  * the values that the client knows. The row holds the `sid` of the ID
  * token, so a new secret version since then changes nothing (ruling 57). An
  * account delete removes a pairwise subject first. Then the token holds
- * `sid` alone, which section 2.4 allows. It never holds a nonce.
+ * `sid` alone, which section 2.4 allows. It never holds a nonce. `iss` is
+ * the issuer that the client saw in its ID token (section 2.6 checks it as
+ * for the ID token), kept on the row (plan 12i Task 18).
  */
 export async function logoutToken(
   config: ResolvedConfig,
@@ -232,7 +243,7 @@ export async function logoutToken(
   const iat = Math.floor(config.clock.now().getTime() / 1000);
   const sub = await storedSubject(config, row.userId, client);
   return signToken(config, LOGOUT_TOKEN_TYP, {
-    iss: issuerOf(config),
+    iss: logoutIssuer(config, row),
     aud: client.id,
     iat,
     exp: iat + LOGOUT_TOKEN_LIFE_S,
@@ -241,6 +252,18 @@ export async function logoutToken(
     ...(sub !== null ? { sub } : {}),
     sid: row.sid,
   });
+}
+
+/**
+ * The `iss` of the logout token of `row`: the issuer that the row keeps
+ * while it is the issuer of an entry of `baseURL`. A row of an older core
+ * keeps none, and an entry can leave the list. Both name the primary, never
+ * an issuer that this deployment no longer holds. The delivery can run on
+ * any entry, so the request's own issuer takes no part.
+ */
+function logoutIssuer(config: ResolvedConfig, row: OAuthLogoutRow): string {
+  if (row.issuer !== null && entryOfIssuer(config, row.issuer) !== null) return row.issuer;
+  return primaryIssuer(config);
 }
 
 /** The wait after `attempts` failed attempts. */

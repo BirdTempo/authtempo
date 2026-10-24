@@ -448,4 +448,207 @@ describe("the base URL list (plan 12i Task 18)", () => {
       `${B}/auth/oauth/github`,
     );
   });
+
+  it("mints a session JWT on B for B's audience, and B verifies it", async () => {
+    const w = world();
+    const s = await signedIn(w);
+    const minted = await w.auth.handle(
+      new Request(`${B}/auth/token`, { headers: { cookie: s.cookie } }),
+    );
+    const { token } = (await minted.json()) as { token: string };
+    expect(claimsOf(recordCredential(token))).toMatchObject({ iss: `${B}/auth`, aud: B });
+    const live = await w.auth.handle(
+      new Request(`${B}/auth/token/live`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}` },
+      }),
+    );
+    expect(await live.json()).toEqual({ live: true });
+  });
+
+  it("mails the invitation link and the reset link of B for a request on B", async () => {
+    const w = world({ organizations: {}, password: {} });
+    const s = await signedIn(w);
+    const created = await w.auth.handle(
+      postOn(B, "/auth/organizations/create", { slug: "acme", name: "Acme" }, { cookie: s.cookie }),
+    );
+    const { organization } = (await created.json()) as { organization: { id: string } };
+    const invited = await w.auth.handle(
+      postOn(
+        B,
+        "/auth/organizations/invite",
+        { organizationId: organization.id, email: recordAddress("bo@example.com"), role: "member" },
+        { cookie: s.cookie },
+      ),
+    );
+    expect(invited.status).toBe(200);
+    expect(w.mail.at(-1)?.text).toContain(`${B}/?invitation=inv_`);
+    const reset = await w.auth.handle(
+      postOn(B, "/auth/password/reset/request", { email: "ada@example.com" }),
+    );
+    expect(reset.status).toBe(200);
+    expect(w.mail.at(-1)?.text).toContain(`${B}/auth/password/reset?token=`);
+    for (const m of w.mail) expect(m.text).not.toContain(A);
+  });
+
+  it("names B's issuer as the Basic realm of a client refused on B", async () => {
+    const w = world({ oauth: { resources: [RESOURCE], registration: { cimd: false } } });
+    // A client id that no client holds, in a Basic header: invalid_client with the challenge.
+    const res = await w.auth.handle(
+      new Request(`${B}/auth/oauth/token`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          authorization: `Basic ${btoa("cl_none:wrong")}`,
+        },
+        body: new URLSearchParams({ grant_type: "client_credentials" }).toString(),
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(res.headers.get("www-authenticate")).toBe(`Basic realm="${B}/auth"`);
+  });
+});
+
+describe("the back-channel logout on a base URL list (plan 12i Task 18)", () => {
+  const BC = "https://client.example.com/backchannel";
+  const AFTER = "https://client.example.com/signed-out";
+
+  /** A world whose fetch keeps each back-channel post. */
+  function logoutWorld(extra: Partial<AuthConfig> = {}) {
+    const posts: { url: string; body: string }[] = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      posts.push({ url: String(url), body: typeof init?.body === "string" ? init.body : "" });
+      return new Response(null, { status: 200 });
+    }) as typeof fetch;
+    const w = world({
+      oauth: {
+        resources: [RESOURCE],
+        registration: { cimd: false, dynamic: true },
+        fetch: fetchFn,
+      },
+      ...extra,
+    });
+    /** The `iss` of each logout token that reached the client. */
+    const logoutIssuers = () =>
+      posts
+        .filter((p) => p.url === BC)
+        .map((p) => claimsOf(new URLSearchParams(p.body).get("logout_token") ?? "").iss);
+    return { ...w, posts, logoutIssuers };
+  }
+
+  /** A client with a back-channel URI gets an ID token on `host`; answers the token. */
+  async function idTokenOn(w: ReturnType<typeof logoutWorld>, host: string, cookie: string) {
+    const reg = await w.auth.handle(
+      postOn(host, "/auth/oauth/register", {
+        redirect_uris: [REDIRECT],
+        backchannel_logout_uri: BC,
+        post_logout_redirect_uris: [AFTER],
+      }),
+    );
+    expect(reg.status).toBe(201);
+    const { client_id: clientId } = (await reg.json()) as { client_id: string };
+    const p = await pkce();
+    const query = new URLSearchParams({
+      response_type: "code",
+      client_id: clientId,
+      redirect_uri: REDIRECT,
+      code_challenge: p.challenge,
+      code_challenge_method: "S256",
+      scope: "openid",
+      resource: RESOURCE,
+      state: "st",
+      nonce: "n",
+    });
+    const page = await w.auth.handle(
+      new Request(`${host}/auth/oauth/authorize?${query}`, { headers: { cookie } }),
+    );
+    const done =
+      page.status !== 200
+        ? page
+        : await w.auth.handle(
+            new Request(`${host}/auth/oauth/authorize`, {
+              method: "POST",
+              headers: {
+                "content-type": "application/x-www-form-urlencoded",
+                origin: host,
+                cookie,
+              },
+              body: new URLSearchParams({
+                request_id: requestIdOf(await page.text()),
+                decision: "allow",
+              }).toString(),
+            }),
+          );
+    const code = recordCredential(
+      new URL(done.headers.get("location") ?? "").searchParams.get("code") ?? "",
+    );
+    const tok = await w.auth.handle(
+      formOn(
+        host,
+        "/auth/oauth/token",
+        {
+          grant_type: "authorization_code",
+          code,
+          code_verifier: p.verifier,
+          client_id: clientId,
+          redirect_uri: REDIRECT,
+          resource: RESOURCE,
+        },
+        false,
+      ),
+    );
+    expect(tok.status).toBe(200);
+    const { id_token: idToken } = (await tok.json()) as { id_token: string };
+    return recordCredential(idToken);
+  }
+
+  const signOutOn = (w: ReturnType<typeof logoutWorld>, host: string, cookie: string) =>
+    w.auth.handle(postOn(host, "/auth/sign-out", {}, { cookie }));
+
+  it("names the issuer of the client's ID token when the sweep ends the session", async () => {
+    const w = logoutWorld();
+    const s = await signedIn(w);
+    expect(claimsOf(await idTokenOn(w, B, s.cookie)).iss).toBe(`${B}/auth`);
+    // OIDC Back-Channel Logout 1.0 section 2.6: the client checks iss as for its ID token.
+    w.clock.advance(400 * 24 * 60 * 60_000);
+    await w.auth.api.sweepExpired();
+    expect(w.logoutIssuers()).toEqual([`${B}/auth`]);
+  });
+
+  it("names the issuer of the link on B when the sign-out is on A", async () => {
+    const w = logoutWorld();
+    const s = await signedIn(w);
+    await idTokenOn(w, B, s.cookie);
+    expect((await signOutOn(w, A, s.cookie)).status).toBe(200);
+    expect(w.logoutIssuers()).toEqual([`${B}/auth`]);
+  });
+
+  it("names the primary for an issuer that left the list", async () => {
+    const w = logoutWorld();
+    const s = await signedIn(w);
+    await idTokenOn(w, B, s.cookie);
+    // The deployment drops B. Its old link must not sign a token for a host it no longer holds.
+    const later = createAuth({ ...w.input, baseURL: [A] });
+    const out = await later.handle(postOn(A, "/auth/sign-out", {}, { cookie: s.cookie }));
+    expect(out.status).toBe(200);
+    expect(w.logoutIssuers()).toEqual([`${A}/auth`]);
+  });
+
+  it("takes an ID token hint of B at the end-session route on A", async () => {
+    const w = logoutWorld();
+    const s = await signedIn(w);
+    const hint = await idTokenOn(w, B, s.cookie);
+    const query = new URLSearchParams({
+      id_token_hint: hint,
+      post_logout_redirect_uri: AFTER,
+      state: "st",
+    });
+    // A valid hint names the session: no confirm page, and the redirect goes to the client.
+    const res = await w.auth.handle(
+      new Request(`${A}/auth/oauth/end-session?${query}`, { headers: { cookie: s.cookie } }),
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${AFTER}?state=st`);
+    expect(w.logoutIssuers()).toEqual([`${B}/auth`]);
+  });
 });
