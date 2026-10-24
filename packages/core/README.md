@@ -453,12 +453,17 @@ turns it off. The app asks `POST /social/<provider>/id-token/nonce` for a
 nonce. It gives `providerNonce`, the SHA-256 hex of the nonce, to the
 provider, and keeps the raw `nonce`. Then it posts the ID token with the raw
 nonce to `POST /social/<provider>/id-token`. The token's `nonce` claim must
-be the hash of the posted nonce. A party that holds only the token sees the
-hash, so it cannot post the nonce. Core verifies the token against the
-provider's key set, and then spends the nonce once. The `aud` must be
-`clientId` or an entry of `audiences`, the list of the app's native client
-ids. A row for each token bars a second use on every instance. The account
-rules, the gate, and the anonymous upgrade are those of the callback.
+be the hash of the posted nonce. While `requireNonce` is on, a party that
+holds only the token sees the hash, so it cannot post the nonce. With
+`social.idToken.requireNonce: false`, a token posted with no nonce skips
+the hash check, except an Apple token with `nonce_supported` true. So a
+party that holds only such a token can sign in before the app. Only the
+one-use row of the token then stops a second use. Core verifies the token
+against the provider's key set, and then spends the nonce once. The `aud`
+must be `clientId` or an entry of `audiences`, the list of the app's
+native client ids. A row for each token bars a second use on every
+instance. The account rules, the gate, and the anonymous upgrade are those
+of the callback.
 
 ## Passkeys
 

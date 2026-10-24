@@ -301,18 +301,18 @@ These routes exist for each configured provider. `:provider` is the name of the 
 | --- | --- |
 | Needs | Nothing. The route exists for `google` and `apple`, while `social.idToken` is not `false`. The Origin check applies, so core takes no form post of One Tap's redirect mode |
 | Input | JSON `{ idToken, nonce?, name?, next?, trustDevice? }`. `nonce` is the raw `nonce` of the nonce route, not `providerNonce`. It is needed while `social.idToken.requireNonce` is on, and for an Apple token with `nonce_supported` true. `name` is the name that Apple's native sheet gives the app; it fills a new Apple user only |
-| Answer | `{ token, user, session, via? }` with the session cookie, or `{ twoFactor }` with no cookie for a user with the second factor on. The token's `nonce` claim must be the SHA-256 hex of the posted `nonce`. A party that holds only the token sees only the hash, so it cannot post the nonce. Core checks the token before it spends the nonce, so a bad token cannot use the nonce up. The nonce is spent once. The token must verify against the provider's key set, with RS256 or ES256, the provider's issuer, one `aud` of `clientId` and `audiences`, an `exp` not past, an `iat` at most 60 seconds ahead, and a life of at most one day. Each token signs in once, on every instance. The account rules and the gate are those of the callback. A live anonymous session of the request is replaced |
+| Answer | `{ token, user, session, via? }` with the session cookie, or `{ twoFactor }` with no cookie for a user with the second factor on. The token's `nonce` claim must be the SHA-256 hex of the posted `nonce`. While `social.idToken.requireNonce` is on, a party that holds only the token sees only the hash, so it cannot post the nonce. With `requireNonce` false, a token posted with no nonce skips the hash check, except an Apple token with `nonce_supported` true. So a party that holds only such a token can sign in before the app. Only the one-use row of the token then stops a second use. Core checks the token before it spends the nonce, so a bad token cannot use the nonce up. The nonce is spent once. The token must verify against the provider's key set, with RS256 or ES256, the provider's issuer, one `aud` of `clientId` and `audiences`, an `exp` not past, an `iat` at most 60 seconds ahead, and a life of at most one day. Each token signs in once, on every instance. The account rules and the gate are those of the callback. A live anonymous session of the request is replaced |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_token`](/docs/reference/errors/#invalid_token), [`rate_limited`](/docs/reference/errors/#rate_limited), [`oauth_failed`](/docs/reference/errors/#oauth_failed), [`email_required`](/docs/reference/errors/#email_required), [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
-
-## Passkeys
-
-These routes exist when the config sets `passkey`.
 
 Owner check before the first release with this route. Core's tests use test keys, not real tokens. Run these checks on a real device:
 
 1. Sign in once with Google One Tap. Give it `providerNonce`, and confirm that the token's `nonce` claim is that value.
 2. Sign in once with the native Apple sheet. Give it `providerNonce`, and confirm that the token's `nonce` claim is that value.
 3. On the Apple token, confirm that `exp` minus `iat` is 86400 seconds or less. Core refuses a token with a longer life.
+
+## Passkeys
+
+These routes exist when the config sets `passkey`.
 
 <h3 id="post-passkey-register-options"><code>POST /passkey/register/options</code></h3>
 
