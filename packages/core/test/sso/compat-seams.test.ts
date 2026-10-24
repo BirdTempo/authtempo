@@ -212,6 +212,34 @@ describe("the compat seams of core (plan 12d Task 14)", () => {
     expect(domainRecordFor({ ...w.config })).toBe(BA_RECORD);
   });
 
+  it("gives an app config with a forged symbol of the same description core's record only (ruling 80)", async () => {
+    const forged: DomainRecordOf = (row) => ({ name: `_forged.${row.domain}`, values: ["forged"] });
+    const config = {
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      organizations: {},
+      sso: { oidc: true as const, dns: [fakeDns("a", {})] },
+      // A new symbol and a registered symbol, each of the description of core's key.
+      [Symbol("authtempo.compat.domainRecord")]: forged,
+      [Symbol.for("authtempo.compat.domainRecord")]: forged,
+    };
+    const verify = new Request(`${BASE_URL}/auth/sso/domains/verify`, { method: "POST" });
+    // No withDomainRecord: the forged key is no record, so the seam refuses the Auth.
+    expect(() => verifyDomainByRecord(createAuth(config), verify)).toThrow(TypeError);
+    // A resolved config, or a copy, with the forged key holds no record either.
+    const resolved = { ...ssoAuth().config, ...config };
+    expect(domainRecordFor(resolved)).toBeNull();
+    // With withDomainRecord, the record is the one of the compat entry, not the forged one.
+    const input = { ...config };
+    withDomainRecord(input as never, BA_RECORD);
+    const w = ssoAuth({ sso: { oidc: true } });
+    carryDomainRecord(input, w.config);
+    expect(domainRecordFor({ ...w.config, ...config })).toBe(BA_RECORD);
+  });
+
   it("refuses each call outside the seams with a TypeError", async () => {
     const dns = fakeDns("a", {});
     const config = {
