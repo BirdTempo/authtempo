@@ -50,7 +50,7 @@ describe("the SCIM base (plan 12d Task 9)", () => {
         // The member caps of a Group write, from the D1 budget (plan 12d Task 11).
         "urn:authtempo:params:scim:schemas:extension:limits:2.0": {
           groupMembersMax: 10_000,
-          membersPerRequestMax: 9,
+          membersPerRequestMax: 61,
           roleRecomputeMax: 250,
         },
         meta: {

@@ -392,10 +392,10 @@ describe("the SCIM Groups (plan 12d Task 11)", () => {
     const w = await world();
     await setMap(w, { Admins: "admin" });
     const ids: string[] = [];
-    for (let i = 0; i < 10; i++) ids.push(await userOf(w, `u${i}`));
+    for (let i = 0; i < 62; i++) ids.push(await userOf(w, `u${i}`));
     const group = await groupOf(w, "Admins");
     const before = await counts(w);
-    // Ten values: one past PATCH_MEMBERS_MAX (9, from the D1 budget).
+    // 62 values: one past PATCH_MEMBERS_MAX (61, from the D1 budget, ruling 57 of plan 12d).
     const over = await read(
       await scim(
         w,
@@ -406,7 +406,7 @@ describe("the SCIM Groups (plan 12d Task 11)", () => {
       ),
     );
     expect([over.status, over.body.scimType]).toEqual([400, "invalidValue"]);
-    expect(over.body.detail).toBe("one request changes at most 9 members of a group");
+    expect(over.body.detail).toBe("one request changes at most 61 members of a group");
     // A valid add and a failed operation in one PATCH: nothing changes.
     const half = await read(
       await scim(
@@ -422,16 +422,16 @@ describe("the SCIM Groups (plan 12d Task 11)", () => {
     );
     expect([half.status, half.body.scimType]).toEqual([400, "invalidValue"]);
     expect(await counts(w)).toEqual(before);
-    // Nine values fit.
-    const nine = await scim(
+    // 61 values fit.
+    const fit = await scim(
       w,
       w.token,
       "PATCH",
       `/Groups/${group}`,
-      patch({ op: "add", path: "members", value: ids.slice(0, 9).map((value) => ({ value })) }),
+      patch({ op: "add", path: "members", value: ids.slice(0, 61).map((value) => ({ value })) }),
     );
-    expect(nine.status).toBe(204);
-    expect(await roleOf(w, ids[8] ?? "")).toBe("admin");
+    expect(fit.status).toBe(204);
+    expect(await roleOf(w, ids[60] ?? "")).toBe("admin");
   });
 
   it("refuses a second group with the same displayName", async () => {

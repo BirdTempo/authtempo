@@ -610,8 +610,8 @@ export async function addTeamMember(
  *
  * Cost: one statement of the hold per 50 persons on Postgres and none on
  * D1, the team lock, one read per 50 persons of the member rows and of the
- * team rows, the count, one create per new row, and one read per 50 of the
- * users. A SCIM write reads no user with the hold of `holdUser`: on D1 that
+ * team rows, the count, one create per chunk of `rowsPerInsert` new rows
+ * (ruling 57 of plan 12d), and one read per 50 of the users. A SCIM write reads no user with the hold of `holdUser`: on D1 that
  * hold costs three statements per person.
  */
 export async function addTeamMembersIn(
@@ -695,7 +695,8 @@ export async function addTeamMembersIn(
         },
       );
     }
-  for (const row of rows) await tx.create("teamMember", row);
+  // One statement per chunk of rows (ruling 57 of plan 12d).
+  await tx.createMany("teamMember", rows);
   await usersStay(
     tx,
     rows.map((r) => r.userId),

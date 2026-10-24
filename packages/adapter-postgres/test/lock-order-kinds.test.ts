@@ -213,6 +213,11 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
       note(steps, model, "create");
       return tx.create(model, data);
     }) as typeof tx.create,
+    // The rows of a group or team write go in by createMany (ruling 57 of plan 12d).
+    createMany: ((model: ModelName, rows: never) => {
+      note(steps, model, "create");
+      return tx.createMany(model, rows);
+    }) as typeof tx.createMany,
     update: ((model: ModelName, where: never, data: never) => {
       note(steps, model, "update");
       return tx.update(model, where, data);

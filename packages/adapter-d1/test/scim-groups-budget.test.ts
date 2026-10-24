@@ -23,7 +23,7 @@ const GROUP_URN = "urn:ietf:params:scim:schemas:core:2.0:Group";
 const PATCH_URN = "urn:ietf:params:scim:api:messages:2.0:PatchOp";
 
 /** PATCH_MEMBERS_MAX and GROUP_ROLE_USERS_MAX of groups.ts, typed here. */
-const PATCH_CAP = 9;
+const PATCH_CAP = 61;
 const ROLE_CAP = 250;
 
 /** A view of `db` that counts each statement, and each statement of a batch. */
@@ -358,10 +358,12 @@ describe("the SCIM Groups on D1 (plan 12d Task 11, ruling 25 N4)", () => {
   it("refuses a role change past the budget with a small undo, inside 50 queries", async () => {
     const setup = make(env.DB, false);
     const { token } = await acme(setup);
-    const ids = await users(token, 9);
+    // A write at the member cap: 9 adds hold the role web, and 51 the default role. The 51
+    // role changes of member to admin take two updates of 50 rows.
+    const ids = await users(token, PATCH_CAP);
     const gone = ids[0] ?? "";
-    const web = ids.slice(1, 5);
-    const plain = ids.slice(5, 9);
+    const web = ids.slice(1, 10);
+    const plain = ids.slice(10, PATCH_CAP);
     const made: string[] = [];
     for (const [name, list] of [
       ["Admins", [gone]],
@@ -482,11 +484,17 @@ describe("the SCIM Groups on D1 (plan 12d Task 11, ruling 25 N4)", () => {
  * adds. The tenth value (`over`) answers 400 after 6 queries, before any
  * write. `back` is the worst write at GROUP_ROLE_USERS_MAX: a rename into
  * the map gives each of 250 members the mapped role.
+ *
+ * Measured again on 2026-10-24 for ruling 57 of plan 12d, with
+ * `createMany` and PATCH_MEMBERS_MAX 61: `mixed` is 60 adds and 1 removal,
+ * 50 queries. The 62nd value (`over`) answers 400 after 6 queries. The
+ * other counts are the same numbers as at 9 members: the inserts of 61
+ * rows cost as few queries as the creates of 9 rows did.
  */
 const MEASURED_CAP = {
   create: 42,
   over: 6,
-  mixed: 49,
+  mixed: 50,
   adds: 45,
   get: 6,
   list: 5,
@@ -506,9 +514,11 @@ const MEASURED_REACTIVATE = { reactivate: 33 };
  * 12d). The check comes before the scimGroupMember writes, so the undo
  * restores the group row and the team row only. Before this fix, the meter
  * did not count the scimGroupMember writes, and the same write passed with
- * 51 queries.
+ * 51 queries. Since ruling 57 the write of 9 values fits, so the scene
+ * sends 61 values with two updates of the role member to admin: 23 queries
+ * on 2026-10-24.
  */
-const MEASURED_TOO_LARGE = { refused: 20 };
+const MEASURED_TOO_LARGE = { refused: 23 };
 /** Two list pages with members, each of whole groups, at most 10000 member rows. */
 const MEASURED_LIST = { first: 6, next: 6 };
 

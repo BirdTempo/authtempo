@@ -217,26 +217,26 @@ describe("the Okta sequence (plan 12d Task 12)", () => {
     expectStatus(gone, 404);
   });
 
-  it("refuses a full push of ten members: the known gap of ruling 57 item 2", async () => {
+  it("refuses a full push of 62 members: the known gap of ruling 57 item 2", async () => {
     // Okta sends up to 1000 members in one group PATCH (ruling 57 item 2 of
-    // plan 12d). This server takes PATCH_MEMBERS_MAX (9) values per request
-    // on every store, from the D1 budget. The 12d final fix wave owns the
-    // fix (a multi-row insert, then a larger cap). This test names the gap.
+    // plan 12d). With the multi-row insert of the 12d fix wave, this server
+    // takes PATCH_MEMBERS_MAX (61) values per request on every store, from
+    // the D1 budget. A push of 1000 stays an owner item. This test names the gap.
     const w = await oktaWorld();
     const group = String((await replay(w, w.token, "okta", "10-create-group")).body.id);
     const users: string[] = [];
-    for (let i = 0; i < 10; i++) users.push(await another(w, `member${i}`));
+    for (let i = 0; i < 62; i++) users.push(await another(w, `member${i}`));
     const push = (values: string[]) =>
       scim(w, w.token, "PATCH", `/Groups/${group}`, {
         schemas: [PATCH_URN],
         Operations: [{ op: "replace", path: "members", value: values.map((value) => ({ value })) }],
       });
-    const ten = await push(users);
-    expect(ten.status).toBe(400);
-    expect(((await ten.json()) as { scimType: string }).scimType).toBe("invalidValue");
+    const over = await push(users);
+    expect(over.status).toBe(400);
+    expect(((await over.json()) as { scimType: string }).scimType).toBe("invalidValue");
     expect(await membersOf(w, group)).toEqual([]);
-    const nine = await push(users.slice(0, 9));
-    expect(nine.status).toBe(204);
-    expect(await membersOf(w, group)).toEqual(users.slice(0, 9).sort());
+    const fit = await push(users.slice(0, 61));
+    expect(fit.status).toBe(204);
+    expect(await membersOf(w, group)).toEqual(users.slice(0, 61).sort());
   });
 });

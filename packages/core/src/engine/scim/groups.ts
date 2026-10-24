@@ -625,14 +625,17 @@ async function writeMembers(
         { field: "groupId", op: "eq", value: m.groupId },
         { field: "scimUserId", op: "in", value: m.removed.slice(i, i + IN_CHUNK) },
       ]);
-    for (const scimUserId of m.added)
-      await t.create("scimGroupMember", {
+    // One statement per chunk of rows (ruling 57 of plan 12d).
+    await t.createMany(
+      "scimGroupMember",
+      m.added.map((scimUserId) => ({
         id: newId(m.now),
         groupId: m.groupId,
         scimUserId,
         createdAt: m.now,
         updatedAt: m.now,
-      });
+      })),
+    );
     // The read after the inserts: a SCIM delete or an account delete of a User that
     // ended before the hold took its row. Then the write stops, and no row stays.
     if (
@@ -652,24 +655,27 @@ async function writeMembers(
  * on Postgres or the undo read on D1, the team member delete, and the
  * session update. Per 50 persons who join it: the hold where the storage
  * has row locks, the reads of the member rows and the team rows, and the
- * read after the inserts; then the count and one create per person. A team
- * delete: the team member delete and the session update with its undo read
- * on D1. Then the audit row.
+ * read after the inserts; then the count and one create per chunk of
+ * `rowsPerInsert` rows (ruling 57 of plan 12d). A team delete: the team
+ * member delete and the session update with its undo read on D1. Then the
+ * audit row.
  */
 function tailOf(
+  storage: StorageAdapter,
   adds: number,
   removes: number,
   teamDelete: boolean,
-  locks: boolean,
   holds: number,
   rows: number,
 ): number {
   const chunks = (n: number) => Math.ceil(n / IN_CHUNK);
+  const locks = storage.lockInOrder !== undefined;
+  const inserts = Math.ceil(adds / storage.rowsPerInsert("teamMember"));
   return (
     (locks ? chunks(holds) : 0) +
     rows +
     (removes > 0 ? 3 * chunks(removes) : 0) +
-    (adds > 0 ? (locks ? 4 : 3) * chunks(adds) + 1 + adds : 0) +
+    (adds > 0 ? (locks ? 4 : 3) * chunks(adds) + 1 + inserts : 0) +
     (teamDelete ? 3 : 0) +
     1
   );
@@ -677,15 +683,21 @@ function tailOf(
 
 /**
  * The calls of the scimGroupMember rows of a write: one delete for a group
- * delete. Else one delete per 50 removed members, one create per added
- * member, and one read after the creates per 50 of them. A D1 run of
- * ruling 59 of plan 12d found these calls outside the meter: a write of 51
- * queries passed the budget check.
+ * delete. Else one delete per 50 removed members, one create per chunk of
+ * `rowsPerInsert` added members (ruling 57 of plan 12d), and one read after
+ * the creates per 50 of them. A D1 run of ruling 59 of plan 12d found these
+ * calls outside the meter: a write of 51 queries passed the budget check.
  */
-function rowCalls(kind: Write["kind"], added: number, removed: number): number {
+function rowCalls(
+  storage: StorageAdapter,
+  kind: Write["kind"],
+  added: number,
+  removed: number,
+): number {
   const chunks = (n: number) => Math.ceil(n / IN_CHUNK);
   if (kind === "delete") return 1;
-  return chunks(removed) + added + chunks(added);
+  const inserts = Math.ceil(added / storage.rowsPerInsert("scimGroupMember"));
+  return chunks(removed) + inserts + chunks(added);
 }
 
 /**
@@ -795,12 +807,12 @@ async function writeGroup(
   // at a time (ruling 59 M2 of plan 12d). A delete reads no User of a removed member.
   const holds = [...new Set(rowsOf([...added, ...removed, ...again]).map((x) => x.userId))];
   const tail = tailOf(
+    storage,
     teamOf ? joins.length : 0,
     teamOf && write.kind !== "delete" ? leaves.length : 0,
     write.kind === "delete" && team !== null,
-    storage.lockInOrder !== undefined,
     holds.length,
-    rowCalls(write.kind, added.length, removed.length),
+    rowCalls(storage, write.kind, added.length, removed.length),
   );
   const changedList = changedNames(write, added.length, removed.length);
   const action =

@@ -147,7 +147,7 @@ These counts live in their rows, so they hold under every limiter.
 | SSO domains of one organization | `sso.limits.domainsPerOrganization`, 20 by default | `domain_limit` |
 | Live SCIM tokens of one organization | 2 | `token_limit` |
 | Members of one SCIM group | 10000 | SCIM 400 `invalidValue` |
-| Members of a group that one SCIM request changes | 9, from the D1 Free budget of 50 queries | SCIM 400 `invalidValue` |
+| Members of a group that one SCIM request changes | 61, from the D1 Free budget of 50 queries, on every store | SCIM 400 `invalidValue` |
 | Members whose role one rename or delete of a mapped SCIM group computes | 250 | SCIM 400 `invalidValue` |
 | Results of one SCIM list page | 100 | The page ends there |
 | One SCIM request body | 1 MB | SCIM 413 |

@@ -109,9 +109,9 @@ describe("the SCIM limits (plan 12d Task 12)", () => {
       const more = await status(w, "PATCH", `/Users/${id}`, patch(...ops(101)));
       expect([more.status, more.body.scimType]).toEqual([400, "invalidValue"]);
 
-      // The member cap of Task 11: 9 values in one request pass, 10 answer 400 invalidValue.
+      // The member cap of ruling 57: 61 values in one request pass, 62 answer 400 invalidValue.
       const users: string[] = [];
-      for (let i = 0; i < 10; i++) users.push(await user(w, `m${i}`));
+      for (let i = 0; i < 62; i++) users.push(await user(w, `m${i}`));
       const group = await status(w, "POST", "/Groups", {
         schemas: [GROUP_URN],
         displayName: "Eng",
@@ -124,10 +124,10 @@ describe("the SCIM limits (plan 12d Task 12)", () => {
           `/Groups/${gid}`,
           patch({ op: "add", path: "members", value: values.map((value) => ({ value })) }),
         );
-      const ten = await add(users);
-      expect([ten.status, ten.body.scimType]).toEqual([400, "invalidValue"]);
+      const past = await add(users);
+      expect([past.status, past.body.scimType]).toEqual([400, "invalidValue"]);
       expect((await status(w, "GET", `/Groups/${gid}`)).body.members).toBeUndefined();
-      expect((await add(users.slice(0, 9))).status).toBe(204);
+      expect((await add(users.slice(0, 61))).status).toBe(204);
     },
     LONG_TEST_MS,
   );
