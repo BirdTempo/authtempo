@@ -746,7 +746,7 @@ Some routes answer 403 `anonymous_refused` to an anonymous session, before the h
 | --- | --- |
 | Needs | Nothing; or a session cookie, or a `ts_` bearer token. A live anonymous session answers itself and makes nothing. A live session of another kind answers `conflict` |
 | Input | JSON `{}` |
-| Answer | `{ token, user, session }` with the cookie. The user has no address and `isAnonymous: true`. No second factor gates it |
+| Answer | `{ token, user, session }` with the cookie. The stored user has no address and `isAnonymous: true`, and the answer's `user` has `email: null`. No second factor gates it |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`conflict`](/docs/reference/errors/#conflict), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed) |
 | Captcha | With `captcha` and the flow `anonymous-sign-in`: the header `x-captcha-response`, after the per-IP limit |
 

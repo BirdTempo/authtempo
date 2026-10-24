@@ -25,7 +25,8 @@ export interface Feature {
  * SCIM guide. Plan 12i adds `passkeyRelatedOrigins`, the 29th,
  * `username`, the 30th, `phone`, the 31st, `anonymous`, the 32nd,
  * `multiSession`, the 33rd, `socialIdToken`, the 34th, and `passkeySignUp`,
- * the 35th. A Record over
+ * the 35th. Plan 12i Task 17 points each of the seven to its own guide;
+ * `socialIdToken` points to the One Tap guide. A Record over
  * the union fails the site's typecheck when core adds a member, so a new
  * feature cannot
  * ship without its row. Each line restates the description of its guide.
@@ -95,13 +96,13 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     title: "Passkey related origins",
     line: "Use one passkey on related sites, with the document of WebAuthn Level 3.",
     icon: "passkey",
-    guide: "/docs/guides/passkeys/#related-origins",
+    guide: "/docs/guides/related-origins/",
   },
   passkeySignUp: {
     title: "Passkey sign-up",
     line: "Make an account with a passkey and a name, and no address.",
     icon: "passkey",
-    guide: "/docs/reference/routes/#post-passkey-sign-up-options",
+    guide: "/docs/guides/passkey-sign-up/",
   },
   password: {
     title: "Passwords",
@@ -239,31 +240,31 @@ export const FEATURES: Readonly<Record<RouteFeature, Feature>> = {
     title: "Username",
     line: "A public username for each account, with a check that a name is free.",
     icon: "password",
-    guide: "/docs/reference/routes/#username",
+    guide: "/docs/guides/username/",
   },
   phone: {
     title: "Phone sign-in",
     line: "A sign-in code by SMS through a send-only port, with a daily cap that core counts.",
     icon: "routes",
-    guide: "/docs/reference/routes/#phone",
+    guide: "/docs/guides/phone/",
   },
   anonymous: {
     title: "Anonymous sign-in",
     line: "A session for a guest with no address, kept out of each route that needs a way in.",
     icon: "routes",
-    guide: "/docs/reference/routes/#anonymous",
+    guide: "/docs/guides/anonymous/",
   },
   multiSession: {
     title: "Multi-session",
     line: "The sessions of several users in one browser, with a switch and a sign-out of one.",
     icon: "session",
-    guide: "/docs/reference/routes/#multi-session",
+    guide: "/docs/guides/multi-session/",
   },
   socialIdToken: {
     title: "ID-token sign-in",
     line: "Google One Tap and the native Apple sheet, with a nonce of one use and one sign-in per token.",
     icon: "routes",
-    guide: "/docs/reference/routes/#post-social-provider-id-token",
+    guide: "/docs/guides/one-tap/",
   },
 };
 

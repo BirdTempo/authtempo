@@ -46,6 +46,7 @@ import test from "../../../../../samples/guides/social-providers.test.ts?raw";
 - GitHub counts an address as verified only when its primary address has `verified: true`.
 - LinkedIn's subject is pairwise for each client id. A new LinkedIn client id gives every person a new subject.
 - Every call to a provider stops after 10 seconds. Core never stores or logs a provider's access token.
+- Each of the six newer presets has its own guide: [Microsoft](/docs/guides/providers/microsoft/), [Discord](/docs/guides/providers/discord/), [GitLab](/docs/guides/providers/gitlab/), [Slack](/docs/guides/providers/slack/), [X](/docs/guides/providers/x/), and [Facebook](/docs/guides/providers/facebook/).
 - A provider with a token exchange of its own can set `tokenRequest` on its `social.oauth2` entry. Core runs it after the state checks, and its fetch calls only `tokenUrl`. [Sign in with TikTok](/docs/guides/providers/tiktok/) and [Sign in with WeChat](/docs/guides/providers/wechat/) use it.
 
 ## If it fails

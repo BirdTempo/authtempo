@@ -1,0 +1,63 @@
+---
+title: Sign in with Slack
+description: Add the Sign in with Slack preset, which finds the user by the workspace id and the user id together.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 14"
+  - packages/core/src/social/slack.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../../samples/guides/slack.ts?raw";
+import test from "../../../../../../samples/guides/slack.test.ts?raw";
+
+**For:** an app developer whose users work in Slack workspaces.
+
+**What it does:** `social.slack` adds a "Continue with Slack" button on the OpenID Connect endpoints of Slack. Core finds or makes the user by the workspace id and the user id.
+
+Before you rely on this preset, sign in once with a real account.
+
+## Before you start
+
+- A working social sign-in from [Sign in with Google and Apple](/docs/guides/social/).
+- A Slack app with Sign in with Slack and the scopes `openid`, `profile`, and `email`, for [`social.slack`](/docs/reference/config/#social).
+
+## Steps
+
+1. Add `https://<your api host>/auth/social/slack/callback` to the redirect URLs of the Slack app.
+2. Copy the client id and the client secret to your secret store.
+3. Set `social.slack` with `clientId` and `clientSecret`.
+4. Link to `/auth/social/slack/start?next=/home` from the sign-in page.
+
+<Code code={config} lang="ts" title="The Slack preset in the config" />
+
+<Code code={test} lang="ts" title="The start as a test" />
+
+## How it behaves
+
+- The scope is `openid profile email`. Core reads the profile from `openid.connect.userInfo`.
+- The subject is `<team_id>:<user_id>`, such as `T123:U456`. Slack says a user id is unique only in its workspace. A user id alone from a second workspace could sign in as another person.
+- Slack answers an error with status 200 and `ok: false`. The token answer and the profile answer must each hold `ok: true`, else `oauth_failed`.
+- A profile with no team id or no user id answers `oauth_failed`.
+- An address counts as verified only with `email_verified: true`. An unverified address links no user that exists.
+
+## Residuals
+
+- Under Slack Enterprise Grid, one person can be in two workspaces. Each workspace gives a new subject, so that person gets two accounts.
+- Better Auth keeps the user id alone as the subject of a Slack account. A Better Auth `account` row of the provider `slack` does not match the core subject by itself.
+- Before you go live, confirm with a real sign-in that the profile holds the team id. Core's tests use recorded answers.
+
+## If it fails
+
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the token call or the profile call answered `ok: false`, or the profile has no team id. Check the client id, the secret, and the scopes.
+- [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person refused at Slack.
+- [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified): another user holds the address, and Slack did not verify it.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the state is spent or old, or the callback came to another browser. Start again.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user.
+
+## Next
+
+- [Sign in with GitHub, LinkedIn, and any OIDC or OAuth2 provider](/docs/guides/social-providers/)
+- [Sign in with Discord](/docs/guides/providers/discord/)
+- [Social](/docs/reference/config/#social)

@@ -1,0 +1,64 @@
+---
+title: Sign in with GitLab
+description: Add the GitLab preset for gitlab.com or your own GitLab instance, with no address that counts as verified.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 13"
+  - packages/core/src/social/gitlab.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../../samples/guides/gitlab.ts?raw";
+import test from "../../../../../../samples/guides/gitlab.test.ts?raw";
+
+**For:** an app developer whose users have accounts on gitlab.com or on a GitLab instance of their company.
+
+**What it does:** `social.gitlab` adds a "Continue with GitLab" button. Core finds or makes the user by the numeric GitLab user id.
+
+Before you rely on this preset, sign in once with a real account.
+
+## Before you start
+
+- A working social sign-in from [Sign in with Google and Apple](/docs/guides/social/).
+- An application on the GitLab instance with the scope `read_user`, for [`social.gitlab`](/docs/reference/config/#social).
+
+## Steps
+
+1. Set `https://<your api host>/auth/social/gitlab/callback` as the redirect URI of the GitLab application.
+2. Copy the application id and the secret to your secret store.
+3. Set `social.gitlab` with `clientId` and `clientSecret`.
+4. For your own instance, set `issuer` to its `https:` origin.
+5. Link to `/auth/social/gitlab/start?next=/home` from the sign-in page.
+
+<Code code={config} lang="ts" title="The GitLab preset in the config" />
+
+<Code code={test} lang="ts" title="The start as a test" />
+
+## How it behaves
+
+- `issuer` is `https://gitlab.com` by default. Another value is an `https:` origin with no path and no trailing slash.
+- Core posts the client secret to the issuer. So `createAuth` refuses an IP address, a local name, or the host of `baseURL`.
+- The scope is `read_user`. Core reads the profile from `GET /api/v4/user`.
+- The subject is the numeric `id`, the key that Better Auth keeps. A Better Auth `account` row of the provider `gitlab` links with no change.
+- A user whose `state` is not `active`, or who is `locked`, answers `oauth_failed`.
+- A GitLab address never counts as verified. The Users API names no field that proves the mailbox. So a GitLab address links no user that exists.
+
+## Residuals
+
+- A GitLab address can fill a new user, unverified. The user then proves the address by mail.
+- A first GitLab sign-in never links to an account that holds the same address. The callback answers `email_taken_unverified`.
+
+## If it fails
+
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the token call or the profile call failed, or the user is not active. Check the issuer, the application id, and the secret.
+- [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person refused at GitLab.
+- [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified): another user holds the address.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the state is spent or old, or the callback came to another browser. Start again.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user.
+
+## Next
+
+- [Sign in with GitHub, LinkedIn, and any OIDC or OAuth2 provider](/docs/guides/social-providers/)
+- [Account settings](/docs/guides/account-settings/)
+- [Social](/docs/reference/config/#social)

@@ -1,0 +1,84 @@
+---
+title: Anonymous sessions
+description: Give a guest a session with no address, and replace the guest with a real account at the first sign-in.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 6"
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 7"
+  - packages/core/src/engine/anonymous.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../samples/guides/anonymous.ts?raw";
+import test from "../../../../../samples/guides/anonymous.test.ts?raw";
+
+**For:** an app developer who lets a person use the app before they make an account, such as a shop with a cart.
+
+**What it does:** `POST /anonymous/sign-in` makes a user with no address and opens its session. A later sign-in in the same browser replaces that user, and `hooks.anonymous` moves the app's data.
+
+## Before you start
+
+- A sign-in method for the real account, such as [Sign in with a magic link](/docs/guides/magic-link/).
+- A limiter that counts for the whole deployment: the D1, Postgres, or MySQL limiter. [Limits](/docs/reference/limits/) names each one.
+- A scheduled sweep, as in [The sweep](/docs/guides/sweep/). It deletes the old guests.
+
+## Steps
+
+1. Set `anonymous` to `{}`, or to an object with `ttlDays`.
+2. Pass the limiter of your adapter as `limiter`.
+3. Post `{}` to `POST /anonymous/sign-in` when a guest first needs a session. `client.anonymous.signIn()` makes the same call.
+4. Store the guest's data under the user id of that session.
+5. Move the data in `hooks.anonymous.afterLink`, and only when `proof` is `verified`.
+6. Offer "Delete my data": it posts `{}` to `POST /anonymous/delete`.
+7. On a public site, add the captcha flow `anonymous-sign-in` to `captcha.flows`.
+
+<Code code={config} lang="ts" title="A guest cart in the config" />
+
+<Code code={test} lang="ts" title="The guest and the upgrade as a test" />
+
+## The proof rule
+
+The link event holds `proof: "verified"` or `proof: "unverified"`. Move data only on `verified`.
+
+An unverified proof can be a claim. With `password.uniformSignUp: false`, a person can sign in with a password to an address that nobody verified. When the real owner later proves the address, the claim rule gives the owner the account. Data that moved on the unverified proof would then reach the owner.
+
+With `uniformSignUp: true`, the default, the session of a password sign-up opens at the confirm link. That proof is `verified`.
+
+## How it behaves
+
+- The anonymous user has no address, no phone, no passkey, and no password. Its session is its only key. No second factor gates it.
+- A live anonymous session answers itself and makes nothing. A live session of another kind answers `conflict`.
+- An anonymous session gets 403 `anonymous_refused` at each route that needs a way in, or that would change the user in place. These are the re-authentication, the profile, the address, the username, the account delete, each way in, and the second factor.
+- The list also holds the organization create, the invitation accept, the API token create, the OAuth consent, and the device approve. It holds with `anonymous` off too.
+- A sign-in that carries a live anonymous session makes or finds its own user. It never changes the anonymous user into the user of the sign-in.
+- `beforeLink` runs inside the transaction of the sign-in. A refusal answers `hook_refused`, and the anonymous user and its session stay.
+- `afterLink` runs after the commit. Then the anonymous session ends with `anonymous_upgrade`, and the anonymous user goes, with `user.afterDelete`.
+- A proof by mail or SMS links only when the completing request carries the anonymous session that asked for it. So a stranger cannot move data into your account with a link for your address.
+- A social sign-in links the anonymous user of its start. A password, passkey, or ID-token sign-in links the anonymous session of its own request.
+- An SSO sign-in, a password reset that opens a session, and a handoff link nothing. The sweep deletes that anonymous user later.
+- The sweep deletes an anonymous user made more than `ttlDays` ago (30 by default) with no live session, at most `anonymous.sweepBatch` per run.
+- The limits: `anonymous:ip` 10 per hour, the cap `anonymous:all-day` of `anonymous.dailyCap` (1000 by default) per 24 hours, and `anonymous-delete:user` 5 per hour.
+- `createAuth` refuses `anonymous` with a limiter that counts per isolate. For tests and local development, set `anonymous.isolateLimiter: "allow"`.
+
+## Residuals
+
+- A throw of `afterLink` writes the line `hook.after_failed` and keeps the anonymous user, but no later sign-in links it. Move the data from that line before the sweep deletes the user.
+- `POST /handoff/continue` is open to an anonymous session, so an anonymous user can hold more than one session. An upgrade ends each of them.
+- A `POST /anonymous/delete` in parallel with an upgrade can delete the anonymous user before `afterLink` runs. The same person does both, so no other person gets the data.
+- Two sign-ins at once from one anonymous session can each run `beforeLink`, and only one links. So move data in `afterLink` only.
+
+## If it fails
+
+- [`anonymous_refused`](/docs/reference/errors/#anonymous_refused): the route needs a real account. Sign in first.
+- [`conflict`](/docs/reference/errors/#conflict): the browser holds a session of another kind already.
+- [`rate_limited`](/docs/reference/errors/#rate_limited): the IP made 10 guests this hour, or the deployment reached the daily cap.
+- [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), and [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable): the captcha flow `anonymous-sign-in` refused the request.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): `signUp` is not `"open"`.
+- [`hook_refused`](/docs/reference/errors/#hook_refused): `beforeLink` refused the sign-in. The guest session stays.
+
+## Next
+
+- [Hooks](/docs/guides/hooks/#the-anonymous-upgrade)
+- [The sweep](/docs/guides/sweep/)
+- [The account with no address](/docs/concepts/account-without-address/)

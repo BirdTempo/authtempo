@@ -1,0 +1,65 @@
+---
+title: Sign in with Microsoft
+description: Add the Microsoft Entra ID preset for work, school, and personal accounts, with the tenant bound to each token.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 13"
+  - packages/core/src/social/microsoft.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../../samples/guides/microsoft.ts?raw";
+import test from "../../../../../../samples/guides/microsoft.test.ts?raw";
+
+**For:** an app developer whose users have a Microsoft work, school, or personal account.
+
+**What it does:** `social.microsoft` adds a "Continue with Microsoft" button on the v2.0 endpoints of Entra ID. Core finds or makes the user by the `oid` of the token.
+
+Before you rely on this preset, sign in once with a real account.
+
+## Before you start
+
+- A working social sign-in from [Sign in with Google and Apple](/docs/guides/social/).
+- An app registration in Entra ID with a client secret, for [`social.microsoft`](/docs/reference/config/#social).
+
+## Steps
+
+1. Register `https://<your api host>/auth/social/microsoft/callback` as a web redirect URI of the app registration.
+2. Add the optional claim `xms_edov` to the ID token of the app registration.
+3. Copy the application (client) id and the client secret to your secret store.
+4. Set `social.microsoft` with `clientId`, `clientSecret`, and `tenant`.
+5. Link to `/auth/social/microsoft/start?next=/home` from the sign-in page.
+
+<Code code={config} lang="ts" title="The Microsoft preset in the config" />
+
+<Code code={test} lang="ts" title="The start as a test" />
+
+## How it behaves
+
+- `tenant` is `common` (every kind of account), `organizations` (work and school), `consumers` (personal), or the GUID of one tenant.
+- Each token must name its own tenant: its `iss` must be the issuer of its `tid`. A token of another tenant than the GUID of `tenant` answers `oauth_failed`.
+- `organizations` refuses a personal account, and `consumers` takes only a personal account.
+- The subject is `oid`, the key that Better Auth keeps. Microsoft gives one `oid` to each app of a tenant. A Better Auth `account` row of the provider `microsoft` links with no change.
+- An address is verified only with `xms_edov: true`. Microsoft says the `email` claim is not sure to be correct and can change.
+- So without `xms_edov`, an Entra ID address links no user that exists. The callback answers `email_taken_unverified` for an address that another user holds. This stops the nOAuth attack.
+- The scope is `openid profile email`.
+
+## Residuals
+
+- An address with no `xms_edov` can fill a new user, unverified. That user then proves the address by mail before it can do what a verified address allows.
+- Before you go live, sign in once with a work account of one tenant and once with a personal account. Check that `xms_edov` reaches the token.
+
+## If it fails
+
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the token named another tenant, the token call failed, or the claims are bad. Check `tenant`, the client id, and the secret.
+- [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person refused at Microsoft, or the tenant needs the consent of an admin.
+- [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified): another user holds the address, and the token has no `xms_edov: true`.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the state is spent or old, or the callback came to another browser. Start again.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user.
+
+## Next
+
+- [Sign in with GitHub, LinkedIn, and any OIDC or OAuth2 provider](/docs/guides/social-providers/)
+- [Enterprise SSO with Entra ID](/docs/guides/sso-entra/)
+- [Social](/docs/reference/config/#social)

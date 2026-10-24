@@ -1,0 +1,61 @@
+---
+title: Sign in with Discord
+description: Add the Discord preset, which finds the user by the Discord id and counts an address only when Discord verified it.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 13"
+  - packages/core/src/social/discord.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../../samples/guides/discord.ts?raw";
+import test from "../../../../../../samples/guides/discord.test.ts?raw";
+
+**For:** an app developer whose users have Discord accounts, such as a game or a community.
+
+**What it does:** `social.discord` adds a "Continue with Discord" button. Core finds or makes the user by the Discord user id.
+
+Before you rely on this preset, sign in once with a real account.
+
+## Before you start
+
+- A working social sign-in from [Sign in with Google and Apple](/docs/guides/social/).
+- An application in the Discord developer portal with OAuth2 on, for [`social.discord`](/docs/reference/config/#social).
+
+## Steps
+
+1. Add `https://<your api host>/auth/social/discord/callback` to the OAuth2 redirects of the Discord application.
+2. Copy the client id and the client secret to your secret store.
+3. Set `social.discord` with `clientId` and `clientSecret`.
+4. Link to `/auth/social/discord/start?next=/home` from the sign-in page.
+
+<Code code={config} lang="ts" title="The Discord preset in the config" />
+
+<Code code={test} lang="ts" title="The start as a test" />
+
+## How it behaves
+
+- The scope is `identify email`. Core reads the profile from `GET /users/@me`.
+- The subject is the user `id`, the key that Better Auth keeps. A Better Auth `account` row of the provider `discord` links with no change.
+- An address counts as verified only with `verified: true` in the profile. An unverified address links no user that exists.
+- The name is `global_name`, else `username`. The image is the avatar of the user on the Discord CDN.
+- An answer with no Discord id answers `oauth_failed`.
+
+## Residuals
+
+- A Discord address that Discord did not verify can fill a new user, unverified. The user then proves the address by mail.
+
+## If it fails
+
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the token call or the profile call failed. Check the client id, the secret, and the redirect.
+- [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person refused at Discord.
+- [`email_taken_unverified`](/docs/reference/errors/#email_taken_unverified): another user holds the address, and Discord did not verify it.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the state is spent or old, or the callback came to another browser. Start again.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user.
+
+## Next
+
+- [Sign in with GitHub, LinkedIn, and any OIDC or OAuth2 provider](/docs/guides/social-providers/)
+- [Sign in with Slack](/docs/guides/providers/slack/)
+- [Social](/docs/reference/config/#social)

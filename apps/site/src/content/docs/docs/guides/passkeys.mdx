@@ -57,7 +57,7 @@ import test from "../../../../../samples/guides/passkeys.test.ts?raw";
 
 ## Related origins
 
-WebAuthn Level 3 lets a passkey of one RP ID work on other sites, such as `example.com` and `example.net`.
+WebAuthn Level 3 lets a passkey of one RP ID work on other sites, such as `example.com` and `example.net`. [Use one passkey on related sites](/docs/guides/related-origins/) gives the steps.
 
 - Set `passkey.relatedOrigins: true`, and add each origin to `passkey.origins` and to `trustedOrigins`.
 - `passkey.origins` may then hold at most five origins outside the domain tree of `rpID`. A browser must accept at least five labels, such as `example` of `example.net`.

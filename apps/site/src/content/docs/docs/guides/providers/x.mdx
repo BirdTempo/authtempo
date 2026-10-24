@@ -1,0 +1,62 @@
+---
+title: Sign in with X
+description: Add the X preset, which finds the user by the X user id and takes only a confirmed address.
+type: how-to
+sources:
+  - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 32
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 14"
+  - packages/core/src/social/twitter.ts
+---
+
+import { Code } from "@astrojs/starlight/components";
+import config from "../../../../../../samples/guides/x.ts?raw";
+import test from "../../../../../../samples/guides/x.test.ts?raw";
+
+**For:** an app developer whose users have X accounts.
+
+**What it does:** `social.twitter` adds a "Continue with X" button. Core finds or makes the user by the X user id. The provider name is `twitter`, as in Better Auth.
+
+Before you rely on this preset, sign in once with a real account.
+
+## Before you start
+
+- A working social sign-in from [Sign in with Google and Apple](/docs/guides/social/).
+- An X app with OAuth 2.0 as a confidential client, for [`social.twitter`](/docs/reference/config/#social). Ask X for the email access of the app.
+
+## Steps
+
+1. Add `https://<your api host>/auth/social/twitter/callback` to the callback URIs of the X app.
+2. Copy the OAuth 2.0 client id and client secret to your secret store.
+3. Set `social.twitter` with `clientId` and `clientSecret`.
+4. Link to `/auth/social/twitter/start?next=/home` from the sign-in page.
+
+<Code code={config} lang="ts" title="The X preset in the config" />
+
+<Code code={test} lang="ts" title="The start as a test" />
+
+## How it behaves
+
+- The scope is `users.read tweet.read users.email`.
+- Core sends the client id and secret to the token URL as HTTP Basic, as X asks of a confidential client.
+- The subject is the user `id` of `GET /2/users/me`, the key that Better Auth keeps. A Better Auth `account` row of the provider `twitter` links with no change.
+- A second read of `GET /2/users/me` asks for `confirmed_email`. Only that field gives an address, and it counts as verified.
+- When the second read fails, the profile has no address. An X account that signed in before still signs in.
+- A new person with no address from X gets `email_required`: core makes a user from a preset only with an address. So ask X for the email access of the app.
+
+## Residuals
+
+- X defines `confirmed_email` as the confirmed address of the user. Core's tests use recorded answers. Before you go live, confirm that X gives no `confirmed_email` for an address that is not confirmed.
+
+## If it fails
+
+- [`oauth_failed`](/docs/reference/errors/#oauth_failed): the token call or the first profile read failed. Check that the app is a confidential client, and check the secret.
+- [`oauth_denied`](/docs/reference/errors/#oauth_denied): the person refused at X.
+- [`email_required`](/docs/reference/errors/#email_required): X gave no address for a new person. Ask X for the email access of the app.
+- [`invalid_token`](/docs/reference/errors/#invalid_token): the state is spent or old, or the callback came to another browser. Start again.
+- [`sign_up_closed`](/docs/reference/errors/#sign_up_closed): the sign-up rule refused a new user.
+
+## Next
+
+- [Sign in with GitHub, LinkedIn, and any OIDC or OAuth2 provider](/docs/guides/social-providers/)
+- [Sign in with Facebook](/docs/guides/providers/facebook/)
+- [Social](/docs/reference/config/#social)
