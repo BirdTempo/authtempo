@@ -243,8 +243,12 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `password.requireVerified` | boolean | `false` | True refuses the right password of an unverified address with `email_unverified` and mails a new link. A sign-up then opens no session. The default keeps the sign-in of an unverified user that core allows since plan 8. |
 | `password.uniformSignUp` | boolean | `true` | Every sign-up answers `{ sent: true }` with no session, and a known address gets a mail (ASVS 5.0.0 6.3.8). False keeps a session at sign-up and `email_taken`. `requireVerified` changes only the answer of `false`. |
 | `password.existingAccountMail` | function of `{ email, appName, appURL }` to a mail | `defaultExistingAccountMail` | The mail to a known address at a uniform sign-up. Core sends it to the address, whatever `to` it answers. |
-| `password.verifyBy` | `"link"` or `"code"` | `"link"` | The proof of the address at sign-up. `"code"` mails a code of 6 digits that lives 10 minutes, for `POST /password/verify/code`. 5 wrong tries spend a code. See [Prove the address by a code](/docs/guides/verify-by-code/). |
+| `password.verifyBy` | `"link"` or `"code"` | `"link"` | The proof of the address at sign-up. `"code"` mails a code for `POST /password/verify/code`, with the shape of `password.verifyCode`. See [Prove the address by a code](/docs/guides/verify-by-code/). |
 | `password.verifyCodeMail` | function of `{ email, code, appName, ttlMinutes }` to a mail | `defaultVerifyCodeMail` | The mail of the sign-up code. Core sends it to the address, whatever `to` it answers. |
+| `password.verifyCode` | `VerifyCodeConfig` | 6 digits, 10 minutes, 5 tries | The sign-up code of `verifyBy: "code"`. A value outside its range stops `createAuth`. |
+| `password.verifyCode.length` | number | 6 | The digits of the sign-up code, an integer from 6 to 10. |
+| `password.verifyCode.ttlMinutes` | number | 10 | The life of the sign-up code, an integer from 1 to 30. |
+| `password.verifyCode.maxAttempts` | number | 5 | The wrong tries that spend a sign-up code, an integer from 1 to 10. |
 
 ## Email codes
 

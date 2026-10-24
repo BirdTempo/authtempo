@@ -769,13 +769,25 @@ export interface PasswordConfig {
   existingAccountMail?: (input: ExistingAccountMailInput) => MailMessage;
   /**
    * The proof of the address at sign-up (plan 12i Task 20). `"link"` (the
-   * default) mails a link. `"code"` mails a code of 6 digits that lives 10
-   * minutes, for a device whose mailbox is elsewhere. The person posts it to
-   * `POST /password/verify/code`. Each code takes 5 wrong tries.
+   * default) mails a link. `"code"` mails a code, for a device whose mailbox
+   * is elsewhere. The person posts it to `POST /password/verify/code`. The
+   * shape of the code is `verifyCode`.
    */
   verifyBy?: "link" | "code";
   /** The mail of the sign-up code. Core sends it to the address, whatever `to` it answers. Default `defaultVerifyCodeMail`. */
   verifyCodeMail?: (input: EmailOtpMailInput) => MailMessage;
+  /** The sign-up code of `verifyBy: "code"` (ruling 39 of plan 12i). */
+  verifyCode?: VerifyCodeConfig;
+}
+
+/** The sign-up code. Each value must be a whole number in its range. */
+export interface VerifyCodeConfig {
+  /** The digits of the code, 6 to 10. Default 6. */
+  length?: number;
+  /** The life of the code, 1 to 30. Default 10. */
+  ttlMinutes?: number;
+  /** The wrong tries that spend the code, 1 to 10. Default 5. */
+  maxAttempts?: number;
 }
 
 export interface EmailOtpConfig {
@@ -1392,6 +1404,7 @@ export interface ResolvedConfig {
     existingAccountMail: (input: ExistingAccountMailInput) => MailMessage;
     verifyBy: "link" | "code";
     verifyCodeMail: (input: EmailOtpMailInput) => MailMessage;
+    verifyCode: Required<VerifyCodeConfig>;
   } | null;
   emailOtp: ResolvedEmailOtp | null;
   /** Null: the phone code is off, and no stored phone signs in (plan 12i). */
@@ -1883,6 +1896,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       throw new ConfigError('password.verifyBy must be "link" or "code"');
     if (p.verifyCodeMail !== undefined && typeof p.verifyCodeMail !== "function")
       throw new ConfigError("password.verifyCodeMail must be a function");
+    const verifyCode = resolveVerifyCode(p.verifyCode);
     password = {
       hash: p.hash ?? createPbkdf2PasswordHash(),
       minLength,
@@ -1895,6 +1909,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       existingAccountMail: p.existingAccountMail ?? defaultExistingAccountMail,
       verifyBy,
       verifyCodeMail: p.verifyCodeMail ?? defaultVerifyCodeMail,
+      verifyCode,
     };
   }
   const signUp = input.signUp ?? "open";
@@ -2515,6 +2530,36 @@ const EMAIL_OTP_KEYS: Readonly<Record<keyof EmailOtpConfig, true>> = {
   mail: true,
   resetMail: true,
 };
+
+const VERIFY_CODE_RANGES = {
+  length: { min: 6, max: 10, fallback: 6 },
+  ttlMinutes: { min: 1, max: 30, fallback: 10 },
+  maxAttempts: { min: 1, max: 10, fallback: 5 },
+} as const;
+
+/**
+ * `password.verifyCode` (ruling 39 of plan 12i). Absent: 6 digits, 10
+ * minutes, 5 wrong tries, the email code's defaults. The compat shim maps
+ * Better Auth's `otpLength`, `expiresIn`, and `allowedAttempts` onto it.
+ */
+function resolveVerifyCode(input: VerifyCodeConfig | undefined): Required<VerifyCodeConfig> {
+  const o: VerifyCodeConfig = input === undefined ? {} : input;
+  if (!isPlainObject(o as unknown)) throw new ConfigError("password.verifyCode must be an object");
+  for (const [key, value] of Object.entries(o))
+    if (value !== undefined && !Object.hasOwn(VERIFY_CODE_RANGES, key))
+      throw new ConfigError(
+        `password.verifyCode.${key} is not an option; core has length, ttlMinutes, and maxAttempts`,
+      );
+  const out: Record<keyof VerifyCodeConfig, number> = { length: 0, ttlMinutes: 0, maxAttempts: 0 };
+  for (const key of Object.keys(VERIFY_CODE_RANGES) as (keyof VerifyCodeConfig)[]) {
+    const { min, max, fallback } = VERIFY_CODE_RANGES[key];
+    const value = o[key] ?? fallback;
+    if (!Number.isSafeInteger(value) || value < min || value > max)
+      throw new ConfigError(`password.verifyCode.${key} must be an integer from ${min} to ${max}`);
+    out[key] = value;
+  }
+  return out;
+}
 
 /** `emailOtp` (plan 9e). Absent: on, with the defaults. `false`: off. */
 function resolveEmailOtp(input: EmailOtpConfig | false | undefined): ResolvedEmailOtp | null {

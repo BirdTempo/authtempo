@@ -18,6 +18,7 @@ import {
   COMPAT_PLUGIN,
   type CompatDatabase,
   type CompatPlugin,
+  type EmailOtpOptions,
   type OrganizationOptions,
   type ScimScope,
   type User,
@@ -66,6 +67,20 @@ export const BETTER_AUTH_DEFAULTS = {
 } as const;
 
 const DAY = 86_400;
+
+/**
+ * The code options of the email-otp plugin in core's terms: the sign-in
+ * code, the reset code, and the sign-up code read them. Better Auth counts
+ * seconds and core whole minutes, rounded up, so a code never lives shorter
+ * than the app asked: 90 s is 2 minutes.
+ */
+function otpShape(o: EmailOtpOptions): { ttlMinutes: number; length: 6 | 8; maxAttempts: number } {
+  return {
+    ttlMinutes: Math.ceil((o.expiresIn ?? BETTER_AUTH_DEFAULTS.emailOtpExpiresIn) / 60),
+    length: o.otpLength === 8 ? 8 : 6,
+    maxAttempts: o.allowedAttempts ?? BETTER_AUTH_DEFAULTS.emailOtpAllowedAttempts,
+  };
+}
 
 export interface Mapped {
   config: AuthConfig;
@@ -573,13 +588,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
     // its email-otp plugin (plan 9e).
     emailOtp: otp
       ? {
-          // Better Auth counts seconds and core whole minutes, rounded up, so
-          // a code never lives shorter than the app asked: 90 s is 2 minutes.
-          ttlMinutes: Math.ceil(
-            (otp.options.expiresIn ?? BETTER_AUTH_DEFAULTS.emailOtpExpiresIn) / 60,
-          ),
-          length: otp.options.otpLength === 8 ? 8 : 6,
-          maxAttempts: otp.options.allowedAttempts ?? BETTER_AUTH_DEFAULTS.emailOtpAllowedAttempts,
+          ...otpShape(otp.options),
           mail: ({ email, code }) => otpMail(email, "sign-in", code),
           resetMail: ({ email, code }) => otpMail(email, "forget-password", code),
         }
@@ -681,6 +690,9 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
             ...(otp?.options.overrideDefaultEmailVerification === true
               ? {
                   verifyBy: "code" as const,
+                  // Better Auth applies the plugin's code options to this code
+                  // too (ruling 39 M2 of plan 12i).
+                  verifyCode: otpShape(otp.options),
                   verifyCodeMail: ({ email, code }: { email: string; code: string }) =>
                     otpMail(email, "email-verification", code),
                 }

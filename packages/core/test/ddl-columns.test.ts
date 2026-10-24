@@ -245,9 +245,11 @@ describe("the column map (plan 12g)", () => {
     // (ruling 25 M4), and its delete per user. Plan 12i Task 11 adds 1: the
     // per-IP key of the multi-session routes. Plan 12i Task 10 adds 2: the
     // per-IP keys of the ID-token nonce and sign-in. Plan 12i Task 20 adds 2:
-    // the per-IP and the per-address keys of the sign-up code.
-    expect(sites.length).toBe(105);
+    // the per-IP and the per-address keys of the sign-up code. Ruling 39 adds
+    // 1: the day cap of the sign-up code mails.
+    expect(sites.length).toBe(106);
     expect(sites).toContain('engine/id-token.ts "id-token:ip" ipKey(input.ip)');
+    expect(sites).toContain('engine/password.ts "password-verify-code:email-day" email');
     expect(sites).toContain('engine/phone.ts "phone-add:phone" input.phone');
     expect(sites).toContain('http/routes/multi-session.ts "multi-session:ip" ipKey(ctx.ip)');
     expect(sites).toContain('engine/phone.ts "phone-otp:all-day" CAP_SUBJECT');

@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig, MailMessage, PasswordConfig } from "../src/config.js";
+import { createAuth } from "../src/create-auth.js";
 import { type AnonymousLinkEvent, hookRefusal } from "../src/engine/hooks.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { createMemoryAdapter } from "../src/storage/memory.js";
+import type { StorageAdapter } from "../src/storage/port.js";
 import {
   makeAuth,
   post,
@@ -396,4 +399,153 @@ describe("the sign-up code (plan 12i Task 20)", () => {
     expect(sent.map((m) => m.to)).toEqual([EMAIL, EMAIL, EMAIL]);
     expect(sent[1]?.subject).toBe("Your account at api.example.com");
   });
+
+  it("confirms an address posted in another case", async () => {
+    // The engine normalizes the address before the compare (ruling 39 L1).
+    const w = world();
+    await signUp(w);
+    const res = await confirm(w, lastCode(w), "Ada@EXAMPLE.com");
+    expect(res.status).toBe(200);
+    expect((await userOf(w))?.emailVerified).toBe(true);
+  });
+
+  it("mails the code to the address whatever to the builder writes", async () => {
+    const w = world({
+      verifyCodeMail: ({ code }) => ({ to: "elsewhere@example.net", subject: "Code", text: code }),
+    });
+    await signUp(w);
+    expect(w.mail.map((m) => m.to)).toEqual([EMAIL]);
+  });
+
+  it("caps the code mails of one address at 10 a day, for a known and an unknown address", async () => {
+    // Ruling 39 m1: password-verify-code:email-day. The sign-up and each
+    // resend count it before any read. With 5 wrong tries per code, one
+    // address gets at most 50 guesses a day.
+    const w = world();
+    const nobody = recordAddress("nobody@example.com");
+    const resend = (email: string) =>
+      w.handle(post("/auth/password/verify/resend", { email }, ip()));
+    expect(await (await signUp(w)).json()).toEqual({ sent: true });
+    // 9 resends in 3 windows of 15 minutes: the resend limit is 3 a window.
+    for (let i = 0; i < 9; i++) {
+      if (i > 0 && i % 3 === 0) w.clock.advance(900_000);
+      expect((await resend(EMAIL)).status).toBe(200);
+      expect((await resend(nobody)).status).toBe(200);
+    }
+    expect(w.mail).toHaveLength(10);
+    w.clock.advance(900_000);
+    // The 11th mail of the day: refused, for the known and the unknown address alike.
+    expect(await answer(await resend(EMAIL))).toEqual({
+      status: 429,
+      body: { error: "rate_limited" },
+    });
+    // The unknown address made no sign-up, so it has one more count.
+    expect((await resend(nobody)).status).toBe(200);
+    expect(await answer(await resend(nobody))).toEqual({
+      status: 429,
+      body: { error: "rate_limited" },
+    });
+    // A sign-up counts too: the known address is at the cap.
+    expect((await answer(await signUp(w))).status).toBe(429);
+    expect(w.mail).toHaveLength(10);
+    // A day later the address gets a code again.
+    w.clock.advance(86_400_000);
+    expect((await resend(EMAIL)).status).toBe(200);
+    expect(w.mail).toHaveLength(11);
+  });
+
+  it("takes the length, the life, and the tries of the code from password.verifyCode", async () => {
+    const w = world({ verifyCode: { length: 8, ttlMinutes: 5, maxAttempts: 3 } });
+    await signUp(w);
+    const text = w.mail[0]?.text ?? "";
+    expect(text).toMatch(/^\d{8} is your .* It expires in 5 minutes\./);
+    const code = recordCredential(text.slice(0, 8));
+    const [row] = await codeRows(w);
+    expect((row?.expiresAt.getTime() ?? 0) - (row?.createdAt.getTime() ?? 0)).toBe(300_000);
+    const wrong = code === "00000000" ? "11111111" : "00000000";
+    expect((await answer(await confirm(w, wrong))).body).toEqual({ error: "invalid_code" });
+    expect((await answer(await confirm(w, wrong))).body).toEqual({ error: "invalid_code" });
+    expect((await answer(await confirm(w, wrong))).body).toEqual({ error: "too_many_attempts" });
+    expect((await answer(await confirm(w, code))).body).toEqual({ error: "too_many_attempts" });
+    // The defaults: 6 digits, 10 minutes, 5 tries.
+    expect(world().config.password?.verifyCode).toEqual({
+      length: 6,
+      ttlMinutes: 10,
+      maxAttempts: 5,
+    });
+  });
+
+  it("refuses a password.verifyCode value outside its range at createAuth", () => {
+    const bad: [PasswordConfig["verifyCode"], string][] = [
+      [{ length: 5 }, "password.verifyCode.length must be an integer from 6 to 10"],
+      [{ length: 11 }, "password.verifyCode.length must be an integer from 6 to 10"],
+      [{ ttlMinutes: 0 }, "password.verifyCode.ttlMinutes must be an integer from 1 to 30"],
+      [{ ttlMinutes: 31 }, "password.verifyCode.ttlMinutes must be an integer from 1 to 30"],
+      [{ maxAttempts: 0 }, "password.verifyCode.maxAttempts must be an integer from 1 to 10"],
+      [{ maxAttempts: 2.5 }, "password.verifyCode.maxAttempts must be an integer from 1 to 10"],
+      [
+        { tries: 3 } as unknown as PasswordConfig["verifyCode"],
+        "password.verifyCode.tries is not an option",
+      ],
+    ];
+    for (const [verifyCode, message] of bad) expect(() => world({ verifyCode })).toThrow(message);
+    for (const verifyCode of [{ length: 10, ttlMinutes: 30, maxAttempts: 10 }, { maxAttempts: 1 }])
+      expect(() => world({ verifyCode })).not.toThrow();
+  });
+});
+
+/** A view of `s` that waits `ms` before each call, as a remote store does. */
+function slowStore(s: StorageAdapter, ms: number): StorageAdapter {
+  return new Proxy(s, {
+    get(target, key) {
+      const v = Reflect.get(target, key);
+      if (typeof v !== "function") return v;
+      if (key === "transaction")
+        return (fn: (tx: StorageAdapter) => Promise<unknown>) =>
+          target.transaction((tx) => fn(slowStore(tx, ms)));
+      return async (...a: unknown[]) => {
+        await new Promise((r) => setTimeout(r, ms));
+        return (v as (...x: unknown[]) => unknown).apply(target, a);
+      };
+    },
+  }) as StorageAdapter;
+}
+
+describe("the answer time of the uniform sign-up with the code (ruling 39 M1)", () => {
+  it("answers a known and a new address within a small fixed bound", async () => {
+    // A store with 2 ms per call, through auth.handle with a waitUntil. The
+    // user rows, made.after, and the mail run after the answer for both, so
+    // the answer waits for no storage call. Before ruling 39, a new address
+    // waited for 6 more calls: about 9 ms more (review probe P1).
+    const PER_CALL_MS = 2;
+    const BOUND_MS = 3;
+    const ROUNDS = 15;
+    const auth = createAuth({
+      baseURL: "https://api.example.com",
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: ["https://app.example.com"],
+      storage: slowStore(createMemoryAdapter(), PER_CALL_MS),
+      mail: { send: async () => {} },
+      password: { hash: FAST, verifyBy: "code" },
+    });
+    const after: Promise<unknown>[] = [];
+    const time = async (email: string) => {
+      const request = post("/auth/password/sign-up", { email, password: PASSWORD }, ip());
+      const t0 = performance.now();
+      const res = await auth.handle(request, { waitUntil: (p) => void after.push(p) });
+      const ms = performance.now() - t0;
+      expect(await res.json()).toEqual({ sent: true });
+      await Promise.all(after.splice(0));
+      return ms;
+    };
+    for (let i = 0; i < ROUNDS; i++) await time(recordAddress(`known${i}@example.com`));
+    const known: number[] = [];
+    const fresh: number[] = [];
+    for (let i = 0; i < ROUNDS; i++) {
+      known.push(await time(recordAddress(`known${i}@example.com`)));
+      fresh.push(await time(recordAddress(`new${i}@example.com`)));
+    }
+    const median = (x: number[]) => [...x].sort((a, b) => a - b)[Math.floor(x.length / 2)] ?? 0;
+    expect(Math.abs(median(fresh) - median(known))).toBeLessThan(BOUND_MS);
+  }, 20_000);
 });

@@ -46,7 +46,8 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `password-resend:ip:<ip>` | 15 minutes | 20 | Verify mail resend |
 | `password-resend:email:<email>` | 15 minutes | 3 | Verify mail resend |
 | `password-verify-code:ip:<ip>` | 15 minutes | 30 | Sign-up code verify, before the per-address limit |
-| `password-verify-code:email:<email>` | 15 minutes | 10 | Sign-up code verify. With 5 wrong tries per code, it bounds the guesses on one address |
+| `password-verify-code:email:<email>` | 15 minutes | 10 | Sign-up code verify. With `maxAttempts` wrong tries per code (5 by default), it bounds the guesses on one address |
+| `password-verify-code:email-day:<email>` | 24 hours | 10 | Sign-up code mails, at the sign-up and each resend, before any read. With `maxAttempts` tries per code, one address gets at most 10 times `maxAttempts` guesses a day |
 | `password-reset:ip:<ip>` | 15 minutes | 20 | Reset request |
 | `password-reset:email:<email>` | 15 minutes | 5 | Reset request |
 | `password-reset-post:ip:<ip>` | 15 minutes | 20 | Reset form post |

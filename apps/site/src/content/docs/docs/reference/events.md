@@ -237,7 +237,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `operator.action.actorKind` | `secret`, `user`, `app`, `scim` |
 | `operator.refused.action` | 28 values: each action of an audit row, the 18 of SSO and SCIM too. [Routes](/docs/reference/routes/) lists them under the operator audit. |
 | `operator.refused.actorKind` | `secret`, `user`, `app`, `scim` |
-| `limit.hit.family` | 94 values: each family of [Limits](/docs/reference/limits/). |
+| `limit.hit.family` | 95 values: each family of [Limits](/docs/reference/limits/). |
 | `sso.guard_refused.step` | `impersonation`, `rank`, `email`, `second_factor`, `fresh` |
 | `sso.failed.step` | 30 values: each refused step of an OIDC start or callback, and of a SAML post. [Errors](/docs/reference/errors/) names the steps under `sso_failed`. |
 | `sso.second_factor_idp.claim` | `amr`, `acr`, `authnContext` |

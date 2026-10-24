@@ -19,7 +19,7 @@ import {
   upgradeSteps,
 } from "./anonymous.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
-import { type CodeShape, compareCode, consumeCode, issueCode } from "./email-otp.js";
+import { compareCode, consumeCode, issueCode } from "./email-otp.js";
 import { requireFresh } from "./fresh.js";
 import { HookStop, hookGuard, stopWith } from "./hooks.js";
 import { passwordMethod } from "./last-method.js";
@@ -103,16 +103,19 @@ const RESET_PURPOSES: readonly VerificationPurpose[] = ["password-reset", "passw
 // product owns this limit (plan 8b).
 const RESEND_PER_IP = { seconds: 900, max: 20 };
 const RESEND_PER_EMAIL = { seconds: 900, max: 3 };
-// The sign-up code (plan 12i Task 20): the draw and the counter of the
-// email code (spec 8.10 items 3 and 5). 6 digits for 10 minutes, and 5
-// wrong tries spend the code, as the email code's defaults.
-const VERIFY_CODE: CodeShape = { length: 6, ttlMinutes: 10 };
-const VERIFY_CODE_MAX_ATTEMPTS = 5;
+// The sign-up code (plan 12i Task 20) has the draw and the counter of the
+// email code (spec 8.10 items 3 and 5). Its shape is `password.verifyCode`
+// (ruling 39 of plan 12i).
 // Per 15 minutes, as the email code verify. The per-address key bounds
 // the guesses on one address to 10 in 15 minutes, whatever the count of
 // codes that the resend sends.
 const VERIFY_CODE_PER_IP = { seconds: 900, max: 30 };
 const VERIFY_CODE_PER_EMAIL = { seconds: 900, max: 10 };
+// Per 24 hours, the sign-up code mails of one address (ruling 39 m1). The
+// sign-up and each resend count it before any read. Each code takes
+// `maxAttempts` wrong tries, so one address gets at most 10 times
+// `maxAttempts` guesses a day: 50 with the defaults.
+const VERIFY_CODE_PER_EMAIL_DAY = { seconds: 86_400, max: 10 };
 /**
  * The marker on the stored hash string of a sign-up's password row until
  * the sign-up proved the user still unverified. The row is unusable until
@@ -343,6 +346,9 @@ export async function passwordSignUp(
   // no mail, and before the hash: only a sign-up that can mail counts.
   if (!(await limit(config, "password-sign-up:email", email, SIGN_UP_PER_EMAIL)))
     return fail("rate_limited");
+  // The day cap of the sign-up code, before any read: a known address
+  // counts as a new one does.
+  if (!(await allowCodeMail(config, email))) return fail("rate_limited");
   // Before the transaction: a hash inside it would hold a Postgres connection for its CPU time.
   const hash = await pw.hash.hash(input.password);
   const now = config.clock.now();
@@ -543,8 +549,12 @@ type UniformOutcome =
 /**
  * The uniform sign-up (plan 12b): `{ sent: true }` on every path, no
  * session. A new address gets the verify mail, a known one the
- * existing-account mail, and a refused or raced one no mail. The retry on
- * a unique violation runs outside the transaction (plan 3 rule).
+ * existing-account mail, and a refused or raced one no mail. With the code
+ * and a `waitUntil`, the answer goes first. The rows, `made.after`, and the
+ * mail then run after it as one job (ruling 39 of plan 12i). So a known and
+ * a new address do the same work before the answer, and its time tells
+ * neither. The link keeps the order of plan 12b: the job runs before the
+ * answer.
  */
 async function uniformSignUp(
   config: ResolvedConfig,
@@ -554,6 +564,28 @@ async function uniformSignUp(
   made: CreateSteps,
   anonymous: AnonymousCaller | null,
   after: AfterAnswer | undefined,
+): Promise<Result<{ sent: true }>> {
+  const job = () => uniformJob(config, pw, row, now, made, anonymous);
+  if (pw.verifyBy === "code" && after) {
+    // Each refusal of the job is quiet, so the answer is true whatever the
+    // job does. A throw becomes the router's `error.internal` line.
+    after(job());
+    return ok({ sent: true });
+  }
+  return job();
+}
+
+/**
+ * The rows, `made.after`, and the mail of the uniform sign-up. The retry
+ * on a unique violation runs outside the transaction (plan 3 rule).
+ */
+async function uniformJob(
+  config: ResolvedConfig,
+  pw: Resolved,
+  row: UniformRow,
+  now: Date,
+  made: CreateSteps,
+  anonymous: AnonymousCaller | null,
 ): Promise<Result<{ sent: true }>> {
   let done: UniformOutcome | null = null;
   for (let attempt = 0; done === null; attempt++) {
@@ -580,19 +612,12 @@ async function uniformSignUp(
       throw err;
     }
   }
-  // A code row and its mail for a new address, one mail for a known one.
-  // With the code, both go after the answer (ruling 23 of plan 12i), so the
-  // time of the answer does not tell the two apart. The link keeps its
-  // order of plan 12b: the mail goes before the answer.
-  const later = pw.verifyBy === "code" ? after : undefined;
   if (done.outcome === "created") {
     // Right after the commit, before the mail (plan 12a).
     await made.after(done.user);
-    const { passwordId } = done;
-    await deliver(() => sendVerifyMail(config, row.email, passwordId, now, anonymous), later);
+    await sendVerifyMail(config, row.email, done.passwordId, now, anonymous);
   }
-  if (done.outcome === "existing")
-    await deliver(() => sendExistingAccountMail(config, pw, row.email), later);
+  if (done.outcome === "existing") await sendExistingAccountMail(config, pw, row.email);
   return ok({ sent: true });
 }
 
@@ -715,7 +740,7 @@ async function sendVerifyCode(
 ): Promise<void> {
   const pw = config.password;
   if (!pw) return;
-  const code = await issueCode(config, VERIFY_CODE, "password-verify-otp", email, {
+  const code = await issueCode(config, pw.verifyCode, "password-verify-otp", email, {
     passwordId,
     ...anonymousData(anonymous),
   });
@@ -723,7 +748,7 @@ async function sendVerifyCode(
     email,
     code,
     appName: config.appName,
-    ttlMinutes: VERIFY_CODE.ttlMinutes,
+    ttlMinutes: pw.verifyCode.ttlMinutes,
   });
   // To the address the code belongs to, whatever the builder wrote.
   await config.mail.send({ ...message, to: email });
@@ -781,9 +806,16 @@ export async function resendPasswordVerification(
   return ok({ sent: true });
 }
 
-/** The per-email limit of a new verify link: the resend route's key (plan 8b). */
-function allowResendMail(config: ResolvedConfig, email: string): Promise<boolean> {
-  return limit(config, "password-resend:email", email, RESEND_PER_EMAIL);
+/** The per-email limit of a new verify link: the resend route's key (plan 8b), and the code's day cap. */
+async function allowResendMail(config: ResolvedConfig, email: string): Promise<boolean> {
+  if (!(await limit(config, "password-resend:email", email, RESEND_PER_EMAIL))) return false;
+  return allowCodeMail(config, email);
+}
+
+/** The day cap of the sign-up code mails of one address (ruling 39 m1). No count with the link. */
+async function allowCodeMail(config: ResolvedConfig, email: string): Promise<boolean> {
+  if (config.password?.verifyBy !== "code") return true;
+  return limit(config, "password-verify-code:email-day", email, VERIFY_CODE_PER_EMAIL_DAY);
 }
 
 /**
@@ -1168,7 +1200,8 @@ export async function verifyPasswordCode(
   config: ResolvedConfig,
   input: PasswordVerifyCode,
 ): Promise<Result<PasswordVerified>> {
-  if (!config.password) return fail("not_found");
+  const pw = config.password;
+  if (!pw) return fail("not_found");
   if (!(await limit(config, "password-verify-code:ip", ipKey(input.ip), VERIFY_CODE_PER_IP)))
     return fail("rate_limited");
   // A malformed address counts on the IP only, and its compare finds no row.
@@ -1181,7 +1214,7 @@ export async function verifyPasswordCode(
   const now = config.clock.now();
   const checked = await compareCode(
     config,
-    VERIFY_CODE_MAX_ATTEMPTS,
+    pw.verifyCode.maxAttempts,
     "password-verify-otp",
     email,
     input.code,
@@ -1246,6 +1279,7 @@ async function confirmSignUp(
         // The anonymous upgrade (plan 12i Task 7): its hook before the session hook and its hold.
         if (!user.emailVerified)
           await upgrade.before(tx, claimed, upgradeProof(claimed), "password");
+        // No gate step: a factor needs `provedAccount`, so an unverified user has none.
         const prepared = user.emailVerified
           ? null
           : await prepareSession(

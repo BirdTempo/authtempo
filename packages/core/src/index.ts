@@ -43,6 +43,7 @@ export type {
   TotpConfig,
   TotpGateConfig,
   UsernameConfig,
+  VerifyCodeConfig,
 } from "./config.js";
 export {
   ConfigError,

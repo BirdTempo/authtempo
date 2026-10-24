@@ -1303,6 +1303,15 @@ export function checkOptions(options: BetterAuthOptions): OptionCheck {
   // mails a code through sendVerificationOTP, as Better Auth does.
   const codeProof =
     pluginOf(options, "email-otp")?.options.overrideDefaultEmailVerification === true;
+  // The sign-up code lives at most 30 minutes in core (password.verifyCode,
+  // ruling 39 M2 of plan 12i). The sign-in code takes up to 60.
+  const codeLife = pluginOf(options, "email-otp")?.options.expiresIn;
+  if (codeProof && typeof codeLife === "number" && codeLife > 1800)
+    refuse(
+      out,
+      "plugins[email-otp].expiresIn",
+      "with overrideDefaultEmailVerification, core's sign-up code takes 60 to 1800 seconds",
+    );
   if (options.emailAndPassword?.enabled === true) {
     if (!codeProof && typeof options.emailVerification?.sendVerificationEmail !== "function") {
       refuse(

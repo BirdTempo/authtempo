@@ -345,6 +345,48 @@ describe("Better Auth's email OTP paths (plan 9e)", () => {
     expect(res.headers.getSetCookie().some((c) => c.includes(String(body.token)))).toBe(true);
   });
 
+  it("applies otpLength, expiresIn, and allowedAttempts to the sign-up code, as Better Auth does (ruling 39 M2 of plan 12i)", async () => {
+    const shape = (otp: Partial<EmailOtpOptions>) =>
+      mapOptions(options({ overrideDefaultEmailVerification: true, ...otp })).config.password
+        ?.verifyCode;
+    expect(shape({ otpLength: 8, expiresIn: 90, allowedAttempts: 4 })).toEqual({
+      length: 8,
+      ttlMinutes: 2,
+      maxAttempts: 4,
+    });
+    // Better Auth's defaults with no option: 6 digits, 300 seconds, 3 tries.
+    expect(shape({})).toEqual({ length: 6, ttlMinutes: 5, maxAttempts: 3 });
+    // Probe P3 of the review: 8 digits, and the third wrong try spends the code.
+    const { auth, post, sent } = app({
+      overrideDefaultEmailVerification: true,
+      otpLength: 8,
+      expiresIn: 300,
+      allowedAttempts: 3,
+    });
+    await auth.api.signUpEmail({
+      body: { email: EMAIL, password: "correct horse battery", name: "Otp" },
+    });
+    const code = sent[0]?.otp ?? "";
+    expect(code).toMatch(/^\d{8}$/);
+    const wrong = code === "00000000" ? "11111111" : "00000000";
+    const codes: unknown[] = [];
+    for (let i = 0; i < 3; i++)
+      codes.push(
+        (await json(await post("/email-otp/verify-email", { email: EMAIL, otp: wrong }))).code,
+      );
+    expect(codes).toEqual(["INVALID_OTP", "INVALID_OTP", "TOO_MANY_ATTEMPTS"]);
+    // A life core's sign-up code cannot keep refuses at betterAuth(), by its Better Auth name.
+    expect(() =>
+      betterAuth(options({ overrideDefaultEmailVerification: true, expiresIn: 1801 })),
+    ).toThrow(
+      "plugins[email-otp].expiresIn: with overrideDefaultEmailVerification, core's sign-up code takes 60 to 1800 seconds",
+    );
+    expect(() =>
+      betterAuth(options({ overrideDefaultEmailVerification: true, expiresIn: 1800 })),
+    ).not.toThrow();
+    expect(() => betterAuth(options({ expiresIn: 3600 }))).not.toThrow();
+  });
+
   it("answers 501 NOT_SUPPORTED for the other paths, the other types, and a user field at sign-in", async () => {
     const { post } = app();
     // The verify of the address needs overrideDefaultEmailVerification (plan 12i Task 20).

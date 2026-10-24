@@ -41,6 +41,7 @@ import type {
   TotpGateConfig,
   TwitterConfig,
   UsernameConfig,
+  VerifyCodeConfig,
 } from "@authtempo/core";
 
 /** One `true` for each key of T, the optional keys too. */
@@ -288,7 +289,13 @@ export const CONFIG_KEYS = {
     existingAccountMail: true,
     verifyBy: true,
     verifyCodeMail: true,
+    verifyCode: true,
   } satisfies Keys<PasswordConfig>,
+  "password.verifyCode": {
+    length: true,
+    ttlMinutes: true,
+    maxAttempts: true,
+  } satisfies Keys<VerifyCodeConfig>,
   "password.legacyVerify": { verify: true, timeoutMs: true } satisfies Keys<LegacyVerifyConfig>,
   emailOtp: {
     ttlMinutes: true,

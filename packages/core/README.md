@@ -519,8 +519,9 @@ optional.
 | `requireVerified` | `false` | True refuses the password sign-in of an unverified address. |
 | `uniformSignUp` | `true` | Every sign-up answers `{ sent: true }` with no session. A known address gets a mail. False keeps a session at sign-up and `email_taken`. |
 | `existingAccountMail` | `defaultExistingAccountMail` | The mail to a known address at a uniform sign-up. Core sends it to the address. |
-| `verifyBy` | `"link"` | The proof of the address at sign-up: a link, or `"code"` for a code of 6 digits. |
+| `verifyBy` | `"link"` | The proof of the address at sign-up: a link, or `"code"` for a code (see "The sign-up code"). |
 | `verifyCodeMail` | `defaultVerifyCodeMail` | The mail of the sign-up code. Core sends it to the address. |
+| `verifyCode` | `{ length: 6, ttlMinutes: 10, maxAttempts: 5 }` | The sign-up code: `length` 6 to 10, `ttlMinutes` 1 to 30, `maxAttempts` 1 to 10. |
 
 The default hash is PBKDF2-HMAC-SHA256 on Web Crypto. A hash is stored as
 `pbkdf2-sha256$<iterations>$<salt>$<hash>`. The salt is 16 random bytes and
@@ -594,7 +595,9 @@ exists. That tells less than whether an account exists.
 `verifyBy: "code"` (plan 12i Task 20) mails a code in place of the verify
 link. It is for a device whose mailbox is elsewhere, or a mail client that
 strips links. The code has 6 digits from `crypto.getRandomValues` and lives
-10 minutes. The row is `password-verify-otp`, keyed by the address. Its
+10 minutes. `verifyCode` sets `length` (6 to 10), `ttlMinutes` (1 to 30),
+and `maxAttempts` (1 to 10, default 5). A value outside its range stops
+`createAuth` (ruling 39). The row is `password-verify-otp`, keyed by the address. Its
 `valueHash` is HMAC-SHA256 under the current secret version, as the email
 code's is (spec 8.10 item 3). A new code spends the earlier live code of
 the address.
@@ -602,8 +605,8 @@ the address.
 `POST /password/verify/code { email, code }` checks the code. No row, an
 expired row, a spent row, and a wrong code run the same HMAC and compare,
 and each answers `invalid_code`. A wrong code counts one try by
-compare-and-set. The fifth wrong try spends the code and answers
-`too_many_attempts`. A right code is spent in one conditional update. Then
+compare-and-set. The wrong try number `maxAttempts` spends the code and
+answers `too_many_attempts`. A right code is spent in one conditional update. Then
 the confirm of the link runs: the claim rule, and the session of an
 unverified user, with `via: "password"`. A user already verified gets
 `{ verified: true }` and no session, as at the link. So the code never
@@ -611,13 +614,18 @@ opens a session past the second factor: an unverified user cannot turn
 the factor on. The confirm links an anonymous user only when the
 confirming request carries the anonymous session that asked for the code.
 
-The uniform sign-up and `POST /password/verify/resend` send the code after
-the answer, through the `waitUntil` of the request (ruling 23). The mail
-to a known address goes after the answer too. So the time of the answer
-does not hold the code row or the mail. The sign-up of a new address still
-writes the user and the password row before the answer, as with the link.
-In process, `api.password.signUp` and `resendVerification` send the code
-in the call.
+With the `waitUntil` of the request, the uniform sign-up answers after the
+limits, the body checks, and the hash (ruling 39). The user rows,
+`user.afterCreate`, and the mail then run after the answer as one job. So
+a known and a new address do the same work before the answer. Each refusal
+of the job is quiet, and a throw becomes the line `error.internal`.
+`POST /password/verify/resend` reads the user and sends the code after the
+answer too (ruling 23). In process, `api.password.signUp` and
+`resendVerification` do the work in the call.
+
+The sign-up and each resend count `password-verify-code:email-day`, 10 code
+mails per address a day, before any read. So one address gets at most 10
+times `maxAttempts` guesses a day: 50 with the defaults.
 
 `breachCheck` (plan 12b, ASVS 5.0.0 6.2.12). The check fails closed, and
 core holds no list of breached passwords. An answer of `true` refuses the
@@ -658,6 +666,7 @@ The limits, in the same limiter as the other routes:
 | `password-resend:email:<email>` | 3 per 15 minutes |
 | `password-verify-code:ip:<ip>` | 30 per 15 minutes |
 | `password-verify-code:email:<email>` | 10 per 15 minutes |
+| `password-verify-code:email-day:<email>` | 10 per 24 hours |
 | `password-change:user:<userId>` | 10 per 15 minutes |
 
 `<ip>` is an IPv4 address, the IPv4 form of a mapped IPv6 address, or the

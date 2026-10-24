@@ -951,10 +951,16 @@ answers 400. A slug that core's slug rule refuses answers `VALIDATION_ERROR`
 - `overrideDefaultEmailVerification: true` is core's
   `password.verifyBy: "code"` (plan 12i Task 20). The sign-up mails a code
   through `sendVerificationOTP` with the type `email-verification`, and
-  `emailVerification.sendVerificationEmail` is then not required. The code
-  has 6 digits, lives 10 minutes, and takes 5 wrong tries. `otpLength`,
-  `expiresIn`, and `allowedAttempts` set the sign-in code and the reset code
-  only.
+  `emailVerification.sendVerificationEmail` is then not required.
+  `otpLength`, `expiresIn`, and `allowedAttempts` set this code too, as in
+  Better Auth (`password.verifyCode`, ruling 39). Better Auth's defaults
+  apply: 6 digits, 300 seconds, and 3 tries. An `expiresIn` over 1800
+  seconds is refused with this option: core's sign-up code lives at most
+  30 minutes.
+- The shim sets `password.uniformSignUp: false`, as Better Auth does. So
+  the sign-up answer tells a known address. On Workers, the time of the
+  `email-verification` resend also tells an unverified user with a
+  password.
 - Refused by name: `generateOTP`, `sendVerificationOnSignUp: true`,
   `resendStrategy: "reuse"`, and `rateLimit`.
 

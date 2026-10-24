@@ -19,16 +19,22 @@ const RAW = Symbol("raw");
 const PASSWORD = "correct horse battery";
 // The counts of the run of 2026-10-25, with the D1 limiter. A known address
 // does fewer queries than a new one, as in the link's sign-up of plan 12b.
-// The code row and the mails go after the answer, so the time of the answer
-// does not hold them (ruling 23). A wrong code and an unknown address do the
-// same count: two limits and two reads, or two limits, a read, and the count.
-const SIGN_UP_NEW_QUERIES = 13;
-const SIGN_UP_KNOWN_QUERIES = 3;
+// The user rows, the code row, and the mails go after the answer (rulings
+// 23 and 39). So the time of the answer does not hold them. The day cap of
+// ruling 39 adds one query to each sign-up and each resend. A wrong code and
+// an unknown address do the same count: two limits and two reads, or two
+// limits, a read, and the count.
+const SIGN_UP_NEW_QUERIES = 14;
+const SIGN_UP_KNOWN_QUERIES = 4;
 const CONFIRM_QUERIES = 23;
 const WRONG_QUERIES = 4;
 const UNKNOWN_QUERIES = 4;
-const RESEND_QUERIES = 7;
-const RESEND_UNKNOWN_QUERIES = 3;
+const RESEND_QUERIES = 8;
+const RESEND_UNKNOWN_QUERIES = 4;
+// At the return of handle: the two sign-up limits, the day cap, and the
+// first read of the job. The job starts in the route, and the answer does
+// not wait for that read.
+const BEFORE_ANSWER_QUERIES = 4;
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {
@@ -154,5 +160,30 @@ describe("the sign-up code on D1 (plan 12i Task 20)", () => {
     ]);
     for (const q of [fresh, known, resend, unknownResend, confirm, wrong, unknown])
       expect(q.queries).toBeLessThanOrEqual(BUDGET);
+  });
+
+  it("runs the same queries before the answer of a sign-up for a known and a new address", async () => {
+    // Ruling 39 of plan 12i (M1): with a waitUntil, the user rows,
+    // made.after, and the mail run after the answer. The answer of a known
+    // and a new address then waits for the same queries (see
+    // BEFORE_ANSWER_QUERIES). Before the ruling, a new address waited for 11
+    // and a known one for 3 (review probe P2).
+    const w = make();
+    const after: Promise<unknown>[] = [];
+    const signUp = async (email: string) => {
+      w.count.queries = 0;
+      const res = await w.auth.handle(post("/password/sign-up", { email, password: PASSWORD }), {
+        waitUntil: (p) => void after.push(p),
+      });
+      const before = w.count.queries;
+      expect(await res.json()).toEqual({ sent: true });
+      await Promise.all(after.splice(0));
+      return { before, total: w.count.queries };
+    };
+    const fresh = await signUp("ada@example.com");
+    const known = await signUp("ada@example.com");
+    expect([fresh.before, known.before]).toEqual([BEFORE_ANSWER_QUERIES, BEFORE_ANSWER_QUERIES]);
+    expect([fresh.total, known.total]).toEqual([SIGN_UP_NEW_QUERIES, SIGN_UP_KNOWN_QUERIES]);
+    expect(w.mail.map((m) => m.to)).toEqual(["ada@example.com", "ada@example.com"]);
   });
 });

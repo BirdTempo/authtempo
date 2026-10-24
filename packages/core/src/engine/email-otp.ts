@@ -48,9 +48,10 @@ export type CodePurpose = EmailOtpPurpose | "reauth-otp" | "email-change-otp";
  */
 export type DrawnPurpose = CodePurpose | "phone-otp" | "phone-add-otp" | "password-verify-otp";
 
-/** What a draw reads of a code config: the email code's or the phone code's. */
+/** What a draw reads of a code config: the email code's, the phone code's, or the sign-up code's. */
 export interface CodeShape {
-  length: 6 | 8;
+  /** 6 or 8 for the email code; 6 to 10 for the sign-up code (`password.verifyCode`). */
+  length: number;
   ttlMinutes: number;
 }
 
