@@ -4,12 +4,14 @@ import { markFresh } from "../src/engine/fresh.js";
 import { hookRefusal } from "../src/engine/hooks.js";
 import { defaultNoticeMail, type NoticeMailInput } from "../src/engine/notices.js";
 import {
+  createSession,
   destroySession,
   endSessions,
   type ResolvedSession,
   resolveSession,
 } from "../src/engine/sessions.js";
 import { completeSocial, startLink, startSocial } from "../src/engine/social.js";
+import { draftUserRow } from "../src/engine/users.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { StorageAdapter } from "../src/storage/port.js";
@@ -410,6 +412,36 @@ describe("the link of a social identity (plan 12a, spec 8.15)", () => {
       status: 403,
     });
     expect(allow).not.toHaveBeenCalled();
+  });
+
+  it("refuses a link for a user with no address, and writes no identity (plan 12i, ruling 18)", async () => {
+    const w = world();
+    // The user row of plan 12i Task 1: no address, so no verified address.
+    // No route takes an address away, so the draft is the only such user.
+    const lone = await w.auth.storage.create(
+      "user",
+      draftUserRow({ email: null, emailVerified: false, name: null }, w.auth.clock.now()),
+    );
+    const { token } = await createSession(w.auth.config, {
+      userId: lone.id,
+      ip: null,
+      userAgent: null,
+    });
+    const session = await resolveSession(w.auth.config, token);
+    if (!session) throw new Error("no session");
+    const states = async () => (await w.auth.storage.findMany("verification", [])).length;
+    const before = await states();
+    // The start refuses first. The callback is the second guard: a provider
+    // address never equals a null address, so it answers email_mismatch.
+    expect(await startLink(w.auth.config, { provider: "google", session, ip: null })).toEqual({
+      ok: false,
+      code: "email_unverified",
+      status: 403,
+    });
+    expect(await states()).toBe(before);
+    expect(
+      await w.auth.storage.findMany("identity", [{ field: "userId", op: "eq", value: lone.id }]),
+    ).toEqual([]);
   });
 
   it("allows 10 link starts per user in 15 minutes, on a key of its own, after the IP key", async () => {

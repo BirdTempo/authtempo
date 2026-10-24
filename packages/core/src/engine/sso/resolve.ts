@@ -184,7 +184,9 @@ async function beforeSignIn(
     // address in the domain, so the user's own address must be in it too.
     // The profile address passed the same check, so an equal address reads
     // nothing more.
-    // A user with no address (plan 12i) is in no domain.
+    // A user with no address (plan 12i) is in no domain. No route makes
+    // such a user hold an SSO identity (ruling 18). The branch fails closed
+    // and gives the domain check a string.
     if (
       user.email !== email &&
       (user.email === null ||

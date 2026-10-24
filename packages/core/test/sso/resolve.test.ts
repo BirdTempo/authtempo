@@ -7,7 +7,6 @@ import { createRole, deleteRole } from "../../src/engine/roles.js";
 import { createScimToken } from "../../src/engine/scim/tokens.js";
 import { resolveSession } from "../../src/engine/sessions.js";
 import { updateDomain } from "../../src/engine/sso/domains.js";
-import { draftUserRow } from "../../src/engine/users.js";
 import type { AuthEvent } from "../../src/observe/port.js";
 import { sha256Hex } from "../../src/primitives/crypto.js";
 import type { ModelName } from "../../src/schema.js";
@@ -164,34 +163,6 @@ describe("the SSO resolution (plan 12d Task 5)", () => {
     await move("ada.l@acme.example");
     const back = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
     expect((await resolveSession(w.config, back.token ?? ""))?.user.id).toBe(me.user.id);
-  });
-
-  it("refuses a known identity of a user with no address (plan 12i, ruling 15)", async () => {
-    const w = ssoSignInWorld();
-    const { connectionId } = await acmeWithSso(w);
-    // A user with no address that holds the connection's identity. A later
-    // task of plan 12i makes such a user, so the storage writes the rows here.
-    const now = w.clock.now();
-    const lone = await w.storage.create(
-      "user",
-      draftUserRow({ email: null, emailVerified: false, name: null }, now),
-    );
-    await w.storage.create("identity", {
-      id: "idn-lone",
-      userId: lone.id,
-      provider: `sso:${connectionId}`,
-      subject: "a-1",
-      linkedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    });
-    const before = await counts(w);
-    // A user with no address is in no domain, whatever address the IdP sends.
-    const r = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
-    expect(r.error).toBe("sso_domain_mismatch");
-    expect(r.token).toBeNull();
-    expect(await counts(w)).toEqual(before);
-    expect(await sessionsOf(w, lone.id)).toEqual([]);
   });
 
   it("refuses a known identity whose address leaves the domain before the hold (ruling 78)", async () => {
