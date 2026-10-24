@@ -3308,6 +3308,9 @@ const RESERVED_REASON = [
 /** The bound of `social.stateData.maxBytes` (plan 12i Task 19): the state payload of the Better Auth docs audit is 1 KB at most. */
 export const STATE_DATA_MAX_BYTES = 1024;
 
+/** The characters of a path that a cookie Path attribute holds as one value: no ";", no ",". */
+const REDIRECT_PATH_RE = /^[A-Za-z0-9._~!$&'()*+=:@%/-]+$/;
+
 /**
  * The path of a provider's `redirectURI` (plan 12i Task 12), after the
  * checks of spec 32 item 11. The router serves the path by exact match, so
@@ -3335,6 +3338,12 @@ function redirectOverridePath(
     throw new ConfigError(`${at} must have no query and no fragment`);
   if (url.href !== value)
     throw new ConfigError(`${at} must be in the normal form of a URL: ${url.href}`);
+  // The path is the Path attribute of the binding cookie (social.ts). The
+  // URL parser keeps ";" and "," in a path, and each can end that attribute.
+  if (!REDIRECT_PATH_RE.test(url.pathname))
+    throw new ConfigError(
+      `${at} must have a path of the characters A-Z a-z 0-9 . _ ~ ! $ & ' ( ) * + = : @ % / - only`,
+    );
   if (!url.pathname.startsWith(`${basePath}/`))
     throw new ConfigError(`${at} must have a path under basePath ${basePath}`);
   const segments = url.pathname.slice(basePath.length).split("/");

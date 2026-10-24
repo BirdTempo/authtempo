@@ -10,11 +10,12 @@ sources:
   - packages/core/src/engine/sessions.ts
   - packages/core/src/http/impersonation-rules.ts
   - docs/superpowers/plans/2026-10-14-12f-operator-tools.md
+  - packages/core/src/engine/last-method.ts
 ---
 
 **For:** a developer who writes the cookie text of a privacy page, or checks why a browser drops a cookie.
 
-**What it does:** this page lists the four cookies of core. Each is `HttpOnly` and `Secure`, and holds no data but a token.
+**What it does:** this page lists the five cookies of core. Each is `Secure`. Four are `HttpOnly` and hold no data but a token. The last method cookie is readable by page scripts and holds the name of a sign-in method.
 
 ## Before you start
 
@@ -25,9 +26,10 @@ sources:
 | Name | Path | SameSite | Life | Set by |
 | --- | --- | --- | --- | --- |
 | `__Host-tempo_session` | `/` | `cookie.sameSite`, `Lax` by default | `session.ttlDays`, at most `session.absoluteDays` | Every sign-in in a browser |
-| `__Secure-tempo_session_oauth` | `<basePath>/social` | `None` | 10 minutes | The social start |
+| `__Secure-tempo_session_oauth` | `<basePath>/social`, or the path of the provider's `redirectURI` | `None` | 10 minutes | The social start |
 | `tempo_totp_trust` | `<basePath>/` | `cookie.sameSite` | `totp.trustDays` | A second factor verify with `trustDevice` |
 | `__Host-tempo_session_actor` | `/` | `cookie.sameSite`, `Lax` by default | `operator.impersonation.ttlMinutes` | The start of an [impersonation](/docs/reference/routes/#impersonation) |
+| `__Host-tempo_last_method` | `/` | `Lax` | `lastMethod.days`, 30 by default | A browser sign-in while `lastMethod` is on |
 
 The `__Host-` prefix makes a browser refuse the session cookie unless it is `Secure`, has `Path=/`, and has no `Domain`. A host on a sibling subdomain cannot set it. The names keep the old product name tempo-auth for compatibility.
 
@@ -35,6 +37,7 @@ The `__Host-` prefix makes a browser refuse the session cookie unless it is `Sec
 - The old session cookie `tempo_session`: for one release, a request that carries it and no `__Host-tempo_session` stays signed in. The answer sets `__Host-tempo_session` with the same token and clears `tempo_session`. Only the default name gets this move. `auth.handle`, `auth.session`, and `auth.caller` read the old cookie. Only `auth.handle` moves it.
 - The Better Auth shim uses the default name, so it gets the same move. Its `api.getSession` reads the old cookie too. The Expo storage key keeps the name `<storagePrefix>_tempo_session`.
 - `totp.trustCookieName` renames the trust cookie.
+- `lastMethod.cookieName` renames the last method cookie. Core refuses a name of another cookie of core.
 - The actor cookie is the session cookie name with `_actor` at the end, so `cookieName` renames it too. During an impersonation it holds the operator's own `ts_` token, and the session cookie holds the token of the impersonation session. The stop clears it and puts the operator's token back in the session cookie.
 - A sign-out clears the cookie. A sign-out with the old cookie clears both names. After a reset or a claim, the next `GET /session` clears it.
 
@@ -49,6 +52,8 @@ The move lasts one release. Row 12j removes it in the next release.
 ## The rules
 
 - The session cookie holds a `ts_` token. The binding cookie holds the binding token of one social flow. The trust cookie holds a `td_` token. The actor cookie holds a `ts_` token.
+- The last method cookie holds one value of a closed set, such as `password` or `social:google`. It is not `HttpOnly`, because the sign-in page reads it to show the method of the last sign-in first. It signs no one in and names no account. Core never reads it. A bearer client gets no last method cookie.
+- A provider's `redirectURI` moves its callback to that path. The binding cookie then has that path, so the browser sends it to the callback.
 - After a sliding refresh, an app route that calls `auth.session` must send `auth.sessionCookie(request, resolved)`. Otherwise the browser drops the cookie at its old `Max-Age`.
 - A reader that cannot set a cookie, such as a server render, calls `auth.session(request, { refresh: false })`. That read does not slide the expiry and writes nothing, so the browser's own `GET /auth/session` still gets the renewed cookie.
 - The binding cookie is `SameSite=None`, because Apple posts its callback from its own site, and a browser sends no `Lax` cookie on that post.

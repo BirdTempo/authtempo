@@ -13,7 +13,15 @@ import { setUsername } from "../src/engine/username.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, BASE_URL, get, post, recordCredential, tokenFromMail } from "./helpers.js";
+import {
+  APP_ORIGIN,
+  BASE_URL,
+  get,
+  makeAuth,
+  post,
+  recordCredential,
+  tokenFromMail,
+} from "./helpers.js";
 import { signUpAndVerify } from "./password-helpers.js";
 import { type FakeIdToken, fakeJwt, GOOGLE, tokenEndpoint } from "./social-helpers.js";
 import { codeNow, EMAIL, enrolled, PASSWORD, totpAuth } from "./totp-helpers.js";
@@ -160,6 +168,62 @@ const CASES: Record<string, (w: World) => Promise<{ res: Response; json: boolean
   },
 };
 
+/** The token of the confirm mail of a sign-up through the route, which opens a session too. */
+async function signedUp(w: World): Promise<{ res: Response; token: string }> {
+  const res = await w.handle(post("/auth/password/sign-up", { email: EMAIL, password: PASSWORD }));
+  const mail = w.auth.mail.findLast((m) => m.to === EMAIL && m.subject.startsWith("Confirm"));
+  return { res, token: tokenFromMail(mail?.text ?? "") };
+}
+
+/**
+ * More browser sign-ins of a value of CASES (review I2): the name of the
+ * case, the value, and the run. `json` is true when the answer has `via`.
+ */
+const MORE: [string, string, (w: World) => Promise<{ res: Response; json: boolean }>][] = [
+  [
+    "the sign-up with a session",
+    "password",
+    async (w) => ({ res: (await signedUp(w)).res, json: true }),
+  ],
+  [
+    "the confirm link, form",
+    "password",
+    async (w) => {
+      const { token } = await signedUp(w);
+      const res = await w.handle(
+        new Request(`${BASE_URL}/auth/password/verify`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded", origin: BASE_URL },
+          body: new URLSearchParams({ token }).toString(),
+        }),
+      );
+      expect(res.status).toBe(302);
+      return { res, json: false };
+    },
+  ],
+  [
+    "the confirm link, JSON",
+    "password",
+    async (w) => {
+      const { token } = await signedUp(w);
+      const res = await w.handle(post("/auth/password/verify", { token }));
+      // The answer is { verified: true }: a confirm, not a sign-in answer, so no `via`.
+      expect(await res.clone().json()).toEqual({ verified: true });
+      return { res, json: false };
+    },
+  ],
+  [
+    "the magic link, JSON",
+    "magic_link",
+    async (w) => {
+      const sent = await requestMagicLink(w.auth.config, { email: EMAIL, ip: null });
+      if (!sent.ok) throw new Error(sent.code);
+      const token = tokenFromMail(w.auth.mail.at(-1)?.text ?? "");
+      return { res: await w.handle(post("/auth/magic-link/verify", { token })), json: true };
+    },
+  ],
+];
+
 describe("the last method cookie (plan 12i Task 12)", () => {
   it("sets the cookie at each browser sign-in with its value", async () => {
     for (const [value, run] of Object.entries(CASES)) {
@@ -168,6 +232,13 @@ describe("the last method cookie (plan 12i Task 12)", () => {
       expect(hasSession(res), value).toBe(true);
       expect(lastCookie(res), value).toBe(expected(value));
       if (json) expect((await bodyOf(res)).via, value).toBe(value);
+    }
+    for (const [name, value, run] of MORE) {
+      const w = world();
+      const { res, json } = await run(w);
+      expect(hasSession(res), name).toBe(true);
+      expect(lastCookie(res), name).toBe(expected(value));
+      if (json) expect((await bodyOf(res)).via, name).toBe(value);
     }
     // The value of a sign-in behind the second factor: the challenge verify sets it.
     const w = world();
@@ -207,6 +278,30 @@ describe("the last method cookie (plan 12i Task 12)", () => {
     expect(Object.keys(await bodyOf(res))).toEqual(["token", "user", "session"]);
     const absent = totpAuth();
     expect(absent.config.lastMethod).toBeNull();
+  });
+
+  it("refuses a cookie name of core, a bad name, and days out of range", () => {
+    // A clash lets the readable cookie overwrite a cookie of core in the same answer (review I2).
+    const names = [
+      SESSION,
+      "tempo_session",
+      "__Secure-tempo_session_oauth",
+      "__Host-tempo_session_actor",
+      "tempo_totp_trust",
+      "a b",
+      "",
+    ];
+    for (const cookieName of names)
+      expect(() => makeAuth({ lastMethod: { cookieName } }), cookieName).toThrow(
+        /lastMethod\.cookieName/,
+      );
+    // The names follow a custom session cookie name.
+    expect(() =>
+      makeAuth({ cookieName: "__Host-app", lastMethod: { cookieName: "__Host-app_actor" } }),
+    ).toThrow(/lastMethod\.cookieName/);
+    expect(() => makeAuth({ lastMethod: { days: 0 } })).toThrow(/lastMethod\.days/);
+    expect(() => makeAuth({ lastMethod: { days: 401 } })).toThrow(/lastMethod\.days/);
+    expect(makeAuth({ lastMethod: { days: 400 } }).config.lastMethod?.days).toBe(400);
   });
 
   it("never stores the method on the user row", async () => {

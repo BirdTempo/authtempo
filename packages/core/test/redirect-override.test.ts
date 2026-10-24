@@ -5,6 +5,7 @@ import { ROUTES } from "../src/http/route-list.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { BASE_URL, get, makeAuth, post } from "./helpers.js";
+import { observed } from "./observe-helpers.js";
 import { fakeFetch } from "./social-helpers.js";
 import { verifiedSession } from "./totp-helpers.js";
 
@@ -134,6 +135,10 @@ describe("the redirect override (plan 12i Task 12)", () => {
     refused(`${BASE_URL}/auth/oauth/github#top`);
     refused(`${BASE_URL}/auth/oauth/../session`);
     refused("not a url");
+    // A ";" or "," ends the Path attribute of the binding cookie: the rest
+    // would be an attribute of its own, such as a Domain (review M1).
+    refused(`${BASE_URL}/auth/cb;Domain=example.com`);
+    refused(`${BASE_URL}/auth/cb,x`);
     // A ROUTES path, literal or through a parameter segment.
     refused(`${BASE_URL}/auth/session`);
     refused(`${BASE_URL}/auth/social/github/callback`);
@@ -170,6 +175,18 @@ describe("the redirect override (plan 12i Task 12)", () => {
     expect(() =>
       makeAuth({ social: { github: { ...GITHUB, redirectURI: OVERRIDE } } }),
     ).not.toThrow();
+  });
+
+  it("names the provider in the failure event of an alias", async () => {
+    // The path of this alias does not hold the provider name (review M2).
+    const o = observed({
+      social: { github: { ...GITHUB, redirectURI: `${BASE_URL}/auth/cb/gh` } },
+    });
+    const res = await o.auth.handle(get("/auth/cb/gh?error=access_denied&state=x"));
+    expect(res.status).toBe(302);
+    const failed = (await o.events()).filter((e) => e.name === "sign_in");
+    expect(failed).toHaveLength(1);
+    expect(failed[0]).toMatchObject({ method: "social", provider: "github", outcome: "failure" });
   });
 
   it("the route-list test serves each alias of the config and no other", () => {
