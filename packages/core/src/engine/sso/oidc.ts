@@ -207,20 +207,30 @@ async function discoveredEndpoints(
 /**
  * The provider of a row with the step of its failure: `secret`,
  * `discovery`, or `discovery_host`. `secret` is the opened client secret,
- * for the scrub of the events of the callback.
+ * for the scrub of the events of the callback. A failure after the open
+ * answers it too, so the refusal scrubs it (ruling 83 l2b of plan 12d).
+ * The discovery emits through the scrub of the opened secret.
  */
 async function providerOf(
   config: ResolvedConfig,
   sso: ResolvedSso,
   row: SsoConnectionRow,
-): Promise<{ ok: true; value: OidcProvider; secret: string } | { ok: false; step: OidcStep }> {
+): Promise<
+  | { ok: true; value: OidcProvider; secret: string }
+  | { ok: false; step: OidcStep; secret: string | null }
+> {
   const c = row.config as unknown as OidcStored;
   const clientSecret = await connectionSecret(config, row);
-  if (clientSecret === null) return { ok: false, step: "secret" };
+  if (clientSecret === null) return { ok: false, step: "secret", secret: null };
   let endpoints = c.endpoints;
   if (!endpoints) {
-    const found = await discoveredEndpoints(config, sso, row, c.issuer);
-    if (!found.ok) return found;
+    const found = await discoveredEndpoints(
+      withSecrets(config, [clientSecret]),
+      sso,
+      row,
+      c.issuer,
+    );
+    if (!found.ok) return { ...found, secret: clientSecret };
     endpoints = found.value;
   }
   // The name is a log name only: `ssoCallbackUrl` gives the redirect URI.
@@ -236,7 +246,7 @@ async function providerOf(
   // With endpoints, `oidcProvider` builds the provider and never a discovery entry.
   return provider.kind === "oidc"
     ? { ok: true, value: provider, secret: clientSecret }
-    : { ok: false, step: "discovery" };
+    : { ok: false, step: "discovery", secret: clientSecret };
 }
 
 /**
@@ -253,7 +263,11 @@ export async function connectionProvider(
   if (!config.sso || row.kind !== "oidc") return null;
   const r = await providerOf(config, config.sso, row);
   if (!r.ok) {
-    config.observe.emit({ name: "sso.failed", connectionId: row.id, step: r.step });
+    withSecrets(config, [r.secret]).observe.emit({
+      name: "sso.failed",
+      connectionId: row.id,
+      step: r.step,
+    });
     return null;
   }
   return r.value;
@@ -295,7 +309,9 @@ export async function startSso(
   // A SAML connection sends an AuthnRequest (plan 12d Task 8).
   if (row.kind === "saml") return startSaml(config, row, input);
   const provider = await providerOf(config, sso, row);
-  if (!provider.ok) return refused(config, row.id, provider.step, input.ip);
+  // A refusal after the open of the secret scrubs it (ruling 83 l2b of plan 12d).
+  if (!provider.ok)
+    return refused(withSecrets(config, [provider.secret]), row.id, provider.step, input.ip);
   const now = config.clock.now();
   const state = randomToken(OAUTH_STATE_PREFIX);
   const verifier = randomBase64Url(32);
@@ -420,7 +436,9 @@ export async function completeSsoOidc(
   // A state row of `sso:<id>` comes from an OIDC start; a kind change is not possible (Task 3).
   if (connection.kind !== "oidc") return fail("sso_not_configured");
   const provider = await providerOf(config, sso, connection);
-  if (!provider.ok) return no(provider.step);
+  // The discovery refusals come after the open of the secret: they scrub it (ruling 83 l2b).
+  if (!provider.ok)
+    return refused(withSecrets(config, [provider.secret]), id, provider.step, input.ip);
   const p = provider.value;
   // From here each event of the request scrubs the opened client secret too (plan 12d on 12h).
   const scrubbed = withSecrets(config, [provider.secret]);

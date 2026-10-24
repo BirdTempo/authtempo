@@ -7,11 +7,11 @@ import { coreRoutes } from "../src/http/routes/index.js";
 import { passwordsOf, scimRoute } from "../src/http/routes/scim.js";
 import { type Observer, withSecrets } from "../src/observe/observer.js";
 import type { AuthEvent } from "../src/observe/port.js";
-import { BASE_URL, makeAuth } from "./helpers.js";
+import { BASE_URL, get, makeAuth } from "./helpers.js";
 import { scimAuth, scimToken } from "./scim/helpers.js";
 import { SSO_APP, seedOrganization } from "./sso/helpers.js";
 import { samlWorld } from "./sso/saml-helpers.js";
-import { acmeWithSso, ssoSignIn, ssoSignInWorld } from "./sso/sign-in-helpers.js";
+import { acmeWithSso, issuerOf, ssoSignIn, ssoSignInWorld } from "./sso/sign-in-helpers.js";
 
 // The secrets of one request body of plan 12d, in the scrub of the observer
 // of plan 12h (ruling 64 of plan 12d): a SCIM password and token, the OIDC
@@ -359,5 +359,159 @@ describe("the secrets of one request (plan 12d on 12h)", () => {
     const failed = kept.sink.filter((e) => e.name === "sso.failed");
     expect(failed.map((e) => [e.connectionId, e.step])).toEqual([["***", "subject"]]);
     expect(kept.lines).toEqual([["authtempo: sso failed", "***", "subject"]]);
+  });
+  it("keeps the opened client secret from a discovery refusal of an OIDC callback (ruling 83 l2b)", async () => {
+    // Letters that end in Error: the error name kind keeps such a value, so a field holds it.
+    const secret = "AcmeOidcDiscoverySecretError";
+    const issuer = issuerOf("acme");
+    const run = async (observe: AuthConfig["observe"] | undefined) => {
+      // The discovery document answers at the start. At the callback the fetch throws an
+      // error named as the secret, so the event of the failed discovery carries it.
+      let down = false;
+      const fetchFn = (async () => {
+        if (down) {
+          const e = new Error("down");
+          e.name = secret;
+          throw e;
+        }
+        return Response.json({
+          issuer,
+          authorization_endpoint: "https://login.acme-idp.example/authorize",
+          token_endpoint: "https://login.acme-idp.example/token",
+          jwks_uri: "https://login.acme-idp.example/keys",
+        });
+      }) as typeof fetch;
+      const v = ssoSignInWorld({
+        ...(observe ? { observe } : {}),
+        sso: { oidc: true, fetch: fetchFn },
+      });
+      const organizationId = await seedOrganization(v, "acme");
+      // A connection with no endpoints: core reads the discovery document of the issuer.
+      const made = await createConnection(v.config, SSO_APP, {
+        organizationId,
+        kind: "oidc",
+        label: "acme IdP",
+        issuer,
+        clientId: "acme-client",
+        clientSecret: secret,
+      });
+      if (!made.ok) throw new Error(made.code);
+      const id = made.value.id;
+      const started = await v.handle(get(`/auth/sso/${id}/start?next=/home`));
+      const url = new URL(started.headers.get("location") ?? "");
+      expect(url.origin).toBe("https://login.acme-idp.example");
+      const bind =
+        started.headers
+          .getSetCookie()
+          .find((c) => c.startsWith("__Secure-tempo_session_oauth="))
+          ?.split(";")[0]
+          ?.split("=")[1] ?? "";
+      // An update forgets the kept document, so the callback reads it again.
+      const moved = await updateConnection(v.config, SSO_APP, { id, label: "acme IdP 2" });
+      expect(moved.ok).toBe(true);
+      down = true;
+      const q = new URLSearchParams({ code: "c1", state: url.searchParams.get("state") ?? "" });
+      const res = await v.handle(
+        get(`/auth/sso/${id}/callback?${q}`, { cookie: `__Secure-tempo_session_oauth=${bind}` }),
+      );
+      expect(
+        new URL(res.headers.get("location") ?? "", BASE_URL).searchParams.get("auth_error"),
+      ).toBe("sso_failed");
+      await v.config.observe.flush();
+    };
+    const kept = await bothWays(run, () => [secret]);
+    const failed = kept.sink.filter((e) => e.name === "sso.failed");
+    expect(failed.map((e) => e.step)).toEqual(["discovery"]);
+    expect(kept.sink.filter((e) => e.name === "oidc.discovery_failed")).toHaveLength(1);
+  });
+  it("keeps the opened client secret from the sso.failed event of a discovery refusal (ruling 83 l2b)", async () => {
+    // A client secret that is also the connection id: the sso.failed field is the secret.
+    const issuer = issuerOf("acme");
+    const run = async (observe: AuthConfig["observe"] | undefined) => {
+      let down = false;
+      const fetchFn = (async () => {
+        if (down) throw new Error("down");
+        return Response.json({
+          issuer,
+          authorization_endpoint: "https://login.acme-idp.example/authorize",
+          token_endpoint: "https://login.acme-idp.example/token",
+          jwks_uri: "https://login.acme-idp.example/keys",
+        });
+      }) as typeof fetch;
+      const v = ssoSignInWorld({
+        ...(observe ? { observe } : {}),
+        sso: { oidc: true, fetch: fetchFn },
+      });
+      const organizationId = await seedOrganization(v, "acme");
+      const made = await createConnection(v.config, SSO_APP, {
+        organizationId,
+        kind: "oidc",
+        label: "acme IdP",
+        issuer,
+        clientId: "acme-client",
+        clientSecret: "acme-secret-0123456789",
+      });
+      if (!made.ok) throw new Error(made.code);
+      const id = made.value.id;
+      const moved = await updateConnection(v.config, SSO_APP, { id, clientSecret: id });
+      expect(moved.ok).toBe(true);
+      const started = await v.handle(get(`/auth/sso/${id}/start?next=/home`));
+      const url = new URL(started.headers.get("location") ?? "");
+      const bind =
+        started.headers
+          .getSetCookie()
+          .find((c) => c.startsWith("__Secure-tempo_session_oauth="))
+          ?.split(";")[0]
+          ?.split("=")[1] ?? "";
+      // An update forgets the kept document, so the callback reads it again, and fails.
+      expect((await updateConnection(v.config, SSO_APP, { id, label: "acme IdP 2" })).ok).toBe(
+        true,
+      );
+      down = true;
+      const q = new URLSearchParams({ code: "c1", state: url.searchParams.get("state") ?? "" });
+      const res = await v.handle(
+        get(`/auth/sso/${id}/callback?${q}`, { cookie: `__Secure-tempo_session_oauth=${bind}` }),
+      );
+      expect(
+        new URL(res.headers.get("location") ?? "", BASE_URL).searchParams.get("auth_error"),
+      ).toBe("sso_failed");
+      await v.config.observe.flush();
+      return id;
+    };
+    const kept = await bothWays(run, (id) => [id]);
+    const failed = kept.sink.filter((e) => e.name === "sso.failed");
+    expect(failed.map((e) => [e.connectionId, e.step])).toEqual([["***", "discovery"]]);
+    expect(kept.lines).toContainEqual(["authtempo: sso failed", "***", "discovery"]);
+  });
+  it("keeps the opened client secret from a discovery refusal of an OIDC start (ruling 83 l2b)", async () => {
+    // A client secret that is also the connection id: the sso.failed field is the secret.
+    const run = async (observe: AuthConfig["observe"] | undefined) => {
+      const fetchFn = (async () => {
+        throw new Error("down");
+      }) as typeof fetch;
+      const v = ssoSignInWorld({
+        ...(observe ? { observe } : {}),
+        sso: { oidc: true, fetch: fetchFn },
+      });
+      const organizationId = await seedOrganization(v, "acme");
+      const made = await createConnection(v.config, SSO_APP, {
+        organizationId,
+        kind: "oidc",
+        label: "acme IdP",
+        issuer: issuerOf("acme"),
+        clientId: "acme-client",
+        clientSecret: "acme-secret-0123456789",
+      });
+      if (!made.ok) throw new Error(made.code);
+      const id = made.value.id;
+      expect((await updateConnection(v.config, SSO_APP, { id, clientSecret: id })).ok).toBe(true);
+      const started = await v.handle(get(`/auth/sso/${id}/start?next=/home`));
+      expect(started.status).toBeGreaterThanOrEqual(300);
+      await v.config.observe.flush();
+      return id;
+    };
+    const kept = await bothWays(run, (id) => [id]);
+    const failed = kept.sink.filter((e) => e.name === "sso.failed");
+    expect(failed.map((e) => [e.connectionId, e.step])).toEqual([["***", "discovery"]]);
   });
 });
