@@ -10,6 +10,14 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hasAddress, provedAccount } from "./address.js";
+import {
+  type AnonymousCaller,
+  anonymousData,
+  recordedAnonymous,
+  type UpgradeSteps,
+  upgradeProof,
+  upgradeSteps,
+} from "./anonymous.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
 import { HookStop, hookGuard, stopWith } from "./hooks.js";
@@ -28,7 +36,6 @@ import {
   challengeOpened,
   endedList,
   endSessions,
-  openSession,
   type PreparedSession,
   prepareSession,
   type ResolvedSession,
@@ -165,6 +172,12 @@ export interface PasswordSignUp {
   userAgent: string | null;
   /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
   captchaToken?: string | null | undefined;
+  /**
+   * The live anonymous session of the request (plan 12i Task 7). A sign-up
+   * that opens its session replaces it there. A sign-up that mails a link
+   * records it in the link's row, and the confirm replaces it.
+   */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 /**
@@ -201,6 +214,12 @@ export interface PasswordSignInFields {
   next?: string | undefined;
   /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
   captchaToken?: string | null | undefined;
+  /**
+   * The live anonymous session of the request (plan 12i Task 7). The
+   * sign-in completes in this request, so it is bound: it replaces this
+   * anonymous user.
+   */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 /** A session, or a second-factor challenge for a user with the factor on (plan 9f). */
@@ -305,12 +324,28 @@ export async function passwordSignUp(
   // The user hooks of the new user (plan 12a). The transaction runs the sign-up rule itself.
   const made = createSteps(config, "password", { signUpRule: false });
   if (pw.uniformSignUp)
-    return uniformSignUp(config, pw, { email, name: name ?? null, hash }, now, made);
+    return uniformSignUp(
+      config,
+      pw,
+      { email, name: name ?? null, hash },
+      now,
+      made,
+      input.anonymous ?? null,
+    );
+  // A sign-up that opens its session completes in this request: bound (plan 12i Task 7).
+  const upgrade = upgradeSteps(config, input.anonymous ?? null, null, "bound");
   let created: Result<Created> | null = null;
   for (let attempt = 0; created === null; attempt++) {
     try {
       created = await hookGuard(() =>
-        insertSignUp(config, input, { email, name: name ?? null, hash, username }, now, made),
+        insertSignUp(
+          config,
+          input,
+          { email, name: name ?? null, hash, username },
+          now,
+          made,
+          upgrade,
+        ),
       );
     } catch (err) {
       // A concurrent sign-up or sign-in created the user between our read
@@ -337,8 +372,13 @@ export async function passwordSignUp(
   // Right after the commit, before the session hook and the mail (plan 12a).
   await made.after(answer.user);
   // Right after the commit, before the mail: the session exists whatever the mail does.
-  if ("session" in answer) await sessionOpened(config, answer.session, answer.user, "password");
-  await sendVerifyMail(config, email, created.value.passwordId, now);
+  if ("session" in answer) {
+    await sessionOpened(config, answer.session, answer.user, "password");
+    await upgrade.after();
+  }
+  // A link with no session yet records the anonymous user for its confirm.
+  const recorded = "session" in answer ? null : (input.anonymous ?? null);
+  await sendVerifyMail(config, email, created.value.passwordId, now, recorded);
   return ok(answer);
 }
 
@@ -358,6 +398,7 @@ function insertSignUp(
   row: SignUpRow,
   now: Date,
   made: CreateSteps,
+  upgrade: UpgradeSteps,
 ): Promise<Result<Created>> {
   return config.storage.transaction(async (tx): Promise<Result<Created>> => {
     // A retry forgets the user of the attempt that rolled back.
@@ -403,6 +444,8 @@ function insertSignUp(
     // 2026-10-15): else a stranger who knows an invited address gets a
     // session. The verify link opens it, as under `requireVerified`.
     const opens = !config.password?.requireVerified && config.signUp !== "invited";
+    // The anonymous upgrade (plan 12i Task 7): its hook before the session hook, before the first create.
+    if (opens) await upgrade.before(tx, minted, upgradeProof(minted), "password");
     const prepared = opens
       ? await prepareSession(
           config,
@@ -458,6 +501,8 @@ function insertSignUp(
       await dropSession();
       return fail("email_taken_unverified");
     }
+    // The claim of the anonymous upgrade, after the guards: no path commits it without the session.
+    if (s) await upgrade.claim(tx);
     const answer: PasswordSignUpResult = s
       ? { token: s.token, user, session: s.session }
       : { user, verifyRequired: true };
@@ -481,6 +526,7 @@ async function uniformSignUp(
   row: UniformRow,
   now: Date,
   made: CreateSteps,
+  anonymous: AnonymousCaller | null,
 ): Promise<Result<{ sent: true }>> {
   let done: UniformOutcome | null = null;
   for (let attempt = 0; done === null; attempt++) {
@@ -510,7 +556,7 @@ async function uniformSignUp(
   if (done.outcome === "created") {
     // Right after the commit, before the mail (plan 12a).
     await made.after(done.user);
-    await sendVerifyMail(config, row.email, done.passwordId, now);
+    await sendVerifyMail(config, row.email, done.passwordId, now, anonymous);
   }
   if (done.outcome === "existing") await sendExistingAccountMail(config, pw, row.email);
   return ok({ sent: true });
@@ -584,12 +630,17 @@ async function sendExistingAccountMail(
   await config.mail.send({ ...message, to: email });
 }
 
-/** One `password-verify` row and one mail. The link opens a confirm page with no side effect. */
+/**
+ * One `password-verify` row and one mail. The link opens a confirm page with
+ * no side effect. The row records the anonymous user of the request that
+ * asked for the link (plan 12i Task 7): the confirm is a mailed proof.
+ */
 async function sendVerifyMail(
   config: ResolvedConfig,
   email: string,
   passwordId: string,
   now: Date,
+  anonymous: AnonymousCaller | null,
 ): Promise<void> {
   const token = randomToken(PASSWORD_VERIFY_PREFIX);
   await config.storage.create("verification", {
@@ -599,7 +650,7 @@ async function sendVerifyMail(
     valueHash: await sha256Hex(token),
     expiresAt: new Date(now.getTime() + config.magicLink.ttlMinutes * 60_000),
     consumedAt: null,
-    data: { passwordId },
+    data: { passwordId, ...anonymousData(anonymous) },
     createdAt: now,
     updatedAt: now,
     secretVersion: config.keyring.current,
@@ -615,6 +666,8 @@ async function sendVerifyMail(
 export interface PasswordResend {
   email: string;
   ip: string | null;
+  /** The live anonymous session of the request (plan 12i Task 7): the new link records its user. */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 /**
@@ -651,7 +704,7 @@ export async function resendPasswordVerification(
     { field: "userId", op: "eq", value: user.id },
   ]);
   if (!row || row.hash.startsWith(PENDING_HASH_PREFIX)) return ok({ sent: true });
-  await replaceVerifyMail(config, email, row.id);
+  await replaceVerifyMail(config, email, row.id, input.anonymous ?? null);
   return ok({ sent: true });
 }
 
@@ -665,13 +718,14 @@ async function replaceVerifyMail(
   config: ResolvedConfig,
   email: string,
   passwordId: string,
+  anonymous: AnonymousCaller | null,
 ): Promise<void> {
   await config.storage.delete("verification", [
     { field: "purpose", op: "eq", value: "password-verify" },
     { field: "identifier", op: "eq", value: email },
     { field: "consumedAt", op: "eq", value: null },
   ]);
-  await sendVerifyMail(config, email, passwordId, config.clock.now());
+  await sendVerifyMail(config, email, passwordId, config.clock.now(), anonymous);
 }
 
 /**
@@ -685,9 +739,10 @@ export async function mailVerifyAgain(
   config: ResolvedConfig,
   email: string,
   passwordId: string,
+  anonymous: AnonymousCaller | null = null,
 ): Promise<boolean> {
   if (!(await allowResendMail(config, email))) return false;
-  await replaceVerifyMail(config, email, passwordId);
+  await replaceVerifyMail(config, email, passwordId, anonymous);
   return true;
 }
 
@@ -800,9 +855,12 @@ export async function passwordSignIn(
   // for the sign-up session; this closes it for the sign-in.
   // A user with no address is proved by the proof that made it (`provedAccount`), and gets no mail.
   if ((pw.requireVerified || config.signUp === "invited") && !provedAccount(user)) {
-    if (hasAddress(user)) await mailVerifyAgain(config, user.email, row.id);
+    if (hasAddress(user))
+      await mailVerifyAgain(config, user.email, row.id, input.anonymous ?? null);
     return fail("email_unverified");
   }
+  // The sign-in completes in this request: bound (plan 12i Task 7).
+  const upgrade = upgradeSteps(config, input.anonymous ?? null, null, "bound");
   // The second factor (plan 9f, owner decision 1b): a user with the factor on
   // gets a challenge in place of the session. The gate keeps the guard below
   // for its challenge, so a reset, a change, or a claim since the check
@@ -818,6 +876,7 @@ export async function passwordSignIn(
       next: input.next,
       trustDevice: input.trustDevice,
       method: passwordMethod(input),
+      anonymous: upgrade.carried(),
     },
     now,
   );
@@ -828,11 +887,14 @@ export async function passwordSignIn(
   }
   const signedIn = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<PasswordSession>> => {
-      const s = await openSession(
+      // The anonymous upgrade (plan 12i Task 7): its hook before the session hook and its hold.
+      await upgrade.before(tx, user, upgradeProof(user), "password");
+      const prepared = await prepareSession(
         config,
         { user, ip: input.ip, userAgent: input.userAgent, via: "password" },
         tx,
       );
+      const s = await writeSession(config, prepared, tx);
       // For every user, verified or not. Between the verify and this point a
       // reset or a change can write a new hash and delete the sessions, and a
       // claim (the owner's magic link) can delete the row and the sessions.
@@ -856,6 +918,8 @@ export async function passwordSignIn(
         await tx.delete("session", [{ field: "id", op: "eq", value: s.session.id }]);
         return fail("invalid_credentials");
       }
+      // The claim after the row check, so no path commits a claim without its session.
+      await upgrade.claim(tx);
       return ok({ token: s.token, user, session: s.session });
     }),
   );
@@ -865,6 +929,7 @@ export async function passwordSignIn(
     // The trust row that skipped the gate, after the commit, as the other gates do.
     await touchTrust(config, gate.trustId, now);
     await sessionOpened(config, signedIn.value.session, signedIn.value.user, "password");
+    await upgrade.after();
   }
   return signedIn;
 }
@@ -973,6 +1038,8 @@ export interface PasswordVerify {
   token: string;
   ip: string | null;
   userAgent: string | null;
+  /** The live anonymous session of the confirm: a mailed proof (plan 12i Task 7). */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 export interface PasswordVerified {
@@ -1010,6 +1077,12 @@ export async function verifyPasswordEmail(
   const passwordId = (row.data as { passwordId?: unknown } | null)?.passwordId;
   if (typeof passwordId !== "string") return fail("invalid_token");
   const ended = endedList(config);
+  const upgrade = upgradeSteps(
+    config,
+    input.anonymous ?? null,
+    recordedAnonymous(row.data),
+    "mailed",
+  );
   // The verify hooks of the claim (plan 12a, Task 18).
   const verify = verifySteps(config, "password_verify");
   const run = () =>
@@ -1027,6 +1100,9 @@ export async function verifyPasswordEmail(
         // for the D1 undo (see `insertSignUp`). A verified user gets no
         // session and no verify, so no hook.
         if (!user.emailVerified) await verify.before(user);
+        // The anonymous upgrade (plan 12i Task 7): its hook before the session hook and its hold.
+        if (!user.emailVerified)
+          await upgrade.before(tx, claimed, upgradeProof(claimed), "password");
         const prepared = user.emailVerified
           ? null
           : await prepareSession(
@@ -1050,6 +1126,7 @@ export async function verifyPasswordEmail(
         if (prepared === null) return ok({ user, signedIn: null });
         await claimEmail(tx, user.id, { passwordId, username: true }, now, verify, ended);
         await ensureEmailIdentity(tx, user.id, row.identifier, now);
+        await upgrade.claim(tx);
         const s = await writeSession(config, prepared, tx);
         return ok({ user: claimed, signedIn: s });
       }),
@@ -1067,8 +1144,10 @@ export async function verifyPasswordEmail(
     // After the commit, before the session hooks (plan 12a).
     await verify.after(verified.value.user);
     await sessionsEnded(config, ended, "claim", verify.stops, verify.endedCount());
-    if (verified.value.signedIn)
+    if (verified.value.signedIn) {
       await sessionOpened(config, verified.value.signedIn.session, verified.value.user, "password");
+      await upgrade.after();
+    }
   }
   return verified;
 }

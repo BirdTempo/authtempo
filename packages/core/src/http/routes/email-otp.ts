@@ -1,5 +1,6 @@
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
+import { anonymousCaller } from "../../engine/anonymous.js";
 import {
   type EmailOtpSession,
   requestEmailOtp,
@@ -41,6 +42,7 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
             email: body.value.email,
             ip: ctx.ip,
             captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+            anonymous: await anonymousCaller(ctx.config, ctx.request),
           }),
         );
       },
@@ -58,6 +60,7 @@ export function emailOtpRoutes(config: ResolvedConfig): Route[] {
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           trustDevice: trustTokenOf(ctx.config, ctx.request, body.value.trustDevice),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
         if (!r.ok) return respond(r);
         // A user with the second factor on: the challenge, and no cookie (plan 12c).

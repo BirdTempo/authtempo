@@ -6,6 +6,12 @@ import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import { StorageError, type Where } from "../storage/port.js";
 import { handleProved } from "./address.js";
+import {
+  type AnonymousCaller,
+  anonymousData,
+  recordedAnonymous,
+  upgradeSteps,
+} from "./anonymous.js";
 import { createSteps } from "./create-steps.js";
 import { compareCode, consumeCode, issueCode } from "./email-otp.js";
 import { requireFresh } from "./fresh.js";
@@ -243,6 +249,8 @@ export interface PhoneRequest {
   ip: string | null;
   /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
   captchaToken?: string | null | undefined;
+  /** The live anonymous session of the request (plan 12i Task 7): the code row records its user. */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 /**
@@ -271,7 +279,12 @@ export async function requestPhone(
   const number = gate.value;
   const known = await config.storage.findOne("user", byPhone(number));
   if (!known && !phone.signUp) return ok({ sent: true });
-  const send = { purpose: "phone-otp", identifier: number, to: number, data: {} } as const;
+  const send = {
+    purpose: "phone-otp",
+    identifier: number,
+    to: number,
+    data: anonymousData(input.anonymous),
+  } as const;
   if (!after) return sentAnswer(await sendPhoneCode(config, send));
   after(sendLater(config, send));
   return ok({ sent: true });
@@ -317,6 +330,8 @@ export interface PhoneVerify {
   userAgent: string | null;
   /** The clear `td_` token of a trusted device (plan 12c): it skips the gate. */
   trustDevice?: string | undefined;
+  /** The live anonymous session of the completing request: a code by SMS is a mailed proof (plan 12i Task 7). */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 /** A sign-in by a phone code: the session token, the user, and the session row. */
@@ -350,6 +365,12 @@ export async function verifyPhone(
   if (!checked.ok) return checked;
   const row = checked.value;
   const now = config.clock.now();
+  const upgrade = upgradeSteps(
+    config,
+    input.anonymous ?? null,
+    recordedAnonymous(row.data),
+    "mailed",
+  );
   const steps = gatedSteps(
     config,
     {
@@ -360,6 +381,7 @@ export async function verifyPhone(
       next: "/",
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.phone ?? false,
+      upgrade,
     },
     now,
   );
@@ -376,6 +398,7 @@ export async function verifyPhone(
   }
   await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, opened.session, user, "phone");
+  await upgrade.after();
   return ok({ token: opened.token, user, session: opened.session });
 }
 

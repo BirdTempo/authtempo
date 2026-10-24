@@ -41,7 +41,8 @@ describe("checkConfig", () => {
     // anonymous.sweepBatch and anonymous.dailyCap. Ruling 27 adds
     // anonymous.isolateLimiter.
     // Plan 12i Task 11 adds multiSession and multiSession.max.
-    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2);
+    // Plan 12i Task 7 adds hooks.anonymous.
+    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1);
     expect(keys).toContain("multiSession.max");
     expect(keys).toContain("passkey.extensions.largeBlob");
     expect(keys).toContain("social.oauth2[].tokenRequest");

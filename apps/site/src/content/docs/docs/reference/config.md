@@ -386,6 +386,7 @@ Another key of `operator` is refused. Set `operator.secretHash` or `operator.sec
 | `hooks.operator` | `OperatorHooks` | none | Needs `operator.users`, `sso`, or `scim`. `beforeAction` runs before an operator act and can refuse it. `afterAction` gets each audit row after the commit, also the rows of SSO and SCIM; send the row to a separate system there. |
 | `hooks.sso` | `SsoHooks` | none | Needs `sso`. `beforeSignIn` runs in an SSO sign-in before its first write and can refuse it. |
 | `hooks.scim` | `ScimHooks` | none | Needs `scim`. `afterChange` runs once after the commit of each SCIM write. A throw writes one log line, and the write stays. |
+| `hooks.anonymous` | `AnonymousHooks` | none | Needs `anonymous`. A sign-in from a browser with a live anonymous session replaces the anonymous user. `beforeLink` runs in the sign-in's transaction and can refuse it. `afterLink` runs after the commit, before the anonymous user goes. Move data only when `proof` is `verified`. |
 
 ## Captcha
 

@@ -103,6 +103,15 @@ const SITES: Site[] = [
   },
   {
     file: "engine/anonymous.ts",
+    fn: "upgradeSteps",
+    call: "endSessions",
+    count: 1,
+    kind: "endSessions",
+    reason:
+      "the anonymous sessions that a sign-in replaced (plan 12i Task 7); the outbox rows stay and are due now",
+  },
+  {
+    file: "engine/anonymous.ts",
     fn: "deleteSessionsOf",
     call: 'delete("session"',
     count: 1,

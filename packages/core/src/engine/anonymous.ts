@@ -8,10 +8,20 @@ import type { SessionRow, UserRow } from "../schema.js";
 import type { Meter } from "../storage/meter.js";
 import type { StorageAdapter, Where } from "../storage/port.js";
 import { createSteps } from "./create-steps.js";
-import { hookGuard, runAfter, runBefore } from "./hooks.js";
+import {
+  type AnonymousLinkEvent,
+  hookGuard,
+  runAfter,
+  runAfterChecked,
+  runBefore,
+  type SessionVia,
+} from "./hooks.js";
 import {
   endedList,
   endSessions,
+  liveSessionWhere,
+  peekRequestSession,
+  peekRequestUser,
   prepareSession,
   type ResolvedSession,
   sessionIsLive,
@@ -429,4 +439,206 @@ export async function sweepAnonymous(
     after = last.createdAt;
   }
   return n;
+}
+
+/**
+ * The live anonymous session of a request, and its user (plan 12i Task 7).
+ * A pathway reads it at its start and at its completion. An impersonation
+ * session is not the person's own, so it never counts.
+ */
+export interface AnonymousCaller {
+  user: UserRow;
+  session: SessionRow;
+}
+
+/**
+ * The live anonymous session of `request`, or null. It reads with no write
+ * (`peekRequestSession`), so it moves no expiry, and the handler's later
+ * session read takes the same row. With `anonymous` off it reads nothing: a
+ * deployment that turned it off pays no query on each sign-in.
+ */
+export async function anonymousCaller(
+  config: ResolvedConfig,
+  request: Request,
+): Promise<AnonymousCaller | null> {
+  if (!config.anonymous) return null;
+  const session = await peekRequestSession(config, request);
+  if (session === null || session.actorId !== null) return null;
+  const user = await peekRequestUser(config, request);
+  return user?.isAnonymous && user.id === session.userId ? { user, session } : null;
+}
+
+/**
+ * How a pathway completes (deviation 2 of plan 12i). `"mailed"`: the proof
+ * went by mail or SMS, so a stranger can request it for another person. It
+ * links only when the completing request carries the same anonymous
+ * session as its start. `"bound"`: the completion is tied to the browser
+ * of the start, by the binding cookie of a social flow or by the request
+ * itself. It links the anonymous user that its row names, or with none,
+ * the anonymous session of the request.
+ */
+export type UpgradeKind = "mailed" | "bound";
+
+/** What a challenge row keeps for the upgrade at its verify (plan 12i Task 7). */
+export interface CarriedUpgrade {
+  anonymousUserId: string;
+  kind: UpgradeKind;
+}
+
+/** The steps of an upgrade, as `upgradeSteps` answers them. */
+export interface UpgradeSteps {
+  /** The anonymous user that a challenge of this sign-in carries to its verify, or null. */
+  carried(): CarriedUpgrade | null;
+  /**
+   * Inside the sign-in transaction, after the user is known, before the
+   * session hook: the reads, then `beforeLink`. It writes and locks
+   * nothing, and the flow calls it before the session hook holds the user
+   * row. So no lock is held while the app's hook runs. A refusal throws
+   * `HookStop`, and no session opens.
+   */
+  before(
+    tx: StorageAdapter,
+    user: UserRow,
+    proof: "verified" | "unverified",
+    via: SessionVia,
+  ): Promise<void>;
+  /**
+   * Inside the same transaction, right before the session write: the claim
+   * of the anonymous sessions. It comes after the user writes of the flow,
+   * so the session rows lock after the user row (the order of
+   * user-hold.ts). A sign-in that loses the claim to a parallel upgrade
+   * opens its session and links nothing.
+   */
+  claim(tx: StorageAdapter): Promise<void>;
+  /** After the commit: `afterLink`, then the end of the anonymous session, then the delete. */
+  after(): Promise<void>;
+}
+
+/**
+ * The proof of a sign-in for the anonymous upgrade (deviation 3 of plan
+ * 12i). A user with an address that no proof verified is a claim: the real
+ * owner of the address can claim it later. Every other user is
+ * `"verified"`: the address is proved, or there is no address to claim.
+ */
+export function upgradeProof(user: UserRow): "verified" | "unverified" {
+  return user.email !== null && !user.emailVerified ? "unverified" : "verified";
+}
+
+/**
+ * The upgrade of a sign-in, always by replace (plan 12i Task 7, spec 32
+ * item 9, owner decision 2). `anonymous` is the anonymous session of the
+ * completing request. `recordedId` is the anonymous user that the
+ * pathway's row recorded at its start. With no anonymous user to link, the
+ * steps do nothing.
+ *
+ * The claim is the race guard. Inside the sign-in transaction, one
+ * conditional update sets `freshAt` to null on the live anonymous sessions
+ * that still hold one. A session with a null `freshAt` is never fresh, and
+ * an anonymous session needs no fresh rule. The first upgrade takes the
+ * sessions; a second one, parallel or later, matches no row and links
+ * nothing. So `afterLink` runs for one sign-in only, and the anonymous data
+ * goes to one account. A failure of the transaction undoes the claim.
+ */
+export function upgradeSteps(
+  config: ResolvedConfig,
+  anonymous: AnonymousCaller | null,
+  recordedId: string | null,
+  kind: UpgradeKind,
+): UpgradeSteps {
+  const callerId = anonymous?.user.isAnonymous ? anonymous.user.id : null;
+  const target =
+    kind === "mailed"
+      ? recordedId !== null && callerId === recordedId
+        ? recordedId
+        : null
+      : (recordedId ?? callerId);
+  let linked: AnonymousLinkEvent | null = null;
+  // The event and the sessions that `before` read, for `claim`.
+  let pending: { event: AnonymousLinkEvent; sessions: SessionRow[] } | null = null;
+  return {
+    carried: () => (target === null ? null : { anonymousUserId: target, kind }),
+    async before(tx, user, proof, via) {
+      // A retry of the transaction runs this again; the rows of the attempt that rolled back are gone.
+      linked = null;
+      pending = null;
+      if (target === null || target === user.id) return;
+      const anonymousUser = await tx.findOne("user", [
+        { field: "id", op: "eq", value: target },
+        { field: "isAnonymous", op: "eq", value: true },
+      ]);
+      if (!anonymousUser) return;
+      const now = config.clock.now();
+      // The person's own live sessions of the anonymous user. An impersonation session is not theirs.
+      const where: Where<"session">[] = [
+        ...liveSessionWhere(config, target, now),
+        { field: "actorId", op: "eq", value: null },
+        { field: "freshAt", op: "ne", value: null },
+      ];
+      const sessions = await tx.findMany("session", where, { sort: { field: "id", dir: "asc" } });
+      if (sessions.length === 0) return;
+      const event: AnonymousLinkEvent = { anonymousUser, user, proof, via };
+      await runBefore(
+        config.observe,
+        "anonymous.beforeLink",
+        config.hooks.anonymous.beforeLink,
+        event,
+      );
+      pending = { event, sessions };
+    },
+    async claim(tx) {
+      linked = null;
+      const read = pending;
+      if (!read) return;
+      const where: Where<"session">[] = [
+        { field: "id", op: "in", value: read.sessions.map((r) => r.id) },
+        { field: "freshAt", op: "ne", value: null },
+      ];
+      await tx.lockInOrder?.("session", where);
+      // Zero rows: a parallel upgrade claimed the sessions first. It links, and this sign-in does not.
+      if ((await tx.update("session", where, { freshAt: null })) > 0) linked = read.event;
+    },
+    async after() {
+      const event = linked;
+      linked = null;
+      if (!event) return;
+      const { anonymousUser } = event;
+      // A throw keeps the anonymous user and its session: the app moved no data, so none is lost.
+      const done = await runAfterChecked(
+        config.observe,
+        "anonymous.afterLink",
+        config.hooks.anonymous.afterLink,
+        event,
+        anonymousUser.id,
+      );
+      if (!done) return;
+      const ended = endedList(config);
+      const now = config.clock.now();
+      const count = await config.storage.transaction(async (tx) => {
+        if (ended) ended.length = 0;
+        return endSessions(
+          tx,
+          [{ field: "userId", op: "eq", value: anonymousUser.id }],
+          ended ?? null,
+          now,
+          null,
+        );
+      });
+      await sessionsEnded(config, ended, "anonymous_upgrade", null, count);
+      // After the session end: the delete takes users with no session, so it runs as the sweep does.
+      await deleteAnonymousUsers(config, [anonymousUser.id]);
+    },
+  };
+}
+
+/** The anonymous user that a pathway row recorded at its start, or null (plan 12i Task 7). */
+export function recordedAnonymous(data: unknown): string | null {
+  const id = (data as { anonymousUserId?: unknown } | null)?.anonymousUserId;
+  return typeof id === "string" ? id : null;
+}
+
+/** The `data` field of a pathway row that records `caller`: empty for no anonymous caller. */
+export function anonymousData(caller: AnonymousCaller | null | undefined): {
+  anonymousUserId?: string;
+} {
+  return caller ? { anonymousUserId: caller.user.id } : {};
 }

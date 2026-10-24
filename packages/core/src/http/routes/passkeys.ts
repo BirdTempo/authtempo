@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { anonymousCaller } from "../../engine/anonymous.js";
 import { requireFresh } from "../../engine/fresh.js";
 import {
   deletePasskey,
@@ -101,6 +102,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
             ip: ctx.ip,
             hints: body.value.hints,
             extensions: body.value.extensions,
+            anonymous: await anonymousCaller(ctx.config, ctx.request),
           }),
         );
       },
@@ -116,6 +118,7 @@ export function passkeyRoutes(config: ResolvedConfig): Route[] {
           response: body.value.response,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
         if (!r.ok) return respond(r);
         const maxAge = sessionMaxAgeSeconds(ctx.config);

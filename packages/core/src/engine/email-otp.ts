@@ -8,6 +8,12 @@ import { currentSecret, hashSecretFor } from "../primitives/keyring.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type { Sort, StorageAdapter, Where } from "../storage/port.js";
+import {
+  type AnonymousCaller,
+  anonymousData,
+  recordedAnonymous,
+  upgradeSteps,
+} from "./anonymous.js";
 import { createSteps, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { resetWithProof } from "./password.js";
@@ -80,6 +86,8 @@ export interface EmailOtpRequest {
   ip: string | null;
   /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
   captchaToken?: string | null | undefined;
+  /** The live anonymous session of the request (plan 12i Task 7): a sign-in code records its user. */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 export interface EmailOtpVerify {
@@ -89,6 +97,8 @@ export interface EmailOtpVerify {
   userAgent: string | null;
   /** The clear `td_` token of a trusted device (plan 12c): it skips the gate. */
   trustDevice?: string | undefined;
+  /** The live anonymous session of the completing request: a mailed proof (plan 12i Task 7). */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 /** A sign-in or a reset by code: the session token, the user, and the session row. */
@@ -196,7 +206,9 @@ async function requestCode(
     return fail("rate_limited");
   // An enforced address gets no mail and the normal answer, so the answer tells nothing (plan 12d).
   if (await ssoRequiredFor(config, email)) return ok({ sent: true });
-  const code = await issueCode(config, otp, purpose, email, {});
+  // A sign-in code records the anonymous user of the request (plan 12i Task 7). A reset code links nothing.
+  const data = purpose === "email-otp" ? anonymousData(input.anonymous) : {};
+  const code = await issueCode(config, otp, purpose, email, data);
   const build = purpose === "email-otp" ? otp.mail : otp.resetMail;
   const message = build({ email, code, ttlMinutes: otp.ttlMinutes, appName: config.appName });
   // To the address the code belongs to, whatever the builder wrote.
@@ -354,6 +366,12 @@ export async function verifyEmailOtp(
   const consumed = await consumeCode(config.storage, checked.value, now);
   if (!consumed.ok) return consumed;
   const ended = endedList(config);
+  const upgrade = upgradeSteps(
+    config,
+    input.anonymous ?? null,
+    recordedAnonymous(consumed.value.data),
+    "mailed",
+  );
   // The hook runs before the resolution's first write, for the D1 undo (see
   // `insertSignUp` in password.ts). A user with the second factor on gets a
   // challenge in place of the session (plan 12c). The code proves the
@@ -368,6 +386,7 @@ export async function verifyEmailOtp(
       next: "/",
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.emailOtp ?? false,
+      upgrade,
     },
     now,
   );
@@ -401,6 +420,7 @@ export async function verifyEmailOtp(
   }
   await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, after.session, user, "email_otp");
+  await upgrade.after();
   return ok({ token: after.token, user, session: after.session });
 }
 

@@ -1,5 +1,6 @@
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
+import { anonymousCaller } from "../../engine/anonymous.js";
 import { MAGIC_LINK_TOKEN_RE, requestMagicLink, verifyMagicLink } from "../../engine/magic-link.js";
 import {
   publicSession,
@@ -41,6 +42,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
             next: body.value.next,
             ip: ctx.ip,
             captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+            anonymous: await anonymousCaller(ctx.config, ctx.request),
           }),
         );
       },
@@ -82,6 +84,7 @@ export function magicLinkRoutes(config: ResolvedConfig): Route[] {
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           trustDevice: trustTokenOf(ctx.config, ctx.request, body.value.trustDevice),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
         if (!result.ok) return jsonCaller ? respond(result) : failed(ctx, result.code);
         // A user with the second factor on (plan 12c): no cookie. A form goes

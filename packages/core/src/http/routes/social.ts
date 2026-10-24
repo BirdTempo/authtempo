@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { anonymousCaller } from "../../engine/anonymous.js";
 import { socialMethod } from "../../engine/last-method.js";
 import { sessionCookieToken, sessionMaxAgeSeconds } from "../../engine/sessions.js";
 import { completeSocial, startLink, startSocial } from "../../engine/social.js";
@@ -91,6 +92,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
         trustDevice: trustTokenOf(ctx.config, ctx.request, undefined),
         // The cookie only: a provider's redirect carries no bearer header (plan 12a).
         sessionToken: sessionCookieToken(ctx.config, ctx.request),
+        anonymous: await anonymousCaller(ctx.config, ctx.request),
       });
       if (!r.ok) return failed(ctx, r.code);
       if ("linked" in r.value) {
@@ -131,6 +133,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
             next: ctx.url.searchParams.get("next") ?? undefined,
             data: ctx.url.searchParams.get("data") ?? undefined,
             ip: ctx.ip,
+            anonymous: await anonymousCaller(ctx.config, ctx.request),
           });
           if (!r.ok) return authErrorRedirect(ctx.config, r.code);
           const res = redirect(r.value.location);

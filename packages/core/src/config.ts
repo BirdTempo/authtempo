@@ -25,6 +25,8 @@ import {
   type EmailOtpMailInput,
 } from "./engine/email-otp-mail.js";
 import {
+  ANONYMOUS_HOOK_POINTS,
+  type AnonymousHooks,
   type HooksConfig,
   IDENTITY_HOOK_POINTS,
   type IdentityHooks,
@@ -1945,6 +1947,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       typeof input.operator === "object" && input.operator.users === true,
       input.sso !== undefined && input.sso !== false,
       input.scim !== undefined && input.scim !== false,
+      input.anonymous !== undefined && input.anonymous !== false,
     ),
     account: resolveAccount(input.account),
     username: resolveUsername(input.username, organizations?.reservedSlugs ?? null),
@@ -3502,6 +3505,7 @@ const HOOK_GROUPS: readonly string[] = [
   "operator",
   "sso",
   "scim",
+  "anonymous",
 ];
 
 function resolveHooks(
@@ -3510,6 +3514,7 @@ function resolveHooks(
   operatorUsersOn: boolean,
   ssoOn: boolean,
   scimOn: boolean,
+  anonymousOn: boolean,
 ): ResolvedHooks {
   if (input === undefined)
     return {
@@ -3520,12 +3525,13 @@ function resolveHooks(
       operator: {},
       sso: {},
       scim: {},
+      anonymous: {},
     };
   if (!isHookObject(input)) throw new ConfigError("hooks must be a plain object");
   for (const key of Object.keys(input))
     if (!HOOK_GROUPS.includes(key))
       throw new ConfigError(
-        `hooks.${key} is not a hook group; core has organization, session, user, identity, operator, sso, and scim`,
+        `hooks.${key} is not a hook group; core has organization, session, user, identity, operator, sso, scim, and anonymous`,
       );
   // Each value passed the function check in hookGroup; the interfaces type the events.
   const organization = hookGroup(
@@ -3565,7 +3571,15 @@ function resolveHooks(
   // Only a SCIM write runs this point (plan 12d Task 10).
   if (Object.keys(scim).length > 0 && !scimOn)
     throw new ConfigError("hooks.scim needs scim: the hooks would never run");
-  return { organization, session, user, identity, operator, sso, scim };
+  const anonymous = hookGroup(
+    "hooks.anonymous",
+    input.anonymous,
+    ANONYMOUS_HOOK_POINTS,
+  ) as unknown as AnonymousHooks;
+  // Only the upgrade of an anonymous session runs these points (plan 12i Task 7).
+  if (Object.keys(anonymous).length > 0 && !anonymousOn)
+    throw new ConfigError("hooks.anonymous needs anonymous: the hooks would never run");
+  return { organization, session, user, identity, operator, sso, scim, anonymous };
 }
 
 const CAPTCHA_KEYS: Readonly<Record<keyof CaptchaConfig, true>> = {

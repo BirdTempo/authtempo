@@ -7,6 +7,7 @@
  */
 import { CAPTCHA_FLOWS } from "../captcha.js";
 import {
+  ANONYMOUS_HOOK_POINTS,
   type HookName,
   IDENTITY_HOOK_POINTS,
   OPERATOR_HOOK_POINTS,
@@ -118,7 +119,7 @@ const COUNT = { kind: "count" } as const;
 
 const enumOf = (values: readonly string[]) => ({ kind: "enum", values }) as const;
 
-/** Every hook name, read from the seven hook point constants (the last two of plan 12d). */
+/** Every hook name, read from the eight hook point constants (sso and scim of plan 12d, anonymous of plan 12i). */
 const HOOK_NAMES: readonly string[] = [
   ...Object.keys(ORGANIZATION_HOOK_POINTS).map((p) => `organization.${p}`),
   ...Object.keys(SESSION_HOOK_POINTS).map((p) => `session.${p}`),
@@ -127,6 +128,7 @@ const HOOK_NAMES: readonly string[] = [
   ...Object.keys(OPERATOR_HOOK_POINTS).map((p) => `operator.${p}`),
   ...Object.keys(SSO_HOOK_POINTS).map((p) => `sso.${p}`),
   ...Object.keys(SCIM_HOOK_POINTS).map((p) => `scim.${p}`),
+  ...Object.keys(ANONYMOUS_HOOK_POINTS).map((p) => `anonymous.${p}`),
 ];
 
 /** The key of each entry of ROUTES, `<method> <path>`. */
@@ -974,6 +976,9 @@ export const HOOK_EVENTS: Readonly<Record<HookName, EventName | { readonly exemp
   "operator.afterAction": "operator.action",
   "sso.beforeSignIn": REFUSAL_EXEMPT,
   "scim.afterChange": "scim.change",
+  "anonymous.beforeLink": REFUSAL_EXEMPT,
+  // The upgrade ends the anonymous session after this point: session.end with anonymous_upgrade.
+  "anonymous.afterLink": "session.end",
 };
 
 /** The `organization.change` event of an `after` point, emitted beside its hook. */

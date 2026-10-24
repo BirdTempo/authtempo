@@ -7,6 +7,12 @@ import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { UserRow } from "../schema.js";
+import {
+  type AnonymousCaller,
+  anonymousData,
+  recordedAnonymous,
+  upgradeSteps,
+} from "./anonymous.js";
 import { createSteps, verifySteps } from "./create-steps.js";
 import { hookGuard } from "./hooks.js";
 import { gatedSteps, type SignInChallenge, touchTrust } from "./second-factor.js";
@@ -26,6 +32,8 @@ export interface MagicLinkRequest {
   ip: string | null;
   /** The captcha token (plan 12b). Undefined in process: no check. Null or "": the request had none. */
   captchaToken?: string | null | undefined;
+  /** The live anonymous session of the request (plan 12i Task 7): the row records its user. */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 export interface MagicLinkVerify {
@@ -34,6 +42,12 @@ export interface MagicLinkVerify {
   userAgent: string | null;
   /** The clear `td_` token of a trusted device (plan 12c): it skips the gate. */
   trustDevice?: string | undefined;
+  /**
+   * The live anonymous session of the completing request (plan 12i Task 7).
+   * A mailed proof links only when it is the session that the request of
+   * the link recorded (deviation 2).
+   */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 /**
@@ -65,7 +79,7 @@ export async function requestMagicLink(
     valueHash: await sha256Hex(token),
     expiresAt: new Date(now.getTime() + config.magicLink.ttlMinutes * 60_000),
     consumedAt: null,
-    data: { next },
+    data: { next, ...anonymousData(input.anonymous) },
     createdAt: now,
     updatedAt: now,
     secretVersion: config.keyring.current,
@@ -108,6 +122,12 @@ export async function verifyMagicLink(
   // The session or the challenge commits with the claim in one transaction,
   // so a claimant's in-flight callback cannot keep a session the claim deleted.
   const ended = endedList(config);
+  const upgrade = upgradeSteps(
+    config,
+    input.anonymous ?? null,
+    recordedAnonymous(row.data),
+    "mailed",
+  );
   // The hook runs before the resolution's first write, for the D1 undo (see `insertSignUp` in password.ts).
   const steps = gatedSteps(
     config,
@@ -119,6 +139,7 @@ export async function verifyMagicLink(
       next,
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.magicLink ?? false,
+      upgrade,
     },
     now,
   );
@@ -152,5 +173,6 @@ export async function verifyMagicLink(
   }
   await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, after.session, user, "magic_link");
+  await upgrade.after();
   return ok({ token: after.token, next, user });
 }

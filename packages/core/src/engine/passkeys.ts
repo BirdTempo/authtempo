@@ -6,7 +6,7 @@ import { fromBase64Url, randomBase64Url, sha256Hex, toBase64Url } from "../primi
 import { newId } from "../primitives/ids.js";
 import type { PasskeyHint } from "../primitives/passkey-hints.js";
 import { fail, ok, type Result } from "../result.js";
-import type { PasskeyRow, SessionRow, UserRow } from "../schema.js";
+import type { PasskeyRow, SessionRow, UserRow, VerificationRow } from "../schema.js";
 import type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,
@@ -15,6 +15,13 @@ import type {
 } from "../seams/webauthn.js";
 import { StorageError, type Where } from "../storage/port.js";
 import { passkeyUserName, provedAccount } from "./address.js";
+import {
+  type AnonymousCaller,
+  anonymousData,
+  recordedAnonymous,
+  upgradeProof,
+  upgradeSteps,
+} from "./anonymous.js";
 import { hookGuard } from "./hooks.js";
 import { guardedRemove } from "./identities.js";
 import { sendNotice } from "./notices.js";
@@ -27,7 +34,7 @@ import {
   withoutSecretOutputs,
 } from "./passkey-extensions.js";
 import { FactorRaceError, factorRow, later } from "./second-factor.js";
-import { openSession, sessionOpened } from "./sessions.js";
+import { prepareSession, sessionOpened, writeSession } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
 import { validShownName } from "./users.js";
 
@@ -176,7 +183,7 @@ async function consumeChallenge(
   identifier: string,
   kind: Kind,
   bind?: string,
-): Promise<Result<true>> {
+): Promise<Result<VerificationRow>> {
   const now = config.clock.now();
   const row = await config.storage.findOne("verification", [
     { field: "valueHash", op: "eq", value: await sha256Hex(challenge) },
@@ -205,7 +212,7 @@ async function consumeChallenge(
   // A second-factor ceremony is bound to one `tf_` challenge (plan 12c, ASVS
   // 5.0 6.6.2): an assertion for one sign-in does not pass at another.
   if (bind !== undefined && data?.challengeId !== bind) return fail("invalid_token");
-  return ok(true);
+  return ok(row);
 }
 
 export async function passkeyRegistrationOptions(
@@ -318,6 +325,8 @@ export async function passkeyAuthenticationOptions(
     ip: string | null;
     hints?: PasskeyHint[] | undefined;
     extensions?: PasskeySignInExtensions | undefined;
+    /** The live anonymous session of the request (plan 12i Task 7): the row records its user. */
+    anonymous?: AnonymousCaller | null | undefined;
   },
 ): Promise<Result<PublicKeyCredentialRequestOptionsJSON>> {
   if (!config.passkey) return fail("not_found");
@@ -327,7 +336,12 @@ export async function passkeyAuthenticationOptions(
   if (!(await limit(config, "passkey-options:ip", ipKey(input.ip), OPTIONS_LIMIT))) {
     return fail("rate_limited");
   }
-  const { bytes } = await issueChallenge(config, SIGN_IN, "authentication");
+  const { bytes } = await issueChallenge(
+    config,
+    SIGN_IN,
+    "authentication",
+    anonymousData(input.anonymous),
+  );
   const options = await config.webauthn.authenticationOptions({
     rpID: config.passkey.rpID,
     challenge: bytes,
@@ -402,7 +416,17 @@ async function checkAssertion(
 
 export async function verifyPasskeyAuthentication(
   config: ResolvedConfig,
-  input: { response: unknown; ip: string | null; userAgent: string | null },
+  input: {
+    response: unknown;
+    ip: string | null;
+    userAgent: string | null;
+    /**
+     * The live anonymous session of the verify (plan 12i Task 7). The
+     * assertion completes in this request, so the sign-in is bound: the
+     * row's anonymous user links, or with none, this one.
+     */
+    anonymous?: AnonymousCaller | null | undefined;
+  },
 ): Promise<Result<{ token: string; user: UserRow; session: SessionRow }>> {
   if (!config.passkey) return fail("not_found");
   // First: no read, store, or log sees a PRF output or a large blob (plan 12i).
@@ -423,17 +447,32 @@ export async function verifyPasskeyAuthentication(
   // Only SSO signs in an address of an enforced domain (plan 12d): the assertion names the user.
   const enforced = await enforcedAnswer(config, user.email);
   if (enforced) return enforced;
+  const upgrade = upgradeSteps(
+    config,
+    input.anonymous ?? null,
+    recordedAnonymous(consumed.value.data),
+    "bound",
+  );
   // One transaction, so a session hook's membership check and the write read the same state.
   const opened = await hookGuard(async () =>
     ok(
-      await config.storage.transaction((tx) =>
-        openSession(config, { user, ip: input.ip, userAgent: input.userAgent, via: "passkey" }, tx),
-      ),
+      await config.storage.transaction(async (tx) => {
+        // Before the session hook and its hold of the user row, as at the other pathways.
+        await upgrade.before(tx, user, upgradeProof(user), "passkey");
+        const prepared = await prepareSession(
+          config,
+          { user, ip: input.ip, userAgent: input.userAgent, via: "passkey" },
+          tx,
+        );
+        await upgrade.claim(tx);
+        return writeSession(config, prepared, tx);
+      }),
     ),
   );
   if (!opened.ok) return opened;
   const { token, session } = opened.value;
   await sessionOpened(config, session, user, "passkey");
+  await upgrade.after();
   return ok({ token, user, session });
 }
 

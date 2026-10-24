@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { requestEmailOtp } from "../src/engine/email-otp.js";
 import { passwordMethod } from "../src/engine/last-method.js";
@@ -493,6 +493,28 @@ describe("the last method cookie (plan 12i Task 12)", () => {
     expect(again.status).toBe(200);
     expect(lastCookie(again)).toBeNull();
     expect(await bodyOf(again)).not.toHaveProperty("via");
+  });
+
+  it("sets the value of the method at an upgrade of an anonymous session (plan 12i Task 7)", async () => {
+    // Ruling 21: the upgrade signs in by a method, so the cookie names that method.
+    const afterLink = vi.fn();
+    const w = world({
+      anonymous: { isolateLimiter: "allow" },
+      hooks: { anonymous: { afterLink } },
+    });
+    const anon = await w.handle(post("/auth/anonymous/sign-in", {}));
+    const token = anon.headers
+      .getSetCookie()
+      .find((c) => c.startsWith(`${SESSION}=`))
+      ?.slice(SESSION.length + 1)
+      .split(";")[0];
+    const jar = { cookie: `${SESSION}=${token}` };
+    await signUpAndVerify(w.auth, EMAIL, PASSWORD);
+    const res = await passwordSignIn(w, { email: EMAIL }, jar);
+    expect(res.status).toBe(200);
+    expect(afterLink).toHaveBeenCalledTimes(1);
+    expect(lastCookie(res)).toBe(expected("password"));
+    expect(await bodyOf(res)).toMatchObject({ via: "password" });
   });
 
   it("names the password sign-in by its identifier: phone for a number (plan 12i Task 4)", () => {

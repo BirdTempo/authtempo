@@ -100,7 +100,9 @@ export type SessionEndReason =
   | "impersonation_end"
   // plan 12i: a sign-in in a browser whose bag of sessions is full ends the
   // oldest session of the bag (multi-session).
-  | "displaced";
+  | "displaced"
+  // plan 12i: a sign-in replaced the anonymous user of the session.
+  | "anonymous_upgrade";
 /**
  * Each value of `SessionEndReason`, for the `reason` field of the event
  * `session.end` (plan 12h Task 5). A Record, so a new reason fails the
@@ -121,6 +123,7 @@ export const SESSION_END_REASONS = {
   operator: true,
   impersonation_end: true,
   displaced: true,
+  anonymous_upgrade: true,
 } as const satisfies Record<SessionEndReason, true>;
 
 /** The member a before hook sees: no row exists yet. */
@@ -534,6 +537,38 @@ export interface IdentityHooks {
 }
 
 /**
+ * The anonymous upgrade (plan 12i Task 7, spec 32 item 9). A sign-in from
+ * a browser with a live anonymous session replaces the anonymous user with
+ * the user of the sign-in. `proof` is `"unverified"` when that user holds
+ * an address that no proof verified: the real owner of the address can
+ * claim the account later. So move the anonymous data only on
+ * `"verified"` (deviation 3).
+ */
+export interface AnonymousLinkEvent {
+  anonymousUser: UserRow;
+  user: UserRow;
+  proof: "verified" | "unverified";
+  via: SessionVia;
+}
+
+/** The anonymous points (plan 12i Task 7). They need `anonymous`. */
+export interface AnonymousHooks {
+  /**
+   * Inside the sign-in transaction, before the session write. A refusal
+   * answers `hook_refused`: no session opens, and the anonymous user and
+   * its session stay.
+   */
+  beforeLink?(e: AnonymousLinkEvent): Awaitable<void>;
+  /**
+   * After the commit, before the anonymous session ends and the anonymous
+   * user goes. Move the app data here. A throw writes one log line and
+   * keeps the anonymous user, so no data is lost; the sweep removes it
+   * later.
+   */
+  afterLink?(e: AnonymousLinkEvent): Awaitable<void>;
+}
+
+/**
  * The operator points (plan 12f, spec 26 item 10). Each operator act runs
  * them through `operatorAct`. `afterAction` also gets each audit row of an
  * SSO or SCIM act (spec 30 item 24). They need `operator.users`, `sso`, or
@@ -594,6 +629,7 @@ export interface HooksConfig {
   operator?: OperatorHooks;
   sso?: SsoHooks;
   scim?: ScimHooks;
+  anonymous?: AnonymousHooks;
 }
 
 /** After `resolveConfig`: every group present, each hook bound to the object it came on. */
@@ -605,6 +641,7 @@ export interface ResolvedHooks {
   operator: OperatorHooks;
   sso: SsoHooks;
   scim: ScimHooks;
+  anonymous: AnonymousHooks;
 }
 
 /** The name in a log line. */
@@ -615,7 +652,8 @@ export type HookName =
   | `identity.${keyof IdentityHooks & string}`
   | `operator.${keyof OperatorHooks & string}`
   | `sso.${keyof SsoHooks & string}`
-  | `scim.${keyof ScimHooks & string}`;
+  | `scim.${keyof ScimHooks & string}`
+  | `anonymous.${keyof AnonymousHooks & string}`;
 
 /** Every hook point. A Record, so a point added to the interface and not listed here fails the compile. */
 export const ORGANIZATION_HOOK_POINTS: Readonly<Record<keyof OrganizationHooks, true>> = {
@@ -683,6 +721,11 @@ export const SSO_HOOK_POINTS: Readonly<Record<keyof SsoHooks, true>> = {
 
 export const SCIM_HOOK_POINTS: Readonly<Record<keyof ScimHooks, true>> = {
   afterChange: true,
+};
+
+export const ANONYMOUS_HOOK_POINTS: Readonly<Record<keyof AnonymousHooks, true>> = {
+  beforeLink: true,
+  afterLink: true,
 };
 
 /** The longest refusal text, in UTF-16 code units. The text goes into a JSON body that a client shows. */
@@ -855,13 +898,30 @@ export async function runAfter<E>(
   event: E,
   rowId: string,
 ): Promise<void> {
-  if (!hook) return;
+  await runAfterChecked(observe, name, hook, event, rowId);
+}
+
+/**
+ * `runAfter`, with the answer of the hook: false when it threw or its event
+ * could not be copied, after the same line. A flow whose next step needs
+ * the hook done skips that step then (plan 12i Task 7).
+ */
+export async function runAfterChecked<E>(
+  observe: Observer,
+  name: HookName,
+  hook: ((e: E) => unknown) | undefined,
+  event: E,
+  rowId: string,
+): Promise<boolean> {
+  if (!hook) return true;
   const copied = eventCopy(observe, name, event);
-  if (!copied) return;
+  if (!copied) return false;
   try {
     await hook(copied.copy);
+    return true;
   } catch (e) {
     observe.emit({ name: "hook.after_failed", hook: name, rowId, errorName: e });
+    return false;
   }
 }
 

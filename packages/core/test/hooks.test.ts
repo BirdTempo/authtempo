@@ -58,6 +58,7 @@ describe("hooks config (plan 9d)", () => {
       operator: {},
       sso: {},
       scim: {},
+      anonymous: {},
     });
   });
 
@@ -69,7 +70,7 @@ describe("hooks config (plan 9d)", () => {
       ["hooks", "hooks must be a plain object"],
       [
         { request: {} },
-        "hooks.request is not a hook group; core has organization, session, user, identity, operator, sso, and scim",
+        "hooks.request is not a hook group; core has organization, session, user, identity, operator, sso, scim, and anonymous",
       ],
       [
         { organization: { beforeCreate: "x" } },

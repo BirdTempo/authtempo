@@ -8,6 +8,7 @@ import { groupBackupCode, normalizeBackupCode, randomBackupCode } from "../primi
 import { fail, ok, type Result } from "../result.js";
 import type { SecondFactorMethod, SecondFactorRow, SessionRow, UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
+import { type CarriedUpgrade, type UpgradeSteps, upgradeProof } from "./anonymous.js";
 import { stopWith } from "./hooks.js";
 import type { LastMethod } from "./last-method.js";
 import type { ImpersonationStops } from "./operator/audit.js";
@@ -453,6 +454,8 @@ export interface ChallengeInput extends ChallengeOrigin {
   stateData?: OpenedStateData;
   /** The last method of the sign-in (plan 12i Task 12): the verify sets its cookie. A reset has none. */
   method?: LastMethod;
+  /** The anonymous user that the verify replaces (plan 12i Task 7), with the rule of its pathway. */
+  anonymous?: CarriedUpgrade | null;
 }
 
 /**
@@ -496,6 +499,12 @@ export async function writeChallenge(
       ...(input.notAfter ? { notAfter: input.notAfter.toISOString() } : {}),
       ...(payload ? { sealedData: payload.sealed, sealedDataVersion: payload.version } : {}),
       ...(input.method ? { method: input.method } : {}),
+      ...(input.anonymous
+        ? {
+            anonymousUserId: input.anonymous.anonymousUserId,
+            anonymousKind: input.anonymous.kind,
+          }
+        : {}),
     },
     createdAt: now,
     updatedAt: now,
@@ -602,6 +611,13 @@ export function gatedSteps(
     stateData?: OpenedStateData;
     /** The last method of the sign-in (plan 12i Task 12), kept in a challenge for its verify. */
     method?: LastMethod;
+    /**
+     * The anonymous upgrade of the sign-in (plan 12i Task 7). With a
+     * session, its `before` runs before the session hook, and its `claim`
+     * right before the session write. A challenge carries its anonymous
+     * user to the verify, which links.
+     */
+    upgrade?: UpgradeSteps;
   },
   now: Date,
 ): {
@@ -625,6 +641,8 @@ export function gatedSteps(
         return;
       }
       trustId = read.trustId;
+      // Before the session hook and its hold of the user row: no lock is held while it runs.
+      await open.upgrade?.before(tx, user, upgradeProof(user), open.via);
       prepared = await prepareSession(
         config,
         {
@@ -656,6 +674,7 @@ export function gatedSteps(
             notAfter: open.notAfter,
             ...(open.stateData ? { stateData: open.stateData } : {}),
             ...(open.method ? { method: open.method } : {}),
+            anonymous: open.upgrade?.carried() ?? null,
           },
           now,
         );
@@ -663,6 +682,7 @@ export function gatedSteps(
       }
       const p = prepared;
       if (!p) throw new Error("authtempo: the session hook step did not run");
+      await open.upgrade?.claim(tx);
       const s = await writeSession(config, p, tx);
       return { kind: "session", token: s.token, session: s.session };
     },

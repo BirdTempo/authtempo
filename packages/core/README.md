@@ -1365,7 +1365,8 @@ const auth = createAuth({
   `password_reset`, `password_change`, `claim`, `expired`, `two_factor`,
   `revoked`, `email_change`, or `account_deleted` since plan 12a. Since
   plan 12e it can be `oidc_logout`, and since plan 12f `banned`,
-  `operator`, or `impersonation_end`. It fires once per ended row.
+  `operator`, or `impersonation_end`. Since plan 12i it can be
+  `anonymous_upgrade`. It fires once per ended row.
   `sweepExpired` deletes expired rows in bulk and fires no hook for them, so
   `expired` fires only when a request presents the token after its expiry.
   A claim ends a claimant's sessions with `claim` in every flow that
@@ -1403,6 +1404,17 @@ const auth = createAuth({
   a flow creates verified fires `beforeCreate` and `afterCreate`, not these
   points. The change of address fires `beforeUpdate` and `afterUpdate`. A
   verify is not a change of a credential, so it sends no notice mail.
+- Anonymous points (plan 12i Task 7): `hooks.anonymous.beforeLink` and
+  `afterLink`. They need `anonymous`. A sign-in from a browser with a live
+  anonymous session replaces the anonymous user. The event holds
+  `anonymousUser`, `user`, `proof`, and `via`. `beforeLink` runs in the
+  sign-in's transaction, before the session write, and a refusal answers
+  `hook_refused` with no session. `afterLink` runs after the commit. Then
+  the anonymous session ends with `anonymous_upgrade`, and the anonymous
+  user goes, with `user.afterDelete`. A throw of `afterLink` writes one
+  line and keeps the anonymous user. Move the app's data only when
+  `proof` is `verified`: an `unverified` user holds an address that its
+  owner can claim later.
 - SSO point (plan 12d): `hooks.sso.beforeSignIn`, with the connection,
   the IdP's profile, and the user that the sign-in answers, or null for a
   create. It needs `sso`. It runs in the sign-in's transaction before its

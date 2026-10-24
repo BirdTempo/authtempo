@@ -1,5 +1,6 @@
 import { CAPTCHA_HEADER } from "../../captcha.js";
 import type { ResolvedConfig } from "../../config.js";
+import { anonymousCaller } from "../../engine/anonymous.js";
 import { type LastMethod, passwordMethod } from "../../engine/last-method.js";
 import {
   changePassword,
@@ -81,6 +82,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
         if (!r.ok) return respond(r);
         // The uniform answer (plan 12b): the same bytes for every address, no cookie.
@@ -109,6 +111,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           trustDevice: trustTokenOf(ctx.config, ctx.request, body.value.trustDevice),
           next: body.value.next,
           captchaToken: ctx.request.headers.get(CAPTCHA_HEADER),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
         if (!r.ok) return respond(r);
         // A user with a second factor (plan 9f): the challenge, and no cookie.
@@ -145,6 +148,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
           token: body.value.token,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
         if (!r.ok) return jsonCaller ? respond(r) : failed(ctx, r.code);
         const res = jsonCaller ? json({ verified: true }) : redirect(resolveNext(ctx.config, "/"));
@@ -163,7 +167,11 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         const body = await readJson(ctx.request, resendBody);
         if (!body.ok) return respond(body);
         return respond(
-          await resendPasswordVerification(ctx.config, { email: body.value.email, ip: ctx.ip }),
+          await resendPasswordVerification(ctx.config, {
+            email: body.value.email,
+            ip: ctx.ip,
+            anonymous: await anonymousCaller(ctx.config, ctx.request),
+          }),
         );
       },
     },

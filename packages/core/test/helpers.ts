@@ -199,6 +199,7 @@ export function noVerifyHooks(via: UserVerifyVia): VerifySteps {
         operator: {},
         sso: {},
         scim: {},
+        anonymous: {},
       },
       observe: DEFAULT_OBSERVE,
     },

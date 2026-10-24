@@ -18,6 +18,13 @@ import type {
 } from "../schema.js";
 import { type StorageAdapter, StorageError } from "../storage/port.js";
 import { passkeyUserName, provedAccount } from "./address.js";
+import {
+  type AnonymousCaller,
+  type CarriedUpgrade,
+  recordedAnonymous,
+  upgradeProof,
+  upgradeSteps,
+} from "./anonymous.js";
 import { requireFresh } from "./fresh.js";
 import { hookGuard } from "./hooks.js";
 import { isLastMethod, type LastMethod } from "./last-method.js";
@@ -49,10 +56,11 @@ import {
 import { acceptEmailCode, acceptPasskey, liveChallenge } from "./second-factor-methods.js";
 import {
   endedList,
-  openSession,
+  prepareSession,
   type ResolvedSession,
   sessionOpened,
   sessionsEnded,
+  writeSession,
 } from "./sessions.js";
 import { enforcedAnswer } from "./sso/enforce.js";
 import { openStateData } from "./state-data.js";
@@ -752,6 +760,12 @@ export interface TwoFactorVerify {
   /** True: write a trusted device and answer its token. */
   trustDevice?: boolean | undefined;
   ip: string | null;
+  /**
+   * The live anonymous session of the verify request (plan 12i Task 7). The
+   * challenge row carries the anonymous user of the first factor and its
+   * rule. A mailed first factor links only when this is that session.
+   */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 /** The one proof of a verify (plan 12c). */
@@ -806,6 +820,8 @@ export async function twoFactorGate(
     trustDevice: string | undefined;
     /** The last method of this sign-in (plan 12i Task 12). */
     method: LastMethod;
+    /** The anonymous user that the verify replaces (plan 12i Task 7). */
+    anonymous: CarriedUpgrade | null;
   },
   now: Date,
 ): Promise<{ challenge: Result<TwoFactorPending> } | { trustId: string | null }> {
@@ -831,6 +847,7 @@ export async function twoFactorGate(
           userAgent: input.userAgent,
           next: input.next,
           method: input.method,
+          anonymous: input.anonymous,
         },
         now,
       );
@@ -1009,13 +1026,26 @@ async function answerChallenge(
       }
     : null;
   const trustHash = trust ? await sha256Hex(trust.token) : null;
+  // The anonymous upgrade of the first factor (plan 12i Task 7), by the rule the row keeps.
+  // The row decides: a challenge that carries no anonymous user links none. A mailed first
+  // factor needs the same session at the verify too; a bound one is the browser of the row.
+  const kind = (challenge.data as { anonymousKind?: unknown } | null)?.anonymousKind;
+  const upgrade = upgradeSteps(
+    config,
+    kind === "mailed" ? (input.anonymous ?? null) : null,
+    kind === "mailed" || kind === "bound" ? recordedAnonymous(challenge.data) : null,
+    kind === "mailed" ? "mailed" : "bound",
+  );
   const opened = await hookGuard(() =>
     config.storage.transaction(async (tx): Promise<Result<TwoFactorSession>> => {
-      const s = await openSession(
+      // The anonymous upgrade (plan 12i Task 7): its hook before the session hook and its hold.
+      await upgrade.before(tx, user, upgradeProof(user), via);
+      const prepared = await prepareSession(
         config,
         { user, ip, userAgent, via, ...(notAfter ? { notAfter } : {}) },
         tx,
       );
+      const s = await writeSession(config, prepared, tx);
       if (trust && trustHash)
         await tx.create("trustedDevice", {
           id: trust.id,
@@ -1040,6 +1070,8 @@ async function answerChallenge(
         if (trust) await tx.delete("trustedDevice", [{ field: "id", op: "eq", value: trust.id }]);
         return fail("invalid_token");
       }
+      // The claim after the spend of the challenge, so no path commits a claim without its session.
+      await upgrade.claim(tx);
       return ok({
         token: s.token,
         user,
@@ -1062,6 +1094,7 @@ async function answerChallenge(
       undefined,
       stateData.value?.value ?? null,
     );
+    await upgrade.after();
   }
   return opened;
 }

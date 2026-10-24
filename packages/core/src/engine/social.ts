@@ -34,6 +34,7 @@ import {
 } from "../social/provider.js";
 import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hasAddress } from "./address.js";
+import { type AnonymousCaller, upgradeSteps } from "./anonymous.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
 import {
@@ -97,6 +98,12 @@ export interface SocialStart {
    */
   data?: string | undefined;
   ip: string | null;
+  /**
+   * The live anonymous session of the start (plan 12i Task 7). The state
+   * row records its user, and the callback, bound to this browser by the
+   * binding cookie, replaces it.
+   */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 export interface SocialStarted {
@@ -127,6 +134,12 @@ export interface SocialComplete {
    * not take the link. A sign-in callback does not read it.
    */
   sessionToken?: string | null | undefined;
+  /**
+   * The live anonymous session of the callback request (plan 12i Task 7).
+   * The callback links the anonymous user of the state row; with none, this
+   * one. Apple's cross-site form post carries no `Lax` cookie: the row links then.
+   */
+  anonymous?: AnonymousCaller | null | undefined;
 }
 
 interface StateData {
@@ -141,6 +154,8 @@ interface StateData {
    * as AAD (plan 12i Task 19). The clear payload is never in the row.
    */
   sealedData?: string;
+  /** The anonymous user of the start's session (plan 12i Task 7). A link start records none. */
+  anonymousUserId?: string;
 }
 
 /** The depth of the payload: the object itself is 1. */
@@ -257,6 +272,7 @@ async function beginSocial(
     next: safeNext(input.next),
     ...(link ? { link } : {}),
     ...(payload ? { sealedData: (await sealStateData(config, payload.value, id)).sealed } : {}),
+    ...(input.anonymous && !link ? { anonymousUserId: input.anonymous.user.id } : {}),
   };
   await config.storage.create("verification", {
     id,
@@ -452,6 +468,13 @@ export async function completeSocial(
   // so a claimant's in-flight callback cannot keep a session the claim deleted.
   const ended = endedList(config);
   const next = safeNext(data.next);
+  // The binding cookie ties this callback to the browser of the start, so the row's anonymous user links.
+  const upgrade = upgradeSteps(
+    config,
+    input.anonymous ?? null,
+    typeof data.anonymousUserId === "string" ? data.anonymousUserId : null,
+    "bound",
+  );
   // The hook runs before the resolution's first write, for the D1 undo (see
   // `insertSignUp` in password.ts). A user with the second factor on gets a
   // challenge in place of the session (plan 12c). A new identity of a
@@ -469,6 +492,7 @@ export async function completeSocial(
       gate: config.totp?.gate.social ?? false,
       // A challenge carries the opened bytes to `session.afterCreate` at its verify.
       ...(opened.value ? { stateData: opened.value } : {}),
+      upgrade,
     },
     now,
   );
@@ -511,6 +535,7 @@ export async function completeSocial(
   }
   await touchTrust(config, steps.trustId(), now);
   await sessionOpened(config, after.session, user, "social", provider.name, stateData);
+  await upgrade.after();
   return ok({ token: after.token, next, user });
 }
 

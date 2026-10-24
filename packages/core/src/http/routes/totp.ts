@@ -1,4 +1,5 @@
 import type { ResolvedConfig } from "../../config.js";
+import { anonymousCaller } from "../../engine/anonymous.js";
 import { requireFresh } from "../../engine/fresh.js";
 import { sendSecondFactorEmail } from "../../engine/second-factor-methods.js";
 import {
@@ -185,7 +186,11 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, verifyBody);
         if (!body.ok) return respond(body);
-        const r = await verifyTwoFactor(ctx.config, { ...body.value, ip: ctx.ip });
+        const r = await verifyTwoFactor(ctx.config, {
+          ...body.value,
+          ip: ctx.ip,
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
+        });
         if (!r.ok) return respond(r);
         const v = r.value;
         return withCookies(
@@ -277,6 +282,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
             : {}),
           trustDevice: body.value.trustDevice === "1",
           ip: ctx.ip,
+          anonymous: await anonymousCaller(ctx.config, ctx.request),
         });
         if (r.ok) return withCookies(ctx, redirect(resolveNext(ctx.config, r.value.next)), r.value);
         // The challenge still lives after a wrong code: send the person back to the form.
