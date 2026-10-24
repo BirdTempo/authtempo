@@ -47,8 +47,9 @@ function engineLimits(): Map<string, Limit> {
     const constants = new Map<string, Limit>();
     for (const m of src.matchAll(/const ([A-Z_]+) = \{ seconds: ([0-9_ *]+), max: ([0-9_]+) \};/g))
       constants.set(m[1] ?? "", { seconds: numberOf(m[2] ?? ""), max: numberOf(m[3] ?? "") });
+    // Since plan 12h each site calls limit(config, "<family>", <subject>, <window>).
     for (const m of src.matchAll(
-      /allow\(\s*`([a-z-]+:[a-z]+):\$\{[^`]*`,\s*([A-Z_]+)\s*,?\s*\)/g,
+      /(?<![\w.])limit\(\s*[\w.]+,\s*"([a-z-]+:[a-z]+)",\s*[^,]+,\s*([A-Z_]+)\s*,?\s*\)/g,
     )) {
       const limit = constants.get(m[2] ?? "");
       if (!limit) throw new Error(`no constant ${m[2]} in ${file}`);
