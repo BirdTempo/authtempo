@@ -25,6 +25,14 @@ export interface Dialect {
   booleans: "integer" | "native";
   /** The equal operator that also matches a null with a null. */
   nullSafeEq: "IS" | "IS NOT DISTINCT FROM" | "<=>";
+  /**
+   * "json": an `in` list of more than `IN_PARAMS_MAX` values and a
+   * `createMany` insert bind one JSON list, and `json_each` expands it in
+   * the statement (ruling 84 of plan 12d). D1 binds 100 parameters per
+   * query, so a list of one parameter per value cannot grow there.
+   * "params": one parameter per value.
+   */
+  lists: "json" | "params";
 }
 
 export const SQLITE: Dialect = {
@@ -37,6 +45,7 @@ export const SQLITE: Dialect = {
   dates: "epoch-ms",
   booleans: "integer",
   nullSafeEq: "IS",
+  lists: "json",
 };
 
 export const POSTGRES: Dialect = {
@@ -49,6 +58,7 @@ export const POSTGRES: Dialect = {
   dates: "native",
   booleans: "native",
   nullSafeEq: "IS NOT DISTINCT FROM",
+  lists: "params",
 };
 
 /**
@@ -66,6 +76,7 @@ export const MYSQL: Dialect = {
   dates: "epoch-ms",
   booleans: "integer",
   nullSafeEq: "<=>",
+  lists: "params",
 };
 
 export const META_TABLE = "ta_meta";
@@ -397,7 +408,13 @@ function compileWhere<M extends ModelName>(
           impossible = true;
           break;
         }
-        parts.push(`${col} IN (${vals.map((v) => p.add(enc(v))).join(", ")})`);
+        // A long list binds one JSON text on SQLite and D1 (ruling 84 of plan 12d). The
+        // values stay bound: json_each reads them, and no value enters the SQL text.
+        if (d.lists === "json" && vals.length > IN_PARAMS_MAX)
+          parts.push(
+            `${col} IN (SELECT value FROM json_each(${p.add(JSON.stringify(vals.map(enc)))}))`,
+          );
+        else parts.push(`${col} IN (${vals.map((v) => p.add(enc(v))).join(", ")})`);
         break;
       }
       case "lt":
@@ -441,11 +458,11 @@ export function insertStatement<M extends ModelName>(
   model: M,
   data: Models[M],
 ): Statement {
-  return insertManyStatement(d, model, [data]);
+  return valuesInsert(d, model, [data]);
 }
 
 /** One INSERT of every row of `rows`, a VALUES tuple per row (ruling 57 of plan 12d). */
-export function insertManyStatement<M extends ModelName>(
+function valuesInsert<M extends ModelName>(
   d: Dialect,
   model: M,
   rows: readonly Models[M][],
@@ -472,13 +489,58 @@ export function insertManyStatement<M extends ModelName>(
 }
 
 /**
+ * One INSERT of every row of `rows` (ruling 57 of plan 12d). On a "json"
+ * dialect the rows bind as one JSON list of tuples, and `jsonRows`
+ * expands it, so the parameters do not grow with the rows (ruling 84).
+ * Else a VALUES tuple per row.
+ */
+export function insertManyStatement<M extends ModelName>(
+  d: Dialect,
+  model: M,
+  rows: readonly Models[M][],
+): Statement {
+  if (d.lists !== "json") return valuesInsert(d, model, rows);
+  assertModel(model);
+  if (rows.length === 0) throw invalid(model, "rows", "an insert needs at least one row");
+  const fields = fieldsOf(model);
+  const tuples = rows.map((data) => {
+    assertFields(model, Object.keys(data));
+    const row = data as unknown as Record<string, unknown>;
+    return fields.map((f) => encodeValue(d, fieldType(model, f), row[f], model, f));
+  });
+  return {
+    sql: `INSERT INTO ${d.quote(TABLES[model])} (${fields.map((f) => d.quote(columnName(f))).join(", ")}) ${jsonRows(fields.length)}`,
+    params: [JSON.stringify(tuples)],
+  };
+}
+
+/**
+ * The SELECT of `n` columns from the one JSON parameter `placeholder`: a
+ * list of tuples, one row per tuple (ruling 84 of plan 12d). SQLite reads
+ * a JSON number as an integer and a JSON string as text, so each encoded
+ * value comes back as it was bound. The values never enter the SQL text.
+ */
+export function jsonRows(n: number, placeholder = "?"): string {
+  const cols = Array.from({ length: n }, (_, i) => `json_extract(value, '$[${i}]')`);
+  return `SELECT ${cols.join(", ")} FROM json_each(${placeholder})`;
+}
+
+/**
  * The bound parameters of one D1 query: 100 (D1 limits page, last updated
  * 21 April 2026, read 2026-10-24). The page applies each limit of a query
  * to each statement of a batch. So one INSERT of many rows is one query,
- * and its rows share the 100 parameters. The memory adapter uses the same
- * bound, so the core tests count the chunks of D1.
+ * and its rows share the 100 parameters. Since ruling 84 of plan 12d a
+ * D1 insert binds one JSON list, so this bound no longer sets its chunk.
  */
 export const D1_BOUND_PARAMS = 100;
+
+/**
+ * The most values of an `in` list with one parameter per value: 50, half
+ * the D1 bound, as `IN_CHUNK` of batch.ts. A longer list binds one JSON
+ * text on a "json" dialect (ruling 84 of plan 12d). A shorter one keeps
+ * the text of the statements before that ruling.
+ */
+export const IN_PARAMS_MAX = 50;
 
 /**
  * The most rows of one `createMany` statement on every store: 1000. The
@@ -486,17 +548,85 @@ export const D1_BOUND_PARAMS = 100;
  * 2026-10-24 the MySQL 8.4 server of a test slot (768 MB) ended with exit
  * 137, out of memory, in a transaction of 13108 rows in two statements of
  * 65535 parameters. A smaller statement bounds the memory of the server.
- * The SCIM writes send at most 61 rows (PATCH_MEMBERS_MAX).
+ * The SCIM writes send at most PATCH_MEMBERS_MAX rows.
  */
 export const INSERT_ROWS_MAX = 1000;
 
-/** The rows of one `createMany` statement under `bound` parameters: from 1 to `INSERT_ROWS_MAX`. */
-export function rowsPerInsertOf(st: SqlStatements, model: ModelName, bound: number): number {
-  assertModel(model);
-  return Math.max(1, Math.min(INSERT_ROWS_MAX, Math.floor(bound / st.insertParams(model))));
+/** The most values of one list of the engine in one statement: the most rows of one insert. */
+export const LIST_MAX = INSERT_ROWS_MAX;
+
+/**
+ * The most bytes of one D1 statement: 100 KB (D1 limits page, last updated
+ * 21 April 2026, read 2026-10-24). The page does not say whether a bound
+ * value counts. The safe reading counts the bound text too, so a JSON list
+ * never passes it (ruling 84 of plan 12d).
+ */
+export const STATEMENT_BYTES_MAX = 100_000;
+
+/** The most bytes of the JSON text of one list: 90 KB, so the SQL text of its statement fits beside it. */
+export const LIST_BYTES_MAX = 90_000;
+
+const utf8 = new TextEncoder();
+
+/** The bytes of the JSON text of `v`, in UTF-8. */
+export function jsonBytes(v: unknown): number {
+  return utf8.encode(JSON.stringify(v) ?? "null").length;
 }
 
-/** The statements of one `createMany`: one INSERT per chunk of `rowsPerInsertOf` rows. */
+/** The bytes of a statement: its SQL text and the text of each string parameter, in UTF-8. */
+export function statementBytes(s: Statement): number {
+  let n = utf8.encode(s.sql).length;
+  for (const v of s.params) if (typeof v === "string") n += utf8.encode(v).length;
+  return n;
+}
+
+/**
+ * Splits `values` into lists in order: at most `LIST_MAX` values each, and
+ * at most `bytes` of JSON text each by `bytesOf` (ruling 84 of plan 12d).
+ * A value larger than `bytes` is a list of its own.
+ */
+export function listChunks<T>(
+  values: readonly T[],
+  bytes: number = LIST_BYTES_MAX,
+  bytesOf: (v: T) => number = jsonBytes,
+): T[][] {
+  const out: T[][] = [];
+  let chunk: T[] = [];
+  // The brackets of the list.
+  let used = 2;
+  for (const v of values) {
+    // The value and its comma.
+    const n = bytesOf(v) + 1;
+    if (chunk.length > 0 && (chunk.length >= LIST_MAX || used + n > bytes)) {
+      out.push(chunk);
+      chunk = [];
+      used = 2;
+    }
+    chunk.push(v);
+    used += n;
+  }
+  if (chunk.length > 0) out.push(chunk);
+  return out;
+}
+
+/**
+ * The rows of one `createMany` statement under `bound` parameters: from 1
+ * to `INSERT_ROWS_MAX`. A statement set whose rows bind as one JSON list
+ * (`insertParams` 0) answers `INSERT_ROWS_MAX`.
+ */
+export function rowsPerInsertOf(st: SqlStatements, model: ModelName, bound: number): number {
+  assertModel(model);
+  const per = st.insertParams(model);
+  if (per === 0) return INSERT_ROWS_MAX;
+  return Math.max(1, Math.min(INSERT_ROWS_MAX, Math.floor(bound / per)));
+}
+
+/**
+ * The statements of one `createMany`: one INSERT per chunk of
+ * `rowsPerInsertOf` rows. A statement of more than `STATEMENT_BYTES_MAX`
+ * bytes splits in two halves, and again, until each fits or holds one row
+ * (ruling 84 of plan 12d).
+ */
 export function insertChunks<M extends ModelName>(
   st: SqlStatements,
   model: M,
@@ -505,15 +635,25 @@ export function insertChunks<M extends ModelName>(
 ): Statement[] {
   const size = rowsPerInsertOf(st, model, bound);
   const out: Statement[] = [];
-  for (let i = 0; i < rows.length; i += size)
-    out.push(st.insertMany(model, rows.slice(i, i + size)));
+  const add = (part: readonly Models[M][]) => {
+    const s = st.insertMany(model, part);
+    if (part.length < 2 || statementBytes(s) <= STATEMENT_BYTES_MAX) {
+      out.push(s);
+      return;
+    }
+    const half = Math.ceil(part.length / 2);
+    add(part.slice(0, half));
+    add(part.slice(half));
+  };
+  for (let i = 0; i < rows.length; i += size) add(rows.slice(i, i + size));
   return out;
 }
 
 /**
- * The D1 undo of one `createMany`: a delete by `id` per 50 rows, so the
- * undo of a large insert stays small. A user row keeps the rule of
- * `undoCreate` with one statement per row.
+ * The D1 undo of one `createMany`: a delete by `id` per list of
+ * `listChunks`, so the undo of a large insert stays small (ruling 84 of
+ * plan 12d). A user row keeps the rule of `undoCreate` with one statement
+ * per row.
  */
 export function undoCreateMany<M extends ModelName>(
   st: SqlStatements,
@@ -522,16 +662,21 @@ export function undoCreateMany<M extends ModelName>(
 ): Statement[] {
   if (model === "user") return rows.map((r) => st.undoCreate(model, r));
   const out: Statement[] = [];
-  for (let i = 0; i < rows.length; i += UNDO_CHUNK) {
-    const ids = rows.slice(i, i + UNDO_CHUNK).map((r) => (r as { id: string }).id);
+  for (const ids of listChunks(rows.map((r) => (r as { id: string }).id))) {
     const s = st.delete(model, [{ field: "id", op: "in", value: ids } as Where<M>]);
     if (s) out.push(s);
   }
   return out;
 }
 
-/** The ids of one undo delete: 50, half the D1 bound, as `IN_CHUNK` of batch.ts. */
-const UNDO_CHUNK = 50;
+/** True when each value of each raw row is JSON text as it was read: null, a string, or a number. */
+export function jsonSafeRows(rows: readonly Record<string, unknown>[]): boolean {
+  return rows.every((r) =>
+    Object.values(r).every(
+      (v) => v === null || typeof v === "string" || (typeof v === "number" && Number.isFinite(v)),
+    ),
+  );
+}
 
 export function selectStatement<M extends ModelName>(
   d: Dialect,
@@ -709,7 +854,10 @@ export interface SqlStatements {
   insert<M extends ModelName>(model: M, data: Models[M]): Statement;
   /** One INSERT of each row of `rows`, which holds at least one row (ruling 57 of plan 12d). */
   insertMany<M extends ModelName>(model: M, rows: readonly Models[M][]): Statement;
-  /** The bound parameters of one row of `insertMany`. */
+  /**
+   * The bound parameters of one row of `insertMany`. 0: the rows bind as
+   * one JSON list, one parameter per statement (ruling 84 of plan 12d).
+   */
   insertParams(model: ModelName): number;
   select<M extends ModelName>(
     model: M,
@@ -757,13 +905,32 @@ export interface SqlStatements {
   ): Statement;
   /** D1 undo of a delete: the raw row inserted again. */
   reinsertRow(model: ModelName, row: Record<string, unknown>): Statement;
+  /**
+   * Optional. D1 undo of a delete of many rows: the raw rows inserted
+   * again, one statement per list of `listChunks` (ruling 84 of plan 12d).
+   * The rows hold the same columns. So the undo of a delete of 1000 rows
+   * stays inside the query budget. Without it, the D1 adapter sends
+   * `reinsertRow` per row.
+   */
+  reinsertRows?(model: ModelName, rows: readonly Record<string, unknown>[]): Statement[];
+  /**
+   * Optional. D1 undo of an update of many rows: `restoreRow` of each row,
+   * one statement per list of `listChunks` (ruling 84 of plan 12d). It
+   * keeps every rule of `restoreRow`. Without it, the D1 adapter sends
+   * `restoreRow` per row.
+   */
+  restoreRows?<M extends ModelName>(
+    model: M,
+    rows: readonly Record<string, unknown>[],
+    data: Partial<Omit<Models[M], "id">>,
+  ): Statement[];
   /** A delete inside a D1 transaction, with RETURNING of every raw column the undo needs. */
   deleteReturning<M extends ModelName>(model: M, where: Where<M>[]): Statement | null;
 }
 
 /** Core's own statements on the `ta_` tables. The D1 strings are the ones the adapter built before plan 9. */
 export function coreStatements(d: Dialect): SqlStatements {
-  return {
+  const out: SqlStatements = {
     insert(model, data) {
       return insertStatement(d, model, data);
     },
@@ -772,7 +939,7 @@ export function coreStatements(d: Dialect): SqlStatements {
     },
     insertParams(model) {
       assertModel(model);
-      return fieldsOf(model).length;
+      return d.lists === "json" ? 0 : fieldsOf(model).length;
     },
     select(model, where, opts) {
       return selectStatement(d, model, where, opts);
@@ -828,6 +995,40 @@ export function coreStatements(d: Dialect): SqlStatements {
         params: cols.map((c) => row[c]),
       };
     },
+    reinsertRows(model, rows) {
+      const first = rows[0];
+      if (d.lists !== "json" || first === undefined || !jsonSafeRows(rows))
+        return rows.map((r) => out.reinsertRow(model, r));
+      const cols = Object.keys(first);
+      return listChunks(rows.map((r) => cols.map((c) => r[c]))).map((chunk) => ({
+        sql: `INSERT INTO ${d.quote(TABLES[model])} (${cols.map(d.quote).join(", ")}) ${jsonRows(cols.length)}`,
+        params: [JSON.stringify(chunk)],
+      }));
+    },
+    restoreRows(model, rows, data) {
+      if (d.lists !== "json" || rows.length < 2 || !jsonSafeRows(rows))
+        return rows.map((r) => out.restoreRow(model, r, data));
+      // The rule of restoreRow, with the old values of each row from one JSON list: the
+      // list joins the table by id. Each column goes back on its own, and only while it
+      // holds the value the update wrote.
+      const fields = Object.keys(data);
+      assertFields(model, fields);
+      const p = new Params(d);
+      const t = d.quote(TABLES[model]);
+      const sets = fields.map((f, i) => {
+        const q = d.quote(columnName(f));
+        const ph = p.add(
+          encodeValue(d, fieldType(model, f), (data as Record<string, unknown>)[f], model, f),
+        );
+        return `${q} = CASE WHEN ${t}.${q} ${d.nullSafeEq} ${ph} THEN u.c${i + 1} ELSE ${t}.${q} END`;
+      });
+      const cols = ["id", ...fields.map(columnName)];
+      const pick = cols.map((_, i) => `json_extract(value, '$[${i}]') AS c${i}`);
+      return listChunks(rows.map((r) => cols.map((c) => r[c]))).map((chunk) => ({
+        sql: `UPDATE ${t} SET ${sets.join(", ")} FROM (SELECT ${pick.join(", ")} FROM json_each(${d.placeholder(p.values.length + 1)})) AS u WHERE ${t}.${d.quote("id")} = u.c0`,
+        params: [...p.values, JSON.stringify(chunk)],
+      }));
+    },
     deleteReturning(model, where) {
       const s = deleteStatement(d, model, where);
       return (
@@ -838,4 +1039,5 @@ export function coreStatements(d: Dialect): SqlStatements {
       );
     },
   };
+  return out;
 }

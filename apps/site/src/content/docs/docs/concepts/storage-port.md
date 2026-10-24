@@ -25,8 +25,8 @@ The port is generic. Core names a model and its fields. The adapter maps them to
 | Method | What it does |
 | --- | --- |
 | `create` | Writes one row and answers it. |
-| `createMany` | Writes rows of one model and answers them, all or nothing. It sends one INSERT per chunk of `rowsPerInsert` rows, and nothing for an empty list. A unique clash fails the call, and no row of the call stays. |
-| `rowsPerInsert` | Answers the most rows of a model that one INSERT of `createMany` writes: the bound parameters of the database over the columns of a row, and at most 1000. D1 binds 100 parameters per query, SQLite 32766, MySQL 65535, and postgres.js 65533. |
+| `createMany` | Writes rows of one model and answers them, all or nothing. It sends one INSERT per chunk of `rowsPerInsert` rows, and nothing for an empty list. On D1 and SQLite a statement of more than 100 KB splits in halves. A unique clash fails the call, and no row of the call stays. |
+| `rowsPerInsert` | Answers the most rows of a model that one INSERT of `createMany` writes: the bound parameters of the database over the columns of a row, and at most 1000. Postgres and MySQL bind one parameter per value: postgres.js takes 65533, MySQL 65535. D1 and SQLite bind the rows as one JSON list, so they answer 1000. |
 | `findOne` | Answers the first row that matches, or null. |
 | `findMany` | Answers the rows that match, with an optional sort and limit. |
 | `update` | Writes the fields to every row that matches, and answers the count. |
@@ -53,6 +53,7 @@ An adapter can leave these out. Core then takes a fixed worst case.
 - A string with NUL or with a lone surrogate in any `where` value throws `invalid_argument`, also in an `in` list. The rule holds on every op and every store.
 - `update` and `delete` take a `where`, never a bare id. So core can say "spend this token only if it is not spent" in one statement.
 - An empty `in` list matches nothing. An empty `where` on `update` or `delete` is an error.
+- An `in` list of up to 1000 values is one statement on every store. On D1 and SQLite a list of more than 50 values binds as one JSON text, which `json_each` reads. No value enters the SQL text.
 - Two null values never conflict on a unique key.
 - Reads inside a transaction see the transaction's own writes.
 - A sort takes one key or a list of keys, each with its own direction.

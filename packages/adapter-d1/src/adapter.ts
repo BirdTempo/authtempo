@@ -50,7 +50,8 @@ export interface D1AdapterOptions {
   /**
    * The bound parameters of one statement, for the chunks of `createMany`
    * (ruling 57 of plan 12d). Default: `D1_BOUND_PARAMS`, 100. A SQLite
-   * driver passes the limit of its own build.
+   * driver passes the limit of its own build. A statement set whose rows
+   * bind as one JSON list (ruling 84) does not read it.
    */
   boundParams?: number;
 }
@@ -196,8 +197,14 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
       } catch (e) {
         throw ctx.toStorageError(model, e) ?? e;
       }
-      for (const row of results[0]?.results ?? [])
-        ctx.undo.push({ model, op: "update", ...st.restoreRow(model, row, data) });
+      // The list form for more than one row when the statement set has one: the undo of an
+      // update of many rows stays inside the query budget (ruling 84 of plan 12d).
+      const prior = results[0]?.results ?? [];
+      const restores =
+        prior.length > 1 && st.restoreRows
+          ? st.restoreRows(model, prior, data)
+          : prior.map((row) => st.restoreRow(model, row, data));
+      for (const u of restores) ctx.undo.push({ model, op: "update", ...u });
       return results[1]?.meta.changes ?? 0;
     },
     async delete(model, where) {
@@ -218,7 +225,12 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
       const returning = st.deleteReturning(model, where);
       if (!returning) return 0;
       const rows = await all(db, returning, ctx.sent);
-      for (const row of rows) ctx.undo.push({ model, op: "delete", ...st.reinsertRow(model, row) });
+      // The list form for more than one row, as for an update (ruling 84 of plan 12d).
+      const reinserts =
+        rows.length > 1 && st.reinsertRows
+          ? st.reinsertRows(model, rows)
+          : rows.map((row) => st.reinsertRow(model, row));
+      for (const u of reinserts) ctx.undo.push({ model, op: "delete", ...u });
       return rows.length;
     },
     async transaction(fn) {

@@ -36,26 +36,121 @@ describe("d1 undo log", () => {
     expect(row).toMatchObject({ id: "u1", name: "Ada", email: "a@example.com" });
   });
 
-  it("undoes a createMany of 120 rows with one delete per 50 rows (ruling 57 of plan 12d)", async () => {
+  it("undoes a createMany of 1000 rows with one delete (rulings 57 and 84 of plan 12d)", async () => {
     const db = createD1Adapter(env.DB);
-    const rows = Array.from({ length: 120 }, (_, i) => ({
-      id: `m-${String(i).padStart(3, "0")}`,
+    const rows = Array.from({ length: 1000 }, (_, i) => ({
+      id: `m-${String(i).padStart(4, "0")}`,
       groupId: "g1",
       scimUserId: `su-${i}`,
       createdAt: t0,
       updatedAt: t0,
     }));
+    let write = 0;
     let afterWrite = 0;
     await expect(
       db.transaction(async (tx) => {
+        const start = db.statementsSent?.() ?? 0;
         await tx.createMany("scimGroupMember", rows);
+        afterWrite = db.statementsSent?.() ?? 0;
+        write = afterWrite - start;
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    // One insert binds the 1000 rows as one JSON list, and one delete binds their ids.
+    expect([write, (db.statementsSent?.() ?? 0) - afterWrite]).toEqual([1, 1]);
+    expect(await db.findMany("scimGroupMember", [])).toEqual([]);
+  });
+
+  it("splits a createMany past 100 KB of statement into halves (ruling 84 of plan 12d)", async () => {
+    const db = createD1Adapter(env.DB);
+    // 1000 rows with a scimUserId of 256 characters: about 290 KB of JSON text.
+    const rows = Array.from({ length: 1000 }, (_, i) => ({
+      id: `m-${String(i).padStart(4, "0")}`,
+      groupId: "g1",
+      scimUserId: `su-${i}-`.padEnd(256, "x"),
+      createdAt: t0,
+      updatedAt: t0,
+    }));
+    await db.findOne("user", [{ field: "id", op: "eq", value: "none" }]);
+    const start = db.statementsSent?.() ?? 0;
+    await db.createMany("scimGroupMember", rows);
+    // Halves of 500, then of 250 rows: four statements of about 72 KB each.
+    expect((db.statementsSent?.() ?? 0) - start).toBe(4);
+    expect(await db.findMany("scimGroupMember", [], { sort: { field: "id", dir: "asc" } })).toEqual(
+      rows,
+    );
+  });
+
+  it("undoes an update and a delete of 1000 rows with one statement per list (ruling 84 of plan 12d)", async () => {
+    const db = createD1Adapter(env.DB);
+    const users = Array.from({ length: 1000 }, (_, i) => {
+      const id = `u-${String(i).padStart(4, "0")}`;
+      return {
+        id,
+        email: `${id}@example.com`,
+        emailVerified: true,
+        name: null,
+        image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
+        createdAt: t0,
+        updatedAt: t0,
+      };
+    });
+    await db.createMany("user", users);
+    const all = () => db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+    const before = await all();
+    const ids = users.map((u) => u.id);
+    let afterWrite = 0;
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.update("user", [{ field: "id", op: "in", value: ids }], {
+          name: "changed",
+          updatedAt: new Date(t0.getTime() + 1000),
+        });
+        await tx.delete("user", [{ field: "id", op: "in", value: ids.slice(0, 500) }]);
         afterWrite = db.statementsSent?.() ?? 0;
         throw new Error("boom");
       }),
     ).rejects.toThrow("boom");
-    // 120 rows of 5 columns: 6 inserts of 20 rows, then 3 undo deletes, not 120.
-    expect((db.statementsSent?.() ?? 0) - afterWrite).toBe(3);
-    expect(await db.findMany("scimGroupMember", [])).toEqual([]);
+    // The undo: one reinsert of the 500 deleted rows, one restore of the 1000 updated rows.
+    // It sent one statement per row before ruling 84: 1500.
+    expect((db.statementsSent?.() ?? 0) - afterWrite).toBe(2);
+    expect(await all()).toEqual(before);
+  });
+
+  it("keeps a later write of another request in the undo of many rows (ruling 46 of plan 12k)", async () => {
+    const db = createD1Adapter(env.DB);
+    const users = Array.from({ length: 60 }, (_, i) => {
+      const id = `u-${String(i).padStart(4, "0")}`;
+      return {
+        id,
+        email: `${id}@example.com`,
+        emailVerified: false,
+        name: null,
+        image: null,
+        bannedAt: null,
+        banReason: null,
+        banUntil: null,
+        createdAt: t0,
+        updatedAt: t0,
+      };
+    });
+    await db.createMany("user", users);
+    const ids = users.map((u) => u.id);
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.update("user", [{ field: "id", op: "in", value: ids }], { name: "changed" });
+        // Another request writes the name of u-0001 and the address of u-0002 in the meantime.
+        await env.DB.prepare("UPDATE ta_user SET name = 'other' WHERE id = 'u-0001'").run();
+        await env.DB.prepare("UPDATE ta_user SET email_verified = 1 WHERE id = 'u-0002'").run();
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    const after = await db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+    expect(after.map((u) => u.name)).toEqual(ids.map((id) => (id === "u-0001" ? "other" : null)));
+    expect(after.filter((u) => u.emailVerified).map((u) => u.id)).toEqual(["u-0002"]);
   });
 
   it("removes a row created and then updated in a failing transaction", async () => {

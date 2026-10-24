@@ -84,11 +84,19 @@ export class StorageError extends Error {
  *
  * Many-row rule (ruling 57 of plan 12d). `createMany` writes its rows in
  * chunks of `rowsPerInsert(model)`, one INSERT statement per chunk, so
- * `statementsSent` grows by ceil(n / chunk). An empty list sends nothing
- * and answers []. It is all or nothing, inside a transaction and outside
- * one: when a row breaks a unique key, with a stored row or with another
- * row of the list, the call fails with `unique_violation` and writes no
- * row. Each row meets the rules of `create` data.
+ * `statementsSent` grows by ceil(n / chunk), or more on a split below.
+ * An empty list sends nothing and answers []. It is all or nothing,
+ * inside a transaction and outside one: when a row breaks a unique key,
+ * with a stored row or with another row of the list, the call fails with
+ * `unique_violation` and writes no row. Each row meets the rules of
+ * `create` data. On D1 and SQLite the rows of a chunk bind as one JSON
+ * list, and a statement of more than 100 KB splits in halves (ruling 84 of
+ * plan 12d).
+ *
+ * List rule (ruling 84 of plan 12d). An `in` list of up to 1000 values is
+ * one statement on every store. On D1 and SQLite a list of more than 50
+ * values binds as one JSON text, so the bound parameters do not grow. The
+ * values stay bound, and none enters the SQL text.
  *
  * Transaction rules. Reads inside a transaction see its own writes; the
  * engine relies on this. If the function throws, only the transaction's own

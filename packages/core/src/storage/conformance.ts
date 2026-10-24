@@ -1961,7 +1961,7 @@ export function runAdapterConformance(
         expect(await ofGroup("g2")).toEqual(members("g2", size + 1));
       });
 
-      it("writes a full chunk of team member rows in one statement, with the columns that a storage adds", async () => {
+      it("writes a full chunk of team member rows, with the columns that a storage adds, in one statement or two halves", async () => {
         if (options.unmapped?.some((m) => m === "team" || m === "teamMember")) return;
         // The Better Auth tables add a key column to a team member row, so its chunk is smaller.
         const size = db.rowsPerInsert("teamMember");
@@ -1994,7 +1994,10 @@ export function runAdapterConformance(
           createdAt: at,
           updatedAt: at,
         }));
-        expect(await growth(() => db.createMany("teamMember", rows))).toBe(counted(1));
+        // The key column of the Better Auth tables makes a chunk of 1000 rows pass 100 KB on
+        // SQLite, so it splits in two halves there (ruling 84 of plan 12d).
+        const sent = await growth(() => db.createMany("teamMember", rows));
+        if (sent !== null) expect([1, 2]).toContain(sent);
         expect(
           await db.findMany("teamMember", [{ field: "teamId", op: "eq", value: "t1" }], {
             sort: { field: "id", dir: "asc" },
@@ -2067,6 +2070,130 @@ export function runAdapterConformance(
           db.createMany("scimGroupMember", [{ ...row, nope: 1 } as unknown as ScimGroupMemberRow]),
         ).rejects.toMatchObject({ name: "StorageError", code: "unknown_field" });
         expect(await ofGroup("g1")).toEqual([]);
+      });
+    });
+
+    describe("lists of up to 1000 values (ruling 84 of plan 12d)", () => {
+      const at = new Date("2026-10-24T00:00:00.000Z");
+      const later = new Date(at.getTime() + 60_000);
+      /** `n` member rows of group `g`, with a scimUserId of `width` characters. */
+      const members = (g: string, n: number, width = 9): ScimGroupMemberRow[] =>
+        Array.from({ length: n }, (_, k) => {
+          const i = String(k).padStart(6, "0");
+          return {
+            id: `${g}-${i}`,
+            groupId: g,
+            scimUserId: `su-${i}`.padEnd(width, "x"),
+            createdAt: at,
+            updatedAt: at,
+          };
+        });
+      const growth = async (step: () => Promise<unknown>) => {
+        const before = db.statementsSent?.();
+        await step();
+        const after = db.statementsSent?.();
+        return before === undefined || after === undefined ? null : after - before;
+      };
+      const counted = (n: number) => (db.statementsSent ? n : null);
+
+      it("reads, updates, and deletes by an in list of 1000 values in one statement each", async () => {
+        const rows = members("g1", 1000);
+        await db.createMany("scimGroupMember", rows);
+        const ids = rows.map((r) => r.id);
+        const inIds = [{ field: "id" as const, op: "in" as const, value: ids }];
+        let found: ScimGroupMemberRow[] = [];
+        expect(
+          await growth(async () => {
+            found = await db.findMany("scimGroupMember", inIds);
+          }),
+        ).toBe(counted(1));
+        expect(found).toHaveLength(1000);
+        let changed = 0;
+        expect(
+          await growth(async () => {
+            changed = await db.update("scimGroupMember", inIds, { updatedAt: later });
+          }),
+        ).toBe(counted(1));
+        expect(changed).toBe(1000);
+        let gone = 0;
+        expect(
+          await growth(async () => {
+            gone = await db.delete("scimGroupMember", [
+              { field: "id", op: "in", value: ids.slice(0, 999) },
+            ]);
+          }),
+        ).toBe(counted(1));
+        expect(gone).toBe(999);
+        const left = await db.findMany("scimGroupMember", []);
+        expect(left.map((r) => [r.id, r.updatedAt.getTime()])).toEqual([
+          ["g1-000999", later.getTime()],
+        ]);
+      });
+
+      it("keeps each value of a long in list bound: quotes, brackets, and SQL text match only their own row", async () => {
+        const odd = [
+          "x') OR 1=1 --",
+          'y"] OR 1=1 --',
+          "z'; DELETE FROM ta_scim_group_member; --",
+          "\\u0027 OR '1'='1",
+          "[1, 2]",
+        ];
+        const rows = [...members("g1", 60), ...members("g2", 2)].map((r, i) => {
+          const id = odd[i] ?? r.id;
+          return { ...r, id };
+        });
+        await db.createMany("scimGroupMember", rows);
+        // 58 values: more than 50, so a D1 or SQLite store binds the list as one JSON text.
+        const wanted = [
+          ...odd,
+          ...rows.slice(odd.length, 55).map((r) => r.id),
+          "none",
+          "' OR ''='",
+          // A where value only: an ascii column of MySQL holds no such id.
+          "ü-ß-東京",
+        ];
+        const found = await db.findMany("scimGroupMember", [
+          { field: "id", op: "in", value: wanted },
+        ]);
+        expect(found.map((r) => r.id).sort()).toEqual(
+          rows
+            .slice(0, 55)
+            .map((r) => r.id)
+            .sort(),
+        );
+        expect(await db.findMany("scimGroupMember", [])).toHaveLength(62);
+      });
+
+      it("writes 1000 rows of long values in one call and reads each back", async () => {
+        // A scimUserId of 64 characters, the width of the column on MySQL: about 115 KB of
+        // values. A D1 statement holds at most 100 KB, so D1 splits the call.
+        const rows = members("g1", 1000, 64);
+        expect(await db.createMany("scimGroupMember", rows)).toEqual(rows);
+        expect(
+          await db.findMany("scimGroupMember", [], { sort: { field: "id", dir: "asc" } }),
+        ).toEqual(rows);
+      });
+
+      it("rolls back an update and a delete of 1000 rows each with the transaction", async () => {
+        const users = Array.from({ length: 1000 }, (_, i) => {
+          const id = `u-${String(i).padStart(6, "0")}`;
+          return user(id, `${id}@example.com`, at);
+        });
+        await db.createMany("user", users);
+        const ids = users.map((u) => u.id);
+        const all = () => db.findMany("user", [], { sort: { field: "id", dir: "asc" } });
+        const before = await all();
+        await expect(
+          db.transaction(async (tx) => {
+            const inIds = [{ field: "id" as const, op: "in" as const, value: ids }];
+            expect(await tx.update("user", inIds, { name: "changed", updatedAt: later })).toBe(
+              1000,
+            );
+            expect(await tx.delete("user", inIds)).toBe(1000);
+            throw new Error("boom");
+          }),
+        ).rejects.toThrow("boom");
+        expect(await all()).toEqual(before);
       });
     });
 

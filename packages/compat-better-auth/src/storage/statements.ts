@@ -2,6 +2,7 @@ import { toStorageError as d1StorageError } from "@authtempo/adapter-d1";
 import { toStorageError as postgresStorageError } from "@authtempo/adapter-postgres";
 import {
   type ModelName,
+  type Models,
   PENDING_HASH_PREFIX,
   StorageError,
   schema,
@@ -14,6 +15,10 @@ import {
   columnName,
   coreStatements,
   encodeValue,
+  IN_PARAMS_MAX,
+  jsonRows,
+  jsonSafeRows,
+  listChunks,
   POSTGRES,
   SQLITE,
   type SqlStatements,
@@ -97,6 +102,23 @@ export interface CompatStatements extends SqlStatements {
  */
 export const UNMAPPED_MODELS: ReadonlySet<ModelName> = new Set<ModelName>([]);
 
+/** `reinsertRows` of `st`, else `reinsertRow` per row. */
+function reinsertEach(st: SqlStatements, model: ModelName, rows: readonly Row[]): Statement[] {
+  return st.reinsertRows ? st.reinsertRows(model, rows) : rows.map((r) => st.reinsertRow(model, r));
+}
+
+/** `restoreRows` of `st`, else `restoreRow` per row. */
+function restoreEach<M extends ModelName>(
+  st: SqlStatements,
+  model: M,
+  rows: readonly Row[],
+  data: Partial<Omit<Models[M], "id">>,
+): Statement[] {
+  return st.restoreRows
+    ? st.restoreRows(model, rows, data)
+    : rows.map((r) => st.restoreRow(model, r, data));
+}
+
 function withoutUnmapped(st: CompatStatements): CompatStatements {
   const none = (model: ModelName) => UNMAPPED_MODELS.has(model);
   const refuse = (model: ModelName): never => {
@@ -136,6 +158,12 @@ function withoutUnmapped(st: CompatStatements): CompatStatements {
     },
     reinsertRow(model, row) {
       return none(model) ? refuse(model) : st.reinsertRow(model, row);
+    },
+    reinsertRows(model, rows) {
+      return none(model) ? refuse(model) : reinsertEach(st, model, rows);
+    },
+    restoreRows(model, rows, data) {
+      return none(model) ? refuse(model) : restoreEach(st, model, rows, data);
     },
     deleteReturning(model, where) {
       return none(model) ? null : st.deleteReturning(model, where);
@@ -227,6 +255,12 @@ function withCoreTables(st: CompatStatements, dialect: "postgres" | "sqlite"): C
     },
     reinsertRow(model, row) {
       return own(model) ? core.reinsertRow(model, row) : st.reinsertRow(model, row);
+    },
+    reinsertRows(model, rows) {
+      return reinsertEach(own(model) ? core : st, model, rows);
+    },
+    restoreRows(model, rows, data) {
+      return restoreEach(own(model) ? core : st, model, rows, data);
     },
     deleteReturning(model, where) {
       return own(model) ? core.deleteReturning(model, where) : st.deleteReturning(model, where);
@@ -432,7 +466,13 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
             impossible = true;
             break;
           }
-          parts.push(`${c} IN (${vals.map(enc).join(", ")})`);
+          // A long list binds one JSON text on SQLite, as in core's builder (ruling 84 of
+          // plan 12d). The values stay bound, and none enters the SQL text.
+          if (!pg && vals.length > IN_PARAMS_MAX)
+            parts.push(
+              `${c} IN (SELECT value FROM json_each(${p.add(JSON.stringify(vals.map((v) => encode(model, w.field, v))))}))`,
+            );
+          else parts.push(`${c} IN (${vals.map(enc).join(", ")})`);
           break;
         }
         case "startsWith":
@@ -505,10 +545,61 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       return `(${vals.join(", ")})`;
     });
     if (tuples.length === 0) throw invalid(model, "rows", "an insert needs at least one row");
+    // More than one row on SQLite: the values bind as one JSON list of tuples, in the order
+    // of the placeholders (ruling 84 of plan 12d). One row keeps the statement it had.
+    if (!pg && rows.length > 1) {
+      const width = cols.length;
+      const list = Array.from({ length: rows.length }, (_, r) =>
+        p.values.slice(r * width, (r + 1) * width),
+      );
+      return {
+        sql: `INSERT INTO ${table(model)} (${cols.join(", ")}) ${jsonRows(width)}`,
+        params: [JSON.stringify(list)],
+      };
+    }
     return {
       sql: `INSERT INTO ${table(model)} (${cols.join(", ")}) VALUES ${tuples.join(", ")}`,
       params: p.values,
     };
+  }
+
+  /**
+   * The columns that the undo of an update writes back, for `restoreRow`
+   * and `restoreRows`. The row comes from SELECT *, so its keys are the
+   * DDL's spelling. On SQLite that can differ in case from the configured
+   * names. Core's rule (`SqlStatements.restoreRow`): only the columns the
+   * update set. These are the column of each field of `data` and each
+   * `updateExtras` column. So a claim's change to another column stays
+   * (final review M-1). Each column goes back on its own, and only while
+   * it holds the value the update wrote. So a later write of another
+   * request stays (ruling 46 of plan 12k), and the other columns still go
+   * back (ruling 47).
+   */
+  function restoreColumns(
+    model: ModelName,
+    row: Row,
+    data: Row,
+  ): { idKey: string; cols: string[]; written: unknown[] } {
+    const map = MAP[model];
+    const t = map.table;
+    const idKey =
+      Object.keys(row).find((c) => fieldOfRaw(t, c) === "id") ?? names.rawColumn(t, "id");
+    const extras = map.updateExtras?.(data) ?? {};
+    const set = [
+      ...Object.keys(data).map((f) => map.fields[f]?.column ?? f),
+      ...Object.keys(extras),
+    ];
+    const written = [
+      ...Object.keys(data).map((f) => encode(model, f, data[f])),
+      ...Object.values(extras),
+    ];
+    const cols = set.map((f) => {
+      const c = Object.keys(row).find((k) => k !== idKey && fieldOfRaw(t, k) === f);
+      // The update wrote this column, so the SELECT * before it read it.
+      if (c === undefined) throw new StorageError("schema_mismatch", model, [f]);
+      return c;
+    });
+    return { idKey, cols, written };
   }
 
   const st: CompatStatements = {
@@ -520,6 +611,8 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     },
     insertParams(model) {
       assertModel(model);
+      // SQLite binds the rows of insertMany as one JSON list (ruling 84 of plan 12d).
+      if (!pg) return 0;
       const map = MAP[model];
       // The extras of a row of empty text: the keys are the same for every row.
       const blank = Object.fromEntries(Object.keys(map.fields).map((f) => [f, ""]));
@@ -635,34 +728,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       );
     },
     restoreRow(model, row, data) {
-      // The row comes from SELECT *, so its keys are the DDL's spelling. On
-      // SQLite that can differ in case from the configured names.
-      const map = MAP[model];
-      const t = map.table;
-      const idKey =
-        Object.keys(row).find((c) => fieldOfRaw(t, c) === "id") ?? names.rawColumn(t, "id");
-      // Core's rule (`SqlStatements.restoreRow`): only the columns the update
-      // set. These are the column of each field of `data` and each
-      // `updateExtras` column. So a claim's change to another column stays
-      // (final review M-1).
-      // Each column goes back on its own, and only while it holds the value
-      // the update wrote. So a later write of another request stays (ruling
-      // 46 of plan 12k), and the other columns still go back (ruling 47).
-      const extras = map.updateExtras?.(data as Row) ?? {};
-      const set = [
-        ...Object.keys(data).map((f) => map.fields[f]?.column ?? f),
-        ...Object.keys(extras),
-      ];
-      const written = [
-        ...Object.keys(data).map((f) => encode(model, f, (data as Row)[f])),
-        ...Object.values(extras),
-      ];
-      const cols = set.map((f) => {
-        const c = Object.keys(row).find((k) => k !== idKey && fieldOfRaw(t, k) === f);
-        // The update wrote this column, so the SELECT * before it read it.
-        if (c === undefined) throw new StorageError("schema_mismatch", model, [f]);
-        return c;
-      });
+      const { idKey, cols, written } = restoreColumns(model, row, data as Row);
       const p = new Params();
       const eq = d.nullSafeEq;
       const sets = cols.map((c, i) => {
@@ -684,6 +750,41 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     deleteReturning(model, where) {
       const s = st.delete(model, where);
       return s && { sql: `${s.sql} RETURNING *`, params: s.params };
+    },
+    reinsertRows(model, rows) {
+      const first = rows[0];
+      if (pg || first === undefined || !jsonSafeRows(rows))
+        return rows.map((r) => st.reinsertRow(model, r));
+      const cols = Object.keys(first);
+      return listChunks(rows.map((r) => cols.map((c) => r[c]))).map((chunk) => ({
+        sql: `INSERT INTO ${table(model)} (${cols.map(quoteRaw).join(", ")}) ${jsonRows(cols.length)}`,
+        params: [JSON.stringify(chunk)],
+      }));
+    },
+    restoreRows(model, rows, data) {
+      const first = rows[0];
+      if (pg || first === undefined || rows.length < 2 || !jsonSafeRows(rows))
+        return rows.map((r) => st.restoreRow(model, r, data));
+      // The rule of restoreRow, with the old values of each row from one JSON list that
+      // joins the table by id (ruling 84 of plan 12d). The rows of SELECT * share their keys.
+      const { idKey, cols, written } = restoreColumns(model, first, data as Row);
+      const target = table(model);
+      const p = new Params();
+      const sets = cols.map((c, i) => {
+        const q = quoteRaw(c);
+        return `${q} = CASE WHEN ${target}.${q} ${d.nullSafeEq} ${p.add(written[i])} THEN u.c${i + 1} ELSE ${target}.${q} END`;
+      });
+      const keys = [idKey, ...cols];
+      const pick = keys.map((_, i) => `json_extract(value, '$[${i}]') AS c${i}`);
+      return listChunks(rows.map((r) => keys.map((c) => r[c]))).map((chunk) => {
+        const q = new Params();
+        q.values.push(...p.values);
+        const list = q.add(JSON.stringify(chunk));
+        return {
+          sql: `UPDATE ${target} SET ${sets.join(", ")} FROM (SELECT ${pick.join(", ")} FROM json_each(${list})) AS u WHERE ${target}.${column(model, "id")} = u.c0`,
+          params: q.values,
+        };
+      });
     },
     toStorageError(model, err) {
       if (!(err instanceof Error)) return null;

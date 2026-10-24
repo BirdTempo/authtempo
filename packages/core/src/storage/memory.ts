@@ -1,6 +1,13 @@
 import { type ModelName, type Models, schema } from "../schema.js";
 import { type FindManyOptions, type StorageAdapter, StorageError, type Where } from "./port.js";
-import { assertWhereText, D1_BOUND_PARAMS } from "./sql.js";
+import {
+  assertWhereText,
+  coreStatements,
+  D1_BOUND_PARAMS,
+  insertChunks,
+  rowsPerInsertOf,
+  SQLITE,
+} from "./sql.js";
 
 type Store = Map<ModelName, Map<string, Record<string, unknown>>>;
 
@@ -150,8 +157,8 @@ function adapterOn(
     return [...t.values()].filter((r) => matches(r, where));
   };
 
-  const perInsert = (model: ModelName) =>
-    Math.floor(D1_BOUND_PARAMS / Object.keys(schema[model].fields).length);
+  // The statements of D1, so a call counts as a D1 call does (rulings 57 and 84 of plan 12d).
+  const d1 = coreStatements(SQLITE);
 
   return {
     async create<M extends ModelName>(model: M, data: Models[M]): Promise<Models[M]> {
@@ -171,8 +178,6 @@ function adapterOn(
     ): Promise<Models[M][]> {
       const t = table(model);
       if (rows.length === 0) return [];
-      // The chunks of D1, so the call counts as a D1 call does (ruling 57 of plan 12d).
-      sent.statements += Math.ceil(rows.length / perInsert(model));
       // All or nothing: check each row against the table and the rows before it, then write.
       const added: Record<string, unknown>[] = [];
       for (const data of rows) {
@@ -183,6 +188,8 @@ function adapterOn(
         checkUnique(model, [...t.values(), ...added], row);
         added.push(row);
       }
+      // The chunks of D1, so the call counts as a D1 call does (rulings 57 and 84 of plan 12d).
+      sent.statements += insertChunks(d1, model, rows, D1_BOUND_PARAMS).length;
       for (const row of added) {
         t.set(row.id as string, row);
         log?.push(() => t.delete(row.id as string));
@@ -191,7 +198,7 @@ function adapterOn(
     },
     rowsPerInsert(model: ModelName): number {
       table(model);
-      return perInsert(model);
+      return rowsPerInsertOf(d1, model, D1_BOUND_PARAMS);
     },
     async findOne<M extends ModelName>(model: M, where: Where<M>[]): Promise<Models[M] | null> {
       sent.statements++;
