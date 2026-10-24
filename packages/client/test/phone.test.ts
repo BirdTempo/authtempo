@@ -13,6 +13,7 @@ describe("the phone (plan 12i Task 5)", () => {
     const sms = createRecordingSms();
     const server = makeServer({
       phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
+      lastMethod: {},
     });
     const client = createClient({ baseURL: BASE_URL, fetch: inProcessFetch(server.auth).fetch });
     expect(await client.phone.add({ phone: "+14155550101" })).toMatchObject({
@@ -26,6 +27,9 @@ describe("the phone (plan 12i Task 5)", () => {
     });
     const signedIn = await client.phone.verify({ phone: "+14155550100", code: lastCode(sms) });
     expect(signedIn).toMatchObject({ ok: true, value: { user: { email: null } } });
+    // The answer names the method (plan 12i Task 12), and the type carries it.
+    const via = signedIn.ok && "token" in signedIn.value ? signedIn.value.via : undefined;
+    expect(via).toBe("phone");
     // The phone is the last way in of this user.
     expect(await client.phone.remove()).toMatchObject({
       ok: false,

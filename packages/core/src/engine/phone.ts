@@ -356,6 +356,7 @@ export async function verifyPhone(
       ip: input.ip,
       userAgent: input.userAgent,
       via: "phone",
+      method: "phone",
       next: "/",
       trustDevice: input.trustDevice,
       gate: config.totp?.gate.phone ?? false,

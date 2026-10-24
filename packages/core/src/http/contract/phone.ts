@@ -1,6 +1,6 @@
 import { z } from "zod";
 import type { RouteKey } from "../route-list.js";
-import { OkAnswer, SentAnswer, SignedInAnswer, TwoFactorChallenge } from "./shapes.js";
+import { OkAnswer, SentAnswer, SignInAnswer, TwoFactorChallenge } from "./shapes.js";
 import type { RouteContract } from "./types.js";
 
 // The engine checks E.164 and the regions; these caps only bound the input.
@@ -26,8 +26,8 @@ export const PHONE_CONTRACT = {
   },
   "POST /phone/verify": {
     body: { schema: verifyBody, media: ["json"], parsedBy: "zod" },
-    // The session, or the challenge of a user with the second factor on.
-    answer: { kind: "json", schema: z.union([SignedInAnswer, TwoFactorChallenge]) },
+    // The session with `via` (plan 12i Task 12), or the challenge of a user with the second factor on.
+    answer: { kind: "json", schema: z.union([SignInAnswer, TwoFactorChallenge]) },
   },
   "POST /phone/add": {
     body: { schema: addBody, media: ["json"], parsedBy: "zod" },

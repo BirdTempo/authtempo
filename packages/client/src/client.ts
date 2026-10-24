@@ -787,7 +787,7 @@ export interface Client {
       phone: string;
       code: string;
       trustDevice?: string | undefined;
-    }): Promise<ClientResult<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>>;
+    }): Promise<ClientResult<SignInJSON | TwoFactorChallengeJSON>>;
     /** Needs a fresh session. A code to the new number, or a note when another account holds it. */
     add(input: { phone: string }): Promise<ClientResult<{ sent: true }>>;
     /** Needs a fresh session. `phone_taken` when another account set the number first. */
@@ -1378,7 +1378,7 @@ export function createClient(options: ClientOptions): Client {
       ),
     verify: ({ phone: number, code, trustDevice }) =>
       changes(
-        send<({ token: string } & PublicSessionJSON) | TwoFactorChallengeJSON>("phone.verify", {
+        send<SignInJSON | TwoFactorChallengeJSON>("phone.verify", {
           phone: number,
           code,
           ...(trustDevice !== undefined ? { trustDevice } : {}),

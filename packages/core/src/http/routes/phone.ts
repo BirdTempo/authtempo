@@ -11,7 +11,12 @@ import {
 import { addBody, addVerifyBody, removeBody, requestBody, verifyBody } from "../contract/phone.js";
 import { readJson, respond } from "../json.js";
 import type { Route } from "../router.js";
-import { signedInResponse, trustTokenOf, twoFactorJson } from "../session-answer.js";
+import {
+  signedInResponse,
+  trustTokenOf,
+  twoFactorJson,
+  withLastMethod,
+} from "../session-answer.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
 
 /**
@@ -22,7 +27,7 @@ import { sent, unauthorized, withSession } from "../session-route.js";
  */
 export function phoneRoutes(config: ResolvedConfig): Route[] {
   if (!config.phone) return [];
-  const signedIn = (v: PhoneSession): Response => signedInResponse(config, v);
+  const signedIn = (v: PhoneSession): Response => signedInResponse(config, v, "phone");
   return [
     {
       method: "POST",
@@ -61,7 +66,9 @@ export function phoneRoutes(config: ResolvedConfig): Route[] {
         });
         if (!r.ok) return respond(r);
         // A user with the second factor on: the challenge, and no cookie (plan 12c).
-        return "twoFactor" in r.value ? twoFactorJson(r.value) : signedIn(r.value);
+        // The challenge row keeps the method `phone`, and its verify sets the cookie (plan 12i Task 12).
+        if ("twoFactor" in r.value) return twoFactorJson(r.value);
+        return withLastMethod(ctx.config, ctx.request, signedIn(r.value), "phone");
       },
     },
     {

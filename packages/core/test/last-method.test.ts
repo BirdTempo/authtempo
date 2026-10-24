@@ -9,11 +9,12 @@ import {
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
 import { passwordSignIn as engineSignIn } from "../src/engine/password.js";
-import { resolveSession } from "../src/engine/sessions.js";
+import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { setUsername } from "../src/engine/username.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { tiktokEntry } from "../src/social/entries/index.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import tiktokTokenText from "./fixtures/providers/tiktok/token.json?raw";
 import tiktokUserText from "./fixtures/providers/tiktok/user.json?raw";
@@ -24,6 +25,7 @@ import {
   makeAuth,
   post,
   recordCredential,
+  settled,
   tokenFromMail,
 } from "./helpers.js";
 import { signUpAndVerify } from "./password-helpers.js";
@@ -33,10 +35,12 @@ import { codeNow, EMAIL, enrolled, PASSWORD, totpAuth } from "./totp-helpers.js"
 // The last method (plan 12i Task 12, spec 32 item 11). A readable cookie
 // with one value of a closed set, set at each browser sign-in. It is a hint
 // for the sign-in page only: it signs no one in and names no account.
-// The phone value comes from the phone routes of Task 5, and the anonymous
-// sign-in of Task 6 sets no cookie; each of those tasks adds its case here.
+// The phone value comes from the phone sign-in of Task 5 and from the
+// password sign-in by phone. The anonymous sign-in of Task 6 sets no
+// cookie; Task 6 adds its case here.
 
 const RP = { rpID: "example.com", rpName: "Example", origins: [APP_ORIGIN] };
+const PHONE = "+14155550100";
 const LAST = "__Host-tempo_last_method";
 const SESSION = "__Host-tempo_session";
 /** 30 days, the default. */
@@ -52,8 +56,11 @@ function world(extra: Partial<AuthConfig> = {}) {
       return new Response(tiktokUserText);
     return Response.json({ id_token: "idtok-default", access_token: "at", token_type: "Bearer" });
   });
+  const sms = createRecordingSms();
   const auth = totpAuth({
     username: {},
+    // A sign-up by the phone code, on the memory limiter (deviation 5 of plan 12i).
+    phone: { sms, regions: ["+1"], signUp: true, isolateLimiter: "allow" },
     social: {
       google: GOOGLE,
       oauth2: [tiktokEntry({ clientKey: "tiktok-key", clientSecret: "tiktok-secret" })],
@@ -64,8 +71,9 @@ function world(extra: Partial<AuthConfig> = {}) {
     lastMethod: {},
     ...extra,
   });
-  const handle = createRouter(auth.config, coreRoutes(auth.config));
-  return { auth, tokens, handle };
+  // The phone code goes out after the answer: `settled` waits for that work.
+  const handle = settled(createRouter(auth.config, coreRoutes(auth.config)));
+  return { auth, tokens, handle, sms };
 }
 type World = ReturnType<typeof world>;
 
@@ -109,6 +117,38 @@ async function named(w: World) {
   if (!set.ok) throw new Error(set.code);
 }
 
+/** The code of the last text to the phone: the default message starts with it. */
+function phoneCode(w: World): string {
+  const text = w.sms.sent.findLast((m) => m.to === PHONE)?.text ?? "";
+  const code = /^(\d+) is your /.exec(text)?.[1];
+  if (code === undefined) throw new Error(`no code in the text: ${text}`);
+  return recordCredential(code);
+}
+
+/** The phone sign-in through the routes: the request, then the verify of its code. */
+async function phoneSignIn(w: World): Promise<Response> {
+  const sent = await w.handle(post("/auth/phone/request", { phone: PHONE }));
+  expect(await sent.json()).toEqual({ sent: true });
+  return w.handle(post("/auth/phone/verify", { phone: PHONE, code: phoneCode(w) }));
+}
+
+/** A verified user with a password whose phone `/phone/add/verify` set, so no test seeds a phone. */
+async function phoned(w: World) {
+  await signUpAndVerify(w.auth, EMAIL, PASSWORD);
+  const user = await w.auth.storage.findOne("user", [{ field: "email", op: "eq", value: EMAIL }]);
+  if (!user) throw new Error("no user");
+  const { token } = await createSession(w.auth.config, {
+    userId: user.id,
+    ip: null,
+    userAgent: null,
+  });
+  const cookie = `${w.auth.config.cookieName}=${token}`;
+  const added = await w.handle(post("/auth/phone/add", { phone: PHONE }, { cookie }));
+  expect(await added.json()).toEqual({ sent: true });
+  const set = await w.handle(post("/auth/phone/add/verify", { code: phoneCode(w) }, { cookie }));
+  expect(await set.json()).toEqual({ phone: PHONE });
+}
+
 /** One browser sign-in per value: the answer, and whether it is JSON. */
 const CASES: Record<string, (w: World) => Promise<{ res: Response; json: boolean }>> = {
   password: async (w) => {
@@ -119,6 +159,8 @@ const CASES: Record<string, (w: World) => Promise<{ res: Response; json: boolean
     await named(w);
     return { res: await passwordSignIn(w, { username: "Ada" }), json: true };
   },
+  // A sign-up by the phone code (Task 5): a new user with no address.
+  phone: async (w) => ({ res: await phoneSignIn(w), json: true }),
   magic_link: async (w) => {
     const sent = await requestMagicLink(w.auth.config, { email: EMAIL, ip: null });
     if (!sent.ok) throw new Error(sent.code);
@@ -246,6 +288,23 @@ const MORE: [string, string, (w: World) => Promise<{ res: Response; json: boolea
     },
   ],
   [
+    // The number of the user, proved by `/phone/add/verify` (Task 5).
+    "the password sign-in by phone",
+    "phone",
+    async (w) => {
+      await phoned(w);
+      return { res: await passwordSignIn(w, { phone: PHONE }), json: true };
+    },
+  ],
+  [
+    "the phone sign-in of a user with an address",
+    "phone",
+    async (w) => {
+      await phoned(w);
+      return { res: await phoneSignIn(w), json: true };
+    },
+  ],
+  [
     "the magic link, JSON",
     "magic_link",
     async (w) => {
@@ -286,6 +345,22 @@ describe("the last method cookie (plan 12i Task 12)", () => {
     expect(hasSession(res)).toBe(true);
     expect(lastCookie(res)).toBe(expected("username"));
     expect((await bodyOf(res)).via).toBe("username");
+    // The phone sign-in behind the second factor (`totp.gate.phone`): the challenge keeps `phone`.
+    const g = world();
+    await phoned(g);
+    const factor = await enrolled(g.auth, EMAIL);
+    const gated = await phoneSignIn(g);
+    expect(lastCookie(gated)).toBeNull();
+    const phoneChallenge = ((await bodyOf(gated)).twoFactor as { challenge: string }).challenge;
+    const passed = await g.handle(
+      post("/auth/totp/verify", {
+        challenge: phoneChallenge,
+        code: await codeNow(g.auth, factor.secret),
+      }),
+    );
+    expect(hasSession(passed)).toBe(true);
+    expect(lastCookie(passed)).toBe(expected("phone"));
+    expect((await bodyOf(passed)).via).toBe("phone");
     // A custom name and lifetime.
     const custom = world({ lastMethod: { cookieName: "last_way", days: 2 } });
     const r = await CASES.password?.(custom);
@@ -371,8 +446,8 @@ describe("the last method cookie (plan 12i Task 12)", () => {
   });
 
   it("names the password sign-in by its identifier: phone for a number (plan 12i Task 4)", () => {
-    // The route sets passwordMethod(by). A proved phone comes with Task 5
-    // (verifyAddPhone), so no test here seeds one; Task 5 adds the route case.
+    // The route sets passwordMethod(by). The route case is "the password
+    // sign-in by phone" of MORE, with a phone that verifyAddPhone set.
     expect(passwordMethod({})).toBe("password");
     expect(passwordMethod({ username: "ada" })).toBe("username");
     expect(passwordMethod({ phone: "+14155550100" })).toBe("phone");
