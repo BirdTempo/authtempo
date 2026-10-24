@@ -741,11 +741,37 @@ class TokenHostError extends Error {
   }
 }
 
-/** The origin and path of a fetch input, or null when it is not a URL. */
-function originAndPath(input: Parameters<typeof fetch>[0]): string | null {
+/** The origin and path of a URL text, or null when it is not a URL. */
+function originAndPath(text: string): string | null {
   try {
-    const url = new URL(input instanceof Request ? input.url : String(input));
+    const url = new URL(text);
     return url.origin + url.pathname;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The URL and the init of a hook's fetch call, read from the input one time
+ * into values that core owns (ruling 28 I1). A second read could answer
+ * another URL: a toString that changes, or a Request subclass whose url
+ * getter lies. A Request input is copied into a plain Request, which reads
+ * the fields of the input, not its getters. The call keeps the method, the
+ * headers, and the body of a Request input. Null when the input is not a URL.
+ */
+async function ownedCall(
+  input: Parameters<typeof fetch>[0],
+  init: RequestInit | undefined,
+): Promise<{ url: URL; init: RequestInit } | null> {
+  try {
+    if (!(input instanceof Request)) return { url: new URL(String(input)), init: { ...init } };
+    const own = new Request(input, init);
+    const body =
+      own.method === "GET" || own.method === "HEAD" ? undefined : await own.arrayBuffer();
+    return {
+      url: new URL(own.url),
+      init: { method: own.method, headers: own.headers, ...(body ? { body } : {}) },
+    };
   } catch {
     return null;
   }
@@ -791,9 +817,12 @@ async function requestedToken(
   }
   const pinned = originAndPath(provider.tokenUrl);
   const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
+  // The pin checks the URL that core owns, and the call sends that same URL.
   const boundFetch: typeof fetch = async (input, init) => {
-    if (pinned === null || originAndPath(input) !== pinned) throw new TokenHostError();
-    return config.social.fetch(input, { ...init, signal });
+    const call = await ownedCall(input, init);
+    if (pinned === null || call === null || call.url.origin + call.url.pathname !== pinned)
+      throw new TokenHostError();
+    return config.social.fetch(call.url.href, { ...call.init, signal });
   };
   // Promise.race keeps a handler on this promise, so its late rejection is handled.
   const deadline = new Promise<never>((_, reject) => {

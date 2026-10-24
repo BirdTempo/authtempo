@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig, ResolvedConfig } from "../src/config.js";
-import { completeSocial, startSocial } from "../src/engine/social.js";
+import { completeSocial, startLink, startSocial } from "../src/engine/social.js";
+import { draftUserRow } from "../src/engine/users.js";
+import { newId } from "../src/primitives/ids.js";
 import { tiktokEntry, wechatEntry } from "../src/social/entries/index.js";
 import type { OAuth2Entry } from "../src/social/oauth2.js";
-import type { SocialProfile, TokenRequestInput } from "../src/social/provider.js";
+import {
+  PROVIDER_TIMEOUT_MS,
+  type SocialProfile,
+  type TokenRequestInput,
+} from "../src/social/provider.js";
 import tiktokExpectedText from "./fixtures/providers/tiktok/expected.json?raw";
 import tiktokTokenText from "./fixtures/providers/tiktok/token.json?raw";
 import tiktokTokenErrorText from "./fixtures/providers/tiktok/token-error.json?raw";
@@ -16,8 +22,10 @@ import wechatTokenOpenidText from "./fixtures/providers/wechat/token-openid.json
 import wechatUserText from "./fixtures/providers/wechat/userinfo.json?raw";
 import wechatUserErrorText from "./fixtures/providers/wechat/userinfo-error.json?raw";
 import wechatUserOpenidText from "./fixtures/providers/wechat/userinfo-openid.json?raw";
-import { BASE_URL, makeAuth, recordCredential } from "./helpers.js";
+import { BASE_URL, makeAuth, recordAddress, recordCredential } from "./helpers.js";
+import { FAST } from "./password-helpers.js";
 import { fakeFetch, type TokenCall } from "./social-helpers.js";
+import { verifiedSession } from "./totp-helpers.js";
 
 type Json = Record<string, unknown>;
 const json = (text: string) => JSON.parse(text) as Json;
@@ -77,8 +85,15 @@ function world(social: AuthConfig["social"], answer: Record<string, (c: TokenCal
   const f = fakeFetch(
     (call) => answer[call.url.split("?")[0] ?? ""]?.(call) ?? new Response("nf", { status: 404 }),
   );
-  const auth = makeAuth({ social: { ...social, fetch: f.fetchFn } });
-  return { ...auth, calls: f.calls };
+  // `sent` reads each call as a real fetch does: the method, the URL, and the body (ruling 28 I1).
+  const sent: string[] = [];
+  const fetchFn: typeof fetch = async (input, init) => {
+    const real = new Request(input, init);
+    sent.push(`${real.method} ${real.url} ${await real.text()}`.trimEnd());
+    return f.fetchFn(input, init);
+  };
+  const auth = makeAuth({ social: { ...social, fetch: fetchFn } });
+  return { ...auth, calls: f.calls, sent };
 }
 
 const tiktokWorld = (
@@ -214,7 +229,31 @@ describe("the tokenRequest hook (plan 12i Task 22)", () => {
       "https://evil.example/token": () => Response.json({ access_token: "a" }),
       "https://id.hooked.example/other": () => Response.json({ access_token: "a" }),
     };
-    for (const url of ["https://evil.example/token", "https://id.hooked.example/other"]) {
+    // A Request subclass whose url getter names tokenUrl, on another real URL (ruling 28 I1, probe P2).
+    class LyingRequest extends Request {
+      override get url() {
+        return "https://id.hooked.example/token";
+      }
+    }
+    // Each input, and the calls that may leave: none, or tokenUrl alone.
+    const inputs: [string, () => Parameters<typeof fetch>[0], string[]][] = [
+      ["another host", () => "https://evil.example/token", []],
+      ["another path", () => "https://id.hooked.example/other", []],
+      [
+        // An input whose string names tokenUrl at the first read only (ruling 28 I1, probe P1).
+        // Core reads it one time, so the call goes to tokenUrl, never to the second answer.
+        "a string that changes on the second read",
+        () => {
+          let reads = 0;
+          const text = () =>
+            reads++ === 0 ? "https://id.hooked.example/token" : "https://evil.example/token";
+          return { toString: text } as unknown as string;
+        },
+        ["GET https://id.hooked.example/token"],
+      ],
+      ["a Request whose url getter lies", () => new LyingRequest("https://evil.example/token"), []],
+    ];
+    for (const [what, input, leaves] of inputs) {
       const userinfo = vi.fn(hookEntry().userinfo);
       const w = world(
         {
@@ -223,7 +262,7 @@ describe("the tokenRequest hook (plan 12i Task 22)", () => {
               userinfo,
               addressless: true,
               tokenRequest: async ({ fetch }) => {
-                await fetch(url);
+                await fetch(input());
                 return { accessToken: "a", extra: {} };
               },
             }),
@@ -231,13 +270,16 @@ describe("the tokenRequest hook (plan 12i Task 22)", () => {
         },
         answers,
       );
-      expect((await signIn(w.config, "hooked")).done).toMatchObject({
-        ok: false,
-        code: "oauth_failed",
-      });
+      const { done } = await signIn(w.config, "hooked");
+      // A real fetch reads the URL as `sent` does.
+      expect(w.sent, what).toEqual(leaves);
+      if (leaves.length > 0) {
+        expect(done, what).toMatchObject({ ok: true });
+        continue;
+      }
+      expect(done, what).toMatchObject({ ok: false, code: "oauth_failed" });
       // The engine refused the call before any network request.
-      expect(w.calls).toEqual([]);
-      expect(userinfo).toHaveBeenCalledTimes(0);
+      expect(userinfo, what).toHaveBeenCalledTimes(0);
     }
     // The pinned URL with a query passes, and the call carries no redirect follow.
     const w = world(
@@ -256,6 +298,30 @@ describe("the tokenRequest hook (plan 12i Task 22)", () => {
     );
     expect((await signIn(w.config, "hooked")).done).toMatchObject({ ok: true });
     expect(w.calls.map((c) => c.url)).toEqual(["https://id.hooked.example/token?x=1"]);
+    // A Request input to tokenUrl passes, with its method and its body.
+    const bodies: string[] = [];
+    const r = world(
+      {
+        oauth2: [
+          hookEntry({
+            addressless: true,
+            tokenRequest: async ({ fetch }) => {
+              const res = await fetch(
+                new Request("https://id.hooked.example/token", { method: "POST", body: "a=1" }),
+              );
+              bodies.push(await res.text());
+              return { accessToken: "a", extra: {} };
+            },
+          }),
+        ],
+      },
+      {
+        "https://id.hooked.example/token": () => Response.json({ access_token: "a" }),
+      },
+    );
+    expect((await signIn(r.config, "hooked")).done).toMatchObject({ ok: true });
+    expect(r.sent).toEqual(["POST https://id.hooked.example/token a=1"]);
+    expect(bodies).toEqual(['{"access_token":"a"}']);
   });
 
   it("answers oauth_failed on a tokenRequest answer that breaks the shape", async () => {
@@ -546,5 +612,182 @@ describe("the tokenRequest hook (plan 12i Task 22)", () => {
     // The second sign-in finds the same user by the identity.
     expect((await signIn(w.config, "hooked")).done).toMatchObject({ ok: true });
     expect(await users(w)).toHaveLength(2);
+  });
+
+  it("never claims an unverified user by the address of an addressless profile (ruling 28 M1)", async () => {
+    const mia = recordAddress("mia@example.com");
+    const w = world(
+      {
+        oauth2: [
+          hookEntry({
+            addressless: true,
+            tokenRequest: async () => ({ accessToken: "a", extra: {} }),
+            // The app's userinfo answers a verified address that the entry does not prove.
+            userinfo: async () => ({
+              subject: "hooked-mia",
+              email: mia,
+              emailVerified: true,
+              name: null,
+              image: null,
+            }),
+          }),
+        ],
+      },
+      {},
+    );
+    // An unverified user with an address and the entry's identity: the state of
+    // a Better Auth import, whose TikTok and WeChat users hold a placeholder
+    // address that core keeps unverified (ledger, Task 22; carried to Task 16).
+    const now = w.clock.now();
+    const held = await w.storage.create(
+      "user",
+      draftUserRow({ email: mia, emailVerified: false, name: null, image: null }, now),
+    );
+    await w.storage.create("identity", {
+      id: newId(now),
+      userId: held.id,
+      provider: "hooked",
+      subject: "hooked-mia",
+      linkedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
+    const r = await signIn(w.config, "hooked");
+    // The identity signs in its user, and the profile address proves nothing.
+    expect(r.done).toMatchObject({ ok: true, value: { user: { id: held.id } } });
+    const after = await w.storage.findOne("user", [{ field: "id", op: "eq", value: held.id }]);
+    expect(after?.emailVerified).toBe(false);
+    expect(await identities(w, "email")).toEqual([]);
+  });
+
+  it("answers oauth_failed when tokenRequest never settles (ruling 28 M2)", async () => {
+    const real = AbortSignal.timeout.bind(AbortSignal);
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => real(20));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const userinfo = vi.fn(hookEntry().userinfo);
+    const w = world(
+      {
+        oauth2: [
+          hookEntry({
+            userinfo,
+            addressless: true,
+            tokenRequest: () => new Promise<never>(() => {}),
+          }),
+        ],
+      },
+      {},
+    );
+    const r = await signIn(w.config, "hooked");
+    expect(r.done).toMatchObject({ ok: false, code: "oauth_failed" });
+    expect(timeout).toHaveBeenCalledWith(PROVIDER_TIMEOUT_MS);
+    expect(userinfo).toHaveBeenCalledTimes(0);
+    expect(await users(w)).toEqual([]);
+    await w.config.observe.flush();
+    expect(error).toHaveBeenCalledWith(
+      "authtempo: social token request failed",
+      "hooked",
+      "TimeoutError",
+    );
+  });
+
+  it("gives tokenRequest a fetch whose signal aborts at PROVIDER_TIMEOUT_MS (ruling 28 M2)", async () => {
+    // A fake AbortSignal.timeout on fake timers, so the test can move the clock to the limit.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+        const c = new AbortController();
+        setTimeout(() => c.abort(new DOMException("timed out", "TimeoutError")), ms);
+        return c.signal;
+      });
+      const signals: (AbortSignal | null | undefined)[] = [];
+      const fetchFn: typeof fetch = async (_input, init) => {
+        signals.push(init?.signal);
+        return Response.json({ access_token: "a" });
+      };
+      const auth = makeAuth({
+        social: {
+          oauth2: [
+            hookEntry({
+              addressless: true,
+              tokenRequest: async ({ fetch }) => {
+                await fetch("https://id.hooked.example/token", { method: "POST" });
+                return { accessToken: "a", extra: {} };
+              },
+            }),
+          ],
+          fetch: fetchFn,
+        },
+      });
+      expect((await signIn(auth.config, "hooked")).done).toMatchObject({ ok: true });
+      expect(signals).toHaveLength(1);
+      const [signal] = signals;
+      expect(signal).toBeInstanceOf(AbortSignal);
+      vi.advanceTimersByTime(PROVIDER_TIMEOUT_MS - 1);
+      expect(signal?.aborted).toBe(false);
+      vi.advanceTimersByTime(1);
+      expect(signal?.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("answers email_required at a link of an addressless entry (ruling 28 M3)", async () => {
+    const mia = recordAddress("mia@example.com");
+    const tokenRequest = vi.fn(async () => ({ accessToken: "a", extra: {} }));
+    const auth = makeAuth({
+      password: { hash: FAST, uniformSignUp: false },
+      social: {
+        oauth2: [
+          hookEntry({
+            addressless: true,
+            tokenRequest,
+            // The profile answers the session user's own verified address: still no proof.
+            userinfo: async () => ({
+              subject: "hooked-mia",
+              email: mia,
+              emailVerified: true,
+              name: null,
+              image: null,
+            }),
+          }),
+        ],
+      },
+    });
+    const session = await verifiedSession(auth, mia);
+    const s = await startLink(auth.config, {
+      provider: "hooked",
+      session,
+      next: "/settings",
+      ip: "1.1.1.1",
+    });
+    if (!s.ok) throw new Error(s.code);
+    const done = await completeSocial(auth.config, {
+      provider: "hooked",
+      state: new URL(s.value.location).searchParams.get("state"),
+      code: CODE,
+      error: null,
+      bindToken: s.value.bindToken,
+      sessionToken: session.token,
+      ip: "1.1.1.1",
+      userAgent: "ua",
+    });
+    expect(tokenRequest).toHaveBeenCalledTimes(1);
+    expect(done).toMatchObject({ ok: false, code: "email_required" });
+    expect(await identities(auth, "hooked")).toEqual([]);
+  });
+
+  it("makes no user of an addressless entry under signUp invited (ruling 28 M3)", async () => {
+    const tokenRequest = vi.fn(async () => ({ accessToken: "a", extra: {} }));
+    // The hook makes no network call, so the entry needs no fake fetch.
+    const auth = makeAuth({
+      signUp: "invited",
+      organizations: {},
+      social: { oauth2: [hookEntry({ addressless: true, tokenRequest })] },
+    });
+    const r = await signIn(auth.config, "hooked");
+    expect(tokenRequest).toHaveBeenCalledTimes(1);
+    expect(r.done).toMatchObject({ ok: false, code: "sign_up_closed" });
+    expect(await users(auth)).toEqual([]);
+    expect(await identities(auth, "hooked")).toEqual([]);
   });
 });
