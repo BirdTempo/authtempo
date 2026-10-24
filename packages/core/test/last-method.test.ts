@@ -7,6 +7,7 @@ import {
   passkeyRegistrationOptions,
   verifyPasskeyRegistration,
 } from "../src/engine/passkeys.js";
+import { passwordMethod } from "../src/engine/last-method.js";
 import { passwordSignIn as engineSignIn } from "../src/engine/password.js";
 import { resolveSession } from "../src/engine/sessions.js";
 import { setUsername } from "../src/engine/username.js";
@@ -335,5 +336,13 @@ describe("the last method cookie (plan 12i Task 12)", () => {
       for (const value of Object.values(user))
         expect(["password", "social:google"]).not.toContain(value);
     }
+  });
+
+  it("names the password sign-in by its identifier: phone for a number (plan 12i Task 4)", () => {
+    // The route sets passwordMethod(by). A proved phone comes with Task 5
+    // (verifyAddPhone), so no test here seeds one; Task 5 adds the route case.
+    expect(passwordMethod({})).toBe("password");
+    expect(passwordMethod({ username: "ada" })).toBe("username");
+    expect(passwordMethod({ phone: "+14155550100" })).toBe("phone");
   });
 });
