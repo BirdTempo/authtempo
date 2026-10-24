@@ -370,10 +370,10 @@ These routes exist when the config sets `password`.
 | Field | Value |
 | --- | --- |
 | Needs | Nothing |
-| Input | JSON `{ email, password, trustDevice?, next? }` |
+| Input | JSON `{ email?, username?, phone?, password, trustDevice?, next? }`. The body has exactly one of `email`, `username`, or `phone`. `username` needs the `username` config. `phone` is E.164. A bad form of a username or a phone answers `invalid_credentials` after the dummy hash |
 | Answer | `{ token, user, session }` with the cookie, or `{ twoFactor: { challenge, expiresAt, methods } }` with no cookie for a user with the second factor on |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`invalid_credentials`](/docs/reference/errors/#invalid_credentials), [`rate_limited`](/docs/reference/errors/#rate_limited), [`hook_refused`](/docs/reference/errors/#hook_refused), [`hook_failed`](/docs/reference/errors/#hook_failed), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`email_unverified`](/docs/reference/errors/#email_unverified), [`conflict`](/docs/reference/errors/#conflict), [`account_banned`](/docs/reference/errors/#account_banned), [`sso_required`](/docs/reference/errors/#sso_required) |
-| Captcha | With `captcha`: the header `x-captcha-response`, after the per-IP limit and before the per-email limits |
+| Captcha | With `captcha`: the header `x-captcha-response`, after the per-IP limit and before the per-address, per-username, and per-phone limits |
 
 <h3 id="get-password-verify"><code>GET /password/verify</code></h3>
 

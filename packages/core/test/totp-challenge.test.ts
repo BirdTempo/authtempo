@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   changePassword,
-  type PasswordSignIn,
+  type PasswordSignInFields,
   passwordSignIn,
   requestPasswordReset,
   resetPassword,
@@ -25,7 +25,10 @@ import {
   wrongFor,
 } from "./totp-helpers.js";
 
-const signIn = (auth: Auth, over: Partial<PasswordSignIn> = {}) =>
+/** The address form of the input (plan 12i Task 3 made the input a union). */
+type Over = Partial<PasswordSignInFields & { email: string }>;
+
+const signIn = (auth: Auth, over: Over = {}) =>
   passwordSignIn(auth.config, {
     email: EMAIL,
     password: PASSWORD,
@@ -34,7 +37,7 @@ const signIn = (auth: Auth, over: Partial<PasswordSignIn> = {}) =>
     ...over,
   });
 
-async function challengeOf(auth: Auth, over: Partial<PasswordSignIn> = {}): Promise<string> {
+async function challengeOf(auth: Auth, over: Over = {}): Promise<string> {
   const r = await signIn(auth, over);
   if (!r.ok || !("twoFactor" in r.value)) throw new Error("the sign-in answered no challenge");
   return r.value.twoFactor.challenge;

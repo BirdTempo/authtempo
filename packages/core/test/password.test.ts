@@ -4,6 +4,7 @@ import { continueHandoff, redeemHandoff, startHandoff } from "../src/engine/hand
 import { requestMagicLink, verifyMagicLink } from "../src/engine/magic-link.js";
 import {
   changePassword,
+  type PasswordSignInFields,
   passwordSignIn,
   passwordSignUp,
   requestPasswordReset,
@@ -252,7 +253,8 @@ function counting(inner: PasswordHashSeam, beforeHash: () => Promise<void> = asy
 
 function signIn(
   auth: ReturnType<typeof makeAuth>,
-  over: Partial<Parameters<typeof passwordSignIn>[1]> = {},
+  // The address form of the input (plan 12i Task 3 made the input a union).
+  over: Partial<PasswordSignInFields & { email: string }> = {},
 ) {
   return sessionOnly(
     passwordSignIn(auth.config, {

@@ -5,6 +5,7 @@ import {
   PASSWORD_RESET_TOKEN_RE,
   PASSWORD_VERIFY_TOKEN_RE,
   type PasswordSession,
+  passwordIdentifier,
   passwordSignIn,
   passwordSignUp,
   requestPasswordReset,
@@ -93,9 +94,12 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const body = await readJson(ctx.request, signInBody);
         if (!body.ok) return respond(body);
+        const v = body.value;
+        const by = passwordIdentifier(v);
+        if (!by) return respond(fail("invalid_body"));
         const r = await passwordSignIn(ctx.config, {
-          email: body.value.email,
-          password: body.value.password,
+          ...by,
+          password: v.password,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
           trustDevice: trustTokenOf(ctx.config, ctx.request, body.value.trustDevice),

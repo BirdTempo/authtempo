@@ -8,7 +8,9 @@ import {
   verifyPasskeyRegistration,
 } from "../../src/engine/passkeys.js";
 import { passwordSignIn, passwordSignUp, requestPasswordReset } from "../../src/engine/password.js";
+import { resolveSession } from "../../src/engine/sessions.js";
 import { updateDomain } from "../../src/engine/sso/domains.js";
+import { setUsername } from "../../src/engine/username.js";
 import { SoftAuthenticator } from "../../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "../helpers.js";
 import { FAST, signUpAndVerify } from "../password-helpers.js";
@@ -36,6 +38,8 @@ function world(extra: Partial<AuthConfig> = {}) {
     social: { google: GOOGLE, fetch: fetchFn },
     passkey: RP,
     password: { hash: FAST, uniformSignUp: false },
+    // Plan 12i Task 3: the password sign-in by username.
+    username: {},
     ...extra,
   });
 }
@@ -84,6 +88,26 @@ const DOORS: Door[] = [
     json: true,
     async prepare(w) {
       return () => w.handle(post("/auth/password/sign-in", { email: ADA, password: PASSWORD }));
+    },
+  },
+  {
+    // Plan 12i Task 3: a username names its address only through the user
+    // row, so the check runs after the password, and the answer is the same.
+    name: "the password sign-in by username",
+    json: true,
+    async prepare(w) {
+      const s = await passwordSignIn(w.config, {
+        email: ADA,
+        password: PASSWORD,
+        ip: null,
+        userAgent: null,
+      });
+      if (!s.ok || !("token" in s.value)) throw new Error("no session");
+      const session = await resolveSession(w.config, s.value.token);
+      if (!session) throw new Error("no session");
+      must(await setUsername(w.config, { session, username: "Ada", ip: null, userAgent: null }));
+      return () =>
+        w.handle(post("/auth/password/sign-in", { username: "ada", password: PASSWORD }));
     },
   },
   {

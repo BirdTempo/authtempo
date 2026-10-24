@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { USERNAME_LENGTH } from "../src/engine/username.js";
 import { ipKey } from "../src/limiter/ip-key.js";
 import { LIMIT_FAMILIES } from "../src/limiter/limit.js";
 import { limiterKey } from "../src/limiter/memory.js";
@@ -63,6 +64,10 @@ function longestPart(expr: string): string {
   if (/(^|\.)(email|newEmail)$/.test(expr)) return "語".repeat(254);
   // A hash in hex.
   if (/CodeHash$/.test(expr)) return "f".repeat(64);
+  // A stored username: ASCII, at most USERNAME_LENGTH.max characters (plan 12i Task 3).
+  if (expr === "name.username") return "u".repeat(USERNAME_LENGTH.max);
+  // A phone that passed PHONE_RE: a plus and at most 15 digits (plan 12i Task 3).
+  if (expr === "input.phone") return `+${"9".repeat(15)}`;
   // The name of an operator secret: at most 32 characters (config.ts).
   if (expr === "entry.name") return "n".repeat(32);
   throw new Error(`no longest form for the key part \${${expr}}: give it a row in this test`);
@@ -227,8 +232,9 @@ describe("the column map (plan 12g)", () => {
     // Plan 12d adds 8: the SSO manager, the domain verify, the discovery, the
     // start, the ACS, and the three of the SCIM token check. Plan 12i adds 1:
     // the password:user key of a check with no address (ruling 15). Plan 12i
-    // Task 2 adds 2: the username set and the availability check.
-    expect(sites.length).toBe(87);
+    // Task 2 adds 2: the username set and the availability check. Plan 12i
+    // Task 3 adds 2: the password sign-in by username and by phone.
+    expect(sites.length).toBe(89);
     expect(sites).toContain('engine/slug-check.ts "slug-check:user" userId');
     expect(sites).toContain(
       'engine/token-use.ts kind === "tk" ? "token-use:tk" : "token-use:to" row.id',

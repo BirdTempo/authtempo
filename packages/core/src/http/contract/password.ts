@@ -14,8 +14,16 @@ export const signUpBody = z.object({
   username: z.string().max(256).optional(),
 });
 
+/**
+ * Plan 12i Task 3: exactly one of `email`, `username`, or `phone`. The
+ * route holds the body to one, as the reauth body holds its proofs, so the
+ * document keeps one object. The engine reads the form of a username and a
+ * phone.
+ */
 export const signInBody = z.object({
-  email: z.string().max(320),
+  email: z.string().max(320).optional(),
+  username: z.string().max(256).optional(),
+  phone: z.string().max(32).optional(),
   // The engine refuses more than 128 code points; this cap only bounds the body.
   password: z.string().max(1024),
   // Plan 9f: a native app's trust token (a browser sends the cookie), and the landing path after a challenge.

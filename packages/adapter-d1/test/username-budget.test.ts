@@ -22,6 +22,11 @@ const SET_QUERIES = 6;
 const CHECK_QUERIES = 2;
 const SIGN_UP_QUERIES = 14;
 const TAKEN_QUERIES = 3;
+// Plan 12i Task 3: the password sign-in by username, run of 2026-10-24.
+// A right password, an unknown name, and a wrong password.
+const NAME_SIGN_IN_QUERIES = 12;
+const UNKNOWN_NAME_QUERIES = 3;
+const WRONG_PASSWORD_QUERIES = 4;
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {
@@ -162,6 +167,36 @@ describe("the username on D1 (plan 12i Task 2)", () => {
       TAKEN_QUERIES,
     ]);
     for (const q of [set, check, up, taken]) expect(q.queries).toBeLessThanOrEqual(BUDGET);
+  });
+
+  it("keeps each sign-in by username within the D1 Free budget", async () => {
+    const w = make();
+    // A real user: the sign-up with the name, then the verify link of the mail.
+    const up = await w.auth.handle(
+      post("/password/sign-up", {
+        email: "ada@example.com",
+        password: "correct horse battery",
+        username: "Ada",
+      }),
+    );
+    expect(await up.json()).toEqual({ sent: true });
+    const text = w.mail.findLast((m) => m.to === "ada@example.com")?.text ?? "";
+    const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+    expect((await w.auth.handle(post("/password/verify", { token }))).status).toBe(200);
+    const signIn = (username: string, password: string) =>
+      measure(w, post("/password/sign-in", { username, password }));
+    const right = await signIn("ADA", "correct horse battery");
+    expect(right.status).toBe(200);
+    const unknown = await signIn("nobody", "correct horse battery");
+    const wrong = await signIn("ada", "a wrong horse battery");
+    expect(unknown.body).toEqual({ error: "invalid_credentials" });
+    expect(wrong.body).toEqual(unknown.body);
+    expect([right.queries, unknown.queries, wrong.queries]).toEqual([
+      NAME_SIGN_IN_QUERIES,
+      UNKNOWN_NAME_QUERIES,
+      WRONG_PASSWORD_QUERIES,
+    ]);
+    for (const q of [right, unknown, wrong]) expect(q.queries).toBeLessThanOrEqual(BUDGET);
   });
 
   it("lets the unique key decide a race of two sets of one name", async () => {

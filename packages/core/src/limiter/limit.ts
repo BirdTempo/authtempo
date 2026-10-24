@@ -88,6 +88,9 @@ export const LIMIT_FAMILIES = Object.freeze([
   // Plan 12i: the username set and the availability check.
   "username:user",
   "username-available:ip",
+  // Plan 12i Task 3: the password sign-in by username and by phone.
+  "password:username",
+  "password:phone",
 ] as const);
 
 export type LimitFamily = (typeof LIMIT_FAMILIES)[number];

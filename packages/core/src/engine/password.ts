@@ -8,7 +8,7 @@ import { randomToken, sha256Hex } from "../primitives/crypto.js";
 import { newId } from "../primitives/ids.js";
 import { fail, ok, type Result } from "../result.js";
 import type { SessionRow, UserRow, VerificationPurpose, VerificationRow } from "../schema.js";
-import { type StorageAdapter, StorageError } from "../storage/port.js";
+import { type StorageAdapter, StorageError, type Where } from "../storage/port.js";
 import { hasAddress, provedAccount } from "./address.js";
 import { type CreateSteps, createSteps, type VerifySteps, verifySteps } from "./create-steps.js";
 import { requireFresh } from "./fresh.js";
@@ -20,6 +20,7 @@ import { deliverLogouts } from "./oauth-logout.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { activeBan } from "./operator/ban-rule.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
+import { PHONE_RE } from "./phone.js";
 import { gateRead, touchTrust, writeChallenge } from "./second-factor.js";
 import { deleteHandoffCodes, endOtherAccess } from "./session-list.js";
 import {
@@ -71,6 +72,10 @@ const SIGN_UP_PER_EMAIL = { seconds: 3600, max: 5 };
 // addresses; the IP limit stops one address that tries many accounts.
 const SIGN_IN_PER_IP = { seconds: 900, max: 20 };
 const SIGN_IN_PER_EMAIL = { seconds: 900, max: 10 };
+// Plan 12i: the same count for a username and for a phone, so that no
+// identifier gives more guesses at one account than the address does.
+const SIGN_IN_PER_USERNAME = { seconds: 900, max: 10 };
+const SIGN_IN_PER_PHONE = { seconds: 900, max: 10 };
 // Per 15 minutes, as the magic link request.
 const RESET_PER_IP = { seconds: 900, max: 20 };
 const RESET_PER_EMAIL = { seconds: 900, max: 5 };
@@ -158,8 +163,31 @@ export interface PasswordSignUp {
   captchaToken?: string | null | undefined;
 }
 
-export interface PasswordSignIn {
-  email: string;
+/**
+ * The one identifier of a password sign-in (plan 12i, spec 32 item 6):
+ * exactly one of an address, a username, or a phone.
+ */
+export type PasswordIdentifier =
+  | { email: string; username?: never; phone?: never }
+  | { username: string; email?: never; phone?: never }
+  | { phone: string; email?: never; username?: never };
+
+export type PasswordSignIn = PasswordIdentifier & PasswordSignInFields;
+
+/** The one identifier of a body that may hold any of the three, or null for two or none. */
+export function passwordIdentifier(body: {
+  email?: string | undefined;
+  username?: string | undefined;
+  phone?: string | undefined;
+}): PasswordIdentifier | null {
+  const { email, username, phone } = body;
+  if ([email, username, phone].filter((v) => v !== undefined).length !== 1) return null;
+  if (email !== undefined) return { email };
+  if (username !== undefined) return { username };
+  return phone === undefined ? null : { phone };
+}
+
+export interface PasswordSignInFields {
   password: string;
   ip: string | null;
   userAgent: string | null;
@@ -677,13 +705,10 @@ export async function passwordSignIn(
   // After the per-IP limit and before every per-email limit: see checkCaptcha (plan 12b).
   const captcha = await checkCaptcha(config, "password-sign-in", input.captchaToken, input.ip);
   if (captcha) return captcha;
-  // Before any lookup: the lookup and the email limit key trust a normalized address.
-  const email = normalizeEmail(input.email);
-  if (email !== null && !(await limit(config, "password:email", email, SIGN_IN_PER_EMAIL)))
-    return fail("rate_limited");
-  // Only SSO signs in an address of an enforced domain (plan 12d, spec 30 item 12).
-  const enforced = email === null ? null : await enforcedAnswer(config, email);
-  if (enforced) return enforced;
+  // Before any lookup: the lookup and its limit key trust the normalized form.
+  const by = await signInLookup(config, input);
+  if (!by.ok) return by;
+  const { where, byEmail } = by.value;
   // The length is the caller's own input, so this refusal tells nothing about an account. It bounds the CPU.
   if ([...input.password].length > PASSWORD_MAX_LENGTH) return fail("invalid_credentials");
   // The floor of every failure from here on (spec 17.4). Date.now, not the
@@ -693,25 +718,35 @@ export async function passwordSignIn(
     await legacyFloor(pw, started);
     return fail("invalid_credentials");
   };
-  const user =
-    email === null
-      ? null
-      : await config.storage.findOne("user", [{ field: "email", op: "eq", value: email }]);
+  const user = where === null ? null : await config.storage.findOne("user", where);
   const row = user
     ? await config.storage.findOne("password", [{ field: "userId", op: "eq", value: user.id }])
     : null;
   // A pending row counts as no row. The re-check below matches the proved
   // hash, so it never matches a pending row either.
-  // The read is by address, so `hasAddress` holds; the guard narrows the type.
-  if (!user || !hasAddress(user) || !row || row.hash.startsWith(PENDING_HASH_PREFIX)) {
+  if (!user || !row || row.hash.startsWith(PENDING_HASH_PREFIX)) {
     await pw.hash.verify(input.password, await pw.hash.dummy());
     return refuse();
   }
-  const checked =
-    row.hash === LEGACY_VERIFY_HASH
-      ? await legacyCheck(pw, user.email, input.password, started)
-      : await pw.hash.verify(input.password, row.hash);
+  // The old system knows a user by the address. A legacy row of a user with
+  // no address has no check: the dummy, then the failure (no importer
+  // writes such a row).
+  let checked: { ok: boolean; rehash: boolean };
+  if (row.hash !== LEGACY_VERIFY_HASH) checked = await pw.hash.verify(input.password, row.hash);
+  else if (hasAddress(user)) checked = await legacyCheck(pw, user.email, input.password, started);
+  else {
+    await pw.hash.verify(input.password, await pw.hash.dummy());
+    return refuse();
+  }
   if (!checked.ok) return refuse();
+  // A sign-in by address had the SSO check at the door, before any read.
+  // A username or a phone names its address only through the user row, so
+  // the check comes after the password: only a person who knows it learns
+  // that the account is in an enforced domain.
+  if (!byEmail) {
+    const enforced = await enforcedAnswer(config, user.email);
+    if (enforced) return enforced;
+  }
   const now = config.clock.now();
   // The hash this sign-in proved. The session is valid only while the row still holds it.
   let proved = row.hash;
@@ -759,8 +794,9 @@ export async function passwordSignIn(
   // address could sign up with their own password and sign in before the
   // address is proved. The ruling of 2026-10-15 closed it for social and
   // for the sign-up session; this closes it for the sign-in.
-  if ((pw.requireVerified || config.signUp === "invited") && !user.emailVerified) {
-    await mailVerifyAgain(config, user.email, row.id);
+  // A user with no address is proved by the proof that made it (`provedAccount`), and gets no mail.
+  if ((pw.requireVerified || config.signUp === "invited") && !provedAccount(user)) {
+    if (hasAddress(user)) await mailVerifyAgain(config, user.email, row.id);
     return fail("email_unverified");
   }
   // The second factor (plan 9f, owner decision 1b): a user with the factor on
@@ -826,6 +862,48 @@ export async function passwordSignIn(
     await sessionOpened(config, signedIn.value.session, signedIn.value.user, "password");
   }
   return signedIn;
+}
+
+/**
+ * The read of a password sign-in by its one identifier (plan 12i, spec 32
+ * item 6), after its limit. `where` is null for an input that no user can
+ * hold: a malformed address, a username that breaks the form or is
+ * reserved, or a phone that is not E.164. The caller then runs the dummy
+ * verify, so a bad form answers as an unknown account does. Only a
+ * well-formed identifier counts on its own limit, as the address did
+ * before this plan. A username with the username config off is not an
+ * input: `invalid_body`, as at the sign-up.
+ */
+async function signInLookup(
+  config: ResolvedConfig,
+  input: PasswordIdentifier,
+): Promise<Result<{ where: Where<"user">[] | null; byEmail: boolean }>> {
+  // The type holds one; a plain JavaScript caller can pass two or none.
+  if (passwordIdentifier(input) === null) return fail("invalid_body");
+  if (input.username !== undefined) {
+    if (!config.username) return fail("invalid_body");
+    const name = normalizeUsername(config, input.username);
+    if (name === null) return ok({ where: null, byEmail: false });
+    if (!(await limit(config, "password:username", name.username, SIGN_IN_PER_USERNAME)))
+      return fail("rate_limited");
+    return ok({ where: byUsername(name.username), byEmail: false });
+  }
+  if (input.phone !== undefined) {
+    // Task 4 adds the phone config. Until then no flow stores a phone, so
+    // this read finds no user that core made.
+    if (!PHONE_RE.test(input.phone)) return ok({ where: null, byEmail: false });
+    if (!(await limit(config, "password:phone", input.phone, SIGN_IN_PER_PHONE)))
+      return fail("rate_limited");
+    return ok({ where: [{ field: "phone", op: "eq", value: input.phone }], byEmail: false });
+  }
+  const email = normalizeEmail(input.email);
+  if (email === null) return ok({ where: null, byEmail: true });
+  if (!(await limit(config, "password:email", email, SIGN_IN_PER_EMAIL)))
+    return fail("rate_limited");
+  // Only SSO signs in an address of an enforced domain (plan 12d, spec 30 item 12).
+  const enforced = await enforcedAnswer(config, email);
+  if (enforced) return enforced;
+  return ok({ where: [{ field: "email", op: "eq", value: email }], byEmail: true });
 }
 
 /**
