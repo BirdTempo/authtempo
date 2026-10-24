@@ -96,6 +96,20 @@ export function issuerOf(config: ResolvedConfig): string {
   return `${config.baseURL}${config.basePath}`;
 }
 
+/** The issuer of the primary entry of `baseURL`: core's issuer outside a request. */
+export function primaryIssuer(config: ResolvedConfig): string {
+  return `${config.baseURLs[0] ?? config.baseURL}${config.basePath}`;
+}
+
+/**
+ * The entry of `baseURLs` whose issuer is `iss`, or null (plan 12i Task 18).
+ * A JWT verify takes the issuer of any entry: one key signs for all of them.
+ */
+export function entryOfIssuer(config: ResolvedConfig, iss: unknown): string | null {
+  if (typeof iss !== "string") return null;
+  return config.baseURLs.find((entry) => `${entry}${config.basePath}` === iss) ?? null;
+}
+
 /** The minting config. A route or an API call that reaches here exists only while it is on. */
 export function mintConfig(config: ResolvedConfig): ResolvedJwtMint {
   if (!config.jwtMint) throw new Error("authtempo: jwtMint is off");
@@ -419,11 +433,13 @@ export async function verifySessionJwt(
   if (d?.header.typ !== SESSION_JWT_TYPE) return null;
   const p = d.payload;
   const now = Math.floor(config.clock.now().getTime() / 1000);
-  if (p.iss !== issuerOf(config) || typeof p.sub !== "string" || typeof p.sid !== "string")
-    return null;
+  const entry = entryOfIssuer(config, p.iss);
+  if (entry === null || typeof p.sub !== "string" || typeof p.sid !== "string") return null;
   if (typeof p.exp !== "number" || p.exp <= now) return null;
   const aud: unknown[] = typeof p.aud === "string" ? [p.aud] : Array.isArray(p.aud) ? p.aud : [];
-  if (!aud.some((a) => typeof a === "string" && mint.audience.includes(a))) return null;
+  // A default audience is the entry that minted the token, as the mint wrote it.
+  const accepted = config.baseDefaults.audience ? [entry] : mint.audience;
+  if (!aud.some((a) => typeof a === "string" && accepted.includes(a))) return null;
   return p as SessionJwtClaims;
 }
 

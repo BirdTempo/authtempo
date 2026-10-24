@@ -731,9 +731,21 @@ export interface ProviderSignUp {
  * control, and it lists every refused key at construction. typetest/options.ts
  * pins both rules.
  */
+/**
+ * Better Auth's dynamic base URL (`@better-auth/core` 1.7.2
+ * `types/init-options.d.mts`, read 2026-10-14). The shim maps it to core's
+ * `baseURL` list (plan 12i Task 18): exact hosts only, and `protocol` must
+ * be `https` or `http`.
+ */
+export interface DynamicBaseURLConfig {
+  allowedHosts: string[];
+  fallback?: string | undefined;
+  protocol?: "http" | "https" | "auto" | undefined;
+}
+
 export interface BetterAuthOptions {
   appName?: string;
-  baseURL?: string;
+  baseURL?: string | DynamicBaseURLConfig;
   basePath?: string;
   secret?: string;
   /** The app secrets by version, the current first (Better Auth 1.7). Mapped to core's `secrets` (plan 12b). */

@@ -26,14 +26,14 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `basePath` | string | `"/auth"` | Starts with `/` and does not end with `/`. |
-| `baseURL` | string | required | The origin of the server that mounts `handle`: no path, no trailing slash. |
+| `baseURL` | string or string list | required | The origin of the server that mounts `handle`: no path, no trailing slash. A list holds 1 to 20 exact origins in the normal form of the URL parser, each `https:`, or `http:` on `localhost` or `127.0.0.1`, with no wildcard and no duplicate. The router picks the entry of the request's origin and answers 421 `host_not_allowed` to any other. The first entry is the primary. [Serve one deployment on several hosts](/docs/guides/base-url-list/). |
 | `secret` | string | `secrets` | Version 1 of the app secret. At least 32 characters. When it is the current version, it needs an estimate of 100 bits or more. It keys the stored codes and seals the factor secrets and the signing keys. |
 | `secrets` | list of `{ version, value }` | `[{ version: 1, value: secret }]` | The app secrets, the current version first. The current version seals and keys every new value. See [Secrets](/docs/operations/secrets/). |
 | `secrets[].version` | number | required | An integer from 1 to 999999. A row from before version 9 of the schema reads as version 1. |
 | `secrets[].value` | string | required | At least 32 characters. The first entry needs an estimate of 100 bits or more. An entry under 120 bits writes one warning line. |
-| `appName` | string | the host of `baseURL` | 1 to 80 characters with no control character. It names the app in the pages and the mail subjects. |
+| `appName` | string | the host of the first entry of `baseURL` | 1 to 80 characters with no control character. It names the app in the pages and the mail subjects. |
 | `trustedOrigins` | string list | required | Exact origins and app schemes. A `*` is refused. |
-| `appURL` | string | `baseURL` | An exact origin that is `baseURL` or a member of `trustedOrigins`. Sign-ins land here. |
+| `appURL` | string | the picked entry of `baseURL` | An exact origin that is the first entry of `baseURL` or a member of `trustedOrigins`. Sign-ins land here. |
 | `cookie` | object | `{ sameSite: "Lax" }` | See `cookie.sameSite`. |
 | `storage` | `StorageAdapter` | required | An adapter that passes the conformance suite. |
 | `mail` | `MailPort` | required | `{ send(message) }`. Core calls it once per mail. |
@@ -83,7 +83,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `magicLink.ttlMinutes` | number | 15 | The life of a link in minutes. |
-| `magicLink.linkBuilder` | function of the token and `next` | `<baseURL><basePath>/magic-link/verify?token=<token>` | The link in the mail. It must open the verify route with the token. |
+| `magicLink.linkBuilder` | function of the token and `next` | `<baseURL><basePath>/magic-link/verify?token=<token>`, on the picked entry | The link in the mail. It must open the verify route with the token. |
 | `magicLink.confirmPage` | function of `ConfirmPageInput` | `defaultConfirmPage` | Answers the markup of the confirm page. |
 
 ## Social
@@ -117,7 +117,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `social.apple.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
 | `social.github.clientId` | string | required | The client id of the GitHub OAuth app. |
 | `social.github.clientSecret` | string | required | The client secret of the GitHub OAuth app. |
-| `social.github.redirectURI` | string | `<baseURL><basePath>/social/github/callback` | The callback URL that the provider has registered, for an app that cannot register the default. An `https:` URL in the normal form, on the origin of `baseURL`, with a path under `basePath`, and no query or fragment. Not the path of a route of core, nor of another provider. Core sends it as `redirect_uri` and serves its path as the callback. Each preset and list entry takes this key. |
+| `social.github.redirectURI` | string | `<baseURL><basePath>/social/github/callback` | The callback URL that the provider has registered, for an app that cannot register the default. An `https:` URL in the normal form, on the origin of an entry of `baseURL`, with a path under `basePath`, and no query or fragment. Not the path of a route of core, nor of another provider. Core sends its path on the request's entry as `redirect_uri` and serves its path as the callback. Each preset and list entry takes this key. |
 | `social.linkedin.clientId` | string | required | The client id of the LinkedIn app. |
 | `social.linkedin.clientSecret` | string | required | The client secret of the LinkedIn app. |
 | `social.linkedin.redirectURI` | string | the default callback | The redirect override. See `social.github.redirectURI`. |
@@ -174,7 +174,7 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | --- | --- | --- | --- |
 | `passkey.rpID` | string | required | The registrable domain that the passkeys bind to. Write it in lowercase ASCII, with an internationalized domain in punycode, such as `xn--bcher-kva.example`. `createAuth` refuses another form and names the punycode form. |
 | `passkey.rpName` | string | required | The name that the device shows. Not empty. |
-| `passkey.origins` | string list | required | Exact origins on `rpID`, not empty. Each must be `baseURL` or in `trustedOrigins`. |
+| `passkey.origins` | string list | required | Exact origins on `rpID`, not empty. Each must be an entry of `baseURL` or in `trustedOrigins`. |
 | `passkey.relatedOrigins` | boolean | `false` | With `true`, `auth.wellKnown` serves `/.well-known/webauthn` on the `rpID` host, and `origins` may hold at most five origins outside `rpID` (WebAuthn Level 3). |
 | `passkey.hints` | object | none | The hints of each ceremony. |
 | `passkey.hints.register` | hint list | none | `security-key`, `client-device`, or `hybrid`, each once, in order of preference, for the registration. |
@@ -294,7 +294,7 @@ Another key of `jwtMint` is refused.
 | Key | Type | Default | Rule |
 | --- | --- | --- | --- |
 | `jwtMint.alg` | `"EdDSA"`, `"ES256"`, or `"RS256"` | `"EdDSA"` | Every JWT of the deployment signs with this alg. A change retires the signing key at the next signature. |
-| `jwtMint.audience` | string or string list | `[baseURL]` | 1 to 10 strings of 1 to 2048 characters with no control character, and none an `oauth.resources` entry. |
+| `jwtMint.audience` | string or string list | `[baseURL]`, the picked entry | 1 to 10 strings of 1 to 2048 characters with no control character, and none an `oauth.resources` entry. |
 | `jwtMint.ttlMinutes` | number | 15 | An integer from 1 to 60. |
 | `jwtMint.claims` | function of the user and the session | none | Answers an object of claims. Core sets the reserved claims itself. |
 | `jwtMint.rotateEvery` | number of days | none: no timer | A whole number from 1 to 365. The first signature with a key this old makes a new key. A JWKS read never rotates. |

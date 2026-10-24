@@ -121,6 +121,9 @@ export const ERRORS = {
   phone_invalid: 400,
   phone_region: 400,
   sms_unavailable: 503,
+  // plan 12i Task 18: the request's host is not an entry of the baseURL list
+  // (spec 32 item 18). RFC 9110 section 15.5.20: 421 is the misdirected request.
+  host_not_allowed: 421,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

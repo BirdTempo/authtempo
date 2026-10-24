@@ -19,7 +19,7 @@ const FS_MODULE = "node:fs";
  *
  * The verdict is `ok`, or one failure text, by three rules:
  * 1. A code is in the entry's `codes` or `oauthCodes`, or in `ROUTER_CODES`,
- *    with the status of its table. A redirect carries its code in `Location`.
+ *    or is `HOST_CODE` (plan 12i Task 18), with the status of its table. A redirect carries its code in `Location`.
  * 2. A 2xx JSON body parses under the strict answer schema of the contract.
  * 3. The content type fits a kind of the contract: JSON for `json` and
  *    `metadata`, HTML for `html`, a redirect with `Location` for `redirect`.
@@ -55,7 +55,7 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   const { ERROR_SCHEMAS } = await import("../../src/openapi/responses.js");
   const { answerKinds } = await import("../../src/http/contract/types.js");
   const { routeKeyOf } = await import("../../src/http/route-key.js");
-  const { ROUTER_CODES, ROUTES } = await import("../../src/http/route-list.js");
+  const { HOST_CODE, ROUTER_CODES, ROUTES } = await import("../../src/http/route-list.js");
   type RouteContract = import("../../src/http/contract/types.js").RouteContract;
   type AnswerKind = RouteContract["answer"];
   type RouteKey = import("../../src/http/route-list.js").RouteKey;
@@ -72,7 +72,8 @@ vi.mock("../../src/http/router.js", async (importOriginal) => {
   // RouteEntry, not the frozen literals of ROUTES: a read of `auth` then takes any AuthForm.
   const ENTRIES = new Map<string, RouteEntry>(ROUTES.map((r) => [`${r.method} ${r.path}`, r]));
   const CONTRACT: Record<string, RouteContract> = ROUTE_CONTRACT;
-  const ROUTER = new Set<string>(ROUTER_CODES);
+  // The host code of a baseURL list: any route answers it, and no entry declares it.
+  const ROUTER = new Set<string>([...ROUTER_CODES, HOST_CODE]);
   /**
    * The keys of an error body beside `error`, for each code that has one
    * (ruling 7 of plan 12h). `message` is on hook_refused, and on the

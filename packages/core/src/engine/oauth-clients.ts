@@ -436,7 +436,7 @@ function readClientMetadata(
   if (!absent(m.jwks) && !jwks) return meta("jwks");
   let jwksUri: string | null = null;
   if (!absent(m.jwks_uri)) {
-    if (typeof m.jwks_uri !== "string" || !validCimdUrl(m.jwks_uri, config.baseURL))
+    if (typeof m.jwks_uri !== "string" || !validCimdUrl(m.jwks_uri, config.baseURLs))
       return meta("jwks_uri");
     // With no fetch, core can never read the set, and the client could never authenticate.
     if (!oauth.fetch) return meta("jwks_uri");
@@ -455,7 +455,7 @@ function readClientMetadata(
   let backchannelLogoutUri: string | null = null;
   if (!absent(m.backchannel_logout_uri)) {
     const uri = m.backchannel_logout_uri;
-    const valid = validLogoutUri(uri, config.baseURL) && oauth.fetch !== null;
+    const valid = validLogoutUri(uri, config.baseURLs) && oauth.fetch !== null;
     // A document is a claim of its host alone. Its logout URI must be on that
     // host, so a document cannot make core post to a third party (ruling 24).
     if (cimd && !(valid && sameHost(uri, m.client_id))) dropped.push("backchannel_logout_uri");
@@ -634,7 +634,7 @@ export async function registerClient(
  * supplier's fetch may be the only guard: on Node or Bun a plain `fetch`
  * reaches internal hosts.
  */
-export function validCimdUrl(value: string, baseURL: string): boolean {
+export function validCimdUrl(value: string, baseURL: string | readonly string[]): boolean {
   if (value.length > URI_MAX || value.includes("#") || hasControlChar(value)) return false;
   if (/\/\.\.?(\/|$)/.test(value)) return false;
   let u: URL;
@@ -659,7 +659,10 @@ export function validCimdUrl(value: string, baseURL: string): boolean {
  * allows http for a confidential client; core refuses it, because the token
  * ends a person's session.
  */
-export function validLogoutUri(value: unknown, baseURL: string): value is string {
+export function validLogoutUri(
+  value: unknown,
+  baseURL: string | readonly string[],
+): value is string {
   if (typeof value !== "string" || value.length > URI_MAX) return false;
   if (value.includes("#") || hasControlChar(value)) return false;
   let u: URL;
@@ -829,7 +832,7 @@ export async function fetchClientJwks(
   }
   const oauth = config.oauth;
   const url = client.jwksUri;
-  if (!oauth || url === null || !validCimdUrl(url, config.baseURL)) return null;
+  if (!oauth || url === null || !validCimdUrl(url, config.baseURLs)) return null;
   const now = config.clock.now().getTime();
   const kept = oauth.jwksCache.get(url);
   const live = kept && kept.until > now ? kept : null;
@@ -998,6 +1001,6 @@ export async function findClient(
     }
     return row;
   }
-  if (!oauth.cimd || !validCimdUrl(clientId, config.baseURL)) return null;
+  if (!oauth.cimd || !validCimdUrl(clientId, config.baseURLs)) return null;
   return cimdClient(config, oauth, clientId, now);
 }

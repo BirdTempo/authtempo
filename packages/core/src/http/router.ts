@@ -1,5 +1,5 @@
 import { CAPTCHA_HEADER } from "../captcha.js";
-import type { ResolvedConfig } from "../config.js";
+import { atBase, pickBase, type ResolvedConfig } from "../config.js";
 import { peekSession, sessionCapMs } from "../engine/sessions.js";
 import { ERRORS } from "../errors.js";
 import { type Outcome, SIGN_IN_ROUTES, validateEvent } from "../observe/events.js";
@@ -9,7 +9,7 @@ import { impersonationRefusal } from "./impersonation-rules.js";
 import { ANSWER_CODE, json } from "./json.js";
 import { REDIRECT_ERROR } from "./redirect.js";
 import { PARAM_SEGMENT_RE } from "./route-key.js";
-import type { RouteKey, RouterCode } from "./route-list.js";
+import { HOST_CODE, type RouteKey, type RouterCode } from "./route-list.js";
 
 export interface RouteContext {
   request: Request;
@@ -118,8 +118,17 @@ export function fetchMetadataRefuses(request: Request, originTrusted: boolean): 
 }
 
 /** One answer of the router itself (plan 11g): the code with its status from `ERRORS`. */
-function routerError(code: RouterCode): Response {
+function routerError(code: RouterCode | typeof HOST_CODE): Response {
   return json({ error: code }, ERRORS[code]);
+}
+
+/**
+ * The config of the request's host (plan 12i Task 18), or null for a host
+ * outside a `baseURL` list. Only `request.url` takes part, never a header.
+ */
+function hostConfig(config: ResolvedConfig, url: URL): ResolvedConfig | null {
+  const entry = pickBase(config, url);
+  return entry === null ? null : atBase(config, entry);
 }
 
 /**
@@ -311,6 +320,9 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * A path with no core route gets both rules. So a package that serves its
  * own POST paths beside core (the Better Auth shim) checks them as core
  * does, through `crossSiteRefusal` (plan 12a fix wave, final review F1).
+ * A host outside a `baseURL` list gets 421 `host_not_allowed` for each
+ * method, before the rules (plan 12i Task 18). The Origin rule reads the
+ * entry of the request's host.
  */
 export function createPostGate(
   config: ResolvedConfig,
@@ -318,12 +330,15 @@ export function createPostGate(
 ): (request: Request) => Response | null {
   const matchRoute = createRouteMatcher(config, routes);
   return (request) => {
+    const url = new URL(request.url);
+    const host = hostConfig(config, url);
+    if (host === null) return routerError(HOST_CODE);
     if (SAFE_METHODS.has(request.method)) return null;
-    const route = matchRoute(request.method, new URL(request.url).pathname)?.route;
+    const route = matchRoute(request.method, url.pathname)?.route;
     if (route?.allowCrossSiteForm) return null;
     const origin = request.headers.get("origin");
     if (route?.clientOrigin && origin !== null) return null;
-    const trusted = origin !== null && originTrusted(config, origin);
+    const trusted = origin !== null && originTrusted(host, origin);
     if (origin !== null && !trusted) return routerError("origin_not_trusted");
     if (fetchMetadataRefuses(request, trusted)) return routerError("origin_not_trusted");
     return null;
@@ -345,7 +360,9 @@ export function createPostGate(
  * rule covers `POST`, `PUT`, `PATCH`, and `DELETE`: a request whose Origin
  * header is present and not trusted gets 403 before any handler runs. One
  * with no Origin is a non-browser client and passes. One that
- * `fetchMetadataRefuses` names gets the same 403 (plan 12b). A route with `clientOrigin` checks a
+ * `fetchMetadataRefuses` names gets the same 403 (plan 12b). A host outside a
+ * `baseURL` list gets 421 `host_not_allowed` before any of this (plan 12i
+ * Task 18); the request's config holds the entry of its host. A route with `clientOrigin` checks a
  * foreign Origin itself, and a route with `preflight` answers a foreign
  * preflight itself (plan 11d). An impersonation session gets 403
  * `impersonation_session` at each route of `IMPERSONATION_REFUSED`, after
@@ -381,8 +398,10 @@ export function createRouter(
     try {
       ip = config.clientIp(request);
     } catch {}
+    // The entry of the request's host (plan 12i Task 18). A host outside the list runs no handler.
+    const host = hostConfig(config, url);
     const scoped: ResolvedConfig = {
-      ...config,
+      ...(host ?? config),
       observe: config.observe.scope({
         traceId,
         spanId: minted.spanId,
@@ -392,7 +411,10 @@ export function createRouter(
         userAgent: request.headers.get("user-agent"),
       }),
     };
-    const res = await answer(scoped, request, url, match, traceId);
+    const res =
+      host === null
+        ? withTrace(routerError(HOST_CODE), traceId)
+        : await answer(scoped, request, url, match, traceId);
     const { outcome, code } = outcomeOf(res);
     scoped.observe.emit({
       name: "request",
@@ -430,7 +452,7 @@ export function createRouter(
     traceId: string,
   ): Promise<Response> {
     const origin = request.headers.get("origin");
-    const trusted = origin !== null && originTrusted(config, origin);
+    const trusted = origin !== null && originTrusted(scoped, origin);
     if (request.method === "OPTIONS") {
       // A browser on another origin asks before a credentialed request. Only
       // a trusted origin gets an answer it can use.

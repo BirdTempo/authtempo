@@ -22,7 +22,14 @@ import type {
   VerificationRow,
 } from "../schema.js";
 import { hasAddress, provedAccount } from "./address.js";
-import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
+import {
+  entryOfIssuer,
+  issuerOf,
+  mintConfig,
+  primaryIssuer,
+  signToken,
+  verifyLocal,
+} from "./jwt.js";
 import { consentCovers, type OAuthCodeData } from "./oauth-authorize.js";
 import type { AuthedClient } from "./oauth-client-auth.js";
 import { clientAccessOf, type OAuthClientAccess } from "./oauth-credentials.js";
@@ -118,6 +125,8 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
   const dpopJkt = d.dpopJkt === undefined ? null : nullable(d.dpopJkt);
   // A code of a core before plan 12e Task 12 has no authTime: its ID token has no auth_time.
   const authTime = d.authTime ?? null;
+  // A code of a core before plan 12i Task 18 has no issuer: the primary minted it.
+  const issuer = d.issuer === undefined ? null : nullable(d.issuer);
   if (
     typeof clientId !== "string" ||
     typeof redirectUri !== "string" ||
@@ -128,6 +137,7 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
     typeof sessionId !== "string" ||
     nonce === undefined ||
     dpopJkt === undefined ||
+    issuer === undefined ||
     (authTime !== null && !Number.isSafeInteger(authTime))
   )
     return null;
@@ -142,6 +152,7 @@ function codeData(row: VerificationRow): OAuthCodeData | null {
     sessionId,
     dpopJkt,
     authTime: authTime as number | null,
+    issuer,
   };
 }
 
@@ -423,6 +434,9 @@ export async function exchangeCode(
   }
   const data = codeData(consumed.value);
   if (!data || data.clientId !== client.id || data.redirectUri !== input.redirectUri)
+    return oauthFail("invalid_grant");
+  // RFC 8414: a code of one entry of baseURL is no grant at another (plan 12i Task 18).
+  if ((data.issuer ?? primaryIssuer(config)) !== issuerOf(config))
     return oauthFail("invalid_grant");
   // A code with no challenge is a confidential client's (`pkceRequired`).
   // A metadata document can change its method between the authorize step
@@ -714,7 +728,11 @@ export async function resolveAccessToken(
   if (!d || d.header.typ !== ACCESS_TOKEN_TYPE) return null;
   const p = d.payload;
   const now = Math.floor(config.clock.now().getTime() / 1000);
-  if (p.iss !== issuerOf(config) || typeof p.aud !== "string" || !oauth.resources.includes(p.aud))
+  if (
+    entryOfIssuer(config, p.iss) === null ||
+    typeof p.aud !== "string" ||
+    !oauth.resources.includes(p.aud)
+  )
     return null;
   if (typeof p.exp !== "number" || p.exp <= now) return null;
   // The ban window reads the issue time (ruling 28). Core writes iat in each access token.

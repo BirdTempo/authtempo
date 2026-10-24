@@ -252,6 +252,22 @@ multipart, `text/plain`, or no content type) needs `Sec-Fetch-Site` to be
 passes. A refusal answers 403 `origin_not_trusted`. Apple's callback skips
 both rules: Apple posts it from its own site.
 
+## A list of hosts
+
+`baseURL` takes a list of 1 to 20 exact origins (plan 12i Task 18). Each is
+`https:`, or `http:` on `localhost` or `127.0.0.1`, in the normal form of
+the URL parser. The router picks the entry equal to the origin of
+`request.url`, and answers 421 `host_not_allowed` to any other host before
+any handler. Core never reads `x-forwarded-host` or `forwarded`.
+
+The issuer, the metadata documents, the mail links, the social callback,
+the failure redirect, the default `appURL`, the `Origin` check, and the
+default `jwtMint.audience` follow the picked entry. A session JWT of any
+entry verifies on each entry. An OAuth code or a held authorize request
+answers `invalid_grant`, or is not found, on another entry. Outside a
+request, core uses the first entry. A `baseURL` string serves any host,
+as before.
+
 ## Handoff for native and desktop apps
 
 Set `handoff: { schemes: ["consumera://"] }`. The app makes a PKCE

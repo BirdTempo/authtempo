@@ -79,7 +79,8 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       );
     return res;
   };
-  const failed = (code: string) => authErrorRedirect(config, code);
+  // The appURL of the request's entry of baseURL (plan 12i Task 18).
+  const failed = (ctx: RouteContext, code: string) => authErrorRedirect(ctx.config, code);
   return [
     {
       method: "POST",
@@ -212,12 +213,12 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       key: "GET /totp/challenge",
       async handler(ctx) {
         const challenge = ctx.url.searchParams.get("challenge") ?? "";
-        if (!TWO_FACTOR_TOKEN_RE.test(challenge)) return failed("invalid_token");
+        if (!TWO_FACTOR_TOKEN_RE.test(challenge)) return failed(ctx, "invalid_token");
         const view = await challengeView(ctx.config, {
           challenge,
           trustToken: readCookie(ctx.request, totp.trustCookieName) ?? undefined,
         });
-        if (!view.ok) return failed(view.code);
+        if (!view.ok) return failed(ctx, view.code);
         const asked = ctx.url.searchParams.get("method");
         const wanted =
           ctx.url.searchParams.get("backup") === "1"
@@ -258,12 +259,12 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
       key: "POST /totp/challenge",
       async handler(ctx) {
         const body = await readBody(ctx.request, pageBody);
-        if (!body.ok) return failed("invalid_token");
+        if (!body.ok) return failed(ctx, "invalid_token");
         const { challenge, code, backupCode, emailCode, action } = body.value;
         const page = `${ctx.config.baseURL}${challengePath}?challenge=${encodeURIComponent(challenge)}`;
         if (action === "send-email") {
           const sent = await sendSecondFactorEmail(ctx.config, { challenge });
-          return sent.ok ? redirect(`${page}&method=email`) : failed(sent.code);
+          return sent.ok ? redirect(`${page}&method=email`) : failed(ctx, sent.code);
         }
         const r = await verifyTwoFactor(ctx.config, {
           challenge,
@@ -284,7 +285,7 @@ export function totpRoutes(config: ResolvedConfig): Route[] {
             `${page}${backupCode !== undefined ? "&backup=1" : emailCode !== undefined ? "&method=email" : ""}&error=${CHALLENGE_PAGE_ERROR}`,
             CHALLENGE_PAGE_ERROR,
           );
-        return failed(r.code);
+        return failed(ctx, r.code);
       },
     },
   ];

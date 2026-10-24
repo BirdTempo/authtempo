@@ -32,7 +32,7 @@ import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { defaultPasswordVerifyPage, type ResetPageInput } from "../password-pages.js";
 import { authErrorRedirect, errorRedirect, redirect, resolveNext } from "../redirect.js";
-import type { Route } from "../router.js";
+import type { Route, RouteContext } from "../router.js";
 import {
   challengePageUrl,
   sessionCookieFor,
@@ -58,7 +58,8 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
   const pw = config.password;
   const verifyPath = `${config.basePath}/password/verify`;
   const resetPath = `${config.basePath}/password/reset`;
-  const failed = (code: string) => authErrorRedirect(config, code);
+  // The appURL of the request's entry of baseURL (plan 12i Task 18).
+  const failed = (ctx: RouteContext, code: string) => authErrorRedirect(ctx.config, code);
   const page = (html: string) =>
     new Response(html, { status: 200, headers: pageHeaders(config, noScriptPagePolicy(config)) });
   const cookieFor = (token: string) => sessionCookieFor(config, token);
@@ -124,7 +125,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       key: "GET /password/verify",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
-        if (!PASSWORD_VERIFY_TOKEN_RE.test(token)) return failed("invalid_token");
+        if (!PASSWORD_VERIFY_TOKEN_RE.test(token)) return failed(ctx, "invalid_token");
         return page(
           defaultPasswordVerifyPage({ action: verifyPath, token, appName: ctx.config.appName }),
         );
@@ -138,13 +139,14 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, tokenBody);
         // A form with no token is a client bug. The person sees the page for a bad link.
-        if (!body.ok) return jsonCaller ? respond(fail("invalid_token")) : failed("invalid_token");
+        if (!body.ok)
+          return jsonCaller ? respond(fail("invalid_token")) : failed(ctx, "invalid_token");
         const r = await verifyPasswordEmail(ctx.config, {
           token: body.value.token,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
         });
-        if (!r.ok) return jsonCaller ? respond(r) : failed(r.code);
+        if (!r.ok) return jsonCaller ? respond(r) : failed(ctx, r.code);
         const res = jsonCaller ? json({ verified: true }) : redirect(resolveNext(ctx.config, "/"));
         if (!r.value.signedIn) return res;
         // The confirm of a password sign-up opens its session (plan 12b).
@@ -189,7 +191,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       key: "GET /password/reset",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
-        if (!PASSWORD_RESET_TOKEN_RE.test(token)) return failed("invalid_token");
+        if (!PASSWORD_RESET_TOKEN_RE.test(token)) return failed(ctx, "invalid_token");
         const raw = ctx.url.searchParams.get("error");
         const error = isPageError(raw) ? raw : null;
         return page(
@@ -211,7 +213,8 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
       async handler(ctx) {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, resetBody);
-        if (!body.ok) return jsonCaller ? respond(fail("invalid_token")) : failed("invalid_token");
+        if (!body.ok)
+          return jsonCaller ? respond(fail("invalid_token")) : failed(ctx, "invalid_token");
         const r = await resetPassword(ctx.config, {
           token: body.value.token,
           password: body.value.password,
@@ -227,7 +230,7 @@ export function passwordRoutes(config: ResolvedConfig): Route[] {
               `${ctx.config.baseURL}${resetPath}?token=${encodeURIComponent(body.value.token)}&error=${r.code}`,
               r.code,
             );
-          return failed(r.code);
+          return failed(ctx, r.code);
         }
         // The factor is on (plan 12c, owner decision 1 of 2026-10-14): no
         // cookie. JSON answers the challenge; a form goes to the challenge

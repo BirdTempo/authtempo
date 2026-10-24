@@ -1,11 +1,13 @@
-import type { ResolvedConfig } from "../config.js";
+import { atBase, pickBase, type ResolvedConfig } from "../config.js";
 import { issuerOf, mintConfig } from "../engine/jwt.js";
 import { AUTH_METHODS, SUBJECT_TYPES, tokenGrantTypes } from "../engine/oauth-clients.js";
 import { oauthOf } from "../engine/oauth-result.js";
 import { ID_TOKEN_CLAIMS, SCOPE_CLAIMS } from "../engine/oauth-token.js";
+import { ERRORS } from "../errors.js";
 import { FOREIGN_ALGS } from "../primitives/foreign-jwk.js";
 import { onDomainTree } from "../primitives/host.js";
 import { json } from "./json.js";
+import { HOST_CODE } from "./route-list.js";
 
 /**
  * The metadata documents (plan 9g, spec 8.13 item 5). RFC 8414 and OIDC
@@ -155,15 +157,24 @@ function resourceFor(config: ResolvedConfig, origin: string, rest: string): stri
   );
 }
 
-/** `auth.wellKnown`: mount it for the paths that start with `/.well-known/` at the origin root. */
+/**
+ * `auth.wellKnown`: mount it for the paths that start with `/.well-known/` at
+ * the origin root. The metadata documents name the issuer of the request's
+ * entry of a `baseURL` list (plan 12i Task 18). A host outside the list gets
+ * 421 `host_not_allowed`. The related origins document comes first: it names
+ * no issuer, and the `rpID` host need not be an entry.
+ */
 export function createWellKnownHandler(
-  config: ResolvedConfig,
+  base: ResolvedConfig,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
     const url = new URL(request.url);
     const path = url.pathname;
     if (path === WEBAUTHN_PATH && request.method === "GET")
-      return relatedOriginsAnswer(config, request) ?? json({ error: "not_found" }, 404);
+      return relatedOriginsAnswer(base, request) ?? json({ error: "not_found" }, 404);
+    const entry = pickBase(base, url);
+    if (entry === null) return json({ error: HOST_CODE }, ERRORS[HOST_CODE]);
+    const config = atBase(base, entry);
     if (!config.oauth) return json({ error: "not_found" }, 404);
     let body: Record<string, unknown> | null = null;
     if (

@@ -591,7 +591,8 @@ describe("the device grant (plan 12e Task 14, RFC 8628)", () => {
       { field: "purpose", op: "eq", value: "oauth-request" },
     ]);
     expect(rows.map((r) => r.data)).toEqual([
-      { params: "device=1", userId: null, minAuthTime: null },
+      // The issuer of the entry that holds the request (plan 12i Task 18).
+      { params: "device=1", userId: null, minAuthTime: null, issuer: ISSUER },
     ]);
     expect(JSON.stringify(rows)).not.toContain(started.user_code.replace("-", ""));
     const back = `${ISSUER}/oauth/authorize?request_id=${requestId}`;

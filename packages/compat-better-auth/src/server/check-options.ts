@@ -783,9 +783,95 @@ const apple = object({
   ),
 });
 
+/**
+ * Better Auth's `DynamicBaseURLConfig` (plan 12i Task 18, spec 32 item 18).
+ * Core picks an entry by the exact origin of `request.url` and reads no
+ * proxy header. Each refusal names why a looser form would give a host of
+ * the issuer to someone else.
+ */
+const dynamicBaseURL: Rule = (v, p, out) => {
+  if (typeof v === "string") return;
+  object({
+    allowedHosts: (hosts, hp, o) => {
+      stringList(hosts, hp, o);
+      if (!Array.isArray(hosts)) return;
+      if (hosts.length === 0) refuse(o, hp, "expected at least one host");
+      hosts.forEach((h, i) => {
+        if (typeof h !== "string") return;
+        if (h.includes("*"))
+          refuse(
+            o,
+            `${hp}[${i}]`,
+            "a wildcard is refused: any customer of a shared platform can own a matching host and then holds a host of the issuer; list each exact host",
+          );
+        else if (!exactHost(h))
+          refuse(o, `${hp}[${i}]`, "expected an exact host, with no scheme, path, or user");
+      });
+    },
+    fallback: string,
+    protocol: (proto, pp, o) => {
+      if (proto === "auto")
+        refuse(
+          o,
+          pp,
+          'auto reads x-forwarded-proto, which a client sets; core reads no proxy header, so set "https" (or "http" on localhost)',
+        );
+      else if (proto !== "https" && proto !== "http") refuse(o, pp, 'expected "https" or "http"');
+    },
+  })(v, p, out);
+  if (!plainObject(v)) return;
+  // Better Auth's default protocol is auto, which reads a proxy header.
+  if (v.protocol === undefined)
+    refuse(
+      out,
+      `${p}.protocol`,
+      'required: Better Auth\'s default auto reads x-forwarded-proto, which a client sets; set "https" (or "http" on localhost)',
+    );
+  if (v.allowedHosts === undefined) refuse(out, `${p}.allowedHosts`, "required");
+  const origins = dynamicOrigins(v);
+  if (typeof v.fallback === "string" && origins !== null && !origins.includes(v.fallback))
+    refuse(
+      out,
+      `${p}.fallback`,
+      "must be one origin of allowedHosts: core answers 421 to any other host and builds no URL from it",
+    );
+};
+
+/** A host with an optional port and nothing else: `new URL` keeps it as the host. */
+function exactHost(h: string): boolean {
+  try {
+    const u = new URL(`https://${h}`);
+    return (
+      u.host === h.toLowerCase() &&
+      u.pathname === "/" &&
+      !u.username &&
+      !u.password &&
+      !u.search &&
+      !u.hash
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The origins of a dynamic base URL, `<protocol>://<host>` per host, or null
+ * while a part is missing. `map-options.ts` reads it too: one rule.
+ */
+export function dynamicOrigins(v: Record<string, unknown>): string[] | null {
+  const { allowedHosts, protocol } = v;
+  if (!Array.isArray(allowedHosts) || (protocol !== "https" && protocol !== "http")) return null;
+  const hosts: string[] = [];
+  for (const h of allowedHosts) {
+    if (typeof h !== "string" || h.includes("*") || !exactHost(h)) return null;
+    hosts.push(h);
+  }
+  return hosts.map((h) => new URL(`${protocol}://${h}`).origin);
+}
+
 const TOP: Record<string, Rule> = {
   appName: string,
-  baseURL: string,
+  baseURL: dynamicBaseURL,
   basePath: string,
   secret: string,
   // Plan 12b: Better Auth's versioned secrets. Core reads a row of before

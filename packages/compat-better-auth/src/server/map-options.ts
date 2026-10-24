@@ -23,7 +23,13 @@ import {
   type User,
 } from "../types.js";
 import { IMPERSONATION_SECONDS, platformRoleOf } from "./admin.js";
-import { appSchemes, DEFAULT_ROLE_RANKS, pluginOf, signUpClosed } from "./check-options.js";
+import {
+  appSchemes,
+  DEFAULT_ROLE_RANKS,
+  dynamicOrigins,
+  pluginOf,
+  signUpClosed,
+} from "./check-options.js";
 import { BETTER_AUTH_CLOCK_SKEW_MS, DEFAULT_TOKEN_PREFIX } from "./check-sso.js";
 import { compatHooks } from "./hooks.js";
 import { compatAccountMail, compatMail, INVITATION_LINK_PREFIX, otpMail } from "./mail.js";
@@ -430,11 +436,25 @@ export function ssoOf(options: BetterAuthOptions): MappedSso | null {
   };
 }
 
+/**
+ * The origins of a dynamic base URL, `fallback` first when it is one of
+ * them (plan 12i Task 18): core's first entry is its primary. Empty for a
+ * string. checkOptions refused every other form.
+ */
+function baseOrigins(baseURL: BetterAuthOptions["baseURL"]): string[] {
+  if (typeof baseURL !== "object") return [];
+  const origins = dynamicOrigins({ ...baseURL }) ?? [];
+  const first = baseURL.fallback;
+  return first === undefined ? origins : [first, ...origins.filter((o) => o !== first)];
+}
+
 /** Runs after checkOptions found no refusal, so every value here has its checked type. */
 export function mapOptions(options: BetterAuthOptions): Mapped {
-  const url = new URL(options.baseURL ?? "");
+  const origins = baseOrigins(options.baseURL);
+  const url = new URL(typeof options.baseURL === "string" ? options.baseURL : (origins[0] ?? ""));
   const path = url.pathname.replace(/\/+$/, "");
   const basePath = options.basePath ?? (path || BETTER_AUTH_DEFAULTS.basePath);
+  // The primary: core builds from it outside a request (plan 12i Task 18).
   const origin = url.origin;
   const database = options.database as CompatDatabase;
   const plugins = new Set(
@@ -461,7 +481,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   const ep = options.emailAndPassword;
   const deleteUser = options.user?.deleteUser;
   const config: AuthConfig = {
-    baseURL: origin,
+    baseURL: typeof options.baseURL === "string" ? origin : origins,
     basePath,
     // Plan 12b: secrets map one entry for one entry. With neither key, core's
     // own refusal of an empty secret names the problem.

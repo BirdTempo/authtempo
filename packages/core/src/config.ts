@@ -215,8 +215,15 @@ export interface ResolvedAccount {
 export interface AuthConfig {
   /** Path prefix for the auth routes. Default "/auth". */
   basePath?: string;
-  /** Origin of the server that mounts `handle`, no path, no trailing slash. */
-  baseURL: string;
+  /**
+   * Origin of the server that mounts `handle`, no path, no trailing slash.
+   * A list (plan 12i Task 18) holds 1 to 20 exact origins, each `https:`, or
+   * `http:` on `localhost` or `127.0.0.1`. The router then picks the entry
+   * equal to the origin of `request.url` and answers 421 `host_not_allowed`
+   * to any other host. It never reads `x-forwarded-host` or `forwarded`.
+   * The first entry is the primary: core uses it outside a request.
+   */
+  baseURL: string | string[];
   /**
    * The app secret, read as version 1 (plan 12b). At least 32 characters and
    * an estimate of 100 bits or more: use 32 random bytes, for example
@@ -1232,7 +1239,17 @@ export interface ResolvedScim {
 
 export interface ResolvedConfig {
   basePath: string;
+  /** The entry of `baseURLs` that the request picked, or the primary outside a request (plan 12i Task 18). */
   baseURL: string;
+  /** Every origin of `baseURL`, the primary first. One entry for a `baseURL` string. */
+  baseURLs: readonly string[];
+  /**
+   * True for a `baseURL` list: the router and `auth.wellKnown` answer 421 to
+   * a host outside it. False for a string, which answers as before plan 12i.
+   */
+  hostPick: boolean;
+  /** The values that core builds from the picked entry because the app gave none (`atBase`). */
+  baseDefaults: BaseDefaults;
   appName: string;
   /** The app secrets by version (plan 12b). No code reads one secret string: each read names its version. */
   keyring: Keyring;
@@ -1456,21 +1473,144 @@ export class ConfigError extends Error {
   }
 }
 
+/** The values that follow the picked entry of `baseURL` because the app gave none (plan 12i Task 18). */
+export interface BaseDefaults {
+  /** No `appURL`: the default is the picked entry. */
+  appURL: boolean;
+  /** No `magicLink.linkBuilder`: the link is on the picked entry. */
+  linkBuilder: boolean;
+  /** No `appURL` and no `organizations.invitationLinkBuilder`: the link is on the picked entry. */
+  invitationLink: boolean;
+  /** No `jwtMint.audience`: a session JWT names the picked entry. */
+  audience: boolean;
+}
+
+/** The most entries of a `baseURL` list (spec 32 item 18). */
+const BASE_URLS_MAX = 20;
+
+/** The hosts on which a `baseURL` list takes `http:`: a local run only. */
+const HTTP_BASE_HOSTS: ReadonlySet<string> = new Set(["localhost", "127.0.0.1"]);
+
+/** One origin of `baseURL`, with the rules of a string `baseURL` before plan 12i. */
+function checkBaseOrigin(at: string, value: string): URL {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new ConfigError(`${at} must be an absolute URL`);
+  }
+  if (url.pathname !== "/" || value.endsWith("/") || url.search || url.hash)
+    throw new ConfigError(`${at} must be an origin with no path and no trailing slash`);
+  // The public document of `GET /openapi.json` names this origin, so a password here would leak.
+  if (url.username || url.password)
+    throw new ConfigError(`${at} must have no user name and no password`);
+  return url;
+}
+
+/**
+ * The origins of `baseURL`, the primary first (plan 12i Task 18). A string
+ * keeps the rules of before. A list is 1 to 20 exact origins in the normal
+ * form of the URL parser, so the router can compare `request.url` by string.
+ * A wildcard is refused: on a shared platform, any customer can own a
+ * matching host and then holds a host of the issuer.
+ */
+function resolveBaseURLs(input: unknown): readonly [string, ...string[]] {
+  if (typeof input === "string") {
+    checkBaseOrigin("baseURL", input);
+    return [input];
+  }
+  if (!Array.isArray(input) || input.length < 1 || input.length > BASE_URLS_MAX)
+    throw new ConfigError(`baseURL must be an origin or a list of 1 to ${BASE_URLS_MAX} origins`);
+  const list: string[] = [];
+  input.forEach((entry: unknown, i) => {
+    const at = `baseURL[${i}]`;
+    if (typeof entry !== "string") throw new ConfigError(`${at} must be a string`);
+    if (entry.includes("*")) throw new ConfigError(`${at} has a wildcard: ${entry}`);
+    const url = checkBaseOrigin(at, entry);
+    // The parser lowers the case, writes an IDN host in punycode, and drops a default port.
+    if (url.origin !== entry)
+      throw new ConfigError(`${at} must be an exact origin in normal form: ${url.origin}`);
+    if (
+      url.protocol !== "https:" &&
+      !(url.protocol === "http:" && HTTP_BASE_HOSTS.has(url.hostname))
+    )
+      throw new ConfigError(`${at} must be https, or http on localhost or 127.0.0.1: ${entry}`);
+    if (list.includes(entry)) throw new ConfigError(`${at} repeats ${entry}`);
+    list.push(entry);
+  });
+  const [primary, ...rest] = list;
+  if (primary === undefined) throw new ConfigError("baseURL must not be empty");
+  return [primary, ...rest];
+}
+
+/** The default magic link: the verify route on `base`. */
+function defaultMagicLink(base: string, basePath: string): (token: string) => string {
+  return (token) => `${base}${basePath}/magic-link/verify?token=${encodeURIComponent(token)}`;
+}
+
+/** The default invitation link: the app's root on `appURL`. */
+function defaultInvitationLink(appURL: string): (token: string) => string {
+  return (token) => `${appURL}/?invitation=${encodeURIComponent(token)}`;
+}
+
+/**
+ * Every `aud` that a session JWT of any entry can hold: each entry for a
+ * default audience, else `jwtMint.audience`. The verify reads it, and so do
+ * the checks that keep an access token and an ID token apart from it.
+ */
+export function sessionAudiences(
+  jwtMint: ResolvedJwtMint,
+  defaults: BaseDefaults,
+  baseURLs: readonly string[],
+): readonly string[] {
+  return defaults.audience ? baseURLs : jwtMint.audience;
+}
+
+/**
+ * The entry of `baseURLs` for the origin of `url`, or null for a host
+ * outside the list (plan 12i Task 18). The compare is exact, on the origin
+ * that the URL parser gives. No header takes part: a client sets
+ * `x-forwarded-host` and `forwarded` freely. A `baseURL` string picks its
+ * one entry for any host, as before.
+ */
+export function pickBase(config: ResolvedConfig, url: URL): string | null {
+  if (!config.hostPick) return config.baseURL;
+  return config.baseURLs.find((entry) => entry === url.origin) ?? null;
+}
+
+/**
+ * The config of a request on `entry` of `baseURLs`: `baseURL` and each
+ * default that `baseDefaults` names follow the entry. The app's own values
+ * stay. Answers `config` itself for the entry it already has.
+ */
+export function atBase(config: ResolvedConfig, entry: string): ResolvedConfig {
+  if (entry === config.baseURL) return config;
+  const d = config.baseDefaults;
+  const appURL = d.appURL ? entry : config.appURL;
+  const org = config.organizations;
+  const mint = config.jwtMint;
+  return {
+    ...config,
+    baseURL: entry,
+    appURL,
+    magicLink: d.linkBuilder
+      ? { ...config.magicLink, linkBuilder: defaultMagicLink(entry, config.basePath) }
+      : config.magicLink,
+    organizations:
+      org && d.invitationLink
+        ? { ...org, invitationLinkBuilder: defaultInvitationLink(appURL) }
+        : org,
+    jwtMint: mint && d.audience ? { ...mint, audience: [entry] } : mint,
+  };
+}
+
 /** Applies defaults and refuses a config that cannot keep the security rules. */
 export function resolveConfig(input: AuthConfig): ResolvedConfig {
   const keyring = resolveSecrets(input.secret, input.secrets);
-  let origin: URL;
-  try {
-    origin = new URL(input.baseURL);
-  } catch {
-    throw new ConfigError("baseURL must be an absolute URL");
-  }
-  if (origin.pathname !== "/" || input.baseURL.endsWith("/") || origin.search || origin.hash) {
-    throw new ConfigError("baseURL must be an origin with no path and no trailing slash");
-  }
-  // The public document of `GET /openapi.json` names this origin, so a password here would leak.
-  if (origin.username || origin.password)
-    throw new ConfigError("baseURL must have no user name and no password");
+  const baseURLs = resolveBaseURLs(input.baseURL);
+  // The primary: core builds from it outside a request (plan 12i Task 18).
+  const baseURL = baseURLs[0];
+  const origin = new URL(baseURL);
   const appName = input.appName ?? origin.host;
   // The name goes into a mail subject, so a CR or LF would inject a header.
   if (appName.length < 1 || appName.length > APP_NAME_MAX || hasControlChar(appName))
@@ -1480,8 +1620,8 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
   for (const o of input.trustedOrigins) {
     if (o.includes("*")) throw new ConfigError(`trustedOrigins has a wildcard: ${o}`);
   }
-  const appURL = input.appURL ?? input.baseURL;
-  if (appURL !== input.baseURL) {
+  const appURL = input.appURL ?? baseURL;
+  if (appURL !== baseURL) {
     let app: URL;
     try {
       app = new URL(appURL);
@@ -1563,9 +1703,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       platformOrganization,
       platformRole,
       invitationTtlDays: ttl,
-      invitationLinkBuilder:
-        o.invitationLinkBuilder ??
-        ((token) => `${appURL}/?invitation=${encodeURIComponent(token)}`),
+      invitationLinkBuilder: o.invitationLinkBuilder ?? defaultInvitationLink(appURL),
       limits: resolveLimits(o.limits),
       dynamicRoles: resolveDynamicRoles(o.dynamicRoles),
       teams: resolveTeams(o.teams),
@@ -1580,7 +1718,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     throw new ConfigError("basePath must not hold a segment that starts with :");
   }
   const clock = input.clock ?? systemClock;
-  const providers = socialProviders(input.social, input.baseURL, basePath);
+  const providers = socialProviders(input.social, baseURLs, basePath);
   // A caller's fetch must be callable without a receiver. The engine calls it as a plain function.
   // Every provider call goes through providerFetch: no redirect is followed
   // (plan 12b). The jose seam gets the same fetch, so the JWKS read has the
@@ -1613,7 +1751,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
       }
       // The router answers 403 to a post from an origin that is not trusted, so an
       // origin the passkey config accepts but the router refuses is a silent break.
-      if (o !== input.baseURL && !input.trustedOrigins.includes(o)) {
+      if (!baseURLs.includes(o) && !input.trustedOrigins.includes(o)) {
         throw new ConfigError(
           `passkey.origins has ${o}, which is neither baseURL nor in trustedOrigins; add it to trustedOrigins or the router answers 403 to its posts`,
         );
@@ -1684,14 +1822,26 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     throw new ConfigError("signUp invited needs organizations: an invitation is the only way in");
   // One source for the session cookie names: the trust cookie check of `totp` reads them too.
   const { cookieName, legacyCookieName } = sessionCookieNames(input.cookieName);
-  const jwtMint = resolveJwtMint(input.jwtMint, input.baseURL);
+  const jwtMint = resolveJwtMint(input.jwtMint, baseURL);
+  // A default audience follows the picked entry, so a session JWT of each entry has its own (plan 12i Task 18).
+  const baseDefaults: BaseDefaults = {
+    appURL: input.appURL === undefined,
+    linkBuilder: input.magicLink?.linkBuilder === undefined,
+    invitationLink:
+      input.appURL === undefined &&
+      (input.organizations === false || input.organizations?.invitationLinkBuilder === undefined),
+    audience: input.jwtMint !== false && input.jwtMint?.audience === undefined,
+  };
   if (input.openapi !== undefined && typeof input.openapi !== "boolean")
     throw new ConfigError("openapi must be true or false");
   const openapi = input.openapi ?? false;
   const observeConfig = resolveObserve(input.observe);
   return {
     basePath,
-    baseURL: input.baseURL,
+    baseURL,
+    baseURLs,
+    hostPick: Array.isArray(input.baseURL),
+    baseDefaults,
     appName,
     keyring,
     trustedOrigins: new Set(input.trustedOrigins),
@@ -1707,10 +1857,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     session: resolveSessionConfig(input.session),
     magicLink: {
       ttlMinutes: input.magicLink?.ttlMinutes ?? 15,
-      linkBuilder:
-        input.magicLink?.linkBuilder ??
-        ((token) =>
-          `${input.baseURL}${basePath}/magic-link/verify?token=${encodeURIComponent(token)}`),
+      linkBuilder: input.magicLink?.linkBuilder ?? defaultMagicLink(baseURL, basePath),
       confirmPage: input.magicLink?.confirmPage ?? defaultConfirmPage,
     },
     social: { providers, fetch: fetchFn, stateData: resolveStateData(input.social?.stateData) },
@@ -1726,11 +1873,16 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     phone: resolvePhone(input.phone, input.limiter),
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
     jwtMint,
-    oauth: resolveOAuth(input.oauth, jwtMint, {
-      baseURL: input.baseURL,
-      appURL,
-      trustedOrigins: input.trustedOrigins,
-    }),
+    // Every audience that a session JWT of any entry can hold: an access token must hold none.
+    oauth: resolveOAuth(
+      input.oauth,
+      jwtMint && { ...jwtMint, audience: [...sessionAudiences(jwtMint, baseDefaults, baseURLs)] },
+      {
+        baseURLs,
+        appURL,
+        trustedOrigins: input.trustedOrigins,
+      },
+    ),
     operator: resolveOperator(input.operator, organizations?.platformRole ?? null),
     sso: resolveSso(input.sso, organizations !== null),
     scim: resolveScim(input.scim, organizations),
@@ -2942,7 +3094,7 @@ function resolveDpop(input: unknown): ResolvedOAuth["dpop"] {
  */
 function resolveSignInURL(
   input: unknown,
-  origins: { baseURL: string; appURL: string; trustedOrigins: readonly string[] },
+  origins: { baseURLs: readonly string[]; appURL: string; trustedOrigins: readonly string[] },
 ): string | null {
   if (input === undefined) return null;
   const refuse = () =>
@@ -2958,7 +3110,7 @@ function resolveSignInURL(
   } catch {
     throw refuse();
   }
-  const owned = [origins.baseURL, origins.appURL, ...origins.trustedOrigins];
+  const owned = [...origins.baseURLs, origins.appURL, ...origins.trustedOrigins];
   if (
     (isPath ? url.origin !== origins.appURL : url.protocol !== "https:") ||
     !owned.includes(url.origin) ||
@@ -3019,7 +3171,7 @@ function integerIn(path: string, value: number, min: number, max: number): numbe
 function resolveOAuth(
   input: OAuthConfig | false | undefined,
   jwtMint: ResolvedJwtMint | null,
-  origins: { baseURL: string; appURL: string; trustedOrigins: readonly string[] },
+  origins: { baseURLs: readonly string[]; appURL: string; trustedOrigins: readonly string[] },
 ): ResolvedOAuth | null {
   if (input === undefined || input === false) return null;
   if (!isPlainObject(input as unknown)) throw new ConfigError("oauth must be an object or false");
@@ -3383,7 +3535,7 @@ const REDIRECT_PATH_RE = /^[A-Za-z0-9._~!$&'()*+=:@%/-]+$/;
 function redirectOverridePath(
   at: string,
   value: unknown,
-  baseURL: string,
+  baseURLs: readonly string[],
   basePath: string,
 ): string {
   let url: URL;
@@ -3394,7 +3546,8 @@ function redirectOverridePath(
   }
   if (typeof value !== "string" || url.protocol !== "https:")
     throw new ConfigError(`${at} must be an https URL`);
-  if (url.origin !== new URL(baseURL).origin || url.username !== "" || url.password !== "")
+  // An entry of a baseURL list (ruling 21 of plan 12i): the start sends the path on its own entry.
+  if (!baseURLs.includes(url.origin) || url.username !== "" || url.password !== "")
     throw new ConfigError(`${at} must have the origin of baseURL and no credentials`);
   if (value.includes("?") || value.includes("#"))
     throw new ConfigError(`${at} must have no query and no fragment`);
@@ -3444,7 +3597,7 @@ function resolveStateData(
 
 function socialProviders(
   social: AuthConfig["social"],
-  baseURL: string,
+  baseURLs: readonly string[],
   basePath: string,
 ): ConfiguredProvider[] {
   const providers: ConfiguredProvider[] = [];
@@ -3453,7 +3606,7 @@ function socialProviders(
   const push = (path: string, input: RedirectOverride, provider: ConfiguredProvider) => {
     if (input.redirectURI !== undefined) {
       const at = `${path}.redirectURI`;
-      const pathname = redirectOverridePath(at, input.redirectURI, baseURL, basePath);
+      const pathname = redirectOverridePath(at, input.redirectURI, baseURLs, basePath);
       const other = overrides.get(pathname);
       if (other !== undefined)
         throw new ConfigError(`${at} has the path of ${other}.redirectURI: one path, one provider`);
@@ -3494,7 +3647,7 @@ function socialProviders(
   }
   if (social?.gitlab) {
     requireFields("social.gitlab", social.gitlab, ["clientId", "clientSecret"]);
-    if (social.gitlab.issuer !== undefined && !isGitlabIssuer(social.gitlab.issuer, baseURL))
+    if (social.gitlab.issuer !== undefined && !isGitlabIssuer(social.gitlab.issuer, baseURLs))
       throw new ConfigError(
         "social.gitlab.issuer must be an https origin with no path or trailing slash, on a public host that is not the host of baseURL",
       );

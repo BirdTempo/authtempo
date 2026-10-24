@@ -106,6 +106,7 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   phone_region: "This app does not send codes to numbers of this country.",
   sms_unavailable:
     "The text message could not be sent now. Try again later, or use another method.",
+  host_not_allowed: "This server does not serve this address. Open the app at its usual address.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

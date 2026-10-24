@@ -168,7 +168,7 @@ function refused(
 /** A discovered endpoint: an https URL of a public host with no credentials (plan 12d deviation 7). */
 function publicEndpoint(config: ResolvedConfig, value: string): boolean {
   const u = new URL(value);
-  return u.username === "" && u.password === "" && isPublicHost(u.hostname, config.baseURL);
+  return u.username === "" && u.password === "" && isPublicHost(u.hostname, config.baseURLs);
 }
 
 /** The endpoints of a row with no `endpoints`: the kept result, or a read of the issuer's document. */

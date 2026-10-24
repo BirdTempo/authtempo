@@ -54,6 +54,7 @@ The move lasts one release. Row 12j removes it in the next release.
 - The session cookie holds a `ts_` token. The binding cookie holds the binding token of one social flow. The trust cookie holds a `td_` token. The actor cookie holds a `ts_` token.
 - The last method cookie holds one value of a closed set, such as `password` or `social:google`. It is not `HttpOnly`, because the sign-in page reads it to show the method of the last sign-in first. It signs no one in and names no account. Core never reads it. A bearer client gets no last method cookie.
 - A provider's `redirectURI` moves its callback to that path. The binding cookie then has that path, so the browser sends it to the callback.
+- With a `baseURL` list, no cookie has a `Domain`, so each host keeps its own cookies. The start sends the callback on its own host, and the sign-in ends where it started.
 - After a sliding refresh, an app route that calls `auth.session` must send `auth.sessionCookie(request, resolved)`. Otherwise the browser drops the cookie at its old `Max-Age`.
 - A reader that cannot set a cookie, such as a server render, calls `auth.session(request, { refresh: false })`. That read does not slide the expiry and writes nothing, so the browser's own `GET /auth/session` still gets the renewed cookie.
 - The binding cookie is `SameSite=None`, because Apple posts its callback from its own site, and a browser sends no `Lax` cookie on that post.

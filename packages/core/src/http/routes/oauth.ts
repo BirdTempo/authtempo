@@ -269,13 +269,15 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
    * it is 400 with no challenge, so no browser shows a sign-in dialog.
    */
   const clientRefused = (
+    scoped: ResolvedConfig,
     request: Request,
     r: { ok: false; error: OAuthErrorCode; status: number },
   ) => {
     if (r.error !== "invalid_client") return json({ error: r.error }, r.status);
     if (request.headers.has("authorization"))
       return json({ error: r.error }, r.status, {
-        "www-authenticate": `Basic realm="${issuerOf(config)}"`,
+        // The issuer of the request's entry of baseURL (plan 12i Task 18).
+        "www-authenticate": `Basic realm="${issuerOf(scoped)}"`,
       });
     return json({ error: r.error }, INVALID_CLIENT_NO_HEADER);
   };
@@ -315,7 +317,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
       // A poll that counted on its code key spends it here.
       if (grant === DEVICE_GRANT && pollOnCode(device, claimed)) await tokenLimited(config, ip);
       // The token route's pragma of RFC 6749 section 5.1, as tokenAnswer sets it.
-      const refused = clientRefused(request, authed);
+      const refused = clientRefused(config, request, authed);
       refused.headers.set("pragma", "no-cache");
       return refused;
     }
@@ -472,11 +474,11 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
         let client: AuthedClient | null = null;
         if (namesClient(ctx.request, form)) {
           const authed = await authenticateClient(ctx.config, ctx.request, form);
-          if (!authed.ok) return clientRefused(ctx.request, authed);
+          if (!authed.ok) return clientRefused(ctx.config, ctx.request, authed);
           client = authed.value;
         }
         const r = await revokeToken(ctx.config, { token: form.get("token") ?? "", client });
-        return r.ok ? json({}) : clientRefused(ctx.request, r);
+        return r.ok ? json({}) : clientRefused(ctx.config, ctx.request, r);
       },
     },
     {
@@ -497,7 +499,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
               hint: form.get("token_type_hint"),
             })
           : authed;
-        return noCache(r.ok ? json(r.value) : clientRefused(ctx.request, r));
+        return noCache(r.ok ? json(r.value) : clientRefused(ctx.config, ctx.request, r));
       },
     },
     { method: "GET", path: "/oauth/userinfo", key: "GET /oauth/userinfo", handler: userinfo },
@@ -652,8 +654,9 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
   // The issuer's own well-known paths under basePath (RFC 8414 as consumerb's
   // clients read it, and OIDC Discovery). The protected-resource document has
   // no route here: it lives at the origin root (RFC 9728), so this path answers 404.
-  const metadata = async (): Promise<Response> =>
-    json(authorizationServerMetadata(config), 200, PUBLIC_METADATA_HEADERS);
+  // The issuer of the request's entry of baseURL (plan 12i Task 18).
+  const metadata = async (ctx: RouteContext): Promise<Response> =>
+    json(authorizationServerMetadata(ctx.config), 200, PUBLIC_METADATA_HEADERS);
   routes.push(
     {
       method: "GET",
@@ -680,6 +683,7 @@ export function oauthRoutes(config: ResolvedConfig): Route[] {
 function deviceRoutes(
   config: ResolvedConfig,
   clientRefused: (
+    scoped: ResolvedConfig,
     request: Request,
     r: { ok: false; error: OAuthErrorCode; status: number },
   ) => Response,
@@ -736,7 +740,7 @@ function deviceRoutes(
         if (!(await limit(ctx.config, "oauth-device:ip", ipKey(ctx.ip), DEVICE_START_PER_IP)))
           return noCache(oauthJson(oauthFail("rate_limited")));
         const authed = await authenticateClient(ctx.config, ctx.request, form);
-        if (!authed.ok) return noCache(clientRefused(ctx.request, authed));
+        if (!authed.ok) return noCache(clientRefused(ctx.config, ctx.request, authed));
         const dpop = await deviceStartDpop(ctx.config, ctx.request);
         if (!dpop.ok) return noCache(oauthJson(dpop));
         return noCache(

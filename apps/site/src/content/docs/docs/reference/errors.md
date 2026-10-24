@@ -477,6 +477,15 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | The phone routes, with `phone` set. |
 
+<h3 id="host_not_allowed"><code>host_not_allowed</code> 421</h3>
+
+- **Meaning:** `baseURL` is a list, and the origin of the request is not one of its entries. The scheme, the host, and the port must each be equal. No handler ran. Core reads no `x-forwarded-host` or `forwarded` header.
+- **Do:** Add the origin to the `baseURL` list, or send the request to an origin of the list. Behind a proxy on Node, build `request.url` from the host that the proxy checked.
+
+| Routes |
+| --- |
+| Every route, and `auth.wellKnown`, while `baseURL` is a list. See [the base URL list](/docs/guides/base-url-list/). |
+
 <h3 id="session_not_fresh"><code>session_not_fresh</code> 403</h3>
 
 - **Meaning:** The change needs a session that a sign-in or a re-authentication proved within `session.freshMinutes`.

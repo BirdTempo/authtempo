@@ -2610,6 +2610,14 @@ export const ROUTER_CODES = [
 export type RouterCode = (typeof ROUTER_CODES)[number];
 
 /**
+ * The code that the router answers on every route for a host outside a
+ * `baseURL` list (plan 12i Task 18). No entry declares it, and the OpenAPI
+ * document states it in its rules: a deployment with a `baseURL` string
+ * never answers it, so a 421 on each operation would be untrue there.
+ */
+export const HOST_CODE = "host_not_allowed" as const satisfies ErrorCode;
+
+/**
  * The codes of the operator routes that only a request with a session gets
  * (plan 12f): `operator_self` for the act of a platform operator on their
  * own user, and `impersonation_session` for a request of an impersonation

@@ -19,7 +19,7 @@ import { changeBody, confirmBody, deleteBody, updateBody, verifyBody } from "../
 import { noScriptPagePolicy, pageHeaders } from "../csp.js";
 import { json, readJson, respond } from "../json.js";
 import { authErrorRedirect, redirect, resolveNext } from "../redirect.js";
-import type { Route } from "../router.js";
+import type { Route, RouteContext } from "../router.js";
 import { sent, unauthorized, withSession } from "../session-route.js";
 import { signedOut } from "./sessions.js";
 
@@ -30,7 +30,8 @@ import { signedOut } from "./sessions.js";
  */
 export function userRoutes(config: ResolvedConfig): Route[] {
   const confirmPath = `${config.basePath}/user/change-email/confirm`;
-  const failed = (code: string) => authErrorRedirect(config, code);
+  // The appURL of the request's entry of baseURL (plan 12i Task 18).
+  const failed = (ctx: RouteContext, code: string) => authErrorRedirect(ctx.config, code);
   const routes: Route[] = [
     {
       method: "POST",
@@ -70,7 +71,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
       key: "GET /user/change-email/confirm",
       async handler(ctx) {
         const token = ctx.url.searchParams.get("token") ?? "";
-        if (!EMAIL_CHANGE_TOKEN_RE.test(token)) return failed("invalid_token");
+        if (!EMAIL_CHANGE_TOKEN_RE.test(token)) return failed(ctx, "invalid_token");
         const html = ctx.config.account.confirmPage({
           action: confirmPath,
           token,
@@ -90,13 +91,14 @@ export function userRoutes(config: ResolvedConfig): Route[] {
         const jsonCaller = isJsonRequest(ctx.request);
         const body = await readBody(ctx.request, confirmBody);
         // A form with no token is a client bug. The person sees the page of a bad link.
-        if (!body.ok) return jsonCaller ? respond(fail("invalid_token")) : failed("invalid_token");
+        if (!body.ok)
+          return jsonCaller ? respond(fail("invalid_token")) : failed(ctx, "invalid_token");
         const r = await confirmEmailChange(ctx.config, {
           token: body.value.token,
           ip: ctx.ip,
           userAgent: ctx.request.headers.get("user-agent"),
         });
-        if (!r.ok) return jsonCaller ? respond(r) : failed(r.code);
+        if (!r.ok) return jsonCaller ? respond(r) : failed(ctx, r.code);
         if (jsonCaller) return json({ user: r.value.user });
         return redirect(resolveNext(ctx.config, r.value.next));
       },
@@ -157,7 +159,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
         key: "GET /user/delete/confirm",
         async handler(ctx) {
           const token = ctx.url.searchParams.get("token") ?? "";
-          if (!DELETE_TOKEN_RE.test(token)) return failed("invalid_token");
+          if (!DELETE_TOKEN_RE.test(token)) return failed(ctx, "invalid_token");
           const html = defaultAccountDeletePage({
             action: deleteConfirmPath,
             token,
@@ -176,7 +178,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
         async handler(ctx) {
           const jsonCaller = isJsonRequest(ctx.request);
           const s = await withSession(ctx.config, ctx.request);
-          if (!s) return jsonCaller ? unauthorized() : failed("unauthorized");
+          if (!s) return jsonCaller ? unauthorized() : failed(ctx, "unauthorized");
           const body = await readBody(ctx.request, confirmBody);
           // A form with no token is a client bug. The person sees the page of a bad link.
           const r = body.ok
@@ -187,7 +189,7 @@ export function userRoutes(config: ResolvedConfig): Route[] {
                 userAgent: ctx.request.headers.get("user-agent"),
               })
             : fail("invalid_token");
-          if (!r.ok) return sent(jsonCaller ? respond(r) : failed(r.code), s.renewed);
+          if (!r.ok) return sent(jsonCaller ? respond(r) : failed(ctx, r.code), s.renewed);
           // The session is gone: answer as the sign-out does, with no renewed cookie.
           const out = await signedOut(
             ctx.config,

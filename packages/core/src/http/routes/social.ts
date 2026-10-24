@@ -41,8 +41,9 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
     const bindPath = provider.redirectURI
       ? new URL(provider.redirectURI).pathname
       : `${config.basePath}/social`;
-    const failed = (code: string) => {
-      const res = authErrorRedirect(config, code);
+    // The appURL of the request's entry of baseURL (plan 12i Task 18).
+    const failed = (ctx: RouteContext, code: string) => {
+      const res = authErrorRedirect(ctx.config, code);
       // An invalid_token answer keeps the binding cookie: a state of another
       // tab, or no state, consumes no row of this browser's flow. A link
       // refused for its session spent its state, and the cookie expires.
@@ -91,7 +92,7 @@ export function socialRoutes(config: ResolvedConfig): Route[] {
         // The cookie only: a provider's redirect carries no bearer header (plan 12a).
         sessionToken: sessionCookieToken(ctx.config, ctx.request),
       });
-      if (!r.ok) return failed(r.code);
+      if (!r.ok) return failed(ctx, r.code);
       if ("linked" in r.value) {
         // A link (plan 12a): the session does not change, so no session cookie.
         // The state is spent, so the binding cookie goes.

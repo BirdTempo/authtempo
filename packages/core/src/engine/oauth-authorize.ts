@@ -9,7 +9,7 @@ import { clientRef } from "../redact.js";
 import type { OAuthClientRow, SessionRow, UserRow, VerificationRow } from "../schema.js";
 import { StorageError } from "../storage/port.js";
 import { provedAccount } from "./address.js";
-import { issuerOf } from "./jwt.js";
+import { issuerOf, primaryIssuer } from "./jwt.js";
 import { pkceRequired } from "./oauth-client-auth.js";
 import { findClient } from "./oauth-clients.js";
 import { oauthOf } from "./oauth-result.js";
@@ -102,6 +102,13 @@ export interface OAuthCodeData {
    * token's `auth_time` (plan 12e). Null for a code of an older core.
    */
   authTime: number | null;
+  /**
+   * The issuer of the entry of `baseURL` that minted the code (plan 12i
+   * Task 18). RFC 8414 binds an issuer to the host of its metadata, so
+   * another entry's token endpoint refuses the code. Null for a code of an
+   * older core: the primary minted it.
+   */
+  issuer: string | null;
 }
 
 /** The data of an `oauth-request` verification row (plan 9h). */
@@ -116,6 +123,12 @@ export interface OAuthRequestData {
    * meet set it to the time of the request.
    */
   minAuthTime: number | null;
+  /**
+   * The issuer of the entry that holds the request (plan 12i Task 18). The
+   * sign-in and the consent on another entry do not find it. Null for a row
+   * of an older core: the primary holds it.
+   */
+  issuer: string | null;
 }
 
 /**
@@ -347,6 +360,7 @@ export async function issueCode(
     sessionId: input.sessionId,
     dpopJkt: request.dpopJkt,
     authTime: input.authTime,
+    issuer: issuerOf(config),
   };
   await config.storage.create("verification", {
     id: newId(now),
@@ -425,7 +439,12 @@ async function holdRequest(
 ): Promise<string> {
   const now = config.clock.now();
   const id = randomToken(REQUEST_PREFIX);
-  const data: OAuthRequestData = { params: params.toString(), userId, minAuthTime };
+  const data: OAuthRequestData = {
+    params: params.toString(),
+    userId,
+    minAuthTime,
+    issuer: issuerOf(config),
+  };
   await config.storage.create("verification", {
     id: newId(now),
     purpose: "oauth-request",
@@ -455,12 +474,18 @@ async function readHeld(config: ResolvedConfig, id: string): Promise<HeldRequest
   const userId = row.data?.userId;
   // A row of a core before plan 12e has no minAuthTime and asks for no new sign-in.
   const min = row.data?.minAuthTime ?? null;
+  // A row of a core before plan 12i Task 18 has no issuer: the primary holds it.
+  const iss = row.data?.issuer ?? null;
   if (typeof params !== "string") return null;
   if (min !== null && !Number.isSafeInteger(min)) return null;
+  if (iss !== null && typeof iss !== "string") return null;
+  const issuer = iss as string | null;
+  // RFC 8414: the request belongs to the issuer of the entry that held it.
+  if ((issuer ?? primaryIssuer(config)) !== issuerOf(config)) return null;
   const minAuthTime = min as number | null;
-  if (userId === null) return { id, row, data: { params, userId: null, minAuthTime } };
+  if (userId === null) return { id, row, data: { params, userId: null, minAuthTime, issuer } };
   if (typeof userId !== "string") return null;
-  return { id, row, data: { params, userId, minAuthTime } };
+  return { id, row, data: { params, userId, minAuthTime, issuer } };
 }
 
 /** Spends the held request in one conditional update: one request, one final answer, also for two parallel ones. */

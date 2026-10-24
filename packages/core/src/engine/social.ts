@@ -202,17 +202,22 @@ async function resolveProvider(
 
 /**
  * The `redirect_uri` of a provider, at the start and at the token exchange:
- * its `redirectURI` override, else the default callback (plan 12i Task 12).
- * Pass the configured entry: a discovery entry keeps the override, and the
- * provider that it resolves does not.
+ * the path of its `redirectURI` override, else the default callback (plan
+ * 12i Task 12). Pass the configured entry: a discovery entry keeps the
+ * override, and the provider that it resolves does not. The origin is the
+ * request's entry of `baseURL` (plan 12i Task 18, ruling 21). The binding
+ * cookie is host-only, so a sign-in ends on the host where it started.
+ * With one entry, the URL is the override as the config gives it.
  */
 export function callbackUrl(
   config: ResolvedConfig,
   provider: { name: string; redirectURI?: string },
 ): string {
-  return (
-    provider.redirectURI ?? `${config.baseURL}${config.basePath}/social/${provider.name}/callback`
-  );
+  const path =
+    provider.redirectURI === undefined
+      ? `${config.basePath}/social/${provider.name}/callback`
+      : new URL(provider.redirectURI).pathname;
+  return `${config.baseURL}${path}`;
 }
 
 /**

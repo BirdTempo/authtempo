@@ -226,6 +226,7 @@ Better Auth defaults that core does not keep:
 | A reset keeps the other sessions | A reset ends every session. |
 | The verify link lives 1 hour beside a magic link of 5 minutes | Both live as long as the magic link. With the magic link plugin and no `emailVerification.expiresIn`, the verify link lives 300 s, not 3600 s, and a note says so at start. |
 | `trustedOrigins` takes a function and wildcards such as `https://*.example.com` | Each entry is an exact origin (`https://app.example.com`, no path or trailing slash) or an app scheme (`myapp://`). Any other entry is refused at start. |
+| `baseURL` takes `{ allowedHosts, fallback, protocol }` with wildcard hosts, and `protocol: "auto"` reads `x-forwarded-proto` | Each host must be exact, and `protocol` must be `https` or `http`; a wildcard, `auto`, and no `protocol` are refused. The hosts map to core's `baseURL` list, and a `fallback` equal to one of them is the primary. Core picks the host from the request URL and reads no proxy header. A wildcard on a shared platform lets any customer of the platform own a host of the issuer. |
 
 Call arguments that core cannot keep: on the server, `api.signUpEmail` with
 `callbackURL` or `image`, and `api.signInEmail` with `callbackURL` or

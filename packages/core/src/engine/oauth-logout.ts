@@ -1,4 +1,4 @@
-import type { ResolvedConfig } from "../config.js";
+import { type ResolvedConfig, sessionAudiences } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
 import type { Observer } from "../observe/observer.js";
@@ -7,7 +7,7 @@ import { constantTimeEqual, randomBase64Url } from "../primitives/crypto.js";
 import { clientRef } from "../redact.js";
 import type { OAuthClientRow, OAuthLogoutRow, SessionRow } from "../schema.js";
 import type { Meter } from "../storage/meter.js";
-import { issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
+import { entryOfIssuer, issuerOf, mintConfig, signToken, verifyLocal } from "./jwt.js";
 import { findClient } from "./oauth-clients.js";
 import { endSessionById, linkSession, queueLogouts } from "./oauth-outbox.js";
 import { sidNames, storedSubject, userOfSubject } from "./oauth-subject.js";
@@ -75,8 +75,10 @@ export async function checkIdTokenHint(
   const decoded = await verifyLocal(config, hint);
   if (!decoded || decoded.header.typ !== SESSION_JWT_TYPE) return null;
   const p = decoded.payload;
-  if (p.iss !== issuerOf(config) || typeof p.sub !== "string") return null;
-  if (typeof p.aud !== "string" || mintConfig(config).audience.includes(p.aud)) return null;
+  if (entryOfIssuer(config, p.iss) === null || typeof p.sub !== "string") return null;
+  // The audience of a session JWT of any entry: a session JWT is no ID token.
+  const sessionAud = sessionAudiences(mintConfig(config), config.baseDefaults, config.baseURLs);
+  if (typeof p.aud !== "string" || sessionAud.includes(p.aud)) return null;
   if (p.sid !== undefined && typeof p.sid !== "string") return null;
   const client = await findClient(config, p.aud);
   if (!client) return null;
