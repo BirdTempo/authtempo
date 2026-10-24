@@ -53,6 +53,7 @@ import {
   addTeamMembersIn,
   createTeamIn,
   deleteTeamIn,
+  endTeamSessions,
   lockOrganization,
   lockTeam,
   removeTeamMembersIn,
@@ -706,8 +707,10 @@ function tailOf(
  * row and the organization row. The scimGroupMember rows that the write
  * deletes go back in the lists of `reinsertCalls`, and the added rows go in
  * one delete per list. For the persons who leave the team: the reinsert of
- * their team member rows and the restore of their sessions, per list of
- * persons. For the persons who join: one delete per list. The role
+ * their team member rows. Their sessions end as the last write, after the
+ * audit row, so no undo restores them: a person can hold many sessions
+ * (ruling 86 of plan 12d). A fault at that last write undoes the audit row:
+ * one delete. For the persons who join: one delete per list. The role
  * updates add their restores in `planRoles`.
  */
 function undoOf(
@@ -741,7 +744,7 @@ function undoOf(
           teamId: team.id,
           organizationId: team.organizationId,
           userId,
-        })) + listCalls(leaves)
+        })) + 1
       : 0) +
     (joins.length > 0 ? listCalls(joins) : 0)
   );
@@ -774,7 +777,8 @@ function rowCalls(
  * no flow of user-hold.ts takes it. Then the users that join the team, the
  * sessions of the persons who leave it, the organization row and the team
  * row, the member rows of the role recompute, and the team member rows.
- * The audit row is the last statement.
+ * Then the audit row. The session ends of the persons who leave the team
+ * come last (ruling 86 of plan 12d).
  */
 async function writeGroup(
   config: ResolvedConfig,
@@ -967,6 +971,8 @@ async function writeGroup(
     hookGuard(() =>
       storage.transaction(async (tx) => {
         changes = [];
+        // The team whose sessions of the leavers end as the last write.
+        let ends: TeamRow | null = null;
         const versioned =
           write.kind === "create"
             ? []
@@ -1064,8 +1070,10 @@ async function writeGroup(
               events: [],
               strict: false,
               teamLocked: true,
+              sessionsLater: true,
             });
             if (!left.ok) stopWith(left.code);
+            ends = live;
           }
           if (live && joins.length > 0) {
             const joined = await addTeamMembersIn(config, tx, {
@@ -1080,10 +1088,12 @@ async function writeGroup(
             if (!joined.ok) stopWith(joined.code);
           }
         }
-        return {
-          ok: true as const,
-          value: await writeAuditIn(tx, draftOf(caller, action, null, data), now),
-        };
+        const value = await writeAuditIn(tx, draftOf(caller, action, null, data), now);
+        // The sessions of those who leave the team end last, after each read that can
+        // conflict and after the audit row. So no undo of the write restores them (ruling 86
+        // of plan 12d).
+        if (ends) await endTeamSessions(tx, ends.id, leaves);
+        return { ok: true as const, value };
       }),
     );
   let written: Awaited<ReturnType<typeof run>> | null = null;

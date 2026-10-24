@@ -803,8 +803,11 @@ export interface TeamMemberEvent {
  * team lock, the before hook of each event, the team rows, and the active
  * team of the sessions. With `strict`, a person with no team row answers
  * `not_found`, and no row changes. An empty `events` runs no team hook, as
- * `createTeamIn` says. `teamLocked` is the flag of `addTeamMembersIn`. The
- * caller runs `afterRemoveTeamMember` after its commit.
+ * `createTeamIn` says. `teamLocked` is the flag of `addTeamMembersIn`. With
+ * `sessionsLater`, the caller ends the sessions with `endTeamSessions` as
+ * its last write: a SCIM group write does so after its last read that can
+ * conflict (ruling 86 of plan 12d). The caller runs `afterRemoveTeamMember`
+ * after its commit.
  *
  * Cost: per list of `listChunks` (up to 1000 persons, ruling 84 of plan
  * 12d), one session lock statement on Postgres (none on D1), one delete,
@@ -819,6 +822,7 @@ export async function removeTeamMembersIn(
     events: readonly TeamMemberEvent[];
     strict: boolean;
     teamLocked?: boolean;
+    sessionsLater?: boolean;
   },
 ): Promise<Result<true>> {
   const { team } = input;
@@ -848,17 +852,36 @@ export async function removeTeamMembersIn(
     ]);
   // Fewer rows: a removal ran after the read. Each team row that a delete wrote goes back.
   if (input.strict && removed < ids.length) stopWith("not_found");
-  // An active team needs its membership, as setActiveTeam checks.
-  for (const chunk of chunks)
+  if (!input.sessionsLater) await endTeamSessions(tx, team.id, ids);
+  return ok(true);
+}
+
+/**
+ * Clears the active team `teamId` of the sessions of `userIds`: one update
+ * per list of `listChunks`. An active team needs its membership, as
+ * setActiveTeam checks. The caller holds the locks of these sessions.
+ *
+ * The count of the changed sessions has no cap: a person can hold many
+ * sessions. On D1 the undo of this update restores about 1450 sessions per
+ * statement. So a SCIM group write runs it as its last write, after its
+ * last read that can conflict and after its audit row. Then no undo of the
+ * write restores the sessions (ruling 86 of plan 12d). A failed update
+ * changes no session, because D1 runs it as one batch.
+ */
+export async function endTeamSessions(
+  tx: StorageAdapter,
+  teamId: string,
+  userIds: readonly string[],
+): Promise<void> {
+  for (const chunk of listChunks([...new Set(userIds)].sort()))
     await tx.update(
       "session",
       [
         { field: "userId", op: "in", value: chunk },
-        { field: "activeTeamId", op: "eq", value: team.id },
+        { field: "activeTeamId", op: "eq", value: teamId },
       ],
       { activeTeamId: null },
     );
-  return ok(true);
 }
 
 /**

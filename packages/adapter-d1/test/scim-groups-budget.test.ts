@@ -622,8 +622,11 @@ const MEASURED_TOO_LARGE = { refused: 20 };
  *
  * Ruling 85: the undo of the insert chunks of one model is one delete, and
  * 1000 rows take three inserts. 41 on 2026-10-24.
+ *
+ * Ruling 86: the session end of the leaver comes after the audit row, so
+ * the refusal comes before it. 39 on 2026-10-24.
  */
-const MEASURED_TEAM_LIMIT = { refused: 41 };
+const MEASURED_TEAM_LIMIT = { refused: 39 };
 /** Two list pages with members, each of whole groups, at most 10000 member rows. */
 const MEASURED_LIST = { first: 6, next: 6 };
 
@@ -996,7 +999,8 @@ describe("the late conflicts of the SCIM Groups on D1 at the member cap (ruling 
     );
     // More role pairs: each adds two queries to the write and one to its undo. The meter
     // keeps room for the undo of a late conflict, and counts the audit row too. So a write
-    // whose undo would not fit is refused before any write (ruling 85 of plan 12d).
+    // whose undo would not fit is refused, and the undo of the refusal restores the group row
+    // and the team row (ruling 85 of plan 12d).
     for (const name of ["r1", "r2"]) {
       const role = await setup.api.createRole({
         user: owner,
@@ -1071,18 +1075,195 @@ describe("the late conflicts of the SCIM Groups on D1 at the member cap (ruling 
  * rows take three inserts. `put` is the PUT of 1000 members over 1000
  * others (MI-3). Each person who leaves the team has a session in it. The
  * role pairs: the meter keeps room for the undo and counts the audit row
- * too, so it refuses those writes before any write. With no such room the
- * same writes sent 50 and 53 queries at their late conflicts.
+ * too, so it refuses those writes after the group row and the team row.
+ * Their undo restores both. With no such room the same writes sent 50 and
+ * 53 queries at their late conflicts.
+ *
+ * Ruling 86: the session ends of the persons who leave the team come after
+ * the audit row, so no late conflict restores them. `mixed` sends 44 and
+ * `put` 46 on 2026-10-24. The role pairs stay refused: a fault at the
+ * session end, the last write, sends 51 and 54 with the undo of the audit
+ * row. Their late conflicts at the read of usersStay send 47 and 50.
  */
 const MEASURED_LATE = {
   create: 35,
-  mixed: 47,
+  mixed: 44,
   mixedScimUser: 28,
   adds: 37,
-  put: 49,
+  put: 46,
   rename: 23,
   delete: 25,
   threePairs: 20,
   fourPairs: 20,
   swap: 39,
 };
+
+/**
+ * A view of `db` that counts each statement and fails statement `target`
+ * (from 1) once, alone or in a batch: a fault of D1 at that statement. A
+ * failed batch counts each of its statements, as D1 does. `fired` names the
+ * statement that failed, or is empty when no statement failed.
+ */
+function faulty(db: D1Database, target: number) {
+  const c = { n: 0, fired: "" };
+  const sqlOf = new WeakMap<object, string>();
+  const wrap = (s: D1PreparedStatement, sql: string): D1PreparedStatement => {
+    const p = new Proxy(s, {
+      get(a, b) {
+        if (b === "bind") return (...v: unknown[]) => wrap(a.bind(...v), sql);
+        const x = Reflect.get(a, b);
+        if (b === "run" || b === "all" || b === "first" || b === "raw")
+          return (...args: unknown[]) => {
+            c.n++;
+            if (c.n === target) {
+              c.fired = sql;
+              return Promise.reject(new Error("D1 fault"));
+            }
+            return (x as (...y: unknown[]) => unknown).apply(a, args);
+          };
+        return typeof x === "function" ? x.bind(a) : x;
+      },
+    });
+    sqlOf.set(p, sql);
+    return p;
+  };
+  const view = new Proxy(db, {
+    get(t, k) {
+      if (k === "prepare") return (sql: string) => wrap(t.prepare(sql), sql);
+      if (k === "batch")
+        return (st: D1PreparedStatement[]) => {
+          const from = c.n;
+          c.n += st.length;
+          if (from < target && target <= c.n) {
+            c.fired = sqlOf.get(st[target - from - 1] as object) ?? "batch";
+            return Promise.reject(new Error("D1 fault"));
+          }
+          return t.batch(st);
+        };
+      const x = Reflect.get(t, k);
+      return typeof x === "function" ? x.bind(t) : x;
+    },
+  });
+  return { db: view as D1Database, c };
+}
+
+describe("the session ends of the persons who leave a team on D1 (ruling 86 of plan 12d)", () => {
+  it("keeps a PUT of 1000 over 1000 inside 50 queries at a fault of each statement, for 1, 3, 4, and 50 sessions of each leaver", async () => {
+    const setup = make(env.DB, false);
+    const { token } = await acme(setup);
+    const ids = await users(token, 2 * PATCH_CAP);
+    const first = ids.slice(0, PATCH_CAP);
+    const second = ids.slice(PATCH_CAP);
+    const body = (list: readonly string[]) => ({
+      schemas: [GROUP_URN],
+      displayName: "Admins",
+      members: members(list),
+    });
+    const made = await call(token, "POST", "/Groups", body(first));
+    expect(made.status).toBe(201);
+    const id = String(made.body.id);
+    const teamId = String(
+      await env.DB.prepare("SELECT team_id AS n FROM ta_scim_group WHERE id = ?")
+        .bind(id)
+        .first("n"),
+    );
+    const cols = (
+      await env.DB.prepare("SELECT name FROM pragma_table_info('ta_session')").all()
+    ).results.map((r) => String(r.name));
+    // The rows copy the session of the owner, as a sign-in writes them.
+    const pick = (c: string) =>
+      c === "id"
+        ? "'s-' || u.id || '-' || j.i"
+        : c === "user_id"
+          ? "u.user_id"
+          : c === "token_hash"
+            ? "'t-' || u.id || '-' || j.i"
+            : c === "active_organization_id"
+              ? "u.organization_id"
+              : c === "active_team_id"
+                ? "?2"
+                : `s.${c}`;
+    /** `k` sessions of each member of `first`, each one acting in the team. */
+    const sessions = async (k: number) => {
+      await env.DB.prepare("DELETE FROM ta_session WHERE id LIKE 's-%'").run();
+      await env.DB.prepare(
+        `WITH RECURSIVE j(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM j WHERE i < ?3) INSERT INTO ta_session (${cols.join(", ")}) SELECT ${cols.map(pick).join(", ")} FROM ta_session s, ta_scim_user u, j WHERE s.id = (SELECT min(id) FROM ta_session) AND u.id IN (SELECT value FROM json_each(?1))`,
+      )
+        .bind(JSON.stringify(first), teamId, k)
+        .run();
+    };
+    const state = async () => ({
+      groups: await count("SELECT count(*) AS n FROM ta_scim_group"),
+      rows: await count("SELECT count(*) AS n FROM ta_scim_group_member"),
+      teams: await count("SELECT count(*) AS n FROM ta_team"),
+      teamRows: await count("SELECT count(*) AS n FROM ta_team_member"),
+      versions: await count("SELECT coalesce(sum(version), 0) AS n FROM ta_scim_group"),
+      admins: await count("SELECT count(*) AS n FROM ta_member WHERE role = 'admin'"),
+      members: await count("SELECT count(*) AS n FROM ta_member WHERE role = 'member'"),
+      sessions: await count("SELECT count(*) AS n FROM ta_session"),
+      inTeam: await count("SELECT count(*) AS n FROM ta_session WHERE active_team_id IS NOT NULL"),
+      audit: await count("SELECT count(*) AS n FROM ta_operator_audit"),
+      users: await count("SELECT count(*) AS n FROM ta_user"),
+    });
+    /** The PUT of `second` over `first` with a fault at statement `target`. */
+    const put = async (target: number) => {
+      await env.DB.prepare("UPDATE ta_scim_token SET last_used_at = last_used_at - 120000").run();
+      const { db: view, c } = faulty(env.DB, target);
+      const res = await make(view, true).handle(
+        new Request(`${API}/auth/scim/v2/Groups/${id}`, {
+          method: "PUT",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/scim+json" },
+          body: JSON.stringify(body(second)),
+        }),
+      );
+      await res.text();
+      return { status: res.status, queries: c.n, fired: c.fired };
+    };
+    const worst: Record<string, number> = {};
+    for (const k of [1, 3, 4, 50]) {
+      await sessions(k);
+      const before = await state();
+      expect(before.inTeam).toBe(k * PATCH_CAP);
+      // A fault at each statement, the session end too, until the PUT runs with no fault.
+      // A fault at a read costs what a conflict at that read costs: the write up to it and
+      // the undo. Each faulted run must leave the state as it was.
+      let most = 0;
+      let clean = 0;
+      for (let target = 1; clean === 0; target++) {
+        const r = await put(target);
+        if (r.fired === "") {
+          expect(r.status).toBe(200);
+          clean = r.queries;
+          break;
+        }
+        expect([target, r.status], r.fired).toEqual([target, 500]);
+        expect(await state(), `${k} sessions, fault at ${target}: ${r.fired}`).toEqual(before);
+        most = Math.max(most, r.queries);
+      }
+      // The PUT ended the session of each leaver in the team.
+      expect(await state()).toEqual({
+        ...before,
+        versions: before.versions + 1,
+        inTeam: 0,
+        audit: before.audit + 1,
+      });
+      worst[`fault${k}`] = most;
+      worst[`clean${k}`] = clean;
+      // Back to the members of `first`, for the next count of sessions.
+      expect((await call(token, "PUT", `/Groups/${id}`, body(first))).status).toBe(200);
+    }
+    console.log(`session ends: ${JSON.stringify(worst)}`);
+    // Measured on the binding, 2026-10-24.
+    expect(worst).toEqual({
+      fault1: 50,
+      clean1: 39,
+      fault3: 50,
+      clean3: 39,
+      fault4: 50,
+      clean4: 39,
+      fault50: 50,
+      clean50: 39,
+    });
+    for (const n of Object.values(worst)) expect(n).toBeLessThanOrEqual(50);
+  }, 600_000);
+});

@@ -112,7 +112,7 @@ To fix a custom extension URN, remove the custom mapping in the directory, or as
 ### The known gaps
 
 - A PUT with more than 1000 members answers 400, and so does a PUT that takes away more than 1000 members. An Okta app of the App Integration Wizard sends a PUT with every member of a group. Push the group again in smaller steps.
-- A write of 1000 members whose role changes make three or more pairs of an old and a new role can answer 400. D1 needs room in its budget to reverse a write that fails late, and every store keeps the same rule. Send fewer members in each request then.
+- A write of 1000 members whose role changes make three or more pairs of an old and a new role can answer 400. D1 needs room in its budget to reverse a write that fails late, and every store keeps the same rule. The undo of the refusal restores the group row and the team row, so nothing changes. An Okta push can meet it. Take 999 adds and 1 removal to the mapped group `Admins`. 300 of the added persons hold the role of the mapped group `Web`. Okta marks the push failed. Push the group in smaller steps then: 500 members with 3 pairs fit, and 333 members with 4 pairs.
 - A list with no filter reads every User of the organization for `totalResults`. On Postgres with 10 000 Users, it took 29.7 ms at the median and 40.6 ms at the most (10 runs, load 14, measured 2026-10-24).
 
 ## If it fails

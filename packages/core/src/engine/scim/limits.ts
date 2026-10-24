@@ -28,7 +28,10 @@ export const GROUP_MEMBERS_MAX = 10_000;
  * on every store, because the engine keeps the D1 Free budget on every
  * store. Since ruling 85 the same PATCH sends 39 queries, and a PUT of
  * 1000 members over 1000 others 39. The worst late conflict with its D1
- * undo sends 49. The meter keeps room for that undo.
+ * undo sends 49. The meter keeps room for that undo. Since ruling 86 the
+ * session ends of the persons who leave the team are the last write, so no
+ * undo restores them. The PUT then sends 46 at its late conflict, and 50 at
+ * a fault of each statement, for 1, 3, 4, and 50 sessions of each leaver.
  */
 export const PATCH_MEMBERS_MAX = 1000;
 
