@@ -320,7 +320,7 @@ const SIGN_INS: Record<
   },
   // The anonymous sign-in of plan 12i Task 6: a new user and session, with no gate.
   anonymous: async () => {
-    const w = world({}, { anonymous: {} });
+    const w = world({}, { anonymous: { isolateLimiter: "allow" } });
     return {
       act: () => signInAnonymous(w.auth.config, { current: null, ip: null, userAgent: null }),
       events: w.events,

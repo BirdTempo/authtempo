@@ -7,6 +7,7 @@ import {
   insertChunks,
   rowsPerInsertOf,
   SQLITE,
+  sortsOf,
 } from "./sql.js";
 
 type Store = Map<ModelName, Map<string, Record<string, unknown>>>;
@@ -216,12 +217,7 @@ function adapterOn(
       if (limit !== undefined && !(Number.isSafeInteger(limit) && limit >= 0)) {
         throw new StorageError("invalid_argument", model, ["limit"]);
       }
-      const sorts =
-        opts?.sort === undefined ? [] : Array.isArray(opts.sort) ? opts.sort : [opts.sort];
-      assertFields(
-        model,
-        sorts.map((x) => x.field),
-      );
+      const sorts = sortsOf(model, opts);
       if (sorts.length > 0) {
         rows = rows.sort((a, b) => {
           for (const { field, dir } of sorts) {

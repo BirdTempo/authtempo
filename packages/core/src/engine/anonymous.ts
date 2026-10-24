@@ -387,10 +387,12 @@ export async function sweepAnonymous(
       { field: "createdAt", op: "lt", value: before },
     ];
     if (after !== null) where.push({ field: "createdAt", op: "gte", value: after });
+    // Both fields hold no null, so the SQL has no `IS NULL` term, and the index gives the
+    // order: a page reads about `take` rows, not every old anonymous user (ruling 27).
     const read = await config.storage.findMany("user", where, {
       sort: [
-        { field: "createdAt", dir: "asc" },
-        { field: "id", dir: "asc" },
+        { field: "createdAt", dir: "asc", notNull: true },
+        { field: "id", dir: "asc", notNull: true },
       ],
       limit: take + held.size,
     });

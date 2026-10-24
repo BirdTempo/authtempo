@@ -84,7 +84,7 @@ async function withPasskey(auth: Auth, user: UserRow): Promise<void> {
 describe("the account with no address (plan 12i Task 1)", () => {
   it("two users with no address coexist", async () => {
     // Two users of the anonymous sign-in of plan 12i Task 6, the first route with no address.
-    const auth = makeAuth({ anonymous: {} });
+    const auth = makeAuth({ anonymous: { isolateLimiter: "allow" } });
     const now = auth.clock.now();
     const handle = createRouter(auth.config, coreRoutes(auth.config));
     const ids: string[] = [];

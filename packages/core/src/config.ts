@@ -557,10 +557,12 @@ export interface AnonymousConfig {
   sweepBatch?: number;
   /**
    * The anonymous users that the deployment makes per 24 hours, 1 to
-   * 100000. Default 1000. A sign-in over the cap answers 429. The count is
-   * per deployment on a shared limiter, and per isolate on the memory limiter.
+   * 100000. Default 1000. A sign-in over the cap answers 429. The cap is
+   * per deployment, so it needs a shared limiter (ruling 27 of plan 12i).
    */
   dailyCap?: number;
+  /** "allow" builds with a limiter that counts per isolate: the cap is then per isolate (tests and local dev). */
+  isolateLimiter?: "allow";
 }
 
 /**
@@ -1929,7 +1931,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     account: resolveAccount(input.account),
     username: resolveUsername(input.username, organizations?.reservedSlugs ?? null),
     lastMethod: resolveLastMethod(input.lastMethod, cookieName, totpTrustName(input.totp)),
-    anonymous: resolveAnonymous(input.anonymous),
+    anonymous: resolveAnonymous(input.anonymous, input.limiter),
     captcha: resolveCaptcha(
       input.captcha,
       // Core's own sign-in page serves the handoff and the OAuth login step,
@@ -1963,10 +1965,18 @@ const ANONYMOUS_KEYS: Readonly<Record<keyof AnonymousConfig, true>> = {
   ttlDays: true,
   sweepBatch: true,
   dailyCap: true,
+  isolateLimiter: true,
 };
 
-/** `anonymous` (plan 12i Task 6). Absent or `false`: off. */
-function resolveAnonymous(input: AnonymousConfig | false | undefined): ResolvedAnonymous | null {
+/**
+ * `anonymous` (plan 12i Task 6). Absent or `false`: off. The daily cap is a
+ * promise per deployment, so a limiter that counts per isolate is refused
+ * unless the app writes `isolateLimiter: "allow"`, as for `phone`.
+ */
+function resolveAnonymous(
+  input: AnonymousConfig | false | undefined,
+  limiter: LimiterPort | undefined,
+): ResolvedAnonymous | null {
   if (input === undefined || input === false) return null;
   // `as unknown`: the guard must not narrow `input`, or its fields lose their types.
   if (!isPlainObject(input as unknown))
@@ -1985,6 +1995,12 @@ function resolveAnonymous(input: AnonymousConfig | false | undefined): ResolvedA
   const dailyCap = input.dailyCap ?? 1000;
   if (!Number.isSafeInteger(dailyCap) || dailyCap < 1 || dailyCap > 100_000)
     throw new ConfigError("anonymous.dailyCap must be an integer from 1 to 100000");
+  if (input.isolateLimiter !== undefined && input.isolateLimiter !== "allow")
+    throw new ConfigError('anonymous.isolateLimiter must be "allow" or absent');
+  // The cap counts every anonymous user of the deployment. An isolate count
+  // would let each isolate make `dailyCap` users, so the promise would not hold.
+  if (limiter?.scope !== "shared" && input.isolateLimiter !== "allow")
+    throw new ConfigError("anonymous needs a shared limiter: the daily cap is per deployment");
   return { ttlDays, sweepBatch, dailyCap };
 }
 

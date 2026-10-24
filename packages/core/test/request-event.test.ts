@@ -93,7 +93,7 @@ const FAILING: Readonly<
   // Plan 12i Task 6: a sign-in over the limit of one IP.
   "POST /anonymous/sign-in": {
     via: "anonymous",
-    over: { anonymous: {}, limiter: { allow: async () => false } },
+    over: { anonymous: { isolateLimiter: "allow" }, limiter: { allow: async () => false } },
     make: async () => post("/auth/anonymous/sign-in", {}),
   },
   "POST /passkey/authenticate/verify": {

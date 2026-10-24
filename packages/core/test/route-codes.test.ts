@@ -376,7 +376,7 @@ function world(extra: Partial<AuthConfig> = {}) {
     // The phone routes of plan 12i Task 5, on the memory limiter.
     phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
     // The anonymous routes of plan 12i Task 6.
-    anonymous: {},
+    anonymous: { isolateLimiter: "allow" },
     // The base URL is the trusted origin of the POSTs below; the consent form takes that origin only.
     trustedOrigins: [BASE_URL],
     ...extra,

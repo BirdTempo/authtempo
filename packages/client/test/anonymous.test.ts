@@ -4,7 +4,7 @@ import { BASE_URL, inProcessFetch, makeServer } from "./harness.js";
 
 describe("the anonymous sign-in (plan 12i Task 6)", () => {
   it("signs in a guest, refuses a route that needs a way in, and deletes the guest", async () => {
-    const server = makeServer({ anonymous: {} });
+    const server = makeServer({ anonymous: { isolateLimiter: "allow" } });
     const client = createClient({ baseURL: BASE_URL, fetch: inProcessFetch(server.auth).fetch });
     const signedIn = await client.anonymous.signIn();
     expect(signedIn).toMatchObject({ ok: true, value: { user: { email: null } } });

@@ -138,7 +138,7 @@ function world(secretHash = "0".repeat(64)) {
     // The phone routes of plan 12i Task 5, on the memory limiter.
     phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
     // The anonymous routes of plan 12i Task 6.
-    anonymous: {},
+    anonymous: { isolateLimiter: "allow" },
   });
   const handle = createRouter(auth.config, coreRoutes(auth.config));
   const cookieOf = (token: string) => ({ cookie: `${auth.config.cookieName}=${token}` });

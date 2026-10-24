@@ -23,6 +23,7 @@ import {
   SQLITE,
   type SqlStatements,
   type Statement,
+  sortsOf,
   TABLES,
   USER_CHILD_MODELS,
   undoCreateWhere,
@@ -636,12 +637,7 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
     },
     select(model, where, opts = {}) {
       assertModel(model);
-      const sorts =
-        opts.sort === undefined ? [] : Array.isArray(opts.sort) ? opts.sort : [opts.sort];
-      assertFields(
-        model,
-        sorts.map((s) => s.field),
-      );
+      const sorts = sortsOf(model, opts);
       if (opts.limit !== undefined && (!Number.isSafeInteger(opts.limit) || opts.limit < 0)) {
         throw invalid(model, "limit", "expected a non-negative integer");
       }
@@ -666,7 +662,10 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
           const e =
             MAP[model].fields[s.field]?.codec === "nullAsEmpty" ? `NULLIF(${raw}, '')` : raw;
           const dir = s.dir === "asc" ? "ASC" : "DESC";
-          return pg ? `${e} ${dir}` : `${e} IS NULL${dir === "DESC" ? " DESC" : ""}, ${e} ${dir}`;
+          // A notNull key names a column that holds no null, so an index gives the order.
+          return pg || s.notNull
+            ? `${e} ${dir}`
+            : `${e} IS NULL${dir === "DESC" ? " DESC" : ""}, ${e} ${dir}`;
         });
         sql += ` ORDER BY ${terms.join(", ")}`;
       }

@@ -45,7 +45,7 @@ import test from "../../../../../samples/guides/adapter-conformance.test.ts?raw"
 - Throw `invalid_argument` for a string with NUL or with a lone surrogate in any `where` value, on every op, also in an `in` list. The conformance suite tries both in each op.
 - `update` and `delete` take a `where` and answer the count of rows. An empty `where` on them is an error.
 - An empty `in` list matches nothing. Two null values never conflict on a unique key.
-- `sort` takes one key or a list of keys, each with its own direction.
+- `sort` takes one key or a list of keys, each with its own direction. A key with `notNull: true` names a field that is not nullable, so the SQL needs no null term and an index can give the order. Throw `invalid_argument` for `notNull` on a nullable field.
 - Reads inside a transaction see the writes of the transaction.
 - A nested transaction rolls back its own writes only.
 - The field types are string, boolean, integer, date, and json. `eq` on a date matches to the millisecond.

@@ -2152,7 +2152,7 @@ describe("the SSO lines (plan 12d)", () => {
   });
 
   it("sweep.anonymous_stopped", async () => {
-    const auth = makeAuth({ anonymous: {} });
+    const auth = makeAuth({ anonymous: { isolateLimiter: "allow" } });
     const findMany = auth.storage.findMany.bind(auth.storage);
     // The anonymous step reads the user rows first (plan 12i Task 6); no step before it does.
     auth.storage.findMany = ((m, where, opts) =>

@@ -24,6 +24,8 @@ import { draftUserRow } from "../src/engine/users.js";
 import { ROUTES, type RouteKey } from "../src/http/route-list.js";
 import { createRouter, type Route } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import { createMemoryLimiter, systemClock } from "../src/index.js";
+import type { LimiterPort } from "../src/limiter/port.js";
 import { type ModelName, schema } from "../src/schema.js";
 import { USER_CHILD_MODELS } from "../src/storage/sql.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
@@ -91,7 +93,7 @@ function features(extra: Partial<AuthConfig> = {}): Partial<AuthConfig> {
     },
     username: {},
     phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
-    anonymous: {},
+    anonymous: { isolateLimiter: "allow" },
     ...extra,
   };
 }
@@ -299,7 +301,7 @@ describe("anonymous sign-in (plan 12i Task 6)", () => {
 
   it("caps the anonymous users of the deployment per day (ruling 25 M4)", async () => {
     const day = 24 * 60 * 60 * 1000;
-    const o = observed({ anonymous: { dailyCap: 2 } });
+    const o = observed({ anonymous: { isolateLimiter: "allow", dailyCap: 2 } });
     const signIn = () => o.auth.handle(post("/auth/anonymous/sign-in", {}, fromNewIp()));
     expect((await signIn()).status).toBe(200);
     expect((await signIn()).status).toBe(200);
@@ -339,7 +341,7 @@ describe("the anonymous config (plan 12i Task 6)", () => {
     mail: { send: async () => {} },
   };
   it("defaults ttlDays to 30 and refuses a value out of bounds", () => {
-    expect(resolveConfig({ ...input, anonymous: {} }).anonymous).toEqual({
+    expect(resolveConfig({ ...input, anonymous: { isolateLimiter: "allow" } }).anonymous).toEqual({
       ttlDays: 30,
       sweepBatch: 100,
       dailyCap: 1000,
@@ -347,28 +349,47 @@ describe("the anonymous config (plan 12i Task 6)", () => {
     expect(
       resolveConfig({
         ...input,
-        anonymous: { ttlDays: 365, sweepBatch: 1, dailyCap: 100_000 },
+        anonymous: { isolateLimiter: "allow", ttlDays: 365, sweepBatch: 1, dailyCap: 100_000 },
       }).anonymous,
     ).toEqual({ ttlDays: 365, sweepBatch: 1, dailyCap: 100_000 });
     expect(resolveConfig({ ...input, anonymous: false }).anonymous).toBeNull();
     expect(resolveConfig(input).anonymous).toBeNull();
     for (const ttlDays of [0, 366, 1.5])
-      expect(() => resolveConfig({ ...input, anonymous: { ttlDays } })).toThrow(
-        "anonymous.ttlDays must be an integer from 1 to 365",
-      );
+      expect(() =>
+        resolveConfig({ ...input, anonymous: { isolateLimiter: "allow", ttlDays } }),
+      ).toThrow("anonymous.ttlDays must be an integer from 1 to 365");
     for (const sweepBatch of [0, 101, 2.5])
-      expect(() => resolveConfig({ ...input, anonymous: { sweepBatch } })).toThrow(
-        "anonymous.sweepBatch must be an integer from 1 to 100",
-      );
+      expect(() =>
+        resolveConfig({ ...input, anonymous: { isolateLimiter: "allow", sweepBatch } }),
+      ).toThrow("anonymous.sweepBatch must be an integer from 1 to 100");
     for (const dailyCap of [0, 100_001, 2.5])
-      expect(() => resolveConfig({ ...input, anonymous: { dailyCap } })).toThrow(
-        "anonymous.dailyCap must be an integer from 1 to 100000",
-      );
+      expect(() =>
+        resolveConfig({ ...input, anonymous: { isolateLimiter: "allow", dailyCap } }),
+      ).toThrow("anonymous.dailyCap must be an integer from 1 to 100000");
     expect(() => resolveConfig({ ...input, anonymous: { ttl: 3 } as never })).toThrow(
-      "anonymous.ttl is not an option; core has ttlDays, sweepBatch, dailyCap",
+      "anonymous.ttl is not an option; core has ttlDays, sweepBatch, dailyCap, isolateLimiter",
     );
     expect(() => resolveConfig({ ...input, anonymous: true as never })).toThrow(
       "anonymous must be an object or false",
+    );
+  });
+
+  it("refuses anonymous with an isolate limiter: the daily cap is per deployment (ruling 27)", () => {
+    const message = "anonymous needs a shared limiter: the daily cap is per deployment";
+    const shared: LimiterPort = { scope: "shared", allow: async () => true };
+    // The default limiter is the memory limiter, which counts per isolate.
+    expect(() => createAuth({ ...input, anonymous: {} })).toThrow(message);
+    expect(() =>
+      createAuth({ ...input, limiter: createMemoryLimiter(systemClock), anonymous: {} }),
+    ).toThrow(message);
+    // A limiter of the app with no scope counts as isolate.
+    expect(() =>
+      createAuth({ ...input, limiter: { allow: async () => true }, anonymous: {} }),
+    ).toThrow(message);
+    expect(() => createAuth({ ...input, anonymous: { isolateLimiter: "allow" } })).not.toThrow();
+    expect(() => createAuth({ ...input, limiter: shared, anonymous: {} })).not.toThrow();
+    expect(() => createAuth({ ...input, anonymous: { isolateLimiter: "yes" as "allow" } })).toThrow(
+      'anonymous.isolateLimiter must be "allow" or absent',
     );
   });
 });
@@ -498,7 +519,7 @@ describe("the anonymous branch of provedAccount and handleProved (plan 12i Task 
   });
 
   it("denies the OAuth grant gates to an anonymous user", async () => {
-    const h = oauthHandle({ anonymous: {}, oauth: oauthWithDevice() });
+    const h = oauthHandle({ anonymous: { isolateLimiter: "allow" }, oauth: oauthWithDevice() });
     const a = await anonymous({ auth: h, handle: h.auth.handle });
     const clientId = await registered(h);
     const { challenge } = await pkce();
@@ -735,7 +756,7 @@ describe("the anonymous sweep (plan 12i Task 6)", () => {
     const opened = world({
       limiter: { allow: async () => true },
       session: { ttlDays: 7 },
-      anonymous: { ttlDays: 1 },
+      anonymous: { isolateLimiter: "allow", ttlDays: 1 },
     });
     const a = await anonymous(opened);
     // The app then turns on an absolute cap of 1 day. The session keeps its expiresAt.
@@ -744,7 +765,7 @@ describe("the anonymous sweep (plan 12i Task 6)", () => {
       clock: opened.auth.clock,
       limiter: { allow: async () => true },
       session: { ttlDays: 7, absoluteDays: 1 },
-      anonymous: { ttlDays: 1 },
+      anonymous: { isolateLimiter: "allow", ttlDays: 1 },
     });
     // Two days on: the cap ends the session, and its expiresAt is 5 days ahead.
     opened.auth.clock.advance(2 * 24 * 60 * 60 * 1000);
@@ -764,7 +785,7 @@ describe("the anonymous sweep (plan 12i Task 6)", () => {
     const w = world({
       limiter: { allow: async () => true },
       session: { ttlDays: 7 },
-      anonymous: { sweepBatch: 3 },
+      anonymous: { isolateLimiter: "allow", sweepBatch: 3 },
       hooks: { user: { afterDelete } },
     });
     for (let i = 0; i < 5; i++) await anonymous(w);
@@ -779,7 +800,7 @@ describe("the anonymous sweep (plan 12i Task 6)", () => {
   it("takes the oldest anonymous user first by createdAt, not by id (ruling 25 L3)", async () => {
     const w = world({
       limiter: { allow: async () => true },
-      anonymous: { sweepBatch: 1 },
+      anonymous: { isolateLimiter: "allow", sweepBatch: 1 },
     });
     // A Better Auth anonymous user keeps its random id through compat (plan 12i
     // Task 16), so an id has no time order. The newer user has the lower id.
@@ -810,7 +831,7 @@ describe("the anonymous sweep (plan 12i Task 6)", () => {
 
 describe("the null address in the answers of an anonymous user (plan 12i Task 6)", () => {
   it("answers the operator reads of an anonymous user with a null address", async () => {
-    const f = await operatorFixture({ config: { anonymous: {} } });
+    const f = await operatorFixture({ config: { anonymous: { isolateLimiter: "allow" } } });
     const handle = createRouter(f.auth.config, coreRoutes(f.auth.config));
     const a = await anonymous({ auth: f.auth, handle });
     const id = a.resolved.user.id;
@@ -826,7 +847,10 @@ describe("the null address in the answers of an anonymous user (plan 12i Task 6)
   });
 
   it("redeems a handoff of an anonymous session with a null address", async () => {
-    const auth = makeAuth({ handoff: { schemes: ["consumera://"] }, anonymous: {} });
+    const auth = makeAuth({
+      handoff: { schemes: ["consumera://"] },
+      anonymous: { isolateLimiter: "allow" },
+    });
     const handle = createRouter(auth.config, coreRoutes(auth.config));
     const a = await anonymous({ auth, handle });
     const { verifier, challenge } = await pkce();
@@ -862,7 +886,7 @@ describe("the null address in the answers of an anonymous user (plan 12i Task 6)
       trustedOrigins: [APP_ORIGIN],
       storage: makeAuth().storage,
       mail: { send: async () => {} },
-      anonymous: {},
+      anonymous: { isolateLimiter: "allow" },
     });
     const api = auth.api.anonymous;
     if (!api) throw new Error("no anonymous api");

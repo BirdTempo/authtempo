@@ -281,7 +281,7 @@ function world(teams: { keepLastTeam?: boolean } = {}) {
     // Plan 12d Task 10: the SCIM Users of Acme. Task 11: each Group has a team and a role.
     scim: { groups: "both" },
     // Plan 12i Task 6: the anonymous sign-in and its delete.
-    anonymous: {},
+    anonymous: { isolateLimiter: "allow" },
     jwt: {
       verifyIdToken: async (input) => {
         const claims = idTokens[input.token];

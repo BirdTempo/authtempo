@@ -28,6 +28,10 @@ const PINS = {
 };
 // The sweep of 101 anonymous users past their days, with no live session.
 const SWEEP_PINS = { queries: 28, anonymousUsers: 100 };
+// The rows that one read of the anonymous step may take on D1: an index entry
+// and a row for each of the 50 users of a page (ANONYMOUS_PAGE), and the one
+// index entry that ends the range (run of 2026-10-25: 101).
+const PAGE_ROWS = 2 * 50 + 1;
 // The sweep of 60 anonymous users past their days behind a backlog of 300
 // client links (ruling 25 M2), on the run of 2026-10-24. With no share of
 // its own, the step gets one page, 50 users, after the link and outbox steps.
@@ -108,6 +112,13 @@ function reading(db: D1Database) {
   });
   return { db: view as D1Database, log };
 }
+
+// A limiter that allows each call, for the setup and the sweeps. It counts
+// nothing, so the anonymous config allows it as an isolate limiter.
+const OPEN: Partial<AuthConfig> = {
+  limiter: { allow: async () => true },
+  anonymous: { isolateLimiter: "allow" },
+};
 
 let current = new Date("2026-10-24T00:00:00.000Z");
 const clock = { now: () => current };
@@ -202,21 +213,21 @@ describe("the anonymous routes on D1 (plan 12i Task 6)", () => {
       limiter: { allow: async () => true },
       mail: { send: async () => {} },
       clock,
-      anonymous: {},
+      anonymous: { isolateLimiter: "allow" },
     });
     for (let i = 0; i < 101; i++)
       expect((await setup.handle(post("/anonymous/sign-in", {}))).status).toBe(200);
     expect(await rows("ta_user")).toBe(101);
     // Past the 30 days of anonymous.ttlDays and the 30 days of the session: no session is live.
     current = new Date(current.getTime() + 31 * DAY_MS);
-    const w = make({ limiter: { allow: async () => true } });
+    const w = make(OPEN);
     const swept = await w.auth.api.sweepExpired();
     const got = { queries: w.count.queries, anonymousUsers: swept.anonymousUsers };
     expect(got).toEqual(SWEEP_PINS);
     expect(got.queries).toBeLessThanOrEqual(BUDGET);
     expect(await rows("ta_user")).toBe(101 - swept.anonymousUsers);
     // The next sweep takes the rest.
-    const next = make({ limiter: { allow: async () => true } });
+    const next = make(OPEN);
     expect((await next.auth.api.sweepExpired()).anonymousUsers).toBe(101 - swept.anonymousUsers);
     expect(next.count.queries).toBeLessThanOrEqual(BUDGET);
     expect(await rows("ta_user")).toBe(0);
@@ -237,7 +248,12 @@ describe("the anonymous step on a large user table (plan 12i Task 6, ruling 25)"
     for (let i = 0; i < rows.length; i += 500) await env.DB.batch(rows.slice(i, i + 500));
   }
 
-  /** `count` anonymous users made by the route at the clock time. */
+  /**
+   * `count` anonymous users made by the route, one per second from the clock
+   * time. The index has no `id`, so SQLite sorts the users of one `createdAt`
+   * by id in a temp tree: a read takes each user of the last time it reaches.
+   * Users of one millisecond are rare, so the seed gives each its own second.
+   */
   async function signIns(count: number) {
     const setup = createAuth({
       baseURL: BASE,
@@ -247,10 +263,12 @@ describe("the anonymous step on a large user table (plan 12i Task 6, ruling 25)"
       limiter: { allow: async () => true },
       mail: { send: async () => {} },
       clock,
-      anonymous: {},
+      anonymous: { isolateLimiter: "allow" },
     });
-    for (let i = 0; i < count; i++)
+    for (let i = 0; i < count; i++) {
       expect((await setup.handle(post("/anonymous/sign-in", {}))).status).toBe(200);
+      current = new Date(current.getTime() + 1000);
+    }
   }
 
   it("reads the old anonymous users alone through the index on (is_anonymous, created_at)", async () => {
@@ -269,22 +287,23 @@ describe("the anonymous step on a large user table (plan 12i Task 6, ruling 25)"
       limiter: { allow: async () => true },
       mail: { send: async () => {} },
       clock,
-      anonymous: {},
+      anonymous: { isolateLimiter: "allow" },
     });
     expect((await auth.api.sweepExpired()).anonymousUsers).toBe(100);
     const steps = log.filter((l) => /FROM ta_user WHERE is_anonymous = /.test(l.sql));
     expect(steps).toHaveLength(2);
-    // The SQLite text sorts by `created_at IS NULL` first, so the index finds the rows but
-    // does not give their order. A read takes each old anonymous user: an index entry and a
-    // row, and no user with an address or a young one. A scan would read 10 420 rows.
-    for (const step of steps) expect(step.rows).toBeLessThanOrEqual(2 * 120 + 1);
+    // Each read takes one page: an index entry and a row for each user, and one entry
+    // more that ends the range. A scan would read 10 420 rows. A sort by
+    // `created_at IS NULL` first would read each old anonymous user (ruling 27).
+    for (const step of steps) expect(step.rows).toBeLessThanOrEqual(PAGE_ROWS);
     const [first] = steps;
     const plan = await env.DB.prepare(`EXPLAIN QUERY PLAN ${first?.sql}`)
       .bind(1, 0, 50)
       .all<{ detail: string }>();
-    expect(plan.results.map((r) => r.detail).join("; ")).toContain(
-      "USING INDEX ix_ta_user__is_anonymous__created_at",
-    );
+    const detail = plan.results.map((r) => r.detail).join("; ");
+    expect(detail).toContain("USING INDEX ix_ta_user__is_anonymous__created_at");
+    // The index gives the created_at order: only the id term of one time needs a sort.
+    expect(detail).not.toContain("TEMP B-TREE FOR ORDER BY");
     // The next sweep takes the other 20, and then an idle sweep reads no young user.
     expect((await auth.api.sweepExpired()).anonymousUsers).toBe(20);
     log.length = 0;
@@ -292,6 +311,31 @@ describe("the anonymous step on a large user table (plan 12i Task 6, ruling 25)"
     const idle = log.filter((l) => /FROM ta_user WHERE is_anonymous = /.test(l.sql));
     expect(idle.map((l) => l.rows)).toEqual([expect.any(Number)]);
     expect(idle[0]?.rows).toBeLessThanOrEqual(2);
+  }, 120_000);
+
+  it("reads one page per read with a backlog of 2 000 old anonymous users (ruling 27)", async () => {
+    // A backlog after an outage: every run must cost a page, not the backlog.
+    await seedAddressUsers(1_000, current.getTime() - 40 * DAY_MS);
+    await signIns(2_000);
+    current = new Date(current.getTime() + 31 * DAY_MS);
+    const { db, log } = reading(env.DB);
+    const auth = createAuth({
+      baseURL: BASE,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: createD1Adapter(db),
+      limiter: { allow: async () => true },
+      mail: { send: async () => {} },
+      clock,
+      anonymous: { isolateLimiter: "allow" },
+    });
+    expect((await auth.api.sweepExpired()).anonymousUsers).toBe(100);
+    // Two pages, and each reads one page of the backlog, not the 2 000 users. With the
+    // `IS NULL` term each read took the whole backlog that stayed: 4 000 and 3 900 rows.
+    const steps = log.filter((l) => /FROM ta_user WHERE is_anonymous = /.test(l.sql));
+    expect(steps).toHaveLength(2);
+    for (const step of steps) expect(step.rows).toBeLessThanOrEqual(PAGE_ROWS);
+    expect(await rows("ta_user")).toBe(1_000 + 2_000 - 100);
   }, 120_000);
 
   it("keeps its share when a link backlog fills the steps before it", async () => {
@@ -312,7 +356,7 @@ describe("the anonymous step on a large user table (plan 12i Task 6, ruling 25)"
     await env.DB.batch(batch);
     await signIns(60);
     current = new Date(current.getTime() + 31 * DAY_MS);
-    const w = make({ limiter: { allow: async () => true } });
+    const w = make(OPEN);
     const swept = await w.auth.api.sweepExpired();
     const got = {
       oauthSessionLinks: swept.oauthSessionLinks,

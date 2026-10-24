@@ -38,7 +38,7 @@ import type {
 } from "../schema.js";
 import { schema } from "../schema.js";
 import { createPbkdf2PasswordHash } from "../seams/password-hash.js";
-import { type StorageAdapter, StorageError, type Where } from "./port.js";
+import { type Sort, type StorageAdapter, StorageError, type Where } from "./port.js";
 import { USER_CHILD_MODELS } from "./sql.js";
 
 export { runRefreshRaceConformance } from "./refresh-race-conformance.js";
@@ -813,6 +813,29 @@ export function runAdapterConformance(
       });
       expect(rows.map((r) => r.id)).toEqual(["o3", "o1", "o2"]);
       expect(rows[1]?.metadata).toEqual({ k: 1 });
+    });
+
+    it("sorts a notNull key as a plain key, and refuses notNull on a nullable field (ruling 27 of plan 12i)", async () => {
+      const later = new Date(t0.getTime() + 1000);
+      await db.create("user", user("u2", "b@example.com", later));
+      await db.create("user", user("u1", "a@example.com", later));
+      await db.create("user", user("u3", "c@example.com", t0));
+      const ids = async (dir: "asc" | "desc") =>
+        (
+          await db.findMany("user", [], {
+            sort: [
+              { field: "createdAt", dir, notNull: true },
+              { field: "id", dir: "asc", notNull: true },
+            ],
+          })
+        ).map((r) => r.id);
+      expect(await ids("asc")).toEqual(["u3", "u1", "u2"]);
+      expect(await ids("desc")).toEqual(["u1", "u2", "u3"]);
+      await expect(
+        db.findMany("user", [], {
+          sort: { field: "name", dir: "asc", notNull: true } as Sort<"user">,
+        }),
+      ).rejects.toMatchObject({ code: "invalid_argument", fields: ["name"] });
     });
 
     it("applies each key's own direction, so an ascending id follows a descending name", async () => {

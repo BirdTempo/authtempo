@@ -62,7 +62,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `phone-add:user:<userId>` | 15 minutes | 3 | Phone add, after the fresh rule and before the request limits. The note to a taken number counts too |
 | `phone-add:phone:<phone>` | 24 hours | 10 | Phone add, over every user, after the form and region checks. The note to a taken number counts too |
 | `anonymous:ip:<ip>` | 1 hour | 10 | Anonymous sign-in that makes a user, before the captcha. A live anonymous session answers itself and counts nothing |
-| `anonymous:all-day:deployment` | 24 hours | `anonymous.dailyCap`, default 1000 | Anonymous sign-in that makes a user, after the per-IP limit and the captcha. One count for the deployment: a shared limiter makes it one for all isolates |
+| `anonymous:all-day:deployment` | 24 hours | `anonymous.dailyCap`, default 1000 | Anonymous sign-in that makes a user, after the per-IP limit and the captcha. It needs a shared limiter |
 | `anonymous-delete:user:<userId>` | 1 hour | 5 | Anonymous delete, after the check that the user is anonymous |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |

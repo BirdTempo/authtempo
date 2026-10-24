@@ -51,6 +51,7 @@ import {
   MIGRATION_0012_NAME,
 } from "../src/storage/migration.js";
 import { resolveNames } from "../src/storage/names.js";
+import { compatStatements } from "../src/storage/statements.js";
 import { before17 } from "./d1/sql.js";
 import { BETTER_AUTH_SQLITE } from "./fixtures.js";
 
@@ -1021,6 +1022,31 @@ describe("migration 0012 (plan 12i)", () => {
         sql: 'CREATE INDEX ix_user__is_anonymous__created_at ON "user" ("isAnonymous", "createdAt")',
       },
     ]);
+    // The read of the anonymous step: no IS NULL term for a notNull key.
+    const read = compatStatements("sqlite", resolveNames()).select(
+      "user",
+      [
+        { field: "isAnonymous", op: "eq", value: true },
+        { field: "createdAt", op: "lt", value: new Date("2026-10-01T00:00:00.000Z") },
+      ],
+      {
+        sort: [
+          { field: "createdAt", dir: "asc", notNull: true },
+          { field: "id", dir: "asc", notNull: true },
+        ],
+        limit: 50,
+      },
+    );
+    const plan = db
+      .prepare(`EXPLAIN QUERY PLAN ${read?.sql}`)
+      .all(...((read?.params ?? []) as never[]))
+      .map((r) => (r as { detail: string }).detail)
+      .join("; ");
+    // The index gives the createdAt order, so a page reads about its own rows. A sort by
+    // "createdAt" IS NULL first would sort every match (ruling 27 of plan 12i).
+    expect(read?.sql).toContain('ORDER BY "createdAt" ASC, "id" ASC');
+    expect(plan).toContain("USING INDEX ix_user__is_anonymous__created_at");
+    expect(plan).not.toContain("TEMP B-TREE FOR ORDER BY");
     expect(db.prepare("SELECT key, value FROM ta_meta ORDER BY key").all()).toEqual([
       { key: "compat_better_auth", value: "12" },
       { key: "schema_version", value: "15" },

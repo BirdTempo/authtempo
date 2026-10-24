@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SCHEMA_VERSION, schema } from "../src/schema.js";
-import { StorageError } from "../src/storage/port.js";
+import { type Sort, StorageError, type Where } from "../src/storage/port.js";
 import {
   assertFields,
   assertModel,
@@ -14,6 +14,7 @@ import {
   fieldsFromColumns,
   fieldsFromUniqueIndex,
   insertStatement,
+  MYSQL,
   POSTGRES,
   SQLITE,
   schemaVersionGate,
@@ -264,6 +265,29 @@ describe("statements", () => {
       "SELECT id, created_at, updated_at, email, email_verified, name, image, banned_at, ban_reason, ban_until, username, display_username, phone, is_anonymous FROM ta_user WHERE name IS NOT NULL ORDER BY name ASC",
     );
     expect(p?.params).toEqual([]);
+  });
+  it("writes no IS NULL term for a notNull key, and refuses it on a nullable field (ruling 27)", () => {
+    const where: Where<"user">[] = [{ field: "isAnonymous", op: "eq", value: true }];
+    const sort: Sort<"user">[] = [
+      { field: "createdAt", dir: "asc", notNull: true },
+      { field: "id", dir: "asc", notNull: true },
+    ];
+    // Without the IS NULL term, the index on (is_anonymous, created_at) gives the order.
+    expect(selectStatement(SQLITE, "user", where, { sort, limit: 50 })?.sql).toMatch(
+      / WHERE is_anonymous = \? ORDER BY created_at ASC, id ASC LIMIT \?$/,
+    );
+    expect(selectStatement(MYSQL, "user", where, { sort })?.sql).toMatch(
+      / ORDER BY `created_at` ASC, `id` ASC$/,
+    );
+    // A key with no notNull keeps the term.
+    expect(
+      selectStatement(SQLITE, "user", where, { sort: { field: "createdAt", dir: "desc" } })?.sql,
+    ).toMatch(/ ORDER BY created_at IS NULL DESC, created_at DESC$/);
+    expect(() =>
+      selectStatement(SQLITE, "user", [], {
+        sort: { field: "name", dir: "asc", notNull: true } as Sort<"user">,
+      }),
+    ).toThrow("notNull needs a field that is not nullable");
   });
   it("returns null for a where that can never match", () => {
     expect(selectStatement(SQLITE, "user", [{ field: "id", op: "in", value: [] }])).toBeNull();

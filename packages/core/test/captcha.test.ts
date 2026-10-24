@@ -33,7 +33,7 @@ function setup(captcha: AuthConfig["captcha"], extra: Partial<AuthConfig> = {}) 
     // The phone code request of plan 12i Task 5, on the memory limiter.
     phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
     // The anonymous sign-in of plan 12i Task 6.
-    anonymous: {},
+    anonymous: { isolateLimiter: "allow" },
     ...(captcha ? { captcha } : {}),
     ...extra,
   });
@@ -420,7 +420,7 @@ describe("the captcha port (plan 12b)", () => {
         },
       },
       phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
-      anonymous: {},
+      anonymous: { isolateLimiter: "allow" },
       captcha: { port: fakePort("pass").port, flows: [...CAPTCHA_FLOWS] },
     });
     const known = "known@example.com";

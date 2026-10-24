@@ -435,7 +435,8 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | `anonymous` | `AnonymousConfig` or `false` | `false` | Turns on `POST /anonymous/sign-in` and `POST /anonymous/delete`. An anonymous user has no address and no way in. The routes of `ANONYMOUS_REFUSED` refuse its session. `{}` turns it on with the defaults. |
 | `anonymous.ttlDays` | number | 30 | An integer from 1 to 365. The sweep deletes an anonymous user made more than this many days ago with no live session, at most `sweepBatch` per sweep. |
 | `anonymous.sweepBatch` | number | 100 | An integer from 1 to 100. The most anonymous users that one sweep deletes. Each deleted user gets `user.afterDelete`, outside the call budget of the sweep. Lower it when that hook sends queries or requests. |
-| `anonymous.dailyCap` | number | 1000 | An integer from 1 to 100000. The anonymous users that the deployment makes per 24 hours. A sign-in over the cap answers 429 `rate_limited`, and `limit.hit` names the family `anonymous:all-day`. The count is per deployment on a shared limiter, and per isolate on the memory limiter. Turn on the captcha flow `anonymous-sign-in` on a public site, so that a script cannot spend the cap. |
+| `anonymous.dailyCap` | number | 1000 | An integer from 1 to 100000. The anonymous users that the deployment makes per 24 hours. A sign-in over the cap answers 429 `rate_limited`, and `limit.hit` names the family `anonymous:all-day`. The cap is per deployment, so `anonymous` needs a shared limiter: the D1, Postgres, or MySQL limiter. A limiter that counts per isolate, such as the memory limiter, is refused at build. Turn on the captcha flow `anonymous-sign-in` on a public site, so that a script cannot spend the cap. |
+| `anonymous.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests and local development. The cap is then per isolate. |
 
 ## Observability
 
