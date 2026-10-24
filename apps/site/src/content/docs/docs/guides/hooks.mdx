@@ -117,18 +117,25 @@ Warning: on Postgres with a pool of one connection, a before hook that queries t
 
 ## The anonymous upgrade
 
-A sign-in from a browser with a live anonymous session always replaces the anonymous user. Core never changes the anonymous user into the user of the sign-in.
+A sign-in from a browser with a live anonymous session replaces the anonymous user. Core never changes the anonymous user into the user of the sign-in.
 
+- These sign-ins link: the password sign-in, the password sign-up and its confirm, the magic link, the email code, and the phone code. A social sign-in, a passkey sign-in, and the challenge verify of a gated sign-in also link.
+- An SSO sign-in, a password reset that opens a session, and a handoff link nothing. Their session replaces the cookie. The anonymous user stays with no hook, and the sweep deletes it and its data.
+- With `anonymous` off, nothing links. This includes a sign-in that started before the deployment turned `anonymous` off.
 - The event holds `anonymousUser`, `user`, `proof`, and `via`. `user` is the account that the person signed in to.
 - `beforeLink` runs in the sign-in's transaction, before the session write. A refusal answers `hook_refused`, and no session opens. The anonymous user and its session stay.
 - `afterLink` runs after the commit. Move the app's data here. Then the anonymous session ends with `anonymous_upgrade`, and the anonymous user goes. `user.afterDelete` runs for it, and `user.beforeDelete` does not.
-- A throw of `afterLink` writes one line and keeps the anonymous user and its session, so no data is lost. The sweep removes the user later.
+- A throw of `afterLink` writes the line `hook.after_failed`, with the anonymous user's id as `rowId`. The anonymous user and its session stay, but no later sign-in links them: the upgrade spent the claim. When the anonymous session expires and `anonymous.ttlDays` pass, the sweep deletes the user. Act on the line: move the data before that sweep. The sweep fires `user.afterDelete` for the user.
+- A failure after `afterLink`, at the session end or the delete, writes the line `anonymous.cleanup_failed`. The sign-in still answers with its session. The sweep deletes the anonymous user later.
+- `afterLink` runs in the request of the sign-in. On D1, its queries count toward the 50 queries of that invocation, with those of the sign-in. A sign-up confirm with a full `multiSession` bag uses 36 of them before the hook runs.
 - `proof` is `unverified` when `user` holds an address that no proof verified. The real owner of the address can claim that account later. Move data only when `proof` is `verified`.
 - A proof by mail or SMS links only when the completing request carries the anonymous session that asked for it. These proofs are the magic link, the email code, the confirm link of a sign-up, and the phone code. So a stranger cannot move data into your account with a link for your address.
 - A social sign-in links the anonymous user of its start: the binding cookie ties the callback to that browser. A password sign-in and a passkey sign-in link the anonymous session of their own request.
 - A sign-in with the second factor links at the challenge verify. A challenge that expires links nothing.
 - With `multiSession` on, the anonymous session never enters the bag, so an upgrade displaces no bag session. A switch to a bag session is no sign-in and links nothing.
 - Two sign-ins from one anonymous session at once: each can run `beforeLink`, and one links. The other signs in with no `afterLink`. So move data in `afterLink` only. An impersonation session never links.
+- Residual: `POST /handoff/continue` is open to an anonymous session, so an anonymous user can hold more than one session. An upgrade ends all of them, and with an `afterEnd` hook each end adds queries.
+- Residual: a `POST /anonymous/delete` in parallel with an upgrade can delete the anonymous user before `afterLink` runs. Then `afterLink` runs after `user.afterDelete`. The same person does both, so no other person gains data.
 
 ## Locks over a before hook
 

@@ -1406,13 +1406,19 @@ const auth = createAuth({
   verify is not a change of a credential, so it sends no notice mail.
 - Anonymous points (plan 12i Task 7): `hooks.anonymous.beforeLink` and
   `afterLink`. They need `anonymous`. A sign-in from a browser with a live
-  anonymous session replaces the anonymous user. The event holds
+  anonymous session replaces the anonymous user. An SSO sign-in, a
+  password reset that opens a session, and a handoff link nothing, and
+  nothing links with `anonymous` off. The event holds
   `anonymousUser`, `user`, `proof`, and `via`. `beforeLink` runs in the
   sign-in's transaction, before the session write, and a refusal answers
   `hook_refused` with no session. `afterLink` runs after the commit. Then
   the anonymous session ends with `anonymous_upgrade`, and the anonymous
   user goes, with `user.afterDelete`. A throw of `afterLink` writes one
-  line and keeps the anonymous user. Move the app's data only when
+  line that names the anonymous user, and keeps it. No later sign-in links
+  it, and the sweep deletes it, so act on the line. A failure of the end
+  or the delete after `afterLink` writes `anonymous.cleanup_failed` and
+  keeps the sign-in. On D1, the queries of `afterLink` count toward the
+  limit of the sign-in request. Move the app's data only when
   `proof` is `verified`: an `unverified` user holds an address that its
   owner can claim later.
 - SSO point (plan 12d): `hooks.sso.beforeSignIn`, with the connection,

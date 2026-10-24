@@ -12,7 +12,8 @@ import { FIELD_KINDS } from "../src/redact.js";
  * line, and Task 4 the line of the SMS port. Plan 12i Task 14 adds the
  * token answer refusal line. The Task 5 fix round adds the line of an SMS
  * after the answer (ruling 23). The second fix round adds the line of a
- * Worker with no waitUntil (ruling 29). A call that builds a text for each
+ * Worker with no waitUntil (ruling 29). Task 7 adds the line of the
+ * upgrade clean-up (ruling 36 L2). A call that builds a text for each
  * value gives one text for each value. These are the email code and
  * second-factor counts, and the three sweep steps. A part that a field
  * fills is written `<field>`.
@@ -95,6 +96,8 @@ const START_LIST: readonly string[] = [
   "authtempo: the sweep organization rest step stopped",
   // The anonymous step of the sweep (plan 12i Task 6).
   "authtempo: the sweep anonymous step stopped",
+  // The clean-up after an anonymous upgrade (plan 12i Task 7, ruling 36 L2).
+  "authtempo: the anonymous upgrade cleanup failed",
   "authtempo: sso guard refused",
   "authtempo: sso failed",
   "authtempo: sso denied",
@@ -128,10 +131,10 @@ const ENTRIES = Object.entries(EVENTS) as [string, EventSpec][];
 describe("the event table (plan 12h Task 3, spec 31 items 6 and 7)", () => {
   it("has one row for each line of the start list", () => {
     const texts = ENTRIES.flatMap(([, spec]) => (spec.line ? [spec.line.text] : []));
-    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, and 3 + 1 + 3 + 1 of plan
-    // 12i (Task 14: 1, Task 5: 3, Task 6: 1).
-    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1);
-    expect(texts).toHaveLength(77 + 1 + 3 + 1);
+    // 63 of plan 12h, 1 of plan 12g, 10 of plan 12d, and 3 + 1 + 3 + 1 + 1 of
+    // plan 12i (Task 14: 1, Task 5: 3, Task 6: 1, Task 7: 1).
+    expect(START_LIST).toHaveLength(77 + 1 + 3 + 1 + 1);
+    expect(texts).toHaveLength(77 + 1 + 3 + 1 + 1);
     expect(new Set(texts)).toEqual(new Set(START_LIST));
   });
 

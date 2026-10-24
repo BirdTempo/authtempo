@@ -213,6 +213,7 @@ With no sink, core writes each line of this table with `console`, with the text 
 | `authtempo: the sweep sso recheck step stopped` | `sweep.sso_recheck_stopped` | Act when it repeats. The sweep stopped its recheck of the verified SSO domains. The next sweep tries again. |
 | `authtempo: the sweep organization rest step stopped` | `sweep.organization_rest_stopped` | Act when it repeats. The sweep stopped its step of the rows that an account delete left. The next sweep tries again. |
 | `authtempo: the sweep anonymous step stopped` | `sweep.anonymous_stopped` | Act when it repeats. The sweep stopped its step of the anonymous users past `anonymous.ttlDays`. The next sweep tries again. |
+| `authtempo: the anonymous upgrade cleanup failed` | `anonymous.cleanup_failed` | Watch. A sign-in replaced an anonymous user, but the end of its session or its delete failed. The sign-in holds. The sweep deletes the user later. |
 | `authtempo: sso guard refused` | `sso.guard_refused` | Act when no owner acted. The SSO manager guard refused a caller at the named step. |
 | `authtempo: sso failed` | `sso.failed` | Act when it repeats for one connection. An SSO sign-in failed at the named step. Check the setup of the provider. |
 | `authtempo: sso denied` | `sso.denied` | Watch. The provider answered an error to the sign-in, such as a person who said no. |

@@ -483,6 +483,76 @@ describe("the anonymous upgrade (plan 12i Task 7)", () => {
     expect(still.status).toBe(200);
   });
 
+  it("keeps a committed sign-in when the clean-up after afterLink fails", async () => {
+    const rec = recorder();
+    let down = false;
+    const w = world(
+      {
+        hooks: rec.hooks({
+          afterLink: (e) => {
+            rec.after(e);
+            // The next transaction is the end of the anonymous session.
+            down = true;
+          },
+        }),
+      },
+      rec,
+    );
+    const transaction = w.storage.transaction.bind(w.storage);
+    // A store error after the commit, such as query 51 on D1 Free. It fails one call.
+    w.storage.transaction = ((work) => {
+      if (!down) return transaction(work);
+      down = false;
+      return Promise.reject(new Error("Too many API requests by single worker invocation."));
+    }) as typeof w.storage.transaction;
+    const anon = await anonymousJar(w);
+    const res = await magicLink(w, "ada@example.com", anon.cookie, anon.cookie);
+    expect(res.status).toBe(200);
+    const token = setToken(w, res);
+    expect(token).not.toBeNull();
+    expect(w.rec.links.map((l) => l.point)).toEqual(["before", "after"]);
+    const lines = (await w.events()).filter((e) => e.name === "anonymous.cleanup_failed");
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ rowId: anon.userId, errorName: "Error" });
+    // The anonymous user stays for the sweep. The claim spent its session, so no sign-in links it again.
+    expect((await userOf(w, anon.userId))?.isAnonymous).toBe(true);
+    expect(w.rec.deleted).toEqual([]);
+    const [row] = await sessionsOf(w, anon.userId);
+    expect(row?.freshAt).toBeNull();
+    const me = await w.handle(get("/auth/session", { cookie: `${w.config.cookieName}=${token}` }));
+    expect(await me.json()).toMatchObject({ user: { email: "ada@example.com" } });
+  });
+
+  it("links nothing through a row recorded before anonymous was turned off", async () => {
+    const w = world();
+    const { soft } = await passkeyUser(w, "ada@example.com");
+    const anon = await anonymousJar(w);
+    // The passkey options record the anonymous user. Then the deployment turns anonymous off.
+    const options = await w.handle(
+      post("/auth/passkey/authenticate/options", {}, jarHeaders(anon.cookie)),
+    );
+    const { challenge } = (await options.json()) as { challenge: string };
+    const rec = recorder();
+    // The same hooks with no anonymous points: those need anonymous on.
+    const hooks = rec.hooks();
+    delete hooks.anonymous;
+    const off = world({ anonymous: false, hooks, storage: w.storage, clock: w.config.clock }, rec);
+    const res = await off.handle(
+      post(
+        "/auth/passkey/authenticate/verify",
+        { response: await soft.authenticate(challenge) },
+        jarHeaders(anon.cookie),
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(setToken(off, res)).not.toBeNull();
+    expect((await userOf(w, anon.userId))?.isAnonymous).toBe(true);
+    expect(rec.deleted).toEqual([]);
+    expect(rec.ended).toEqual([]);
+    const [row] = await sessionsOf(w, anon.userId);
+    expect(row?.freshAt).not.toBeNull();
+  });
+
   it("upgrades on each pathway", async () => {
     const rows: [string, (w: World, jar: string) => Promise<Response>, SessionVia][] = [
       [
@@ -568,6 +638,65 @@ describe("the anonymous upgrade (plan 12i Task 7)", () => {
 });
 
 describe("the anonymous upgrade under attack (plan 12i Task 7, security focus)", () => {
+  it("links nothing at an email code asked from a stranger's anonymous session", async () => {
+    const w = world();
+    await signUpAndVerify(w, "ann@example.com", PASSWORD);
+    const stranger = await anonymousJar(w);
+    const asked = await w.handle(
+      post("/auth/otp/request", { email: "ann@example.com" }, jarHeaders(stranger.cookie)),
+    );
+    expect(asked.status).toBe(200);
+    const mail = w.mail.findLast((m) => m.to === "ann@example.com");
+    const code = /\b(\d{6})\b/.exec(mail?.text ?? "")?.[1];
+    if (!code) throw new Error("no code in the mail");
+    // The owner enters the code in a browser with no session.
+    const res = await w.handle(
+      post(
+        "/auth/otp/verify",
+        { email: "ann@example.com", code: recordCredential(code) },
+        jarHeaders(null),
+      ),
+    );
+    expect(res.status).toBe(200);
+    await kept(w, stranger);
+  });
+
+  it("links nothing at a phone code asked from a stranger's anonymous session", async () => {
+    const w = world();
+    const stranger = await anonymousJar(w);
+    const asked = await w.handle(
+      post("/auth/phone/request", { phone: PHONE }, jarHeaders(stranger.cookie)),
+    );
+    expect(asked.status).toBe(200);
+    const text = w.sms.sent.findLast((s) => s.to === PHONE)?.text ?? "";
+    const code = /^(\d+) is your /.exec(text)?.[1];
+    if (!code) throw new Error("no code in the text");
+    // The owner of the number enters the code in a browser with no session.
+    const res = await w.handle(
+      post("/auth/phone/verify", { phone: PHONE, code: recordCredential(code) }, jarHeaders(null)),
+    );
+    expect(res.status).toBe(200);
+    await kept(w, stranger);
+  });
+
+  it("links nothing at a sign-up confirm asked from a stranger's anonymous session", async () => {
+    const w = world({ password: { hash: FAST, uniformSignUp: true } });
+    const stranger = await anonymousJar(w);
+    const up = await w.handle(
+      post(
+        "/auth/password/sign-up",
+        { email: "ann@example.com", password: PASSWORD },
+        jarHeaders(stranger.cookie),
+      ),
+    );
+    expect(up.status).toBe(200);
+    const token = tokenFromMail(w.mail.findLast((m) => m.to === "ann@example.com")?.text ?? "");
+    // The owner of the address opens the confirm link in a browser with no session.
+    const res = await w.handle(post("/auth/password/verify", { token }, jarHeaders(null)));
+    expect(res.status).toBe(200);
+    await kept(w, stranger);
+  });
+
   it("links one of two parallel upgrades of one anonymous session", async () => {
     const w = world();
     await signUpAndVerify(w, "ann@example.com", PASSWORD);

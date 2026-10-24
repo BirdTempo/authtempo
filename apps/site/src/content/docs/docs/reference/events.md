@@ -165,6 +165,7 @@ Each event has these fields too:
 | `sweep.sso_recheck_stopped` | error | `errorClass: errorClass` | `authtempo: the sweep sso recheck step stopped` |
 | `sweep.organization_rest_stopped` | error | `errorClass: errorClass` | `authtempo: the sweep organization rest step stopped` |
 | `sweep.anonymous_stopped` | error | `errorClass: errorClass` | `authtempo: the sweep anonymous step stopped` |
+| `anonymous.cleanup_failed` | error | `rowId: id`, `errorName: errorName` | `authtempo: the anonymous upgrade cleanup failed` |
 | `sso.guard_refused` | error | `step: enum` | `authtempo: sso guard refused` |
 | `sso.failed` | error | `connectionId: id`, `step: enum` | `authtempo: sso failed` |
 | `sso.denied` | error | `connectionId: id` | `authtempo: sso denied` |

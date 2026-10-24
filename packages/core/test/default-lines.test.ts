@@ -2165,6 +2165,51 @@ describe("the SSO lines (plan 12d)", () => {
     expect(log.mock.calls).toEqual([["authtempo: the sweep anonymous step stopped", "Error"]]);
   });
 
+  it("anonymous.cleanup_failed", async () => {
+    let down = false;
+    const auth = makeAuth({
+      password: { hash: FAST, uniformSignUp: false },
+      anonymous: { isolateLimiter: "allow" },
+      hooks: {
+        anonymous: {
+          // The next transaction is the end of the anonymous session, after the commit.
+          afterLink: () => {
+            down = true;
+          },
+        },
+      },
+    });
+    await verifiedSession(auth, "ada@example.com");
+    const transaction = auth.storage.transaction.bind(auth.storage);
+    auth.storage.transaction = ((work) => {
+      if (!down) return transaction(work);
+      down = false;
+      return Promise.reject(new Error("too many queries"));
+    }) as StorageAdapter["transaction"];
+    const handle = createRouter(auth.config, coreRoutes(auth.config));
+    const signedIn = await handle(post("/auth/anonymous/sign-in", {}));
+    const name = `${auth.config.cookieName}=`;
+    const cookie = signedIn.headers
+      .getSetCookie()
+      .find((c) => c.startsWith(name))
+      ?.split(";")[0];
+    const anonymous = await auth.storage.findOne("user", [
+      { field: "isAnonymous", op: "eq", value: true },
+    ]);
+    const log = errors();
+    const res = await handle(
+      post(
+        "/auth/password/sign-in",
+        { email: "ada@example.com", password: PASSWORD },
+        { cookie: cookie ?? "" },
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(log.mock.calls).toEqual([
+      ["authtempo: the anonymous upgrade cleanup failed", anonymous?.id, "Error"],
+    ]);
+  });
+
   it("sweep.organization_rest_stopped", async () => {
     const auth = makeAuth({ organizations: {}, password: { hash: FAST } });
     const ada = await verifiedSession(auth, "ada@example.com");

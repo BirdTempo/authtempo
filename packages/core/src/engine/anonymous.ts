@@ -546,8 +546,11 @@ export function upgradeSteps(
   kind: UpgradeKind,
 ): UpgradeSteps {
   const callerId = anonymous?.user.isAnonymous ? anonymous.user.id : null;
-  const target =
-    kind === "mailed"
+  // With `anonymous` off, nothing links: not even a row that recorded an
+  // anonymous user before the deployment turned it off (choice 7).
+  const target = !config.anonymous
+    ? null
+    : kind === "mailed"
       ? recordedId !== null && callerId === recordedId
         ? recordedId
         : null
@@ -602,7 +605,7 @@ export function upgradeSteps(
       linked = null;
       if (!event) return;
       const { anonymousUser } = event;
-      // A throw keeps the anonymous user and its session: the app moved no data, so none is lost.
+      // A throw keeps the anonymous user. The claim is spent, so the app acts on the line.
       const done = await runAfterChecked(
         config.observe,
         "anonymous.afterLink",
@@ -611,21 +614,32 @@ export function upgradeSteps(
         anonymousUser.id,
       );
       if (!done) return;
-      const ended = endedList(config);
-      const now = config.clock.now();
-      const count = await config.storage.transaction(async (tx) => {
-        if (ended) ended.length = 0;
-        return endSessions(
-          tx,
-          [{ field: "userId", op: "eq", value: anonymousUser.id }],
-          ended ?? null,
-          now,
-          null,
-        );
-      });
-      await sessionsEnded(config, ended, "anonymous_upgrade", null, count);
-      // After the session end: the delete takes users with no session, so it runs as the sweep does.
-      await deleteAnonymousUsers(config, [anonymousUser.id]);
+      // The sign-in is committed, so a throw here must not fail its answer. A
+      // store error, or query 51 on D1 Free, writes one line and keeps the
+      // anonymous user. Its session is claimed, so the sweep removes it later.
+      try {
+        const ended = endedList(config);
+        const now = config.clock.now();
+        const count = await config.storage.transaction(async (tx) => {
+          if (ended) ended.length = 0;
+          return endSessions(
+            tx,
+            [{ field: "userId", op: "eq", value: anonymousUser.id }],
+            ended ?? null,
+            now,
+            null,
+          );
+        });
+        await sessionsEnded(config, ended, "anonymous_upgrade", null, count);
+        // After the session end: the delete takes users with no session, so it runs as the sweep does.
+        await deleteAnonymousUsers(config, [anonymousUser.id]);
+      } catch (e) {
+        config.observe.emit({
+          name: "anonymous.cleanup_failed",
+          rowId: anonymousUser.id,
+          errorName: e,
+        });
+      }
     },
   };
 }

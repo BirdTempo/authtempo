@@ -713,6 +713,11 @@ export const EVENTS = {
     "authtempo: the sweep anonymous step stopped",
     SWEEP_STOP,
   ),
+  // The clean-up of an anonymous upgrade after its commit (plan 12i Task 7, ruling 36 L2).
+  "anonymous.cleanup_failed": fault("error", "authtempo: the anonymous upgrade cleanup failed", {
+    rowId: ROW_ID,
+    errorName: ERROR_NAME,
+  }),
   // The lines of plan 12d (SSO and SCIM). The raw IP of a refused sign-in is
   // an address input: only the include rule writes it (spec 31 item 8).
   "sso.guard_refused": fault("error", "authtempo: sso guard refused", {

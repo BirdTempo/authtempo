@@ -561,9 +561,10 @@ export interface AnonymousHooks {
   beforeLink?(e: AnonymousLinkEvent): Awaitable<void>;
   /**
    * After the commit, before the anonymous session ends and the anonymous
-   * user goes. Move the app data here. A throw writes one log line and
-   * keeps the anonymous user, so no data is lost; the sweep removes it
-   * later.
+   * user goes. Move the app data here. A throw writes one line that names
+   * the anonymous user, and keeps that user. No later sign-in links it, and
+   * the sweep deletes it after `anonymous.ttlDays`. So the app must act on
+   * the line. Its queries count toward the D1 limit of the sign-in request.
    */
   afterLink?(e: AnonymousLinkEvent): Awaitable<void>;
 }
