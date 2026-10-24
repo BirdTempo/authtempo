@@ -57,7 +57,8 @@ export function phoneRefusal(
  * Only with `phone` on, and only for a number that the config accepts, so
  * the phone code can reach it. Core writes a phone only after a code proved
  * it (Task 5); the compat package reads one only where Better Auth marks it
- * verified. The last-credential guard and the verified handle read this.
+ * verified. The last-credential guard, the verified handle, and the
+ * password sign-in by phone (`inRegion` there) hold this rule.
  */
 export function phoneSignsIn(config: ResolvedConfig, user: UserRow): boolean {
   return config.phone !== null && user.phone !== null && inRegion(config, user.phone);

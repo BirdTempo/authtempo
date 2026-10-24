@@ -5,6 +5,7 @@ import { setUsername } from "../src/engine/username.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import type { PasswordHashSeam } from "../src/seams/password-hash.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { post } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { type Auth, EMAIL, enrolled, PASSWORD, totpAuth, verifiedSession } from "./totp-helpers.js";
@@ -32,6 +33,14 @@ function counting(inner: PasswordHashSeam) {
 /** The engine with the username on and the detailed sign-up answer of plan 8. */
 function world(extra: Partial<AuthConfig> = {}) {
   return totpAuth({ username: {}, ...extra });
+}
+
+/** The engine with the username and the phone on, for the numbers of +1 only. */
+function phoneWorld(extra: Partial<AuthConfig> = {}) {
+  return world({
+    phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
+    ...extra,
+  });
 }
 
 /** A verified user with a password and the username `name`, set by the real route engine. */
@@ -83,9 +92,9 @@ describe("the password sign-in by email, username, or phone (plan 12i Task 3)", 
     );
   });
 
-  it("refuses a phone that is not E.164 with invalid_credentials", async () => {
+  it("refuses a phone that is not E.164 or not in a region with invalid_credentials", async () => {
     const { verified, seam } = counting(FAST);
-    const auth = world({ password: { hash: seam, uniformSignUp: false } });
+    const auth = phoneWorld({ password: { hash: seam, uniformSignUp: false } });
     await named(auth);
     const dummy = await FAST.dummy();
     // The reads of a user by phone: a bad form reads nothing.
@@ -94,7 +103,17 @@ describe("the password sign-in by email, username, or phone (plan 12i Task 3)", 
       reads.mock.calls.filter(
         ([model, where]) => model === "user" && String(where[0]?.field) === "phone",
       );
-    for (const phone of ["555", "4155550100", "+0123456789", "+1415555010012345", "+1 415 555"]) {
+    // The last two are E.164 outside the one region +1: no stored phone of
+    // them signs in (phoneSignsIn), so they answer as a bad form.
+    for (const phone of [
+      "555",
+      "4155550100",
+      "+0123456789",
+      "+1415555010012345",
+      "+1 415 555",
+      "+447700900123",
+      "+33612345678",
+    ]) {
       verified.length = 0;
       expect(await signIn(auth, { phone }), phone).toMatchObject({
         ok: false,
@@ -159,6 +178,31 @@ describe("the password sign-in by email, username, or phone (plan 12i Task 3)", 
     ).toEqual({ status: 400, body: { error: "invalid_body" } });
   });
 
+  it("refuses a phone with the phone config off, as a username with its config off (ruling 20)", async () => {
+    // A compat store can hold a phone that Better Auth proved. With `phone`
+    // off no phone code exists, so the number is no way in (ruling 15).
+    const { verified, seam } = counting(FAST);
+    const off = world({ password: { hash: seam, uniformSignUp: false } });
+    await named(off);
+    const reads = vi.spyOn(off.config.storage, "findOne");
+    const limits = vi.spyOn(off.config.limiter, "allow");
+    const handle = createRouter(off.config, coreRoutes(off.config));
+    verified.length = 0;
+    expect(
+      await call(handle, post("/auth/password/sign-in", { phone: PHONE, password: PASSWORD })),
+    ).toEqual({ status: 400, body: { error: "invalid_body" } });
+    expect(await signIn(off, { phone: PHONE })).toMatchObject({ ok: false, code: "invalid_body" });
+    // The same answer as a username with the username config off.
+    const noName = totpAuth();
+    expect(await signIn(noName, { username: "alice" })).toMatchObject({ code: "invalid_body" });
+    // No verify, no read of a user, and no per-phone count.
+    expect(verified).toEqual([]);
+    expect(reads.mock.calls.filter(([model]) => model === "user")).toHaveLength(0);
+    expect(
+      limits.mock.calls.map(([key]) => String(key)).filter((k) => k.includes("phone")),
+    ).toEqual([]);
+  });
+
   it("answers invalid_credentials for an unknown username and runs the dummy hash", async () => {
     const { verified, seam } = counting(FAST);
     const auth = world({ password: { hash: seam, uniformSignUp: false } });
@@ -195,7 +239,7 @@ describe("the password sign-in by email, username, or phone (plan 12i Task 3)", 
   });
 
   it("applies the per-identifier limits", async () => {
-    const auth = world();
+    const auth = phoneWorld();
     await named(auth);
     // Ten tries for one name, each from its own IP, in two cases of the name.
     for (let i = 0; i < 10; i++)

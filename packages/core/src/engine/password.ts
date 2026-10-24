@@ -20,7 +20,7 @@ import { deliverLogouts } from "./oauth-logout.js";
 import { type ImpersonationStops, impersonationStops } from "./operator/audit.js";
 import { activeBan } from "./operator/ban-rule.js";
 import { PASSWORD_MAX_LENGTH, passwordPolicyError } from "./password-policy.js";
-import { PHONE_RE } from "./phone.js";
+import { inRegion } from "./phone.js";
 import { gateRead, touchTrust, writeChallenge } from "./second-factor.js";
 import { deleteHandoffCodes, endOtherAccess } from "./session-list.js";
 import {
@@ -871,11 +871,12 @@ export async function passwordSignIn(
  * The read of a password sign-in by its one identifier (plan 12i, spec 32
  * item 6), after its limit. `where` is null for an input that no user can
  * hold: a malformed address, a username that breaks the form or is
- * reserved, or a phone that is not E.164. The caller then runs the dummy
- * verify, so a bad form answers as an unknown account does. Only a
- * well-formed identifier counts on its own limit, as the address did
- * before this plan. A username with the username config off is not an
- * input: `invalid_body`, as at the sign-up.
+ * reserved, or a phone that is not E.164 or is outside `phone.regions`.
+ * The caller then runs the dummy verify, so a bad form answers as an
+ * unknown account does. Only a well-formed identifier counts on its own
+ * limit, as the address did before this plan. A username with the
+ * username config off is not an input: `invalid_body`, as at the sign-up.
+ * A phone with the phone config off is the same (ruling 20 of plan 12i).
  */
 async function signInLookup(
   config: ResolvedConfig,
@@ -892,9 +893,11 @@ async function signInLookup(
     return ok({ where: byUsername(name.username), byEmail: false });
   }
   if (input.phone !== undefined) {
-    // Task 4 adds the phone config. Until then no flow stores a phone, so
-    // this read finds no user that core made.
-    if (!PHONE_RE.test(input.phone)) return ok({ where: null, byEmail: false });
+    // A stored phone signs in only as `phoneSignsIn` says (ruling 15): with
+    // `phone` on and the number in a region. A compat store can hold a phone
+    // with `phone` off, so the gate comes before the read.
+    if (!config.phone) return fail("invalid_body");
+    if (!inRegion(config, input.phone)) return ok({ where: null, byEmail: false });
     if (!(await limit(config, "password:phone", input.phone, SIGN_IN_PER_PHONE)))
       return fail("rate_limited");
     return ok({ where: [{ field: "phone", op: "eq", value: input.phone }], byEmail: false });
