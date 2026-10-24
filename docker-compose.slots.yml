@@ -29,11 +29,12 @@
 #
 # The set total since 2026-10-24 (ruling 86 of plan 12d): the libSQL limits
 # grew for two adapter-sqlite runs in one set (see the libsql service). The
-# sum of the limits of one set is 3264 MiB (3.2 GiB). The peak of a set is
-# 1.42 GiB, with two adapter-sqlite runs. Take one set at its limits and 7
-# sets at their peaks (9.9 GiB), so 8 sets in all. Add slot 0 (1.5 GiB) and
-# the other projects (0.25 GiB). The sum is 14.85 GiB of the 15.66 GiB of
-# Docker (docker info, 2026-10-24).
+# sum of the limits of one set is 3264 MiB (3.19 GiB). The peak of a set is
+# 1.42 GiB, with two adapter-sqlite runs. The sum of 8 sets (MAX_ACTIVE_SETS
+# of scripts/test-slots.mjs) takes one set at its limits and 7 sets at their
+# peaks: 3.19 + 7 x 1.42 = 13.13 GiB. Add slot 0 (1.5 GiB) and the other
+# projects (0.25 GiB): 14.88 GiB of the 15.66 GiB of Docker (docker info,
+# 16816451584 bytes, 2026-10-24). This comment is the one text of the sum.
 services:
   postgres:
     extends: { file: docker-compose.yml, service: postgres }
