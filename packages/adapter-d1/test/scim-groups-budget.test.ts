@@ -577,12 +577,16 @@ describe("the SCIM Groups on D1 (plan 12d Task 11, ruling 25 N4)", () => {
  * mapped group of 1000 members (GROUP_ROLE_USERS_MAX) send 21, 22, and 24.
  * The scratch measure of the same day at 1, 61, 500, and 1000 values:
  * create 26, 26, 28, 32; mixed 26, 35, 37, 41.
+ *
+ * Measured again on 2026-10-24 for ruling 85 of plan 12d: an insert chunk
+ * of `rowChunks` takes two thirds of the list bytes, not half. So 1000 rows
+ * take three statements, not four: create 30, mixed 39, adds 33.
  */
 const MEASURED_CAP = {
-  create: 32,
+  create: 30,
   over: 6,
-  mixed: 41,
-  adds: 35,
+  mixed: 39,
+  adds: 33,
   get: 6,
   list: 5,
   check: 6,
@@ -615,8 +619,11 @@ const MEASURED_TOO_LARGE = { refused: 20 };
  * the role updates, and the team member delete. The D1 undo restores the
  * rows of each write with one statement per list: 45 queries in all on
  * 2026-10-24.
+ *
+ * Ruling 85: the undo of the insert chunks of one model is one delete, and
+ * 1000 rows take three inserts. 41 on 2026-10-24.
  */
-const MEASURED_TEAM_LIMIT = { refused: 45 };
+const MEASURED_TEAM_LIMIT = { refused: 41 };
 /** Two list pages with members, each of whole groups, at most 10000 member rows. */
 const MEASURED_LIST = { first: 6, next: 6 };
 
@@ -731,3 +738,351 @@ const MEASURED_ORGANIZATION_DELETE = { delete: 31 };
 const ACCOUNT_DELETE_GROUPS = 120;
 const MEASURED_ACCOUNT_DELETE = { accountDelete: 36, sweeps: [24, 24, 34] };
 const GROUPS = 500;
+
+/**
+ * A view of `db` that runs `act` once, just before the first statement
+ * whose SQL `match` takes, alone or in a batch. `match` sees each statement
+ * in the order of the run. `act` writes through `env.DB`, as another
+ * request does, so the counts of the view do not hold it.
+ */
+function trapped(db: D1Database, match: (sql: string) => boolean, act: () => Promise<void>) {
+  let armed = true;
+  const sqlOf = new WeakMap<object, string>();
+  const fire = async (sql: string) => {
+    if (armed && match(sql)) {
+      armed = false;
+      await act();
+    }
+  };
+  const wrap = (s: D1PreparedStatement, sql: string): D1PreparedStatement => {
+    const p = new Proxy(s, {
+      get(a, b) {
+        if (b === "bind") return (...v: unknown[]) => wrap(a.bind(...v), sql);
+        const x = Reflect.get(a, b);
+        if (b === "run" || b === "all" || b === "first" || b === "raw")
+          return async (...args: unknown[]) => {
+            await fire(sql);
+            return (x as (...y: unknown[]) => unknown).apply(a, args);
+          };
+        return typeof x === "function" ? x.bind(a) : x;
+      },
+    });
+    sqlOf.set(p, sql);
+    return p;
+  };
+  const view = new Proxy(db, {
+    get(t, k) {
+      if (k === "prepare") return (sql: string) => wrap(t.prepare(sql), sql);
+      if (k === "batch")
+        return async (st: D1PreparedStatement[]) => {
+          for (const s of st) await fire(sqlOf.get(s) ?? "");
+          return t.batch(st);
+        };
+      const x = Reflect.get(t, k);
+      return typeof x === "function" ? x.bind(t) : x;
+    },
+  });
+  return { db: view as D1Database, fired: () => !armed };
+}
+
+/** The row of `table` by id, to put back after a scene deletes it. */
+async function saved(table: string, id: string) {
+  const row = await env.DB.prepare(`SELECT * FROM ${table} WHERE id = ?`).bind(id).first();
+  if (!row) throw new Error(`no row ${id} in ${table}`);
+  const cols = Object.keys(row);
+  return () =>
+    env.DB.prepare(
+      `INSERT INTO ${table} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`,
+    )
+      .bind(...cols.map((c) => row[c]))
+      .run();
+}
+
+describe("the late conflicts of the SCIM Groups on D1 at the member cap (ruling 85 of plan 12d)", () => {
+  it("undoes each write of a late conflict inside 50 queries", async () => {
+    const setup = make(env.DB, false);
+    const { organizationId, owner, token } = await acme(setup);
+    const ids = await users(token, 3 * PATCH_CAP);
+    const first = ids.slice(0, PATCH_CAP);
+    const second = ids.slice(PATCH_CAP, 2 * PATCH_CAP);
+    const third = ids.slice(2 * PATCH_CAP);
+    const userOf = async (scimUserId: string) =>
+      String(
+        await env.DB.prepare("SELECT user_id AS n FROM ta_scim_user WHERE id = ?")
+          .bind(scimUserId)
+          .first("n"),
+      );
+    const state = async () => ({
+      groups: await count("SELECT count(*) AS n FROM ta_scim_group"),
+      rows: await count("SELECT count(*) AS n FROM ta_scim_group_member"),
+      teams: await count("SELECT count(*) AS n FROM ta_team"),
+      teamRows: await count("SELECT count(*) AS n FROM ta_team_member"),
+      versions: await count("SELECT coalesce(sum(version), 0) AS n FROM ta_scim_group"),
+      names: await count("SELECT count(*) AS n FROM ta_team WHERE name = 'Admins'"),
+      admins: await count("SELECT count(*) AS n FROM ta_member WHERE role = 'admin'"),
+      members: await count("SELECT count(*) AS n FROM ta_member WHERE role = 'member'"),
+      sessions: await count("SELECT count(*) AS n FROM ta_session WHERE active_team_id IS NULL"),
+      audit: await count("SELECT count(*) AS n FROM ta_operator_audit"),
+    });
+    /**
+     * One request on a view that runs `act` before the first statement that
+     * `match` takes. It must answer 409, and the state must equal the state
+     * before, once `undo` puts back the row that `act` changed.
+     */
+    const late = async (
+      method: string,
+      path: string,
+      body: unknown,
+      match: (sql: string) => boolean,
+      act: () => Promise<() => Promise<unknown>>,
+    ) => {
+      const before = await state();
+      await env.DB.prepare("UPDATE ta_scim_token SET last_used_at = last_used_at - 120000").run();
+      const { db: view, c } = counting(env.DB);
+      let undo: () => Promise<unknown> = async () => {};
+      const trap = trapped(view, match, async () => {
+        undo = await act();
+      });
+      const res = await make(trap.db, true).handle(
+        new Request(`${API}/auth/scim/v2${path}`, {
+          method,
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/scim+json" },
+          body: JSON.stringify(body),
+        }),
+      );
+      const text = await res.text();
+      expect([trap.fired(), res.status, text.slice(0, 300)], path).toEqual([
+        true,
+        409,
+        expect.any(String),
+      ]);
+      expect([res.status, text], path).toEqual([409, expect.stringContaining("conflict")]);
+      await undo();
+      expect(await state()).toEqual(before);
+      return c.n;
+    };
+    /** After the first team member insert: the read of usersStay, the last read of the write. */
+    const atUsersStay = () => {
+      let seen = false;
+      return (sql: string) => {
+        if (sql.startsWith("INSERT INTO ta_team_member")) seen = true;
+        return seen && sql.startsWith("SELECT") && sql.includes("FROM ta_user WHERE");
+      };
+    };
+    /** After the first scimGroupMember insert: the read of the Users of the added members. */
+    const atScimUsers = () => {
+      let seen = false;
+      return (sql: string) => {
+        if (sql.startsWith("INSERT INTO ta_scim_group_member")) seen = true;
+        return seen && sql.startsWith("SELECT") && sql.includes("FROM ta_scim_user WHERE");
+      };
+    };
+    /** The account delete of a person, between the reads and the write. */
+    const dropUser = (scimUserId: string) => async () => {
+      const id = await userOf(scimUserId);
+      const back = await saved("ta_user", id);
+      await env.DB.prepare("DELETE FROM ta_user WHERE id = ?").bind(id).run();
+      return back;
+    };
+    const dropScimUser = (scimUserId: string) => async () => {
+      const back = await saved("ta_scim_user", scimUserId);
+      await env.DB.prepare("DELETE FROM ta_scim_user WHERE id = ?").bind(scimUserId).run();
+      return back;
+    };
+    const body = (list: readonly string[]) => ({
+      schemas: [GROUP_URN],
+      displayName: "Admins",
+      members: members(list),
+    });
+    const counts: Record<string, number> = {};
+    // The create of a mapped group with a team and 1000 members.
+    counts.create = await late(
+      "POST",
+      "/Groups",
+      body(first),
+      atUsersStay(),
+      dropUser(first[500] ?? ""),
+    );
+    const made = await call(token, "POST", "/Groups", body(first));
+    expect(made.status).toBe(201);
+    const id = String(made.body.id);
+    // Each member of the group signed in through the connection and acts in its team. A
+    // person who leaves the team then loses the active team of each session: one more
+    // undo statement. The rows copy the session of the owner, as a sign-in writes them.
+    const teamId = String(
+      await env.DB.prepare("SELECT team_id AS n FROM ta_scim_group WHERE id = ?")
+        .bind(id)
+        .first("n"),
+    );
+    const cols = (
+      await env.DB.prepare("SELECT name FROM pragma_table_info('ta_session')").all()
+    ).results.map((r) => String(r.name));
+    const pick = (c: string) =>
+      c === "id"
+        ? "'s-' || u.id"
+        : c === "user_id"
+          ? "u.user_id"
+          : c === "token_hash"
+            ? "'t-' || u.id"
+            : c === "active_organization_id"
+              ? "u.organization_id"
+              : c === "active_team_id"
+                ? "?2"
+                : `s.${c}`;
+    await env.DB.prepare(
+      `INSERT INTO ta_session (${cols.join(", ")}) SELECT ${cols.map(pick).join(", ")} FROM ta_session s, ta_scim_user u WHERE s.id = (SELECT min(id) FROM ta_session) AND u.id IN (SELECT value FROM json_each(?1))`,
+    )
+      .bind(JSON.stringify(first), teamId)
+      .run();
+    expect(
+      await count("SELECT count(*) AS n FROM ta_session WHERE active_team_id IS NOT NULL"),
+    ).toBe(PATCH_CAP);
+    const mixed = patch(
+      { op: "add", path: "members", value: members(second.slice(0, PATCH_CAP - 1)) },
+      { op: "remove", path: `members[value eq "${first[0]}"]` },
+    );
+    // The worst PATCH of the review (MA-1): 999 adds and 1 removal.
+    counts.mixed = await late(
+      "PATCH",
+      `/Groups/${id}`,
+      mixed,
+      atUsersStay(),
+      dropUser(second[5] ?? ""),
+    );
+    counts.mixedScimUser = await late(
+      "PATCH",
+      `/Groups/${id}`,
+      mixed,
+      atScimUsers(),
+      dropScimUser(second[5] ?? ""),
+    );
+    counts.adds = await late(
+      "PATCH",
+      `/Groups/${id}`,
+      patch({ op: "add", path: "members", value: members(third) }),
+      atUsersStay(),
+      dropUser(third[5] ?? ""),
+    );
+    // A PUT of 1000 members that replaces the 1000 members of the group (MI-3).
+    counts.put = await late(
+      "PUT",
+      `/Groups/${id}`,
+      body(second),
+      atUsersStay(),
+      dropUser(second[5] ?? ""),
+    );
+    // The role recompute: a role that changed after the read makes the last role update
+    // write fewer rows. The rename out of the map and the delete change each role.
+    const roleOf = (scimUserId: string) => async () => {
+      const user = await userOf(scimUserId);
+      await env.DB.prepare("UPDATE ta_member SET role = 'web' WHERE user_id = ?").bind(user).run();
+      return () =>
+        env.DB.prepare("UPDATE ta_member SET role = 'admin' WHERE user_id = ?").bind(user).run();
+    };
+    const atRoleUpdate = (sql: string) => sql.startsWith("UPDATE ta_member SET role");
+    counts.rename = await late(
+      "PATCH",
+      `/Groups/${id}`,
+      patch({ op: "replace", path: "displayName", value: "Former" }),
+      atRoleUpdate,
+      roleOf(first[7] ?? ""),
+    );
+    counts.delete = await late(
+      "DELETE",
+      `/Groups/${id}`,
+      undefined,
+      atRoleUpdate,
+      roleOf(first[7] ?? ""),
+    );
+    // More role pairs: each adds two queries to the write and one to its undo. The meter
+    // keeps room for the undo of a late conflict, and counts the audit row too. So a write
+    // whose undo would not fit is refused before any write (ruling 85 of plan 12d).
+    for (const name of ["r1", "r2"]) {
+      const role = await setup.api.createRole({
+        user: owner,
+        organizationId,
+        name,
+        permissions: { member: ["read"] },
+      });
+      if (!role.ok) throw new Error(role.code);
+    }
+    const roleMix = async (list: readonly string[], role: string) => {
+      const users = await Promise.all(list.map(userOf));
+      await env.DB.prepare(
+        "UPDATE ta_member SET role = ?1 WHERE user_id IN (SELECT value FROM json_each(?2))",
+      )
+        .bind(role, JSON.stringify(users))
+        .run();
+    };
+    /** A mixed PATCH that the meter must refuse with no write: its queries. */
+    const refusedLate = async () => {
+      const before = await state();
+      await env.DB.prepare("UPDATE ta_scim_token SET last_used_at = last_used_at - 120000").run();
+      const { db: view, c } = counting(env.DB);
+      const trap = trapped(view, atUsersStay(), async () => {
+        throw new Error("the meter must stop the write first");
+      });
+      const res = await make(trap.db, true).handle(
+        new Request(`${API}/auth/scim/v2/Groups/${id}`, {
+          method: "PATCH",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/scim+json" },
+          body: JSON.stringify(
+            patch(
+              { op: "add", path: "members", value: members(third.slice(0, PATCH_CAP - 1)) },
+              { op: "remove", path: `members[value eq "${first[0]}"]` },
+            ),
+          ),
+        }),
+      );
+      const refused = JSON.parse(await res.text()) as Record<string, unknown>;
+      expect([res.status, refused.detail]).toEqual([
+        400,
+        "the role change of this request does not fit one request; change fewer members in each request",
+      ]);
+      expect(trap.fired()).toBe(false);
+      expect(await state()).toEqual(before);
+      return c.n;
+    };
+    // Three pairs: the added persons hold two roles, and the removed one leaves admin.
+    await roleMix(third.slice(0, 300), "web");
+    counts.threePairs = await refusedLate();
+    // Four pairs: the added persons hold three roles.
+    await roleMix(third.slice(300, 600), "r1");
+    counts.fourPairs = await refusedLate();
+    await roleMix(third.slice(0, 600), "member");
+    // The PUT of the swap passes, inside 50 queries too.
+    const swap = await call(token, "PUT", `/Groups/${id}`, body(second), true);
+    expect(swap.status, JSON.stringify(swap.body)).toBe(200);
+    expect(await count("SELECT count(*) AS n FROM ta_team_member")).toBe(PATCH_CAP);
+    expect(await count("SELECT count(*) AS n FROM ta_member WHERE role = 'admin'")).toBe(PATCH_CAP);
+    counts.swap = swap.queries;
+    console.log(`late conflicts: ${JSON.stringify(counts)}`);
+    expect(counts).toEqual(MEASURED_LATE);
+    for (const n of Object.values(counts)) expect(n).toBeLessThanOrEqual(50);
+  }, 600_000);
+});
+
+/**
+ * The late conflicts on the binding, 2026-10-24, for ruling 85 of plan 12d,
+ * with the token write of `lastUsedAt` in each call. Before the ruling the
+ * `mixed` scene of the review (MA-1) sent 54 queries: 40 of the write and
+ * 14 of the undo. Since the ruling the undo of the insert chunks of one
+ * model is one delete. A read of up to 2000 ids is one statement, and 1000
+ * rows take three inserts. `put` is the PUT of 1000 members over 1000
+ * others (MI-3). Each person who leaves the team has a session in it. The
+ * role pairs: the meter keeps room for the undo and counts the audit row
+ * too, so it refuses those writes before any write. With no such room the
+ * same writes sent 50 and 53 queries at their late conflicts.
+ */
+const MEASURED_LATE = {
+  create: 35,
+  mixed: 47,
+  mixedScimUser: 28,
+  adds: 37,
+  put: 49,
+  rename: 23,
+  delete: 25,
+  threePairs: 20,
+  fourPairs: 20,
+  swap: 39,
+};

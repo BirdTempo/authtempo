@@ -1,6 +1,10 @@
 import type { D1Subset } from "@authtempo/adapter-d1/seam";
 import { type ModelName, type StorageAdapter, schema } from "@authtempo/core";
-import { type ConformanceOptions, runAdapterConformance } from "@authtempo/core/conformance";
+import {
+  type ConformanceOptions,
+  runAdapterConformance,
+  runStoredFormConformance,
+} from "@authtempo/core/conformance";
 import { columnName, TABLES, uniqueIndexName } from "@authtempo/core/sql";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
@@ -119,6 +123,20 @@ export function mappingCases(
     // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
     // The D1 suite adds the ping row of plan 12h through `conformance`.
     { updateInTransaction: 2, ...conformance },
+  );
+
+  // The foreign keys of Better Auth name the user, the organization, and the team rows.
+  runStoredFormConformance(
+    runs.conformance,
+    async () => {
+      await truncate();
+      return {
+        adapter: db(),
+        all: async (sql) => (await rawDb.prepare(sql).all()).results,
+        close: truncate,
+      };
+    },
+    { parents: ["user", "organization", "team"] },
   );
 
   describe(runs.mapping, () => {

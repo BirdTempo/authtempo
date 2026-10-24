@@ -91,12 +91,20 @@ export class StorageError extends Error {
  * `unique_violation` and writes no row. Each row meets the rules of
  * `create` data. On D1 and SQLite the rows of a chunk bind as one JSON
  * list, and a statement of more than 100 KB splits in halves (ruling 84 of
- * plan 12d).
+ * plan 12d). The halves stop at one row. So one value of more than 90 KB,
+ * or one row of more than 100 KB, goes alone in its statement. D1 may
+ * refuse such a statement; then the whole call fails, all or nothing
+ * (ruling 85). A string with a lone surrogate stores U+FFFD in its place,
+ * by `create` and by `createMany` alike. On MySQL a chunk of more than 50
+ * rows takes one of the sizes 64, 128, 256, 512, and 1000. So the server
+ * keeps few prepared statements (ruling 85).
  *
- * List rule (ruling 84 of plan 12d). An `in` list of up to 1000 values is
- * one statement on every store. On D1 and SQLite a list of more than 50
- * values binds as one JSON text, so the bound parameters do not grow. The
- * values stay bound, and none enters the SQL text.
+ * List rule (rulings 84 and 85 of plan 12d). An `in` list of up to 2000 values
+ * is one statement on every store. On D1 and SQLite a list of more than 50
+ * values binds as one JSON text, so the bound parameters do not grow. On MySQL
+ * such a list pads to the next of the sizes 64, 128, 256, 512, 1000, and 2000.
+ * The pad repeats its last value, which matches no other row. The values stay
+ * bound, and none enters the SQL text.
  *
  * Transaction rules. Reads inside a transaction see its own writes; the
  * engine relies on this. If the function throws, only the transaction's own

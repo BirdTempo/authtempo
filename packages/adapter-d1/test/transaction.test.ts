@@ -81,6 +81,71 @@ describe("d1 undo log", () => {
     );
   });
 
+  it("joins the undo of createMany calls of one model, one after the other, into one delete per list (ruling 85 of plan 12d)", async () => {
+    const db = createD1Adapter(env.DB);
+    const rows = (g: string, n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `${g}-${String(i).padStart(4, "0")}`,
+        groupId: g,
+        scimUserId: `su-${i}`,
+        createdAt: t0,
+        updatedAt: t0,
+      }));
+    await db.create("scimGroup", {
+      id: "keep",
+      organizationId: "o1",
+      displayName: "Keep",
+      displayNameKey: "keep",
+      externalId: null,
+      teamId: null,
+      version: 1,
+      createdAt: t0,
+      updatedAt: t0,
+    });
+    let afterWrite = 0;
+    await expect(
+      db.transaction(async (tx) => {
+        // Four calls of 250 rows, as insertRows sends 1000 rows in four chunks.
+        for (const g of ["a", "b", "c", "d"]) await tx.createMany("scimGroupMember", rows(g, 250));
+        await tx.update("scimGroup", [{ field: "id", op: "eq", value: "keep" }], { version: 2 });
+        await tx.createMany("scimGroupMember", rows("e", 3));
+        afterWrite = db.statementsSent?.() ?? 0;
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    // The undo: one delete of the last call, the restore of the group, one delete of the
+    // four calls before it. It sent one delete per call before ruling 85: 6.
+    expect((db.statementsSent?.() ?? 0) - afterWrite).toBe(3);
+    expect(await db.findMany("scimGroupMember", [])).toEqual([]);
+    expect(
+      (await db.findOne("scimGroup", [{ field: "id", op: "eq", value: "keep" }]))?.version,
+    ).toBe(1);
+  });
+
+  it("keeps the undo of an outer createMany out of the run of a nested transaction (ruling 85 of plan 12d)", async () => {
+    const db = createD1Adapter(env.DB);
+    const row = (id: string) => ({
+      id,
+      groupId: "g1",
+      scimUserId: `su-${id}`,
+      createdAt: t0,
+      updatedAt: t0,
+    });
+    await db.transaction(async (tx) => {
+      await tx.createMany("scimGroupMember", [row("outer-1"), row("outer-2")]);
+      await expect(
+        tx.transaction(async (inner) => {
+          await inner.createMany("scimGroupMember", [row("inner-1"), row("inner-2")]);
+          throw new Error("inner");
+        }),
+      ).rejects.toThrow("inner");
+      // After the nested call, a createMany of the outer level joins the outer run again.
+      await tx.createMany("scimGroupMember", [row("outer-3"), row("outer-4")]);
+    });
+    const ids = (await db.findMany("scimGroupMember", [])).map((r) => r.id).sort();
+    expect(ids).toEqual(["outer-1", "outer-2", "outer-3", "outer-4"]);
+  });
+
   it("undoes an update and a delete of 1000 rows with one statement per list (ruling 84 of plan 12d)", async () => {
     const db = createD1Adapter(env.DB);
     const users = Array.from({ length: 1000 }, (_, i) => {

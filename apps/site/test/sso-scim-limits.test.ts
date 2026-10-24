@@ -125,16 +125,42 @@ describe("the SSO and SCIM limits of the engine and the docs (ruling 74 m1)", ()
       ],
     ],
     [
-      "the members that one SCIM request changes",
+      "the members that one SCIM request names or takes away",
       () => constant("engine/scim/limits.ts", "PATCH_MEMBERS_MAX"),
       [
-        ["reference/limits.md", /\| Members of a group that one SCIM request changes \| (\d+),/],
-        ["reference/routes.md", /One request changes at most (\d+) members of a group/],
+        ["reference/limits.md", /\| Members of a group that one SCIM request names \| (\d+),/],
+        [
+          "reference/limits.md",
+          /\| Members of a group that one SCIM request takes away \| (\d+) \|/,
+        ],
+        ["reference/routes.md", /One request names at most (\d+) members of a group/],
+        ["reference/routes.md", /It takes away at most (\d+) members/],
+        ["reference/routes.md", /so a PUT of (\d+) members that replaces/],
+        ["reference/routes.md", /that replaces (\d+) other members passes/],
         ["reference/routes.md", /`membersPerRequestMax` (\d+)/],
-        ["reference/routes.md", /when it changes more than (\d+) members/],
-        ["guides/scim.mdx", /One request changes at most (\d+) members of a group/],
-        ["guides/scim.mdx", /A request that changes more than (\d+) members of a group/],
+        ["reference/routes.md", /when it holds more than (\d+) members/],
+        ["reference/routes.md", /when it takes away more than (\d+) members/],
+        ["reference/routes.md", /Okta sends up to (\d+) members in one group PATCH/],
+        ["guides/scim.mdx", /One request names at most (\d+) members of a group/],
+        ["guides/scim.mdx", /It takes away at most (\d+) members too/],
+        ["guides/scim.mdx", /So a PUT of (\d+) members that replaces/],
+        ["guides/scim.mdx", /that replaces (\d+) other members passes/],
+        ["guides/scim.mdx", /Okta sends up to (\d+) members in one group PATCH/],
+        ["guides/scim.mdx", /A request that names more than (\d+) members of a group/],
+        ["guides/scim.mdx", /of a group, or takes away more than (\d+) \|/],
+        // The known gaps (LO-2 of the review of ruling 84).
+        ["guides/scim.mdx", /A PUT with more than (\d+) members answers 400/],
+        ["guides/scim.mdx", /a PUT that takes away more than (\d+) members/],
+        ["guides/scim.mdx", /A write of (\d+) members whose role changes/],
       ],
+    ],
+    [
+      "the ids of one list statement",
+      () => {
+        const m = /const LIST_MAX = (\d+) \* INSERT_ROWS_MAX;/.exec(source("storage/sql.ts"));
+        return Number(m?.[1]) * constant("storage/sql.ts", "INSERT_ROWS_MAX");
+      },
+      [["reference/routes.md", /deletes, and updates up to (\d+) ids in one statement/]],
     ],
     [
       "the members of one role recompute",

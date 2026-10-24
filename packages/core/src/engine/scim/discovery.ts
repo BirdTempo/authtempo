@@ -41,6 +41,8 @@ export function scimBase(config: ResolvedConfig): string {
  * filter subset, and ETags; it has no bulk, no sort, and no password
  * change. `filter.maxResults` is the page bound of `pageParams`. The
  * limits extension states the member caps of a Group write.
+ * `membersPerRequestMax` counts the members that one request names, and
+ * the members that it takes away (ruling 85 of plan 12d).
  */
 export function serviceProviderConfig(config: ResolvedConfig): Record<string, unknown> {
   return {

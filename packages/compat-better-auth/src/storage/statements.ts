@@ -26,6 +26,7 @@ import {
   TABLES,
   USER_CHILD_MODELS,
   undoCreateWhere,
+  wellFormed,
   whileNoChildRow,
 } from "@authtempo/core/sql";
 import { fromStoredPermissions, toStoredPermissions } from "../role-map.js";
@@ -538,10 +539,14 @@ export function compatStatements(dialect: "postgres" | "sqlite", names: Names): 
       }
       for (const [c, v] of Object.entries(map.insertExtras?.(data) ?? {})) {
         own.push(names.column(map.table, c));
-        vals.push(p.add(v));
+        // A text that bypasses encode stores U+FFFD for a lone surrogate too (ruling 85).
+        vals.push(p.add(typeof v === "string" ? wellFormed(v) : v));
       }
-      // insertExtras names the same columns for every row of a model.
+      // insertExtras names the same columns for every row of a model. A row with other
+      // columns would shift its values into the wrong columns of the JSON form, so it throws.
       if (cols.length === 0) cols = own;
+      else if (own.length !== cols.length || own.some((c, i) => c !== cols[i]))
+        throw invalid(model, "rows", "each row of an insert names the same columns");
       return `(${vals.join(", ")})`;
     });
     if (tuples.length === 0) throw invalid(model, "rows", "an insert needs at least one row");

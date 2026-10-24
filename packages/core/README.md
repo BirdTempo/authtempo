@@ -1188,8 +1188,9 @@ page gives each route with its errors.
   most 2 live `sk_` tokens. A SCIM create needs an address in a verified
   domain of the token's organization. A deactivate ends the person's
   access at once when a domain of the organization claims the address.
-- One SCIM request changes at most 9 members of a group (the D1 Free
-  budget). Okta sends larger batches, and they answer 400.
+- One SCIM request names at most 1000 members of a group, and takes
+  away at most 1000 (the D1 Free budget). Okta sends up to 1000 members
+  in one group PATCH, so its batch fits.
 
 ## Hooks
 

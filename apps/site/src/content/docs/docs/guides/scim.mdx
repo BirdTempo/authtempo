@@ -92,7 +92,7 @@ A person can move the account to an address of their own. When no verified domai
 | A `schemas` URN that core does not serve, such as a custom extension | 400 `invalidSyntax` |
 | A remove of `userName` or of a group `displayName`, or a replace of it with null | 400 `mutability` |
 | A body over 1 MB | 413 |
-| A request that changes more than 1000 members of a group | 400 `invalidValue` |
+| A request that names more than 1000 members of a group, or takes away more than 1000 | 400 `invalidValue` |
 
 To fix a custom extension URN, remove the custom mapping in the directory, or ask for the extension.
 
@@ -106,12 +106,13 @@ To fix a custom extension URN, remove the custom mapping in the directory, or as
 - The manager of Entra ID as a list of one object.
 - The email match of Entra ID: the filter `emails[type eq "work"].value eq "<address>"`.
 - A remove of a person who is not a member: 204, and nothing changes. A directory sends a removal again after a time-out.
-- One request changes at most 1000 members of a group, inside the D1 Free budget of 50 queries. The cap is the same on D1, SQLite, Postgres, and MySQL. Okta sends up to 1000 members in one group PATCH, so its batch fits.
+- One request names at most 1000 members of a group, inside the D1 Free budget of 50 queries. The count holds the members of a POST or a PUT body, or the values of a PATCH. It takes away at most 1000 members too. So a PUT of 1000 members that replaces 1000 other members passes. The cap is the same on D1, SQLite, Postgres, and MySQL. Okta sends up to 1000 members in one group PATCH, so its batch fits.
 - After a write of a value with `primary: true`, each other value of that attribute gets `primary: false`.
 
 ### The known gaps
 
-- A PUT with every member of a group that changes more than 1000 members answers 400. An Okta app of the App Integration Wizard sends such a PUT. Push the group again in smaller steps.
+- A PUT with more than 1000 members answers 400, and so does a PUT that takes away more than 1000 members. An Okta app of the App Integration Wizard sends a PUT with every member of a group. Push the group again in smaller steps.
+- A write of 1000 members whose role changes make three or more pairs of an old and a new role can answer 400. D1 needs room in its budget to reverse a write that fails late, and every store keeps the same rule. Send fewer members in each request then.
 - A list with no filter reads every User of the organization for `totalResults`. On Postgres with 10 000 Users, it took 29.7 ms at the median and 40.6 ms at the most (10 runs, load 14, measured 2026-10-24).
 
 ## If it fails

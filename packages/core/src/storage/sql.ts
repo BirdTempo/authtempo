@@ -33,6 +33,13 @@ export interface Dialect {
    * "params": one parameter per value.
    */
   lists: "json" | "params";
+  /**
+   * "fixed": a "params" list of more than `IN_PARAMS_MAX` values pads to one of
+   * `LIST_SIZES` (ruling 85 of plan 12d). A `createMany` chunk takes one of
+   * those sizes too. MySQL keeps one server prepared statement per SQL text.
+   * "any": a list and a chunk take any size.
+   */
+  listSizes: "fixed" | "any";
 }
 
 export const SQLITE: Dialect = {
@@ -46,6 +53,7 @@ export const SQLITE: Dialect = {
   booleans: "integer",
   nullSafeEq: "IS",
   lists: "json",
+  listSizes: "any",
 };
 
 export const POSTGRES: Dialect = {
@@ -59,6 +67,7 @@ export const POSTGRES: Dialect = {
   booleans: "native",
   nullSafeEq: "IS NOT DISTINCT FROM",
   lists: "params",
+  listSizes: "any",
 };
 
 /**
@@ -77,6 +86,7 @@ export const MYSQL: Dialect = {
   booleans: "integer",
   nullSafeEq: "<=>",
   lists: "params",
+  listSizes: "fixed",
 };
 
 export const META_TABLE = "ta_meta";
@@ -254,6 +264,22 @@ export function whereTextFault(value: unknown): "a NUL character" | "a lone surr
   return null;
 }
 
+/**
+ * `text` with each lone surrogate as U+FFFD: `String.prototype.toWellFormed`
+ * of ES2024. Node 20 and later, Bun, and Workers have it; the lib of this
+ * build is ES2023, so the type comes here. The replace serves a runtime
+ * without it. A lone surrogate is no code point. A driver that writes the
+ * text as UTF-8 stores U+FFFD. But a JSON list stores the bytes of the
+ * surrogate (CESU-8), and libSQL aborts on their read. So every write form
+ * stores U+FFFD (ruling 85 of plan 12d).
+ */
+export function wellFormed(text: string): string {
+  const s = text as string & { toWellFormed?: () => string };
+  return typeof s.toWellFormed === "function"
+    ? s.toWellFormed()
+    : text.replace(/\p{Cs}/gu, "\ufffd");
+}
+
 function isPlainJson(value: unknown): boolean {
   if (typeof value !== "object" || value === null) return false;
   if (Array.isArray(value)) return true;
@@ -276,7 +302,7 @@ export function encodeValue(
       // Postgres text rejects U+0000 with a raw driver error, and SQLite stores it.
       // Refuse it on every dialect, so both adapters give the same invalid_argument.
       if (value.includes("\u0000")) throw invalid(model, field, "string holds a NUL character");
-      return value;
+      return wellFormed(value);
     case "integer":
       if (typeof value !== "number" || !Number.isInteger(value))
         throw invalid(model, field, "expected an integer");
@@ -414,7 +440,14 @@ function compileWhere<M extends ModelName>(
           parts.push(
             `${col} IN (SELECT value FROM json_each(${p.add(JSON.stringify(vals.map(enc)))}))`,
           );
-        else parts.push(`${col} IN (${vals.map((v) => p.add(enc(v))).join(", ")})`);
+        else {
+          const marks = vals.map((v) => p.add(enc(v)));
+          // A fixed size: the last value again, which matches the rows it matches already.
+          const last = enc(vals[vals.length - 1]);
+          if (d.listSizes === "fixed")
+            for (let i = vals.length; i < paddedSize(vals.length); i++) marks.push(p.add(last));
+          parts.push(`${col} IN (${marks.join(", ")})`);
+        }
         break;
       }
       case "lt":
@@ -543,6 +576,46 @@ export const D1_BOUND_PARAMS = 100;
 export const IN_PARAMS_MAX = 50;
 
 /**
+ * The sizes of a long list and of a large insert chunk on a "fixed" dialect,
+ * MySQL (ruling 85 of plan 12d). The `execute` of mysql2 keeps one server
+ * prepared statement per SQL text on each connection, up to 16000. The server
+ * holds at most `max_prepared_stmt_count` of them for all clients, 16382 by
+ * default (MySQL 8.4 docs, read 2026-10-24). When it reaches that count, each
+ * client of the server gets error 1461. A list of 51 to 2000 values, with one
+ * text per size, gave up to 1950 texts of each statement kind on each
+ * connection. With these sizes, a kind has at most 56 texts.
+ */
+export const LIST_SIZES: readonly number[] = [64, 128, 256, 512, 1000, 2000];
+
+/**
+ * The placeholders of an `in` list of `n` values on a "fixed" dialect: `n`
+ * up to `IN_PARAMS_MAX`, else the first of `LIST_SIZES` that holds `n`.
+ * Past the last size, the next multiple of 1000: no engine list is so long.
+ */
+export function paddedSize(n: number): number {
+  if (n <= IN_PARAMS_MAX) return n;
+  return LIST_SIZES.find((size) => size >= n) ?? Math.ceil(n / 1000) * 1000;
+}
+
+/**
+ * The rows of each statement of a `createMany` of `n` rows on a "fixed"
+ * dialect, in order. Each takes the largest of `LIST_SIZES` up to `max` that
+ * fits the rest. The last rows go at most `IN_PARAMS_MAX` at a time. So the
+ * inserts of one model have at most 55 texts. An insert cannot pad: a row twice
+ * breaks the primary key.
+ */
+export function fixedChunks(n: number, max: number): number[] {
+  const sizes = LIST_SIZES.filter((size) => size <= Math.min(max, INSERT_ROWS_MAX)).reverse();
+  const out: number[] = [];
+  for (let left = n; left > 0; ) {
+    const size = sizes.find((x) => x <= left) ?? Math.min(left, IN_PARAMS_MAX, max);
+    out.push(size);
+    left -= size;
+  }
+  return out;
+}
+
+/**
  * The most rows of one `createMany` statement on every store: 1000. The
  * bound parameters allow more on SQLite, Postgres, and MySQL. But on
  * 2026-10-24 the MySQL 8.4 server of a test slot (768 MB) ended with exit
@@ -552,8 +625,14 @@ export const IN_PARAMS_MAX = 50;
  */
 export const INSERT_ROWS_MAX = 1000;
 
-/** The most values of one list of the engine in one statement: the most rows of one insert. */
-export const LIST_MAX = INSERT_ROWS_MAX;
+/**
+ * The most values of one list of the engine in one statement: 2000. A
+ * write of a SCIM group reads the added and the removed members in one
+ * list, up to 1000 each (ruling 85 of plan 12d). One statement per list
+ * keeps the undo of a late conflict inside the D1 budget. An insert keeps
+ * its own bound, `INSERT_ROWS_MAX`.
+ */
+export const LIST_MAX = 2 * INSERT_ROWS_MAX;
 
 /**
  * The most bytes of one D1 statement: 100 KB (D1 limits page, last updated
@@ -581,14 +660,15 @@ export function statementBytes(s: Statement): number {
 }
 
 /**
- * Splits `values` into lists in order: at most `LIST_MAX` values each, and
- * at most `bytes` of JSON text each by `bytesOf` (ruling 84 of plan 12d).
- * A value larger than `bytes` is a list of its own.
+ * Splits `values` into lists in order (ruling 84 of plan 12d). Each holds at
+ * most `max` values and at most `bytes` of JSON text by `bytesOf`. A value
+ * larger than `bytes` is a list of its own.
  */
 export function listChunks<T>(
   values: readonly T[],
   bytes: number = LIST_BYTES_MAX,
   bytesOf: (v: T) => number = jsonBytes,
+  max: number = LIST_MAX,
 ): T[][] {
   const out: T[][] = [];
   let chunk: T[] = [];
@@ -597,7 +677,7 @@ export function listChunks<T>(
   for (const v of values) {
     // The value and its comma.
     const n = bytesOf(v) + 1;
-    if (chunk.length > 0 && (chunk.length >= LIST_MAX || used + n > bytes)) {
+    if (chunk.length > 0 && (chunk.length >= max || used + n > bytes)) {
       out.push(chunk);
       chunk = [];
       used = 2;

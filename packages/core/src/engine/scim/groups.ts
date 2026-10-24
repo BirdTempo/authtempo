@@ -30,7 +30,14 @@ import type {
   TeamRow,
   UserRow,
 } from "../../schema.js";
-import { findManyList, IN_CHUNK, listCalls, listChunks, rowChunks } from "../../storage/batch.js";
+import {
+  findManyList,
+  IN_CHUNK,
+  listCalls,
+  listChunks,
+  reinsertCalls,
+  rowChunks,
+} from "../../storage/batch.js";
 import type { Meter } from "../../storage/meter.js";
 import { type StorageAdapter, StorageError } from "../../storage/port.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "../hooks.js";
@@ -280,10 +287,12 @@ export function readGroup(body: unknown): { ok: true; doc: GroupDoc } | Refused 
 export function applyGroupPatch(
   doc: GroupDoc,
   ops: readonly PatchOp[],
-): { ok: true; doc: GroupDoc } | Refused {
+): { ok: true; doc: GroupDoc; named: number } | Refused {
   let displayName = doc.displayName;
   let externalId = doc.externalId;
   const members = new Set(doc.members);
+  // The member values that the operations name: the cap of one request (ruling 85 of plan 12d).
+  let named = 0;
   for (const op of ops) {
     const path = op.path;
     if (path === null) return refused("each operation needs a path", "invalidPath");
@@ -312,10 +321,12 @@ export function applyGroupPatch(
         // A remove of a non-member changes nothing (ruling 57 item 5 of plan 12d): an IdP
         // sends a removal again after a time-out, and an error marks its push failed.
         members.delete(path.filter.value);
+        named++;
         continue;
       }
       const list = memberValues(op.value);
       if (isRefused(list)) return list;
+      named += list.length;
       if (op.op === "replace") members.clear();
       if (op.op === "remove") {
         if (op.value === null) members.clear();
@@ -325,15 +336,26 @@ export function applyGroupPatch(
   }
   if (members.size > GROUP_MEMBERS_MAX)
     return refused(`a group holds at most ${GROUP_MEMBERS_MAX} members`, "invalidValue");
-  return { ok: true, doc: { displayName, externalId, members } };
+  return { ok: true, doc: { displayName, externalId, members }, named };
 }
 
 // --- The write (Behaviors 1 to 4 and 6).
 
-/** One write of a Group: a create, an update of a row and its members, or a delete. */
+/**
+ * One write of a Group: a create, an update of a row and its members, or a
+ * delete. `named` is the count of member values that the request names
+ * (ruling 85 of plan 12d). These are the members of a POST or a PUT body,
+ * or the values of the operations of a PATCH.
+ */
 type Write =
-  | { kind: "create"; next: GroupDoc }
-  | { kind: "update"; row: ScimGroupRow; before: ReadonlySet<string>; next: GroupDoc }
+  | { kind: "create"; next: GroupDoc; named: number }
+  | {
+      kind: "update";
+      row: ScimGroupRow;
+      before: ReadonlySet<string>;
+      next: GroupDoc;
+      named: number;
+    }
   | { kind: "delete"; row: ScimGroupRow; before: ReadonlySet<string> };
 
 /** The role recompute of one write does not fit the call budget of one request. */
@@ -384,7 +406,8 @@ interface RolePlan {
  * back. The meter holds the whole request: when the updates and `tail` do
  * not fit the budget, the write stops here. Only the group row and the team
  * writes come before, so the undo of the refusal on D1 stays small (ruling
- * 59 of plan 12d).
+ * 59 of plan 12d). `tail` also holds the undo of the write on D1 at a late
+ * conflict, and each role update adds its restore (ruling 85).
  */
 async function planRoles(
   config: ResolvedConfig,
@@ -449,7 +472,8 @@ async function planRoles(
   const hooked =
     hooks.beforeUpdateMemberRole !== undefined || hooks.afterUpdateMemberRole !== undefined;
   const reads = hooked ? listCalls(changes.map((c) => c.member.userId)) : 0;
-  if (meter.used + reads + 2 * updates + tail > OPERATOR_CALL_BUDGET) throw new TooLarge();
+  // Each role update sends 2 statements on D1, and its undo 1.
+  if (meter.used + reads + 3 * updates + tail > OPERATOR_CALL_BUDGET) throw new TooLarge();
   if (hooked) {
     const users = new Map(
       (
@@ -674,6 +698,56 @@ function tailOf(
 }
 
 /**
+ * The undo statements of a write on D1 at the worst (ruling 85 of plan
+ * 12d). That is a conflict at its last read, after each write but the audit
+ * row. The D1
+ * undo log sends them in the same request, so the meter keeps room for
+ * them. One restore or delete of the group row, and `teamRows` for the team
+ * row and the organization row. The scimGroupMember rows that the write
+ * deletes go back in the lists of `reinsertCalls`, and the added rows go in
+ * one delete per list. For the persons who leave the team: the reinsert of
+ * their team member rows and the restore of their sessions, per list of
+ * persons. For the persons who join: one delete per list. The role
+ * updates add their restores in `planRoles`.
+ */
+function undoOf(
+  groupId: string,
+  team: { id: string; organizationId: string } | null,
+  teamRows: number,
+  deleted: readonly string[],
+  added: readonly string[],
+  leaves: readonly string[],
+  joins: readonly string[],
+  now: Date,
+): number {
+  const rows = (ids: readonly string[], row: (id: string) => object) =>
+    ids.length === 0 ? 0 : reinsertCalls(ids.map(row));
+  return (
+    1 +
+    teamRows +
+    rows(deleted, (scimUserId) => ({
+      id: groupId,
+      createdAt: now,
+      updatedAt: now,
+      groupId,
+      scimUserId,
+    })) +
+    (added.length > 0 ? listCalls(added) : 0) +
+    (team && leaves.length > 0
+      ? rows(leaves, (userId) => ({
+          id: team.id,
+          createdAt: now,
+          updatedAt: now,
+          teamId: team.id,
+          organizationId: team.organizationId,
+          userId,
+        })) + listCalls(leaves)
+      : 0) +
+    (joins.length > 0 ? listCalls(joins) : 0)
+  );
+}
+
+/**
  * The calls of the scimGroupMember rows of a write: one delete for a group
  * delete. Else one delete per list of removed members, one create per
  * chunk of rows (rulings 57 and 84 of plan 12d), and one read after the
@@ -719,10 +793,20 @@ async function writeGroup(
   const after: ReadonlySet<string> = write.kind === "delete" ? new Set() : write.next.members;
   const added = [...after].filter((id) => !before.has(id)).sort();
   const removed = [...before].filter((id) => !after.has(id)).sort();
-  if (write.kind !== "delete" && added.length + removed.length > PATCH_MEMBERS_MAX)
+  // The cap counts the member values of the request, not the changes (ruling 85 of plan
+  // 12d). So a PUT of 1000 members that replaces 1000 other members passes. A remove with
+  // no value or a replace can take away more than it names, so the removals have the cap
+  // too.
+  if (write.kind !== "delete" && write.named > PATCH_MEMBERS_MAX)
     return scimFail(
       400,
-      `one request changes at most ${PATCH_MEMBERS_MAX} members of a group`,
+      `one request names at most ${PATCH_MEMBERS_MAX} members of a group`,
+      "invalidValue",
+    );
+  if (write.kind !== "delete" && removed.length > PATCH_MEMBERS_MAX)
+    return scimFail(
+      400,
+      `one request takes away at most ${PATCH_MEMBERS_MAX} members of a group`,
       "invalidValue",
     );
   if (after.size > GROUP_MEMBERS_MAX)
@@ -738,11 +822,19 @@ async function writeGroup(
   const mapped = (name: string | null) => name !== null && facts?.byKey.has(scimKey(name)) === true;
   const keyMoved = oldName !== null && newName !== null && scimKey(oldName) !== scimKey(newName);
   let again: string[] = [];
+  // A delete and a rename compute the role of each member of the group: the cap of
+  // GROUP_ROLE_USERS_MAX. A member change computes the roles of the added and the removed
+  // members only, each list at most PATCH_MEMBERS_MAX by the caps above (ruling 85).
+  let whole = false;
   if (write.kind === "create") again = mapped(newName) ? added : [];
-  else if (write.kind === "delete") again = mapped(oldName) ? [...before] : [];
-  else if (keyMoved && (mapped(oldName) || mapped(newName))) again = [...after, ...removed];
-  else if (mapped(newName)) again = [...added, ...removed];
-  if (again.length > GROUP_ROLE_USERS_MAX)
+  else if (write.kind === "delete") {
+    again = mapped(oldName) ? [...before] : [];
+    whole = true;
+  } else if (keyMoved && (mapped(oldName) || mapped(newName))) {
+    again = [...after, ...removed];
+    whole = true;
+  } else if (mapped(newName)) again = [...added, ...removed];
+  if (whole && again.length > GROUP_ROLE_USERS_MAX)
     return scimFail(
       400,
       `the change computes the roles of more than ${GROUP_ROLE_USERS_MAX} members; take the group out of the role map, or change fewer members first`,
@@ -825,15 +917,36 @@ async function writeGroup(
         ),
       ).length
     : 0;
-  const tail = tailOf(
-    storage,
-    teamOf ? joins : [],
-    teamOf && write.kind !== "delete" ? leaves : [],
-    teamRows,
-    write.kind === "delete" && team !== null,
-    holds,
-    rowCalls(write.kind, added, removed, memberRows.length),
-  );
+  const tail =
+    tailOf(
+      storage,
+      teamOf ? joins : [],
+      teamOf && write.kind !== "delete" ? leaves : [],
+      teamRows,
+      write.kind === "delete" && team !== null,
+      holds,
+      rowCalls(write.kind, added, removed, memberRows.length),
+    ) +
+    // The undo on D1 of a late conflict. A group delete removes the team rows and the
+    // sessions after the role updates, so their undo comes after the last conflict.
+    undoOf(
+      groupId,
+      teamOf,
+      // The team row: its create, its rename, or its lock, each one restore. A team delete
+      // reinserts it, after the lock of the organization row when the last team stays.
+      write.kind === "delete"
+        ? team === null
+          ? 0
+          : 1 + (o.teams?.keepLastTeam ? 1 : 0)
+        : newTeam !== null || (team !== null && (renamed || joins.length > 0 || leaves.length > 0))
+          ? 1
+          : 0,
+      write.kind === "delete" ? [...before] : removed,
+      write.kind === "delete" ? [] : added,
+      teamOf && write.kind !== "delete" ? leaves : [],
+      teamOf ? joins : [],
+      now,
+    );
   const changedList = changedNames(write, added.length, removed.length);
   const action =
     write.kind === "create"
@@ -1113,7 +1226,13 @@ export async function scimCreateGroup(
   const read = readGroup(body);
   if (!read.ok) return read.answer;
   const meter = await meterFor(config, caller);
-  return writeGroup(config, caller, { kind: "create", next: read.doc }, meter, null);
+  return writeGroup(
+    config,
+    caller,
+    { kind: "create", next: read.doc, named: read.doc.members.size },
+    meter,
+    null,
+  );
 }
 
 /** Reads one Group of the caller's organization (Behavior 5), `GET /Groups/:id`. */
@@ -1253,7 +1372,7 @@ export async function scimReplaceGroup(
     caller,
     id,
     ifMatch,
-    (row, before) => ({ kind: "update", row, before, next: doc }),
+    (row, before) => ({ kind: "update", row, before, next: doc, named: doc.members.size }),
     null,
   );
 }
@@ -1302,7 +1421,7 @@ export async function scimPatchGroup(
         return url.searchParams.has("attributes")
           ? oneAnswer(config, row, [...before], 200, url)
           : { status: 204, body: null };
-      return { kind: "update", row, before, next };
+      return { kind: "update", row, before, next, named: applied.named };
     },
     url,
   );

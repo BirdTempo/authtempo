@@ -406,7 +406,7 @@ describe("the SCIM Groups (plan 12d Task 11)", () => {
       ),
     );
     expect([over.status, over.body.scimType]).toEqual([400, "invalidValue"]);
-    expect(over.body.detail).toBe("one request changes at most 1000 members of a group");
+    expect(over.body.detail).toBe("one request names at most 1000 members of a group");
     // A valid add and a failed operation in one PATCH: nothing changes.
     const half = await read(
       await scim(
@@ -433,6 +433,80 @@ describe("the SCIM Groups (plan 12d Task 11)", () => {
     expect(fit.status).toBe(204);
     expect(await roleOf(w, ids[999] ?? "")).toBe("admin");
   }, 60_000);
+
+  it("counts the member values of the request: a PUT and a PATCH replace of 1000 members over 1000 others pass (ruling 85 of plan 12d)", async () => {
+    const w = await world();
+    await setMap(w, { Admins: "admin" });
+    const ids: string[] = [];
+    for (let i = 0; i < 3001; i++) {
+      // The token takes 1200 calls in 10 minutes: a new window every 1000 Users.
+      if (i % 1000 === 0) w.clock.advance(600_000);
+      ids.push(await userOf(w, `u${i}`));
+    }
+    const first = ids.slice(0, 1000);
+    const second = ids.slice(1000, 2000);
+    const third = ids.slice(2000, 3000);
+    const members = (list: readonly string[]) => list.map((value) => ({ value }));
+    const group = await groupOf(w, "Admins", first);
+    const listed = async () =>
+      (await w.storage.findMany("scimGroupMember", [{ field: "groupId", op: "eq", value: group }]))
+        .map((m) => m.scimUserId)
+        .sort();
+    // A PUT of 1000 members that replaces the 1000 members of the group: 2000 changes.
+    const put = await read(
+      await scim(w, w.token, "PUT", `/Groups/${group}`, {
+        schemas: [GROUP_URN],
+        displayName: "Admins",
+        members: members(second),
+      }),
+    );
+    expect(put.status, JSON.stringify(put.body)).toBe(200);
+    expect(await listed()).toEqual([...second].sort());
+    expect(await roleOf(w, first[0] ?? "")).toBe("member");
+    expect(await roleOf(w, second[999] ?? "")).toBe("admin");
+    // A PATCH replace of the member list names 1000 values and takes away 1000 others.
+    const replace = await scim(
+      w,
+      w.token,
+      "PATCH",
+      `/Groups/${group}`,
+      patch({ op: "replace", path: "members", value: members(third) }),
+    );
+    expect(replace.status).toBe(204);
+    expect(await listed()).toEqual([...third].sort());
+    // One past the cap in a PUT body.
+    const before = await counts(w);
+    const big = await read(
+      await scim(w, w.token, "PUT", `/Groups/${group}`, {
+        schemas: [GROUP_URN],
+        displayName: "Admins",
+        members: members([...third, ids[3000] ?? ""]),
+      }),
+    );
+    expect([big.status, big.body.detail]).toEqual([
+      400,
+      "one request names at most 1000 members of a group",
+    ]);
+    // A group of 1001 members: a remove with no value takes away 1001 members.
+    const one = await scim(
+      w,
+      w.token,
+      "PATCH",
+      `/Groups/${group}`,
+      patch({ op: "add", path: "members", value: members([ids[3000] ?? ""]) }),
+    );
+    expect(one.status).toBe(204);
+    const grown = await counts(w);
+    const all = await read(
+      await scim(w, w.token, "PATCH", `/Groups/${group}`, patch({ op: "remove", path: "members" })),
+    );
+    expect([all.status, all.body.detail]).toEqual([
+      400,
+      "one request takes away at most 1000 members of a group",
+    ]);
+    expect(await counts(w)).toEqual(grown);
+    expect(grown).not.toEqual(before);
+  }, 120_000);
 
   it("refuses a second group with the same displayName", async () => {
     const w = await world();

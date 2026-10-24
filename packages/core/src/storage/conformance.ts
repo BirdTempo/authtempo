@@ -36,6 +36,7 @@ import type {
   UserRow,
   VerificationRow,
 } from "../schema.js";
+import { schema } from "../schema.js";
 import { createPbkdf2PasswordHash } from "../seams/password-hash.js";
 import { type StorageAdapter, StorageError, type Where } from "./port.js";
 import { USER_CHILD_MODELS } from "./sql.js";
@@ -2130,6 +2131,31 @@ export function runAdapterConformance(
         ]);
       });
 
+      it("reads, updates, and deletes by an in list of 2000 values in one statement each (ruling 85 of plan 12d)", async () => {
+        const rows = [...members("g1", 1000), ...members("g2", 1000)];
+        await db.createMany("scimGroupMember", rows.slice(0, 1000));
+        await db.createMany("scimGroupMember", rows.slice(1000));
+        const inIds = [{ field: "id" as const, op: "in" as const, value: rows.map((r) => r.id) }];
+        let found: ScimGroupMemberRow[] = [];
+        expect(
+          await growth(async () => {
+            found = await db.findMany("scimGroupMember", inIds);
+          }),
+        ).toBe(counted(1));
+        expect(found).toHaveLength(2000);
+        expect(
+          await growth(async () => {
+            expect(await db.update("scimGroupMember", inIds, { updatedAt: later })).toBe(2000);
+          }),
+        ).toBe(counted(1));
+        expect(
+          await growth(async () => {
+            expect(await db.delete("scimGroupMember", inIds)).toBe(2000);
+          }),
+        ).toBe(counted(1));
+        expect(await db.findMany("scimGroupMember", [])).toEqual([]);
+      });
+
       it("keeps each value of a long in list bound: quotes, brackets, and SQL text match only their own row", async () => {
         const odd = [
           "x') OR 1=1 --",
@@ -2849,4 +2875,206 @@ async function rotationRun(storage: StorageAdapter): Promise<void> {
 function must<T>(r: Result<T> | undefined): T {
   if (!r?.ok) throw new Error(`rotation: ${r ? r.code : "no api"}`);
   return r.value;
+}
+
+/** One SQLite store for `runStoredFormConformance`: the adapter and a raw read of its database. */
+export interface StoredFormTarget {
+  adapter: StorageAdapter;
+  /** The rows of one SQL read on the database, as the driver answers them. */
+  all(sql: string): Promise<Record<string, unknown>[]>;
+  close(): Promise<void>;
+}
+
+export interface StoredFormOptions {
+  /**
+   * Models whose rows other rows name by a foreign key. Their rows go in
+   * first, and the undo row does not delete them, because a delete cascades
+   * to the rows that name them. Default: none.
+   */
+  parents?: readonly ModelName[];
+}
+
+/** Values that a column type can read back in another form: numbers, JSON, keywords, and spaces. */
+const STORED_TEXTS = (r: number) => [
+  `1234${r}`,
+  `1.50${r}`,
+  `{"a":${r}}`,
+  `[${r}]`,
+  `-0${r}`,
+  `${r}e3`,
+  `true${r}`,
+  `null ${r}`,
+  ` 4${r} `,
+  `東京-${r}-😀`,
+];
+
+/**
+ * Row `r` of `model` with a value of each type in each field. A field that
+ * names a parent row names row `r` of that parent. With `nulls`, each
+ * nullable field is null. `prefix` starts each free text.
+ */
+function storedRow(model: ModelName, r: number, nulls: boolean, prefix = "") {
+  const fields = schema[model].fields as Record<
+    string,
+    { type: string; nullable?: boolean; int64?: true }
+  >;
+  const out: Record<string, unknown> = {};
+  let i = 0;
+  for (const [f, def] of Object.entries(fields)) {
+    i++;
+    if (f === "id") out[f] = `id-${model}-${r}`;
+    else if (f === "userId" || f === "inviterId" || f === "actorId") out[f] = `id-user-${r}`;
+    else if (f === "organizationId" || f === "activeOrganizationId")
+      out[f] = `id-organization-${r}`;
+    else if (f === "teamId" || f === "activeTeamId") out[f] = `id-team-${r}`;
+    else if (nulls && def.nullable) out[f] = null;
+    else if (model === "invitation" && f === "teamIds") out[f] = [`id-team-${r}`];
+    else if (model === "organizationRole" && f === "permissions") out[f] = { project: ["read"] };
+    else if (model === "passkey" && f === "publicKey") out[f] = "AQID-_";
+    else if (model === "identity" && f === "provider") out[f] = `github${r}`;
+    else if (def.type === "string") out[f] = `${prefix}${STORED_TEXTS(r)[i % 10]}`;
+    else if (def.type === "integer") out[f] = def.int64 ? Number.MAX_SAFE_INTEGER - r : 7 + r;
+    else if (def.type === "boolean") out[f] = r % 2 === 0;
+    else if (def.type === "date") out[f] = new Date(1761264000123 + r * 1001);
+    else out[f] = { k: `v"q\\${r}`, n: 1.5, big: 1e21, arr: [1, "2", null, true, { z: "東" }] };
+  }
+  return out;
+}
+
+/**
+ * The stored form of each row on D1 and on each SQLite driver (rulings 84
+ * and 85 of plan 12d). `createMany` binds its rows as one JSON list, and
+ * `create` binds one parameter per value. Both must store the same type and
+ * the same bytes in each column. Else a compare such as `expiresAt > now`
+ * goes wrong with no error. The undo of an update and a delete of many rows
+ * binds JSON lists too, and must restore the same bytes. A SQLite store
+ * runs it from its own test file with a factory that opens a fresh,
+ * migrated, empty database.
+ */
+export function runStoredFormConformance(
+  name: string,
+  open: () => Promise<StoredFormTarget>,
+  options: StoredFormOptions = {},
+): void {
+  const parents = options.parents ?? [];
+  const models = [
+    ...parents,
+    ...(Object.keys(schema) as ModelName[]).filter((m) => !parents.includes(m)),
+  ];
+
+  /** Each row of each table, a column as its type and `form` of its value, in one sorted text. */
+  async function snapshot(t: StoredFormTarget, form: "quote" | "hex"): Promise<string> {
+    const tables = (
+      await t.all(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' AND name NOT LIKE 'd1\\_%' ESCAPE '\\' AND name NOT IN ('ta_migrations', 'ta_meta', 'ta_limit') ORDER BY name",
+      )
+    ).map((r) => String(r.name));
+    const lines: string[] = [];
+    for (const table of tables) {
+      const cols = (await t.all(`SELECT name FROM pragma_table_info('${table}')`)).map((r) =>
+        String(r.name),
+      );
+      // One pair of terms per column: a text of all columns nests too deep for D1.
+      const each = cols.map((c, i) => `typeof("${c}") AS t${i}, ${form}("${c}") AS v${i}`);
+      for (const r of await t.all(`SELECT ${each.join(", ")} FROM "${table}"`))
+        lines.push(
+          `${table}: ${cols.map((c, i) => `${c}=${String(r[`t${i}`])}:${String(r[`v${i}`])}`).join(" | ")}`,
+        );
+    }
+    return lines.sort().join("\n");
+  }
+
+  /** Rows 0, 1, and 2 of each model, 2 with nulls, by `create` or by `createMany`. */
+  async function writeAll(db: StorageAdapter, many: boolean, prefix = ""): Promise<string[]> {
+    const errors: string[] = [];
+    for (const m of models) {
+      const rows = [0, 1, 2].map((r) => storedRow(m, r, r === 2, prefix));
+      try {
+        if (many) await db.createMany(m, rows as never[]);
+        else for (const row of rows) await db.create(m, row as never);
+      } catch (e) {
+        errors.push(`${m}: ${(e as Error).message}`);
+      }
+    }
+    return errors;
+  }
+
+  describe(`stored form: ${name}`, () => {
+    it("stores the same type and value in each column by create and by createMany, and the undo of many rows restores them (ruling 85 of plan 12d)", async () => {
+      const one = await open();
+      let created: string;
+      let refusedOne: string[];
+      try {
+        refusedOne = await writeAll(one.adapter, false);
+        created = await snapshot(one, "quote");
+      } finally {
+        await one.close();
+      }
+      const two = await open();
+      try {
+        expect(await writeAll(two.adapter, true)).toEqual(refusedOne);
+        const many = await snapshot(two, "quote");
+        expect(many.split("\n").length).toBeGreaterThan(models.length);
+        expect(many).toBe(created);
+        // An update and a delete of the three rows of each model, in a transaction that
+        // throws. The undo of many rows restores each column as it was.
+        const errors: string[] = [];
+        const written = models.filter((m) => !refusedOne.some((e) => e.startsWith(`${m}: `)));
+        for (const m of [...written].reverse()) {
+          const fields = schema[m].fields as Record<string, { type: string }>;
+          const data: Record<string, unknown> = {};
+          for (const [f, def] of Object.entries(fields)) {
+            if (f === "id") continue;
+            if (def.type === "date") data[f] = new Date(1800000000000);
+            else if (def.type === "boolean") data[f] = true;
+            else if (def.type === "integer") data[f] = 99;
+          }
+          const inIds = [
+            { field: "id", op: "in", value: [0, 1, 2].map((r) => `id-${m}-${r}`) },
+          ] as never[];
+          try {
+            await two.adapter.transaction(async (tx) => {
+              expect(await tx.update(m, inIds, data as never)).toBe(3);
+              if (!parents.includes(m)) expect(await tx.delete(m, inIds)).toBe(3);
+              throw new Error("boom");
+            });
+          } catch (e) {
+            if ((e as Error).message !== "boom") errors.push(`${m}: ${(e as Error).message}`);
+          }
+        }
+        expect(errors).toEqual([]);
+        expect(await snapshot(two, "quote")).toBe(many);
+      } finally {
+        await two.close();
+      }
+    });
+
+    it("stores a lone surrogate as U+FFFD by create and by createMany, and reads it back (ruling 85 of plan 12d)", async () => {
+      // Each free text starts with a lone high and a lone low surrogate.
+      const names = async (db: StorageAdapter) =>
+        (await db.findMany("user", [], { sort: { field: "id", dir: "asc" } })).map((u) => u.name);
+      const fixed = [0, 1, 2].map((r) => storedRow("user", r, r === 2, "a\ufffdb\ufffd").name);
+      const one = await open();
+      let created: string;
+      try {
+        await writeAll(one.adapter, false, "a\ud800b\udc00");
+        created = await snapshot(one, "hex");
+        expect(await names(one.adapter)).toEqual(fixed);
+      } finally {
+        await one.close();
+      }
+      // The bytes of U+FFFD at the start of a text column, and no CESU-8 form of a
+      // surrogate (ED A0 80 for U+D800).
+      expect(created).toContain("=text:61EFBFBD62EFBFBD");
+      expect(created).not.toContain("=text:61EDA080");
+      const two = await open();
+      try {
+        await writeAll(two.adapter, true, "a\ud800b\udc00");
+        expect(await snapshot(two, "hex")).toBe(created);
+        expect(await names(two.adapter)).toEqual(fixed);
+      } finally {
+        await two.close();
+      }
+    });
+  });
 }

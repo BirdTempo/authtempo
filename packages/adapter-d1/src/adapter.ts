@@ -25,6 +25,12 @@ interface Undo extends Statement {
   model: ModelName;
   /** The write this entry reverses. A failed entry reports it as `<model>:<op>`. */
   op: "create" | "update" | "delete";
+  /**
+   * The undo of `createMany` calls of one model, one after the other in the
+   * log. It holds their rows and the count of the entries that delete them.
+   * Each entry of the run holds the same object (ruling 85 of plan 12d).
+   */
+  many?: { rows: readonly Row[]; entries: number };
 }
 
 /** What the adapter runs. `createD1Adapter` passes core's statements; plan 9's compatibility storage passes its own. */
@@ -59,6 +65,8 @@ export interface D1AdapterOptions {
 interface Ctx extends D1AdapterOptions {
   undo: Undo[] | null;
   sent: { statements: number; ready?: number };
+  /** The first entry of the log that the open nested transaction owns: a run of `many` never joins an entry below it. */
+  floor: number;
 }
 
 async function run(db: D1Subset, s: Statement, sent: Ctx["sent"]): Promise<D1SubsetResult> {
@@ -149,9 +157,24 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
       } catch (e) {
         throw ctx.toStorageError(model, e) ?? e;
       }
-      if (ctx.undo)
-        for (const u of undoCreateMany(st, model, rows))
-          ctx.undo.push({ model, op: "create", ...u });
+      if (ctx.undo) {
+        // The undo of a createMany right after a createMany of the same model joins its
+        // run: one delete per list of all their ids. An insert of 1000 rows in four chunks
+        // then takes one undo statement, not four. So the undo of a late conflict stays
+        // inside the D1 budget (ruling 85 of plan 12d). Only an entry just before this one
+        // joins, so the reverse order of the log does not change.
+        const log = ctx.undo;
+        const last = log.at(-1);
+        let all: readonly Row[] = rows as unknown as Row[];
+        if (last?.many && last.model === model && log.length - last.many.entries >= ctx.floor) {
+          all = [...last.many.rows, ...all];
+          log.splice(log.length - last.many.entries);
+        }
+        const undo = undoCreateMany(st, model, all as never);
+        // A user row keeps one statement per row (undoCreate), so its run does not join.
+        const many = model === "user" ? undefined : { rows: all, entries: undo.length };
+        for (const u of undo) log.push({ model, op: "create", ...u, ...(many ? { many } : {}) });
+      }
       return structuredClone([...rows]);
     },
     rowsPerInsert(model) {
@@ -239,14 +262,18 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
         // A nested call shares the log. A throw reverses only its own entries.
         const log = ctx.undo;
         const mark = log.length;
+        const floor = ctx.floor;
+        ctx.floor = mark;
         try {
           return await fn(self);
         } catch (e) {
           const own = log.splice(mark);
           return rethrowAfterUndo(db, own, e, ctx.sent);
+        } finally {
+          ctx.floor = floor;
         }
       }
-      const inner: Ctx = { ...ctx, undo: [] };
+      const inner: Ctx = { ...ctx, undo: [], floor: 0 };
       const tx = adapterOn(db, inner);
       try {
         return await fn(tx);
@@ -270,7 +297,12 @@ function adapterOn(db: D1Subset, ctx: Ctx): StorageAdapter {
 }
 
 export function createD1AdapterOn(db: D1Subset, options: D1AdapterOptions): StorageAdapter {
-  return adapterOn(db, { ...options, undo: null, sent: options.sent ?? { statements: 0 } });
+  return adapterOn(db, {
+    ...options,
+    undo: null,
+    sent: options.sent ?? { statements: 0 },
+    floor: 0,
+  });
 }
 
 export { StorageError };

@@ -1,6 +1,7 @@
 import type { FindManyOptions, ModelName, StorageAdapter, StorageError } from "@authtempo/core";
 import {
   assertModel,
+  fixedChunks,
   rowsPerInsertOf,
   type SqlStatements,
   type Statement,
@@ -138,12 +139,16 @@ function adapterOn(ctx: Ctx): StorageAdapter {
       for (const data of rows) guardData(model, data as unknown as Row);
       // InnoDB undoes a failed statement whole. More than one chunk runs in a
       // transaction (a savepoint inside one), one call per chunk, so the call
-      // is all or nothing.
-      const size = self.rowsPerInsert(model);
-      if (rows.length > size) {
+      // is all or nothing. A chunk takes a fixed size, so the server keeps few
+      // prepared statements of the inserts (ruling 85 of plan 12d).
+      const sizes = fixedChunks(rows.length, self.rowsPerInsert(model));
+      if (sizes.length > 1) {
         await self.transaction(async (tx) => {
-          for (let i = 0; i < rows.length; i += size)
-            await tx.createMany(model, rows.slice(i, i + size));
+          let at = 0;
+          for (const size of sizes) {
+            await tx.createMany(model, rows.slice(at, at + size));
+            at += size;
+          }
         });
         return structuredClone([...rows]);
       }

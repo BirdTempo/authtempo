@@ -1,6 +1,6 @@
 import type { ModelName, Models } from "../schema.js";
 import { type StorageAdapter, StorageError, type Where } from "./port.js";
-import { jsonBytes, LIST_BYTES_MAX, LIST_MAX, listChunks } from "./sql.js";
+import { INSERT_ROWS_MAX, jsonBytes, LIST_BYTES_MAX, LIST_MAX, listChunks } from "./sql.js";
 
 export { LIST_MAX, listChunks };
 
@@ -38,8 +38,8 @@ export async function findManyIn<M extends ModelName, F extends keyof Models[M] 
 }
 
 /**
- * `findMany` with an `in` list of up to 1000 values in one statement
- * (ruling 84 of plan 12d). D1 and SQLite bind the list as one JSON text,
+ * `findMany` with an `in` list of up to `LIST_MAX` values in one statement
+ * (rulings 84 and 85 of plan 12d). D1 and SQLite bind the list as one JSON text,
  * and Postgres and MySQL bind one parameter per value. A list of more than
  * `LIST_MAX` values, or of more than `LIST_BYTES_MAX` bytes of JSON text,
  * runs in the chunks of `listChunks`. The result keeps no order, and a
@@ -67,15 +67,32 @@ export function listCalls(values: readonly unknown[]): number {
 
 /**
  * The rows of `createMany` in the chunks of the engine (ruling 84 of plan
- * 12d): at most `LIST_MAX` rows, and at most half of `LIST_BYTES_MAX` of
- * the JSON text of their values, a date as its text. A D1 or SQLite
- * statement of a chunk binds the values as one JSON list, a date as a
- * number of fewer bytes. The Better Auth tables add a key column to a row,
- * shorter than the row. So the bound list of a chunk stays under
- * `LIST_BYTES_MAX`, and each chunk is one statement on every store.
+ * 12d): at most `INSERT_ROWS_MAX` rows, and at most two thirds of
+ * `LIST_BYTES_MAX` of the JSON text of their values, a date as its text. A
+ * D1 or SQLite statement of a chunk binds the values as one JSON list, a
+ * date as a number of fewer bytes. The Better Auth tables add a key column
+ * of 43 characters to a team member row, a third of the row or less. So the
+ * bound list of a chunk stays under `LIST_BYTES_MAX`, and each chunk is one
+ * statement on every store. A chunk takes about 350 team member rows, so
+ * 1000 rows take three statements (ruling 85: four before).
  */
 export function rowChunks<T extends object>(rows: readonly T[]): T[][] {
-  return listChunks(rows, LIST_BYTES_MAX / 2, (r) => jsonBytes(Object.values(r)));
+  return listChunks(
+    rows,
+    (LIST_BYTES_MAX * 2) / 3,
+    (r) => jsonBytes(Object.values(r)),
+    INSERT_ROWS_MAX,
+  );
+}
+
+/**
+ * The statements of the D1 undo of a delete of `rows` (rulings 84 and 85 of
+ * plan 12d). That is one reinsert per list of `listChunks` of the raw rows. A
+ * row counts as in `rowChunks`, a date as its text, which is longer than the
+ * number of milliseconds that a D1 row holds.
+ */
+export function reinsertCalls(rows: readonly object[]): number {
+  return listChunks(rows, LIST_BYTES_MAX, (r) => jsonBytes(Object.values(r))).length;
 }
 
 /** Inserts `rows` by `createMany`, one call per chunk of `rowChunks`: one statement each. */
