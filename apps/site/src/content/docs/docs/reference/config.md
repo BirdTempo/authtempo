@@ -234,9 +234,9 @@ Another key of `phone` is refused. Core makes each code, keys its hash, counts e
 | `phone.ttlMinutes` | number | 5 | An integer from 1 to 10. |
 | `phone.length` | 6 or 8 | 6 | The digits of a code. |
 | `phone.maxAttempts` | number | 3 | An integer from 3 to 10. |
-| `phone.dailyCap` | number | 1000 | The codes of the deployment per 24 hours, an integer from 1 to 100000. A send over the cap makes no call to the port. |
+| `phone.dailyCap` | number | 1000 | The codes of the deployment per 24 hours, an integer from 1 to 100000. A send over the cap makes no call to the port. The window is fixed: see [the limits](/docs/reference/limits/). |
 | `phone.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests and local development. The cap is then per isolate. |
-| `phone.message` | function of `{ code, appName, ttlMinutes }` to a string | `defaultPhoneMessage` | The text of the SMS. |
+| `phone.message` | function of `{ code, appName, ttlMinutes }` to a string | `defaultPhoneMessage` | The text of the SMS. A throw counts as `"unavailable"`, as a throw of the port does. |
 
 ## Second factor
 

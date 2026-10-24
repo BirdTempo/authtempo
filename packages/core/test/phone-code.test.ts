@@ -198,7 +198,10 @@ describe("the phone code (plan 12i Task 4, spec 32 item 4)", () => {
     expect((await rows(auth)).map((r) => r.identifier).sort()).toEqual([A, B]);
     // The cap is one count for every number and purpose, for 24 hours.
     expect(await send(auth, A, "phone-add-otp", "user-1")).toBe("capped");
-    auth.clock.advance(24 * 60 * 60_000);
+    // The window is 24 hours from the first send: 1 second before its end, still capped.
+    auth.clock.advance(24 * 60 * 60_000 - 1000);
+    expect(await send(auth, "+14155550102")).toBe("capped");
+    auth.clock.advance(1000);
     expect(await send(auth, "+14155550102")).toBe("sent");
   });
 
@@ -213,6 +216,18 @@ describe("the phone code (plan 12i Task 4, spec 32 item 4)", () => {
     expect(await send(auth, A)).toBe("unavailable");
     expect(errors.mock.calls).toEqual([["authtempo: the SMS port threw", "Error"]]);
     expect(JSON.stringify(errors.mock.calls)).not.toContain("+");
+  });
+
+  it("treats a throw of the message builder as a failed send", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const auth = phoneAuth({
+      message: () => {
+        throw new TypeError("no template");
+      },
+    });
+    expect(await send(auth, A)).toBe("unavailable");
+    expect(auth.sms.sent).toEqual([]);
+    expect(errors.mock.calls).toEqual([["authtempo: the SMS port threw", "TypeError"]]);
   });
 
   it("sends no code outside text", async () => {
@@ -257,6 +272,19 @@ describe("the phone code (plan 12i Task 4, spec 32 item 4)", () => {
     expect(await gate(B, "198.51.102.2")).toMatchObject({ ok: true });
     // A refused form spends no per-number key.
     expect(await gate("+1415", "198.51.102.3")).toMatchObject({ code: "phone_invalid" });
+  });
+
+  it("keeps the request window per number 15 minutes", async () => {
+    const auth = phoneAuth();
+    const gate = (ip: string) => phoneRequestGate(auth.config, { phone: A, ip });
+    for (const ip of ["198.51.106.1", "198.51.106.2", "198.51.106.3"])
+      expect(await gate(ip)).toMatchObject({ ok: true });
+    expect(await gate("198.51.106.4")).toMatchObject({ code: "rate_limited" });
+    // phone-otp:phone, 1 second before the end of its window and at the end.
+    auth.clock.advance(15 * 60_000 - 1000);
+    expect(await gate("198.51.106.5")).toMatchObject({ code: "rate_limited" });
+    auth.clock.advance(1000);
+    expect(await gate("198.51.106.6")).toMatchObject({ ok: true });
   });
 
   it("checks the captcha after the per-IP limit and before the per-number keys", async () => {
@@ -309,6 +337,15 @@ describe("the phone code (plan 12i Task 4, spec 32 item 4)", () => {
       });
     expect(await check(auth, B, "000000", "phone-otp", "198.51.103.99")).toMatchObject({
       code: "rate_limited",
+    });
+    // phone-verify:phone, 1 second before the end of its window and at the end.
+    auth.clock.advance(15 * 60_000 - 1000);
+    expect(await check(auth, B, "000000", "phone-otp", "198.51.103.98")).toMatchObject({
+      code: "rate_limited",
+    });
+    auth.clock.advance(1000);
+    expect(await check(auth, B, "000000", "phone-otp", "198.51.103.97")).toMatchObject({
+      code: "invalid_code",
     });
   });
 

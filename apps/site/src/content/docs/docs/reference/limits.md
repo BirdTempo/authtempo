@@ -122,6 +122,10 @@ For an IPv4 address, `<ip>` is the address. An IPv4-mapped IPv6 address gives it
 
 `password:email`, `password:username`, and `password:phone` count apart, one key for each kind of identifier. So from many IPs, one account with an address, a username, and a phone takes up to 30 guesses per 15 minutes. This is a known residual. A count per account would close it, but its 429 would tell that a phone and an address name one account. `password:ip` bounds each IP at 20 guesses.
 
+`phone-otp:all-day:deployment` counts in a fixed window that opens at the first send. The count starts again when the window ends. So up to 2 × `dailyCap` sends can go out in a short span across the end of a window. The stored key holds the maximum, so a new `dailyCap` starts a new count.
+
+The per-number phone keys read the number as given. Two E.164 forms can name one handset, such as `+4407700900123` and `+447700900123`. Each form then gets its own count. Core uses no phone library and does not rewrite a number. Give an SMS port that refuses a form that its supplier rewrites.
+
 The stored key of an owned limiter is the key, the seconds, and the maximum, joined by U+001F.
 
 ## The device code

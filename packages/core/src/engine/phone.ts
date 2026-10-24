@@ -97,7 +97,9 @@ export async function phoneRequestGate(
  * cap bounds the calls to the supplier, not the delivered texts. The
  * earlier live codes of the purpose and identifier are spent with the
  * write, so one code is live. The SMS goes after the row, never inside a
- * transaction. With `phone` off the answer is `"unavailable"`.
+ * transaction. A throw of `phone.message` or of the port answers
+ * `"unavailable"` with one `sms.port_threw` line. With `phone` off the
+ * answer is `"unavailable"`.
  *
  * The identifier of a `phone-otp` code is the number; of a `phone-add-otp`
  * code, the user id, with the number in `data`.
@@ -121,8 +123,9 @@ export async function sendPhoneCode(
   const cap = { seconds: CAP_WINDOW_SECONDS, max: phone.dailyCap };
   if (!(await limit(config, "phone-otp:all-day", CAP_SUBJECT, cap))) return "capped";
   const code = await issueCode(config, phone, input.purpose, input.identifier, input.data);
-  const text = phone.message({ code, appName: config.appName, ttlMinutes: phone.ttlMinutes });
   try {
+    // The builder runs inside the try: its throw answers as a failed send.
+    const text = phone.message({ code, appName: config.appName, ttlMinutes: phone.ttlMinutes });
     // To the number of the code, whatever the builder wrote.
     return (await phone.sms.send({ to: input.to, text })) === "sent" ? "sent" : "unavailable";
   } catch (e) {
