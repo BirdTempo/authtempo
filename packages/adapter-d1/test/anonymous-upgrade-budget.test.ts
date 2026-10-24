@@ -40,6 +40,12 @@ const PINS = {
   passkey: { start: 4, done: 24 },
   challenge: { start: 10, done: 28 },
 };
+// The completing request of an upgrade in a browser with a full bag
+// (multiSession max 10, nine bag tokens), the join of plan 12i Tasks 7 and
+// 11. The router's bag step adds one read of the rows of the browser. The
+// anonymous session has ended by then, so the step reads no user and ends
+// no bag session. Counts of the run of 2026-10-25.
+const FULL_BAG_PINS = { signIn: 26, signUpConfirm: 36 };
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {
@@ -173,6 +179,29 @@ async function verifiedUser(w: World, email: string) {
   const link = w.mail.findLast((m) => m.to === email)?.text ?? "";
   const res = await call(w, post("/password/verify", { token: tokenIn(link) }));
   expect(res.status).toBe(200);
+}
+
+/** A browser: the cookies that the answers set, sent back on each request. */
+function browser() {
+  const cookies = new Map<string, string>();
+  return {
+    cookies,
+    jar: () => [...cookies].map(([k, v]) => `${k}=${v}`).join("; ") || null,
+    take(res: Response): Response {
+      for (const line of res.headers.getSetCookie()) {
+        const pair = line.split(";")[0] ?? "";
+        const eq = pair.indexOf("=");
+        if (pair.slice(eq + 1) === "") cookies.delete(pair.slice(0, eq));
+        else cookies.set(pair.slice(0, eq), pair.slice(eq + 1));
+      }
+      return res;
+    },
+  };
+}
+
+async function hashOf(token: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return [...new Uint8Array(digest)].map((x) => x.toString(16).padStart(2, "0")).join("");
 }
 
 beforeEach(async () => {
@@ -338,6 +367,63 @@ describe("the anonymous upgrade on D1 (plan 12i Task 7)", () => {
       expect(done).toBeLessThanOrEqual(BUDGET);
     }
   });
+
+  // The join of Tasks 7 and 11: the one reachable way to an anonymous
+  // session with a bag. The active session of a full browser ends on
+  // another device, and the browser then signs in anonymously.
+  for (const name of ["signIn", "signUpConfirm"] as const)
+    it(`keeps an upgrade with a full bag within the D1 Free budget: ${name}`, async () => {
+      const uniform = name === "signUpConfirm";
+      const w = make({
+        multiSession: { max: 10 },
+        ...(uniform ? { password: { hash: createPbkdf2PasswordHash({ iterations: 1000 }) } } : {}),
+      });
+      const b = browser();
+      for (let i = 0; i < 10; i++) {
+        const email = `u${i}@example.com`;
+        await verifiedUser(w, email);
+        const res = b.take(
+          await call(w, post("/password/sign-in", { email, password: PASSWORD }, b.jar())),
+        );
+        expect(res.status).toBe(200);
+      }
+      const bag = b.cookies.get("__Host-tempo_sessions")?.split(".");
+      expect(bag).toHaveLength(9);
+      const active = b.cookies.get("__Host-tempo_session") ?? "";
+      const other = browser();
+      other.take(
+        await call(w, post("/password/sign-in", { email: "u9@example.com", password: PASSWORD })),
+      );
+      const row = await createD1Adapter(env.DB).findOne("session", [
+        { field: "tokenHash", op: "eq", value: await hashOf(active) },
+      ]);
+      const revoked = await call(w, post("/sessions/revoke", { id: row?.id }, other.jar()));
+      expect(revoked.status).toBe(200);
+      expect(b.take(await call(w, post("/anonymous/sign-in", {}, b.jar()))).status).toBe(200);
+      expect(b.cookies.get("__Host-tempo_sessions")?.split(".")).toEqual(bag);
+      const before = w.links.length;
+      let done: Awaited<ReturnType<typeof measure>>;
+      if (uniform) {
+        await call(
+          w,
+          post("/password/sign-up", { email: "new@example.com", password: PASSWORD }, b.jar()),
+        );
+        const link = w.mail.findLast((m) => m.to === "new@example.com")?.text ?? "";
+        done = await measure(w, post("/password/verify", { token: tokenIn(link) }, b.jar()));
+      } else {
+        await verifiedUser(w, "new@example.com");
+        done = await measure(
+          w,
+          post("/password/sign-in", { email: "new@example.com", password: PASSWORD }, b.jar()),
+        );
+      }
+      expect(b.take(done.res).status).toBe(200);
+      expect(w.links.slice(before).map((l) => l.split(" ")[0])).toEqual(["before", "after"]);
+      // The anonymous session took no bag place, so the bag is the same nine.
+      expect(b.cookies.get("__Host-tempo_sessions")?.split(".")).toEqual(bag);
+      expect(done.queries).toBe(FULL_BAG_PINS[name]);
+      expect(done.queries).toBeLessThanOrEqual(BUDGET);
+    });
 
   it("links one of parallel upgrades of one anonymous session", async () => {
     // The claim is a conditional update: on D1 the statements of the sign-ins interleave.

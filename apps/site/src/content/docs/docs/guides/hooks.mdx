@@ -127,6 +127,7 @@ A sign-in from a browser with a live anonymous session always replaces the anony
 - A proof by mail or SMS links only when the completing request carries the anonymous session that asked for it. These proofs are the magic link, the email code, the confirm link of a sign-up, and the phone code. So a stranger cannot move data into your account with a link for your address.
 - A social sign-in links the anonymous user of its start: the binding cookie ties the callback to that browser. A password sign-in and a passkey sign-in link the anonymous session of their own request.
 - A sign-in with the second factor links at the challenge verify. A challenge that expires links nothing.
+- With `multiSession` on, the anonymous session never enters the bag, so an upgrade displaces no bag session. A switch to a bag session is no sign-in and links nothing.
 - Two sign-ins from one anonymous session at once: each can run `beforeLink`, and one links. The other signs in with no `afterLink`. So move data in `afterLink` only. An impersonation session never links.
 
 ## Locks over a before hook

@@ -28,8 +28,9 @@ import {
  * The rules: one session per user, so a second sign-in of a user ends the
  * first with `sign_out`. An impersonation session never enters the bag:
  * the actor cookie keeps the operator's token. An anonymous user's session
- * never enters the bag. A full bag ends its least recently used session
- * with `displaced`.
+ * never enters the bag. A switch from it is no sign-in, so it runs no
+ * anonymous upgrade (plan 12i Task 7). A full bag ends its least recently
+ * used session with `displaced`.
  *
  * The bag order is the order of use: a session that leaves the active place
  * goes to the end of the bag, at a sign-in and at a switch. So the first
@@ -117,7 +118,8 @@ export async function bagAtSignIn(
   }
   const before = previous === null ? null : live(previous);
   if (previous !== null && before) {
-    // An anonymous session never enters the bag (plan 12i Task 6 owns its end).
+    // An anonymous session never enters the bag. An upgrade (Task 7) or the
+    // sweep (Task 6) ends it.
     const user =
       before.userId === current.userId
         ? null
@@ -184,7 +186,8 @@ function bagMode(mode: SessionReadMode): SessionReadMode {
 /**
  * Makes the bag session `sessionId` the active one (plan 12i). Every bag
  * token resolves first. The old active session moves into the bag, unless
- * its user is anonymous. A switch writes no `freshAt`: each session keeps
+ * its user is anonymous. A switch is no sign-in, so it links no anonymous
+ * user and ends no anonymous session (plan 12i Task 7). A switch writes no `freshAt`: each session keeps
  * its own. The new active session then gets the normal read of a request,
  * in `mode`, so a due refresh slides it (ruling 34 of plan 12i). `not_found`
  * when no live bag session has the id.
