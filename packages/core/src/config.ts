@@ -647,13 +647,25 @@ export interface PasskeyConfig {
    */
   extensions?: PasskeyExtensions;
   /**
-   * Default false. With true, `POST /passkey/sign-up/options` and
-   * `/verify` make a user with a passkey and no address (plan 12i). The
+   * Default false. With true or an object, `POST /passkey/sign-up/options`
+   * and `/verify` make a user with a passkey and no address (plan 12i). The
    * user gives a name. The `signUp` rule of the deployment applies: only
    * `"open"` lets a passkey-first user in, because an invitation names an
-   * address.
+   * address. `true` is `{}`: the daily cap of 1000 on a shared limiter.
    */
-  signUp?: boolean;
+  signUp?: boolean | PasskeySignUpConfig;
+}
+
+/** The passkey-first sign-up (plan 12i Task 8, ruling 38 M3). */
+export interface PasskeySignUpConfig {
+  /**
+   * The sign-up options that the deployment answers per 24 hours, 1 to
+   * 100000. Default 1000. An options request over the cap answers 429. The
+   * cap is per deployment, so it needs a shared limiter, as `anonymous` does.
+   */
+  dailyCap?: number;
+  /** "allow" builds with a limiter that counts per isolate: the cap is then per isolate (tests and local dev). */
+  isolateLimiter?: "allow";
 }
 
 /** The passkey extensions of the config (plan 12i). `largeBlob` is the `support` value of the registration. */
@@ -670,7 +682,13 @@ export interface ResolvedPasskey {
   relatedOrigins: boolean;
   hints: { register: PasskeyHint[]; signIn: PasskeyHint[] };
   extensions: Required<PasskeyExtensions>;
-  signUp: boolean;
+  /** The passkey-first sign-up, or null while it is off. */
+  signUp: ResolvedPasskeySignUp | null;
+}
+
+/** The resolved `passkey.signUp` (plan 12i Task 8). */
+export interface ResolvedPasskeySignUp {
+  dailyCap: number;
 }
 
 /**
@@ -1854,8 +1872,6 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         );
       }
     }
-    if (input.passkey.signUp !== undefined && typeof input.passkey.signUp !== "boolean")
-      throw new ConfigError("passkey.signUp must be true or false");
     if (outside > RELATED_ORIGINS_MAX)
       throw new ConfigError(
         `relatedOrigins: at most five origins outside ${input.passkey.rpID}, the minimum a client must support (WebAuthn Level 3)`,
@@ -1870,7 +1886,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
         signIn: passkeyHints("passkey.hints.signIn", input.passkey.hints?.signIn),
       },
       extensions: passkeyExtensions(input.passkey.extensions),
-      signUp: input.passkey.signUp ?? false,
+      signUp: resolvePasskeySignUp(input.passkey.signUp, input.limiter),
     };
   }
   let password: ResolvedConfig["password"] = null;
@@ -2088,6 +2104,43 @@ function resolveAnonymous(
   if (limiter?.scope !== "shared" && input.isolateLimiter !== "allow")
     throw new ConfigError("anonymous needs a shared limiter: the daily cap is per deployment");
   return { ttlDays, sweepBatch, dailyCap };
+}
+
+/** The keys of `passkey.signUp`. A Record, so a key added to `PasskeySignUpConfig` and not listed here fails the compile. */
+const PASSKEY_SIGN_UP_KEYS: Readonly<Record<keyof PasskeySignUpConfig, true>> = {
+  dailyCap: true,
+  isolateLimiter: true,
+};
+
+/**
+ * `passkey.signUp` (plan 12i Task 8). Absent or `false`: off. Each options
+ * request can lead to a new user, so the daily cap is a promise per
+ * deployment, as for `anonymous` (ruling 38 M3). A limiter that counts per
+ * isolate is refused unless the app writes `isolateLimiter: "allow"`.
+ */
+function resolvePasskeySignUp(
+  input: boolean | PasskeySignUpConfig | undefined,
+  limiter: LimiterPort | undefined,
+): ResolvedPasskeySignUp | null {
+  if (input === undefined || input === false) return null;
+  if (input !== true && !isPlainObject(input as unknown))
+    throw new ConfigError("passkey.signUp must be true, false, or an object");
+  const given: PasskeySignUpConfig = input === true ? {} : input;
+  for (const [key, value] of Object.entries(given))
+    if (value !== undefined && !Object.hasOwn(PASSKEY_SIGN_UP_KEYS, key))
+      throw new ConfigError(
+        `passkey.signUp.${key} is not an option; core has ${Object.keys(PASSKEY_SIGN_UP_KEYS).join(", ")}`,
+      );
+  const dailyCap = given.dailyCap ?? 1000;
+  if (!Number.isSafeInteger(dailyCap) || dailyCap < 1 || dailyCap > 100_000)
+    throw new ConfigError("passkey.signUp.dailyCap must be an integer from 1 to 100000");
+  if (given.isolateLimiter !== undefined && given.isolateLimiter !== "allow")
+    throw new ConfigError('passkey.signUp.isolateLimiter must be "allow" or absent');
+  // The cap counts every sign-up of the deployment. An isolate count would
+  // let each isolate answer `dailyCap` options, so the promise would not hold.
+  if (limiter?.scope !== "shared" && given.isolateLimiter !== "allow")
+    throw new ConfigError("passkey.signUp needs a shared limiter: the daily cap is per deployment");
+  return { dailyCap };
 }
 
 /** The resolved `username` (plan 12i). Each bound counts the characters of the typed name after NFKC. */

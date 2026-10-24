@@ -35,7 +35,12 @@ function setup(captcha: AuthConfig["captcha"], extra: Partial<AuthConfig> = {}) 
     // The anonymous sign-in of plan 12i Task 6.
     anonymous: { isolateLimiter: "allow" },
     // The passkey-first sign-up of plan 12i Task 8.
-    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE], signUp: true },
+    passkey: {
+      rpID: "api.example.com",
+      rpName: "Example",
+      origins: [BASE],
+      signUp: { isolateLimiter: "allow" },
+    },
     ...(captcha ? { captcha } : {}),
     ...extra,
   });
@@ -425,7 +430,12 @@ describe("the captcha port (plan 12b)", () => {
       },
       phone: { sms: createRecordingSms(), regions: ["+1"], isolateLimiter: "allow" },
       anonymous: { isolateLimiter: "allow" },
-      passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE], signUp: true },
+      passkey: {
+        rpID: "api.example.com",
+        rpName: "Example",
+        origins: [BASE],
+        signUp: { isolateLimiter: "allow" },
+      },
       captcha: { port: fakePort("pass").port, flows: [...CAPTCHA_FLOWS] },
     });
     const known = "known@example.com";

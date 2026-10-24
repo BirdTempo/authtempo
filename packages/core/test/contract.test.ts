@@ -109,7 +109,12 @@ function postForm(
 function world(secretHash = "0".repeat(64)) {
   const auth = makeAuth({
     password: { hash: FAST, uniformSignUp: false },
-    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL], signUp: true },
+    passkey: {
+      rpID: "api.example.com",
+      rpName: "Example",
+      origins: [BASE_URL],
+      signUp: { isolateLimiter: "allow" },
+    },
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     // The platform role turns on the impersonation routes (plan 12f).

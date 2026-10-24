@@ -244,6 +244,9 @@ export const CONFIG_KEYS = {
   "passkey.extensions": { prf: true, largeBlob: true, credProps: true } satisfies Keys<
     NonNullable<Part<"passkey">["extensions"]>
   >,
+  "passkey.signUp": { dailyCap: true, isolateLimiter: true } satisfies Keys<
+    Exclude<NonNullable<Part<"passkey">["signUp"]>, boolean>
+  >,
   handoff: {
     schemes: true,
     devRedirectPattern: true,

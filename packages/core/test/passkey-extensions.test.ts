@@ -8,7 +8,7 @@ import {
 import { createSession } from "../src/engine/sessions.js";
 import { createRouter } from "../src/http/router.js";
 import { passkeyRoutes } from "../src/http/routes/passkeys.js";
-import { toBase64Url } from "../src/primitives/crypto.js";
+import { fromBase64Url, toBase64Url } from "../src/primitives/crypto.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "../src/seams/webauthn.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, get, makeAuth, post } from "./helpers.js";
@@ -347,6 +347,82 @@ describe("the passkey extensions (plan 12i Task 21)", () => {
         });
     // The flags of the registration are stored; the sign-in outputs change no flag.
     expect(await onlyPasskey(w)).toMatchObject({ discoverable: true, prf: true, largeBlob: true });
+  });
+
+  it("drops both outputs at the passkey-first sign-up verify (ruling 38 M1)", async () => {
+    const seam = recordingSeam();
+    const auth = makeAuth({
+      passkey: { ...rp(ALL_ON), signUp: { isolateLimiter: "allow" } },
+      trustedOrigins: [APP_ORIGIN],
+      webauthn: seam,
+    });
+    const handle = createRouter(auth.config, passkeyRoutes(auth.config));
+    const writes: string[] = [];
+    for (const method of ["create", "createMany", "update", "transaction"] as const) {
+      const real = auth.storage[method].bind(auth.storage) as (...a: unknown[]) => unknown;
+      vi.spyOn(auth.storage, method).mockImplementation(((...args: unknown[]) => {
+        if (method !== "transaction") {
+          writes.push(JSON.stringify(args));
+          return real(...args);
+        }
+        // The sign-up writes inside a transaction: record the writes of its handle too.
+        const [fn] = args as [(tx: Record<string, unknown>) => unknown];
+        return real((tx: Record<string, unknown>) =>
+          fn(
+            new Proxy(tx, {
+              get(target, key) {
+                const value = Reflect.get(target, key);
+                if (typeof value !== "function") return value;
+                if (key === "create" || key === "createMany" || key === "update")
+                  return (...a: unknown[]) => {
+                    writes.push(JSON.stringify(a));
+                    return value.apply(target, a);
+                  };
+                return value.bind(target);
+              },
+            }),
+          ),
+        );
+      }) as never);
+    }
+    const lines: string[] = [];
+    for (const level of ["log", "info", "warn", "error", "debug"] as const)
+      vi.spyOn(console, level).mockImplementation((...args: unknown[]) => {
+        lines.push(JSON.stringify(args));
+      });
+    const options = await handle(post("/auth/passkey/sign-up/options", { name: "Ana" }));
+    expect(options.status).toBe(200);
+    const o = (await options.json()) as { challenge: string; user: { id: string } };
+    const soft = await SoftAuthenticator.create({ rpID: RP_ID, origin: APP_ORIGIN });
+    const response = {
+      ...(await soft.register(o.challenge, fromBase64Url(o.user.id))),
+      clientExtensionResults: {
+        credProps: { rk: true, note: EXTRA_OUTPUT },
+        prf: { enabled: true, results: { first: PRF_AT_REGISTER } },
+        largeBlob: { supported: true, blob: BLOB_AT_REGISTER },
+        hmacGetSecret: { output1: UNKNOWN_OUTPUT },
+      },
+    };
+    const answer = await handle(post("/auth/passkey/sign-up/verify", { response }));
+    expect(answer.status).toBe(200);
+    const answers = [await answer.text()];
+    await auth.config.observe.flush();
+    // The seam got the response, without the outputs.
+    expect(seam.seen).toHaveLength(1);
+    expect(seam.seen.join("\n")).toContain('"clientExtensionResults"');
+    // The passkey row and the user row passed the record of the writes.
+    expect(writes.join("\n")).toContain('"passkey"');
+    const all = { seam: seam.seen, writes, lines, answers };
+    for (const secret of SECRETS)
+      for (const [where, texts] of Object.entries(all))
+        expect({ where, holds: texts.some((t) => t.includes(secret)) }).toEqual({
+          where,
+          holds: false,
+        });
+    // The flags of the registration are stored.
+    const rows = await auth.storage.findMany("passkey", []);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ discoverable: true, prf: true, largeBlob: true });
   });
 
   it("decides nothing on the flags", async () => {

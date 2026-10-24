@@ -32,6 +32,7 @@ export type {
   OrganizationsConfig,
   PasskeyConfig,
   PasskeyExtensions,
+  PasskeySignUpConfig,
   PasswordConfig,
   PhoneConfig,
   PhoneMessageInput,

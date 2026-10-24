@@ -104,7 +104,12 @@ const FAILING: Readonly<
   "POST /passkey/sign-up/verify": {
     via: "passkey",
     over: {
-      passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL], signUp: true },
+      passkey: {
+        rpID: "api.example.com",
+        rpName: "Example",
+        origins: [BASE_URL],
+        signUp: { isolateLimiter: "allow" },
+      },
     },
     make: async () =>
       post("/auth/passkey/sign-up/verify", {

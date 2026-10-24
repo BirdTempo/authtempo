@@ -187,7 +187,9 @@ Each provider adds a start route and a callback route. A field of a preset must 
 | `passkey.extensions.prf` | boolean | `false` | Asks for PRF at the registration and stores the `prf` flag. The sign-in options take PRF salts. |
 | `passkey.extensions.largeBlob` | `"preferred"`, `"required"`, or `false` | `false` | The `largeBlob.support` value of the registration. Stores the `largeBlob` flag. The sign-in options take a `largeBlob` read. |
 | `passkey.extensions.credProps` | boolean | `false` | Asks for `credProps` at the registration and stores `rk` as the `discoverable` flag. |
-| `passkey.signUp` | boolean | `false` | With `true`, `POST /passkey/sign-up/options` and `/verify` make a user with a passkey and no address. Only `signUp: "open"` lets such a user in. |
+| `passkey.signUp` | boolean or object | `false` | With `true` or an object, `POST /passkey/sign-up/options` and `/verify` make a user with a passkey and no address. Only `signUp: "open"` lets such a user in. `true` is the object `{}`. |
+| `passkey.signUp.dailyCap` | number | 1000 | An integer from 1 to 100000. The sign-up options that the deployment answers per 24 hours. An options request over the cap answers 429 `rate_limited`, and `limit.hit` names the family `passkey-sign-up:all-day`. The cap is per deployment, so the sign-up needs a shared limiter: the D1, Postgres, or MySQL limiter. A limiter that counts per isolate, such as the memory limiter, is refused at build. A script with a software authenticator makes a user at each verify. Turn on the captcha flow `passkey-sign-up` on a public site, so that a script cannot spend the cap. |
+| `passkey.signUp.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests and local development. The cap is then per isolate. |
 
 ## Handoff
 

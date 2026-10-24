@@ -69,7 +69,7 @@ function world(extra: Partial<AuthConfig> = {}) {
     },
     jwt: fakeJwt(tokens),
     // The passkey-first sign-up of plan 12i Task 8 sets the value passkey too.
-    passkey: { ...RP, signUp: true },
+    passkey: { ...RP, signUp: { isolateLimiter: "allow" } },
     lastMethod: {},
     ...extra,
   });

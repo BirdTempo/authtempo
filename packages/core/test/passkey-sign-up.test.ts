@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig, ResolvedConfig } from "../src/config.js";
 import type { AnonymousLinkEvent, UserCreateVia } from "../src/engine/hooks.js";
 import { passkeySignUpOptions, verifyPasskeySignUp } from "../src/engine/passkeys.js";
@@ -9,6 +9,7 @@ import type { UserRow } from "../src/schema.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "../src/seams/webauthn.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { BASE_URL, get, makeAuth, post, recordCredential, settled } from "./helpers.js";
+import { observed } from "./observe-helpers.js";
 import { FAST, signUpAndVerify } from "./password-helpers.js";
 
 /**
@@ -34,7 +35,7 @@ function world(extra: Partial<AuthConfig> = {}) {
   };
   const auth = makeAuth({
     webauthn,
-    passkey: { ...RP, signUp: true },
+    passkey: { ...RP, signUp: { isolateLimiter: "allow" } },
     anonymous: { isolateLimiter: "allow" },
     password: { hash: FAST, uniformSignUp: false },
     hooks: {
@@ -100,6 +101,10 @@ async function signUp(w: World, name = "Ana") {
   return { soft, res, token, cookie: `${w.config.cookieName}=${token}`, userId: o.json.user.id };
 }
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("passkey-first sign-up (plan 12i Task 8)", () => {
   it("signs up with a passkey and no address", async () => {
     const w = world();
@@ -161,7 +166,7 @@ describe("passkey-first sign-up (plan 12i Task 8)", () => {
     expect(res.status).toBe(400);
     expect(await res.json()).toEqual({ error: "passkey_failed" });
     expect(setToken(w.config, res)).toBeNull();
-    // The transaction undid the user of the refused sign-up.
+    // The passkey row comes first, so the refused sign-up wrote no user.
     expect((await w.storage.findMany("user", [])).map((u) => u.id)).toEqual([
       new TextDecoder().decode(fromBase64Url(first.userId)),
     ]);
@@ -288,6 +293,25 @@ describe("passkey-first sign-up (plan 12i Task 8)", () => {
     expect(old.status).toBe(401);
   });
 
+  it("replaces the anonymous user of the options when the verify has no cookie (ruling 38 M2)", async () => {
+    const w = world();
+    const anon = await w.handle(post("/auth/anonymous/sign-in", {}, ip()));
+    const anonToken = setToken(w.config, anon);
+    const jar = `${w.config.cookieName}=${anonToken}`;
+    const [anonUser] = await w.storage.findMany("user", []);
+    // The options come from the anonymous browser. The verify carries no cookie.
+    const o = await options(w.handle, { name: "Ana" }, { ...ip(), cookie: jar });
+    const res = await verify(w.handle, (await ceremony(o.json)).response);
+    expect(res.status).toBe(200);
+    // The challenge row recorded the anonymous user, so the verify links it.
+    expect(w.links.map((e) => [e.anonymousUser.id, e.proof, e.via])).toEqual([
+      [anonUser?.id, "verified", "passkey"],
+    ]);
+    const users = await w.storage.findMany("user", []);
+    expect(users.map((u) => [u.isAnonymous, u.name])).toEqual([[false, "Ana"]]);
+    expect((await w.handle(get("/auth/session", { cookie: jar }))).status).toBe(401);
+  });
+
   it("links nothing to a signed-in user that is not anonymous", async () => {
     const w = world();
     await signUpAndVerify(w, "cy@example.com", "correct horse battery");
@@ -347,6 +371,102 @@ describe("passkey-first sign-up (plan 12i Task 8)", () => {
     );
     expect(good.res.status).toBe(200);
     expect(tokens).toEqual(["passkey-sign-up bad", "passkey-sign-up good"]);
+  });
+
+  it("refuses a credential id over 1023 bytes and writes nothing (ruling 38 L1)", async () => {
+    const w = world();
+    const o = await options(w.handle, { name: "Ana" });
+    // WebAuthn Level 3 bounds a credential id to 1023 bytes (ruling 7 of plan 12g).
+    const long = await SoftAuthenticator.create({
+      rpID: RP.rpID,
+      origin: BASE_URL,
+      credentialIdBytes: 1024,
+    });
+    const signed = (await ceremony(o.json, long)).response;
+    // The id fields are short; the attested data holds the long id.
+    const short = "AAAA";
+    const res = await verify(w.handle, { ...signed, id: short, rawId: short });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({ error: "passkey_failed" });
+    expect(setToken(w.config, res)).toBeNull();
+    expect(await w.storage.findMany("user", [])).toEqual([]);
+    expect(await w.storage.findMany("passkey", [])).toEqual([]);
+    // An id of 1023 bytes passes.
+    const edge = await options(w.handle, { name: "Bo" });
+    const fits = await SoftAuthenticator.create({
+      rpID: RP.rpID,
+      origin: BASE_URL,
+      credentialIdBytes: 1023,
+    });
+    const kept = (await ceremony(edge.json, fits)).response;
+    expect((await verify(w.handle, { ...kept, id: short, rawId: short })).status).toBe(200);
+  });
+
+  it("writes the passkey row before the user row (ruling 38 L2)", async () => {
+    const w = world();
+    const order: string[] = [];
+    const real = w.storage.transaction.bind(w.storage);
+    vi.spyOn(w.storage, "transaction").mockImplementation(((
+      fn: (tx: unknown) => Promise<unknown>,
+    ) =>
+      real((tx) =>
+        fn(
+          new Proxy(tx, {
+            get(target, key) {
+              if (key === "create")
+                return (model: string, data: unknown) => {
+                  order.push(model);
+                  return (target.create as (m: string, d: unknown) => unknown)(model, data);
+                };
+              const value = Reflect.get(target, key);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          }),
+        ),
+      )) as never);
+    await signUp(w);
+    // A credential id that exists fails at the first write, so the
+    // transaction undoes nothing. The other order leaves a user with no way in.
+    expect(order.filter((m) => m === "passkey" || m === "user")).toEqual(["passkey", "user"]);
+  });
+
+  it("caps the sign-up options of the deployment per day (ruling 38 M3)", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const o = observed({
+      passkey: { ...RP, signUp: { isolateLimiter: "allow", dailyCap: 2 } },
+    });
+    const ask = () => o.auth.handle(post("/auth/passkey/sign-up/options", { name: "Ana" }, ip()));
+    expect((await ask()).status).toBe(200);
+    expect((await ask()).status).toBe(200);
+    // A new IP: the per-IP limit allows it, and the cap of the deployment refuses it.
+    const third = await ask();
+    expect(third.status).toBe(429);
+    expect(await third.json()).toEqual({ error: "rate_limited" });
+    const hits = (await o.events()).filter((e) => e.name === "limit.hit");
+    expect(hits.map((e) => e.family)).toEqual(["passkey-sign-up:all-day"]);
+    // The window is 24 hours.
+    o.clock.advance(day - 1000);
+    expect((await ask()).status).toBe(429);
+    o.clock.advance(1000);
+    expect((await ask()).status).toBe(200);
+  });
+
+  it("counts no failed captcha against the daily cap (ruling 38 M3)", async () => {
+    const w = world({
+      passkey: { ...RP, signUp: { isolateLimiter: "allow", dailyCap: 1 } },
+      captcha: {
+        port: { verify: async ({ token }) => (token === "good" ? "pass" : "fail") },
+        flows: ["passkey-sign-up"],
+      },
+    });
+    const ask = (token: string) =>
+      options(w.handle, { name: "Ana" }, { ...ip(), "x-captcha-response": token });
+    for (let i = 0; i < 3; i++) expect((await ask("bad")).json.error).toBe("captcha_failed");
+    // The cap of 1 is still free: the three failures counted nothing.
+    expect((await ask("good")).res.status).toBe(200);
+    const second = await ask("good");
+    expect(second.res.status).toBe(429);
+    expect(second.json.error).toBe("rate_limited");
   });
 
   it("serves no sign-up route while passkey.signUp is off", async () => {

@@ -14,6 +14,8 @@ import { defaultConfirmPage } from "../src/http/confirm-page.js";
 import { defaultConsentPage } from "../src/http/consent-page.js";
 import { defaultResetPage } from "../src/http/password-pages.js";
 import { defaultTotpPage } from "../src/http/totp-page.js";
+import { createMemoryLimiter, systemClock } from "../src/index.js";
+import type { LimiterPort } from "../src/limiter/port.js";
 import type { OAuth2Entry } from "../src/social/oauth2.js";
 import type { OidcEntry } from "../src/social/oidc.js";
 import { COMING_PRESET_NAMES, PRESET_PROVIDER_NAMES } from "../src/social/provider.js";
@@ -392,10 +394,10 @@ describe("passkey config", () => {
       // Plan 12i Task 21: each passkey extension is off by default.
       extensions: { prf: false, largeBlob: false, credProps: false },
       // Plan 12i Task 8: the passkey-first sign-up is off by default.
-      signUp: false,
+      signUp: null,
     });
   });
-  it("refuses a passkey.signUp that is not a boolean (plan 12i Task 8)", () => {
+  it("refuses a passkey.signUp that is not a boolean or an object (plan 12i Task 8)", () => {
     expect(() =>
       resolveConfig({
         ...base,
@@ -407,7 +409,53 @@ describe("passkey config", () => {
         },
         trustedOrigins: ["https://example.com"],
       }),
-    ).toThrow("passkey.signUp must be true or false");
+    ).toThrow("passkey.signUp must be true, false, or an object");
+  });
+  it("resolves passkey.signUp with a daily cap of 1000 by default (ruling 38 M3)", () => {
+    const pk = { rpID: "example.com", rpName: "Example", origins: ["https://example.com"] };
+    const signUp = (value: unknown) =>
+      resolveConfig({
+        ...base,
+        passkey: { ...pk, signUp: value as never },
+        trustedOrigins: ["https://example.com"],
+      }).passkey?.signUp;
+    expect(signUp(false)).toBeNull();
+    expect(signUp(undefined)).toBeNull();
+    expect(signUp({ isolateLimiter: "allow" })).toEqual({ dailyCap: 1000 });
+    expect(signUp({ isolateLimiter: "allow", dailyCap: 100_000 })).toEqual({ dailyCap: 100_000 });
+    expect(signUp({ isolateLimiter: "allow", dailyCap: 1 })).toEqual({ dailyCap: 1 });
+    for (const dailyCap of [0, 100_001, 2.5])
+      expect(() => signUp({ isolateLimiter: "allow", dailyCap })).toThrow(
+        "passkey.signUp.dailyCap must be an integer from 1 to 100000",
+      );
+    expect(() => signUp({ isolateLimiter: "allow", cap: 5 })).toThrow(
+      "passkey.signUp.cap is not an option; core has dailyCap, isolateLimiter",
+    );
+    expect(() => signUp({ isolateLimiter: "yes" })).toThrow(
+      'passkey.signUp.isolateLimiter must be "allow" or absent',
+    );
+  });
+  it("refuses passkey.signUp with an isolate limiter: the daily cap is per deployment (ruling 38 M3)", () => {
+    const message = "passkey.signUp needs a shared limiter: the daily cap is per deployment";
+    const pk = { rpID: "example.com", rpName: "Example", origins: ["https://example.com"] };
+    const withSignUp = (signUp: unknown, limiter?: LimiterPort) =>
+      resolveConfig({
+        ...base,
+        ...(limiter ? { limiter } : {}),
+        passkey: { ...pk, signUp: signUp as never },
+        trustedOrigins: ["https://example.com"],
+      });
+    const shared: LimiterPort = { scope: "shared", allow: async () => true };
+    // The default limiter is the memory limiter, which counts per isolate.
+    expect(() => withSignUp(true)).toThrow(message);
+    expect(() => withSignUp({})).toThrow(message);
+    expect(() => withSignUp(true, createMemoryLimiter(systemClock))).toThrow(message);
+    // A limiter of the app with no scope counts as isolate.
+    expect(() => withSignUp(true, { allow: async () => true })).toThrow(message);
+    expect(withSignUp(true, shared).passkey?.signUp).toEqual({ dailyCap: 1000 });
+    expect(withSignUp({ isolateLimiter: "allow" }).passkey?.signUp).toEqual({ dailyCap: 1000 });
+    // Off needs no shared limiter.
+    expect(withSignUp(false).passkey?.signUp).toBeNull();
   });
   it("refuses a passkey extension value of another type (plan 12i Task 21)", () => {
     const pk = { rpID: "api.example.com", rpName: "Example", origins: ["https://api.example.com"] };

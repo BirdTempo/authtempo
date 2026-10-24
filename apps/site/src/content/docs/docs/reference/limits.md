@@ -37,6 +37,7 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `passkey-options:ip:<ip>` | 15 minutes | 30 | Passkey sign-in options and re-authentication options |
 | `passkey-verify:ip:<ip>` | 15 minutes | 20 | Passkey sign-in verify and passkey sign-up verify |
 | `passkey-sign-up:ip:<ip>` | 1 hour | 10 | Passkey sign-up options, after the name rule and the sign-up rule, before the captcha |
+| `passkey-sign-up:all-day:deployment` | 24 hours | `passkey.signUp.dailyCap`, default 1000 | Passkey sign-up options, after the per-IP limit and the captcha. It needs a shared limiter |
 | `handoff-start:ip:<ip>` | 15 minutes | 30 | Handoff start |
 | `handoff-redeem:ip:<ip>` | 15 minutes | 20 | Handoff redeem |
 | `password-sign-up:ip:<ip>` | 1 hour | 10 | Password sign-up |

@@ -356,7 +356,12 @@ function world(extra: Partial<AuthConfig> = {}) {
     limiter,
     password: { hash: FAST, uniformSignUp: false },
     // The passkey-first sign-up of plan 12i Task 8.
-    passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE_URL], signUp: true },
+    passkey: {
+      rpID: "api.example.com",
+      rpName: "Example",
+      origins: [BASE_URL],
+      signUp: { isolateLimiter: "allow" },
+    },
     handoff: { schemes: ["example://"] },
     social: SOCIAL,
     organizations: { dynamicRoles: {}, teams: {} },

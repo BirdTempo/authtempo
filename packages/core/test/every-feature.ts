@@ -61,7 +61,7 @@ export function everyFeature(): ResolvedConfig {
       rpName: "Example",
       origins: [BASE],
       relatedOrigins: true,
-      signUp: true,
+      signUp: { isolateLimiter: "allow" },
     },
     handoff: { schemes: ["example://"] },
     organizations: {

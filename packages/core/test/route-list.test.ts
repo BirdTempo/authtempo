@@ -164,7 +164,12 @@ describe("ROUTES (plan 11a)", () => {
       name: "passkey sign-up",
       start: { passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE] } },
       delta: {
-        passkey: { rpID: "api.example.com", rpName: "Example", origins: [BASE], signUp: true },
+        passkey: {
+          rpID: "api.example.com",
+          rpName: "Example",
+          origins: [BASE],
+          signUp: { isolateLimiter: "allow" },
+        },
       },
       features: ["passkeySignUp"],
     },

@@ -46,11 +46,14 @@ describe("checkConfig", () => {
     // audiences on social.google and social.apple.
     // Plan 12i Task 20 adds password.verifyBy and password.verifyCodeMail.
     // Ruling 39 adds password.verifyCode and its three keys.
-    // Plan 12i Task 8 adds passkey.signUp.
-    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4 + 2 + 4 + 1);
+    // Plan 12i Task 8 adds passkey.signUp. Ruling 38 adds
+    // passkey.signUp.dailyCap and passkey.signUp.isolateLimiter.
+    expect(keys.length).toBe(255 + 12 + 4 + 5 + 1 + 5 + 2 + 1 + 4 + 2 + 4 + 3);
     expect(keys).toContain("social.idToken.requireNonce");
     expect(keys).toContain("social.apple.audiences");
     expect(keys).toContain("password.verifyCode.maxAttempts");
+    expect(keys).toContain("passkey.signUp.dailyCap");
+    expect(keys).toContain("passkey.signUp.isolateLimiter");
     expect(keys).toContain("multiSession.max");
     expect(keys).toContain("passkey.extensions.largeBlob");
     expect(keys).toContain("social.oauth2[].tokenRequest");

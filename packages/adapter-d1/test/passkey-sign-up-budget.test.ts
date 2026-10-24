@@ -19,8 +19,9 @@ const RAW = Symbol("raw");
 // The counts of the run of 2026-10-25, with the D1 limiter. `options` and
 // `verify` are a sign-up with no session. `upgrade` is the verify that
 // replaces an anonymous user: the claim, the session end, and the delete.
-// `taken` is the verify of a credential id that exists.
-const PINS = { options: 3, verify: 7, upgradeOptions: 4, upgrade: 20, taken: 4 };
+// `taken` is the verify of a credential id that exists. The daily cap of
+// ruling 38 M3 adds one limiter query to each options call.
+const PINS = { options: 4, verify: 7, upgradeOptions: 5, upgrade: 20, taken: 4 };
 
 /** A view of `db` that counts each statement, and each statement of a batch. Query `BUDGET + 1` throws. */
 function counting(db: D1Database) {
@@ -150,7 +151,9 @@ describe("the passkey-first sign-up on D1 (plan 12i Task 8)", () => {
     const again = await ceremony(w, null, first.soft);
     const taken = await measure(w, post("/passkey/sign-up/verify", { response: again.response }));
     expect(await taken.res.json()).toEqual({ error: "passkey_failed" });
-    // The refused sign-up wrote no user: the passkey row comes first.
+    // The refused sign-up wrote no user: the passkey row comes first. The
+    // pin `taken` also holds that order: the user row first adds its insert
+    // and its undo (ruling 38 L2). Core's write-order test names the order.
     const users = await env.DB.prepare("SELECT COUNT(*) AS n FROM ta_user").first<{ n: number }>();
     expect(users?.n).toBe(2);
 

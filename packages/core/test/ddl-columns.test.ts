@@ -74,6 +74,8 @@ function longestPart(expr: string): string {
   if (expr === "input.identifier") return `+${"9".repeat(15)}`;
   // The one subject of the daily SMS cap (plan 12i).
   if (expr === "CAP_SUBJECT") return "deployment";
+  // The one subject of the daily cap of the passkey-first sign-up (ruling 38 M3).
+  if (expr === "SIGN_UP_CAP_SUBJECT") return "deployment";
   throw new Error(`no longest form for the key part \${${expr}}: give it a row in this test`);
 }
 
@@ -248,9 +250,11 @@ describe("the column map (plan 12g)", () => {
     // the per-IP and the per-address keys of the sign-up code. Ruling 39 adds
     // 1: the day cap of the sign-up code mails. Plan 12i Task 8 adds 2: the
     // per-IP keys of the passkey-first sign-up options and its verify.
-    expect(sites.length).toBe(108);
+    // Ruling 38 adds 1: the daily cap of the passkey-first sign-up.
+    expect(sites.length).toBe(109);
     expect(sites).toContain('engine/id-token.ts "id-token:ip" ipKey(input.ip)');
     expect(sites).toContain('engine/password.ts "password-verify-code:email-day" email');
+    expect(sites).toContain('engine/passkeys.ts "passkey-sign-up:all-day" SIGN_UP_CAP_SUBJECT');
     expect(sites).toContain('engine/phone.ts "phone-add:phone" input.phone');
     expect(sites).toContain('http/routes/multi-session.ts "multi-session:ip" ipKey(ctx.ip)');
     expect(sites).toContain('engine/phone.ts "phone-otp:all-day" CAP_SUBJECT');

@@ -62,6 +62,10 @@ export const RENAME_PER_USER = { seconds: 900, max: 30 };
  * window, and count.
  */
 export const SIGN_UP_PER_IP = { seconds: 3600, max: 10 };
+/** The window of the daily cap (ruling 38 M3). The max is `passkey.signUp.dailyCap`. */
+const SIGN_UP_CAP_WINDOW_SECONDS = 86_400;
+/** The subject of the daily cap: one count for the deployment. */
+const SIGN_UP_CAP_SUBJECT = "deployment";
 
 /**
  * The longest name of a passkey-first sign-up, in UTF-16 code units (plan
@@ -353,10 +357,11 @@ export interface PasskeySignUpOptions {
 
 /**
  * `POST /passkey/sign-up/options` (plan 12i Task 8, spec 32 item 2). The
- * name rule, the sign-up rule of the deployment, the per-IP limit, and the
- * captcha come first, in that order. Then the user id is minted, and a
- * challenge row keeps it with the name for 5 minutes. No user row exists
- * until the verify. The options carry no address and no data of another
+ * name rule, the sign-up rule of the deployment, the per-IP limit, the
+ * captcha, and the daily cap of the deployment come first, in that order. A
+ * failed captcha does not count against the cap. Then the user id is
+ * minted, and a challenge row keeps it with the name for 5 minutes. No user
+ * row exists until the verify. The options carry no address and no data of another
  * user: the user handle is the new id, and the user name is the name given.
  */
 export async function passkeySignUpOptions(
@@ -375,6 +380,10 @@ export async function passkeySignUpOptions(
     return fail("rate_limited");
   const captcha = await checkCaptcha(config, "passkey-sign-up", input.captchaToken, input.ip);
   if (captcha) return captcha;
+  // A software authenticator makes a user per verify. The cap bounds the users of a day (ruling 38 M3).
+  const cap = { seconds: SIGN_UP_CAP_WINDOW_SECONDS, max: rp.signUp.dailyCap };
+  if (!(await limit(config, "passkey-sign-up:all-day", SIGN_UP_CAP_SUBJECT, cap)))
+    return fail("rate_limited");
   const userId = newId(config.clock.now());
   const { bytes } = await issueChallenge(config, SIGN_UP, "sign-up", {
     userId,

@@ -352,7 +352,9 @@ These routes exist when the config sets `passkey`.
 
 <h3 id="post-passkey-sign-up-options"><code>POST /passkey/sign-up/options</code></h3>
 
-These two routes exist when `passkey.signUp` is true. They make a user with a passkey and no address.
+These two routes exist when `passkey.signUp` is true or an object. They make a user with a passkey and no address.
+
+A script with a software authenticator can make a user at each verify, with no attestation. The per-IP limit and the daily cap of the deployment bound it. The cap is `passkey.signUp.dailyCap`, default 1000. A script that spends the cap stops real sign-ups until the next day. So turn on the captcha flow `passkey-sign-up` on a public site.
 
 | Field | Value |
 | --- | --- |
@@ -360,7 +362,7 @@ These two routes exist when `passkey.signUp` is true. They make a user with a pa
 | Input | JSON `{ name, hints? }`. `name` is 1 to 80 characters, not blank, with no control, format, or bidi character. `hints` replaces `passkey.hints.register` for this ceremony |
 | Answer | The creation options JSON for `navigator.credentials.create`. `user.id` is the base64url of the new user id, and `user.name` and `user.displayName` are the name. The options carry no address and no data of another user. No user exists until the verify |
 | Errors | [`invalid_body`](/docs/reference/errors/#invalid_body), [`rate_limited`](/docs/reference/errors/#rate_limited), [`captcha_required`](/docs/reference/errors/#captcha_required), [`captcha_failed`](/docs/reference/errors/#captcha_failed), [`captcha_unavailable`](/docs/reference/errors/#captcha_unavailable), [`sign_up_closed`](/docs/reference/errors/#sign_up_closed) |
-| Captcha | With `captcha` and the flow `passkey-sign-up`: the header `x-captcha-response`, after the per-IP limit |
+| Captcha | With `captcha` and the flow `passkey-sign-up`: the header `x-captcha-response`, after the per-IP limit and before the daily cap. A failed captcha does not count against the cap |
 
 <h3 id="post-passkey-sign-up-verify"><code>POST /passkey/sign-up/verify</code></h3>
 
