@@ -266,18 +266,16 @@ export function whereTextFault(value: unknown): "a NUL character" | "a lone surr
 
 /**
  * `text` with each lone surrogate as U+FFFD: `String.prototype.toWellFormed`
- * of ES2024. Node 20 and later, Bun, and Workers have it; the lib of this
- * build is ES2023, so the type comes here. The replace serves a runtime
- * without it. A lone surrogate is no code point. A driver that writes the
- * text as UTF-8 stores U+FFFD. But a JSON list stores the bytes of the
+ * of ES2024. The engines floor is Node 22 (the root package.json), and Node
+ * 22, Bun, and Workers have it. The lib of this build is ES2023, so the
+ * type comes here. A lone surrogate is no code point. A driver that writes
+ * the text as UTF-8 stores U+FFFD. But a JSON list stores the bytes of the
  * surrogate (CESU-8), and libSQL aborts on their read. So every write form
- * stores U+FFFD (ruling 85 of plan 12d).
+ * stores U+FFFD (ruling 85 of plan 12d). No fallback: a branch that no
+ * supported runtime takes has no test (ruling 86 of plan 12d).
  */
 export function wellFormed(text: string): string {
-  const s = text as string & { toWellFormed?: () => string };
-  return typeof s.toWellFormed === "function"
-    ? s.toWellFormed()
-    : text.replace(/\p{Cs}/gu, "\ufffd");
+  return (text as string & { toWellFormed(): string }).toWellFormed();
 }
 
 function isPlainJson(value: unknown): boolean {
