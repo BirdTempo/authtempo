@@ -100,17 +100,22 @@ const SCIM_GROUP_CALLS = 2;
  *   (organization-rest.ts). So a solo organization with SCIM Groups goes
  *   with the account too.
  *
- * With the impersonation tool on, the scenes send 43, 45, 46, and 50. The
- * list of the operator scene: the ready check 1, the session read of the
- * router 1, the rest of `resolveSession` 4, the limiter 1, and the
- * membership read 1. In the transaction: the user lock 2, the session of
- * the proof 1, the impersonation hold 1, the organization rule 3, the owner
- * lock 2, the user delete 1, the solo organizations 6, the invitation
- * delete 1, the member delete of the user 1, the owner recount 1,
- * `endSessions` 5, the page of the impersonation sessions 2, the scimUser
- * read 1, and the 13 deletes of `LAST_MODELS`. After the commit: the
- * verification delete 1 and the outbox read 1. The pins are in
- * operator-loss-budget.test.ts of adapter-d1.
+ * With the impersonation tool on, the scenes sent 43, 45, 46, and 50, and
+ * the confirm of the operator scene sent 51 (ruling 79 of plan 12d). Its
+ * query 51 was the outbox read, so the logouts waited for the sweep. Ruling
+ * 79 cut 1 call: `endSessions` reads the sessions once for the stop rows and
+ * the hook list. Now the scenes send 42, 44, 45, and 49. The worst is the
+ * confirm of the operator scene, with no SCIM Group or with 3: 50. Its list:
+ * the ready check 1, the session read of the router 1, the rest of
+ * `resolveSession` 4, the limiter 1, and the membership read 1. In the
+ * transaction: the user lock 2, the spend of the link 1, the session of the
+ * proof 1, the impersonation hold 1, the organization rule 3, the owner lock
+ * 2, the user delete 1, the solo organizations 6, the invitation delete 1,
+ * the member delete of the user 1, the owner recount 1, `endSessions` 4, the
+ * page of the impersonation sessions 2, the scimUser read 1, and the 13
+ * deletes of `LAST_MODELS`. After the commit: the verification delete 1 and
+ * the outbox read 1. The pins are in operator-loss-budget.test.ts of
+ * adapter-d1.
  */
 
 /**

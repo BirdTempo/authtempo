@@ -511,24 +511,31 @@ export async function endSessions(
     now,
   );
   let n = 0;
-  // Each impersonation session goes by id, with its stop row in this
-  // transaction (ruling 43 of plan 12f). With `stops` null, the tool is off
-  // and the read does not run.
-  if (stops) {
-    const impersonations = await tx.findMany(
-      "session",
-      [...where, { field: "actorId", op: "ne", value: null }],
-      { sort: { field: "id", dir: "asc" } },
-    );
-    for (const row of impersonations)
-      if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
+  // One read serves the stop rows and the list (ruling 79 of plan 12d): on D1 each read is
+  // a query of the 50 of one invocation. With neither, the tool is off and no hook listens.
+  const rows =
+    stops || ended
+      ? await tx.findMany(
+          "session",
+          ended ? where : [...where, { field: "actorId", op: "ne", value: null }],
+          { sort: { field: "id", dir: "asc" } },
+        )
+      : [];
+  // Each impersonation session goes by id first, with its stop row in this
+  // transaction (ruling 43 of plan 12f). With `stops` null, the tool is off.
+  if (stops)
+    for (const row of rows)
+      if (
+        row.actorId !== null &&
+        (await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1
+      ) {
         ended?.push(row);
         n++;
         await writeStopRow(tx, stops, row, now);
       }
-  }
   if (ended)
-    for (const row of await tx.findMany("session", where, { sort: { field: "id", dir: "asc" } })) {
+    for (const row of rows) {
+      if (stops && row.actorId !== null) continue;
       if ((await tx.delete("session", [{ field: "id", op: "eq", value: row.id }])) === 1) {
         ended.push(row);
         n++;

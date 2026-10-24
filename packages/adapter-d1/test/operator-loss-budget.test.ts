@@ -24,18 +24,26 @@ const SECRET = "operator-support-0123456789abcdef-0123";
 
 /** The key that gives the statement of the binding under a counting view. */
 const RAW = Symbol("raw");
+/** The key that gives the SQL of a statement under a counting view. */
+const SQL = Symbol("sql");
 
-/** A view of `db` that counts each statement it runs, and each statement of a batch. */
+/**
+ * A view of `db` that counts each statement it runs, and each statement of a
+ * batch. `last` is the SQL of the last statement that it counted.
+ */
 function counting(db: D1Database) {
-  const count = { queries: 0 };
-  const wrapStatement = (s: D1PreparedStatement): D1PreparedStatement =>
+  const count = { queries: 0, last: "" };
+  const wrapStatement = (s: D1PreparedStatement, sql: string): D1PreparedStatement =>
     new Proxy(s, {
       get(target, key) {
         if (key === RAW) return target;
-        if (key === "bind") return (...values: unknown[]) => wrapStatement(target.bind(...values));
+        if (key === SQL) return sql;
+        if (key === "bind")
+          return (...values: unknown[]) => wrapStatement(target.bind(...values), sql);
         if (key === "run" || key === "all" || key === "first" || key === "raw")
           return (...args: unknown[]) => {
             count.queries++;
+            count.last = sql;
             return (target[key] as (...a: unknown[]) => unknown).apply(target, args);
           };
         const value = Reflect.get(target, key);
@@ -44,10 +52,12 @@ function counting(db: D1Database) {
     });
   const counted = new Proxy(db, {
     get(target, key) {
-      if (key === "prepare") return (sql: string) => wrapStatement(target.prepare(sql));
+      if (key === "prepare") return (sql: string) => wrapStatement(target.prepare(sql), sql);
       if (key === "batch")
         return (statements: D1PreparedStatement[]) => {
           count.queries += statements.length;
+          count.last =
+            (statements.at(-1) as unknown as Record<symbol, string> | undefined)?.[SQL] ?? "";
           return target.batch(
             statements.map((s) => (s as unknown as Record<symbol, D1PreparedStatement>)[RAW] ?? s),
           );
@@ -192,7 +202,10 @@ async function leftToken(tokens: string[]): Promise<string> {
   throw new Error("no left session");
 }
 
-/** One route call as one invocation on a counting view: the status, the body, and the queries. */
+/**
+ * One route call as one invocation on a counting view: the status, the body,
+ * the queries, and the SQL of the last query.
+ */
 async function invoke(
   sent: MailMessage[],
   path: string,
@@ -217,6 +230,7 @@ async function invoke(
     status: res.status,
     body: (await res.json()) as Record<string, unknown>,
     queries: count.queries,
+    last: count.last,
   };
 }
 
@@ -274,8 +288,12 @@ async function sweepAll(sent: MailMessage[], extra: Partial<AuthConfig> = {}) {
  * sends 3 more fewer: the lock starts from the user of the session, and the
  * outbox update goes. `DELETE_CALLS_BEFORE` goes from 8 to 7, and the
  * client link delete goes. So the page of the delete ends 1 session more.
+ * Ruling 79 of plan 12d (run of 2026-10-24): `endSessions` reads the
+ * sessions of the user once for the stop rows and the hook list. So the
+ * delete reserves the same and sends 1 query fewer before its page, and the
+ * page ends 1 session more: 46 queries, 3 sessions, sweeps of 47, 47, and 44.
  */
-const DELETE_COUNTS: [number, number, number[]] = [45, 2, [47, 47, 46]];
+const DELETE_COUNTS: [number, number, number[]] = [46, 3, [47, 47, 44]];
 const REMOVE_COUNTS: [number, number, number[]] = [47, 10, [47, 47, 28]];
 
 const asUser = (token: string) => ({ cookie: `__Host-tempo_session=${token}`, origin: BASE });
@@ -515,7 +533,9 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
    * the sweep ends the 40. Ruling 78 of plan 12d (run of 2026-10-24) takes
    * 2 calls from the session read and the lock, 2 from the outbox update,
    * and 1 from the client link delete. So the delete sends 47 and ends 1
-   * impersonation session, and the removal sends 49.
+   * impersonation session, and the removal sends 49. Ruling 79 of plan 12d
+   * (same day) takes 1 session read from `endSessions`: the delete sends 48
+   * and ends 2 impersonation sessions.
    */
   const dueWithSaml = async () =>
     ({
@@ -523,7 +543,7 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
       session: { slidingRefreshDays: 0.05 },
       sso: { saml: true, dns: [{ name: "a", txt: async () => [] }] },
     }) satisfies Partial<AuthConfig>;
-  const DUE_DELETE_COUNTS: [number, number, number[]] = [47, 2, [48, 48, 49]];
+  const DUE_DELETE_COUNTS: [number, number, number[]] = [48, 3, [48, 48, 47]];
   const DUE_REMOVE_COUNTS: [number, number, number[]] = [49, 10, [48, 48, 31]];
 
   it("deletes an operator with a due refresh and sso.saml on in 50 queries, and the sweep ends the rest", async () => {
@@ -550,9 +570,10 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
    * the spend cost 2 on D1, so no page fit, and the fixed part alone passed
    * 50. The spend is a delete now, 1 statement. Measured on 2026-10-24.
    * Ruling 78 of plan 12d (same day): 48 queries, and the page ends 1
-   * impersonation session.
+   * impersonation session. Ruling 79 (same day): `endSessions` reads the
+   * sessions once, so 47 queries, and still no page fits.
    */
-  const DUE_CONFIRM_COUNTS: [number, number] = [48, 2];
+  const DUE_CONFIRM_COUNTS: [number, number] = [47, 2];
 
   it("confirms a mailed delete of an operator with a due refresh and sso.saml on in 50 queries", async () => {
     const sent: MailMessage[] = [];
@@ -805,13 +826,18 @@ describe("the losses of an operator outside the operator acts on D1 (ruling 63 o
  * that give access, and its member rows, and the sweep takes the rest
  * (organization-rest.ts in core). The list of each scene is in the comment
  * above `LAST_MODELS` in account-delete.ts. The pins are the queries of the
- * act and of each sweep, until no pending row stays.
+ * act and of each sweep, until no pending row stays. Ruling 79 of plan 12d
+ * (same day): the confirm of the operator scene sent 51, and its query 51
+ * was the read of the back-channel outbox. `endSessions` now reads the
+ * sessions once, so each scene sends 1 fewer, and that confirm sends 50.
  */
 const SOLO_COUNTS = {
-  plain: [43, [30]],
-  due: [45, [31]],
-  confirm: [46, [31]],
-  operator: [50, [48, 48, 48, 35]],
+  plain: [42, [30]],
+  due: [44, [31]],
+  confirm: [45, [31]],
+  operator: [49, [48, 48, 48, 35]],
+  operatorConfirm0: [50, [48, 48, 48, 35]],
+  operatorConfirm3: [50, [48, 48, 48, 37]],
 } as const satisfies Record<string, readonly [number, readonly number[]]>;
 
 /**
@@ -924,4 +950,58 @@ describe("the account delete of a solo organization's owner through the route on
     expect([r.queries, sweeps]).toEqual(SOLO_COUNTS.operator);
     expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
   });
+  /**
+   * The worst scene (ruling 79 of plan 12d): the confirm of the operator scene, with no
+   * SCIM Group and with 3. The sweep takes the groups. The last query is the read of the
+   * back-channel outbox, so the delivery runs inside the 50 and the logouts need no sweep.
+   */
+  for (const groups of [0, 3] as const)
+    it(`confirms the delete of an operator with 40 impersonation sessions who owns a solo organization with ${groups} SCIM Groups in 50 queries`, async () => {
+      const sent: MailMessage[] = [];
+      const extra = {
+        ...(await dueWithSaml()),
+        account: { deleteConfirm: { ttlMinutes: 1440 } },
+      } satisfies Partial<AuthConfig>;
+      const { setup, bobToken, bobId } = await fortyImpersonations(sent, extra);
+      const bob = await setup.api.getSession(bobToken);
+      if (!bob) throw new Error("no session");
+      const made = await setup.api.createOrganization({
+        user: bob.user,
+        slug: "bob-solo",
+        name: "Bob",
+      });
+      if (!made.ok) throw new Error(made.code);
+      const organizationId = made.value.organization.id;
+      for (let i = 0; i < groups; i++)
+        await env.DB.prepare(
+          "INSERT INTO ta_scim_group (id, created_at, updated_at, organization_id, display_name, display_name_key, version) VALUES (?, 0, 0, ?, ?, ?, 1)",
+        )
+          .bind(`group-${i}`, organizationId, `Group ${i}`, `group ${i}`)
+          .run();
+      const asked = await invoke(sent, "/user/delete", asUser(bobToken), {}, extra);
+      expect(asked.status, JSON.stringify(asked.body)).toBe(200);
+      const text = sent.filter((m) => m.text.includes("/user/delete/confirm")).at(-1)?.text ?? "";
+      const token = decodeURIComponent(/token=([A-Za-z0-9_%-]+)/.exec(text)?.[1] ?? "");
+      current = new Date(current.getTime() + 80 * 60_000);
+      const r = await invoke(sent, "/user/delete/confirm", asUser(bobToken), { token }, extra);
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+      expect(await env.DB.prepare("SELECT id FROM ta_user WHERE id = ?").bind(bobId).first()).toBe(
+        null,
+      );
+      expect(r.last).toMatch(/^SELECT .* FROM ta_oauth_logout WHERE user_id = \?/);
+      const sweeps = await sweepAll(sent, extra);
+      expect(await impersonations()).toBe(0);
+      expect(await stopCauses()).toEqual(Array(40).fill("account_delete"));
+      expect(await restOf(organizationId)).toBe(0);
+      const g = await env.DB.prepare(
+        "SELECT COUNT(*) AS n FROM ta_scim_group WHERE organization_id = ?",
+      )
+        .bind(organizationId)
+        .first<{ n: number }>();
+      expect(g?.n).toBe(0);
+      expect([r.queries, sweeps]).toEqual(
+        SOLO_COUNTS[groups === 0 ? "operatorConfirm0" : "operatorConfirm3"],
+      );
+      expect(Math.max(r.queries, ...sweeps)).toBeLessThanOrEqual(50);
+    });
 });
