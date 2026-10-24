@@ -734,4 +734,38 @@ describe("the SSO domains", () => {
     // One resolver is a valid list: the app picks its resolvers.
     expect(resolveConfig({ ...input, sso: { dns: [fakeDns("a", {})] } }).sso?.dns).toHaveLength(1);
   });
+
+  it("takes a SAML clock skew from 0 to 300 seconds, and refuses any other value by its key (ruling 88 F2)", () => {
+    const input = {
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [],
+      storage: createMemoryAdapter(),
+      mail: { send: async () => {} },
+      organizations: {},
+    };
+    const skewOf = (clockSkewSeconds: unknown) =>
+      resolveConfig({
+        ...input,
+        sso: { dns: [fakeDns("a", {})], saml: { clockSkewSeconds } as never },
+      }).sso?.saml?.clockSkewSeconds;
+    expect([skewOf(0), skewOf(300)]).toEqual([0, 300]);
+    for (const bad of [-1, 301, 1.5, "60", Number.NaN])
+      expect(() => skewOf(bad), String(bad)).toThrow(
+        new ConfigError("sso.saml.clockSkewSeconds must be an integer from 0 to 300"),
+      );
+  });
+
+  it("limits an organization to 20 domains by default (ruling 88 F2)", async () => {
+    const w = ssoAuth();
+    expect(w.config.sso?.limits).toEqual({
+      connectionsPerOrganization: 10,
+      domainsPerOrganization: 20,
+    });
+    const org = await seedOrganization(w);
+    for (let i = 1; i <= 20; i++) await added(w, org, `d${i}.example`);
+    expect(
+      await addDomain(w.config, SSO_APP, { organizationId: org, domain: "d21.example" }),
+    ).toEqual({ ok: false, code: "domain_limit", status: 409 });
+  });
 });

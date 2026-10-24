@@ -389,6 +389,47 @@ describe("the SSO connections (plan 12d Task 3)", () => {
     expect(await auditOf(w, "sso_connection_create")).toHaveLength(3);
   });
 
+  it("stops at the 11th connection under the default limit of 10 (ruling 88 F2)", async () => {
+    const w = connectionAuth();
+    const org = await seedOrganization(w);
+    for (let i = 0; i < 10; i++) await oidcConnection(w, org);
+    expect(await createConnection(w.config, SSO_APP, oidcInput(org))).toEqual({
+      ok: false,
+      code: "connection_limit",
+      status: 409,
+    });
+  });
+
+  it("refuses an OIDC scope that does not hold openid (ruling 88 F5)", async () => {
+    const w = connectionAuth();
+    const org = await seedOrganization(w);
+    // The last three hold openid, with two spaces or a space at an end (RFC 6749 section 3.3).
+    for (const scope of [
+      "email profile",
+      "openidx email",
+      "OPENID",
+      "openid  email",
+      " openid",
+      "openid ",
+    ])
+      expect(
+        await createConnection(w.config, SSO_APP, { ...oidcInput(org), scope }),
+        scope,
+      ).toEqual(refusedFor("scope must hold openid"));
+    const made = await createConnection(w.config, SSO_APP, {
+      ...oidcInput(org),
+      scope: "email openid profile",
+    });
+    expect(made.ok).toBe(true);
+    if (!made.ok) return;
+    expect((await rowOf(w, made.value.id))?.config).toMatchObject({
+      scope: "email openid profile",
+    });
+    expect(
+      await updateConnection(w.config, SSO_APP, { id: made.value.id, scope: "email profile" }),
+    ).toEqual(refusedFor("scope must hold openid"));
+  });
+
   it("takes the enforce flag and the route off the domains of a deleted connection", async () => {
     const w = connectionAuth();
     const org = await seedOrganization(w);

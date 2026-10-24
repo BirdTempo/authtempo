@@ -467,7 +467,12 @@ function checkFields(
       out.clientSecret = v.clientSecret;
     }
     if (v.scope !== undefined) {
-      if (!isText(v.scope, 1, SCOPE_MAX) || !v.scope.split(" ").includes("openid"))
+      // RFC 6749 section 3.3: one space between two scope tokens, and none at an end.
+      if (
+        !isText(v.scope, 1, SCOPE_MAX) ||
+        !v.scope.split(" ").includes("openid") ||
+        v.scope.split(" ").includes("")
+      )
         return refuse("scope must hold openid, with one space between the scopes");
       out.oidc.scope = v.scope;
     }

@@ -498,7 +498,9 @@ export interface IdentityHooks {
 
 /**
  * The operator points (plan 12f, spec 26 item 10). Each operator act runs
- * them through `operatorAct`. They need `operator.users`.
+ * them through `operatorAct`. `afterAction` also gets each audit row of an
+ * SSO or SCIM act (spec 30 item 24). They need `operator.users`, `sso`, or
+ * `scim`.
  */
 export interface OperatorHooks {
   /**

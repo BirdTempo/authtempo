@@ -384,6 +384,27 @@ describe("the OIDC sign-in of an SSO connection (plan 12d Task 4)", () => {
     LONG_TEST_MS,
   );
 
+  it("keeps a discovery result for one hour, and reads the document again after it (ruling 88 F6)", async () => {
+    const w = oidcWorld();
+    const id = await connection(w, await seedOrganization(w, "acme"), "acme", null);
+    w.docs[`${issuerOf("acme")}/.well-known/openid-configuration`] = {
+      issuer: issuerOf("acme"),
+      ...wellKnown(endpointsOf("acme")),
+    };
+    const reads = () =>
+      w.calls.filter((c) => c.url.endsWith("/.well-known/openid-configuration")).length;
+    await start(w, id);
+    expect(reads()).toBe(1);
+    // 1 ms before the hour ends, the kept result serves the start.
+    w.clock.advance(60 * 60 * 1000 - 1);
+    await start(w, id);
+    expect(reads()).toBe(1);
+    // At the end of the hour, the start reads the document again.
+    w.clock.advance(1);
+    await start(w, id);
+    expect(reads()).toBe(2);
+  });
+
   it("reads the document again after an update of the connection", async () => {
     const w = oidcWorld();
     const id = await connection(w, await seedOrganization(w, "acme"), "acme", null);

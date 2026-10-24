@@ -741,6 +741,91 @@ describe("the SCIM Users (plan 12d Task 10)", () => {
   });
 });
 
+describe("the sign-up rule and the hooks of a SCIM write (ruling 88 of plan 12d)", () => {
+  it("answers 403 to a create with the sign-up rule false, and writes no row (F11)", async () => {
+    const w = await world({ signUp: false });
+    const token = await tokenOf(w, w.organizationId);
+    const models = ["user", "member", "scimUser", "operatorAudit"] as const;
+    const count = () =>
+      Promise.all(models.map(async (m) => (await w.storage.findMany(m, [])).length));
+    const before = await count();
+    const r = await read(await scim(w, token, "POST", "/Users", userBody(ADA)));
+    expect([r.status, r.body]).toEqual([
+      403,
+      { schemas: [ERROR_URN], status: "403", detail: "sign_up_closed" },
+    ]);
+    expect(await count()).toEqual(before);
+    expect(await userAt(w, ADA)).toBeNull();
+  });
+
+  it("runs the user create hooks, the member hooks, and operator.afterAction with via scim (F12)", async () => {
+    const seen: string[] = [];
+    const audits: unknown[] = [];
+    // No operator key: a SCIM act alone writes audit rows, and afterAction gets them.
+    const w = await world({
+      hooks: {
+        user: {
+          beforeCreate: (e) => {
+            seen.push(`user.beforeCreate ${e.via} ${e.user.email}`);
+          },
+          afterCreate: (e) => {
+            seen.push(`user.afterCreate ${e.via} ${e.user.email}`);
+          },
+        },
+        organization: {
+          beforeAddMember: (e) => {
+            seen.push(`organization.beforeAddMember ${e.via} ${e.memberUser.email}`);
+          },
+          afterAddMember: (e) => {
+            seen.push(`organization.afterAddMember ${e.via} ${e.member.email}`);
+          },
+          beforeRemoveMember: (e) => {
+            seen.push(`organization.beforeRemoveMember ${e.via} ${e.member.email}`);
+          },
+          afterRemoveMember: (e) => {
+            seen.push(`organization.afterRemoveMember ${e.via} ${e.member.email}`);
+          },
+        },
+        operator: {
+          afterAction: (e) => {
+            seen.push(`operator.afterAction ${e.audit.action}`);
+            audits.push(e.audit);
+          },
+        },
+      },
+    });
+    const token = await tokenOf(w, w.organizationId);
+    seen.length = 0;
+    audits.length = 0;
+    const id = await created(w, token, ADA);
+    const off = await scim(
+      w,
+      token,
+      "PATCH",
+      `/Users/${id}`,
+      patch({ op: "replace", path: "active", value: false }),
+    );
+    expect(off.status).toBe(200);
+    expect(seen).toEqual([
+      `user.beforeCreate scim ${ADA}`,
+      `organization.beforeAddMember scim ${ADA}`,
+      `user.afterCreate scim ${ADA}`,
+      `organization.afterAddMember scim ${ADA}`,
+      "operator.afterAction scim_user_create",
+      `organization.beforeRemoveMember scim ${ADA}`,
+      `organization.afterRemoveMember scim ${ADA}`,
+      "operator.afterAction scim_user_deactivate",
+    ]);
+    // The hook got the stored rows, once each.
+    const rows = await w.storage.findMany(
+      "operatorAudit",
+      [{ field: "actorKind", op: "eq", value: "scim" }],
+      { sort: { field: "id", dir: "asc" } },
+    );
+    expect(audits).toEqual(rows);
+  });
+});
+
 describe("the event session.end of a SCIM write with no session.afterEnd hook (ruling 81 M1)", () => {
   /** The world with an observe sink and no afterEnd hook, and the session.end events of the sink. */
   async function sinkWorld() {

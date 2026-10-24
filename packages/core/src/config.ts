@@ -2719,9 +2719,12 @@ function resolveHooks(
     input.operator,
     OPERATOR_HOOK_POINTS,
   ) as unknown as OperatorHooks;
-  // Only an operator act runs these points, and the acts need operator.users.
-  if (Object.keys(operator).length > 0 && !operatorUsersOn)
-    throw new ConfigError("hooks.operator needs operator.users: the hooks would never run");
+  // An act that writes an audit row runs these points: an operator act of operator.users,
+  // and an SSO or SCIM act (spec 30 item 24). With none of the three on, no act runs them.
+  if (Object.keys(operator).length > 0 && !operatorUsersOn && !ssoOn && !scimOn)
+    throw new ConfigError(
+      "hooks.operator needs operator.users, sso, or scim: the hooks would never run",
+    );
   const sso = hookGroup("hooks.sso", input.sso, SSO_HOOK_POINTS) as unknown as SsoHooks;
   // Only an SSO sign-in runs this point (plan 12d).
   if (Object.keys(sso).length > 0 && !ssoOn)

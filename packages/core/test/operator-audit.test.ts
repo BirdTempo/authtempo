@@ -570,7 +570,9 @@ describe("the operator audit row (plan 12f Task 4)", () => {
 describe("hooks.operator in the config (plan 12f Task 4)", () => {
   it("refuses hooks.operator while operator.users is off, and a name that is no hook point", async () => {
     expect(() => makeAuth({ hooks: { operator: { afterAction() {} } } })).toThrow(
-      new ConfigError("hooks.operator needs operator.users: the hooks would never run"),
+      new ConfigError(
+        "hooks.operator needs operator.users, sso, or scim: the hooks would never run",
+      ),
     );
     await expect(operatorAuth({ hooks: { operator: { afterBan() {} } as never } })).rejects.toThrow(
       new ConfigError("hooks.operator.afterBan is not a hook point"),

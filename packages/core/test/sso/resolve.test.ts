@@ -303,6 +303,58 @@ describe("the SSO resolution (plan 12d Task 5)", () => {
     expect(members.map((m) => [m.organizationId, m.role])).toEqual([[organizationId, "member"]]);
   });
 
+  it("runs the user create hooks and the member hooks with via sso, and operator.afterAction for each SSO audit row (ruling 88 F12)", async () => {
+    const seen: string[] = [];
+    const audits: unknown[] = [];
+    // No operator key: an SSO act alone writes audit rows, and afterAction gets them.
+    const w = ssoSignInWorld({
+      hooks: {
+        user: {
+          beforeCreate: (e) => {
+            seen.push(`user.beforeCreate ${e.via} ${e.user.email}`);
+          },
+          afterCreate: (e) => {
+            seen.push(`user.afterCreate ${e.via} ${e.user.email}`);
+          },
+        },
+        organization: {
+          beforeAddMember: (e) => {
+            seen.push(`organization.beforeAddMember ${e.via} ${e.memberUser.email}`);
+          },
+          afterAddMember: (e) => {
+            seen.push(`organization.afterAddMember ${e.via} ${e.member.email}`);
+          },
+        },
+        operator: {
+          afterAction: (e) => {
+            seen.push(`operator.afterAction ${e.audit.action}`);
+            audits.push(e.audit);
+          },
+        },
+      },
+    });
+    const { connectionId } = await acmeWithSso(w);
+    seen.length = 0;
+    // The domain and the connection of acmeWithSso each wrote audit rows; the hook got each row.
+    const rows = await w.storage.findMany("operatorAudit", [], {
+      sort: { field: "id", dir: "asc" },
+    });
+    expect(rows.map((r) => r.action)).toEqual([
+      "sso_domain_add",
+      "sso_domain_verify",
+      "sso_connection_create",
+    ]);
+    expect(audits).toEqual(rows);
+    const r = await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
+    expect(r.error).toBeNull();
+    expect(seen).toEqual([
+      `user.beforeCreate sso ${ADA}`,
+      `organization.beforeAddMember sso ${ADA}`,
+      `user.afterCreate sso ${ADA}`,
+      `organization.afterAddMember sso ${ADA}`,
+    ]);
+  });
+
   it("refuses a just-in-time create with jit off", async () => {
     const w = ssoSignInWorld();
     const { connectionId } = await acmeWithSso(w, { jit: false });
