@@ -104,6 +104,59 @@ function toAdminClientSession(p: AdminSessionJSON): {
   };
 }
 
+/** The user of a shim answer in the client's keys (plan 12i Task 16). */
+function pickUser(u: ClientUser): ClientUser {
+  return { id: u.id, name: u.name, email: u.email, emailVerified: u.emailVerified, image: u.image };
+}
+
+/** The shim's session JSON (shapes.ts toSession), with the dates as text. */
+interface ShimSessionJSON {
+  id: string;
+  token: string;
+  userId: string;
+  expiresAt: string;
+  activeOrganizationId: string | null;
+  activeTeamId: string | null;
+}
+
+/** Better Auth's `{ session, user }` of a multi-session call, in the client's keys. `token` is the session id. */
+function pickPair(p: { session: ShimSessionJSON; user: ClientUser }): {
+  session: ClientSession;
+  user: ClientUser;
+} {
+  return {
+    session: {
+      id: p.session.id,
+      token: p.session.token,
+      userId: p.session.userId,
+      expiresAt: new Date(p.session.expiresAt),
+      activeOrganizationId: p.session.activeOrganizationId,
+      activeTeamId: p.session.activeTeamId,
+    } as ClientSession,
+    user: pickUser(p.user),
+  };
+}
+
+/**
+ * Core's last method values in Better Auth's names (plan 12i Task 16).
+ * Better Auth 1.7.2 names an email sign-in `email`, a provider by its id,
+ * and the magic link `magic-link` (last-login-method/index.mjs:8 to :16).
+ */
+const LAST_METHOD_NAMES: Readonly<Record<string, string>> = {
+  password: "email",
+  magic_link: "magic-link",
+  email_otp: "email-otp",
+  passkey: "passkey",
+  username: "username",
+  phone: "phone-number",
+};
+
+/** Better Auth's name of one core value, or null for a value outside core's set. */
+export function betterAuthMethod(value: string): string | null {
+  if (value.startsWith("social:")) return value.slice("social:".length) || null;
+  return Object.hasOwn(LAST_METHOD_NAMES, value) ? (LAST_METHOD_NAMES[value] ?? null) : null;
+}
+
 function toClientSession(p: PublicSession): { session: ClientSession; user: ClientUser } {
   return {
     session: {
@@ -764,6 +817,63 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
     return { data: { url: `${origin}${basePath}/handoff/start`, redirect: false }, error: null };
   }
 
+  /**
+   * A sign-in through a path of the shim (plan 12i Task 16): the token is
+   * kept for Expo, and a challenge answers Better Auth's redirect. The shim
+   * set the `two_factor` cookie, so the verify goes through the shim.
+   */
+  async function shimSignIn(
+    path: string,
+    body: unknown,
+  ): Promise<CompatClientResult<{ token: string; user: ClientUser } | TwoFactorRedirect>> {
+    challenge = null;
+    const r = await shim<{
+      token?: string;
+      user?: ClientUser;
+      twoFactorRedirect?: true;
+      twoFactorMethods?: string[];
+    }>(path, body);
+    if (!r.data) return { data: null, error: r.error };
+    if (r.data.twoFactorRedirect) {
+      dropToken();
+      const methods = { twoFactorMethods: r.data.twoFactorMethods ?? ["totp"] };
+      const page = twoFactorPlugin?.options.twoFactorPage;
+      if (twoFactorPlugin?.options.onTwoFactorRedirect)
+        await twoFactorPlugin.options.onTwoFactorRedirect(methods);
+      else if (page !== undefined && safePage(page) && typeof location !== "undefined")
+        location.href = page;
+      return { data: { twoFactorRedirect: true, ...methods }, error: null };
+    }
+    const { token, user } = r.data;
+    if (typeof token !== "string" || !user)
+      return { data: null, error: clientError(BETTER_AUTH_CODES.unexpected, 200) };
+    try {
+      keepToken(token);
+    } catch (e) {
+      return { data: null, error: tokenStoreError(e) };
+    }
+    store.refetchIfStarted();
+    return { data: { token, user: pickUser(user) }, error: null };
+  }
+  /** The name of the last method cookie: the client plugin's, else Better Auth's default. */
+  const lastMethodCookie =
+    options.plugins?.find(
+      (p): p is Extract<typeof p, { id: "last-login-method" }> => p.id === "last-login-method",
+    )?.options?.cookieName ?? "better-auth.last_used_login_method";
+  const readLastMethod = (): string | null => {
+    if (typeof document === "undefined") return null;
+    for (const part of document.cookie.split(";")) {
+      const at = part.indexOf("=");
+      if (at < 0 || part.slice(0, at).trim() !== lastMethodCookie) continue;
+      try {
+        return betterAuthMethod(decodeURIComponent(part.slice(at + 1).trim()));
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
   const activeOrganization = async (): Promise<string | null> =>
     (await readSession(true)).data?.session.activeOrganizationId ?? null;
 
@@ -844,6 +954,12 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
         if (r.data?.redirect && typeof location !== "undefined") location.href = r.data.url;
         return r;
       },
+      anonymous: () =>
+        shimSignIn("/sign-in/anonymous", {}) as Promise<
+          CompatClientResult<{ token: string; user: ClientUser }>
+        >,
+      username: (input) => shimSignIn("/sign-in/username", input),
+      phoneNumber: (input) => shimSignIn("/sign-in/phone-number", input),
       async emailOtp({ email, otp, name, image }) {
         if (name !== undefined || image !== undefined)
           return notSupported("core takes no name or image at the email code sign-in");
@@ -864,17 +980,84 @@ export function createAuthClient<O extends ClientOptions = ClientOptions>(
         return r;
       },
     },
+    deleteAnonymousUser: async () => {
+      const r = await shim<{ success: true }>("/delete-anonymous-user", {});
+      if (r.data) {
+        dropToken();
+        store.refetchIfStarted();
+      }
+      return r;
+    },
+    isUsernameAvailable: ({ username }) =>
+      shim<{ available: boolean }>("/is-username-available", { username }),
+    phoneNumber: {
+      sendOtp: ({ phoneNumber }) =>
+        shim<{ message: string }>("/phone-number/send-otp", { phoneNumber }),
+      async verify(input) {
+        const r = await shim<{ status: true; token: string | null; user: ClientUser }>(
+          "/phone-number/verify",
+          input,
+        );
+        if (!r.data) return r;
+        try {
+          if (r.data.token !== null && input.updatePhoneNumber !== true) keepToken(r.data.token);
+        } catch (e) {
+          return { data: null, error: tokenStoreError(e) };
+        }
+        store.refetchIfStarted();
+        return { data: { ...r.data, user: pickUser(r.data.user) }, error: null };
+      },
+    },
+    multiSession: {
+      async listDeviceSessions() {
+        const r = await shim<{ session: ShimSessionJSON; user: ClientUser }[]>(
+          "/multi-session/list-device-sessions",
+          undefined,
+          "GET",
+        );
+        return r.data
+          ? { data: r.data.map(pickPair), error: null }
+          : { data: null, error: r.error };
+      },
+      async setActive({ sessionToken }) {
+        const r = await shim<{ session: ShimSessionJSON; user: ClientUser }>(
+          "/multi-session/set-active",
+          { sessionToken },
+        );
+        if (!r.data) return { data: null, error: r.error };
+        store.refetchIfStarted();
+        return { data: pickPair(r.data), error: null };
+      },
+      async revoke({ sessionToken }) {
+        const r = await shim<{ status: true }>("/multi-session/revoke", { sessionToken });
+        if (r.data) store.refetchIfStarted();
+        return r;
+      },
+    },
+    getLastUsedLoginMethod: readLastMethod,
+    isLastUsedLoginMethod: (method) => readLastMethod() === method,
+    clearLastUsedLoginMethod() {
+      if (typeof document !== "undefined")
+        // biome-ignore lint/suspicious/noDocumentCookie: the Cookie Store API is not in every browser that Better Auth's client serves, and core's cookie is readable by design.
+        document.cookie = `${lastMethodCookie}=; Path=/; Max-Age=0; Secure; SameSite=Lax`;
+    },
     signUp: {
-      async email({ email, password, name, image, callbackURL }) {
+      async email({ email, password, name, image, callbackURL, username, displayUsername }) {
         if (image !== undefined) return notSupported("core takes no image at sign-up");
         // Core's verify link lands on the app origin. The server api refuses it too.
         if (callbackURL !== undefined) return notSupported("core takes no callbackURL at sign-up");
+        // Core keeps the typed username as displayUsername; the server api refuses the same (plan 12i Task 16).
+        if (displayUsername !== undefined && displayUsername !== username)
+          return notSupported(
+            "core keeps the typed username as displayUsername; send the same value or leave it out",
+          );
         const r = await run(
           async (c) => {
             const up = await c.password.signUp({
               email,
               password,
               ...(name !== "" ? { name } : {}),
+              ...(username !== undefined ? { username } : {}),
             });
             if (!up.ok) return up;
             // Core's uniform answer (plan 12b) carries no user, and Better

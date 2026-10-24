@@ -74,8 +74,8 @@ runAdapterConformance(
     await migrateWithoutLock(pg.sql, s.names);
     return { adapter: s.storage, close: () => pg.close(), stop: () => pg.stop() };
   },
-  // Better Auth's user.email is NOT NULL until Task 16 of plan 12i maps a null address.
-  { rowLocks: true, ping: true, nullEmail: false, oldStore: oldStore(BETTER_AUTH_PG) },
+  // A null address is Better Auth's placeholder in the table since plan 12i Task 16.
+  { rowLocks: true, ping: true, oldStore: oldStore(BETTER_AUTH_PG) },
 );
 
 runAdapterConformance(
@@ -89,7 +89,6 @@ runAdapterConformance(
   {
     rowLocks: true,
     ping: true,
-    nullEmail: false,
     oldStore: oldStore(CONSUMER_I_PG, { casing: "snake" }),
   },
 );

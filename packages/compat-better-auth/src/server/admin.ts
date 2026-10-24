@@ -434,6 +434,7 @@ async function adminAnswer(
         headers,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       }),
+      mapped.handleOptions,
     );
   };
   /** The session of a token that core's answer set: the session row and the user row. */

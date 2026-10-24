@@ -14,7 +14,9 @@ import {
 import type {
   AccountHookFields,
   BetterAuthOptions,
+  CompatDatabase,
   OrganizationHookOptions,
+  Session,
   SessionDraftFields,
   User,
 } from "../types.js";
@@ -736,9 +738,74 @@ export function compatHooks(options: BetterAuthOptions): HooksConfig {
   return {
     ...(org ? { organization: organizationHooksOf(org.organizationHooks ?? {}, limit) } : {}),
     session: sessionHooksOf(options.databaseHooks?.session?.create),
-    user: userHooksOf(options),
+    user: withPluginNames(options, userHooksOf(options)),
     identity: identityHooksOf(options),
     ...ssoHooksOf(options),
+    ...anonymousHooksOf(options),
+  };
+}
+
+/**
+ * The name of a user that the anonymous or the phone-number plugin makes,
+ * as Better Auth 1.7.2 names it (plan 12i Task 16). The anonymous name is
+ * `generateName()`, else "Anonymous" (anonymous/index.mjs:97). The phone
+ * name is `getTempName(phone)`, else the number (phone-number/routes.mjs:367). The name is set before
+ * `databaseHooks.user.create.before` runs, and that hook may change it.
+ */
+function withPluginNames(options: BetterAuthOptions, hooks: UserHooks): UserHooks {
+  const anon = pluginOf(options, "anonymous")?.options;
+  const temp = pluginOf(options, "phone-number")?.options.signUpOnVerification;
+  if (!anon && !temp) return hooks;
+  const inner = hooks.beforeCreate;
+  const nameOf = async (e: { user: UserRow; via: string }): Promise<string | undefined> => {
+    if (e.via === "anonymous" && anon) return (await anon.generateName?.()) || "Anonymous";
+    if (e.via === "phone" && temp && e.user.phone !== null)
+      return temp.getTempName?.(e.user.phone) ?? e.user.phone;
+    return undefined;
+  };
+  return {
+    ...hooks,
+    async beforeCreate(e) {
+      const name = await refusingApiErrors(() => nameOf(e));
+      if (name === undefined) return inner?.(e);
+      const patch = await inner?.({ ...e, user: { ...e.user, name } });
+      return { name, ...(patch ?? {}) };
+    },
+  };
+}
+
+/**
+ * `onLinkAccount` of the anonymous plugin on core's
+ * `hooks.anonymous.afterLink` (plan 12i Task 16). It runs after the commit
+ * of a sign-in over an anonymous session, before core deletes the
+ * anonymous user. Better Auth calls it at the same point (anonymous/index.mjs:136).
+ * Core's event has no session, so the shim reads the newest session of
+ * each user: two reads. `proof` is core's: move the anonymous data only on
+ * `"verified"` (deviation 3). Better Auth calls the hook for both proofs, so
+ * the shim does too. A throw keeps the anonymous user, as core's hook does.
+ */
+function anonymousHooksOf(options: BetterAuthOptions): Pick<HooksConfig, "anonymous"> {
+  const link = pluginOf(options, "anonymous")?.options.onLinkAccount;
+  if (!link) return {};
+  const storage = (options.database as CompatDatabase).storage;
+  const newest = async (userId: string): Promise<Session | null> => {
+    const rows = await storage.findMany("session", [{ field: "userId", op: "eq", value: userId }]);
+    const row = rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+    return row ? toSession(row, row.tokenHash) : null;
+  };
+  return {
+    anonymous: {
+      async afterLink(e) {
+        await link({
+          anonymousUser: {
+            user: { ...toUser(e.anonymousUser), isAnonymous: true },
+            session: await newest(e.anonymousUser.id),
+          },
+          newUser: { user: toUser(e.user), session: await newest(e.user.id) },
+          proof: e.proof,
+        });
+      },
+    },
   };
 }
 

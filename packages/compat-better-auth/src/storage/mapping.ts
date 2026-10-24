@@ -16,11 +16,12 @@ import type { BetterAuthTable } from "./names.js";
  * (`invitation.teamId`, plan 12k Task 11). An empty list and null are null.
  * Better Auth refuses a team id that holds "," (INVALID_TEAM_ID), so the
  * join loses nothing.
- * `notNull`: core allows null, and the table column does not. A write of
- * null fails with `invalid_argument` before any statement runs. Better
- * Auth's `user.email` is NOT NULL, and core's address is nullable from
- * schema version 15 (plan 12i). Task 16 of plan 12i maps a null address to
- * Better Auth's placeholder address in its place.
+ * `placeholder`: Better Auth's `user.email` is NOT NULL, and core's address
+ * is nullable from schema version 15 (plan 12i). An insert of null writes
+ * Better Auth's placeholder of the row's id, and every placeholder reads as
+ * null (placeholder.ts, plan 12i Task 16). A write of an address in a
+ * placeholder form, or an update to null, fails with `invalid_argument`
+ * before any statement runs.
  */
 export type Codec =
   | "nullAsEmpty"
@@ -28,7 +29,7 @@ export type Codec =
   | "emptyAsNull"
   | "permission"
   | "commaList"
-  | "notNull";
+  | "placeholder";
 
 export interface FieldMap {
   readonly column: string;
@@ -163,7 +164,7 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
     table: "user",
     fields: {
       ...same("id", "emailVerified", "image", "createdAt", "updatedAt"),
-      email: as("email", "notNull"),
+      email: as("email", "placeholder"),
       name: as("name", "nullAsEmpty"),
       bannedAt: as("taBannedAt"),
       banReason: as("taBanReason"),
@@ -179,7 +180,8 @@ export const MAPPING: { [M in MappedModel]: ModelMap<M> } = {
       isAnonymous: as("isAnonymous"),
     },
     // Core writes a phone only after its code (Task 4 of plan 12i), so a
-    // phone that core writes is proved. Task 16 of plan 12i maps the rest.
+    // phone that core writes is proved. A Better Auth number with no proof
+    // reads as no phone (onlyWhen above).
     insertExtras: (row) => ({ phoneNumberVerified: row.phone === null ? null : true }),
     updateExtras: (data) =>
       data.phone === undefined ? {} : { phoneNumberVerified: data.phone === null ? null : true },

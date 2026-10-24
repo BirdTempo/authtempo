@@ -16,6 +16,7 @@ import {
   isCredential,
   profilePatch,
   sessionIdOf,
+  usernameOf,
 } from "./api.js";
 import { translate } from "./email-otp.js";
 import type { Mapped } from "./map-options.js";
@@ -145,6 +146,7 @@ export async function accountRoute(
         headers,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       }),
+      mapped.handleOptions,
     );
   };
   const status = () => ({ status: true });
@@ -197,8 +199,15 @@ export async function accountRoute(
         const own = (await caller()).session.id;
         return answer(await core("POST", "/sessions/revoke", { id: own }), status);
       }
-      case "/update-user":
-        return answer(await core("POST", "/user/update", profilePatch(body)), status);
+      case "/update-user": {
+        // Plan 12i Task 16: the username goes to core's own route first.
+        const { username, rest } = usernameOf(body, mapped.plugins.has("username"));
+        if (username !== undefined) {
+          const set = await core("POST", "/user/username", { username });
+          if (!set.ok || Object.keys(rest).length === 0) return answer(set, status);
+        }
+        return answer(await core("POST", "/user/update", profilePatch(rest)), status);
+      }
       case "/change-email": {
         const newEmail = required(body, "newEmail");
         // Better Auth 1.7.2's answer with the option off (update-user.mjs:440 to :443).

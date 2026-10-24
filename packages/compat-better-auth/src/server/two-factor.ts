@@ -149,6 +149,7 @@ export async function twoFactorRoute(
           trustDevice: body.trustDevice === true,
         }),
       }),
+      mapped.handleOptions,
     );
     const out = (await res
       .clone()

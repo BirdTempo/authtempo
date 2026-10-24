@@ -111,10 +111,11 @@ export interface ConformanceOptions {
    */
   lockStatements?: number;
   /**
-   * False for a storage whose user table needs an address in every row: the
-   * Better Auth tables, until plan 12i Task 16 maps a null address to a
-   * placeholder. The suite then holds that a create with no address fails
-   * with a StorageError. Default true (schema version 15).
+   * False for a storage whose user table needs an address in every row and
+   * has no form for a null. The suite then holds that a create with no
+   * address fails with a StorageError. Default true (schema version 15).
+   * The Better Auth tables keep the default since plan 12i Task 16. The
+   * compat storage writes a placeholder for a null and reads it back as null.
    */
   nullEmail?: boolean;
 }

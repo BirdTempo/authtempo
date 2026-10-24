@@ -136,6 +136,12 @@ describe("betterAuth", () => {
       freshAge: 86400,
       deleteTokenExpiresIn: 86400,
       basePath: "/api/auth",
+      phoneExpiresIn: 300,
+      phoneOtpLength: 6,
+      phoneAllowedAttempts: 3,
+      maximumSessions: 5,
+      lastLoginCookie: "better-auth.last_used_login_method",
+      lastLoginMaxAge: 2592000,
     });
     expect(m.config.session).toEqual({ ttlDays: 7, slidingRefreshDays: 1, freshMinutes: 1440 });
     expect(m.config.magicLink).toEqual({ ttlMinutes: 60 });
@@ -255,11 +261,19 @@ describe("betterAuth", () => {
       },
       advanced: { defaultCookieAttributes: { sameSite: "None" } },
     });
+    // Plan 12i Task 16: Better Auth's callback path stays each provider's redirect URI.
+    const cb = (id: string) => `${BASE}/api/auth/callback/${id}`;
     expect(m.config.social).toEqual({
-      google: { clientId: "g", clientSecret: "gs" },
-      apple: { clientId: "com.example.web", teamId: "TEAM123456", keyId: "KEY1234567", privateKey },
-      github: { clientId: "h", clientSecret: "hs" },
-      linkedin: { clientId: "l", clientSecret: "ls" },
+      google: { clientId: "g", clientSecret: "gs", redirectURI: cb("google") },
+      apple: {
+        clientId: "com.example.web",
+        teamId: "TEAM123456",
+        keyId: "KEY1234567",
+        privateKey,
+        redirectURI: cb("apple"),
+      },
+      github: { clientId: "h", clientSecret: "hs", redirectURI: cb("github") },
+      linkedin: { clientId: "l", clientSecret: "ls", redirectURI: cb("linkedin") },
     });
     expect(m.config.cookie).toEqual({ sameSite: "None" });
     expect(m.config.cookieName).toBe("__Host-tempo_session");

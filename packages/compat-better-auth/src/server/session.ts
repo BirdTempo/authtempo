@@ -40,6 +40,7 @@ export async function getSessionRoute(
       headers,
       ...(method === "POST" ? { body: "{}" } : {}),
     }),
+    mapped.handleOptions,
   );
   if (res.status !== 200 && res.status !== 401) return res;
   // Core's headers stay: the renewed cookie, the clear of a dead cookie, and CORS.

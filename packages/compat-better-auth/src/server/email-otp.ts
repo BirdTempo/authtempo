@@ -131,6 +131,7 @@ export async function emailOtpRoute(
         headers,
         body: JSON.stringify(payload),
       }),
+      mapped.handleOptions,
     );
   };
   const success = () => ({ success: true });

@@ -41,23 +41,40 @@ describe("checkOptions on the five apps (Review Focus 1)", () => {
     ]);
   });
 
-  it("names core's preset for microsoft, discord, gitlab, slack, twitter, and facebook (plan 12i Tasks 13 and 14)", () => {
+  it("maps microsoft, discord, gitlab, twitter, and facebook, and refuses slack by its subject (plan 12i Task 16, ruling 22)", () => {
     const refusalOf = (name: string) =>
       checkOptions({
         socialProviders: { [name]: { clientId: "i", clientSecret: "s" } },
       } as unknown as BetterAuthOptions).refusals.filter((r) => r.startsWith("socialProviders"));
-    for (const name of ["microsoft", "discord", "gitlab", "slack", "twitter", "facebook"])
-      expect(refusalOf(name)).toEqual([
-        `socialProviders.${name}: not mapped; use core's preset social.${name} through core's createAuth`,
-      ]);
+    for (const name of ["microsoft", "discord", "gitlab", "twitter", "facebook"])
+      expect(refusalOf(name)).toEqual([]);
+    const [slack] = refusalOf("slack");
+    expect(slack).toMatch(
+      /^socialProviders\.slack: not mapped: core's Slack subject is team_id:user_id, and Better Auth's account rows hold the user_id alone/,
+    );
+    // Every other key of the Better Auth provider stays refused.
+    expect(
+      checkOptions({
+        socialProviders: {
+          microsoft: { clientId: "i", clientSecret: "s", tenantId: "common", prompt: "login" },
+          gitlab: {
+            clientId: "i",
+            clientSecret: "s",
+            issuer: "https://gitlab.example.com",
+            scope: [],
+          },
+        },
+      } as unknown as BetterAuthOptions).refusals.filter((r) => r.startsWith("socialProviders")),
+    ).toEqual([
+      "socialProviders.gitlab.scope: authtempo has no such option",
+      "socialProviders.microsoft.prompt: authtempo has no such option",
+    ]);
     // An inherited key of a plain object is not a preset name.
     expect(refusalOf("toString")).toEqual([
       "socialProviders.toString: not mapped; add it through core's social.oidc or social.oauth2",
     ]);
-    // The README states each reason that a provider id can reach. Core keeps no name for a coming preset.
-    expect(readme).toContain(
-      "`not mapped; use core's preset social.microsoft through core's createAuth`",
-    );
+    // The README states each reason that a provider id can reach.
+    expect(readme).toContain("core's Slack subject is team_id:user_id");
     expect(readme).not.toContain("coming preset");
     expect(readme).toContain("`not mapped; add it through core's social.oidc or social.oauth2`");
   });

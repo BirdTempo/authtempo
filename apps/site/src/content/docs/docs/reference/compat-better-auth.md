@@ -11,6 +11,7 @@ sources:
   - packages/compat-better-auth/README.md "The admin plugin"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 26
   - packages/compat-better-auth/README.md "API keys"
+  - packages/compat-better-auth/README.md "Sign-in plugins"
   - docs/superpowers/specs/2026-10-09-tempo-auth-design.md 16.1
 ---
 
@@ -55,7 +56,7 @@ An import of another subpath, such as `better-auth/db` or `better-auth/plugins/a
 | Plugin | What it does on authtempo |
 | --- | --- |
 | `organization` | Core's organizations. `sendInvitationEmail` is required. |
-| `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required. |
+| `passkey` | Core's passkeys. `rpID`, `rpName`, and `origin` are required. `registration.requireSession: false`, `resolveUser`, and `afterVerification` are refused: use core's `passkey.signUp`. |
 | `magicLink` | Core's magic link with its confirm page. `sendMagicLink` is required. |
 | `emailOTP` | Core's email codes, for the sign-in and the reset. With `changeEmail: { enabled: true }`, also for the change of address. `sendVerificationOTP` is required. |
 | `bearer` | Adds `set-auth-token` to each answer that sets the session cookie. |
@@ -63,9 +64,17 @@ An import of another subpath, such as `better-auth/db` or `better-auth/plugins/a
 | `twoFactor` | Core's TOTP second factor on the password sign-in. Pass `accountLockout: { enabled: false }`. Core's gate on the magic link, the email code, and social stays off. A reset by code of a user with the factor on opens no session. |
 | `admin` | Core's operator tools. Needs `organization` and `authtempo.platformOrganization`. See [The admin plugin](#the-admin-plugin). |
 | `apiKey` | Core's API tokens: `tk_` for `references: "user"`, `to_` for `"organization"`. `rateLimit` is the window of a new key. `enableSessionForAPIKeys: true`, `disableKeyHashing: true`, and a custom generator are refused. [Cutover of API tokens](/docs/migrate/better-auth/#cutover-of-api-tokens) moves the old keys. |
+| `anonymous` | Core's anonymous sign-in. `onLinkAccount` runs after the sign-in that replaces the anonymous user, with core's `proof`. `generateRandomEmail` and `disableDeleteAnonymousUser: true` are refused. |
+| `username` | Core's username and its password sign-in. Needs `emailAndPassword`. The validators and the normalization are refused: core stores NFKC in lower case. |
+| `phoneNumber` | Core's phone code. `sendOTP` delivers each code that core makes. Needs `authtempo.phone.regions`. `verifyOTP` and the reset by phone are refused. |
+| `oneTap` | Core's ID-token route for Google, with no nonce. Needs `socialProviders.google`. |
+| `multiSession` | Core's multi-session, 2 to 10 sessions in one browser. |
+| `lastLoginMethod` | Core's last method cookie under Better Auth's cookie name. `storeInDatabase: true` is refused. |
 | `jwt`, `mcp`, `cimd`, `oidc-provider`, `oauth-provider` | Refused at start. Move to core's `createAuth` with `jwtMint` and `oauth`. |
 
 Any other plugin is refused at start by its id.
+
+An anonymous user or a phone user has no address. Such a user holds Better Auth's placeholder address in `user.email`, because that column is NOT NULL. The storage reads each placeholder as no address, so core never mails one and never counts one as proved.
 
 ## The defaults
 

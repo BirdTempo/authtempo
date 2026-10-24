@@ -33,8 +33,9 @@ import type {
  * (plan 12i). Better Auth's own default form is `<id>@<namespace>.placeholder.invalid`
  * (`createPlaceholderEmail` of @better-auth/core 1.7.2, deviation 7), and
  * `.invalid` never resolves (RFC 6761 section 6.4). The storage of the
- * Better Auth tables refuses a null address until Task 16 of plan 12i maps
- * it, so only a core row reaches this form today.
+ * Better Auth tables writes the same form for a null address, or
+ * `temp-<id>@<emailDomainName>` with that option (placeholder.ts, plan 12i
+ * Task 16). It reads each back as null.
  */
 export function shownAddress(user: { id: string; email: string | null }): string {
   return user.email ?? `${user.id}@anonymous.placeholder.invalid`;

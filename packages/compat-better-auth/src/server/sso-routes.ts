@@ -603,7 +603,7 @@ class Calls {
   }
 
   async core(to: string, body?: Json): Promise<Response> {
-    return this.keep(await this.auth.handle(this.requestTo(to, body)));
+    return this.keep(await this.auth.handle(this.requestTo(to, body), this.mapped.handleOptions));
   }
 
   keep(res: Response): Response {
@@ -1091,7 +1091,10 @@ export async function ssoAcsRoute(
   const row = await connectionRow(mapped, providerId);
   if (!row)
     return Response.json({ code: NOT_FOUND.code, message: NOT_FOUND.message }, { status: 404 });
-  return auth.handle(new Request(`${mapped.origin}${mapped.basePath}/sso/${row.id}/acs`, request));
+  return auth.handle(
+    new Request(`${mapped.origin}${mapped.basePath}/sso/${row.id}/acs`, request),
+    mapped.handleOptions,
+  );
 }
 
 /**
@@ -1178,6 +1181,7 @@ export async function ssoRoute(
         `${mapped.origin}${mapped.basePath}/sso/${row.id}/callback${url.search}`,
         request,
       ),
+      mapped.handleOptions,
     );
   }
   return null;

@@ -1273,8 +1273,8 @@ export const MIGRATION_0012_NAME = "0012_compat_schema_v15";
  * `isAnonymous` and `createdAt` serves the anonymous step of core's sweep
  * (ruling 25 H1 of plan 12i, 2026-10-24). It was added before the file
  * left the lane: no database outside the tests ran it. Better Auth's own
- * `user.email` stays NOT NULL: the storage refuses a null address
- * (`notNull`), and Task 16 of plan 12i maps it to the placeholder address.
+ * `user.email` stays NOT NULL: the storage writes Better Auth's
+ * placeholder address for a null (`placeholder`, plan 12i Task 16).
  * Better Auth's `passkey` gets `taDiscoverable`, `taPrf`, and `taLargeBlob`;
  * the last two are NOT NULL with the default false, so a row that Better
  * Auth writes reads false. Core's own `ta_oauth_session_client` and

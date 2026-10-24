@@ -125,9 +125,9 @@ export function mappingCases(
       return { adapter: db(), close: truncate };
     },
     // D1 sends an update in a transaction as 2 statements: the read for the undo and the write.
-    // The D1 suite adds the ping row of plan 12h through `conformance`. Better Auth's
-    // user.email is NOT NULL until Task 16 of plan 12i maps a null address.
-    { updateInTransaction: 2, nullEmail: false, ...conformance },
+    // The D1 suite adds the ping row of plan 12h through `conformance`. A null address
+    // is Better Auth's placeholder in the table since plan 12i Task 16, and reads back as null.
+    { updateInTransaction: 2, ...conformance },
   );
 
   // The foreign keys of Better Auth name the user, the organization, and the team rows.
@@ -141,8 +141,8 @@ export function mappingCases(
         close: truncate,
       };
     },
-    // Better Auth's user.email is NOT NULL until Task 16 of plan 12i maps a null address.
-    { parents: ["user", "organization", "team"], nullEmail: false },
+    // A null address is Better Auth's placeholder in the table since plan 12i Task 16.
+    { parents: ["user", "organization", "team"] },
   );
 
   describe(runs.mapping, () => {

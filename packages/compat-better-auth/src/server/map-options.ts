@@ -1,11 +1,13 @@
 import {
   type AuthConfig,
   defaultSignInPage,
+  type HandleOptions,
   isIpLiteral,
   type LimiterPort,
   normalizeSlug,
   SCIM_SCOPES,
   type SignInPageInput,
+  type SmsPort,
 } from "@authtempo/core";
 import { type DomainRecordOf, withDomainRecord } from "@authtempo/core/compat";
 import { tiktokEntry, wechatEntry } from "@authtempo/core/social-entries";
@@ -20,6 +22,7 @@ import {
   type CompatPlugin,
   type EmailOtpOptions,
   type OrganizationOptions,
+  type PhoneNumberOptions,
   type ScimScope,
   type User,
 } from "../types.js";
@@ -64,6 +67,15 @@ export const BETTER_AUTH_DEFAULTS = {
   // dist/api/routes/update-user.mjs:322: `deleteTokenExpiresIn || 3600 * 24` (read 2026-10-17, plan 12a Task 20).
   deleteTokenExpiresIn: 86_400,
   basePath: "/api/auth",
+  // Plan 12i Task 16, each read 2026-10-25: phone-number/index.mjs:11 and
+  // :12 and routes.mjs:505; multi-session/index.mjs:15; and
+  // last-login-method/index.mjs (the cookie name and 3600 * 24 * 30).
+  phoneExpiresIn: 300,
+  phoneOtpLength: 6,
+  phoneAllowedAttempts: 3,
+  maximumSessions: 5,
+  lastLoginCookie: "better-auth.last_used_login_method",
+  lastLoginMaxAge: 2_592_000,
 } as const;
 
 const DAY = 86_400;
@@ -82,8 +94,98 @@ function otpShape(o: EmailOtpOptions): { ttlMinutes: number; length: 6 | 8; maxA
   };
 }
 
+/** The mark of a code in the SMS text that core builds for the shim (plan 12i Task 16). */
+const CODE_TEXT = /^authtempo-code:(\d{6,8})$/;
+
+/**
+ * The phone-number plugin's `sendOTP` as core's SMS port (plan 12i Task
+ * 16). Core makes, keys, binds, counts, and caps each code (spec 32 item
+ * 4). Better Auth's `sendOTP` takes the code, not a text. So the shim's
+ * text is the code with a mark, and this wrapper is the one place that
+ * passes a code to app code. A note to a taken number holds no code, and
+ * Better Auth has no sender for it: it is not sent. Core counted it against
+ * the daily cap already, and the answer stays the same for a free number.
+ * Core catches a throw of `sendOTP` and writes the line `sms.port_threw`.
+ */
+export function phonePort(sendOTP: PhoneNumberOptions["sendOTP"]): SmsPort {
+  return {
+    async send({ to, text }) {
+      const code = CODE_TEXT.exec(text)?.[1];
+      if (code !== undefined) await sendOTP({ phoneNumber: to, code });
+      return "sent";
+    },
+  };
+}
+
+type SignInConfig = Pick<
+  AuthConfig,
+  "anonymous" | "username" | "phone" | "multiSession" | "lastMethod"
+>;
+
+/** The sign-in plugins of plan 12i Task 16 as core's config. checkOptions refused every other value. */
+function signInConfig(options: BetterAuthOptions): SignInConfig {
+  const out: SignInConfig = {};
+  if (pluginOf(options, "anonymous")) {
+    const cap = options.authtempo?.anonymousDailyCap;
+    out.anonymous = cap !== undefined ? { dailyCap: cap } : {};
+  }
+  const u = pluginOf(options, "username")?.options;
+  if (u)
+    out.username = {
+      ...(u.minUsernameLength !== undefined ? { minLength: u.minUsernameLength } : {}),
+      ...(u.maxUsernameLength !== undefined ? { maxLength: u.maxUsernameLength } : {}),
+    };
+  const p = pluginOf(options, "phone-number")?.options;
+  const settings = options.authtempo?.phone;
+  if (p && settings)
+    out.phone = {
+      sms: phonePort(p.sendOTP),
+      regions: [...settings.regions],
+      signUp: p.signUpOnVerification !== undefined,
+      // Seconds in Better Auth, whole minutes in core, rounded up.
+      ttlMinutes: Math.ceil((p.expiresIn ?? BETTER_AUTH_DEFAULTS.phoneExpiresIn) / 60),
+      length: (p.otpLength ?? BETTER_AUTH_DEFAULTS.phoneOtpLength) === 8 ? 8 : 6,
+      maxAttempts: p.allowedAttempts ?? BETTER_AUTH_DEFAULTS.phoneAllowedAttempts,
+      ...(settings.dailyCap !== undefined ? { dailyCap: settings.dailyCap } : {}),
+      message: ({ code }) => `authtempo-code:${code}`,
+    };
+  const m = pluginOf(options, "multi-session")?.options;
+  if (m) out.multiSession = { max: m.maximumSessions ?? BETTER_AUTH_DEFAULTS.maximumSessions };
+  const l = pluginOf(options, "last-login-method")?.options;
+  if (l)
+    out.lastMethod = {
+      // Better Auth's own name, so its client reads the cookie that core sets.
+      cookieName: l.cookieName ?? BETTER_AUTH_DEFAULTS.lastLoginCookie,
+      days: (l.maxAge ?? BETTER_AUTH_DEFAULTS.lastLoginMaxAge) / DAY,
+    };
+  return out;
+}
+
+/**
+ * Better Auth's callback of a provider, `<baseURL><basePath>/callback/<id>`,
+ * as core's `redirectURI` override (plan 12i Task 16). So the URI that the
+ * app registered at each provider for Better Auth stays. Core takes an
+ * https override only: on an http `baseURL` (local work) the callback is
+ * core's `/social/<id>/callback`. The app's own `redirectURI` wins.
+ */
+function callbackOf(
+  given: string | undefined,
+  origin: string,
+  basePath: string,
+  id: string,
+): { redirectURI?: string } {
+  if (given !== undefined) return { redirectURI: given };
+  return origin.startsWith("https:") ? { redirectURI: `${origin}${basePath}/callback/${id}` } : {};
+}
+
 export interface Mapped {
   config: AuthConfig;
+  /**
+   * The host's `{ waitUntil }` of one handler request (plan 12i Task 16).
+   * Each inner `auth.handle` call passes it, so a route's work after the
+   * answer runs under the host's waitUntil (ruling 23). Absent for `api`.
+   */
+  handleOptions?: HandleOptions;
   /** The origin of inner requests: the primary, or the request's entry after `mappedFor`. */
   origin: string;
   /** Every origin of a `baseURL` list, the primary first. Empty for a string (plan 12i Task 18). */
@@ -511,6 +613,22 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
   const linkedin = options.socialProviders?.linkedin;
   const tiktok = options.socialProviders?.tiktok;
   const wechat = options.socialProviders?.wechat;
+  // The presets of plan 12i Tasks 13 and 14 (Task 16). checkOptions refuses Slack (ruling 22).
+  const microsoft = options.socialProviders?.microsoft;
+  const discord = options.socialProviders?.discord;
+  const gitlab = options.socialProviders?.gitlab;
+  const twitter = options.socialProviders?.twitter;
+  const facebook = options.socialProviders?.facebook;
+  const presets = microsoft || discord || gitlab || twitter || facebook;
+  const back = (id: string, given: string | undefined) => callbackOf(given, origin, basePath, id);
+  const idSecret = (
+    id: string,
+    c: { clientId: string; clientSecret: string; redirectURI?: string },
+  ) => ({
+    clientId: c.clientId,
+    clientSecret: c.clientSecret,
+    ...back(id, c.redirectURI),
+  });
   const ep = options.emailAndPassword;
   const deleteUser = options.user?.deleteUser;
   const config: AuthConfig = {
@@ -619,15 +737,15 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
           // magic link, email code, and social sign-in open a session with no
           // second factor, so the shim keeps core's gate off on those three
           // (owner decision 2 of 2026-10-14). The reset gate has no key.
-          gate: { magicLink: false, emailOtp: false, social: false },
+          // Its phone-number plugin gates /sign-in/phone-number only, which
+          // is a password sign-in here: the phone code opens no gate either.
+          gate: { magicLink: false, emailOtp: false, social: false, phone: false },
         }
       : false,
-    ...(google || apple || github || linkedin || tiktok || wechat
+    ...(google || apple || github || linkedin || tiktok || wechat || presets
       ? {
           social: {
-            ...(google
-              ? { google: { clientId: google.clientId, clientSecret: google.clientSecret } }
-              : {}),
+            ...(google ? { google: idSecret("google", google) } : {}),
             ...(apple
               ? {
                   apple: {
@@ -635,15 +753,34 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
                     teamId: apple.teamId ?? "",
                     keyId: apple.keyId ?? "",
                     privateKey: apple.privateKey ?? "",
+                    ...back("apple", apple.redirectURI),
                   },
                 }
               : {}),
-            ...(github
-              ? { github: { clientId: github.clientId, clientSecret: github.clientSecret } }
+            ...(github ? { github: idSecret("github", github) } : {}),
+            ...(linkedin ? { linkedin: idSecret("linkedin", linkedin) } : {}),
+            ...(microsoft
+              ? {
+                  microsoft: {
+                    ...idSecret("microsoft", microsoft),
+                    // Better Auth's default tenant (social-providers/microsoft-entra-id.mjs).
+                    tenant: microsoft.tenantId ?? "common",
+                  },
+                }
               : {}),
-            ...(linkedin
-              ? { linkedin: { clientId: linkedin.clientId, clientSecret: linkedin.clientSecret } }
+            ...(discord ? { discord: idSecret("discord", discord) } : {}),
+            ...(gitlab
+              ? {
+                  gitlab: {
+                    ...idSecret("gitlab", gitlab),
+                    ...(gitlab.issuer !== undefined ? { issuer: gitlab.issuer } : {}),
+                  },
+                }
               : {}),
+            ...(twitter ? { twitter: idSecret("twitter", twitter) } : {}),
+            ...(facebook ? { facebook: idSecret("facebook", facebook) } : {}),
+            // Better Auth's One Tap posts a token with no nonce (one-tap/index.mjs).
+            ...(pluginOf(options, "one-tap") ? { idToken: { requireNonce: false } } : {}),
             // Plan 12i Task 22: core's list entries with Better Auth's provider
             // ids and subjects (open_id; unionid, else openid), so a Better
             // Auth-era account row links on the first sign-in.
@@ -655,11 +792,18 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
                           tiktokEntry({
                             clientKey: tiktok.clientKey,
                             clientSecret: tiktok.clientSecret,
+                            ...back("tiktok", tiktok.redirectURI),
                           }),
                         ]
                       : []),
                     ...(wechat
-                      ? [wechatEntry({ appId: wechat.clientId, appSecret: wechat.clientSecret })]
+                      ? [
+                          wechatEntry({
+                            appId: wechat.clientId,
+                            appSecret: wechat.clientSecret,
+                            ...back("wechat", wechat.redirectURI),
+                          }),
+                        ]
                       : []),
                   ],
                 }
@@ -701,6 +845,7 @@ export function mapOptions(options: BetterAuthOptions): Mapped {
         }
       : {}),
     ...pluginConfig(options),
+    ...signInConfig(options),
     ...apiKeyTokens(options),
     ...ssoConfig(options),
     hooks: compatHooks(options),

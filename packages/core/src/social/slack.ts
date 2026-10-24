@@ -48,8 +48,9 @@ export function slackProvider(c: SlackConfig): OAuth2Provider {
  * user id is unique only in its workspace, and names the pair as the
  * unique key. The engine finds an identity by `(provider, subject)`, so a
  * user id alone from a second workspace could sign in as another person.
- * Better Auth 1.7.2 stores the user id alone; plan 12i Task 16 maps that
- * row. Only the boolean `email_verified: true` makes the address verified.
+ * Better Auth 1.7.2 stores the user id alone, so the compat package refuses
+ * its Slack provider (plan 12i Task 16, ruling 22). Only the boolean
+ * `email_verified: true` makes the address verified.
  * An answer with no `ok: true`, no team id, or no user id throws, and the
  * engine answers `oauth_failed`.
  */

@@ -365,8 +365,8 @@ export const strictOptionGuards = [
   } satisfies BetterAuthOptions,
   {
     socialProviders: {
-      // @ts-expect-error since plan 9b a refused key fails the compile; github and linkedin map since plan 9c
-      discord: { clientId: "d", clientSecret: "d" },
+      // @ts-expect-error since plan 9b a refused key fails the compile; discord maps since plan 12i Task 16, Slack is refused (ruling 22)
+      slack: { clientId: "d", clientSecret: "d" },
     },
   } satisfies BetterAuthOptions,
   {
