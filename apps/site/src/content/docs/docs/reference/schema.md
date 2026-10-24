@@ -38,7 +38,7 @@ sources:
 | 12 | `0012_schema_v12` | `ta_operator_audit`. It also adds the three ban fields to `ta_user` and `actor_id` to `ta_session` (plan 12f). |
 | 13 | `0013_schema_v13` | `ta_organization_role`, `ta_team`, `ta_team_member`, `ta_organization_token`, `ta_moved_token`. It also adds `active_team_id` to `ta_session`, `team_ids` to `ta_invitation`, and nine columns to `ta_api_token` (plan 12k). |
 | 14 | `0014_schema_v14` | `ta_sso_connection`, `ta_sso_domain`, `ta_scim_token`, `ta_scim_user`, `ta_scim_group`, `ta_scim_group_member` (plan 12d). |
-| 15 | `0015_schema_v15` | No table. It makes `email` of `ta_user` nullable, and adds `username`, `display_username`, `phone`, and `is_anonymous` to `ta_user`, and three flags to `ta_passkey` (plan 12i). It adds a nullable `issuer` to `ta_oauth_session_client` and `ta_oauth_logout`: the logout token names the issuer that the client saw (plan 12i Task 18). |
+| 15 | `0015_schema_v15` | No table. It makes `email` of `ta_user` nullable, and adds `username`, `display_username`, `phone`, and `is_anonymous` to `ta_user`, and three flags to `ta_passkey` (plan 12i). It adds a nullable `issuer` to `ta_oauth_session_client` and `ta_oauth_logout`: the back-channel sign-out message names the issuer that the client saw (plan 12i Task 18). |
 
 `SCHEMA_VERSION` of `@authtempo/core` is 15.
 
@@ -118,7 +118,7 @@ Version 15 comes from the `0015_schema_v15` migration of D1 and Postgres, from `
 | `passkey.prf` | `prf` | boolean | True when the authenticator said that it supports the PRF extension. Default false (plan 12i). |
 | `passkey.largeBlob` | `large_blob` | boolean | True when the authenticator said that it supports the `largeBlob` extension. Default false (plan 12i). |
 | `oauthSessionClient.issuer` | `issuer` | string, nullable | The issuer of the ID tokens of the link: the entry of a `baseURL` list where the client got them. Null for a link of version 14 (plan 12i Task 18). |
-| `oauthLogout.issuer` | `issuer` | string, nullable | The `issuer` of the link that the logout replaced. The logout token names it; null names the primary (plan 12i Task 18). |
+| `oauthLogout.issuer` | `issuer` | string, nullable | The `issuer` of the link that the row replaced. The back-channel sign-out message names it; null names the primary (plan 12i Task 18). |
 
 The counts are `integer` on Postgres, as every count of core is, except the passkey `counter` and the TOTP `lastStep`.
 
