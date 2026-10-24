@@ -103,10 +103,20 @@ export async function readScimBody(
 }
 
 /**
+ * True for the attribute name `password`, also in the URN form that ends in
+ * `:password`. A SCIM attribute name has no case (RFC 7643 section 2.1).
+ */
+function namesPassword(name: string): boolean {
+  const lower = name.toLowerCase();
+  return lower === "password" || lower.endsWith(":password");
+}
+
+/**
  * Each password of a SCIM body (ruling 60 P2 of plan 12d): the value of a
  * key `password` at any depth, and the value of a PATCH operation whose
- * path is `password`. Core stores none of them, and each event of the
- * request scrubs them.
+ * path is `password`. The URN form of the key or the path counts too
+ * (ruling 81 l1). Core stores none of them, and each event of the request
+ * scrubs them.
  */
 export function passwordsOf(body: unknown): string[] {
   const out: string[] = [];
@@ -118,10 +128,8 @@ export function passwordsOf(body: unknown): string[] {
     const path = entries.find(([k]) => k.toLowerCase() === "path")?.[1];
     for (const [key, item] of entries) {
       const named =
-        key.toLowerCase() === "password" ||
-        (key.toLowerCase() === "value" &&
-          typeof path === "string" &&
-          path.toLowerCase() === "password");
+        namesPassword(key) ||
+        (key.toLowerCase() === "value" && typeof path === "string" && namesPassword(path));
       if (named && typeof item === "string") out.push(item);
       else stack.push(item);
     }

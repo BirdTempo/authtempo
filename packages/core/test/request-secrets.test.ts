@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthConfig } from "../src/config.js";
 import { scimJson } from "../src/engine/scim/answer.js";
-import { createConnection } from "../src/engine/sso/connections.js";
+import { createConnection, updateConnection } from "../src/engine/sso/connections.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { passwordsOf, scimRoute } from "../src/http/routes/scim.js";
@@ -121,9 +121,21 @@ describe("the secrets of one request (plan 12d on 12h)", () => {
           { op: "replace", path: "password", value: "a-2" },
           { op: "add", value: { password: "a-3", nickName: "x" } },
           { op: "replace", path: "nickName", value: "not a password" },
+          // The URN form of the path and the key, in any case (ruling 81 l1).
+          {
+            op: "replace",
+            path: "urn:ietf:params:scim:schemas:core:2.0:User:password",
+            value: "a-4",
+          },
+          { op: "add", value: { "urn:ietf:params:scim:schemas:core:2.0:User:PASSWORD": "a-5" } },
+          {
+            op: "replace",
+            path: "urn:ietf:params:scim:schemas:core:2.0:User:nickName",
+            value: "no",
+          },
         ],
       }).sort(),
-    ).toEqual(["a-1", "a-2", "a-3"]);
+    ).toEqual(["a-1", "a-2", "a-3", "a-4", "a-5"]);
   });
 
   it("adds the bearer token and each password of a SCIM body to the scrub", async () => {
@@ -287,5 +299,65 @@ describe("the secrets of one request (plan 12d on 12h)", () => {
     const failed = kept.sink.filter((e) => e.name === "sso.failed");
     expect(failed.map((e) => [e.connectionId, e.step])).toEqual([["***", "request"]]);
     expect(kept.lines).toEqual([["authtempo: sso failed", "***", "request"]]);
+  });
+
+  it("keeps the SAMLResponse of an ACS post from a sink and a line (ruling 81 m1)", async () => {
+    // A SAMLResponse that is also the connection id of the path: its event field is the secret.
+    const response = "sr0123456789abcdef";
+    const run = async (observe: AuthConfig["observe"] | undefined) => {
+      const v = samlWorld(observe ? { observe } : {});
+      const res = await v.handle(
+        new Request(`${BASE_URL}/auth/sso/${response}/acs`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: `SAMLResponse=${response}&RelayState=rs0123456789abcdef`,
+        }),
+      );
+      expect(res.headers.get("location")).toContain("auth_error=sso_failed");
+      await v.config.observe.flush();
+    };
+    const kept = await bothWays(run, () => [response]);
+    const failed = kept.sink.filter((e) => e.name === "sso.failed");
+    expect(failed.map((e) => [e.connectionId, e.step])).toEqual([["***", "request"]]);
+    expect(kept.lines).toEqual([["authtempo: sso failed", "***", "request"]]);
+  });
+
+  it("adds the SAMLResponse and the RelayState of an ACS post to the scrub (ruling 81 m1)", async () => {
+    const w = samlWorld();
+    const s = spied(w.config);
+    const res = await createRouter(
+      s.config,
+      coreRoutes(s.config),
+    )(
+      new Request(`${BASE_URL}/auth/sso/rs0123456789abcdef/acs`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: "SAMLResponse=PHg%2B&RelayState=rs-relay-0123456789",
+      }),
+    );
+    expect(res.headers.get("location")).toContain("auth_error=sso_failed");
+    expect(s.seen).toEqual([["PHg+", "rs-relay-0123456789"]]);
+  });
+
+  it("keeps the opened client secret from a refusal of an OIDC callback (ruling 81 l2)", async () => {
+    // A client secret that is also the connection id: the sso.failed field is the secret.
+    const run = async (observe: AuthConfig["observe"] | undefined) => {
+      const v = ssoSignInWorld(observe ? { observe } : {});
+      const c = await acmeWithSso(v);
+      const moved = await updateConnection(v.config, SSO_APP, {
+        id: c.connectionId,
+        clientSecret: c.connectionId,
+      });
+      expect(moved.ok).toBe(true);
+      // An ID token with no subject: the callback refuses at the step subject.
+      const answer = await ssoSignIn(v, c.connectionId, "acme", { email: "ada@acme.example" });
+      expect(answer.error).toBe("sso_failed");
+      await v.config.observe.flush();
+      return c.connectionId;
+    };
+    const kept = await bothWays(run, (id) => [id]);
+    const failed = kept.sink.filter((e) => e.name === "sso.failed");
+    expect(failed.map((e) => [e.connectionId, e.step])).toEqual([["***", "subject"]]);
+    expect(kept.lines).toEqual([["authtempo: sso failed", "***", "subject"]]);
   });
 });

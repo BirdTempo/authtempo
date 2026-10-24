@@ -424,6 +424,8 @@ export async function completeSsoOidc(
   const p = provider.value;
   // From here each event of the request scrubs the opened client secret too (plan 12d on 12h).
   const scrubbed = withSecrets(config, [provider.secret]);
+  // The refusals from here emit through the scrub of the opened secret too (ruling 81 l2).
+  const refuse = (step: OidcStep) => refused(scrubbed, id, step, input.ip);
   // Each IdP call goes through `sso.fetch` with its byte cap (plan 12d), the JWKS read too.
   const token = await exchangeProviderCode(
     scrubbed,
@@ -435,7 +437,7 @@ export async function completeSsoOidc(
     cappedFetch(sso.fetch, SSO_TOKEN_BODY_MAX),
     tokenAuthOf(connection.config as unknown as OidcStored),
   );
-  if (token === null) return no("exchange");
+  if (token === null) return refuse("exchange");
   let claims: Record<string, unknown>;
   try {
     claims = await scrubbed.jwt.verifyIdToken({
@@ -447,13 +449,13 @@ export async function completeSsoOidc(
       fetch: jwksFetchOf(sso.fetch),
     });
   } catch {
-    return no("id_token");
+    return refuse("id_token");
   }
   const nonce = claims.nonce;
   if (typeof nonce !== "string" || !constantTimeEqual(await sha256Hex(nonce), data.nonceHash))
-    return no("nonce");
+    return refuse("nonce");
   const profile = profileOf(claims);
-  if (!profile) return no("subject");
+  if (!profile) return refuse("subject");
   seam.onProfile?.(profile);
   return resolveSsoUser(scrubbed, connection, profile, {
     next: safeNext(data.next),
