@@ -249,30 +249,6 @@ async function providerOf(
     : { ok: false, step: "discovery", secret: clientSecret };
 }
 
-/**
- * The provider of an OIDC row (plan 12d Task 4 Behavior 3), or null. It
- * opens the sealed client secret through `connectionSecret`; a secret that
- * does not open answers null. A row with no `endpoints` reads the issuer's
- * discovery document once per hour per isolate. Each discovered endpoint
- * must be on a public host, else null with the log step `discovery_host`.
- */
-export async function connectionProvider(
-  config: ResolvedConfig,
-  row: SsoConnectionRow,
-): Promise<OidcProvider | null> {
-  if (!config.sso || row.kind !== "oidc") return null;
-  const r = await providerOf(config, config.sso, row);
-  if (!r.ok) {
-    withSecrets(config, [r.secret]).observe.emit({
-      name: "sso.failed",
-      connectionId: row.id,
-      step: r.step,
-    });
-    return null;
-  }
-  return r.value;
-}
-
 /** The connection row of a sign-in, or `sso_not_configured`: no row, a row that is off, or a kind that is off. */
 async function liveConnection(
   config: ResolvedConfig,
