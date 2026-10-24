@@ -681,7 +681,7 @@ export async function resolveSession(
     if (!write) return null;
     const stops = impersonationStops(config, "deprovision");
     const n = await endSessionById(config.storage, session, now, stops);
-    if (n === 1) await sessionsEnded(config, [session], "revoked", stops);
+    if (n === 1) await sessionsEnded(config, [session], "revoked", stops, n);
     return null;
   }
   // The door of the operator of an impersonation session (the plan 12f Task 11 fix).

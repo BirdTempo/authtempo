@@ -297,7 +297,7 @@ export async function resolveSsoUser(
   // After the commit, before the session hook and before a challenge answer (plan 12a).
   await verified.after(user);
   await made.after(user);
-  await sessionsEnded(config, ended, "claim", verified.stops);
+  await sessionsEnded(config, ended, "claim", verified.stops, verified.endedCount());
   const member = joined as MemberRow | null;
   if (member) {
     const organization = await config.storage.findOne("organization", [

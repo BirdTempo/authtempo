@@ -7,6 +7,7 @@ import { createRole, deleteRole } from "../../src/engine/roles.js";
 import { createScimToken } from "../../src/engine/scim/tokens.js";
 import { resolveSession } from "../../src/engine/sessions.js";
 import { updateDomain } from "../../src/engine/sso/domains.js";
+import type { AuthEvent } from "../../src/observe/port.js";
 import { sha256Hex } from "../../src/primitives/crypto.js";
 import type { ModelName } from "../../src/schema.js";
 import { tokenFromMail } from "../helpers.js";
@@ -231,6 +232,33 @@ describe("the SSO resolution (plan 12d Task 5)", () => {
     expect((await userAt(w, ADA))?.emailVerified).toBe(true);
     const sessions = await sessionsOf(w, user.id);
     expect(sessions.map((s) => s.tokenHash)).toEqual([await sha256Hex(r.token ?? "")]);
+  });
+
+  it("sends one session.end with the count at a claim with no afterEnd hook (ruling 81 M1)", async () => {
+    const batches: AuthEvent[][] = [];
+    const w = ssoSignInWorld({
+      password: { hash: FAST, uniformSignUp: false, requireVerified: false },
+      observe: { sink: { write: (b) => void batches.push([...b]) } },
+    });
+    const { connectionId } = await acmeWithSso(w);
+    const up = await passwordSignUp(w.config, {
+      email: ADA,
+      password: "a claimant's password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok || !("token" in up.value)) throw new Error("the sign-up opened no session");
+    await w.config.observe.flush();
+    batches.splice(0);
+    await ssoSignIn(w, connectionId, "acme", { sub: "a-1", email: ADA });
+    expect(await resolveSession(w.config, up.value.token)).toBeNull();
+    await w.config.observe.flush();
+    expect(
+      batches
+        .flat()
+        .filter((e) => e.name === "session.end")
+        .map((e) => [e.reason, e.count]),
+    ).toEqual([["claim", 1]]);
   });
 
   it("refuses a user disabled by SCIM", async () => {

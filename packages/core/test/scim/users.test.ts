@@ -741,6 +741,63 @@ describe("the SCIM Users (plan 12d Task 10)", () => {
   });
 });
 
+describe("the event session.end of a SCIM write with no session.afterEnd hook (ruling 81 M1)", () => {
+  /** The world with an observe sink and no afterEnd hook, and the session.end events of the sink. */
+  async function sinkWorld() {
+    const batches: AuthEvent[][] = [];
+    const w = await world({ observe: { sink: { write: (b) => void batches.push([...b]) } } });
+    const ends = async () => {
+      await w.config.observe.flush();
+      return batches
+        .flat()
+        .filter((e) => e.name === "session.end")
+        .map((e) => [e.reason, e.count]);
+    };
+    return { w, ends, clear: () => void batches.splice(0) };
+  }
+
+  it("sends one session.end with the count at a deactivate", async () => {
+    const { w, ends, clear } = await sinkWorld();
+    const token = await tokenOf(w, w.organizationId);
+    await signUpAndVerify(w, ADA);
+    const user = await userAt(w, ADA);
+    if (!user) throw new Error("no user");
+    const id = await created(w, token, ADA);
+    const live = await w.storage.findMany("session", [
+      { field: "userId", op: "eq", value: user.id },
+    ]);
+    expect(live).toHaveLength(1);
+    await ends();
+    clear();
+    const off = await scim(
+      w,
+      token,
+      "PATCH",
+      `/Users/${id}`,
+      patch({ op: "replace", path: "active", value: false }),
+    );
+    expect(off.status).toBe(200);
+    expect(await ends()).toEqual([["revoked", 1]]);
+  });
+
+  it("sends one session.end with the count when a create claims an unverified user", async () => {
+    const { w, ends, clear } = await sinkWorld();
+    const token = await tokenOf(w, w.organizationId);
+    const up = await passwordSignUp(w.config, {
+      email: "uma@acme.example",
+      password: "a claimant's password",
+      ip: null,
+      userAgent: null,
+    });
+    if (!up.ok || !("token" in up.value)) throw new Error("the sign-up opened no session");
+    await ends();
+    clear();
+    await created(w, token, "uma@acme.example");
+    expect(await resolveSession(w.config, up.value.token)).toBeNull();
+    expect(await ends()).toEqual([["claim", 1]]);
+  });
+});
+
 describe("api.scim.users (plan 12d Task 10)", () => {
   it("serves the same rules with the app as the actor", async () => {
     const txt: Record<string, string[]> = {};

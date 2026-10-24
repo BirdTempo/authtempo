@@ -1050,7 +1050,7 @@ export async function scimCreateUser(
     const { user } = resolved.value;
     await made.after(user);
     await verified.after(user);
-    await sessionsEnded(config, ended, "claim", verified.stops);
+    await sessionsEnded(config, ended, "claim", verified.stops, verified.endedCount());
     const member = joined as MemberRow | null;
     const j = join as Join | null;
     if (member && j) await afterJoin(config, j, member, user);
@@ -1397,10 +1397,14 @@ async function writeChange(
         : "scim_user_update";
   let join: Join | null = null;
   let joined: MemberRow | null = null;
+  // The sessions that the written round ended, for the event `session.end` (plan 12h
+  // Task 5). The list is undefined when no `session.afterEnd` hook listens.
+  let endedCount = 0;
   const run = (p: ReturnType<typeof planOf>, small: boolean) =>
     hookGuard(() =>
       storage.transaction(async (tx) => {
         join = null;
+        endedCount = 0;
         const { member, removes, removeEvent, ends, stops } = p;
         // The before hooks first: no lock and no write comes before them.
         if (move && doc)
@@ -1508,6 +1512,7 @@ async function writeChange(
             // family here: its pending-end row covers them all (ruling 66 of plan 12d).
             const page = small
               ? {
+                  ended: 0,
                   left: true,
                   before: await markAllAccessEnd(tx, config, user.id, meter, "revoked"),
                 }
@@ -1522,6 +1527,7 @@ async function writeChange(
                   "revoked",
                   stops,
                 );
+            endedCount = page.ended;
             // The door of the sessions and families that stay (`revokedFor`, ruling 50
             // of plan 12d) reads the pending-end rows only for one from before this
             // write. The time is at or after the `before` of the row (ruling 55).
@@ -1581,7 +1587,7 @@ async function writeChange(
     return scimFail(409, "a group write changed the member row in each round; send it again");
   if (written.ok === "stop") return written.answer;
   if (!written.ok) return failAnswer(written);
-  await sessionsEnded(config, plan.ends.ended, "revoked", plan.stops);
+  await sessionsEnded(config, plan.ends.ended, "revoked", plan.stops, endedCount);
   await endFamilies(config, plan.ends.families);
   if (plan.removes && plan.removeEvent && plan.member) {
     await runAfter(
