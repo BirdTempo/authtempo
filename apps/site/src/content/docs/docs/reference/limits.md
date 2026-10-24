@@ -10,6 +10,7 @@ sources:
   - docs/superpowers/plans/2026-10-14-12e-oauth-provider-v2.md
   - docs/superpowers/plans/2026-10-14-12h-observability.md "Task 13"
   - docs/superpowers/plans/2026-10-14-12d-sso-scim.md
+  - docs/superpowers/plans/2026-10-14-12i-sign-in-additions.md "Task 4"
 ---
 
 **For:** an operator who sizes the limits of a deployment, or a developer who reads a `rate_limited` answer.
@@ -52,6 +53,12 @@ The first two parts of a key are its family, such as `magic-link:email`. A refus
 | `otp:email-day:<email>` | 24 hours | 20 | Email code request, both purposes, and the re-authentication code |
 | `otp-verify:ip:<ip>` | 15 minutes | 30 | Email code verify, reset, re-authentication code, and change-of-address code |
 | `otp-verify:email:<email>` | 15 minutes | 10 | Email code verify, reset, re-authentication code, and change-of-address code |
+| `phone-otp:ip:<ip>` | 15 minutes | 10 | Phone code request, before the read of the number |
+| `phone-otp:phone:<phone>` | 15 minutes | 3 | Phone code request, after the form and region checks |
+| `phone-otp:phone-day:<phone>` | 24 hours | 10 | Phone code request, after the form and region checks |
+| `phone-otp:all-day:deployment` | 24 hours | `phone.dailyCap`, default 1000 | Every phone code send of the deployment, before the row and the SMS. It needs a shared limiter |
+| `phone-verify:ip:<ip>` | 15 minutes | 30 | Every phone code check |
+| `phone-verify:phone:<phone>` | 15 minutes | 10 | Phone sign-in code check |
 | `totp-code:user:<userId>` | 15 minutes | 10 | Every second factor code check: a TOTP code, a backup code, or an email code |
 | `totp-code:user-day:<userId>` | 24 hours | 30 | Every second factor code check |
 | `totp-setup:user:<userId>` | 15 minutes | 5 | The password check of the TOTP setup, of each method enable, and of the method disable, on one budget |
@@ -137,6 +144,7 @@ These counts live in their rows, so they hold under every limiter.
 | Count | Maximum | The answer |
 | --- | --- | --- |
 | Wrong guesses of one email code | `emailOtp.maxAttempts`, 5 by default | `too_many_attempts` |
+| Wrong guesses of one phone code | `phone.maxAttempts`, 3 by default | `too_many_attempts` |
 | Wrong codes of one second factor challenge | 5 | `too_many_attempts` |
 | Email code sends of one second factor challenge | 3 | `rate_limited` |
 | API tokens of one user | 50 | `token_limit` |
@@ -170,6 +178,7 @@ These counts live in their rows, so they hold under every limiter.
 | Session | `session.ttlDays`, 30 days by default, with a sliding refresh after `session.slidingRefreshDays`. With `session.absoluteDays`, at most that many days after the sign-in |
 | Magic link | `magicLink.ttlMinutes`, 15 minutes by default |
 | Email code | `emailOtp.ttlMinutes`, 10 minutes by default |
+| Phone code | `phone.ttlMinutes`, 5 minutes by default |
 | Reset link | `password.resetTtlMinutes`, 15 minutes by default |
 | Social state and binding cookie | 10 minutes |
 | Passkey challenge | 5 minutes |

@@ -126,7 +126,7 @@ export async function requestEmailChange(
   const method = input.method ?? "link";
   const otp = config.emailOtp;
   if (method === "code" && !otp) return fail("not_found");
-  // A user with no address (plan 12i) needs another proved handle: a passkey (a phone from Task 4).
+  // A user with no address (plan 12i) needs another proved handle: a phone that signs in, or a passkey.
   if (
     hasAddress(user) ? !user.emailVerified : !(await verifiedHandle(config, config.storage, user))
   )

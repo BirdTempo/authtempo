@@ -29,7 +29,7 @@ export interface UserRow extends BaseRow {
   /**
    * The phone number in E.164 (plan 12i). Unique. A stored phone is not
    * always a proved phone: a Better Auth store can hold one that no code
-   * proved. It counts as a way in only with `config.phone` (Task 4).
+   * proved. It counts as a way in only with `config.phone` (`phoneSignsIn`).
    */
   phone: string | null;
   /** True for an anonymous account (plan 12i). A sign-in replaces it. */

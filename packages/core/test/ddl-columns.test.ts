@@ -70,6 +70,10 @@ function longestPart(expr: string): string {
   if (expr === "input.phone") return `+${"9".repeat(15)}`;
   // The name of an operator secret: at most 32 characters (config.ts).
   if (expr === "entry.name") return "n".repeat(32);
+  // The identifier of a phone code after the PHONE_RE check: at most 16 characters (plan 12i Task 4).
+  if (expr === "input.identifier") return `+${"9".repeat(15)}`;
+  // The one subject of the daily SMS cap (plan 12i).
+  if (expr === "CAP_SUBJECT") return "deployment";
   throw new Error(`no longest form for the key part \${${expr}}: give it a row in this test`);
 }
 
@@ -233,8 +237,11 @@ describe("the column map (plan 12g)", () => {
     // start, the ACS, and the three of the SCIM token check. Plan 12i adds 1:
     // the password:user key of a check with no address (ruling 15). Plan 12i
     // Task 2 adds 2: the username set and the availability check. Plan 12i
-    // Task 3 adds 2: the password sign-in by username and by phone.
-    expect(sites.length).toBe(89);
+    // Task 3 adds 2: the password sign-in by username and by phone. Plan 12i
+    // Task 4 adds 6: the three request keys, the daily cap, and the two
+    // verify keys of the phone code.
+    expect(sites.length).toBe(95);
+    expect(sites).toContain('engine/phone.ts "phone-otp:all-day" CAP_SUBJECT');
     expect(sites).toContain('engine/slug-check.ts "slug-check:user" userId');
     expect(sites).toContain(
       'engine/token-use.ts kind === "tk" ? "token-use:tk" : "token-use:to" row.id',

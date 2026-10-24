@@ -53,6 +53,7 @@ The keys of `createAuth(config)`. `baseURL`, `trustedOrigins`, `storage`, and `m
 | `signUp` | `"open"` \| `"invited"` \| `false` | `"open"` | Who may become a user. `"invited"` needs `organizations` and a pending invitation of the address. `false` lets nobody new in. |
 | `password` | object | off | `{}` turns passwords on. With no key, the password routes answer 404. |
 | `emailOtp` | object or `false` | on | `false` removes the code routes and `api.emailOtp`. |
+| `phone` | object or `false` | off | The phone code by SMS. An object needs `sms` and `regions`, and a limiter whose `scope` is `"shared"`. |
 | `totp` | object or `false` | on when `password` is set | `false` removes the routes and `api.totp`. An object without `password` is refused. |
 | `jwtMint` | object or `false` | on | `false` removes `/jwks`, `/token`, `/token/live`, and `api.jwt`. The OAuth provider needs it. |
 | `oauth` | object or `false` | off | On when `resources` is set. Refused without `jwtMint`. |
@@ -221,6 +222,22 @@ Another key of `emailOtp` is refused.
 | `emailOtp.mail` | function of `EmailOtpMailInput` | `defaultEmailOtpMail` | Answers the sign-in code mail. Core sends it to the code's address. |
 | `emailOtp.resetMail` | function of `EmailOtpMailInput` | `defaultResetOtpMail` | Answers the reset code mail, with the same rule. |
 
+## Phone codes
+
+Another key of `phone` is refused. Core makes each code, keys its hash, counts each guess, and counts every send against `dailyCap`. The SMS port only sends text.
+
+| Key | Type | Default | Rule |
+| --- | --- | --- | --- |
+| `phone.sms` | `SmsPort` | required | An object with `send({ to, text })` that answers `"sent"` or `"unavailable"`. A throw counts as `"unavailable"`. |
+| `phone.regions` | `string[]` | required, no default | 1 to 50 calling-code prefixes, such as `"+1"` or `"+44"`: a plus sign and 1 to 4 digits. A number outside every prefix gets no SMS. |
+| `phone.signUp` | boolean | `false` | True lets a code to an unknown number make a user. |
+| `phone.ttlMinutes` | number | 5 | An integer from 1 to 10. |
+| `phone.length` | 6 or 8 | 6 | The digits of a code. |
+| `phone.maxAttempts` | number | 3 | An integer from 3 to 10. |
+| `phone.dailyCap` | number | 1000 | The codes of the deployment per 24 hours, an integer from 1 to 100000. A send over the cap makes no call to the port. |
+| `phone.isolateLimiter` | `"allow"` | absent | Lets a limiter that counts per isolate build, for tests and local development. The cap is then per isolate. |
+| `phone.message` | function of `{ code, appName, ttlMinutes }` to a string | `defaultPhoneMessage` | The text of the SMS. |
+
 ## Second factor
 
 Another key of `totp` is refused.
@@ -348,7 +365,7 @@ Core serves its own sign-in page with `handoff` or `oauth`, unless `handoff.sign
 | --- | --- | --- | --- |
 | `captcha` | object | off | Turns the check on for the flows in `captcha.flows`. |
 | `captcha.port` | `CaptchaPort` | required | An object with `verify`. `@authtempo/captcha-turnstile` gives one. Its optional `page` puts the widget on core's sign-in page: `scriptSrc` is an https URL, `responseField` is 1 to 64 letters, digits, `_`, or `-`, and `cspSources` holds https origins with no path. |
-| `captcha.flows` | `CaptchaFlow[]` | `password-sign-up`, `magic-link-request`, `email-otp-request`, `password-reset-request` | 1 or more distinct flows. `password-sign-in` is the fifth flow, and it is off by default. `password-reset-request` covers the reset link and the reset code. |
+| `captcha.flows` | `CaptchaFlow[]` | `password-sign-up`, `magic-link-request`, `email-otp-request`, `password-reset-request` | 1 or more distinct flows. `password-sign-in` and `phone-request` are off by default. `password-reset-request` covers the reset link and the reset code. `phone-request` covers the phone code request. |
 | `captcha.onUnavailable` | `"allow"` \| `"refuse"` | `"allow"` | What happens when the captcha gives no answer. `"allow"` writes one log line and goes on: the limits still bound the flow. `"refuse"` answers 503 `captcha_unavailable`. |
 
 ## Account

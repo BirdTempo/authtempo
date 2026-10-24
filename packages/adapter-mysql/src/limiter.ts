@@ -33,6 +33,8 @@ const SWEEP = "DELETE FROM `ta_limit` WHERE `expires_at` <= ?";
  */
 export function createMysqlLimiter(pool: Pool, clock: Clock = systemClock): LimiterPort {
   return {
+    // The count lives in the database, so every isolate of the deployment reads one count.
+    scope: "shared",
     async allow(key, window) {
       const id = limiterKey(key, window);
       const conn = await pool.getConnection();

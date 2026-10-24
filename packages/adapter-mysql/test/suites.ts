@@ -3,7 +3,7 @@ import {
   runRefreshRaceConformance,
   runSecretRotationConformance,
 } from "@authtempo/core/conformance";
-import { runLimiterConformance } from "@authtempo/core/limiter-conformance";
+import { runLimiterConformance, runPhoneCapConformance } from "@authtempo/core/limiter-conformance";
 import { runShapeConformance, type ShapeSide } from "@authtempo/core/shape-conformance";
 import { MYSQL } from "@authtempo/core/sql";
 import type { Pool, RowDataPacket } from "mysql2/promise";
@@ -76,6 +76,16 @@ export function runMysqlSuites(server: MysqlServer): void {
     const db = await supply.take();
     const clock = manualClock();
     return { limiter: createMysqlLimiter(db.pool, clock), clock, close: () => db.close() };
+  });
+
+  // The daily cap of the phone code under 40 parallel sends (plan 12i Task 4).
+  runPhoneCapConformance(name, async () => {
+    const db = await supply.take();
+    return {
+      limiter: createMysqlLimiter(db.pool),
+      storage: createMysqlAdapter(db.pool),
+      close: () => db.close(),
+    };
   });
 
   // Rulings 40 and 43 of plan 12e and plan 12b on MySQL (ruling 5 of plan 12g).

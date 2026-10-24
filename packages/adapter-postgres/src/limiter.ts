@@ -26,6 +26,8 @@ const SWEEP = "DELETE FROM ta_limit WHERE expires_at <= $1::bigint";
  */
 export function createPostgresLimiter(sql: Sql, clock: Clock = systemClock): LimiterPort {
   return {
+    // The count lives in the database, so every isolate of the deployment reads one count.
+    scope: "shared",
     async allow(key, window) {
       const id = limiterKey(key, window);
       const rows = await sql.unsafe<{ count: string | number }[]>(ALLOW, [

@@ -115,6 +115,12 @@ export const ERRORS = {
   username_taken: 409,
   // plan 12i Task 2: the form, the length bounds, or the reserved set refused the name
   username_invalid: 400,
+  // plan 12i: the phone code (spec 32 item 4). A number that is not E.164, a
+  // number outside every region of `phone.regions`, and an SMS port that did
+  // not send.
+  phone_invalid: 400,
+  phone_region: 400,
+  sms_unavailable: 503,
 } as const;
 
 export type ErrorCode = keyof typeof ERRORS;

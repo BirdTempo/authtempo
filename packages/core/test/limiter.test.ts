@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import { createMemoryLimiter } from "../src/limiter/memory.js";
+import { systemClock } from "../src/primitives/clock.js";
 
 it("allows max calls per window, then refuses, then resets after the window", async () => {
   let t = new Date("2026-01-01T00:00:00Z");
@@ -50,4 +51,9 @@ it("treats one key under two windows as two independent limits", async () => {
   expect(await limiter.allow("K", long)).toBe(true);
   t = new Date(t0 + 62_000);
   expect(await limiter.allow("K", long)).toBe(false);
+});
+
+it("counts per isolate, so it says isolate (plan 12i)", () => {
+  // Each isolate has its own map: the daily SMS cap needs a shared limiter.
+  expect(createMemoryLimiter(systemClock).scope).toBe("isolate");
 });

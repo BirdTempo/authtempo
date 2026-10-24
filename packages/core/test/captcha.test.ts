@@ -54,6 +54,9 @@ const ROUTE_OF: Record<CaptchaFlow, Array<{ path: string; body: Record<string, s
     { path: "/password/reset/request", body: { email: "a@example.com" } },
     { path: "/otp/reset/request", body: { email: "a@example.com" } },
   ],
+  // Plan 12i: the phone routes come with Task 5. phone-code.test.ts checks
+  // the flow through the request gate of the phone code.
+  "phone-request": [],
 };
 
 const post = (path: string, body: unknown, token?: string, ip = "203.0.113.5") =>
@@ -195,11 +198,11 @@ describe("the captcha port (plan 12b)", () => {
       [{ port: {} }, "captcha.port must have a verify function"],
       [
         { port, flows: [] },
-        "captcha.flows must be a list of 1 or more distinct flows: password-sign-up, password-sign-in, magic-link-request, email-otp-request, password-reset-request",
+        "captcha.flows must be a list of 1 or more distinct flows: password-sign-up, password-sign-in, magic-link-request, email-otp-request, password-reset-request, phone-request",
       ],
       [
         { port, flows: ["sign-up"] },
-        "captcha.flows must be a list of 1 or more distinct flows: password-sign-up, password-sign-in, magic-link-request, email-otp-request, password-reset-request",
+        "captcha.flows must be a list of 1 or more distinct flows: password-sign-up, password-sign-in, magic-link-request, email-otp-request, password-reset-request, phone-request",
       ],
       [{ port, onUnavailable: "fail" }, 'captcha.onUnavailable must be "allow" or "refuse"'],
       [

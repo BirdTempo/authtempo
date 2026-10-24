@@ -10,6 +10,7 @@ const RUNS = [
   "refresh reuse race: postgres",
   "refresh revoke race: postgres",
   "shape conformance: postgres",
+  "phone cap: postgres",
 ];
 
 export default defineConfig({

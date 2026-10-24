@@ -26,6 +26,7 @@ import { createSession, type ResolvedSession, resolveSession } from "../src/engi
 import { draftUserRow, mayCreateUser } from "../src/engine/users.js";
 import { decodeJws } from "../src/primitives/jwk.js";
 import type { UserRow } from "../src/schema.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
 import { APP_ORIGIN, BASE_URL, get, makeAuth, post, tokenFromMail } from "./helpers.js";
 import {
@@ -314,8 +315,8 @@ describe("the account with no address (plan 12i Task 1)", () => {
   });
 
   it("counts no stored phone as a way in or a handle with no phone config (ruling 15)", async () => {
-    // A Better Auth store holds a phone that its own code verify proved; core
-    // has no phone route before Task 4, so the phone signs in nowhere.
+    // A Better Auth store holds a phone that its own code verify proved. With
+    // no `phone` config no phone code exists, so the phone signs in nowhere.
     const auth = makeAuth({ passkey: RP });
     const phoned = await auth.storage.create(
       "user",
@@ -337,6 +338,48 @@ describe("the account with no address (plan 12i Task 1)", () => {
       code: "last_credential",
       status: 409,
     });
+  });
+
+  it("counts a stored phone as a way in and a handle only with phone on and the number in a region (ruling 15)", async () => {
+    // The same stored phone as the test before: a Better Auth store holds one
+    // that its code verify proved. Core's own verify of a phone is Task 5.
+    const phone = (regions: string[]) =>
+      makeAuth({
+        passkey: RP,
+        phone: { sms: createRecordingSms(), regions, isolateLimiter: "allow" },
+      });
+    const on = phone(["+1"]);
+    const phoned = await on.storage.create(
+      "user",
+      draftUserRow(
+        { email: null, emailVerified: false, name: null, phone: "+14155550100" },
+        on.clock.now(),
+      ),
+    );
+    expect(await verifiedHandle(on.config, on.storage, phoned)).toBe(true);
+    expect(await waysIn(on.config, on.storage, phoned)).toBe(1);
+    // With a passkey too, the passkey can go: the phone stays a way in.
+    await withPasskey(on, phoned);
+    expect(await waysIn(on.config, on.storage, phoned)).toBe(2);
+    const [passkey] = await on.storage.findMany("passkey", [
+      { field: "userId", op: "eq", value: phoned.id },
+    ]);
+    if (!passkey) throw new Error("no passkey");
+    expect(await deletePasskey(on.config, { user: phoned, id: passkey.id })).toEqual({
+      ok: true,
+      value: { ok: true },
+    });
+    // A number outside every region gets no code, so it is no way in and no handle.
+    const elsewhere = phone(["+44"]);
+    const far = await elsewhere.storage.create(
+      "user",
+      draftUserRow(
+        { email: null, emailVerified: false, name: null, phone: "+14155550100" },
+        elsewhere.clock.now(),
+      ),
+    );
+    expect(await verifiedHandle(elsewhere.config, elsewhere.storage, far)).toBe(false);
+    expect(await waysIn(elsewhere.config, elsewhere.storage, far)).toBe(0);
   });
 
   it("sorts a member with no address after every address", () => {

@@ -8,6 +8,7 @@ import { requireFresh } from "./fresh.js";
 import { hookGuard, runAfter, runBefore, stopWith } from "./hooks.js";
 import { sendNotice } from "./notices.js";
 import { PENDING_HASH_PREFIX } from "./password.js";
+import { phoneSignsIn } from "./phone.js";
 import { unchanged } from "./profile.js";
 import { later, ROUNDS } from "./second-factor.js";
 import type { ResolvedSession } from "./sessions.js";
@@ -36,9 +37,9 @@ export interface Credentials {
    */
   mailbox: boolean;
   /**
-   * A phone that signs in (plan 12i). No phone route exists before Task 4
-   * adds `config.phone`, so no stored phone counts yet. A Better Auth store
-   * can hold a phone that no code proved (ruling 15 of plan 12i).
+   * A phone that signs in (plan 12i): a stored phone counts only with
+   * `config.phone` on and a number that the config accepts
+   * (`phoneSignsIn`, ruling 15 of plan 12i).
    */
   phone: boolean;
 }
@@ -59,8 +60,7 @@ export async function credentialsOf(
     passkeys,
     identities: await storage.findMany("identity", [{ field: "userId", op: "eq", value: user.id }]),
     mailbox: hasAddress(user) && user.emailVerified,
-    // Task 4 of plan 12i makes this `user.phone !== null && config.phone !== false`.
-    phone: false,
+    phone: phoneSignsIn(config, user),
   };
 }
 

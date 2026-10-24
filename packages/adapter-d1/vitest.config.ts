@@ -12,6 +12,7 @@ const RUNS = [
   "refresh reuse race: d1",
   "refresh revoke race: d1",
   "shape conformance: d1",
+  "phone cap: d1",
 ];
 
 // `readD1Migrations` and `applyD1Migrations` checked against the installed

@@ -67,6 +67,8 @@ function forwardedAdapter(name: string): StorageAdapter {
 /** The D1 limiter of the sandbox, with each call forwarded into the object. */
 function forwardedLimiter(name: string, clock: ManualClock): LimiterPort {
   return {
+    // The scope of the D1 limiter that each call forwards to (plan 12i Task 4).
+    scope: "shared",
     allow: (key, window) => inside(name, (db) => createD1Limiter(db, clock).allow(key, window)),
     sweep: (now) =>
       inside(name, async (db) => {

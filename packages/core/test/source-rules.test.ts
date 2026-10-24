@@ -18,6 +18,9 @@ const FS_MODULE = "node:fs";
  */
 const ASSERTIONS = [".email!", "email as string", ".email as string"];
 
+/** The SMS suppliers and SDKs that core must not name (plan 12i Task 4), in lower case. */
+const SUPPLIERS = ["twilio", "vonage", "nexmo", "messagebird", "plivo", "sinch", "aws-sdk"];
+
 describe("the source rules of plan 12i", () => {
   it("no assertion on an address", async () => {
     const { readdirSync, readFileSync }: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
@@ -31,5 +34,31 @@ describe("the source rules of plan 12i", () => {
       return ASSERTIONS.filter((form) => text.includes(form)).map((form) => `${file}: ${form}`);
     });
     expect(hits).toEqual([]);
+  });
+
+  it("names no SMS supplier in core", async () => {
+    // The SMS port is supplier-free (plan 12i Global Constraints): an app
+    // brings its supplier through `phone.sms`, and no core file names one.
+    const { readdirSync, readFileSync }: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
+    const src = new URL("../src/", import.meta.url);
+    const files = readdirSync(src, { recursive: true }).filter((file) => file.endsWith(".ts"));
+    expect(files).toContain("seams/sms.ts");
+    expect(files).toContain("engine/phone.ts");
+    const hits = files.flatMap((file) => {
+      const text = readFileSync(new URL(file, src), "utf8").toLowerCase();
+      return SUPPLIERS.filter((name) => text.includes(name)).map((name) => `${file}: ${name}`);
+    });
+    expect(hits).toEqual([]);
+  });
+
+  it("checks a phone code through the one compare of the email code", async () => {
+    // compareCode runs one keyed HMAC and one constant-time compare on every
+    // path. A second compare in the phone code would drift from it.
+    const { readFileSync }: SourceFs = await import(/* @vite-ignore */ FS_MODULE);
+    const phone = readFileSync(new URL("../src/engine/phone.ts", import.meta.url), "utf8");
+    expect(phone).toContain("return compareCode(");
+    expect(phone).not.toMatch(/valueHash|constantTimeEqual|===\s*input\.code/);
+    const otp = readFileSync(new URL("../src/engine/email-otp.ts", import.meta.url), "utf8");
+    expect(otp).toContain("constantTimeEqual(candidate, row?.valueHash ?? NO_ROW_HASH)");
   });
 });

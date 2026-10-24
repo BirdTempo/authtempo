@@ -1,6 +1,7 @@
 import type { ResolvedConfig } from "../config.js";
 import type { UserRow } from "../schema.js";
 import type { StorageAdapter } from "../storage/port.js";
+import { phoneSignsIn } from "./phone.js";
 
 /**
  * The account with no address (plan 12i, spec 32 item 1). From schema
@@ -15,11 +16,10 @@ export function hasAddress(user: UserRow): user is UserRow & { email: string } {
 }
 
 /**
- * True when the user proved a way to reach the person: a verified address
- * or a passkey. A stored phone counts only from Task 4 of plan 12i, with
- * `config.phone`: a Better Auth store can hold a phone that no code proved
- * (ruling 15 of plan 12i). It reads the passkeys only when the address
- * check fails.
+ * True when the user proved a way to reach the person: a verified address,
+ * a phone that signs in, or a passkey. A stored phone counts only with
+ * `config.phone` on (`phoneSignsIn`, ruling 15 of plan 12i). It reads the
+ * passkeys only when the other checks fail.
  */
 export async function verifiedHandle(
   config: ResolvedConfig,
@@ -27,6 +27,7 @@ export async function verifiedHandle(
   user: UserRow,
 ): Promise<boolean> {
   if (hasAddress(user) && user.emailVerified) return true;
+  if (phoneSignsIn(config, user)) return true;
   if (!config.passkey) return false;
   return (
     (await storage.findOne("passkey", [{ field: "userId", op: "eq", value: user.id }])) !== null

@@ -25,6 +25,7 @@ import {
 } from "../src/engine/passkeys.js";
 import { changePassword, passwordSignIn, passwordSignUp } from "../src/engine/password.js";
 import { effectiveIn } from "../src/engine/permissions.js";
+import { sendPhoneCode } from "../src/engine/phone.js";
 import { updateProfile } from "../src/engine/profile.js";
 import { createRole, listRoles } from "../src/engine/roles.js";
 import { rewrapSecrets } from "../src/engine/secrets.js";
@@ -571,6 +572,30 @@ describe("the captcha lines (plan 12b)", () => {
     expect(log.mock.calls).toEqual([
       ["authtempo: the captcha did not answer", "magic-link-request"],
     ]);
+  });
+});
+
+describe("the SMS lines (plan 12i)", () => {
+  it("sms.port_threw", async () => {
+    const log = errors();
+    const config = resolveConfig(
+      input({
+        phone: {
+          sms: {
+            send: async ({ to }) => {
+              throw new Error(`down for ${to}`);
+            },
+          },
+          regions: ["+1"],
+          isolateLimiter: "allow",
+        },
+      }),
+    );
+    const to = "+14155550100";
+    expect(
+      await sendPhoneCode(config, { purpose: "phone-otp", identifier: to, to, data: {} }),
+    ).toBe("unavailable");
+    expect(log.mock.calls).toEqual([["authtempo: the SMS port threw", "Error"]]);
   });
 });
 

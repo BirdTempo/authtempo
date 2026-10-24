@@ -32,6 +32,13 @@ export const LIMIT_FAMILIES = Object.freeze([
   "otp:email-day",
   "otp-verify:ip",
   "otp-verify:email",
+  // Plan 12i: the phone code. all-day is the daily cap of the deployment.
+  "phone-otp:ip",
+  "phone-otp:phone",
+  "phone-otp:phone-day",
+  "phone-otp:all-day",
+  "phone-verify:ip",
+  "phone-verify:phone",
   "totp-code:user",
   "totp-code:user-day",
   "totp-setup:user",

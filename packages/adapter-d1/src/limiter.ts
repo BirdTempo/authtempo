@@ -28,6 +28,8 @@ const SWEEP = "DELETE FROM ta_limit WHERE expires_at <= ?1";
  */
 export function createD1Limiter(db: D1Subset, clock: Clock = systemClock): LimiterPort {
   return {
+    // The count lives in the database, so every isolate of the deployment reads one count.
+    scope: "shared",
     async allow(key, window) {
       const id = limiterKey(key, window);
       const row = (await db

@@ -170,6 +170,14 @@ export const BETTER_AUTH_CODES = {
   // (plugins/username/error-codes.mjs). The status stays core's.
   username_taken: "USERNAME_IS_ALREADY_TAKEN",
   username_invalid: "INVALID_USERNAME",
+  // Plan 12i deviation 10: Better Auth 1.7.2's phone-number plugin names a
+  // number that it refuses INVALID_PHONE_NUMBER (plugins/phone-number
+  // error-codes.mjs, read 2026-10-14). It has no region list, so a number
+  // outside the regions gets the same name. It has no name for an SMS
+  // outage: the shim answers SMS_UNAVAILABLE. The statuses stay core's.
+  phone_invalid: "INVALID_PHONE_NUMBER",
+  phone_region: "INVALID_PHONE_NUMBER",
+  sms_unavailable: "SMS_UNAVAILABLE",
   network: "NETWORK_ERROR",
   unexpected: "UNEXPECTED_RESPONSE",
   cancelled: "AUTH_CANCELLED",

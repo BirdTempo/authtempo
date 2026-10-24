@@ -11,7 +11,9 @@ export type CaptchaFlow =
   | "password-sign-in"
   | "magic-link-request"
   | "email-otp-request"
-  | "password-reset-request";
+  | "password-reset-request"
+  /** The phone code request (plan 12i). Not a default: the app names it. */
+  | "phone-request";
 
 export const CAPTCHA_FLOWS: readonly CaptchaFlow[] = Object.freeze([
   "password-sign-up",
@@ -19,6 +21,7 @@ export const CAPTCHA_FLOWS: readonly CaptchaFlow[] = Object.freeze([
   "magic-link-request",
   "email-otp-request",
   "password-reset-request",
+  "phone-request",
 ]);
 
 /** The flows that send mail or write rows, so a bot costs the app money. The sign-in is opt-in. */

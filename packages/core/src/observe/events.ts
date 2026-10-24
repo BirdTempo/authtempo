@@ -423,6 +423,8 @@ export const EVENTS = {
   "captcha.no_answer": fault("error", "authtempo: the captcha did not answer", {
     flow: enumOf(CAPTCHA_FLOWS),
   }),
+  // Plan 12i: never the number or the text, which holds the code.
+  "sms.port_threw": fault("error", "authtempo: the SMS port threw", { errorName: ERROR_NAME }),
   "hook.copy_failed": fault("error", "authtempo: hook event copy failed", {
     hook: enumOf(HOOK_NAMES),
     errorName: ERROR_NAME,

@@ -14,6 +14,8 @@ export const PREFIXES = [
   "refresh reuse race: ",
   "refresh revoke race: ",
   "shape conformance: ",
+  // The daily cap of the phone code on each shared limiter (plan 12i Task 4).
+  "phone cap: ",
   // The driver tests of the SQLite adapter (plan 12g Task 4): the batch unit and the version floor.
   "sqlite driver: ",
 ];

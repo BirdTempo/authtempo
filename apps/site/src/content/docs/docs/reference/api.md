@@ -93,6 +93,7 @@ Each call answers a `Result`: `{ ok: true, value }` or `{ ok: false, code, statu
 | `defaultConfirmPage`, `defaultSignInPage`, `defaultHandoffConfirmPage`, `defaultResetPage`, `defaultPasswordVerifyPage`, `defaultTotpPage`, `defaultConsentPage`, `defaultDevicePage`, `defaultEmailChangePage` | The default pages. [Replace the default pages](/docs/guides/pages/) tells how to replace one. |
 | `defaultAccountDeletePage` | The page of the mailed delete link (`account.deleteConfirm`). No key replaces it. An app that serves its own page posts the token with `client.user.confirmDelete`. |
 | `defaultEmailOtpMail`, `defaultResetOtpMail`, `defaultSecondFactorMail`, `defaultAccountMail`, `defaultNoticeMail` | The default mails of the email codes and of the settings page. `defaultSecondFactorMail` is the mail of a second-factor email code. `defaultNoticeMail` is the notice after a change of a way in. |
+| `defaultPhoneMessage` | The default SMS text of a phone code: the code, the app name, and the life in minutes. |
 | `defaultExistingAccountMail` | The default mail to a known address at a uniform sign-up. `password.existingAccountMail` replaces it. |
 | `limiterKey` | Joins a key, the seconds, and the maximum into the stored key of the owned limiters. |
 | `ipKey` | The IP part of a per-IP limiter key: the IPv4 form of an IPv4-mapped address, the `/64` of another IPv6 address, `unknown` for no IP. |
@@ -149,8 +150,8 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | Area | Types |
 | --- | --- |
 | The auth object | `Auth`, `AuthApi`, `SessionApi`, `UserApi`, `IdentitiesApi`, `PublicUser`, `Caller`, `Result`, `Awaitable`, `PublicSession`, `ResolvedSession`, `ResolvedApiToken`, `SweepResult`, `Clock` |
-| Config | `AuthConfig`, `SecretVersion`, `Keyring`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `MicrosoftConfig`, `DiscordConfig`, `GitLabConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `OrganizationsConfig`, `OrganizationLimits`, `DynamicRolesConfig`, `TeamsConfig`, `TokensConfig`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `TotpConfig`, `TotpGateConfig`, `PasskeyConfig`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `OperatorSecretEntry`, `OperatorScope`, `HooksConfig`, `CaptchaConfig`, `AccountConfig`, `AccountNoticesConfig`, `AccountDeleteConfirmConfig`, `UsernameConfig` |
-| Ports and seams | `StorageAdapter`, `LimiterPort`, `LimitWindow`, `MailPort`, `MailMessage`, `PasswordHashSeam`, `JwtSeam`, `WebAuthnSeam`, `DeriveGate`, `SignES256Input`, `VerifyIdTokenInput`, `JwsAlg`, `PublicJwk` |
+| Config | `AuthConfig`, `SecretVersion`, `Keyring`, `AppleConfig`, `GoogleConfig`, `GitHubConfig`, `LinkedInConfig`, `MicrosoftConfig`, `DiscordConfig`, `GitLabConfig`, `OidcEntry`, `OidcEndpoints`, `OAuth2Entry`, `OrganizationsConfig`, `OrganizationLimits`, `DynamicRolesConfig`, `TeamsConfig`, `TokensConfig`, `PasswordConfig`, `LegacyVerifyConfig`, `EmailOtpConfig`, `PhoneConfig`, `PhoneMessageInput`, `TotpConfig`, `TotpGateConfig`, `PasskeyConfig`, `JwtMintConfig`, `OAuthConfig`, `OperatorConfig`, `OperatorSecretEntry`, `OperatorScope`, `HooksConfig`, `CaptchaConfig`, `AccountConfig`, `AccountNoticesConfig`, `AccountDeleteConfirmConfig`, `UsernameConfig` |
+| Ports and seams | `StorageAdapter`, `LimiterPort`, `LimitWindow`, `MailPort`, `MailMessage`, `PasswordHashSeam`, `JwtSeam`, `WebAuthnSeam`, `SmsPort`, `DeriveGate`, `SignES256Input`, `VerifyIdTokenInput`, `JwsAlg`, `PublicJwk` |
 | Storage | `ModelName`, `Models`, `Where`, `Op`, `Sort`, `FindManyOptions`, `UserRow`, `IdentityRow`, `SessionRow`, `VerificationRow`, `PasskeyRow`, `PasswordRow`, `ApiTokenRow`, `OrganizationRow`, `MemberRow`, `InvitationRow`, `TotpRow`, `TrustedDeviceRow`, `SecondFactorRow`, `SecondFactorMethod`, `JwkRow`, `OAuthClientRow`, `OAuthConsentRow`, `OAuthTokenRow`, `OAuthDeviceRow`, `OAuthSubjectRow`, `OAuthSessionClientRow`, `OAuthLogoutRow`, `ClientAuthMethod`, `DeviceStatus`, `OperatorAuditRow`, `OperatorAction`, `OrganizationRoleRow`, `TeamRow`, `TeamMemberRow`, `OrganizationTokenRow`, `MovedTokenRow` |
 | Errors | `ErrorCode`, `OAuthErrorCode` |
 | Pages and mails | `ConfirmPageInput`, `SignInPageInput`, `HandoffConfirmPageInput`, `ResetPageInput`, `PasswordVerifyPageInput`, `TotpChallengePageInput`, `ConsentPageInput`, `DevicePageInput`, `DEVICE_WARNING`, `EmailOtpMailInput`, `ExistingAccountMailInput`, `AccountMailInput`, `NoticeEvent`, `NoticeMailInput`, `EmailChangePageInput`, `AccountDeletePageInput` |
@@ -178,9 +179,9 @@ Each type is exported for an app that writes its own seam, page, or adapter.
 | --- | --- |
 | `@authtempo/core/errors` | The error tables alone, for a client bundle. |
 | `@authtempo/core/conformance` | `runAdapterConformance`, the suite of every storage adapter. |
-| `@authtempo/core/limiter-conformance` | The suite of every limiter. |
+| `@authtempo/core/limiter-conformance` | The suite of every limiter, and `runPhoneCapConformance`, the daily cap of the phone code on a shared limiter. |
 | `@authtempo/core/sql` | The SQL helpers that both adapters share. |
-| `@authtempo/core/testing` | `SoftAuthenticator`, `totpCode`, `base32Decode`, `ROUTES`, the route list, and `TEST_SECRET`, the app secret of the tests. |
+| `@authtempo/core/testing` | `SoftAuthenticator`, `totpCode`, `base32Decode`, `ROUTES`, the route list, `TEST_SECRET`, the app secret of the tests, and `createRecordingSms`, an SMS port that records each text. |
 | `@authtempo/core/routes` | The route facts of an SDK. The next part lists them. |
 | `@authtempo/core/credentials` | The credential facts of an SDK. The part after it lists them. |
 | `@authtempo/core/access` | The pure permission checks, for a browser bundle. The access part lists them. |

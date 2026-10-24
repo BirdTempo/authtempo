@@ -450,6 +450,33 @@ A failure answers JSON `{ "error": "<code>" }` with the status of the code. Only
 | --- |
 | The routes of [`captcha_required`](#captcha_required). |
 
+<h3 id="phone_invalid"><code>phone_invalid</code> 400</h3>
+
+- **Meaning:** The phone number is not in E.164 form. That form is a plus sign and 8 to 15 digits, with no leading zero.
+- **Do:** Ask for the number again with the plus sign and the country code, and with no space.
+
+| Routes |
+| --- |
+| The phone routes, with `phone` set. |
+
+<h3 id="phone_region"><code>phone_region</code> 400</h3>
+
+- **Meaning:** The number is outside every prefix of `phone.regions`. No SMS was sent.
+- **Do:** Tell the person that this app sends no code to numbers of that country, and offer another method.
+
+| Routes |
+| --- |
+| The phone routes, with `phone` set. |
+
+<h3 id="sms_unavailable"><code>sms_unavailable</code> 503</h3>
+
+- **Meaning:** The SMS port of the app answered `"unavailable"` or threw. The code counted against `phone.dailyCap`.
+- **Do:** Try again later, or offer another method.
+
+| Routes |
+| --- |
+| The phone routes, with `phone` set. |
+
 <h3 id="session_not_fresh"><code>session_not_fresh</code> 403</h3>
 
 - **Meaning:** The change needs a session that a sign-in or a re-authentication proved within `session.freshMinutes`.

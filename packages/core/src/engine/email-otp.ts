@@ -1,5 +1,5 @@
 import { checkCaptcha } from "../captcha.js";
-import type { ResolvedConfig, ResolvedEmailOtp } from "../config.js";
+import type { ResolvedConfig } from "../config.js";
 import { ipKey } from "../limiter/ip-key.js";
 import { limit } from "../limiter/limit.js";
 import { constantTimeEqual, hmacSha256Hex, randomDigits } from "../primitives/crypto.js";
@@ -34,6 +34,18 @@ export type EmailOtpPurpose = "email-otp" | "password-reset-otp";
  * identifier.
  */
 export type CodePurpose = EmailOtpPurpose | "reauth-otp" | "email-change-otp";
+
+/**
+ * Every purpose of a code that core draws: the mailed codes and the phone
+ * codes (plan 12i). One draw, one keyed hash, and one compare serve them all.
+ */
+export type DrawnPurpose = CodePurpose | "phone-otp" | "phone-add-otp";
+
+/** What a draw reads of a code config: the email code's or the phone code's. */
+export interface CodeShape {
+  length: 6 | 8;
+  ttlMinutes: number;
+}
 
 // Per 15 minutes, for the sign-in code and the reset code together: one
 // budget per address and per IP for every mailed code. 3 per address is the
@@ -102,8 +114,8 @@ export function codeHash(secret: string, rowId: string, code: string): Promise<s
  */
 export async function issueCode(
   config: ResolvedConfig,
-  otp: ResolvedEmailOtp,
-  purpose: CodePurpose,
+  otp: CodeShape,
+  purpose: DrawnPurpose,
   identifier: string,
   data: Record<string, unknown>,
 ): Promise<string> {
@@ -227,7 +239,7 @@ export async function verifyGate(
  */
 export async function newestCode(
   storage: StorageAdapter,
-  purpose: CodePurpose,
+  purpose: DrawnPurpose,
   identifier: string,
 ): Promise<VerificationRow | null> {
   const where: Where<"verification">[] = [
@@ -263,6 +275,22 @@ export async function checkCode(
 ): Promise<Result<VerificationRow>> {
   const otp = config.emailOtp;
   if (!otp) return fail("not_found");
+  return compareCode(config, otp.maxAttempts, purpose, identifier, code, now);
+}
+
+/**
+ * The compare of `checkCode`, for every drawn code (plan 12i: the phone
+ * code reads it too). One copy of the check, so the mailed code and the
+ * phone code cannot drift apart. `maxAttempts` is the config of the code.
+ */
+export async function compareCode(
+  config: ResolvedConfig,
+  maxAttempts: number,
+  purpose: DrawnPurpose,
+  identifier: string | null,
+  code: string,
+  now: Date,
+): Promise<Result<VerificationRow>> {
   const row = identifier === null ? null : await newestCode(config.storage, purpose, identifier);
   // One HMAC and one compare on every path, against a fixed value when no row exists.
   // The row's version keys the HMAC (plan 12b). With no row, the current
@@ -274,10 +302,10 @@ export async function checkCode(
   const right = constantTimeEqual(candidate, row?.valueHash ?? NO_ROW_HASH) && key.known;
   if (!row) return fail("invalid_code");
   if (row.consumedAt !== null)
-    return fail(attemptsOf(row) >= otp.maxAttempts ? "too_many_attempts" : "invalid_code");
+    return fail(attemptsOf(row) >= maxAttempts ? "too_many_attempts" : "invalid_code");
   if (row.expiresAt.getTime() <= now.getTime()) return fail("invalid_code");
   if (right) return ok(row);
-  return fail(await countAttempt(config.observe, config.storage, row, otp.maxAttempts, now));
+  return fail(await countAttempt(config.observe, config.storage, row, maxAttempts, now));
 }
 
 /**

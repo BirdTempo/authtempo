@@ -102,6 +102,10 @@ const CORE_TEXT: Readonly<Record<ErrorCode, string>> = {
   username_taken: "Another account has this username. Choose another username.",
   username_invalid:
     "Use letters, digits, the underscore, and the dot only. This username is not available.",
+  phone_invalid: "Enter the phone number with a plus sign and the country code.",
+  phone_region: "This app does not send codes to numbers of this country.",
+  sms_unavailable:
+    "The text message could not be sent now. Try again later, or use another method.",
 };
 
 const OAUTH_TEXT: Readonly<Record<OAuthErrorCode, string>> = {

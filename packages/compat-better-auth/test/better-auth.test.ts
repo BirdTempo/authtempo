@@ -228,6 +228,14 @@ describe("betterAuth", () => {
     expect(await twice("password:ip:203.0.113.1")).toEqual([true, false]);
   });
 
+  it("keeps the scope of the limiter through the unknown-IP wrap (plan 12i Task 4)", () => {
+    // Without the scope, a shared limiter reads as isolate, and createAuth refuses `phone`.
+    const allow = async () => true;
+    expect(skipUnknownIp({ allow, scope: "shared" }).scope).toBe("shared");
+    expect(skipUnknownIp({ allow, scope: "isolate" }).scope).toBe("isolate");
+    expect("scope" in skipUnknownIp({ allow })).toBe(false);
+  });
+
   it("maps Google, Apple, the cookie's sameSite, and the cookie name onto core's config", () => {
     const privateKey = "-----BEGIN PRIVATE KEY-----\nMIGT\n-----END PRIVATE KEY-----";
     const m = mapOptions({

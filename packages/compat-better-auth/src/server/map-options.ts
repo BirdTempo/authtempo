@@ -184,6 +184,9 @@ export function skipUnknownIp(limiter: LimiterPort): LimiterPort {
     allow: (key, window) =>
       NO_IP_KEY.test(key) ? Promise.resolve(true) : limiter.allow(key, window),
     ...(sweep ? { sweep } : {}),
+    // The wrap keeps the scope (plan 12i Task 4): without it a shared limiter
+    // reads as isolate, and createAuth refuses `phone`.
+    ...(limiter.scope ? { scope: limiter.scope } : {}),
   };
 }
 

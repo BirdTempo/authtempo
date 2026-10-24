@@ -29,6 +29,8 @@ export type {
   OrganizationsConfig,
   PasskeyConfig,
   PasswordConfig,
+  PhoneConfig,
+  PhoneMessageInput,
   ResolvedEmailOtp,
   ScimConfig,
   SsoConfig,
@@ -42,6 +44,7 @@ export {
   ConfigError,
   DEFAULT_RESERVED_SLUGS,
   DELETE_CONFIRM_TTL_MINUTES,
+  defaultPhoneMessage,
   isAppScheme,
 } from "./config.js";
 export {
@@ -339,6 +342,7 @@ export {
   type PasswordHashSeam,
   PBKDF2_ITERATIONS,
 } from "./seams/password-hash.js";
+export type { SmsPort } from "./seams/sms.js";
 export type {
   AuthenticationResponseJSON,
   PublicKeyCredentialCreationOptionsJSON,

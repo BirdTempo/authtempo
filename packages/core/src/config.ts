@@ -99,6 +99,7 @@ import { secretParts } from "./redact.js";
 import type { SessionRow, UserRow } from "./schema.js";
 import { createJoseJwtSeam, type JwtSeam } from "./seams/jwt.js";
 import { createPbkdf2PasswordHash, type PasswordHashSeam } from "./seams/password-hash.js";
+import type { SmsPort } from "./seams/sms.js";
 import { createSimpleWebAuthnSeam, type WebAuthnSeam } from "./seams/webauthn.js";
 import { type AppleConfig, appleProvider } from "./social/apple.js";
 import { type DiscordConfig, discordProvider } from "./social/discord.js";
@@ -397,6 +398,12 @@ export interface AuthConfig {
    */
   emailOtp?: EmailOtpConfig | false;
   /**
+   * The phone code (plan 12i, spec 32 items 4 and 5): a code by SMS through
+   * a send-only port. Off by default. `regions` has no default: the app
+   * picks each country on purpose.
+   */
+  phone?: PhoneConfig | false;
+  /**
    * The TOTP second factor (plan 9f, spec 8.11). On by default when
    * `password` is set: a user turns it on for their own account. `false`
    * removes the routes and `api.totp`. Without `password` there is no
@@ -642,6 +649,50 @@ export interface ResolvedEmailOtp {
   maxAttempts: number;
   mail: (input: EmailOtpMailInput) => MailMessage;
   resetMail: (input: EmailOtpMailInput) => MailMessage;
+}
+
+/** The input of the SMS text of a phone code. */
+export interface PhoneMessageInput {
+  code: string;
+  appName: string;
+  ttlMinutes: number;
+}
+
+export interface PhoneConfig {
+  /** The send-only port. Core makes, keys, binds, counts, and caps every code (spec 32 item 4). */
+  sms: SmsPort;
+  /** Calling-code prefixes such as "+1" or "+44": 1 to 50, required. A number outside every prefix gets no SMS. */
+  regions: string[];
+  /** A code to an unknown number makes a user at the verify. Default false. */
+  signUp?: boolean;
+  /** The life of a code, 1 to 10. Default 5. */
+  ttlMinutes?: number;
+  /** The digits of a code, 6 or 8. Default 6. */
+  length?: 6 | 8;
+  /** The wrong codes that spend a code, 3 to 10. Default 3. */
+  maxAttempts?: number;
+  /** The codes of the deployment per 24 hours, 1 to 100000. Default 1000. */
+  dailyCap?: number;
+  /** "allow" builds with a limiter that counts per isolate: the cap is then per isolate (tests and local dev). */
+  isolateLimiter?: "allow";
+  /** The SMS text. Default `defaultPhoneMessage`. */
+  message?: (input: PhoneMessageInput) => string;
+}
+
+export interface ResolvedPhone {
+  sms: SmsPort;
+  regions: readonly string[];
+  signUp: boolean;
+  ttlMinutes: number;
+  length: 6 | 8;
+  maxAttempts: number;
+  dailyCap: number;
+  message: (input: PhoneMessageInput) => string;
+}
+
+/** The default SMS text of a phone code. */
+export function defaultPhoneMessage(input: PhoneMessageInput): string {
+  return `${input.code} is your ${input.appName} code. It expires in ${input.ttlMinutes} minutes.`;
 }
 
 /**
@@ -1179,6 +1230,8 @@ export interface ResolvedConfig {
     existingAccountMail: (input: ExistingAccountMailInput) => MailMessage;
   } | null;
   emailOtp: ResolvedEmailOtp | null;
+  /** Null: the phone code is off, and no stored phone signs in (plan 12i). */
+  phone: ResolvedPhone | null;
   totp: ResolvedTotp | null;
   jwtMint: ResolvedJwtMint | null;
   oauth: ResolvedOAuth | null;
@@ -1591,6 +1644,7 @@ export function resolveConfig(input: AuthConfig): ResolvedConfig {
     signUp,
     password,
     emailOtp: resolveEmailOtp(input.emailOtp),
+    phone: resolvePhone(input.phone, input.limiter),
     totp: resolveTotp(input.totp, password !== null, input.appName ?? origin.hostname, cookieName),
     jwtMint,
     oauth: resolveOAuth(input.oauth, jwtMint, {
@@ -1995,6 +2049,87 @@ function resolveEmailOtp(input: EmailOtpConfig | false | undefined): ResolvedEma
     maxAttempts,
     mail: o.mail ?? defaultEmailOtpMail,
     resetMail: o.resetMail ?? defaultResetOtpMail,
+  };
+}
+
+const PHONE_KEYS: Readonly<Record<keyof PhoneConfig, true>> = {
+  sms: true,
+  regions: true,
+  signUp: true,
+  ttlMinutes: true,
+  length: true,
+  maxAttempts: true,
+  dailyCap: true,
+  isolateLimiter: true,
+  message: true,
+};
+
+/**
+ * A calling-code prefix: a plus sign and 1 to 4 digits, with no leading
+ * zero. Four digits allow a part of a country, such as "+1416".
+ */
+const REGION_RE = /^\+[1-9][0-9]{0,3}$/;
+
+/**
+ * `phone` (plan 12i, spec 32 item 4). Absent or `false`: off. The daily cap
+ * is a promise per deployment, so a limiter that counts per isolate is
+ * refused unless the app writes `isolateLimiter: "allow"`. A limiter with
+ * no `scope` counts as isolate; the default is the memory limiter.
+ */
+function resolvePhone(
+  input: PhoneConfig | false | undefined,
+  limiter: LimiterPort | undefined,
+): ResolvedPhone | null {
+  if (input === undefined || input === false) return null;
+  if (!isPlainObject(input as unknown)) throw new ConfigError("phone must be an object or false");
+  for (const [key, value] of Object.entries(input))
+    if (value !== undefined && !Object.hasOwn(PHONE_KEYS, key))
+      throw new ConfigError(
+        `phone.${key} is not an option; core has ${Object.keys(PHONE_KEYS).join(", ")}`,
+      );
+  const sms = input.sms as unknown;
+  if (typeof sms !== "object" || sms === null || typeof (sms as SmsPort).send !== "function")
+    throw new ConfigError("phone.sms must be an SmsPort with a send function");
+  const regions = input.regions as unknown;
+  if (!Array.isArray(regions) || regions.length < 1 || regions.length > 50)
+    throw new ConfigError(
+      "phone.regions must list 1 to 50 calling-code prefixes; it has no default",
+    );
+  for (const r of regions as unknown[])
+    if (typeof r !== "string" || !REGION_RE.test(r))
+      throw new ConfigError(
+        `phone.regions has ${String(r)}; a region is a calling-code prefix such as "+1" or "+44"`,
+      );
+  if (input.signUp !== undefined && typeof input.signUp !== "boolean")
+    throw new ConfigError("phone.signUp must be true or false");
+  const ttlMinutes = input.ttlMinutes ?? 5;
+  if (!Number.isSafeInteger(ttlMinutes) || ttlMinutes < 1 || ttlMinutes > 10)
+    throw new ConfigError("phone.ttlMinutes must be an integer from 1 to 10");
+  const length = input.length ?? 6;
+  if (length !== 6 && length !== 8) throw new ConfigError("phone.length must be 6 or 8");
+  const maxAttempts = input.maxAttempts ?? 3;
+  if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 3 || maxAttempts > 10)
+    throw new ConfigError("phone.maxAttempts must be an integer from 3 to 10");
+  const dailyCap = input.dailyCap ?? 1000;
+  if (!Number.isSafeInteger(dailyCap) || dailyCap < 1 || dailyCap > 100_000)
+    throw new ConfigError("phone.dailyCap must be an integer from 1 to 100000");
+  if (input.isolateLimiter !== undefined && input.isolateLimiter !== "allow")
+    throw new ConfigError('phone.isolateLimiter must be "allow" or absent');
+  if (input.message !== undefined && typeof input.message !== "function")
+    throw new ConfigError("phone.message must be a function");
+  // The cap counts every send of the deployment. An isolate count would let
+  // each isolate send `dailyCap` codes, so the promise would not hold.
+  if (limiter?.scope !== "shared" && input.isolateLimiter !== "allow")
+    throw new ConfigError("phone needs a shared limiter: the daily cap is per deployment");
+  return {
+    sms: input.sms,
+    regions: Object.freeze([...(regions as string[])]),
+    signUp: input.signUp ?? false,
+    ttlMinutes,
+    length,
+    maxAttempts,
+    dailyCap,
+    message: input.message ?? defaultPhoneMessage,
   };
 }
 
