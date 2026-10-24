@@ -553,26 +553,6 @@ function optionsRows(key: RouteKey, fields: readonly string[]): AnswerShapeExemp
 /** The optional keys of a request options answer that the seam always writes. */
 const REQUEST_OPTION_KEYS = ["timeout", "rpId", "allowCredentials", "userVerification"] as const;
 
-/**
- * Plan 12i Task 11: the rows of a phone user of Task 5 with no address, in
- * the bag or active at a switch. The Task 11 join answers each null form,
- * and then this list is empty.
- */
-export const UNTIL_VERIFIED_HANDLE: readonly AnswerShapeExempt[] = (
-  [
-    ["GET /multi-session", "sessions[].user.email"],
-    ["POST /multi-session/switch", "user.email"],
-  ] as const
-).map(
-  ([key, field]): AnswerShapeExempt => ({
-    key,
-    field,
-    form: "null",
-    reason:
-      "a phone user of plan 12i Task 5 has no address; the join of Task 11 answers the null form and drops the row; address-less.test.ts proves the engine reads",
-  }),
-);
-
 export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
   ...optionsRows("POST /passkey/register/options", [
     "timeout",
@@ -678,7 +658,6 @@ export const ANSWER_SHAPE_EXEMPT: readonly AnswerShapeExempt[] = [
         "the route proves an address or sets one, so its user always has one; the schema is nullable because a user can have no address (plan 12i); address-less.test.ts proves the null rules",
     }),
   ),
-  ...UNTIL_VERIFIED_HANDLE,
   // Plan 12i Task 1 (ruling 15): these routes need a member, and every member
   // has a verified address. The organization create, the member add, and the
   // invitation accept each need one (`verified` in organizations.ts), and no

@@ -396,6 +396,24 @@ describe("the last method cookie (plan 12i Task 12)", () => {
     expect(absent.config.lastMethod).toBeNull();
   });
 
+  it("holds the phone sign-in to the one bearer rule too (plan 12i Tasks 5 and 12)", async () => {
+    // The phone route sets the cookie through withLastMethod, so isBearerRequest decides.
+    for (const [authorization, cookie] of [
+      ["Bearer ts_x", null],
+      ["Basic dXNlcjpwYXNz", expected("phone")],
+    ] as const) {
+      const w = world();
+      const sent = await w.handle(post("/auth/phone/request", { phone: PHONE }));
+      expect(await sent.json()).toEqual({ sent: true });
+      const res = await w.handle(
+        post("/auth/phone/verify", { phone: PHONE, code: phoneCode(w) }, { authorization }),
+      );
+      expect(res.status).toBe(200);
+      expect({ authorization, cookie: lastCookie(res) }).toEqual({ authorization, cookie });
+      expect((await bodyOf(res)).via).toBe("phone");
+    }
+  });
+
   it("refuses a cookie name of core, a bad name, and days out of range", () => {
     // A clash lets the readable cookie overwrite a cookie of core in the same answer (review I2).
     const names = [

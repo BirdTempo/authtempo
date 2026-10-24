@@ -39,7 +39,8 @@ import test from "../../../../../samples/guides/base-url-list.test.ts?raw";
 - A host outside the list gets 421 `host_not_allowed` before any handler. The answer holds the code only. `auth.wellKnown` answers the same, except for the WebAuthn related origins document.
 - These follow the picked entry: the OAuth issuer, the metadata documents, the mail links, and the social callback. So do the failure redirect, the default `appURL`, the `Origin` check, and the default `jwtMint.audience`.
 - A `redirectURI` override must be on an entry of the list. The start sends its path on the entry where the sign-in started, so the sign-in ends on that host.
-- The session cookie has the `__Host-` prefix and no `Domain`. Each host keeps its own session.
+- The session cookie has the `__Host-` prefix and no `Domain`. Each host keeps its own session. The bag cookie of `multiSession` follows the same rule.
+- The Express, Fastify, and Hono bindings serve a request whose `Host` header does not parse as the primary entry. That is no way past the 421: such a client can send the primary host too.
 - A session JWT of any entry verifies on each entry, with the audience of the entry that minted it.
 - A back-channel sign-out message names the issuer of the entry where the client got its ID token. It keeps that issuer also when the entry left the list, because the client refuses any other issuer.
 - An OAuth code or a held authorize request of one entry answers `invalid_grant`, or is not found, on another entry. RFC 8414 binds an issuer to the host of its metadata.

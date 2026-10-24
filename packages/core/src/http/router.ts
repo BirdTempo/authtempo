@@ -508,7 +508,11 @@ export function createRouter(
       const res = await moveLegacyCookie(
         scoped,
         request,
-        await withSessionBag(scoped, request, await dispatch(scoped, request, url, match, waitUntil)),
+        await withSessionBag(
+          scoped,
+          request,
+          await dispatch(scoped, request, url, match, waitUntil),
+        ),
       );
       return withTrace(trusted ? cors(res, origin) : res, traceId);
     } catch (e) {

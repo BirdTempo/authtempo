@@ -242,6 +242,42 @@ describe("the base URL list (plan 12i Task 18)", () => {
     for (const c of cookies) expect(c.toLowerCase()).not.toContain("domain=");
   });
 
+  it("keeps the bag cookie of multi-session on the host that set it (plan 12i Task 11)", async () => {
+    const w = world({ multiSession: {} });
+    const tokens: string[] = [];
+    let last: Response | null = null;
+    for (const email of ["ada@example.com", "bob@example.com"]) {
+      await w.auth.handle(postOn(B, "/auth/magic-link/request", { email: recordAddress(email) }));
+      const token = tokenFromMail(w.mail.at(-1)?.text ?? "");
+      const cookie = tokens.length === 0 ? {} : { cookie: `__Host-tempo_session=${tokens[0]}` };
+      last = await w.auth.handle(postOn(B, "/auth/magic-link/verify", { token }, cookie));
+      expect(last.status).toBe(200);
+      const set = last.headers.getSetCookie().find((c) => c.startsWith("__Host-tempo_session="));
+      tokens.push(set?.split(";")[0]?.split("=")[1] ?? "");
+    }
+    // The second sign-in on B moves the first session into the bag: a `__Host-` cookie with no Domain.
+    const bag = last?.headers.getSetCookie().find((c) => c.startsWith("__Host-tempo_sessions="));
+    expect(bag).toBe(
+      `__Host-tempo_sessions=${tokens[0]}; Path=/; Max-Age=${w.config.session.ttlDays * 86_400}; HttpOnly; Secure; SameSite=Lax`,
+    );
+    for (const c of last?.headers.getSetCookie() ?? [])
+      expect(c.toLowerCase()).not.toContain("domain=");
+    // The three routes answer 421 on a host outside the list, before any bag read.
+    const C = "https://c.example";
+    for (const [method, path] of [
+      ["GET", "/auth/multi-session"],
+      ["POST", "/auth/multi-session/switch"],
+      ["POST", "/auth/multi-session/sign-out"],
+    ] as const) {
+      const res = await w.auth.handle(
+        method === "GET"
+          ? new Request(`${C}${path}`, { headers: { cookie: `__Host-tempo_session=${tokens[1]}` } })
+          : postOn(C, path, { sessionId: "x" }, { cookie: `__Host-tempo_session=${tokens[1]}` }),
+      );
+      expect({ path, status: res.status }).toEqual({ path, status: 421 });
+    }
+  });
+
   it("verifies a JWT of any entry's issuer and refuses an OAuth code on another entry", async () => {
     const w = world({
       oauth: { resources: [RESOURCE], registration: { cimd: false, dynamic: true } },

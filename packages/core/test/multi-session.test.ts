@@ -8,6 +8,7 @@ import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
 import { sha256Hex } from "../src/primitives/crypto.js";
 import type { SessionRow } from "../src/schema.js";
+import { createRecordingSms } from "../src/testing/recording-sms.js";
 import {
   APP_ORIGIN,
   BASE_URL,
@@ -15,6 +16,7 @@ import {
   makeAuth,
   post,
   recordAddress,
+  settled,
   tokenFromMail,
 } from "./helpers.js";
 import {
@@ -29,8 +31,8 @@ import { PASSWORD } from "./totp-helpers.js";
 // Multi-session (plan 12i Task 11, spec 32 item 11, owner decision 4). Every
 // session comes from a real sign-in through the router, in one cookie jar per
 // browser. The bag cookie holds the other tokens of the browser. Each read
-// resolves each token through resolveSession. The anonymous case waits for
-// the join with Task 6: no flow of this tree makes an anonymous user.
+// resolves each token through resolveSession. The joins with Tasks 5 and 6
+// (a phone user with no address, an anonymous user) are at the end.
 
 const SESSION = "__Host-tempo_session";
 const BAG = "__Host-tempo_sessions";
@@ -746,5 +748,125 @@ describe("multi-session (plan 12i Task 11)", () => {
     await signIn(w, b, "bob@example.com");
     expect(b.cookies.has(BAG)).toBe(false);
     expect((await w.handle(get("/auth/multi-session", b.header()))).status).toBe(404);
+  });
+});
+
+describe("multi-session with the phone and anonymous users (plan 12i Tasks 5, 6, and 11)", () => {
+  const PHONE = "+14155550100";
+  let ip = 0;
+  const fromNewIp = () => ({ "cf-connecting-ip": `198.51.100.${++ip}` });
+
+  /** The multi-session world with phone and anonymous on, and a router that waits for the SMS. */
+  function joinWorld() {
+    const sms = createRecordingSms();
+    const auth = makeAuth({
+      password: { hash: FAST, uniformSignUp: false },
+      multiSession: {},
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true },
+      anonymous: { isolateLimiter: "allow" },
+    });
+    const handle = settled(createRouter(auth.config, coreRoutes(auth.config)));
+    return { auth, handle, sms };
+  }
+  type JoinWorld = ReturnType<typeof joinWorld>;
+
+  /** A sign-up by the phone code in browser `b`: a user with no address (Task 5). */
+  async function phoneSignIn(w: JoinWorld, b: Browser) {
+    const sent = await w.handle(post("/auth/phone/request", { phone: PHONE }, fromNewIp()));
+    expect(await sent.json()).toEqual({ sent: true });
+    const text = w.sms.sent.findLast((m) => m.to === PHONE)?.text ?? "";
+    const code = /^(\d+) is your /.exec(text)?.[1] ?? "";
+    const res = b.take(
+      await w.handle(
+        post("/auth/phone/verify", { phone: PHONE, code }, { ...b.header(), ...fromNewIp() }),
+      ),
+    );
+    expect(res.status).toBe(200);
+    return b.cookies.get(SESSION) ?? "";
+  }
+
+  /** An anonymous sign-in in browser `b` (Task 6). */
+  async function anonymousSignIn(w: JoinWorld, b: Browser) {
+    const res = b.take(
+      await w.handle(post("/auth/anonymous/sign-in", {}, { ...b.header(), ...fromNewIp() })),
+    );
+    expect(res.status).toBe(200);
+    return b.cookies.get(SESSION) ?? "";
+  }
+
+  it("lists and switches to a phone user with no address (Task 5)", async () => {
+    const w = joinWorld();
+    const b = browser();
+    const phone = await phoneSignIn(w, b);
+    await signIn(w, b, "ada@example.com");
+    expect(b.bag()).toEqual([phone]);
+    const { body } = await list(w, b);
+    expect(body.sessions.map((s) => s.user.email)).toEqual(["ada@example.com", null]);
+    const res = b.take(
+      await w.handle(
+        post("/auth/multi-session/switch", { sessionId: await idOf(w, phone) }, b.header()),
+      ),
+    );
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { user: { email: string | null } }).user.email).toBeNull();
+    expect(b.cookies.get(SESSION)).toBe(phone);
+  });
+
+  it("never moves an anonymous session into the bag, and leaves its end to the sweep (Task 6)", async () => {
+    const w = joinWorld();
+    const b = browser();
+    const guest = await anonymousSignIn(w, b);
+    const ada = await signIn(w, b, "ada@example.com");
+    expect(b.cookies.get(SESSION)).toBe(ada);
+    expect(b.bag()).toEqual([]);
+    expect(b.cookies.has(BAG)).toBe(false);
+    // The sign-in ends no anonymous session: the anonymous sweep owns that end.
+    expect(await rowOf(w, guest)).not.toBeNull();
+  });
+
+  it("serves the three routes to an anonymous session, which never enters the bag (Task 6)", async () => {
+    // The reachable way to an anonymous session with a bag: the active
+    // session ends on another device, and the browser then signs in anonymously.
+    const w = joinWorld();
+    const b = browser();
+    const bob = await signIn(w, b, "bob@example.com");
+    const ada = await signIn(w, b, "ada@example.com");
+    expect(b.bag()).toEqual([bob]);
+    const other = browser();
+    await signIn(w, other, "ada@example.com");
+    const revoked = await w.handle(
+      post("/auth/sessions/revoke", { id: await idOf(w, ada) }, other.header()),
+    );
+    expect(revoked.status).toBe(200);
+    const guest = await anonymousSignIn(w, b);
+    expect(b.bag()).toEqual([bob]);
+    // The list answers the anonymous active session with no address.
+    const { res, body } = await list(w, b);
+    expect(res.status).toBe(200);
+    expect(body.sessions.map((s) => [s.active, s.user.email])).toEqual([
+      [true, null],
+      [false, "bob@example.com"],
+    ]);
+    // A switch leaves the anonymous user as a sign-in does: its token stays out of the bag.
+    const switched = b.take(
+      await w.handle(
+        post("/auth/multi-session/switch", { sessionId: await idOf(w, bob) }, b.header()),
+      ),
+    );
+    expect(switched.status).toBe(200);
+    expect(b.cookies.get(SESSION)).toBe(bob);
+    expect(b.bag()).toEqual([]);
+    expect(await rowOf(w, guest)).not.toBeNull();
+    // The sign-out of one ends the anonymous user's own session.
+    const again = browser();
+    const guest2 = await anonymousSignIn(w, again);
+    const out = again.take(
+      await w.handle(
+        post("/auth/multi-session/sign-out", { sessionId: await idOf(w, guest2) }, again.header()),
+      ),
+    );
+    expect(out.status).toBe(200);
+    expect(await rowOf(w, guest2)).toBeNull();
+    expect(again.cookies.size).toBe(0);
   });
 });

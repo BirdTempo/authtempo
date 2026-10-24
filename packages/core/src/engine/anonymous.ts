@@ -41,6 +41,10 @@ import { draftUserRow } from "./users.js";
  * too), because a sign-in leaves the anonymous user and changes nothing of
  * it. Also not listed: the remove of a passkey or a phone, because an
  * anonymous user can hold neither, so the route finds nothing to remove.
+ * Also not listed: the three multi-session routes. They change no account
+ * and grant no privilege. A switch leaves the anonymous user as a sign-in
+ * does, and its token never enters the bag. The sign-out of one ends a
+ * session of the browser, as `POST /sign-out` does.
  */
 export const ANONYMOUS_REFUSED: ReadonlySet<RouteKey> = new Set<RouteKey>([
   // The re-authentication: an anonymous user has no proof to give.
