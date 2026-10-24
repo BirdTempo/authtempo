@@ -375,6 +375,12 @@ export const EVENTS = {
   "observe.wait_until_threw": fault("error", "authtempo: waitUntil threw; the flush has no hook", {
     errorName: ERROR_NAME,
   }),
+  // Ruling 29 of plan 12i: on Workers with no waitUntil, handle waits for the work after the answer.
+  "observe.wait_until_missing": fault(
+    "warn",
+    "authtempo: no waitUntil on Workers; the answer waited for the work after it",
+    {},
+  ),
   "secret.low_entropy": fault(
     "warn",
     `authtempo: <path> has an estimated <bits> bits of entropy; ${ENTROPY_WARN_BITS} or more is recommended`,
@@ -429,7 +435,7 @@ export const EVENTS = {
   "sms.port_threw": fault("error", "authtempo: the SMS port threw", { errorName: ERROR_NAME }),
   // Ruling 23 of plan 12i: a send after the answer that the cap refused or the port did not make.
   "sms.not_sent": fault("error", "authtempo: an SMS after the answer was not sent", {
-    reason: enumOf(["capped", "unavailable"]),
+    reason: enumOf(["capped", "unavailable", "timeout"]),
   }),
   "hook.copy_failed": fault("error", "authtempo: hook event copy failed", {
     hook: enumOf(HOOK_NAMES),

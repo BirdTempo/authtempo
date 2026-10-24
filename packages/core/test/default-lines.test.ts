@@ -175,6 +175,26 @@ describe("the observer lines (plan 12h)", () => {
       ["authtempo: waitUntil threw; the flush has no hook", "TypeError"],
     ]);
   });
+
+  it("observe.wait_until_missing", async () => {
+    const log = warns();
+    vi.stubGlobal("navigator", { userAgent: "Cloudflare-Workers" });
+    try {
+      const sms = createRecordingSms();
+      const auth = createAuth(
+        input({ phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: true } }),
+      );
+      const res = await auth.handle(post("/auth/phone/request", { phone: "+14155550100" }));
+      expect(res.status).toBe(200);
+      // The code went out before the answer.
+      expect(sms.sent).toHaveLength(1);
+      expect(log.mock.calls).toEqual([
+        ["authtempo: no waitUntil on Workers; the answer waited for the work after it"],
+      ]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe("the secret lines (plan 12b)", () => {

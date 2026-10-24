@@ -278,17 +278,36 @@ export async function requestPhone(
 }
 
 /**
+ * The time limit of a send after the answer (ruling 29 of plan 12i, LB).
+ * Core has no time limit of its own for the SMS port, so the ruling sets
+ * 10 seconds. The flush of the request waits for this work. Workers keeps a
+ * `waitUntil` alive for 30 seconds after the answer, so the flush still
+ * runs after a hung port (Workers limits, read 2026-10-25).
+ */
+export const SEND_LATER_MS = 10_000;
+
+/**
  * A send after the answer (ruling 23 of plan 12i). No caller reads its
  * result, so a send that did not go out writes one `sms.not_sent` line
  * with the reason. A throw of the port has its `sms.port_threw` line too.
+ * A send that passes `SEND_LATER_MS` gets the reason `timeout`. Its port
+ * call can still end later.
  */
 async function sendLater(
   config: ResolvedConfig,
   input: Parameters<typeof sendPhoneCode>[1],
 ): Promise<void> {
-  const answer = await sendPhoneCode(config, input);
-  if (answer === "capped" || answer === "unavailable")
-    config.observe.emit({ name: "sms.not_sent", reason: answer });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<"timeout">((resolve) => {
+    timer = setTimeout(() => resolve("timeout"), SEND_LATER_MS);
+  });
+  try {
+    const answer = await Promise.race([sendPhoneCode(config, input), limit]);
+    if (answer === "capped" || answer === "unavailable" || answer === "timeout")
+      config.observe.emit({ name: "sms.not_sent", reason: answer });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export interface PhoneVerify {

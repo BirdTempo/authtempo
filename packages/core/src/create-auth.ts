@@ -1035,10 +1035,12 @@ export interface Auth {
   /**
    * Serves the auth routes under `basePath`. Mount it for any request whose
    * path starts with `basePath`. With `observe`, pass `{ waitUntil }`: the
-   * flush of the events then runs after the answer (plan 12h). The work that
-   * a route does after its answer, such as the SMS of a phone code, runs
-   * under it too (ruling 23 of plan 12i). With no `waitUntil`, that work
-   * runs detached, and on Workers the runtime can stop it.
+   * flush of the events then runs after the answer (plan 12h). Some routes
+   * do work after the answer, such as the SMS of a phone code. That work
+   * runs under the same `waitUntil` (ruling 23 of plan 12i). With no
+   * `waitUntil`, that work runs detached. On Workers with no `waitUntil`,
+   * `handle` waits for that work before it answers, and writes one
+   * `observe.wait_until_missing` line (ruling 29 of plan 12i).
    */
   handle(request: Request, options?: HandleOptions): Promise<Response>;
   /**
@@ -1253,6 +1255,16 @@ function scimApp(input: { actor: SsoAppActor; organizationId: string }) {
 /** The URL of a call of `api.scim.users` with no query. */
 const SCIM_NO_QUERY = new URL("https://scim.invalid/");
 
+/**
+ * True on Cloudflare Workers: workerd sets `navigator.userAgent` to
+ * "Cloudflare-Workers" (Workers runtime APIs, read 2026-10-25). The workerd
+ * test of examples/worker pins the value. Read at each call, so a test can
+ * set the global.
+ */
+function onWorkers(): boolean {
+  return globalThis.navigator?.userAgent === "Cloudflare-Workers";
+}
+
 export function createAuth(input: AuthConfig): Auth {
   const config = resolveConfig(input);
   // The record of a compat package (withDomainRecord) reaches the routes and the sweep.
@@ -1276,26 +1288,32 @@ export function createAuth(input: AuthConfig): Auth {
     // The work after the answer of a route (ruling 23 of plan 12i) runs
     // under the same waitUntil. The flush waits for it, so its lines go out
     // in the batch of the request. With no waitUntil, the work runs detached.
+    // Workers stops a detached promise at the answer, before its first I/O
+    // (probe of the Task 5 re-review). So on Workers with no waitUntil, handle
+    // waits for the work before it answers (ruling 29 of plan 12i).
     async handle(request, options) {
       const after: Promise<unknown>[] = [];
-      const res = await route(
-        request,
-        options?.waitUntil ? { waitUntil: (work) => void after.push(work) } : undefined,
-      );
-      if (options?.waitUntil) {
-        let start = () => {};
-        const started = new Promise<void>((resolve) => {
-          start = resolve;
-        });
-        try {
-          // The router catches each rejection of the work, so `all` waits for every one.
-          // With no work, the flush starts as before, with no extra wait.
-          const ready = after.length === 0 ? started : started.then(() => Promise.all(after));
-          options.waitUntil(ready.then(() => config.observe.flush()));
-          start();
-        } catch (e) {
-          config.observe.emit({ name: "observe.wait_until_threw", errorName: e });
+      const res = await route(request, { waitUntil: (work) => void after.push(work) });
+      if (!options?.waitUntil) {
+        if (after.length > 0 && onWorkers()) {
+          config.observe.emit({ name: "observe.wait_until_missing" });
+          // The router catches each rejection of the work, so `all` never throws.
+          await Promise.all(after);
         }
+        return res;
+      }
+      let start = () => {};
+      const started = new Promise<void>((resolve) => {
+        start = resolve;
+      });
+      try {
+        // The router catches each rejection of the work, so `all` waits for every one.
+        // With no work, the flush starts as before, with no extra wait.
+        const ready = after.length === 0 ? started : started.then(() => Promise.all(after));
+        options.waitUntil(ready.then(() => config.observe.flush()));
+        start();
+      } catch (e) {
+        config.observe.emit({ name: "observe.wait_until_threw", errorName: e });
       }
       return res;
     },

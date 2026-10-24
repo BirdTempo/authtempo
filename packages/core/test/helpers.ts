@@ -48,7 +48,7 @@ export const APP_ORIGIN = "https://app.example.com";
 
 /**
  * A router call that waits for the work after the answer (ruling 23 of plan
- * 12i), so a test reads the SMS that a route sent. The router catches each
+ * 12i). So a test reads the SMS that a route sent. The router catches each
  * rejection of that work, so the wait never throws.
  */
 export function settled(

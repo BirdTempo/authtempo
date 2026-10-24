@@ -92,6 +92,7 @@ Each event has these fields too:
 | Event | Level | Fields | Default line |
 | --- | --- | --- | --- |
 | `observe.wait_until_threw` | error | `errorName: errorName` | `authtempo: waitUntil threw; the flush has no hook` |
+| `observe.wait_until_missing` | warn | none | `authtempo: no waitUntil on Workers; the answer waited for the work after it` |
 | `secret.low_entropy` | warn | `secretIndex?: count`, `bits: count` | `authtempo: <path> has an estimated <bits> bits of entropy; 120 or more is recommended` |
 | `secret.unknown_version` | error | `version: count`, `rowId: id` | `authtempo: a stored value names secret version <version>, which is not configured` |
 | `error.internal` | error | `method: method`, `route: route`, `errorName: errorName` | `authtempo: unhandled error` |
@@ -203,7 +204,7 @@ An enum field takes only the values of its list. A long list names its count and
 | `reauth.outcome` | `success`, `failure` |
 | `captcha.port_threw.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request` |
 | `captcha.no_answer.flow` | `password-sign-up`, `password-sign-in`, `magic-link-request`, `email-otp-request`, `password-reset-request`, `phone-request` |
-| `sms.not_sent.reason` | `capped`, `unavailable` |
+| `sms.not_sent.reason` | `capped`, `unavailable`, `timeout` |
 | `hook.copy_failed.hook` | 46 values: each hook name, `<group>.<point>`, from the seven hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
 | `hook.before_failed.hook` | 46 values: each hook name, `<group>.<point>`, from the seven hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |
 | `hook.after_failed.hook` | 46 values: each hook name, `<group>.<point>`, from the seven hook point constants. [Run your code at a hook point](/docs/guides/hooks/) lists the points. |

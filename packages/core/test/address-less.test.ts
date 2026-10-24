@@ -320,7 +320,7 @@ describe("the account with no address (plan 12i Task 1)", () => {
   });
 
   it("counts no stored phone as a way in or a handle with no phone config (ruling 15)", async () => {
-    // A phone that a real code proved (ruling 23 L3): a user with no address
+    // A phone that a real code proved (ruling 23 L3). A user with no address
     // and a passkey adds it with `phone` on, then drops the passkey.
     const sms = createRecordingSms();
     const on = makeAuth({

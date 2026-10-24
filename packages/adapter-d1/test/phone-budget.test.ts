@@ -29,8 +29,8 @@ const PINS = {
   requestNew: 9,
   verifySignUp: 9,
   verifySignIn: 8,
-  // The Task 5 fix round: the add counts one key per number, not two, and
-  // the note writes a decoy row of 3 queries (ruling 23, m1 and L5). The one
+  // The Task 5 fix round: the add counts one key per number, not two. The
+  // note writes a decoy row of 3 queries (ruling 23, m1 and L5). The one
   // query between the add and the note is outside the phone work, as before.
   add: 10,
   addNote: 11,

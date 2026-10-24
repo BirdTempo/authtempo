@@ -1,17 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import type { AuthConfig, PhoneConfig } from "../src/config.js";
+import { createAuth } from "../src/create-auth.js";
 import { codeHash } from "../src/engine/email-otp.js";
 import { passwordSignIn } from "../src/engine/password.js";
-import { requestPhone } from "../src/engine/phone.js";
+import { requestPhone, SEND_LATER_MS } from "../src/engine/phone.js";
 import { createSession, resolveSession } from "../src/engine/sessions.js";
 import { verifyTwoFactor } from "../src/engine/totp.js";
 import { createRouter } from "../src/http/router.js";
 import { coreRoutes } from "../src/http/routes/index.js";
+import type { HandleOptions } from "../src/observe/port.js";
 import { currentSecret } from "../src/primitives/keyring.js";
 import type { UserRow } from "../src/schema.js";
 import { createRecordingSms } from "../src/testing/recording-sms.js";
 import { SoftAuthenticator } from "../src/testing/soft-authenticator.js";
-import { APP_ORIGIN, makeAuth, post, settled } from "./helpers.js";
+import { APP_ORIGIN, BASE_URL, makeAuth, post, settled } from "./helpers.js";
 import { FAST } from "./password-helpers.js";
 import { codeNow, enrolled, PASSWORD } from "./totp-helpers.js";
 
@@ -342,16 +344,18 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     expect((await remove(lone.cookie)).body).toEqual({ error: "not_found" });
   });
 
-  it("answers a known and an unknown number before the SMS port returns (ruling 23)", async () => {
-    // A port that waits up to 1 s, or until the test lets it go (probe P1 of
-    // the Task 5 review waited 150 ms). A send before the answer waits the whole 1 s.
+  /**
+   * A port that waits up to 1 s, or until the test lets it go (probe P1 of
+   * the Task 5 review waited 150 ms). A send before the answer waits the
+   * whole 1 s. Ada holds number A, and B has no account. `auth` is the core
+   * of every host: the tests below call `auth.handle`, not the router.
+   */
+  async function heldWorld() {
     const PORT_MS = 1000;
     const inner = createRecordingSms();
     let returned = 0;
     let release = () => {};
-    let held = new Promise<void>((r) => {
-      release = r;
-    });
+    let held = Promise.resolve();
     const sms = {
       async send(input: { to: string; text: string }) {
         await Promise.race([held, new Promise((r) => setTimeout(r, PORT_MS))]);
@@ -361,37 +365,131 @@ describe("the phone flows (plan 12i Task 5, spec 32 item 5)", () => {
     };
     const w = world({ sms, signUp: false });
     const ada = await addressUser(w, "ada@example.com");
-    // The add sends before its answer: let the port go at once.
-    release();
+    // The add sends before its answer, with the port free.
     expect((await add(w, ada.cookie, A)).body).toEqual({ sent: true });
     const addCode = /^(\d+) /.exec(inner.sent.at(-1)?.text ?? "")?.[1] ?? "";
     expect((await addVerify(w, ada.cookie, addCode)).body).toEqual({ phone: A });
     held = new Promise<void>((r) => {
       release = r;
     });
+    const auth = createAuth({
+      baseURL: BASE_URL,
+      secret: "0123456789abcdef0123456789abcdef",
+      trustedOrigins: [APP_ORIGIN],
+      storage: w.storage,
+      clock: w.clock,
+      mail: { send: async () => {} },
+      phone: { sms, regions: ["+1"], isolateLimiter: "allow", signUp: false },
+    });
     const before = returned;
-    const after: Promise<unknown>[] = [];
-    const timed = async (phone: string) => {
+    const timed = async (phone: string, options?: HandleOptions) => {
       const t0 = performance.now();
-      const res = await w.route(
+      const res = await auth.handle(
         post("/auth/phone/request", { phone }, { "cf-connecting-ip": w.ip() }),
-        { waitUntil: (p) => void after.push(p) },
+        options,
       );
-      // The answer came before the port returned.
       return { ms: performance.now() - t0, portReturned: returned - before, res };
     };
-    const known = await timed(A);
-    const unknown = await timed(B);
-    release();
+    return {
+      PORT_MS,
+      inner,
+      timed,
+      release: () => release(),
+      returned: () => returned - before,
+    };
+  }
+
+  it("answers a known and an unknown number through handle before the SMS port returns (ruling 23)", async () => {
+    const h = await heldWorld();
+    const after: Promise<unknown>[] = [];
+    const options = { waitUntil: (p: Promise<unknown>) => void after.push(p) };
+    const known = await h.timed(A, options);
+    const unknown = await h.timed(B, options);
+    h.release();
     await Promise.all(after);
+    // The answer came before the port returned.
     expect([known.portReturned, unknown.portReturned]).toEqual([0, 0]);
     expect(unknown.res.status).toBe(known.res.status);
     expect(await unknown.res.json()).toEqual(await known.res.json());
-    expect(known.ms).toBeLessThan(PORT_MS);
-    expect(Math.abs(known.ms - unknown.ms)).toBeLessThan(PORT_MS / 2);
+    expect(known.ms).toBeLessThan(h.PORT_MS);
+    expect(Math.abs(known.ms - unknown.ms)).toBeLessThan(h.PORT_MS / 2);
     // The work after the answer sent the code to the known number only.
-    expect(returned - before).toBe(1);
-    expect(inner.sent.at(-1)?.to).toBe(A);
+    expect(h.returned()).toBe(1);
+    expect(h.inner.sent.at(-1)?.to).toBe(A);
+  });
+
+  it("answers through handle with no waitUntil before the SMS port returns, off Workers (ruling 29)", async () => {
+    expect(globalThis.navigator?.userAgent).not.toBe("Cloudflare-Workers");
+    const h = await heldWorld();
+    const known = await h.timed(A);
+    const unknown = await h.timed(B);
+    expect([known.portReturned, unknown.portReturned]).toEqual([0, 0]);
+    expect(await unknown.res.json()).toEqual(await known.res.json());
+    expect(known.ms).toBeLessThan(h.PORT_MS);
+    expect(Math.abs(known.ms - unknown.ms)).toBeLessThan(h.PORT_MS / 2);
+    // The detached work still sends the code.
+    h.release();
+    await vi.waitFor(() => expect(h.returned()).toBe(1));
+    expect(h.inner.sent.at(-1)?.to).toBe(A);
+  });
+
+  it("waits through handle for the work after the answer on Workers with no waitUntil (ruling 29)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("navigator", { userAgent: "Cloudflare-Workers" });
+    try {
+      const h = await heldWorld();
+      h.release();
+      // No waitUntil: the code goes out before the answer, so a runtime that
+      // stops detached work cannot drop it.
+      const known = await h.timed(A);
+      expect(known.portReturned).toBe(1);
+      expect(h.inner.sent.at(-1)?.to).toBe(A);
+      // An unknown number has no work after the answer: no wait and no line.
+      const unknown = await h.timed(B);
+      expect(await unknown.res.json()).toEqual(await known.res.json());
+      expect(warn.mock.calls).toEqual([
+        ["authtempo: no waitUntil on Workers; the answer waited for the work after it"],
+      ]);
+      // With waitUntil on Workers, the answer does not wait.
+      const after: Promise<unknown>[] = [];
+      const held = await heldWorld();
+      const timed = await held.timed(A, { waitUntil: (p) => void after.push(p) });
+      expect(timed.portReturned).toBe(0);
+      held.release();
+      await Promise.all(after);
+      expect(held.returned()).toBe(1);
+    } finally {
+      vi.unstubAllGlobals();
+      warn.mockRestore();
+    }
+  });
+
+  it("gives up a hung send after the answer at the time limit (ruling 29, LB)", async () => {
+    const lines = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const w = world({ sms: { send: () => new Promise<never>(() => {}) }, signUp: true });
+      const after: Promise<unknown>[] = [];
+      const res = await w.route(
+        post("/auth/phone/request", { phone: B }, { "cf-connecting-ip": w.ip() }),
+        { waitUntil: (p) => void after.push(p) },
+      );
+      expect(res.status).toBe(200);
+      let done = false;
+      void Promise.all(after).then(() => {
+        done = true;
+      });
+      await vi.advanceTimersByTimeAsync(SEND_LATER_MS - 1);
+      expect(done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(done).toBe(true);
+      expect(lines.mock.calls).toEqual([
+        ["authtempo: an SMS after the answer was not sent", "timeout"],
+      ]);
+    } finally {
+      vi.useRealTimers();
+      lines.mockRestore();
+    }
   });
 
   it("turns a cap refusal and an outage after the answer into lines, not a 429 or a 503", async () => {
